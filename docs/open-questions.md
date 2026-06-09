@@ -6,8 +6,15 @@
 - **D2 — Scope.** Maximal: intrinsic code properties **plus** all cross-cutting concerns. *(2026-06-08)*
 - **D3 — Sequence.** Map first, then design the skill suite. Research/reference-gathering happens against the map before any skill design. *(2026-06-08)*
 - **D4 — Repo.** `code-quality-atlas`, private, under `~/code/`. Name provisional. *(2026-06-08)*
+- **D5 — Map pressure-test → taxonomy v0.2.** Resolved the candidate additions: **promoted** AI/LLM-integration (#25), Configuration & environment (#26), Compliance/licensing/provenance (#27); **broadened** #3 (distributed correctness) and #9 (caller ergonomics / internal-API DX); **cross-linked** money/units #4 ↔ #23; **kept folded** logging in #16. Now 27 categories. Reversible. *(2026-06-08)*
 
 ## Open questions
+
+### Q2 — Candidate additions  → RESOLVED (see D5)
+Disposition table lives in [`taxonomy.md`](taxonomy.md#candidate-additions--resolved-v02). Residual low-priority candidates still open: cloud cost / FinOps (factor-note in #15); SLO/error-budget (factor-note in #16, overlaps #24); telemetry/analytics privacy (across #16 and #27). Revisit only if any proves to need its own review behavior.
+
+### Q9 — Compliance scope boundary *(new, from D5)*
+Where does #27 (compliance/licensing/provenance) stop being "engineering quality" and become legal/governance that's out of scope for a code-review skill? Likely keep only the parts a reviewer can see in a diff (license headers, dep licenses, PII in code/logs, AI-provenance markers); push the rest to humans.
 
 ### Q1 — Granularity (the big one, blocks phase 2)
 24 categories is too many for 24 skills; several would be thin. How do categories collapse into a buildable, composable set? Options to weigh later:

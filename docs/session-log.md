@@ -20,3 +20,9 @@ Chronological record of how the research evolved. Newest at the bottom.
 **Open at end of session:** granularity (Q1) is the gating question for phase 2; candidate additions (Q2) pending; review-vs-maintenance, scores-vs-findings, counterweight enforcement, language strategy, composition, maintenance-scope all logged (Q3–Q8).
 
 **Next:** continue iterating the *research* — fill `references.md` TODOs, mine static-analysis tools for concrete checks per category, resolve candidate additions — before moving to phase 2 (skill-suite architecture).
+
+### 2026-06-08 (cont.) — map pressure-test → v0.2
+
+- Resolved all 7 candidate additions *(→ D5)*. Map now **27 categories**: added #25 AI/LLM-integration, #26 Configuration & environment, #27 Compliance/licensing/provenance; broadened #3 and #9; cross-linked #4 ↔ #23.
+- Logged new open question Q9 (compliance scope boundary).
+- Kicked off the parallel research pass: one research agent per cluster (references + static-analysis-tool rule mining + reviewable-heuristic seeds), output filed under `docs/research/`. Cluster I taken extra-deep as the template.
