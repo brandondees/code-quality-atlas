@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+
+# Editor / tooling cruft
+.idea/
+.vscode/
+*.swp
+
+# Scratch
+scratch/
+*.tmp
