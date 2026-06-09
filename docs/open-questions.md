@@ -7,6 +7,9 @@
 - **D3 — Sequence.** Map first, then design the skill suite. Research/reference-gathering happens against the map before any skill design. *(2026-06-08)*
 - **D4 — Repo.** `code-quality-atlas`, private, under `~/code/`. Name provisional. *(2026-06-08)*
 - **D5 — Map pressure-test → taxonomy v0.2.** Resolved the candidate additions: **promoted** AI/LLM-integration (#25), Configuration & environment (#26), Compliance/licensing/provenance (#27); **broadened** #3 (distributed correctness) and #9 (caller ergonomics / internal-API DX); **cross-linked** money/units #4 ↔ #23; **kept folded** logging in #16. Now 27 categories. Reversible. *(2026-06-08)*
+- **D6 — Docs are the source of truth; skills are derived, traceable & regenerable.** *(user, 2026-06-09)* The taxonomy + per-cluster research are canonical. Every skill must trace back to the categories/research sections it's built from, and be **rebuildable/refinable** as those docs improve. Research critique/refinement runs **async and in parallel** with skill-building — the architecture must let improving docs flow into improving skills over time (a compounding loop), never a one-shot generation that then drifts. This makes phase-2 partly a *pipeline* design, not just a set of skills.
+- **D7 — Skills follow Anthropic's Agent Skills best practices; optimize for progressive disclosure, auto-trigger descriptions, and model portability.** *(user, 2026-06-09; ref https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices)* `SKILL.md` is a lean entry point (**<500 lines**, aim ≪) with frontmatter (gerund `name`; specific third-person `description` ≤1024 chars carrying explicit trigger keywords; provenance) + when-to-use + a lean checklist; detailed heuristics / tool-rules / references / examples live in **one-level-deep bundled files** loaded on demand (no context cost until read; >100-line files get a ToC). **Do not assume the model is Claude** — target portability down to ~8B local models: bundled files are explicit, concrete, checklist-style (low ambiguity), with concrete good/bad examples and a single default approach (no option-menus). Plain markdown+files = harness/model-agnostic. Forward-slash paths; no time-sensitive text; consistent terminology.
+- **D8 — Eval-first.** Each skill ships **≥3 evaluation scenarios** (query + expected_behavior, with a no-skill baseline). Evals are the **regression net for regeneration**: docs change → drift-check flags affected skills → regenerate/refine → re-run evals to confirm no behavioral regression. Write evals before skill prose.
 
 ## Open questions
 
@@ -15,6 +18,22 @@ Disposition table lives in [`taxonomy.md`](taxonomy.md#candidate-additions--reso
 
 ### Q9 — Compliance scope boundary *(new, from D5)*
 Where does #27 (compliance/licensing/provenance) stop being "engineering quality" and become legal/governance that's out of scope for a code-review skill? Likely keep only the parts a reviewer can see in a diff (license headers, dep licenses, PII in code/logs, AI-provenance markers); push the rest to humans.
+
+---
+
+## Phase 2 design questions *(opened 2026-06-09, gating the skill-suite architecture)*
+
+### Q10 — Regeneration model (the D6 mechanism)
+How do docs→skills stay linked so improving research rebuilds/refines skills? Options: (a) **generated** — a generator reads taxonomy+research and emits skills; regen = re-run; (b) **authored-with-provenance** — hand-authored skills carry frontmatter linking to source categories/sections + content hashes; a drift-checker flags stale skills; (c) **hybrid** — generator emits a structured first draft + provenance, humans/agents refine, drift-checker compares recorded source-hashes vs current docs and proposes updates. (Leaning hybrid.) Blocks the whole pipeline design.
+
+### Q11 — Async-critique integration
+The research docs will be critiqued/refined continuously and in parallel. How does a doc change surface the skills it affects? (Provenance map + drift report; CI check; a "docs changed → which skills to rebuild" command.) Tied to Q10.
+
+### Q1 (revisited) — Granularity, now constrained by D6
+Granularity isn't just "how many skills" — it's "what unit of the research does one skill correspond to," because that mapping IS the regeneration link. A clean category→skill (or cluster→skill, or behavior→skill) mapping makes regeneration tractable; a fuzzy one makes it impossible. Resolve Q1 and Q10 together.
+
+### Q12 — Packaging & where skills live
+In-repo `skills/` dir? A Claude Code plugin? How are they versioned relative to the docs (so a skill records which doc version it was built from)?
 
 ### Q1 — Granularity (the big one, blocks phase 2)
 24 categories is too many for 24 skills; several would be thin. How do categories collapse into a buildable, composable set? Options to weigh later:

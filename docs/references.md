@@ -24,6 +24,7 @@ These span most of the map and are worth reading as whole-suite influences.
 - **Google — Engineering Practices / Code Review Developer Guide** (`google.github.io/eng-practices/`) — what to look for, the "CL author" and "reviewer" guides; a model for review-skill behavior.
 - **Nicole Forsgren, Jez Humble, Gene Kim — *Accelerate*** (DORA) — outcome metrics that quality should serve (#19, #21).
 - **SOLID** (Martin) and its critiques — useful as a checklist *and* as something to push back on (#9).
+- **Anthropic — "Agent Skills: best practices"** (https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices) → mine: the authoring contract for the whole suite — progressive disclosure (lean SKILL.md <500 lines + one-level-deep bundled files, ToC on >100-line files), description-writing for auto-trigger (third person, specific, trigger keywords), degrees-of-freedom matching, eval-first development, and testing across models. Drives D7/D8.
 
 ---
 
