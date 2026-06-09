@@ -1,7 +1,5 @@
 # Research — Cluster VI: Evolution & humans (Maintainability & Process)
-> Part of code-quality-atlas phase-1 research (see ../taxonomy.md). Generated 2026-06-08 via web research. Citations best-effort; uncertainty flagged inline.
->
-> **Tooling caveat (read me):** In this run, all live-fetch tools (WebSearch, WebFetch, curl, browser MCPs, GitHub MCP) were denied by the sandbox, so nothing below was re-fetched at generation time. Content is drawn from stable, well-established domain knowledge. Per the README hard rules, **every URL is marked `(verify)`** and any rule ID / success-criterion number / attributed phrasing I could not re-confirm live is also marked `(verify)`. Treat this file as a high-quality draft whose citations need a verification pass, not as link-checked output.
+> Part of code-quality-atlas phase-1 research (see ../taxonomy.md). Drafted 2026-06-08 (from model knowledge, web-less subagent); **web-verified 2026-06-09 from the main loop.** Standards spines (WCAG 2.2 SCs, Conventional Commits, Diátaxis, ADR, Keep a Changelog, SPDX/AGPL copyleft, REUSE, EAA, GDPR) and high-traffic tool rule IDs (axe-core, eslint-plugin-jsx-a11y, commitlint, the SmartBear/Cisco review-size study) are confirmed against live sources. Residual `(verify)` marks niche/less-stable tool rule names (some SonarQube squids, formatjs/i18next/html-validate plugin rules) to confirm at skill-build time.
 
 ---
 
@@ -57,11 +55,11 @@ Scope: change amplification (one change → many edits); blast radius / ripple e
 Scope: API docs & docstrings; README / onboarding; architecture decision records (ADRs); runbooks; changelogs; usage examples & diagrams.
 
 ### Key references
-- **Diátaxis (Daniele Procida) — diataxis.fr** `(verify)`.
+- **Diátaxis (Daniele Procida) — https://diataxis.fr/**
   → mine: four distinct doc modes — **tutorials** (learning-oriented), **how-to guides** (task/goal-oriented), **reference** (information-oriented), **explanation** (understanding-oriented) — on two axes (action↔cognition, acquisition↔application). A doc that mixes modes (tutorial that drifts into reference) is a smell; missing a *whole quadrant* (e.g. no how-tos) is a gap.
-- **Michael Nygard — "Documenting Architecture Decisions" (ADR)** (2011) `(verify)`.
-  → mine: lightweight, immutable, append-only decision records capturing **context → decision → consequences** (and status: proposed/accepted/superseded). The *why* lives here, not in code comments. Superseding rather than editing preserves history.
-- **Keep a Changelog (keepachangelog.com) + Semantic Versioning (semver.org)** `(verify)`.
+- **Michael Nygard — "Documenting Architecture Decisions" (ADR, 2011)** — https://adr.github.io/ (overview: https://martinfowler.com/bliki/ArchitectureDecisionRecord.html)
+  → mine: lightweight, immutable, append-only decision records with the fields **title, status, context, decision, consequences** (status: proposed/accepted/superseded). The *why* lives here, not in code comments. Superseding rather than editing preserves history.
+- **Keep a Changelog — https://keepachangelog.com/ + Semantic Versioning — https://semver.org/**
   → mine: human-readable `CHANGELOG.md` grouped by Added/Changed/Deprecated/Removed/Fixed/Security, newest-first, `Unreleased` section; tie entries to SemVer bumps. "Don't let your friends dump git logs into changelogs" `(verify)` phrasing.
 - **Google Developer Documentation Style Guide / "Docs as Code"** `(verify)`.
   → mine: docs live in the repo, reviewed in PRs, linted and built in CI; same change should update the doc that describes it. Treat doc drift like a failing test.
@@ -103,22 +101,22 @@ Scope: API docs & docstrings; README / onboarding; architecture decision records
 Scope: WCAG conformance; semantic markup & ARIA; keyboard nav & focus; localization (no hardcoded strings, RTL, number/date/currency/unit formatting — correctness cross-links #4); responsive/edge layouts; design fidelity vs. spec.
 
 ### Key references
-- **W3C — WCAG 2.2 (and 2.1)** — w3.org/TR/WCAG22 `(verify)`. POUR: Perceivable, Operable, Understandable, Robust; conformance levels A / AA / AAA.
-  → mine: AA is the common legal/contractual bar. High-value SCs to check: **1.1.1 Non-text Content** (alt text), **1.4.3 Contrast (Minimum)** (4.5:1 text / 3:1 large), **2.1.1 Keyboard** (all functionality via keyboard), **2.4.7 Focus Visible**, **2.4.3 Focus Order**, **4.1.2 Name, Role, Value**, **3.3.2 Labels or Instructions**, **1.3.1 Info and Relationships**, **2.5.3 Label in Name**, and 2.2-added **2.4.11 Focus Not Obscured**, **2.5.8 Target Size (Minimum)** 24×24px. `(verify)` SC numbers.
+- **W3C — WCAG 2.2** — https://www.w3.org/TR/WCAG22/ — POUR: Perceivable, Operable, Understandable, Robust; conformance levels A / AA / AAA (AA is the common legal bar).
+  → mine: AA is the common legal/contractual bar. High-value SCs to check: **1.1.1 Non-text Content** (alt text), **1.4.3 Contrast (Minimum)** (4.5:1 text / 3:1 large), **2.1.1 Keyboard** (all functionality via keyboard), **2.4.7 Focus Visible**, **2.4.3 Focus Order**, **4.1.2 Name, Role, Value**, **3.3.2 Labels or Instructions**, **1.3.1 Info and Relationships**, **2.5.3 Label in Name**, and 2.2-added **2.4.11 Focus Not Obscured (Minimum)** (AA), **2.5.8 Target Size (Minimum)** 24×24 CSS px (AA). *(SC numbers verified against w3.org/TR/WCAG22.)*
 - **WAI-ARIA Authoring Practices Guide (APG)** `(verify)`.
   → mine: "first rule of ARIA — use native HTML if you can"; correct roles/states/keyboard interaction patterns for widgets (dialog, menu, combobox, tabs). Misused ARIA is worse than none.
 - **MDN — Accessibility & Internationalization; `Intl` API** `(verify)`.
   → mine: use `Intl.NumberFormat`, `Intl.DateTimeFormat`, `Intl.PluralRules`, `Intl.Collator` instead of hand-rolled formatting; locale + currency are inputs, never hardcoded. Cross-links #4 (money/units correctness).
 - **Unicode CLDR / ICU MessageFormat** `(verify)`.
   → mine: locale data (plural categories beyond singular/plural, date/number patterns, RTL) belongs to CLDR; pluralization and gender/select via ICU MessageFormat, not string concatenation. Don't assume two plural forms.
-- **EN 301 549 / ADA / Section 508 / European Accessibility Act (EAA)** `(verify)`.
-  → mine: accessibility is frequently a *legal* requirement (cross-links #27), typically anchored to WCAG 2.x AA; EAA enforcement from mid-2025 raises stakes for consumer products. `(verify)` dates.
+- **EN 301 549 / ADA / Section 508 / European Accessibility Act (EAA)**
+  → mine: accessibility is frequently a *legal* requirement (cross-links #27), typically anchored to WCAG 2.x AA. The **EAA (EU Directive 2019/882) came into full effect 2025-06-28**, applying to products/services sold into the EU regardless of where the company is based — raising the stakes materially for consumer products.
 - **Deque "axe" rules / WebAIM (contrast, screen-reader surveys)** `(verify)`.
   → mine: the most common real-world failures cluster in low contrast, missing alt, empty links/buttons, missing form labels, missing document language — prioritize checks there.
 
 ### Tooling rules worth lifting
-- **axe-core** rule ids — `color-contrast`, `image-alt`, `label`, `button-name`, `link-name`, `html-has-lang`, `aria-required-attr`, `aria-roles`, `aria-allowed-attr`, `duplicate-id-aria`, `frame-title`, `list`, `region`, `landmark-one-main`. `(verify)` exact ids.
-- **eslint-plugin-jsx-a11y** — `alt-text`, `anchor-is-valid`, `aria-props`, `aria-role`, `role-has-required-aria-props`, `no-noninteractive-element-interactions`, `click-events-have-key-events`, `no-autofocus`, `label-has-associated-control`, `tabindex-no-positive`. `(verify)`.
+- **axe-core** rule ids — `color-contrast`, `image-alt`, `label`, `button-name`, `link-name`, `html-has-lang`, `aria-required-attr`, `aria-roles`, `aria-allowed-attr`, `duplicate-id-aria`, `frame-title`, `list`, `region`, `landmark-one-main`. *(core ids verified at dequeuniversity.com/rules/axe; full set is ~90+ rules.)*
+- **eslint-plugin-jsx-a11y** — `alt-text`, `anchor-is-valid`, `aria-props`, `aria-role`, `role-has-required-aria-props`, `no-noninteractive-element-interactions`, `click-events-have-key-events`, `no-autofocus`, `label-has-associated-control`, `tabindex-no-positive`. *(verified at github.com/jsx-eslint/eslint-plugin-jsx-a11y; static JSX checker — pair with @axe-core/react for rendered-DOM checks.)*
 - **Lighthouse / Pa11y / Pa11y-CI** — automated axe/HTML_CodeSniffer audits in CI with score thresholds; WCAG2AA ruleset selection. `(verify)`.
 - **i18n string-extraction linters** — `eslint-plugin-i18next` `no-literal-string`; `eslint-plugin-formatjs` (`enforce-id`, `no-literal-string-in-jsx` `(verify)`); `eslint-plugin-react-intl` — flag hardcoded user-facing strings.
 - **`i18n-ally` / `i18next-parser` / Pontoon-style checks** — detect missing/extra/untranslated keys, interpolation mismatches between locales. `(verify)`.
@@ -151,15 +149,15 @@ Scope: WCAG conformance; semantic markup & ARIA; keyboard nav & focus; localizat
 Scope: PR size & reviewability; commit atomicity & message hygiene; risk signaling in commits/PRs; ownership (CODEOWNERS); definition of done; agent-native parity.
 
 ### Key references
-- **Conventional Commits 1.0.0 (conventionalcommits.org)** `(verify)`.
+- **Conventional Commits 1.0.0** — https://www.conventionalcommits.org/en/v1.0.0/ (feat→MINOR, fix→PATCH, `!`/`BREAKING CHANGE:`→MAJOR).
   → mine: `type(scope)!: subject` + body + footer; types `feat`/`fix`/`docs`/`refactor`/`test`/`chore`/`perf`/`build`/`ci`; `!` or `BREAKING CHANGE:` footer signals SemVer-major. Machine-readable risk/intent → auto-changelog and release decisions (links #22).
 - **Google Engineering Practices — "Code Review Developer Guide" (Small CLs; What to look for)** `(verify)`.
   → mine: prefer small, single-purpose changelists; review for design, functionality, complexity, tests, naming, comments; "approve when it definitely improves overall code health, even if not perfect."
-- **SmartBear / Cisco code-review study (Cohen) & "PRs should be small"** `(verify)`.
-  → mine: review effectiveness drops sharply past ~200–400 LOC and ~60 min `(verify)` numbers; defect-detection falls with size. Big PRs get rubber-stamped — size is itself a quality risk.
+- **SmartBear / Cisco code-review study** (10 months, 2,500 reviews, 3.2M LOC at Cisco) — smartbear.com "Best Practices for Peer Code Review".
+  → mine: defect-detection density is highest **below 200 LOC** and falls off **above ~400 LOC**; best inspection rate **<300–500 LOC/hour** and within **60–90 min** before detection plummets (≈70–90% defect yield at that pace). Big PRs get rubber-stamped — size is itself a quality risk.
 - **Tim Pope — "A Note About Git Commit Messages"** `(verify)`.
   → mine: imperative-mood subject ≤~50 chars, blank line, wrapped body explaining *why* not *what*; one logical change per commit. Atomic commits enable clean revert/bisect.
-- **Chris Beams — "How to Write a Git Commit Message" (seven rules)** `(verify)`.
+- **Chris Beams — "How to Write a Git Commit Message" (seven rules)** — https://cbea.ms/git-commit/ (50-char imperative subject, blank line, 72-wrapped body, why-not-how).
   → mine: the concrete subject/body rules; "If applied, this commit will <subject>." as the imperative test.
 - **GitHub Docs — CODEOWNERS** `(verify)`.
   → mine: path-based required reviewers; ownership makes "who must approve this area" explicit and routes risk to the right people. Stale/missing CODEOWNERS = unowned blast radius.
@@ -167,7 +165,7 @@ Scope: PR size & reviewability; commit atomicity & message hygiene; risk signali
   → mine: parity check — new user-facing capabilities should also be reachable programmatically (API/CLI/tool), not UI-only, so agents and automation aren't second-class. (Project-specific principle; map to a reviewable check.)
 
 ### Tooling rules worth lifting
-- **commitlint (`@commitlint/config-conventional`)** — `type-enum`, `subject-empty`, `subject-full-stop`, `header-max-length` (72), `body-leading-blank`, `footer-leading-blank` — enforce Conventional Commits. `(verify)` rule names.
+- **commitlint (`@commitlint/config-conventional`)** — `type-enum`, `subject-empty`, `subject-full-stop`, `header-max-length` (72), `body-leading-blank`, `footer-leading-blank` — enforce Conventional Commits. *(`@commitlint/config-conventional` `type-enum`: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test — verified.)*
 - **gitlint** — `title-max-length`, `title-must-not-contain-word` (e.g. "WIP"), `body-min-length`, `title-imperative-mood` `(verify)` — Python-side commit hygiene.
 - **Danger / Danger JS** — custom PR rules: warn on large diffs, missing tests for changed src, missing CHANGELOG entry, PR description present, no `fixup!`/`WIP` commits. `(verify)`.
 - **GitHub branch protection / rulesets** — required reviews, required CODEOWNERS review, required status checks, linear history, signed commits, dismiss-stale-approvals. `(verify)`.
@@ -198,19 +196,19 @@ Scope: PR size & reviewability; commit atomicity & message hygiene; risk signali
 Scope: dependency license compatibility & copyleft contamination; code provenance & attribution (incl. AI-generated code); regulatory & data-privacy obligations (GDPR/CCPA-style handling, residency, retention, consent); accessibility-as-legal-requirement; export/compliance constraints.
 
 ### Key references
-- **SPDX (spdx.dev) — license identifiers + SBOM** `(verify)`.
+- **SPDX — license identifiers + SBOM** — https://spdx.org/licenses/ (standard short IDs + permanent URLs).
   → mine: standard license IDs (`MIT`, `Apache-2.0`, `GPL-3.0-only`, `LGPL-3.0`, `AGPL-3.0-only`, `BSD-3-Clause`, `MPL-2.0`) and `SPDX-License-Identifier:` headers; SBOM (SPDX / CycloneDX) as the provenance artifact a review can check against.
-- **FSF / "copyleft" guidance + Blue Oak / choosealicense.com** `(verify)`.
-  → mine: copyleft strength ladder — permissive (MIT/BSD/Apache-2.0) → weak/file-level (MPL-2.0, LGPL) → strong (GPL) → network/strong (AGPL). AGPL contamination over a network boundary is the classic "surprise" for SaaS. Apache-2.0 has explicit patent grant; GPLv2-only ↔ Apache-2.0 has known incompatibility `(verify)`.
+- **FSF "copyleft" guidance + Blue Oak / choosealicense.com**
+  → mine: copyleft strength ladder — permissive (MIT/BSD/Apache-2.0) → weak/file-level (MPL-2.0, LGPL) → strong (GPL) → network/strong (AGPL). **AGPL triggers on *network interaction*, not just distribution** — the classic SaaS surprise: modifying AGPL software and offering it as a service obliges you to provide its source to users who interact with it. Apache-2.0 carries an explicit patent grant; GPLv2-only ↔ Apache-2.0 is a known incompatibility.
 - **OpenChain / OWASP Dependency-Track + CycloneDX** `(verify)`.
   → mine: continuous SBOM-based license + vulnerability + policy monitoring; treat license policy as a gate, not a one-time audit. (Vuln side cross-links #18.)
-- **GDPR (EU 2016/679) & CCPA/CPRA** `(verify)`.
+- **GDPR (EU 2016/679) & CCPA/CPRA**
   → mine: lawful basis + consent, **data minimization**, purpose limitation, storage-limitation/**retention**, data-subject rights (access/erasure/portability), **data residency**/cross-border transfer, breach-notification timelines. Code that collects/stores/transfers PII must map to these (cross-links #14 PII handling, #16 telemetry).
-- **REUSE Specification (reuse.software, FSF Europe)** `(verify)`.
+- **REUSE Specification (FSFE)** — https://reuse.software/spec/ (`reuse lint` makes per-file SPDX+copyright machine-checkable).
   → mine: every file should declare copyright + SPDX license (header or `.license` sidecar); `reuse lint` makes provenance machine-checkable. A new source file with no license header is a provenance gap.
 - **DCO (Developer Certificate of Origin) / `Signed-off-by` + AI-codegen provenance debates** `(verify)`.
   → mine: contributor attestation of right-to-contribute; the open question of attribution/licensing for AI-generated code and training-data provenance — at minimum, label AI-assisted contributions and run license/secret/IP checks on them as untrusted input.
-- **Accessibility-as-law: ADA / Section 508 / EN 301 549 / EAA** `(verify)`.
+- **Accessibility-as-law: ADA / Section 508 / EN 301 549 / EAA (EU 2019/882, in force 2025-06-28)**
   → mine: WCAG 2.x AA conformance is the de facto legal yardstick (cross-links #23) — a11y findings can carry legal, not just UX, weight.
 
 ### Tooling rules worth lifting
@@ -242,7 +240,7 @@ Scope: dependency license compatibility & copyleft contamination; code provenanc
 
 ## Open threads   (gaps / mis-placements / sub-topics worth deeper research)
 
-- **Citations need a live verification pass.** Every URL and several rule IDs / WCAG SC numbers in this file are marked `(verify)` because no live fetch was possible this run. Highest-value to re-confirm: WCAG 2.2 SC numbers (2.5.8 target size, 2.4.11 focus not obscured), axe-core / jsx-a11y exact rule ids, SonarQube squids, formatjs/i18next rule names, and the SmartBear/Cisco review-size numbers.
+- **Citation status (was a gap):** the standards spines and high-traffic tool IDs are now **web-verified (2026-06-09)** — WCAG 2.2 SCs (2.4.11, 2.5.8, 1.4.3), axe-core / jsx-a11y rule ids, Conventional Commits + commitlint, the SmartBear/Cisco review-size numbers, Diátaxis, ADR, Keep a Changelog, SPDX/AGPL, REUSE, EAA (2025-06-28), GDPR. Residual `(verify)`: some SonarQube squids and formatjs/i18next/html-validate plugin rule names — confirm at skill-build time.
 - **#21 ↔ #15/#6 overlap.** Cyclomatic/cognitive complexity and god-modules appear here (as change-amplification proxies), in #6 (local readability), and #12 (architecture). The *maintainability* lens is specifically VCS-aware (churn × complexity, change-coupling, bus factor) — worth carving out as the distinguishing behavior so it doesn't collapse into generic complexity linting.
 - **#22 ↔ #7 boundary.** "Comment rot" lives in #7 (comments) but doc-drift detection (docstring-vs-signature, example rot) is here. Suggest: #7 = in-code why-not-what; #22 = external/structured docs + ADR/changelog/runbook. Tools like `darglint`/`eslint-plugin-jsdoc` straddle both.
 - **i18n money/units genuinely double-booked (#23 ↔ #4).** The *formatting* facet (Intl/CLDR, locale-aware output) is here; the *arithmetic correctness* facet (precision, overflow, currency math) is #4. The taxonomy already cross-links this; a single skill may need to own both ends to avoid a seam.

@@ -34,3 +34,16 @@ Chronological record of how the research evolved. Newest at the bottom.
 - Captured cross-cutting structural findings into [`map-gaps.md`](map-gaps.md) (G1–G8): double-booked concerns needing single owners, a possible "Excessive Agency" promotion, the Clean-Code-vs-Ousterhout decomposition tension, where LLM judgment is the only tool, and git-history-shaped vs diff-shaped skills.
 
 **Next:** redo the research properly from the main loop (where web works) — write the 3 missing clusters (I/III/V) with verified citations, and verify/upgrade the 3 drafts (clear `(verify)`, add real URLs). Cluster I first, as the exemplar.
+
+### 2026-06-09 — full web-grounded research pass complete (all 6 clusters)
+
+Ran the whole research pass from the **main loop** (web works there; subagents are sandboxed without it). For each cluster: verified references, static-analysis tool rule IDs, and reviewable heuristics against live sources, committing per cluster.
+
+- **Cluster I (correctness)** — written fresh as the **exemplar** (extra-deep + Template notes). Verified ESLint/typescript-eslint/RuboCop/Bandit/gosec rules, `go test -race` semantics; Out of the Tar Pit, Release It!, Goldberg, Lamport, Falsehoods-about-Time.
+- **Cluster II (readability)** — verified & upgraded draft: Sonar S3776=15/S1192/S125, Pylint C0104/R2004, RuboCop AbcSize 17/PerceivedComplexity 8, golangci `mnd`, Ruff D417/ERA001, Belshee 7 stages. Corrected `stylecheck` (ships via staticcheck).
+- **Cluster III (structure)** — written fresh: connascence (9 types + strength/degree/locality), parse-don't-validate / illegal-states lineage, the-wrong-abstraction counterweight, dependency-cruiser/import-linter/ArchUnit, Reek smells, jscpd/CPD/S4144, Spectral/oasdiff/buf/Pact, Bloch/Postel/RMM.
+- **Cluster IV (runtime)** — verified & upgraded draft: OWASP Top 10 2021, CWE Top 25 2024 (XSS #1), OWASP LLM Top 10 2025, **ASVS corrected to 5.0 (17 chapters)**, Bandit/gosec IDs, Core Web Vitals (INP replaced FID 2024-03-12), Willison lethal trifecta (2025-06-16).
+- **Cluster V (verification)** — written fresh: pyramid vs trophy, mutation + property-based testing, SLSA/Scorecard/SBOM/OSV, expand-contract migrations + gh-ost/pt-osc/strong_migrations, twelve-factor + feature-toggle taxonomy, DORA, Bazel hermetic.
+- **Cluster VI (evolution)** — verified & upgraded draft: WCAG 2.2 SCs (2.4.11, 2.5.8 24px, 1.4.3), axe/jsx-a11y rules, Conventional Commits + Beams, **SmartBear/Cisco study (200–400 LOC)**, Diátaxis/ADR/Keep-a-Changelog, AGPL network copyleft/SPDX/REUSE, **EAA in force 2025-06-28**, GDPR.
+
+**Phase 1 (research & taxonomy) is effectively complete.** Remaining before phase 2: resolve the granularity question (Q1) and a few residual open questions; then design the skill-suite architecture.

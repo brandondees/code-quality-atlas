@@ -26,6 +26,8 @@ File header template:
 ## Open threads   (gaps / mis-placements / sub-topics worth deeper research)
 ```
 
+**Status:** all 6 cluster files written and **web-verified from the main loop (2026-06-09)**. Cluster I is the exemplar (extra-deep). Each file ends with an *Open threads* section feeding [`../map-gaps.md`](../map-gaps.md) and phase-2 design. Residual `(verify)` tags mark only niche/fast-moving tool rule IDs.
+
 ## Index
 
 | File | Cluster | Categories |

@@ -14,10 +14,10 @@ We are in phase 1.
 **Phase 1 of 3 — Research & taxonomy (in progress)**
 
 - [x] Scope decision: **maximal** — intrinsic code properties **plus** all cross-cutting concerns (security, performance, tests, deps, build/CI, data, docs, accessibility, observability, …).
-- [x] First-pass taxonomy: **6 clusters / 24 categories / ~70 factors** → [`docs/taxonomy.md`](docs/taxonomy.md)
-- [ ] Reference gathering — books, papers, tools, linters, heuristics → [`docs/references.md`](docs/references.md)
-- [ ] Prior-art survey → [`docs/prior-art.md`](docs/prior-art.md)
-- [ ] Resolve open questions → [`docs/open-questions.md`](docs/open-questions.md)
+- [x] Taxonomy v0.2 (pressure-tested): **6 clusters / 27 categories / ~80 factors** → [`docs/taxonomy.md`](docs/taxonomy.md)
+- [x] **Per-cluster research — all 6 clusters written & web-verified (2026-06-09):** references, static-analysis tool rules, reviewable heuristics → [`docs/research/`](docs/research/)
+- [x] Prior-art survey → [`docs/prior-art.md`](docs/prior-art.md); cross-cutting findings → [`docs/map-gaps.md`](docs/map-gaps.md)
+- [ ] Resolve remaining open questions (granularity Q1, compliance scope Q9, …) before phase 2 → [`docs/open-questions.md`](docs/open-questions.md)
 
 **Phase 2 — Skill-suite architecture** (not started): decide granularity, group categories into buildable skills, define how they're invoked and composed.
 
