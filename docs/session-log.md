@@ -26,3 +26,11 @@ Chronological record of how the research evolved. Newest at the bottom.
 - Resolved all 7 candidate additions *(→ D5)*. Map now **27 categories**: added #25 AI/LLM-integration, #26 Configuration & environment, #27 Compliance/licensing/provenance; broadened #3 and #9; cross-linked #4 ↔ #23.
 - Logged new open question Q9 (compliance scope boundary).
 - Kicked off the parallel research pass: one research agent per cluster (references + static-analysis-tool rule mining + reviewable-heuristic seeds), output filed under `docs/research/`. Cluster I taken extra-deep as the template.
+
+### 2026-06-08 (cont.) — research pass: web-access blocker + salvage
+
+- **Key environment finding:** general-purpose subagents are **sandboxed without network** (WebSearch/WebFetch/curl all denied), but the **main loop has working web access**. Future research must be run from the main loop (or hand sources to subagents), not delegated to web-less subagents.
+- Of 6 cluster agents: **3 correctly refused to fabricate and stopped** (I, III, V — no files); **3 wrote from-memory drafts** with `(verify)` tags + caveats (II readability, IV runtime, VI evolution). Drafts committed as **unverified v0** for safekeeping. (Cluster IV left ~15 canonical URLs unmarked — to be verified.)
+- Captured cross-cutting structural findings into [`map-gaps.md`](map-gaps.md) (G1–G8): double-booked concerns needing single owners, a possible "Excessive Agency" promotion, the Clean-Code-vs-Ousterhout decomposition tension, where LLM judgment is the only tool, and git-history-shaped vs diff-shaped skills.
+
+**Next:** redo the research properly from the main loop (where web works) — write the 3 missing clusters (I/III/V) with verified citations, and verify/upgrade the 3 drafts (clear `(verify)`, add real URLs). Cluster I first, as the exemplar.

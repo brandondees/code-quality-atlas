@@ -35,5 +35,7 @@ Built fresh from **first principles**. Existing skills, plugins, linters, and re
 | [`docs/taxonomy.md`](docs/taxonomy.md) | The master map: clusters → categories → factors |
 | [`docs/references.md`](docs/references.md) | Annotated references by cluster — the active research surface |
 | [`docs/prior-art.md`](docs/prior-art.md) | Existing skills / tools that already cover parts of the map |
+| [`docs/research/`](docs/research/) | Per-cluster research: references, tooling rules, reviewable heuristics |
+| [`docs/map-gaps.md`](docs/map-gaps.md) | Cross-cutting structural findings feeding phase-2 (double-booked concerns, decomposition tension, etc.) |
 | [`docs/open-questions.md`](docs/open-questions.md) | Decisions made + unresolved questions |
 | [`docs/session-log.md`](docs/session-log.md) | Chronological record of how this evolved |
