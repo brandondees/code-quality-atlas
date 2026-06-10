@@ -2,5 +2,30 @@
   "skills": [
     "checking-restraint"
   ],
-  "scenarios": []
+  "scenarios": [
+    {
+      "query": "Review this change:\n```python\nclass ExportStrategyRegistry:\n    \"\"\"Pluggable export formats. Only CSV exists today, but this keeps us flexible.\"\"\"\n    def __init__(self):\n        self._strategies = {}\n    def register(self, fmt, strategy_cls, **default_opts):\n        self._strategies[fmt] = (strategy_cls, default_opts)\n    def export(self, fmt=\"csv\", **overrides):\n        cls, opts = self._strategies[fmt]\n        return cls(**{**opts, **overrides}).run()\n```",
+      "expected_behavior": [
+        "Flags speculative generality: a registry/strategy pattern with config overrides for a single implementation (YAGNI / rule of three)",
+        "Recommends inlining to a direct export_csv function until a real second format exists",
+        "Notes that the right abstraction can't be designed from one example (wrong-abstraction risk)"
+      ]
+    },
+    {
+      "query": "Review this change:\n```js\n// Micro-optimized membership test for speed.\nlet permBits = 0;\nfor (const p of user.permissions) permBits |= PERM_BIT[p];\nfunction canEdit(user) {\n  return (permBits & PERM_BIT.edit) !== 0;   // settings page, loads once per visit\n}\n```",
+      "expected_behavior": [
+        "Flags premature optimization: hand-rolled bit-twiddling on a cold path (once per page visit) with no profile or benchmark justifying it",
+        "Notes the readability/correctness cost (module-level permBits is shared mutable state across users)",
+        "Recommends the simple readable check (e.g. user.permissions.includes('edit')) unless a profile shows this path is hot"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef parse_csv_row(row: str) -> list[str]:\n    return [cell.strip() for cell in row.split(\",\")]\n```\nContext: called from one place; input is a trusted internal fixed-format file.",
+      "expected_behavior": [
+        "Reports no findings",
+        "Does not recommend adding a CSV library, abstraction layer, config options, or speculative edge-case handling for the trusted fixed-format input",
+        "Recognizes a direct concrete implementation as appropriate restraint"
+      ]
+    }
+  ]
 }

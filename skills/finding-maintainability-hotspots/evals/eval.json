@@ -2,5 +2,31 @@
   "skills": [
     "finding-maintainability-hotspots"
   ],
-  "scenarios": []
+  "scenarios": [
+    {
+      "query": "Here is a maintainability scan of our repo (last 12 months). What should we act on?\n```text\nfile                        commits  authors  cognitive-complexity  todo/hack\npricing/rules_engine.py        64       1            118               7\nweb/views.py                   38       7             15               0\ndb/schema.py                   10       3              5               0\n```",
+      "expected_behavior": [
+        "Identifies pricing/rules_engine.py as the hotspot (high churn combined with high complexity)",
+        "Flags the bus-factor risk: a single author owns the most complex, most-changed file",
+        "Flags the 7 untracked TODO/HACK markers and recommends linking them to tracked issues",
+        "Does not flag web/views.py (high churn but low complexity, many authors) as a hotspot"
+      ]
+    },
+    {
+      "query": "Co-change analysis from our repo. Anything to act on?\n```text\npair                                              co-change rate   import link?\nauth/sessions.py <-> admin/audit_log.py                88%              no\nauth/sessions.py <-> auth/tokens.py                    70%              yes\n```",
+      "expected_behavior": [
+        "Flags the sessions/audit_log pair as hidden coupling: high co-change with no declared code dependency",
+        "Recommends making the implicit contract explicit (shared type/interface or an event), so one side can't silently break the other",
+        "Treats the sessions/tokens pair as expected coupling (declared import within the same module)"
+      ]
+    },
+    {
+      "query": "Here is a maintainability scan of our repo (last 12 months). What should we act on?\n```text\nfile                        commits  authors  cognitive-complexity  todo/hack\napi/orders.py                  21       5             12           1 (linked #310)\ncore/tax.py                    17       4             10           0\nlib/dates.py                    8       5              4           0\n```",
+      "expected_behavior": [
+        "Reports no maintainability hotspots",
+        "Recognizes churn is spread across multiple authors, complexity is modest, and the one TODO is tracked",
+        "Does not invent a hotspot from the merely-highest numbers in a healthy table"
+      ]
+    }
+  ]
 }
