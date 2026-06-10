@@ -25,17 +25,6 @@
 
 ---
 
-## Open threads (gaps / mis-placements / sub-topics worth deeper research)
-
-- **Sourcing status (was a gap):** the draft's standards spines and high-traffic rule IDs are now **web-verified (2026-06-09)** — CWE 2024 ranks, ASVS 5.0 (17 chapters), OWASP LLM Top 10 2025, Bandit/gosec IDs, Core Web Vitals, lethal trifecta. Residual `(verify)`: exact Semgrep/CodeQL query IDs, Sonar squids, LLM-Guard scanner names — these churn fastest and should be confirmed at skill-build time.
-- **Security ↔ Dependencies/Supply chain (#14 ↔ #18):** A06 Vulnerable Components and CVE scanning live in both #14 and #18; LLM03 (LLM supply chain) and #25 also overlap. Decide which skill *owns* dependency-CVE review so it isn't done twice or dropped between them.
-- **Security ↔ Compliance/PII (#14 ↔ #27):** PII handling, data residency/retention, and "PII sent to third-party models" (#25) straddle #14, #25, and #27. The map currently has PII handling under #14 and regulatory obligations under #27 — a review skill will need an explicit hand-off rule.
-- **Observability ↔ Configuration (#16 ↔ #26):** Twelve-factor logging, feature-flag lifecycle/stale-flag cleanup, and graceful startup/shutdown appear in both #16 and #26. The taxonomy already notes flags live in #12/#16/#26 — worth a single canonical home for "feature-flag hygiene."
-- **SLO/error-budget straddles #16 and #24:** As the taxonomy's residual-candidates note flags, SLO/error-budget framing is partly a process concern. The observability skill should *instrument* SLIs; the process skill should own the budget policy. Clarify the seam.
-- **Performance counterweight is hard to lint:** "Premature optimization" is almost entirely a heuristic/judgment call with essentially no tooling support (unlike most categories). The skill will likely need an LLM-judgment check ("is there a profile/benchmark justifying this?") rather than a rule — note for phase-2 skill design, and mirrors the #11 premature-abstraction counterweight problem.
-- **#25 is tooling-thin and fast-moving:** Unlike #14–#16, classic static analysis barely covers LLM integration; the leverage is in eval harnesses, output-schema enforcement, and guardrail frameworks. Tool/IDs here will churn fastest of any category — design the skill to assert *behaviors* (validate output, pin model, bound cost, label untrusted input) rather than name specific tools.
-- **Agentic/tool-use risk may deserve its own factor:** "Excessive Agency" (LLM06) + the lethal-trifecta pattern (autonomous tool-calling agents acting on untrusted input) is arguably bigger than a sub-bullet of #25 and cross-cuts #14 (authz of tool actions) and #13 (API contracts the agent calls). Candidate for promotion or an explicit cross-link as agent features proliferate.
-
 ## From category #27
 
 ### Reviewable heuristics (skill-checklist seeds)
@@ -53,15 +42,3 @@
 - **SBOM currency:** if dependencies changed, is the SBOM / license inventory regenerated so provenance stays accurate?
 
 ---
-
-## Open threads   (gaps / mis-placements / sub-topics worth deeper research)
-
-- **Citation status (was a gap):** the standards spines and high-traffic tool IDs are now **web-verified (2026-06-09)** — WCAG 2.2 SCs (2.4.11, 2.5.8, 1.4.3), axe-core / jsx-a11y rule ids, Conventional Commits + commitlint, the SmartBear/Cisco review-size numbers, Diátaxis, ADR, Keep a Changelog, SPDX/AGPL, REUSE, EAA (2025-06-28), GDPR. Residual `(verify)`: some SonarQube squids and formatjs/i18next/html-validate plugin rule names — confirm at skill-build time.
-- **#21 ↔ #15/#6 overlap.** Cyclomatic/cognitive complexity and god-modules appear here (as change-amplification proxies), in #6 (local readability), and #12 (architecture). The *maintainability* lens is specifically VCS-aware (churn × complexity, change-coupling, bus factor) — worth carving out as the distinguishing behavior so it doesn't collapse into generic complexity linting.
-- **#22 ↔ #7 boundary.** "Comment rot" lives in #7 (comments) but doc-drift detection (docstring-vs-signature, example rot) is here. Suggest: #7 = in-code why-not-what; #22 = external/structured docs + ADR/changelog/runbook. Tools like `darglint`/`eslint-plugin-jsdoc` straddle both.
-- **i18n money/units genuinely double-booked (#23 ↔ #4).** The *formatting* facet (Intl/CLDR, locale-aware output) is here; the *arithmetic correctness* facet (precision, overflow, currency math) is #4. The taxonomy already cross-links this; a single skill may need to own both ends to avoid a seam.
-- **AI-generated-code provenance (#27) ↔ #25.** Provenance/attribution/licensing of AI output sits in #27; prompt-injection and output-validation sit in #25. A reviewer checking an AI-authored PR needs both lenses at once — candidate for a combined "AI-contribution review" behavior.
-- **Privacy/telemetry is triple-booked** (#27 regulatory, #16 observability/logging-no-PII, #14 PII handling). The taxonomy's own residual-candidates note flags this. For the skill suite, recommend one PII-data-flow check that all three reference rather than three partial ones.
-- **Agent-native parity (#24)** is a project-specific principle with thin external prior art (mainly the in-repo `agent-native-reviewer`). Worth deeper sourcing or treating as a house rule rather than an industry-standard heuristic.
-- **"Definition of done" and SLO/error-budget framing** straddle process (#24) and observability (#16); the taxonomy notes this. Decide whether DoD is a checklist owned by #24 that *includes* observability gates, or a cross-cutting meta-check.
-- **Legal calls exceed an agent's authority.** Several #27 heuristics (copyleft linkage, export control, data-residency legality) should *flag for human/legal review* rather than assert a verdict — the skill design should encode that escalation, not pretend to adjudicate.

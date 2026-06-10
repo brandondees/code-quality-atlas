@@ -65,3 +65,28 @@ def test_extract_section_and_hash_with_unicode_heading():
     h2 = section_hash(markdown, 7)
     assert h1 == h2                        # deterministic
     assert len(h1) == 64                   # SHA-256 hex
+
+
+def test_last_section_stops_at_non_numbered_h2():
+    """The last numbered section must terminate at a trailing non-numbered H2
+    (e.g. `## Open threads`) — not absorb it into its text/hash (regression for
+    the section-boundary bug)."""
+    sec4 = extract_section(SAMPLE, 4)
+    assert "Is every acquired resource released" in sec4   # its own content kept
+    assert "Open threads" not in sec4                      # trailing H2 excluded
+    assert "## Open threads" not in sec4
+    # editing the Open-threads block must NOT change section #4's hash
+    edited = SAMPLE.replace("must NOT be absorbed", "must absolutely NOT be absorbed")
+    assert section_hash(edited, 4) == section_hash(SAMPLE, 4)
+
+
+def test_section_stops_at_non_numbered_h2_inline():
+    markdown = (
+        "# Doc\n\n"
+        "## #1 Only section\n\nbody line\n\n"
+        "## Open threads\n\ntrailing notes\n"
+    )
+    sec = extract_section(markdown, 1)
+    assert "body line" in sec
+    assert "trailing notes" not in sec
+    assert "Open threads" not in sec

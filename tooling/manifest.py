@@ -69,7 +69,11 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
         if not s.built_from:
             raise ValidationError(f"{s.name}: built_from must be non-empty")
         for src in s.built_from:
-            text = Path(docs_root, src.path).read_text(encoding="utf-8")
+            try:
+                text = Path(docs_root, src.path).read_text(encoding="utf-8")
+            except (OSError, UnicodeError) as exc:
+                raise ValidationError(
+                    f"{s.name}: cannot read source file {src.path}: {exc}") from exc
             try:
                 extract_section(text, src.section)
             except KeyError:

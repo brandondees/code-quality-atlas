@@ -14,10 +14,22 @@ class DriftReport:
 
 
 def _read_provenance(skill_md: Path) -> tuple[str, list[dict]]:
-    text = skill_md.read_text(encoding="utf-8")
-    front = yaml.safe_load(text.split("---\n")[1])
-    prov = front["provenance"]
-    return front["name"], prov["built_from"]
+    # `utf-8-sig` drops a BOM and `\r\n` -> `\n` normalizes a Windows checkout,
+    # so the `---\n` fence split works regardless of line endings/encoding mark.
+    text = skill_md.read_text(encoding="utf-8-sig").replace("\r\n", "\n")
+    # Frontmatter is the block between the first two `---` fences. Limit the
+    # split to 2 so a `---` in the body can't shift the parse, and validate the
+    # shape so a malformed header/body gives a clear ValueError, not Index/Type/KeyError.
+    parts = text.split("---\n", 2)
+    if len(parts) < 3 or parts[0].strip():
+        raise ValueError(f"{skill_md}: missing or malformed YAML frontmatter")
+    front = yaml.safe_load(parts[1])
+    if (not isinstance(front, dict) or "name" not in front
+            or not isinstance(front.get("provenance"), dict)
+            or "built_from" not in front["provenance"]):
+        raise ValueError(
+            f"{skill_md}: frontmatter must define `name` and `provenance.built_from`")
+    return front["name"], front["provenance"]["built_from"]
 
 
 def check_drift(skills_root: str = "skills", docs_root: str = ".") -> list[DriftReport]:
