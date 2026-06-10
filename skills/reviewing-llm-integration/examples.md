@@ -53,6 +53,6 @@ def classify(ticket_text: str) -> str:
 ```
 **Expected finding:** None — pinned model, delimited untrusted input, temperature 0
 for a classification task, bounded tokens and timeout, schema-validated output with
-a defined fallback, and no tool/egress surface. Report "No findings." Do NOT demand
+a defined fallback, and no tool/egress surface. Report "No findings". Do NOT demand
 guardrails that are already present, and do NOT flag the mere act of calling an LLM
 as a risk when the integration is bounded like this.

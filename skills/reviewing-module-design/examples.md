@@ -51,7 +51,7 @@ class EmailAddress:
 ```
 **Expected finding:** None — untrusted input is parsed once into a precise immutable
 type at the boundary (parse-don't-validate); downstream code can't hold an invalid
-`EmailAddress`. Report "No findings." Do NOT flag the small surface as "needs more
+`EmailAddress`. Report "No findings". Do NOT flag the small surface as "needs more
 methods," do NOT suggest an interface/abstract base for a single implementation, and
 do NOT call a deliberately narrow value object "anemic."
 

@@ -53,7 +53,7 @@ def is_locked_out(account: Account) -> bool:
 ```
 **Expected finding:** None — intention-revealing names, a predicate boolean
 (`is_locked_out`), the literal is a named constant, guard clause keeps nesting flat.
-Report "No findings." Do NOT flag the short body as "needs comments" — clear code
+Report "No findings". Do NOT flag the short body as "needs comments" — clear code
 needs no restating comment. Do NOT flag `0`/`1`-style obvious literals or demand
 longer names for already-clear ones.
 

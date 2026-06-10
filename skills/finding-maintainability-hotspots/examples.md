@@ -43,7 +43,7 @@ lib/utils.py                      9       6              6           0
 ```
 **Expected finding:** None — churn is spread across files with multiple authors,
 complexity is modest everywhere, and the one TODO is tracked against an issue.
-Report "No findings: no maintainability hotspots in this scan." Do NOT invent a
+Report "No findings: no maintainability hotspots in this scan". Do NOT invent a
 hotspot from the merely-highest number in a healthy table — hotspot means churn AND
 complexity AND concentration compounding, not "something has to be worst."
 

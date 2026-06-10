@@ -89,9 +89,13 @@ class ScenarioRun:
     response: str
 
 
+DEFAULT_HOSTS = {"ollama": OLLAMA_HOST, "openai": OPENAI_HOST}
+
+
 def run_skill_evals(skill_dir: Path, model: str,
-                    host: str = OLLAMA_HOST, api: str = "ollama") -> list[ScenarioRun]:
+                    host: str | None = None, api: str = "ollama") -> list[ScenarioRun]:
     query = {"ollama": query_ollama, "openai": query_openai}[api]
+    host = host or DEFAULT_HOSTS[api]
     system = assemble_context(skill_dir) + _REVIEWER_DIRECTIVE
     doc = load_evals(str(skill_dir / "evals" / "eval.json"))
     runs: list[ScenarioRun] = []
@@ -111,10 +115,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--host", default=None,
                     help="defaults to the chosen api's local port")
     args = ap.parse_args(argv)
-    host = args.host or {"ollama": OLLAMA_HOST, "openai": OPENAI_HOST}[args.api]
 
     skill_dir = Path(args.skills_root, args.skill)
-    runs = run_skill_evals(skill_dir, args.model, host=host, api=args.api)
+    runs = run_skill_evals(skill_dir, args.model, host=args.host, api=args.api)
     for i, r in enumerate(runs, 1):
         print(f"\n{'=' * 72}\nSCENARIO {i}")
         print(f"QUERY:\n{r.query}\n")

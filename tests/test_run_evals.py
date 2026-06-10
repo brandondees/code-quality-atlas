@@ -60,3 +60,8 @@ def test_run_skill_evals_openai_backend(tmp_path, monkeypatch):
     assert [r.response for r in runs] == [
         "openai-reviewed: q1", "openai-reviewed: q2", "openai-reviewed: q3"]
     assert calls == ["http://localhost:9999"] * 3
+
+    # host omitted -> defaults to the chosen api's port, not Ollama's
+    calls.clear()
+    run_evals.run_skill_evals(out, "fake-model", api="openai")
+    assert calls == [run_evals.OPENAI_HOST] * 3

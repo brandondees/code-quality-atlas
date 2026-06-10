@@ -54,7 +54,7 @@ def format_receipt(order):
     return "\n".join(lines)
 ```
 **Expected finding:** None — a direct, concrete implementation with no speculative
-layers. Report "No findings." Do NOT recommend introducing an abstraction, interface,
+layers. Report "No findings". Do NOT recommend introducing an abstraction, interface,
 formatter class, or template engine "for flexibility" — recommending un-needed
 abstraction is exactly the failure mode this skill guards against. (When reporting
 no findings, say "No findings" plainly; don't borrow a justification from another

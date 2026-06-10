@@ -48,6 +48,11 @@ curl -sLO https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/mai
 python -m tooling.run_evals --skill <name> --model qwen2.5-coder-7b --api openai
 ```
 
+Verify what you downloaded before running it: check the binary against the
+checksum/digest on the llama.cpp release page (`gh release view <tag>` or the
+asset's `digest` in the releases API) and the GGUF against the SHA256 shown on
+its Hugging Face file page — these are unsigned third-party artifacts.
+
 CPU-only inference is slow (~5 tok/s on 4 cores for a 7B Q4) but fine for
 eval-scenario volumes; `llama-server` caches the shared system prefix across a
 skill's scenarios.
