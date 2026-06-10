@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "auditing-config-and-build-hygiene"
+  ],
+  "scenarios": [
+    {
+      "query": "Audit this build/config scan:\n```text\n.github/workflows/deploy.yml: uses: docker/build-push-action@v2 (tag, not SHA);\n  deploys on push to main; test job exists but `continue-on-error: true`\nDockerfile: FROM node:latest; COPY .npmrc (contains registry auth token)\nconfig/index.js: module.exports = { db: process.env.DB_URL || 'postgres://localhost' }\n  -- no validation; prod fell back to localhost last month (incident #77)\n```",
+      "expected_behavior": [
+        "Flags the auth token copied into the image (.npmrc) as a baked-in secret to inject at runtime and rotate",
+        "Flags the unpinned base image and action tag, and the test job that can't block deploys (continue-on-error on a merge/deploy gate)",
+        "Flags the unvalidated config with a dangerous localhost fallback (fail fast at startup instead), citing the incident"
+      ]
+    },
+    {
+      "query": "Audit this scan:\n```text\nflags.yml:\n  use_new_search: false   (owner none; added 2 years ago; referenced in 0 code paths)\n  beta_invoices: true     (owner none; both branches still maintained, 9 months)\nbuild.sh: curl https://internal.example/toolchain.sh | bash   (no checksum)\nMakefile: build depends on developer-local /opt/sdk-11.0.2\n```",
+      "expected_behavior": [
+        "Flags the dead flag (referenced nowhere) for deletion and the long-lived ownerless flag for an owner + removal plan",
+        "Flags the curl-pipe-bash toolchain fetch with no pin/checksum as unreproducible and a supply-chain risk",
+        "Flags the dependence on machine-local state (/opt/sdk) breaking build reproducibility"
+      ]
+    },
+    {
+      "query": "Audit this scan:\n```text\nci.yml: actions pinned by SHA; lint, types, tests, pip-audit all required to merge;\n  python toolchain pinned via uv.lock; image by digest; build-once-promote\nsettings.py: pydantic BaseSettings validates every var at startup; defaults safe;\n  secret scanner clean; each var documented\nflags: one flag, owner @growth, removal ticket linked\n```",
+      "expected_behavior": [
+        "Reports no findings (config and build hygiene are sound)",
+        "Recognizes the pinned reproducible build, required gates, fail-fast validated config, and owned flag",
+        "Does not demand additional infrastructure beyond the project's needs"
+      ]
+    }
+  ]
+}

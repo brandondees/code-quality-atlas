@@ -1,0 +1,20 @@
+# Reviewable heuristics — reviewing-observability-and-operability
+
+## Contents
+- From category #16
+
+## From category #16
+
+### Reviewable heuristics (skill-checklist seeds)
+- Are logs structured (key-value/JSON) with consistent fields (timestamp, level, service, request/trace ID) rather than interpolated prose? Can you grep/query by field in production?
+- Is the log *level* appropriate (no INFO spam in hot loops; real failures at ERROR; nothing security/PII-sensitive logged at any level)? Is there a correlation/trace ID threaded through so one request's logs are linkable?
+- Do new failure paths emit a context-rich error (what operation, which inputs/IDs — non-sensitive, the wrapped cause) rather than a bare `error`/stack with no story? Errors should wrap, not swallow, and not be both logged *and* rethrown (double-logging).
+- For any new meaningful operation: is it instrumented with at least one of the four golden signals (latency histogram, error counter, throughput)? Are spans created and trace context propagated across service/async boundaries?
+- Does a new service/endpoint expose liveness and readiness checks, and do readiness checks actually reflect dependency health (DB/cache reachable) without being so strict they flap?
+- Risky/irreversible behavior change: is it behind a feature flag or kill switch so it can be disabled in prod without a redeploy? Is there a documented rollback?
+- Startup/shutdown: does the service start only after dependencies are ready, and on shutdown drain in-flight work, stop accepting new requests, flush logs/metrics, and close connections (handle SIGTERM)? (Graceful shutdown.)
+- Is there an SLI/SLO implied by this change, and is the data to measure it being emitted (good-event and total-event counts)? Don't alert on causes you can fix later; alert on user-facing symptoms.
+- Cardinality discipline: are high-cardinality values (user IDs, raw URLs, emails) used as *event attributes*, not as Prometheus metric *labels* (which explode series count and cost)?
+- Are timeouts, retries, and deadlines observable (logged/metered with reason) so on-call can see *why* something is slow or failing, not just that it is?
+
+---

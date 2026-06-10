@@ -1,7 +1,7 @@
 # Examples — reviewing-test-quality
 
 A test diff often contains several independent problems. Check every line against
-the checklist and report each distinct issue as its own numbered finding.
+the checklist and report each distinct issue as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
 
 ## Bad → finding
 

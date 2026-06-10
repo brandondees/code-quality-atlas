@@ -1,0 +1,20 @@
+# Reviewable heuristics — reviewing-api-contract-safety
+
+## Contents
+- From category #13
+
+## From category #13
+
+### Reviewable heuristics (skill-checklist seeds)
+- Is the change to a public contract **backward-compatible**? If breaking, is it versioned and communicated (semver, deprecation window)?
+- Is the API **easy to use, hard to misuse**? Required things required by the type; invalid combinations impossible; sensible defaults.
+- **"When in doubt, leave it out":** any field/endpoint/param being added that isn't clearly needed? (You can add later; you can't remove.)
+- **Consistent** with the rest of the surface (naming, pluralization, error shape, pagination, status codes, casing — cross #8)?
+- Are **errors part of the contract** — typed, documented, stable codes — not ad-hoc strings?
+- **Idempotency**: are unsafe operations idempotent or protected by idempotency keys (cross #3)?
+- Pagination, rate limits, filtering defined for collection endpoints?
+- Is there a **contract test** (Pact/schema) guarding the consumer-provider boundary?
+- Does the response avoid leaking internal representation (implementation bleed)?
+- **Robustness nuance**: are we appropriately *strict in what we accept* (not silently coercing bad input — cross #2)?
+
+---

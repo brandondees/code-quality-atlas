@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "tracing-correctness-and-invariants"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this change:\n```python\n# Returns the last `n` readings, oldest first.\ndef last_readings(readings, n):\n    result = []\n    for i in range(len(readings) - n, len(readings)):\n        result.append(readings[i])\n    return result\n```",
+      "expected_behavior": [
+        "Flags the negative-start bug: when n > len(readings), range(len-n, len) has a negative start so readings[i] wraps around and returns wrong elements",
+        "Flags the unhandled boundary cases (n = 0, empty readings, n larger than the list) against the function's stated contract",
+        "Recommends an explicit clamp or slice (readings[-n:] with n validated) so the function is total over its inputs"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef hold_lock_and_bill(client):\n    lock = acquire_billing_lock(client.id)\n    started = time.time()\n    total = client.hours * 19.99            # invoice amount\n    bill(client, total)\n    release(lock)\n    return time.time() - started\n```",
+      "expected_behavior": [
+        "Flags that the lock is not released if bill() raises (use try/finally or a context manager)",
+        "Flags binary-float money arithmetic (hours * 19.99) and recommends Decimal or integer cents",
+        "Flags wall-clock time.time() for measuring elapsed time and recommends a monotonic clock"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef page_bounds(page: int, page_size: int, total: int) -> tuple[int, int]:\n    \"\"\"Half-open [start, end) bounds for 1-based page numbers; raises on bad input.\"\"\"\n    if page < 1 or page_size < 1:\n        raise ValueError(\"page and page_size must be >= 1\")\n    start = (page - 1) * page_size\n    return start, min(start + page_size, total)\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes the validated inputs, the documented half-open convention, and the clamped end bound",
+        "Does not invent off-by-one issues in correct boundary math"
+      ]
+    }
+  ]
+}

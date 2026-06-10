@@ -1,7 +1,7 @@
 # Examples — reviewing-naming-and-readability
 
 A diff often contains several independent readability problems. Check every line
-and report each distinct issue as its own numbered finding.
+and report each distinct issue as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
 
 ## Bad → finding
 

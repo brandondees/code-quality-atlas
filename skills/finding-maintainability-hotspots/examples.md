@@ -2,7 +2,7 @@
 
 This skill is repo-shaped: its input is repository history/scan data (churn,
 complexity, authorship, co-change), not a single diff. Report each distinct issue
-as its own numbered finding.
+as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
 
 ## Bad → finding
 

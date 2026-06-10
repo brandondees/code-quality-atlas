@@ -3,7 +3,7 @@
 This skill is low-freedom: findings should quote the exact safe recipe, not general
 advice. The running app and the migration deploy at different moments — every
 change must be compatible with both the old and new code being live. Report each
-distinct unsafe operation as its own numbered finding.
+distinct unsafe operation as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
 
 **Decision rules (apply before flagging):**
 - **Any one-step rename or type-change of a live column/table is breaking** during

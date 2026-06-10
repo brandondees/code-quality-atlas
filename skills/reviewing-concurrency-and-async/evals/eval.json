@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "reviewing-concurrency-and-async"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this change:\n```python\nasync def reserve_seat(show_id, seat, user):\n    taken = await db.fetchval(\n        \"SELECT reserved_by FROM seats WHERE show=$1 AND seat=$2\", show_id, seat)\n    if taken is None:\n        await payments.charge(user, seat_price(show_id))\n        await db.execute(\n            \"UPDATE seats SET reserved_by=$1 WHERE show=$2 AND seat=$3\",\n            user.id, show_id, seat)\n```",
+      "expected_behavior": [
+        "Flags the check-then-act race across awaits: two users can both see the seat free and both be charged (double-booking)",
+        "Recommends an atomic claim (conditional UPDATE ... WHERE reserved_by IS NULL checking rowcount, or unique constraint) before charging",
+        "Notes the charge-before-reserve ordering leaves a crash window where a user is charged without a seat"
+      ]
+    },
+    {
+      "query": "Review this change:\n```js\nlet pending = [];\napp.post('/jobs', (req, res) => {\n  pending.push(req.body);            // mutated by every request\n  processJob(req.body);              // async, result ignored\n  res.json({ queued: pending.length });\n});\n```",
+      "expected_behavior": [
+        "Flags the ignored promise from processJob: rejections are unhandled and vanish silently",
+        "Flags the shared mutable pending array growing without bound and being mutated by concurrent requests with no removal/synchronization story",
+        "Recommends awaiting/handling the job promise (or a real queue) rather than fire-and-forget"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\nasync def apply_credit(account_id, amount, request_id):\n    # retried by the gateway; request_id is stable per logical operation\n    await db.execute(\n        \"INSERT INTO ledger (request_id, account_id, amount) VALUES ($1,$2,$3) \"\n        \"ON CONFLICT (request_id) DO NOTHING\",\n        request_id, account_id, amount,\n    )\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes the idempotency key and database-enforced atomicity make retries and concurrency safe",
+        "Does not demand locks or transactions the constraint already makes unnecessary"
+      ]
+    }
+  ]
+}

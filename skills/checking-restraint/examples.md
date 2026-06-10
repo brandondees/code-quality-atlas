@@ -1,6 +1,6 @@
 # Examples — checking-restraint
 
-Report each distinct issue as its own numbered finding.
+Report each distinct issue as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
 
 ## Bad → finding
 

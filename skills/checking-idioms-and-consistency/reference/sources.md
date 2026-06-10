@@ -1,0 +1,14 @@
+# References to mine — checking-idioms-and-consistency
+
+## Contents
+- From category #8
+
+## From category #8
+
+### Key references
+- **Language & org style guides** — **PEP 8**, **Google Style Guides** (google.github.io/styleguide), **Airbnb JavaScript**, **Effective Go / Go Code Review Comments**, **Rust API Guidelines**, **Ruby Style Guide** → mine: each is a curated, battle-tested list of "in this ecosystem, do it *this* way." We don't adopt one; we mine the *recurring* checks.
+- **Effective Go + "Go Code Review Comments"** → mine: an *idiom* guide written as review comments (error shape, naming, receiver names, interface size, `gofmt` non-negotiable) — a template for the "idiomatic use" half.
+- **Andrew Hunt & David Thomas — *The Pragmatic Programmer* (Orthogonality, DRY, least surprise)** → mine: consistency is least-surprise; learning one part should predict the rest.
+- **Martin Fowler — *Refactoring* / PoEAA** → mine: when a codebase has *chosen* a pattern (Repository, Result type, error-as-value, hexagonal ports), new code should conform; divergence without reason is a smell.
+- **Sandi Metz — "The Wrong Abstraction"** (cross-links #11) → mine: consistency is good *until* it forces the wrong shape; flag inconsistency, but don't demand uniformity that papers over genuinely different cases. **Counterweight.**
+- **Opinionated-reviewer prior art** (../prior-art.md): `dhh-rails`, `kieran-*`, `pattern-recognition-specialist` → mine: the *named-perspective* pattern — strong ecosystem-specific taste catches idiom violations a generic linter misses. Worth replicating per ecosystem (see map-gaps G6).

@@ -123,3 +123,22 @@ pairs carry the most weight for weak models) and/or adding an explicit
   flowing to two sinks (shell + filesystem) yields only the first sink's finding;
   security sweeps on small models need a deterministic scanner (semgrep/bandit)
   alongside for exhaustiveness.
+
+**Tuning lessons (wave 3 + wave-1 retrofit, same model):**
+- **The numbered-list template can backfire on clean code.** Retrofitting wave-1
+  examples to numbered lists left bad-case recall unchanged but made two skills
+  start *filling in* numbered findings on correct code (inventing issues to have a
+  list). Counter-tune that fixed it: every preamble now ends with — when the input
+  is correct, the entire response is exactly "No findings"; never produce a
+  numbered list for correct code. Ship the template and the escape hatch together.
+- **Scan-table hallucination:** given a dependency table with an empty `cves`
+  column, the model invented a CVE and a fix version. Repo-shaped decision rules
+  must say "cite only signals present in the scan" explicitly — for audit skills
+  the input table is the whole evidence base, and weak models will pad it.
+- **Range-arithmetic ceiling:** `range(len(x) - n, len(x))` going negative when
+  `n > len(x)` produced a confidently wrong off-by-one diagnosis — same family as
+  the 3B control-flow ceiling. For tracing-correctness on small models, pair with
+  property-based tests rather than trusting the diagnosis.
+- The repo-shaped audits otherwise transferred well: with decision rules + exact
+  no-finding sentences in place from the start, all five passed their healthy-scan
+  scenarios on the first run.

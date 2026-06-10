@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "auditing-dependencies-and-supply-chain"
+  ],
+  "scenarios": [
+    {
+      "query": "Audit this dependency scan. Project: Apache-2.0 SaaS, also shipped on-prem to customers.\n```text\npackage        version  pinned?  cves           last release  maintainers  license   notes\nrequets        2.31     no       -              5 years ago   1            MIT       name 1 char off `requests`\nimg-resize     3.0.1    lock     CVE-2026-114   3 weeks ago   5            MIT       fix in 3.0.2\nlicense-check  1.2.0    lock     -              2 months ago  2            GPL-3.0   imported as a library at runtime\n```",
+      "expected_behavior": [
+        "Flags the typosquat (requets vs requests) as a likely malicious/mistaken package needing immediate verification, and its unpinned floating version",
+        "Flags the known CVE with the available fixed version (bump img-resize to 3.0.2)",
+        "Flags the GPL-3.0 runtime library inside an Apache-2.0 product shipped on-prem as a license-compatibility risk to escalate"
+      ]
+    },
+    {
+      "query": "Audit this scan of a new PR adding one dependency.\n```text\npackage      version  pinned?            cves  last release  maintainers  weekly downloads  notes\nis-positive  ^2.0     no lockfile entry  -     7 years ago   1            120               adds 3 transitive deps; replaces `n > 0`\n```",
+      "expected_behavior": [
+        "Flags the trivial dependency (replaces a one-line expression) and recommends removing it in favor of inline code",
+        "Flags the unpinned version / missing lockfile entry",
+        "Flags the abandonment/single-maintainer signals as supply-chain surface not worth the cost for zero benefit"
+      ]
+    },
+    {
+      "query": "Audit this dependency scan. Project: MIT web service.\n```text\npackage   version  pinned?  cves  last release  maintainers  license  notes\nexpress   4.21.0   lock     -     1 month ago   20+          MIT      renovate enabled, npm ci in CI\npg        8.13.1   lock     -     2 months ago  10           MIT      -\n```",
+      "expected_behavior": [
+        "Reports no findings (dependencies and supply chain are healthy)",
+        "Recognizes pinned lockfile usage enforced in CI, active maintenance, clean scans, compatible licenses",
+        "Does not invent risks or recommend alternative libraries as a matter of preference"
+      ]
+    }
+  ]
+}

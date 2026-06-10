@@ -1,0 +1,20 @@
+# Reviewable heuristics — auditing-architecture-conformance
+
+## Contents
+- From category #12
+
+## From category #12
+
+### Reviewable heuristics (skill-checklist seeds)
+- Do source dependencies respect the **intended direction** (domain doesn't import infrastructure; UI→app→domain, not back)?
+- Any **dependency cycles** between modules/packages/services (ADP)?
+- Is there a **god module / hub** with huge fan-in *and* fan-out that everything routes through?
+- Does the change honor existing layer/boundary contracts, or smuggle a cross-layer import?
+- Could the intended rule be expressed as a **fitness function** (an ArchUnit/import-linter check)? If a rule is repeatedly violated, the boundary is wrong or unclear.
+- New cross-service/cross-context coupling via an **explicit contract** (API/event), not a shared DB or internal reach-in?
+- Is the architecture style **consistent** with the rest of the system (not a competing pattern bolted on)?
+- Does it scale along the expected axis (data volume, traffic, team size), or bake in a single-node assumption (cross #3, #15)?
+- Backward/forward-compatibility plan for the boundary change (cross #13)?
+- Feature-flag/config architecture: are flags scoped and removable (lifecycle — cross #26)?
+
+---
