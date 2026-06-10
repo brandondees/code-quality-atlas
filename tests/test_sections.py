@@ -47,3 +47,21 @@ def test_section_hash_changes_when_text_changes():
                             "Does every remote call have a timeout and deadline?")
     assert section_hash(edited, 2) != section_hash(SAMPLE, 2)
     assert section_hash(edited, 4) == section_hash(SAMPLE, 4)  # #4 untouched
+
+
+def test_extract_section_and_hash_with_unicode_heading():
+    """extract_section and section_hash must handle em-dash and & in a heading."""
+    markdown = (
+        "# Doc\n\n"
+        "## #7 Comments — why & how\n\n"
+        "Good comments explain intent, not mechanics.\n\n"
+        "## #8 Next section\n\n"
+        "Some other content.\n"
+    )
+    section = extract_section(markdown, 7)
+    assert "Comments — why & how" in section
+    assert "## #8" not in section          # stopped before next section
+    h1 = section_hash(markdown, 7)
+    h2 = section_hash(markdown, 7)
+    assert h1 == h2                        # deterministic
+    assert len(h1) == 64                   # SHA-256 hex

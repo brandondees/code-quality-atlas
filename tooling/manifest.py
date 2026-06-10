@@ -11,6 +11,13 @@ class Source:
     category: int
     source: str  # "<path>#<n>"
 
+    def __post_init__(self) -> None:
+        if self.category != self.section:
+            raise ValueError(
+                f"manifest category {self.category} != source section {self.section}"
+                f" for {self.source}"
+            )
+
     @property
     def path(self) -> str:
         return self.source.rsplit("#", 1)[0]
@@ -70,17 +77,21 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
 
 
 def load_manifest(path: str) -> Manifest:
-    data = yaml.safe_load(open(path, encoding="utf-8"))
+    with open(path, encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
     skills = []
-    for s in data["skills"]:
-        built = [Source(category=b["category"], source=b["source"]) for b in s["built_from"]]
-        skills.append(Skill(
-            name=s["name"],
-            description=s["description"].strip(),
-            shape=s["shape"],
-            wave=s["wave"],
-            built_from=built,
-            primary_owner=s.get("primary_owner"),
-            cross_ref=s.get("cross_ref", []),
-        ))
+    for i, s in enumerate(data["skills"]):
+        try:
+            built = [Source(category=b["category"], source=b["source"]) for b in s["built_from"]]
+            skills.append(Skill(
+                name=s["name"],
+                description=s["description"].strip(),
+                shape=s["shape"],
+                wave=s["wave"],
+                built_from=built,
+                primary_owner=s.get("primary_owner"),
+                cross_ref=s.get("cross_ref", []),
+            ))
+        except KeyError as e:
+            raise ValidationError(f"skill #{i}: missing field {e}") from e
     return Manifest(taxonomy_version=data["taxonomy_version"], skills=skills)

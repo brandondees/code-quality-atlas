@@ -16,7 +16,7 @@ def test_build_reference_heuristics_concatenates_across_sources_with_headers():
     assert "## From category #4" in md
     assert "Is any error swallowed" in md
     assert "Is every acquired resource released" in md
-    assert "## Contents" in md  # ToC because >100 lines? small here; still include ToC header
+    assert "## Contents" in md  # ToC is always emitted
 
 
 def test_build_reference_tooling_only_has_tooling():

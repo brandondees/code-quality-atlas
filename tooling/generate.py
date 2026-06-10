@@ -16,13 +16,16 @@ _KIND_TITLE = {
 def build_reference(skill: Skill, kind: str, docs_root: str = ".") -> str:
     """Concatenate the `kind` subsection from each source category into one
     reference file, each under a `## From category #n` header, with a ToC."""
-    parts: list[str] = []
+    if kind not in _KIND_TITLE:
+        raise ValueError(f"unknown kind {kind!r}; must be one of {list(_KIND_TITLE)}")
+    entries = []
     for src in skill.built_from:
         text = Path(docs_root, src.path).read_text(encoding="utf-8")
         body = extract_subsection(extract_section(text, src.section), kind).strip()
         if body:
-            parts.append(f"## From category #{src.section}\n\n{body}")
-    toc = "\n".join(f"- From category #{s.section}" for s in skill.built_from)
+            entries.append((src.section, body))
+    toc = "\n".join(f"- From category #{n}" for n, _ in entries)
+    parts = [f"## From category #{n}\n\n{body}" for n, body in entries]
     header = f"# {_KIND_TITLE[kind]} — {skill.name}\n\n## Contents\n{toc}\n"
     return header + "\n" + "\n\n".join(parts) + "\n"
 

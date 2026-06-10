@@ -42,5 +42,5 @@ def extract_subsection(section_text: str, kind: str) -> str:
 
 def section_hash(markdown: str, n: int) -> str:
     """SHA-256 (hex) of the normalized text of section #n."""
-    normalized = extract_section(markdown, n).strip().encode("utf-8")
+    normalized = extract_section(markdown, n).replace("\r\n", "\n").strip().encode("utf-8")
     return hashlib.sha256(normalized).hexdigest()
