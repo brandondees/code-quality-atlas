@@ -1,0 +1,37 @@
+# Reviewable heuristics — checking-restraint
+
+## Contents
+- From category #11
+- From category #15
+
+## From category #11
+
+### Reviewable heuristics (skill-checklist seeds)
+- Is this abstraction introduced on **real, repeated need** (rule of three), or speculatively for one/two uses (YAGNI)?
+- Does it have a single, nameable responsibility — or is it a grab-bag taking flags/conditionals to fit multiple callers (the **wrong-abstraction** smell)?
+- Is there an **existing** abstraction this duplicates/competes with (reuse/extend it, don't fork — cross #8)?
+- Would **inlining** make the code clearer? If the abstraction fights its callers, recommend re-inlining.
+- Is the indirection earning its keep, or a **shallow wrapper** that just adds a layer to read through (Ousterhout)?
+- Any **speculative generality**: config options, plugin hooks, "just in case" parameters with a single caller? Remove.
+- Is the duplication here actually **coincidental** (looks the same, will evolve differently)? If so, leave it duplicated.
+- **Counterweight discipline:** am I recommending an abstraction the evidence doesn't yet justify? Default to "duplicate once more, then extract."
+
+---
+
+## From category #15
+
+### Reviewable heuristics (skill-checklist seeds)
+- Is there a loop that issues a query/RPC/HTTP call per iteration? (N+1.) Push to a single batched/`IN`/join query or a bulk endpoint. Flag `await` inside `for` over independent items.
+- What is the worst-case complexity on the hot path as input grows? Flag accidental O(n²) (nested loops over the same collection, `Array.includes` inside a loop → use a Set/Map), and unbounded growth.
+- Is the same expensive value (DB read, computed result, parsed config, compiled regex) recomputed when it could be hoisted or memoized? Conversely, is anything memoized that's cheap and rarely reused (premature)?
+- Caching correctness: is there a clear invalidation story (TTL, event-based, or write-through)? A cache without an invalidation answer is a future stale-data bug. Check key construction includes everything that affects the value (tenant, locale, version).
+- I/O batching: are round-trips minimized (batch reads/writes, pipelining, HTTP keep-alive/connection pooling) rather than chatty per-item calls?
+- Streaming vs buffering: for large payloads/files, is data streamed rather than fully loaded into memory? Flag "read entire file/response into a string then process."
+- Allocation/GC pressure on hot paths: avoidable per-iteration allocations, boxing, large defensive copies, building huge intermediate collections? (Especially in tight loops and request handlers.)
+- Lazy vs eager: is work deferred until needed (and *only* the needed work done), without re-triggering N+1 via lazy loading inside a loop?
+- Frontend: does this change grow the bundle or block startup (new heavy dep, non-code-split route, render-blocking resource, large synchronous work on the main thread hurting INP)? Is the dep tree-shakeable and the import scoped?
+- Cloud cost (FinOps): does the change add per-request cost that scales badly (chatty cross-AZ/egress traffic, unbounded fan-out, over-provisioned instances, polling instead of events)?
+- **Premature-optimization smell test (counterweight):** Is this off a measured hot path, justified by no profile/benchmark, and does it trade real readability/correctness risk for unmeasured gains (hand-rolled cache, micro-bit-twiddling, denormalization, custom data structure)? If yes, push back and ask for a profile or a benchmark. "Make it correct and clear first; optimize the measured 3%."
+- Did a perf claim (either "this is slow" or "this is faster") come with a number — benchmark, profile, or Big-O argument — rather than intuition?
+
+---

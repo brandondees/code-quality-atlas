@@ -1,0 +1,79 @@
+taxonomy_version: v0.2
+skills:
+  - name: hunting-silent-failures
+    description: >
+      Reviews changes for swallowed or silently-handled errors — empty
+      catch/rescue blocks, ignored returned errors, bare excepts, unhandled
+      promise rejections, broad exception catches — and for unsafe fallbacks,
+      missing timeouts, and absent retries/circuit-breakers. Use when reviewing
+      error handling, exceptions, try/catch, rescue, fallback, resilience,
+      timeouts, or resource cleanup on failure paths.
+    shape: diff
+    wave: 1
+    built_from:
+      - { category: 2, source: docs/research/cluster-1-correctness.md#2 }
+      - { category: 4, source: docs/research/cluster-1-correctness.md#4 }
+
+  - name: reviewing-naming-and-readability
+    description: >
+      Reviews code for naming and local readability: intention-revealing names
+      vs placeholders, function length and cyclomatic/cognitive complexity, deep
+      nesting, magic numbers/strings, mixed levels of abstraction, and comment
+      accuracy. Use when reviewing readability, naming, complexity, nesting,
+      magic values, or comments.
+    shape: diff
+    wave: 1
+    built_from:
+      - { category: 5, source: docs/research/cluster-2-readability.md#5 }
+      - { category: 6, source: docs/research/cluster-2-readability.md#6 }
+      - { category: 7, source: docs/research/cluster-2-readability.md#7 }
+
+  - name: reviewing-module-design
+    description: >
+      Reviews module and type design: cohesion and coupling (via connascence),
+      encapsulation, hard-to-misuse interfaces, and making illegal states
+      unrepresentable. Use when reviewing class/module structure, interfaces,
+      type or data modeling, coupling, or API ergonomics for callers.
+    shape: diff
+    wave: 1
+    built_from:
+      - { category: 9, source: docs/research/cluster-3-structure.md#9 }
+      - { category: 10, source: docs/research/cluster-3-structure.md#10 }
+
+  - name: checking-restraint
+    description: >
+      Reviews changes for over-engineering — premature abstraction, speculative
+      generality, the wrong abstraction, and premature optimization without a
+      profile. The restraint / brake-pedal lens. Use when a change adds
+      abstraction layers, config knobs, generality, or hand-optimized code, or
+      when asking whether a change is doing too much.
+    shape: diff
+    wave: 1
+    built_from:
+      - { category: 11, source: docs/research/cluster-3-structure.md#11 }
+      - { category: 15, source: docs/research/cluster-4-runtime.md#15 }
+
+  - name: reviewing-llm-integration
+    description: >
+      Reviews LLM/AI integration code for prompt-injection surface, the lethal
+      trifecta, unvalidated model output, missing eval coverage, unpinned models,
+      unbounded token/cost, and PII sent to third-party models. Use when
+      reviewing code that calls an LLM or model API, builds prompts, parses
+      model output, or wires up agents and tools.
+    shape: diff
+    wave: 1
+    built_from:
+      - { category: 25, source: docs/research/cluster-4-runtime.md#25 }
+      - { category: 27, source: docs/research/cluster-6-evolution.md#27 }
+
+  - name: finding-maintainability-hotspots
+    description: >
+      Scans a repository for maintainability hotspots: high churn × complexity
+      files, change-coupling, bus-factor / knowledge concentration, and
+      untracked tech debt. A repo-wide / scheduled scan rather than a single-diff
+      review. Use when auditing maintainability, tech debt, refactoring targets,
+      or risky areas across the codebase.
+    shape: repo
+    wave: 1
+    built_from:
+      - { category: 21, source: docs/research/cluster-6-evolution.md#21 }
