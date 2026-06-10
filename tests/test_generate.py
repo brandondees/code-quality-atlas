@@ -43,3 +43,20 @@ def test_build_skill_md_has_frontmatter_and_provenance_and_links():
     assert "reference/heuristics.md" in md
     assert "reference/tool-rules.md" in md
     assert "examples.md" in md
+
+
+from tooling.generate import generate_skill
+import json
+
+
+def test_generate_skill_writes_full_tree(tmp_path):
+    out = generate_skill(_skill(), taxonomy_version="v0.2", docs_root=".",
+                         skills_root=str(tmp_path))
+    assert (out / "SKILL.md").exists()
+    assert (out / "reference" / "heuristics.md").exists()
+    assert (out / "reference" / "tool-rules.md").exists()
+    assert (out / "reference" / "sources.md").exists()
+    assert (out / "examples.md").exists()
+    eval_doc = json.loads((out / "evals" / "eval.json").read_text())
+    assert eval_doc["skills"] == ["hunting-silent-failures"]
+    assert isinstance(eval_doc["scenarios"], list)
