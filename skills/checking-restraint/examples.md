@@ -1,5 +1,7 @@
 # Examples — checking-restraint
 
+Report each distinct issue as its own numbered finding.
+
 ## Bad → finding
 
 **Input (diff):**
@@ -16,11 +18,12 @@ class NotificationChannelFactory:
     def create(self, name="email", **overrides):
         return self.plugins[name](self.config, **overrides)
 ```
-**Expected finding:** Speculative generality: a factory + plugin registry + config
-overrides for a single implementation with one caller (YAGNI / rule of three).
-Inline it to `send_email(...)` and extract an abstraction only when a real second
-channel arrives — the right interface is unknowable from one example, and a wrong
-abstraction is costlier than duplication.
+**Expected finding:**
+1. **Speculative generality:** a factory + plugin registry + config overrides for a
+   single implementation with one caller (YAGNI / rule of three). Inline it to
+   `send_email(...)` and extract an abstraction only when a real second channel
+   arrives — the right interface is unknowable from one example, and a wrong
+   abstraction is costlier than duplication.
 
 ## Bad → finding
 
@@ -36,13 +39,15 @@ function getUser(id) {
   return u;
 }
 ```
-**Expected finding:** Premature optimization: a hand-rolled, unbounded cache with no
-invalidation story, on a path measured in calls per day, justified by no profile.
-It buys nothing measurable and adds a stale-user bug and a memory leak. Remove the
-cache; if this path ever shows up in a profile, add caching with an explicit
-invalidation/TTL plan then. (When flagging a premature optimization, always name the
-concrete risk it smuggles in — stale data, a memory leak, module-level/shared mutable
-state that leaks across users or requests — not just the readability cost.)
+**Expected finding:**
+1. **Premature optimization:** a hand-rolled, unbounded cache with no invalidation
+   story, on a path measured in calls per day, justified by no profile. Remove the
+   cache; if this path ever shows up in a profile, add caching with an explicit
+   invalidation/TTL plan then.
+2. **Concrete risks the optimization smuggles in:** a stale-user bug (no
+   invalidation) and a memory leak (unbounded growth) — when flagging a premature
+   optimization, always name the module-level/shared mutable state, staleness, or
+   leak it introduces, not just the readability cost.
 
 ## Good → no finding
 

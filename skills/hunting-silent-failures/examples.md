@@ -1,5 +1,7 @@
 # Examples — hunting-silent-failures
 
+Report each distinct issue as its own numbered finding.
+
 ## Bad → finding
 
 **Input (diff):**
@@ -10,9 +12,11 @@ except Exception:
     pass
 order.mark_paid()
 ```
-**Expected finding:** Swallowed exception: the `except Exception: pass` hides charge
-failures, and `order.mark_paid()` runs even when the charge failed. Fail loud — let
-the error propagate, or handle the specific failure and do NOT mark the order paid.
+**Expected finding:**
+1. **Swallowed exception:** the `except Exception: pass` hides charge failures —
+   fail loud (let the error propagate) or handle the specific failure.
+2. **False success state:** `order.mark_paid()` runs even when the charge failed —
+   the failure path must NOT fall through to marking the order paid.
 
 ## Bad → finding
 
@@ -21,9 +25,11 @@ the error propagate, or handle the specific failure and do NOT mark the order pa
 const res = await fetch(url);   // no timeout, no error handling
 return res.json();
 ```
-**Expected finding:** No timeout and no failure handling on a remote call. Add an
-AbortController timeout and handle non-OK responses / network errors with a defined
-fallback; bare `await fetch` can hang indefinitely.
+**Expected finding:**
+1. **No timeout on a remote call:** bare `await fetch` can hang indefinitely — add
+   an AbortController timeout.
+2. **No failure handling:** non-OK responses and network errors are unhandled —
+   handle them with a defined fallback.
 
 ## Good → no finding
 

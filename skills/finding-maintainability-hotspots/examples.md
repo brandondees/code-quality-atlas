@@ -1,7 +1,8 @@
 # Examples — finding-maintainability-hotspots
 
 This skill is repo-shaped: its input is repository history/scan data (churn,
-complexity, authorship, co-change), not a single diff.
+complexity, authorship, co-change), not a single diff. Report each distinct issue
+as its own numbered finding.
 
 ## Bad → finding
 
@@ -12,11 +13,14 @@ billing/invoice_engine.py        87       1            142               9
 api/routes.py                    41       6             18               0
 models/user.py                   12       4              9               1
 ```
-**Expected finding:** `billing/invoice_engine.py` is the hotspot: highest churn ×
-highest complexity — refactoring it pays for itself fastest. Bus factor 1: a single
-author owns 87 commits of a 142-complexity file; require a second reviewer and
-knowledge-spreading. Nine untracked `TODO/HACK` markers — link them to issues or
-schedule them. `api/routes.py` churns a lot but is simple and shared — fine.
+**Expected finding:**
+1. **Hotspot:** `billing/invoice_engine.py` — highest churn × highest complexity;
+   refactoring it pays for itself fastest.
+2. **Bus factor 1:** a single author owns 87 commits of a 142-complexity file —
+   require a second reviewer and knowledge-spreading.
+3. **Untracked debt:** nine `TODO/HACK` markers with no linked issues — link them
+   to tracked issues or schedule them.
+4. `api/routes.py` churns a lot but is simple and shared — fine; not a hotspot.
 
 ## Bad → finding
 
@@ -26,11 +30,13 @@ pair                                          co-change rate   import link?
 orders/checkout.py <-> email/templates.py          91%              no
 orders/checkout.py <-> orders/cart.py              74%              yes
 ```
-**Expected finding:** `checkout.py` and `email/templates.py` change together in 91%
-of commits with no code-level dependency — hidden coupling (an implicit contract,
-likely duplicated order-summary formatting). Name the contract and make it explicit
-(shared type or template input builder) so a checkout change can't silently break
-emails. The `checkout <-> cart` coupling is expected — they share a declared import.
+**Expected finding:**
+1. **Hidden coupling:** `checkout.py` and `email/templates.py` change together in
+   91% of commits with no code-level dependency — an implicit contract, likely
+   duplicated order-summary formatting. Name the contract and make it explicit
+   (shared type or template input builder) so a checkout change can't silently
+   break emails.
+2. The `checkout <-> cart` coupling is expected — they share a declared import.
 
 ## Good → no finding
 
