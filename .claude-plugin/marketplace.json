@@ -1,0 +1,16 @@
+{
+  "name": "code-quality-atlas",
+  "owner": {
+    "name": "Brandon Dees"
+  },
+  "description": "Marketplace for the code-quality-atlas skill suite.",
+  "plugins": [
+    {
+      "name": "code-quality-atlas",
+      "source": "./",
+      "description": "22 code-review and maintenance skills derived from a verified code-quality research atlas: 16 diff-shaped review lenses and 6 repo-shaped audits, with provenance, examples, and cross-model evals.",
+      "category": "code-review",
+      "tags": ["code-review", "code-quality", "audit"]
+    }
+  ]
+}

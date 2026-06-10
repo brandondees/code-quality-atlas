@@ -55,3 +55,15 @@ Ran the whole research pass from the **main loop** (web works there; subagents a
 - **Wave 2 (5 high-stakes triage skills).** Key discovery: **numbered findings lists in examples.md force enumeration** on weak models (1/4 → 3/4 recall). Documented 7B ceilings: DDL keyword blindness, multi-sink tracking. First external critique flowed docs→drift→regenerate end-to-end. (PR #4.)
 - **Wave 3 (11 skills: 6 diff-shaped + 5 repo-shaped audits)** + wave-1 retrofit + **G1 single-owner enforcement** in the manifest validator. New lessons: the list template needs an explicit "correct code → exactly 'No findings'" escape hatch (it induced list-filling on clean code); audit skills hallucinate scan data without a "cite only what the scan shows" rule; range-arithmetic is a 7B ceiling.
 - **Phase 3 complete: all 22 behaviors / 27 categories built**, each with examples + ≥3 eval scenarios, gated on two model tiers. Remaining: Q12 packaging (plugin wrap).
+
+### 2026-06-10 (cont.) — Q12 packaging: repo is now an installable plugin
+
+- Added `.claude-plugin/plugin.json` + `marketplace.json`; `skills/` already matched the
+  plugin-default layout, so packaging was purely additive *(→ D9)*.
+- **Commit-SHA versioning** (no `version` field): every merged commit ships, matching the
+  docs→drift→regenerate loop; pinned semver deferred until the suite stabilizes.
+- Validated with `claude plugin validate` and a local end-to-end
+  marketplace-add → install → 22/22 skills discovered → uninstall cycle.
+- All roadmap items are now closed; remaining work is the compounding loop itself
+  (critique research → drift → regenerate → re-gate) plus future re-granularization
+  via the manifest as model capability shifts.
