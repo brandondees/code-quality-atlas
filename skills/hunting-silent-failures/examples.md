@@ -1,3 +1,40 @@
 # Examples — hunting-silent-failures
 
-<!-- Add concrete good/bad input→finding pairs during refinement. -->
+## Bad → finding
+
+**Input (diff):**
+```python
+try:
+    charge = payments.charge(order.total)
+except Exception:
+    pass
+order.mark_paid()
+```
+**Expected finding:** Swallowed exception: the `except Exception: pass` hides charge
+failures, and `order.mark_paid()` runs even when the charge failed. Fail loud — let
+the error propagate, or handle the specific failure and do NOT mark the order paid.
+
+## Bad → finding
+
+**Input (diff):**
+```js
+const res = await fetch(url);   // no timeout, no error handling
+return res.json();
+```
+**Expected finding:** No timeout and no failure handling on a remote call. Add an
+AbortController timeout and handle non-OK responses / network errors with a defined
+fallback; bare `await fetch` can hang indefinitely.
+
+## Good → no finding
+
+**Input (diff):**
+```python
+try:
+    charge = payments.charge(order.total)
+except PaymentDeclined as e:
+    log.warning("charge declined", order_id=order.id, reason=e.code)
+    return CheckoutResult.declined(e.code)   # specific, surfaced, no false "paid"
+order.mark_paid()
+```
+**Expected finding:** None — narrow exception, surfaced with context, no silent
+fallthrough.
