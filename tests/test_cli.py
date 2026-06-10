@@ -28,3 +28,25 @@ def test_cli_runs_as_module(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert "No drift" in result.stdout
+
+
+def test_cli_eval_reports_valid_and_invalid(tmp_path, capsys):
+    import json
+    good = tmp_path / "good-skill" / "evals"
+    good.mkdir(parents=True)
+    (good / "eval.json").write_text(json.dumps({
+        "skills": ["good-skill"],
+        "scenarios": [{"query": f"q{i}", "expected_behavior": ["b"]} for i in range(3)],
+    }))
+    bad = tmp_path / "bad-skill" / "evals"
+    bad.mkdir(parents=True)
+    (bad / "eval.json").write_text(json.dumps({"skills": ["bad-skill"], "scenarios": []}))
+
+    rc = main(["eval", "--skills-root", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert rc == 1                      # at least one invalid
+    assert "OK: good-skill (3 scenarios)" in out
+    assert "INVALID: bad-skill" in out
+
+    rc = main(["eval", "--skills-root", str(tmp_path), "--skill", "good-skill"])
+    assert rc == 0                      # filtering to the valid one passes
