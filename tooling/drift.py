@@ -15,7 +15,13 @@ class DriftReport:
 
 def _read_provenance(skill_md: Path) -> tuple[str, list[dict]]:
     text = skill_md.read_text(encoding="utf-8")
-    front = yaml.safe_load(text.split("---\n")[1])
+    # Frontmatter is the block between the first two `---` fences. Limit the
+    # split to 2 so a `---` in the body can't shift the parse, and validate the
+    # shape so a malformed/missing header gives a clear error, not IndexError.
+    parts = text.split("---\n", 2)
+    if len(parts) < 3 or parts[0].strip():
+        raise ValueError(f"{skill_md}: missing or malformed YAML frontmatter")
+    front = yaml.safe_load(parts[1])
     prov = front["provenance"]
     return front["name"], prov["built_from"]
 

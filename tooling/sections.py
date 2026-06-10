@@ -3,17 +3,28 @@ import re
 import hashlib
 
 _SECTION_START = re.compile(r"^## #(\d+)\b", re.MULTILINE)
+_ANY_H2 = re.compile(r"^## ", re.MULTILINE)
 
 
 def extract_section(markdown: str, n: int) -> str:
     """Return the text of the `## #n …` section, from its heading up to the
-    next `## ` heading or end of document. Raises KeyError if not found."""
-    starts = [(int(m.group(1)), m.start()) for m in _SECTION_START.finditer(markdown)]
-    for i, (num, pos) in enumerate(starts):
-        if num == n:
-            end = starts[i + 1][1] if i + 1 < len(starts) else len(markdown)
-            return markdown[pos:end].rstrip() + "\n"
-    raise KeyError(f"section #{n} not found")
+    next H2 heading (`## …`, numbered OR not — e.g. a trailing `## Open threads`)
+    or end of document. Raises KeyError if not found.
+
+    The boundary is *any* H2, not just the next numbered section: otherwise the
+    last numbered category in a file would absorb trailing non-numbered H2s (e.g.
+    `## Open threads`), polluting its reference text and provenance hash and
+    causing false drift."""
+    start = None
+    for m in _SECTION_START.finditer(markdown):
+        if int(m.group(1)) == n:
+            start = m.start()
+            break
+    if start is None:
+        raise KeyError(f"section #{n} not found")
+    ends = [m.start() for m in _ANY_H2.finditer(markdown) if m.start() > start]
+    end = ends[0] if ends else len(markdown)
+    return markdown[start:end].rstrip() + "\n"
 
 
 _SUBHEADINGS = {

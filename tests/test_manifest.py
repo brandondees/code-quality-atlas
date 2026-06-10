@@ -48,3 +48,10 @@ def test_validate_rejects_unresolvable_source():
     bad = _skill(built_from=[Source(99, "tests/fixtures/research_sample.md#99")])
     with pytest.raises(ValidationError, match="section #99"):
         validate(Manifest("v0.2", [bad]))
+
+def test_validate_rejects_missing_source_file():
+    """A built_from pointing at a non-existent file must raise ValidationError
+    (with skill + path context), not a bare FileNotFoundError/OSError."""
+    bad = _skill(built_from=[Source(2, "tests/fixtures/does_not_exist.md#2")])
+    with pytest.raises(ValidationError, match="cannot read source file"):
+        validate(Manifest("v0.2", [bad]))

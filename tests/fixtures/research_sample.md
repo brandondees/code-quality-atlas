@@ -25,3 +25,10 @@
 ### Reviewable heuristics (skill-checklist seeds)
 - Is every acquired resource released on all paths?
 - Are caches bounded with eviction/TTL?
+
+---
+
+## Open threads
+
+- This non-numbered H2 must NOT be absorbed into section #4 (the last numbered
+  section). It mirrors the real `docs/research/cluster-*.md` files.

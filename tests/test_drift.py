@@ -51,3 +51,14 @@ def test_multi_source_drift_only_changed_source_reported(tmp_path):
     changed_sections = [s.section for s in reports[0].changed]
     assert changed_sections == [2]           # #2 drifted
     assert 4 not in changed_sections         # #4 untouched
+
+
+def test_malformed_skill_md_raises_clear_error(tmp_path):
+    """A SKILL.md missing its YAML frontmatter must raise a clear error, not a
+    bare IndexError from splitting on '---'."""
+    import pytest
+    skill_dir = tmp_path / "broken"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("# broken\n\nno frontmatter here\n")
+    with pytest.raises(ValueError, match="frontmatter"):
+        check_drift(skills_root=str(tmp_path), docs_root=".")

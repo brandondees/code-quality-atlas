@@ -36,12 +36,3 @@
 - Are connection pools bounded and reused, with no per-request unbounded resource creation?
 
 ---
-
-## Open threads
-
-- **Leak ↔ error-handling intertwine:** resource leaks (#4) overwhelmingly occur on error paths (#2). A combined "fail-and-clean-up" review behavior may be worth more than two separate ones — note for phase-2 granularity.
-- **Distributed correctness spans clusters:** #3's distributed facet overlaps #20 (transactions/data safety) and #16 (timeouts, failure observability). Single-owner question (see map-gaps G1).
-- **Tool-covered vs. judgment-only:** #1 logic and #2/#4 leak checks are heavily covered by the *recommended* linter sets — here the skill should **triage tool output**, not re-implement it. The unique LLM value in this cluster is *intent-matching* (#1) and the semantic "is this the right failure behavior?" (#2) that no linter judges (map-gaps G5).
-- **Money/units double-booked** with #23 (already cross-linked): value-correctness lives here (#4), formatting lives in #23.
-- **Determinism** (#1) cross-links #25 (LLM nondeterminism) and #17 (flaky tests) — a shared "is this reproducible?" heuristic could serve all three.
-- **Thin tooling for time/float/money semantics** beyond `Lint/FloatComparison` and the falsehoods checklist → this sub-area is heuristic-led, a good early skill target.

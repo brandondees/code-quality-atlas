@@ -10,10 +10,10 @@ provenance:
   built_from:
   - category: 25
     source: docs/research/cluster-4-runtime.md#25
-    hash: 50eed7d384d719649b96bf16051744e3c80954079467508fb4c02f813c3ad1b7
+    hash: 91ad39b5e42b74c026eed080276563ac7b3e57f3667abcbb2a97cddedfb83d02
   - category: 27
     source: docs/research/cluster-6-evolution.md#27
-    hash: 69e72250723c3e9ab22ccbefecb049b2a53da21c6da51f55d570f161bfe0454f
+    hash: 973cb4bcfda0d546fe1fa8a4cde13fda7368c1cd120d0581b2a02d5ace663cfc
 ---
 
 # reviewing-llm-integration
