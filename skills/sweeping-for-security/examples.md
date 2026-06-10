@@ -8,7 +8,7 @@ finding — finding one does not end the sweep.
 
 **Input (diff):**
 ```python
-API_KEY = "sk_live_9f8a7b6c5d4e"
+API_KEY = "prod-payments-secret-EXAMPLE-NOT-REAL"   # hardcoded production credential
 
 def get_invoice(request):
     inv_id = request.GET["id"]
@@ -21,8 +21,8 @@ def get_invoice(request):
    (`db.execute("SELECT * FROM invoices WHERE id = %s", [inv_id])`).
 2. **Missing authorization (IDOR):** any authenticated user can fetch any invoice
    by id; scope the lookup to the resource owner.
-3. **Hardcoded live secret** `API_KEY` in source — move to a secrets manager /
-   runtime env and rotate the exposed key.
+3. **Hardcoded production secret** `API_KEY` in source — move to a secrets
+   manager / runtime env and rotate the exposed key.
 
 ## Bad → finding
 

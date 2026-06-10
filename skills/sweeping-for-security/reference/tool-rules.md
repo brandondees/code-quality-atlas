@@ -7,7 +7,7 @@
 
 ### Tooling rules worth lifting
 - **Semgrep** `tainted-sql-string` / registry `python.lang.security.audit.formatted-sql-query` — taint-flow from request input into a SQL string (SQLi). `(verify)` exact rule IDs.
-- **Bandit** (Python) — `B608` `hardcoded_sql_expressions` (string-built SQL → SQLi); `B602` `subprocess_popen_with_shell_equals_true` (command injection); `B301`/`B307` `pickle`/`eval` on untrusted data (deserialization); `B105`–`B107` hardcoded password string/funcarg/default; `B501` `request_with_no_cert_validation` (`verify=False`, TLS disabled); `B303`/`B324` `hashlib` weak hash (MD5/SHA1). *(plugin names verified against bandit.readthedocs.io)*
+- **Bandit** (Python) — `B608` `hardcoded_sql_expressions` (string-built SQL → SQLi); `B602` `subprocess_popen_with_shell_equals_true` (command injection); `B301` `pickle` on untrusted data (unsafe deserialization); `B307` `eval` on untrusted data (code injection); `B105`–`B107` hardcoded password string/funcarg/default; `B501` `request_with_no_cert_validation` (`verify=False`, TLS disabled); `B303`/`B324` `hashlib` weak hash (MD5/SHA1). *(plugin names verified against bandit.readthedocs.io)*
 - **ESLint `eslint-plugin-security`** `detect-non-literal-fs-filename` (path traversal), `detect-child-process` (command injection), `detect-eval-with-expression`, `detect-non-literal-regexp` (ReDoS surface), `detect-object-injection`.
 - **ESLint (React)** `react/no-danger` / `react/no-danger-with-children` — flags `dangerouslySetInnerHTML` (XSS sink).
 - **SonarQube / SonarSource** hotspot & vuln rules, e.g. `javascript:S5122` (permissive CORS), `javascript:S2076`/`S2078` (OS command / LDAP injection), `java:S2068` (hardcoded credentials), `java:S5547` (weak/insecure cipher). `(verify)` exact squids.
