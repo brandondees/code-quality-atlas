@@ -41,3 +41,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     return 2
+
+
+if __name__ == "__main__":  # pragma: no cover
+    import sys
+    sys.exit(main())

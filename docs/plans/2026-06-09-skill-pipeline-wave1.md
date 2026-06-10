@@ -1035,7 +1035,14 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     return 2
+
+
+if __name__ == "__main__":  # pragma: no cover
+    import sys
+    sys.exit(main())
 ```
+
+> **Note (added during execution):** the `if __name__ == "__main__"` guard is required — without it `python -m tooling.cli …` defines `main()` but never calls it, so Tasks 13/15 (which invoke the module) silently no-op. A subprocess regression test (`test_cli_runs_as_module`) locks this in, since the direct-`main()` unit test cannot catch a missing guard.
 
 - [ ] **Step 4: Run test to verify it passes**
 
