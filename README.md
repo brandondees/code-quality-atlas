@@ -7,21 +7,25 @@ The goal is two-phased:
 1. Map *everything* that factors into code quality, as comprehensively as possible.
 2. Distill that map into a coherent set of composable agent skills that help **review** and **maintain** code.
 
-We are in phase 1.
+We are in phase 3 (building the skills, wave by wave).
 
 ## Status
 
-**Phase 1 of 3 — Research & taxonomy (in progress)**
+**Phase 1 — Research & taxonomy (complete, 2026-06-09)**
 
 - [x] Scope decision: **maximal** — intrinsic code properties **plus** all cross-cutting concerns (security, performance, tests, deps, build/CI, data, docs, accessibility, observability, …).
 - [x] Taxonomy v0.2 (pressure-tested): **6 clusters / 27 categories / ~80 factors** → [`docs/taxonomy.md`](docs/taxonomy.md)
-- [x] **Per-cluster research — all 6 clusters written & web-verified (2026-06-09):** references, static-analysis tool rules, reviewable heuristics → [`docs/research/`](docs/research/)
+- [x] **Per-cluster research — all 6 clusters written & web-verified:** references, static-analysis tool rules, reviewable heuristics → [`docs/research/`](docs/research/)
 - [x] Prior-art survey → [`docs/prior-art.md`](docs/prior-art.md); cross-cutting findings → [`docs/map-gaps.md`](docs/map-gaps.md)
-- [ ] Resolve remaining open questions (granularity Q1, compliance scope Q9, …) before phase 2 → [`docs/open-questions.md`](docs/open-questions.md)
 
-**Phase 2 — Skill-suite architecture** (not started): decide granularity, group categories into buildable skills, define how they're invoked and composed.
+**Phase 2 — Skill-suite architecture (complete, 2026-06-09)** → [`docs/phase-2-skill-suite-design.md`](docs/phase-2-skill-suite-design.md): docs are the source of truth; skills are generated from [`skills/manifest.yaml`](skills/manifest.yaml) with provenance hashes, a drift-checker, and eval-first refinement. 22 behaviors mapped over the 27 categories, built in waves.
 
-**Phase 3 — Build the skills** (not started).
+**Phase 3 — Build the skills (in progress)**
+
+- [x] **Wave 1 — the 6 ★ skills** (LLM-judgment-heavy, highest unique value) → [`skills/`](skills/): generated, refined with examples + ≥3 eval scenarios each, cross-model-tested down to small local models (see [`docs/runbooks/regenerating-skills.md`](docs/runbooks/regenerating-skills.md)).
+- [ ] **Wave 2 — high-stakes triage:** security sweep, migration & data safety, performance, test quality, accessibility & i18n.
+- [ ] **Wave 3 — remainder + repo/cron-shaped audits** (architecture conformance, dependencies & supply chain, docs health, compliance).
+- [ ] Residual open questions (compliance scope Q9, packaging Q12) → [`docs/open-questions.md`](docs/open-questions.md)
 
 ## Approach
 
