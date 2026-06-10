@@ -42,3 +42,17 @@ small models: **over-flagging clean code** (inventing issues on the "good"
 scenario). Fix by strengthening that skill's `examples.md` (good→no-finding
 pairs carry the most weight for weak models) and/or adding an explicit
 "don't invent issues; report no finding when the code is correct" guard.
+
+**Tuning lessons (from `hunting-silent-failures` on `llama3.2:3b`, 3B):**
+- The suite-wide "Reviewer discipline" guard (in every generated `SKILL.md`) must be
+  **recall-safe**: a blanket "prefer reporting nothing over a false positive" made the
+  3B model under-report on a genuinely bad case. Keep "report no findings when the code
+  is correct, *but still report every genuine issue with full detail*."
+- Targeted `examples.md` good-to-no-finding pairs reliably kill **specific** false-positive
+  classes (e.g. "don't recommend broadening a narrow `except`").
+- **Model-capability ceiling:** a 3B model misreads control flow (e.g. that an early
+  `return` prevents a later line) even when an example states it explicitly — prompt
+  tuning can't close this. Treat **~7-8B as the practical floor** for *clean-code
+  precision* (no-finding reliability); below that, detection still works but expect
+  over-flagging on correct code. For high-stakes correctness, pair the skill with a
+  deterministic check rather than trusting a tiny model's "no findings".

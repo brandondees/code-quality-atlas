@@ -22,6 +22,10 @@ provenance:
 
 Reviews LLM/AI integration code for prompt-injection surface, the lethal trifecta, unvalidated model output, missing eval coverage, unpinned models, unbounded token/cost, and PII sent to third-party models. Use when reviewing code that calls an LLM or model API, builds prompts, parses model output, or wires up agents and tools.
 
+## Reviewer discipline
+
+Report only real problems. If the code correctly handles the case, reply "No findings" and stop — do not invent issues, and do not suggest changes to code that is already correct. This guards against false positives on correct code; still report every genuine issue you do find, with its full detail.
+
 ## Top checks
 
 Start with the full checklist, then escalate to the references as needed.

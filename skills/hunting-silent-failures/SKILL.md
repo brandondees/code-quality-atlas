@@ -22,6 +22,10 @@ provenance:
 
 Reviews changes for swallowed or silently-handled errors — empty catch/rescue blocks, ignored returned errors, bare excepts, unhandled promise rejections, broad exception catches — and for unsafe fallbacks, missing timeouts, and absent retries/circuit-breakers. Use when reviewing error handling, exceptions, try/catch, rescue, fallback, resilience, timeouts, or resource cleanup on failure paths.
 
+## Reviewer discipline
+
+Report only real problems. If the code correctly handles the case, reply "No findings" and stop — do not invent issues, and do not suggest changes to code that is already correct. This guards against false positives on correct code; still report every genuine issue you do find, with its full detail.
+
 ## Top checks
 
 Start with the full checklist, then escalate to the references as needed.

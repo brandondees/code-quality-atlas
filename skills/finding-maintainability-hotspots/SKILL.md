@@ -18,6 +18,10 @@ provenance:
 
 Scans a repository for maintainability hotspots: high churn × complexity files, change-coupling, bus-factor / knowledge concentration, and untracked tech debt. A repo-wide / scheduled scan rather than a single-diff review. Use when auditing maintainability, tech debt, refactoring targets, or risky areas across the codebase.
 
+## Reviewer discipline
+
+Report only real problems. If the code correctly handles the case, reply "No findings" and stop — do not invent issues, and do not suggest changes to code that is already correct. This guards against false positives on correct code; still report every genuine issue you do find, with its full detail.
+
 ## Top checks
 
 Start with the full checklist, then escalate to the references as needed.

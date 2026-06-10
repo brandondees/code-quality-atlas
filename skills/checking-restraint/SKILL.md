@@ -22,6 +22,10 @@ provenance:
 
 Reviews changes for over-engineering — premature abstraction, speculative generality, the wrong abstraction, and premature optimization without a profile. The restraint / brake-pedal lens. Use when a change adds abstraction layers, config knobs, generality, or hand-optimized code, or when asking whether a change is doing too much.
 
+## Reviewer discipline
+
+Report only real problems. If the code correctly handles the case, reply "No findings" and stop — do not invent issues, and do not suggest changes to code that is already correct. This guards against false positives on correct code; still report every genuine issue you do find, with its full detail.
+
 ## Top checks
 
 Start with the full checklist, then escalate to the references as needed.

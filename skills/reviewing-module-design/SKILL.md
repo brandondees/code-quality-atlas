@@ -21,6 +21,10 @@ provenance:
 
 Reviews module and type design: cohesion and coupling (via connascence), encapsulation, hard-to-misuse interfaces, and making illegal states unrepresentable. Use when reviewing class/module structure, interfaces, type or data modeling, coupling, or API ergonomics for callers.
 
+## Reviewer discipline
+
+Report only real problems. If the code correctly handles the case, reply "No findings" and stop — do not invent issues, and do not suggest changes to code that is already correct. This guards against false positives on correct code; still report every genuine issue you do find, with its full detail.
+
 ## Top checks
 
 Start with the full checklist, then escalate to the references as needed.

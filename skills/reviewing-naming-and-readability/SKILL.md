@@ -24,6 +24,10 @@ provenance:
 
 Reviews code for naming and local readability: intention-revealing names vs placeholders, function length and cyclomatic/cognitive complexity, deep nesting, magic numbers/strings, mixed levels of abstraction, and comment accuracy. Use when reviewing readability, naming, complexity, nesting, magic values, or comments.
 
+## Reviewer discipline
+
+Report only real problems. If the code correctly handles the case, reply "No findings" and stop — do not invent issues, and do not suggest changes to code that is already correct. This guards against false positives on correct code; still report every genuine issue you do find, with its full detail.
+
 ## Top checks
 
 Start with the full checklist, then escalate to the references as needed.

@@ -37,4 +37,20 @@ except PaymentDeclined as e:
 order.mark_paid()
 ```
 **Expected finding:** None — narrow exception, surfaced with context, no silent
-fallthrough.
+fallthrough. The early `return` is intentional and correct: a declined charge must
+NOT fall through to `order.mark_paid()`. Do not suggest replacing it with `raise` or
+removing it — that would break the declined-checkout path. **Catching one specific
+exception (`PaymentDeclined`) and letting any other exception propagate is correct
+fail-loud behavior** — do NOT flag it as "incomplete" and do NOT recommend broadening
+the `except` to catch more types. Report "No findings."
+
+## Good → no finding
+
+**Input (diff):**
+```python
+resp = client.get(url, timeout=5)
+resp.raise_for_status()
+return resp.json()
+```
+**Expected finding:** None — the call has a timeout and `raise_for_status()` surfaces
+non-2xx responses loudly. Report "No findings"; do not invent issues.
