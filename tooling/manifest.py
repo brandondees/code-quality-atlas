@@ -71,7 +71,7 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
         for src in s.built_from:
             try:
                 text = Path(docs_root, src.path).read_text(encoding="utf-8")
-            except OSError as exc:
+            except (OSError, UnicodeError) as exc:
                 raise ValidationError(
                     f"{s.name}: cannot read source file {src.path}: {exc}") from exc
             try:
