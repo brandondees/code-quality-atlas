@@ -1,11 +1,10 @@
 ---
 name: hunting-silent-failures
-description: "Reviews changes for swallowed or silently-handled errors \u2014 empty\
-  \ catch/rescue blocks, ignored returned errors, bare excepts, unhandled promise\
-  \ rejections, broad exception catches \u2014 and for unsafe fallbacks, missing timeouts,\
-  \ and absent retries/circuit-breakers. Use when reviewing error handling, exceptions,\
-  \ try/catch, rescue, fallback, resilience, timeouts, or resource cleanup on failure\
-  \ paths."
+description: Reviews changes for swallowed or silently-handled errors — empty catch/rescue
+  blocks, ignored returned errors, bare excepts, unhandled promise rejections, broad
+  exception catches — and for unsafe fallbacks, missing timeouts, and absent retries/circuit-breakers.
+  Use when reviewing error handling, exceptions, try/catch, rescue, fallback, resilience,
+  timeouts, or resource cleanup on failure paths.
 provenance:
   taxonomy_version: v0.2
   built_from:

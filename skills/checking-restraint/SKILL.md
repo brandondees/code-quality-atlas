@@ -1,10 +1,10 @@
 ---
 name: checking-restraint
-description: "Reviews changes for over-engineering \u2014 premature abstraction, speculative\
-  \ generality, the wrong abstraction, and premature optimization without a profile.\
-  \ The restraint / brake-pedal lens. Use when a change adds abstraction layers, config\
-  \ knobs, generality, or hand-optimized code, or when asking whether a change is\
-  \ doing too much."
+description: Reviews changes for over-engineering — premature abstraction, speculative
+  generality, the wrong abstraction, and premature optimization without a profile.
+  The restraint / brake-pedal lens. Use when a change adds abstraction layers, config
+  knobs, generality, or hand-optimized code, or when asking whether a change is doing
+  too much.
 provenance:
   taxonomy_version: v0.2
   built_from:

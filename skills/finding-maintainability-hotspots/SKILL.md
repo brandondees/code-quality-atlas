@@ -1,10 +1,9 @@
 ---
 name: finding-maintainability-hotspots
-description: "Scans a repository for maintainability hotspots: high churn \xD7 complexity\
-  \ files, change-coupling, bus-factor / knowledge concentration, and untracked tech\
-  \ debt. A repo-wide / scheduled scan rather than a single-diff review. Use when\
-  \ auditing maintainability, tech debt, refactoring targets, or risky areas across\
-  \ the codebase."
+description: 'Scans a repository for maintainability hotspots: high churn × complexity
+  files, change-coupling, bus-factor / knowledge concentration, and untracked tech
+  debt. A repo-wide / scheduled scan rather than a single-diff review. Use when auditing
+  maintainability, tech debt, refactoring targets, or risky areas across the codebase.'
 provenance:
   taxonomy_version: v0.2
   built_from:

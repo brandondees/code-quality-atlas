@@ -44,7 +44,8 @@ def build_skill_md(skill: Skill, taxonomy_version: str, docs_root: str = ".") ->
         "description": skill.description,
         "provenance": {"taxonomy_version": taxonomy_version, "built_from": built_from},
     }
-    fm = yaml.safe_dump(front, sort_keys=False, default_flow_style=False).strip()
+    fm = yaml.safe_dump(front, sort_keys=False, default_flow_style=False,
+                        allow_unicode=True).strip()
     body = (
         f"# {skill.name}\n\n"
         "## When to use\n\n"
