@@ -30,3 +30,20 @@ def test_extract_subsection_absent_returns_empty():
     # #4 has no references-with-this-marker beyond what's present; tooling exists
     assert extract_subsection(section, "tooling") != ""
     assert extract_subsection(section, "missing-kind-x") == ""
+
+
+from tooling.sections import section_hash
+
+def test_section_hash_is_stable_and_specific():
+    h2a = section_hash(SAMPLE, 2)
+    h2b = section_hash(SAMPLE, 2)
+    h4 = section_hash(SAMPLE, 4)
+    assert h2a == h2b                 # deterministic
+    assert h2a != h4                  # section-specific
+    assert len(h2a) == 64             # sha256 hex
+
+def test_section_hash_changes_when_text_changes():
+    edited = SAMPLE.replace("Does every remote call have a timeout?",
+                            "Does every remote call have a timeout and deadline?")
+    assert section_hash(edited, 2) != section_hash(SAMPLE, 2)
+    assert section_hash(edited, 4) == section_hash(SAMPLE, 4)  # #4 untouched
