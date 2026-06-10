@@ -17,3 +17,28 @@ derived. After you critique/improve a research section, flow it into the skills:
 
 Adapting granularity later: edit `skills/manifest.yaml` (merge/split skills or
 re-map `built_from` categories), then run steps 2–4. No research edits needed.
+
+## Cross-model evals (the portability gate, D7/D8)
+
+Validate eval *structure* (≥3 scenarios) for one or all skills:
+
+```
+python -m tooling.cli eval                 # all skills
+python -m tooling.cli eval --skill <name>  # one skill
+```
+
+Run a skill's scenarios against a local model via Ollama and read the responses
+next to their `expected_behavior` (the harness assembles the same context a
+model with the skill loaded would see: SKILL.md + reference/heuristics.md +
+examples.md):
+
+```
+python -m tooling.run_evals --skill <name> --model llama3.2:3b
+```
+
+Grade each response against `expected_behavior`. Skills must be tested on at
+least two tiers (a strong model and a small/local one). Known failure mode on
+small models: **over-flagging clean code** (inventing issues on the "good"
+scenario). Fix by strengthening that skill's `examples.md` (good→no-finding
+pairs carry the most weight for weak models) and/or adding an explicit
+"don't invent issues; report no finding when the code is correct" guard.
