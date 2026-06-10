@@ -2,7 +2,7 @@
 
 A diff often contains several independent vulnerabilities. Check every untrusted
 input against every sink it reaches and report each issue as its own numbered
-finding — finding one does not end the sweep.
+finding — finding one does not end the sweep. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
 
 ## Bad → finding
 

@@ -10,6 +10,7 @@ skills:
       timeouts, or resource cleanup on failure paths.
     shape: diff
     wave: 1
+    cross_ref: [4]    # primary owner: tracing-correctness-and-invariants
     built_from:
       - { category: 2, source: docs/research/cluster-1-correctness.md#2 }
       - { category: 4, source: docs/research/cluster-1-correctness.md#4 }
@@ -49,6 +50,7 @@ skills:
       when asking whether a change is doing too much.
     shape: diff
     wave: 1
+    cross_ref: [15]   # primary owner: reviewing-performance-and-efficiency (counterweight lens here)
     built_from:
       - { category: 11, source: docs/research/cluster-3-structure.md#11 }
       - { category: 15, source: docs/research/cluster-4-runtime.md#15 }
@@ -62,6 +64,7 @@ skills:
       model output, or wires up agents and tools.
     shape: diff
     wave: 1
+    cross_ref: [27]   # primary owner: auditing-compliance-and-provenance
     built_from:
       - { category: 25, source: docs/research/cluster-4-runtime.md#25 }
       - { category: 27, source: docs/research/cluster-6-evolution.md#27 }
@@ -146,3 +149,161 @@ skills:
     wave: 2
     built_from:
       - { category: 23, source: docs/research/cluster-6-evolution.md#23 }
+
+  - name: tracing-correctness-and-invariants
+    description: >
+      Traces whether a change actually does what it claims: invariants and
+      postconditions preserved on every branch, boundary values (0, 1, n-1,
+      empty, max, negative) handled, off-by-one in ranges and loop bounds,
+      null/undefined checked at boundaries, exhaustive switch/match, resource
+      cleanup on all paths, money as integer minor units, monotonic clocks for
+      durations, UTC for storage. Use when reviewing logic, algorithms, loops,
+      conditionals, edge cases, or whether the implementation matches the
+      stated intent.
+    shape: diff
+    wave: 3
+    built_from:
+      - { category: 1, source: docs/research/cluster-1-correctness.md#1 }
+      - { category: 4, source: docs/research/cluster-1-correctness.md#4 }
+
+  - name: reviewing-concurrency-and-async
+    description: >
+      Reviews concurrent and async code for races and ordering bugs: shared
+      mutable state without synchronization, check-then-act spanning an await,
+      lost updates from interleaved requests, lock ordering, unawaited
+      promises, accidental sequential awaits, non-idempotent message
+      consumers, exactly-once assumptions, and missing cancellation/timeout
+      propagation. Use when reviewing threads, async/await, promises, locks,
+      queues, message handlers, or anything two callers can run at once.
+    shape: diff
+    wave: 3
+    built_from:
+      - { category: 3, source: docs/research/cluster-1-correctness.md#3 }
+
+  - name: checking-idioms-and-consistency
+    description: >
+      Checks that a change follows the project's own conventions and the
+      language/framework's idioms: formatter applied, idiomatic constructs
+      over clumsy equivalents, recurring problems solved the same way the
+      codebase already does, no second parallel way to do the same thing,
+      consistent naming/casing/imports/file layout. Use when reviewing style,
+      conventions, idioms, framework usage, or consistency with the rest of
+      the codebase.
+    shape: diff
+    wave: 3
+    built_from:
+      - { category: 8, source: docs/research/cluster-2-readability.md#8 }
+
+  - name: reviewing-api-contract-safety
+    description: >
+      Reviews public API and contract changes for safety: backward
+      compatibility (versioned/deprecated if breaking), hard-to-misuse
+      shapes, "when in doubt leave it out" on new surface, typed and stable
+      error contracts, idempotency for unsafe operations, pagination and rate
+      limits on collections, contract tests, and no internal-representation
+      leakage. Use when reviewing REST/GraphQL/RPC endpoints, request or
+      response shapes, SDK surface, webhooks, or any consumer-facing contract.
+    shape: diff
+    wave: 3
+    built_from:
+      - { category: 13, source: docs/research/cluster-3-structure.md#13 }
+
+  - name: reviewing-observability-and-operability
+    description: >
+      Reviews changes for production operability: structured logs with
+      consistent fields and correlation/trace IDs, right log levels with no
+      PII, context-rich errors that wrap rather than swallow, golden-signal
+      instrumentation and propagated trace context, liveness/readiness
+      checks, kill switches for risky changes, graceful shutdown, and metric
+      cardinality discipline. Use when reviewing logging, metrics, tracing,
+      alerts, health checks, feature flags, or deploy/rollback paths.
+    shape: diff
+    wave: 3
+    built_from:
+      - { category: 16, source: docs/research/cluster-4-runtime.md#16 }
+
+  - name: reviewing-pr-and-process-hygiene
+    description: >
+      Reviews the PR itself rather than just the code: size and single
+      purpose (~<=400 net LOC), atomic commits with imperative why-bearing
+      messages, correct conventional type and breaking-change signaling, risk
+      and rollback notes, docs/changelog updated with the API surface, no
+      drive-by scope creep, no committed secrets or debug leftovers. Use when
+      reviewing a pull request's structure, commits, description, changelog,
+      or readiness to merge.
+    shape: diff
+    wave: 3
+    cross_ref: [22]   # primary owner: auditing-documentation-health
+    built_from:
+      - { category: 24, source: docs/research/cluster-6-evolution.md#24 }
+      - { category: 22, source: docs/research/cluster-6-evolution.md#22 }
+
+  - name: auditing-architecture-conformance
+    description: >
+      Audits a repository for architecture conformance: dependency direction
+      violations between layers/modules, cyclic dependencies, reach-arounds
+      past a boundary, accidental coupling to internals, and drift between
+      the documented architecture and the import graph. A repo-wide /
+      scheduled audit rather than a single-diff review. Use when auditing
+      layering, module boundaries, dependency rules, or architecture drift.
+    shape: repo
+    wave: 3
+    built_from:
+      - { category: 12, source: docs/research/cluster-3-structure.md#12 }
+
+  - name: auditing-dependencies-and-supply-chain
+    description: >
+      Audits dependencies and the supply chain: known CVEs in direct and
+      transitive deps, unpinned or floating versions, lockfile integrity,
+      abandoned or low-reputation packages, typosquats, install scripts,
+      license compatibility of the dependency tree, and SBOM currency. A
+      repo-wide / scheduled audit. Use when auditing package.json, lockfiles,
+      requirements, vendored code, or supply-chain risk.
+    shape: repo
+    wave: 3
+    cross_ref: [27]   # primary owner: auditing-compliance-and-provenance
+    built_from:
+      - { category: 18, source: docs/research/cluster-5-verification.md#18 }
+      - { category: 27, source: docs/research/cluster-6-evolution.md#27 }
+
+  - name: auditing-config-and-build-hygiene
+    description: >
+      Audits configuration and build/CI health: config schema-validated at
+      startup and fail-fast, secrets out of config files, parity across
+      environments, reproducible and hermetic builds, pinned toolchains and
+      CI actions, cache correctness, flaky or slow pipelines, and unused or
+      drifting config keys. A repo-wide / scheduled audit. Use when auditing
+      CI pipelines, Dockerfiles, build scripts, env vars, or config files.
+    shape: repo
+    wave: 3
+    built_from:
+      - { category: 19, source: docs/research/cluster-5-verification.md#19 }
+      - { category: 26, source: docs/research/cluster-5-verification.md#26 }
+
+  - name: auditing-documentation-health
+    description: >
+      Audits documentation health across a repository: API-surface-to-docs
+      parity, docstring accuracy against current signatures, README
+      front-door freshness, runnable examples that still run, ADR coverage
+      for non-obvious decisions, changelog discipline, orphaned or
+      contradictory docs, and stale diagrams. A repo-wide / scheduled audit.
+      Use when auditing docs, READMEs, docstrings, changelogs, ADRs, or
+      onboarding material.
+    shape: repo
+    wave: 3
+    built_from:
+      - { category: 22, source: docs/research/cluster-6-evolution.md#22 }
+
+  - name: auditing-compliance-and-provenance
+    description: >
+      Audits compliance, licensing, and provenance: dependency licenses
+      compatible with the distribution model, copyleft contamination, missing
+      SPDX headers and attribution, code of unclear provenance, PII data
+      flows without minimization or retention limits, consent gating for
+      telemetry, and SBOM currency. Detects and escalates to humans rather
+      than deciding legal questions. A repo-wide / scheduled audit. Use when
+      auditing licenses, PII handling, data retention, or provenance.
+    shape: repo
+    wave: 3
+    built_from:
+      - { category: 27, source: docs/research/cluster-6-evolution.md#27 }

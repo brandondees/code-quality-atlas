@@ -1,0 +1,32 @@
+{
+  "skills": [
+    "auditing-architecture-conformance"
+  ],
+  "scenarios": [
+    {
+      "query": "Audit this architecture scan. Declared rules (docs/architecture.md): handlers -> services -> repos -> db; no skip or upward imports; no cycles.\n```text\nviolations:\n  services/payouts.go   imports  handlers/render.go\n  handlers/users.go     imports  repos/users_repo.go   (skips services)\ncycles:\n  services/accounts.go -> services/ledger.go -> services/accounts.go\n```",
+      "expected_behavior": [
+        "Flags the upward import (services -> handlers) against the declared direction",
+        "Flags the skip-layer import (handlers directly to repos, bypassing services)",
+        "Flags the services cycle and recommends breaking it (extract shared concept or invert an edge)",
+        "Recommends encoding the rules as an automated fitness function so violations fail CI"
+      ]
+    },
+    {
+      "query": "Audit this scan. Declared rule (ADR-7): bounded contexts `catalog` and `checkout` may only communicate via published events; no shared DB.\n```text\nfindings:\n  checkout/inventory_sync.py reads table catalog_products directly (shared DB)\n  checkout/api.py imports catalog/internal/pricing_rules.py\n```",
+      "expected_behavior": [
+        "Flags the shared-database access as cross-context coupling violating ADR-7 (recommend the published event/API contract instead)",
+        "Flags the reach-in to another context's internals (catalog/internal) as boundary violation",
+        "Frames both against the declared rule rather than generic style preference"
+      ]
+    },
+    {
+      "query": "Audit this architecture scan. Declared rule: ui -> app -> domain -> infra, no cycles.\n```text\nviolations: none\ncycles: none\nfan-in/fan-out (top): domain/types.py fan-in 51 fan-out 2; app/use_cases.py fan-in 12 fan-out 9\n```",
+      "expected_behavior": [
+        "Reports no findings (conforms to the declared architecture)",
+        "Recognizes high fan-in with low fan-out (domain/types.py) as a healthy shared kernel, not a god module",
+        "Does not invent rules or violations the declared architecture doesn't contain"
+      ]
+    }
+  ]
+}

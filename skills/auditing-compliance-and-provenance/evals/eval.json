@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "auditing-compliance-and-provenance"
+  ],
+  "scenarios": [
+    {
+      "query": "Audit this compliance scan. Product: closed-source desktop app sold worldwide.\n```text\nlicenses: dep `gpl-tablesort` GPL-3.0, statically linked into the shipped binary\nvendored: src/vendor/fastjson/ — files match a GitHub repo, copyright headers removed\npii: crash reporter uploads full memory dumps (may contain user documents) with\n     no user prompt; retention unlimited\n```",
+      "expected_behavior": [
+        "Flags the GPL-3.0 statically linked into a closed-source shipped binary as a serious license conflict to escalate to legal (not to silently decide)",
+        "Flags the vendored code with removed copyright headers as an attribution violation to restore",
+        "Flags the crash-dump PII flow (no consent, unbounded retention, sensitive contents) requiring consent gating, minimization, and retention limits"
+      ]
+    },
+    {
+      "query": "Audit this scan. Product: proprietary SaaS.\n```text\nnew code: utils/geo.py — 240 lines matching a Stack Overflow answer verbatim,\n  no attribution, no license note\ntelemetry: new feature logs user GPS coordinates to the analytics pipeline;\n  purpose: \"may be useful later\"; no consent flow; users in EU\nsbom: last generated 14 months ago; 60+ dep changes since\n```",
+      "expected_behavior": [
+        "Flags the unattributed Stack Overflow code as a provenance/license gap (CC BY-SA obligations) to attribute or rewrite",
+        "Flags the GPS collection with no stated purpose, no consent, and EU users as a data-protection violation to escalate (purpose limitation/consent)",
+        "Flags the stale SBOM (14 months, 60+ changes) for regeneration"
+      ]
+    },
+    {
+      "query": "Audit this compliance scan. Product: Apache-2.0 open-source CLI.\n```text\nlicenses: deps all Apache-2.0/MIT/BSD; NOTICE file current\nspdx: REUSE lint green (100% headers)\npii: tool collects nothing; --telemetry flag exists, defaults off, documented\nprovenance: no vendored code; SBOM attached to each release\n```",
+      "expected_behavior": [
+        "Reports no findings (compliance and provenance are clean)",
+        "Recognizes compatible licenses, full attribution/SPDX coverage, opt-in telemetry, current SBOM",
+        "Does not speculate about legal risks the scan provides no evidence for"
+      ]
+    }
+  ]
+}

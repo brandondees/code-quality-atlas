@@ -1,5 +1,7 @@
 # Examples — reviewing-module-design
 
+Report each distinct issue as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
+
 ## Bad → finding
 
 **Input (diff):**
@@ -11,12 +13,15 @@ class Order:
         self.cancelled_reason = None   # set when cancelled
         self.tracking_number = ""      # "" until shipped
 ```
-**Expected finding:** Illegal states are representable: nothing stops
-`status == "cancelled"` with a `shipped_at`, or `status == "shipped"` with no
-tracking number. Stringly-typed status invites typos. Model the lifecycle as a
-tagged union / state machine (e.g. `Shipped(shipped_at, tracking_number)` vs
-`Cancelled(reason)`) so each state carries exactly its own data, and replace the
-`""`/`None` sentinels with explicit optional types.
+**Expected finding:**
+1. **Illegal states are representable:** nothing stops `status == "cancelled"` with
+   a `shipped_at`, or `status == "shipped"` with no tracking number. Model the
+   lifecycle as a tagged union / state machine (e.g.
+   `Shipped(shipped_at, tracking_number)` vs `Cancelled(reason)`) so each state
+   carries exactly its own data.
+2. **Stringly-typed status** invites typos — use an enum or the tagged union's tag.
+3. **Sentinel values** (`""`, `None`) stand in for "absent" — use explicit optional
+   types tied to the state that owns them.
 
 ## Bad → finding
 
@@ -29,11 +34,13 @@ function applyDiscount(customer) {
   }
 }
 ```
-**Expected finding:** Law-of-Demeter violation: the four-hop reach-through
-(`customer.account.subscription.plan.tier`) couples this function to the internal
-structure of three other objects — any reshuffle breaks it. Feature Envy: the method
-mostly manipulates `cart`'s data; move the discount onto the cart (or ask, don't
-take: `customer.discountTier()`), and avoid mutating `cart.total` from outside.
+**Expected finding:**
+1. **Law-of-Demeter violation:** the four-hop reach-through
+   (`customer.account.subscription.plan.tier`) couples this function to the
+   internal structure of three other objects — any reshuffle breaks it. Ask, don't
+   take: `customer.discountTier()`.
+2. **Feature Envy / broken encapsulation:** the function mutates `cart`'s data from
+   outside — move the discount onto the cart (or have the customer apply it).
 
 ## Good → no finding
 

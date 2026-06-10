@@ -1,0 +1,37 @@
+---
+name: auditing-config-and-build-hygiene
+description: 'Audits configuration and build/CI health: config schema-validated at
+  startup and fail-fast, secrets out of config files, parity across environments,
+  reproducible and hermetic builds, pinned toolchains and CI actions, cache correctness,
+  flaky or slow pipelines, and unused or drifting config keys. A repo-wide / scheduled
+  audit. Use when auditing CI pipelines, Dockerfiles, build scripts, env vars, or
+  config files.'
+provenance:
+  taxonomy_version: v0.2
+  built_from:
+  - category: 19
+    source: docs/research/cluster-5-verification.md#19
+    hash: 10b5ff2b03994f8c94218d994a97bb5d90c052b2c6719db21aab3605ed861353
+  - category: 26
+    source: docs/research/cluster-5-verification.md#26
+    hash: 7e08a34862897e0e935e8e3a24c49dd71b46b0409d0b8bcab0614d6aeb7fbdac
+---
+
+# auditing-config-and-build-hygiene
+
+## When to use
+
+Audits configuration and build/CI health: config schema-validated at startup and fail-fast, secrets out of config files, parity across environments, reproducible and hermetic builds, pinned toolchains and CI actions, cache correctness, flaky or slow pipelines, and unused or drifting config keys. A repo-wide / scheduled audit. Use when auditing CI pipelines, Dockerfiles, build scripts, env vars, or config files.
+
+## Reviewer discipline
+
+Report only real problems. If the code correctly handles the case, reply "No findings" and stop — do not invent issues, and do not suggest changes to code that is already correct. This guards against false positives on correct code; still report every genuine issue you do find, with its full detail.
+
+## Top checks
+
+Start with the full checklist, then escalate to the references as needed.
+
+- See [reference/heuristics.md](reference/heuristics.md) for the full review checklist.
+- See [reference/tool-rules.md](reference/tool-rules.md) for static-analysis rules to triage.
+- See [reference/sources.md](reference/sources.md) for the references behind each check.
+- See [examples.md](examples.md) for good/bad examples.

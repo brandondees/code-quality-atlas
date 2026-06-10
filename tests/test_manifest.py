@@ -63,3 +63,45 @@ def test_validate_rejects_invalid_utf8_source(tmp_path):
     bad = _skill(built_from=[Source(2, "bad.md#2")])
     with pytest.raises(ValidationError, match="cannot read source file"):
         validate(Manifest("v0.2", [bad]), docs_root=str(tmp_path))
+
+
+def test_g1_double_primary_rejected(tmp_path):
+    doc = tmp_path / "r.md"
+    doc.write_text("## #2 Errors\n\n### Reviewable heuristics (skill-checklist seeds)\n- x\n")
+    src = f"{doc}#2"
+    a = Skill(name="skill-a", description="d", shape="diff", wave=1,
+              built_from=[Source(2, src)])
+    b = Skill(name="skill-b", description="d", shape="diff", wave=1,
+              built_from=[Source(2, src)])
+    with pytest.raises(ValidationError, match="multiple primary owners"):
+        validate(Manifest(taxonomy_version="v0", skills=[a, b]), docs_root="/")
+
+
+def test_g1_cross_ref_resolves_double_booking(tmp_path):
+    doc = tmp_path / "r.md"
+    doc.write_text("## #2 Errors\n\n### Reviewable heuristics (skill-checklist seeds)\n- x\n")
+    src = f"{doc}#2"
+    a = Skill(name="skill-a", description="d", shape="diff", wave=1,
+              built_from=[Source(2, src)])
+    b = Skill(name="skill-b", description="d", shape="diff", wave=1,
+              built_from=[Source(2, src)], cross_ref=[2])
+    validate(Manifest(taxonomy_version="v0", skills=[a, b]), docs_root="/")
+
+
+def test_g1_cross_ref_must_be_in_built_from(tmp_path):
+    doc = tmp_path / "r.md"
+    doc.write_text("## #2 Errors\n\n### Reviewable heuristics (skill-checklist seeds)\n- x\n")
+    a = Skill(name="skill-a", description="d", shape="diff", wave=1,
+              built_from=[Source(2, f"{doc}#2")], cross_ref=[9])
+    with pytest.raises(ValidationError, match="not in built_from"):
+        validate(Manifest(taxonomy_version="v0", skills=[a]), docs_root="/")
+
+
+def test_duplicate_built_from_category_rejected(tmp_path):
+    doc = tmp_path / "r.md"
+    doc.write_text("## #2 Errors\n\n### Reviewable heuristics (skill-checklist seeds)\n- x\n")
+    src = f"{doc}#2"
+    a = Skill(name="skill-a", description="d", shape="diff", wave=1,
+              built_from=[Source(2, src), Source(2, src)])
+    with pytest.raises(ValidationError, match="more than once"):
+        validate(Manifest(taxonomy_version="v0", skills=[a]), docs_root="/")

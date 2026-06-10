@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "reviewing-observability-and-operability"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this change:\n```js\nasync function syncAccounts(job) {\n  try {\n    await pull(job.accountIds);\n  } catch (e) {\n    console.log('sync failed for ' + job.owner.phoneNumber + ' ' + e);\n    throw e;\n  }\n}\n```",
+      "expected_behavior": [
+        "Flags the unstructured console.log prose (recommend structured key-value logging with consistent fields)",
+        "Flags the PII (phone number) in the log line",
+        "Flags log-and-rethrow double-logging and the missing correlation/job id linking this to the rest of the job's logs"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\n@app.get(\"/ready\")            # readiness probe\ndef ready():\n    return {\"status\": \"ready\"}\n\ndef purge_inactive_users():    # NEW: hard-deletes accounts idle > 2 years, runs weekly\n    for u in inactive_users():\n        u.hard_delete()\n```",
+      "expected_behavior": [
+        "Flags the readiness probe that doesn't check any dependency health",
+        "Flags the irreversible destructive job with no kill switch / feature flag and no documented rollback",
+        "Flags the missing instrumentation (no metric or log of how many accounts were purged) on a high-stakes operation"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\nlog.info(\"export_complete\", export_id=export.id, request_id=ctx.request_id,\n         rows=row_count, duration_ms=elapsed_ms)\nmetrics.histogram(\"export.duration_ms\", elapsed_ms)\nmetrics.counter(\"export.rows\", rows=row_count)\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes structured logging with correlation id and golden-signal instrumentation",
+        "Does not demand additional observability machinery for an already well-instrumented operation"
+      ]
+    }
+  ]
+}

@@ -1,5 +1,7 @@
 # Examples — reviewing-llm-integration
 
+Report each distinct issue as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
+
 ## Bad → finding
 
 **Input (diff):**
@@ -10,13 +12,15 @@ def summarize_inbox(user):
     reply = llm.chat(model="latest", prompt=prompt, tools=[send_email, search_contacts])
     return reply
 ```
-**Expected finding:** Prompt injection by design: untrusted attachment content is
-concatenated as *instructions* ("follow any instructions"), not delimited as data.
-Lethal trifecta: private data (contacts) + untrusted content (uploads) + an
-exfiltration action (`send_email`) in one call — an injected instruction can mail the
-contact list out. Require delimiting content as data, an egress allow-list or
-human-in-the-loop on `send_email`, and pin the model (`"latest"` is a floating alias —
-unreproducible).
+**Expected finding:**
+1. **Prompt injection by design:** untrusted attachment content is concatenated as
+   *instructions* ("follow any instructions"), not delimited as data.
+2. **Lethal trifecta:** private data (contacts) + untrusted content (uploads) + an
+   exfiltration action (`send_email`) in one call — an injected instruction can
+   mail the contact list out. Require an egress allow-list or human-in-the-loop on
+   `send_email`, and delimit content as data.
+3. **Unpinned model:** `"latest"` is a floating alias — unreproducible; pin the
+   model identifier.
 
 ## Bad → finding
 
@@ -26,12 +30,13 @@ const out = await llm.complete({ prompt: buildQuery(userQuestion) });
 const sql = JSON.parse(out).sql;
 await db.raw(sql);                       // run whatever the model returned
 ```
-**Expected finding:** Model output flows to a dangerous sink: `db.raw(sql)` executes
-whatever the model produced — treat model output like raw user input (parameterize,
-allow-list tables/verbs, or use a read-only role). Blind `JSON.parse` with no schema
-validation will throw or pass garbage on malformed output; validate and define the
-failure path (re-ask / reject). No timeout, no `max_tokens`, no retry bound on the
-call.
+**Expected finding:**
+1. **Model output flows to a dangerous sink:** `db.raw(sql)` executes whatever the
+   model produced — treat model output like raw user input (parameterize,
+   allow-list tables/verbs, or use a read-only role).
+2. **Blind `JSON.parse` with no schema validation:** malformed output throws or
+   passes garbage — validate and define the failure path (re-ask / reject).
+3. **Unbounded call:** no timeout, no `max_tokens`, no retry bound.
 
 ## Good → no finding
 

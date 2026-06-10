@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "auditing-documentation-health"
+  ],
+  "scenarios": [
+    {
+      "query": "Audit this docs parity scan:\n```text\nREADME: setup section says `docker compose up` — compose file deleted in March,\n  replaced by `make dev`; badge links to CI that was migrated\nAPI docs: document DELETE /v2/teams/{id} — endpoint removed two releases ago;\n  new POST /v2/teams/{id}/archive undocumented\ndocstring: send_invoice(to, cc=None) — docs describe parameter `bcc` (never existed)\n  and claim it raises InvoiceError; it actually returns an error result object\n```",
+      "expected_behavior": [
+        "Flags the broken README setup instructions (deleted compose file) as an onboarding regression",
+        "Flags the contradictory API docs: a documented endpoint that no longer exists and a new endpoint with no docs",
+        "Flags the docstring describing a nonexistent parameter and wrong error behavior as worse than no docs"
+      ]
+    },
+    {
+      "query": "Audit this scan:\n```text\nnew feature shipped last month: scheduled exports (cron jobs, a queue, an alert)\n  - tutorial written (how to click through the UI)\n  - no reference for the 6 new config keys\n  - no runbook: on-call has no detect/diagnose/rollback steps (paged twice already)\nADRs: none for the new queue dependency (RabbitMQ added; no decision record)\n```",
+      "expected_behavior": [
+        "Flags the missing reference docs for the new config keys (a tutorial is not a substitute for reference)",
+        "Flags the missing runbook for the new operational surface, citing the on-call pages",
+        "Flags the missing ADR for the architecturally significant new dependency"
+      ]
+    },
+    {
+      "query": "Audit this docs parity scan:\n```text\nREADME quickstart: CI-checked, green\npublic surface: 17/17 functions documented; docstring/signature parity green\nCHANGELOG: current through last release, semver-categorized\nrunbooks: one per scheduled job, last reviewed this quarter\n```",
+      "expected_behavior": [
+        "Reports no findings (documentation is healthy)",
+        "Recognizes parity between surface and docs, runnable examples, current changelog",
+        "Does not demand more documentation volume when parity and accuracy are met"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+# Reviewable heuristics — reviewing-concurrency-and-async
+
+## Contents
+- From category #3
+
+## From category #3
+
+### Reviewable heuristics (skill-checklist seeds)
+- Is shared mutable state touched by multiple threads/tasks without synchronization?
+- Any check-then-act / read-modify-write that spans an `await`/`yield` and isn't atomic?
+- Could two concurrent requests interleave to break an invariant (lost update, double-spend)?
+- Are locks acquired in a consistent global order, with minimal scope (deadlock avoidance)?
+- Are all promises awaited/handled, and is concurrency *intentional* (`Promise.all`) vs. accidental sequential?
+- For message consumers: is processing **idempotent** and keyed on a stable id (at-least-once-safe)?
+- Does the code assume wall-clock ordering across nodes/processes (clock skew)?
+- Does it assume **exactly-once delivery** (it doesn't exist — needs dedupe)?
+- Are cancellation/timeouts propagated and is cleanup guaranteed on cancel?
+- Frontend: after an `await`, does the handler assume the DOM node / component still exists?
+- Is there a test that actually exercises the concurrent path (so `-race`/TSan can fire)?
+
+---

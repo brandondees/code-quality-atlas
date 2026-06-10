@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "reviewing-api-contract-safety"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this change to our public v2 API:\n```diff\n GET /v2/invoices/{id}\n {\n-  \"amount_cents\": 4200,\n-  \"currency\": \"usd\",\n+  \"amount\": 42.00,\n   \"due_date\": \"2026-07-01\"\n }\n```",
+      "expected_behavior": [
+        "Flags the breaking removal/rename of amount_cents (and dropped currency field) on a public endpoint without versioning or deprecation",
+        "Flags the semantic change from integer cents to a float amount as dangerous for consumers (precision/parsing)",
+        "Recommends expand/contract: add the new field alongside the old with a deprecation window, or version the endpoint"
+      ]
+    },
+    {
+      "query": "Review this new endpoint:\n```python\n@app.post(\"/v1/refunds\")\ndef refund(req):\n    r = process_refund(req.json[\"order_id\"], req.json.get(\"amount\"))\n    return r.__dict__          # SQLAlchemy row attrs incl. _sa_instance_state, ledger_shard\n\n@app.get(\"/v1/refunds\")\ndef refunds(req):\n    return [r.__dict__ for r in Refund.query.all()]\n```",
+      "expected_behavior": [
+        "Flags the unsafe refund POST with no idempotency protection (a retry double-refunds)",
+        "Flags the leaked internal representation (__dict__ with ORM internals/shard fields) and recommends an explicit response schema",
+        "Flags the unbounded collection endpoint with no pagination or limits"
+      ]
+    },
+    {
+      "query": "Review this change to our public v1 API (docs and contract tests updated in the same PR):\n```diff\n GET /v1/customers/{id}\n {\n   \"id\": 7,\n   \"name\": \"Ada\",\n+  \"preferred_locale\": \"en-US\"   // optional; null when unset\n }\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes the additive optional field as backward-compatible evolution",
+        "Does not demand a version bump or deprecation process for a non-breaking change"
+      ]
+    }
+  ]
+}

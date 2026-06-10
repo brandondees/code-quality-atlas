@@ -1,5 +1,8 @@
 # Examples — reviewing-naming-and-readability
 
+A diff often contains several independent readability problems. Check every line
+and report each distinct issue as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
+
 ## Bad → finding
 
 **Input (diff):**
@@ -15,11 +18,13 @@ def process(data, flag):
             return tmp
     return None
 ```
-**Expected finding:** Placeholder names (`process`, `data`, `tmp`, `flag`, `d`) hide
-intent — name the domain concept (e.g. `find_large_settled_orders`). Magic numbers
-`3`, `2`, `10000` need named constants (`MODE_AUDIT`, `STATUS_SETTLED`,
-`LARGE_ORDER_THRESHOLD_CENTS` — with units). Four levels of nesting: invert to guard
-clauses (`if data is None: return ...`) so the happy path is un-indented.
+**Expected finding:**
+1. **Placeholder names** (`process`, `data`, `tmp`, `flag`, `d`) hide intent — name
+   the domain concept (e.g. `find_large_settled_orders`).
+2. **Magic numbers** `3`, `2`, `10000` need named constants (`MODE_AUDIT`,
+   `STATUS_SETTLED`, `LARGE_ORDER_THRESHOLD_CENTS` — with units).
+3. **Four levels of nesting:** invert to guard clauses
+   (`if data is None: return ...`) so the happy path is un-indented.
 
 ## Bad → finding
 
@@ -32,13 +37,16 @@ async function fetchUserViaHttpGet(id) {
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) { /* ... */ }
 }
 ```
-**Expected finding:** The comment says "3 times" but the code allows 5 — a
-contradicting comment is worse than none; fix one of them. Delete the commented-out
-code (`oldFetchUser`) — version control is the archive. The name `fetchUserViaHttpGet`
-encodes the mechanism; `fetchUser` survives a transport change. (This check applies
-in every language: any name that bakes in the transport, library, or storage
-mechanism — `saveViaJdbc`, `loadFromRedis` — should state intent instead, so always
-scan function names for embedded mechanism, not just the obvious smells.)
+**Expected finding:**
+1. **Comment contradicts the code:** the comment says "3 times" but the code allows
+   5 — a contradicting comment is worse than none; fix one of them.
+2. **Commented-out code** (`oldFetchUser`) — delete it; version control is the
+   archive.
+3. **Mechanism-encoding name:** `fetchUserViaHttpGet` bakes the transport into the
+   name; `fetchUser` survives a transport change. (This check applies in every
+   language: any name embedding the transport, library, or storage mechanism —
+   `saveViaJdbc`, `loadFromRedis` — should state intent instead, so always scan
+   function names for embedded mechanism, not just the obvious smells.)
 
 ## Good → no finding
 

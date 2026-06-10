@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "reviewing-pr-and-process-hygiene"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this PR:\n```text\nTitle: \"stuff + fixes\"\nDescription: (empty)\nDiff: +1,850 −400 across 31 files: new SSO login flow, plus a global\n  tabs->spaces reformat, plus renaming all *Util classes to *Helper\nCommits: \"asdf\", \"works now\", \"final\", \"final2\"\nLeftover in diff: print(\"DEBUG user=\", user), aws_keys.json committed\n```",
+      "expected_behavior": [
+        "Flags the oversized mixed-purpose diff (feature + reformat + rename) and recommends splitting",
+        "Flags the meaningless commit messages preventing revert/bisect and the empty description with no risk/rollback/test notes",
+        "Flags the committed credentials file as requiring removal AND rotation, and the debug print leftover"
+      ]
+    },
+    {
+      "query": "Review this PR:\n```text\nTitle: \"refactor: simplify webhook payloads\"\nCommits: refactor: simplify webhook payloads\nDiff: removes the `legacy_id` field from all outgoing webhook payloads;\n  consumers were emailed last month.\nChangelog: no entry. Docs: webhook reference still lists legacy_id.\n```",
+      "expected_behavior": [
+        "Flags the breaking change mistyped as refactor with no BREAKING CHANGE signal (it alters a public contract and drives versioning)",
+        "Flags the missing changelog entry and the stale webhook docs still listing the removed field",
+        "Recommends a migration note/deprecation signaling in the PR itself, not just an email"
+      ]
+    },
+    {
+      "query": "Review this PR:\n```text\nTitle: \"fix: retry webhook delivery on 503 with backoff (#1204)\"\nDescription: root cause (provider maintenance windows), fix (3 retries,\n  exponential backoff), blast radius (webhook sender only), tested: unit +\n  staging soak, rollback: revert, flag WEBHOOK_RETRY kill-switch included.\nDiff: +61 −9 in 4 files (fix, tests, changelog, runbook note)\nCommits: one, imperative, explains why, links #1204\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes the small single-purpose diff, correct typing, complete description with rollback, and docs/changelog in the same PR",
+        "Does not demand extra process ceremony for an already well-hygiened small fix"
+      ]
+    }
+  ]
+}

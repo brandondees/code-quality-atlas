@@ -20,12 +20,15 @@ We are in phase 3 (building the skills, wave by wave).
 
 **Phase 2 — Skill-suite architecture (complete, 2026-06-09)** → [`docs/phase-2-skill-suite-design.md`](docs/phase-2-skill-suite-design.md): docs are the source of truth; skills are generated from [`skills/manifest.yaml`](skills/manifest.yaml) with provenance hashes, a drift-checker, and eval-first refinement. 22 behaviors mapped over the 27 categories, built in waves.
 
-**Phase 3 — Build the skills (in progress)**
+**Phase 3 — Build the skills (complete, 2026-06-10)**
 
 - [x] **Wave 1 — the 6 ★ skills** (LLM-judgment-heavy, highest unique value) → [`skills/`](skills/): generated, refined with examples + ≥3 eval scenarios each, cross-model-tested down to small local models (see [`docs/runbooks/regenerating-skills.md`](docs/runbooks/regenerating-skills.md)).
 - [x] **Wave 2 — high-stakes triage** (5 skills): security sweep, migration & data safety, performance & efficiency, test quality, accessibility & i18n — same refine-and-eval loop; small-model gaps + linter pairings documented in the runbook.
-- [ ] **Wave 3 — remainder + repo/cron-shaped audits** (architecture conformance, dependencies & supply chain, docs health, compliance).
-- [ ] Residual open questions (compliance scope Q9, packaging Q12) → [`docs/open-questions.md`](docs/open-questions.md)
+- [x] **Wave 3 — remainder + repo/cron-shaped audits** (11 skills): tracing correctness, concurrency & async, idioms & consistency, API contract safety, observability & operability, PR & process hygiene; plus repo-shaped audits for architecture conformance, dependencies & supply chain, config & build hygiene, documentation health, and compliance & provenance.
+- [x] **G1 single-owner enforcement:** the manifest validator rejects a category with two primary owners; double-booked categories carry explicit `cross_ref` markers.
+- [ ] **Q12 packaging:** plugin-wrap `skills/` for one-command install → [`docs/open-questions.md`](docs/open-questions.md)
+
+All **22 behaviors / 27 categories** from the [phase-2 design](docs/phase-2-skill-suite-design.md) are built.
 
 ## Approach
 

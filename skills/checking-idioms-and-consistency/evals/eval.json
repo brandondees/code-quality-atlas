@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "checking-idioms-and-consistency"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this change. Project context: Ruby on Rails app; errors are raised as ServiceError(code) and rendered by a controller concern; RuboCop enforced.\n```ruby\ndef cancel_subscription(id)\n  sub = Subscription.find_by(id: id)\n  if sub == nil\n    return { error: 'not_found', code: 404 }\n  end\n  arr = Array.new\n  sub.items.each { |i| arr.push(i.name) }\n  arr\nend\n```",
+      "expected_behavior": [
+        "Flags the ad-hoc error hash diverging from the project's ServiceError convention (a second error shape)",
+        "Flags the non-idiomatic nil check (sub == nil vs sub.nil? / unless sub) per the project's linter",
+        "Flags the clumsy Array.new + each + push where the idiomatic form is sub.items.map(&:name)"
+      ]
+    },
+    {
+      "query": "Review this change. Project context: TypeScript, camelCase, src/lib/http.ts exports a configured fetchJson used everywhere (auth headers, retries).\n```ts\nexport async function get_data(url: string) {\n  const res = await fetch(url);\n  return res.json();\n}\n```",
+      "expected_behavior": [
+        "Flags the parallel utility duplicating the existing configured fetchJson helper (loses auth/retry behavior and creates a second way)",
+        "Flags the snake_case name in a camelCase codebase",
+        "Recommends using or extending the existing helper instead of adding a competitor"
+      ]
+    },
+    {
+      "query": "Review this change. Project context: Python service, errors via ApiError, pathlib preferred, ruff clean.\n```python\ndef load_template(name: str) -> str:\n    path = TEMPLATES_DIR / f\"{name}.html\"\n    if not path.exists():\n        raise ApiError(\"template_missing\", f\"no template named {name}\")\n    return path.read_text()\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes the change follows the project's error convention and idiomatic pathlib usage",
+        "Does not impose personal style preferences on convention-following code"
+      ]
+    }
+  ]
+}

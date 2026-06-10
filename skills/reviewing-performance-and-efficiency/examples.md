@@ -1,6 +1,6 @@
 # Examples — reviewing-performance-and-efficiency
 
-Report each distinct issue as its own numbered finding.
+Report each distinct issue as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
 
 **Decision rule (apply before flagging):** a performance finding needs a path that
 is plausibly hot — a request handler, a loop over unbounded data, a render path.
