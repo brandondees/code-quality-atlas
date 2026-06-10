@@ -1,0 +1,38 @@
+# Reviewable heuristics — reviewing-module-design
+
+## Contents
+- From category #9
+- From category #10
+
+## From category #9
+
+### Reviewable heuristics (skill-checklist seeds)
+- Does the unit have **one** clear responsibility (high cohesion)? State its job in a sentence without "and."
+- Is the interface **narrow relative to the behavior** behind it (deep module), or a shallow pass-through adding no value?
+- What is the **strongest connascence crossing the boundary**, and is it local? (Position/Algorithm connascence across modules is a smell; prefer Name/Type.)
+- Does it **hide its implementation** so internals can change without breaking callers?
+- Is it **hard to misuse** — invalid argument/call-sequence prevented by types, not docs (caller ergonomics / pit of success)?
+- Any **Feature Envy** (method mostly manipulates another object's data → move it there)?
+- Any **Data Clump** (the same field/param cluster traveling together → extract a type)?
+- Law of Demeter respected (no `a.b.c.d` train-wreck reach-through)?
+- Mutability minimized; value objects immutable?
+- Composition preferred over inheritance; inheritance shallow and not used purely for reuse?
+- Any cyclic dependency between units (break via dependency inversion)?
+- "When in doubt, leave it out": is speculative public surface being added (cross #11)?
+
+---
+
+## From category #10
+
+### Reviewable heuristics (skill-checklist seeds)
+- Are **invalid states representable**? Could you construct a value the domain forbids (an order both `draft` and `shipped`)? Model with a tagged union / state machine instead.
+- Is untrusted input **parsed into a precise type at the boundary** (parse-don't-validate), or validated then passed onward as raw primitives (re-validatable downstream)?
+- **Primitive obsession**: are domain concepts (email, money, id, %) raw `string`/`number`, or wrapped in domain types carrying invariants/units (cross #4)?
+- Are optional/nullable fields modeled explicitly (`Option`/`Maybe`/`| null`) rather than sentinel values (`-1`, `""`)?
+- Are unions/enums **exhaustively** handled (compiler-checked)?
+- Do (smart) constructors enforce invariants so an invalid instance can't exist?
+- Is `null`/`undefined` controlled (`strictNullChecks` on; no non-null assertions)?
+- Are mutually-exclusive nullable fields collapsed into a tagged union?
+- Do the **types and the persistence schema agree** on constraints (cross #20)?
+
+---

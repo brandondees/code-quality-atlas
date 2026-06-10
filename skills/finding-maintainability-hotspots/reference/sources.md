@@ -1,0 +1,22 @@
+# References to mine — finding-maintainability-hotspots
+
+## Contents
+- From category #21
+
+## From category #21
+
+### Key references
+- **John Ousterhout — *A Philosophy of Software Design*** (2018/2021). `(verify)` URL.
+  → mine: "change amplification" and "cognitive load" as named symptoms of complexity; the *deep module* (simple interface, substantial implementation) as the antidote — a diff that widens a shallow module's interface is a maintainability smell.
+- **Martin Fowler — "Technical Debt Quadrant"** — martinfowler.com/bliki/TechnicalDebtQuadrant.html `(verify)`.
+  → mine: two axes — reckless↔prudent and deliberate↔inadvertent — to *classify* a debt note, not just flag it. "Prudent/deliberate" debt is acceptable if tracked; "reckless/inadvertent" is the danger zone.
+- **Martin Fowler — *Refactoring* (2nd ed.)** and "Is High Quality Software Worth the Cost?" `(verify)`.
+  → mine: refactorability requires test coverage as a safety net; the "design stamina hypothesis" — internal quality pays off past a short payback period. A change to under-tested code raises blast-radius risk.
+- **Meir Lehman — Laws of Software Evolution** (continuing change; increasing complexity) `(verify)`.
+  → mine: software that is used *must* change, and absent deliberate work its complexity rises — so maintainability is a moving target, and "no change needed here" is itself a claim to check.
+- **Adam Tornhill — *Your Code as a Crime Scene* / *Software Design X-Rays*; CodeScene** `(verify)`.
+  → mine: behavioral code analysis — hotspots = high churn × high complexity; "knowledge maps" and bus-factor/abandoned-code via VCS authorship. Change-coupling (files that change together but don't reference each other) as a hidden-ripple signal.
+- **Michael Feathers — *Working Effectively with Legacy Code*** `(verify)`.
+  → mine: "legacy = code without tests"; *seams* and characterization tests as the precondition for safe change. A diff that adds behavior to untested code without first adding a pin-down test is risky.
+- **Connascence (Meilir Page-Jones; connascence.io)** `(verify)`.
+  → mine: a vocabulary for coupling strength (name → type → meaning → position → algorithm → execution-order → timing → value → identity) and *locality* (connascence across module boundaries is worse). Useful to name *why* a change amplifies.

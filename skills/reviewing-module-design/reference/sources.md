@@ -1,0 +1,23 @@
+# References to mine — reviewing-module-design
+
+## Contents
+- From category #9
+- From category #10
+
+## From category #9
+
+### Key references
+- **David Parnas — "On the Criteria To Be Used in Decomposing Systems into Modules" (1972)** → mine: decompose by **information hiding** — each module hides a design decision likely to change — not by flowchart/processing steps. The foundational cohesion/encapsulation argument.
+- **Meilir Page-Jones — Connascence** (catalog: https://connascence.io/) → mine: a *precise* vocabulary for coupling. Nine types — **static**: Name, Type, Meaning/Convention, Position, Algorithm; **dynamic**: Execution (order), Timing, Value, Identity — each evaluated by **Strength** (harder to refactor = worse), **Degree** (how many entities), **Locality** (near is better than far). Operational rule: *prefer weaker connascence; keep stronger connascence local.* Far more actionable than "reduce coupling."
+- **John Ousterhout — *A Philosophy of Software Design* (deep modules)** → mine: a good module is a **simple interface over substantial behavior**; shallow modules (interface ≈ implementation) are negative-value ("classitis").
+- **Joshua Bloch — "How to Design a Good API and Why It Matters" (2006)** — https://research.google.com/pubs/archive/32713.pdf → mine: **"easy to use, hard to misuse"**, "when in doubt, leave it out", minimize mutability, names matter. The caller-ergonomics / internal-API-DX core of #9.
+- **Rust API Guidelines — "hard to misuse"** `(verify URL)` → mine: type-driven misuse-resistance (newtypes, builders, typestate) so wrong usage won't compile.
+
+## From category #10
+
+### Key references
+- **Alexis King — "Parse, Don't Validate" (2019)** — https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/ `(verify URL)` → mine: parse untrusted input into a **constrained type once** at the boundary; downstream relies on the type's guarantees. "Shotgun parsing" (validate-then-pass-raw, re-checked everywhere) is the antipattern.
+- **Yaron Minsky — "Make Illegal States Unrepresentable" (Effective ML, 2010; Jane Street/OCaml)** → mine: model the domain so invalid/nonsensical states **cannot be expressed**; the type system is the enforcement mechanism, not runtime checks or docs.
+- **Scott Wlaschin — "Designing with Types" (F# for Fun and Profit)** — https://fsharpforfunandprofit.com/posts/designing-with-types-making-illegal-states-unrepresentable/ → mine: practical recipes — replace primitives with domain types, sum types for state machines, encode optionality explicitly.
+- **Martin Fowler — "Primitive Obsession" smell** → mine: stringly-typed/primitive fields that should be domain types (`Email`, `Money`, `UserId`, `Percentage`) carrying invariants and units.
+- **Hillel Wayne — type-driven design / lightweight formal methods** `(verify)` → mine: types as cheap proofs; let the compiler check invariants you'd otherwise test.

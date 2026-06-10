@@ -1,0 +1,28 @@
+{
+  "skills": ["hunting-silent-failures"],
+  "scenarios": [
+    {
+      "query": "Review this change:\n```python\ntry:\n    charge = payments.charge(order.total)\nexcept Exception:\n    pass\norder.mark_paid()\n```",
+      "expected_behavior": [
+        "Flags the empty `except Exception: pass` as a swallowed error",
+        "Notes that order.mark_paid() runs even when the charge failed",
+        "Recommends failing loud or handling the specific exception without marking paid"
+      ]
+    },
+    {
+      "query": "Review this change:\n```js\nconst res = await fetch(url);\nreturn res.json();\n```",
+      "expected_behavior": [
+        "Flags the missing timeout on the remote call",
+        "Flags the missing handling of non-OK responses / network errors",
+        "Suggests a timeout (e.g. AbortController) and a defined fallback"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\ntry:\n    charge = payments.charge(order.total)\nexcept PaymentDeclined as e:\n    log.warning('declined', order_id=order.id, reason=e.code)\n    return CheckoutResult.declined(e.code)\norder.mark_paid()\n```",
+      "expected_behavior": [
+        "Reports no silent-failure issue",
+        "Recognizes the exception is narrow, surfaced with context, and avoids a false 'paid' state"
+      ]
+    }
+  ]
+}

@@ -6,6 +6,13 @@
 .vscode/
 *.swp
 
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
 # Scratch
 scratch/
 *.tmp
