@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "code-quality-atlas",
+  "displayName": "Code Quality Atlas",
+  "description": "A research-derived suite of 22 code-review and maintenance skills covering correctness, readability, structure, security, performance, tests, migrations, accessibility, observability, and repo-wide audits (architecture, dependencies, config, docs, compliance). Each skill is generated from a verified research atlas with provenance, refined examples, and cross-model evals.",
+  "author": {
+    "name": "Brandon Dees",
+    "url": "https://github.com/brandondees"
+  },
+  "repository": "https://github.com/brandondees/code-quality-atlas",
+  "keywords": [
+    "code-review",
+    "code-quality",
+    "security",
+    "performance",
+    "testing",
+    "accessibility",
+    "maintenance",
+    "audit"
+  ]
+}

@@ -2,12 +2,12 @@
 
 A from-first-principles research project — and, eventually, a **standalone agent skill suite for code review and maintenance.**
 
-The goal is two-phased:
+The goal is two-part:
 
 1. Map *everything* that factors into code quality, as comprehensively as possible.
 2. Distill that map into a coherent set of composable agent skills that help **review** and **maintain** code.
 
-We are in phase 3 (building the skills, wave by wave).
+All three phases are complete — the suite is built and installable (see Install below). Ongoing work is the compounding loop: critique the research, let drift flag affected skills, regenerate, re-gate.
 
 ## Status
 
@@ -26,9 +26,21 @@ We are in phase 3 (building the skills, wave by wave).
 - [x] **Wave 2 — high-stakes triage** (5 skills): security sweep, migration & data safety, performance & efficiency, test quality, accessibility & i18n — same refine-and-eval loop; small-model gaps + linter pairings documented in the runbook.
 - [x] **Wave 3 — remainder + repo/cron-shaped audits** (11 skills): tracing correctness, concurrency & async, idioms & consistency, API contract safety, observability & operability, PR & process hygiene; plus repo-shaped audits for architecture conformance, dependencies & supply chain, config & build hygiene, documentation health, and compliance & provenance.
 - [x] **G1 single-owner enforcement:** the manifest validator rejects a category with two primary owners; double-booked categories carry explicit `cross_ref` markers.
-- [ ] **Q12 packaging:** plugin-wrap `skills/` for one-command install → [`docs/open-questions.md`](docs/open-questions.md)
+- [x] **Q12 packaging:** the repo is itself a Claude Code plugin + marketplace (commit-SHA versioned) → see Install below.
 
 All **22 behaviors / 27 categories** from the [phase-2 design](docs/phase-2-skill-suite-design.md) are built.
+
+## Install (Claude Code)
+
+```
+/plugin marketplace add brandondees/code-quality-atlas
+/plugin install code-quality-atlas@code-quality-atlas
+```
+
+All 22 skills load with provenance intact; updates ship with every merged commit
+(commit-SHA versioning) — refresh with `/plugin marketplace update code-quality-atlas`.
+The skills are plain markdown and remain harness-agnostic; the plugin wrapper is
+additive (D9 in [`docs/open-questions.md`](docs/open-questions.md)).
 
 ## Approach
 
