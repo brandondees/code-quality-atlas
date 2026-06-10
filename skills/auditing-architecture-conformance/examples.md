@@ -1,7 +1,7 @@
 # Examples — auditing-architecture-conformance
 
 This skill is repo-shaped: its input is an import-graph / layering scan, not a
-single diff. Report each distinct violation as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
+single diff. Report each distinct violation as its own numbered finding. When the scan is healthy, the entire response is exactly this skill's no-finding sentence given in the decision rule below — never a numbered list of findings for a healthy scan.
 
 **Decision rule (apply before flagging):** a conformance finding needs a stated
 rule (documented layering, an import-linter/ArchUnit config, an ADR) that the scan

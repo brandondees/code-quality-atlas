@@ -69,8 +69,12 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
             raise ValidationError(f"{s.name}: shape must be diff|repo, got {s.shape!r}")
         if not s.built_from:
             raise ValidationError(f"{s.name}: built_from must be non-empty")
+        categories = [src.category for src in s.built_from]
+        if len(categories) != len(set(categories)):
+            raise ValidationError(
+                f"{s.name}: built_from lists a category more than once")
         for c in s.cross_ref:
-            if c not in [src.category for src in s.built_from]:
+            if c not in categories:
                 raise ValidationError(
                     f"{s.name}: cross_ref category {c} is not in built_from")
         for src in s.built_from:

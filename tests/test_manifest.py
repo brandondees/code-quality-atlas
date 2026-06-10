@@ -95,3 +95,13 @@ def test_g1_cross_ref_must_be_in_built_from(tmp_path):
               built_from=[Source(2, f"{doc}#2")], cross_ref=[9])
     with pytest.raises(ValidationError, match="not in built_from"):
         validate(Manifest(taxonomy_version="v0", skills=[a]), docs_root="/")
+
+
+def test_duplicate_built_from_category_rejected(tmp_path):
+    doc = tmp_path / "r.md"
+    doc.write_text("## #2 Errors\n\n### Reviewable heuristics (skill-checklist seeds)\n- x\n")
+    src = f"{doc}#2"
+    a = Skill(name="skill-a", description="d", shape="diff", wave=1,
+              built_from=[Source(2, src), Source(2, src)])
+    with pytest.raises(ValidationError, match="more than once"):
+        validate(Manifest(taxonomy_version="v0", skills=[a]), docs_root="/")

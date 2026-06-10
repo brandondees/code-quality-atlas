@@ -1,7 +1,7 @@
 # Examples — auditing-dependencies-and-supply-chain
 
 This skill is repo-shaped: its input is a dependency / supply-chain scan. Report
-each distinct risk as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
+each distinct risk as its own numbered finding. When the scan is healthy, the entire response is exactly this skill's no-finding sentence given in the decision rule below — never a numbered list of findings for a healthy scan.
 
 **Decision rule (apply before flagging):** flag a dependency only for a concrete
 risk signal — a known CVE, no pin/lockfile drift, abandonment (years without

@@ -3,7 +3,7 @@
 This skill is repo-shaped: its input is a license / PII / provenance scan. Its job
 is to **detect and escalate, not decide** — legal questions (copyleft linkage,
 lawful basis, export control) go to humans with the evidence attached. Report each
-distinct issue as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
+distinct issue as its own numbered finding. When the scan is healthy, the entire response is exactly this skill's no-finding sentence given in the decision rule below — never a numbered list of findings for a healthy scan.
 
 **Decision rule (apply before flagging):** a compliance finding needs concrete
 evidence — an incompatible license in the tree, missing attribution/SPDX, code of

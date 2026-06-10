@@ -1,7 +1,7 @@
 # Examples — auditing-documentation-health
 
 This skill is repo-shaped: its input is a docs-vs-code parity scan. Report each
-distinct issue as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
+distinct issue as its own numbered finding. When the scan is healthy, the entire response is exactly this skill's no-finding sentence given in the decision rule below — never a numbered list of findings for a healthy scan.
 
 **Decision rule (apply before flagging):** a docs finding needs a concrete
 mismatch or gap — a documented thing that no longer exists, an existing public

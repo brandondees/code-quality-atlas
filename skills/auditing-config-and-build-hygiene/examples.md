@@ -1,7 +1,7 @@
 # Examples — auditing-config-and-build-hygiene
 
 This skill is repo-shaped: its input is a scan of CI pipelines, build scripts, and
-configuration. Report each distinct issue as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
+configuration. Report each distinct issue as its own numbered finding. When the scan is healthy, the entire response is exactly this skill's no-finding sentence given in the decision rule below — never a numbered list of findings for a healthy scan.
 
 **Decision rule (apply before flagging):** a hygiene finding needs a concrete
 defect — a secret in the repo/image, an unpinned toolchain or action, a missing
