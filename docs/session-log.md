@@ -58,7 +58,7 @@ Ran the whole research pass from the **main loop** (web works there; subagents a
 
 ### 2026-06-10 (cont.) — Q12 packaging: repo is now an installable plugin
 
-- Added `.claude-plugin/plugin.json` + `marketplace.json`; `skills/` already matched the
+- Added `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json`; `skills/` already matched the
   plugin-default layout, so packaging was purely additive *(→ D9)*.
 - **Commit-SHA versioning** (no `version` field): every merged commit ships, matching the
   docs→drift→regenerate loop; pinned semver deferred until the suite stabilizes.

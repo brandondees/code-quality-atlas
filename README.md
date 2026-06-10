@@ -2,7 +2,7 @@
 
 A from-first-principles research project — and, eventually, a **standalone agent skill suite for code review and maintenance.**
 
-The goal is two-phased:
+The goal is two-part:
 
 1. Map *everything* that factors into code quality, as comprehensively as possible.
 2. Distill that map into a coherent set of composable agent skills that help **review** and **maintain** code.
