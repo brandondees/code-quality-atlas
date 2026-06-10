@@ -42,7 +42,7 @@ NOT fall through to `order.mark_paid()`. Do not suggest replacing it with `raise
 removing it — that would break the declined-checkout path. **Catching one specific
 exception (`PaymentDeclined`) and letting any other exception propagate is correct
 fail-loud behavior** — do NOT flag it as "incomplete" and do NOT recommend broadening
-the `except` to catch more types. Report "No findings."
+the `except` to catch more types. Report "No findings".
 
 ## Good → no finding
 

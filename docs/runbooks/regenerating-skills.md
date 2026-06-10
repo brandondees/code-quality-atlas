@@ -36,6 +36,27 @@ examples.md):
 python -m tooling.run_evals --skill <name> --model llama3.2:3b
 ```
 
+**No Ollama available?** (e.g. a sandboxed cloud session): any OpenAI-compatible
+server works via `--api openai`. The lightest path is llama.cpp's `llama-server`
+with a GGUF from Hugging Face — no install, just a prebuilt binary:
+
+```
+curl -sLO https://github.com/ggml-org/llama.cpp/releases/download/<tag>/llama-<tag>-bin-ubuntu-x64.tar.gz
+tar xzf llama-<tag>-bin-ubuntu-x64.tar.gz
+curl -sLO https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf
+./llama-<tag>/llama-server -m qwen2.5-coder-7b-instruct-q4_k_m.gguf -c 16384 --port 8080 &
+python -m tooling.run_evals --skill <name> --model qwen2.5-coder-7b --api openai
+```
+
+Verify what you downloaded before running it: check the binary against the
+checksum/digest on the llama.cpp release page (`gh release view <tag>` or the
+asset's `digest` in the releases API) and the GGUF against the SHA256 shown on
+its Hugging Face file page — these are unsigned third-party artifacts.
+
+CPU-only inference is slow (~5 tok/s on 4 cores for a 7B Q4) but fine for
+eval-scenario volumes; `llama-server` caches the shared system prefix across a
+skill's scenarios.
+
 Grade each response against `expected_behavior`. Skills must be tested on at
 least two tiers (a strong model and a small/local one). Known failure mode on
 small models: **over-flagging clean code** (inventing issues on the "good"
@@ -56,3 +77,27 @@ pairs carry the most weight for weak models) and/or adding an explicit
   precision* (no-finding reliability); below that, detection still works but expect
   over-flagging on correct code. For high-stakes correctness, pair the skill with a
   deterministic check rather than trusting a tiny model's "no findings".
+
+**Tuning lessons (from the full 6-skill pass on `qwen2.5-coder-7b` Q4, llama-server):**
+- The 7-8B floor holds: the clean-code scenario that broke the 3B passes here, and
+  most skills pass all scenarios outright. Repo-shaped scans are the exception (below).
+- **"What should we act on?" invites invention.** On a healthy repo-scan table the
+  model recommended refactoring the biggest *healthy* file. Targeted fix that worked:
+  an explicit **decision rule** in `examples.md` ("a maximum is not a finding"; rough
+  numeric bounds for when factors compound into a hotspot) plus the exact no-finding
+  sentence to emit. Repo-shaped skills need decision rules, not just example pairs.
+- **Pin sampling.** The eval harness sends `temperature: 0`; before that, llama-server's
+  default (0.8) made scenario results flip between runs — one run flagged 3/3 expected
+  findings, the next found 1/3 on the same input. Never grade an unpinned run.
+- **Remaining 7B-class gap: secondary findings get dropped.** The model reports the
+  primary one-or-two findings and stops. Two flavors seen, both stable at temp 0 and
+  both resistant to example-prose tuning: (a) findings that need data-flow reasoning
+  ("this module-level cache is shared mutable state across users"); (b) the third
+  independent finding in a multi-issue diff (caught the comment/code contradiction
+  and the commented-out code, never the mechanism-encoding name). Same family as the
+  3B control-flow ceiling, one level up. Known gap; don't chase it with more prose —
+  expect ~"top findings only" recall from 7B-class models and pair with linters for
+  exhaustiveness.
+- Weak models **mimic the examples' output format** (echoing "**Expected finding:**"
+  as a literal prefix). Cosmetic, but means `examples.md` is effectively the output
+  template — keep its finding prose in exactly the shape you want responses to take.

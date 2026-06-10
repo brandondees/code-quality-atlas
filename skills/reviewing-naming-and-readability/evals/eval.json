@@ -2,5 +2,30 @@
   "skills": [
     "reviewing-naming-and-readability"
   ],
-  "scenarios": []
+  "scenarios": [
+    {
+      "query": "Review this change:\n```python\ndef check(x, mode):\n    if x is not None:\n        if mode == 7:\n            res = []\n            for item in x:\n                if item.kind == 4:\n                    if item.score > 750:\n                        res.append(item)\n            return res\n    return None\n```",
+      "expected_behavior": [
+        "Flags the placeholder/non-intention-revealing names (check, x, res, mode)",
+        "Flags the magic numbers (7, 4, 750) and recommends named constants",
+        "Flags the deep nesting and recommends guard clauses / early returns to flatten the happy path"
+      ]
+    },
+    {
+      "query": "Review this change:\n```java\n// Timeout after 30 seconds.\nstatic final int TIMEOUT_MS = 60_000;\n\n// int oldTimeout = 15_000;\n// client.setTimeout(oldTimeout);\nResponse callBackendViaOkHttpPost(Request req) { /* ... */ }\n```",
+      "expected_behavior": [
+        "Flags the comment/code contradiction (comment says 30 seconds, constant is 60,000 ms)",
+        "Flags the commented-out code for deletion (version control is the archive)",
+        "Flags the mechanism-encoding name callBackendViaOkHttpPost and suggests an intent-revealing name like callBackend"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\nMAX_PAGE_SIZE = 100\n\ndef clamp_page_size(requested: int) -> int:\n    if requested < 1:\n        return 1\n    return min(requested, MAX_PAGE_SIZE)\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Does not flag the obvious literal 1 or demand comments on already-clear code",
+        "Recognizes the names are intention-revealing and the structure is flat"
+      ]
+    }
+  ]
 }

@@ -2,5 +2,30 @@
   "skills": [
     "reviewing-module-design"
   ],
-  "scenarios": []
+  "scenarios": [
+    {
+      "query": "Review this change:\n```python\nclass Subscription:\n    def __init__(self):\n        self.state = \"trial\"        # \"trial\" | \"active\" | \"cancelled\"\n        self.paid_until = None      # set when active\n        self.cancel_reason = None   # set when cancelled\n        self.card_last4 = \"\"        # \"\" until a card is attached\n```",
+      "expected_behavior": [
+        "Flags that illegal state combinations are representable (e.g. cancelled with paid_until set, active with no card)",
+        "Flags the stringly-typed state and the None/empty-string sentinels",
+        "Recommends a tagged union / state machine (or enum + per-state data) so each state carries exactly its own fields"
+      ]
+    },
+    {
+      "query": "Review this change:\n```js\nfunction notifyOverdue(invoice) {\n  const email = invoice.customer.profile.contact.email;\n  invoice.customer.profile.flags.overdueNotified = true;\n  mailer.send(email, renderOverdue(invoice));\n}\n```",
+      "expected_behavior": [
+        "Flags the Law-of-Demeter reach-through (invoice.customer.profile.contact.email / .profile.flags)",
+        "Flags the mutation of another object's internal state from outside (feature envy / poor encapsulation)",
+        "Recommends asking the object for what's needed (e.g. customer.contactEmail(), customer.markOverdueNotified()) instead of reaching through"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\n@dataclass(frozen=True)\nclass Percentage:\n    value: Decimal\n\n    @classmethod\n    def parse(cls, raw: str) -> \"Percentage\":\n        v = Decimal(raw)\n        if not (0 <= v <= 100):\n            raise InvalidPercentage(raw)\n        return cls(v)\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes parse-don't-validate: input is parsed once at the boundary into an immutable type that can't hold an invalid value",
+        "Does not suggest adding speculative methods, interfaces, or abstractions to the small value object"
+      ]
+    }
+  ]
 }
