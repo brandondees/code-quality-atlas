@@ -1,0 +1,25 @@
+# Reviewable heuristics — reviewing-accessibility-and-i18n
+
+## Contents
+- From category #23
+
+## From category #23
+
+### Reviewable heuristics (skill-checklist seeds)
+- **Semantic-first:** is a real `<button>`/`<a>`/`<nav>`/`<main>`/heading used, or a `<div>` with a click handler? Native element = keyboard + role + focus for free.
+- **Keyboard operable:** can every interactive element be reached and activated by Tab/Shift-Tab/Enter/Space/Escape/arrows as appropriate? No mouse-only handlers (click without key handler).
+- **Focus management:** after opening a modal/menu/route change, does focus move sensibly and return on close? Is focus trapped in the dialog? Is `:focus-visible` styling present (not `outline:none` with no replacement)?
+- **Name/role/value:** do icon-only buttons, inputs, and custom widgets have accessible names (label, `aria-label`, `aria-labelledby`)? No empty buttons/links.
+- **Contrast:** does new text/UI meet 4.5:1 (or 3:1 large / non-text)? Check both themes if dark mode exists.
+- **Images & media:** meaningful images have descriptive `alt`; decorative images have empty `alt=""`; videos have captions/transcript where required.
+- **ARIA discipline:** is ARIA only used where native HTML can't express it, with all required states (e.g. `aria-expanded`, `aria-selected`) wired and *updated*? No redundant/conflicting roles.
+- **No hardcoded user-facing strings:** is every new UI string going through the i18n catalog (no literal JSX/template text)? Includes aria-labels, placeholders, error messages, pluralized/templated text.
+- **Pluralization & interpolation:** are plurals/gender handled via ICU/`Intl.PluralRules` (not `count + "s"`), and do interpolation placeholders match across all locale files?
+- **Locale-aware formatting:** are numbers/dates/currency/units formatted via `Intl`/CLDR with explicit locale + currency, not hand-built strings or assumed `en-US`/`USD`? (cross-links #4 money/units correctness.)
+- **RTL & expansion:** does layout use logical properties / direction-agnostic CSS, and tolerate ~30–40% text expansion and longer words without clipping/overlap? Mirrored icons where directional.
+- **Responsive/edge layouts:** does it hold up at small/large viewports, 200% zoom, and long-content edge cases without loss of content or function (WCAG 1.4.10 Reflow, 1.4.4 Resize Text)? `(verify)`.
+- **Target size:** are interactive targets ≥24×24px (WCAG 2.2 2.5.8) with adequate spacing? `(verify)`.
+- **Document language:** is `<html lang>` set/updated, and per-element `lang` on foreign-language runs?
+- **Design fidelity vs. spec:** does the implementation match the design/spec for spacing, states (hover/focus/disabled/error), and content — flag silent deviations.
+
+---

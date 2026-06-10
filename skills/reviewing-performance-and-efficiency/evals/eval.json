@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "reviewing-performance-and-efficiency"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this change:\n```ruby\ndef digest\n  Project.where(active: true).map do |project|\n    owner = User.find(project.owner_id)          # per-project query\n    tasks = Task.where(project_id: project.id)   # per-project query\n    \"#{project.name} (#{owner.name}): #{tasks.count} tasks\"\n  end\nend\n```",
+      "expected_behavior": [
+        "Flags the N+1 pattern: a query (or two) per project inside the loop",
+        "Recommends batching: eager-load/includes the owners and tasks, or fetch with IN/joins, instead of per-row queries",
+        "Notes the per-iteration count query can be folded into a grouped/aggregate query"
+      ]
+    },
+    {
+      "query": "Review this change:\n```js\nfunction findDuplicates(emailsA, emailsB) {\n  const dupes = [];\n  for (const e of emailsA) {\n    if (emailsB.indexOf(e) !== -1) dupes.push(e);\n  }\n  return dupes;\n}\napp.get('/report', (req, res) => {\n  const config = JSON.parse(fs.readFileSync('./rules-2mb.json'));  // every request\n  res.json(run(config, findDuplicates(load('a'), load('b'))));\n});\n```",
+      "expected_behavior": [
+        "Flags the O(n²) membership test (indexOf inside the loop) and recommends a Set",
+        "Flags re-reading and re-parsing the 2MB config file on every request — hoist it (load once at startup or memoize)",
+        "Notes the synchronous readFileSync blocks the event loop on a request path"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef weekly_cleanup():\n    # runs once a week from cron\n    stale = [s for s in load_sessions() if s.expired()]\n    for s in stale:\n        s.archive()\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes this is a cold path (weekly cron) where the simple loop is appropriate",
+        "Does not recommend caching, parallelism, or other optimization unjustified by any profile"
+      ]
+    }
+  ]
+}

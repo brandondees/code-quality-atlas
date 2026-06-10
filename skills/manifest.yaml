@@ -77,3 +77,72 @@ skills:
     wave: 1
     built_from:
       - { category: 21, source: docs/research/cluster-6-evolution.md#21 }
+
+  - name: sweeping-for-security
+    description: >
+      Sweeps changes for security risks: injection (SQL/command/XSS) from
+      unparameterized or unencoded untrusted input, missing authorization on
+      object references (IDOR), hardcoded secrets, weak or homegrown crypto,
+      unsafe deserialization, SSRF, CSRF, permissive CORS/TLS settings, and
+      sensitive data in logs or URLs. Use when reviewing auth, user input,
+      queries, secrets, crypto, cookies, file paths, or any code handling
+      untrusted data.
+    shape: diff
+    wave: 2
+    built_from:
+      - { category: 14, source: docs/research/cluster-4-runtime.md#14 }
+
+  - name: reviewing-performance-and-efficiency
+    description: >
+      Reviews changes for performance and efficiency problems: N+1 queries,
+      await-in-loop and chatty per-item I/O, accidental O(n²) on hot paths,
+      recomputed expensive values, caches without invalidation, buffering
+      whole payloads instead of streaming, allocation pressure, bundle/startup
+      bloat, and per-request cloud cost. Demands a profile before accepting
+      optimization claims. Use when reviewing queries in loops, hot paths,
+      caching, large payloads, or anything justified by "performance."
+    shape: diff
+    wave: 2
+    built_from:
+      - { category: 15, source: docs/research/cluster-4-runtime.md#15 }
+
+  - name: reviewing-test-quality
+    description: >
+      Reviews tests for quality: behavior vs implementation coupling,
+      over-mocking, meaningful branch/edge coverage on the diff, regression
+      tests for bug fixes, isolation and determinism (no shared state, real
+      clocks, or unseeded randomness), right level per the pyramid/trophy, and
+      disabled/focused tests sneaking in. Use when reviewing test files, test
+      coverage, mocks, fixtures, flaky tests, or a bug fix's tests.
+    shape: diff
+    wave: 2
+    built_from:
+      - { category: 17, source: docs/research/cluster-5-verification.md#17 }
+
+  - name: reviewing-migration-and-data-safety
+    description: >
+      Reviews schema migrations and data changes for safety: backward
+      compatibility with the running app (expand/migrate/contract), table
+      locks from NOT NULL/index/FK on large tables, unbatched backfills,
+      missing dual-write during transitions, irreversible or destructive DDL,
+      and integrity constraints left to app code. Use when reviewing
+      migrations, ALTER TABLE, backfills, schema or data-format changes, or
+      anything touching persistence.
+    shape: diff
+    wave: 2
+    built_from:
+      - { category: 20, source: docs/research/cluster-5-verification.md#20 }
+
+  - name: reviewing-accessibility-and-i18n
+    description: >
+      Reviews UI changes for accessibility and internationalization: semantic
+      HTML vs div-with-onclick, keyboard operability and focus management,
+      accessible names on icon buttons and inputs, contrast, ARIA misuse,
+      hardcoded user-facing strings, naive pluralization, non-locale-aware
+      number/date/currency formatting, and RTL-unsafe layout. Use when
+      reviewing components, templates, markup, forms, modals, UI text, or
+      anything user-facing.
+    shape: diff
+    wave: 2
+    built_from:
+      - { category: 23, source: docs/research/cluster-6-evolution.md#23 }

@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "sweeping-for-security"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this change:\n```python\ndef export_report(request):\n    name = request.GET[\"filename\"]\n    os.system(f\"zip /tmp/out.zip /data/reports/{name}\")\n    return FileResponse(open(f\"/data/reports/{name}\"))\n```",
+      "expected_behavior": [
+        "Flags command injection: request-derived filename interpolated into a shell command (use subprocess with an argument list, no shell, or a vetted library)",
+        "Flags path traversal: the unvalidated filename can contain ../ to escape /data/reports (resolve and confine to the directory, or allow-list)",
+        "Recommends treating the request parameter as untrusted on both sinks"
+      ]
+    },
+    {
+      "query": "Review this change:\n```js\nconst JWT_SECRET = \"hunter2-prod\";\nfunction resetToken(user) {\n  const token = Math.random().toString(36).slice(2);\n  db.run(`UPDATE users SET reset='${token}' WHERE email='${user.email}'`);\n  return token;\n}\n```",
+      "expected_behavior": [
+        "Flags the hardcoded production secret in source (move to env/secrets manager, rotate)",
+        "Flags Math.random() for a security token (not a CSPRNG; use crypto.randomBytes or equivalent)",
+        "Flags the string-interpolated SQL as injection-prone (parameterize)"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef delete_document(request, doc_id):\n    doc = Document.objects.get(id=doc_id, owner=request.user)\n    doc.delete()\n    log.info(\"document deleted\", doc_id=doc_id, user_id=request.user.id)\n    return HttpResponse(status=204)\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes the ownership-scoped, ORM-parameterized lookup (no IDOR, no injection) and that the log records ids, not sensitive payloads",
+        "Does not invent missing defenses or flag the use of a URL parameter as inherently unsafe"
+      ]
+    }
+  ]
+}

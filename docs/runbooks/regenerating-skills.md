@@ -101,3 +101,25 @@ pairs carry the most weight for weak models) and/or adding an explicit
 - Weak models **mimic the examples' output format** (echoing "**Expected finding:**"
   as a literal prefix). Cosmetic, but means `examples.md` is effectively the output
   template — keep its finding prose in exactly the shape you want responses to take.
+
+**Tuning lessons (wave 2, same model):**
+- **Numbered findings lists are the single highest-leverage example format.** With
+  flowing-paragraph examples the model reported 1 of 3–4 findings in multi-issue
+  diffs; rewriting the examples' expected findings as numbered lists lifted recall
+  immediately (migration rename scenario went 1/3 → 3/3, test-quality went 1/4 →
+  3/4). Since examples are the output template, a list template forces enumeration.
+- **The cold-path decision rule transfers.** Performance initially "optimized" a
+  weekly cron loop; an explicit decision rule (hot-path required before flagging,
+  exact no-finding sentence) fixed it — same playbook as the hotspots fix.
+- **7B ceiling, new instance: DDL keyword blindness.** Migration safety pattern-
+  matches `ALTER TABLE ... ADD` and emits the memorized "NOT NULL with no default"
+  finding even when the diff adds a *nullable* column with a `NOT VALID` constraint
+  (the safe expand step) — three runs, three identical misfires, immune to an
+  explicit "quote the keyword or the finding is invented" rule. Same family:
+  pattern-match beats reading. For migration safety, treat the 7B tier as
+  detection-only and pair with a deterministic linter (squawk, strong_migrations)
+  for the safe/unsafe-variant distinction.
+- **Multi-sink tracking is part of the dropped-findings gap:** one untrusted value
+  flowing to two sinks (shell + filesystem) yields only the first sink's finding;
+  security sweeps on small models need a deterministic scanner (semgrep/bandit)
+  alongside for exhaustiveness.

@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "reviewing-migration-and-data-safety"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this migration (Postgres, orders has ~80M rows):\n```sql\nALTER TABLE orders ADD COLUMN region text NOT NULL DEFAULT 'us';\nCREATE INDEX idx_orders_region ON orders (region);\nUPDATE orders SET region = 'eu' WHERE shipping_country IN ('DE','FR','ES');\n```",
+      "expected_behavior": [
+        "Flags the plain CREATE INDEX on a large table as write-blocking and recommends CREATE INDEX CONCURRENTLY",
+        "Flags the single unbatched UPDATE over ~80M rows (long lock/transaction) and recommends a batched, throttled, idempotent, resumable backfill as a separate step",
+        "Discusses rolling-deploy/expand-contract discipline for the schema change rather than doing everything in one migration"
+      ]
+    },
+    {
+      "query": "Review this migration:\n```ruby\nclass RenameUsersTable < ActiveRecord::Migration[7.1]\n  def change\n    rename_column :accounts, :email, :primary_email\n    drop_table :user_preferences\n  end\nend\n```",
+      "expected_behavior": [
+        "Flags the in-place column rename as breaking the currently-running app version (old code still uses email during a rolling deploy)",
+        "Recommends the expand/contract rename recipe: add new column, dual-write, backfill, move reads, stop writing old, drop last",
+        "Flags drop_table as destructive DDL that must be gated until the new path is verified and old code drained (and notes reversibility)"
+      ]
+    },
+    {
+      "query": "Review this migration (step 1; dual-write shipped, contract tracked in TICKET-220):\n```sql\nALTER TABLE shipments ADD COLUMN carrier_code text;\nALTER TABLE shipments ADD CONSTRAINT shipments_carrier_code_fk\n  FOREIGN KEY (carrier_code) REFERENCES carriers (code) NOT VALID;\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes the nullable expand plus NOT VALID constraint (validated later) as the safe pattern",
+        "Does not demand the constraint validation, NOT NULL, or contract step happen in this migration — deferring them is the point"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "reviewing-accessibility-and-i18n"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this change:\n```jsx\n<span className=\"link\" onClick={() => nav('/settings')}>\n  <GearIcon />\n</span>\n<style>{`.link:focus { outline: 0; }`}</style>\n```",
+      "expected_behavior": [
+        "Flags the non-semantic span-with-onClick: not keyboard operable, not focusable, no role — recommend a real link/button (anchor for navigation)",
+        "Flags the icon-only control's missing accessible name (aria-label or visible text)",
+        "Flags outline: 0 removing the visible focus indicator without a replacement"
+      ]
+    },
+    {
+      "query": "Review this change:\n```jsx\nfunction DueNotice({ days, fee }) {\n  return <p>{\"Overdue by \" + days + \" day\" + (days > 1 ? \"s\" : \"\") + \". Fee: \" + fee.toFixed(2) + \" EUR\"}</p>;\n}\n```",
+      "expected_behavior": [
+        "Flags the hardcoded user-facing string that bypasses the i18n catalog",
+        "Flags the English-only plural construction and recommends ICU MessageFormat / Intl.PluralRules",
+        "Flags the hand-built currency string and recommends Intl.NumberFormat with explicit locale and currency"
+      ]
+    },
+    {
+      "query": "Review this change:\n```jsx\n<label htmlFor=\"qty\">{t(\"cart.quantity\")}</label>\n<input id=\"qty\" type=\"number\" min=\"1\" value={qty} onChange={onQty} />\n<button type=\"submit\">{t(\"cart.checkout\")}</button>\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes the labeled input (explicit label association), native button with visible text, and i18n-routed strings",
+        "Does not demand redundant ARIA roles/attributes on elements with correct native semantics"
+      ]
+    }
+  ]
+}

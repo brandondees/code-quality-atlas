@@ -1,0 +1,32 @@
+{
+  "skills": [
+    "reviewing-test-quality"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this change:\n```java\n@Test\npublic void sendsWelcome() {\n    UserService svc = new UserService(repoMock, mailerMock, auditMock);\n    when(repoMock.insert(any())).thenReturn(new User(1L));\n    svc.register(\"a@b.com\");\n    verify(repoMock).insert(any());\n    verify(auditMock).log(eq(\"register\"), any());\n    verify(mailerMock, times(1)).send(any());\n}\n```",
+      "expected_behavior": [
+        "Flags the implementation-coupled assertions: the test only verifies which mocks were called, not any observable outcome",
+        "Notes a refactor would break it while real bugs (wrong email address/content, wrong user state) would pass",
+        "Recommends asserting behavior (e.g. the recipient and content of the sent mail, the persisted user) with real/fake collaborators"
+      ]
+    },
+    {
+      "query": "Review this change:\n```js\nlet cache = {};\ndescribe('pricing', () => {\n  it.only('applies discount', async () => {\n    cache.rate = await fetchRateFromApi();   // real network call\n    expect(price(100, cache.rate)).toBeLessThan(100);\n  });\n  it('uses cached rate', () => {\n    expect(price(100, cache.rate)).toBeDefined();\n  });\n});\n```",
+      "expected_behavior": [
+        "Flags the focused test (it.only) which silently disables the rest of the suite",
+        "Flags the real network call making the test nondeterministic/flaky (stub or inject the rate)",
+        "Flags the shared mutable cache creating order dependence between the two tests",
+        "Notes the weak assertions (toBeLessThan(100) / toBeDefined) would not catch a wrong discount"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef test_parse_quantity_rejects_zero():\n    with pytest.raises(InvalidQuantity):\n        parse_quantity(\"0\")\n\ndef test_parse_quantity_accepts_minimum():\n    assert parse_quantity(\"1\") == Quantity(1)\n\ndef test_parse_quantity_rejects_garbage():\n    with pytest.raises(InvalidQuantity):\n        parse_quantity(\"banana\")\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes deterministic, isolated, behavior-level tests covering the boundary (0 vs 1) and the error path",
+        "Does not demand mocks, more tests, or restructuring of already-good tests"
+      ]
+    }
+  ]
+}

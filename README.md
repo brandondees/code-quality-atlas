@@ -23,7 +23,7 @@ We are in phase 3 (building the skills, wave by wave).
 **Phase 3 — Build the skills (in progress)**
 
 - [x] **Wave 1 — the 6 ★ skills** (LLM-judgment-heavy, highest unique value) → [`skills/`](skills/): generated, refined with examples + ≥3 eval scenarios each, cross-model-tested down to small local models (see [`docs/runbooks/regenerating-skills.md`](docs/runbooks/regenerating-skills.md)).
-- [ ] **Wave 2 — high-stakes triage:** security sweep, migration & data safety, performance, test quality, accessibility & i18n.
+- [x] **Wave 2 — high-stakes triage** (5 skills): security sweep, migration & data safety, performance & efficiency, test quality, accessibility & i18n — same refine-and-eval loop; small-model gaps + linter pairings documented in the runbook.
 - [ ] **Wave 3 — remainder + repo/cron-shaped audits** (architecture conformance, dependencies & supply chain, docs health, compliance).
 - [ ] Residual open questions (compliance scope Q9, packaging Q12) → [`docs/open-questions.md`](docs/open-questions.md)
 
