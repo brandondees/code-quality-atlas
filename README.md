@@ -32,10 +32,40 @@ All **22 behaviors / 27 categories** from the [phase-2 design](docs/phase-2-skil
 
 ## Install (Claude Code)
 
+In an interactive Claude Code session on your machine (terminal CLI, desktop app, or IDE extension):
+
 ```
 /plugin marketplace add brandondees/code-quality-atlas
 /plugin install code-quality-atlas@code-quality-atlas
 ```
+
+Or from a plain shell, non-interactively (add `--scope project` to scope to one repo):
+
+```bash
+claude plugin marketplace add brandondees/code-quality-atlas
+claude plugin install code-quality-atlas@code-quality-atlas
+```
+
+Or per-repo via settings — commit this to a project's `.claude/settings.json` and
+anyone who trusts the folder gets the suite, **including Claude Code web sessions**
+(which don't expose the interactive `/plugin` command):
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "code-quality-atlas": {
+      "source": { "source": "github", "repo": "brandondees/code-quality-atlas" }
+    }
+  },
+  "enabledPlugins": {
+    "code-quality-atlas@code-quality-atlas": true
+  }
+}
+```
+
+> **Note:** while this repo is private, the installing machine needs git credentials
+> that can read it (`gh` auth or SSH keys; web sessions clone with your GitHub
+> credentials). Make the repo public for zero-friction sharing.
 
 All 22 skills load with provenance intact; updates ship with every merged commit
 (commit-SHA versioning) — refresh with `/plugin marketplace update code-quality-atlas`.
