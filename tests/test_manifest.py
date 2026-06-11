@@ -105,3 +105,35 @@ def test_duplicate_built_from_category_rejected(tmp_path):
               built_from=[Source(2, src), Source(2, src)])
     with pytest.raises(ValidationError, match="more than once"):
         validate(Manifest(taxonomy_version="v0", skills=[a]), docs_root="/")
+
+
+from tooling.manifest import Route, Router
+
+def test_design_flag_only_on_diff_lenses():
+    with pytest.raises(ValidationError, match="design"):
+        validate(Manifest("v0.2", [_skill(shape="repo", design=True)]))
+
+def test_router_route_must_run_known_skills():
+    m = Manifest("v0.2", [_skill(picker="p")],
+                 router=Router(name="choosing-review-lenses", description="d",
+                               routes=[Route(when="Bug fix", run=["no-such-lens"])]))
+    with pytest.raises(ValidationError, match="unknown skill"):
+        validate(m)
+
+def test_router_requires_every_skill_to_have_a_picker():
+    m = Manifest("v0.2", [_skill()],   # no picker
+                 router=Router(name="choosing-review-lenses", description="d",
+                               routes=[Route(when="Bug fix",
+                                             run=["hunting-silent-failures"])]))
+    with pytest.raises(ValidationError, match="picker is required"):
+        validate(m)
+
+def test_valid_router_accepted_and_real_manifest_loads():
+    m = Manifest("v0.2", [_skill(picker="p")],
+                 router=Router(name="choosing-review-lenses", description="d",
+                               routes=[Route(when="Bug fix",
+                                             run=["hunting-silent-failures"])]))
+    validate(m)  # no raise
+    real = load_manifest("skills/manifest.yaml")
+    assert real.router is not None
+    assert all(s.picker for s in real.skills)

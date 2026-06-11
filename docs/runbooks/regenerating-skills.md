@@ -7,8 +7,13 @@ derived. After you critique/improve a research section, flow it into the skills:
    Lists every skill whose source sections changed (by `#n`).
 2. **Regenerate:** `python -m tooling.cli generate`
    Rebuilds each skill's `SKILL.md` + `reference/*` from current docs and
-   re-stamps provenance hashes. `examples.md` and `evals/eval.json` are NOT
-   overwritten (hand-refined content is preserved).
+   re-stamps provenance hashes. The inlined "Top checks" are the head of each
+   source category's heuristics list, so reordering bullets in a research
+   section is how you curate them. `examples.md` and `evals/eval.json` are NOT
+   overwritten (hand-refined content is preserved). The router skill
+   (`choosing-review-lenses`) is rebuilt from `manifest.yaml`'s `router:`
+   section + per-skill `picker`/`design` fields — it has no research sources,
+   so drift never flags it; edit the manifest and regenerate.
 3. **Re-validate evals:** for each affected skill, re-run its `evals/eval.json`
    scenarios against your model tiers (see the skill's evals). Fix regressions
    by tightening `reference/heuristics.md` (via the docs) or `examples.md`.

@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from tooling.manifest import load_manifest, validate
-from tooling.generate import generate_skill
+from tooling.generate import generate_router, generate_skill, primary_owners
 from tooling.drift import check_drift
 from tooling.evals import load_evals, validate_evals, EvalError
 
@@ -30,9 +30,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "generate":
         manifest = load_manifest(args.manifest)
         validate(manifest, docs_root=args.docs_root)
+        owners = primary_owners(manifest)
         for skill in manifest.skills:
             out = generate_skill(skill, manifest.taxonomy_version,
-                                 docs_root=args.docs_root, skills_root=args.skills_root)
+                                 docs_root=args.docs_root, skills_root=args.skills_root,
+                                 owners=owners)
+            print(f"generated {out}")
+        if manifest.router is not None:
+            out = generate_router(manifest, skills_root=args.skills_root)
             print(f"generated {out}")
         return 0
 

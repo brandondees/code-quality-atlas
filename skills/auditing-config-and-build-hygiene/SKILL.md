@@ -23,15 +23,28 @@ provenance:
 
 Audits configuration and build/CI health: config schema-validated at startup and fail-fast, secrets out of config files, parity across environments, reproducible and hermetic builds, pinned toolchains and CI actions, cache correctness, flaky or slow pipelines, and unused or drifting config keys. A repo-wide / scheduled audit. Use when auditing CI pipelines, Dockerfiles, build scripts, env vars, or config files.
 
+**Shape: repo.** Run against the whole repository (scheduled or on demand), not a single diff.
+
 ## Reviewer discipline
 
 Report only real problems. If the code correctly handles the case, reply "No findings" and stop — do not invent issues, and do not suggest changes to code that is already correct. This guards against false positives on correct code; still report every genuine issue you do find, with its full detail.
 
 ## Top checks
 
-Start with the full checklist, then escalate to the references as needed.
+The head of the full checklist — enough for a first pass without opening any reference file:
 
-- See [reference/heuristics.md](reference/heuristics.md) for the full review checklist.
-- See [reference/tool-rules.md](reference/tool-rules.md) for static-analysis rules to triage.
-- See [reference/sources.md](reference/sources.md) for the references behind each check.
-- See [examples.md](examples.md) for good/bad examples.
+- Does CI run the full gate on the diff — lint, format-check, type-check, tests, dep/security scan — and is passing **required** to merge?
+- Is the build **reproducible/hermetic** enough to not depend on machine-local state (pinned toolchain, lockfiles, no network in build)?
+- Is CI **fast and reliable**? A new slow/flaky job is a defect — parallelized, cached, deterministic?
+- Are **secrets** injected at runtime (not baked into the image/repo/CI logs) and least-privilege scoped (cross #14)?
+- Is config **separated from code** and injected via env — no secrets or env-specific values hardcoded/committed?
+- Is config **validated at startup** (fail fast, clear message), not lazily at first use?
+- Are **safe, secure defaults** used (deny-by-default, TLS on, debug off in prod — cross #14)?
+- **Dev/prod parity**: does the change keep environments close (same backing services, same config shape), avoiding env-specific code branches?
+
+## Going deeper
+
+- [reference/heuristics.md](reference/heuristics.md) — the full checklist; open it when the change sits squarely in this lens's domain.
+- [examples.md](examples.md) — concrete good/bad findings, and the output format to match.
+- [reference/tool-rules.md](reference/tool-rules.md) — static-analysis rules covering the mechanical subset; for wiring up linters, not needed for the judgment review itself.
+- [reference/sources.md](reference/sources.md) — the research behind each check; for provenance, not needed during a review.

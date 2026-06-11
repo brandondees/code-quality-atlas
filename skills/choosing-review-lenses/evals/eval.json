@@ -1,0 +1,39 @@
+{
+  "skills": [
+    "choosing-review-lenses"
+  ],
+  "scenarios": [
+    {
+      "query": "I have a PR to review: it adds an ALTER TABLE statement introducing a new column plus a script that backfills the column for existing rows. Which review lenses should I run?",
+      "expected_behavior": [
+        "Recommends reviewing-migration-and-data-safety as the primary lens",
+        "Adds tracing-correctness-and-invariants and hunting-silent-failures for the backfill logic and its failure paths",
+        "Keeps the selection to 2-4 lenses instead of recommending the whole suite"
+      ]
+    },
+    {
+      "query": "Review this design doc before we build it (no code exists yet): it describes a sync engine that reads a remote calendar via API, merges changes into a local store with a read-modify-write loop, and adds a schema change for back-links. Which lenses apply?",
+      "expected_behavior": [
+        "Selects only design-capable lenses, citing the design-doc route / the catalog's design markers",
+        "Names reviewing-concurrency-and-async for the read-modify-write loop and reviewing-migration-and-data-safety for the schema change, with tracing-correctness-and-invariants for the merge semantics",
+        "Does not recommend code-only lenses such as reviewing-naming-and-readability or checking-idioms-and-consistency for a document with no code"
+      ]
+    },
+    {
+      "query": "Which lenses should I run for a docs-only PR that fixes typos in the README?",
+      "expected_behavior": [
+        "Recommends at most reviewing-pr-and-process-hygiene (or auditing-documentation-health if a docs audit is wanted), not code lenses",
+        "Does not fan out correctness, security, or performance lenses onto a typo-only change",
+        "Keeps the recommendation minimal and says why the other lenses don't apply"
+      ]
+    },
+    {
+      "query": "This PR makes our checkout endpoint faster by adding a Redis cache in front of the pricing query, and it also rewrites the retry logic around the payment-provider call. What should review it?",
+      "expected_behavior": [
+        "Combines the performance route (reviewing-performance-and-efficiency, checking-restraint) with the resilience route (hunting-silent-failures) for the retry rewrite",
+        "Caps the combined selection at about 4 lenses rather than taking both rows in full",
+        "Notes that shared findings (e.g. caching checks appearing in both restraint and performance) are reported once, under the primary owner"
+      ]
+    }
+  ]
+}

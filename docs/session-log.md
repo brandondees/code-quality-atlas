@@ -67,3 +67,34 @@ Ran the whole research pass from the **main loop** (web works there; subagents a
 - All roadmap items are now closed; remaining work is the compounding loop itself
   (critique research → drift → regenerate → re-gate) plus future re-granularization
   via the manifest as model capability shifts.
+
+### 2026-06-11 — first dogfood feedback → packaging fixes (D10)
+
+A user session that drove the suite by hand (fetching SKILL.md + heuristics from
+the repo to review a sync-engine design and a diff) returned the first real
+usage critique. Verdict: the heuristics content and the "Reviewer discipline"
+guard earned their keep (lens checklists directly produced design bugs the
+session would otherwise have shipped); the **packaging** carried the friction.
+Six findings, ranked; all addressed through the manifest/generator so docs and
+regeneration stay canonical:
+
+1. **SKILL.md wasn't self-sufficient** ("Top checks" listed zero checks — every
+   review needed a second fetch) → the generator now inlines the top ~8 checks
+   (head of each source category's heuristics; cross_ref categories capped at 2).
+2. **No composition layer** (picking from 22 lenses was on the user) → new
+   manifest `router:` section generates `choosing-review-lenses`: a
+   situation → 2-4-lenses routes table + a one-line catalog. Q7 partially resolved.
+3. **Diff-vs-design applicability was unsigned** → `design: true` manifest flag;
+   every SKILL.md now states its shape, design-capable lenses are ◆-marked.
+4. **The 22 descriptions blur at selection time** → per-skill `picker` one-liners
+   carry the differentiation in the router catalog; the eval-tuned trigger
+   descriptions stay untouched.
+5. **Heuristic-level overlap caused duplicate findings** → cross_ref skills now
+   emit a dedupe note naming the category's primary owner (G1 at review time).
+6. **tool-rules.md / sources.md role unclear** → the links section now says when
+   each reference is needed (not during the judgment review itself).
+
+Validator additions: routes must reference known skills, pickers required when a
+router exists, `design` only on diff lenses. The router carries
+`built_from: []` (manifest-derived; docs drift can't flag it) and ships 4 eval
+scenarios + examples. Suite is now **23 skills**; CI gate updated.
