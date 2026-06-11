@@ -90,3 +90,24 @@ def test_section_stops_at_non_numbered_h2_inline():
     assert "body line" in sec
     assert "trailing notes" not in sec
     assert "Open threads" not in sec
+
+
+from tooling.sections import extract_bullets
+
+def test_extract_bullets_from_heuristics_subsection():
+    heur = extract_subsection(extract_section(SAMPLE, 2), "heuristics")
+    bullets = extract_bullets(heur)
+    assert bullets[0].startswith("Is any error swallowed")
+    assert len(bullets) == 3
+    assert all(not b.startswith("- ") for b in bullets)
+
+def test_extract_bullets_joins_continuation_lines_and_skips_trailing_rule():
+    text = (
+        "### Heading\n"
+        "- First check spanning\n"
+        "  two lines?\n"
+        "- Second check?\n"
+        "\n---\n"
+    )
+    bullets = extract_bullets(text)
+    assert bullets == ["First check spanning two lines?", "Second check?"]

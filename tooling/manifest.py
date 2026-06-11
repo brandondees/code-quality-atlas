@@ -36,12 +36,29 @@ class Skill:
     built_from: list[Source]
     primary_owner: int | None = None
     cross_ref: list[int] = field(default_factory=list)
+    design: bool = False     # diff lens that also applies to design docs/plans
+    picker: str = ""         # one-line differentiator for the router catalog
+
+
+@dataclass
+class Route:
+    when: str                # the change shape, e.g. "Schema migration or backfill"
+    run: list[str]           # skill names to run for it
+    note: str = ""
+
+
+@dataclass
+class Router:
+    name: str
+    description: str
+    routes: list[Route]
 
 
 @dataclass
 class Manifest:
     taxonomy_version: str
     skills: list[Skill]
+    router: Router | None = None
 
 
 _NAME_RE = re.compile(r"^[a-z0-9-]+$")
@@ -67,6 +84,11 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
             raise ValidationError(f"{s.name}: description must be non-empty and <=1024 chars")
         if s.shape not in ("diff", "repo"):
             raise ValidationError(f"{s.name}: shape must be diff|repo, got {s.shape!r}")
+        if s.design and s.shape != "diff":
+            raise ValidationError(
+                f"{s.name}: design applies only to diff-shaped lenses")
+        if len(s.picker) > 160:
+            raise ValidationError(f"{s.name}: picker must be <=160 chars")
         if not s.built_from:
             raise ValidationError(f"{s.name}: built_from must be non-empty")
         categories = [src.category for src in s.built_from]
@@ -96,6 +118,27 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
             raise ValidationError(
                 f"category #{category} has multiple primary owners: {', '.join(owners)} "
                 f"— mark all but one with cross_ref: [{category}]")
+    if manifest.router is not None:
+        r = manifest.router
+        if not _NAME_RE.match(r.name) or len(r.name) > 64 or r.name in seen:
+            raise ValidationError(f"router: invalid or duplicate name {r.name!r}")
+        if not r.description or len(r.description) > 1024:
+            raise ValidationError("router: description must be non-empty and <=1024 chars")
+        if not r.routes:
+            raise ValidationError("router: routes must be non-empty")
+        for route in r.routes:
+            if not route.when or not route.run:
+                raise ValidationError("router: every route needs `when` and `run`")
+            for lens in route.run:
+                if lens not in seen:
+                    raise ValidationError(
+                        f"router: route {route.when!r} runs unknown skill {lens!r}")
+        # The catalog lists every lens by its picker line; a missing picker
+        # would silently leave that lens undiscoverable to the router.
+        for s in manifest.skills:
+            if not s.picker:
+                raise ValidationError(
+                    f"{s.name}: picker is required when a router is defined")
 
 
 def load_manifest(path: str) -> Manifest:
@@ -113,7 +156,21 @@ def load_manifest(path: str) -> Manifest:
                 built_from=built,
                 primary_owner=s.get("primary_owner"),
                 cross_ref=s.get("cross_ref", []),
+                design=s.get("design", False),
+                picker=s.get("picker", "").strip(),
             ))
         except KeyError as e:
             raise ValidationError(f"skill #{i}: missing field {e}") from e
-    return Manifest(taxonomy_version=data["taxonomy_version"], skills=skills)
+    router = None
+    if "router" in data:
+        r = data["router"]
+        try:
+            router = Router(
+                name=r["name"],
+                description=r["description"].strip(),
+                routes=[Route(when=x["when"], run=x["run"], note=x.get("note", ""))
+                        for x in r["routes"]],
+            )
+        except KeyError as e:
+            raise ValidationError(f"router: missing field {e}") from e
+    return Manifest(taxonomy_version=data["taxonomy_version"], skills=skills, router=router)

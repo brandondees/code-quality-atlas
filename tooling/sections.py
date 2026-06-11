@@ -51,6 +51,25 @@ def extract_subsection(section_text: str, kind: str) -> str:
     return ""
 
 
+_BULLET = re.compile(r"^- ", re.MULTILINE)
+
+
+def extract_bullets(text: str) -> list[str]:
+    """Return the top-level `- ` bullet items of `text`, each as a single
+    string with its leading `- ` stripped and any continuation lines joined.
+    Nested bullets stay part of their parent item."""
+    starts = [m.start() for m in _BULLET.finditer(text)]
+    items = []
+    for i, pos in enumerate(starts):
+        end = starts[i + 1] if i + 1 < len(starts) else len(text)
+        item = text[pos + 2:end].strip()
+        # A heading/horizontal rule after the last bullet is not bullet content.
+        item = re.split(r"\n(?=#|---)", item)[0].strip()
+        if item:
+            items.append(" ".join(line.strip() for line in item.splitlines()))
+    return items
+
+
 def section_hash(markdown: str, n: int) -> str:
     """SHA-256 (hex) of the normalized text of section #n."""
     normalized = extract_section(markdown, n).replace("\r\n", "\n").strip().encode("utf-8")

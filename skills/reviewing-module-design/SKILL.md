@@ -21,15 +21,28 @@ provenance:
 
 Reviews module and type design: cohesion and coupling (via connascence), encapsulation, hard-to-misuse interfaces, and making illegal states unrepresentable. Use when reviewing class/module structure, interfaces, type or data modeling, coupling, or API ergonomics for callers.
 
+**Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists.
+
 ## Reviewer discipline
 
 Report only real problems. If the code correctly handles the case, reply "No findings" and stop — do not invent issues, and do not suggest changes to code that is already correct. This guards against false positives on correct code; still report every genuine issue you do find, with its full detail.
 
 ## Top checks
 
-Start with the full checklist, then escalate to the references as needed.
+The head of the full checklist — enough for a first pass without opening any reference file:
 
-- See [reference/heuristics.md](reference/heuristics.md) for the full review checklist.
-- See [reference/tool-rules.md](reference/tool-rules.md) for static-analysis rules to triage.
-- See [reference/sources.md](reference/sources.md) for the references behind each check.
-- See [examples.md](examples.md) for good/bad examples.
+- Does the unit have **one** clear responsibility (high cohesion)? State its job in a sentence without "and."
+- Is the interface **narrow relative to the behavior** behind it (deep module), or a shallow pass-through adding no value?
+- What is the **strongest connascence crossing the boundary**, and is it local? (Position/Algorithm connascence across modules is a smell; prefer Name/Type.)
+- Does it **hide its implementation** so internals can change without breaking callers?
+- Are **invalid states representable**? Could you construct a value the domain forbids (an order both `draft` and `shipped`)? Model with a tagged union / state machine instead.
+- Is untrusted input **parsed into a precise type at the boundary** (parse-don't-validate), or validated then passed onward as raw primitives (re-validatable downstream)?
+- **Primitive obsession**: are domain concepts (email, money, id, %) raw `string`/`number`, or wrapped in domain types carrying invariants/units (cross #4)?
+- Are optional/nullable fields modeled explicitly (`Option`/`Maybe`/`| null`) rather than sentinel values (`-1`, `""`)?
+
+## Going deeper
+
+- [reference/heuristics.md](reference/heuristics.md) — the full checklist; open it when the change sits squarely in this lens's domain.
+- [examples.md](examples.md) — concrete good/bad findings, and the output format to match.
+- [reference/tool-rules.md](reference/tool-rules.md) — static-analysis rules covering the mechanical subset; for wiring up linters, not needed for the judgment review itself.
+- [reference/sources.md](reference/sources.md) — the research behind each check; for provenance, not needed during a review.

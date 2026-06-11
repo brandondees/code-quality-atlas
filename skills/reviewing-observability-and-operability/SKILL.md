@@ -20,15 +20,28 @@ provenance:
 
 Reviews changes for production operability: structured logs with consistent fields and correlation/trace IDs, right log levels with no PII, context-rich errors that wrap rather than swallow, golden-signal instrumentation and propagated trace context, liveness/readiness checks, kill switches for risky changes, graceful shutdown, and metric cardinality discipline. Use when reviewing logging, metrics, tracing, alerts, health checks, feature flags, or deploy/rollback paths.
 
+**Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists.
+
 ## Reviewer discipline
 
 Report only real problems. If the code correctly handles the case, reply "No findings" and stop — do not invent issues, and do not suggest changes to code that is already correct. This guards against false positives on correct code; still report every genuine issue you do find, with its full detail.
 
 ## Top checks
 
-Start with the full checklist, then escalate to the references as needed.
+The head of the full checklist — enough for a first pass without opening any reference file:
 
-- See [reference/heuristics.md](reference/heuristics.md) for the full review checklist.
-- See [reference/tool-rules.md](reference/tool-rules.md) for static-analysis rules to triage.
-- See [reference/sources.md](reference/sources.md) for the references behind each check.
-- See [examples.md](examples.md) for good/bad examples.
+- Are logs structured (key-value/JSON) with consistent fields (timestamp, level, service, request/trace ID) rather than interpolated prose? Can you grep/query by field in production?
+- Is the log *level* appropriate (no INFO spam in hot loops; real failures at ERROR; nothing security/PII-sensitive logged at any level)? Is there a correlation/trace ID threaded through so one request's logs are linkable?
+- Do new failure paths emit a context-rich error (what operation, which inputs/IDs — non-sensitive, the wrapped cause) rather than a bare `error`/stack with no story? Errors should wrap, not swallow, and not be both logged *and* rethrown (double-logging).
+- For any new meaningful operation: is it instrumented with at least one of the four golden signals (latency histogram, error counter, throughput)? Are spans created and trace context propagated across service/async boundaries?
+- Does a new service/endpoint expose liveness and readiness checks, and do readiness checks actually reflect dependency health (DB/cache reachable) without being so strict they flap?
+- Risky/irreversible behavior change: is it behind a feature flag or kill switch so it can be disabled in prod without a redeploy? Is there a documented rollback?
+- Startup/shutdown: does the service start only after dependencies are ready, and on shutdown drain in-flight work, stop accepting new requests, flush logs/metrics, and close connections (handle SIGTERM)? (Graceful shutdown.)
+- Is there an SLI/SLO implied by this change, and is the data to measure it being emitted (good-event and total-event counts)? Don't alert on causes you can fix later; alert on user-facing symptoms.
+
+## Going deeper
+
+- [reference/heuristics.md](reference/heuristics.md) — the full checklist; open it when the change sits squarely in this lens's domain.
+- [examples.md](examples.md) — concrete good/bad findings, and the output format to match.
+- [reference/tool-rules.md](reference/tool-rules.md) — static-analysis rules covering the mechanical subset; for wiring up linters, not needed for the judgment review itself.
+- [reference/sources.md](reference/sources.md) — the research behind each check; for provenance, not needed during a review.

@@ -8,7 +8,11 @@ skills:
       missing timeouts, and absent retries/circuit-breakers. Use when reviewing
       error handling, exceptions, try/catch, rescue, fallback, resilience,
       timeouts, or resource cleanup on failure paths.
+    picker: >
+      Where do errors vanish? Swallowed exceptions, silent fallbacks, missing
+      timeouts and retries.
     shape: diff
+    design: true
     wave: 1
     cross_ref: [4]    # primary owner: tracing-correctness-and-invariants
     built_from:
@@ -22,6 +26,9 @@ skills:
       nesting, magic numbers/strings, mixed levels of abstraction, and comment
       accuracy. Use when reviewing readability, naming, complexity, nesting,
       magic values, or comments.
+    picker: >
+      Can a newcomer read this function? Names, length, nesting, magic values,
+      comment accuracy.
     shape: diff
     wave: 1
     built_from:
@@ -35,7 +42,11 @@ skills:
       encapsulation, hard-to-misuse interfaces, and making illegal states
       unrepresentable. Use when reviewing class/module structure, interfaces,
       type or data modeling, coupling, or API ergonomics for callers.
+    picker: >
+      Are the boundaries right? Coupling, encapsulation, interfaces that are
+      hard to misuse, illegal states unrepresentable.
     shape: diff
+    design: true
     wave: 1
     built_from:
       - { category: 9, source: docs/research/cluster-3-structure.md#9 }
@@ -48,7 +59,11 @@ skills:
       profile. The restraint / brake-pedal lens. Use when a change adds
       abstraction layers, config knobs, generality, or hand-optimized code, or
       when asking whether a change is doing too much.
+    picker: >
+      Is this change too much? Premature abstraction or optimization — the
+      brake pedal.
     shape: diff
+    design: true
     wave: 1
     cross_ref: [15]   # primary owner: reviewing-performance-and-efficiency (counterweight lens here)
     built_from:
@@ -62,7 +77,11 @@ skills:
       unbounded token/cost, and PII sent to third-party models. Use when
       reviewing code that calls an LLM or model API, builds prompts, parses
       model output, or wires up agents and tools.
+    picker: >
+      Is the model call safe and bounded? Injection surface, output validation,
+      evals, token cost, PII.
     shape: diff
+    design: true
     wave: 1
     cross_ref: [27]   # primary owner: auditing-compliance-and-provenance
     built_from:
@@ -76,6 +95,9 @@ skills:
       untracked tech debt. A repo-wide / scheduled scan rather than a single-diff
       review. Use when auditing maintainability, tech debt, refactoring targets,
       or risky areas across the codebase.
+    picker: >
+      Where does the repo hurt most? Churn × complexity, change-coupling,
+      bus factor, untracked debt.
     shape: repo
     wave: 1
     built_from:
@@ -90,7 +112,11 @@ skills:
       sensitive data in logs or URLs. Use when reviewing auth, user input,
       queries, secrets, crypto, cookies, file paths, or any code handling
       untrusted data.
+    picker: >
+      Can an attacker abuse this? Injection, authorization, secrets, crypto,
+      untrusted data.
     shape: diff
+    design: true
     wave: 2
     built_from:
       - { category: 14, source: docs/research/cluster-4-runtime.md#14 }
@@ -104,7 +130,11 @@ skills:
       bloat, and per-request cloud cost. Demands a profile before accepting
       optimization claims. Use when reviewing queries in loops, hot paths,
       caching, large payloads, or anything justified by "performance."
+    picker: >
+      Will this be slow or expensive at scale? N+1, O(n²) hot paths, caching,
+      payload buffering.
     shape: diff
+    design: true
     wave: 2
     built_from:
       - { category: 15, source: docs/research/cluster-4-runtime.md#15 }
@@ -117,6 +147,9 @@ skills:
       clocks, or unseeded randomness), right level per the pyramid/trophy, and
       disabled/focused tests sneaking in. Use when reviewing test files, test
       coverage, mocks, fixtures, flaky tests, or a bug fix's tests.
+    picker: >
+      Do the tests prove anything? Behavior coupling, over-mocking, edge
+      coverage, determinism.
     shape: diff
     wave: 2
     built_from:
@@ -131,7 +164,11 @@ skills:
       and integrity constraints left to app code. Use when reviewing
       migrations, ALTER TABLE, backfills, schema or data-format changes, or
       anything touching persistence.
+    picker: >
+      Can this migration lock tables or lose data? Expand/contract, backfills,
+      reversibility.
     shape: diff
+    design: true
     wave: 2
     built_from:
       - { category: 20, source: docs/research/cluster-5-verification.md#20 }
@@ -145,6 +182,9 @@ skills:
       number/date/currency formatting, and RTL-unsafe layout. Use when
       reviewing components, templates, markup, forms, modals, UI text, or
       anything user-facing.
+    picker: >
+      Can everyone use this UI? Keyboard, screen readers, contrast, locales,
+      RTL.
     shape: diff
     wave: 2
     built_from:
@@ -160,7 +200,11 @@ skills:
       durations, UTC for storage. Use when reviewing logic, algorithms, loops,
       conditionals, edge cases, or whether the implementation matches the
       stated intent.
+    picker: >
+      Does the code do what it claims? Invariants, boundaries, off-by-one,
+      resource cleanup.
     shape: diff
+    design: true
     wave: 3
     built_from:
       - { category: 1, source: docs/research/cluster-1-correctness.md#1 }
@@ -175,7 +219,11 @@ skills:
       consumers, exactly-once assumptions, and missing cancellation/timeout
       propagation. Use when reviewing threads, async/await, promises, locks,
       queues, message handlers, or anything two callers can run at once.
+    picker: >
+      What breaks when two run at once? Races, lost updates, unawaited
+      promises, idempotency.
     shape: diff
+    design: true
     wave: 3
     built_from:
       - { category: 3, source: docs/research/cluster-1-correctness.md#3 }
@@ -189,6 +237,9 @@ skills:
       consistent naming/casing/imports/file layout. Use when reviewing style,
       conventions, idioms, framework usage, or consistency with the rest of
       the codebase.
+    picker: >
+      Does this look like the rest of the codebase? Conventions, idioms, no
+      second parallel way.
     shape: diff
     wave: 3
     built_from:
@@ -203,7 +254,11 @@ skills:
       limits on collections, contract tests, and no internal-representation
       leakage. Use when reviewing REST/GraphQL/RPC endpoints, request or
       response shapes, SDK surface, webhooks, or any consumer-facing contract.
+    picker: >
+      Will this break a consumer? Compatibility, error contracts, idempotency,
+      pagination.
     shape: diff
+    design: true
     wave: 3
     built_from:
       - { category: 13, source: docs/research/cluster-3-structure.md#13 }
@@ -217,7 +272,11 @@ skills:
       checks, kill switches for risky changes, graceful shutdown, and metric
       cardinality discipline. Use when reviewing logging, metrics, tracing,
       alerts, health checks, feature flags, or deploy/rollback paths.
+    picker: >
+      Can you debug this in production at 3am? Logs, traces, health checks,
+      kill switches, rollback.
     shape: diff
+    design: true
     wave: 3
     built_from:
       - { category: 16, source: docs/research/cluster-4-runtime.md#16 }
@@ -231,6 +290,9 @@ skills:
       drive-by scope creep, no committed secrets or debug leftovers. Use when
       reviewing a pull request's structure, commits, description, changelog,
       or readiness to merge.
+    picker: >
+      Is the PR itself reviewable? Size, atomic commits, description, scope
+      creep, changelog.
     shape: diff
     wave: 3
     cross_ref: [22]   # primary owner: auditing-documentation-health
@@ -246,6 +308,9 @@ skills:
       the documented architecture and the import graph. A repo-wide /
       scheduled audit rather than a single-diff review. Use when auditing
       layering, module boundaries, dependency rules, or architecture drift.
+    picker: >
+      Does the import graph still match the intended architecture? Layers,
+      cycles, reach-arounds.
     shape: repo
     wave: 3
     built_from:
@@ -259,6 +324,9 @@ skills:
       license compatibility of the dependency tree, and SBOM currency. A
       repo-wide / scheduled audit. Use when auditing package.json, lockfiles,
       requirements, vendored code, or supply-chain risk.
+    picker: >
+      Is the dependency tree safe? CVEs, pinning, typosquats, install scripts,
+      licenses.
     shape: repo
     wave: 3
     cross_ref: [27]   # primary owner: auditing-compliance-and-provenance
@@ -274,6 +342,9 @@ skills:
       CI actions, cache correctness, flaky or slow pipelines, and unused or
       drifting config keys. A repo-wide / scheduled audit. Use when auditing
       CI pipelines, Dockerfiles, build scripts, env vars, or config files.
+    picker: >
+      Are config and CI trustworthy? Secrets, env parity, reproducible pinned
+      builds, cache correctness.
     shape: repo
     wave: 3
     built_from:
@@ -289,6 +360,9 @@ skills:
       contradictory docs, and stale diagrams. A repo-wide / scheduled audit.
       Use when auditing docs, READMEs, docstrings, changelogs, ADRs, or
       onboarding material.
+    picker: >
+      Do the docs still tell the truth? API parity, stale examples, ADR
+      coverage, changelog discipline.
     shape: repo
     wave: 3
     built_from:
@@ -303,7 +377,76 @@ skills:
       telemetry, and SBOM currency. Detects and escalates to humans rather
       than deciding legal questions. A repo-wide / scheduled audit. Use when
       auditing licenses, PII handling, data retention, or provenance.
+    picker: >
+      Any licensing, PII, or provenance exposure? Detect and escalate to
+      humans — never decide legal questions.
     shape: repo
     wave: 3
     built_from:
       - { category: 27, source: docs/research/cluster-6-evolution.md#27 }
+
+# The composition layer (Q7): maps "what am I reviewing" to the lenses worth
+# running, so neither a human nor an agent has to know the whole catalog to
+# select well. Generated into skills/<name>/SKILL.md from this section alone.
+router:
+  name: choosing-review-lenses
+  description: >
+    Picks which code-quality-atlas review lenses to run for a given change:
+    maps what is being reviewed (bug fix, feature, refactor, migration, async
+    or concurrent code, API change, UI change, error handling, LLM
+    integration, design doc, dependency bump, CI/config change, or a
+    whole-repo audit) to the 2-4 most relevant lenses. Use first when starting
+    a code review or audit with the atlas suite, when unsure which review
+    skills apply, or when asked to review something without a named lens.
+  routes:
+    - when: Bug fix
+      run: [tracing-correctness-and-invariants, reviewing-test-quality,
+            hunting-silent-failures]
+    - when: New feature (general-purpose change)
+      run: [tracing-correctness-and-invariants, reviewing-naming-and-readability,
+            reviewing-test-quality, checking-restraint]
+    - when: Refactor / restructuring
+      run: [reviewing-module-design, checking-restraint,
+            checking-idioms-and-consistency, reviewing-naming-and-readability]
+    - when: Schema migration, backfill, or data-format change
+      run: [reviewing-migration-and-data-safety, tracing-correctness-and-invariants,
+            hunting-silent-failures]
+    - when: Async / concurrent / distributed change (queues, workers, locks, await)
+      run: [reviewing-concurrency-and-async, tracing-correctness-and-invariants,
+            hunting-silent-failures]
+    - when: Public API or contract change (endpoints, SDK surface, webhooks)
+      run: [reviewing-api-contract-safety, reviewing-module-design,
+            sweeping-for-security]
+    - when: Error-handling / resilience change (retries, fallbacks, timeouts)
+      run: [hunting-silent-failures, reviewing-observability-and-operability,
+            reviewing-concurrency-and-async]
+    - when: UI / frontend change (components, templates, user-facing text)
+      run: [reviewing-accessibility-and-i18n, checking-idioms-and-consistency,
+            reviewing-naming-and-readability]
+    - when: Auth, user input, or anything handling untrusted data
+      run: [sweeping-for-security, hunting-silent-failures,
+            tracing-correctness-and-invariants]
+    - when: Performance-motivated change ("this makes it faster")
+      run: [reviewing-performance-and-efficiency, checking-restraint,
+            tracing-correctness-and-invariants]
+    - when: LLM / agent / model-API integration
+      run: [reviewing-llm-integration, sweeping-for-security, checking-restraint]
+    - when: Logging, metrics, alerts, feature flags, deploy/rollback paths
+      run: [reviewing-observability-and-operability, sweeping-for-security]
+    - when: Tests-only change
+      run: [reviewing-test-quality, checking-idioms-and-consistency]
+    - when: Design doc / plan / RFC (no code yet)
+      run: [tracing-correctness-and-invariants, reviewing-concurrency-and-async,
+            reviewing-migration-and-data-safety, reviewing-api-contract-safety]
+      note: pick by the design's domain, from design-capable (◆) lenses only
+    - when: Dependency add or bump
+      run: [auditing-dependencies-and-supply-chain, checking-restraint]
+    - when: CI / build / config change
+      run: [auditing-config-and-build-hygiene, sweeping-for-security]
+    - when: Any pull request (the PR artifact itself, on top of content lenses)
+      run: [reviewing-pr-and-process-hygiene]
+    - when: Whole-repo health audit (scheduled / cron)
+      run: [finding-maintainability-hotspots, auditing-architecture-conformance,
+            auditing-dependencies-and-supply-chain, auditing-config-and-build-hygiene,
+            auditing-documentation-health, auditing-compliance-and-provenance]
+      note: the six repo-shaped audits; run independently, not as one pass

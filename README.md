@@ -30,6 +30,12 @@ All three phases are complete — the suite is built and installable (see Instal
 
 All **22 behaviors / 27 categories** from the [phase-2 design](docs/phase-2-skill-suite-design.md) are built.
 
+**First dogfood cycle (2026-06-11)** — real-usage feedback drove five packaging fixes (D10): every `SKILL.md` now inlines its top ~8 checks (self-sufficient first pass, no second fetch); a 23rd skill, [`choosing-review-lenses`](skills/choosing-review-lenses/SKILL.md), routes "what am I reviewing" → the 2-4 lenses worth running; design-capable lenses are explicitly marked (◆); skills sharing a research category name the primary owner so findings aren't double-reported; and reference links say when each file is actually needed.
+
+## Using the suite
+
+Start with **`choosing-review-lenses`** — it maps the change shape (bug fix, migration, async code, API change, design doc, repo audit, …) to the right 2-4 lenses and carries a one-line catalog of all of them. Each lens's `SKILL.md` is self-sufficient for a first pass; its `reference/heuristics.md` holds the full checklist.
+
 ## Install (Claude Code)
 
 In an interactive Claude Code session on your machine (terminal CLI, desktop app, or IDE extension):
@@ -67,7 +73,7 @@ anyone who trusts the folder gets the suite, **including Claude Code web session
 > that can read it (`gh` auth or SSH keys; web sessions clone with your GitHub
 > credentials). Make the repo public for zero-friction sharing.
 
-All 22 skills load with provenance intact; updates ship with every merged commit
+All 23 skills load with provenance intact; updates ship with every merged commit
 (commit-SHA versioning) — refresh with `/plugin marketplace update code-quality-atlas`.
 The skills are plain markdown and remain harness-agnostic; the plugin wrapper is
 additive (D9 in [`docs/open-questions.md`](docs/open-questions.md)).
@@ -89,5 +95,5 @@ Built fresh from **first principles**. Existing skills, plugins, linters, and re
 | [`docs/open-questions.md`](docs/open-questions.md) | Decisions made + unresolved questions |
 | [`docs/plans/`](docs/plans/) | Implementation plans (e.g. the wave-1 pipeline build) |
 | [`docs/session-log.md`](docs/session-log.md) | Chronological record of how this evolved |
-| [`skills/`](skills/) | The 22 generated + refined skills (see `manifest.yaml`) |
+| [`skills/`](skills/) | The 22 generated + refined lenses **+ the `choosing-review-lenses` router** (see `manifest.yaml`) |
 | [`tooling/`](tooling/) | The pipeline: generator, drift-checker, eval validator, cross-model runner |
