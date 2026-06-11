@@ -74,7 +74,18 @@ anyone who trusts the folder gets the suite, **including Claude Code web session
 > credentials). Make the repo public for zero-friction sharing.
 
 All 23 skills load with provenance intact; updates ship with every merged commit
-(commit-SHA versioning) — refresh with `/plugin marketplace update code-quality-atlas`.
+(commit-SHA versioning — no version bumps needed). How updates reach you depends
+on the install path:
+
+- **Interactive installs** (`/plugin install` on CLI/desktop/IDE) cache the plugin
+  and do **not** auto-refresh by default. Either pull manually with
+  `/plugin marketplace update code-quality-atlas`, or enable auto-update once
+  (`/plugin` → **Marketplaces** → select `code-quality-atlas` → **Enable
+  auto-update**) and it refreshes at startup from then on.
+- **Settings-based installs** (the `.claude/settings.json` snippet above,
+  including Claude Code web sessions) install fresh at session start, so every
+  new session already has the latest merged commit — nothing to do.
+
 The skills are plain markdown and remain harness-agnostic; the plugin wrapper is
 additive (D9 in [`docs/open-questions.md`](docs/open-questions.md)).
 
