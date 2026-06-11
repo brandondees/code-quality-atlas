@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 from tooling.manifest import load_manifest, Manifest, Skill, Source
 
 def test_load_manifest_parses_skill_and_sources():

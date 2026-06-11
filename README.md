@@ -69,9 +69,9 @@ anyone who trusts the folder gets the suite, **including Claude Code web session
 }
 ```
 
-> **Note:** while this repo is private, the installing machine needs git credentials
-> that can read it (`gh` auth or SSH keys; web sessions clone with your GitHub
-> credentials). Make the repo public for zero-friction sharing.
+> **Note:** if installing from a private copy/fork of this repo, the installing
+> machine needs git credentials that can read it (`gh` auth or SSH keys; web
+> sessions clone with your GitHub credentials).
 
 All 23 skills load with provenance intact; updates ship with every merged commit
 (commit-SHA versioning — no version bumps needed). How updates reach you depends
@@ -108,3 +108,7 @@ Built fresh from **first principles**. Existing skills, plugins, linters, and re
 | [`docs/session-log.md`](docs/session-log.md) | Chronological record of how this evolved |
 | [`skills/`](skills/) | The 22 generated + refined lenses **+ the `choosing-review-lenses` router** (see `manifest.yaml`) |
 | [`tooling/`](tooling/) | The pipeline: generator, drift-checker, eval validator, cross-model runner |
+
+## License
+
+Dual-licensed by content type: the research atlas and skills (`docs/`, `skills/`, this README) are [CC BY 4.0](LICENSE-CC-BY-4.0) — reuse freely with attribution; the pipeline code (`tooling/`, `tests/`, CI/config) is [MIT](LICENSE-MIT). Details in [LICENSE](LICENSE).

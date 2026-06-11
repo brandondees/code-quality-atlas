@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # tests/test_generate.py
 from pathlib import Path
 from tooling.manifest import Manifest, Route, Router, Skill, Source

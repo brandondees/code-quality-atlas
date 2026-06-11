@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # tests/test_run_evals.py
 from tooling import run_evals
 from tooling.manifest import Skill, Source

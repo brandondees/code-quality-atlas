@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # tests/test_drift.py
 from pathlib import Path
 from tooling.manifest import Skill, Source

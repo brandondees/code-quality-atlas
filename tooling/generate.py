@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # tooling/generate.py
 from __future__ import annotations
 import json

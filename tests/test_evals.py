@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # tests/test_evals.py
 import json, pytest
 from tooling.evals import load_evals, validate_evals, EvalError
