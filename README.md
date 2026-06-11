@@ -87,4 +87,7 @@ Built fresh from **first principles**. Existing skills, plugins, linters, and re
 | [`docs/research/`](docs/research/) | Per-cluster research: references, tooling rules, reviewable heuristics |
 | [`docs/map-gaps.md`](docs/map-gaps.md) | Cross-cutting structural findings feeding phase-2 (double-booked concerns, decomposition tension, etc.) |
 | [`docs/open-questions.md`](docs/open-questions.md) | Decisions made + unresolved questions |
+| [`docs/plans/`](docs/plans/) | Implementation plans (e.g. the wave-1 pipeline build) |
 | [`docs/session-log.md`](docs/session-log.md) | Chronological record of how this evolved |
+| [`skills/`](skills/) | The 22 generated + refined skills (see `manifest.yaml`) |
+| [`tooling/`](tooling/) | The pipeline: generator, drift-checker, eval validator, cross-model runner |
