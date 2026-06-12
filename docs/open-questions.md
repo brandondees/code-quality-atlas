@@ -20,10 +20,14 @@
 **Live state (2026-06-12).** Most of the questions below were answered by what
 shipped across phases 2–3 and are now marked `→ RESOLVED` in place (with a
 pointer to the decision or skill that closed them). **Genuinely still open:**
+Q13 (team preferences overlay — designed, not yet built),
 Q3 (review-vs-maintenance modes), Q4 (findings-vs-scores), Q6 (idiom packs),
 Q8 (proactive/cron-shaped maintenance — partially built as the repo audits),
 and the Q2 residual low-priority candidates. Everything else here is historical
 context kept for provenance.
+
+### Q13 — Team preferences overlay *(new, 2026-06-12)*
+The suite pushes research-derived "objectively better" defaults but has no home for the **codebase owner's / team's considered opinion** (only `checking-idioms-and-consistency` bends, and only to linter configs). Design write-up: [`team-preferences-overlay.md`](team-preferences-overlay.md). Decisions captured from the user this session: **(a) tiered precedence** — preference-tier findings (taste/thresholds/idioms) the team may tune or silently suppress; floor-tier findings (security, correctness, data/migration safety, concurrency) can never be silently dropped, only `acknowledge`d with a recorded rationale that still surfaces; **(b) bootstrap = template + inference, but inference is proposal-only** — it emits a ratification *interview*, never writes the overlay, and never runs by accident, so a haphazard/vibe-coded repo can't launder unconsidered "approve-click" patterns into ratified standards. Overlay lives in the *reviewed* repo (`.code-quality-atlas/preferences.md`), is read at review time by the router, and stays out of generated-skill provenance (D6). Status: **design, awaiting review before implementation planning.** Open sub-questions live in the write-up (§9).
 
 ### Q2 — Candidate additions  → RESOLVED (see D5)
 

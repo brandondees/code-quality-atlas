@@ -162,3 +162,22 @@ skill/decision:
 Added a "Live state" banner naming what's **genuinely** open: Q3 (review-vs-
 maintenance modes), Q4 (findings-vs-scores), Q6 (idiom packs), the Q8 fixing
 residual, and the Q2 low-priority candidates. Docs-only; 61 tests pass, no drift.
+
+### 2026-06-12 (cont.) — team preferences overlay (Q13, design)
+
+First-usage feedback (user): the suite is research-rooted and pushes "objectively
+better" defaults, but has nowhere to incorporate the **owner's/team's considered
+opinion** — today only `checking-idioms-and-consistency` bends, and only to linter
+configs. Opened Q13 and wrote the design: [`team-preferences-overlay.md`](team-preferences-overlay.md).
+
+Two user decisions shaped it. **Tiered precedence** — taste/threshold/idiom
+findings are preference-tier (team may tune or silently suppress); security /
+correctness / data-safety / concurrency are floor-tier (never silently dropped,
+only `acknowledge`d with a rationale that still surfaces). **Bootstrap = template
++ inference, but inference is proposal-only** — the inference skill emits a
+ratification interview (evidence + "deliberate decision or accident?") and never
+writes the overlay itself, never runs by accident; this is the guardrail against
+a haphazard/vibe-coded repo laundering unconsidered approve-clicks into ratified
+standards. Overlay lives in the *reviewed* repo (`.code-quality-atlas/preferences.md`),
+read at review time by the router, kept out of generated-skill provenance (D6).
+Status: design, awaiting review before implementation planning.
