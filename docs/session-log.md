@@ -98,3 +98,13 @@ Validator additions: routes must reference known skills, pickers required when a
 router exists, `design` only on diff lenses. The router carries
 `built_from: []` (manifest-derived; docs drift can't flag it) and ships 4 eval
 scenarios + examples. Suite is now **23 skills**; CI gate updated.
+
+### 2026-06-11 (cont.) — license for public release (D11)
+
+Private-repo install friction prompted flipping the repo public. Pre-publication
+sweep: no secrets/PII (example credentials are labeled fakes), no third-party
+text carrying its own license terms. License decision (user): **dual MIT (code)
++ CC BY 4.0 (content)** — see D11. Added LICENSE / LICENSE-MIT /
+LICENSE-CC-BY-4.0, SPDX headers on Python sources, `license: MIT AND CC-BY-4.0`
+in plugin.json, and a README License section. Visibility flip itself happens in
+GitHub settings.

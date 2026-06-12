@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # tooling/drift.py
 from __future__ import annotations
 from dataclasses import dataclass

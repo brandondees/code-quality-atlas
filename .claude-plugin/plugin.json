@@ -8,6 +8,7 @@
     "url": "https://github.com/brandondees"
   },
   "repository": "https://github.com/brandondees/code-quality-atlas",
+  "license": "MIT AND CC-BY-4.0",
   "keywords": [
     "code-review",
     "code-quality",

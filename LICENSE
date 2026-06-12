@@ -1,0 +1,20 @@
+# License
+
+This repository is dual-licensed by content type.
+
+- **Content — CC BY 4.0.** The research atlas and the skills derived from it —
+  everything under `docs/` and `skills/`, plus `README.md` — is licensed under
+  the Creative Commons Attribution 4.0 International License. Full text:
+  [`LICENSE-CC-BY-4.0`](LICENSE-CC-BY-4.0). Reuse, adapt, and redistribute
+  freely, including commercially, with attribution to **Brandon Dees /
+  code-quality-atlas** (a link to this repository satisfies it).
+
+- **Code — MIT.** Everything else — the generation/drift/eval pipeline under
+  `tooling/`, the tests, and the repo's CI and configuration files — is
+  licensed under the MIT License. Full text: [`LICENSE-MIT`](LICENSE-MIT).
+  Python sources carry `SPDX-License-Identifier: MIT` headers.
+
+The installable plugin bundle contains both kinds of material; its manifest
+declares the combined SPDX expression `MIT AND CC-BY-4.0`.
+
+SPDX-License-Identifier: MIT AND CC-BY-4.0

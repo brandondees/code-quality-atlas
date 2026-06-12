@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # tooling/run_evals.py
 """Run a skill's eval scenarios against a local model.
 

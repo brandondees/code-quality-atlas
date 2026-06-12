@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # tests/test_cli.py
 import subprocess
 import sys

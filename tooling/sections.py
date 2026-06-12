@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # tooling/sections.py
 import re
 import hashlib

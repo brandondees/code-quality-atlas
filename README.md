@@ -69,12 +69,23 @@ anyone who trusts the folder gets the suite, **including Claude Code web session
 }
 ```
 
-> **Note:** while this repo is private, the installing machine needs git credentials
-> that can read it (`gh` auth or SSH keys; web sessions clone with your GitHub
-> credentials). Make the repo public for zero-friction sharing.
+> **Note:** if installing from a private copy/fork of this repo, the installing
+> machine needs git credentials that can read it (`gh` auth or SSH keys; web
+> sessions clone with your GitHub credentials).
 
 All 23 skills load with provenance intact; updates ship with every merged commit
-(commit-SHA versioning) — refresh with `/plugin marketplace update code-quality-atlas`.
+(commit-SHA versioning — no version bumps needed). How updates reach you depends
+on the install path:
+
+- **Interactive installs** (`/plugin install` on CLI/desktop/IDE) cache the plugin
+  and do **not** auto-refresh by default. Either pull manually with
+  `/plugin marketplace update code-quality-atlas`, or enable auto-update once
+  (`/plugin` → **Marketplaces** → select `code-quality-atlas` → **Enable
+  auto-update**) and it refreshes at startup from then on.
+- **Settings-based installs** (the `.claude/settings.json` snippet above,
+  including Claude Code web sessions) install fresh at session start, so every
+  new session already has the latest merged commit — nothing to do.
+
 The skills are plain markdown and remain harness-agnostic; the plugin wrapper is
 additive (D9 in [`docs/open-questions.md`](docs/open-questions.md)).
 
@@ -97,3 +108,7 @@ Built fresh from **first principles**. Existing skills, plugins, linters, and re
 | [`docs/session-log.md`](docs/session-log.md) | Chronological record of how this evolved |
 | [`skills/`](skills/) | The 22 generated + refined lenses **+ the `choosing-review-lenses` router** (see `manifest.yaml`) |
 | [`tooling/`](tooling/) | The pipeline: generator, drift-checker, eval validator, cross-model runner |
+
+## License
+
+Dual-licensed by content type: the research atlas and skills (`docs/`, `skills/`, this README) are [CC BY 4.0](LICENSE-CC-BY-4.0) — reuse freely with attribution; the pipeline code (`tooling/`, `tests/`, CI/config) is [MIT](LICENSE-MIT). Details in [LICENSE](LICENSE).

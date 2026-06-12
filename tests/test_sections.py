@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # tests/test_sections.py
 from pathlib import Path
 from tooling.sections import extract_section
