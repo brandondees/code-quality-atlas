@@ -131,8 +131,19 @@ A second routine on the same repo:
 ### 3. (Optional) merge gate
 
 If you already run a scheduled "merge PRs meeting criteria" routine, point its
-criteria at the reviewer's terminal state: an `APPROVE` from the atlas reviewer
+criteria at the reviewer's terminal state: an approval from the atlas reviewer
 carrying `<!-- atlas-review round:N -->` plus green CI is a clean "ready" signal.
+
+**Match the approval in the review *body*, not the GitHub review *state*.** GitHub
+forbids approving your own PR, so when the reviewer runs as the **same identity
+that opened the PR** — the common case here, where your build sessions open PRs as
+you and the reviewer routine also runs as you — it **cannot** emit an `APPROVE`
+review state. It falls back to a `COMMENT` whose body says it approves (observed:
+`## Round N — APPROVE (own-PR, posted as comment)`). A gate keyed on
+`reviewDecision == APPROVED` therefore never fires on your own PRs; key it on the
+`<!-- atlas-review round:N -->` marker plus an `APPROVE` token in the review body
+instead. (On PRs opened by a *different* identity, the reviewer posts a real
+`APPROVE` state and either signal works.)
 
 ## Why it converges instead of looping forever
 
