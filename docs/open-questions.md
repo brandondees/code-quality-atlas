@@ -34,12 +34,20 @@ surfaced at the factor level — fixable through the manifest/research, with the
 router half tracked as Q14. Everything else here is historical context kept for
 provenance.
 
-**Pending follow-up:** cross-model eval re-gate for the 2026-06-12
-research-expansion additions (runbook step 3) — the appended heuristics shipped
-without a small-model re-run (no local model in the sandbox session). Run the
-affected skills' evals per the [regeneration runbook](runbooks/regenerating-skills.md)
-on the next machine with a local model, and before the next
-skill-behavior-changing PR.
+**Pending follow-up → RESOLVED (2026-06-12, local re-gate).** The cross-model
+eval re-gate for the research-expansion additions ran on a laptop with Ollama.
+All six skills whose heuristics changed since the expansion
+(`reviewing-llm-integration`, `reviewing-decision-lifecycle`,
+`auditing-enforcement-and-meta-artifacts`, `auditing-config-and-build-hygiene`,
+`auditing-documentation-health`, `reviewing-pr-and-process-hygiene`) **pass** on
+the 7-8B tier (`qwen2.5:7b`); the two new v0.3 skills were cross-confirmed on a
+second family (`llama3.1:8b`). Every clean/healthy scenario correctly returned
+"No findings" — no over-flagging regression. The only gaps observed are the
+already-documented 7B ceilings (top-findings-only recall on dense audit scans;
+cosmetic format-leak on qwen — a trailing "No findings:" sentence after real
+findings, absent on llama). Per the runbook these are model-capability limits,
+not heuristic regressions, so no tuning was applied. See the session-log entry
+of the same date.
 
 ### Q17 — Self-improving loop: usage signals → learnings → research edits *(new, 2026-06-12)*
 Make the suite self-improving: agents running the skills reflect on how the review process worked, detect routing misses / false positives / escapes / coverage gaps, and propagate learnings back to this repo — opt-in for consumers, mostly automated. Key insight: the **back half already exists** (D6/D8: research edit → drift → regenerate → evals → ship); what's missing is signal collection, distillation, and consented transport. Design exploration: [`self-improvement-loop.md`](self-improvement-loop.md) — a signal taxonomy (S1–S8, with taste S7 firewalled to the Q13 overlay, never upstreamed), the mechanism substrate (plugin hooks incl. a `PostToolUse` Skill-matcher invocation logger, a generated synthesizer "Process notes" appendix via a manifest `feedback:` section, `/atlas-retro` transcript digestion, a GitHub **outcome-auditor** routine joining reviews to merges/reverts as ground truth, an eval-first intake routine here), a **learning contract** mirroring D12's finding contract (stamped with the plugin commit SHA, enabling champion/challenger measurement across regenerations), four opt-in tiers (`off`/`local`/`draft`/`auto`) with the privacy boundary at record *creation* (abstracted evidence, never raw code), and the meta-loop's own failure modes (heuristic bloat, self-report bias, taste laundering, poisoned reports) countered by evidence thresholds + the eval-first ratchet as immune system. Staged rollout (§7): process-notes + local log first; full automation keeps exactly two human gates (consumer filing approval, atlas merge). Feeds Q14 (the invocation log is the missing lens-usage evidence) and depends on Q13. Status: **brainstorm captured, awaiting user review.**

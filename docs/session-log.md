@@ -420,3 +420,46 @@ Generate clean, no drift, 63 tests pass (+2: picker tagline, router body), evals
 valid. **Not yet addressed:** the harness-level cost of 22 names in the listing
 and the fact that frontmatter descriptions can be dropped from the model's skill
 budget remain harness constraints the SessionStart hook mitigates but can't fix.
+
+## 2026-06-12 — Cross-model eval re-gate (local Ollama, laptop)
+
+Closed the pending portability follow-up: the 2026-06-12 research-expansion
+additions had shipped without a small-model re-run (no local model in the
+sandbox session). Ran the re-gate on a laptop with Ollama.
+
+**Scope.** Six skills whose `reference/heuristics.md` changed since the
+expansion-pass parent (`git diff` against `5f5e798~1`): the two new v0.3 skills
+(`reviewing-decision-lifecycle`, `auditing-enforcement-and-meta-artifacts` —
+never gated on any model before) plus four with appended heuristics
+(`reviewing-llm-integration`, `auditing-config-and-build-hygiene`,
+`auditing-documentation-health`, `reviewing-pr-and-process-hygiene`). 20
+scenarios total. Drift was clean going in.
+
+**Method.** `python -m tooling.run_evals --skill <s> --model qwen2.5:7b --api
+ollama` (temp 0, the harness pins sampling). `qwen2.5:7b` is the closest
+available stand-in for the previously-validated `qwen2.5-coder-7b` tier; the two
+new skills were also run on `llama3.1:8b` to confirm the result wasn't
+qwen-specific.
+
+**Result: all six pass on the 7-8B tier.** Every clean/healthy scenario (6/6)
+correctly returned "No findings" — the over-flagging regression the runbook
+warns about did not appear. Detection fired on every bad case. The new v0.3
+skills passed cleanly on **both** model families; `llama3.1:8b` actually
+produced tidier output than qwen on `reviewing-decision-lifecycle` (no
+repetition).
+
+**Two observations, both pre-documented 7B ceilings — not regressions:**
+- **Top-findings-only recall on dense audit scans.** `auditing-config-and-build-hygiene`
+  scenario 1 caught the baked-in secret and the unvalidated-config fallback but
+  dropped `continue-on-error` and `node:latest`; scenario 2 caught the dead flag
+  and curl-pipe-bash but dropped the `/opt/sdk` machine-local dependency. Exactly
+  the runbook's "~top findings only from 7B-class models; pair with linters for
+  exhaustiveness" gap.
+- **Cosmetic format-leak (qwen only).** A few qwen responses appended the
+  template's "No findings:" sentence *after* listing real findings — the
+  documented "weak models mimic example output format" artifact. Absent on
+  llama3.1:8b. Per the runbook, not chased with more prose.
+
+**No tuning applied** — no heuristic regressions found, only model-capability
+limits already characterized in the runbook. Re-gate complete; suite is clear
+for the next behavior-changing PR.
