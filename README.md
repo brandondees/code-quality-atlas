@@ -90,6 +90,29 @@ on the install path:
   including Claude Code web sessions) install fresh at session start, so every
   new session already has the latest merged commit — nothing to do.
 
+#### Automatic routing (SessionStart hook)
+
+The plugin ships a `SessionStart` hook ([`hooks/hooks.json`](hooks/hooks.json) →
+[`hooks/route.sh`](hooks/route.sh)) so the suite is used as designed without you
+having to name a skill first. On each session it injects one line of guidance —
+*"for a review or audit, start with `choosing-review-lenses`, then finish with
+`synthesizing-review-findings`"* — directly into context.
+
+This exists because, with 24+ skills, individual skill **descriptions** can be
+dropped from the model's skill listing (it is budgeted to ~1% of context and is
+not re-injected after `/compact`), which makes the lenses easy to overlook on a
+plain "review this" request. The hook's `additionalContext` is injected verbatim
+before the first prompt, so it is reliable where the listing is not. The hook is
+**side-effect-free**: it only prints to stdout and writes nothing to your repo.
+
+> **Cold-first-session caveat.** The hook can only fire once the plugin itself is
+> loaded. On the very first session right after install — while a marketplace
+> plugin is still being fetched and indexed — both the skill listing *and* this
+> hook may arrive after your first message (you may watch the skills appear
+> mid-session). Every subsequent session, the plugin is cached and the hook fires
+> at startup as intended. If a first session misses it, just re-send your request
+> or invoke `choosing-review-lenses` directly.
+
 ### Other harnesses (Skulto)
 
 The skills are plain markdown and remain harness-agnostic; the plugin wrapper is
@@ -146,6 +169,7 @@ Built fresh from **first principles**. Existing skills, plugins, linters, and re
 | [`docs/session-log.md`](docs/session-log.md) | Chronological record of how this evolved |
 | [`skills/`](skills/) | The 22 generated + refined lenses **+ the `choosing-review-lenses` router** (see `manifest.yaml`) |
 | [`commands/`](commands/) | Slash commands for hands-off PR review automation (`/atlas-review-pr`, `/atlas-rebase-stale`) |
+| [`hooks/`](hooks/) | `SessionStart` hook that injects routing guidance so the suite is used without naming a skill (side-effect-free) |
 | [`templates/`](templates/) | `REVIEW.md` convergence policy to copy into a reviewed repo |
 | [`tooling/`](tooling/) | The pipeline: generator, drift-checker, eval validator, cross-model runner |
 
