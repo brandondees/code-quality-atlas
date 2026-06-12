@@ -205,6 +205,46 @@ Scope: the machinery wrapped around the code, reviewed as its own surface (the G
 
 ---
 
+## #31 Infrastructure-as-code
+
+Scope: IaC manifests — Terraform / OpenTofu, Kubernetes / Helm, CloudFormation, Pulumi — reviewed **as code that provisions production**, where a one-line diff can open a security hole or destroy data far beyond what the same-size application diff could. Four facets: **change blast-radius** (what does `plan` say this actually creates/replaces/destroys); **over-broad access** (public exposure, wildcard IAM — cross #14 least-privilege, which owns the security *verdict*); **drift** between declared config and live infra; **module/provider hygiene** (pinned versions, no secrets in state/vars, sane defaults). Distinct from **#19** (the build/CI *pipeline* and generic workflow mechanics, which owns Dockerfile/workflow linting) and **#26** (application *config keys*). Mature scanners exist (Checkov, Trivy, kube-linter) — the lens **orchestrates and judges blast-radius and intent**, it does not re-implement the rule engines. Repo-shaped (map-gaps G7): exposure and drift are *standing* conditions across all manifests, better scanned on a schedule (and in any IaC PR) than discovered one diff at a time.
+
+### Key references
+- **Checkov (Palo Alto Networks / Prisma Cloud, formerly Bridgecrew)** — https://github.com/bridgecrewio/checkov . The most widely-adopted open-source IaC scanner; 1,000+ built-in policies across Terraform/CloudFormation/K8s/Helm/ARM, **graph-based cross-resource checks** (e.g. a security group wired to a public subnet), and custom policies in Python or YAML. Standalone CLI is free.
+  → mine: the default first scanner for Terraform/CloudFormation/K8s; its graph checks catch relationships a single-resource linter misses. Soft-failed or `--skip-check`'d en masse, it is theater (cross #30 suppression hygiene).
+- **Trivy (Aqua Security) — IaC/misconfiguration scanning; tfsec is folded in** — https://github.com/aquasecurity/trivy . Aqua merged **tfsec into Trivy** (announced 2023, completed 2024); tfsec still runs but gets **no new checks**, and its `AVD-AWS-xxxx` IDs map unchanged into Trivy. For new work, use Trivy `config`/`misconfig`, not tfsec.
+  → mine: if a repo still calls `tfsec`, that is a **stale-tool finding** — migrate to Trivy so post-2024 Terraform features are covered. One scanner (Trivy) covers IaC misconfig **and** image/dependency CVEs (cross #18).
+- **kube-linter (StackRox / Red Hat) + hadolint** — https://github.com/stackrox/kube-linter . kube-linter checks Kubernetes YAML and Helm charts against best practices (no `latest` tag, resource requests/limits set, non-root, read-only root FS, no privileged); hadolint (DL3xxx) covers Dockerfiles (the Dockerfile mechanics themselves are #19's, but image-security defaults are shared).
+  → mine: a K8s workload with **no resource limits** (noisy-neighbour / OOM-kill risk, cross #28), running **privileged / as root**, or pulling **`:latest`** is the recurring set — these are the kube-linter defaults worth asserting by hand.
+- **Policy-as-code: OPA / Conftest (Rego) and HashiCorp Sentinel** — https://www.openpolicyagent.org/ , https://www.conftest.dev/ .
+  → mine: org-specific guardrails (no public S3, mandatory tags, approved regions/instance types) belong in **versioned policy** evaluated in CI on the `plan`, not in a reviewer's memory — recommend codifying a repeated manual objection as a policy.
+- **Drift detection: `terraform plan` (canonical), driftctl (maintenance mode), Snyk IaC** — https://developer.hashicorp.com/terraform/cli/commands/plan .
+  → mine: a non-empty `terraform plan` against a supposedly-applied config **is** drift — someone changed live infra by hand (ClickOps), and the next apply will revert or fight it. `driftctl` is now maintenance-mode (Snyk moved drift detection into its platform); the always-available signal is `plan` in CI.
+- **Cautionary — verify the tool still lives.** **Terrascan (Tenable) was archived 2025-11-20, read-only** — no new checks, no new provider/CVE coverage. A pipeline still gating on Terrascan has a **silently-decaying** gate.
+  → mine: a concrete instance of this suite's standing rule — a canonical-but-dead scanner is a gap to close (migrate to Checkov/Trivy), not a gate to trust because it still exits zero (cross #19, #30).
+
+### Tooling rules worth lifting
+- **Checkov** — `checkov -d .`; built-in policy IDs `CKV_AWS_*` / `CKV_K8S_*` / `CKV2_*` (the `CKV2_` graph checks are the cross-resource ones); custom policies in Python/YAML; `--compact --quiet` for CI.
+- **Trivy** — `trivy config <dir>` (IaC misconfig, includes the former tfsec rules `AVD-*`); `trivy k8s`; pairs with `trivy image` / `trivy fs` for CVEs so one tool spans IaC + supply chain.
+- **kube-linter** — `kube-linter lint .` over K8s manifests/Helm; default checks: `latest-tag`, `no-read-only-root-fs`, `run-as-non-root`, `unset-cpu-requirements` / `unset-memory-requirements`, `privileged-container`, `dangling-service`.
+- **hadolint** — `DL3008` (pin apt versions), `DL3007` (no `:latest` base), `DL3002` (no root `USER`), `DL3025` (JSON CMD) — image hygiene (Dockerfile *mechanics* owned by #19).
+- **Conftest / OPA** — `conftest test plan.json` to enforce Rego policy on a `terraform show -json` plan; **Sentinel** for Terraform Cloud/Enterprise org policy.
+- **`terraform plan` / `terraform validate` / `tflint`** — `validate` for syntax, `tflint` for provider-specific correctness + deprecations, `plan` (reviewed in the PR) as the blast-radius and drift signal; run `plan` in CI before any `apply`.
+
+### Reviewable heuristics (skill-checklist seeds)
+- **Blast radius of the change:** what does `terraform plan` (or the CloudFormation change set) say this actually does — **create, in-place update, or replace/destroy**? A `-/+` replace of a stateful resource (database, volume, bucket) is potential **data loss / downtime**; a destroy of anything stateful needs explicit confirmation and a backup (cross #20, #28).
+- **Public exposure:** does the change open something to the world — `0.0.0.0/0` ingress, a public S3 bucket / blob container, a database with a public IP, a K8s `Service` of type `LoadBalancer` with no restriction? Default to private; flag any new public surface for explicit justification (security verdict owned by #14).
+- **Over-broad IAM / least privilege:** wildcard `Action: "*"` or `Resource: "*"`, `AdministratorAccess`, or a role far broader than the workload needs? Scope to the specific actions/resources required (cross #14).
+- **Secrets in plaintext or state:** are credentials hardcoded in `.tf` / vars / manifests, or written to **Terraform state** (which is plaintext)? Source from a secrets manager / sealed-secrets; ensure state is encrypted and access-controlled.
+- **Unpinned modules & providers:** are Terraform `required_providers` / module sources and provider versions **pinned** (not floating to `latest`), and is the **state backend remote and locked** (not local `terraform.tfstate`)? Floating versions make the next apply non-reproducible (cross #18, #19).
+- **Drift between declared and live:** does a `terraform plan` on supposedly-applied config come back **non-empty** (someone changed infra by hand)? ClickOps drift means the IaC is no longer the source of truth — reconcile or import it.
+- **Container/workload defaults (K8s):** do Pods/Deployments set **resource requests and limits** (no limits → noisy-neighbour / OOM, cross #28), run **non-root** with a **read-only root filesystem**, avoid **`privileged` / hostNetwork / hostPath / docker-socket** mounts, and pin image digests (no `:latest`)?
+- **Encryption & data protection:** is encryption-at-rest enabled on new storage (bucket / volume / DB) and TLS required in transit, rather than relying on a permissive default?
+- **Tool currency & gate health:** is the IaC scanner in CI **maintained and actually running** (Checkov/Trivy current — not archived Terrascan or unmaintained tfsec), required to pass (not `continue-on-error`), and are its suppressions rule-scoped with a reason (cross #30)?
+- **Policy-as-code for repeated objections:** is an org guardrail that keeps coming up in review (mandatory tags, no public exposure, approved regions) **codified as OPA/Conftest/Sentinel policy** evaluated on the plan, rather than re-litigated by hand each PR?
+
+---
+
 ## Open threads
 
 - **#17 over-mocking ↔ #11 dependency-elimination**: both push toward real collaborators/fakes over mocks. A shared "minimize mocking" stance is needed so the test-quality skill and the simplicity skill agree.

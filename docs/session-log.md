@@ -542,3 +542,51 @@ scans" limit; per the runbook it is not chased with more prose (risks
 clean-code over-flagging). Posture for this skill at 7-8B stays detection +
 pair with deterministic linters (hadolint for `:latest`, a flag-audit tool) for
 exhaustiveness. The other five skills signed off as-is.
+
+## 2026-06-12 — v0.3 build complete: #28 resilience + #31 IaC (the last two)
+
+Built the two remaining v0.3 categories, closing out D13's build phase (all 31
+categories now have skills). Same docs→manifest→generate pipeline as #29/#30.
+
+**#28 → `reviewing-resilience-and-scalability`** (shape: diff, design-capable).
+Design-time operability, distinct from #16's runtime observability: unbounded
+queues/buffers, missing timeouts + failure plans on dependency calls, blast radius
+/ bulkheading, retry budgets, statelessness for horizontal scale, single-writer
+bottlenecks, RTO/RPO + tested restore, graceful degradation, multi-tenant
+isolation. Research section in cluster-4-runtime.md#28 (Release It!, Google SRE
+cascading-failures/overload, AWS Well-Architected Reliability, The Tail at Scale,
+chaos engineering, Reactive Streams backpressure, twelve-factor statelessness).
+Added a synthesizer tension (restraint ↔ resilience machinery).
+
+**#31 → `auditing-infrastructure-as-code`** (shape: repo, the 8th repo audit).
+IaC manifests as production code: blast-radius of a plan (replace/destroy of
+stateful resources), public exposure, wildcard IAM, secrets in state, unpinned
+modules/providers, declared-vs-live drift, unsafe container defaults, stale/
+soft-failed scanners. Research section in cluster-5-verification.md#31 with
+**web-verified (2026-06-12)** tooling currency — the churny part: tfsec is folded
+into Trivy (no new checks since the 2024 merge; AVD-* IDs map over), **Terrascan
+was archived 2025-11-20 (read-only)**, driftctl is maintenance-mode (Snyk moved
+drift into its platform; `terraform plan` is the canonical drift signal), Checkov
+(Palo Alto) and kube-linter (StackRox) current. The Terrascan/tfsec facts double
+as a worked instance of the suite's own "verify the tool still runs, don't
+cargo-cult a canonical-but-dead default" stance. The security *verdict* on
+exposure/IAM stays owned by #14 (noted inline, no cross_ref).
+
+Router: added a resilience/scalability/DR-design route and an IaC-change route;
+the whole-repo audit list grew seven → eight (IaC only where manifests exist).
+
+**Cross-model gate (qwen2.5:7b + llama3.1:8b, temp 0):**
+- #28 — bad-diff and bad-design scenarios fully enumerated on both; clean scenario
+  clean. **One tuning iteration:** llama initially over-flagged the clean
+  (stateless) scenario by demanding RTO/RPO where there is no durable state. Fixed
+  by scoping the recoverability check in `examples.md` ("match the check to the
+  surface — RTO/RPO/HA apply only to durable-state or DR designs"). Re-run: clean
+  on both.
+- #31 — qwen S1 6/6, S2 4/5 (dropped only the lowest-value "kube-linter not run"
+  meta-finding — the documented secondary-finding ceiling), clean S3; llama S1 7/7,
+  S2 5/5 (caught the one qwen dropped), clean S3. No example defect — qwen's drop
+  is its recall ceiling.
+
+Generate clean, no drift, eval structure valid for all 28, 81 tests pass. 26 lens
+skills + router + synthesizer. Residuals are the known 7B ceilings (secondary-
+finding recall on dense scans; cosmetic format-leak), not chased per the runbook.

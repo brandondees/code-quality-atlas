@@ -42,6 +42,7 @@ When the change trips one of these known opposing pairs, apply the default and s
 | `checking-restraint` ↔ `reviewing-test-quality` | how much test coverage is enough | Cover the behavior and a regression test for any fixed bug; stop at coverage that only pins implementation detail. More tests is not automatically better. |
 | `checking-restraint` ↔ `reviewing-api-contract-safety` | new validation or surface "to be safe" vs. leaving it out | "When in doubt, leave it out" — minimal new public surface wins; add validation only on surface that actually ships now. |
 | `reviewing-performance-and-efficiency` ↔ `reviewing-naming-and-readability` | a fast but cryptic form vs. a clear but slower one | Keep the readable form unless a profile proves the clear version is the bottleneck; if the fast form must stay, require a comment explaining why. |
+| `checking-restraint` ↔ `reviewing-resilience-and-scalability` | defensive resilience machinery (retries, circuit breakers, multi-region, extra replicas) vs. simplicity | Add resilience in proportion to the availability/scale target and the failure modes the system will actually face; do not engineer for scale or failures with no stated requirement. Restraint wins absent an SLO or scale target — but a real unbounded queue, missing timeout, or untested restore is a correctness/operability defect, not gold-plating, and stands. |
 
 For a tension not in this table, prefer the **safer and simpler** option, and say what evidence would change the call.
 

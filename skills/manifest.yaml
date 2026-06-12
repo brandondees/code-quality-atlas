@@ -434,6 +434,49 @@ skills:
     built_from:
       - { category: 30, source: docs/research/cluster-5-verification.md#30 }
 
+  - name: reviewing-resilience-and-scalability
+    description: >
+      Reviews a change or design for operational resilience and scale: unbounded
+      queues/buffers/result sets, missing timeouts and failure plans on calls to
+      other services, blast radius and bulkheading, retry budgets and idempotency,
+      in-process state that blocks horizontal scaling, single-writer bottlenecks,
+      recoverability (RTO/RPO and tested restore), graceful degradation under
+      overload, and multi-tenant isolation. Design-time operability — distinct
+      from #16's runtime observability. Use when reviewing a new queue, cache,
+      stateful service, failover/HA/DR design, capacity or scaling plan, or a call
+      to a dependency that could be slow or down. Skip when the change is a small,
+      stateless local edit with no new dependency call, queue, shared state, or
+      scaling/recovery surface.
+    picker: >
+      Will it survive failure and scale? Unbounded queues, timeouts and blast
+      radius, retries, statelessness, RTO/RPO — design-time, not #16's runtime.
+    shape: diff
+    design: true
+    wave: 4
+    built_from:
+      - { category: 28, source: docs/research/cluster-4-runtime.md#28 }
+
+  - name: auditing-infrastructure-as-code
+    description: >
+      Audits infrastructure-as-code manifests (Terraform/OpenTofu, Kubernetes and
+      Helm, CloudFormation, Pulumi) as code that provisions production: the blast
+      radius of a change (in-place update vs replace/destroy of stateful
+      resources), public exposure (`0.0.0.0/0`, public buckets), over-broad or
+      wildcard IAM, secrets in plaintext or Terraform state, unpinned modules and
+      providers, drift between declared and live infra, missing container resource
+      limits / non-root / read-only roots, and unmaintained or soft-failed
+      scanners. Orchestrates and judges blast-radius; defers the security verdict
+      to humans and to sweeping-for-security. A repo-wide / scheduled audit. Use
+      when auditing Terraform, Kubernetes, Helm, or CloudFormation. Skip when the
+      repo or change contains no infrastructure-as-code manifests.
+    picker: >
+      Does this infra change expose or destroy something? Blast radius, public
+      access, wildcard IAM, secrets in state, drift.
+    shape: repo
+    wave: 4
+    built_from:
+      - { category: 31, source: docs/research/cluster-5-verification.md#31 }
+
 # The composition layer (Q7): maps "what am I reviewing" to the lenses worth
 # running, so neither a human nor an agent has to know the whole catalog to
 # select well. Generated into skills/<name>/SKILL.md from this section alone.
@@ -492,6 +535,13 @@ router:
     - when: Error-handling / resilience change (retries, fallbacks, timeouts)
       run: [hunting-silent-failures, reviewing-observability-and-operability,
             reviewing-concurrency-and-async]
+    - when: Resilience / scalability / capacity / DR design (a new queue or cache,
+            a stateful service, failover/HA, a scaling or capacity plan, or a call
+            to a dependency that can be slow or down)
+      run: [reviewing-resilience-and-scalability, reviewing-concurrency-and-async,
+            reviewing-observability-and-operability]
+      note: design-time operability — blast radius, backpressure, statelessness,
+            RTO/RPO; pairs with #16 for the runtime-instrumentation side
     - when: UI / frontend change (components, templates, user-facing text)
       run: [reviewing-accessibility-and-i18n, checking-idioms-and-consistency,
             reviewing-naming-and-readability]
@@ -515,14 +565,20 @@ router:
       run: [auditing-dependencies-and-supply-chain, checking-restraint]
     - when: CI / build / config change
       run: [auditing-config-and-build-hygiene, sweeping-for-security]
+    - when: Infrastructure-as-code change (Terraform/OpenTofu, Kubernetes/Helm,
+            CloudFormation manifests)
+      run: [auditing-infrastructure-as-code, sweeping-for-security]
+      note: repo-shaped — judges blast radius, public exposure, IAM scope, and
+            declared-vs-live drift; #14 owns the security verdict
     - when: Any pull request (the PR artifact itself, on top of content lenses)
       run: [reviewing-pr-and-process-hygiene]
     - when: Whole-repo health audit (scheduled / cron)
       run: [finding-maintainability-hotspots, auditing-architecture-conformance,
             auditing-dependencies-and-supply-chain, auditing-config-and-build-hygiene,
             auditing-documentation-health, auditing-compliance-and-provenance,
-            auditing-enforcement-and-meta-artifacts]
-      note: the seven repo-shaped audits; run independently, not as one pass
+            auditing-enforcement-and-meta-artifacts, auditing-infrastructure-as-code]
+      note: the eight repo-shaped audits; run independently, not as one pass
+            (auditing-infrastructure-as-code only where IaC manifests exist)
     - when: Enforcement config — lint/type suppressions, alert rules or dashboards,
             or checked-in generated artifacts
       run: [auditing-enforcement-and-meta-artifacts]
@@ -583,3 +639,12 @@ synthesizer:
       resolve: >
         Keep the readable form unless a profile proves the clear version is the
         bottleneck; if the fast form must stay, require a comment explaining why.
+    - between: [checking-restraint, reviewing-resilience-and-scalability]
+      about: defensive resilience machinery (retries, circuit breakers, multi-region,
+        extra replicas) vs. simplicity
+      resolve: >
+        Add resilience in proportion to the availability/scale target and the
+        failure modes the system will actually face; do not engineer for scale or
+        failures with no stated requirement. Restraint wins absent an SLO or scale
+        target — but a real unbounded queue, missing timeout, or untested restore
+        is a correctness/operability defect, not gold-plating, and stands.

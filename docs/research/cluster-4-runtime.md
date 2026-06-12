@@ -171,6 +171,47 @@
 
 ---
 
+## #28 Operational & resilience design
+
+Scope: *design-time* operability — whether the system is built to survive failure, recover, and scale — as distinct from #16's *runtime* operability (the instrumentation emitted from app code) and from #2/#3's code-level error handling. Four facets: **resilience as design** (failure-mode / blast-radius analysis, bulkheads, graceful degradation, dependency-failure plans); **recoverability** (RTO/RPO, *tested* restore — not just backups taken; absorbs #20's backup note); **scalability as design** (statelessness, horizontal-scaling readiness, single-writer bottlenecks, backpressure on unbounded queues; resolves the dropped #12 scalability factor and absorbs system-wide rate-limit/quota); **multi-tenancy isolation** (noisy-neighbour, per-tenant quotas). Reviewed at *decision time* (an RFC, capacity plan, or DR design) **and** on a diff (a new stateful singleton, an unbounded queue, a synchronous call to a flaky dependency with no timeout/fallback). The lens asks *"what happens when this dependency is slow, this queue is unbounded, this instance dies, or this tenant goes hot?"* — questions a diff-level correctness or security pass does not ask.
+
+### Key references
+- **Michael Nygard, *Release It!* (2nd ed., 2018)** — the canonical stability-patterns catalog. Patterns: **Circuit Breaker**, **Bulkhead**, **Timeout**, **Steady State**, **Fail Fast**, **Back Pressure**, **Handshaking**, **Shed Load**. Antipatterns: **Integration Points** (every call out is a failure source), **Cascading Failures**, **Slow Responses**, **Unbounded Result Sets**.
+  → mine: every synchronous call to another service needs a **timeout** and a defined behavior when it fails (circuit-breaker / fallback / fail-fast); a failure in one dependency must be **bulkheaded** so it can't exhaust the shared resource (threads, connections) and take down the whole system. An **unbounded result set or queue** is a latent OOM/overload — bound it.
+- **Google SRE Book & SRE Workbook — "Addressing Cascading Failures", "Handling Overload", "Managing Critical State"** — https://sre.google/sre-book/addressing-cascading-failures/ .
+  → mine: under overload, **shed load and degrade gracefully** (serve a cheaper/cached/partial response) rather than collapsing; retries need **budgets + jitter + exponential backoff** or they amplify an outage into a retry storm. A single-writer / global-lock / leader bottleneck caps throughput regardless of horizontal scale.
+- **AWS Well-Architected Framework — Reliability Pillar** — https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/ . DR strategies on a cost/complexity ladder: **backup & restore → pilot light → warm standby → multi-site active/active**, each with an explicit **RTO** (how long to recover) and **RPO** (how much data loss is acceptable).
+  → mine: a design that stores durable state must state its **RTO/RPO** and pick a DR strategy that meets them; "we take backups" is not recoverability until a **restore has actually been tested** — an untested backup is Schrödinger's backup.
+- **"The Tail at Scale" (Dean & Barroso, CACM 2013)** — https://research.google/pubs/the-tail-at-scale/ .
+  → mine: at scale, **tail latency** (p99/p999), not the mean, governs user experience and fan-out cost; a request that fans out to N backends is as slow as its slowest one. Bound per-call latency (timeouts, hedged requests) so one slow component doesn't define the whole response.
+- **Principles of Chaos Engineering + Rosenthal & Jones, *Chaos Engineering* (O'Reilly)** — https://principlesofchaos.org/ .
+  → mine: resilience is a *hypothesis* until tested — the strongest designs name how a failure mode would be exercised (game day / fault injection / DR drill), not just assert that failover "should" work.
+- **Reactive Streams / backpressure** — https://www.reactive-streams.org/ ; Universal Scalability Law (Neil Gunther) for the contention + coherency ceilings on scaling.
+  → mine: a fast producer feeding a slow consumer through an **unbounded buffer** trades a crash for a slower crash (memory) — apply **backpressure** (bounded queue + blocking/dropping/load-shedding policy). Shared mutable coordination (a global counter, a single sequence) is the coherency term that caps horizontal scaling.
+- **Twelve-Factor App — Factor VI (processes are stateless)** — https://12factor.net/processes ; SaaS multi-tenancy "noisy neighbour".
+  → mine: horizontally-scalable services keep **no in-process session/affinity state** (push it to a shared store); a new in-memory cache, sticky session, or local-disk write is a scaling and failover hazard. In multi-tenant systems, one tenant must not be able to exhaust a shared resource — **per-tenant quotas / fair scheduling / isolation**.
+
+### Tooling rules worth lifting
+- **This category is judgment-led, not linter-led.** Unlike #14/#15, there is little static analysis that proves resilience; the leverage is in design review and chaos/load testing, so the heuristics carry the weight. Treat the tools below as evidence-gatherers, not gates.
+- **Resilience libraries (presence + correct use, not mere import):** Resilience4j / Polly / Hystrix-legacy (circuit breakers, bulkheads, rate limiters), Envoy/Istio outlier-detection & circuit-breaking, AWS SDK adaptive retry. A retry config with **no budget/jitter** is a finding, not a fix.
+- **Load & soak testing:** k6, Gatling, Locust, `wrk` — a scalability or capacity claim is unbacked without a load profile; watch **p99/p999**, not mean.
+- **Chaos / fault injection:** Chaos Mesh, Gremlin, AWS FIS, Toxiproxy (inject latency/faults into dependency calls) — the way to turn a resilience assertion into evidence.
+- **Recovery drills:** scripted restore-from-backup in CI/staging, AWS Resilience Hub / Route 53 ARC for RTO/RPO assessment — backups are only credible once a restore is exercised.
+
+### Reviewable heuristics (skill-checklist seeds)
+- **Unbounded growth:** does the change introduce a queue, buffer, list, cache, or result set with **no size bound or backpressure**? Unbounded accumulation is a latent OOM / overload under load — bound it and define the drop/block/shed policy when full.
+- **Dependency failure plan:** does every synchronous call to another service / DB / third-party API have a **timeout** and a defined behavior when it is slow or down (circuit-breaker, fallback, fail-fast)? A bare call with no timeout blocks a thread indefinitely and cascades (Integration Points → Cascading Failure).
+- **Blast radius & bulkheading:** if this component fails or slows, what else goes with it? Is the failure **isolated** (separate pool/bulkhead/process), or does it share a resource (thread pool, connection pool, event loop) whose exhaustion takes down unrelated work?
+- **Retry safety:** do retries have a **budget, backoff, and jitter**, and is the retried operation **idempotent** (cross #3)? Naive immediate retries amplify a partial outage into a retry storm.
+- **Statelessness / horizontal scale:** does the change add **in-process state** (a local cache, session affinity, an in-memory counter, local-disk write) that prevents running N identical instances or surviving an instance restart? Push durable/shared state to a backing store.
+- **Single-writer bottleneck:** is there a global lock, a leader-only path, a single sequence/counter, or a hot row that **caps throughput** no matter how many instances run? Name it as the scaling ceiling.
+- **Recoverability (RTO/RPO):** for a change touching durable state, are the **RTO and RPO** stated and met by the chosen backup/DR strategy, and has the **restore actually been tested**? "Backups are taken" without a tested restore is not recoverability.
+- **Graceful degradation under overload:** when a dependency is down or load spikes, does the system **shed load / degrade to a cached-or-partial response**, or does it collapse? Is there a kill switch / feature flag to shed a non-critical path (cross #16)?
+- **Multi-tenancy isolation:** can one tenant (or one abusive caller) exhaust a shared resource and starve the rest? Are there **per-tenant quotas / rate limits / fair scheduling**?
+- **Resilience as a tested hypothesis:** for a design that claims failover/HA/DR, is there a stated way it has been (or will be) **exercised** — a game day, fault-injection test, or DR drill — rather than an untested "it should fail over" assertion?
+
+---
+
 ## Open threads (gaps / mis-placements / sub-topics worth deeper research)
 
 - **Sourcing status (was a gap):** the draft's standards spines and high-traffic rule IDs are now **web-verified (2026-06-09)** — CWE 2024 ranks, ASVS 5.0 (17 chapters), OWASP LLM Top 10 2025, Bandit/gosec IDs, Core Web Vitals, lethal trifecta. Residual `(verify)`: exact Semgrep/CodeQL query IDs, Sonar squids, LLM-Guard scanner names — these churn fastest and should be confirmed at skill-build time.

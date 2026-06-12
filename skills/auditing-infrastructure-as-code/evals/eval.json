@@ -1,0 +1,38 @@
+{
+  "skills": [
+    "auditing-infrastructure-as-code"
+  ],
+  "scenarios": [
+    {
+      "query": "Audit this IaC scan:\n```text\nterraform plan: aws_s3_bucket.exports unchanged; aws_db_instance.analytics -/+ destroy and recreate (instance_class change)\nmain.tf:  resource aws_s3_bucket_public_access_block { block_public_acls = false }  # bucket is public\n          resource aws_iam_role_policy { Action = \"*\", Resource = \"*\" }\n          provider \"aws\" {}                         # no version pin\n          variable \"stripe_key\" { default = \"sk_live_9f...\" }\nbackend:  local; terraform.tfstate committed to the repo\nCI:       terrascan (repo archived 2025-11); not required to merge\n```",
+      "expected_behavior": [
+        "Flags the destructive plan: aws_db_instance.analytics shows -/+ (destroy and recreate) which is data loss and downtime; find a non-replacing path or snapshot and plan a migration",
+        "Flags the public S3 bucket (public access block disabled) as unintended public exposure; attributes the security verdict to sweeping-for-security / #14",
+        "Flags the wildcard IAM (Action \"*\", Resource \"*\") as over-broad; scope to least privilege",
+        "Flags the hardcoded stripe_key secret in a variable default (also written to plaintext state); source from a secrets manager and rotate",
+        "Flags the unpinned aws provider and the local committed state (non-reproducible, unlocked, secrets in repo); pin the provider and move to a remote locked encrypted backend",
+        "Flags terrascan as an archived/unmaintained scanner that is also not required to merge; migrate to a maintained scanner (Checkov/Trivy) and make it blocking",
+        "Cites only defects present in the scan; does not invent CVEs or plan actions"
+      ]
+    },
+    {
+      "query": "Audit this IaC scan:\n```text\ndeploy.yaml: containers: [{ image: payments:latest, securityContext: { privileged: true, runAsUser: 0 } }]\n             # no resources.requests or resources.limits set\nservice.yaml: kind: Service, type: LoadBalancer  (no loadBalancerSourceRanges)\nsecret.yaml:  stringData: { DB_PASSWORD: \"hunter2\" }   # plaintext in the manifest, committed\nkube-linter:  not run in CI\n```",
+      "expected_behavior": [
+        "Flags the privileged, root container on :latest: privileged + runAsUser 0 means a container escape is host compromise, and :latest is unreproducible; drop privileged, run non-root with read-only root FS, pin a digest",
+        "Flags the missing resource requests/limits as a noisy-neighbour / OOM risk; set requests and limits",
+        "Flags the LoadBalancer with no loadBalancerSourceRanges as unrestricted public exposure; restrict source ranges or front with ingress (verdict owned by sweeping-for-security)",
+        "Flags the plaintext DB_PASSWORD committed in the manifest; use a sealed/external secret and rotate",
+        "Flags that kube-linter is not run in CI, so these defaults regress silently; add it as a required check",
+        "Reports each as its own finding rather than collapsing them"
+      ]
+    },
+    {
+      "query": "Audit this IaC scan:\n```text\nterraform plan: 1 to add, 1 to change, 0 to destroy (a new CloudWatch alarm; an added resource tag)\nmain.tf:  providers pinned (aws ~> 5.40); modules pinned by version; state in S3 backend with DynamoDB lock + SSE\n          SG ingress restricted to the app SG only; IAM scoped to specific actions and resource ARNs\n          aws_db_instance.storage_encrypted = true; S3 buckets private with SSE; secrets sourced from SSM\nk8s:      resources requests+limits set; runAsNonRoot: true; readOnlyRootFilesystem: true; images pinned by digest\nCI:       checkov required to merge and passing; conftest policy enforces no-public + mandatory tags on the plan\nplan-drift: terraform plan on the applied config returns no changes\n```",
+      "expected_behavior": [
+        "Reports no findings (infrastructure-as-code is sound)",
+        "Recognizes pinned providers/modules, remote locked encrypted state, least-privilege and private access, encryption at rest, safe K8s defaults, a maintained required scanner with policy-as-code, and no drift",
+        "Does not treat the non-destructive plan (adds/changes to stateless resources, 0 to destroy) as a finding, and does not invent a CVE or exposure the scan does not show"
+      ]
+    }
+  ]
+}
