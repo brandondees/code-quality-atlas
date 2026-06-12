@@ -2,7 +2,7 @@
 
 ## Skill routing
 
-When this plugin is installed, use these skills instead of the built-in equivalents:
+When working in this repository, use these skills instead of the built-in equivalents. (Plugin consumers: copy the *Skill routing* section to your project's CLAUDE.md to apply this policy there — Claude Code reads CLAUDE.md from your working directory, not from plugin repos.)
 
 | Task | Use |
 |---|---|
