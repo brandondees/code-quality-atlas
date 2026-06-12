@@ -36,12 +36,20 @@ surfaced at the factor level — fixable through the manifest/research, with the
 router half tracked as Q14. Everything else here is historical context kept for
 provenance.
 
-**Pending follow-up:** cross-model eval re-gate for the 2026-06-12
-research-expansion additions (runbook step 3) — the appended heuristics shipped
-without a small-model re-run (no local model in the sandbox session). Run the
-affected skills' evals per the [regeneration runbook](runbooks/regenerating-skills.md)
-on the next machine with a local model, and before the next
-skill-behavior-changing PR.
+**Pending follow-up → RESOLVED (2026-06-12, local re-gate).** The cross-model
+eval re-gate for the research-expansion additions ran on a laptop with Ollama.
+All six skills whose heuristics changed since the expansion
+(`reviewing-llm-integration`, `reviewing-decision-lifecycle`,
+`auditing-enforcement-and-meta-artifacts`, `auditing-config-and-build-hygiene`,
+`auditing-documentation-health`, `reviewing-pr-and-process-hygiene`) **pass** on
+the 7-8B tier (`qwen2.5:7b`); the two new v0.3 skills were cross-confirmed on a
+second family (`llama3.1:8b`). Every clean/healthy scenario correctly returned
+"No findings" — no over-flagging regression. The only gaps observed are the
+already-documented 7B ceilings (top-findings-only recall on dense audit scans;
+cosmetic format-leak on qwen — a trailing "No findings:" sentence after real
+findings, absent on llama). Per the runbook these are model-capability limits,
+not heuristic regressions, so no tuning was applied. See the session-log entry
+of the same date.
 
 ### Q18 — Artifact-scoped lens hosting: many per-artifact lenses without context bloat *(new, 2026-06-12)*
 

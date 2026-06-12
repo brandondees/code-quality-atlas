@@ -465,3 +465,80 @@ it to the Live-state banner; G11's disposition table parks the *factor* at **#30
 (keeping Q16 = runtime safety) pending the owner call. **Docs-only** — `taxonomy.md`/`manifest.yaml`
 untouched, so no drift; nothing built yet. Decisions pending: Q18 hosting pattern (a/b/c) and the
 G11 factor placement, both gating the build.
+
+## 2026-06-12 — Cross-model eval re-gate (local Ollama, laptop)
+
+Closed the pending portability follow-up: the 2026-06-12 research-expansion
+additions had shipped without a small-model re-run (no local model in the
+sandbox session). Ran the re-gate on a laptop with Ollama.
+
+**Scope.** Six skills whose `reference/heuristics.md` changed since the
+expansion-pass parent (`git diff` against `5f5e798~1`): the two new v0.3 skills
+(`reviewing-decision-lifecycle`, `auditing-enforcement-and-meta-artifacts` —
+never gated on any model before) plus four with appended heuristics
+(`reviewing-llm-integration`, `auditing-config-and-build-hygiene`,
+`auditing-documentation-health`, `reviewing-pr-and-process-hygiene`). 20
+scenarios total. Drift was clean going in.
+
+**Method.** `python -m tooling.run_evals --skill <s> --model qwen2.5:7b --api
+ollama` (temp 0, the harness pins sampling). `qwen2.5:7b` is the closest
+available stand-in for the previously-validated `qwen2.5-coder-7b` tier; the two
+new skills were also run on `llama3.1:8b` to confirm the result wasn't
+qwen-specific.
+
+**Result: all six pass on the 7-8B tier.** Every clean/healthy scenario (6/6)
+correctly returned "No findings" — the over-flagging regression the runbook
+warns about did not appear. Detection fired on every bad case. The new v0.3
+skills passed cleanly on **both** model families; `llama3.1:8b` actually
+produced tidier output than qwen on `reviewing-decision-lifecycle` (no
+repetition).
+
+**Two observations, both pre-documented 7B ceilings — not regressions:**
+- **Top-findings-only recall on dense audit scans.** `auditing-config-and-build-hygiene`
+  scenario 1 caught the baked-in secret and the unvalidated-config fallback but
+  dropped `continue-on-error` and `node:latest`; scenario 2 caught the dead flag
+  and curl-pipe-bash but dropped the `/opt/sdk` machine-local dependency. Exactly
+  the runbook's "~top findings only from 7B-class models; pair with linters for
+  exhaustiveness" gap.
+- **Cosmetic format-leak (qwen only).** A few qwen responses appended the
+  template's "No findings:" sentence *after* listing real findings — the
+  documented "weak models mimic example output format" artifact. Absent on
+  llama3.1:8b. Per the runbook, not chased with more prose.
+
+**No tuning applied** — no heuristic regressions found, only model-capability
+limits already characterized in the runbook. Re-gate complete; suite is clear
+for the next behavior-changing PR.
+
+### Follow-up — tuned `auditing-config-and-build-hygiene` (the one soft skill)
+
+A closer scorecard of the detection scenarios (not just the clean ones) showed
+config-hygiene was the only skill below bar: on qwen2.5:7b it scored ~2/3 and
+~1.5/3 sub-finding recall on its two bad scans, dropping whole distinct finding
+*types* — the soft-failed `continue-on-error` gate, the `/opt/sdk` machine-local
+build dependency. All five dropped checks were present in `heuristics.md`; the
+gap was that `examples.md` (the model's de-facto output template) had one bad
+example that *bundled* the unpinned artifacts into a single finding and never
+exercised machine-local deps or the dead-vs-ownerless flag distinction.
+
+Fix (examples only — not regenerated, not drift-hashed): unbundled pinning into
+per-artifact findings (action SHA / base-image digest / lockfile are three
+checks), added a decision-rule line saying so, and added a **second bad example**
+covering build-reproducibility + the two-flag dispositions, using content
+isomorphic to but different from the eval inputs (jdk path, `wget|sh`, different
+flag names) to teach the pattern without teaching the answer.
+
+Re-run result:
+- **qwen2.5:7b** — S1 now catches the soft-failed gate (was missed); S2 now
+  catches the machine-local dependency (was missed). S3 still clean (the richer
+  template did not induce over-flagging).
+- **llama3.1:8b** — S2 **3/3**, both flags separately enumerated, confirming the
+  second example is sufficient for a capable 8B model.
+
+Residual (accepted, documented 7B-class ceiling): on the densest scan (S1, 5+
+defects) both models still drop `node:latest` after flagging the action pin —
+a *second instance of an already-flagged class* — and one llama run also dropped
+the config-validation finding. This is the "top-findings-only recall on dense
+scans" limit; per the runbook it is not chased with more prose (risks
+clean-code over-flagging). Posture for this skill at 7-8B stays detection +
+pair with deterministic linters (hadolint for `:latest`, a flag-audit tool) for
+exhaustiveness. The other five skills signed off as-is.
