@@ -137,3 +137,28 @@ manifest-canonical, `built_from: []`, no-docs-drift generation pattern.
 - Ships 4 eval scenarios (dedup, conflict reconciliation, all-clear no-inflation,
   severity-ranking with a Blocker float) + examples. Suite is now **24 skills**;
   CI gate, README, and Q7 (now RESOLVED) updated. 60 tests pass, no drift.
+
+### 2026-06-12 (cont.) — reconcile the open-questions ledger
+
+A "let's look at the other questions" pass found the *Open questions* section
+significantly stale: five questions still listed as open were actually answered
+by what shipped in phases 2–3, never marked. Dogfooding `auditing-documentation-
+health` (docs telling the truth about the code), reconciled them in place with
+the established `→ RESOLVED (see …)` pattern + a pointer to the closing
+skill/decision:
+
+- **Q1** (granularity, "the big blocker") → behavior-based, manifest-mapped (22
+  behaviors / 27 categories); both the original and revisited copies marked.
+- **Q5** (counterweight enforcement) → `checking-restraint` shipped exactly the
+  proposed "is this too much?" lens; D12's synthesizer tensions enforce it at
+  merge time.
+- **Q9** (compliance scope boundary) → `auditing-compliance-and-provenance`
+  adopted the proposed detect-and-escalate-to-humans stance.
+- **Q10/Q11** (regeneration model, async-critique) → the built hybrid pipeline
+  (manifest + generate + provenance hashes + drift gate).
+- **Q8** downgraded to *partially resolved*: the cron-shaped detectors exist (6
+  repo audits + hotspots), but the *fixing* half is still open — same gap as Q3.
+
+Added a "Live state" banner naming what's **genuinely** open: Q3 (review-vs-
+maintenance modes), Q4 (findings-vs-scores), Q6 (idiom packs), the Q8 fixing
+residual, and the Q2 low-priority candidates. Docs-only; 61 tests pass, no drift.
