@@ -185,7 +185,7 @@ skills:
       hardcoded user-facing strings, naive pluralization, non-locale-aware
       number/date/currency formatting, and RTL-unsafe layout. Use when
       reviewing components, templates, markup, forms, modals, UI text, or
-      anything user-facing. Skip on changes with no user-facing surface —
+      anything user-facing. Skip when the change has no user-facing surface —
       backend, CLI, library, or infra code with no rendered UI or localized
       strings.
     picker: >

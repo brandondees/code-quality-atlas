@@ -5,7 +5,7 @@ description: 'Reviews UI changes for accessibility and internationalization: sem
   names on icon buttons and inputs, contrast, ARIA misuse, hardcoded user-facing strings,
   naive pluralization, non-locale-aware number/date/currency formatting, and RTL-unsafe
   layout. Use when reviewing components, templates, markup, forms, modals, UI text,
-  or anything user-facing. Skip on changes with no user-facing surface — backend,
+  or anything user-facing. Skip when the change has no user-facing surface — backend,
   CLI, library, or infra code with no rendered UI or localized strings.'
 provenance:
   taxonomy_version: v0.3
@@ -21,7 +21,7 @@ provenance:
 
 ## When to use
 
-Reviews UI changes for accessibility and internationalization: semantic HTML vs div-with-onclick, keyboard operability and focus management, accessible names on icon buttons and inputs, contrast, ARIA misuse, hardcoded user-facing strings, naive pluralization, non-locale-aware number/date/currency formatting, and RTL-unsafe layout. Use when reviewing components, templates, markup, forms, modals, UI text, or anything user-facing. Skip on changes with no user-facing surface — backend, CLI, library, or infra code with no rendered UI or localized strings.
+Reviews UI changes for accessibility and internationalization: semantic HTML vs div-with-onclick, keyboard operability and focus management, accessible names on icon buttons and inputs, contrast, ARIA misuse, hardcoded user-facing strings, naive pluralization, non-locale-aware number/date/currency formatting, and RTL-unsafe layout. Use when reviewing components, templates, markup, forms, modals, UI text, or anything user-facing. Skip when the change has no user-facing surface — backend, CLI, library, or infra code with no rendered UI or localized strings.
 
 **Shape: diff.** Written for concrete code; not meant for design docs or plans.
 

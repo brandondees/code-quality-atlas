@@ -46,17 +46,20 @@ in mind — wide fan-out is faster but costs more context and more sandboxes.
 2. **Honor each lens's skip conditions.** The narrowly-scoped lenses carry
    explicit *Skip when…* clauses (e.g. `reviewing-accessibility-and-i18n` skips
    backend/CLI repos, `reviewing-llm-integration` skips repos with no model
-   call). An agent that finds the skip condition true for its repo should report
-   "Not applicable" for that lens rather than inventing findings — this is what
-   keeps a wide fan-out from drowning the report in noise from irrelevant repos.
+   call). An agent that finds the skip condition true for its repo should return
+   `[]` for that lens (identical to a ran-but-clean lens — the orchestrator drops
+   both) and note the skip in its summary, rather than inventing findings — this
+   is what keeps a wide fan-out from drowning the report in noise from irrelevant
+   repos.
 
 3. **Fan out with background agents.** Spawn one agent per repo (the harness's
    parallel-agent / background-task mechanism). Give each the **same** prompt:
    the lens set, the repo to audit, and the instruction to **return findings in
    the finding contract** — a JSON list of `{repo, location, severity, lens,
-   finding, fix}` objects (add `repo` to the standard four fields so findings
-   stay attributable after the merge). An agent with no findings for a lens
-   returns an empty list for it, not prose.
+   finding, fix}` objects (add `repo` to the contract's five base fields so
+   findings stay attributable after the merge). An agent with no findings for a
+   lens returns an empty list for it, not prose; a lens it skipped per step 2
+   does the same.
 
 4. **Aggregate centrally.** When the agents return, the orchestrator applies
    `synthesizing-review-findings`:
