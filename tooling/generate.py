@@ -14,6 +14,21 @@ _KIND_TITLE = {
     "references": "References to mine",
 }
 
+# Standing guidance prepended to every tool-rules.md. The named tools in each
+# list are concrete starting points, not a mandate — this keeps a reviewer from
+# cargo-culting a canonical-but-broken tool instead of finding the equivalent
+# that fits the stack.
+_TOOLING_PREAMBLE = (
+    "> **Selecting tools for this stack.** The tools named below are "
+    "field-tested starting points, not a mandate. Pick the one that fits this "
+    "codebase's language version, build, and CI — and verify it actually runs "
+    "on your toolchain before relying on it. A listed tool that is broken, "
+    "abandoned, or noisy on your setup is a gap to close, not a permanent "
+    "`continue-on-error`: prefer a working, maintained equivalent (often a "
+    "younger, less well-known one) over a canonical-but-broken default. The "
+    "capability is the requirement; the specific tool is replaceable.\n"
+)
+
 
 def build_reference(skill: Skill, kind: str, docs_root: str = ".") -> str:
     """Concatenate the `kind` subsection from each source category into one
@@ -28,7 +43,8 @@ def build_reference(skill: Skill, kind: str, docs_root: str = ".") -> str:
             entries.append((src.section, body))
     toc = "\n".join(f"- From category #{n}" for n, _ in entries)
     parts = [f"## From category #{n}\n\n{body}" for n, body in entries]
-    header = f"# {_KIND_TITLE[kind]} — {skill.name}\n\n## Contents\n{toc}\n"
+    preamble = f"{_TOOLING_PREAMBLE}\n" if kind == "tooling" else ""
+    header = f"# {_KIND_TITLE[kind]} — {skill.name}\n\n{preamble}## Contents\n{toc}\n"
     return header + "\n" + "\n\n".join(parts) + "\n"
 
 
