@@ -10,7 +10,7 @@ provenance:
   built_from:
   - category: 17
     source: docs/research/cluster-5-verification.md#17
-    hash: 52dd483c959a98d8c492566859693f11a6d3a025898824612d13d723d3f4d1c0
+    hash: 812542b90495808d4a5d1c03ec846668333da9b1ffc182ef86ad3512e3586527
 ---
 
 # reviewing-test-quality
@@ -36,7 +36,7 @@ The head of the full checklist — enough for a first pass without opening any r
 - Is the test at the **right level** (pyramid/trophy) — logic in fast unit/integration, e2e reserved for critical journeys?
 - **Over-mocking smell**: do mocks assert on implementation calls so a refactor breaks tests without behavior changing? Prefer real collaborators / fakes (cross #11).
 - Are **edge/boundary** cases covered (empty, null, max, error paths) — where the bugs live (cross #1)?
-- Would the suite **catch a real bug** (mutation intuition), or does high coverage mask weak assertions?
+- Would the suite **catch a real bug**, not just execute lines? Apply mutation intuition — for a pure, deterministic, fast-to-test unit, prefer actually running a mutation tool (cheap, high-signal) over eyeballing it; otherwise high coverage masks weak assertions.
 
 ## Going deeper
 
