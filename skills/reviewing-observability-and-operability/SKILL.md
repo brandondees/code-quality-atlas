@@ -16,6 +16,8 @@ provenance:
 
 # reviewing-observability-and-operability
 
+*Can you debug this in production at 3am? Logs, traces, health checks, kill switches, rollback.*
+
 ## When to use
 
 Reviews changes for production operability: structured logs with consistent fields and correlation/trace IDs, right log levels with no PII, context-rich errors that wrap rather than swallow, golden-signal instrumentation and propagated trace context, liveness/readiness checks, kill switches for risky changes, graceful shutdown, and metric cardinality discipline. Use when reviewing logging, metrics, tracing, alerts, health checks, feature flags, or deploy/rollback paths.

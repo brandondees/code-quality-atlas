@@ -16,6 +16,8 @@ provenance:
 
 # auditing-documentation-health
 
+*Do the docs still tell the truth? API parity, stale examples, ADR coverage, changelog discipline.*
+
 ## When to use
 
 Audits documentation health across a repository: API-surface-to-docs parity, docstring accuracy against current signatures, README front-door freshness, runnable examples that still run, ADR coverage for non-obvious decisions, changelog discipline, orphaned or contradictory docs, and stale diagrams. A repo-wide / scheduled audit. Use when auditing docs, READMEs, docstrings, changelogs, ADRs, or onboarding material.

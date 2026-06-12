@@ -15,6 +15,8 @@ provenance:
 
 # reviewing-test-quality
 
+*Do the tests prove anything? Behavior coupling, over-mocking, edge coverage, determinism.*
+
 ## When to use
 
 Reviews tests for quality: behavior vs implementation coupling, over-mocking, meaningful branch/edge coverage on the diff, regression tests for bug fixes, isolation and determinism (no shared state, real clocks, or unseeded randomness), right level per the pyramid/trophy, and disabled/focused tests sneaking in. Use when reviewing test files, test coverage, mocks, fixtures, flaky tests, or a bug fix's tests.

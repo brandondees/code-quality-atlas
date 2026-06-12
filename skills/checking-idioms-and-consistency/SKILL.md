@@ -16,6 +16,8 @@ provenance:
 
 # checking-idioms-and-consistency
 
+*Does this look like the rest of the codebase? Conventions, idioms, no second parallel way.*
+
 ## When to use
 
 Checks that a change follows the project's own conventions and the language/framework's idioms: formatter applied, idiomatic constructs over clumsy equivalents, recurring problems solved the same way the codebase already does, no second parallel way to do the same thing, consistent naming/casing/imports/file layout. Use when reviewing style, conventions, idioms, framework usage, or consistency with the rest of the codebase.

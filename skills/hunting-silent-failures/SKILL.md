@@ -18,6 +18,8 @@ provenance:
 
 # hunting-silent-failures
 
+*Where do errors vanish? Swallowed exceptions, silent fallbacks, missing timeouts and retries.*
+
 ## When to use
 
 Reviews changes for swallowed or silently-handled errors — empty catch/rescue blocks, ignored returned errors, bare excepts, unhandled promise rejections, broad exception catches — and for unsafe fallbacks, missing timeouts, and absent retries/circuit-breakers. Use when reviewing error handling, exceptions, try/catch, rescue, fallback, resilience, timeouts, or resource cleanup on failure paths.

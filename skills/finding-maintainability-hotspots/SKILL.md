@@ -14,6 +14,8 @@ provenance:
 
 # finding-maintainability-hotspots
 
+*Where does the repo hurt most? Churn × complexity, change-coupling, bus factor, untracked debt.*
+
 ## When to use
 
 Scans a repository for maintainability hotspots: high churn × complexity files, change-coupling, bus-factor / knowledge concentration, and untracked tech debt. A repo-wide / scheduled scan rather than a single-diff review. Use when auditing maintainability, tech debt, refactoring targets, or risky areas across the codebase.

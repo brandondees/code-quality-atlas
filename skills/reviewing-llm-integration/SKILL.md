@@ -4,7 +4,8 @@ description: Reviews LLM/AI integration code for prompt-injection surface, the l
   trifecta, unvalidated model output, missing eval coverage, unpinned models, unbounded
   token/cost, and PII sent to third-party models. Use when reviewing code that calls
   an LLM or model API, builds prompts, parses model output, or wires up agents and
-  tools.
+  tools. Skip when the change has no model/LLM call, prompt construction, or model-output
+  handling — ordinary code that never touches an AI API.
 provenance:
   taxonomy_version: v0.3
   built_from:
@@ -18,9 +19,11 @@ provenance:
 
 # reviewing-llm-integration
 
+*Is the model call safe and bounded? Injection surface, output validation, evals, token cost, PII.*
+
 ## When to use
 
-Reviews LLM/AI integration code for prompt-injection surface, the lethal trifecta, unvalidated model output, missing eval coverage, unpinned models, unbounded token/cost, and PII sent to third-party models. Use when reviewing code that calls an LLM or model API, builds prompts, parses model output, or wires up agents and tools.
+Reviews LLM/AI integration code for prompt-injection surface, the lethal trifecta, unvalidated model output, missing eval coverage, unpinned models, unbounded token/cost, and PII sent to third-party models. Use when reviewing code that calls an LLM or model API, builds prompts, parses model output, or wires up agents and tools. Skip when the change has no model/LLM call, prompt construction, or model-output handling — ordinary code that never touches an AI API.
 
 **Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists.
 

@@ -18,6 +18,8 @@ provenance:
 
 # reviewing-decision-lifecycle
 
+*Is this decision sound and recorded? Adoption justification, lock-in/exit, ADR assumptions, revisit-triggers, planned retirement.*
+
 ## When to use
 
 Reviews a decision as it is made — an ADR, RFC, design doc, adoption PR, or deprecation/rollout plan — rather than the code that implements it: is the choice (dependency, framework, platform, build-vs-buy) justified against cheaper options; is lock-in and exit cost assessed; is the rationale and its assumptions recorded with a revisit-trigger; is retirement planned on a schedule with a sunset date and migration path. Use when reviewing an architecture decision record, an RFC, a dependency or technology adoption, a vendor or build-vs-buy choice, or a deprecation/sunset plan.

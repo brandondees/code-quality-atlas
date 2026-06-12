@@ -19,6 +19,8 @@ provenance:
 
 # reviewing-pr-and-process-hygiene
 
+*Is the PR itself reviewable? Size, atomic commits, description, scope creep, changelog.*
+
 ## When to use
 
 Reviews the PR itself rather than just the code: size and single purpose (~<=400 net LOC), atomic commits with imperative why-bearing messages, correct conventional type and breaking-change signaling, risk and rollback notes, docs/changelog updated with the API surface, no drive-by scope creep, no committed secrets or debug leftovers. Use when reviewing a pull request's structure, commits, description, changelog, or readiness to merge.

@@ -386,3 +386,37 @@ and scheduled check-in rather than trusting the push stream. Optional routine
 tweak (a one-line issue-comment beacon from `atlas-review-pr`) offered, pending
 owner call. **Remaining v0.3 build:** #28 operational & resilience design, #31
 infrastructure-as-code, and the ~10 add-factor regenerations.
+
+## 2026-06-12 — Second feedback cycle: direct-invocation discoverability
+
+A dogfood session reported it **never reached for the suite** on a multi-repo
+audit — it spawned ad-hoc Explore agents instead. Root cause: 22 peer lenses
+with no scannable summaries, no negative triggers, and no fleet workflow. PR #30
+had already repositioned `choosing-review-lenses` from a mandatory front door to
+an *optional* uncertainty helper (call lenses directly when the relevant ones
+are clear) — but it hand-edited the generated router `SKILL.md`, diverging it
+from the generator (CI's `drift` only hashes research provenance, so it passed).
+
+This cycle's refinements, all source-of-truth-first:
+
+- **Skip clauses.** The five narrowly-scoped lenses (accessibility-and-i18n,
+  llm-integration, migration-and-data-safety, concurrency-and-async,
+  api-contract-safety) gained explicit *Skip when…* sentences in their manifest
+  descriptions, so direct invocation doesn't misfire on irrelevant repos —
+  matching the `claude-api` skill's SKIP precedent the feedback cited.
+- **Scannable taglines.** `build_skill_md` now emits each lens's one-line
+  `picker` as an italic tagline between the H1 and "When to use", so a lens is
+  recognizable at a glance without reading its trigger-rich description.
+- **Router reconciled.** Added an optional `body` field to the router (terse
+  `description` for the listing, richer `body` for the loaded "When to use"),
+  and ported PR #30's two "How to pick" bullets into `build_router_md`. Regenerate
+  now reproduces PR #30 faithfully — the divergence is closed, not reverted.
+- **Multi-repo fan-out.** New `docs/runbooks/multi-repo-audit.md`: one background
+  agent per repo, each emitting the synthesizer's finding contract (plus a `repo`
+  field), aggregated centrally — dedupe within repo, group across repos, one
+  fleet verdict. Linked from the README and the synthesizer's *Going deeper*.
+
+Generate clean, no drift, 63 tests pass (+2: picker tagline, router body), evals
+valid. **Not yet addressed:** the harness-level cost of 22 names in the listing
+and the fact that frontmatter descriptions can be dropped from the model's skill
+budget remain harness constraints the SessionStart hook mitigates but can't fix.

@@ -5,7 +5,9 @@ description: 'Reviews concurrent and async code for races and ordering bugs: sha
   from interleaved requests, lock ordering, unawaited promises, accidental sequential
   awaits, non-idempotent message consumers, exactly-once assumptions, and missing
   cancellation/timeout propagation. Use when reviewing threads, async/await, promises,
-  locks, queues, message handlers, or anything two callers can run at once.'
+  locks, queues, message handlers, or anything two callers can run at once. Skip when
+  the code is single-threaded and synchronous with no shared mutable state, async/await,
+  or message handling — nothing two callers race on.'
 provenance:
   taxonomy_version: v0.3
   built_from:
@@ -16,9 +18,11 @@ provenance:
 
 # reviewing-concurrency-and-async
 
+*What breaks when two run at once? Races, lost updates, unawaited promises, idempotency.*
+
 ## When to use
 
-Reviews concurrent and async code for races and ordering bugs: shared mutable state without synchronization, check-then-act spanning an await, lost updates from interleaved requests, lock ordering, unawaited promises, accidental sequential awaits, non-idempotent message consumers, exactly-once assumptions, and missing cancellation/timeout propagation. Use when reviewing threads, async/await, promises, locks, queues, message handlers, or anything two callers can run at once.
+Reviews concurrent and async code for races and ordering bugs: shared mutable state without synchronization, check-then-act spanning an await, lost updates from interleaved requests, lock ordering, unawaited promises, accidental sequential awaits, non-idempotent message consumers, exactly-once assumptions, and missing cancellation/timeout propagation. Use when reviewing threads, async/await, promises, locks, queues, message handlers, or anything two callers can run at once. Skip when the code is single-threaded and synchronous with no shared mutable state, async/await, or message handling — nothing two callers race on.
 
 **Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists.
 

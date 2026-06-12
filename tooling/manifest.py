@@ -53,6 +53,7 @@ class Router:
     name: str
     description: str
     routes: list[Route]
+    body: str = ""           # richer "When to use" text; falls back to description
 
 
 @dataclass
@@ -141,6 +142,8 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
             raise ValidationError(f"router: invalid or duplicate name {r.name!r}")
         if not r.description or len(r.description) > 1024:
             raise ValidationError("router: description must be non-empty and <=1024 chars")
+        if len(r.body) > 1024:
+            raise ValidationError("router: body must be <=1024 chars")
         if not r.routes:
             raise ValidationError("router: routes must be non-empty")
         for route in r.routes:
@@ -210,6 +213,7 @@ def load_manifest(path: str) -> Manifest:
                 description=r["description"].strip(),
                 routes=[Route(when=x["when"], run=x["run"], note=x.get("note", ""))
                         for x in r["routes"]],
+                body=r.get("body", "").strip(),
             )
         except KeyError as e:
             raise ValidationError(f"router: missing field {e}") from e

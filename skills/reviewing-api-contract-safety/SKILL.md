@@ -5,7 +5,9 @@ description: 'Reviews public API and contract changes for safety: backward compa
   it out" on new surface, typed and stable error contracts, idempotency for unsafe
   operations, pagination and rate limits on collections, contract tests, and no internal-representation
   leakage. Use when reviewing REST/GraphQL/RPC endpoints, request or response shapes,
-  SDK surface, webhooks, or any consumer-facing contract.'
+  SDK surface, webhooks, or any consumer-facing contract. Skip when the change is
+  internal-only with no consumer-facing surface — private helpers or implementation
+  details no external caller depends on.'
 provenance:
   taxonomy_version: v0.3
   built_from:
@@ -16,9 +18,11 @@ provenance:
 
 # reviewing-api-contract-safety
 
+*Will this break a consumer? Compatibility, error contracts, idempotency, pagination.*
+
 ## When to use
 
-Reviews public API and contract changes for safety: backward compatibility (versioned/deprecated if breaking), hard-to-misuse shapes, "when in doubt leave it out" on new surface, typed and stable error contracts, idempotency for unsafe operations, pagination and rate limits on collections, contract tests, and no internal-representation leakage. Use when reviewing REST/GraphQL/RPC endpoints, request or response shapes, SDK surface, webhooks, or any consumer-facing contract.
+Reviews public API and contract changes for safety: backward compatibility (versioned/deprecated if breaking), hard-to-misuse shapes, "when in doubt leave it out" on new surface, typed and stable error contracts, idempotency for unsafe operations, pagination and rate limits on collections, contract tests, and no internal-representation leakage. Use when reviewing REST/GraphQL/RPC endpoints, request or response shapes, SDK surface, webhooks, or any consumer-facing contract. Skip when the change is internal-only with no consumer-facing surface — private helpers or implementation details no external caller depends on.
 
 **Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists.
 

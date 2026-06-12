@@ -17,6 +17,8 @@ provenance:
 
 # reviewing-module-design
 
+*Are the boundaries right? Coupling, encapsulation, interfaces that are hard to misuse, illegal states unrepresentable.*
+
 ## When to use
 
 Reviews module and type design: cohesion and coupling (via connascence), encapsulation, hard-to-misuse interfaces, and making illegal states unrepresentable. Use when reviewing class/module structure, interfaces, type or data modeling, coupling, or API ergonomics for callers.

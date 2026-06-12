@@ -20,6 +20,8 @@ provenance:
 
 # auditing-enforcement-and-meta-artifacts
 
+*Is the enforcement apparatus healthy? Suppression hygiene & baseline trend, actionable alerts/monitoring-as-code, codegen-source drift gate.*
+
 ## When to use
 
 Audits the enforcement apparatus and meta-artifacts wrapped around the code, as their own reviewable surface: suppression hygiene (blanket or unjustified `# noqa` / `eslint-disable` / `# type: ignore`, unused/stale suppressions, a lint or type baseline growing rather than shrinking), monitoring config as an artifact (cause-based or unactionable alerts, alert rules with no runbook or `for:` duration, dashboards referencing renamed/dead metrics, click-ops that drift instead of monitoring-as-code), and codegen-to-source drift (checked-in generated artifacts that can silently diverge from their generator/spec with no regenerate-and-diff gate in CI). A repo-wide / scheduled audit rather than a single-diff review. Use when auditing lint/type suppressions, alert rules, dashboards, or checked-in generated code.

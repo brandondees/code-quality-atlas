@@ -18,6 +18,8 @@ provenance:
 
 # checking-restraint
 
+*Is this change too much? Premature abstraction or optimization — the brake pedal.*
+
 ## When to use
 
 Reviews changes for over-engineering — premature abstraction, speculative generality, the wrong abstraction, and premature optimization without a profile. The restraint / brake-pedal lens. Use when a change adds abstraction layers, config knobs, generality, or hand-optimized code, or when asking whether a change is doing too much.

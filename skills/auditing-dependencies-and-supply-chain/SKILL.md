@@ -18,6 +18,8 @@ provenance:
 
 # auditing-dependencies-and-supply-chain
 
+*Is the dependency tree safe? CVEs, pinning, typosquats, install scripts, licenses.*
+
 ## When to use
 
 Audits dependencies and the supply chain: known CVEs in direct and transitive deps, unpinned or floating versions, lockfile integrity, abandoned or low-reputation packages, typosquats, install scripts, license compatibility of the dependency tree, and SBOM currency. A repo-wide / scheduled audit. Use when auditing package.json, lockfiles, requirements, vendored code, or supply-chain risk.

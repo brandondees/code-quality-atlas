@@ -16,6 +16,8 @@ provenance:
 
 # reviewing-performance-and-efficiency
 
+*Will this be slow or expensive at scale? N+1, O(n²) hot paths, caching, payload buffering.*
+
 ## When to use
 
 Reviews changes for performance and efficiency problems: N+1 queries, await-in-loop and chatty per-item I/O, accidental O(n²) on hot paths, recomputed expensive values, caches without invalidation, buffering whole payloads instead of streaming, allocation pressure, bundle/startup bloat, and per-request cloud cost. Demands a profile before accepting optimization claims. Use when reviewing queries in loops, hot paths, caching, large payloads, or anything justified by "performance."
