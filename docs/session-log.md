@@ -464,7 +464,7 @@ Opened **Q18** (artifact-scoped lens hosting) in [`open-questions.md`](open-ques
 it to the Live-state banner; G11's disposition table parks the *factor* at **#30 meta-artifact**
 (keeping Q16 = runtime safety) pending the owner call. **Docs-only** — `taxonomy.md`/`manifest.yaml`
 untouched, so no drift; nothing built yet. Decisions pending: Q18 hosting pattern (a/b/c) and the
-G11 factor placement, both gating the build.
+G11 factor placement, both gating the build. *(PR #33, merged.)*
 
 ## 2026-06-12 — Cross-model eval re-gate (local Ollama, laptop)
 
@@ -543,6 +543,57 @@ clean-code over-flagging). Posture for this skill at 7-8B stays detection +
 pair with deterministic linters (hadolint for `:latest`, a flag-audit tool) for
 exhaustiveness. The other five skills signed off as-is.
 
+### 2026-06-12 (cont.) — decision sweep: Q16 resolved (D14, promote agentic safety → #32)
+
+Resumed the decision-gated open questions as a sweep (the back half of the "let's discuss the
+decision questions" thread). First call: **Q16 → promote** (user, D5-style). Agentic/tool-use
+safety leaves #25 to become **#32 Agentic & tool-use safety**, scoped to the *action/tool surface*
+(distinct from #25's *model call*). The **trigger gap** was the decider — agent-heavy codebases
+(tool defs, MCP servers, autonomous loops) may not read as "LLM integration," so #25's trigger can
+miss exactly the highest-risk repos — reinforced by G1 cross-cutting ownership (#13/#14/#24/#25) and
+OWASP's *separate* Agentic Top 10 (ASI01–ASI10). The cheaper "sharpen #25's trigger only" middle
+path was considered and rejected (leaves G1 ownership unresolved; keeps the bundled ~8-check budget
+crowded). **#25↔#32 boundary:** model-call → #25, action/tool → #32; the lethal-trifecta *framing*
+stays #25 but its exfil/action-leg mitigations are #32 (#25 references #32, no double-report).
+
+Recorded as **D14**; `taxonomy.md` carries the #32 entry (placed with its sibling #25), G2/Q16
+flipped to resolved, the v0.3 disposition + numbering notes updated. **Docs-only, no build yet** —
+the agentic material already ships under #25, so nothing is lost in the interim; the build phase
+(move the 9 heuristics → #32 research section, lens `reviewing-agentic-safety` `shape: diff` with a
+skip-clause, router/synthesizer wiring, evals, `taxonomy_version` bump, cross-model re-gate) is
+**batched** with the other sweep outcomes per the user's "record and continue" call. **Holding the
+commit** to bundle Q16/Q13/Q18 decision-records into one docs PR at the end of the sweep. 32
+categories. Remaining sweep decisions: **Q13** (team-preferences overlay — keystone) and **Q18**
+(artifact-scoped lens hosting pattern).
+
+### 2026-06-12 (cont.) — decision sweep complete: Q13 (approved/deferred) + Q18 → D15
+
+Closed the remaining two sweep decisions.
+
+- **Q13 (team-preferences overlay) — design APPROVED, build DEFERRED.** The design was already
+  complete with both hard calls locked (tiered precedence; proposal-only inference), so this was an
+  approve-to-implementation call, not a fresh fork. User approved the design as the implementation
+  basis but **deferred the build** (sequenced after the v0.3 / #32 work rather than next) — so the
+  keystone unblock of Q17/Q18/Q14 waits. The §9 residuals (tier-tag granularity per-check vs
+  per-lens; overlay↔linter-config precedence; monorepo discovery; `acknowledge` expiry) are left to
+  implementation-planning.
+- **Q18 (artifact-scoped lens hosting) → D15: the `artifact` shape.** Chose option (b): a fourth
+  review **shape `artifact`** (sibling to diff / repo / decision), hosted as one entry-point lens
+  that presence-detects an artifact and loads a bundled rubric on demand, driven by a manifest
+  `artifacts:` table. Over (a) one-off lens — (b) *generalizes* the whole §3 catalog at one
+  description's cost (the pattern the owner asked to strengthen); over (c) retrieval-routed — (c)
+  breaks D7 plain-markdown portability (parked, long-horizon). **G11 authoring-quality factor → #30**
+  (keeps #32 = runtime agent safety); `SKILL.md`-authoring is the first instance (we already enforce
+  the standard on ourselves). Borrows linter-world presence-activation; feeds Q14's cleanest relevance
+  signal. `taxonomy.md` carries the #30 factor + the artifact shape in the topic-vs-shape note.
+
+**Sweep outcome — three decisions, all docs-only, all build-pending:** D14 (#32 agentic safety),
+D15 (`artifact` shape + G11→#30), Q13 (approved/deferred). Live-state banner updated. **Build
+backlog now (dependency-ordered):** the v0.3 remainder (#28 operational, #31 IaC, ~10 add-factor
+regenerations) · #32 agentic-safety lens · the `artifact` shape + `SKILL.md` rubric · then the
+deferred Q13 overlay. All gated on a cross-model eval re-gate (no local model in this sandbox).
+Committing the batched decision-records as one docs PR.
+
 ## 2026-06-12 — v0.3 build complete: #28 resilience + #31 IaC (the last two)
 
 Built the two remaining v0.3 categories, closing out D13's build phase (all 31
@@ -590,3 +641,7 @@ the whole-repo audit list grew seven → eight (IaC only where manifests exist).
 Generate clean, no drift, eval structure valid for all 28, 81 tests pass. 26 lens
 skills + router + synthesizer. Residuals are the known 7B ceilings (secondary-
 finding recall on dense scans; cosmetic format-leak), not chased per the runbook.
+
+With D13's build done, the remaining build backlog (from the decision sweep
+above) is: **#32 agentic-safety lens** (D14) · the **`shape: artifact` lens** +
+`SKILL.md` rubric (D15) · then the deferred **Q13 team-preferences overlay**.
