@@ -90,3 +90,25 @@ Surfaced 2026-06-12 chasing "where would *set up a vuln scanner* or *tidy up lin
 This is precisely why a taxonomy-vs-skills audit can't be the gap-hunting method for framing gaps. It motivates a second from-first-principles research pass over *kinds of reviewable surface* — the **round-2 gap hunt** ([`research/taxonomy-gap-hunt-round-2.md`](research/taxonomy-gap-hunt-round-2.md)), seeded by the meta-layer and decision-lifecycle omissions this finding exposed (enforcement apparatus; documentation-as-designed-system; binary/generated artifacts; dependency *selection & exit* vs. mere patching; …).
 
 **Resolved (2026-06-12, taxonomy v0.3 / D13):** the enforcement apparatus is now a first-class category — **#30 Enforcement apparatus & meta-artifacts** (suppression hygiene, monitoring-config-as-artifact, codegen↔source drift) — owned by the repo-shaped audit `auditing-enforcement-and-meta-artifacts` (research in [`research/cluster-5-verification.md`](research/cluster-5-verification.md) #30). The framing hole this finding named is closed.
+
+## G11 — Artifact-authoring quality is a reviewable surface we hold ourselves to but never review
+
+Surfaced 2026-06-12 (owner question: *do we have anything correlating to Anthropic's Agent Skill authoring best-practices guide?*). The answer split two ways and exposed a framing-class gap (the G10 kind — a *silent* hole, not a thin heuristic):
+
+1. **As authors — fully covered.** The best-practices guide *is* **D7**, transcribed into our building standard and **enforced in the pipeline**: `tooling/manifest.py` validates `description` ≤1024 chars; `tooling/generate.py` inlines top checks (progressive disclosure), emits gerund names, one-level-deep bundled files, no time-sensitive text. The suite is a reference *implementation* of the guide.
+2. **As a review lens — unowned.** Nothing reviews **someone else's** `SKILL.md` / agent definition *against* that standard. The two nearest touchpoints miss it: #24 "agent-native parity" is about the *product* exposing agent-reachable actions; #22/#24's `AGENTS.md`-as-doc-artifact (added 2026-06-12) covers only *drift* (is it still true?), not *authoring quality*.
+
+**The generalization (the reason this matters beyond the example).** "Is this `SKILL.md` well-authored?" is one instance of a broad class: files that are **not application source** but carry their own canonical "well-formed X" standard and dedicated linter — Dockerfiles (hadolint), Terraform (tflint/Checkov), K8s manifests (kube-linter), CI workflows (actionlint/zizmor), OpenAPI specs (Spectral/Zally), ADRs, changelogs, `AGENTS.md`, model cards, datasheets, `SKILL.md`. The atlas *touches* several of these but always **folded into a topic cluster** (migrations→#20, IaC→#31, CI→#19, API specs→#13), never as a declared **artifact-scoped review shape** with presence-based activation. That missing slot is why the `SKILL.md` case had nowhere to land.
+
+> **Generalize G10's lesson once more:** the map frames artifacts → properties → mistake-detection, and #30 framed the *enforcement apparatus* as reviewable — but neither framed **"is this artifact well-formed per its own published standard"** as a first-class, presence-activated review behavior spanning artifact *types*.
+
+**Three distinct agent-surfaces** (this gap clarified that they're separate, which informs the Q16 call): runtime agent **security** (tool least-privilege, lethal trifecta) → Q16/#25; agent-facing **docs drift** (`AGENTS.md` stays true) → #22/#24; agent-artifact **authoring quality** (`SKILL.md` built to the guide) → **this gap, unowned.** Bundling authoring under a Q16 *security* category would blur the trigger.
+
+**Disposition (candidate factor + a hosting question).**
+
+| Concern | Where it could land | Lean |
+|---|---|---|
+| "Is this artifact well-formed per its standard?" (the factor) | a #30 meta-artifact factor · a #22/#24 factor · or a promoted Q16 category | **#30 meta-artifact** (keeps Q16 = runtime safety) |
+| *How* to host many artifact lenses without top-level context bloat (the pattern) | new open question | **Q18** (artifact-scoped lens hosting) |
+
+Full research — the artifact-standard catalog (the references beyond the one guide), the context-cost evidence (lost-in-the-middle, context rot, RAG-MCP, the 128-tool ceiling), the presence-based-activation prior art (MegaLinter/ESLint-overrides/Spectral), and three hosting options — is in [`research/artifact-scoped-lenses.md`](research/artifact-scoped-lenses.md). **Status: gap logged + researched; placement and hosting-pattern decisions pending (Q18).**
