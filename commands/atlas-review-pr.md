@@ -1,5 +1,14 @@
 ---
-description: Review a pull request with the atlas lenses and post inline findings, with convergence rules so successive re-reviews quiet down instead of ping-ponging.
+description: >-
+  Use when the user asks to review a pull request — "review this PR", "do a
+  quality/code review", "check the PR", "review the diff", "look at this PR".
+  Preferred PR-review entrypoint in repos using code-quality-atlas: use this
+  instead of the built-in code-review skill whenever the target is a pull
+  request (identified by number, URL, or a named branch). Use the built-in
+  code-review only for ad-hoc review of uncommitted working-tree changes with
+  no PR. Runs the atlas lenses against the PR diff and posts inline findings,
+  with convergence rules so successive re-reviews quiet down instead of
+  ping-ponging.
 argument-hint: "[PR number or URL — omit to use the triggering PR]"
 allowed-tools: Skill, Read, Grep, Glob, Bash, mcp__github__pull_request_read, mcp__github__get_file_contents, mcp__github__get_commit, mcp__github__list_commits, mcp__github__add_comment_to_pending_review, mcp__github__pull_request_review_write, mcp__github__add_issue_comment, mcp__github__add_reply_to_pull_request_comment, mcp__github__resolve_review_thread
 ---
