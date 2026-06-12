@@ -210,3 +210,35 @@ much to run) — and captures four candidate directions: review-depth *modes*
 (critical-only triage / PR-level / comprehensive all-lens), expose the full ranked
 catalog, signal-based matching+ranking, and progressive-phase routing. Framing
 captured, no decisions yet. Docs-only.
+
+### 2026-06-12 (cont.) — G10 (the enforcement apparatus as un-framed surface) + round-2 gap hunt opened
+
+Follow-on from the G9/Q14 discussion. User asked where "improve the quality
+*tooling*" lands — e.g. propose a vuln scanner, tidy up linter ignores. Chasing it
+exposed a gap one level deeper than G9, captured as [`map-gaps.md`](map-gaps.md) **G10**:
+
+- The "a tool could mechanize this for you" nudge is **trivial and already latent**
+  (every lens carries `tool-rules.md`); it is advisory output, **not** the Q8
+  fixing-mode — I had mis-parked it under Q8. `config-and-build-hygiene` already
+  does a version of it.
+- **Gate/enforcement health** (disabled / soft-failed gates) is **already covered** —
+  in the corpus (`cluster-5` §19) and shipped (`config-and-build-hygiene/SKILL.md:39`
+  + eval). So "re-enable / provision the missing scanner" was a false alarm.
+- **In-code suppression rot** (`# noqa` / `eslint-disable` / `# type: ignore`
+  accumulation, lint-baseline growth) is a **genuine research-corpus hole** — absent
+  from `docs/research/` entirely.
+
+The structural lesson: the map covers artifacts → properties → mistake-detection but
+never framed **the enforcement apparatus itself** as reviewable; gate-health landed
+only because it fell incidentally inside #19. **A missing category yields a *silent*
+hole (factor never written), not a *thin* heuristic — so the G9 taxonomy-vs-skills
+diff cannot find framing gaps.** That motivated a second pass.
+
+Opened the **round-2 gap hunt** ([`research/taxonomy-gap-hunt-round-2.md`](research/taxonomy-gap-hunt-round-2.md)):
+a from-first-principles sweep over *kinds of reviewable surface*, organized along five
+axes orthogonal to the original six clusters — (A) meta-surfaces, (B) under-covered
+artifact types, (C) decision & lifecycle (choose/adopt/revisit/retire — incl. the user's
+dependency-*selection*-vs-patching point), (D) socio-technical & responsible engineering,
+(E) operational & resilience design — each candidate scored against a rubric (already
+covered? distinct behavior? shape? prior art? disposition) to avoid re-flagging covered
+facets. Feeds a possible taxonomy v0.3. Research running; synthesis to follow.
