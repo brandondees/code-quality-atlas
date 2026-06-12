@@ -463,3 +463,37 @@ repetition).
 **No tuning applied** — no heuristic regressions found, only model-capability
 limits already characterized in the runbook. Re-gate complete; suite is clear
 for the next behavior-changing PR.
+
+### Follow-up — tuned `auditing-config-and-build-hygiene` (the one soft skill)
+
+A closer scorecard of the detection scenarios (not just the clean ones) showed
+config-hygiene was the only skill below bar: on qwen2.5:7b it scored ~2/3 and
+~1.5/3 sub-finding recall on its two bad scans, dropping whole distinct finding
+*types* — the soft-failed `continue-on-error` gate, the `/opt/sdk` machine-local
+build dependency. All five dropped checks were present in `heuristics.md`; the
+gap was that `examples.md` (the model's de-facto output template) had one bad
+example that *bundled* the unpinned artifacts into a single finding and never
+exercised machine-local deps or the dead-vs-ownerless flag distinction.
+
+Fix (examples only — not regenerated, not drift-hashed): unbundled pinning into
+per-artifact findings (action SHA / base-image digest / lockfile are three
+checks), added a decision-rule line saying so, and added a **second bad example**
+covering build-reproducibility + the two-flag dispositions, using content
+isomorphic to but different from the eval inputs (jdk path, `wget|sh`, different
+flag names) to teach the pattern without teaching the answer.
+
+Re-run result:
+- **qwen2.5:7b** — S1 now catches the soft-failed gate (was missed); S2 now
+  catches the machine-local dependency (was missed). S3 still clean (the richer
+  template did not induce over-flagging).
+- **llama3.1:8b** — S2 **3/3**, both flags separately enumerated, confirming the
+  second example is sufficient for a capable 8B model.
+
+Residual (accepted, documented 7B-class ceiling): on the densest scan (S1, 5+
+defects) both models still drop `node:latest` after flagging the action pin —
+a *second instance of an already-flagged class* — and one llama run also dropped
+the config-validation finding. This is the "top-findings-only recall on dense
+scans" limit; per the runbook it is not chased with more prose (risks
+clean-code over-flagging). Posture for this skill at 7-8B stays detection +
+pair with deterministic linters (hadolint for `:latest`, a flag-audit tool) for
+exhaustiveness. The other five skills signed off as-is.
