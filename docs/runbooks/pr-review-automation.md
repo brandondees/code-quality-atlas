@@ -90,16 +90,20 @@ In the Claude Code web app → **Routines** → **New routine**:
   ```text
   /atlas-review-pr
 
-  After that first review, do not exit — stay resident and watch this PR.
-  Subscribe to its activity and re-run the review on each new push, in this same
-  session. Keep the round count and the findings you have already raised in memory
-  across pushes: resolve threads that later pushes addressed, and never re-litigate
-  ones that still stand. Each round, apply REVIEW.md's convergence policy — raise
-  the severity floor as rounds accumulate (round 1: all; round 2: Major+; round 3+:
-  Blocker-only), post a single APPROVE when nothing meets the floor, and stop after
-  the hard round cap. Exit the session once you have approved or reached the cap.
-  Note: a bare push with no CI or comment activity may not wake the subscription;
-  if you suspect you missed pushes, re-fetch the PR head before deciding you are done.
+  After that first review, do not exit — stay resident and watch this PR until it
+  is merged or closed. Subscribe to its activity and re-run the review on each new
+  push, in this same session. Keep the round count and the findings you have already
+  raised in memory across pushes: resolve threads that later pushes addressed, and
+  never re-litigate ones that still stand. Each round, apply REVIEW.md's convergence
+  policy — raise the severity floor as rounds accumulate (round 1: all; round 2:
+  Major+; round 3+: Blocker-only), and post a single APPROVE when nothing meets the
+  floor. Approving does NOT end your watch: stay subscribed and keep reviewing later
+  pushes, so a change pushed after you approved still gets reviewed. After an
+  approval, only speak again if a later push introduces a finding at or above the
+  floor — don't re-post APPROVE on every subsequent quiet push. Stop watching only
+  when the PR is merged or closed, or the hard round cap is reached. Note: a bare
+  push with no CI or comment activity may not wake the subscription; if you suspect
+  you missed pushes, re-fetch the PR head before deciding you are done.
   ```
 
 - **Connectors:** the form attaches **all your account connectors by default** and
