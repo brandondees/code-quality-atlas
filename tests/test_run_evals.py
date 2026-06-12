@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 # tests/test_run_evals.py
+import http.client
 import json
 import urllib.error
 
@@ -103,6 +104,13 @@ def test_query_ollama_returns_content(monkeypatch):
 
 def test_query_ollama_network_error_raises_runtimeerror(monkeypatch):
     _patch_urlopen(monkeypatch, exc=urllib.error.URLError("connection refused"))
+    with pytest.raises(RuntimeError, match="Ollama request to .* failed"):
+        run_evals.query_ollama("m", "sys", "usr")
+
+
+def test_query_ollama_http_exception_raises(monkeypatch):
+    # HTTPException (RemoteDisconnected/BadStatusLine) is a distinct path from URLError.
+    _patch_urlopen(monkeypatch, exc=http.client.RemoteDisconnected("server closed"))
     with pytest.raises(RuntimeError, match="Ollama request to .* failed"):
         run_evals.query_ollama("m", "sys", "usr")
 

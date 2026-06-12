@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: MIT
-from tooling.manifest import load_manifest, Manifest, Skill, Source
+import pytest
+
+from tooling.manifest import (
+    Manifest, Skill, Source, ValidationError, load_manifest, validate,
+)
 
 def test_load_manifest_parses_skill_and_sources():
     m = load_manifest("tests/fixtures/manifest_sample.yaml")
@@ -20,9 +24,6 @@ def test_source_parses_path_and_section():
     assert s.section == 2
 
 
-import pytest
-
-
 def test_source_without_fragment_raises_clear_error():
     with pytest.raises(ValueError, match="<path>#<section>"):
         Source(category=2, source="docs/research/cluster-1-correctness.md")
@@ -31,9 +32,6 @@ def test_source_without_fragment_raises_clear_error():
 def test_source_with_nonnumeric_fragment_raises_clear_error():
     with pytest.raises(ValueError, match="non-negative integer"):
         Source(category=2, source="docs/research/cluster-1-correctness.md#two")
-
-
-from tooling.manifest import ValidationError
 
 
 def _write_manifest(tmp_path, text):
@@ -86,9 +84,6 @@ def test_load_manifest_wraps_malformed_source(tmp_path):
     with pytest.raises(ValidationError, match="skill #0"):
         load_manifest(path)
 
-
-from tooling.manifest import validate, ValidationError
-import pytest
 
 def _skill(**kw):
     base = dict(name="hunting-silent-failures",

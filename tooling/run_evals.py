@@ -40,10 +40,13 @@ def assemble_context(skill_dir: Path) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-def _post_json(url: str, payload: dict, timeout: int, label: str) -> dict:
+def _post_json(url: str, payload: dict, timeout: int, label: str) -> object:
     """POST `payload` as JSON and parse the JSON reply, turning network failures
     and non-JSON bodies into a RuntimeError that names the backend — so a single
-    transient or an error page doesn't abort the run with a raw traceback."""
+    transient or an error page doesn't abort the run with a raw traceback.
+
+    Returns whatever JSON the server sent (json.loads can yield a list, str, None,
+    etc.); callers must narrow with isinstance before any dict access."""
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -99,7 +102,12 @@ def query_openai(model: str, system: str, user: str,
     data = _post_json(f"{host}/v1/chat/completions", payload, timeout,
                       "OpenAI-compatible")
     if isinstance(data, dict) and data.get("error"):
-        raise RuntimeError(f"OpenAI-compatible API error: {data['error']}")
+        # OpenAI-compatible errors are objects ({"error": {"message": ...}});
+        # surface the message text rather than the dict repr.
+        err = data["error"]
+        if isinstance(err, dict):
+            err = err.get("message", err)
+        raise RuntimeError(f"OpenAI-compatible API error: {err}")
     try:
         content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as e:
