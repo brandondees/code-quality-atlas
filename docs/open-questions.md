@@ -22,6 +22,7 @@ shipped across phases 2–3 and are now marked `→ RESOLVED` in place (with a
 pointer to the decision or skill that closed them). **Genuinely still open:**
 Q13 (team preferences overlay — designed, not yet built),
 Q14 (router intent / matching-and-ranking / review-depth modes — new),
+Q15 (a decision-time review shape — new, the round-2 gap-hunt headline),
 Q3 (review-vs-maintenance modes), Q4 (findings-vs-scores), Q6 (idiom packs),
 Q8 (proactive/cron-shaped maintenance — partially built as the repo audits),
 and the Q2 residual low-priority candidates. A factor-level coverage audit
@@ -61,6 +62,12 @@ The 2-4 cap is really a *depth* choice wearing a *relevance* mask. Separating th
 - Does the team-preferences overlay (Q13) set the default mode and the critical-tier floor per repo?
 
 **Relation to prior decisions.** Refines D10 (router) and D12 (synthesizer / advisory fan-out); "all lenses in parallel" is consistent with D12's finding contract a harness can mechanize. Evidence: G9. **Status: open — framing captured, no decisions yet.**
+
+### Q15 — A decision-time review shape *(new, 2026-06-12; the round-2 gap-hunt headline)*
+
+The round-2 gap hunt ([`research/taxonomy-gap-hunt-round-2.md`](research/taxonomy-gap-hunt-round-2.md)) found that the strongest, most-recurring gap is not a topic but a **shape**. The suite reviews *diffs* (diff-lenses) and *repo state* (cron audits), but never a **decision as it is made** — an ADR, RFC, adoption PR, deprecation plan, rollout plan, capacity/DR design. Axis C (adopt / revisit-ADR / retire) is *entirely* this shape; much of axis E (DR, capacity, resilience, progressive-delivery) is RFC-shaped; so are B3 (model adoption) and D2 (privacy-by-design). Many of round 2's strongest gaps are invisible to a diff **and** to a repo scan because they live in the decision, not the artifact.
+
+The router has a thin "design doc / RFC" route today, but no lens *family* built for decision-record review — which asks different questions: *is the rationale recorded? are the assumptions stated and still valid? is there a revisit-trigger? what's the exit / rollback / sunset?* **Open:** is decision-time a new **lens family** (parallel to diff-shaped and repo-shaped), a cross-cutting **mode** on existing lenses, or its own **cluster**? How does it relate to the proposed **#29 (decision lifecycle)**, which is the *topic* whose natural *shape* this is — same thing, or topic-vs-shape orthogonal? Likely wants a short design pass like Q13. **Status: open — framing captured; feeds the taxonomy v0.3 decision.**
 
 ### Q2 — Candidate additions  → RESOLVED (see D5)
 

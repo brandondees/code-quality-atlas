@@ -242,3 +242,32 @@ dependency-*selection*-vs-patching point), (D) socio-technical & responsible eng
 (E) operational & resilience design — each candidate scored against a rubric (already
 covered? distinct behavior? shape? prior art? disposition) to avoid re-flagging covered
 facets. Feeds a possible taxonomy v0.3. Research running; synthesis to follow.
+
+### 2026-06-12 (cont.) — round-2 gap hunt synthesized (→ taxonomy v0.3 proposal + Q15)
+
+Five parallel research agents (axes A–E) returned; synthesized into
+[`research/taxonomy-gap-hunt-round-2.md`](research/taxonomy-gap-hunt-round-2.md).
+Three structural findings, each bigger than any single category:
+
+1. **A missing review *shape*: decision-time / decision-record review.** The suite
+   has diff-lenses and repo/cron-audits but nothing that reviews a *decision as
+   made* (ADR/RFC/adoption/deprecation/rollout/capacity-DR plan). Recurs across all
+   of axis C and most of axis E. Opened as **Q15** — the headline.
+2. **The G10 meta-layer generalizes** — suppression rot (A1), monitoring-config
+   (A4), codegen↔source drift (A5), test scaffolding (A2), IaC (B1): one omission,
+   ~5 instances, not five unrelated gaps.
+3. **A design-time operational cluster is missing** (scale / recover / degrade —
+   distinct from #16's *runtime* operability), which also absorbs the two G9 #12
+   drops. Axis D's restraint check **passed**: the socio-technical "gaps" were
+   mostly governance (out-of-scope) or already-covered, confirming v0.2 didn't
+   under-reach on the human axis — the real gaps are *structural*, not ideological.
+
+Proposed v0.3 (disposition table in the doc): **2–4 new categories** — #28 operational
+& resilience design [high]; #29 decision lifecycle [med-high, scope to the reviewable
+slice, escalate TCO/procurement]; #30 enforcement-apparatus/meta-artifacts [high on
+suppression hygiene; grouping open]; IaC-as-reviewed-code [high, placement open] —
+**+ ~10 add-factors** (#27 asset/model-weight licensing + privacy-by-design; #25
+harmful-output eval; #17 test-apparatus; #19 codegen-drift + rollout-plan; #22
+docs-as-system; …). Plus the cross-cutting tool-mechanization `mechanize-with:` nudge.
+**Not editing `taxonomy.md` yet — owner decision pending on how much to promote vs.
+fold (a restraint call).** Docs-only.
