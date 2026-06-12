@@ -14,6 +14,12 @@
 - **Build** — Bazel/Buck (hermetic), Nix (reproducible envs), Docker multi-stage.
 - **Gate the diff** with the project's linters + formatter (Prettier/Black/gofmt) + type-checker (tsc/mypy) — cross #8.
 - **Deploy safety** — canary / blue-green / progressive delivery (Argo Rollouts, Flagger) + automated rollback.
+- **hadolint** (Dockerfile) — `DL3006` always tag the image version explicitly, `DL3007` don't use `:latest`, `DL3008` pin versions in `apt-get install` (`DL3013` pip / `DL3016` npm / `DL3018` apk), `DL3002` last `USER` should not be root, `DL3004` no `sudo`, `DL3009` delete apt lists after installing. *(IDs verified against hadolint/hadolint README.)*
+- **Checkov** (IaC scanner: Terraform/OpenTofu, CloudFormation, Kubernetes, Helm, Kustomize, Dockerfile, ARM/Bicep, Serverless, OpenAPI) — policy IDs like `CKV_AWS_20` (S3 ACL allows public READ) / `CKV_AWS_57` (public WRITE), with a published policy index mapping to CIS et al.; suppressions are inline and *reasoned* (`#checkov:skip=ID:why`).
+- **tflint** — pluggable Terraform linter: provider-specific mistakes (invalid instance types), deprecated syntax, unused declarations; SARIF/JSON output for CI.
+- **kube-linter** — `run-as-non-root`, `no-read-only-root-fs`, `privileged-container`, `privilege-escalation-container`, `unset-cpu-requirements` / `unset-memory-requirements`, `latest-tag`, `default-service-account`, `host-network`, `docker-sock`. *(check names verified against stackrox/kube-linter generated docs.)*
+- **actionlint** — GitHub Actions workflow linter: expression type-checks, runner-label validation, plus a shellcheck integration over `run:` scripts.
+- **zizmor** — GitHub Actions *security* audits (~two dozen rules): template injection (`${{ }}` of attacker-influenced context interpolated into `run:`), actions pinned to mutable tags instead of commit SHAs, excessive workflow token permissions, use of actions with known advisories.
 
 ## From category #26
 

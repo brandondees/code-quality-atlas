@@ -83,6 +83,12 @@
 - **Build** — Bazel/Buck (hermetic), Nix (reproducible envs), Docker multi-stage.
 - **Gate the diff** with the project's linters + formatter (Prettier/Black/gofmt) + type-checker (tsc/mypy) — cross #8.
 - **Deploy safety** — canary / blue-green / progressive delivery (Argo Rollouts, Flagger) + automated rollback.
+- **hadolint** (Dockerfile) — `DL3006` always tag the image version explicitly, `DL3007` don't use `:latest`, `DL3008` pin versions in `apt-get install` (`DL3013` pip / `DL3016` npm / `DL3018` apk), `DL3002` last `USER` should not be root, `DL3004` no `sudo`, `DL3009` delete apt lists after installing. *(IDs verified against hadolint/hadolint README.)*
+- **Checkov** (IaC scanner: Terraform/OpenTofu, CloudFormation, Kubernetes, Helm, Kustomize, Dockerfile, ARM/Bicep, Serverless, OpenAPI) — policy IDs like `CKV_AWS_20` (S3 ACL allows public READ) / `CKV_AWS_57` (public WRITE), with a published policy index mapping to CIS et al.; suppressions are inline and *reasoned* (`#checkov:skip=ID:why`).
+- **tflint** — pluggable Terraform linter: provider-specific mistakes (invalid instance types), deprecated syntax, unused declarations; SARIF/JSON output for CI.
+- **kube-linter** — `run-as-non-root`, `no-read-only-root-fs`, `privileged-container`, `privilege-escalation-container`, `unset-cpu-requirements` / `unset-memory-requirements`, `latest-tag`, `default-service-account`, `host-network`, `docker-sock`. *(check names verified against stackrox/kube-linter generated docs.)*
+- **actionlint** — GitHub Actions workflow linter: expression type-checks, runner-label validation, plus a shellcheck integration over `run:` scripts.
+- **zizmor** — GitHub Actions *security* audits (~two dozen rules): template injection (`${{ }}` of attacker-influenced context interpolated into `run:`), actions pinned to mutable tags instead of commit SHAs, excessive workflow token permissions, use of actions with known advisories.
 
 ### Reviewable heuristics (skill-checklist seeds)
 - Does CI run the full gate on the diff — lint, format-check, type-check, tests, dep/security scan — and is passing **required** to merge?
@@ -94,6 +100,11 @@
 - Is incomplete work integrated **behind a flag** (trunk-based), not a long-lived branch?
 - Does the pipeline **build once and promote** the same artifact, not rebuild per environment?
 - Are pre-commit/pre-push hooks present so obvious issues never reach CI?
+- **IaC is code:** does infrastructure/config-as-code in the diff (Terraform, K8s manifests, Helm, Dockerfiles, CI workflows) pass the same gate as app code — linted (checkov/tflint/kube-linter/hadolint), reviewed, and `plan`ned in CI before apply?
+- **Workflow injection:** does any `${{ }}` expression interpolate attacker-influenceable context (issue/PR titles and bodies, branch names, commit messages) directly into a `run:` script? Pass it through an env var instead — the template is expanded *before* the shell parses (template injection).
+- **Action/workflow supply chain:** are third-party actions pinned to full commit SHAs (not mutable tags), and are workflow token `permissions:` explicitly declared and least-privilege (cross #18, #14)?
+- **Container hygiene in the diff:** image versions pinned (no `:latest`), a non-root final `USER`, CPU/memory requests+limits set, read-only root filesystem where workable, no `privileged: true` or host namespace/docker-socket mounts without a documented reason.
+- **Cloud misconfig in the diff:** does a new/changed IaC resource open public access (`0.0.0.0/0` ingress, public bucket ACL), disable encryption, or grant wildcard IAM? Deliberate-and-documented or a finding (security verdict owned by #14).
 
 ---
 
@@ -160,3 +171,4 @@
 - **#20 is the densest single-source category**: `strong_migrations`' unsafe-op catalog is the highest-value checklist seed in this whole cluster. Migration safety also overlaps #3 (online-change concurrency) and #2 (transaction/rollback) — a combined "safe data change" behavior is attractive.
 - **Diff-shaped vs repo/cron-shaped (map-gaps G7)**: most of this cluster is diff-reviewable, but **dependency freshness (#18), stale-flag cleanup (#26), and schema drift (#20)** are *standing* conditions better checked on a schedule than in a single PR. Implies some Cluster-V skills are maintenance/cron-shaped, not review-shaped (cross open-question Q8).
 - **Feature-flag lifecycle** is triple-booked (#12/#16/#26); canonical home proposed as #26 (map-gaps G1).
+- **IaC/workflow surface added (2026-06-12):** hadolint/Checkov/tflint/kube-linter/actionlint/zizmor rules + five heuristics now live in #19. The seam mirrors G1: cloud *misconfiguration* findings are security findings (#14 owns the verdict, A05), and environment-pinning overlaps #26 portability — proposed split: **#19 owns the pipeline/workflow/manifest mechanics; #14 owns the security adjudication.** If IaC-heavy repos prove to need more, this is a candidate for its own review behavior (noted in taxonomy residual candidates).

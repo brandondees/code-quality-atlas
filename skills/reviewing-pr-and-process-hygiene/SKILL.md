@@ -11,10 +11,10 @@ provenance:
   built_from:
   - category: 24
     source: docs/research/cluster-6-evolution.md#24
-    hash: 7c8122197c0e3193fe0661f0a70e35a54345d07beabe6395e85d263b3be0d73d
+    hash: ada06f4719199568f3ff41c1080b068a218dfcfc3b7604d8b7bc589f3c4fb09f
   - category: 22
     source: docs/research/cluster-6-evolution.md#22
-    hash: c2b968248bfa961bf8a9ca267334e64935892ae4074bd2a1cf1028044482c669
+    hash: 688743a28f3d05b13c5aa6762e6941820eb10a8825850180eaf8c3277139142d
 ---
 
 # reviewing-pr-and-process-hygiene

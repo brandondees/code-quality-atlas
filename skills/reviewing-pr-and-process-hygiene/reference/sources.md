@@ -21,6 +21,8 @@
   → mine: path-based required reviewers; ownership makes "who must approve this area" explicit and routes risk to the right people. Stale/missing CODEOWNERS = unowned blast radius.
 - **Agent-native architecture (compound-engineering `agent-native-reviewer` prior art; "any action a user can take, an agent can too")** `(verify)`.
   → mine: parity check — new user-facing capabilities should also be reachable programmatically (API/CLI/tool), not UI-only, so agents and automation aren't second-class. (Project-specific principle; map to a reviewable check.)
+- **AGENTS.md / Agentic AI Foundation (Linux Foundation, 2025-12)** — https://agents.md/ (see #22 for the doc-artifact side).
+  → mine: industry grounding for treating agents as first-class contributors to the development process — the ecosystem now standardizes how repos onboard automated collaborators. Strengthens the agent-native-parity principle from "house rule" toward industry practice; the *docs* obligation lives in #22, the *process* stance (agents can do what contributors can do) lives here.
 
 ## From category #22
 
@@ -37,3 +39,5 @@
   → mine: README-as-front-door checklist (what it is, why, install, minimal usage, where to go next); the "minimal runnable example" as the highest-leverage doc artifact.
 - **The C4 model (Simon Brown) and Mermaid / PlantUML diagrams-as-code** `(verify)`.
   → mine: diagrams should be versioned text (Mermaid/PlantUML), not binary screenshots, so they're diffable and stay in sync; C4's Context→Container→Component levels give a "what level is this diagram" check.
+- **AGENTS.md — open agent-instructions convention** — https://agents.md/ (introduced by OpenAI 2025-08; stewarded by the **Agentic AI Foundation** under the Linux Foundation since 2025-12, founded by Anthropic, OpenAI, and Block; adopted by tens of thousands of repos and the major coding agents).
+  → mine: "a README for agents" — a repo-level Markdown file carrying build/test/lint commands, conventions, and layout for *automated* contributors, with **nearest-file-wins** precedence so monorepo subprojects ship tailored instructions. Establishes agent-facing docs as a first-class doc artifact — which means it inherits every doc obligation in this category, drift above all (a stale AGENTS.md actively misleads agents that, unlike humans, won't shrug it off).

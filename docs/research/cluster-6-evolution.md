@@ -67,6 +67,8 @@ Scope: API docs & docstrings; README / onboarding; architecture decision records
   → mine: README-as-front-door checklist (what it is, why, install, minimal usage, where to go next); the "minimal runnable example" as the highest-leverage doc artifact.
 - **The C4 model (Simon Brown) and Mermaid / PlantUML diagrams-as-code** `(verify)`.
   → mine: diagrams should be versioned text (Mermaid/PlantUML), not binary screenshots, so they're diffable and stay in sync; C4's Context→Container→Component levels give a "what level is this diagram" check.
+- **AGENTS.md — open agent-instructions convention** — https://agents.md/ (introduced by OpenAI 2025-08; stewarded by the **Agentic AI Foundation** under the Linux Foundation since 2025-12, founded by Anthropic, OpenAI, and Block; adopted by tens of thousands of repos and the major coding agents).
+  → mine: "a README for agents" — a repo-level Markdown file carrying build/test/lint commands, conventions, and layout for *automated* contributors, with **nearest-file-wins** precedence so monorepo subprojects ship tailored instructions. Establishes agent-facing docs as a first-class doc artifact — which means it inherits every doc obligation in this category, drift above all (a stale AGENTS.md actively misleads agents that, unlike humans, won't shrug it off).
 
 ### Tooling rules worth lifting
 - **Vale (prose linter)** — style/terminology/readability rules over Markdown/docs; enforce a project glossary and banned terms. `(verify)`.
@@ -93,6 +95,7 @@ Scope: API docs & docstrings; README / onboarding; architecture decision records
 - **No orphaned/contradictory docs:** does this change delete or supersede docs it invalidates (removed endpoint still documented; deprecated path still in tutorial)?
 - **Comment rot:** are nearby comments/docstrings that the change falsifies updated or removed (not left lying)?
 - **Discoverability:** is the new doc linked from an index/nav/README, not just dropped in a folder?
+- **Agent-instructions drift:** if the repo carries an agent-instructions file (AGENTS.md / CLAUDE.md / equivalent), does this change keep it true — build/test/lint commands still correct, conventions and layout still accurate, subproject files updated where nearest-file-wins applies? Same drift class as README rot, but higher blast radius: agents follow stale instructions literally (cross #24 agent-native parity).
 
 ---
 
@@ -163,6 +166,8 @@ Scope: PR size & reviewability; commit atomicity & message hygiene; risk signali
   → mine: path-based required reviewers; ownership makes "who must approve this area" explicit and routes risk to the right people. Stale/missing CODEOWNERS = unowned blast radius.
 - **Agent-native architecture (compound-engineering `agent-native-reviewer` prior art; "any action a user can take, an agent can too")** `(verify)`.
   → mine: parity check — new user-facing capabilities should also be reachable programmatically (API/CLI/tool), not UI-only, so agents and automation aren't second-class. (Project-specific principle; map to a reviewable check.)
+- **AGENTS.md / Agentic AI Foundation (Linux Foundation, 2025-12)** — https://agents.md/ (see #22 for the doc-artifact side).
+  → mine: industry grounding for treating agents as first-class contributors to the development process — the ecosystem now standardizes how repos onboard automated collaborators. Strengthens the agent-native-parity principle from "house rule" toward industry practice; the *docs* obligation lives in #22, the *process* stance (agents can do what contributors can do) lives here.
 
 ### Tooling rules worth lifting
 - **commitlint (`@commitlint/config-conventional`)** — `type-enum`, `subject-empty`, `subject-full-stop`, `header-max-length` (72), `body-leading-blank`, `footer-leading-blank` — enforce Conventional Commits. *(`@commitlint/config-conventional` `type-enum`: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test — verified.)*
@@ -246,6 +251,6 @@ Scope: dependency license compatibility & copyleft contamination; code provenanc
 - **i18n money/units genuinely double-booked (#23 ↔ #4).** The *formatting* facet (Intl/CLDR, locale-aware output) is here; the *arithmetic correctness* facet (precision, overflow, currency math) is #4. The taxonomy already cross-links this; a single skill may need to own both ends to avoid a seam.
 - **AI-generated-code provenance (#27) ↔ #25.** Provenance/attribution/licensing of AI output sits in #27; prompt-injection and output-validation sit in #25. A reviewer checking an AI-authored PR needs both lenses at once — candidate for a combined "AI-contribution review" behavior.
 - **Privacy/telemetry is triple-booked** (#27 regulatory, #16 observability/logging-no-PII, #14 PII handling). The taxonomy's own residual-candidates note flags this. For the skill suite, recommend one PII-data-flow check that all three reference rather than three partial ones.
-- **Agent-native parity (#24)** is a project-specific principle with thin external prior art (mainly the in-repo `agent-native-reviewer`). Worth deeper sourcing or treating as a house rule rather than an industry-standard heuristic.
+- **Agent-native parity (#24)** is a project-specific principle with thin external prior art (mainly the in-repo `agent-native-reviewer`). Worth deeper sourcing or treating as a house rule rather than an industry-standard heuristic. **Update (2026-06-12): partially sourced** — AGENTS.md (OpenAI 2025-08, stewarded by the Linux Foundation's Agentic AI Foundation since 2025-12) gives the *agent-facing docs* half industry-standard grounding (now filed in #22 + #24). The parity principle itself ("any user action is agent-reachable") remains a house stance, but the direction of the ecosystem supports it.
 - **"Definition of done" and SLO/error-budget framing** straddle process (#24) and observability (#16); the taxonomy notes this. Decide whether DoD is a checklist owned by #24 that *includes* observability gates, or a cross-cutting meta-check.
 - **Legal calls exceed an agent's authority.** Several #27 heuristics (copyleft linkage, export control, data-residency legality) should *flag for human/legal review* rather than assert a verdict — the skill design should encode that escalation, not pretend to adjudicate.

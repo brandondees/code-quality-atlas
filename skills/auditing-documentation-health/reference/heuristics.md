@@ -18,5 +18,6 @@
 - **No orphaned/contradictory docs:** does this change delete or supersede docs it invalidates (removed endpoint still documented; deprecated path still in tutorial)?
 - **Comment rot:** are nearby comments/docstrings that the change falsifies updated or removed (not left lying)?
 - **Discoverability:** is the new doc linked from an index/nav/README, not just dropped in a folder?
+- **Agent-instructions drift:** if the repo carries an agent-instructions file (AGENTS.md / CLAUDE.md / equivalent), does this change keep it true — build/test/lint commands still correct, conventions and layout still accurate, subproject files updated where nearest-file-wins applies? Same drift class as README rot, but higher blast radius: agents follow stale instructions literally (cross #24 agent-native parity).
 
 ---

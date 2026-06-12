@@ -13,7 +13,7 @@ provenance:
     hash: e510fd2362c34f2524d4eed76104d001fb032f4d62aac866e38da82ad61c368f
   - category: 15
     source: docs/research/cluster-4-runtime.md#15
-    hash: 0a3ca5033ee175b2933254b92caa1e23b8536ab91cc08680d1fa63143183c7c9
+    hash: 95468df6094ec91160285d106ef87d4c7f1de2709ea9f0befebe9aa676028351
 ---
 
 # checking-restraint
