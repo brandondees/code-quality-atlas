@@ -20,8 +20,8 @@
 **Live state (2026-06-12).** Most of the questions below were answered by what
 shipped across phases 2–3 and are now marked `→ RESOLVED` in place (with a
 pointer to the decision or skill that closed them). **Genuinely still open:**
-Q14 (router intent / matching-and-ranking / review-depth modes — new),
 Q13 (team preferences overlay — designed, not yet built),
+Q14 (router intent / matching-and-ranking / review-depth modes — new),
 Q3 (review-vs-maintenance modes), Q4 (findings-vs-scores), Q6 (idiom packs),
 Q8 (proactive/cron-shaped maintenance — partially built as the repo audits),
 and the Q2 residual low-priority candidates. A factor-level coverage audit
@@ -35,7 +35,7 @@ The suite pushes research-derived "objectively better" defaults but has no home 
 
 ### Q14 — Router intent, matching/ranking, and review-depth modes *(new, 2026-06-12)*
 
-**Trigger.** A factor-level coverage audit ([`map-gaps.md`](map-gaps.md) G9) found the router (D10) is behaving as a *suppressor*: by capping each change to 2-4 lenses it leaves the soft lenses (naming/readability, observability, restraint) unfired on most change shapes, so their factors never produce findings — the suite emits no naming findings in practice despite #5 being owned. **This inverts the router's purpose.** `choosing-review-lenses` was built to *improve unprompted, relevant skill activation* — a discovery aid so an agent/harness fires the right lenses without knowing the whole catalog — **not to gate coverage**. The original intent was the full suite run **together, in parallel, for an extremely comprehensive review**; the router was meant to be the on-ramp to that, not a turnstile in front of it.
+**Trigger.** A factor-level coverage audit ([`map-gaps.md`](map-gaps.md) G9) **observed** the router's 2-4-lens cap acting as a *coverage suppressor*: capping each change to 2-4 lenses leaves the soft lenses (naming/readability, observability, restraint) unfired on most change shapes, so their factors never produce findings — the suite emits no naming findings in practice despite #5 being owned. **The cap is working exactly as documented** — `choosing-review-lenses/SKILL.md` (and `tooling/generate.py`) specify "run 2-4 content lenses per change" (D10), and that contract stands. The tension is that the contract was written to *improve unprompted, relevant skill activation* — a discovery aid so an agent/harness fires the right lenses without knowing the whole catalog — **not to gate total coverage**. The original intent was the full suite run **together, in parallel, for an extremely comprehensive review**; the router was meant to be the on-ramp to that, not a turnstile in front of it. Q14 asks whether that contract should be re-scoped — separating relevance from depth (below) — not whether the router is violating it.
 
 **The conflation to undo.** Today's router collapses two independent axes onto one 2-4 list:
 - **Relevance** — which lenses *apply* to this change (a bug fix needn't run a11y).
@@ -56,7 +56,7 @@ The 2-4 cap is really a *depth* choice wearing a *relevance* mask. Separating th
 **Open sub-questions.**
 - Where does *mode* live — a router argument, distinct commands (`/atlas-review-pr` exists; add `/atlas-audit-comprehensive` and `/atlas-triage`?), or a manifest `modes:` section the router generates from?
 - Does the 2-4 cap survive as the *PR-mode default*, or is it dropped for relevance-ranked-to-a-budget?
-- Interaction with the synthesizer (D12): does comprehensive mode raise the trimming floor so readability-class findings aren't discarded?
+- Interaction with the synthesizer (D12) and `REVIEW.md`'s round-based severity floor: that escalating floor is *precisely* what silences Nit/Minor (readability-class) findings after round 1, so comprehensive mode would need to **lower** the floor — keep it at Nit regardless of round count, or bypass the per-round escalation entirely for full-suite runs — to keep those findings alive. (A *higher* floor drops more, not fewer.)
 - Cost/latency: comprehensive-in-parallel is the expensive path — on-demand only, or scheduled like the repo audits?
 - Does the team-preferences overlay (Q13) set the default mode and the critical-tier floor per repo?
 
