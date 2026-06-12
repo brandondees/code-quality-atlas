@@ -33,7 +33,7 @@ build+autofix ──────────────────────
      ▲                                        subscribes & re-reviews each push
      │  reacts to review comments / CI
      │
-     └──── poller routine (hourly/daily) ── rebases "behind" PRs, pokes conflicts ──
+     └──── poller routine (hourly/daily) ── rebases "behind" PRs, pokes conflicts
 ```
 
 1. **Build + auto-fix session** — your existing flow. One web session opens the PR
