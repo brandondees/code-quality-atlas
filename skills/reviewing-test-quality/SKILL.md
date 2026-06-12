@@ -10,7 +10,7 @@ provenance:
   built_from:
   - category: 17
     source: docs/research/cluster-5-verification.md#17
-    hash: 812542b90495808d4a5d1c03ec846668333da9b1ffc182ef86ad3512e3586527
+    hash: 0f6dbdc78c0df22625b2d62c9858de4a0e3b472ca0676681bc84375a22d5f770
 ---
 
 # reviewing-test-quality
