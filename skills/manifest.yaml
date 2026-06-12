@@ -403,6 +403,27 @@ skills:
     built_from:
       - { category: 29, source: docs/research/cluster-6-evolution.md#29 }
 
+  - name: auditing-enforcement-and-meta-artifacts
+    description: >
+      Audits the enforcement apparatus and meta-artifacts wrapped around the code,
+      as their own reviewable surface: suppression hygiene (blanket or unjustified
+      `# noqa` / `eslint-disable` / `# type: ignore`, unused/stale suppressions, a
+      lint or type baseline growing rather than shrinking), monitoring config as an
+      artifact (cause-based or unactionable alerts, alert rules with no runbook or
+      `for:` duration, dashboards referencing renamed/dead metrics, click-ops that
+      drift instead of monitoring-as-code), and codegen-to-source drift (checked-in
+      generated artifacts that can silently diverge from their generator/spec with
+      no regenerate-and-diff gate in CI). A repo-wide / scheduled audit rather than
+      a single-diff review. Use when auditing lint/type suppressions, alert rules,
+      dashboards, or checked-in generated code.
+    picker: >
+      Is the enforcement apparatus healthy? Suppression hygiene & baseline trend,
+      actionable alerts/monitoring-as-code, codegen-source drift gate.
+    shape: repo
+    wave: 4
+    built_from:
+      - { category: 30, source: docs/research/cluster-5-verification.md#30 }
+
 # The composition layer (Q7): maps "what am I reviewing" to the lenses worth
 # running, so neither a human nor an agent has to know the whole catalog to
 # select well. Generated into skills/<name>/SKILL.md from this section alone.
@@ -473,8 +494,14 @@ router:
     - when: Whole-repo health audit (scheduled / cron)
       run: [finding-maintainability-hotspots, auditing-architecture-conformance,
             auditing-dependencies-and-supply-chain, auditing-config-and-build-hygiene,
-            auditing-documentation-health, auditing-compliance-and-provenance]
-      note: the six repo-shaped audits; run independently, not as one pass
+            auditing-documentation-health, auditing-compliance-and-provenance,
+            auditing-enforcement-and-meta-artifacts]
+      note: the seven repo-shaped audits; run independently, not as one pass
+    - when: Enforcement config — lint/type suppressions, alert rules or dashboards,
+            or checked-in generated artifacts
+      run: [auditing-enforcement-and-meta-artifacts]
+      note: repo-shaped — scans suppression accretion and codegen/monitoring drift
+            across the tree, not a single diff
     - when: A decision, not a diff — an ADR / RFC / design doc, a dependency or
             technology adoption, a build-vs-buy or vendor choice, or a
             deprecation / sunset plan
