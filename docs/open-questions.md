@@ -27,6 +27,13 @@ Q8 (proactive/cron-shaped maintenance — partially built as the repo audits),
 and the Q2 residual low-priority candidates. Everything else here is historical
 context kept for provenance.
 
+**Pending follow-up:** cross-model eval re-gate for the 2026-06-12
+research-expansion additions (runbook step 3) — the appended heuristics shipped
+without a small-model re-run (no local model in the sandbox session). Run the
+affected skills' evals per the [regeneration runbook](runbooks/regenerating-skills.md)
+on the next machine with a local model, and before the next
+skill-behavior-changing PR.
+
 ### Q14 — Promote agentic/tool-use safety to its own category? *(new, 2026-06-12)*
 Map-gaps G2's candidate now has standards-grade external backing: OWASP released a dedicated **Top 10 for Agentic Applications** (ASI01–ASI10, 2025-12-09) separate from the LLM Top 10, alongside the Agentic AI Threats & Mitigations companion and the MCP spec's security-best-practices page (confused deputy / token passthrough / tool poisoning). The research-expansion pass (2026-06-12) filed the references + nine agentic heuristics under **#25** in cluster-4, so the suite reviews this material today either way. The open call: promote to a category **#28** (cross-cutting #13 tool contracts, #14 authz, #24 agent process) — clearer ownership and a sharper lens trigger for agent-heavy codebases, at the cost of taxonomy churn and skill re-mapping — or keep it a #25 facet. D5-style taxonomy decision: **awaiting user.**
 
