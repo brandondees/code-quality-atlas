@@ -162,10 +162,12 @@ A second routine on the same repo:
      (mcp__github__pull_request_read).
   2. "behind" + no conflicts → bring up to date with
      mcp__github__update_pull_request_branch (no comment; emits a synchronize event).
-     "dirty"/conflicting → do NOT resolve; post one concise comment naming the
-     conflicting files and asking the owner to rebase, only if no unaddressed
-     <!-- atlas-rebase-poke --> comment from you already exists. Clean/up-to-date/
-     draft → skip silently.
+     "dirty"/conflicting → do NOT resolve; post the poke as an INLINE REVIEW COMMENT
+     (read the diff, anchor to a line on the RIGHT side, submit as a COMMENT review)
+     so the author's auto-fix subscription — which reads review threads, not issue
+     comments — sees it; body = a whole-PR conflict notice asking them to rebase onto
+     base and resolve, only if no unaddressed <!-- atlas-rebase-poke --> review thread
+     from you exists. Clean/up-to-date/draft → skip silently.
   3. Mark every comment <!-- atlas-rebase-poke --> and never double-poke.
   4. End with a one-line summary: how many PRs updated, poked, and skipped.
   ```
@@ -233,16 +235,17 @@ you own, and resets daily.
   push volume down.
 - **Merge conflicts have no webhook** — only the poller catches them; it pokes (it
   does **not** auto-resolve, since that's a code judgment).
-- **The poke doesn't reach the GUI auto-fix session.** The poller posts its poke as
-  an *issue comment*, but the "auto-fix CI and comments on this PR" subscription
-  (the web-GUI toggle on the author/build session) only inspects *review threads* and
-  CI status, and never checks `mergeable_state`. So a conflict poke wakes that session
-  but reads as "no review comments, CI green → nothing to do," and the conflict sits.
-  That subscription's prompt is **harness-generated, not editable here**, so for now a
-  conflict poke on a `dirty` PR is effectively **human-facing**: the poller
-  auto-rebases `behind` PRs, but a genuinely conflicted one needs a human (or a
-  dedicated resolver routine you build) to rebase. The GUI auto-fix behavior is
-  evolving — `send_later` self-arming landed recently — so this gap may close upstream.
+- **Conflict pokes are review comments, so the author session sees them.** The GUI
+  "auto-fix CI and comments on this PR" subscription inspects *review threads*, not
+  issue comments, and never checks `mergeable_state` — so a plain issue-comment poke
+  wakes it but reads as "no review comments, CI green → nothing to do." The poller
+  therefore posts the conflict poke as an **inline review comment** (anchored to a
+  diff line, with the body flagged as a *whole-PR* conflict notice, not a line issue),
+  which lands in the channel that subscription reads and surfaces as actionable
+  feedback; resolving it is left to that session. Residual caveat: actually
+  *resolving* a merge conflict may exceed what an auto-fix session does for a routine
+  lint/CI fix — if it can't, the unresolved poke thread stays as a human-visible flag.
+  (`behind` PRs are still auto-rebased with no comment.)
 - **CI *success* and bare pushes** aren't reliably delivered to a PR-activity
   subscription. Because the reviewer triggers on `opened` and then *watches* via
   subscription (rather than a `synchronize` trigger), a bare push with no CI/comment
