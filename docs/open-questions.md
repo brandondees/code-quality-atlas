@@ -21,6 +21,8 @@
 **Live state (2026-06-12).** Most of the questions below were answered by what
 shipped across phases 2–3 and are now marked `→ RESOLVED` in place (with a
 pointer to the decision or skill that closed them). **Genuinely still open:**
+Q18 (artifact-scoped lens hosting — how to host many per-artifact lenses without
+top-level context bloat; researched, awaiting a hosting-pattern decision),
 Q17 (self-improving loop — design exploration written, awaiting review),
 Q16 (promote agentic/tool-use safety to its own category),
 Q13 (team preferences overlay — designed, not yet built),
@@ -48,6 +50,48 @@ cosmetic format-leak on qwen — a trailing "No findings:" sentence after real
 findings, absent on llama). Per the runbook these are model-capability limits,
 not heuristic regressions, so no tuning was applied. See the session-log entry
 of the same date.
+
+### Q18 — Artifact-scoped lens hosting: many per-artifact lenses without context bloat *(new, 2026-06-12)*
+
+**Trigger.** Owner asked whether we review artifacts against published authoring standards — starting
+from Anthropic's Agent Skill best-practices guide ([`map-gaps.md`](map-gaps.md) **G11**). We hold
+*ourselves* to that guide (D7, enforced in the generator/validator) but have **no lens that reviews
+someone else's `SKILL.md`** — and that's one instance of a broad class (Dockerfiles, Terraform, K8s
+manifests, CI workflows, OpenAPI specs, ADRs, changelogs, `AGENTS.md`, model cards, datasheets), each
+with its own canonical "well-formed X" standard and dedicated linter. Research:
+[`research/artifact-scoped-lenses.md`](research/artifact-scoped-lenses.md).
+
+**The question.** Adding a peer lens per artifact type would pile N always-on `description`s into the
+skill budget — the §2 context tax (every skill's metadata is pre-loaded; "too many tools degrade
+selection"; lost-in-the-middle / context rot make even a catalog that *fits* a reasoning tax; RAG-MCP
+shows retrieval-narrowed tool sets >3× selection accuracy). So: **how do we host an open-ended set of
+artifact-scoped lenses at near-zero idle cost?**
+
+**Candidate directions (no decision yet; full detail in the research doc §6):**
+1. **Minimal** — one new lens with a tight "skip when artifact absent" clause. Closes G11; doesn't
+   generalize; +1 always-on description.
+2. **An `artifact` shape** *(recommended)* — promote `shape: artifact` (sibling to diff / repo /
+   decision): one entry-point lens that detects an artifact and loads the matching rubric from a
+   bundled file, driven by a manifest `artifacts:` table (artifact → detector glob → rubric source).
+   Breadth lives in on-demand rubrics; top-level cost is one description. Borrows the linter world's
+   **presence-based activation** (MegaLinter activate-on-file, ESLint glob `overrides`, Spectral
+   rulesets-by-type) and serves Q14's relevance-vs-depth split (file-presence is a clean relevance
+   signal — Q14 candidate-3 with the cleanest possible signal).
+3. **Retrieval-routed lenses** — full RAG-MCP: index every lens, retrieve per change, carry none at
+   the top level. Highest leverage on the tax but breaks D7 portability (needs a retrieval step, not
+   plain markdown). Longer-horizon.
+
+**Open sub-questions.**
+- Taxonomy placement of the *factor* (artifact-authoring quality): #30 meta-artifact vs #22/#24 vs a
+  promoted Q16 category. Lean #30 (G11's table).
+- Does the `artifact` shape subsume the existing implicit artifact lenses (#20 migrations, #31 IaC,
+  #19 CI) or sit alongside them? (Likely alongside — those carry topic judgment beyond conformance.)
+- Detector reliability: file-presence vs content-sniffing for embedded specs / non-standard paths.
+- New behavior ⇒ cross-model eval re-gate before ship (compounds the pending re-gate above).
+
+**Relation to prior decisions.** Refines D7 (we become a reviewer of the standard we author to),
+D10/D12 (router/synthesizer), and Q14 (the cleanest signal-based-matching case). Evidence: G11 +
+the research doc. **Status: open — researched, hosting-pattern decision pending.**
 
 ### Q17 — Self-improving loop: usage signals → learnings → research edits *(new, 2026-06-12)*
 Make the suite self-improving: agents running the skills reflect on how the review process worked, detect routing misses / false positives / escapes / coverage gaps, and propagate learnings back to this repo — opt-in for consumers, mostly automated. Key insight: the **back half already exists** (D6/D8: research edit → drift → regenerate → evals → ship); what's missing is signal collection, distillation, and consented transport. Design exploration: [`self-improvement-loop.md`](self-improvement-loop.md) — a signal taxonomy (S1–S8, with taste S7 firewalled to the Q13 overlay, never upstreamed), the mechanism substrate (plugin hooks incl. a `PostToolUse` Skill-matcher invocation logger, a generated synthesizer "Process notes" appendix via a manifest `feedback:` section, `/atlas-retro` transcript digestion, a GitHub **outcome-auditor** routine joining reviews to merges/reverts as ground truth, an eval-first intake routine here), a **learning contract** mirroring D12's finding contract (stamped with the plugin commit SHA, enabling champion/challenger measurement across regenerations), four opt-in tiers (`off`/`local`/`draft`/`auto`) with the privacy boundary at record *creation* (abstracted evidence, never raw code), and the meta-loop's own failure modes (heuristic bloat, self-report bias, taste laundering, poisoned reports) countered by evidence thresholds + the eval-first ratchet as immune system. Staged rollout (§7): process-notes + local log first; full automation keeps exactly two human gates (consumer filing approval, atlas merge). Feeds Q14 (the invocation log is the missing lens-usage evidence) and depends on Q13. Status: **brainstorm captured, awaiting user review.**

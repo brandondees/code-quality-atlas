@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh pr *)",
+      "Bash(gh api graphql -f 'query= *)",
+      "Bash(gh api *)",
+      "Bash(git fetch *)",
+      "Bash(git merge *)",
+      "Bash(ollama list *)",
+      "Bash(python -m tooling.cli --help)",
+      "Bash(python -m tooling.cli drift)"
+    ]
+  }
+}
