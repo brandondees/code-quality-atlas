@@ -20,6 +20,8 @@ provenance:
 
 # tracing-correctness-and-invariants
 
+*Does the code do what it claims? Invariants, boundaries, off-by-one, resource cleanup.*
+
 ## When to use
 
 Traces whether a change actually does what it claims: invariants and postconditions preserved on every branch, boundary values (0, 1, n-1, empty, max, negative) handled, off-by-one in ranges and loop bounds, null/undefined checked at boundaries, exhaustive switch/match, resource cleanup on all paths, money as integer minor units, monotonic clocks for durations, UTC for storage. Use when reviewing logic, algorithms, loops, conditionals, edge cases, or whether the implementation matches the stated intent.

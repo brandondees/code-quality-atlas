@@ -6,8 +6,8 @@ description: 'Picks which code-quality-atlas review lenses to run for a given ch
   bump, CI/config change, or a whole-repo audit) to the most relevant lenses. Use
   when you are unsure which lenses apply or asked to review something without specifying
   a lens. Skip this and call individual lenses directly when the relevant ones are
-  already clear from context or explicitly requested — lenses are designed to be
-  selected and run directly without routing through here.'
+  already clear from context or explicitly requested — lenses are designed to be selected
+  and run directly without routing through here.'
 provenance:
   taxonomy_version: v0.3
   built_from: []

@@ -21,7 +21,7 @@ Merges the findings of several code-quality-atlas lenses into one review: dedupl
 
 ## Fan-out model
 
-Fan-out is **advisory by default**: you run each lens the router named, collect its findings, then apply the steps below to merge them. The finding shape is fixed (see *Finding contract*) so a harness that can invoke lenses in parallel may **mechanize** the same merge — the dedupe and ranking rules are deterministic. Automated or by hand, the output is identical.
+Fan-out is **advisory by default**: you run each lens the router named, collect its findings, then apply the steps below to merge them. The finding shape is fixed (see *Finding contract*) so a harness that can invoke lenses in parallel may **mechanize** the same merge — the dedupe and ranking rules are deterministic. Automated or by hand, the output is identical. The same fixed finding shape also lets an orchestrator fan out across **many repositories** — one agent per repo emitting findings in this contract — and aggregate them centrally (see the multi-repo runbook under *Going deeper*).
 
 ## How to synthesize
 
@@ -79,3 +79,4 @@ Synthesis must not inflate. Do not raise a finding no lens reported, do not upgr
 ## Going deeper
 
 - [choosing-review-lenses](../choosing-review-lenses/SKILL.md) — the front half: picks which lenses to run before you synthesize their output.
+- [multi-repo audit runbook](../../docs/runbooks/multi-repo-audit.md) — fan the suite out across many repositories with background agents and aggregate their findings through this contract.

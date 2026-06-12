@@ -128,8 +128,13 @@ def build_skill_md(skill: Skill, taxonomy_version: str, docs_root: str = ".",
     fm = yaml.safe_dump(front, sort_keys=False, default_flow_style=False,
                         allow_unicode=True).strip()
     checks = "\n".join(f"- {c}" for c in top_checks(skill, docs_root))
+    # A one-line scannable summary (the same `picker` the router catalog uses),
+    # surfaced at the top of each lens so the lens is recognizable at a glance
+    # without reading the full trigger-rich description below it.
+    tagline = f"*{skill.picker.strip()}*\n\n" if skill.picker else ""
     body = (
         f"# {skill.name}\n\n"
+        f"{tagline}"
         "## When to use\n\n"
         f"{skill.description}\n\n"
         f"{_scope_line(skill)}\n\n"
@@ -225,14 +230,17 @@ def build_router_md(manifest: Manifest) -> str:
     body = (
         f"# {r.name}\n\n"
         "## When to use\n\n"
-        f"{r.description}\n\n"
+        f"{r.body or r.description}\n\n"
         "## How to pick\n\n"
-        "- Run **2-4 content lenses** per change; more dilutes attention and "
-        "duplicates findings. `reviewing-pr-and-process-hygiene` is **additive** "
-        "— on any PR it rides on top of those lenses and does not spend one of "
+        "- This skill recommends **2-4 content lenses** for a focused "
+        "single-pass review. If you already know which lenses are relevant, or "
+        "if comprehensive coverage is the goal, call them directly — the 2-4 "
+        "figure is this router's own recommendation, not a hard cap on direct "
+        "lens selection. `reviewing-pr-and-process-hygiene` is **additive** — on "
+        "any PR it rides on top of the content lenses and does not spend one of "
         "the 2-4 slots.\n"
         "- Match the change against the routes below; when a change is several "
-        "things at once, combine rows but keep the cap.\n"
+        "things at once, combine rows.\n"
         "- **Keep the brake pedal.** When a change ships abstraction, generality, "
         "or infrastructure ahead of the consumer that needs it (a generic with "
         "one impl, a crate with no caller yet), retain `checking-restraint` in "
@@ -309,7 +317,10 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "finding shape is fixed (see *Finding contract*) so a harness that can "
         "invoke lenses in parallel may **mechanize** the same merge — the dedupe "
         "and ranking rules are deterministic. Automated or by hand, the output "
-        "is identical.\n\n"
+        "is identical. The same fixed finding shape also lets an orchestrator "
+        "fan out across **many repositories** — one agent per repo emitting "
+        "findings in this contract — and aggregate them centrally (see the "
+        "multi-repo runbook under *Going deeper*).\n\n"
         "## How to synthesize\n\n"
         "1. **Collect** — gather every lens's findings, tagging each with the "
         "lens that raised it. A lens that reported \"No findings\" contributes "
@@ -367,6 +378,9 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "## Going deeper\n\n"
         f"- [{router_name}](../{router_name}/SKILL.md) — the front half: picks "
         "which lenses to run before you synthesize their output.\n"
+        "- [multi-repo audit runbook](../../docs/runbooks/multi-repo-audit.md) — "
+        "fan the suite out across many repositories with background agents and "
+        "aggregate their findings through this contract.\n"
     )
     return f"---\n{fm}\n---\n\n{body}"
 

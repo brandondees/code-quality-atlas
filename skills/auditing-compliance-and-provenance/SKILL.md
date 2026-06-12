@@ -16,6 +16,8 @@ provenance:
 
 # auditing-compliance-and-provenance
 
+*Any licensing, PII, or provenance exposure? Detect and escalate to humans — never decide legal questions.*
+
 ## When to use
 
 Audits compliance, licensing, and provenance: dependency licenses compatible with the distribution model, copyleft contamination, missing SPDX headers and attribution, code of unclear provenance, PII data flows without minimization or retention limits, consent gating for telemetry, and SBOM currency. Detects and escalates to humans rather than deciding legal questions. A repo-wide / scheduled audit. Use when auditing licenses, PII handling, data retention, or provenance.

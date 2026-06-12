@@ -76,7 +76,9 @@ skills:
       trifecta, unvalidated model output, missing eval coverage, unpinned models,
       unbounded token/cost, and PII sent to third-party models. Use when
       reviewing code that calls an LLM or model API, builds prompts, parses
-      model output, or wires up agents and tools.
+      model output, or wires up agents and tools. Skip when the change has no
+      model/LLM call, prompt construction, or model-output handling — ordinary
+      code that never touches an AI API.
     picker: >
       Is the model call safe and bounded? Injection surface, output validation,
       evals, token cost, PII.
@@ -163,7 +165,9 @@ skills:
       missing dual-write during transitions, irreversible or destructive DDL,
       and integrity constraints left to app code. Use when reviewing
       migrations, ALTER TABLE, backfills, schema or data-format changes, or
-      anything touching persistence.
+      anything touching persistence. Skip when the change touches no schema,
+      migration, backfill, or persisted data format — pure in-memory or
+      stateless logic with no durable store behind it.
     picker: >
       Can this migration lock tables or lose data? Expand/contract, backfills,
       reversibility.
@@ -181,7 +185,9 @@ skills:
       hardcoded user-facing strings, naive pluralization, non-locale-aware
       number/date/currency formatting, and RTL-unsafe layout. Use when
       reviewing components, templates, markup, forms, modals, UI text, or
-      anything user-facing.
+      anything user-facing. Skip when the change has no user-facing surface —
+      backend, CLI, library, or infra code with no rendered UI or localized
+      strings.
     picker: >
       Can everyone use this UI? Keyboard, screen readers, contrast, locales,
       RTL.
@@ -218,7 +224,9 @@ skills:
       promises, accidental sequential awaits, non-idempotent message
       consumers, exactly-once assumptions, and missing cancellation/timeout
       propagation. Use when reviewing threads, async/await, promises, locks,
-      queues, message handlers, or anything two callers can run at once.
+      queues, message handlers, or anything two callers can run at once. Skip
+      when the code is single-threaded and synchronous with no shared mutable
+      state, async/await, or message handling — nothing two callers race on.
     picker: >
       What breaks when two run at once? Races, lost updates, unawaited
       promises, idempotency.
@@ -254,6 +262,8 @@ skills:
       limits on collections, contract tests, and no internal-representation
       leakage. Use when reviewing REST/GraphQL/RPC endpoints, request or
       response shapes, SDK surface, webhooks, or any consumer-facing contract.
+      Skip when the change is internal-only with no consumer-facing surface —
+      private helpers or implementation details no external caller depends on.
     picker: >
       Will this break a consumer? Compatibility, error contracts, idempotency,
       pagination.
@@ -429,14 +439,30 @@ skills:
 # select well. Generated into skills/<name>/SKILL.md from this section alone.
 router:
   name: choosing-review-lenses
+  # `description` is the terse listing surface (shown in the skill catalogue);
+  # `body` is the richer "When to use" text the model reads once the skill
+  # loads. Keeping them separate lets the listing stay scannable while the body
+  # carries examples — see PR #30 (router repositioned as an uncertainty helper,
+  # not a mandatory front door).
   description: >
     Picks which code-quality-atlas review lenses to run for a given change:
     maps what is being reviewed (bug fix, feature, refactor, migration, async
     or concurrent code, API change, UI change, error handling, LLM
     integration, design doc, dependency bump, CI/config change, or a
-    whole-repo audit) to the 2-4 most relevant lenses. Use first when starting
-    a code review or audit with the atlas suite, when unsure which review
-    skills apply, or when asked to review something without a named lens.
+    whole-repo audit) to the most relevant lenses. Use when you are unsure which
+    lenses apply or asked to review something without specifying a lens. Skip
+    this and call individual lenses directly when the relevant ones are already
+    clear from context or explicitly requested — lenses are designed to be
+    selected and run directly without routing through here.
+  body: >
+    Picks which code-quality-atlas review lenses to run for a given change. Use
+    this skill when you are unsure which lenses apply or when asked to review
+    something without a specific lens named. Skip it and call lenses directly
+    when the relevant ones are already clear — from an explicit request ("check
+    for security issues", "review the error handling"), from obvious context (an
+    async change → `reviewing-concurrency-and-async`), or when comprehensive
+    multi-lens coverage is the goal. Every lens is designed to be triggered and
+    run directly without routing through here first.
   routes:
     - when: Bug fix
       run: [tracing-correctness-and-invariants, reviewing-test-quality,

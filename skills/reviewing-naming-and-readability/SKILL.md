@@ -20,6 +20,8 @@ provenance:
 
 # reviewing-naming-and-readability
 
+*Can a newcomer read this function? Names, length, nesting, magic values, comment accuracy.*
+
 ## When to use
 
 Reviews code for naming and local readability: intention-revealing names vs placeholders, function length and cyclomatic/cognitive complexity, deep nesting, magic numbers/strings, mixed levels of abstraction, and comment accuracy. Use when reviewing readability, naming, complexity, nesting, magic values, or comments.

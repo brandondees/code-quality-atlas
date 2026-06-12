@@ -94,6 +94,19 @@ def test_top_checks_cap_cross_ref_categories():
     assert len(from_4) <= 2
 
 
+def test_picker_renders_as_scannable_tagline():
+    # The one-line picker is surfaced at the top of the body so the lens is
+    # recognizable at a glance, above the trigger-rich description.
+    md = build_skill_md(_skill(picker="Where do errors vanish? Swallowed exceptions."),
+                        taxonomy_version="v0.2", docs_root=".")
+    assert "*Where do errors vanish? Swallowed exceptions.*" in md
+    # the tagline sits between the H1 and the "When to use" header
+    assert md.index("*Where do errors vanish?") < md.index("## When to use")
+    # no stray tagline when a skill has no picker (the two composition skills)
+    plain = build_skill_md(_skill(), taxonomy_version="v0.2", docs_root=".")
+    assert plain.split("## When to use")[0].count("*") == 0
+
+
 def test_scope_line_marks_design_capability():
     plain = build_skill_md(_skill(), taxonomy_version="v0.2", docs_root=".")
     assert "not meant for design docs" in plain
@@ -138,6 +151,20 @@ def test_build_router_md_routes_table_and_catalog():
     assert "| Bug fix | `hunting-silent-failures` |" in md
     assert "— run independently |" in md
     assert "- `hunting-silent-failures` ◆ — Where do errors vanish?" in md
+
+
+def test_router_body_overrides_description_in_when_to_use():
+    # The terse `description` stays the listing surface (frontmatter); a richer
+    # `body`, when present, is what the "When to use" section renders.
+    m = _manifest_with_router()
+    m.router.body = "Richer guidance with an example."
+    md = build_router_md(m)
+    front = yaml.safe_load(md.split("---\n")[1])
+    assert front["description"] == "Picks lenses."          # terse, unchanged
+    assert "Richer guidance with an example." in md         # body in the section
+    # falls back to description when no body is set
+    plain = build_router_md(_manifest_with_router())
+    assert "## When to use\n\nPicks lenses." in plain
 
 
 def test_generate_router_writes_skill_and_draft_eval(tmp_path):

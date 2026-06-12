@@ -19,6 +19,8 @@ provenance:
 
 # auditing-config-and-build-hygiene
 
+*Are config and CI trustworthy? Secrets, env parity, reproducible pinned builds, cache correctness.*
+
 ## When to use
 
 Audits configuration and build/CI health: config schema-validated at startup and fail-fast, secrets out of config files, parity across environments, reproducible and hermetic builds, pinned toolchains and CI actions, cache correctness, flaky or slow pipelines, and unused or drifting config keys. A repo-wide / scheduled audit. Use when auditing CI pipelines, Dockerfiles, build scripts, env vars, or config files.

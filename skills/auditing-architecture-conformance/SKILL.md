@@ -16,6 +16,8 @@ provenance:
 
 # auditing-architecture-conformance
 
+*Does the import graph still match the intended architecture? Layers, cycles, reach-arounds.*
+
 ## When to use
 
 Audits a repository for architecture conformance: dependency direction violations between layers/modules, cyclic dependencies, reach-arounds past a boundary, accidental coupling to internals, and drift between the documented architecture and the import graph. A repo-wide / scheduled audit rather than a single-diff review. Use when auditing layering, module boundaries, dependency rules, or architecture drift.

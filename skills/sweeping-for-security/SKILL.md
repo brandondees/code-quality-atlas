@@ -16,6 +16,8 @@ provenance:
 
 # sweeping-for-security
 
+*Can an attacker abuse this? Injection, authorization, secrets, crypto, untrusted data.*
+
 ## When to use
 
 Sweeps changes for security risks: injection (SQL/command/XSS) from unparameterized or unencoded untrusted input, missing authorization on object references (IDOR), hardcoded secrets, weak or homegrown crypto, unsafe deserialization, SSRF, CSRF, permissive CORS/TLS settings, and sensitive data in logs or URLs. Use when reviewing auth, user input, queries, secrets, crypto, cookies, file paths, or any code handling untrusted data.

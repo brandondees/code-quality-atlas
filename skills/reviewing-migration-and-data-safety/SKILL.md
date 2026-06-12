@@ -5,7 +5,8 @@ description: 'Reviews schema migrations and data changes for safety: backward co
   on large tables, unbatched backfills, missing dual-write during transitions, irreversible
   or destructive DDL, and integrity constraints left to app code. Use when reviewing
   migrations, ALTER TABLE, backfills, schema or data-format changes, or anything touching
-  persistence.'
+  persistence. Skip when the change touches no schema, migration, backfill, or persisted
+  data format — pure in-memory or stateless logic with no durable store behind it.'
 provenance:
   taxonomy_version: v0.3
   built_from:
@@ -16,9 +17,11 @@ provenance:
 
 # reviewing-migration-and-data-safety
 
+*Can this migration lock tables or lose data? Expand/contract, backfills, reversibility.*
+
 ## When to use
 
-Reviews schema migrations and data changes for safety: backward compatibility with the running app (expand/migrate/contract), table locks from NOT NULL/index/FK on large tables, unbatched backfills, missing dual-write during transitions, irreversible or destructive DDL, and integrity constraints left to app code. Use when reviewing migrations, ALTER TABLE, backfills, schema or data-format changes, or anything touching persistence.
+Reviews schema migrations and data changes for safety: backward compatibility with the running app (expand/migrate/contract), table locks from NOT NULL/index/FK on large tables, unbatched backfills, missing dual-write during transitions, irreversible or destructive DDL, and integrity constraints left to app code. Use when reviewing migrations, ALTER TABLE, backfills, schema or data-format changes, or anything touching persistence. Skip when the change touches no schema, migration, backfill, or persisted data format — pure in-memory or stateless logic with no durable store behind it.
 
 **Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists.
 
