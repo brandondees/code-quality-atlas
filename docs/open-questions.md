@@ -20,14 +20,47 @@
 **Live state (2026-06-12).** Most of the questions below were answered by what
 shipped across phases 2–3 and are now marked `→ RESOLVED` in place (with a
 pointer to the decision or skill that closed them). **Genuinely still open:**
+Q14 (router intent / matching-and-ranking / review-depth modes — new),
 Q13 (team preferences overlay — designed, not yet built),
 Q3 (review-vs-maintenance modes), Q4 (findings-vs-scores), Q6 (idiom packs),
 Q8 (proactive/cron-shaped maintenance — partially built as the repo audits),
-and the Q2 residual low-priority candidates. Everything else here is historical
-context kept for provenance.
+and the Q2 residual low-priority candidates. A factor-level coverage audit
+([`map-gaps.md`](map-gaps.md) G9) also found ~10 categories only partially
+surfaced at the factor level — fixable through the manifest/research, with the
+router half tracked as Q14. Everything else here is historical context kept for
+provenance.
 
 ### Q13 — Team preferences overlay *(new, 2026-06-12)*
 The suite pushes research-derived "objectively better" defaults but has no home for the **codebase owner's / team's considered opinion** (only `checking-idioms-and-consistency` bends, and only to linter configs). Design write-up: [`team-preferences-overlay.md`](team-preferences-overlay.md). Decisions captured from the user this session: **(a) tiered precedence** — preference-tier findings (taste/thresholds/idioms) the team may tune or silently suppress; floor-tier findings (security, correctness, data/migration safety, concurrency) can never be silently dropped, only `acknowledge`d with a recorded rationale that still surfaces; **(b) bootstrap = template + inference, but inference is proposal-only** — it emits a ratification *interview*, never writes the overlay, and never runs by accident, so a haphazard/vibe-coded repo can't launder unconsidered "approve-click" patterns into ratified standards. Overlay lives in the *reviewed* repo (`.code-quality-atlas/preferences.md`), is read at review time by the router, and stays out of generated-skill provenance (D6). Status: **design, awaiting review before implementation planning.** Open sub-questions live in the write-up (§9).
+
+### Q14 — Router intent, matching/ranking, and review-depth modes *(new, 2026-06-12)*
+
+**Trigger.** A factor-level coverage audit ([`map-gaps.md`](map-gaps.md) G9) found the router (D10) is behaving as a *suppressor*: by capping each change to 2-4 lenses it leaves the soft lenses (naming/readability, observability, restraint) unfired on most change shapes, so their factors never produce findings — the suite emits no naming findings in practice despite #5 being owned. **This inverts the router's purpose.** `choosing-review-lenses` was built to *improve unprompted, relevant skill activation* — a discovery aid so an agent/harness fires the right lenses without knowing the whole catalog — **not to gate coverage**. The original intent was the full suite run **together, in parallel, for an extremely comprehensive review**; the router was meant to be the on-ramp to that, not a turnstile in front of it.
+
+**The conflation to undo.** Today's router collapses two independent axes onto one 2-4 list:
+- **Relevance** — which lenses *apply* to this change (a bug fix needn't run a11y).
+- **Depth / budget** — *how much* to run right now (quick triage vs. full audit).
+
+The 2-4 cap is really a *depth* choice wearing a *relevance* mask. Separating the two axes is the core of this question.
+
+**Candidate directions (to weigh — no decision yet):**
+1. **Review-depth modes / tiers** — make depth an explicit selectable axis:
+   - *Critical-only triage* — correctness, security, data-safety, concurrency; fast/cheap, gate-shaped (pre-merge smoke).
+   - *PR-level review* — the relevance-routed set (today's behavior), tuned per change shape.
+   - *Comprehensive all-lens audit* — the original vision: every applicable lens in parallel; run periodically / on-demand / on high-risk diffs, not every push.
+   This reframes the six repo audits as the *repo* arm of the comprehensive tier and adds a *diff* arm.
+2. **Expand what the router exposes** — always surface the full ranked catalog rather than a hard 2-4 cut, so no lens is invisible; the cap becomes a *default depth*, overridable.
+3. **Change matching & ranking** — move from the hand-authored `when → lenses` table toward signal-based matching (changed paths, languages, diff features) yielding a relevance *score* per lens, with a depth threshold deciding how far down the ranked list to go. Soft lenses stay reachable at higher depth instead of being absent.
+4. **Progressive-phase routing** — phase the review: gate-critical first (block fast on blockers), then structural/design, then readability/idiom/docs as polish — each phase a depth step a reviewer (human or scheduled) can stop at. Pairs with the synthesizer's severity floor.
+
+**Open sub-questions.**
+- Where does *mode* live — a router argument, distinct commands (`/atlas-review-pr` exists; add `/atlas-audit-comprehensive` and `/atlas-triage`?), or a manifest `modes:` section the router generates from?
+- Does the 2-4 cap survive as the *PR-mode default*, or is it dropped for relevance-ranked-to-a-budget?
+- Interaction with the synthesizer (D12): does comprehensive mode raise the trimming floor so readability-class findings aren't discarded?
+- Cost/latency: comprehensive-in-parallel is the expensive path — on-demand only, or scheduled like the repo audits?
+- Does the team-preferences overlay (Q13) set the default mode and the critical-tier floor per repo?
+
+**Relation to prior decisions.** Refines D10 (router) and D12 (synthesizer / advisory fan-out); "all lenses in parallel" is consistent with D12's finding contract a harness can mechanize. Evidence: G9. **Status: open — framing captured, no decisions yet.**
 
 ### Q2 — Candidate additions  → RESOLVED (see D5)
 

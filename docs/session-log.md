@@ -181,3 +181,32 @@ a haphazard/vibe-coded repo laundering unconsidered approve-clicks into ratified
 standards. Overlay lives in the *reviewed* repo (`.code-quality-atlas/preferences.md`),
 read at review time by the router, kept out of generated-skill provenance (D6).
 Status: design, awaiting review before implementation planning.
+
+### 2026-06-12 (cont.) — factor-level coverage audit (G9) + router-intent question (Q14)
+
+User asked whether the suite has scope gaps — research that settled into the docs
+without reaching the skills — prompted by noticing **no naming findings ever
+surface** despite #5 being owned. Ran a full taxonomy-vs-skills sweep.
+
+Finding: at the *category* level there are **no gaps** — all 27 categories have an
+owning skill. The leak is at the **factor** level, and naming is the worked
+example. Three mechanisms, recorded as [`map-gaps.md`](map-gaps.md) **G9**:
+(1) **router under-selection** — a lens only fires when the router picks it, and
+the 2-4 cap leaves `reviewing-naming-and-readability` in just 3 of ~20 routes;
+(2) **bundle + ~8-check budget** — multi-category skills crowd out the junior
+category's factors; (3) **severity trimming** — the synthesizer ranks the
+readability class to the bottom and trims it. Dropped factors: #12 scalability &
+feature-flag *architecture*, #15 FinOps, #16/#27 telemetry privacy. Thin factors:
+#26 portability, #16 SLO, #6 symmetry/altitude, #21 change-amplification, #24
+agent-native parity, #9 caller ergonomics, #4 numeric overflow. Noted the irony:
+several thin factors are exactly G5's "build-here-first, LLM-only" list.
+
+The router half opened as **Q14**. User reframing (important): the router was meant
+to *improve unprompted, relevant skill activation* — not to **cap** coverage; the
+original intent was the **full suite in parallel for an extremely comprehensive
+review**. So the 2-4 cap inverts the design. Q14 separates the two axes the router
+currently conflates — **relevance** (which lenses apply) vs. **depth/budget** (how
+much to run) — and captures four candidate directions: review-depth *modes*
+(critical-only triage / PR-level / comprehensive all-lens), expose the full ranked
+catalog, signal-based matching+ranking, and progressive-phase routing. Framing
+captured, no decisions yet. Docs-only.

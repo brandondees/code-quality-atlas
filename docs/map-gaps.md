@@ -54,3 +54,21 @@ Idiom/consistency is inherently per-ecosystem (the `dhh-rails` / `kieran-*` prio
 ## G8 — Detection vs. adjudication boundary (esp. #27)
 
 Several #27 checks (regulatory interpretation, license-law compatibility) should **escalate to a human**, not be adjudicated by the agent. The agent's job is *detection + flagging with evidence*, not legal judgment. Generalize: every skill should know which findings it can resolve vs. which it must escalate. Matches Q9.
+
+## G9 — Factor-level propagation gap: category ownership is complete, factor *surfacing* leaks
+
+Full taxonomy-vs-skills sweep (2026-06-12). **All 27 categories have an owning skill** — no orphaned research, no un-skilled area. But ~10 categories are only *partially* surfaced at the **factor** level: a factor lives in `taxonomy.md` (often also in the skill's `heuristics.md`) yet never reaches a top-level inlined check, so it almost never produces a finding. The originating observation was that the suite emits **no naming findings** in practice despite #5 being owned.
+
+Three mechanisms drive the leak:
+
+1. **Router under-selection.** A lens only fires when `choosing-review-lenses` picks it, and the 2-4 cap means soft lenses run on few change shapes — `reviewing-naming-and-readability` appears in just **3 of ~20 routes** (feature, refactor, UI). On bug fixes, migrations, async, API, security, perf, LLM, config, and every repo audit it is never invoked. *(This is the router-intent problem — see Q14.)*
+2. **Bundle + ~8-check budget.** Multi-category skills split a single ~8-check inlined budget, crowding out the junior category's factors: `#5 naming + #6 readability + #7 comments`, `#9 module + #10 type-modeling`, `#19 build + #26 config/portability`, `#18 deps + #27 compliance`.
+3. **Severity trimming.** The synthesizer (D12) floats correctness/security to the top and ranks `Nit` last, so the readability class sinks and gets trimmed from the merged report even when produced.
+
+**Dropped** (absent even from `heuristics.md`): `#12` scalability-of-the-design; `#12` feature-flag *architecture* (runtime flags are in #16; flag *design* is nowhere); `#15` cloud-cost / FinOps *(residual candidate)*; `#16`/`#27` telemetry-analytics privacy *(residual candidate)*.
+
+**Thin** (heuristics-only or a single passing line, not a surfaced check): `#26` portability / environment assumptions (OS/arch, hardcoded paths, locale/encoding/timezone); `#16` SLO / error-budget instrumentation; `#6` symmetry of expression & altitude mixing; `#21` change-amplification & onboarding cost; `#24` agent-native parity & CODEOWNERS; `#9` caller ergonomics ("pit of success") & composition-vs-inheritance; `#4` numeric overflow / counter wraparound.
+
+**Irony vs. G5.** Several of the thin factors — altitude, symmetry, naming quality beyond casing, agent-native parity, caller ergonomics — are *exactly* the ones G5 flagged as **build-here-first** because LLM judgment is the only tool that covers them. The propagation gap hit the highest-unique-value factors hardest: the parts of the map that most justify an LLM reviewer are the parts most likely to go silent.
+
+**Fix surface** (spans three layers): the **manifest** (promote dropped/thin factors into inlined checks; rebalance the bundled-category budgets), the **research docs** (the two genuinely-missing #12 factors need research before they can be a check), and the **router** (stop the under-selection — Q14). Diff-shaped factors regenerate from the manifest; #12 scalability/feature-flag-design need a research pass first.
