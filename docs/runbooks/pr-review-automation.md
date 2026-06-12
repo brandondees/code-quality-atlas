@@ -66,7 +66,12 @@ build+autofix ──────────────────────
 ### 0. Prerequisites
 
 - The plugin installed in the reviewed repo via `.claude/settings.json` (see the
-  README "Install" section) so **web sessions** load it at startup.
+  README "Install" section) so **web sessions** load it at startup — this install
+  path reinstalls fresh each session, so it is never stale. Do **not** rely on an
+  interactive cached install for routines: with auto-update off it can pin to a
+  months-old commit, and a routine that reads `commands/atlas-review-pr.md` (or
+  `REVIEW.md`) from the clone then fails because those files post-date the pin. See
+  the README "Stale-install gotcha" note.
 - The **Claude GitHub App** installed on the repo (required for GitHub triggers).
   The trigger setup prompts you to install it if it isn't already; if configuring
   the trigger never prompts, it's already installed. Note that `/web-setup` grants
