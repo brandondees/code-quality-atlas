@@ -1,0 +1,24 @@
+# References to mine — reviewing-decision-lifecycle
+
+## Contents
+- From category #29
+
+## From category #29
+
+### Key references
+- **Michael Nygard — "Documenting Architecture Decisions" (2011)** — the ADR format (context · decision · status · consequences); status proposed/accepted/superseded.
+  → mine: a non-obvious or hard-to-reverse choice needs a recorded *why*, not just the *what*, so the next engineer inherits the reasoning; an accepted-but-unrecorded decision is unowned debt.
+- **ThoughtWorks Technology Radar — Adopt / Trial / Assess / Hold rings** — https://www.thoughtworks.com/radar/faq (`verify` ring definitions).
+  → mine: a technology's position is a *lifecycle* state, not a one-time yes/no; **Hold** = "don't start anything new with this." Selection should name where the chosen tech sits and where it's heading (rising vs. EOL).
+- **Jeff Bezos — one-way vs. two-way door decisions (2015 Amazon shareholder letter)** `(verify)`.
+  → mine: match scrutiny to reversibility — two-way doors (cheap to undo) decide fast and light; one-way doors (expensive to reverse) demand a recorded decision and an exit plan.
+- **RFC 8594 — The Sunset HTTP Header Field (2019)** — https://www.rfc-editor.org/rfc/rfc8594 ; **RFC 8631** link relations (`deprecation`/`sunset`).
+  → mine: deprecation is a *planned, dated* activity — signal end-of-life with a date and a migration path, not a silent removal discovered later as dead code.
+- **Build-vs-buy / Total Cost of Ownership frameworks** `(verify)`.
+  → mine: the bulk of a dependency's cost is *post-adoption* (integration, maintenance, eventual exit), so "we need it" is not a justification; "we weighed stdlib / a few lines / lib A / build, and chose X because…" is.
+- **Vendor lock-in & reversible-exit literature** `(verify)`.
+  → mine: exit cost can rival annual spend; the mitigations to check for are a **portability boundary/adapter** and **data exportability** — is the dependency silently load-bearing-and-irreplaceable?
+- **Azure Well-Architected Framework — architecture decision records & maintenance** `(verify)`.
+  → mine: periodically scan *accepted* ADRs for outdated or contradicted decisions; a stale decision log is worse than none. Decisions should name the assumptions and the conditions that reopen them.
+- **Keep a Changelog — `Deprecated` / `Removed` sections** — https://keepachangelog.com/ .
+  → mine: deprecation and removal are first-class, announced events with a window, not surprises.

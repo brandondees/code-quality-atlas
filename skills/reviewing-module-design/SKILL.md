@@ -5,7 +5,7 @@ description: 'Reviews module and type design: cohesion and coupling (via connasc
   Use when reviewing class/module structure, interfaces, type or data modeling, coupling,
   or API ergonomics for callers.'
 provenance:
-  taxonomy_version: v0.2
+  taxonomy_version: v0.3
   built_from:
   - category: 9
     source: docs/research/cluster-3-structure.md#9

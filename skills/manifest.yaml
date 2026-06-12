@@ -1,4 +1,4 @@
-taxonomy_version: v0.2
+taxonomy_version: v0.3
 skills:
   - name: hunting-silent-failures
     description: >
@@ -385,6 +385,24 @@ skills:
     built_from:
       - { category: 27, source: docs/research/cluster-6-evolution.md#27 }
 
+  - name: reviewing-decision-lifecycle
+    description: >
+      Reviews a decision as it is made — an ADR, RFC, design doc, adoption PR, or
+      deprecation/rollout plan — rather than the code that implements it: is the
+      choice (dependency, framework, platform, build-vs-buy) justified against
+      cheaper options; is lock-in and exit cost assessed; is the rationale and its
+      assumptions recorded with a revisit-trigger; is retirement planned on a
+      schedule with a sunset date and migration path. Use when reviewing an
+      architecture decision record, an RFC, a dependency or technology adoption, a
+      vendor or build-vs-buy choice, or a deprecation/sunset plan.
+    picker: >
+      Is this decision sound and recorded? Adoption justification, lock-in/exit,
+      ADR assumptions, revisit-triggers, planned retirement.
+    shape: decision
+    wave: 4
+    built_from:
+      - { category: 29, source: docs/research/cluster-6-evolution.md#29 }
+
 # The composition layer (Q7): maps "what am I reviewing" to the lenses worth
 # running, so neither a human nor an agent has to know the whole catalog to
 # select well. Generated into skills/<name>/SKILL.md from this section alone.
@@ -457,6 +475,14 @@ router:
             auditing-dependencies-and-supply-chain, auditing-config-and-build-hygiene,
             auditing-documentation-health, auditing-compliance-and-provenance]
       note: the six repo-shaped audits; run independently, not as one pass
+    - when: A decision, not a diff — an ADR / RFC / design doc, a dependency or
+            technology adoption, a build-vs-buy or vendor choice, or a
+            deprecation / sunset plan
+      run: [reviewing-decision-lifecycle, checking-restraint,
+            reviewing-api-contract-safety]
+      note: decision-shaped — reviews the choice and its record (rationale,
+            assumptions, exit), not implementation code; pair with the
+            design-capable (◆) lenses for the decision's domain
 
 # The other half of composition (Q7): once the router's 2-4 lenses each emit
 # findings, this merges them into one report — deduplicated, conflicts

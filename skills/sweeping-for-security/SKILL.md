@@ -7,7 +7,7 @@ description: 'Sweeps changes for security risks: injection (SQL/command/XSS) fro
   reviewing auth, user input, queries, secrets, crypto, cookies, file paths, or any
   code handling untrusted data.'
 provenance:
-  taxonomy_version: v0.2
+  taxonomy_version: v0.3
   built_from:
   - category: 14
     source: docs/research/cluster-4-runtime.md#14
