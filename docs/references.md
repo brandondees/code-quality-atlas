@@ -61,7 +61,7 @@ These span most of the map and are worth reading as whole-suite influences.
 - **TODO** Brendan Gregg — systems performance; "USE method" (#15).
 - **TODO** caching: "there are only two hard things…" / invalidation literature (#15).
 - **Charity Majors et al. — *Observability Engineering*** — logs/metrics/traces, high-cardinality (#16).
-- **OWASP — Top 10 for Agentic Applications (2026)** (`genai.owasp.org`) — the agentic-risk spine (goal hijack, tool misuse, privilege abuse, memory poisoning, rogue agents); with the LLM Top 10, the two-list backbone of #25 (and Q14).
+- **OWASP — Top 10 for Agentic Applications (2026)** (`genai.owasp.org`) — the agentic-risk spine (goal hijack, tool misuse, privilege abuse, memory poisoning, rogue agents); with the LLM Top 10, the two-list backbone of #25 (and Q16).
 - **Model Context Protocol — security best practices** (`modelcontextprotocol.io`) — confused deputy, token passthrough, tool poisoning — the tool-integration anti-pattern catalog (#25, #14).
 
 ## Cluster V — Verification & Supply

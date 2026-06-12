@@ -1,0 +1,42 @@
+{
+  "skills": [
+    "reviewing-decision-lifecycle"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this adoption proposal.\n```text\nPR: \"Add Kafka for the notifications feature\"\nRationale: \"We need a queue.\" Adds three services (Kafka, Zookeeper, schema-registry) to docker-compose.\nNo ADR. Notifications volume: ~200 messages/day. No mention of alternatives, or of how we would remove it later.\n```",
+      "expected_behavior": [
+        "Flags the missing adoption justification — \"we need a queue\" is not a rationale; expects alternatives weighed (e.g. a DB-backed queue or cron job for ~200 messages/day)",
+        "Flags right-sizing: Kafka + Zookeeper + schema-registry is far too heavy for 200 messages/day (cross-links restraint #11)",
+        "Flags the missing decision record and the absence of any lock-in / exit consideration",
+        "Recommends recording the decision (context, options, consequences) or choosing a lighter option — does not just approve"
+      ]
+    },
+    {
+      "query": "Review whether this accepted decision still holds.\n```text\nADR-12 (accepted 2023): \"Use a single Postgres instance; team is 3 engineers, < 50 req/s, no HA requirement.\"\nToday: team is 25 engineers, 1,200 req/s at peak, a 4-hour outage last quarter (incident #88), still no replica.\nNo revisit-trigger was ever recorded.\n```",
+      "expected_behavior": [
+        "Recognizes the decision's stated assumptions (3 engineers, < 50 req/s, no HA) have expired",
+        "Flags that the decision is now stale debt and should be revisited / superseded (HA, a replica)",
+        "Notes the absence of a revisit-trigger as why it rotted silently, and recommends adding one",
+        "Judges it against changed conditions — does not call the original 2023 decision wrong at the time it was made"
+      ]
+    },
+    {
+      "query": "Review this deprecation plan.\n```text\nRFC: deprecate the v1 /reports API.\n- v1 marked `deprecated: true` in the OpenAPI spec; Sunset header set to 2026-12-01 (RFC 8594)\n- migration guide to v2 published; the top 5 consumers have been contacted\n- removal ticket PLAT-441 scheduled for after the sunset date; changelog \"Deprecated\" entry added\n```",
+      "expected_behavior": [
+        "Reports no substantive findings — retirement is planned and clocked (sunset date, migration path, tracked removal ticket, changelog entry)",
+        "Confirms the Sunset header / deprecation marker and the consumer-migration path are present",
+        "Does not invent problems or demand process beyond what a well-signaled deprecation needs"
+      ]
+    },
+    {
+      "query": "Review this build-vs-buy decision.\n```text\nADR-30: \"Build our own billing & invoicing engine instead of adopting Stripe Billing.\"\nRationale: \"More control.\" No TCO comparison, no estimate of maintenance cost, no exit/migration consideration. Pricing and contract terms not discussed.\n```",
+      "expected_behavior": [
+        "Flags the thin rationale (\"more control\") with no build-vs-buy comparison or maintenance/TCO estimate",
+        "Flags the missing exit / lock-in consideration on a one-way-door choice (a billing engine is expensive to reverse)",
+        "Escalates the TCO / procurement / contract-terms judgment to humans rather than adjudicating the business call (the G8 detect-and-escalate boundary)",
+        "Recommends recording the options considered and the assumptions in the ADR"
+      ]
+    }
+  ]
+}

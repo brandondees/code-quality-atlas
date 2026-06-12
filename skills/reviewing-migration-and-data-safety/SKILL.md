@@ -7,7 +7,7 @@ description: 'Reviews schema migrations and data changes for safety: backward co
   migrations, ALTER TABLE, backfills, schema or data-format changes, or anything touching
   persistence.'
 provenance:
-  taxonomy_version: v0.2
+  taxonomy_version: v0.3
   built_from:
   - category: 20
     source: docs/research/cluster-5-verification.md#20

@@ -182,6 +182,141 @@ standards. Overlay lives in the *reviewed* repo (`.code-quality-atlas/preference
 read at review time by the router, kept out of generated-skill provenance (D6).
 Status: design, awaiting review before implementation planning.
 
+### 2026-06-12 (cont.) — factor-level coverage audit (G9) + router-intent question (Q14)
+
+User asked whether the suite has scope gaps — research that settled into the docs
+without reaching the skills — prompted by noticing **no naming findings ever
+surface** despite #5 being owned. Ran a full taxonomy-vs-skills sweep.
+
+Finding: at the *category* level there are **no gaps** — all 27 categories have an
+owning skill. The leak is at the **factor** level, and naming is the worked
+example. Three mechanisms, recorded as [`map-gaps.md`](map-gaps.md) **G9**:
+(1) **router under-selection** — a lens only fires when the router picks it, and
+the 2-4 cap leaves `reviewing-naming-and-readability` in just 3 of ~20 routes;
+(2) **bundle + ~8-check budget** — multi-category skills crowd out the junior
+category's factors; (3) **severity trimming** — the synthesizer ranks the
+readability class to the bottom and trims it. Dropped factors: #12 scalability &
+feature-flag *architecture*, #15 FinOps, #16/#27 telemetry privacy. Thin factors:
+#26 portability, #16 SLO, #6 symmetry/altitude, #21 change-amplification, #24
+agent-native parity, #9 caller ergonomics, #4 numeric overflow. Noted the irony:
+several thin factors are exactly G5's "build-here-first, LLM-only" list.
+
+The router half opened as **Q14**. User reframing (important): the router was meant
+to *improve unprompted, relevant skill activation* — not to **cap** coverage; the
+original intent was the **full suite in parallel for an extremely comprehensive
+review**. So the 2-4 cap inverts the design. Q14 separates the two axes the router
+currently conflates — **relevance** (which lenses apply) vs. **depth/budget** (how
+much to run) — and captures four candidate directions: review-depth *modes*
+(critical-only triage / PR-level / comprehensive all-lens), expose the full ranked
+catalog, signal-based matching+ranking, and progressive-phase routing. Framing
+captured, no decisions yet. Docs-only.
+
+### 2026-06-12 (cont.) — G10 (the enforcement apparatus as un-framed surface) + round-2 gap hunt opened
+
+Follow-on from the G9/Q14 discussion. User asked where "improve the quality
+*tooling*" lands — e.g. propose a vuln scanner, tidy up linter ignores. Chasing it
+exposed a gap one level deeper than G9, captured as [`map-gaps.md`](map-gaps.md) **G10**:
+
+- The "a tool could mechanize this for you" nudge is **trivial and already latent**
+  (every lens carries `tool-rules.md`); it is advisory output, **not** the Q8
+  fixing-mode — I had mis-parked it under Q8. `config-and-build-hygiene` already
+  does a version of it.
+- **Gate/enforcement health** (disabled / soft-failed gates) is **already covered** —
+  in the corpus (`cluster-5` §19) and shipped (`config-and-build-hygiene/SKILL.md:39`
+  + eval). So "re-enable / provision the missing scanner" was a false alarm.
+- **In-code suppression rot** (`# noqa` / `eslint-disable` / `# type: ignore`
+  accumulation, lint-baseline growth) is a **genuine research-corpus hole** — absent
+  from `docs/research/` entirely.
+
+The structural lesson: the map covers artifacts → properties → mistake-detection but
+never framed **the enforcement apparatus itself** as reviewable; gate-health landed
+only because it fell incidentally inside #19. **A missing category yields a *silent*
+hole (factor never written), not a *thin* heuristic — so the G9 taxonomy-vs-skills
+diff cannot find framing gaps.** That motivated a second pass.
+
+Opened the **round-2 gap hunt** ([`research/taxonomy-gap-hunt-round-2.md`](research/taxonomy-gap-hunt-round-2.md)):
+a from-first-principles sweep over *kinds of reviewable surface*, organized along five
+axes orthogonal to the original six clusters — (A) meta-surfaces, (B) under-covered
+artifact types, (C) decision & lifecycle (choose/adopt/revisit/retire — incl. the user's
+dependency-*selection*-vs-patching point), (D) socio-technical & responsible engineering,
+(E) operational & resilience design — each candidate scored against a rubric (already
+covered? distinct behavior? shape? prior art? disposition) to avoid re-flagging covered
+facets. Feeds a possible taxonomy v0.3. Research running; synthesis to follow.
+
+### 2026-06-12 (cont.) — round-2 gap hunt synthesized (→ taxonomy v0.3 proposal + Q15)
+
+Five parallel research agents (axes A–E) returned; synthesized into
+[`research/taxonomy-gap-hunt-round-2.md`](research/taxonomy-gap-hunt-round-2.md).
+Three structural findings, each bigger than any single category:
+
+1. **A missing review *shape*: decision-time / decision-record review.** The suite
+   has diff-lenses and repo/cron-audits but nothing that reviews a *decision as
+   made* (ADR/RFC/adoption/deprecation/rollout/capacity-DR plan). Recurs across all
+   of axis C and most of axis E. Opened as **Q15** — the headline.
+2. **The G10 meta-layer generalizes** — suppression rot (A1), monitoring-config
+   (A4), codegen↔source drift (A5), test scaffolding (A2), IaC (B1): one omission,
+   ~5 instances, not five unrelated gaps.
+3. **A design-time operational cluster is missing** (scale / recover / degrade —
+   distinct from #16's *runtime* operability), which also absorbs the two G9 #12
+   drops. Axis D's restraint check **passed**: the socio-technical "gaps" were
+   mostly governance (out-of-scope) or already-covered, confirming v0.2 didn't
+   under-reach on the human axis — the real gaps are *structural*, not ideological.
+
+Proposed v0.3 (disposition table in the doc): **2–4 new categories** — #28 operational
+& resilience design [high]; #29 decision lifecycle [med-high, scope to the reviewable
+slice, escalate TCO/procurement]; #30 enforcement-apparatus/meta-artifacts [high on
+suppression hygiene; grouping open]; IaC-as-reviewed-code [high, placement open] —
+**+ ~10 add-factors** (#27 asset/model-weight licensing + privacy-by-design; #25
+harmful-output eval; #17 test-apparatus; #19 codegen-drift + rollout-plan; #22
+docs-as-system; …). Plus the cross-cutting tool-mechanization `mechanize-with:` nudge.
+**Not editing `taxonomy.md` yet — owner decision pending on how much to promote vs.
+fold (a restraint call).** Docs-only.
+
+### 2026-06-12 (cont.) — taxonomy v0.3 drafted (D13) + decision-time shape design (Q15 resolved)
+
+Owner chose **full v0.3 draft** + **design pass first** for the decision-time shape.
+Did the design pass first (it gates how #29 enters the map):
+[`decision-time-review-shape.md`](decision-time-review-shape.md) resolves decision-time
+as a **mode orthogonal to topic** — a `shape: decision` capability (promoting the
+existing `design:` flag) with a shared decision-record checklist, plus a few
+decision-native lenses — **not** a 7th cluster (avoids G1 double-booking). That
+dissolves Q15's "category or shape?" tension: #29 is the *topic*, decision-time is the
+*shape*.
+
+Then drafted **taxonomy v0.3** (`taxonomy.md`, now 31 categories / ~95 factors):
+promoted **#28** operational & resilience design (resolves the G9 #12 scalability
+drop), **#29** decision lifecycle, **#30** enforcement apparatus & meta-artifacts (the
+G10 gap), **#31** infrastructure-as-code; added factors to #16/#17/#19/#20/#22/#25/#27;
+named decision-time as the third review shape; added a "Candidate additions — resolved
+(v0.3)" disposition table. Recorded as **D13**. Governance slices held out-of-scope
+(G8). `taxonomy.md` is docs-only and not a skill `built_from` source, so drift stays
+clean (61 tests pass). **Next: the v0.3 build phase** — research sections for the four
+new categories + manifest entries + generated skills/evals, and regenerating the
+add-factor-affected skills (#16/#17/#19/#20/#22/#25/#27) whose research sections change.
+
+### 2026-06-12 (cont.) — v0.3 build, wave 1: the first decision-time lens
+
+Owner chose **decision-time (#29) first**. Shipped `reviewing-decision-lifecycle`
+end-to-end — the suite's first **decision-shaped** lens, validating the new shape
+through the whole pipeline:
+- **Pipeline:** `manifest.py` validator accepts `shape: decision`; `generate.py`
+  emits a decision scope-line and a "Decision-shaped" router-catalog section.
+- **Research:** `cluster-6-evolution.md` gains `## #29 Decision lifecycle`
+  (references / tool-rules / heuristics) grounded in round-2 prior art — Nygard
+  ADRs, Tech Radar rings, one/two-way doors, RFC 8594 Sunset, build-vs-buy TCO,
+  lock-in/exit.
+- **Skill:** `shape: decision`, `built_from #29`, 8 inlined checks, 4 evals
+  (adoption / stale-ADR / clean-deprecation / build-vs-buy) + examples.
+- **Router:** a decision route + catalog section. **Manifest** `taxonomy_version`
+  bumped v0.2 → v0.3 (provenance across all skills).
+
+Generate clean, no drift, evals valid, 61 tests pass. **Remaining v0.3 build:**
+#28 operational & resilience design, #30 enforcement apparatus & meta-artifacts,
+#31 infrastructure-as-code (each: research section + skill + evals), and the ~10
+add-factor regenerations (#16/#17/#19/#20/#22/#25/#27). Optional polish: a
+shape-aware "Reviewer discipline" wording (says "code" for decision/repo lenses)
+and a decision-specific synthesizer verdict vocabulary (adopt / revisit / reject).
+
 ### 2026-06-12 (cont.) — research review & expansion pass (first compounding-loop iteration on the research itself)
 
 A "review the research, find more to add" pass — the first substantive *research*
@@ -196,7 +331,7 @@ repo's own flags pointed, all citations web-verified today. Four additions:
    Added 4 references + 9 agentic heuristics (tool least-privilege, approval
    gates/step budgets, tool-metadata-as-untrusted-input, token audience discipline,
    sandboxed code exec, inter-agent auth, memory hygiene, audit trail) to cluster-4
-   #25. G2 updated; **promotion decision opened as Q14** (user call, D5-style).
+   #25. G2 updated; **promotion decision opened as Q16** (user call, D5-style).
 2. **IaC/workflow surface (#19).** hadolint (DL3006/7/8, DL3002…), Checkov
    (CKV_AWS_20/57), tflint, kube-linter (run-as-non-root, latest-tag, …),
    actionlint, zizmor (template injection, mutable-tag pinning) — all IDs verified

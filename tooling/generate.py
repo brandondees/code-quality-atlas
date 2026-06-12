@@ -80,6 +80,12 @@ def _scope_line(skill: Skill) -> str:
     if skill.shape == "repo":
         return ("**Shape: repo.** Run against the whole repository (scheduled or "
                 "on demand), not a single diff.")
+    if skill.shape == "decision":
+        return ("**Shape: decision.** Reviewed at decision time — an ADR, RFC, "
+                "design doc, adoption PR, or deprecation/rollout plan — not a diff "
+                "of implementation code. Apply the checks to the decision and its "
+                "record (rationale, assumptions, alternatives, exit/rollback), not "
+                "to lines of code.")
     if skill.design:
         return ("**Shape: diff — design-capable.** Also works on design docs and "
                 "plans: apply the same checks to the proposed states, data flows, "
@@ -250,7 +256,10 @@ def build_router_md(manifest: Manifest) -> str:
         "**Diff-shaped — run on a change:**\n\n"
         f"{catalog('diff')}\n\n"
         "**Repo-shaped — run on the whole repository, scheduled or on demand:**\n\n"
-        f"{catalog('repo')}\n"
+        f"{catalog('repo')}\n\n"
+        "**Decision-shaped — run on a decision or plan (ADR, RFC, adoption, "
+        "deprecation, capacity/DR design), not a diff:**\n\n"
+        f"{catalog('decision')}\n"
     )
     return f"---\n{fm}\n---\n\n{body}"
 

@@ -7,7 +7,7 @@ description: 'Picks which code-quality-atlas review lenses to run for a given ch
   Use first when starting a code review or audit with the atlas suite, when unsure
   which review skills apply, or when asked to review something without a named lens.'
 provenance:
-  taxonomy_version: v0.2
+  taxonomy_version: v0.3
   built_from: []
 ---
 
@@ -50,6 +50,7 @@ Picks which code-quality-atlas review lenses to run for a given change: maps wha
 | CI / build / config change | `auditing-config-and-build-hygiene`, `sweeping-for-security` |
 | Any pull request (the PR artifact itself, on top of content lenses) | `reviewing-pr-and-process-hygiene` |
 | Whole-repo health audit (scheduled / cron) | `finding-maintainability-hotspots`, `auditing-architecture-conformance`, `auditing-dependencies-and-supply-chain`, `auditing-config-and-build-hygiene`, `auditing-documentation-health`, `auditing-compliance-and-provenance` — the six repo-shaped audits; run independently, not as one pass |
+| A decision, not a diff — an ADR / RFC / design doc, a dependency or technology adoption, a build-vs-buy or vendor choice, or a deprecation / sunset plan | `reviewing-decision-lifecycle`, `checking-restraint`, `reviewing-api-contract-safety` — decision-shaped — reviews the choice and its record (rationale, assumptions, exit), not implementation code; pair with the design-capable (◆) lenses for the decision's domain |
 
 ## Catalog
 
@@ -82,3 +83,7 @@ Picks which code-quality-atlas review lenses to run for a given change: maps wha
 - `auditing-config-and-build-hygiene` — Are config and CI trustworthy? Secrets, env parity, reproducible pinned builds, cache correctness.
 - `auditing-documentation-health` — Do the docs still tell the truth? API parity, stale examples, ADR coverage, changelog discipline.
 - `auditing-compliance-and-provenance` — Any licensing, PII, or provenance exposure? Detect and escalate to humans — never decide legal questions.
+
+**Decision-shaped — run on a decision or plan (ADR, RFC, adoption, deprecation, capacity/DR design), not a diff:**
+
+- `reviewing-decision-lifecycle` — Is this decision sound and recorded? Adoption justification, lock-in/exit, ADR assumptions, revisit-triggers, planned retirement.

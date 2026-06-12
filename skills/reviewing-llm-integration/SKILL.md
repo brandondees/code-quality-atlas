@@ -6,7 +6,7 @@ description: Reviews LLM/AI integration code for prompt-injection surface, the l
   an LLM or model API, builds prompts, parses model output, or wires up agents and
   tools.
 provenance:
-  taxonomy_version: v0.2
+  taxonomy_version: v0.3
   built_from:
   - category: 25
     source: docs/research/cluster-4-runtime.md#25

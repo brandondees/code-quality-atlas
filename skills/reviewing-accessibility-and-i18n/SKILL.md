@@ -7,7 +7,7 @@ description: 'Reviews UI changes for accessibility and internationalization: sem
   layout. Use when reviewing components, templates, markup, forms, modals, UI text,
   or anything user-facing.'
 provenance:
-  taxonomy_version: v0.2
+  taxonomy_version: v0.3
   built_from:
   - category: 23
     source: docs/research/cluster-6-evolution.md#23

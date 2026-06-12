@@ -14,18 +14,24 @@
 - **D12 — Composition back half (Q7 resolved): a synthesizer skill + advisory-by-default fan-out.** *(2026-06-12)* The router (D10) picks the lenses; a 24th skill, `synthesizing-review-findings`, merges their output into one report — **collect → dedupe → reconcile → rank → verdict**. Dedup reuses the existing G1 primary-owner attribution (shared findings reported once, under the owner); reconciliation uses a manifest `synthesizer.tensions:` table of known opposing lens pairs (restraint ↔ module-design / performance / test-quality / api-contract; performance ↔ readability) each with a default resolution; ranking uses a `severity_order` scale (Blocker > Major > Minor > Nit) with correctness/security/data-loss floated to the top; the verdict is one of block / approve-with-changes / approve. **Fan-out is advisory by default** (the agent runs the router's lenses, then applies the merge) — chosen over automated orchestration to honor D7 portability (plain markdown, no Claude/harness assumption) — but the skill ships a fixed **finding contract** (location/severity/lens/finding/fix) so a capable harness can *mechanize* the same deterministic merge. Generated from the manifest like the router (`built_from: []`, no docs drift); validator checks tensions name two distinct known lenses and `severity_order` is non-trivial. A `reviewer discipline` guard forbids inflating the merged report beyond the union of real lens findings.
 - **D11 — License for public release: dual MIT (code) + CC BY 4.0 (content).** *(user, 2026-06-11)* The research atlas and skills (`docs/`, `skills/`, README) carry CC BY 4.0 — prose is the project's main value and CC BY is built for it; the pipeline (`tooling/`, `tests/`, CI/config) carries MIT. Python sources get `SPDX-License-Identifier: MIT` headers (dogfooding #27's per-file-header check); the plugin manifest declares `MIT AND CC-BY-4.0`. Root `LICENSE` is the explainer, full texts in `LICENSE-MIT` / `LICENSE-CC-BY-4.0`. Chosen over single-MIT for content-license fit, over copyleft to keep plugin adoption unencumbered. Unblocks flipping the repo public.
 - **D9 — Packaging (Q12 resolved): the repo is itself a Claude Code plugin + marketplace.** `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` (both inside the repo-root `.claude-plugin/` directory); `skills/` is already the plugin-default skill layout, so no restructuring. Install: `/plugin marketplace add brandondees/code-quality-atlas` then `/plugin install code-quality-atlas@code-quality-atlas`. **Versioning: commit-SHA** (no `version` field) — every merged commit ships, matching the regeneration loop; switch to pinned semver if/when the suite stabilizes for external users. Skill-level provenance still carries `taxonomy_version`. Validated with `claude plugin validate` and a local end-to-end install (22/22 skills discovered). *(2026-06-10)*
+- **D13 — Taxonomy v0.3 (round-2 gap hunt): four promoted categories + a third review shape.** *(user, 2026-06-12; "full v0.3 draft")* Promoted **#28 Operational & resilience design**, **#29 Decision lifecycle**, **#30 Enforcement apparatus & meta-artifacts**, **#31 Infrastructure-as-code**; added factors to #16/#17/#19/#20/#22/#25/#27; named **decision-time** as a third review shape alongside diff and repo/cron ([`decision-time-review-shape.md`](decision-time-review-shape.md), Q15). Resolves the G9 #12 drops (→ #28) and the G10 framing gap (→ #30). Decision-time is modelled as a **mode orthogonal to topic** (formalizing the existing `design:` flag) plus a few decision-native lenses — **not** a 7th cluster (would re-create G1 double-booking). Governance slices (build-vs-buy TCO, deep fairness, DevEx-as-a-system) held **out-of-scope** via the G8 detect-and-escalate boundary. Disposition: [`taxonomy.md`](taxonomy.md#candidate-additions--resolved-v03). **`taxonomy.md` updated; skills not yet regenerated** — the add-factors drift-flag their owners (regenerable), and the four new categories need research sections + manifest entries + generated skills (the v0.3 build phase). 31 categories.
 
 ## Open questions
 
 **Live state (2026-06-12).** Most of the questions below were answered by what
 shipped across phases 2–3 and are now marked `→ RESOLVED` in place (with a
 pointer to the decision or skill that closed them). **Genuinely still open:**
-Q14 (promote agentic/tool-use safety to its own category),
+Q16 (promote agentic/tool-use safety to its own category),
 Q13 (team preferences overlay — designed, not yet built),
+Q14 (router intent / matching-and-ranking / review-depth modes — new),
+Q15 (a decision-time review shape — new, the round-2 gap-hunt headline),
 Q3 (review-vs-maintenance modes), Q4 (findings-vs-scores), Q6 (idiom packs),
 Q8 (proactive/cron-shaped maintenance — partially built as the repo audits),
-and the Q2 residual low-priority candidates. Everything else here is historical
-context kept for provenance.
+and the Q2 residual low-priority candidates. A factor-level coverage audit
+([`map-gaps.md`](map-gaps.md) G9) also found ~10 categories only partially
+surfaced at the factor level — fixable through the manifest/research, with the
+router half tracked as Q14. Everything else here is historical context kept for
+provenance.
 
 **Pending follow-up:** cross-model eval re-gate for the 2026-06-12
 research-expansion additions (runbook step 3) — the appended heuristics shipped
@@ -34,11 +40,46 @@ affected skills' evals per the [regeneration runbook](runbooks/regenerating-skil
 on the next machine with a local model, and before the next
 skill-behavior-changing PR.
 
-### Q14 — Promote agentic/tool-use safety to its own category? *(new, 2026-06-12)*
-Map-gaps G2's candidate now has standards-grade external backing: OWASP released a dedicated **Top 10 for Agentic Applications** (ASI01–ASI10, 2025-12-09) separate from the LLM Top 10, alongside the Agentic AI Threats & Mitigations companion and the MCP spec's security-best-practices page (confused deputy / token passthrough / tool poisoning). The research-expansion pass (2026-06-12) filed the references + nine agentic heuristics under **#25** in cluster-4, so the suite reviews this material today either way. The open call: promote to a category **#28** (cross-cutting #13 tool contracts, #14 authz, #24 agent process) — clearer ownership and a sharper lens trigger for agent-heavy codebases, at the cost of taxonomy churn and skill re-mapping — or keep it a #25 facet. D5-style taxonomy decision: **awaiting user.**
+### Q16 — Promote agentic/tool-use safety to its own category? *(new, 2026-06-12)*
+Map-gaps G2's candidate now has standards-grade external backing: OWASP released a dedicated **Top 10 for Agentic Applications** (ASI01–ASI10, 2025-12-09) separate from the LLM Top 10, alongside the Agentic AI Threats & Mitigations companion and the MCP spec's security-best-practices page (confused deputy / token passthrough / tool poisoning). The research-expansion pass (2026-06-12) filed the references + nine agentic heuristics under **#25** in cluster-4, so the suite reviews this material today either way. The open call: promote to a new category **#32** (cross-cutting #13 tool contracts, #14 authz, #24 agent process) — clearer ownership and a sharper lens trigger for agent-heavy codebases, at the cost of taxonomy churn and skill re-mapping — or keep it a #25 facet. D5-style taxonomy decision: **awaiting user.**
 
 ### Q13 — Team preferences overlay *(new, 2026-06-12)*
 The suite pushes research-derived "objectively better" defaults but has no home for the **codebase owner's / team's considered opinion** (only `checking-idioms-and-consistency` bends, and only to linter configs). Design write-up: [`team-preferences-overlay.md`](team-preferences-overlay.md). Decisions captured from the user this session: **(a) tiered precedence** — preference-tier findings (taste/thresholds/idioms) the team may tune or silently suppress; floor-tier findings (security, correctness, data/migration safety, concurrency) can never be silently dropped, only `acknowledge`d with a recorded rationale that still surfaces; **(b) bootstrap = template + inference, but inference is proposal-only** — it emits a ratification *interview*, never writes the overlay, and never runs by accident, so a haphazard/vibe-coded repo can't launder unconsidered "approve-click" patterns into ratified standards. Overlay lives in the *reviewed* repo (`.code-quality-atlas/preferences.md`), is read at review time by the router, and stays out of generated-skill provenance (D6). Status: **design, awaiting review before implementation planning.** Open sub-questions live in the write-up (§9).
+
+### Q14 — Router intent, matching/ranking, and review-depth modes *(new, 2026-06-12)*
+
+**Trigger.** A factor-level coverage audit ([`map-gaps.md`](map-gaps.md) G9) **observed** the router's 2-4-lens cap acting as a *coverage suppressor*: capping each change to 2-4 lenses leaves the soft lenses (naming/readability, observability, restraint) unfired on most change shapes, so their factors never produce findings — the suite emits no naming findings in practice despite #5 being owned. **The cap is working exactly as documented** — `choosing-review-lenses/SKILL.md` (and `tooling/generate.py`) specify "run 2-4 content lenses per change" (D10), and that contract stands. The tension is that the contract was written to *improve unprompted, relevant skill activation* — a discovery aid so an agent/harness fires the right lenses without knowing the whole catalog — **not to gate total coverage**. The original intent was the full suite run **together, in parallel, for an extremely comprehensive review**; the router was meant to be the on-ramp to that, not a turnstile in front of it. Q14 asks whether that contract should be re-scoped — separating relevance from depth (below) — not whether the router is violating it.
+
+**The conflation to undo.** Today's router collapses two independent axes onto one 2-4 list:
+- **Relevance** — which lenses *apply* to this change (a bug fix needn't run a11y).
+- **Depth / budget** — *how much* to run right now (quick triage vs. full audit).
+
+The 2-4 cap is really a *depth* choice wearing a *relevance* mask. Separating the two axes is the core of this question.
+
+**Candidate directions (to weigh — no decision yet):**
+1. **Review-depth modes / tiers** — make depth an explicit selectable axis:
+   - *Critical-only triage* — correctness, security, data-safety, concurrency; fast/cheap, gate-shaped (pre-merge smoke).
+   - *PR-level review* — the relevance-routed set (today's behavior), tuned per change shape.
+   - *Comprehensive all-lens audit* — the original vision: every applicable lens in parallel; run periodically / on-demand / on high-risk diffs, not every push.
+   This reframes the six repo audits as the *repo* arm of the comprehensive tier and adds a *diff* arm.
+2. **Expand what the router exposes** — always surface the full ranked catalog rather than a hard 2-4 cut, so no lens is invisible; the cap becomes a *default depth*, overridable.
+3. **Change matching & ranking** — move from the hand-authored `when → lenses` table toward signal-based matching (changed paths, languages, diff features) yielding a relevance *score* per lens, with a depth threshold deciding how far down the ranked list to go. Soft lenses stay reachable at higher depth instead of being absent.
+4. **Progressive-phase routing** — phase the review: gate-critical first (block fast on blockers), then structural/design, then readability/idiom/docs as polish — each phase a depth step a reviewer (human or scheduled) can stop at. Pairs with the synthesizer's severity floor.
+
+**Open sub-questions.**
+- Where does *mode* live — a router argument, distinct commands (`/atlas-review-pr` exists; add `/atlas-audit-comprehensive` and `/atlas-triage`?), or a manifest `modes:` section the router generates from?
+- Does the 2-4 cap survive as the *PR-mode default*, or is it dropped for relevance-ranked-to-a-budget?
+- Interaction with the synthesizer (D12) and `REVIEW.md`'s round-based severity floor: that escalating floor is *precisely* what silences Nit/Minor (readability-class) findings after round 1, so comprehensive mode would need to **lower** the floor — keep it at Nit regardless of round count, or bypass the per-round escalation entirely for full-suite runs — to keep those findings alive. (A *higher* floor drops more, not fewer.)
+- Cost/latency: comprehensive-in-parallel is the expensive path — on-demand only, or scheduled like the repo audits?
+- Does the team-preferences overlay (Q13) set the default mode and the critical-tier floor per repo?
+
+**Relation to prior decisions.** Refines D10 (router) and D12 (synthesizer / advisory fan-out); "all lenses in parallel" is consistent with D12's finding contract a harness can mechanize. Evidence: G9. **Status: open — framing captured, no decisions yet.**
+
+### Q15 — A decision-time review shape *(new, 2026-06-12; the round-2 gap-hunt headline)*
+
+The round-2 gap hunt ([`research/taxonomy-gap-hunt-round-2.md`](research/taxonomy-gap-hunt-round-2.md)) found that the strongest, most-recurring gap is not a topic but a **shape**. The suite reviews *diffs* (diff-lenses) and *repo state* (cron audits), but never a **decision as it is made** — an ADR, RFC, adoption PR, deprecation plan, rollout plan, capacity/DR design. Axis C (adopt / revisit-ADR / retire) is *entirely* this shape; much of axis E (DR, capacity, resilience, progressive-delivery) is RFC-shaped; so are B3 (model adoption) and D2 (privacy-by-design). Many of round 2's strongest gaps are invisible to a diff **and** to a repo scan because they live in the decision, not the artifact.
+
+The router has a thin "design doc / RFC" route today, but no lens *family* built for decision-record review — which asks different questions: *is the rationale recorded? are the assumptions stated and still valid? is there a revisit-trigger? what's the exit / rollback / sunset?* **Resolved (design pass + D13):** decision-time is a **mode orthogonal to topic** — formalized as a `shape: decision` capability (promoting the existing `design:` flag) carrying a shared decision-record checklist, *plus* a few decision-native lenses (adoption-&-exit, decision-record audit, operational-design) — **not** a 7th cluster. #29 (decision lifecycle) is the *topic* whose natural shape this is; topic and shape are orthogonal axes (like #21's `repo` shape). Design write-up: [`decision-time-review-shape.md`](decision-time-review-shape.md); its §6 sub-questions stay open, and the decision-native lenses are pending the v0.3 build phase. **Status: shape resolved; lenses pending build.**
 
 ### Q2 — Candidate additions  → RESOLVED (see D5)
 

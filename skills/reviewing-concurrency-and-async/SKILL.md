@@ -7,7 +7,7 @@ description: 'Reviews concurrent and async code for races and ordering bugs: sha
   cancellation/timeout propagation. Use when reviewing threads, async/await, promises,
   locks, queues, message handlers, or anything two callers can run at once.'
 provenance:
-  taxonomy_version: v0.2
+  taxonomy_version: v0.3
   built_from:
   - category: 3
     source: docs/research/cluster-1-correctness.md#3

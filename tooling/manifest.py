@@ -99,8 +99,8 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
         seen.add(s.name)
         if not s.description or len(s.description) > 1024:
             raise ValidationError(f"{s.name}: description must be non-empty and <=1024 chars")
-        if s.shape not in ("diff", "repo"):
-            raise ValidationError(f"{s.name}: shape must be diff|repo, got {s.shape!r}")
+        if s.shape not in ("diff", "repo", "decision"):
+            raise ValidationError(f"{s.name}: shape must be diff|repo|decision, got {s.shape!r}")
         if s.design and s.shape != "diff":
             raise ValidationError(
                 f"{s.name}: design applies only to diff-shaped lenses")

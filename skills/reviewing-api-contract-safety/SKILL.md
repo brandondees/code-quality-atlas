@@ -7,7 +7,7 @@ description: 'Reviews public API and contract changes for safety: backward compa
   leakage. Use when reviewing REST/GraphQL/RPC endpoints, request or response shapes,
   SDK surface, webhooks, or any consumer-facing contract.'
 provenance:
-  taxonomy_version: v0.2
+  taxonomy_version: v0.3
   built_from:
   - category: 13
     source: docs/research/cluster-3-structure.md#13
