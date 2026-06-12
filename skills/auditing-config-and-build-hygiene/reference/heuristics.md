@@ -16,6 +16,11 @@
 - Is incomplete work integrated **behind a flag** (trunk-based), not a long-lived branch?
 - Does the pipeline **build once and promote** the same artifact, not rebuild per environment?
 - Are pre-commit/pre-push hooks present so obvious issues never reach CI?
+- **IaC is code:** does infrastructure/config-as-code in the diff (Terraform, K8s manifests, Helm, Dockerfiles, CI workflows) pass the same gate as app code — linted (checkov/tflint/kube-linter/hadolint), reviewed, and `plan`ned in CI before apply?
+- **Workflow injection:** does any `${{ }}` expression interpolate attacker-influenceable context (issue/PR titles and bodies, branch names, commit messages) directly into a `run:` script? Pass it through an env var instead — the template is expanded *before* the shell parses (template injection).
+- **Action/workflow supply chain:** are third-party actions pinned to full commit SHAs (not mutable tags), and are workflow token `permissions:` explicitly declared and least-privilege (cross #18, #14)?
+- **Container hygiene in the diff:** image versions pinned (no `:latest`), a non-root final `USER`, CPU/memory requests+limits set, read-only root filesystem where workable, no `privileged: true` or host namespace/docker-socket mounts without a documented reason.
+- **Cloud misconfig in the diff:** does a new/changed IaC resource open public access (`0.0.0.0/0` ingress, public bucket ACL), disable encryption, or grant wildcard IAM? Deliberate-and-documented or a finding (security verdict owned by #14).
 
 ---
 

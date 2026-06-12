@@ -11,7 +11,7 @@ provenance:
   built_from:
   - category: 22
     source: docs/research/cluster-6-evolution.md#22
-    hash: c2b968248bfa961bf8a9ca267334e64935892ae4074bd2a1cf1028044482c669
+    hash: 688743a28f3d05b13c5aa6762e6941820eb10a8825850180eaf8c3277139142d
 ---
 
 # auditing-documentation-health

@@ -181,3 +181,40 @@ a haphazard/vibe-coded repo laundering unconsidered approve-clicks into ratified
 standards. Overlay lives in the *reviewed* repo (`.code-quality-atlas/preferences.md`),
 read at review time by the router, kept out of generated-skill provenance (D6).
 Status: design, awaiting review before implementation planning.
+
+### 2026-06-12 (cont.) — research review & expansion pass (first compounding-loop iteration on the research itself)
+
+A "review the research, find more to add" pass — the first substantive *research*
+critique since the 2026-06-09 pass, run from the main loop with live web access.
+Reviewed all six cluster files + open threads + map-gaps, then expanded where the
+repo's own flags pointed, all citations web-verified today. Four additions:
+
+1. **Agentic/tool-use safety (#25, the G2 thread).** The world moved: OWASP shipped
+   a dedicated **Top 10 for Agentic Applications** (ASI01–ASI10, 2025-12-09 — after
+   our research date) plus the Threats & Mitigations companion, and the MCP docs
+   carry named anti-patterns (confused deputy, token passthrough, tool poisoning).
+   Added 4 references + 9 agentic heuristics (tool least-privilege, approval
+   gates/step budgets, tool-metadata-as-untrusted-input, token audience discipline,
+   sandboxed code exec, inter-agent auth, memory hygiene, audit trail) to cluster-4
+   #25. G2 updated; **promotion decision opened as Q14** (user call, D5-style).
+2. **IaC/workflow surface (#19).** hadolint (DL3006/7/8, DL3002…), Checkov
+   (CKV_AWS_20/57), tflint, kube-linter (run-as-non-root, latest-tag, …),
+   actionlint, zizmor (template injection, mutable-tag pinning) — all IDs verified
+   against primary sources — plus 5 heuristics (IaC gets the app-code gate,
+   workflow `${{ }}` injection, SHA-pinned actions, container hygiene, cloud
+   misconfig). Seam noted: #19 owns mechanics, #14 owns the security verdict.
+3. **Agent-facing docs (#22/#24).** AGENTS.md (OpenAI 2025-08 → Agentic AI
+   Foundation under the Linux Foundation 2025-12) closes the "agent-native parity
+   is thinly sourced" open thread for the docs half: agent instructions are now a
+   first-class doc artifact with drift obligations (new #22 heuristic).
+4. **FinOps/green residual (#15).** FOCUS spec (v1.2/v1.3 2025) and SCI
+   (ISO/IEC 21031:2024) — the cloud-cost facet now has standards; still
+   factor-level (taxonomy residual note updated).
+
+All additions **append-only** below existing bullets, so every skill's inlined
+"Top checks" stayed stable — regeneration diffs are provenance-hash + reference-file
+content only. references.md reconciled (cluster files are the deep surface; stale
+TODOs annotated). Pipeline: drift flagged 6 skills → regenerate → no drift,
+61 tests pass. **Cross-model eval re-gating deferred** (no local model in this
+sandbox; additions are appended checks, not changed behavior — re-gate per the
+runbook when next on a machine with Ollama).

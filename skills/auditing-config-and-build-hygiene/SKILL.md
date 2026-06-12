@@ -11,7 +11,7 @@ provenance:
   built_from:
   - category: 19
     source: docs/research/cluster-5-verification.md#19
-    hash: 603c6a96f63ba6a91654afbcea538895d07c05f6dd8b8fd781afc01eab86f1bb
+    hash: da36a415b7eac88a3b1993a679e311546753c9f50c382bb2948d7f672ca19017
   - category: 26
     source: docs/research/cluster-5-verification.md#26
     hash: 7e08a34862897e0e935e8e3a24c49dd71b46b0409d0b8bcab0614d6aeb7fbdac
