@@ -92,6 +92,59 @@ on the install path:
   including Claude Code web sessions) install fresh at session start, so every
   new session already has the latest merged commit — nothing to do.
 
+> **Stale-install gotcha (esp. for routines).** An interactive cached install
+> with auto-update *off* stays pinned to whatever commit it was installed at and
+> can silently run a months-old copy — the tell is a session reporting that
+> `commands/atlas-review-pr.md` or `REVIEW.md` is *"not in the repo or its
+> history"* (those files simply post-date the pinned commit). For any repo a
+> routine reviews, prefer the **settings-based install** (always fresh per
+> session) or **enable auto-update** on the interactive install. To keep an
+> interactive install current across all scopes without the manual `/plugin
+> marketplace update`, see the opt-in
+> [`tooling/keep-plugin-current.sh`](tooling/keep-plugin-current.sh) helper below.
+
+#### Keeping an interactive install current (opt-in)
+
+If you stay on an interactive install and don't want to enable auto-update,
+[`tooling/keep-plugin-current.sh`](tooling/keep-plugin-current.sh) refreshes the
+marketplace clone and re-pins **every** scope (user + each project) to the latest
+commit. It reads the scopes from `~/.claude/plugins/installed_plugins.json`, so
+new projects are picked up automatically. A Claude restart still applies the
+staged update — the script only stages it for the next session.
+
+```bash
+tooling/keep-plugin-current.sh                       # this plugin, all scopes
+tooling/keep-plugin-current.sh --user-only           # skip project scopes
+tooling/keep-plugin-current.sh other@some-marketplace # any plugin
+```
+
+It is **not** wired to run automatically — it issues `claude plugin update`
+commands, so when and where it runs is left to you. To self-heal every session,
+add a throttled `SessionStart` hook to your **personal** `~/.claude/settings.json`
+(not committed to any repo), backgrounded so it never blocks startup:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "lf=\"$HOME/.claude/.keep-plugin-current-last\"; ts=$(date +%s); { [ -f \"$lf\" ] && [ $((ts-$(cat \"$lf\"))) -lt 86400 ]; } && exit 0; echo \"$ts\" > \"$lf\"; nohup bash /abs/path/to/code-quality-atlas/tooling/keep-plugin-current.sh >/dev/null 2>&1 &",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The `command` is self-contained: the leading timestamp guard (`$lf` / 86400s)
+runs the updater at most once a day, so most session starts exit immediately
+without a git fetch. Drop the guard if you want it to run every session.
+
 #### Automatic routing (SessionStart hook)
 
 The plugin ships a `SessionStart` hook ([`hooks/hooks.json`](hooks/hooks.json) →
