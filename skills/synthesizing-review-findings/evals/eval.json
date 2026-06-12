@@ -1,0 +1,39 @@
+{
+  "skills": [
+    "synthesizing-review-findings"
+  ],
+  "scenarios": [
+    {
+      "query": "I ran three lenses on a PR. reviewing-performance-and-efficiency says the new Redis cache at orders/pricing.py:42 has no invalidation and no profile justifies it. checking-restraint also flags orders/pricing.py:42 saying no profile justifies the cache, and separately flags a retry count made configurable for one caller. hunting-silent-failures says the retry loop at orders/payment.py:88 swallows the provider error after the last attempt. Merge these into one review.",
+      "expected_behavior": [
+        "Deduplicates the 'no profile justifies the cache' point raised by both performance and restraint at orders/pricing.py:42 into a single finding rather than reporting it twice",
+        "Ranks the swallowed-error finding above the cache and config nits, and ends on a single verdict (approve with changes / block)",
+        "Surfaces the restraint-vs-performance tension on the cache and resolves it with the default (no optimization without a profile) instead of silently dropping one side"
+      ]
+    },
+    {
+      "query": "Two lenses disagree about the same code. reviewing-module-design says extracting a PricingStrategy interface clarifies the seam. checking-restraint says it's a single implementation with no second consumer, so it's premature abstraction. Both point at pricing/strategy.py. Give me one merged conclusion.",
+      "expected_behavior": [
+        "Does not report both as independent findings with opposite conclusions; reconciles them into one resolution",
+        "Applies the restraint-vs-module-design default: prefer the simpler design until a second concrete consumer exists",
+        "States the trade-off so the author could override it with evidence (a second strategy appearing)"
+      ]
+    },
+    {
+      "query": "All four lenses I ran on a one-line typo fix in the README each reported 'No findings'. What's the synthesized review?",
+      "expected_behavior": [
+        "Produces a 'No findings' / approve report and adds no invented findings or speculative suggestions",
+        "Does not manufacture a harsher verdict (no 'approve with changes' or 'block') when nothing was flagged",
+        "Stays short rather than padding the report to look thorough"
+      ]
+    },
+    {
+      "query": "I have a stack of findings from five lenses on one PR: one is a SQL injection on an untrusted query param, two are duplicate notes about the same missing null check at the same line, a couple are naming nits, and one is a formatting comment. How should the final report be organized and what verdict?",
+      "expected_behavior": [
+        "Floats the SQL injection to the top as the highest-severity (Blocker) finding regardless of which lens raised it, and blocks on it",
+        "Collapses the two duplicate null-check notes into a single finding attributed to one (primary) owner",
+        "Groups remaining findings by severity with nits last, keeping each finding to a line rather than restating full lens detail"
+      ]
+    }
+  ]
+}

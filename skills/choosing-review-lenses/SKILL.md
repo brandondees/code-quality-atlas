@@ -24,6 +24,7 @@ Picks which code-quality-atlas review lenses to run for a given change: maps wha
 - For a **design doc or plan** (no code yet), use only lenses marked ◆ in the catalog — the others read concrete code.
 - Lenses that share a research category name their primary owner in their SKILL.md; report each shared finding once, under the owner.
 - Nothing matches: default to `tracing-correctness-and-invariants` + `reviewing-naming-and-readability` + `checking-restraint`.
+- After the lenses run, merge their findings with `synthesizing-review-findings` — one deduplicated, ranked report with a single verdict.
 
 ## Routes
 

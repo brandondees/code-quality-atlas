@@ -56,10 +56,26 @@ class Router:
 
 
 @dataclass
+class Tension:
+    between: list[str]       # the two lenses that pull opposite ways
+    about: str               # what they disagree on, one line
+    resolve: str             # the default the synthesizer applies
+
+
+@dataclass
+class Synthesizer:
+    name: str
+    description: str
+    severity_order: list[str]  # most → least severe, the ranking scale
+    tensions: list[Tension]
+
+
+@dataclass
 class Manifest:
     taxonomy_version: str
     skills: list[Skill]
     router: Router | None = None
+    synthesizer: Synthesizer | None = None
 
 
 _NAME_RE = re.compile(r"^[a-z0-9-]+$")
@@ -140,6 +156,29 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
             if not s.picker:
                 raise ValidationError(
                     f"{s.name}: picker is required when a router is defined")
+    if manifest.synthesizer is not None:
+        sy = manifest.synthesizer
+        if not _NAME_RE.match(sy.name) or len(sy.name) > 64 or sy.name in seen:
+            raise ValidationError(f"synthesizer: invalid or duplicate name {sy.name!r}")
+        if not sy.description or len(sy.description) > 1024:
+            raise ValidationError("synthesizer: description must be non-empty and <=1024 chars")
+        if len(sy.severity_order) < 2:
+            raise ValidationError("synthesizer: severity_order needs at least two levels")
+        if len(sy.severity_order) != len(set(sy.severity_order)):
+            raise ValidationError("synthesizer: severity_order has duplicate levels")
+        # A tension is only meaningful between two known, distinct lenses;
+        # an unknown name would print a dangling reference in the merged report.
+        for t in sy.tensions:
+            if len(t.between) != 2 or t.between[0] == t.between[1]:
+                raise ValidationError(
+                    f"synthesizer: tension `between` must name two distinct lenses, got {t.between}")
+            for lens in t.between:
+                if lens not in seen:
+                    raise ValidationError(
+                        f"synthesizer: tension references unknown skill {lens!r}")
+            if not t.about or not t.resolve:
+                raise ValidationError(
+                    f"synthesizer: tension {t.between} needs `about` and `resolve`")
 
 
 def load_manifest(path: str) -> Manifest:
@@ -174,4 +213,20 @@ def load_manifest(path: str) -> Manifest:
             )
         except KeyError as e:
             raise ValidationError(f"router: missing field {e}") from e
-    return Manifest(taxonomy_version=data["taxonomy_version"], skills=skills, router=router)
+    synthesizer = None
+    if "synthesizer" in data:
+        sy = data["synthesizer"]
+        try:
+            synthesizer = Synthesizer(
+                name=sy["name"],
+                description=sy["description"].strip(),
+                severity_order=sy["severity_order"],
+                tensions=[Tension(between=t["between"],
+                                  about=t["about"].strip(),
+                                  resolve=t["resolve"].strip())
+                          for t in sy.get("tensions", [])],
+            )
+        except KeyError as e:
+            raise ValidationError(f"synthesizer: missing field {e}") from e
+    return Manifest(taxonomy_version=data["taxonomy_version"], skills=skills,
+                    router=router, synthesizer=synthesizer)

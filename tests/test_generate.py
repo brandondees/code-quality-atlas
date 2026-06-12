@@ -134,3 +134,46 @@ def test_generate_router_writes_skill_and_draft_eval(tmp_path):
     assert (out / "SKILL.md").exists()
     eval_doc = json.loads((out / "evals" / "eval.json").read_text())
     assert eval_doc["skills"] == ["choosing-review-lenses"]
+
+
+from tooling.generate import build_synthesizer_md, generate_synthesizer
+from tooling.manifest import Synthesizer, Tension
+
+
+def _manifest_with_synthesizer():
+    m = _manifest_with_router()
+    m.skills.append(_skill(name="checking-restraint",
+                           picker="brake pedal", design=True))
+    m.synthesizer = Synthesizer(
+        name="synthesizing-review-findings",
+        description="Merges lens findings.",
+        severity_order=["Blocker", "Major", "Minor", "Nit"],
+        tensions=[Tension(between=["hunting-silent-failures", "checking-restraint"],
+                          about="brake vs. resilience", resolve="favor safety")],
+    )
+    return m
+
+
+def test_build_synthesizer_md_carries_severity_tensions_and_no_provenance():
+    md = build_synthesizer_md(_manifest_with_synthesizer())
+    front = yaml.safe_load(md.split("---\n")[1])
+    assert front["name"] == "synthesizing-review-findings"
+    assert front["provenance"]["built_from"] == []   # manifest-derived: no docs drift
+    assert "**Blocker** > **Major** > **Minor** > **Nit**" in md
+    assert "`hunting-silent-failures` ↔ `checking-restraint`" in md
+    assert "favor safety" in md
+    # closes the loop back to the router
+    assert "choosing-review-lenses" in md
+
+
+def test_router_points_forward_to_synthesizer_when_present():
+    assert "synthesizing-review-findings" in build_router_md(_manifest_with_synthesizer())
+    # and stays silent when there is no synthesizer
+    assert "synthesizing-review-findings" not in build_router_md(_manifest_with_router())
+
+
+def test_generate_synthesizer_writes_skill_and_draft_eval(tmp_path):
+    out = generate_synthesizer(_manifest_with_synthesizer(), skills_root=str(tmp_path))
+    assert (out / "SKILL.md").exists()
+    eval_doc = json.loads((out / "evals" / "eval.json").read_text())
+    assert eval_doc["skills"] == ["synthesizing-review-findings"]

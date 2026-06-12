@@ -8,7 +8,7 @@
     {
       "name": "code-quality-atlas",
       "source": "./",
-      "description": "23 code-review and maintenance skills derived from a verified code-quality research atlas: 16 diff-shaped review lenses, 6 repo-shaped audits, and a router that picks the right lenses for a change, with provenance, examples, and cross-model evals.",
+      "description": "24 code-review and maintenance skills derived from a verified code-quality research atlas: 16 diff-shaped review lenses, 6 repo-shaped audits, a router that picks the right lenses for a change, and a synthesizer that merges their findings into one ranked verdict, with provenance, examples, and cross-model evals.",
       "category": "code-review",
       "tags": ["code-review", "code-quality", "audit"]
     }

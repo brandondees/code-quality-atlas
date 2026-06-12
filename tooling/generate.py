@@ -214,8 +214,11 @@ def build_router_md(manifest: Manifest) -> str:
         "- Lenses that share a research category name their primary owner in "
         "their SKILL.md; report each shared finding once, under the owner.\n"
         "- Nothing matches: default to `tracing-correctness-and-invariants` + "
-        "`reviewing-naming-and-readability` + `checking-restraint`.\n\n"
-        "## Routes\n\n"
+        "`reviewing-naming-and-readability` + `checking-restraint`.\n"
+        + (f"- After the lenses run, merge their findings with "
+           f"`{manifest.synthesizer.name}` — one deduplicated, ranked report "
+           "with a single verdict.\n" if manifest.synthesizer else "")
+        + "\n## Routes\n\n"
         "| When reviewing… | Run |\n"
         "|---|---|\n"
         f"{routes_table}\n\n"
@@ -236,5 +239,112 @@ def generate_router(manifest: Manifest, skills_root: str = "skills") -> Path:
     if not (out / "evals" / "eval.json").exists():
         (out / "evals" / "eval.json").write_text(json.dumps(
             {"skills": [manifest.router.name], "scenarios": []}, indent=2) + "\n",
+            encoding="utf-8")
+    return out
+
+
+def build_synthesizer_md(manifest: Manifest) -> str:
+    """The back half of composition: merges the findings of the 2-4 lenses the
+    router picked into one report — deduplicated, conflicts reconciled,
+    severity-ranked, single verdict. Like the router, it is built entirely from
+    the manifest (provenance carries no research sections), so regeneration is
+    triggered by manifest edits, not docs drift."""
+    sy = manifest.synthesizer
+    front = {
+        "name": sy.name,
+        "description": sy.description,
+        "provenance": {"taxonomy_version": manifest.taxonomy_version, "built_from": []},
+    }
+    fm = yaml.safe_dump(front, sort_keys=False, default_flow_style=False,
+                        allow_unicode=True).strip()
+    severity = " > ".join(f"**{s}**" for s in sy.severity_order)
+    top, *_ = sy.severity_order
+    tension_rows = "\n".join(
+        f"| `{t.between[0]}` ↔ `{t.between[1]}` | {t.about} | {t.resolve} |"
+        for t in sy.tensions)
+    router_name = manifest.router.name if manifest.router else "choosing-review-lenses"
+    body = (
+        f"# {sy.name}\n\n"
+        "## When to use\n\n"
+        f"{sy.description}\n\n"
+        f"**Shape: composition.** Runs after `{router_name}` has picked the "
+        "lenses and you have each lens's findings in hand; it produces the "
+        "single review a human or agent actually reads. It adds no new checks "
+        "of its own — it only merges.\n\n"
+        "## Fan-out model\n\n"
+        "Fan-out is **advisory by default**: you run each lens the router named, "
+        "collect its findings, then apply the steps below to merge them. The "
+        "finding shape is fixed (see *Finding contract*) so a harness that can "
+        "invoke lenses in parallel may **mechanize** the same merge — the dedupe "
+        "and ranking rules are deterministic. Automated or by hand, the output "
+        "is identical.\n\n"
+        "## How to synthesize\n\n"
+        "1. **Collect** — gather every lens's findings, tagging each with the "
+        "lens that raised it. A lens that reported \"No findings\" contributes "
+        "nothing; do not pad the report on its behalf.\n"
+        "2. **Dedupe** — two findings at the **same location with the same root "
+        "cause** are one finding. Keep the most specific wording and attribute "
+        "it to the category's **primary owner** (named in each lens's *Shared "
+        "categories* note); list the other lens only if it adds a distinct "
+        "angle. Never report a shared finding twice.\n"
+        "3. **Reconcile** — when two lenses pull opposite ways, do not silently "
+        "drop one. Surface the tension and apply the default below, noting the "
+        "trade-off so the author can override with evidence.\n"
+        f"4. **Rank** — order by severity ({severity}). A {top}-level finding "
+        "floats to the top no matter which lens raised it; correctness, "
+        "security, and data-loss findings outrank style and nits.\n"
+        "5. **Verdict** — one line at the top: **block**, **approve with "
+        f"changes**, or **approve**. A single {top} is enough to block; only "
+        "nits left means approve. If every lens found nothing, the whole report "
+        "is \"No findings\" — do not manufacture a harsher verdict than the "
+        "findings justify.\n\n"
+        "## Reconciling lens tensions\n\n"
+        "When the change trips one of these known opposing pairs, apply the "
+        "default and state the trade-off:\n\n"
+        "| Tension | About | Default resolution |\n"
+        "|---|---|---|\n"
+        f"{tension_rows}\n\n"
+        "For a tension not in this table, prefer the **safer and simpler** "
+        "option, and say what evidence would change the call.\n\n"
+        "## Finding contract\n\n"
+        "Normalize every lens finding to this shape before merging — it is what "
+        "makes dedupe and ranking mechanical:\n\n"
+        "- **location** — file and line/range (the dedupe key, with root cause)\n"
+        "- **severity** — one of the levels above\n"
+        "- **lens** — which lens raised it (the primary owner after dedupe)\n"
+        "- **finding** — what is wrong, concretely\n"
+        "- **fix** — the suggested change, or the evidence needed to decide\n\n"
+        "## Output format\n\n"
+        "```\n"
+        "Verdict: <block | approve with changes | approve> — <one-line reason>\n\n"
+        f"{sy.severity_order[0]}\n"
+        "- <location> — <finding> (<lens>). <fix>\n\n"
+        f"{sy.severity_order[min(1, len(sy.severity_order) - 1)]}\n"
+        "- <location> — <finding> (<lens>). <fix>\n\n"
+        "Tensions\n"
+        "- <lens> ↔ <lens>: <how it was resolved here>\n"
+        "```\n\n"
+        "Omit any severity section with no findings. Keep each finding to one "
+        "or two lines; the detail lives in the originating lens's output, not "
+        "restated here.\n\n"
+        "## Reviewer discipline\n\n"
+        "Synthesis must not inflate. Do not raise a finding no lens reported, do "
+        "not upgrade a severity to seem thorough, and do not turn \"No findings\" "
+        "into a verdict with changes. The merged report is exactly the union of "
+        "real lens findings, deduplicated and ordered — nothing added.\n\n"
+        "## Going deeper\n\n"
+        f"- [{router_name}](../{router_name}/SKILL.md) — the front half: picks "
+        "which lenses to run before you synthesize their output.\n"
+    )
+    return f"---\n{fm}\n---\n\n{body}"
+
+
+def generate_synthesizer(manifest: Manifest, skills_root: str = "skills") -> Path:
+    out = Path(skills_root, manifest.synthesizer.name)
+    (out / "evals").mkdir(parents=True, exist_ok=True)
+    (out / "SKILL.md").write_text(build_synthesizer_md(manifest), encoding="utf-8")
+    if not (out / "evals" / "eval.json").exists():
+        (out / "evals" / "eval.json").write_text(json.dumps(
+            {"skills": [manifest.synthesizer.name], "scenarios": []}, indent=2) + "\n",
             encoding="utf-8")
     return out

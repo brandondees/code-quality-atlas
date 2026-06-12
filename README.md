@@ -32,9 +32,11 @@ All **22 behaviors / 27 categories** from the [phase-2 design](docs/phase-2-skil
 
 **First dogfood cycle (2026-06-11)** — real-usage feedback drove five packaging fixes (D10): every `SKILL.md` now inlines its top ~8 checks (self-sufficient first pass, no second fetch); a 23rd skill, [`choosing-review-lenses`](skills/choosing-review-lenses/SKILL.md), routes "what am I reviewing" → the 2-4 lenses worth running; design-capable lenses are explicitly marked (◆); skills sharing a research category name the primary owner so findings aren't double-reported; and reference links say when each file is actually needed.
 
+**Composition completed (2026-06-12, D12)** — the back half of Q7: a 24th skill, [`synthesizing-review-findings`](skills/synthesizing-review-findings/SKILL.md), merges the lenses' output into one report — deduplicated, lens tensions reconciled (e.g. restraint vs. coverage), severity-ranked, single verdict. Fan-out stays advisory by default but ships a fixed finding contract so an orchestrating harness can mechanize the same merge.
+
 ## Using the suite
 
-Start with **`choosing-review-lenses`** — it maps the change shape (bug fix, migration, async code, API change, design doc, repo audit, …) to the right 2-4 lenses and carries a one-line catalog of all of them. Each lens's `SKILL.md` is self-sufficient for a first pass; its `reference/heuristics.md` holds the full checklist.
+Start with **`choosing-review-lenses`** — it maps the change shape (bug fix, migration, async code, API change, design doc, repo audit, …) to the right 2-4 lenses and carries a one-line catalog of all of them. Each lens's `SKILL.md` is self-sufficient for a first pass; its `reference/heuristics.md` holds the full checklist. When you've run more than one lens, finish with **`synthesizing-review-findings`** to fold their findings into one deduplicated, ranked, single-verdict review.
 
 ## Install
 
@@ -75,7 +77,7 @@ anyone who trusts the folder gets the suite, **including Claude Code web session
 > machine needs git credentials that can read it (`gh` auth or SSH keys; web
 > sessions clone with your GitHub credentials).
 
-All 23 skills load with provenance intact; updates ship with every merged commit
+All 24 skills load with provenance intact; updates ship with every merged commit
 (commit-SHA versioning — no version bumps needed). How updates reach you depends
 on the install path:
 
