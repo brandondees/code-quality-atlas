@@ -1,0 +1,42 @@
+{
+  "skills": [
+    "auditing-enforcement-and-meta-artifacts"
+  ],
+  "scenarios": [
+    {
+      "query": "Audit this enforcement-apparatus scan.\n```text\nsuppressions:\n  src/legacy/parser.js:1   /* eslint-disable */        (file-wide, no rule list, no reason)\n  src/api/users.py:42      # noqa                       (bare, no code, no reason)\n  src/api/orders.py:88     # type: ignore               (bare)\nlint baseline (detekt): 1,204 entries, up from 1,011 three months ago\nunused: 17 eslint-disable directives report as unused; 9 mypy ignores flagged by warn_unused_ignores\n```",
+      "expected_behavior": [
+        "Flags the file-wide `/* eslint-disable */` and the bare `# noqa` / `# type: ignore` as blanket suppressions — scope each to a named rule/error code and add a reason",
+        "Flags the baseline growing (1,011 → 1,204) as debt accretion — a ratchet should shrink, not grow; track the count as a trend",
+        "Flags the 17 unused eslint-disable and 9 unused mypy ignores as stale, masking the next real violation at those spots — remove them",
+        "Frames suppression as opting out of enforcement and recommends rule-scoped + justified (issue link / expiry) suppressions"
+      ]
+    },
+    {
+      "query": "Audit these alert rules and dashboards.\n```text\nalerts:\n  HighCPU:          expr cpu_pct > 0.8   for: (none)   annotations: {}        # cause-based, no runbook, no `for`\n  DiskWillFill6h:   expr predict_linear(...) < 0   for: 15m   runbook: https://wiki/runbooks/disk   severity: page  # ok\ndashboards: 3 panels on \"API health\" query metric `http_requests_total_v1` (renamed to _v2 last quarter)\nmonitoring is configured by hand in the Grafana/Datadog UI; not in version control\n```",
+      "expected_behavior": [
+        "Flags HighCPU as cause-based and unactionable (no runbook, no `for:`, no labels) — alert on a user-visible symptom / SLO burn, not a raw CPU gauge",
+        "Recommends running a rule linter (pint / promtool) and adding `for:` + severity + a runbook annotation",
+        "Flags the 3 dashboard panels querying the renamed/dead `http_requests_total_v1` metric as drift giving false confidence",
+        "Flags click-ops monitoring (not in version control) and recommends monitoring-as-code; recognizes DiskWillFill6h (symptom + runbook + for) as healthy"
+      ]
+    },
+    {
+      "query": "Audit generated-artifact freshness.\n```text\nchecked-in generated: api/openapi_client/ (from openapi.yaml), db/queries.go (sqlc from queries.sql)\nCI: lints + builds + tests; no regenerate-and-diff step\nhistory: openapi.yaml changed in 6 commits since api/openapi_client/ was last regenerated\ngenerated files have no `linguist-generated` / generated-by header\n```",
+      "expected_behavior": [
+        "Flags the absence of a `regenerate && git diff --exit-code` CI gate, so generated artifacts can silently drift from their source/spec",
+        "Flags the concrete drift signal — openapi.yaml changed in 6 commits since the client was last regenerated",
+        "Recommends a CI job that regenerates (openapi + sqlc) and fails on any diff",
+        "Flags that generated files are unmarked (no linguist-generated/header), so a human may hand-edit what the next regen clobbers"
+      ]
+    },
+    {
+      "query": "Audit this enforcement-apparatus scan.\n```text\nsuppressions: all rule-scoped with reason + issue link (e.g. `# noqa: E501  # long external URL, see #221`); baseline shrinking 420 → 380 over the quarter; 0 unused (RUF100 / warn_unused_ignores clean)\nalerts: all symptom/SLO-based, each links a runbook, `pint` passes in CI\ncodegen: CI runs `make generate && git diff --exit-code`; passes; generated files marked linguist-generated\n```",
+      "expected_behavior": [
+        "Reports no findings — suppressions are scoped, justified, and shrinking; alerts are symptom-based with runbooks and lint-clean; codegen drift is gated in CI",
+        "Confirms the enforcement apparatus is healthy rather than inventing issues",
+        "Does not manufacture findings on a clean scan"
+      ]
+    }
+  ]
+}

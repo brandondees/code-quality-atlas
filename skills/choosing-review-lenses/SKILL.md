@@ -49,7 +49,8 @@ Picks which code-quality-atlas review lenses to run for a given change: maps wha
 | Dependency add or bump | `auditing-dependencies-and-supply-chain`, `checking-restraint` |
 | CI / build / config change | `auditing-config-and-build-hygiene`, `sweeping-for-security` |
 | Any pull request (the PR artifact itself, on top of content lenses) | `reviewing-pr-and-process-hygiene` |
-| Whole-repo health audit (scheduled / cron) | `finding-maintainability-hotspots`, `auditing-architecture-conformance`, `auditing-dependencies-and-supply-chain`, `auditing-config-and-build-hygiene`, `auditing-documentation-health`, `auditing-compliance-and-provenance` — the six repo-shaped audits; run independently, not as one pass |
+| Whole-repo health audit (scheduled / cron) | `finding-maintainability-hotspots`, `auditing-architecture-conformance`, `auditing-dependencies-and-supply-chain`, `auditing-config-and-build-hygiene`, `auditing-documentation-health`, `auditing-compliance-and-provenance`, `auditing-enforcement-and-meta-artifacts` — the seven repo-shaped audits; run independently, not as one pass |
+| Enforcement config — lint/type suppressions, alert rules or dashboards, or checked-in generated artifacts | `auditing-enforcement-and-meta-artifacts` — repo-shaped — scans suppression accretion and codegen/monitoring drift across the tree, not a single diff |
 | A decision, not a diff — an ADR / RFC / design doc, a dependency or technology adoption, a build-vs-buy or vendor choice, or a deprecation / sunset plan | `reviewing-decision-lifecycle`, `checking-restraint`, `reviewing-api-contract-safety` — decision-shaped — reviews the choice and its record (rationale, assumptions, exit), not implementation code; pair with the design-capable (◆) lenses for the decision's domain |
 
 ## Catalog
@@ -83,6 +84,7 @@ Picks which code-quality-atlas review lenses to run for a given change: maps wha
 - `auditing-config-and-build-hygiene` — Are config and CI trustworthy? Secrets, env parity, reproducible pinned builds, cache correctness.
 - `auditing-documentation-health` — Do the docs still tell the truth? API parity, stale examples, ADR coverage, changelog discipline.
 - `auditing-compliance-and-provenance` — Any licensing, PII, or provenance exposure? Detect and escalate to humans — never decide legal questions.
+- `auditing-enforcement-and-meta-artifacts` — Is the enforcement apparatus healthy? Suppression hygiene & baseline trend, actionable alerts/monitoring-as-code, codegen-source drift gate.
 
 **Decision-shaped — run on a decision or plan (ADR, RFC, adoption, deprecation, capacity/DR design), not a diff:**
 

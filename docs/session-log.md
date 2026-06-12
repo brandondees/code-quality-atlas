@@ -353,3 +353,36 @@ TODOs annotated). Pipeline: drift flagged 6 skills → regenerate → no drift,
 61 tests pass. **Cross-model eval re-gating deferred** (no local model in this
 sandbox; additions are appended checks, not changed behavior — re-gate per the
 runbook when next on a machine with Ollama).
+
+### 2026-06-12 (cont.) — PR #21 reconciled with main; v0.3 build wave 2 (#30) on a new branch
+
+PR #21 reconciled with `main` (merged PRs #22 research-expansion + #25 hook).
+One numbering collision: `main` and this work both minted a **Q14**, and main's
+agentic-safety candidate proposed category **#28** — now v0.3's operational
+category. Relabelled main's self-contained agentic question **Q14 → Q16** and its
+candidate **#28 → #32**, keeping the interconnected v0.3 numbering (Q14 router,
+Q15 decision-time, #28–#31). Verified PR #21's review findings were already
+addressed (CodeRabbit + atlas-review rounds 1–4, all resolved in `6741e12`); CI
+`gate` green; atlas hit its 4-round cap so the wave-1 skill + merge are
+bot-unreviewed but test-green.
+
+Owner approved a **new PR for the build**. Branch `claude/v0.3-enforcement-apparatus`.
+**Wave 2 ships `auditing-enforcement-and-meta-artifacts`** — the **#30** owner,
+closing the G10 framing gap. Repo-shaped audit over three meta-artifacts:
+suppression hygiene (blanket/unjustified/unused `# noqa` · `eslint-disable` ·
+`# type: ignore`, baseline accretion vs. ratchet), monitoring-config-as-artifact
+(symptom-vs-cause alerts, runbook/`for:`/lint, dashboard drift, monitoring-as-code),
+and codegen↔source drift (regenerate-and-`git diff --exit-code` gate). Research
+section #30 added to `cluster-5-verification.md`; manifest entry (`shape: repo`,
+`built_from #30`) + two router routes (added to the cron-audit set → now seven
+audits; plus a targeted enforcement-config route); 4 evals + examples; G10 marked
+resolved in `map-gaps.md`. Generate clean, no drift, 61 tests pass, evals valid.
+
+**Webhook note (owner-flagged):** review *summary bodies* don't reliably wake a
+subscribed session (only inline threads / issue comments do, and CI-success /
+pushes / merges are never delivered). Mitigation adopted: the author session
+**polls** `get_reviews` + `get_review_comments` + `get_check_runs` on each wake
+and scheduled check-in rather than trusting the push stream. Optional routine
+tweak (a one-line issue-comment beacon from `atlas-review-pr`) offered, pending
+owner call. **Remaining v0.3 build:** #28 operational & resilience design, #31
+infrastructure-as-code, and the ~10 add-factor regenerations.

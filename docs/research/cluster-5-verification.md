@@ -163,6 +163,48 @@
 
 ---
 
+## #30 Enforcement apparatus & meta-artifacts
+
+Scope: the machinery wrapped around the code, reviewed as its own surface (the G10 framing gap — a missing category yields a *silent* hole, not a thin heuristic). Three meta-artifacts: **suppression hygiene** (the act of opting out of enforcement — `# noqa` / `eslint-disable` / `# type: ignore` accretion, lint-baseline growth); **monitoring-config as artifact** (alert rules, dashboards, SLO definitions as reviewed code, not the instrumentation #16 emits); **codegen ↔ source drift** (checked-in generated output stale vs. its generator/spec). Repo-shaped (map-gaps G7): accretion and drift are *standing* conditions across the tree, better scanned on a schedule than in a single diff.
+
+### Key references
+- **ESLint — disable-directive hygiene** — `--report-unused-disable-directives`; `eslint-comments` plugin (`no-unlimited-disable`, `no-unused-disable`, `require-description`).
+  → mine: a file-wide `/* eslint-disable */` with no rule list disables *everything*; require rule-scoped (`eslint-disable-next-line rule-name`), described, and unused-directive-swept suppressions.
+- **Ruff / flake8 / pygrep-hooks — `noqa` discipline** — Ruff `RUF100` (unused noqa); pre-commit `python-check-blanket-noqa` (PGH004) and `python-check-blanket-type-ignore` (PGH003).
+  → mine: a bare `# noqa` suppresses *all* lints on the line; require `# noqa: E501` (code-specific) with a reason. Bare `# type: ignore` likewise hides newly-introduced type errors.
+- **mypy / pyright — unused-ignore detection** — mypy `warn_unused_ignores = true`; pyright `reportUnnecessaryTypeIgnoreComment`.
+  → mine: a stale `# type: ignore` masks the *next* real type error at that spot; sweep unused ignores. Require error-code form `# type: ignore[arg-type]`.
+- **Lint baselines & the ratchet pattern** — detekt `baseline.xml`, Android `lint-baseline.xml`, ESLint bulk-suppressions, `betterer` ("quality ratchet").
+  → mine: a baseline *freezes* existing violations so new code is clean; it is healthy only while it **shrinks**. A growing baseline is silent debt accrual — track the entry count as a *trend*, and gate "new suppression needs a reason / issue link / expiry."
+- **Google SRE — "Alerting on SLOs" (SRE Workbook ch. 5) + Rob Ewaschuk, "My Philosophy on Alerting"** — https://sre.google/workbook/alerting-on-slos/ .
+  → mine: alert on **symptoms** (user-visible SLO/error-budget burn), not causes (raw CPU); every page must be **actionable** and link a runbook; unactionable/noisy alerts train responders to ignore the pager.
+- **Prometheus rule & dashboard linting** — Cloudflare `pint`, `promtool check rules`, Grafana/Datadog monitors-as-code (Terraform, grafonnet).
+  → mine: lint alert rules for missing `for:`, missing severity/labels, broken queries, and absent runbook annotations; define monitoring **as code** so it is versioned, reviewable, and restorable rather than click-ops that drift.
+- **Codegen freshness gate** — the `go generate ./... && git diff --exit-code` pattern; protobuf/`buf`, OpenAPI, sqlc, Prisma codegen.
+  → mine: a checked-in generated artifact must be regenerated and `git diff --exit-code`-verified in CI; without that gate it silently diverges from its source/spec. Mark generated files as generated (`linguist-generated`) so humans don't hand-patch what the next regen clobbers.
+
+### Tooling rules worth lifting
+- **ESLint** — `--report-unused-disable-directives` (CI flag); `eslint-comments/no-unlimited-disable`, `/no-unused-disable`, `/require-description`, `/no-aggregating-enable`.
+- **Ruff `RUF100`**, **flake8-noqa**, **pygrep-hooks** `python-check-blanket-noqa` (PGH004) + `python-check-blanket-type-ignore` (PGH003) — ban blanket suppressions in pre-commit.
+- **mypy** `warn_unused_ignores`, **pyright** `reportUnnecessaryTypeIgnoreComment` — sweep dead ignores; **TypeScript** `@ts-expect-error` (errors if unused) over `@ts-ignore`.
+- **Baseline trackers** — detekt `baseline`, Android `lint-baseline.xml`, ESLint bulk-suppressions, `betterer` — and a CI check that the baseline count is **non-increasing**.
+- **`pint` / `promtool check rules`** — alert-rule linters (missing `for:`/labels/runbook, broken PromQL); **grafana/dashboard linters**; **`terraform validate`/`plan`** for monitors-as-code drift.
+- **Codegen drift gate** — `make generate && git diff --exit-code` (or `go generate`, `buf generate`, `sqlc diff`) as a required CI job; `linguist-generated`/`.gitattributes` to mark and exclude generated files from review noise.
+
+### Reviewable heuristics (skill-checklist seeds)
+- **Blanket suppressions:** any file-wide or unscoped `/* eslint-disable */`, bare `# noqa`, bare `# type: ignore`, or `@ts-ignore` that disables *all* checks rather than a named rule? Flag to scope to the specific rule and justify — a blanket disable hides unrelated future violations at that location.
+- **Unjustified suppressions:** does each suppression carry a reason (and ideally an issue link or expiry)? `# noqa: E501  # long external URL` is reviewable; a bare suppression with no rationale is undocumented debt.
+- **Unused / stale suppressions:** are there suppressions for problems that no longer exist (ESLint unused-disable, Ruff `RUF100`, mypy `warn_unused_ignores`)? They mask the *next* real violation at that spot — remove them.
+- **Baseline accretion:** is the lint/type baseline (detekt, lint-baseline.xml, bulk-suppressions) *growing* over time rather than shrinking? A ratchet must only tighten; a growing baseline is silent debt — track the count as a trend, not a point-in-time pass.
+- **Alert actionability:** does every alert rule describe a user-visible **symptom** and link a runbook, or are there cause-based / noisy / unactionable alerts that train responders to ignore the pager? Alert on SLO burn, not raw resource gauges.
+- **Monitoring drift & as-code parity:** are dashboards/monitors referencing metrics that were renamed or removed (dead panels giving false confidence)? Is monitoring defined **as code** (versioned, reviewable, restorable) rather than click-ops that silently drift?
+- **Codegen freshness:** for checked-in generated/compiled artifacts (protobuf, OpenAPI clients, sqlc, ORM models, bundled assets), does CI regenerate and `git diff --exit-code` to prove they match their source — or can they silently drift from the generator/spec?
+- **Generated-file provenance:** are generated files marked as generated (header / `linguist-generated`) and kept out of hand-editing, so the next regeneration doesn't clobber a manual patch?
+- **Suppression density hotspots:** which files concentrate suppressions? A file full of disables is either genuinely hard (flag for refactor) or a place where enforcement is theater — name it.
+- **Alert-rule sanity:** do rules have a `for:` duration, severity/labels, and thresholds tied to an SLO rather than arbitrary numbers? Run a rule linter (`pint` / `promtool`) over them as part of the audit.
+
+---
+
 ## Open threads
 
 - **#17 over-mocking ↔ #11 dependency-elimination**: both push toward real collaborators/fakes over mocks. A shared "minimize mocking" stance is needed so the test-quality skill and the simplicity skill agree.
