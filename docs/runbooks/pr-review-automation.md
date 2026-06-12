@@ -40,18 +40,28 @@ build+autofix ──────────────────────
    and watches it via PR-activity subscription (the `/autofix-pr` / "watch this PR"
    mechanism), reacting to **new review comments and CI failures**. Nothing new here.
 2. **Reviewer routine** — a routine with a **GitHub trigger** on `Pull request
-   opened`. Fires within seconds of a PR opening, spins up one session that runs
-   `/atlas-review-pr`, then **stays resident and watches the PR**, re-reviewing each
-   push in the same session. A routine can carry only **one GitHub event** (see
+   opened`. Fires within seconds of a PR opening, spins up one session that follows
+   the `atlas-review-pr` command (inlined in the routine prompt — slash commands
+   don't resolve in routine sessions, see [Setup](#setup)), then **stays resident and
+   watches the PR**, re-reviewing each push in the same session. A routine can carry only **one GitHub event** (see
    [Setup §1](#1-reviewer-routine-event-driven-no-cron-lag)), so `synchronize` can't
    be a second trigger here — the in-session subscription covers re-review instead.
    The watch behavior lives in the routine's prompt, not the command, so it's set up
    per-routine.
-3. **Poller routine** — a **scheduled** routine on a cheap fast model running
-   `/atlas-rebase-stale`. Catches PRs that fell **behind or into conflict**, which
-   GitHub never delivers as a webhook, so neither (1) nor (2) can see them.
+3. **Poller routine** — a **scheduled** routine on a cheap fast model running the
+   `atlas-rebase-stale` sweep (also inlined in the prompt). Catches PRs that fell
+   **behind or into conflict**, which GitHub never delivers as a webhook, so neither
+   (1) nor (2) can see them.
 
 ## Setup
+
+> **Routine prompts can't use `/`-commands.** A cloud routine session sets up a
+> container, clones the repo, and starts Claude Code — it does **not** register the
+> plugin's slash commands, so a prompt of `/atlas-review-pr` or `/atlas-rebase-stale`
+> fails with `Unknown command` and the session stalls. Skills and the cloned repo
+> files *are* available, so routine prompts must **inline the instructions**, or tell
+> the session to read and follow the command file from the clone. Both routines below
+> do exactly that — the bare slash command alone will not work.
 
 ### 0. Prerequisites
 
@@ -81,14 +91,21 @@ In the Claude Code web app → **Routines** → **New routine**:
   - Optionally add a **filter** (e.g. *Is draft = false*, or *Head branch contains
     `claude/`*) so the reviewer only fires on PRs you actually want reviewed — each
     fire is a run (see [Usage and run limits](#usage-and-run-limits)).
-- **Prompt / Instructions:** `/atlas-review-pr`, followed by an in-session **watch
-  block** so a single `opened`-triggered session re-reviews subsequent pushes
-  instead of exiting after the first pass. The command itself is written for the
-  per-push-trigger model (it counts prior reviews via `<!-- atlas-review round:N -->`
-  markers); the watch block is what adapts it to one resident session:
+- **Prompt / Instructions:** the slash command won't resolve (see the note above),
+  so the prompt **reads and follows the command file** from the clone, then adds an
+  in-session **watch block** so a single `opened`-triggered session re-reviews
+  subsequent pushes instead of exiting after the first pass. The command file is
+  written for the per-push-trigger model (it counts prior reviews via
+  `<!-- atlas-review round:N -->` markers); the watch block adapts it to one resident
+  session:
 
   ```text
-  /atlas-review-pr
+  Read `commands/atlas-review-pr.md` from this cloned repo and follow it exactly to
+  review this pull request — the `/atlas-review-pr` slash command does not resolve in
+  routine sessions, so that file is the source of truth (pick lenses with
+  choosing-review-lenses, run them on the diff, synthesize with
+  synthesizing-review-findings, apply REVIEW.md's policy, and post inline findings
+  under the `<!-- atlas-review round:N -->` marker).
 
   After that first review, do not exit — stay resident and watch this PR until it
   is merged or closed. Subscribe to its activity and re-run the review on each new
@@ -118,7 +135,9 @@ In the Claude Code web app → **Routines** → **New routine**:
 
 ### 2. Poller routine (the conflict/stale backstop)
 
-A second routine on the same repo:
+A second routine. Unlike the reviewer's per-repo GitHub trigger, **one poller can
+sweep many repos at once** — attach every repo you want swept and a single scheduled
+run checks them all:
 
 - **Trigger:** **Schedule**. The web presets are **hourly / daily / weekdays /
   weekly**, and the minimum interval is **one hour** — sub-hour schedules are
@@ -130,7 +149,37 @@ A second routine on the same repo:
   **daily** for a low-traffic one.
 - **Model:** a cheap, fast model (e.g. Haiku) — this job is mechanical.
 - **Connectors:** none needed (same as the reviewer — strip the defaults).
-- **Prompt:** `/atlas-rebase-stale`
+- **Prompt / Instructions:** inline the steps — `/atlas-rebase-stale` won't resolve
+  (see the note at the top of Setup). Reference `commands/atlas-rebase-stale.md` as
+  the source, and have it sweep **every attached repo** (one run covers them all):
+
+  ```text
+  Sweep the open pull requests across EVERY repository attached to this routine and
+  poke the stale ones — the polling backstop for PRs that fell behind or into
+  conflict, which GitHub sends no webhook for. All attached repos are cloned into the
+  workspace, so first enumerate them (e.g. from the workspace root,
+  `for d in */; do git -C "$d" remote get-url origin 2>/dev/null; done`), then run the
+  sweep below for EACH repo. The full spec is commands/atlas-rebase-stale.md; the
+  /atlas-rebase-stale slash command does NOT resolve in routine sessions, so follow
+  these inline steps per repo:
+
+  1. List that repo's open PRs (mcp__github__list_pull_requests); read each PR's
+     mergeable state (mcp__github__pull_request_read).
+  2. "behind" + no conflicts → bring up to date with
+     mcp__github__update_pull_request_branch (no comment; emits a synchronize event).
+     "dirty"/conflicting → do NOT resolve; post the poke as an INLINE REVIEW COMMENT
+     (read the diff, anchor to a line on the RIGHT side, submit as a COMMENT review)
+     so the author's auto-fix subscription — which reads review threads, not issue
+     comments — sees it; body = a whole-PR conflict notice asking them to rebase onto
+     base and resolve, only if no unaddressed <!-- atlas-rebase-poke --> review thread
+     from you exists. Clean/up-to-date/draft → skip silently.
+  3. Mark every poke <!-- atlas-rebase-poke --> and never double-poke.
+  4. End with a one-line summary across all repos: counts of updated, poked, skipped.
+  ```
+
+  (For just one repo, name it instead of enumerating — `Sweep the open pull requests
+  in acme/my-app …`. Verified live: a Haiku run enumerated 12 attached repos, rebased
+  the `behind` PRs, and posted review-comment pokes on the conflicted ones.)
 
 ### 3. (Optional) merge gate
 
@@ -195,6 +244,17 @@ you own, and resets daily.
   push volume down.
 - **Merge conflicts have no webhook** — only the poller catches them; it pokes (it
   does **not** auto-resolve, since that's a code judgment).
+- **Conflict pokes are review comments, so the author session sees them.** The GUI
+  "auto-fix CI and comments on this PR" subscription inspects *review threads*, not
+  issue comments, and never checks `mergeable_state` — so a plain issue-comment poke
+  wakes it but reads as "no review comments, CI green → nothing to do." The poller
+  therefore posts the conflict poke as an **inline review comment** (anchored to a
+  diff line, with the body flagged as a *whole-PR* conflict notice, not a line issue),
+  which lands in the channel that subscription reads and surfaces as actionable
+  feedback; resolving it is left to that session. Residual caveat: actually
+  *resolving* a merge conflict may exceed what an auto-fix session does for a routine
+  lint/CI fix — if it can't, the unresolved poke thread stays as a human-visible flag.
+  (`behind` PRs are still auto-rebased with no comment.)
 - **CI *success* and bare pushes** aren't reliably delivered to a PR-activity
   subscription. Because the reviewer triggers on `opened` and then *watches* via
   subscription (rather than a `synchronize` trigger), a bare push with no CI/comment
