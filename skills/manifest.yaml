@@ -417,6 +417,13 @@ router:
     - when: Public API or contract change (endpoints, SDK surface, webhooks)
       run: [reviewing-api-contract-safety, reviewing-module-design,
             sweeping-for-security]
+    - when: New abstraction, library, or engine shipped ahead of its consumer
+            (generic/trait with one or no impl, a crate with no caller yet,
+            "substrate for a later feature")
+      run: [checking-restraint, reviewing-module-design,
+            reviewing-api-contract-safety, reviewing-test-quality]
+      note: restraint-led — speculative generality can be flawless and premature
+            at once, so it hides from the correctness and test lenses
     - when: Error-handling / resilience change (retries, fallbacks, timeouts)
       run: [hunting-silent-failures, reviewing-observability-and-operability,
             reviewing-concurrency-and-async]
