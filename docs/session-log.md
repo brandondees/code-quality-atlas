@@ -420,3 +420,48 @@ Generate clean, no drift, 63 tests pass (+2: picker tagline, router body), evals
 valid. **Not yet addressed:** the harness-level cost of 22 names in the listing
 and the fact that frontmatter descriptions can be dropped from the model's skill
 budget remain harness constraints the SessionStart hook mitigates but can't fix.
+
+### 2026-06-12 (cont.) — G11 + artifact-scoped-lens research (the foundational pattern)
+
+Owner question while discussing the decision-gated open questions: *do we have anything
+correlating to Anthropic's Agent Skill authoring best-practices guide?* — then, on finding we
+don't, *do more extensive research; that guide isn't the only reference, and strengthen the
+foundational pattern for quality lenses that scope to specific artifact kinds without bloating the
+top-level kit's context cost.* A web-grounded research pass from the main loop (citations verified
+today).
+
+The answer split two ways and exposed a **framing-class gap (the G10 kind)**, logged as
+[`map-gaps.md`](map-gaps.md) **G11**: we **hold ourselves** to the skills guide (D7, enforced in
+`manifest.py`/`generate.py`) but have **no lens that reviews someone else's** `SKILL.md` / agent
+definition against it. The two nearest touchpoints miss it — #24 agent-native parity (product
+exposing agent actions) and #22/#24 `AGENTS.md`-as-doc (drift only). Clarified **three distinct
+agent-surfaces**: runtime security → Q16/#25; agent-doc drift → #22/#24; **agent-artifact authoring
+→ unowned**.
+
+The generalization is the real find: "is this `SKILL.md` well-formed?" instances a broad class —
+files that aren't application source but carry a canonical "well-formed X" standard + dedicated
+linter (Dockerfile/hadolint, Terraform/tflint·Checkov, K8s/kube-linter, CI/actionlint·zizmor,
+OpenAPI/Spectral·Zally, ADR, changelog, `AGENTS.md`, model card, datasheet). The atlas *touches*
+several but always **folded into a topic cluster**, never as a declared **artifact-scoped review
+shape** with presence-based activation — the missing slot the `SKILL.md` case fell through.
+
+Research filed in [`research/artifact-scoped-lenses.md`](research/artifact-scoped-lenses.md):
+(1) the **artifact-standard catalog** — the references beyond the one guide, each row a candidate
+lens + its linter goldmine; (2) the **context-cost evidence** for why "one peer lens per artifact"
+fails — metadata is an always-on tax, "too many tools degrade selection" (Anthropic), RAG-MCP
+(>3× selection accuracy when retrieval-narrowed; ~128-tool provider ceiling), lost-in-the-middle
+(arXiv 2307.03172) and context rot (Chroma 2025) making even a catalog that *fits* a reasoning tax;
+(3) **presence-based-activation prior art** from the linter world (MegaLinter activate-on-file,
+ESLint glob `overrides`, Spectral rulesets-by-type) — a cheap detector gating an expensive
+artifact rubric; (4) a **hosting pattern** with three options, recommending **(b) an `artifact`
+shape** (one entry-point lens + manifest `artifacts:` table + bundled on-demand rubrics) over the
+minimal one-lens fix (a) and the portability-breaking retrieval-routed (c). The pattern directly
+serves Q14 (file-presence is the cleanest relevance signal — candidate-3) and the §3 catalog is a
+linter-mining research task with `SKILL.md` as the highest-confidence worked example (we already
+enforce it on ourselves).
+
+Opened **Q18** (artifact-scoped lens hosting) in [`open-questions.md`](open-questions.md) and added
+it to the Live-state banner; G11's disposition table parks the *factor* at **#30 meta-artifact**
+(keeping Q16 = runtime safety) pending the owner call. **Docs-only** — `taxonomy.md`/`manifest.yaml`
+untouched, so no drift; nothing built yet. Decisions pending: Q18 hosting pattern (a/b/c) and the
+G11 factor placement, both gating the build.
