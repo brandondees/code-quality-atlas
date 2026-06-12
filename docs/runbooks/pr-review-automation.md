@@ -135,7 +135,9 @@ In the Claude Code web app → **Routines** → **New routine**:
 
 ### 2. Poller routine (the conflict/stale backstop)
 
-A second routine on the same repo:
+A second routine. Unlike the reviewer's per-repo GitHub trigger, **one poller can
+sweep many repos at once** — attach every repo you want swept and a single scheduled
+run checks them all:
 
 - **Trigger:** **Schedule**. The web presets are **hourly / daily / weekdays /
   weekly**, and the minimum interval is **one hour** — sub-hour schedules are
@@ -148,18 +150,21 @@ A second routine on the same repo:
 - **Model:** a cheap, fast model (e.g. Haiku) — this job is mechanical.
 - **Connectors:** none needed (same as the reviewer — strip the defaults).
 - **Prompt / Instructions:** inline the steps — `/atlas-rebase-stale` won't resolve
-  (see the note at the top of Setup). Reference `commands/atlas-rebase-stale.md` from
-  the clone as the source, and spell out the loop so a cheap model can follow it:
+  (see the note at the top of Setup). Reference `commands/atlas-rebase-stale.md` as
+  the source, and have it sweep **every attached repo** (one run covers them all):
 
   ```text
-  Sweep the open pull requests in <owner/repo> and poke the stale ones — the polling
-  backstop for PRs that fell behind or into conflict, which GitHub sends no webhook
-  for. The full spec is commands/atlas-rebase-stale.md in this cloned repo, but the
+  Sweep the open pull requests across EVERY repository attached to this routine and
+  poke the stale ones — the polling backstop for PRs that fell behind or into
+  conflict, which GitHub sends no webhook for. All attached repos are cloned into the
+  workspace, so first enumerate them (e.g. from the workspace root,
+  `for d in */; do git -C "$d" remote get-url origin 2>/dev/null; done`), then run the
+  sweep below for EACH repo. The full spec is commands/atlas-rebase-stale.md; the
   /atlas-rebase-stale slash command does NOT resolve in routine sessions, so follow
-  these inline steps directly:
+  these inline steps per repo:
 
-  1. List open PRs (mcp__github__list_pull_requests); read each one's mergeable state
-     (mcp__github__pull_request_read).
+  1. List that repo's open PRs (mcp__github__list_pull_requests); read each PR's
+     mergeable state (mcp__github__pull_request_read).
   2. "behind" + no conflicts → bring up to date with
      mcp__github__update_pull_request_branch (no comment; emits a synchronize event).
      "dirty"/conflicting → do NOT resolve; post the poke as an INLINE REVIEW COMMENT
@@ -168,9 +173,13 @@ A second routine on the same repo:
      comments — sees it; body = a whole-PR conflict notice asking them to rebase onto
      base and resolve, only if no unaddressed <!-- atlas-rebase-poke --> review thread
      from you exists. Clean/up-to-date/draft → skip silently.
-  3. Mark every comment <!-- atlas-rebase-poke --> and never double-poke.
-  4. End with a one-line summary: how many PRs updated, poked, and skipped.
+  3. Mark every poke <!-- atlas-rebase-poke --> and never double-poke.
+  4. End with a one-line summary across all repos: counts of updated, poked, skipped.
   ```
+
+  (For just one repo, name it instead of enumerating — `Sweep the open pull requests
+  in acme/my-app …`. Verified live: a Haiku run enumerated 12 attached repos, rebased
+  the `behind` PRs, and posted review-comment pokes on the conflicted ones.)
 
 ### 3. (Optional) merge gate
 
