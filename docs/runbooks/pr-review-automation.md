@@ -204,14 +204,19 @@ Two autonomous sessions reacting to each other will ping-pong without a brake.
 The brakes live in `REVIEW.md` and are enforced by `/atlas-review-pr`:
 
 - **Escalating severity floor** — round 1 posts everything; later rounds post only
-  Major+, then Blocker-only. Fewer comments each round ⇒ fewer fixes ⇒ fewer pushes.
+  Major+, then Blocker-only *as inline comments*. Fewer inline comments each round ⇒
+  fewer fixes ⇒ fewer pushes. Findings below the floor aren't dropped silently:
+  they're carried as a **non-blocking advisory list** in the review summary (and in
+  the cap notice), so suppressed nits stay visible for optional tidy-up without
+  re-driving the loop.
 - **Approve-on-clean** — a round with nothing above its floor posts a single
-  `APPROVE`. The build session then has no actionable comments and goes quiet. This
-  is the real terminal state.
+  `APPROVE` (with the advisory list, if any). The build session then has no
+  actionable inline comments and goes quiet. This is the real terminal state.
 - **Hard round cap** — a backstop (default 4) that hands a still-churning PR to a
-  human rather than burning another machine round. The cap is enforced by the
-  instructions, not the platform — the reviewer decides each round whether a push
-  warrants a new round, so it won't burn a round on a no-op event.
+  human rather than burning another machine round. The cap notice carries the
+  outstanding advisory findings forward so the human inherits the open list. The cap
+  is enforced by the instructions, not the platform — the reviewer decides each
+  round whether a push warrants a new round, so it won't burn a round on a no-op event.
 
 ## Usage and run limits
 
