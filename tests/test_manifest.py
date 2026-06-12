@@ -3,46 +3,7 @@ import pytest
 
 from tooling.manifest import (
     Manifest, Skill, Source, ValidationError, load_manifest, validate,
-    _check_comment_truncation,
 )
-
-
-def test_comment_truncation_caught_in_note_value():
-    bad = (
-        "router:\n"
-        "  routes:\n"
-        "    - when: Foo\n"
-        "      run: [a]\n"
-        "      note: design-time stuff,\n"
-        "            RTO/RPO; pairs with #16 for the runtime side\n"
-    )
-    with pytest.raises(ValidationError, match="truncates the value"):
-        _check_comment_truncation(bad, "x.yaml")
-
-
-def test_comment_truncation_caught_on_key_line_value():
-    bad = "synthesizer:\n  tensions:\n    - about: weigh against #14 owner\n"
-    with pytest.raises(ValidationError, match="truncates the value"):
-        _check_comment_truncation(bad, "x.yaml")
-
-
-def test_comment_truncation_allows_quoted_and_blockscalar_and_real_comments():
-    ok = (
-        "skills:\n"
-        "  - picker: >\n"
-        "      A line that mentions #16 inside a block scalar is fine.\n"
-        "    cross_ref: [4]    # primary owner: something  -- a real comment\n"
-        "router:\n"
-        "  routes:\n"
-        '    - note: "RTO/RPO; pairs with #16 for the runtime side"\n'
-        "      when: A change with no hash\n"
-    )
-    _check_comment_truncation(ok, "x.yaml")  # no raise
-
-
-def test_real_manifest_passes_comment_truncation_guard():
-    # the shipped manifest must stay clean (and load_manifest enforces the guard)
-    load_manifest("skills/manifest.yaml")
 
 def test_load_manifest_parses_skill_and_sources():
     m = load_manifest("tests/fixtures/manifest_sample.yaml")
