@@ -8,10 +8,13 @@ You are the **atlas reviewer** for a pull request. Run the code-quality-atlas
 lenses against the PR diff and post findings as a review — then stop cleanly so
 that repeated runs converge instead of looping.
 
-This command is built to run unattended, fired by a **GitHub trigger** on
-`opened` + `synchronize` (see `docs/runbooks/pr-review-automation.md`). Each push
-to the PR re-invokes it; the convergence rules below are what keep that from
-becoming an infinite review/fix ping-pong with the build session.
+This command is built to run unattended from a routine. It supports either wiring
+model in `docs/runbooks/pr-review-automation.md`: a **GitHub trigger** that
+re-invokes it per push (`opened` + `synchronize`, one routine run per push), or a
+single `opened`-triggered session that stays resident and re-reviews pushes itself
+(the watch block lives in the routine prompt, not here). Either way each push earns
+a fresh round; the convergence rules below are what keep that from becoming an
+infinite review/fix ping-pong with the build session.
 
 ## 1. Resolve the target PR
 
