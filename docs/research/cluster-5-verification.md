@@ -11,13 +11,13 @@
 - **Kent C. Dodds — "The Testing Trophy" (2018)**, building on **Guillermo Rauch — "Write tests. Not too many. Mostly integration."** → mine: integration tests give the best ROI — they test units collaborating without e2e fragility. The modern counter to a unit-heavy pyramid; use it to resist *both* over-mocked unit tests and over-heavy e2e.
 - **Michael Feathers — *Working Effectively with Legacy Code*** → mine: "legacy code is code without tests"; seams, characterization tests, and **testability as a design property** (if it's hard to test, the design is the problem).
 - **Claessen & Hughes — "QuickCheck: Lightweight Tools for Random Testing of Haskell Programs" (ICFP 2000)** → mine: **property-based testing** — assert invariants over generated inputs; the trio of *generators + properties + shrinking*. Ported as Hypothesis/fast-check/jqwik.
-- **Mutation testing (PIT, Stryker, mutmut)** → mine: a **coverage-quality** signal — does the suite actually *catch injected bugs*? High line coverage + low mutation score = weak assertions.
+- **Mutation testing (PIT, Stryker, mutmut, cargo-mutants)** → mine: a **coverage-quality** signal — does the suite actually *catch injected bugs*? High line coverage + low mutation score = weak assertions. Cheapest and highest-signal on **pure, deterministic, fast-to-test** units (no I/O), where a run is minutes and surviving mutants are an exact list of unasserted behavior — there, prefer running the tool over only intuiting it.
 - **"Test behavior, not implementation" (Dodds; Kent Beck)** → mine: tests coupled to internals break on refactor; assert observable behavior so tests survive refactoring (cross #21).
 - **Martin Fowler — "Eradicating Non-Determinism in Tests"** `(verify URL)` → mine: flaky tests destroy trust; quarantine, then fix the root cause (time, order, concurrency, shared state).
 
 ### Tooling rules worth lifting
 - **Coverage:** coverage.py (Python), Istanbul/nyc & V8 (JS), JaCoCo (Java), SimpleCov (Ruby), `go test -cover`. Lift: track **branch** coverage and the coverage **delta on the diff**, not a global %.
-- **Mutation:** PIT/pitest (Java), **Stryker** (JS/TS, C#, Scala — https://stryker-mutator.io/), mutmut & cosmic-ray (Python), Mutant (Ruby).
+- **Mutation:** PIT/pitest (Java), **Stryker** (JS/TS, C#, Scala — https://stryker-mutator.io/), mutmut & cosmic-ray (Python), Mutant (Ruby), **cargo-mutants** (Rust — https://mutants.rs/), gremlins (Go — https://gremlins.dev/). For a pure crate/module with fast deterministic tests, a mutation run is cheap, and the surviving-mutant list makes a good CI gate.
 - **Property-based:** Hypothesis (Python), fast-check (JS/TS), jqwik (Java), PropEr/QuickCheck.
 - **Flaky control:** `pytest-randomly` (random order), `pytest-rerunfailures`, Jest `--detectOpenHandles`, Gradle/Maven retry, flaky trackers (BuildPulse, Datadog Test Optimization).
 - **Test linters:** `eslint-plugin-jest` (`no-disabled-tests`, `no-focused-tests`, `expect-expect`, `no-conditional-expect`), `rubocop-rspec`, `flake8-pytest-style`.
@@ -30,7 +30,7 @@
 - Is the test at the **right level** (pyramid/trophy) — logic in fast unit/integration, e2e reserved for critical journeys?
 - **Over-mocking smell**: do mocks assert on implementation calls so a refactor breaks tests without behavior changing? Prefer real collaborators / fakes (cross #11).
 - Are **edge/boundary** cases covered (empty, null, max, error paths) — where the bugs live (cross #1)?
-- Would the suite **catch a real bug** (mutation intuition), or does high coverage mask weak assertions?
+- Would the suite **catch a real bug**, not just execute lines? Apply mutation intuition — for a pure, deterministic, fast-to-test unit, prefer actually running a mutation tool (cheap, high-signal) over eyeballing it; otherwise high coverage masks weak assertions.
 - Any disabled/focused/skipped tests (`.only`, `xit`, `@Disabled`) sneaking in?
 - For nondeterministic/concurrent code, is the invariant property-tested and the concurrent path exercised (cross #3)?
 - Is each test readable — clear arrange/act/assert, one behavior per test, name reads as a spec?

@@ -28,6 +28,17 @@ def test_build_reference_tooling_only_has_tooling():
     assert "Is any error swallowed" not in md
 
 
+def test_tooling_reference_leads_with_tool_selection_principle():
+    # The named tools are starting points; the standing preamble must steer a
+    # reviewer to pick/verify for their stack rather than cargo-cult a default.
+    tooling = build_reference(_skill(), kind="tooling", docs_root=".")
+    assert "Selecting tools for this stack" in tooling
+    assert "verify it actually runs on your toolchain" in tooling
+    # ...and only on tool lists, not the heuristics/reference files.
+    heuristics = build_reference(_skill(), kind="heuristics", docs_root=".")
+    assert "Selecting tools for this stack" not in heuristics
+
+
 from tooling.generate import build_skill_md
 import yaml
 

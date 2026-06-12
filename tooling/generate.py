@@ -14,6 +14,21 @@ _KIND_TITLE = {
     "references": "References to mine",
 }
 
+# Standing guidance prepended to every tool-rules.md. The named tools in each
+# list are concrete starting points, not a mandate — this keeps a reviewer from
+# cargo-culting a canonical-but-broken tool instead of finding the equivalent
+# that fits the stack.
+_TOOLING_PREAMBLE = (
+    "> **Selecting tools for this stack.** The tools named below are "
+    "field-tested starting points, not a mandate. Pick the one that fits this "
+    "codebase's language version, build, and CI — and verify it actually runs "
+    "on your toolchain before relying on it. A listed tool that is broken, "
+    "abandoned, or noisy on your setup is a gap to close, not a permanent "
+    "`continue-on-error`: prefer a working, maintained equivalent (often a "
+    "younger, less well-known one) over a canonical-but-broken default. The "
+    "capability is the requirement; the specific tool is replaceable.\n"
+)
+
 
 def build_reference(skill: Skill, kind: str, docs_root: str = ".") -> str:
     """Concatenate the `kind` subsection from each source category into one
@@ -28,7 +43,8 @@ def build_reference(skill: Skill, kind: str, docs_root: str = ".") -> str:
             entries.append((src.section, body))
     toc = "\n".join(f"- From category #{n}" for n, _ in entries)
     parts = [f"## From category #{n}\n\n{body}" for n, body in entries]
-    header = f"# {_KIND_TITLE[kind]} — {skill.name}\n\n## Contents\n{toc}\n"
+    preamble = f"{_TOOLING_PREAMBLE}\n" if kind == "tooling" else ""
+    header = f"# {_KIND_TITLE[kind]} — {skill.name}\n\n{preamble}## Contents\n{toc}\n"
     return header + "\n" + "\n\n".join(parts) + "\n"
 
 
@@ -205,10 +221,17 @@ def build_router_md(manifest: Manifest) -> str:
         "## When to use\n\n"
         f"{r.description}\n\n"
         "## How to pick\n\n"
-        "- Run **2-4 lenses** per change; more dilutes attention and duplicates "
-        "findings.\n"
+        "- Run **2-4 content lenses** per change; more dilutes attention and "
+        "duplicates findings. `reviewing-pr-and-process-hygiene` is **additive** "
+        "— on any PR it rides on top of those lenses and does not spend one of "
+        "the 2-4 slots.\n"
         "- Match the change against the routes below; when a change is several "
         "things at once, combine rows but keep the cap.\n"
+        "- **Keep the brake pedal.** When a change ships abstraction, generality, "
+        "or infrastructure ahead of the consumer that needs it (a generic with "
+        "one impl, a crate with no caller yet), retain `checking-restraint` in "
+        "the set — under the cap it is the lens most often dropped, and the one "
+        "that catches building ahead of need.\n"
         "- For a **design doc or plan** (no code yet), use only lenses marked "
         "◆ in the catalog — the others read concrete code.\n"
         "- Lenses that share a research category name their primary owner in "

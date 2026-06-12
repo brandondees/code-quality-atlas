@@ -19,8 +19,9 @@ Picks which code-quality-atlas review lenses to run for a given change: maps wha
 
 ## How to pick
 
-- Run **2-4 lenses** per change; more dilutes attention and duplicates findings.
+- Run **2-4 content lenses** per change; more dilutes attention and duplicates findings. `reviewing-pr-and-process-hygiene` is **additive** — on any PR it rides on top of those lenses and does not spend one of the 2-4 slots.
 - Match the change against the routes below; when a change is several things at once, combine rows but keep the cap.
+- **Keep the brake pedal.** When a change ships abstraction, generality, or infrastructure ahead of the consumer that needs it (a generic with one impl, a crate with no caller yet), retain `checking-restraint` in the set — under the cap it is the lens most often dropped, and the one that catches building ahead of need.
 - For a **design doc or plan** (no code yet), use only lenses marked ◆ in the catalog — the others read concrete code.
 - Lenses that share a research category name their primary owner in their SKILL.md; report each shared finding once, under the owner.
 - Nothing matches: default to `tracing-correctness-and-invariants` + `reviewing-naming-and-readability` + `checking-restraint`.
