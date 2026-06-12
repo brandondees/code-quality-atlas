@@ -1,6 +1,6 @@
 # Round-2 gap hunt — hunting *framing* gaps in the taxonomy
 
-**Status:** in progress, opened 2026-06-12. Feeds a possible **taxonomy v0.3**.
+**Status:** synthesized 2026-06-12 → **adopted as taxonomy v0.3** (full draft, [D13](../open-questions.md)). Findings + disposition below; taxonomy updated, skill regeneration is the next (build) phase.
 **Motivation:** [`map-gaps.md` G10](../map-gaps.md) — a taxonomy-vs-skills diff (the G9 method) finds *propagation* gaps (researched, didn't reach a check) but is **blind to framing gaps**: a missing category yields no thin heuristic to notice, just silence. Framing gaps are only found by re-asking, from first principles, *what kinds of reviewable surface exist* — and checking which the v0.2 map never carved a home for.
 
 ## The search heuristic (from G10)

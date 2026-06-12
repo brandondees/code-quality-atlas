@@ -271,3 +271,25 @@ harmful-output eval; #17 test-apparatus; #19 codegen-drift + rollout-plan; #22
 docs-as-system; …). Plus the cross-cutting tool-mechanization `mechanize-with:` nudge.
 **Not editing `taxonomy.md` yet — owner decision pending on how much to promote vs.
 fold (a restraint call).** Docs-only.
+
+### 2026-06-12 (cont.) — taxonomy v0.3 drafted (D13) + decision-time shape design (Q15 resolved)
+
+Owner chose **full v0.3 draft** + **design pass first** for the decision-time shape.
+Did the design pass first (it gates how #29 enters the map):
+[`decision-time-review-shape.md`](decision-time-review-shape.md) resolves decision-time
+as a **mode orthogonal to topic** — a `shape: decision` capability (promoting the
+existing `design:` flag) with a shared decision-record checklist, plus a few
+decision-native lenses — **not** a 7th cluster (avoids G1 double-booking). That
+dissolves Q15's "category or shape?" tension: #29 is the *topic*, decision-time is the
+*shape*.
+
+Then drafted **taxonomy v0.3** (`taxonomy.md`, now 31 categories / ~95 factors):
+promoted **#28** operational & resilience design (resolves the G9 #12 scalability
+drop), **#29** decision lifecycle, **#30** enforcement apparatus & meta-artifacts (the
+G10 gap), **#31** infrastructure-as-code; added factors to #16/#17/#19/#20/#22/#25/#27;
+named decision-time as the third review shape; added a "Candidate additions — resolved
+(v0.3)" disposition table. Recorded as **D13**. Governance slices held out-of-scope
+(G8). `taxonomy.md` is docs-only and not a skill `built_from` source, so drift stays
+clean (61 tests pass). **Next: the v0.3 build phase** — research sections for the four
+new categories + manifest entries + generated skills/evals, and regenerating the
+add-factor-affected skills (#16/#17/#19/#20/#22/#25/#27) whose research sections change.
