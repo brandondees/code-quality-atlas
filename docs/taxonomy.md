@@ -141,9 +141,11 @@ Decisions reviewed *as they are made*, not the code that implements them — the
 | Portability & environment assumptions | **Promoted** (merged into #26). |
 
 ### Residual minor candidates (still open, low priority)
-- **Cloud cost / FinOps efficiency** — currently a factor-note in #15. Promote only if it proves to need its own review behavior.
+- **Cloud cost / FinOps efficiency** — currently a factor-note in #15. Promote only if it proves to need its own review behavior. *(2026-06-12: standards now exist — FOCUS billing-data spec, SCI/ISO 21031 carbon rate — filed in cluster-4 research; still factor-level.)*
 - **SLO / error-budget framing** — factor-note in #16; partly a process concern (#24).
 - **Telemetry / analytics privacy** — sits across #16 and #27.
+- **Agentic / tool-use safety** *(2026-06-12)* — no longer "low priority": OWASP shipped a dedicated agentic Top 10 (ASI01–ASI10). Research filed under #25; **promotion decision tracked as Q16** (map-gaps G2).
+- **IaC / workflow review depth** *(2026-06-12)* — Terraform/K8s/Dockerfile/CI-workflow review currently factor-notes in #19 ("pipeline-as-code") and #26 (portability); tooling + heuristics now filed in cluster-5 research (#19). Promote only if IaC-heavy repos prove to need a dedicated lens.
 
 ## Candidate additions — resolved (v0.3)
 

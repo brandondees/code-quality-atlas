@@ -2,6 +2,8 @@
 
 The active research surface. Organized to mirror [`taxonomy.md`](taxonomy.md). This is a **living document** — seeded below with foundational works so we have anchors; the work of phase 1 is to keep filing references, heuristics, checklists, and tool capabilities against the right cluster.
 
+> **Status note (2026-06-12):** the per-cluster files under [`research/`](research/) are now the deep, web-verified reference surface — most `TODO`s below were fulfilled there (Goetz, connascence, the-wrong-abstraction, SLSA, expand/contract, ADRs, Conventional Commits, …). This file stays as the curated *shortlist*: foundational works plus the cross-cutting anchors. New references land in the cluster files first.
+
 Conventions:
 - Cite **author — title** at minimum. Add a URL only when stable and known.
 - Tag each with a one-line note on *what we'd mine from it*.
@@ -59,6 +61,8 @@ These span most of the map and are worth reading as whole-suite influences.
 - **TODO** Brendan Gregg — systems performance; "USE method" (#15).
 - **TODO** caching: "there are only two hard things…" / invalidation literature (#15).
 - **Charity Majors et al. — *Observability Engineering*** — logs/metrics/traces, high-cardinality (#16).
+- **OWASP — Top 10 for Agentic Applications (2026)** (`genai.owasp.org`) — the agentic-risk spine (goal hijack, tool misuse, privilege abuse, memory poisoning, rogue agents); with the LLM Top 10, the two-list backbone of #25 (and Q16).
+- **Model Context Protocol — security best practices** (`modelcontextprotocol.io`) — confused deputy, token passthrough, tool poisoning — the tool-integration anti-pattern catalog (#25, #14).
 
 ## Cluster V — Verification & Supply
 
@@ -76,7 +80,8 @@ These span most of the map and are worth reading as whole-suite influences.
 - **TODO** ADRs (Michael Nygard, "Documenting Architecture Decisions") (#22).
 - **Diátaxis** (`diataxis.fr`) — docs taxonomy: tutorials/how-to/reference/explanation (#22).
 - **WCAG 2.2** + **ARIA Authoring Practices** (`w3.org`) (#23).
-- **TODO** conventional commits; commit-as-communication / risk-signaling notation (#24).
+- **TODO** conventional commits; commit-as-communication / risk-signaling notation (#24). *(done in cluster-6: Conventional Commits 1.0.0, commitlint, Beams.)*
+- **AGENTS.md** (`agents.md`, Agentic AI Foundation / Linux Foundation) — agent-facing repo instructions as a first-class doc artifact (#22, #24).
 
 ---
 

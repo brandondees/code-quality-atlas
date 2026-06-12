@@ -21,6 +21,7 @@
 **Live state (2026-06-12).** Most of the questions below were answered by what
 shipped across phases 2–3 and are now marked `→ RESOLVED` in place (with a
 pointer to the decision or skill that closed them). **Genuinely still open:**
+Q16 (promote agentic/tool-use safety to its own category),
 Q13 (team preferences overlay — designed, not yet built),
 Q14 (router intent / matching-and-ranking / review-depth modes — new),
 Q15 (a decision-time review shape — new, the round-2 gap-hunt headline),
@@ -31,6 +32,16 @@ and the Q2 residual low-priority candidates. A factor-level coverage audit
 surfaced at the factor level — fixable through the manifest/research, with the
 router half tracked as Q14. Everything else here is historical context kept for
 provenance.
+
+**Pending follow-up:** cross-model eval re-gate for the 2026-06-12
+research-expansion additions (runbook step 3) — the appended heuristics shipped
+without a small-model re-run (no local model in the sandbox session). Run the
+affected skills' evals per the [regeneration runbook](runbooks/regenerating-skills.md)
+on the next machine with a local model, and before the next
+skill-behavior-changing PR.
+
+### Q16 — Promote agentic/tool-use safety to its own category? *(new, 2026-06-12)*
+Map-gaps G2's candidate now has standards-grade external backing: OWASP released a dedicated **Top 10 for Agentic Applications** (ASI01–ASI10, 2025-12-09) separate from the LLM Top 10, alongside the Agentic AI Threats & Mitigations companion and the MCP spec's security-best-practices page (confused deputy / token passthrough / tool poisoning). The research-expansion pass (2026-06-12) filed the references + nine agentic heuristics under **#25** in cluster-4, so the suite reviews this material today either way. The open call: promote to a new category **#32** (cross-cutting #13 tool contracts, #14 authz, #24 agent process) — clearer ownership and a sharper lens trigger for agent-heavy codebases, at the cost of taxonomy churn and skill re-mapping — or keep it a #25 facet. D5-style taxonomy decision: **awaiting user.**
 
 ### Q13 — Team preferences overlay *(new, 2026-06-12)*
 The suite pushes research-derived "objectively better" defaults but has no home for the **codebase owner's / team's considered opinion** (only `checking-idioms-and-consistency` bends, and only to linter configs). Design write-up: [`team-preferences-overlay.md`](team-preferences-overlay.md). Decisions captured from the user this session: **(a) tiered precedence** — preference-tier findings (taste/thresholds/idioms) the team may tune or silently suppress; floor-tier findings (security, correctness, data/migration safety, concurrency) can never be silently dropped, only `acknowledge`d with a recorded rationale that still surfaces; **(b) bootstrap = template + inference, but inference is proposal-only** — it emits a ratification *interview*, never writes the overlay, and never runs by accident, so a haphazard/vibe-coded repo can't launder unconsidered "approve-click" patterns into ratified standards. Overlay lives in the *reviewed* repo (`.code-quality-atlas/preferences.md`), is read at review time by the router, and stays out of generated-skill provenance (D6). Status: **design, awaiting review before implementation planning.** Open sub-questions live in the write-up (§9).
