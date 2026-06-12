@@ -193,9 +193,56 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
                     f"synthesizer: tension {t.between} needs `about` and `resolve`")
 
 
+# Plain-scalar prose fields. A bare " #" inside one is read by YAML as a comment
+# and silently truncates the value (e.g. a route note "… pairs with #16 …" loses
+# everything from "#16", dropping the cross-reference). description/picker are
+# written as ">" block scalars, where "#" is literal, so they are exempt.
+_PLAIN_PROSE_KEYS = ("note", "when", "about", "resolve")
+_KEY_RE = re.compile(r"^(\s*)(?:- )?([\w-]+):\s*(.*)$")
+_COMMENT_RISK = re.compile(r"\s#")
+
+
+def _check_comment_truncation(raw: str, path: str) -> None:
+    """Reject an unquoted prose value containing " #": YAML would treat it as a
+    comment and silently drop the rest of the value. Tell the author to quote it
+    rather than shipping a truncated note. (Found via PR #37: two router notes
+    truncated at "pairs with" / "drift;" because of a bare #16 / #14.)"""
+    prose_indent: int | None = None
+    for n, line in enumerate(raw.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            prose_indent = None
+            continue
+        m = _KEY_RE.match(line)
+        if m:
+            indent, key, val = len(m.group(1)), m.group(2), m.group(3)
+            if key in _PLAIN_PROSE_KEYS and val[:1] not in ('"', "'", ">", "|", ""):
+                if _COMMENT_RISK.search(" " + val):
+                    _raise_truncation(path, n, key)
+                prose_indent = indent  # scan its continuation lines too
+            else:
+                prose_indent = None
+            continue
+        # a continuation line of the current plain prose value
+        if prose_indent is not None and len(line) - len(line.lstrip()) > prose_indent:
+            if _COMMENT_RISK.search(line):
+                _raise_truncation(path, n, "value continuation")
+        else:
+            prose_indent = None
+
+
+def _raise_truncation(path: str, line_no: int, key: str) -> None:
+    raise ValidationError(
+        f"{path}:{line_no}: unquoted {key} contains ' #' — YAML reads it as a "
+        f"comment and silently truncates the value. Wrap the value in quotes "
+        f'(e.g. note: "… pairs with #16 …").')
+
+
 def load_manifest(path: str) -> Manifest:
     with open(path, encoding="utf-8") as fh:
-        data = yaml.safe_load(fh)
+        raw = fh.read()
+    _check_comment_truncation(raw, path)
+    data = yaml.safe_load(raw)
     # Guard the parsed structure before indexing into it, so a malformed or
     # partially-written manifest yields a ValidationError naming the file and the
     # offending key rather than a raw TypeError/KeyError into manifest.py internals.
