@@ -39,7 +39,10 @@ for arg in "$@"; do
   case "$arg" in
     --user-only) user_only=1 ;;
     -h|--help)
-      sed -n '3,33p' "$0" | sed 's/^# \{0,1\}//'
+      # Print the leading comment header (after shebang + SPDX), stripping "# ".
+      # Reads until the first non-comment line, so there's no line range to keep
+      # in sync as the header grows.
+      awk 'NR<=2 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"
       exit 0 ;;
     -*) echo "unknown option: $arg" >&2; exit 2 ;;
     *) plugin="$arg" ;;
@@ -66,30 +69,42 @@ check_requirements() {
 }
 check_requirements || exit 1
 
+# Each `claude` call can fail (network, auth, a bad scope). Track that instead of
+# letting the final success line print unconditionally — an operator who restarts
+# on a false "Done" would still be on the old version. We deliberately do NOT use
+# `set -e`: one failing project scope must not abort the remaining updates.
+fail=0
+
 echo "Refreshing marketplace '$marketplace'…"
-claude plugin marketplace update "$marketplace"
+claude plugin marketplace update "$marketplace" \
+  || { echo "  marketplace refresh failed" >&2; fail=1; }
 
 echo "Updating '$plugin' (user scope)…"
-claude plugin update "$plugin" --scope user
-
-if [ "$user_only" -eq 1 ]; then
-  exit 0
-fi
+claude plugin update "$plugin" --scope user \
+  || { echo "  user-scope update failed" >&2; fail=1; }
 
 # Every project-scope install, enumerated from installed_plugins.json, so new
-# projects are picked up automatically without editing this script.
-if [ -f "$INSTALLED" ]; then
-  jq -r --arg k "$plugin" \
-    '.plugins[$k][]? | select(.scope == "project") | .projectPath // empty' \
-    "$INSTALLED" 2>/dev/null | while IFS= read -r proj; do
-      [ -z "$proj" ] && continue
-      if [ -d "$proj" ]; then
-        echo "Updating '$plugin' (project scope: $proj)…"
-        ( cd "$proj" && claude plugin update "$plugin" --scope project )
-      else
-        echo "skipped (project path missing): $proj" >&2
-      fi
-    done
+# projects are picked up automatically without editing this script. Read via
+# process substitution (not a pipe) so the loop runs in THIS shell and `fail`
+# survives it. A missing/malformed JSON file is tolerated (jq stderr silenced) —
+# that's the one place we intentionally keep silent-OK semantics.
+if [ "$user_only" -eq 0 ] && [ -f "$INSTALLED" ]; then
+  while IFS= read -r proj; do
+    [ -z "$proj" ] && continue
+    if [ -d "$proj" ]; then
+      echo "Updating '$plugin' (project scope: $proj)…"
+      ( cd "$proj" && claude plugin update "$plugin" --scope project ) \
+        || { echo "  project-scope update failed: $proj" >&2; fail=1; }
+    else
+      echo "skipped (project path missing): $proj" >&2
+    fi
+  done < <(jq -r --arg k "$plugin" \
+      '.plugins[$k][]? | select(.scope == "project") | .projectPath // empty' \
+      "$INSTALLED" 2>/dev/null)
 fi
 
+if [ "$fail" -ne 0 ]; then
+  echo "One or more updates FAILED — you may still be on the old version (see errors above)." >&2
+  exit 1
+fi
 echo "Done. Restart Claude to apply staged updates."

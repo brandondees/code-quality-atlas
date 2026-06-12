@@ -131,7 +131,7 @@ add a throttled `SessionStart` hook to your **personal** `~/.claude/settings.jso
         "hooks": [
           {
             "type": "command",
-            "command": "nohup bash /abs/path/to/code-quality-atlas/tooling/keep-plugin-current.sh >/dev/null 2>&1 &",
+            "command": "lf=\"$HOME/.claude/.keep-plugin-current-last\"; ts=$(date +%s); { [ -f \"$lf\" ] && [ $((ts-$(cat \"$lf\"))) -lt 86400 ]; } && exit 0; echo \"$ts\" > \"$lf\"; nohup bash /abs/path/to/code-quality-atlas/tooling/keep-plugin-current.sh >/dev/null 2>&1 &",
             "timeout": 5
           }
         ]
@@ -141,8 +141,9 @@ add a throttled `SessionStart` hook to your **personal** `~/.claude/settings.jso
 }
 ```
 
-(Add your own once-a-day throttle — e.g. a timestamp guard — so it isn't doing a
-git fetch on every session.)
+The `command` is self-contained: the leading timestamp guard (`$lf` / 86400s)
+runs the updater at most once a day, so most session starts exit immediately
+without a git fetch. Drop the guard if you want it to run every session.
 
 #### Automatic routing (SessionStart hook)
 
