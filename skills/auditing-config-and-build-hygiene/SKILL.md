@@ -11,7 +11,7 @@ provenance:
   built_from:
   - category: 19
     source: docs/research/cluster-5-verification.md#19
-    hash: 10b5ff2b03994f8c94218d994a97bb5d90c052b2c6719db21aab3605ed861353
+    hash: 603c6a96f63ba6a91654afbcea538895d07c05f6dd8b8fd781afc01eab86f1bb
   - category: 26
     source: docs/research/cluster-5-verification.md#26
     hash: 7e08a34862897e0e935e8e3a24c49dd71b46b0409d0b8bcab0614d6aeb7fbdac
@@ -36,7 +36,7 @@ The head of the full checklist — enough for a first pass without opening any r
 - Does CI run the full gate on the diff — lint, format-check, type-check, tests, dep/security scan — and is passing **required** to merge?
 - Is the build **reproducible/hermetic** enough to not depend on machine-local state (pinned toolchain, lockfiles, no network in build)?
 - Is CI **fast and reliable**? A new slow/flaky job is a defect — parallelized, cached, deterministic?
-- Are **secrets** injected at runtime (not baked into the image/repo/CI logs) and least-privilege scoped (cross #14)?
+- Is any **quality gate disabled or soft-failed** (`continue-on-error`, `|| true`, `allow_failure`, a skipped/excluded check) — a deliberate, tracked decision or silent debt? A gate that's off because its tool broke on the current toolchain (language/runtime version, build) is a **gap to close**: fix it or swap in a maintained equivalent — often a younger, less well-known one — not a permanent `continue-on-error` (cross #21).
 - Is config **separated from code** and injected via env — no secrets or env-specific values hardcoded/committed?
 - Is config **validated at startup** (fail fast, clear message), not lazily at first use?
 - Are **safe, secure defaults** used (deny-by-default, TLS on, debug off in prod — cross #14)?
