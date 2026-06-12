@@ -293,3 +293,26 @@ named decision-time as the third review shape; added a "Candidate additions — 
 clean (61 tests pass). **Next: the v0.3 build phase** — research sections for the four
 new categories + manifest entries + generated skills/evals, and regenerating the
 add-factor-affected skills (#16/#17/#19/#20/#22/#25/#27) whose research sections change.
+
+### 2026-06-12 (cont.) — v0.3 build, wave 1: the first decision-time lens
+
+Owner chose **decision-time (#29) first**. Shipped `reviewing-decision-lifecycle`
+end-to-end — the suite's first **decision-shaped** lens, validating the new shape
+through the whole pipeline:
+- **Pipeline:** `manifest.py` validator accepts `shape: decision`; `generate.py`
+  emits a decision scope-line and a "Decision-shaped" router-catalog section.
+- **Research:** `cluster-6-evolution.md` gains `## #29 Decision lifecycle`
+  (references / tool-rules / heuristics) grounded in round-2 prior art — Nygard
+  ADRs, Tech Radar rings, one/two-way doors, RFC 8594 Sunset, build-vs-buy TCO,
+  lock-in/exit.
+- **Skill:** `shape: decision`, `built_from #29`, 8 inlined checks, 4 evals
+  (adoption / stale-ADR / clean-deprecation / build-vs-buy) + examples.
+- **Router:** a decision route + catalog section. **Manifest** `taxonomy_version`
+  bumped v0.2 → v0.3 (provenance across all skills).
+
+Generate clean, no drift, evals valid, 61 tests pass. **Remaining v0.3 build:**
+#28 operational & resilience design, #30 enforcement apparatus & meta-artifacts,
+#31 infrastructure-as-code (each: research section + skill + evals), and the ~10
+add-factor regenerations (#16/#17/#19/#20/#22/#25/#27). Optional polish: a
+shape-aware "Reviewer discipline" wording (says "code" for decision/repo lenses)
+and a decision-specific synthesizer verdict vocabulary (adopt / revisit / reject).
