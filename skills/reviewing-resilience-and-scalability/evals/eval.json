@@ -1,0 +1,33 @@
+{
+  "skills": [
+    "reviewing-resilience-and-scalability"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this change:\n```python\ndef rebuild_search_index():\n    docs = db.query(\"SELECT * FROM documents\")          # every row\n    payloads = []\n    for d in docs:\n        resp = requests.post(EMBED_URL, json={\"text\": d.body})   # no timeout\n        payloads.append(resp.json()[\"vector\"])\n    INDEX_CACHE.clear(); INDEX_CACHE.update(zip([d.id for d in docs], payloads))\n    return len(payloads)\n```",
+      "expected_behavior": [
+        "Flags the unbounded result set: SELECT * with no limit loads the whole documents table into memory and accumulates a vector per row, which OOMs as data grows; page or stream it",
+        "Flags the missing timeout / failure plan on the requests.post embedding call: one slow or failing call blocks or aborts the whole rebuild; add a timeout, per-item failure isolation, and bounded retries with backoff",
+        "Flags the module-level INDEX_CACHE as in-process state that breaks horizontal scaling and is lost on restart; move shared state to a backing store",
+        "Does not demand resilience machinery with no stated requirement; reports the concrete hazards above"
+      ]
+    },
+    {
+      "query": "Review this design:\n```text\nRFC: Notifications service. Single Postgres primary, no replica. A single global\nrow `counters.next_notification_id` is incremented on every send to assign IDs.\nBackups: nightly pg_dump to S3 (never restored in a drill). Stated target: 8,000\nnotifications/sec at peak and 99.95% availability.\n```",
+      "expected_behavior": [
+        "Flags the single global counter row as a single-writer bottleneck that serializes every insert and caps throughput far below 8,000/sec regardless of scaling; recommends a sequence, UUID, or sharded ID generation",
+        "Flags that a single primary with no replica cannot meet the stated 99.95% availability — any primary failure is full downtime; requires a replica with automated failover and a stated RTO",
+        "Flags the backup/recovery gap: nightly pg_dump gives up to ~24h RPO and the restore has never been tested, so it is not recoverability; recommends stating the acceptable RPO, testing the restore, and adding PITR/WAL if 24h is too much",
+        "Judges against the design's own stated targets (8,000/sec, 99.95%) rather than inventing requirements"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\nasync def fetch_fx_rate(client, pair):\n    # 2s timeout; circuit breaker opens after repeated failures; falls back to the\n    # last cached rate; retries are capped with exponential backoff + jitter.\n    async with fx_breaker:\n        try:\n            r = await client.get(f\"/rate/{pair}\", timeout=2.0)\n            return r.json()[\"rate\"]\n        except (TimeoutError, UpstreamError):\n            return rate_cache.get(pair)   # stale-but-serving\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes the call is bounded (timeout), has a defined failure path (circuit breaker plus cached fallback / graceful degradation), and holds no instance-local state that blocks horizontal scaling",
+        "Does not demand multi-region, extra replicas, or more redundancy absent a stated availability or scale requirement"
+      ]
+    }
+  ]
+}
