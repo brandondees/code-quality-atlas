@@ -36,7 +36,9 @@ All **22 behaviors / 27 categories** from the [phase-2 design](docs/phase-2-skil
 
 Start with **`choosing-review-lenses`** — it maps the change shape (bug fix, migration, async code, API change, design doc, repo audit, …) to the right 2-4 lenses and carries a one-line catalog of all of them. Each lens's `SKILL.md` is self-sufficient for a first pass; its `reference/heuristics.md` holds the full checklist.
 
-## Install (Claude Code)
+## Install
+
+### Claude Code (plugin)
 
 In an interactive Claude Code session on your machine (terminal CLI, desktop app, or IDE extension):
 
@@ -86,8 +88,24 @@ on the install path:
   including Claude Code web sessions) install fresh at session start, so every
   new session already has the latest merged commit — nothing to do.
 
+### Other harnesses (Skulto)
+
 The skills are plain markdown and remain harness-agnostic; the plugin wrapper is
-additive (D9 in [`docs/open-questions.md`](docs/open-questions.md)).
+additive (D9 in [`docs/open-questions.md`](docs/open-questions.md)). Because each
+lens is a standard `SKILL.md`, the suite also installs via
+[Skulto](https://github.com/asteroid-belt/skulto), a cross-platform skill manager
+that syncs skills to Claude Code, Cursor, Windsurf, Copilot, and 25+ other agent
+tools (`brew install asteroid-belt/tap/skulto`):
+
+```bash
+skulto add brandondees/code-quality-atlas        # register the repo and sync it
+skulto install brandondees/code-quality-atlas -y # install all skills (drop -y to pick interactively)
+```
+
+Skulto installs are snapshots — run `skulto pull` (or `skulto update`, which adds
+a security re-scan and change report) to refresh to the latest merged commit.
+To pin a project's skill set for teammates, `skulto save` writes the current
+installs to a `skulto.json` manifest that `skulto sync` reproduces.
 
 ## Approach
 
