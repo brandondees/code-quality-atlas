@@ -1,5 +1,9 @@
 # SPDX-License-Identifier: MIT
-from tooling.manifest import load_manifest, Manifest, Skill, Source
+import pytest
+
+from tooling.manifest import (
+    Manifest, Skill, Source, ValidationError, load_manifest, validate,
+)
 
 def test_load_manifest_parses_skill_and_sources():
     m = load_manifest("tests/fixtures/manifest_sample.yaml")
@@ -20,8 +24,66 @@ def test_source_parses_path_and_section():
     assert s.section == 2
 
 
-from tooling.manifest import validate, ValidationError
-import pytest
+def test_source_without_fragment_raises_clear_error():
+    with pytest.raises(ValueError, match="<path>#<section>"):
+        Source(category=2, source="docs/research/cluster-1-correctness.md")
+
+
+def test_source_with_nonnumeric_fragment_raises_clear_error():
+    with pytest.raises(ValueError, match="non-negative integer"):
+        Source(category=2, source="docs/research/cluster-1-correctness.md#two")
+
+
+def _write_manifest(tmp_path, text):
+    p = tmp_path / "manifest.yaml"
+    p.write_text(text, encoding="utf-8")
+    return str(p)
+
+
+def test_load_manifest_rejects_empty_file(tmp_path):
+    path = _write_manifest(tmp_path, "")
+    with pytest.raises(ValidationError, match="expected a YAML mapping"):
+        load_manifest(path)
+
+
+def test_load_manifest_rejects_list_root(tmp_path):
+    path = _write_manifest(tmp_path, "- a\n- b\n")
+    with pytest.raises(ValidationError, match="expected a YAML mapping"):
+        load_manifest(path)
+
+
+def test_load_manifest_rejects_missing_skills_key(tmp_path):
+    path = _write_manifest(tmp_path, "taxonomy_version: v0.2\n")
+    with pytest.raises(ValidationError, match="missing required key 'skills'"):
+        load_manifest(path)
+
+
+def test_load_manifest_rejects_missing_taxonomy_version(tmp_path):
+    path = _write_manifest(tmp_path, "skills: []\n")
+    with pytest.raises(ValidationError, match="missing required key 'taxonomy_version'"):
+        load_manifest(path)
+
+
+def test_load_manifest_rejects_non_list_skills(tmp_path):
+    path = _write_manifest(tmp_path, "taxonomy_version: v0.2\nskills: not-a-list\n")
+    with pytest.raises(ValidationError, match="'skills' must be a list"):
+        load_manifest(path)
+
+
+def test_load_manifest_wraps_malformed_source(tmp_path):
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    built_from:\n"
+        "      - category: 2\n"
+        "        source: docs/research/cluster-1-correctness.md\n")  # no #section
+    with pytest.raises(ValidationError, match="skill #0"):
+        load_manifest(path)
+
 
 def _skill(**kw):
     base = dict(name="hunting-silent-failures",

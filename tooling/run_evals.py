@@ -12,7 +12,9 @@ any OpenAI-compatible /v1/chat/completions server such as llama-server
 them (no model server needed in CI).
 """
 from __future__ import annotations
+import http.client
 import json
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,6 +40,31 @@ def assemble_context(skill_dir: Path) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+def _post_json(url: str, payload: dict, timeout: int, label: str) -> object:
+    """POST `payload` as JSON and parse the JSON reply, turning network failures
+    and non-JSON bodies into a RuntimeError that names the backend — so a single
+    transient or an error page doesn't abort the run with a raw traceback.
+
+    Returns whatever JSON the server sent (json.loads can yield a list, str, None,
+    etc.); callers must narrow with isinstance before any dict access."""
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        # OSError covers URLError/TimeoutError (connection refused, DNS, timeout);
+        # HTTPException covers malformed responses from the server side.
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+    except (OSError, http.client.HTTPException) as e:
+        raise RuntimeError(f"{label} request to {url} failed: {e}") from e
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise RuntimeError(f"{label} returned a non-JSON response: {e}") from e
+
+
 def query_ollama(model: str, system: str, user: str,
                  host: str = OLLAMA_HOST, timeout: int = 180) -> str:
     payload = {
@@ -50,14 +77,13 @@ def query_ollama(model: str, system: str, user: str,
         # evals must be reproducible — never inherit a server's sampling default
         "options": {"temperature": 0},
     }
-    req = urllib.request.Request(
-        f"{host}/api/chat",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = json.loads(resp.read())
-    return data["message"]["content"]
+    data = _post_json(f"{host}/api/chat", payload, timeout, "Ollama")
+    if isinstance(data, dict) and data.get("error"):
+        raise RuntimeError(f"Ollama API error: {data['error']}")
+    content = data.get("message", {}).get("content") if isinstance(data, dict) else None
+    if not isinstance(content, str):
+        raise RuntimeError(f"unexpected Ollama response shape: {data!r}")
+    return content
 
 
 def query_openai(model: str, system: str, user: str,
@@ -73,14 +99,23 @@ def query_openai(model: str, system: str, user: str,
         # evals must be reproducible — never inherit a server's sampling default
         "temperature": 0,
     }
-    req = urllib.request.Request(
-        f"{host}/v1/chat/completions",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        data = json.loads(resp.read())
-    return data["choices"][0]["message"]["content"]
+    data = _post_json(f"{host}/v1/chat/completions", payload, timeout,
+                      "OpenAI-compatible")
+    if isinstance(data, dict) and data.get("error"):
+        # OpenAI-compatible errors are objects ({"error": {"message": ...}});
+        # surface the message text rather than the dict repr.
+        err = data["error"]
+        if isinstance(err, dict):
+            err = err.get("message", err)
+        raise RuntimeError(f"OpenAI-compatible API error: {err}")
+    try:
+        content = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as e:
+        raise RuntimeError(
+            f"unexpected OpenAI-compatible response shape: {data!r}") from e
+    if not isinstance(content, str):
+        raise RuntimeError(f"unexpected OpenAI-compatible response shape: {data!r}")
+    return content
 
 
 @dataclass

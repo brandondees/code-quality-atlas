@@ -13,6 +13,15 @@ class Source:
     source: str  # "<path>#<n>"
 
     def __post_init__(self) -> None:
+        # Validate the "<path>#<n>" shape up front so a malformed source raises a
+        # clear error here rather than a bare IndexError/ValueError later in .section.
+        if "#" not in self.source:
+            raise ValueError(
+                f"source must be '<path>#<section>', got {self.source!r}")
+        fragment = self.source.rsplit("#", 1)[1]
+        if not fragment.isdigit():
+            raise ValueError(
+                f"source section must be a non-negative integer, got {self.source!r}")
         if self.category != self.section:
             raise ValueError(
                 f"manifest category {self.category} != source section {self.section}"
@@ -187,6 +196,18 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
 def load_manifest(path: str) -> Manifest:
     with open(path, encoding="utf-8") as fh:
         data = yaml.safe_load(fh)
+    # Guard the parsed structure before indexing into it, so a malformed or
+    # partially-written manifest yields a ValidationError naming the file and the
+    # offending key rather than a raw TypeError/KeyError into manifest.py internals.
+    if not isinstance(data, dict):
+        raise ValidationError(
+            f"{path}: expected a YAML mapping, got {type(data).__name__}")
+    for key in ("skills", "taxonomy_version"):
+        if key not in data:
+            raise ValidationError(f"{path}: missing required key {key!r}")
+    if not isinstance(data["skills"], list):
+        raise ValidationError(
+            f"{path}: 'skills' must be a list, got {type(data['skills']).__name__}")
     skills = []
     for i, s in enumerate(data["skills"]):
         try:
@@ -204,6 +225,8 @@ def load_manifest(path: str) -> Manifest:
             ))
         except KeyError as e:
             raise ValidationError(f"skill #{i}: missing field {e}") from e
+        except ValueError as e:  # malformed Source string
+            raise ValidationError(f"skill #{i}: {e}") from e
     router = None
     if "router" in data:
         r = data["router"]

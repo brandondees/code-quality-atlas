@@ -1,8 +1,34 @@
 # SPDX-License-Identifier: MIT
 # tests/test_run_evals.py
+import http.client
+import json
+import urllib.error
+
+import pytest
+
 from tooling import run_evals
 from tooling.manifest import Skill, Source
 from tooling.generate import generate_skill
+
+
+class _FakeResp:
+    """Minimal stand-in for the urlopen context manager."""
+    def __init__(self, body: bytes):
+        self._body = body
+    def read(self):
+        return self._body
+    def __enter__(self):
+        return self
+    def __exit__(self, *exc):
+        return False
+
+
+def _patch_urlopen(monkeypatch, *, body=None, exc=None):
+    def fake_urlopen(req, timeout=None):
+        if exc is not None:
+            raise exc
+        return _FakeResp(body)
+    monkeypatch.setattr(run_evals.urllib.request, "urlopen", fake_urlopen)
 
 
 def _valid_eval_json():
@@ -66,3 +92,68 @@ def test_run_skill_evals_openai_backend(tmp_path, monkeypatch):
     calls.clear()
     run_evals.run_skill_evals(out, "fake-model", api="openai")
     assert calls == [run_evals.OPENAI_HOST] * 3
+
+
+# --- query_ollama / query_openai: network + response-shape robustness (#23) ---
+
+def test_query_ollama_returns_content(monkeypatch):
+    _patch_urlopen(monkeypatch,
+                   body=json.dumps({"message": {"content": "a finding"}}).encode())
+    assert run_evals.query_ollama("m", "sys", "usr") == "a finding"
+
+
+def test_query_ollama_network_error_raises_runtimeerror(monkeypatch):
+    _patch_urlopen(monkeypatch, exc=urllib.error.URLError("connection refused"))
+    with pytest.raises(RuntimeError, match="Ollama request to .* failed"):
+        run_evals.query_ollama("m", "sys", "usr")
+
+
+def test_query_ollama_http_exception_raises(monkeypatch):
+    # HTTPException (RemoteDisconnected/BadStatusLine) is a distinct path from URLError.
+    _patch_urlopen(monkeypatch, exc=http.client.RemoteDisconnected("server closed"))
+    with pytest.raises(RuntimeError, match="Ollama request to .* failed"):
+        run_evals.query_ollama("m", "sys", "usr")
+
+
+def test_query_ollama_surfaces_api_error_message(monkeypatch):
+    _patch_urlopen(monkeypatch,
+                   body=json.dumps({"error": "model 'x' not found"}).encode())
+    with pytest.raises(RuntimeError, match="not found"):
+        run_evals.query_ollama("m", "sys", "usr")
+
+
+def test_query_ollama_unexpected_shape_raises(monkeypatch):
+    _patch_urlopen(monkeypatch, body=json.dumps({"message": {}}).encode())
+    with pytest.raises(RuntimeError, match="unexpected Ollama response shape"):
+        run_evals.query_ollama("m", "sys", "usr")
+
+
+def test_query_ollama_non_json_raises(monkeypatch):
+    _patch_urlopen(monkeypatch, body=b"<html>502 Bad Gateway</html>")
+    with pytest.raises(RuntimeError, match="non-JSON response"):
+        run_evals.query_ollama("m", "sys", "usr")
+
+
+def test_query_openai_returns_content(monkeypatch):
+    _patch_urlopen(monkeypatch, body=json.dumps(
+        {"choices": [{"message": {"content": "ok"}}]}).encode())
+    assert run_evals.query_openai("m", "sys", "usr") == "ok"
+
+
+def test_query_openai_network_error_raises_runtimeerror(monkeypatch):
+    _patch_urlopen(monkeypatch, exc=urllib.error.URLError("refused"))
+    with pytest.raises(RuntimeError, match="OpenAI-compatible request to .* failed"):
+        run_evals.query_openai("m", "sys", "usr")
+
+
+def test_query_openai_surfaces_api_error_message(monkeypatch):
+    _patch_urlopen(monkeypatch, body=json.dumps(
+        {"error": {"message": "rate limited"}}).encode())
+    with pytest.raises(RuntimeError, match="rate limited"):
+        run_evals.query_openai("m", "sys", "usr")
+
+
+def test_query_openai_unexpected_shape_raises(monkeypatch):
+    _patch_urlopen(monkeypatch, body=json.dumps({"choices": []}).encode())
+    with pytest.raises(RuntimeError, match="unexpected OpenAI-compatible response shape"):
+        run_evals.query_openai("m", "sys", "usr")
