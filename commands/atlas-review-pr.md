@@ -47,8 +47,11 @@ approve-on-clean behavior. The repo's own `REVIEW.md` always wins.
 Count this reviewer's prior reviews on the PR — your past review summaries carry
 the marker line `<!-- atlas-review round:N -->`. The current round is the highest
 N seen, plus one (first review is **round 1**). If the round would exceed the cap
-in the convergence policy, **post nothing** beyond a one-line note that the cap is
-reached, and stop.
+in the convergence policy, **run no new lenses and post no new inline comments**;
+instead post a single summary that notes the cap is reached **and re-surfaces the
+outstanding non-blocking findings** — read your most recent round's summary
+(`<!-- atlas-review round:N -->`) and carry its *Non-blocking (advisory)* list
+forward, so the human taking over sees what is left below the floor — then stop.
 
 ## 4. Run the lenses
 
@@ -60,20 +63,27 @@ reached, and stop.
 
 ## 5. Apply the round's severity floor, then post
 
-- Drop every finding below the floor for the current round (the policy raises the
-  floor each round — round 1 may post nits; later rounds post only Major+, then
+- Split this round's findings at the floor for the current round (the policy raises
+  the floor each round — round 1 may post nits; later rounds post only Major+, then
   Blocker-only). Severities are the synthesizer's own: **Blocker > Major > Minor > Nit**.
-- For surviving findings, post **inline review comments** anchored to the diff
-  hunk (`add_comment_to_pending_review`, then submit with
+- For findings **at or above the floor**, post **inline review comments** anchored
+  to the diff hunk (`add_comment_to_pending_review`, then submit with
   `pull_request_review_write`). When a finding is a flaw in code that was *pushed
   in response to an earlier round*, say so in the comment — that's the highest-value
   catch.
+- For findings **below the floor**, do **not** open inline threads. Instead list
+  them under a **`Non-blocking (advisory)`** heading in the review **summary body** —
+  one line each (*severity · `path:line` · one-clause description*) — so they stay
+  visible for optional tidy-up without driving the fix loop. These are advisory:
+  don't `resolve`/re-raise them as threads, and the build session is free to ignore
+  them. (This mirrors how Copilot and CodeRabbit surface their non-blocking notes.)
 - Open your review summary with the marker `<!-- atlas-review round:N -->` so the
-  next run can read the round count.
+  next run can read the round count and carry the advisory list forward.
 - **If nothing survives the floor**, submit a single `APPROVE` review whose body
   notes "no findings at or above this round's floor" (still carrying the round
-  marker), and stop. This is the loop's terminal state: the build session sees no
-  actionable comments and quiesces.
+  marker) — including the `Non-blocking (advisory)` list when below-floor findings
+  exist — and stop. This is the loop's terminal state: the build session sees no
+  actionable inline comments and quiesces.
 
 ## 6. Reply, don't re-litigate
 

@@ -21,17 +21,41 @@ accumulate, so later rounds only interrupt for things that actually matter.
 | 2 | Major and above | Nits and minors were the reviewer's chance; now focus on substance and on flaws in the round-1 fixes. |
 | 3+ | Blocker only | Near convergence — interrupt only for correctness/security/data-loss regressions. |
 
+Dropping a finding *below the floor* means it is not posted as an **inline review
+comment** — those are the actionable items that drive the fix loop. It does **not**
+mean the finding disappears: every round, the below-floor findings are still
+reported as a short **non-blocking advisory list** in the review summary (see
+[Non-blocking findings](#non-blocking-findings-advisory)), the way Copilot and
+CodeRabbit surface non-blocking notes — so the author can dig deeper and tidy up
+without re-opening the convergence loop.
+
+## Non-blocking findings (advisory)
+
+Findings below the current round's floor are reported as an advisory list in the
+**review summary body only** — never as inline threads, and never `resolve`d or
+re-raised thread-to-thread. They are informational: the build / auto-fix session
+**may** optionally address them but is not required to; they do **not** block, do
+**not** count as actionable for convergence, and do **not** on their own earn a new
+round. Keep each to one line — *severity · location · one-clause description*. This
+keeps the actionable surface (inline, at/above floor — "what must change") cleanly
+separate from the advisory surface (summary, below floor — "what could be tidied").
+
 ## Round cap
 
-- **Hard cap: 4 rounds.** Beyond it, post nothing but a one-line note that the cap
-  was reached and stop. A PR still churning after four review rounds needs a human,
-  not another machine round.
+- **Hard cap: 4 rounds.** Beyond it, post no new inline comments and run no new
+  round — but the cap note is **not silent**: post a one-line "cap reached" notice
+  that also re-surfaces the **outstanding non-blocking findings** (carry forward the
+  advisory list from the last round's summary), so the human taking over sees
+  exactly what is left below the floor. A PR still churning after four review rounds
+  needs a human, not another machine round.
 
 ## Approve-on-clean (the terminal state)
 
 - When a round produces **no findings at or above its floor**, submit a single
-  `APPROVE` review saying so. The build session then sees no actionable comments
-  and quiesces — that is how the loop ends, not by running out of rounds.
+  `APPROVE` review saying so — and if any below-floor findings exist, include them
+  as the non-blocking advisory list so they stay visible for optional polish. The
+  build session then sees no actionable (inline) comments and quiesces — that is how
+  the loop ends, not by running out of rounds.
 
 ## Scope discipline
 
