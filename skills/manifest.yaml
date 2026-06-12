@@ -540,8 +540,8 @@ router:
             to a dependency that can be slow or down)
       run: [reviewing-resilience-and-scalability, reviewing-concurrency-and-async,
             reviewing-observability-and-operability]
-      note: design-time operability — blast radius, backpressure, statelessness,
-            RTO/RPO; pairs with #16 for the runtime-instrumentation side
+      note: "design-time operability — blast radius, backpressure, statelessness,
+            RTO/RPO; pairs with #16 for the runtime-instrumentation side"
     - when: UI / frontend change (components, templates, user-facing text)
       run: [reviewing-accessibility-and-i18n, checking-idioms-and-consistency,
             reviewing-naming-and-readability]
@@ -568,8 +568,8 @@ router:
     - when: Infrastructure-as-code change (Terraform/OpenTofu, Kubernetes/Helm,
             CloudFormation manifests)
       run: [auditing-infrastructure-as-code, sweeping-for-security]
-      note: repo-shaped — judges blast radius, public exposure, IAM scope, and
-            declared-vs-live drift; #14 owns the security verdict
+      note: "repo-shaped — judges blast radius, public exposure, IAM scope, and
+            declared-vs-live drift; #14 owns the security verdict"
     - when: Any pull request (the PR artifact itself, on top of content lenses)
       run: [reviewing-pr-and-process-hygiene]
     - when: Whole-repo health audit (scheduled / cron)
