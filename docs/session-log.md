@@ -638,9 +638,14 @@ the whole-repo audit list grew seven → eight (IaC only where manifests exist).
   S2 5/5 (caught the one qwen dropped), clean S3. No example defect — qwen's drop
   is its recall ceiling.
 
-Generate clean, no drift, eval structure valid for all 28, 81 tests pass. 26 lens
-skills + router + synthesizer. Residuals are the known 7B ceilings (secondary-
-finding recall on dense scans; cosmetic format-leak), not chased per the runbook.
+Generate clean, no drift, eval-structure valid for all 28, 81 tests pass.
+**Count reconciliation:** phase 3 ended at 22 lens skills (the "24 skills" earlier
+in this log = those 22 + the router + the synthesizer). v0.3 then added four lens
+skills — #29 decision-lifecycle and #30 enforcement (built earlier in the wave),
+plus #28 resilience and #31 IaC (this entry) — so **22 → 26 lens skills**; with the
+router and synthesizer that is **28 total**. Residuals are the known 7B ceilings
+(secondary-finding recall on dense scans; cosmetic format-leak), not chased per the
+runbook.
 
 With D13's build done, the remaining build backlog (from the decision sweep
 above) is: **#32 agentic-safety lens** (D14) · the **`shape: artifact` lens** +
