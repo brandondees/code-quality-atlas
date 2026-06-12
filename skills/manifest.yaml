@@ -450,3 +450,50 @@ router:
             auditing-dependencies-and-supply-chain, auditing-config-and-build-hygiene,
             auditing-documentation-health, auditing-compliance-and-provenance]
       note: the six repo-shaped audits; run independently, not as one pass
+
+# The other half of composition (Q7): once the router's 2-4 lenses each emit
+# findings, this merges them into one report — deduplicated, conflicts
+# reconciled, severity-ranked, single verdict. Generated into
+# skills/<name>/SKILL.md from this section alone (built_from: []), so manifest
+# edits regenerate it and docs drift never flags it. Fan-out stays advisory by
+# default but the finding contract lets a harness mechanize the same merge (D12).
+synthesizer:
+  name: synthesizing-review-findings
+  description: >
+    Merges the findings of several code-quality-atlas lenses into one review:
+    deduplicates issues raised by more than one lens, reconciles lenses that
+    pull opposite ways (e.g. restraint vs. coverage, cache vs. profile), ranks
+    by severity, and ends on a single block/approve verdict. Use after running
+    2-4 review lenses on a change, when assembling multi-lens output into one
+    report, or when overlapping reviewers' findings need deduplicating and
+    prioritizing.
+  severity_order: [Blocker, Major, Minor, Nit]
+  tensions:
+    - between: [checking-restraint, reviewing-module-design]
+      about: a new abstraction or boundary — one lens brakes, one wants the seam
+      resolve: >
+        Favor the simplest design the current requirements justify; add the
+        boundary only once a second concrete consumer exists. Restraint wins
+        until then.
+    - between: [checking-restraint, reviewing-performance-and-efficiency]
+      about: hand-optimization without a profile
+      resolve: >
+        No optimization lands without a profile showing the hot path.
+        Performance wins only on measured evidence; otherwise keep the simple
+        version.
+    - between: [checking-restraint, reviewing-test-quality]
+      about: how much test coverage is enough
+      resolve: >
+        Cover the behavior and a regression test for any fixed bug; stop at
+        coverage that only pins implementation detail. More tests is not
+        automatically better.
+    - between: [checking-restraint, reviewing-api-contract-safety]
+      about: new validation or surface "to be safe" vs. leaving it out
+      resolve: >
+        "When in doubt, leave it out" — minimal new public surface wins; add
+        validation only on surface that actually ships now.
+    - between: [reviewing-performance-and-efficiency, reviewing-naming-and-readability]
+      about: a fast but cryptic form vs. a clear but slower one
+      resolve: >
+        Keep the readable form unless a profile proves the clear version is the
+        bottleneck; if the fast form must stay, require a comment explaining why.

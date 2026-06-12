@@ -108,3 +108,32 @@ text carrying its own license terms. License decision (user): **dual MIT (code)
 LICENSE-CC-BY-4.0, SPDX headers on Python sources, `license: MIT AND CC-BY-4.0`
 in plugin.json, and a README License section. Visibility flip itself happens in
 GitHub settings.
+
+### 2026-06-12 — composition back half: the synthesizer (D12)
+
+Picked up the one substantive open thread after a clean "what's next" sweep
+(all phases done, CI green, no open PRs/issues): the residual half of Q7. D10's
+router solved lens *selection*; nothing yet merged the selected lenses' output.
+Built `synthesizing-review-findings` (24th skill) as the router's sibling — same
+manifest-canonical, `built_from: []`, no-docs-drift generation pattern.
+
+- New manifest `synthesizer:` section: `severity_order` (Blocker > Major > Minor
+  > Nit) + a `tensions` table of known opposing lens pairs, each with a default
+  resolution (restraint ↔ module-design / performance / test-quality /
+  api-contract; performance ↔ readability). `build_synthesizer_md` assembles the
+  **collect → dedupe → reconcile → rank → verdict** procedure, the tension table,
+  a finding contract, and an output format from it.
+- **Dedup** reuses the existing G1 primary-owner attribution (no new mechanism) —
+  a finding raised by two lenses is reported once, under the owner each lens's
+  *Shared categories* note already names.
+- **Fan-out resolved as advisory-by-default, mechanizable** (D12): the suite stays
+  plain markdown with no Claude/harness assumption (D7), so orchestration isn't
+  baked in — but the fixed finding contract (location/severity/lens/finding/fix)
+  lets a capable harness run the lenses in parallel and apply the *same*
+  deterministic merge. Advisory or automated, identical output.
+- Validator additions: tensions must name two distinct known lenses;
+  `severity_order` non-trivial and unique; synthesizer name can't collide with a
+  lens. Router now points forward to the synthesizer when one is defined.
+- Ships 4 eval scenarios (dedup, conflict reconciliation, all-clear no-inflation,
+  severity-ranking with a Blocker float) + examples. Suite is now **24 skills**;
+  CI gate, README, and Q7 (now RESOLVED) updated. 60 tests pass, no drift.

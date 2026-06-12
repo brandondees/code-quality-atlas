@@ -138,3 +138,54 @@ def test_valid_router_accepted_and_real_manifest_loads():
     real = load_manifest("skills/manifest.yaml")
     assert real.router is not None
     assert all(s.picker for s in real.skills)
+
+
+from tooling.manifest import Synthesizer, Tension
+
+def _two_lens_skills():
+    return [_skill(picker="p"),
+            _skill(name="checking-restraint", picker="brake", design=True,
+                   built_from=[Source(4, "tests/fixtures/research_sample.md#4")])]
+
+def _synth(**kw):
+    base = dict(name="synthesizing-review-findings", description="d",
+                severity_order=["Blocker", "Major", "Minor", "Nit"],
+                tensions=[Tension(between=["hunting-silent-failures", "checking-restraint"],
+                                  about="a", resolve="r")])
+    base.update(kw)
+    return Synthesizer(**base)
+
+def test_synthesizer_tension_must_name_known_skills():
+    m = Manifest("v0.2", _two_lens_skills(),
+                 synthesizer=_synth(tensions=[Tension(
+                     between=["hunting-silent-failures", "no-such-lens"],
+                     about="a", resolve="r")]))
+    with pytest.raises(ValidationError, match="unknown skill"):
+        validate(m)
+
+def test_synthesizer_tension_needs_two_distinct_lenses():
+    m = Manifest("v0.2", _two_lens_skills(),
+                 synthesizer=_synth(tensions=[Tension(
+                     between=["checking-restraint", "checking-restraint"],
+                     about="a", resolve="r")]))
+    with pytest.raises(ValidationError, match="two distinct lenses"):
+        validate(m)
+
+def test_synthesizer_rejects_thin_severity_order():
+    m = Manifest("v0.2", _two_lens_skills(),
+                 synthesizer=_synth(severity_order=["Blocker"]))
+    with pytest.raises(ValidationError, match="severity_order"):
+        validate(m)
+
+def test_synthesizer_name_must_not_collide_with_a_lens():
+    m = Manifest("v0.2", _two_lens_skills(),
+                 synthesizer=_synth(name="checking-restraint"))
+    with pytest.raises(ValidationError, match="invalid or duplicate name"):
+        validate(m)
+
+def test_valid_synthesizer_accepted_and_real_manifest_loads():
+    validate(Manifest("v0.2", _two_lens_skills(), synthesizer=_synth()))  # no raise
+    real = load_manifest("skills/manifest.yaml")
+    assert real.synthesizer is not None
+    assert real.synthesizer.severity_order[0] == "Blocker"
+    assert all(t.between[0] != t.between[1] for t in real.synthesizer.tensions)

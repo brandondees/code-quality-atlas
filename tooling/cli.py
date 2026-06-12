@@ -4,7 +4,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from tooling.manifest import load_manifest, validate
-from tooling.generate import generate_router, generate_skill, primary_owners
+from tooling.generate import (generate_router, generate_skill,
+                              generate_synthesizer, primary_owners)
 from tooling.drift import check_drift
 from tooling.evals import load_evals, validate_evals, EvalError
 
@@ -39,6 +40,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"generated {out}")
         if manifest.router is not None:
             out = generate_router(manifest, skills_root=args.skills_root)
+            print(f"generated {out}")
+        if manifest.synthesizer is not None:
+            out = generate_synthesizer(manifest, skills_root=args.skills_root)
             print(f"generated {out}")
         return 0
 
