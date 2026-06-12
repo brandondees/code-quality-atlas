@@ -3,9 +3,11 @@ name: choosing-review-lenses
 description: 'Picks which code-quality-atlas review lenses to run for a given change:
   maps what is being reviewed (bug fix, feature, refactor, migration, async or concurrent
   code, API change, UI change, error handling, LLM integration, design doc, dependency
-  bump, CI/config change, or a whole-repo audit) to the 2-4 most relevant lenses.
-  Use first when starting a code review or audit with the atlas suite, when unsure
-  which review skills apply, or when asked to review something without a named lens.'
+  bump, CI/config change, or a whole-repo audit) to the most relevant lenses. Use
+  when you are unsure which lenses apply or asked to review something without specifying
+  a lens. Skip this and call individual lenses directly when the relevant ones are
+  already clear from context or explicitly requested — lenses are designed to be
+  selected and run directly without routing through here.'
 provenance:
   taxonomy_version: v0.3
   built_from: []
@@ -15,12 +17,12 @@ provenance:
 
 ## When to use
 
-Picks which code-quality-atlas review lenses to run for a given change: maps what is being reviewed (bug fix, feature, refactor, migration, async or concurrent code, API change, UI change, error handling, LLM integration, design doc, dependency bump, CI/config change, or a whole-repo audit) to the 2-4 most relevant lenses. Use first when starting a code review or audit with the atlas suite, when unsure which review skills apply, or when asked to review something without a named lens.
+Picks which code-quality-atlas review lenses to run for a given change. Use this skill when you are unsure which lenses apply or when asked to review something without a specific lens named. Skip it and call lenses directly when the relevant ones are already clear — from an explicit request ("check for security issues", "review the error handling"), from obvious context (an async change → `reviewing-concurrency-and-async`), or when comprehensive multi-lens coverage is the goal. Every lens is designed to be triggered and run directly without routing through here first.
 
 ## How to pick
 
-- Run **2-4 content lenses** per change; more dilutes attention and duplicates findings. `reviewing-pr-and-process-hygiene` is **additive** — on any PR it rides on top of those lenses and does not spend one of the 2-4 slots.
-- Match the change against the routes below; when a change is several things at once, combine rows but keep the cap.
+- This skill recommends **2-4 content lenses** for a focused single-pass review. If you already know which lenses are relevant, or if comprehensive coverage is the goal, call them directly — the 2-4 figure is this router's own recommendation, not a hard cap on direct lens selection. `reviewing-pr-and-process-hygiene` is **additive** — on any PR it rides on top of the content lenses and does not spend one of the 2-4 slots.
+- Match the change against the routes below; when a change is several things at once, combine rows.
 - **Keep the brake pedal.** When a change ships abstraction, generality, or infrastructure ahead of the consumer that needs it (a generic with one impl, a crate with no caller yet), retain `checking-restraint` in the set — under the cap it is the lens most often dropped, and the one that catches building ahead of need.
 - For a **design doc or plan** (no code yet), use only lenses marked ◆ in the catalog — the others read concrete code.
 - Lenses that share a research category name their primary owner in their SKILL.md; report each shared finding once, under the owner.
