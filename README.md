@@ -109,6 +109,24 @@ a security re-scan and change report) to refresh to the latest merged commit.
 To pin a project's skill set for teammates, `skulto save` writes the current
 installs to a `skulto.json` manifest that `skulto sync` reproduces.
 
+## Automating PR review (Claude Code on the web)
+
+Beyond running lenses by hand, the plugin ships two slash commands that turn the
+suite into a hands-off pull-request loop on cloud sandbox sessions: a GitHub-event
+**reviewer** that posts inline findings on every push and re-reviews until it
+converges, and a cheap scheduled **poller** that rebases stale PRs and pokes
+conflicts (the gap GitHub webhooks don't cover).
+
+- [`commands/atlas-review-pr.md`](commands/atlas-review-pr.md) — `/atlas-review-pr`
+- [`commands/atlas-rebase-stale.md`](commands/atlas-rebase-stale.md) — `/atlas-rebase-stale`
+- [`templates/REVIEW.md`](templates/REVIEW.md) — convergence policy you copy into the reviewed repo
+- [`docs/runbooks/pr-review-automation.md`](docs/runbooks/pr-review-automation.md) — **how to wire the two routines** in the web app
+
+The commands install with the plugin; the routines/triggers are account-side config
+you create once (the runbook walks through it). Convergence — escalating severity
+floor, approve-on-clean, round cap — is what stops the reviewer and a build/auto-fix
+session from ping-ponging forever.
+
 ## Approach
 
 Built fresh from **first principles**. Existing skills, plugins, linters, and review tools (Anthropic's, the community's, the author's own) are treated as **prior art to learn from and borrow from** — not as constraints. The catalog lives in [`docs/prior-art.md`](docs/prior-art.md).
@@ -127,6 +145,8 @@ Built fresh from **first principles**. Existing skills, plugins, linters, and re
 | [`docs/plans/`](docs/plans/) | Implementation plans (e.g. the wave-1 pipeline build) |
 | [`docs/session-log.md`](docs/session-log.md) | Chronological record of how this evolved |
 | [`skills/`](skills/) | The 22 generated + refined lenses **+ the `choosing-review-lenses` router** (see `manifest.yaml`) |
+| [`commands/`](commands/) | Slash commands for hands-off PR review automation (`/atlas-review-pr`, `/atlas-rebase-stale`) |
+| [`templates/`](templates/) | `REVIEW.md` convergence policy to copy into a reviewed repo |
 | [`tooling/`](tooling/) | The pipeline: generator, drift-checker, eval validator, cross-model runner |
 
 ## License
