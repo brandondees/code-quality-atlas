@@ -22,7 +22,9 @@ Several factors legitimately appear under multiple categories. For the *map* tha
 
 OWASP LLM Top 10 **LLM06 (Excessive Agency)** + Simon Willison's **"lethal trifecta"** (private-data access + untrusted-content exposure + exfiltration/action ability) may be big enough to pull out of #25 into its own category. It cross-cuts #14 (security) and #13 (API/contract design, since it's about what actions a tool surface permits). Decision deferred; flagged as the most likely *next* promotion after the v0.2 three.
 
-**Update (2026-06-12) — external validation landed.** OWASP now treats agentic risk as its own discipline: a dedicated **Top 10 for Agentic Applications** (ASI01–ASI10, released 2025-12-09) separate from the LLM-app list, with the **Agentic AI: Threats and Mitigations** (v1.0, 2025-02) companion; the **MCP spec** ships its own security-best-practices page (confused deputy, token passthrough, tool poisoning). The references + nine agentic heuristics are filed under #25 in [`research/cluster-4-runtime.md`](research/cluster-4-runtime.md) regardless of the promotion call, so no research is blocked on it. Promotion to a new category #32 (cross-cutting #13/#14/#24) is now well-evidenced but stays a user decision — tracked as **Q16** in [`open-questions.md`](open-questions.md).
+**Update (2026-06-12) — external validation landed.** OWASP now treats agentic risk as its own discipline: a dedicated **Top 10 for Agentic Applications** (ASI01–ASI10, released 2025-12-09) separate from the LLM-app list, with the **Agentic AI: Threats and Mitigations** (v1.0, 2025-02) companion; the **MCP spec** ships its own security-best-practices page (confused deputy, token passthrough, tool poisoning). The references + nine agentic heuristics are filed under #25 in [`research/cluster-4-runtime.md`](research/cluster-4-runtime.md) regardless of the promotion call, so no research is blocked on it.
+
+**Resolved (2026-06-12, D14 / Q16):** **promoted to category #32 — Agentic & tool-use safety** (cross-cutting #13/#14/#24/#25), scoped to the action/tool surface with a model-call↔action G1 boundary (lethal-trifecta framing stays in #25). `taxonomy.md` carries #32; the owning lens `reviewing-agentic-safety` is pending the build phase (move the 9 heuristics from cluster-4 #25 → a new #32 research section + manifest + generated skill/evals). The trigger gap (agent-heavy repos that don't read as "LLM integration") was the decider over the cheaper "sharpen #25's trigger" path.
 
 ## G3 — Decomposition tension the suite MUST take a stance on
 
@@ -104,11 +106,11 @@ Surfaced 2026-06-12 (owner question: *do we have anything correlating to Anthrop
 
 **Three distinct agent-surfaces** (this gap clarified that they're separate, which informs the Q16 call): runtime agent **security** (tool least-privilege, lethal trifecta) → Q16/#25; agent-facing **docs drift** (`AGENTS.md` stays true) → #22/#24; agent-artifact **authoring quality** (`SKILL.md` built to the guide) → **this gap, unowned.** Bundling authoring under a Q16 *security* category would blur the trigger.
 
-**Disposition (candidate factor + a hosting question).**
+**Disposition (resolved 2026-06-12).**
 
-| Concern | Where it could land | Lean |
-|---|---|---|
-| "Is this artifact well-formed per its standard?" (the factor) | a #30 meta-artifact factor · a #22/#24 factor · or a promoted Q16 category | **#30 meta-artifact** (keeps Q16 = runtime safety) |
-| *How* to host many artifact lenses without top-level context bloat (the pattern) | new open question | **Q18** (artifact-scoped lens hosting) |
+| Concern | Decision |
+|---|---|
+| "Is this artifact well-formed per its standard?" (the factor) | **→ #30 meta-artifact factor** (D15) — keeps #32 = runtime agent safety, #22/#24 = doc-drift; three distinct agent-surfaces stay separate. |
+| *How* to host many artifact lenses without top-level context bloat (the pattern) | **→ a new `shape: artifact`** (D15, Q18 option b) — one entry-point lens + manifest `artifacts:` table + bundled on-demand rubrics; `SKILL.md`-authoring is the first instance. |
 
-Full research — the artifact-standard catalog (the references beyond the one guide), the context-cost evidence (lost-in-the-middle, context rot, RAG-MCP, the 128-tool ceiling), the presence-based-activation prior art (MegaLinter/ESLint-overrides/Spectral), and three hosting options — is in [`research/artifact-scoped-lenses.md`](research/artifact-scoped-lenses.md). **Status: gap logged + researched; placement and hosting-pattern decisions pending (Q18).**
+Full research — the artifact-standard catalog (the references beyond the one guide), the context-cost evidence (lost-in-the-middle, context rot, RAG-MCP, the 128-tool ceiling), the presence-based-activation prior art (MegaLinter/ESLint-overrides/Spectral), and the three hosting options — is in [`research/artifact-scoped-lenses.md`](research/artifact-scoped-lenses.md). **Status: gap logged + researched; both decisions made (D15, Q18 RESOLVED); build pending.**
