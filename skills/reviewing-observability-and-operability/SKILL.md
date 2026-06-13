@@ -11,7 +11,7 @@ provenance:
   built_from:
   - category: 16
     source: docs/research/cluster-4-runtime.md#16
-    hash: 4b280c5dde5faf35119ff2dfaed34505d683cb292b998047a9343594c14ad854
+    hash: a1b7c3b359329ad08a45a9425bc6d5e84aa0260976e7209d3fe96c94e8cb8397
 ---
 
 # reviewing-observability-and-operability

@@ -3,11 +3,13 @@
 > **Selecting tools for this stack.** The tools named below are field-tested starting points, not a mandate. Pick the one that fits this codebase's language version, build, and CI — and verify it actually runs on your toolchain before relying on it. A listed tool that is broken, abandoned, or noisy on your setup is a gap to close, not a permanent `continue-on-error`: prefer a working, maintained equivalent (often a younger, less well-known one) over a canonical-but-broken default. The capability is the requirement; the specific tool is replaceable.
 
 ## Contents
+
 - From category #15
 
 ## From category #15
 
 ### Tooling rules worth lifting
+
 - **ESLint `eslint-plugin-react`** `react/jsx-no-bind` and **`react-hooks/exhaustive-deps`** — inline closures / wrong deps cause needless re-renders & re-allocation on the render hot path.
 - **ESLint** `no-await-in-loop` — sequential awaits in a loop (serialized I/O round-trips that often should be batched/`Promise.all`).
 - **RuboCop Performance** cop family, e.g. `Performance/Detect`, `Performance/Count`, `Performance/RedundantMerge`, `Performance/StringReplacement`, `Performance/CollectionLiteralInLoop`, `Performance/MapCompact` — idiomatic-but-slow patterns and allocation in loops.

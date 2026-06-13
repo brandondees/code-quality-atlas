@@ -1,11 +1,13 @@
 # References to mine — finding-maintainability-hotspots
 
 ## Contents
+
 - From category #21
 
 ## From category #21
 
 ### Key references
+
 - **John Ousterhout — *A Philosophy of Software Design*** (2018/2021). `(verify)` URL.
   → mine: "change amplification" and "cognitive load" as named symptoms of complexity; the *deep module* (simple interface, substantial implementation) as the antidote — a diff that widens a shallow module's interface is a maintainability smell.
 - **Martin Fowler — "Technical Debt Quadrant"** — martinfowler.com/bliki/TechnicalDebtQuadrant.html `(verify)`.

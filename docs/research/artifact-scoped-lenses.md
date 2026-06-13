@@ -70,7 +70,7 @@ The owner's suspicion is correct: the agent-skills guide is one entry in a matur
 standards landscape. Each row is a candidate artifact-scoped lens; most have a dedicated linter
 whose rule set is the heuristic goldmine (the same "mine the linters" move as phase-1 research).
 
-#### AI / agent artifacts
+### AI / agent artifacts
 
 | Artifact | Canonical standard | Dedicated tool / rules | Atlas status |
 |---|---|---|---|
@@ -80,13 +80,13 @@ whose rule set is the heuristic goldmine (the same "mine the linters" move as ph
 | Model card | [Mitchell et al. 2019, arXiv 1810.03993](https://arxiv.org/abs/1810.03993) (intended use, eval, limitations, ethical considerations) | HF model-card schema | uncovered |
 | Dataset datasheet | Gebru et al., *Datasheets for Datasets* (motivation, composition, collection, recommended uses) | — | uncovered |
 
-#### API / contract artifacts
+### API / contract artifacts
 
 | Artifact | Canonical standard | Dedicated tool / rules | Atlas status |
 |---|---|---|---|
 | OpenAPI / AsyncAPI spec | [Google AIP](https://docs.cloud.google.com/apis/design) · [Zalando RESTful Guidelines](http://opensource.zalando.com/restful-api-guidelines/) · Microsoft REST guidelines | [Spectral](https://github.com/stoplightio/spectral) (rulesets per API type/maturity), Zally, oasdiff, buf | partially via #13 `reviewing-api-contract-safety` (judgment, not spec-lint) |
 
-#### Infrastructure / deployment artifacts
+### Infrastructure / deployment artifacts
 
 | Artifact | Canonical standard | Dedicated tool / rules | Atlas status |
 |---|---|---|---|
@@ -95,7 +95,7 @@ whose rule set is the heuristic goldmine (the same "mine the linters" move as ph
 | K8s manifest / Helm chart | Pod Security Standards | [kube-linter](https://github.com/stackrox/kube-linter) | #31 |
 | GitHub Actions workflow | hardening guides; SHA-pinning | [actionlint](https://github.com/rhysd/actionlint), [zizmor](https://github.com/woodruffw/zizmor) (template injection, mutable-tag) | #19 research has these |
 
-#### Build / config / docs / decision artifacts
+### Build / config / docs / decision artifacts
 
 | Artifact | Canonical standard | Dedicated tool / rules | Atlas status |
 |---|---|---|---|
@@ -194,4 +194,5 @@ can author with the highest confidence because we already enforce it on ourselve
 - **Re-gate cost.** A `shape: artifact` skeleton is new behavior → cross-model eval-gate per the
   runbook before it ships (compounds with the already-pending re-gate noted in open-questions).
 </content>
+
 </invoke>

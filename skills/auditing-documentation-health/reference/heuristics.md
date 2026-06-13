@@ -1,11 +1,13 @@
 # Reviewable heuristics — auditing-documentation-health
 
 ## Contents
+
 - From category #22
 
 ## From category #22
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - **API surface ↔ docs parity:** does every new/changed public function, endpoint, CLI flag, or config key have a docstring/doc updated in the same diff? Stale signature-vs-doc = drift.
 - **Docstring accuracy:** do param names, types, return, and `raises`/`throws` in the docstring match the actual signature *after* this change? (params renamed but docstring not — flag.)
 - **Diátaxis coverage:** for a new feature, is there at least the right *mode* of doc — a how-to for a task, reference for an API? Don't accept a tutorial as a substitute for reference.

@@ -1,6 +1,7 @@
 # References to mine — reviewing-naming-and-readability
 
 ## Contents
+
 - From category #5
 - From category #6
 - From category #7
@@ -8,6 +9,7 @@
 ## From category #5
 
 ### Key references
+
 - **Arlo Belshee — "Good Naming Is a Process, Not a Single Step" / "Naming is a Process" series** — https://arlobelshee.com/good-naming-is-a-process-not-a-single-step/ → mine: names improve in **stages**, not one leap — you don't need the perfect name to make progress. The 7 stages: **Missing → Nonsense → Honest → Honest-and-Complete → Does-the-Right-Thing → Intent → Domain Abstraction** (final stage: ["Intent to Domain Abstraction"](https://arlobelshee.com/naming-is-a-process-part-7-intent-to-domain-abstraction/)). Key insight to lift: *dishonest* names (look meaningful, aren't) are more dangerous than honest-nonsense ones; the reviewer behavior is "identify the stage, nudge it one stage better," not "demand perfection."
 - **Robert C. Martin — *Clean Code*, ch. 2 "Meaningful Names"** → mine: intention-revealing names; avoid disinformation; meaningful distinctions (no `a1`/`a2`, no noise words `Info`/`Data`/`Manager`); pronounceable & searchable; class = noun, method = verb. Mine the *checks*, treat as heuristics not law.
 - **Eric Evans — *Domain-Driven Design* (Ubiquitous Language)** + **Vaughn Vernon — *Implementing DDD*** → mine: names should come from the domain's shared vocabulary; a mismatch between code names and domain-expert language is itself a defect.
@@ -18,6 +20,7 @@
 ## From category #6
 
 ### Key references
+
 - **G. Ann Campbell / SonarSource — "Cognitive Complexity: A new way of measuring understandability" (white paper)** → mine: the metric powering modern linters. Rules: (1) **ignore** structures that read multiple statements as one; (2) **+1** for each break in linear flow (`if`/`else if`/`else`, ternary, `switch`, loops, `catch`, mixed boolean-operator sequences, labelled break/continue); (3) **increment more for nesting** — deeper nesting costs more. A flat `switch` scores low, nested conditionals score high — closer to *felt* difficulty than cyclomatic. **Sonar default "too complex" threshold = 15** (rule S3776).
 - **Thomas J. McCabe — "A Complexity Measure" (1976)** → mine: cyclomatic complexity = linearly-independent paths (≈ decision points + 1); a *lower bound on test cases needed*. Common bands: 1–10 simple … >50 untestable `(verify exact bands)`.
 - **Robert C. Martin — *Clean Code*, ch. 3 "Functions"** → mine: small functions, "do one thing," single level of abstraction (the **altitude** rule), few arguments (0–2), no flag arguments, no side-effect surprises. Mine the *checks*, push back on the dogmatic "4 lines."
@@ -29,6 +32,7 @@
 ## From category #7
 
 ### Key references
+
 - **Robert C. Martin — *Clean Code*, ch. 4 "Comments"** → mine: "comments don't make up for bad code"; *good* comments (intent, warning of consequences, TODO, legal, amplification, public-API docs) vs. *bad* (redundant, misleading, mandated noise, commented-out code, journal/attribution now in VCS). The "explain *why*, not *what*" thesis operationalized.
 - **"Comments should say WHY, not WHAT"** (community canon; *Pragmatic Programmer*, McConnell, Coding Horror) → mine: the *what* is the code's job; comments earn their keep capturing intent, rationale, constraints, road-not-taken.
 - **Andrew Hunt & David Thomas — *The Pragmatic Programmer*** → mine: DRY applies to comments — a comment duplicating code is a second source of truth that *will* drift; prefer self-documenting code, reserve comments for the non-obvious *why*.

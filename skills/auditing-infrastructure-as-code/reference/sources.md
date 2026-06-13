@@ -1,11 +1,13 @@
 # References to mine — auditing-infrastructure-as-code
 
 ## Contents
+
 - From category #31
 
 ## From category #31
 
 ### Key references
+
 - **Checkov (Palo Alto Networks / Prisma Cloud, formerly Bridgecrew)** — https://github.com/bridgecrewio/checkov . The most widely-adopted open-source IaC scanner; 1,000+ built-in policies across Terraform/CloudFormation/K8s/Helm/ARM, **graph-based cross-resource checks** (e.g. a security group wired to a public subnet), and custom policies in Python or YAML. Standalone CLI is free.
   → mine: the default first scanner for Terraform/CloudFormation/K8s; its graph checks catch relationships a single-resource linter misses. Soft-failed or `--skip-check`'d en masse, it is theater (cross #30 suppression hygiene).
 - **Trivy (Aqua Security) — IaC/misconfiguration scanning; tfsec is folded in** — https://github.com/aquasecurity/trivy . Aqua merged **tfsec into Trivy** (announced 2023, completed 2024); tfsec still runs but gets **no new checks**, and its `AVD-AWS-xxxx` IDs map unchanged into Trivy. For new work, use Trivy `config`/`misconfig`, not tfsec.

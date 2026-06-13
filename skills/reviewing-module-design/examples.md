@@ -5,6 +5,7 @@ Report each distinct issue as its own numbered finding. When the input is correc
 ## Bad → finding
 
 **Input (diff):**
+
 ```python
 class Order:
     def __init__(self):
@@ -13,7 +14,9 @@ class Order:
         self.cancelled_reason = None   # set when cancelled
         self.tracking_number = ""      # "" until shipped
 ```
+
 **Expected finding:**
+
 1. **Illegal states are representable:** nothing stops `status == "cancelled"` with
    a `shipped_at`, or `status == "shipped"` with no tracking number. Model the
    lifecycle as a tagged union / state machine (e.g.
@@ -26,6 +29,7 @@ class Order:
 ## Bad → finding
 
 **Input (diff):**
+
 ```js
 function applyDiscount(customer) {
   const tier = customer.account.subscription.plan.tier;   // reach-through
@@ -34,7 +38,9 @@ function applyDiscount(customer) {
   }
 }
 ```
+
 **Expected finding:**
+
 1. **Law-of-Demeter violation:** the four-hop reach-through
    (`customer.account.subscription.plan.tier`) couples this function to the
    internal structure of three other objects — any reshuffle breaks it. Ask, don't
@@ -45,6 +51,7 @@ function applyDiscount(customer) {
 ## Good → no finding
 
 **Input (diff):**
+
 ```python
 @dataclass(frozen=True)
 class EmailAddress:
@@ -56,6 +63,7 @@ class EmailAddress:
             raise InvalidEmail(raw)
         return cls(raw.strip().lower())
 ```
+
 **Expected finding:** None — untrusted input is parsed once into a precise immutable
 type at the boundary (parse-don't-validate); downstream code can't hold an invalid
 `EmailAddress`. Report "No findings". Do NOT flag the small surface as "needs more
@@ -65,12 +73,14 @@ do NOT call a deliberately narrow value object "anemic."
 ## Good → no finding
 
 **Input (diff):**
+
 ```ts
 type PaymentState =
   | { kind: "pending" }
   | { kind: "settled"; settledAt: Date }
   | { kind: "failed"; reason: string };
 ```
+
 **Expected finding:** None — a tagged union where each state carries exactly its own
 data; illegal combinations are unrepresentable and `switch` over `kind` is
 compiler-checked for exhaustiveness. Report "No findings"; do not invent issues.

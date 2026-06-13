@@ -1,11 +1,13 @@
 # References to mine — reviewing-accessibility-and-i18n
 
 ## Contents
+
 - From category #23
 
 ## From category #23
 
 ### Key references
+
 - **W3C — WCAG 2.2** — https://www.w3.org/TR/WCAG22/ — POUR: Perceivable, Operable, Understandable, Robust; conformance levels A / AA / AAA (AA is the common legal bar).
   → mine: AA is the common legal/contractual bar. High-value SCs to check: **1.1.1 Non-text Content** (alt text), **1.4.3 Contrast (Minimum)** (4.5:1 text / 3:1 large), **2.1.1 Keyboard** (all functionality via keyboard), **2.4.7 Focus Visible**, **2.4.3 Focus Order**, **4.1.2 Name, Role, Value**, **3.3.2 Labels or Instructions**, **1.3.1 Info and Relationships**, **2.5.3 Label in Name**, and 2.2-added **2.4.11 Focus Not Obscured (Minimum)** (AA), **2.5.8 Target Size (Minimum)** 24×24 CSS px (AA). *(SC numbers verified against w3.org/TR/WCAG22.)*
 - **WAI-ARIA Authoring Practices Guide (APG)** `(verify)`.

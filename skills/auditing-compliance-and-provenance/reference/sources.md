@@ -1,11 +1,13 @@
 # References to mine — auditing-compliance-and-provenance
 
 ## Contents
+
 - From category #27
 
 ## From category #27
 
 ### Key references
+
 - **SPDX — license identifiers + SBOM** — https://spdx.org/licenses/ (standard short IDs + permanent URLs).
   → mine: standard license IDs (`MIT`, `Apache-2.0`, `GPL-3.0-only`, `LGPL-3.0`, `AGPL-3.0-only`, `BSD-3-Clause`, `MPL-2.0`) and `SPDX-License-Identifier:` headers; SBOM (SPDX / CycloneDX) as the provenance artifact a review can check against.
 - **FSF "copyleft" guidance + Blue Oak / choosealicense.com**

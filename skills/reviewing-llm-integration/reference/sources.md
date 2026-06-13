@@ -1,12 +1,14 @@
 # References to mine — reviewing-llm-integration
 
 ## Contents
+
 - From category #25
 - From category #27
 
 ## From category #25
 
 ### Key references
+
 - **OWASP — Top 10 for LLM Applications (2025)** — https://genai.owasp.org/resource/owasp-top-10-for-llm-applications-2025/ → mine: the security spine for LLM features. **Verified 2025 list:** LLM01 Prompt Injection, LLM02 Sensitive Information Disclosure, LLM03 Supply Chain, LLM04 Data and Model Poisoning, LLM05 Improper Output Handling, LLM06 Excessive Agency, LLM07 System Prompt Leakage, LLM08 Vector and Embedding Weaknesses, LLM09 Misinformation, LLM10 Unbounded Consumption. (LLM06 Excessive Agency was notably expanded into excessive *functionality*, *permissions*, and *autonomy*.)
 - **NIST — AI Risk Management Framework (AI RMF 1.0, SP 100-1) + Generative AI Profile (NIST-AI-600-1)** — https://www.nist.gov/itl/ai-risk-management-framework → mine: the Govern / Map / Measure / Manage functions and the GenAI-specific risk profile — a governance/eval vocabulary for "did we test the nondeterministic behavior and bound the risk."
 - **Anthropic / OpenAI — prompt-engineering & safety best-practices docs** — e.g. https://docs.anthropic.com/ → mine: delimit and label untrusted input, separate system vs user instructions, structured/tool-use outputs over free-text parsing, and refusal/guardrail design. (Provider-specific model IDs and pricing should be checked against current docs, not memory.)
@@ -21,6 +23,7 @@
 ## From category #27
 
 ### Key references
+
 - **SPDX — license identifiers + SBOM** — https://spdx.org/licenses/ (standard short IDs + permanent URLs).
   → mine: standard license IDs (`MIT`, `Apache-2.0`, `GPL-3.0-only`, `LGPL-3.0`, `AGPL-3.0-only`, `BSD-3-Clause`, `MPL-2.0`) and `SPDX-License-Identifier:` headers; SBOM (SPDX / CycloneDX) as the provenance artifact a review can check against.
 - **FSF "copyleft" guidance + Blue Oak / choosealicense.com**

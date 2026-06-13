@@ -1,11 +1,13 @@
 # References to mine — checking-idioms-and-consistency
 
 ## Contents
+
 - From category #8
 
 ## From category #8
 
 ### Key references
+
 - **Language & org style guides** — **PEP 8**, **Google Style Guides** (google.github.io/styleguide), **Airbnb JavaScript**, **Effective Go / Go Code Review Comments**, **Rust API Guidelines**, **Ruby Style Guide** → mine: each is a curated, battle-tested list of "in this ecosystem, do it *this* way." We don't adopt one; we mine the *recurring* checks.
 - **Effective Go + "Go Code Review Comments"** → mine: an *idiom* guide written as review comments (error shape, naming, receiver names, interface size, `gofmt` non-negotiable) — a template for the "idiomatic use" half.
 - **Andrew Hunt & David Thomas — *The Pragmatic Programmer* (Orthogonality, DRY, least surprise)** → mine: consistency is least-surprise; learning one part should predict the rest.

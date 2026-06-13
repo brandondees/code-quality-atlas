@@ -16,7 +16,7 @@ lenses **and** across repos — with the same deterministic dedupe-and-rank rule
 
 ## The shape
 
-```
+```text
 orchestrator session
 ├── agent: repo A ──┐
 ├── agent: repo B ──┤  each runs the relevant lenses on its repo,

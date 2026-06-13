@@ -8,6 +8,7 @@ being diverged from.
 ## Bad → finding
 
 **Input (diff, with context):**
+
 ```python
 # Project convention everywhere else: raise ApiError(code, message);
 # middleware builds the response. Style: ruff + "is None" enforced.
@@ -20,7 +21,9 @@ def get_user(req):
         names.append(key)
     return names
 ```
+
 **Expected finding:**
+
 1. **Second way to do the same thing:** the ad-hoc `{"error": ..., "status": ...}`
    dict diverges from the project's `raise ApiError(code, message)` convention —
    callers and middleware now have two error shapes to handle.
@@ -32,6 +35,7 @@ def get_user(req):
 ## Bad → finding
 
 **Input (diff, with context):**
+
 ```js
 // Project has src/utils/formatDate.ts used in 40+ call sites; camelCase enforced.
 export function date_to_string(d) {
@@ -39,7 +43,9 @@ export function date_to_string(d) {
   return `${yyyy}-${d.getMonth() + 1}-${d.getDate()}`;
 }
 ```
+
 **Expected finding:**
+
 1. **Parallel utility:** `date_to_string` duplicates the existing `formatDate`
    helper — a second competing way to format dates. Use or extend the existing one;
    if it can't serve this case, state why in the PR.
@@ -49,6 +55,7 @@ export function date_to_string(d) {
 ## Good → no finding
 
 **Input (diff, with context):**
+
 ```python
 # Project convention: raise ApiError; pathlib over os.path; ruff clean.
 def read_manifest(path: Path) -> dict:
@@ -56,6 +63,7 @@ def read_manifest(path: Path) -> dict:
         raise ApiError("manifest_missing", f"no manifest at {path}")
     return json.loads(path.read_text())
 ```
+
 **Expected finding:** None — follows the project's error convention, idiomatic
 pathlib, formatter-clean. Report "No findings". Do NOT impose personal style
 preferences over the project's established choices, and apply the counterweight:

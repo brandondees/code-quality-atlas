@@ -1,11 +1,13 @@
 # References to mine — reviewing-performance-and-efficiency
 
 ## Contents
+
 - From category #15
 
 ## From category #15
 
 ### Key references
+
 - **Brendan Gregg — Systems Performance (and the USE method)** — http://www.brendangregg.com/usemethod.html → mine: measure before optimizing; for each resource check Utilization, Saturation, Errors. Anchors the "profile, don't guess" discipline reviews should enforce.
 - **Donald Knuth — "Structured Programming with go to Statements" (1974)** → mine: the actual provenance of "premature optimization is the root of all evil (97% of the time)" — and its often-dropped corollary: *do* optimize the critical 3%. Use to keep the counterweight balanced, not absolutist.
 - **Martin Fowler — "Yet Another Optimization Article" / refactoring + performance writing** → mine: optimize against a measured performance profile, not intuition; keep code clean first because clean code is easier to make fast.

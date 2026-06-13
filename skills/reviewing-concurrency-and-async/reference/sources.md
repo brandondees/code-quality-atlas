@@ -1,11 +1,13 @@
 # References to mine — reviewing-concurrency-and-async
 
 ## Contents
+
 - From category #3
 
 ## From category #3
 
 ### Key references
+
 - **Brian Goetz et al. — *Java Concurrency in Practice*** → mine: happens-before, atomicity vs. visibility, safe publication — the vocabulary for reasoning about shared mutable state.
 - **Martin Kleppmann — *Designing Data-Intensive Applications*** → mine: replication/consistency models, the perils of distributed time, and "exactly-once" reframed as idempotency.
 - **Leslie Lamport — "Time, Clocks, and the Ordering of Events in a Distributed System" (CACM, 1978)** → mine: the *happens-before* partial order; you cannot rely on wall-clock ordering across nodes.

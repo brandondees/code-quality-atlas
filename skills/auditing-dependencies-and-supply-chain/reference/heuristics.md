@@ -1,12 +1,14 @@
 # Reviewable heuristics — auditing-dependencies-and-supply-chain
 
 ## Contents
+
 - From category #18
 - From category #27
 
 ## From category #18
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is the new dependency **necessary**, or could stdlib/a few lines do it (avoid trivial deps and transitive bloat)?
 - Is it **healthy**: recently maintained, broadly used, reasonable Scorecard, not single-maintainer abandonware?
 - Any **known CVEs** in it or its transitive tree (run the scanner)? Is the version **pinned via lockfile** and honored in CI (`npm ci`)?
@@ -22,6 +24,7 @@
 ## From category #27
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - **New dependency license check:** does an added dependency (and its transitive tree) carry a license compatible with the project's distribution model? Block/strongly-flag GPL/AGPL pulled into a permissive or proprietary product.
 - **Copyleft contamination / linkage:** does the change *link* or *combine* with copyleft code in a way that triggers obligations (esp. AGPL over a network service)? Static vs. dynamic linking and "mere aggregation" matter — flag for legal if unsure.
 - **License/attribution preservation:** are upstream license texts, copyright notices, and NOTICE files retained when vendoring/copying code? Removed attribution = violation.

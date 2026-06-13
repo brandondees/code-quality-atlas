@@ -9,6 +9,7 @@ Chronological record of how the research evolved. Newest at the bottom.
 **Goal:** brainstorm what factors into code quality, as comprehensively as possible, toward a future skill suite for code review & maintenance.
 
 **What happened:**
+
 - Reframed mid-session: this is a **new, standalone, first-principles** suite. Existing skills are prior art, not a starting point. *(→ D1)*
 - Chose **maximal scope** for the map. *(→ D2)*
 - Chose to do it **phased**: comprehensive map first, then skill-suite architecture; with a research/reference-gathering loop on the map before skill design. *(→ D3)*
@@ -103,8 +104,8 @@ scenarios + examples. Suite is now **23 skills**; CI gate updated.
 
 Private-repo install friction prompted flipping the repo public. Pre-publication
 sweep: no secrets/PII (example credentials are labeled fakes), no third-party
-text carrying its own license terms. License decision (user): **dual MIT (code)
-+ CC BY 4.0 (content)** — see D11. Added LICENSE / LICENSE-MIT /
+text carrying its own license terms. License decision (user): **dual MIT (code) +
+CC BY 4.0 (content)** — see D11. Added LICENSE / LICENSE-MIT /
 LICENSE-CC-BY-4.0, SPDX headers on Python sources, `license: MIT AND CC-BY-4.0`
 in plugin.json, and a README License section. Visibility flip itself happens in
 GitHub settings.
@@ -173,8 +174,8 @@ configs. Opened Q13 and wrote the design: [`team-preferences-overlay.md`](team-p
 Two user decisions shaped it. **Tiered precedence** — taste/threshold/idiom
 findings are preference-tier (team may tune or silently suppress); security /
 correctness / data-safety / concurrency are floor-tier (never silently dropped,
-only `acknowledge`d with a rationale that still surfaces). **Bootstrap = template
-+ inference, but inference is proposal-only** — the inference skill emits a
+only `acknowledge`d with a rationale that still surfaces). **Bootstrap = template +
+inference, but inference is proposal-only** — the inference skill emits a
 ratification interview (evidence + "deliberate decision or accident?") and never
 writes the overlay itself, never runs by accident; this is the guardrail against
 a haphazard/vibe-coded repo laundering unconsidered approve-clicks into ratified
@@ -197,8 +198,8 @@ the 2-4 cap leaves `reviewing-naming-and-readability` in just 3 of ~20 routes;
 category's factors; (3) **severity trimming** — the synthesizer ranks the
 readability class to the bottom and trims it. Dropped factors: #12 scalability &
 feature-flag *architecture*, #15 FinOps, #16/#27 telemetry privacy. Thin factors:
-#26 portability, #16 SLO, #6 symmetry/altitude, #21 change-amplification, #24
-agent-native parity, #9 caller ergonomics, #4 numeric overflow. Noted the irony:
+portability (#26), SLO (#16), symmetry/altitude (#6), change-amplification (#21),
+agent-native parity (#24), caller ergonomics (#9), numeric overflow (#4). Noted the irony:
 several thin factors are exactly G5's "build-here-first, LLM-only" list.
 
 The router half opened as **Q14**. User reframing (important): the router was meant
@@ -223,7 +224,7 @@ exposed a gap one level deeper than G9, captured as [`map-gaps.md`](map-gaps.md)
   does a version of it.
 - **Gate/enforcement health** (disabled / soft-failed gates) is **already covered** —
   in the corpus (`cluster-5` §19) and shipped (`config-and-build-hygiene/SKILL.md:39`
-  + eval). So "re-enable / provision the missing scanner" was a false alarm.
+  - eval). So "re-enable / provision the missing scanner" was a false alarm.
 - **In-code suppression rot** (`# noqa` / `eslint-disable` / `# type: ignore`
   accumulation, lint-baseline growth) is a **genuine research-corpus hole** — absent
   from `docs/research/` entirely.
@@ -299,6 +300,7 @@ add-factor-affected skills (#16/#17/#19/#20/#22/#25/#27) whose research sections
 Owner chose **decision-time (#29) first**. Shipped `reviewing-decision-lifecycle`
 end-to-end — the suite's first **decision-shaped** lens, validating the new shape
 through the whole pipeline:
+
 - **Pipeline:** `manifest.py` validator accepts `shape: decision`; `generate.py`
   emits a decision scope-line and a "Decision-shaped" router-catalog section.
 - **Research:** `cluster-6-evolution.md` gains `## #29 Decision lifecycle`
@@ -311,9 +313,9 @@ through the whole pipeline:
   bumped v0.2 → v0.3 (provenance across all skills).
 
 Generate clean, no drift, evals valid, 61 tests pass. **Remaining v0.3 build:**
-#28 operational & resilience design, #30 enforcement apparatus & meta-artifacts,
-#31 infrastructure-as-code (each: research section + skill + evals), and the ~10
-add-factor regenerations (#16/#17/#19/#20/#22/#25/#27). Optional polish: a
+operational & resilience design (#28), enforcement apparatus & meta-artifacts
+(#30), infrastructure-as-code (#31) — each: research section + skill + evals — and
+the ~10 add-factor regenerations (#16/#17/#19/#20/#22/#25/#27). Optional polish: a
 shape-aware "Reviewer discipline" wording (says "code" for decision/repo lenses)
 and a decision-specific synthesizer verdict vocabulary (adopt / revisit / reject).
 
@@ -494,6 +496,7 @@ produced tidier output than qwen on `reviewing-decision-lifecycle` (no
 repetition).
 
 **Two observations, both pre-documented 7B ceilings — not regressions:**
+
 - **Top-findings-only recall on dense audit scans.** `auditing-config-and-build-hygiene`
   scenario 1 caught the baked-in secret and the unvalidated-config fallback but
   dropped `continue-on-error` and `node:latest`; scenario 2 caught the dead flag
@@ -528,6 +531,7 @@ isomorphic to but different from the eval inputs (jdk path, `wget|sh`, different
 flag names) to teach the pattern without teaching the answer.
 
 Re-run result:
+
 - **qwen2.5:7b** — S1 now catches the soft-failed gate (was missed); S2 now
   catches the machine-local dependency (was missed). S3 still clean (the richer
   template did not induce over-flagging).
@@ -627,6 +631,7 @@ Router: added a resilience/scalability/DR-design route and an IaC-change route;
 the whole-repo audit list grew seven → eight (IaC only where manifests exist).
 
 **Cross-model gate (qwen2.5:7b + llama3.1:8b, temp 0):**
+
 - #28 — bad-diff and bad-design scenarios fully enumerated on both; clean scenario
   clean. **One tuning iteration:** llama initially over-flagged the clean
   (stateless) scenario by demanding RTO/RPO where there is no durable state. Fixed
@@ -650,3 +655,35 @@ runbook.
 With D13's build done, the remaining build backlog (from the decision sweep
 above) is: **#32 agentic-safety lens** (D14) · the **`shape: artifact` lens** +
 `SKILL.md` rubric (D15) · then the deferred **Q13 team-preferences overlay**.
+
+## 2026-06-13 — markdownlint: conform the suite + enforce it (hook + CI)
+
+Settled the recurring CodeRabbit markdown nits (MD022/MD031) for good by making
+the docs conform and adding an enforced gate, rather than per-PR hand-fixes.
+
+**Policy.** Added `.markdownlint-cli2.jsonc`. Enforced the genuine-error rules
+(blank lines around headings/fences/lists — MD022/MD031/MD032 — plus MD040 fence
+languages, MD018, MD004, MD001, MD038). Disabled the rules the docs intentionally
+break: MD013 (line length — prose/tables not wrapped), MD024 (repeated section
+headings are deliberate structure), MD034 (research cites bare URLs inline), MD033
+(`<details>` blocks in commands/templates), MD036 (bold phase labels in README),
+MD041 (command files open with prose), MD060 (compact table pipes). **This
+reverses the earlier "MD022 is house style, don't flag it" stance** — the team's
+call (this session) is to conform the blank-line rules.
+
+**Scope.** ~900 enforced violations across 129 files. `markdownlint-cli2 --fix`
+auto-handled the blank-line bulk; the generator (`tooling/generate.py`) was taught
+to emit lint-clean markdown (blank line after `## Contents`; the synthesizer's
+output-format fence now declares `text`) so regenerated skills stay clean; the
+remaining ~18 were hand-fixed (16 bare fences → `text`; one h2→h4 skip).
+
+**Autofix caught two latent rendering bugs** worth noting: lines that soft-wrapped
+onto a leading `#N` category reference were being parsed as spurious H1 headings
+(autofix turned `#6` into `# 6`), and an `X + Y` plus-sign that wrapped to line
+start had been read as a `+` bullet. Both are now reworded so no prose line opens
+with `#` or a stray bullet.
+
+**Enforcement.** A `markdownlint` step in `.github/workflows/ci.yml` (action
+SHA-pinned, v23.2.0) and a `.pre-commit-config.yaml` hook (markdownlint-cli2
+v0.22.1) — both read the same config, so commit-time and CI agree. Lint clean (0),
+no drift, 85 tests pass. Generator output is idempotent.

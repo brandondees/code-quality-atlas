@@ -5,6 +5,7 @@
 ## Template notes
 
 Each taxonomy category gets three sections:
+
 - **Key references** — `author/org — title` + URL only when verified; each with a `→ mine:` note (the specific idea/heuristic we'd take).
 - **Tooling rules worth lifting** — real rule identifiers from real tools, grouped by tool, each with its one-line meaning. These are pre-validated, real-world heuristics.
 - **Reviewable heuristics (skill-checklist seeds)** — crisp, checkable criteria an LLM reviewer can apply to a diff. These become skill checklists. Where mature linters already cover a check, the skill's job is to *triage tool output*; the unique value is the semantic checks tools can't do (does this match intent?).
@@ -16,6 +17,7 @@ Each taxonomy category gets three sections:
 ## #1 Functional correctness & logic
 
 ### Key references
+
 - **Moseley & Marks — "Out of the Tar Pit" (2006)** — https://curtclifton.net/papers/MoseleyMarks06a.pdf → mine: *state* and *control* are the prime sources of accidental complexity; minimizing mutable state is what makes correctness tractable. (Cross-links #4, #11.)
 - **Steve McConnell — *Code Complete* (2nd ed.), "Defensive Programming"** → mine: assertions, barricades, and explicit boundary handling; validate at the barricade, assert internally.
 - **Glenford Myers — *The Art of Software Testing* (boundary-value analysis)** `(verify)` → mine: bugs cluster at boundaries; review the 0/1/n−1/n/empty/max transitions explicitly.
@@ -23,12 +25,14 @@ Each taxonomy category gets three sections:
 - **Tony Hoare — "Null References: The Billion Dollar Mistake"** `(verify URL)` → mine: null is a pervasive correctness hazard; prefer designs where absence is encoded in the type (cross-links #10).
 
 ### Tooling rules worth lifting
+
 - **ESLint (all in `recommended`):** `no-unreachable` (code after return/throw/break), `no-unreachable-loop` (body runs ≤1×), `no-fallthrough` (switch fallthrough), `no-constant-condition` & `no-constant-binary-expression` (always-true/false → dead branch or bug), `no-dupe-keys` / `no-dupe-args` (silently dropped), `no-self-assign` / `no-self-compare`, `no-unmodified-loop-condition` (likely infinite loop), `array-callback-return` (map/filter/reduce callback missing return), `default-case-last`, `no-cond-assign` (`=` where `==` meant).
 - **typescript-eslint (type-checked):** `no-unnecessary-condition` (type is always truthy/falsy → dead branch), `switch-exhaustiveness-check` (non-exhaustive union switch), `no-base-to-string` (stringifies `[object Object]`).
 - **RuboCop Lint:** `Lint/UnreachableCode`, `Lint/UnreachableLoop`, `Lint/DuplicateMethods`, `Lint/IdentityComparison` (`equal?` when `==` meant), `Lint/UselessAssignment`.
 - **Dead-code detectors:** Vulture (Python), ts-prune / Knip (TS), `golang.org/x/tools/cmd/deadcode`, staticcheck `U1000` (unused), RuboCop `Lint/UselessAssignment`.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Does every branch and early return preserve the function's stated invariant/postcondition?
 - Are boundary values (0, 1, n−1, n, empty, max, negative) explicitly handled — and tested?
 - Any off-by-one in ranges, slices, loop bounds, inclusive/exclusive ends?
@@ -46,12 +50,14 @@ Each taxonomy category gets three sections:
 ## #2 Error handling & resilience
 
 ### Key references
+
 - **Michael Nygard — *Release It!* (2nd ed.), Stability Patterns & Antipatterns** — https://pragprog.com/titles/mnee2/release-it-second-edition/ → mine: the canonical catalog — Timeout, Circuit Breaker, Bulkhead, Steady State; integration points are where systems crack, so every remote call needs a timeout + a failure plan.
 - **Joe Duffy — "The Error Model" (2016)** `(verify URL)` → mine: separate *bugs* (programmer errors → fail-fast/abandon) from *recoverable conditions* (→ typed, handled errors); design which is which rather than catching everything.
 - **The Go Blog — "Error handling and Go"** `(verify URL)` → mine: errors are values; wrap with context; handle at the layer that can act.
 - **Alexis King — "Parse, Don't Validate"** `(verify URL)` (cross #10) → mine: validate once at the boundary and encode success in the type so downstream code can't re-fail.
 
 ### Tooling rules worth lifting
+
 - **typescript-eslint:** `no-floating-promises` (unhandled async error/rejection), `no-misused-promises`, `await-thenable`, `require-await`, `no-throw-literal` `(verify name)` (throw `Error`, not strings).
 - **ESLint:** `no-empty` (empty catch block), `prefer-promise-reject-errors`, `no-ex-assign`.
 - **RuboCop Lint/Style:** `Lint/SuppressedException` (empty `rescue`), `Lint/RescueException` (rescuing `Exception` is too broad), `Lint/ShadowedException`, `Style/RescueStandardError`.
@@ -60,6 +66,7 @@ Each taxonomy category gets three sections:
 - **Sonar / CWE:** CWE-390 "Detection of Error Condition Without Action"; CWE-391 "Unchecked Error Condition".
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is any error swallowed — empty catch/`rescue`, `except: pass`, ignored Go `err`, discarded Result?
 - Does each handler narrow to the *expected* exception type, not a blanket catch-all?
 - On failure does it **fail loud** (surface + log with context) or **degrade intentionally** — never silently?
@@ -77,6 +84,7 @@ Each taxonomy category gets three sections:
 ## #3 Concurrency, async & distributed correctness
 
 ### Key references
+
 - **Brian Goetz et al. — *Java Concurrency in Practice*** → mine: happens-before, atomicity vs. visibility, safe publication — the vocabulary for reasoning about shared mutable state.
 - **Martin Kleppmann — *Designing Data-Intensive Applications*** → mine: replication/consistency models, the perils of distributed time, and "exactly-once" reframed as idempotency.
 - **Leslie Lamport — "Time, Clocks, and the Ordering of Events in a Distributed System" (CACM, 1978)** → mine: the *happens-before* partial order; you cannot rely on wall-clock ordering across nodes.
@@ -84,6 +92,7 @@ Each taxonomy category gets three sections:
 - **Julik Tarkhanov — frontend race reviews (prior art)** `(verify URL)` → mine: DOM-lifecycle / event-timing races in JS/Stimulus controllers (node gone after `await`).
 
 ### Tooling rules worth lifting
+
 - **ESLint / typescript-eslint:** `require-atomic-updates` (read-modify-write across `await`/`yield` → race), `no-await-in-loop` (often accidental sequential where `Promise.all` was meant — correctness + perf), `no-floating-promises`, `no-misused-promises`.
 - **Go:** `go test -race` — dynamic data-race detector; **no false positives, but only catches races your tests actually exercise; misses deadlocks, livelocks, and logical races** (https://go.dev/doc/articles/race_detector). `go vet` analyzers: `copylocks` (lock copied by value), `atomic` (misuse of `sync/atomic`), `lostcancel` (context cancel func not called → leak; cross #4).
 - **JVM:** SpotBugs multithreaded-correctness detectors (e.g. `IS2_INCONSISTENT_SYNC`); Error Prone `@GuardedBy`.
@@ -91,6 +100,7 @@ Each taxonomy category gets three sections:
 - **C/C++/Go:** ThreadSanitizer (TSan) for data races; **Helgrind** (Valgrind) for lock-order/deadlock.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is shared mutable state touched by multiple threads/tasks without synchronization?
 - Any check-then-act / read-modify-write that spans an `await`/`yield` and isn't atomic?
 - Could two concurrent requests interleave to break an invariant (lost update, double-spend)?
@@ -108,6 +118,7 @@ Each taxonomy category gets three sections:
 ## #4 Resource & state management
 
 ### Key references
+
 - **David Goldberg — "What Every Computer Scientist Should Know About Floating-Point Arithmetic" (ACM Computing Surveys, 1991)** — https://docs.oracle.com/cd/E19957-01/806-3568/ncg_goldberg.html → mine: representability/rounding; never compare floats for exact equality; use decimal for money.
 - **Noah Sussman — "Falsehoods Programmers Believe About Time"** — https://infiniteundo.com/post/25326999628/falsehoods-programmers-believe-about-time → mine: 34 time assumptions that break (DST, leap, "24h in a day"); a ready-made review checklist for date/time code.
 - **Martin Fowler — "Money" pattern (P of EAA)** `(verify URL)` → mine: represent money as integer minor units or a `Money(amount, currency)` type; never float; carry currency.
@@ -115,6 +126,7 @@ Each taxonomy category gets three sections:
 - **RAII / ownership (C++, Rust)** → mine: tie resource lifetime to scope; prefer `with`/`using`/`defer`/`ensure` over manual close.
 
 ### Tooling rules worth lifting
+
 - **Go:** `bodyclose` (HTTP response body), `sqlclosecheck` (`database/sql`), `rowserrcheck` (`rows.Err()`), `go vet lostcancel` (context), `ineffassign` (state written, never read).
 - **Python:** Pylint `R1732` (`consider-using-with` — use a context manager), Ruff `SIM115` (open without context manager), Bandit `B110`.
 - **RuboCop:** `Lint/FloatComparison` (exact `==`/`!=` on floats), `Lint/UselessAssignment` (state never read).
@@ -122,6 +134,7 @@ Each taxonomy category gets three sections:
 - **C/C++:** Valgrind/Memcheck, AddressSanitizer + LeakSanitizer (handle/memory leaks).
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is every acquired resource (file, socket, connection, lock, cursor) released on **all** paths including errors (`with`/`using`/`defer`/`ensure`)?
 - Does anything that grows (logs, cache, queue, temp files, sessions) have a bound / eviction / TTL (steady state)?
 - Money/currency stored as integer minor units or a decimal `Money` type — never binary float — and currency carried?

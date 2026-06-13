@@ -12,6 +12,7 @@ legitimately have many importers. If every declared rule passes, report exactly
 ## Bad → finding
 
 **Input (architecture scan; declared rule: ui → app → domain → infra, no upward or skip imports; no cycles):**
+
 ```text
 violations:
   domain/pricing.py        imports  infra/stripe_client.py
@@ -21,7 +22,9 @@ cycles:
 fan-in/fan-out:
   app/helpers.py   fan-in 74   fan-out 41
 ```
+
 **Expected finding:**
+
 1. **Layering violation (domain → infra):** `domain/pricing.py` imports the Stripe
    client directly — invert it: define a payment-gateway port in domain and
    implement it in infra (dependency inversion).
@@ -38,11 +41,13 @@ fan-in/fan-out:
 ## Good → no finding
 
 **Input (architecture scan; same declared rule):**
+
 ```text
 violations: none
 cycles: none
 fan-in/fan-out (top): domain/models.py fan-in 38 fan-out 3
 ```
+
 **Expected finding:** None — no rule violations, no cycles; `domain/models.py`'s
 high fan-in with tiny fan-out is a healthy shared kernel, not a hub. Report
 "No findings: the codebase conforms to its declared architecture". Do NOT flag

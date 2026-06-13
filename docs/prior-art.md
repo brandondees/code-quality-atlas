@@ -3,6 +3,7 @@
 Existing skills, plugins, linters, and review tools that already cover parts of [the map](taxonomy.md). We mine these for **heuristics, checklists, and behaviors** — we do not inherit their boundaries.
 
 Two kinds of prior art:
+
 1. **Agent skills / plugins** — closest in form to what we're building; study how they scope, trigger, and report.
 2. **Static-analysis & review tooling** — decades of encoded heuristics; a goldmine of concrete checks per category.
 
@@ -35,6 +36,7 @@ Mapped to taxonomy categories. "Author's own" = present under `~/.claude/skills`
 **Meta-skills worth studying for *how* to build the suite** (not category coverage, but craft): `skill-builder`, `skill-creator`, `designing-workflow-skills`, `writing-skills`, plus the multi-agent review orchestrators (`pr-review-toolkit:review-pr`, `compound-engineering:workflows:review`, `code-review`).
 
 ### Coverage read
+
 ~13 of 24 categories have *some* agent-skill prior art. The notably **thin / uncovered**: #1 functional correctness, #4 resource & state, #13 API/contract design, #16 observability, #18 dependencies/supply-chain, #21 maintainability-as-a-whole, plus all the candidate additions (esp. AI/LLM-specific quality). These are the greenfield zones.
 
 ---

@@ -1,11 +1,13 @@
 # References to mine — reviewing-decision-lifecycle
 
 ## Contents
+
 - From category #29
 
 ## From category #29
 
 ### Key references
+
 - **Michael Nygard — "Documenting Architecture Decisions" (2011)** — the ADR format (context · decision · status · consequences); status proposed/accepted/superseded.
   → mine: a non-obvious or hard-to-reverse choice needs a recorded *why*, not just the *what*, so the next engineer inherits the reasoning; an accepted-but-unrecorded decision is unowned debt.
 - **ThoughtWorks Technology Radar — Adopt / Trial / Assess / Hold rings** — https://www.thoughtworks.com/radar/faq (`verify` ring definitions).

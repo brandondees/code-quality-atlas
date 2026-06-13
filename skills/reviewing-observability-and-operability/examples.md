@@ -7,6 +7,7 @@ without a redeploy?
 ## Bad → finding
 
 **Input (diff):**
+
 ```python
 def checkout(request, user):
     try:
@@ -15,7 +16,9 @@ def checkout(request, user):
         log.error("Charge failed for " + user.email + ": " + str(e))
         raise
 ```
+
 **Expected finding:**
+
 1. **Unstructured, ungreppable log:** interpolated prose instead of structured
    fields — use key-value logging (`log.error("charge_failed", user_id=..., ...)`)
    so production queries can filter by field.
@@ -29,6 +32,7 @@ def checkout(request, user):
 ## Bad → finding
 
 **Input (diff):**
+
 ```python
 @app.get("/health")          # wired as the readiness probe
 def health():
@@ -38,7 +42,9 @@ def settle_batch():          # NEW: retries failed settlements up to 10x nightly
     for s in failed_settlements():
         retry_settlement(s)
 ```
+
 **Expected finding:**
+
 1. **Readiness probe that checks nothing:** it returns "ok" even when the DB/cache
    are down, so traffic routes to a dead instance — readiness must reflect
    dependency health (without being so strict it flaps).
@@ -52,6 +58,7 @@ def settle_batch():          # NEW: retries failed settlements up to 10x nightly
 ## Good → no finding
 
 **Input (diff):**
+
 ```python
 def checkout(request, user):
     try:
@@ -63,6 +70,7 @@ log = structlog.get_logger()
 log.info("checkout_complete", order_id=order.id, request_id=ctx.request_id,
          amount_cents=order.total_cents)
 ```
+
 **Expected finding:** None — structured fields, correlation id, no PII, the error is
 wrapped with context and logged once at the boundary. Report "No findings". Do NOT
 demand metrics, tracing, or feature flags for every trivial internal helper — the

@@ -1,6 +1,7 @@
 # Reviewable heuristics — reviewing-naming-and-readability
 
 ## Contents
+
 - From category #5
 - From category #6
 - From category #7
@@ -8,6 +9,7 @@
 ## From category #5
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Does each name state *intent* (what/why) rather than *mechanism* or type? (`activeUsers` over `userListFiltered`; `retryBudget` over `n`.)
 - Is name length proportional to scope? (One letter fine for a 3-line loop; a field or exported symbol needs a descriptive name.)
 - Any placeholder/temporary name surviving into the diff? (`tmp`, `data`, `data2`, `obj`, `foo`, `handleStuff`, `Manager`, `Helper`, `Util`.) Flag as "stage: nonsense/honest-incomplete — refine one stage."
@@ -26,6 +28,7 @@
 ## From category #6
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Does this function do *one* thing at *one* level of abstraction? (Altitude: if it mixes high-level policy with low-level byte/string twiddling, extract the low part.)
 - Can you state the function's job in a single verb phrase without "and"? If not, likely SRP violation — split.
 - Nesting depth ≤ ~3? Replace arrow-shaped nesting with **guard clauses / early returns**; invert conditions to de-nest the happy path.
@@ -44,6 +47,7 @@
 ## From category #7
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Does each comment explain **why** (intent, constraint, trade-off, gotcha, issue link) rather than restate **what**? Delete pure restatements.
 - Any **commented-out code**? Delete it — VCS is the archive. Flag every block.
 - Do docstrings/JSDoc/Javadoc **match the current signature**? Every `@param`/`@return`/`@raises` exists and is accurate; no param undocumented or renamed (comment rot).

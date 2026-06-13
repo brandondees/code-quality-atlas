@@ -1,11 +1,13 @@
 # Reviewable heuristics — reviewing-migration-and-data-safety
 
 ## Contents
+
 - From category #20
 
 ## From category #20
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is the schema change **backward-compatible** with the currently-running app version (rolling deploy)? If breaking, is it split expand→migrate→contract?
 - Does adding a NOT NULL column / index / FK **lock the table** (esp. large tables)? Use safe variants (`CREATE INDEX CONCURRENTLY`; add nullable then backfill; `NOT VALID` then validate).
 - Is a data **backfill batched, throttled, idempotent, and resumable** — not one giant `UPDATE`?

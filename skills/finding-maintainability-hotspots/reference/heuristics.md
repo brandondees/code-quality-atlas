@@ -1,11 +1,13 @@
 # Reviewable heuristics — finding-maintainability-hotspots
 
 ## Contents
+
 - From category #21
 
 ## From category #21
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - **Change amplification:** did one conceptual change force edits in N>3 files/modules? If so, is that essential (one concept, many sites) or accidental (a missing abstraction / leaked detail)?
 - **Shotgun surgery smell:** the same constant, enum case, validation, or shape is edited in multiple places in this diff — flag for consolidation.
 - **Blast radius:** does the change touch a high fan-in module (many importers)? Is there a contract/compat note or test proving downstream callers still hold?

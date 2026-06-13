@@ -6,6 +6,7 @@ change must be compatible with both the old and new code being live. Report each
 distinct unsafe operation as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
 
 **Decision rules (apply before flagging):**
+
 - **Any one-step rename or type-change of a live column/table is breaking** during
   a rolling deploy — old code references the old name while both versions run.
   Always demand the expand/contract recipe, never an in-place rename.
@@ -20,12 +21,15 @@ distinct unsafe operation as its own numbered finding. When the input is correct
 ## Bad → finding
 
 **Input (diff):**
+
 ```sql
 ALTER TABLE events ADD COLUMN tenant_id bigint NOT NULL;
 CREATE INDEX idx_events_tenant ON events (tenant_id);
 UPDATE events SET tenant_id = (SELECT tenant_id FROM users WHERE users.id = events.user_id);
 ```
+
 **Expected finding:**
+
 1. **`ADD COLUMN ... NOT NULL` with no default** fails/locks on existing rows — add
    it **nullable**, backfill, then add the constraint (`NOT VALID` then
    `VALIDATE CONSTRAINT`).
@@ -38,6 +42,7 @@ UPDATE events SET tenant_id = (SELECT tenant_id FROM users WHERE users.id = even
 ## Bad → finding
 
 **Input (diff):**
+
 ```python
 class Migration(migrations.Migration):
     operations = [
@@ -45,7 +50,9 @@ class Migration(migrations.Migration):
         migrations.RemoveField("invoice", "legacy_total"),
     ]
 ```
+
 **Expected finding:**
+
 1. **In-place rename breaks the running app:** old code still reading/writing
    `amount` errors the moment this applies (rolling deploy = both versions live).
    Use the expand/contract rename recipe: add `amount_cents` → deploy code writing
@@ -58,15 +65,18 @@ class Migration(migrations.Migration):
 ## Good → no finding
 
 **Input (diff):**
+
 ```sql
 -- expand step 1 of 3 (contract tracked in #514)
 ALTER TABLE events ADD COLUMN tenant_id bigint;            -- nullable
 CREATE INDEX CONCURRENTLY idx_events_tenant ON events (tenant_id);
 ```
+
 ```python
 # separate backfill task: batches of 5000, sleeps, restarts from last id
 def backfill_tenant_ids(start_after=0): ...
 ```
+
 **Expected finding:** None — nullable expand, concurrent index, batched/resumable
 backfill as a separate step, contract phase tracked. Report "No findings". Do NOT
 demand the NOT NULL constraint, constraint validation, or the old-column drop

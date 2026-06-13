@@ -3,6 +3,7 @@
 > **Selecting tools for this stack.** The tools named below are field-tested starting points, not a mandate. Pick the one that fits this codebase's language version, build, and CI — and verify it actually runs on your toolchain before relying on it. A listed tool that is broken, abandoned, or noisy on your setup is a gap to close, not a permanent `continue-on-error`: prefer a working, maintained equivalent (often a younger, less well-known one) over a canonical-but-broken default. The capability is the requirement; the specific tool is replaceable.
 
 ## Contents
+
 - From category #5
 - From category #6
 - From category #7
@@ -10,6 +11,7 @@
 ## From category #5
 
 ### Tooling rules worth lifting
+
 - **ESLint `id-length`** — identifiers shorter/longer than a configured min/max (scope-appropriate length).
 - **ESLint `camelcase`** — casing convention (catches `snake_case` leaking into JS).
 - **ESLint `id-match`** — identifiers must match a configurable regex (encode a naming convention as a rule).
@@ -26,6 +28,7 @@
 ## From category #6
 
 ### Tooling rules worth lifting
+
 - **SonarQube `S3776`** — "Cognitive Complexity of functions should not be too high"; language-agnostic; **default threshold 15**.
 - **ESLint `complexity`** — cyclomatic complexity over a threshold (default 20; teams often set 10).
 - **ESLint `max-depth`** (default 4) — block nesting depth. **`max-lines-per-function` / `max-lines` / `max-statements`** — length/statement caps (the Long Function smell). **`max-params`** (default 3) — Long Parameter List. **`max-nested-callbacks`** — pyramid of doom.
@@ -33,8 +36,8 @@
 - **`eslint-plugin-sonarjs` `cognitive-complexity`** — Sonar's metric inside ESLint.
 - **RuboCop `Metrics/AbcSize`** (Assignments-Branches-Conditions; **default Max 17**), **`Metrics/PerceivedComplexity`** (**Max 8**; Ruby's cognitive-style metric), **`Metrics/CyclomaticComplexity`** (Max 7 `(verify current)`), **`Metrics/MethodLength`, `Metrics/BlockLength`, `Metrics/ParameterLists`**.
 - **Reek `TooManyStatements`, `NestedIterators`, `ControlParameter`, `TooManyBranches`** — long-method, deep-nesting, flag-argument, branch-heavy smells (Ruby).
-- **Pylint `too-many-branches` (R0912)`, `too-many-statements` (R0915)`, `too-many-nested-blocks` (R1702)`, `too-many-arguments` (R0913)`, `too-many-locals` (R0914)`** — Python local-complexity caps; R1702 is a direct nesting gate.
-- **Pylint `magic-value-comparison` (R2004)** — comparisons against magic literals; **opt-in extension** (`pylint.extensions.magic_value`); `valid-magic-values` default `(0, -1, 1, "", "__main__")`. Ruff equivalent **`PLR2004`**. **`no-else-return` (R1705)`, `inconsistent-return-statements` (R1710)`** — nudge toward guard-clause / symmetry.
+- **Pylint `too-many-branches` (R0912)`,`too-many-statements`(R0915)`, `too-many-nested-blocks` (R1702)`,`too-many-arguments`(R0913)`, `too-many-locals` (R0914)`** — Python local-complexity caps; R1702 is a direct nesting gate.
+- **Pylint `magic-value-comparison` (R2004)** — comparisons against magic literals; **opt-in extension** (`pylint.extensions.magic_value`); `valid-magic-values` default `(0, -1, 1, "", "__main__")`. Ruff equivalent **`PLR2004`**. **`no-else-return` (R1705)`,`inconsistent-return-statements`(R1710)`** — nudge toward guard-clause / symmetry.
 - **golangci-lint: `gocyclo`** (cyclomatic), **`gocognit`** (cognitive), **`nestif`** (deeply-nested if), **`funlen`** (function length), **`cyclop`** (func+package cyclomatic), **`mnd`** (magic-number detector; **replaces the old `gomnd`**). A near-complete map of this category in one toolchain.
 - **PMD `CyclomaticComplexity`, `CognitiveComplexity`, `NPathComplexity`, `ExcessiveMethodLength`, `ExcessiveParameterList`, `AvoidDeeplyNestedIfStmts`** (Java) — incl. **NPath** (acyclic execution paths), a stricter cousin of cyclomatic.
 - **Lizard / radon** — language-agnostic cyclomatic + token-count + function-length reporters; radon grades a Maintainability Index. Good "metrics across the diff" framing.
@@ -42,7 +45,8 @@
 ## From category #7
 
 ### Tooling rules worth lifting
-- **Pylint `missing-function-docstring` (C0116)`, `missing-class-docstring` (C0115)`, `missing-module-docstring` (C0112)`** — presence gates. **`fixme` (W0511)** — flags `TODO`/`FIXME`/`XXX`.
+
+- **Pylint `missing-function-docstring` (C0116)`,`missing-class-docstring`(C0115)`, `missing-module-docstring` (C0112)`** — presence gates. **`fixme` (W0511)** — flags `TODO`/`FIXME`/`XXX`.
 - **Ruff / pydocstyle `D` rules (D1xx–D4xx, PEP 257)** — docstring style & completeness. **`undocumented-param` (D417)** — docstring doesn't document all params (only fires when an `Args` section exists; on the google convention). ([Ruff D417](https://docs.astral.sh/ruff/rules/undocumented-param/))
 - **Ruff `commented-out-code` (ERA001)** (from PyCQA `eradicate`) — detects **commented-out code** specifically. ([Ruff ERA001](https://docs.astral.sh/ruff/rules/commented-out-code/)) Direct hit on that facet.
 - **Ruff/flake8 `flake8-todos` / `flake8-fixme`** — flag `TODO`/`FIXME`/`XXX`/`HACK`, sometimes requiring author/issue link.

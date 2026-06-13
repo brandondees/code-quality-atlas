@@ -12,7 +12,7 @@ provenance:
   built_from:
   - category: 23
     source: docs/research/cluster-6-evolution.md#23
-    hash: 1d4b12bc8ee70d17f5cd6ce9cb93b33ebc902036e220f3e16f5c3cd6dd7bd98e
+    hash: a02904ad82b6ea769857880ee0150fd9d19c068d1c8aa3be15ae113b891ad420
 ---
 
 # reviewing-accessibility-and-i18n

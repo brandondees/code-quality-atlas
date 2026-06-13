@@ -16,6 +16,7 @@ minimized with retention paths, report exactly
 ## Bad → finding
 
 **Input (compliance scan; product: proprietary SaaS, EU customers):**
+
 ```text
 licenses:    vendored/chart-lib/ (copied from GitHub, LICENSE file deleted, author header stripped)
              dep `pdf-magic` AGPL-3.0 — imported by the web rendering service
@@ -24,7 +25,9 @@ pii:         new analytics.py sends user_id, email, full search history to third
              retention: no TTL; deletion: no erasure path implemented
 telemetry:   enabled by default, no consent gate, EU traffic included
 ```
+
 **Expected finding:**
+
 1. **Stripped attribution on vendored code:** the deleted LICENSE and author
    headers in `vendored/chart-lib/` violate the upstream license regardless of
    which permissive license it was — restore the license text and attribution.
@@ -42,6 +45,7 @@ telemetry:   enabled by default, no consent gate, EU traffic included
 ## Good → no finding
 
 **Input (compliance scan; product: MIT-licensed library):**
+
 ```text
 licenses:   all deps MIT/BSD/Apache-2.0; tree scan clean; NOTICE retained for the
             one Apache dep
@@ -49,6 +53,7 @@ spdx:       180/180 files carry SPDX headers (REUSE check green)
 pii:        none collected (library code; no telemetry)
 provenance: no vendored code; SBOM regenerated on release
 ```
+
 **Expected finding:** None — compatible licenses with attribution retained, full
 SPDX coverage, no PII surface, current SBOM. Report
 "No findings: compliance and provenance are clean". Do NOT speculate about legal

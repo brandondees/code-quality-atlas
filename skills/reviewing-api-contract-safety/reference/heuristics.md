@@ -1,11 +1,13 @@
 # Reviewable heuristics — reviewing-api-contract-safety
 
 ## Contents
+
 - From category #13
 
 ## From category #13
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is the change to a public contract **backward-compatible**? If breaking, is it versioned and communicated (semver, deprecation window)?
 - Is the API **easy to use, hard to misuse**? Required things required by the type; invalid combinations impossible; sensible defaults.
 - **"When in doubt, leave it out":** any field/endpoint/param being added that isn't clearly needed? (You can add later; you can't remove.)

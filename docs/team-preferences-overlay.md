@@ -37,7 +37,7 @@ The overlay belongs in the **reviewed** repository, not in this atlas — it tra
 code it describes, exactly as `.eslintrc` does. The atlas ships the *machinery to read it*;
 each adopting team owns *its own* overlay.
 
-```
+```text
  their-repo/
    .code-quality-atlas/
      preferences.md         # the overlay (human-authored, owner-ratified)

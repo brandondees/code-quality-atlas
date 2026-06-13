@@ -11,7 +11,7 @@ provenance:
   built_from:
   - category: 12
     source: docs/research/cluster-3-structure.md#12
-    hash: 73ad9e27e4e66a75d4c2d99dec397b8536fa4b835edc22a07de4f7e034cdea45
+    hash: 49051cc3b2f556cac15149bd8a1834bb93672eb5eb558dc04a4f80caed8e8235
 ---
 
 # auditing-architecture-conformance

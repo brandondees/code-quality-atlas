@@ -10,10 +10,10 @@ provenance:
   built_from:
   - category: 11
     source: docs/research/cluster-3-structure.md#11
-    hash: e510fd2362c34f2524d4eed76104d001fb032f4d62aac866e38da82ad61c368f
+    hash: 8449117110d3d31227f83daec22bc0fd1a27e6fa0ca15ac8cfa209ddec674188
   - category: 15
     source: docs/research/cluster-4-runtime.md#15
-    hash: 95468df6094ec91160285d106ef87d4c7f1de2709ea9f0befebe9aa676028351
+    hash: edbac0e3b11b41a9af4c9b8797940b20a90918f40e173c9229c3dbea4e073acc
 ---
 
 # checking-restraint

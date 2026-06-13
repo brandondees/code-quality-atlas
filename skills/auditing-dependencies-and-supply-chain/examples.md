@@ -16,13 +16,16 @@ licensed compatibly, and maintained, report exactly
 ## Bad → finding
 
 **Input (dependency scan; project license: MIT, distributed commercially):**
+
 ```text
 package         version   pinned?  cves          last release  maintainers  license  notes
 left-pad-x      ^1.0      no       -             6 years ago   1            MIT      name 1 char off popular pkg
 yaml-parse      4.1.2     lock     CVE-2025-881  2 months ago  4            MIT      fix in 4.1.3
 report-gen      2.0.0     lock     -             1 month ago   3            AGPL-3.0 postinstall script downloads binary
 ```
+
 **Expected finding:**
+
 1. **Known CVE with a fix available:** `yaml-parse` 4.1.2 carries CVE-2025-881,
    fixed in 4.1.3 — bump it now.
 2. **Typosquat-shaped, abandoned, unpinned:** `left-pad-x` is one character off a
@@ -38,12 +41,14 @@ report-gen      2.0.0     lock     -             1 month ago   3            AGPL
 ## Good → no finding
 
 **Input (dependency scan; project license: MIT):**
+
 ```text
 package    version  pinned?  cves  last release  maintainers  license       notes
 fastify    5.2.1    lock     -     3 weeks ago   12           MIT           -
 pino       9.4.0    lock     -     2 months ago  6            MIT           -
 zod        3.24.0   lock     -     1 month ago   8            MIT           renovate enabled
 ```
+
 **Expected finding:** None — pinned via lockfile, scanned clean, actively
 maintained, compatible licenses, automated updates. Report
 "No findings: dependencies and supply chain are healthy". Do NOT flag a dependency

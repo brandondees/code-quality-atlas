@@ -1,12 +1,14 @@
 # Reviewable heuristics — auditing-config-and-build-hygiene
 
 ## Contents
+
 - From category #19
 - From category #26
 
 ## From category #19
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Does CI run the full gate on the diff — lint, format-check, type-check, tests, dep/security scan — and is passing **required** to merge?
 - Is the build **reproducible/hermetic** enough to not depend on machine-local state (pinned toolchain, lockfiles, no network in build)?
 - Is CI **fast and reliable**? A new slow/flaky job is a defect — parallelized, cached, deterministic?
@@ -27,6 +29,7 @@
 ## From category #26
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is config **separated from code** and injected via env — no secrets or env-specific values hardcoded/committed?
 - Is config **validated at startup** (fail fast, clear message), not lazily at first use?
 - Are **safe, secure defaults** used (deny-by-default, TLS on, debug off in prod — cross #14)?

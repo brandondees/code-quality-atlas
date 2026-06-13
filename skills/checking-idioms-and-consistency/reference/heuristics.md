@@ -1,11 +1,13 @@
 # Reviewable heuristics — checking-idioms-and-consistency
 
 ## Contents
+
 - From category #8
 
 ## From category #8
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Does the change **follow the project's own conventions**? Read `.eslintrc`/`.rubocop.yml`/`ruff.toml`/`.editorconfig`/style guide first; the codebase's established choice wins over personal preference.
 - Is the code **formatted** by the project's formatter? (Unformatted code where Prettier/Black/gofmt exists is an automatic finding.)
 - Does it use the **idiomatic construct** for this language/framework, or a clumsy non-native equivalent? (comprehension vs. manual loop; `Result`/error-as-value vs. exceptions where one was chosen; framework router/ORM idiom vs. hand-rolled.)

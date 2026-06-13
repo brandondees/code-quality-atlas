@@ -7,6 +7,7 @@
 ## #17 Test quality & coverage
 
 ### Key references
+
 - **Mike Cohn — *Succeeding with Agile* (the Test Pyramid)** → mine: more fast unit tests, fewer slow e2e; the cost/speed/stability gradient by test level.
 - **Kent C. Dodds — "The Testing Trophy" (2018)**, building on **Guillermo Rauch — "Write tests. Not too many. Mostly integration."** → mine: integration tests give the best ROI — they test units collaborating without e2e fragility. The modern counter to a unit-heavy pyramid; use it to resist *both* over-mocked unit tests and over-heavy e2e.
 - **Michael Feathers — *Working Effectively with Legacy Code*** → mine: "legacy code is code without tests"; seams, characterization tests, and **testability as a design property** (if it's hard to test, the design is the problem).
@@ -16,6 +17,7 @@
 - **Martin Fowler — "Eradicating Non-Determinism in Tests"** `(verify URL)` → mine: flaky tests destroy trust; quarantine, then fix the root cause (time, order, concurrency, shared state).
 
 ### Tooling rules worth lifting
+
 - **Coverage:** coverage.py (Python), Istanbul/nyc & V8 (JS), JaCoCo (Java), SimpleCov (Ruby), `go test -cover`, **cargo-llvm-cov / cargo-tarpaulin** (Rust). Lift: track **branch** coverage and the coverage **delta on the diff**, not a global %.
 - **Mutation:** PIT/pitest (Java), **Stryker** (JS/TS, C#, Scala — https://stryker-mutator.io/), mutmut & cosmic-ray (Python), Mutant (Ruby), **cargo-mutants** (Rust — https://mutants.rs/), gremlins (Go — https://gremlins.dev/). For a pure crate/module with fast deterministic tests, a mutation run is cheap, and the surviving-mutant list makes a good CI gate.
 - **Property-based:** Hypothesis (Python), fast-check (JS/TS), jqwik (Java), **proptest / quickcheck** (Rust), PropEr/QuickCheck.
@@ -23,6 +25,7 @@
 - **Test linters:** `eslint-plugin-jest` (`no-disabled-tests`, `no-focused-tests`, `expect-expect`, `no-conditional-expect`), `rubocop-rspec`, `flake8-pytest-style`.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Do new/changed tests assert **observable behavior** (inputs→outputs, side effects), not internal calls/private state (refactor-resistant)?
 - Is coverage **meaningful** on the new code — branches and edge cases, not just lines executed? Don't chase a % with assertion-free tests.
 - Bug fix → is there a **regression test** that fails before the fix and passes after?
@@ -40,6 +43,7 @@
 ## #18 Dependencies & supply chain
 
 ### Key references
+
 - **SLSA — Supply-chain Levels for Software Artifacts (OpenSSF)** — https://slsa.dev/ → mine: a build-integrity ladder (v1.0 Build L1–L3: provenance → signed/hosted → isolated/non-forgeable). Can you *prove* the artifact came from this source via this build?
 - **OpenSSF Scorecard** — https://securityscorecards.dev/ `(verify URL)` → mine: 18+ automated checks of a dependency's security hygiene (branch protection, code review, maintained, pinned deps, fuzzing) — a vetting rubric for "should we depend on this?"
 - **SBOM — SPDX & CycloneDX (OWASP)** — https://cyclonedx.org/ → mine: the component inventory (packages, versions, licenses, relationships); the basis for both vuln scanning and license review (cross #27).
@@ -48,6 +52,7 @@
 - **left-pad / event-stream / xz-utils (CVE-2024-3094)** → mine: the canonical cautionary tales — trivial dep removal breakage, account-takeover injection, a backdoor planted by a "maintainer."
 
 ### Tooling rules worth lifting
+
 - **Dependabot** (GitHub, ~14 ecosystems) / **Renovate** (Mend, 30+ managers, groups PRs) — automated update PRs.
 - **OSV-Scanner, pip-audit, npm audit, cargo-audit, govulncheck, bundler-audit, Trivy, Grype, Snyk** — CVE scanning.
 - **Socket.dev** — *behavioral* supply-chain analysis (new install scripts, network/filesystem access) to catch malicious packages, not just known CVEs.
@@ -56,6 +61,7 @@
 - **license scanners** (license-checker, FOSSA, Trivy) — feed #27.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is the new dependency **necessary**, or could stdlib/a few lines do it (avoid trivial deps and transitive bloat)?
 - Is it **healthy**: recently maintained, broadly used, reasonable Scorecard, not single-maintainer abandonware?
 - Any **known CVEs** in it or its transitive tree (run the scanner)? Is the version **pinned via lockfile** and honored in CI (`npm ci`)?
@@ -71,6 +77,7 @@
 ## #19 Build, CI/CD & tooling
 
 ### Key references
+
 - **Jez Humble & David Farley — *Continuous Delivery*** → mine: the deployment pipeline; **build once, promote the same artifact**; keep the build green; automate everything.
 - **Forsgren, Humble, Kim — *Accelerate* / DORA** → mine: the **four key metrics** (deployment frequency, lead time for changes, change-failure rate, time-to-restore) — the outcomes CI/CD quality should move; speed and stability are *not* a trade-off.
 - **Trunk-Based Development** — https://trunkbaseddevelopment.com/ → mine: short-lived branches, integrate continuously, hide incomplete work behind feature flags (cross #26).
@@ -78,6 +85,7 @@
 - **Martin Fowler — "Continuous Integration"** → mine: a slow or flaky CI is itself a quality defect; keep it fast and green, quarantine flakies.
 
 ### Tooling rules worth lifting
+
 - **pre-commit** (multi-language hooks), **husky + lint-staged** (JS), **lefthook** — run lint/format/type-check before commit.
 - **CI** (GitHub Actions/GitLab CI/Buildkite) — required status checks + branch protection as the merge gate.
 - **Build** — Bazel/Buck (hermetic), Nix (reproducible envs), Docker multi-stage.
@@ -91,6 +99,7 @@
 - **zizmor** — GitHub Actions *security* audits (~two dozen rules): template injection (`${{ }}` of attacker-influenced context interpolated into `run:`), actions pinned to mutable tags instead of commit SHAs, excessive workflow token permissions, use of actions with known advisories.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Does CI run the full gate on the diff — lint, format-check, type-check, tests, dep/security scan — and is passing **required** to merge?
 - Is the build **reproducible/hermetic** enough to not depend on machine-local state (pinned toolchain, lockfiles, no network in build)?
 - Is CI **fast and reliable**? A new slow/flaky job is a defect — parallelized, cached, deterministic?
@@ -111,6 +120,7 @@
 ## #20 Data & persistence safety
 
 ### Key references
+
 - **Martin Fowler — "Parallel Change" (expand/contract)** → mine: never do a breaking schema change in one step — **expand** (add new alongside old) → **migrate** (dual-write + batched backfill) → **contract** (drop old once drained). Each phase independently deployable and reversible.
 - **Online schema-change tools — gh-ost (GitHub, binlog-based, *triggerless*), pt-online-schema-change (Percona, trigger + shadow table), pgroll (Postgres)** → mine: large-table `ALTER`s take blocking metadata locks; these copy rows in batches and keep the copy in sync for near-zero downtime.
 - **ankane/strong_migrations** — https://github.com/ankane/strong_migrations → mine: the best single **catalog of unsafe migration operations and their safe rewrites** (the rename-column 6-step: add column → write both → backfill → move reads → stop writing old → drop). Lift these directly as checklist items.
@@ -118,6 +128,7 @@
 - **Batched-backfill discipline** → mine: backfill in small batches (1k–10k rows) with a sleep to avoid lock/IO saturation; make it **idempotent and resumable**.
 
 ### Tooling rules worth lifting
+
 - **strong_migrations** (Rails), **online-migrations** gem, **Django migration checks**, **squawk** (Postgres migration linter) — flag unsafe DDL pre-merge.
 - **gh-ost, pt-osc, pgroll, Vitess online DDL** — zero-downtime schema change execution.
 - **DB constraints** (NOT NULL, FK, UNIQUE, CHECK) + **transactional DDL** (Postgres) — DB-enforced invariants.
@@ -125,6 +136,7 @@
 - **Schema-drift detection** (cross prior-art `schema-drift-detector`); migration dry-run/plan.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is the schema change **backward-compatible** with the currently-running app version (rolling deploy)? If breaking, is it split expand→migrate→contract?
 - Does adding a NOT NULL column / index / FK **lock the table** (esp. large tables)? Use safe variants (`CREATE INDEX CONCURRENTLY`; add nullable then backfill; `NOT VALID` then validate).
 - Is a data **backfill batched, throttled, idempotent, and resumable** — not one giant `UPDATE`?
@@ -140,18 +152,21 @@
 ## #26 Configuration & environment
 
 ### Key references
+
 - **The Twelve-Factor App — Config (factor III)** — https://12factor.net/config → mine: strict separation of config from code; store config in **env vars**; never commit config/secrets. Also factor X (dev/prod parity), XI (logs to stdout — cross #16).
 - **Pete Hodgson — "Feature Toggles (aka Feature Flags)" (martinfowler.com)** — https://martinfowler.com/articles/feature-toggles.html → mine: toggle **categories** (release, ops, experiment, permission), decoupling deploy from release, and the crucial point that **flags have a lifecycle** — release flags are temporary and must be removed to avoid debt (cross #21).
 - **HashiCorp Vault / secrets management** → mine: secrets out of config files; prefer dynamic, leased, rotated secrets.
 - **Config validation at startup / "fail fast"** → mine: validate all config at boot (clear error on missing/invalid), don't discover misconfig at 3am on first use.
 
 ### Tooling rules worth lifting
+
 - **Config schema/validation:** envalid, zod env parsing, **Pydantic Settings**, viper, Spring `@ConfigurationProperties` validation, dotenv-linter.
 - **Secret scanning:** Gitleaks, TruffleHog, detect-secrets (cross #14).
 - **Feature-flag platforms:** LaunchDarkly, **Unleash**, Flagsmith, **OpenFeature** (vendor-neutral standard) — incl. stale-flag detection / flag-cleanup.
 - **Portability/env:** ShellCheck (portable shell), `.editorconfig`; pinned container base images for parity.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is config **separated from code** and injected via env — no secrets or env-specific values hardcoded/committed?
 - Is config **validated at startup** (fail fast, clear message), not lazily at first use?
 - Are **safe, secure defaults** used (deny-by-default, TLS on, debug off in prod — cross #14)?
@@ -168,6 +183,7 @@
 Scope: the machinery wrapped around the code, reviewed as its own surface (the G10 framing gap — a missing category yields a *silent* hole, not a thin heuristic). Three meta-artifacts: **suppression hygiene** (the act of opting out of enforcement — `# noqa` / `eslint-disable` / `# type: ignore` accretion, lint-baseline growth); **monitoring-config as artifact** (alert rules, dashboards, SLO definitions as reviewed code, not the instrumentation #16 emits); **codegen ↔ source drift** (checked-in generated output stale vs. its generator/spec). Repo-shaped (map-gaps G7): accretion and drift are *standing* conditions across the tree, better scanned on a schedule than in a single diff.
 
 ### Key references
+
 - **ESLint — disable-directive hygiene** — `--report-unused-disable-directives`; `eslint-comments` plugin (`no-unlimited-disable`, `no-unused-disable`, `require-description`).
   → mine: a file-wide `/* eslint-disable */` with no rule list disables *everything*; require rule-scoped (`eslint-disable-next-line rule-name`), described, and unused-directive-swept suppressions.
 - **Ruff / flake8 / pygrep-hooks — `noqa` discipline** — Ruff `RUF100` (unused noqa); pre-commit `python-check-blanket-noqa` (PGH004) and `python-check-blanket-type-ignore` (PGH003).
@@ -184,6 +200,7 @@ Scope: the machinery wrapped around the code, reviewed as its own surface (the G
   → mine: a checked-in generated artifact must be regenerated and `git diff --exit-code`-verified in CI; without that gate it silently diverges from its source/spec. Mark generated files as generated (`linguist-generated`) so humans don't hand-patch what the next regen clobbers.
 
 ### Tooling rules worth lifting
+
 - **ESLint** — `--report-unused-disable-directives` (CI flag); `eslint-comments/no-unlimited-disable`, `/no-unused-disable`, `/require-description`, `/no-aggregating-enable`.
 - **Ruff `RUF100`**, **flake8-noqa**, **pygrep-hooks** `python-check-blanket-noqa` (PGH004) + `python-check-blanket-type-ignore` (PGH003) — ban blanket suppressions in pre-commit.
 - **mypy** `warn_unused_ignores`, **pyright** `reportUnnecessaryTypeIgnoreComment` — sweep dead ignores; **TypeScript** `@ts-expect-error` (errors if unused) over `@ts-ignore`.
@@ -192,6 +209,7 @@ Scope: the machinery wrapped around the code, reviewed as its own surface (the G
 - **Codegen drift gate** — `make generate && git diff --exit-code` (or `go generate`, `buf generate`, `sqlc diff`) as a required CI job; `linguist-generated`/`.gitattributes` to mark and exclude generated files from review noise.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - **Blanket suppressions:** any file-wide or unscoped `/* eslint-disable */`, bare `# noqa`, bare `# type: ignore`, or `@ts-ignore` that disables *all* checks rather than a named rule? Flag to scope to the specific rule and justify — a blanket disable hides unrelated future violations at that location.
 - **Unjustified suppressions:** does each suppression carry a reason (and ideally an issue link or expiry)? `# noqa: E501  # long external URL` is reviewable; a bare suppression with no rationale is undocumented debt.
 - **Unused / stale suppressions:** are there suppressions for problems that no longer exist (ESLint unused-disable, Ruff `RUF100`, mypy `warn_unused_ignores`)? They mask the *next* real violation at that spot — remove them.
@@ -210,6 +228,7 @@ Scope: the machinery wrapped around the code, reviewed as its own surface (the G
 Scope: IaC manifests — Terraform / OpenTofu, Kubernetes / Helm, CloudFormation, Pulumi — reviewed **as code that provisions production**, where a one-line diff can open a security hole or destroy data far beyond what the same-size application diff could. Four facets: **change blast-radius** (what does `plan` say this actually creates/replaces/destroys); **over-broad access** (public exposure, wildcard IAM — cross #14 least-privilege, which owns the security *verdict*); **drift** between declared config and live infra; **module/provider hygiene** (pinned versions, no secrets in state/vars, sane defaults). Distinct from **#19** (the build/CI *pipeline* and generic workflow mechanics, which owns Dockerfile/workflow linting) and **#26** (application *config keys*). Mature scanners exist (Checkov, Trivy, kube-linter) — the lens **orchestrates and judges blast-radius and intent**, it does not re-implement the rule engines. Repo-shaped (map-gaps G7): exposure and drift are *standing* conditions across all manifests, better scanned on a schedule (and in any IaC PR) than discovered one diff at a time.
 
 ### Key references
+
 - **Checkov (Palo Alto Networks / Prisma Cloud, formerly Bridgecrew)** — https://github.com/bridgecrewio/checkov . The most widely-adopted open-source IaC scanner; 1,000+ built-in policies across Terraform/CloudFormation/K8s/Helm/ARM, **graph-based cross-resource checks** (e.g. a security group wired to a public subnet), and custom policies in Python or YAML. Standalone CLI is free.
   → mine: the default first scanner for Terraform/CloudFormation/K8s; its graph checks catch relationships a single-resource linter misses. Soft-failed or `--skip-check`'d en masse, it is theater (cross #30 suppression hygiene).
 - **Trivy (Aqua Security) — IaC/misconfiguration scanning; tfsec is folded in** — https://github.com/aquasecurity/trivy . Aqua merged **tfsec into Trivy** (announced 2023, completed 2024); tfsec still runs but gets **no new checks**, and its `AVD-AWS-xxxx` IDs map unchanged into Trivy. For new work, use Trivy `config`/`misconfig`, not tfsec.
@@ -224,6 +243,7 @@ Scope: IaC manifests — Terraform / OpenTofu, Kubernetes / Helm, CloudFormation
   → mine: a concrete instance of this suite's standing rule — a canonical-but-dead scanner is a gap to close (migrate to Checkov/Trivy), not a gate to trust because it still exits zero (cross #19, #30).
 
 ### Tooling rules worth lifting
+
 - **Checkov** — `checkov -d .`; built-in policy IDs `CKV_AWS_*` / `CKV_K8S_*` / `CKV2_*` (the `CKV2_` graph checks are the cross-resource ones); custom policies in Python/YAML; `--compact --quiet` for CI.
 - **Trivy** — `trivy config <dir>` (IaC misconfig, includes the former tfsec rules `AVD-*`); `trivy k8s`; pairs with `trivy image` / `trivy fs` for CVEs so one tool spans IaC + supply chain.
 - **kube-linter** — `kube-linter lint .` over K8s manifests/Helm; default checks: `latest-tag`, `no-read-only-root-fs`, `run-as-non-root`, `unset-cpu-requirements` / `unset-memory-requirements`, `privileged-container`, `dangling-service`.
@@ -232,6 +252,7 @@ Scope: IaC manifests — Terraform / OpenTofu, Kubernetes / Helm, CloudFormation
 - **`terraform plan` / `terraform validate` / `tflint`** — `validate` for syntax, `tflint` for provider-specific correctness + deprecations, `plan` (reviewed in the PR) as the blast-radius and drift signal; run `plan` in CI before any `apply`.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - **Blast radius of the change:** what does `terraform plan` (or the CloudFormation change set) say this actually does — **create, in-place update, or replace/destroy**? A `-/+` replace of a stateful resource (database, volume, bucket) is potential **data loss / downtime**; a destroy of anything stateful needs explicit confirmation and a backup (cross #20, #28).
 - **Public exposure:** does the change open something to the world — `0.0.0.0/0` ingress, a public S3 bucket / blob container, a database with a public IP, a K8s `Service` of type `LoadBalancer` with no restriction? Default to private; flag any new public surface for explicit justification (security verdict owned by #14).
 - **Over-broad IAM / least privilege:** wildcard `Action: "*"` or `Resource: "*"`, `AdministratorAccess`, or a role far broader than the workload needs? Scope to the specific actions/resources required (cross #14).

@@ -11,7 +11,7 @@ provenance:
   built_from:
   - category: 27
     source: docs/research/cluster-6-evolution.md#27
-    hash: 973cb4bcfda0d546fe1fa8a4cde13fda7368c1cd120d0581b2a02d5ace663cfc
+    hash: ba00467edc777fed0fce3439c40c1d7cede1c341eafc278465121b57c67c3ccc
 ---
 
 # auditing-compliance-and-provenance

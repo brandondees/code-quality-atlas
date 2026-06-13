@@ -14,7 +14,7 @@ For **each** taxonomy category in scope, produce three sections:
 
 File header template:
 
-```
+```text
 # Research — Cluster N: <Name>
 > Part of code-quality-atlas phase-1 research (see ../taxonomy.md). Generated 2026-06-08 via web research. Citations best-effort; uncertainty flagged inline.
 

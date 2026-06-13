@@ -3,13 +3,16 @@
 > **Selecting tools for this stack.** The tools named below are field-tested starting points, not a mandate. Pick the one that fits this codebase's language version, build, and CI — and verify it actually runs on your toolchain before relying on it. A listed tool that is broken, abandoned, or noisy on your setup is a gap to close, not a permanent `continue-on-error`: prefer a working, maintained equivalent (often a younger, less well-known one) over a canonical-but-broken default. The capability is the requirement; the specific tool is replaceable.
 
 ## Contents
+
 - From category #25
 - From category #27
 
 ## From category #25
 
 ### Tooling rules worth lifting
+
 *(This space is young; many "rules" are validators/frameworks/scanners rather than classic lint IDs. IDs `(verify)`.)*
+
 - **Pydantic / `instructor` / Zod / OpenAI structured outputs / JSON-Schema response_format** — enforce a schema on model output and reject/repair non-conforming responses. The reviewable rule: *no model output is consumed without schema validation.*
 - **Guardrails AI** (`guardrails-ai`) — declarative output validators/"validators" (regex, JSON schema, PII, toxicity, competitor-mention, on-topic) with re-ask on failure. Lift the catalog of validator types as checklist items.
 - **NeMo Guardrails** (NVIDIA) — programmable input/output "rails" (topical, safety, jailbreak-detection rails) wrapping the LLM call.
@@ -23,6 +26,7 @@
 ## From category #27
 
 ### Tooling rules worth lifting
+
 - **`license-checker` / `license-checker-rseidelsohn` (npm)** — enumerate dependency licenses; `--failOn` / `--onlyAllow` to block disallowed licenses (e.g. GPL/AGPL) in a permissive project. `(verify)`.
 - **FOSSA / Snyk / WhiteSource(Mend) / Black Duck** — license-policy gates, copyleft/contamination alerts, attribution-report generation, IP-snippet matching. `(verify)`.
 - **ScanCode Toolkit + ScanCode.io** — detect licenses/copyrights/origin in source (provenance), emit SPDX. `(verify)`.

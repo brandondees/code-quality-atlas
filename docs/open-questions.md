@@ -71,6 +71,7 @@ shows retrieval-narrowed tool sets >3× selection accuracy). So: **how do we hos
 artifact-scoped lenses at near-zero idle cost?**
 
 **Candidate directions (no decision yet; full detail in the research doc §6):**
+
 1. **Minimal** — one new lens with a tight "skip when artifact absent" clause. Closes G11; doesn't
    generalize; +1 always-on description.
 2. **An `artifact` shape** *(recommended)* — promote `shape: artifact` (sibling to diff / repo /
@@ -85,6 +86,7 @@ artifact-scoped lenses at near-zero idle cost?**
    plain markdown). Longer-horizon.
 
 **Open sub-questions.**
+
 - Taxonomy placement of the *factor* (artifact-authoring quality): #30 meta-artifact vs #22/#24 vs a
   promoted Q16 category. Lean #30 (G11's table).
 - Does the `artifact` shape subsume the existing implicit artifact lenses (#20 migrations, #31 IaC,
@@ -97,13 +99,16 @@ D10/D12 (router/synthesizer), and Q14 (the cleanest signal-based-matching case).
 the research doc. **Status: RESOLVED (D15) — option (b), the `artifact` shape; G11 factor → #30. Build pending.**
 
 ### Q17 — Self-improving loop: usage signals → learnings → research edits *(new, 2026-06-12)*
+
 Make the suite self-improving: agents running the skills reflect on how the review process worked, detect routing misses / false positives / escapes / coverage gaps, and propagate learnings back to this repo — opt-in for consumers, mostly automated. Key insight: the **back half already exists** (D6/D8: research edit → drift → regenerate → evals → ship); what's missing is signal collection, distillation, and consented transport. Design exploration: [`self-improvement-loop.md`](self-improvement-loop.md) — a signal taxonomy (S1–S8, with taste S7 firewalled to the Q13 overlay, never upstreamed), the mechanism substrate (plugin hooks incl. a `PostToolUse` Skill-matcher invocation logger, a generated synthesizer "Process notes" appendix via a manifest `feedback:` section, `/atlas-retro` transcript digestion, a GitHub **outcome-auditor** routine joining reviews to merges/reverts as ground truth, an eval-first intake routine here), a **learning contract** mirroring D12's finding contract (stamped with the plugin commit SHA, enabling champion/challenger measurement across regenerations), four opt-in tiers (`off`/`local`/`draft`/`auto`) with the privacy boundary at record *creation* (abstracted evidence, never raw code), and the meta-loop's own failure modes (heuristic bloat, self-report bias, taste laundering, poisoned reports) countered by evidence thresholds + the eval-first ratchet as immune system. Staged rollout (§7): process-notes + local log first; full automation keeps exactly two human gates (consumer filing approval, atlas merge). Feeds Q14 (the invocation log is the missing lens-usage evidence) and depends on Q13. Status: **brainstorm captured, awaiting user review.**
 
 ### Q16 — Promote agentic/tool-use safety to its own category?  → RESOLVED (see D14: promoted → #32)
+
 Map-gaps G2's candidate now has standards-grade external backing: OWASP released a dedicated **Top 10 for Agentic Applications** (ASI01–ASI10, 2025-12-09) separate from the LLM Top 10, alongside the Agentic AI Threats & Mitigations companion and the MCP spec's security-best-practices page (confused deputy / token passthrough / tool poisoning). The research-expansion pass (2026-06-12) filed the references + nine agentic heuristics under **#25** in cluster-4, so the suite reviews this material today either way. The open call: promote to a new category **#32** (cross-cutting #13 tool contracts, #14 authz, #24 agent process) — clearer ownership and a sharper lens trigger for agent-heavy codebases, at the cost of taxonomy churn and skill re-mapping — or keep it a #25 facet.
 **Resolved (user, 2026-06-12) — promoted to #32 (D14).** The trigger gap was the decider (agent-heavy repos that don't read as "LLM integration" can slip #25's trigger); G1 cross-cutting ownership and OWASP's separate Agentic Top 10 sealed it. Scoped to the action/tool surface with a model-call↔action boundary; the lethal-trifecta framing stays in #25. `taxonomy.md` carries #32; the skill is pending the build phase. The cheaper "sharpen #25's trigger only" middle path was considered and rejected (leaves G1 ownership unresolved, keeps the bundled-budget crowding).
 
 ### Q13 — Team preferences overlay *(new, 2026-06-12)*
+
 The suite pushes research-derived "objectively better" defaults but has no home for the **codebase owner's / team's considered opinion** (only `checking-idioms-and-consistency` bends, and only to linter configs). Design write-up: [`team-preferences-overlay.md`](team-preferences-overlay.md). Decisions captured from the user this session: **(a) tiered precedence** — preference-tier findings (taste/thresholds/idioms) the team may tune or silently suppress; floor-tier findings (security, correctness, data/migration safety, concurrency) can never be silently dropped, only `acknowledge`d with a recorded rationale that still surfaces; **(b) bootstrap = template + inference, but inference is proposal-only** — it emits a ratification *interview*, never writes the overlay, and never runs by accident, so a haphazard/vibe-coded repo can't launder unconsidered "approve-click" patterns into ratified standards. Overlay lives in the *reviewed* repo (`.code-quality-atlas/preferences.md`), is read at review time by the router, and stays out of generated-skill provenance (D6). Status: **design APPROVED (user, 2026-06-12) as the implementation basis; build DEFERRED** — sequenced after the v0.3 / #32 builds rather than next, so the keystone unblock of Q17/Q18/Q14 waits. The genuinely-open §9 residuals (tier-tag granularity — per-check vs per-lens; overlay-vs-linter-config precedence; monorepo discovery; `acknowledge` expiry) are **left to implementation-planning** when the build is picked up.
 
 ### Q14 — Router intent, matching/ranking, and review-depth modes *(new, 2026-06-12)*
@@ -111,12 +116,14 @@ The suite pushes research-derived "objectively better" defaults but has no home 
 **Trigger.** A factor-level coverage audit ([`map-gaps.md`](map-gaps.md) G9) **observed** the router's 2-4-lens cap acting as a *coverage suppressor*: capping each change to 2-4 lenses leaves the soft lenses (naming/readability, observability, restraint) unfired on most change shapes, so their factors never produce findings — the suite emits no naming findings in practice despite #5 being owned. **The cap is working exactly as documented** — `choosing-review-lenses/SKILL.md` (and `tooling/generate.py`) specify "run 2-4 content lenses per change" (D10), and that contract stands. The tension is that the contract was written to *improve unprompted, relevant skill activation* — a discovery aid so an agent/harness fires the right lenses without knowing the whole catalog — **not to gate total coverage**. The original intent was the full suite run **together, in parallel, for an extremely comprehensive review**; the router was meant to be the on-ramp to that, not a turnstile in front of it. Q14 asks whether that contract should be re-scoped — separating relevance from depth (below) — not whether the router is violating it.
 
 **The conflation to undo.** Today's router collapses two independent axes onto one 2-4 list:
+
 - **Relevance** — which lenses *apply* to this change (a bug fix needn't run a11y).
 - **Depth / budget** — *how much* to run right now (quick triage vs. full audit).
 
 The 2-4 cap is really a *depth* choice wearing a *relevance* mask. Separating the two axes is the core of this question.
 
 **Candidate directions (to weigh — no decision yet):**
+
 1. **Review-depth modes / tiers** — make depth an explicit selectable axis:
    - *Critical-only triage* — correctness, security, data-safety, concurrency; fast/cheap, gate-shaped (pre-merge smoke).
    - *PR-level review* — the relevance-routed set (today's behavior), tuned per change shape.
@@ -127,6 +134,7 @@ The 2-4 cap is really a *depth* choice wearing a *relevance* mask. Separating th
 4. **Progressive-phase routing** — phase the review: gate-critical first (block fast on blockers), then structural/design, then readability/idiom/docs as polish — each phase a depth step a reviewer (human or scheduled) can stop at. Pairs with the synthesizer's severity floor.
 
 **Open sub-questions.**
+
 - Where does *mode* live — a router argument, distinct commands (`/atlas-review-pr` exists; add `/atlas-audit-comprehensive` and `/atlas-triage`?), or a manifest `modes:` section the router generates from?
 - Does the 2-4 cap survive as the *PR-mode default*, or is it dropped for relevance-ranked-to-a-budget?
 - Interaction with the synthesizer (D12) and `REVIEW.md`'s round-based severity floor: that escalating floor is *precisely* what silences Nit/Minor (readability-class) findings after round 1, so comprehensive mode would need to **lower** the floor — keep it at Nit regardless of round count, or bypass the per-round escalation entirely for full-suite runs — to keep those findings alive. (A *higher* floor drops more, not fewer.)
@@ -177,6 +185,7 @@ In-repo `skills/` dir? A Claude Code plugin? How are they versioned relative to 
 
 *(Original framing kept for provenance; resolved together with Q1-revisited above.)* The suite collapsed the categories along the **By review behavior** + **Hybrid** options below — broad lens skills plus sharp single-behavior ones (security sweep, migration safety, …) — meeting the decision criterion (coherent trigger, fits working context, actionable findings without re-deriving the map).
 24 categories is too many for 24 skills; several would be thin. How do categories collapse into a buildable, composable set? Options to weigh later:
+
 - **By cluster** (~6 skills) — coarse, each skill covers a whole cluster.
 - **By review behavior** — group by *what the reviewer does* (e.g. "trace correctness", "hunt silent failures", "check the blast radius") rather than by topic. May cut across clusters.
 - **By altitude** — line/function → module → architecture → system. Maps to how reviews actually zoom.

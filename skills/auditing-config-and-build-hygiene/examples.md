@@ -22,6 +22,7 @@ injected/validated, report exactly
 ## Bad → finding (CI + image + config)
 
 **Input (build/config scan):**
+
 ```text
 ci.yml:        uses: actions/checkout@main; tests run but `continue-on-error: true`;
                docker build pulls base image python:latest
@@ -30,7 +31,9 @@ settings.py:   if ENV == "prod": payment_url = "https://pay.internal" else: "htt
                DEBUG defaults to True; config read at first use, KeyError at runtime
 flags.yml:     enable_new_pricing: true  (owner: none, added 14 months ago)
 ```
+
 **Expected finding:**
+
 1. **Secret baked into the image:** the Stripe key in a Dockerfile `ENV` ships in
    every layer — inject at runtime from a secrets manager and rotate the exposed key.
 2. **Unpinned action:** `actions/checkout@main` is a mutable tag — pin it to a full
@@ -52,13 +55,16 @@ flags.yml:     enable_new_pricing: true  (owner: none, added 14 months ago)
 ## Bad → finding (build reproducibility + flags)
 
 **Input (build/config scan):**
+
 ```text
 build.gradle: java toolchain points at /usr/local/jdk-17 on the build box
 install.sh:   wget -qO- https://deps.example/setup.sh | sh   (no version, no checksum)
 flags.yml:    legacy_export: false  (owner none; referenced in 0 code paths; 18 months)
               dark_mode_v2: true    (owner none; both branches still maintained; 7 months)
 ```
+
 **Expected finding:**
+
 1. **Machine-local build dependency:** the Gradle toolchain hardcodes
    `/usr/local/jdk-17`, so the build only works on a box that already has that exact
    path — not hermetic/reproducible. Resolve the JDK through the build tool (a Gradle
@@ -75,6 +81,7 @@ flags.yml:    legacy_export: false  (owner none; referenced in 0 code paths; 18 
 ## Good → no finding
 
 **Input (build/config scan):**
+
 ```text
 ci.yml:        actions pinned by SHA; lint+type+test+audit required to merge; base
                image pinned by digest; artifact built once, promoted to stage/prod
@@ -82,6 +89,7 @@ config.py:     pydantic-settings: all vars validated at import, env-injected,
                documented; DEBUG default False; no secrets in repo (scanner clean)
 flags.yml:     checkout_v2 (owner: @payments, removal: #931, expires 2026-08)
 ```
+
 **Expected finding:** None — pinned and reproducible, gates required, fail-fast
 validated config, owned flags with removal plans. Report
 "No findings: config and build hygiene are sound". Do NOT demand extra

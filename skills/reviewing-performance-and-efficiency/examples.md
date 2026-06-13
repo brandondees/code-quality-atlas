@@ -12,6 +12,7 @@ without a profile is a finding the other way (premature optimization).
 ## Bad → finding
 
 **Input (diff):**
+
 ```python
 def order_summaries(user):
     summaries = []
@@ -21,7 +22,9 @@ def order_summaries(user):
         summaries.append(render(order, items))
     return summaries
 ```
+
 **Expected finding:**
+
 1. **N+1 queries:** one query per order (×2) inside the loop — a user with 500
    orders issues 1001 round-trips. Fetch all orders in one query and all items
    with a single `WHERE order_id IN (...)` (or a join), then group in memory.
@@ -29,6 +32,7 @@ def order_summaries(user):
 ## Bad → finding
 
 **Input (diff):**
+
 ```js
 async function tagActiveUsers(users, activeIds) {
   for (const u of users) {
@@ -39,7 +43,9 @@ async function tagActiveUsers(users, activeIds) {
   }
 }
 ```
+
 **Expected finding:**
+
 1. **Accidental O(n²):** `Array.includes` inside the loop scans `activeIds` per
    user — build a `Set` once and use `set.has(u.id)`.
 2. **Serialized I/O:** `await` per item turns independent requests into sequential
@@ -51,12 +57,14 @@ async function tagActiveUsers(users, activeIds) {
 ## Good → no finding
 
 **Input (diff):**
+
 ```python
 def nightly_export():
     # runs once per night from the scheduler
     rows = [serialize(r) for r in load_completed_jobs()]
     write_csv("/exports/jobs.csv", rows)
 ```
+
 **Expected finding:** None — a once-a-night batch on bounded data is a cold path;
 the simple loop is appropriate. Report "No findings". Do NOT recommend streaming,
 caching, parallelism, or batching that no profile has justified — an unforced

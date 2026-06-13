@@ -1,11 +1,13 @@
 # Reviewable heuristics — reviewing-accessibility-and-i18n
 
 ## Contents
+
 - From category #23
 
 ## From category #23
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - **Semantic-first:** is a real `<button>`/`<a>`/`<nav>`/`<main>`/heading used, or a `<div>` with a click handler? Native element = keyboard + role + focus for free.
 - **Keyboard operable:** can every interactive element be reached and activated by Tab/Shift-Tab/Enter/Space/Escape/arrows as appropriate? No mouse-only handlers (click without key handler).
 - **Focus management:** after opening a modal/menu/route change, does focus move sensibly and return on close? Is focus trapped in the dialog? Is `:focus-visible` styling present (not `outline:none` with no replacement)?

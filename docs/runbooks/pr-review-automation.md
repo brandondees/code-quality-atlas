@@ -26,7 +26,7 @@ So:
 
 ## The three moving parts
 
-```
+```text
                  PR opened (GitHub trigger)
 build+autofix ──────────────────────────►  reviewer routine
   session     ◄──── inline findings ───────  one session: first review, then

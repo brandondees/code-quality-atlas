@@ -7,6 +7,7 @@ happens if two callers run this at once, and what may have changed across each
 ## Bad → finding
 
 **Input (diff):**
+
 ```js
 async function redeemCoupon(userId, couponId) {
   const used = await db.couponUsed(userId, couponId);
@@ -16,7 +17,9 @@ async function redeemCoupon(userId, couponId) {
   }
 }
 ```
+
 **Expected finding:**
+
 1. **Check-then-act across an await (TOCTOU race):** two concurrent requests both
    read `used == false` and both credit — a double-spend. Make the check-and-mark
    atomic: a unique constraint on `(user_id, coupon_id)` with insert-first, or a
@@ -28,6 +31,7 @@ async function redeemCoupon(userId, couponId) {
 ## Bad → finding
 
 **Input (diff):**
+
 ```python
 request_count = 0
 
@@ -36,7 +40,9 @@ def handle(request):            # served by a thread pool
     request_count += 1
     asyncio.create_task(push_metrics())   # fire-and-forget, no reference kept
 ```
+
 **Expected finding:**
+
 1. **Unsynchronized read-modify-write:** `request_count += 1` from multiple threads
    loses updates — use a lock, an atomic counter, or your metrics library's counter.
 2. **Dropped task:** the `create_task` result is discarded — its exceptions vanish
@@ -46,6 +52,7 @@ def handle(request):            # served by a thread pool
 ## Good → no finding
 
 **Input (diff):**
+
 ```python
 async def on_payment_event(msg):
     # at-least-once delivery: idempotent upsert keyed on the event id
@@ -55,6 +62,7 @@ async def on_payment_event(msg):
         msg.event_id, msg.amount,
     )
 ```
+
 **Expected finding:** None — the consumer is idempotent, keyed on a stable id, and
 the database enforces the atomicity (no app-level check-then-act). Report
 "No findings". Do NOT demand a lock where a database constraint already provides

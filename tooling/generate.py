@@ -44,7 +44,7 @@ def build_reference(skill: Skill, kind: str, docs_root: str = ".") -> str:
     toc = "\n".join(f"- From category #{n}" for n, _ in entries)
     parts = [f"## From category #{n}\n\n{body}" for n, body in entries]
     preamble = f"{_TOOLING_PREAMBLE}\n" if kind == "tooling" else ""
-    header = f"# {_KIND_TITLE[kind]} — {skill.name}\n\n{preamble}## Contents\n{toc}\n"
+    header = f"# {_KIND_TITLE[kind]} — {skill.name}\n\n{preamble}## Contents\n\n{toc}\n"
     return header + "\n" + "\n\n".join(parts) + "\n"
 
 
@@ -358,7 +358,7 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "- **finding** — what is wrong, concretely\n"
         "- **fix** — the suggested change, or the evidence needed to decide\n\n"
         "## Output format\n\n"
-        "```\n"
+        "```text\n"
         "Verdict: <block | approve with changes | approve> — <one-line reason>\n\n"
         f"{sy.severity_order[0]}\n"
         "- <location> — <finding> (<lens>). <fix>\n\n"

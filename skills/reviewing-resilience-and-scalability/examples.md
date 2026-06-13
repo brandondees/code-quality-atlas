@@ -28,6 +28,7 @@ scaling-blocking state, report exactly "No findings" — even though this lens
 ## Bad → finding (a code diff)
 
 **Input (review this change):**
+
 ```python
 def sync_partner_feed():
     rows = db.query("SELECT * FROM partners")          # all rows, no limit
@@ -38,7 +39,9 @@ def sync_partner_feed():
     CACHE[:] = items                                    # module-level in-process cache
     return items
 ```
+
 **Expected finding:**
+
 1. **Unbounded result set:** `SELECT *` with no `LIMIT` loads the whole `partners`
    table into memory and accumulates every feed into `items` — memory grows with
    data and OOMs under growth. Page the query and bound/stream the accumulation.
@@ -54,12 +57,15 @@ def sync_partner_feed():
 ## Bad → finding (a design doc / RFC)
 
 **Input (review this design):**
+
 ```text
 RFC: "Orders service — single Postgres primary, no replica. A single `orders`
 table with a global `next_order_no` counter incremented per insert. Nightly
 pg_dump to S3. Target: 5k orders/sec at peak, 99.95% availability."
 ```
+
 **Expected finding:**
+
 1. **Single-writer bottleneck:** a global `next_order_no` counter serializes every
    insert through one row — it caps throughput regardless of scaling and will not
    reach 5k/sec. Use a sequence, UUID, or sharded ID generation.
@@ -74,6 +80,7 @@ pg_dump to S3. Target: 5k orders/sec at peak, 99.95% availability."
 ## Good → no finding
 
 **Input (review this change):**
+
 ```python
 async def fetch_quote(client, symbol):
     # bounded call: 2s timeout, breaker opens after repeated failures,
@@ -85,6 +92,7 @@ async def fetch_quote(client, symbol):
         except (TimeoutError, UpstreamError):
             return cache.get(symbol)            # stale-but-serving fallback
 ```
+
 **Expected finding:** None — the dependency call is bounded (timeout), the failure
 path is defined (circuit breaker + cached fallback / graceful degradation), and it
 holds no instance-local state that blocks scaling. Report exactly "No findings".

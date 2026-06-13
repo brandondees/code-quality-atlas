@@ -11,7 +11,7 @@ provenance:
   built_from:
   - category: 8
     source: docs/research/cluster-2-readability.md#8
-    hash: a934a90b32a30d4a4239c9285e13651166bb062db40fc06ecc68e356b54d4c79
+    hash: 26d5c0f70c305c571b1ae79d07106c45872ee33c0d456c2ee51a997dab0ddf1a
 ---
 
 # checking-idioms-and-consistency

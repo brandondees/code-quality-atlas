@@ -12,10 +12,10 @@ provenance:
   built_from:
   - category: 1
     source: docs/research/cluster-1-correctness.md#1
-    hash: 67804c59cce91a8a7d54c299022f532bd6f99b79926a841fdb5cc8e10fb41ef3
+    hash: a731dbba0203ecaecbea20b4f5fd55e427df59cff4565a35e865895ab4557a64
   - category: 4
     source: docs/research/cluster-1-correctness.md#4
-    hash: 3edce8248eeb84bff46c3aa7e7c5ad1ada54d091f9366fb17fba234616ec27c7
+    hash: 9a8288ba9a0155c5b816ae033497849954224582cc461daf7baeb8b6af4e5afc
 ---
 
 # tracing-correctness-and-invariants

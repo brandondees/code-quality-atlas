@@ -1,12 +1,14 @@
 # References to mine — reviewing-pr-and-process-hygiene
 
 ## Contents
+
 - From category #24
 - From category #22
 
 ## From category #24
 
 ### Key references
+
 - **Conventional Commits 1.0.0** — https://www.conventionalcommits.org/en/v1.0.0/ (feat→MINOR, fix→PATCH, `!`/`BREAKING CHANGE:`→MAJOR).
   → mine: `type(scope)!: subject` + body + footer; types `feat`/`fix`/`docs`/`refactor`/`test`/`chore`/`perf`/`build`/`ci`; `!` or `BREAKING CHANGE:` footer signals SemVer-major. Machine-readable risk/intent → auto-changelog and release decisions (links #22).
 - **Google Engineering Practices — "Code Review Developer Guide" (Small CLs; What to look for)** `(verify)`.
@@ -27,6 +29,7 @@
 ## From category #22
 
 ### Key references
+
 - **Diátaxis (Daniele Procida) — https://diataxis.fr/**
   → mine: four distinct doc modes — **tutorials** (learning-oriented), **how-to guides** (task/goal-oriented), **reference** (information-oriented), **explanation** (understanding-oriented) — on two axes (action↔cognition, acquisition↔application). A doc that mixes modes (tutorial that drifts into reference) is a smell; missing a *whole quadrant* (e.g. no how-tos) is a gap.
 - **Michael Nygard — "Documenting Architecture Decisions" (ADR, 2011)** — https://adr.github.io/ (overview: https://martinfowler.com/bliki/ArchitectureDecisionRecord.html)

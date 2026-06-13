@@ -1,11 +1,13 @@
 # Reviewable heuristics — auditing-architecture-conformance
 
 ## Contents
+
 - From category #12
 
 ## From category #12
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Do source dependencies respect the **intended direction** (domain doesn't import infrastructure; UI→app→domain, not back)?
 - Any **dependency cycles** between modules/packages/services (ADP)?
 - Is there a **god module / hub** with huge fan-in *and* fan-out that everything routes through?

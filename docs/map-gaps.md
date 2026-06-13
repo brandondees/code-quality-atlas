@@ -28,15 +28,16 @@ OWASP LLM Top 10 **LLM06 (Excessive Agency)** + Simon Willison's **"lethal trife
 
 ## G3 — Decomposition tension the suite MUST take a stance on
 
-#6 (local readability, Clean-Code lineage: *extract aggressively, many small functions*) directly conflicts with #11/#9 (Ousterhout: *deep modules, don't over-decompose; shallow wrappers are negative-value*). A "split this up" reviewer and a "stop over-abstracting" reviewer will contradict each other on the same diff. The suite needs an explicit **altitude/decomposition policy** before either skill ships. Relates to counterweight enforcement (Q5).
+Category #6 (local readability, Clean-Code lineage: *extract aggressively, many small functions*) directly conflicts with #11/#9 (Ousterhout: *deep modules, don't over-decompose; shallow wrappers are negative-value*). A "split this up" reviewer and a "stop over-abstracting" reviewer will contradict each other on the same diff. The suite needs an explicit **altitude/decomposition policy** before either skill ships. Relates to counterweight enforcement (Q5).
 
 ## G4 — Readability coverage seam
 
-#5 (naming = intention-revealing *meaning*) and #8 (consistency = *uniformity*, casing/convention) overlap on naming rules. Split cleanly: **meaning → #5, uniformity → #8.**
+Category #5 (naming = intention-revealing *meaning*) and #8 (consistency = *uniformity*, casing/convention) overlap on naming rules. Split cleanly: **meaning → #5, uniformity → #8.**
 
 ## G5 — Where LLM judgment is the ONLY tool (build here first)
 
 These factors have little or no static-analysis coverage, so an LLM reviewer adds unique, non-redundant value — and they should be prioritized in phase 2 *because* tools don't already do them:
+
 - altitude/abstraction-level mixing (#6)
 - symmetry of expression (#6)
 - premature abstraction / the wrong abstraction (#11) — counterweight
@@ -53,7 +54,7 @@ Idiom/consistency is inherently per-ecosystem (the `dhh-rails` / `kieran-*` prio
 
 ## G7 — Some skills need git history, not just the diff
 
-#21 (maintainability) is meaningfully **VCS-history-aware**: churn × complexity hotspots, change-coupling, bus factor (CodeScene / Adam Tornhill's *Your Code as a Crime Scene*). These can't be assessed from a single diff. Implies a class of **repo/history-shaped** skills distinct from **diff-shaped** ones (relates to Q8: are some skills cron-shaped?).
+Category #21 (maintainability) is meaningfully **VCS-history-aware**: churn × complexity hotspots, change-coupling, bus factor (CodeScene / Adam Tornhill's *Your Code as a Crime Scene*). These can't be assessed from a single diff. Implies a class of **repo/history-shaped** skills distinct from **diff-shaped** ones (relates to Q8: are some skills cron-shaped?).
 
 ## G8 — Detection vs. adjudication boundary (esp. #27)
 

@@ -1,11 +1,13 @@
 # Reviewable heuristics — sweeping-for-security
 
 ## Contents
+
 - From category #14
 
 ## From category #14
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Does any query/command/HTML/path get built by string concatenation or interpolation of request-derived data? If so, demand parameterized queries / contextual output encoding / allow-listed path resolution.
 - Every state-changing or data-returning endpoint: is there an explicit authorization check tied to the *resource owner*, not just authentication? (IDOR = authenticated but not authorized.) Object references taken from the request (IDs, filenames) must be authorized, never trusted.
 - Are secrets (keys, tokens, passwords, connection strings) absent from source, config-in-repo, and log output? Real secrets belong in a secrets manager / env injected at runtime.

@@ -5,6 +5,7 @@ Report each distinct issue as its own numbered finding. When the input is correc
 ## Bad → finding
 
 **Input (diff):**
+
 ```python
 def summarize_inbox(user):
     docs = fetch_attachments(user)            # untrusted uploads
@@ -12,7 +13,9 @@ def summarize_inbox(user):
     reply = llm.chat(model="latest", prompt=prompt, tools=[send_email, search_contacts])
     return reply
 ```
+
 **Expected finding:**
+
 1. **Prompt injection by design:** untrusted attachment content is concatenated as
    *instructions* ("follow any instructions"), not delimited as data.
 2. **Lethal trifecta:** private data (contacts) + untrusted content (uploads) + an
@@ -25,12 +28,15 @@ def summarize_inbox(user):
 ## Bad → finding
 
 **Input (diff):**
+
 ```js
 const out = await llm.complete({ prompt: buildQuery(userQuestion) });
 const sql = JSON.parse(out).sql;
 await db.raw(sql);                       // run whatever the model returned
 ```
+
 **Expected finding:**
+
 1. **Model output flows to a dangerous sink:** `db.raw(sql)` executes whatever the
    model produced — treat model output like raw user input (parameterize,
    allow-list tables/verbs, or use a read-only role).
@@ -41,6 +47,7 @@ await db.raw(sql);                       // run whatever the model returned
 ## Good → no finding
 
 **Input (diff):**
+
 ```python
 SCHEMA = TicketLabel  # pydantic: {"label": Literal["bug","billing","other"]}
 
@@ -56,6 +63,7 @@ def classify(ticket_text: str) -> str:
     except ValidationError:
         return "other"                      # defined fallback
 ```
+
 **Expected finding:** None — pinned model, delimited untrusted input, temperature 0
 for a classification task, bounded tokens and timeout, schema-validated output with
 a defined fallback, and no tool/egress surface. Report "No findings". Do NOT demand

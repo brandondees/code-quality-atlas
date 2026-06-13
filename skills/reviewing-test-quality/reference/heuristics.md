@@ -1,11 +1,13 @@
 # Reviewable heuristics — reviewing-test-quality
 
 ## Contents
+
 - From category #17
 
 ## From category #17
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Do new/changed tests assert **observable behavior** (inputs→outputs, side effects), not internal calls/private state (refactor-resistant)?
 - Is coverage **meaningful** on the new code — branches and edge cases, not just lines executed? Don't chase a % with assertion-free tests.
 - Bug fix → is there a **regression test** that fails before the fix and passes after?
