@@ -1,5 +1,5 @@
 # Research — Cluster IV: Cross-cutting runtime qualities
->
+
 > Part of code-quality-atlas phase-1 research (see ../taxonomy.md). Drafted 2026-06-08 (from model knowledge, web-less subagent); **web-verified 2026-06-09 from the main loop.** Standards spines (OWASP Top 10 2021, OWASP LLM Top 10 2025, CWE Top 25 2024, ASVS 5.0, Core Web Vitals, lethal trifecta) and the high-traffic tool rule IDs (Bandit, gosec) are confirmed against live sources. Residual `(verify)` items are the less-stable ones (exact Semgrep/CodeQL query IDs, Sonar squids).
 
 ---

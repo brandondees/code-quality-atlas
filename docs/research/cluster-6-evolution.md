@@ -1,5 +1,5 @@
 # Research — Cluster VI: Evolution & humans (Maintainability & Process)
->
+
 > Part of code-quality-atlas phase-1 research (see ../taxonomy.md). Drafted 2026-06-08 (from model knowledge, web-less subagent); **web-verified 2026-06-09 from the main loop.** Standards spines (WCAG 2.2 SCs, Conventional Commits, Diátaxis, ADR, Keep a Changelog, SPDX/AGPL copyleft, REUSE, EAA, GDPR) and high-traffic tool rule IDs (axe-core, eslint-plugin-jsx-a11y, commitlint, the SmartBear/Cisco review-size study) are confirmed against live sources. Residual `(verify)` marks niche/less-stable tool rule names (some SonarQube squids, formatjs/i18next/html-validate plugin rules) to confirm at skill-build time.
 
 ---
