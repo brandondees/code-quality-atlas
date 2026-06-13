@@ -1,12 +1,14 @@
 # Reviewable heuristics — checking-restraint
 
 ## Contents
+
 - From category #11
 - From category #15
 
 ## From category #11
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is this abstraction introduced on **real, repeated need** (rule of three), or speculatively for one/two uses (YAGNI)?
 - Does it have a single, nameable responsibility — or is it a grab-bag taking flags/conditionals to fit multiple callers (the **wrong-abstraction** smell)?
 - Is there an **existing** abstraction this duplicates/competes with (reuse/extend it, don't fork — cross #8)?
@@ -21,6 +23,7 @@
 ## From category #15
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is there a loop that issues a query/RPC/HTTP call per iteration? (N+1.) Push to a single batched/`IN`/join query or a bulk endpoint. Flag `await` inside `for` over independent items.
 - What is the worst-case complexity on the hot path as input grows? Flag accidental O(n²) (nested loops over the same collection, `Array.includes` inside a loop → use a Set/Map), and unbounded growth.
 - Is the same expensive value (DB read, computed result, parsed config, compiled regex) recomputed when it could be hoisted or memoized? Conversely, is anything memoized that's cheap and rarely reused (premature)?

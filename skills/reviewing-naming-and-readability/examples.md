@@ -6,6 +6,7 @@ and report each distinct issue as its own numbered finding. When the input is co
 ## Bad → finding
 
 **Input (diff):**
+
 ```python
 def process(data, flag):
     if data is not None:
@@ -18,7 +19,9 @@ def process(data, flag):
             return tmp
     return None
 ```
+
 **Expected finding:**
+
 1. **Placeholder names** (`process`, `data`, `tmp`, `flag`, `d`) hide intent — name
    the domain concept (e.g. `find_large_settled_orders`).
 2. **Magic numbers** `3`, `2`, `10000` need named constants (`MODE_AUDIT`,
@@ -29,6 +32,7 @@ def process(data, flag):
 ## Bad → finding
 
 **Input (diff):**
+
 ```js
 // Retries the request 3 times before giving up.
 async function fetchUserViaHttpGet(id) {
@@ -37,7 +41,9 @@ async function fetchUserViaHttpGet(id) {
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) { /* ... */ }
 }
 ```
+
 **Expected finding:**
+
 1. **Comment contradicts the code:** the comment says "3 times" but the code allows
    5 — a contradicting comment is worse than none; fix one of them.
 2. **Commented-out code** (`oldFetchUser`) — delete it; version control is the
@@ -51,6 +57,7 @@ async function fetchUserViaHttpGet(id) {
 ## Good → no finding
 
 **Input (diff):**
+
 ```python
 MAX_LOGIN_ATTEMPTS = 5
 
@@ -59,6 +66,7 @@ def is_locked_out(account: Account) -> bool:
         return False
     return account.lock_expiry > clock.now()
 ```
+
 **Expected finding:** None — intention-revealing names, a predicate boolean
 (`is_locked_out`), the literal is a named constant, guard clause keeps nesting flat.
 Report "No findings". Do NOT flag the short body as "needs comments" — clear code
@@ -68,11 +76,13 @@ longer names for already-clear ones.
 ## Good → no finding
 
 **Input (diff):**
+
 ```js
 for (let i = 0; i < rows.length; i++) {
   total += rows[i].amountCents;
 }
 ```
+
 **Expected finding:** None — a one-letter index is fine for a three-line loop (name
 length proportional to scope), and `amountCents` already carries its unit. Report
 "No findings"; do not invent issues.

@@ -1,11 +1,13 @@
 # Reviewable heuristics — auditing-compliance-and-provenance
 
 ## Contents
+
 - From category #27
 
 ## From category #27
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - **New dependency license check:** does an added dependency (and its transitive tree) carry a license compatible with the project's distribution model? Block/strongly-flag GPL/AGPL pulled into a permissive or proprietary product.
 - **Copyleft contamination / linkage:** does the change *link* or *combine* with copyleft code in a way that triggers obligations (esp. AGPL over a network service)? Static vs. dynamic linking and "mere aggregation" matter — flag for legal if unsure.
 - **License/attribution preservation:** are upstream license texts, copyright notices, and NOTICE files retained when vendoring/copying code? Removed attribution = violation.

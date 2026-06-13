@@ -146,7 +146,7 @@ A7 suite-dogfooding (a practice) · D8 DevEx-as-a-system (org measurement) · de
 
 ### Known G9 (propagation, route to the G9 fix — *not* new research)
 
-#12 scalability (now folded into #28) · #12 feature-flag-architecture · #15 FinOps/cost · A3 flaky-infra-vs-test · A6 build-pipeline-as-object · B5 docs (partially).
+Known: #12 scalability (now folded into #28) · #12 feature-flag-architecture · #15 FinOps/cost · A3 flaky-infra-vs-test · A6 build-pipeline-as-object · B5 docs (partially).
 
 ### Cross-cutting, not a category
 

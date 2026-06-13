@@ -12,6 +12,7 @@ agree and examples run, report exactly "No findings: documentation is healthy".
 ## Bad → finding
 
 **Input (docs parity scan):**
+
 ```text
 README quickstart:   `pip install acme && acme init` — `acme init` was removed in v3
                      (replaced by `acme setup`); install example imports acme.legacy
@@ -21,7 +22,9 @@ docstrings:          rotate_keys(key_id, *, force=False) — docstring documents
 CHANGELOG:           last entry 11 months ago; 6 user-facing releases since
 diagrams/arch.png:   binary image, references services deleted in Q1
 ```
+
 **Expected finding:**
+
 1. **Broken front door:** the README quickstart fails on the first command
    (`acme init` removed) and imports a deleted module — a new user cannot onboard;
    fix and add a CI-checked runnable example.
@@ -37,6 +40,7 @@ diagrams/arch.png:   binary image, references services deleted in Q1
 ## Good → no finding
 
 **Input (docs parity scan):**
+
 ```text
 README quickstart:   runs in CI (doctest job green)
 public API:          22/22 endpoints documented; reference regenerated from schema
@@ -44,6 +48,7 @@ docstrings:          signature parity check green
 CHANGELOG:           entry per release, categories + semver impact
 ADRs:                12, latest covers the queue migration decision
 ```
+
 **Expected finding:** None — surface and docs agree, examples are CI-checked, the
 changelog is current. Report "No findings: documentation is healthy". Do NOT
 demand more documentation volume for its own sake — parity and accuracy are the

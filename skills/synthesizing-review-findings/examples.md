@@ -12,7 +12,7 @@ query and rewrites the payment retry logic.
 
 **Good synthesis:**
 
-```
+```text
 Verdict: approve with changes — one swallowed error must be fixed; the cache needs a profile or invalidation.
 
 Major
@@ -48,7 +48,7 @@ interface with one implementation.
 
 **Good synthesis:** these conflict, so reconcile rather than pick silently:
 
-```
+```text
 Verdict: approve with changes — collapse the premature interface.
 
 Minor
@@ -68,7 +68,7 @@ two contradictory verdicts and no resolution.
 
 **Good synthesis:**
 
-```
+```text
 Verdict: approve — No findings. All lenses clear.
 ```
 

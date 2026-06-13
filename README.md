@@ -46,7 +46,7 @@ Start with **`choosing-review-lenses`** when you are unsure which lenses apply â
 
 In an interactive Claude Code session on your machine (terminal CLI, desktop app, or IDE extension):
 
-```
+```text
 /plugin marketplace add brandondees/code-quality-atlas
 /plugin install code-quality-atlas@code-quality-atlas
 ```

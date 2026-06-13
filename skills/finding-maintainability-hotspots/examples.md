@@ -7,13 +7,16 @@ as its own numbered finding. When the scan is healthy, the entire response is ex
 ## Bad → finding
 
 **Input (repo scan, last 12 months):**
+
 ```text
 file                          commits  authors  cognitive-complexity  todo/hack
 billing/invoice_engine.py        87       1            142               9
 api/routes.py                    41       6             18               0
 models/user.py                   12       4              9               1
 ```
+
 **Expected finding:**
+
 1. **Hotspot:** `billing/invoice_engine.py` — highest churn × highest complexity;
    refactoring it pays for itself fastest.
 2. **Bus factor 1:** a single author owns 87 commits of a 142-complexity file —
@@ -25,12 +28,15 @@ models/user.py                   12       4              9               1
 ## Bad → finding
 
 **Input (repo scan, co-change analysis):**
+
 ```text
 pair                                          co-change rate   import link?
 orders/checkout.py <-> email/templates.py          91%              no
 orders/checkout.py <-> orders/cart.py              74%              yes
 ```
+
 **Expected finding:**
+
 1. **Hidden coupling:** `checkout.py` and `email/templates.py` change together in
    91% of commits with no code-level dependency — an implicit contract, likely
    duplicated order-summary formatting. Name the contract and make it explicit
@@ -41,12 +47,14 @@ orders/checkout.py <-> orders/cart.py              74%              yes
 ## Good → no finding
 
 **Input (repo scan, last 12 months):**
+
 ```text
 file                          commits  authors  cognitive-complexity  todo/hack
 api/handlers.py                  23       5             11           1 (linked #482)
 core/pricing.py                  18       4             14           0
 lib/utils.py                      9       6              6           0
 ```
+
 **Expected finding:** None — churn is spread across files with multiple authors,
 complexity is modest everywhere, and the one TODO is tracked against an issue.
 Report "No findings: no maintainability hotspots in this scan". Do NOT invent a

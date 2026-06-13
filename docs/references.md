@@ -5,6 +5,7 @@ The active research surface. Organized to mirror [`taxonomy.md`](taxonomy.md). T
 > **Status note (2026-06-12):** the per-cluster files under [`research/`](research/) are now the deep, web-verified reference surface — most `TODO`s below were fulfilled there (Goetz, connascence, the-wrong-abstraction, SLSA, expand/contract, ADRs, Conventional Commits, …). This file stays as the curated *shortlist*: foundational works plus the cross-cutting anchors. New references land in the cluster files first.
 
 Conventions:
+
 - Cite **author — title** at minimum. Add a URL only when stable and known.
 - Tag each with a one-line note on *what we'd mine from it*.
 - Tool/linter capabilities go in [`prior-art.md`](prior-art.md), not here; this file is for ideas, principles, and heuristics.

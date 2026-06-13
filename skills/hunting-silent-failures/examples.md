@@ -5,6 +5,7 @@ Report each distinct issue as its own numbered finding. When the input is correc
 ## Bad → finding
 
 **Input (diff):**
+
 ```python
 try:
     charge = payments.charge(order.total)
@@ -12,7 +13,9 @@ except Exception:
     pass
 order.mark_paid()
 ```
+
 **Expected finding:**
+
 1. **Swallowed exception:** the `except Exception: pass` hides charge failures —
    fail loud (let the error propagate) or handle the specific failure.
 2. **False success state:** `order.mark_paid()` runs even when the charge failed —
@@ -21,11 +24,14 @@ order.mark_paid()
 ## Bad → finding
 
 **Input (diff):**
+
 ```js
 const res = await fetch(url);   // no timeout, no error handling
 return res.json();
 ```
+
 **Expected finding:**
+
 1. **No timeout on a remote call:** bare `await fetch` can hang indefinitely — add
    an AbortController timeout.
 2. **No failure handling:** non-OK responses and network errors are unhandled —
@@ -34,6 +40,7 @@ return res.json();
 ## Good → no finding
 
 **Input (diff):**
+
 ```python
 try:
     charge = payments.charge(order.total)
@@ -42,6 +49,7 @@ except PaymentDeclined as e:
     return CheckoutResult.declined(e.code)   # specific, surfaced, no false "paid"
 order.mark_paid()
 ```
+
 **Expected finding:** None — narrow exception, surfaced with context, no silent
 fallthrough. The early `return` is intentional and correct: a declined charge must
 NOT fall through to `order.mark_paid()`. Do not suggest replacing it with `raise` or
@@ -53,10 +61,12 @@ the `except` to catch more types. Report "No findings".
 ## Good → no finding
 
 **Input (diff):**
+
 ```python
 resp = client.get(url, timeout=5)
 resp.raise_for_status()
 return resp.json()
 ```
+
 **Expected finding:** None — the call has a timeout and `raise_for_status()` surfaces
 non-2xx responses loudly. Report "No findings"; do not invent issues.

@@ -3,11 +3,13 @@
 > **Selecting tools for this stack.** The tools named below are field-tested starting points, not a mandate. Pick the one that fits this codebase's language version, build, and CI — and verify it actually runs on your toolchain before relying on it. A listed tool that is broken, abandoned, or noisy on your setup is a gap to close, not a permanent `continue-on-error`: prefer a working, maintained equivalent (often a younger, less well-known one) over a canonical-but-broken default. The capability is the requirement; the specific tool is replaceable.
 
 ## Contents
+
 - From category #8
 
 ## From category #8
 
 ### Tooling rules worth lifting
+
 - **Formatters as the floor: Prettier, Black, gofmt/goimports, rustfmt, clang-format, dotnet format** → the strongest consistency mechanism: mechanical, non-negotiable. Heuristic to lift: *if a formatter exists and isn't applied, that's the finding* — don't spend review attention on it.
 - **Biome / Ruff / golangci-lint / RuboCop as aggregate idiom gates** → meta-rule: *the project's own linter config is the source of truth for its conventions — read it, then check the diff against it.*
 - **RuboCop `Style/*` department** (`Style/GuardClause`, `Style/StringLiterals`, `Style/HashSyntax`, `Style/FrozenStringLiteralComment`, `Style/NumericLiterals`) — Ruby idiom; `Style/GuardClause` bridges to #6.

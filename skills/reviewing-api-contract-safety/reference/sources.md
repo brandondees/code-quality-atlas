@@ -1,11 +1,13 @@
 # References to mine — reviewing-api-contract-safety
 
 ## Contents
+
 - From category #13
 
 ## From category #13
 
 ### Key references
+
 - **Joshua Bloch — "How to Design a Good API and Why It Matters" (2006)** — https://research.google.com/pubs/archive/32713.pdf → mine: easy to use & hard to misuse; "when in doubt, leave it out" (you can add later, can't remove); minimize accessibility/mutability; don't let implementation leak into the API.
 - **Jon Postel — Robustness Principle** ("be conservative in what you send, liberal in what you accept") → mine: a **contested** principle — liberal acceptance can entrench bugs and ambiguity; modern guidance is "be conservative in what you *accept* too." Carry the nuance into review (cross #2).
 - **Leonard Richardson — Richardson Maturity Model** (via Fowler) — https://martinfowler.com/articles/richardsonMaturityModel.html → mine: levels of REST maturity (resources → verbs+status codes → hypermedia) as a consistency yardstick.

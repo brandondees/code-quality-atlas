@@ -15,7 +15,7 @@ provenance:
   built_from:
   - category: 28
     source: docs/research/cluster-4-runtime.md#28
-    hash: 44b453018c0fed54b5ef950778d9cb8bd172759bf95e3f515661ab003d745cf5
+    hash: 91b12107f4499137fe81ce85cf1be3a0ebbb75d73a22c4312f5e882c156dc9fa
 ---
 
 # reviewing-resilience-and-scalability

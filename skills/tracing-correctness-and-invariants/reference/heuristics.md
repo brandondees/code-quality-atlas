@@ -1,12 +1,14 @@
 # Reviewable heuristics — tracing-correctness-and-invariants
 
 ## Contents
+
 - From category #1
 - From category #4
 
 ## From category #1
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Does every branch and early return preserve the function's stated invariant/postcondition?
 - Are boundary values (0, 1, n−1, n, empty, max, negative) explicitly handled — and tested?
 - Any off-by-one in ranges, slices, loop bounds, inclusive/exclusive ends?
@@ -24,6 +26,7 @@
 ## From category #4
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is every acquired resource (file, socket, connection, lock, cursor) released on **all** paths including errors (`with`/`using`/`defer`/`ensure`)?
 - Does anything that grows (logs, cache, queue, temp files, sessions) have a bound / eviction / TTL (steady state)?
 - Money/currency stored as integer minor units or a decimal `Money` type — never binary float — and currency carried?

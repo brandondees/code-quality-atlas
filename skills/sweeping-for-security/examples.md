@@ -7,6 +7,7 @@ finding — finding one does not end the sweep. When the input is correct, the e
 ## Bad → finding
 
 **Input (diff):**
+
 ```python
 API_KEY = "prod-payments-secret-EXAMPLE-NOT-REAL"   # hardcoded production credential
 
@@ -15,7 +16,9 @@ def get_invoice(request):
     rows = db.execute(f"SELECT * FROM invoices WHERE id = {inv_id}")
     return JsonResponse(rows[0])
 ```
+
 **Expected finding:**
+
 1. **SQL injection:** `inv_id` comes from the request and is interpolated into the
    query — use a parameterized query
    (`db.execute("SELECT * FROM invoices WHERE id = %s", [inv_id])`).
@@ -27,6 +30,7 @@ def get_invoice(request):
 ## Bad → finding
 
 **Input (diff):**
+
 ```python
 def render_user_template(request):
     name = request.GET["template"]
@@ -35,7 +39,9 @@ def render_user_template(request):
     if hashlib.md5(request.GET["sig"].encode()).hexdigest() == body[:32]:
         return HttpResponse(html)
 ```
+
 **Expected finding:**
+
 1. **Path traversal:** the user-supplied `name` reaches a filesystem path —
    `../../etc/passwd` escapes `/srv/templates`. Resolve the path and confine it to
    the directory, or allow-list known template names.
@@ -48,12 +54,14 @@ def render_user_template(request):
 ## Good → no finding
 
 **Input (diff):**
+
 ```python
 def get_invoice(request):
     invoice = Invoice.objects.get(
         id=request.GET["id"], owner=request.user)   # ownership enforced, ORM-parameterized
     return JsonResponse(invoice.as_dict())
 ```
+
 **Expected finding:** None — the ORM parameterizes the lookup and the query is
 scoped to the resource owner, so there is no injection and no IDOR. Report
 "No findings". Do NOT demand extra defenses that add nothing here (the id needs no

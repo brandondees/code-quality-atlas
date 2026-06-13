@@ -10,10 +10,10 @@ provenance:
   built_from:
   - category: 2
     source: docs/research/cluster-1-correctness.md#2
-    hash: b0ac6e42beaa9894ca97a61b97d7a75c9eb1e12d9d6bb7611897c9a94de839c0
+    hash: e57d4915e49200d858adbbc56c972154fb6dacf73a988c58de734ea8693339c0
   - category: 4
     source: docs/research/cluster-1-correctness.md#4
-    hash: 3edce8248eeb84bff46c3aa7e7c5ad1ada54d091f9366fb17fba234616ec27c7
+    hash: 9a8288ba9a0155c5b816ae033497849954224582cc461daf7baeb8b6af4e5afc
 ---
 
 # hunting-silent-failures

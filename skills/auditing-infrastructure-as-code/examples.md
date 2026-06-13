@@ -27,6 +27,7 @@ and the scanner is maintained and required, report exactly
 ## Bad → finding (Terraform scan)
 
 **Input (IaC scan):**
+
 ```text
 terraform plan: aws_db_instance.orders  -/+ destroy and recreate (engine_version change)
 main.tf:    resource aws_security_group ingress { cidr_blocks = ["0.0.0.0/0"], from_port = 5432 }
@@ -36,7 +37,9 @@ main.tf:    resource aws_security_group ingress { cidr_blocks = ["0.0.0.0/0"], f
 backend:    local (terraform.tfstate committed to the repo)
 CI:         tfsec (last check added 2024); continue-on-error: true
 ```
+
 **Expected finding:**
+
 1. **Destructive plan on a stateful resource:** the plan shows `aws_db_instance.orders`
    `-/+` (destroy + recreate) — that is data loss and downtime. Find a non-replacing
    path for the engine_version change, or snapshot + plan a migration; never apply a
@@ -60,13 +63,16 @@ CI:         tfsec (last check added 2024); continue-on-error: true
 ## Bad → finding (Kubernetes scan)
 
 **Input (IaC scan):**
+
 ```text
 deploy.yaml: containers: [{ image: api:latest, securityContext: { privileged: true } }]
              # no resources.requests / resources.limits
 service.yaml: kind: Service, type: LoadBalancer, no loadBalancerSourceRanges
 kube-linter: not run in CI
 ```
+
 **Expected finding:**
+
 1. **Privileged container running latest:** the API container is `privileged: true`
    (full host access — a container escape is a host compromise) and pinned to
    `:latest` (unreproducible, silent upgrades). Drop privileged, run as non-root
@@ -84,6 +90,7 @@ kube-linter: not run in CI
 ## Good → no finding
 
 **Input (IaC scan):**
+
 ```text
 terraform plan: 2 to add, 1 to change, 0 to destroy (all stateless: a tag + an SG rule)
 main.tf:    providers pinned (aws ~> 5.40); modules pinned by version; state in S3
@@ -95,6 +102,7 @@ k8s:        resources requests+limits set; runAsNonRoot; readOnlyRootFilesystem;
 CI:         checkov required to merge, passing; conftest policy (no public, mandatory tags)
 plan-drift: terraform plan on the applied config is empty (no drift)
 ```
+
 **Expected finding:** None — providers/modules pinned, state remote+locked+encrypted,
 secrets externalized, access least-privilege and private, storage encrypted, K8s
 defaults safe, scanner maintained and required, and no drift. Report exactly

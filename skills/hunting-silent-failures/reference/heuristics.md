@@ -1,12 +1,14 @@
 # Reviewable heuristics — hunting-silent-failures
 
 ## Contents
+
 - From category #2
 - From category #4
 
 ## From category #2
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is any error swallowed — empty catch/`rescue`, `except: pass`, ignored Go `err`, discarded Result?
 - Does each handler narrow to the *expected* exception type, not a blanket catch-all?
 - On failure does it **fail loud** (surface + log with context) or **degrade intentionally** — never silently?
@@ -24,6 +26,7 @@
 ## From category #4
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is every acquired resource (file, socket, connection, lock, cursor) released on **all** paths including errors (`with`/`using`/`defer`/`ensure`)?
 - Does anything that grows (logs, cache, queue, temp files, sessions) have a bound / eviction / TTL (steady state)?
 - Money/currency stored as integer minor units or a decimal `Money` type — never binary float — and currency carried?

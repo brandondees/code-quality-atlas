@@ -1,0 +1,9 @@
+# Local commit-time gate. One-time setup per clone:
+#   pip install pre-commit && pre-commit install
+# Mirrors the CI markdownlint gate (.github/workflows/ci.yml) so violations are
+# caught before they reach a PR. Rules live in .markdownlint-cli2.jsonc.
+repos:
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.22.1
+    hooks:
+      - id: markdownlint-cli2

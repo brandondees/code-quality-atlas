@@ -1,11 +1,13 @@
 # Reviewable heuristics — reviewing-observability-and-operability
 
 ## Contents
+
 - From category #16
 
 ## From category #16
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Are logs structured (key-value/JSON) with consistent fields (timestamp, level, service, request/trace ID) rather than interpolated prose? Can you grep/query by field in production?
 - Is the log *level* appropriate (no INFO spam in hot loops; real failures at ERROR; nothing security/PII-sensitive logged at any level)? Is there a correlation/trace ID threaded through so one request's logs are linkable?
 - Do new failure paths emit a context-rich error (what operation, which inputs/IDs — non-sensitive, the wrapped cause) rather than a bare `error`/stack with no story? Errors should wrap, not swallow, and not be both logged *and* rethrown (double-logging).

@@ -10,10 +10,10 @@ provenance:
   built_from:
   - category: 18
     source: docs/research/cluster-5-verification.md#18
-    hash: 4fe1f2e6410b4843fc0beaf6ab2c81e62f237d854fe1ba878dced8ae6bad501c
+    hash: f876d3646ec45597347f3dd84153ef0d860abaf9eb3211d7d97cb8aca56cc9da
   - category: 27
     source: docs/research/cluster-6-evolution.md#27
-    hash: 973cb4bcfda0d546fe1fa8a4cde13fda7368c1cd120d0581b2a02d5ace663cfc
+    hash: ba00467edc777fed0fce3439c40c1d7cede1c341eafc278465121b57c67c3ccc
 ---
 
 # auditing-dependencies-and-supply-chain

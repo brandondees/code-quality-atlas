@@ -1,4 +1,5 @@
 # Research — Cluster VI: Evolution & humans (Maintainability & Process)
+>
 > Part of code-quality-atlas phase-1 research (see ../taxonomy.md). Drafted 2026-06-08 (from model knowledge, web-less subagent); **web-verified 2026-06-09 from the main loop.** Standards spines (WCAG 2.2 SCs, Conventional Commits, Diátaxis, ADR, Keep a Changelog, SPDX/AGPL copyleft, REUSE, EAA, GDPR) and high-traffic tool rule IDs (axe-core, eslint-plugin-jsx-a11y, commitlint, the SmartBear/Cisco review-size study) are confirmed against live sources. Residual `(verify)` marks niche/less-stable tool rule names (some SonarQube squids, formatjs/i18next/html-validate plugin rules) to confirm at skill-build time.
 
 ---
@@ -8,6 +9,7 @@
 Scope: change amplification (one change → many edits); blast radius / ripple effects; refactorability (safe to change); tech-debt visibility & accounting; onboarding cost; bus factor / knowledge concentration.
 
 ### Key references
+
 - **John Ousterhout — *A Philosophy of Software Design*** (2018/2021). `(verify)` URL.
   → mine: "change amplification" and "cognitive load" as named symptoms of complexity; the *deep module* (simple interface, substantial implementation) as the antidote — a diff that widens a shallow module's interface is a maintainability smell.
 - **Martin Fowler — "Technical Debt Quadrant"** — martinfowler.com/bliki/TechnicalDebtQuadrant.html `(verify)`.
@@ -24,6 +26,7 @@ Scope: change amplification (one change → many edits); blast radius / ripple e
   → mine: a vocabulary for coupling strength (name → type → meaning → position → algorithm → execution-order → timing → value → identity) and *locality* (connascence across module boundaries is worse). Useful to name *why* a change amplifies.
 
 ### Tooling rules worth lifting
+
 - **CodeScene** — *Hotspot* (high change-frequency × high complexity), *Change Coupling*, *Code Health* decline, *Knowledge Loss / off-boarded code*, *Brain Method / Brain Class* — VCS-aware maintainability signals. `(verify)` exact metric names.
 - **SonarQube** — `Maintainability` rating (A–E), *Technical Debt Ratio* (remediation effort ÷ dev cost), *Code Smells* category, rule `java:S3776` Cognitive Complexity is too high, `java:S138` method too long. `(verify)` squids.
 - **RuboCop** — `Metrics/AbcSize`, `Metrics/CyclomaticComplexity`, `Metrics/PerceivedComplexity`, `Metrics/MethodLength`, `Metrics/ClassLength` — proxies for change-difficulty.
@@ -35,6 +38,7 @@ Scope: change amplification (one change → many edits); blast radius / ripple e
 - **TODO/FIXME/DEBT-tracking linters** (e.g. ESLint `no-warning-comments`, or a `todo-or-die`-style check) — surface *untracked* debt markers so debt is accounted, not invisible.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - **Change amplification:** did one conceptual change force edits in N>3 files/modules? If so, is that essential (one concept, many sites) or accidental (a missing abstraction / leaked detail)?
 - **Shotgun surgery smell:** the same constant, enum case, validation, or shape is edited in multiple places in this diff — flag for consolidation.
 - **Blast radius:** does the change touch a high fan-in module (many importers)? Is there a contract/compat note or test proving downstream callers still hold?
@@ -55,6 +59,7 @@ Scope: change amplification (one change → many edits); blast radius / ripple e
 Scope: API docs & docstrings; README / onboarding; architecture decision records (ADRs); runbooks; changelogs; usage examples & diagrams.
 
 ### Key references
+
 - **Diátaxis (Daniele Procida) — https://diataxis.fr/**
   → mine: four distinct doc modes — **tutorials** (learning-oriented), **how-to guides** (task/goal-oriented), **reference** (information-oriented), **explanation** (understanding-oriented) — on two axes (action↔cognition, acquisition↔application). A doc that mixes modes (tutorial that drifts into reference) is a smell; missing a *whole quadrant* (e.g. no how-tos) is a gap.
 - **Michael Nygard — "Documenting Architecture Decisions" (ADR, 2011)** — https://adr.github.io/ (overview: https://martinfowler.com/bliki/ArchitectureDecisionRecord.html)
@@ -71,6 +76,7 @@ Scope: API docs & docstrings; README / onboarding; architecture decision records
   → mine: "a README for agents" — a repo-level Markdown file carrying build/test/lint commands, conventions, and layout for *automated* contributors, with **nearest-file-wins** precedence so monorepo subprojects ship tailored instructions. Establishes agent-facing docs as a first-class doc artifact — which means it inherits every doc obligation in this category, drift above all (a stale AGENTS.md actively misleads agents that, unlike humans, won't shrug it off).
 
 ### Tooling rules worth lifting
+
 - **Vale (prose linter)** — style/terminology/readability rules over Markdown/docs; enforce a project glossary and banned terms. `(verify)`.
 - **markdownlint** — `MD013` line length, `MD041` first line top-level heading, `MD034` bare URLs, `MD024` duplicate headings — structural doc hygiene. `(verify)` rule numbers.
 - **ESLint `require-jsdoc` / `valid-jsdoc`** (deprecated in core) and **`eslint-plugin-jsdoc`** — `jsdoc/require-param`, `jsdoc/require-returns`, `jsdoc/check-param-names`, `jsdoc/require-description` — docstring completeness/accuracy vs. signature. `(verify)`.
@@ -83,6 +89,7 @@ Scope: API docs & docstrings; README / onboarding; architecture decision records
 - **`commitlint` + `conventional-changelog` / `release-please` / `git-cliff`** — generate changelog entries from conventional commits, keeping CHANGELOG in lockstep with releases. `(verify)`.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - **API surface ↔ docs parity:** does every new/changed public function, endpoint, CLI flag, or config key have a docstring/doc updated in the same diff? Stale signature-vs-doc = drift.
 - **Docstring accuracy:** do param names, types, return, and `raises`/`throws` in the docstring match the actual signature *after* this change? (params renamed but docstring not — flag.)
 - **Diátaxis coverage:** for a new feature, is there at least the right *mode* of doc — a how-to for a task, reference for an API? Don't accept a tutorial as a substitute for reference.
@@ -104,6 +111,7 @@ Scope: API docs & docstrings; README / onboarding; architecture decision records
 Scope: WCAG conformance; semantic markup & ARIA; keyboard nav & focus; localization (no hardcoded strings, RTL, number/date/currency/unit formatting — correctness cross-links #4); responsive/edge layouts; design fidelity vs. spec.
 
 ### Key references
+
 - **W3C — WCAG 2.2** — https://www.w3.org/TR/WCAG22/ — POUR: Perceivable, Operable, Understandable, Robust; conformance levels A / AA / AAA (AA is the common legal bar).
   → mine: AA is the common legal/contractual bar. High-value SCs to check: **1.1.1 Non-text Content** (alt text), **1.4.3 Contrast (Minimum)** (4.5:1 text / 3:1 large), **2.1.1 Keyboard** (all functionality via keyboard), **2.4.7 Focus Visible**, **2.4.3 Focus Order**, **4.1.2 Name, Role, Value**, **3.3.2 Labels or Instructions**, **1.3.1 Info and Relationships**, **2.5.3 Label in Name**, and 2.2-added **2.4.11 Focus Not Obscured (Minimum)** (AA), **2.5.8 Target Size (Minimum)** 24×24 CSS px (AA). *(SC numbers verified against w3.org/TR/WCAG22.)*
 - **WAI-ARIA Authoring Practices Guide (APG)** `(verify)`.
@@ -118,6 +126,7 @@ Scope: WCAG conformance; semantic markup & ARIA; keyboard nav & focus; localizat
   → mine: the most common real-world failures cluster in low contrast, missing alt, empty links/buttons, missing form labels, missing document language — prioritize checks there.
 
 ### Tooling rules worth lifting
+
 - **axe-core** rule ids — `color-contrast`, `image-alt`, `label`, `button-name`, `link-name`, `html-has-lang`, `aria-required-attr`, `aria-roles`, `aria-allowed-attr`, `duplicate-id-aria`, `frame-title`, `list`, `region`, `landmark-one-main`. *(core ids verified at dequeuniversity.com/rules/axe; full set is ~90+ rules.)*
 - **eslint-plugin-jsx-a11y** — `alt-text`, `anchor-is-valid`, `aria-props`, `aria-role`, `role-has-required-aria-props`, `no-noninteractive-element-interactions`, `click-events-have-key-events`, `no-autofocus`, `label-has-associated-control`, `tabindex-no-positive`. *(verified at github.com/jsx-eslint/eslint-plugin-jsx-a11y; static JSX checker — pair with @axe-core/react for rendered-DOM checks.)*
 - **Lighthouse / Pa11y / Pa11y-CI** — automated axe/HTML_CodeSniffer audits in CI with score thresholds; WCAG2AA ruleset selection. `(verify)`.
@@ -129,6 +138,7 @@ Scope: WCAG conformance; semantic markup & ARIA; keyboard nav & focus; localizat
 - **Storybook a11y addon / `@storybook/addon-a11y`** — per-component axe checks in dev/CI. `(verify)`.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - **Semantic-first:** is a real `<button>`/`<a>`/`<nav>`/`<main>`/heading used, or a `<div>` with a click handler? Native element = keyboard + role + focus for free.
 - **Keyboard operable:** can every interactive element be reached and activated by Tab/Shift-Tab/Enter/Space/Escape/arrows as appropriate? No mouse-only handlers (click without key handler).
 - **Focus management:** after opening a modal/menu/route change, does focus move sensibly and return on close? Is focus trapped in the dialog? Is `:focus-visible` styling present (not `outline:none` with no replacement)?
@@ -152,6 +162,7 @@ Scope: WCAG conformance; semantic markup & ARIA; keyboard nav & focus; localizat
 Scope: PR size & reviewability; commit atomicity & message hygiene; risk signaling in commits/PRs; ownership (CODEOWNERS); definition of done; agent-native parity.
 
 ### Key references
+
 - **Conventional Commits 1.0.0** — https://www.conventionalcommits.org/en/v1.0.0/ (feat→MINOR, fix→PATCH, `!`/`BREAKING CHANGE:`→MAJOR).
   → mine: `type(scope)!: subject` + body + footer; types `feat`/`fix`/`docs`/`refactor`/`test`/`chore`/`perf`/`build`/`ci`; `!` or `BREAKING CHANGE:` footer signals SemVer-major. Machine-readable risk/intent → auto-changelog and release decisions (links #22).
 - **Google Engineering Practices — "Code Review Developer Guide" (Small CLs; What to look for)** `(verify)`.
@@ -170,6 +181,7 @@ Scope: PR size & reviewability; commit atomicity & message hygiene; risk signali
   → mine: industry grounding for treating agents as first-class contributors to the development process — the ecosystem now standardizes how repos onboard automated collaborators. Strengthens the agent-native-parity principle from "house rule" toward industry practice; the *docs* obligation lives in #22, the *process* stance (agents can do what contributors can do) lives here.
 
 ### Tooling rules worth lifting
+
 - **commitlint (`@commitlint/config-conventional`)** — `type-enum`, `subject-empty`, `subject-full-stop`, `header-max-length` (72), `body-leading-blank`, `footer-leading-blank` — enforce Conventional Commits. *(`@commitlint/config-conventional` `type-enum`: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test — verified.)*
 - **gitlint** — `title-max-length`, `title-must-not-contain-word` (e.g. "WIP"), `body-min-length`, `title-imperative-mood` `(verify)` — Python-side commit hygiene.
 - **Danger / Danger JS** — custom PR rules: warn on large diffs, missing tests for changed src, missing CHANGELOG entry, PR description present, no `fixup!`/`WIP` commits. `(verify)`.
@@ -181,6 +193,7 @@ Scope: PR size & reviewability; commit atomicity & message hygiene; risk signali
 - **CODEOWNERS validators** (e.g. `mszostok/codeowners-validator`) — detect unowned files, invalid owners, duplicate patterns — keep ownership real. `(verify)`.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - **PR size & focus:** is the PR small and single-purpose (roughly ≤~400 net LOC, one concern)? If it mixes refactor + feature + format churn, suggest splitting — mixed diffs hide bugs.
 - **Atomic commits:** does each commit represent one logical change that builds and (ideally) passes tests on its own, enabling clean `revert`/`bisect`? No "fix typo"/"wip"/"address review" noise left in final history.
 - **Commit message hygiene:** imperative-mood subject within length limit; body explains *why* and trade-offs, not a restatement of the diff; links the issue/ticket.
@@ -201,6 +214,7 @@ Scope: PR size & reviewability; commit atomicity & message hygiene; risk signali
 Scope: dependency license compatibility & copyleft contamination; code provenance & attribution (incl. AI-generated code); regulatory & data-privacy obligations (GDPR/CCPA-style handling, residency, retention, consent); accessibility-as-legal-requirement; export/compliance constraints.
 
 ### Key references
+
 - **SPDX — license identifiers + SBOM** — https://spdx.org/licenses/ (standard short IDs + permanent URLs).
   → mine: standard license IDs (`MIT`, `Apache-2.0`, `GPL-3.0-only`, `LGPL-3.0`, `AGPL-3.0-only`, `BSD-3-Clause`, `MPL-2.0`) and `SPDX-License-Identifier:` headers; SBOM (SPDX / CycloneDX) as the provenance artifact a review can check against.
 - **FSF "copyleft" guidance + Blue Oak / choosealicense.com**
@@ -217,6 +231,7 @@ Scope: dependency license compatibility & copyleft contamination; code provenanc
   → mine: WCAG 2.x AA conformance is the de facto legal yardstick (cross-links #23) — a11y findings can carry legal, not just UX, weight.
 
 ### Tooling rules worth lifting
+
 - **`license-checker` / `license-checker-rseidelsohn` (npm)** — enumerate dependency licenses; `--failOn` / `--onlyAllow` to block disallowed licenses (e.g. GPL/AGPL) in a permissive project. `(verify)`.
 - **FOSSA / Snyk / WhiteSource(Mend) / Black Duck** — license-policy gates, copyleft/contamination alerts, attribution-report generation, IP-snippet matching. `(verify)`.
 - **ScanCode Toolkit + ScanCode.io** — detect licenses/copyrights/origin in source (provenance), emit SPDX. `(verify)`.
@@ -228,6 +243,7 @@ Scope: dependency license compatibility & copyleft contamination; code provenanc
 - **Privacy/PII linters** — e.g. `semgrep` registry rules for PII logging / hardcoded keys; `eslint-plugin-no-secrets`; data-flow rules flagging PII to logs/3rd-party (overlaps #16/#25). `(verify)` exact rule ids.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - **New dependency license check:** does an added dependency (and its transitive tree) carry a license compatible with the project's distribution model? Block/strongly-flag GPL/AGPL pulled into a permissive or proprietary product.
 - **Copyleft contamination / linkage:** does the change *link* or *combine* with copyleft code in a way that triggers obligations (esp. AGPL over a network service)? Static vs. dynamic linking and "mere aggregation" matter — flag for legal if unsure.
 - **License/attribution preservation:** are upstream license texts, copyright notices, and NOTICE files retained when vendoring/copying code? Removed attribution = violation.
@@ -248,6 +264,7 @@ Scope: dependency license compatibility & copyleft contamination; code provenanc
 Scope: decisions reviewed *as they are made* — adoption / build-vs-buy / technology selection; lock-in & exit cost; the decision record (ADR) and whether its assumptions still hold; revisit-triggers; planned retirement / deprecation / sunset. The **decision-time** review shape (see [`../decision-time-review-shape.md`](../decision-time-review-shape.md)): the artifact under review is an ADR / RFC / adoption PR / deprecation plan, not a diff of implementation code.
 
 ### Key references
+
 - **Michael Nygard — "Documenting Architecture Decisions" (2011)** — the ADR format (context · decision · status · consequences); status proposed/accepted/superseded.
   → mine: a non-obvious or hard-to-reverse choice needs a recorded *why*, not just the *what*, so the next engineer inherits the reasoning; an accepted-but-unrecorded decision is unowned debt.
 - **ThoughtWorks Technology Radar — Adopt / Trial / Assess / Hold rings** — https://www.thoughtworks.com/radar/faq (`verify` ring definitions).
@@ -266,6 +283,7 @@ Scope: decisions reviewed *as they are made* — adoption / build-vs-buy / techn
   → mine: deprecation and removal are first-class, announced events with a window, not surprises.
 
 ### Tooling rules worth lifting
+
 - **`adr-tools` / Log4brains / MADR templates** — scaffold and index ADRs; make "is there a decision record for this non-obvious choice?" mechanically checkable. `(verify)`.
 - **`endoflife.date` (API) / `deps.dev` / OSV `(verify)`** — machine-readable lifecycle & maturity signals for an adopted dependency/runtime (is it approaching EOL?).
 - **Dependency-weight inspectors — `npm why` / `cargo tree` / `pipdeptree` / `dependency-review-action`** — surface the transitive weight a new dependency drags in (part of adoption cost; cross #18).
@@ -274,6 +292,7 @@ Scope: decisions reviewed *as they are made* — adoption / build-vs-buy / techn
 - **Renovate/Dependabot with EOL feeds** — flag an adopted technology entering end-of-life so the retire decision is triggered, not missed.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - **Adoption justification recorded:** for a new dependency / framework / platform, is there a rationale weighed against the cheaper options (stdlib, a few lines, an existing in-house capability, a smaller library)? "We need X" is not a justification; an evaluated A/B/build comparison is.
 - **Right-sizing (build-vs-buy):** does the chosen option's weight match the need? A 40-dependency framework for one screen, or a hand-rolled implementation where a maintained library exists, both warrant a second look (cross #11 restraint, #18 deps).
 - **Lock-in & exit cost assessed:** is the cost of *leaving* considered — is data exportable, is the integration behind a portable boundary/adapter, or is this a one-way door into proprietary surface that's expensive to reverse?

@@ -13,7 +13,7 @@ provenance:
   built_from:
   - category: 13
     source: docs/research/cluster-3-structure.md#13
-    hash: 0ef42009707c6564fea2b3fa46fbcc50b664c17d62e0978171efa782eef8d47e
+    hash: 7f725163d5f31734656d5099caa13bf51bc3ab1c71fb65f48ee6e1d0c6543d5a
 ---
 
 # reviewing-api-contract-safety

@@ -1,0 +1,17 @@
+{
+  // Markdownlint config for code-quality-atlas. Enforced in CI (.github/workflows/ci.yml)
+  // and pre-commit (.pre-commit-config.yaml). Rules disabled below are deliberate
+  // project conventions, not laziness — see the rationale on each.
+  "config": {
+    "default": true,
+    "MD013": false, // line-length: prose and reference tables are intentionally not wrapped at 80 cols
+    "MD024": false, // duplicate-headings: repeated section structure is intentional (### Key references per category, Bad → finding per example)
+    "MD033": false, // inline-HTML: <details>/<summary> blocks in commands/ and templates/ are intentional
+    "MD034": false, // bare-URLs: research "→ mine: https://…" notes cite URLs inline by design
+    "MD036": false, // emphasis-as-heading: bold phase labels in README are intentional, not headings
+    "MD041": false, // first-line-h1: command prompt files (commands/*.md) open with prose, not a heading
+    "MD060": false  // table-column-style: compact table pipes are fine; spacing is cosmetic
+  },
+  "globs": ["**/*.md"],
+  "ignores": ["node_modules", ".git"]
+}

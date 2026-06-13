@@ -1,11 +1,13 @@
 # Reviewable heuristics — reviewing-concurrency-and-async
 
 ## Contents
+
 - From category #3
 
 ## From category #3
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is shared mutable state touched by multiple threads/tasks without synchronization?
 - Any check-then-act / read-modify-write that spans an `await`/`yield` and isn't atomic?
 - Could two concurrent requests interleave to break an invariant (lost update, double-spend)?

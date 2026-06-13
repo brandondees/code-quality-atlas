@@ -1,11 +1,13 @@
 # References to mine — reviewing-resilience-and-scalability
 
 ## Contents
+
 - From category #28
 
 ## From category #28
 
 ### Key references
+
 - **Michael Nygard, *Release It!* (2nd ed., 2018)** — the canonical stability-patterns catalog. Patterns: **Circuit Breaker**, **Bulkhead**, **Timeout**, **Steady State**, **Fail Fast**, **Back Pressure**, **Handshaking**, **Shed Load**. Antipatterns: **Integration Points** (every call out is a failure source), **Cascading Failures**, **Slow Responses**, **Unbounded Result Sets**.
   → mine: every synchronous call to another service needs a **timeout** and a defined behavior when it fails (circuit-breaker / fallback / fail-fast); a failure in one dependency must be **bulkheaded** so it can't exhaust the shared resource (threads, connections) and take down the whole system. An **unbounded result set or queue** is a latent OOM/overload — bound it.
 - **Google SRE Book & SRE Workbook — "Addressing Cascading Failures", "Handling Overload", "Managing Critical State"** — https://sre.google/sre-book/addressing-cascading-failures/ .

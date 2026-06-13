@@ -13,7 +13,7 @@ provenance:
   built_from:
   - category: 3
     source: docs/research/cluster-1-correctness.md#3
-    hash: 73a657fe1397e6e9260927b0922fd03bc9a6e3cdab1fa1d002dc32a4b2e3c10a
+    hash: c9755d9b409479e2fac960b39449dc1eaaf0f98e8bbe01fd2758ad97a6bd7ba5
 ---
 
 # reviewing-concurrency-and-async

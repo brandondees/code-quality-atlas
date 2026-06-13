@@ -30,7 +30,7 @@ re-map `built_from` categories), then run steps 2–4. No research edits needed.
 
 Validate eval *structure* (≥3 scenarios) for one or all skills:
 
-```
+```text
 python -m tooling.cli eval                 # all skills
 python -m tooling.cli eval --skill <name>  # one skill
 ```
@@ -40,7 +40,7 @@ next to their `expected_behavior` (the harness assembles the same context a
 model with the skill loaded would see: SKILL.md + reference/heuristics.md +
 examples.md):
 
-```
+```text
 python -m tooling.run_evals --skill <name> --model llama3.2:3b
 ```
 
@@ -48,7 +48,7 @@ python -m tooling.run_evals --skill <name> --model llama3.2:3b
 server works via `--api openai`. The lightest path is llama.cpp's `llama-server`
 with a GGUF from Hugging Face — no install, just a prebuilt binary:
 
-```
+```text
 curl -sLO https://github.com/ggml-org/llama.cpp/releases/download/<tag>/llama-<tag>-bin-ubuntu-x64.tar.gz
 tar xzf llama-<tag>-bin-ubuntu-x64.tar.gz
 curl -sLO https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf
@@ -73,6 +73,7 @@ pairs carry the most weight for weak models) and/or adding an explicit
 "don't invent issues; report no finding when the code is correct" guard.
 
 **Tuning lessons (from `hunting-silent-failures` on `llama3.2:3b`, 3B):**
+
 - The suite-wide "Reviewer discipline" guard (in every generated `SKILL.md`) must be
   **recall-safe**: a blanket "prefer reporting nothing over a false positive" made the
   3B model under-report on a genuinely bad case. Keep "report no findings when the code
@@ -87,6 +88,7 @@ pairs carry the most weight for weak models) and/or adding an explicit
   deterministic check rather than trusting a tiny model's "no findings".
 
 **Tuning lessons (from the full 6-skill pass on `qwen2.5-coder-7b` Q4, llama-server):**
+
 - The 7-8B floor holds: the clean-code scenario that broke the 3B passes here, and
   most skills pass all scenarios outright. Repo-shaped scans are the exception (below).
 - **"What should we act on?" invites invention.** On a healthy repo-scan table the
@@ -111,6 +113,7 @@ pairs carry the most weight for weak models) and/or adding an explicit
   template — keep its finding prose in exactly the shape you want responses to take.
 
 **Tuning lessons (wave 2, same model):**
+
 - **Numbered findings lists are the single highest-leverage example format.** With
   flowing-paragraph examples the model reported 1 of 3–4 findings in multi-issue
   diffs; rewriting the examples' expected findings as numbered lists lifted recall
@@ -133,6 +136,7 @@ pairs carry the most weight for weak models) and/or adding an explicit
   alongside for exhaustiveness.
 
 **Tuning lessons (wave 3 + wave-1 retrofit, same model):**
+
 - **The numbered-list template can backfire on clean code.** Retrofitting wave-1
   examples to numbered lists left bad-case recall unchanged but made two skills
   start *filling in* numbered findings on correct code (inventing issues to have a

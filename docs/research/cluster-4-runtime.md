@@ -1,4 +1,5 @@
 # Research — Cluster IV: Cross-cutting runtime qualities
+>
 > Part of code-quality-atlas phase-1 research (see ../taxonomy.md). Drafted 2026-06-08 (from model knowledge, web-less subagent); **web-verified 2026-06-09 from the main loop.** Standards spines (OWASP Top 10 2021, OWASP LLM Top 10 2025, CWE Top 25 2024, ASVS 5.0, Core Web Vitals, lethal trifecta) and the high-traffic tool rule IDs (Bandit, gosec) are confirmed against live sources. Residual `(verify)` items are the less-stable ones (exact Semgrep/CodeQL query IDs, Sonar squids).
 
 ---
@@ -6,6 +7,7 @@
 ## #14 Security
 
 ### Key references
+
 - **OWASP — OWASP Top 10:2021** — https://owasp.org/Top10/ → mine: the canonical risk buckets a review must screen for, in priority order: A01 Broken Access Control, A02 Cryptographic Failures, A03 Injection (XSS folded in here), A04 Insecure Design, A05 Security Misconfiguration, A06 Vulnerable & Outdated Components, A07 Identification & Authentication Failures, A08 Software & Data Integrity Failures (deserialization, supply chain), A09 Security Logging & Monitoring Failures, A10 Server-Side Request Forgery (SSRF). Use as the top-level checklist spine.
 - **OWASP — Application Security Verification Standard (ASVS) 5.0** (released **May 2025**) — https://owasp.org/www-project-application-security-verification-standard/ → mine: ~350 testable, per-control requirements across **17 chapters** with a three-tier model. v5.0 **renumbered** vs. v4 and added modern coverage (V3 Web Frontend Security, V9 Self-Contained Tokens, V10 OAuth/OIDC, V17 WebRTC). Each requirement is already phrased as a checkable assertion — ideal seed text for skill checklist items. *(Note: the old V1 Architecture / V2 Auth / V4 Access Control numbering is v4; use 5.0 chapter numbers going forward.)*
 - **MITRE — CWE Top 25 Most Dangerous Software Weaknesses (2024)** — https://cwe.mitre.org/top25/archive/2024/2024_cwe_top25.html → mine: weakness-level (not risk-level) granularity for grep/AST rules. **2024 top three: #1 CWE-79 (XSS) — up from #2; #2 CWE-787 (Out-of-bounds Write) — down from #1; #3 CWE-89 (SQL Injection).** Other high entries: CWE-352 (CSRF), CWE-22 (Path Traversal), CWE-78 (OS Command Injection), CWE-862 (Missing Authorization), CWE-918 (SSRF), CWE-502 (Deserialization), CWE-798 (Hardcoded Credentials), CWE-269 (Improper Privilege Management). (Scored frequency × severity over 31,770 CVEs from Jun 2023–Jun 2024.)
@@ -14,6 +16,7 @@
 - **NIST — SP 800-63B Digital Identity Guidelines** → mine: authoritative source for authn rules (password length over composition, no forced periodic rotation, breached-password checks, MFA guidance) — counters folklore review comments.
 
 ### Tooling rules worth lifting
+
 - **Semgrep** `tainted-sql-string` / registry `python.lang.security.audit.formatted-sql-query` — taint-flow from request input into a SQL string (SQLi). `(verify)` exact rule IDs.
 - **Bandit** (Python) — `B608` `hardcoded_sql_expressions` (string-built SQL → SQLi); `B602` `subprocess_popen_with_shell_equals_true` (command injection); `B301` `pickle` on untrusted data (unsafe deserialization); `B307` `eval` on untrusted data (code injection); `B105`–`B107` hardcoded password string/funcarg/default; `B501` `request_with_no_cert_validation` (`verify=False`, TLS disabled); `B303`/`B324` `hashlib` weak hash (MD5/SHA1). *(plugin names verified against bandit.readthedocs.io)*
 - **ESLint `eslint-plugin-security`** `detect-non-literal-fs-filename` (path traversal), `detect-child-process` (command injection), `detect-eval-with-expression`, `detect-non-literal-regexp` (ReDoS surface), `detect-object-injection`.
@@ -26,6 +29,7 @@
 - **brakeman** (Rails) — `SQL`, `CrossSiteScripting`, `MassAssignment`, `Redirect` (open redirect), `RemoteCodeExecution` warning categories.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Does any query/command/HTML/path get built by string concatenation or interpolation of request-derived data? If so, demand parameterized queries / contextual output encoding / allow-listed path resolution.
 - Every state-changing or data-returning endpoint: is there an explicit authorization check tied to the *resource owner*, not just authentication? (IDOR = authenticated but not authorized.) Object references taken from the request (IDs, filenames) must be authorized, never trusted.
 - Are secrets (keys, tokens, passwords, connection strings) absent from source, config-in-repo, and log output? Real secrets belong in a secrets manager / env injected at runtime.
@@ -44,6 +48,7 @@
 ## #15 Performance & efficiency
 
 ### Key references
+
 - **Brendan Gregg — Systems Performance (and the USE method)** — http://www.brendangregg.com/usemethod.html → mine: measure before optimizing; for each resource check Utilization, Saturation, Errors. Anchors the "profile, don't guess" discipline reviews should enforce.
 - **Donald Knuth — "Structured Programming with go to Statements" (1974)** → mine: the actual provenance of "premature optimization is the root of all evil (97% of the time)" — and its often-dropped corollary: *do* optimize the critical 3%. Use to keep the counterweight balanced, not absolutist.
 - **Martin Fowler — "Yet Another Optimization Article" / refactoring + performance writing** → mine: optimize against a measured performance profile, not intuition; keep code clean first because clean code is easier to make fast.
@@ -54,6 +59,7 @@
 - **Green Software Foundation — Software Carbon Intensity (SCI), ISO/IEC 21031:2024** — https://greensoftware.foundation/standards/sci/ → mine: carbon as a *rate* per functional unit (per user, per transaction, per API call) rather than an absolute total — the same review posture as performance budgets: efficiency regressions show up as a rate change. First ISO standard for software carbon measurement (March 2024); the energy/carbon twin of the FinOps facet.
 
 ### Tooling rules worth lifting
+
 - **ESLint `eslint-plugin-react`** `react/jsx-no-bind` and **`react-hooks/exhaustive-deps`** — inline closures / wrong deps cause needless re-renders & re-allocation on the render hot path.
 - **ESLint** `no-await-in-loop` — sequential awaits in a loop (serialized I/O round-trips that often should be batched/`Promise.all`).
 - **RuboCop Performance** cop family, e.g. `Performance/Detect`, `Performance/Count`, `Performance/RedundantMerge`, `Performance/StringReplacement`, `Performance/CollectionLiteralInLoop`, `Performance/MapCompact` — idiomatic-but-slow patterns and allocation in loops.
@@ -66,6 +72,7 @@
 - **DB `EXPLAIN`/`EXPLAIN ANALYZE`** + tools like `pganalyze` / pt-query-digest — surface seq scans, missing indexes, and the literal cost of the hot query.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is there a loop that issues a query/RPC/HTTP call per iteration? (N+1.) Push to a single batched/`IN`/join query or a bulk endpoint. Flag `await` inside `for` over independent items.
 - What is the worst-case complexity on the hot path as input grows? Flag accidental O(n²) (nested loops over the same collection, `Array.includes` inside a loop → use a Set/Map), and unbounded growth.
 - Is the same expensive value (DB read, computed result, parsed config, compiled regex) recomputed when it could be hoisted or memoized? Conversely, is anything memoized that's cheap and rarely reused (premature)?
@@ -84,6 +91,7 @@
 ## #16 Observability & operability
 
 ### Key references
+
 - **Google — Site Reliability Engineering (SRE Book) & SRE Workbook** — https://sre.google/books/ → mine: SLI/SLO/error-budget framing; the "four golden signals" (latency, traffic, errors, saturation) as the default metric set; alert on symptoms (SLO burn) not causes.
 - **Charity Majors, Liz Fong-Jones, George Miranda — Observability Engineering (Honeycomb/O'Reilly)** — https://www.honeycomb.io/ → mine: structured, high-cardinality, wide events over unstructured log lines; the ability to ask new questions of production without shipping new code ("unknown-unknowns").
 - **OpenTelemetry — specification & semantic conventions** — https://opentelemetry.io/docs/ → mine: vendor-neutral traces/metrics/logs; standardized span/attribute naming and trace-context propagation so observability is portable and correlated.
@@ -92,6 +100,7 @@
 - **RFC 5424 (syslog severities)** → mine: the canonical log-level ladder (DEBUG/INFO/NOTICE/WARNING/ERROR/CRITICAL...) so "what level should this be" has an objective answer.
 
 ### Tooling rules worth lifting
+
 - **ESLint** `no-console` — raw `console.log` instead of the project's structured logger (and noise/PII leakage risk). Often paired with a custom rule banning the logger's `debug` in prod paths.
 - **`eslint-plugin-no-secrets`** / log-content linters — heuristic detection of secrets or high-entropy strings being logged.
 - **golangci-lint** `bodyclose` & `contextcheck` — unclosed resources and missing `context.Context` propagation (the latter breaks trace propagation, deadlines, and cancellation → poor operability).
@@ -103,6 +112,7 @@
 - **OpenTelemetry / Prometheus client linters & `promtool check rules`** — validate metric/recording/alerting rule definitions; enforce metric naming conventions (unit suffixes like `_seconds`, `_bytes`, `_total`).
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Are logs structured (key-value/JSON) with consistent fields (timestamp, level, service, request/trace ID) rather than interpolated prose? Can you grep/query by field in production?
 - Is the log *level* appropriate (no INFO spam in hot loops; real failures at ERROR; nothing security/PII-sensitive logged at any level)? Is there a correlation/trace ID threaded through so one request's logs are linkable?
 - Do new failure paths emit a context-rich error (what operation, which inputs/IDs — non-sensitive, the wrapped cause) rather than a bare `error`/stack with no story? Errors should wrap, not swallow, and not be both logged *and* rethrown (double-logging).
@@ -121,6 +131,7 @@
 > Newest and least tooling-covered category — covered deeper per scope. Today there is little mature static analysis here; most "rules" are framework-level validators, eval harnesses, and emerging security scanners rather than classic linters, so the heuristics carry more weight than the tooling list.
 
 ### Key references
+
 - **OWASP — Top 10 for LLM Applications (2025)** — https://genai.owasp.org/resource/owasp-top-10-for-llm-applications-2025/ → mine: the security spine for LLM features. **Verified 2025 list:** LLM01 Prompt Injection, LLM02 Sensitive Information Disclosure, LLM03 Supply Chain, LLM04 Data and Model Poisoning, LLM05 Improper Output Handling, LLM06 Excessive Agency, LLM07 System Prompt Leakage, LLM08 Vector and Embedding Weaknesses, LLM09 Misinformation, LLM10 Unbounded Consumption. (LLM06 Excessive Agency was notably expanded into excessive *functionality*, *permissions*, and *autonomy*.)
 - **NIST — AI Risk Management Framework (AI RMF 1.0, SP 100-1) + Generative AI Profile (NIST-AI-600-1)** — https://www.nist.gov/itl/ai-risk-management-framework → mine: the Govern / Map / Measure / Manage functions and the GenAI-specific risk profile — a governance/eval vocabulary for "did we test the nondeterministic behavior and bound the risk."
 - **Anthropic / OpenAI — prompt-engineering & safety best-practices docs** — e.g. https://docs.anthropic.com/ → mine: delimit and label untrusted input, separate system vs user instructions, structured/tool-use outputs over free-text parsing, and refusal/guardrail design. (Provider-specific model IDs and pricing should be checked against current docs, not memory.)
@@ -133,7 +144,9 @@
 - **Model Context Protocol — security best practices (spec docs)** — https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices → mine: the named MCP anti-patterns reviews must catch: **token passthrough** (explicitly prohibited — a server must validate a token's *audience* and never forward tokens not issued for it), **confused deputy** (a proxy/server tricked into spending its higher authority for a lower-trust caller; require explicit consent for dynamically registered clients, OAuth 2.1 + PKCE, strict redirect-URI validation), and **tool poisoning** (malicious instructions embedded in tool descriptions/metadata — invisible to the user, read by the model).
 
 ### Tooling rules worth lifting
+
 *(This space is young; many "rules" are validators/frameworks/scanners rather than classic lint IDs. IDs `(verify)`.)*
+
 - **Pydantic / `instructor` / Zod / OpenAI structured outputs / JSON-Schema response_format** — enforce a schema on model output and reject/repair non-conforming responses. The reviewable rule: *no model output is consumed without schema validation.*
 - **Guardrails AI** (`guardrails-ai`) — declarative output validators/"validators" (regex, JSON schema, PII, toxicity, competitor-mention, on-topic) with re-ask on failure. Lift the catalog of validator types as checklist items.
 - **NeMo Guardrails** (NVIDIA) — programmable input/output "rails" (topical, safety, jailbreak-detection rails) wrapping the LLM call.
@@ -145,6 +158,7 @@
 - **`detect-secrets` / DLP scanners on the request path** — ensure PII/secrets aren't shipped to a third-party model API (overlaps #14/#27).
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - **Untrusted-input surface:** Is any content the model sees that originates from an untrusted source (user text, retrieved docs/RAG, web pages, tool results, file uploads) clearly *delimited and labeled as data, not instructions*? Assume it can contain injected instructions; the system prompt must not say "do whatever the document says."
 - **Lethal-trifecta check:** Does this feature combine access to private/sensitive data + exposure to untrusted content + an ability to exfiltrate or take consequential actions (send email, call tools, make requests)? If all three, treat injection as exploitable and require mitigations (human-in-the-loop, egress allow-list, capability scoping). (Maps LLM01/LLM06 Excessive Agency.)
 - **Structured-output validation:** Is every model output that drives code/decisions validated against a schema (types, enums, ranges) and safely handled on validation failure (re-ask, fallback, reject) — never trusted as free text or blindly `JSON.parse`d? (Maps LLM05.)
@@ -176,6 +190,7 @@
 Scope: *design-time* operability — whether the system is built to survive failure, recover, and scale — as distinct from #16's *runtime* operability (the instrumentation emitted from app code) and from #2/#3's code-level error handling. Four facets: **resilience as design** (failure-mode / blast-radius analysis, bulkheads, graceful degradation, dependency-failure plans); **recoverability** (RTO/RPO, *tested* restore — not just backups taken; absorbs #20's backup note); **scalability as design** (statelessness, horizontal-scaling readiness, single-writer bottlenecks, backpressure on unbounded queues; resolves the dropped #12 scalability factor and absorbs system-wide rate-limit/quota); **multi-tenancy isolation** (noisy-neighbour, per-tenant quotas). Reviewed at *decision time* (an RFC, capacity plan, or DR design) **and** on a diff (a new stateful singleton, an unbounded queue, a synchronous call to a flaky dependency with no timeout/fallback). The lens asks *"what happens when this dependency is slow, this queue is unbounded, this instance dies, or this tenant goes hot?"* — questions a diff-level correctness or security pass does not ask.
 
 ### Key references
+
 - **Michael Nygard, *Release It!* (2nd ed., 2018)** — the canonical stability-patterns catalog. Patterns: **Circuit Breaker**, **Bulkhead**, **Timeout**, **Steady State**, **Fail Fast**, **Back Pressure**, **Handshaking**, **Shed Load**. Antipatterns: **Integration Points** (every call out is a failure source), **Cascading Failures**, **Slow Responses**, **Unbounded Result Sets**.
   → mine: every synchronous call to another service needs a **timeout** and a defined behavior when it fails (circuit-breaker / fallback / fail-fast); a failure in one dependency must be **bulkheaded** so it can't exhaust the shared resource (threads, connections) and take down the whole system. An **unbounded result set or queue** is a latent OOM/overload — bound it.
 - **Google SRE Book & SRE Workbook — "Addressing Cascading Failures", "Handling Overload", "Managing Critical State"** — https://sre.google/sre-book/addressing-cascading-failures/ .
@@ -192,6 +207,7 @@ Scope: *design-time* operability — whether the system is built to survive fail
   → mine: horizontally-scalable services keep **no in-process session/affinity state** (push it to a shared store); a new in-memory cache, sticky session, or local-disk write is a scaling and failover hazard. In multi-tenant systems, one tenant must not be able to exhaust a shared resource — **per-tenant quotas / fair scheduling / isolation**.
 
 ### Tooling rules worth lifting
+
 - **This category is judgment-led, not linter-led.** Unlike #14/#15, there is little static analysis that proves resilience; the leverage is in design review and chaos/load testing, so the heuristics carry the weight. Treat the tools below as evidence-gatherers, not gates.
 - **Resilience libraries (presence + correct use, not mere import):** Resilience4j / Polly / Hystrix-legacy (circuit breakers, bulkheads, rate limiters), Envoy/Istio outlier-detection & circuit-breaking, AWS SDK adaptive retry. A retry config with **no budget/jitter** is a finding, not a fix.
 - **Load & soak testing:** k6, Gatling, Locust, `wrk` — a scalability or capacity claim is unbacked without a load profile; watch **p99/p999**, not mean.
@@ -199,6 +215,7 @@ Scope: *design-time* operability — whether the system is built to survive fail
 - **Recovery drills:** scripted restore-from-backup in CI/staging, AWS Resilience Hub / Route 53 ARC for RTO/RPO assessment — backups are only credible once a restore is exercised.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - **Unbounded growth:** does the change introduce a queue, buffer, list, cache, or result set with **no size bound or backpressure**? Unbounded accumulation is a latent OOM / overload under load — bound it and define the drop/block/shed policy when full.
 - **Dependency failure plan:** does every synchronous call to another service / DB / third-party API have a **timeout** and a defined behavior when it is slow or down (circuit-breaker, fallback, fail-fast)? A bare call with no timeout blocks a thread indefinitely and cascades (Integration Points → Cascading Failure).
 - **Blast radius & bulkheading:** if this component fails or slows, what else goes with it? Is the failure **isolated** (separate pool/bulkhead/process), or does it share a resource (thread pool, connection pool, event loop) whose exhaustion takes down unrelated work?

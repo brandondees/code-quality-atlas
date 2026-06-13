@@ -11,7 +11,7 @@ provenance:
   built_from:
   - category: 14
     source: docs/research/cluster-4-runtime.md#14
-    hash: e106f7b704d223bd84ff7b4a0745c805b87bdce8aaa8329ce7a6e786d502700c
+    hash: 6e838c49e058d7d11d9e4374321c09ed843a50a6b884b0412c6f781d208e2fb0
 ---
 
 # sweeping-for-security

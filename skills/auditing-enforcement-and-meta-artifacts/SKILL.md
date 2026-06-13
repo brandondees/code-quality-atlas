@@ -15,7 +15,7 @@ provenance:
   built_from:
   - category: 30
     source: docs/research/cluster-5-verification.md#30
-    hash: 045e258b39ea2d36832836d6aaaf27bb03ca58e50b98120d44290a8cef968129
+    hash: ef5524f6b86410b40675952273e78597c8a0fc5d94ea821f67059064c6624c6c
 ---
 
 # auditing-enforcement-and-meta-artifacts

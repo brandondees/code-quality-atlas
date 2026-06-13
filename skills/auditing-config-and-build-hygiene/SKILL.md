@@ -11,10 +11,10 @@ provenance:
   built_from:
   - category: 19
     source: docs/research/cluster-5-verification.md#19
-    hash: da36a415b7eac88a3b1993a679e311546753c9f50c382bb2948d7f672ca19017
+    hash: 10e8a2c0840226222cb146a50f937358eb30bedab3c75a57a0f87a63754a9914
   - category: 26
     source: docs/research/cluster-5-verification.md#26
-    hash: 7e08a34862897e0e935e8e3a24c49dd71b46b0409d0b8bcab0614d6aeb7fbdac
+    hash: 332a4105b73167f5473ffd530cded8ae14cab373ebaa46588b191bc68a47d980
 ---
 
 # auditing-config-and-build-hygiene

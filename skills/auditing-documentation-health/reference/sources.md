@@ -1,11 +1,13 @@
 # References to mine — auditing-documentation-health
 
 ## Contents
+
 - From category #22
 
 ## From category #22
 
 ### Key references
+
 - **Diátaxis (Daniele Procida) — https://diataxis.fr/**
   → mine: four distinct doc modes — **tutorials** (learning-oriented), **how-to guides** (task/goal-oriented), **reference** (information-oriented), **explanation** (understanding-oriented) — on two axes (action↔cognition, acquisition↔application). A doc that mixes modes (tutorial that drifts into reference) is a smell; missing a *whole quadrant* (e.g. no how-tos) is a gap.
 - **Michael Nygard — "Documenting Architecture Decisions" (ADR, 2011)** — https://adr.github.io/ (overview: https://martinfowler.com/bliki/ArchitectureDecisionRecord.html)

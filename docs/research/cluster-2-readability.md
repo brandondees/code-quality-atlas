@@ -7,6 +7,7 @@
 ## #5 Naming — intention-revealing, consistent, domain language, progressive refinement
 
 ### Key references
+
 - **Arlo Belshee — "Good Naming Is a Process, Not a Single Step" / "Naming is a Process" series** — https://arlobelshee.com/good-naming-is-a-process-not-a-single-step/ → mine: names improve in **stages**, not one leap — you don't need the perfect name to make progress. The 7 stages: **Missing → Nonsense → Honest → Honest-and-Complete → Does-the-Right-Thing → Intent → Domain Abstraction** (final stage: ["Intent to Domain Abstraction"](https://arlobelshee.com/naming-is-a-process-part-7-intent-to-domain-abstraction/)). Key insight to lift: *dishonest* names (look meaningful, aren't) are more dangerous than honest-nonsense ones; the reviewer behavior is "identify the stage, nudge it one stage better," not "demand perfection."
 - **Robert C. Martin — *Clean Code*, ch. 2 "Meaningful Names"** → mine: intention-revealing names; avoid disinformation; meaningful distinctions (no `a1`/`a2`, no noise words `Info`/`Data`/`Manager`); pronounceable & searchable; class = noun, method = verb. Mine the *checks*, treat as heuristics not law.
 - **Eric Evans — *Domain-Driven Design* (Ubiquitous Language)** + **Vaughn Vernon — *Implementing DDD*** → mine: names should come from the domain's shared vocabulary; a mismatch between code names and domain-expert language is itself a defect.
@@ -15,6 +16,7 @@
 - **Felienne Hermans — *The Programmer's Brain*** → mine: cognitive-science backing — good names reduce working-memory load; naming is a *comprehension* lever, not mere style.
 
 ### Tooling rules worth lifting
+
 - **ESLint `id-length`** — identifiers shorter/longer than a configured min/max (scope-appropriate length).
 - **ESLint `camelcase`** — casing convention (catches `snake_case` leaking into JS).
 - **ESLint `id-match`** — identifiers must match a configurable regex (encode a naming convention as a rule).
@@ -29,6 +31,7 @@
 - **clang-tidy `readability-identifier-naming`** — highly configurable per-kind naming convention enforcement (C/C++).
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Does each name state *intent* (what/why) rather than *mechanism* or type? (`activeUsers` over `userListFiltered`; `retryBudget` over `n`.)
 - Is name length proportional to scope? (One letter fine for a 3-line loop; a field or exported symbol needs a descriptive name.)
 - Any placeholder/temporary name surviving into the diff? (`tmp`, `data`, `data2`, `obj`, `foo`, `handleStuff`, `Manager`, `Helper`, `Util`.) Flag as "stage: nonsense/honest-incomplete — refine one stage."
@@ -47,6 +50,7 @@
 ## #6 Local readability — length/SRP, complexity, nesting, magic values, altitude, symmetry
 
 ### Key references
+
 - **G. Ann Campbell / SonarSource — "Cognitive Complexity: A new way of measuring understandability" (white paper)** → mine: the metric powering modern linters. Rules: (1) **ignore** structures that read multiple statements as one; (2) **+1** for each break in linear flow (`if`/`else if`/`else`, ternary, `switch`, loops, `catch`, mixed boolean-operator sequences, labelled break/continue); (3) **increment more for nesting** — deeper nesting costs more. A flat `switch` scores low, nested conditionals score high — closer to *felt* difficulty than cyclomatic. **Sonar default "too complex" threshold = 15** (rule S3776).
 - **Thomas J. McCabe — "A Complexity Measure" (1976)** → mine: cyclomatic complexity = linearly-independent paths (≈ decision points + 1); a *lower bound on test cases needed*. Common bands: 1–10 simple … >50 untestable `(verify exact bands)`.
 - **Robert C. Martin — *Clean Code*, ch. 3 "Functions"** → mine: small functions, "do one thing," single level of abstraction (the **altitude** rule), few arguments (0–2), no flag arguments, no side-effect surprises. Mine the *checks*, push back on the dogmatic "4 lines."
@@ -56,6 +60,7 @@
 - **Linux kernel CodingStyle — "if you need more than 3 levels of indentation, you're screwed"** → mine: a blunt real heuristic that nesting depth ≈ complexity.
 
 ### Tooling rules worth lifting
+
 - **SonarQube `S3776`** — "Cognitive Complexity of functions should not be too high"; language-agnostic; **default threshold 15**.
 - **ESLint `complexity`** — cyclomatic complexity over a threshold (default 20; teams often set 10).
 - **ESLint `max-depth`** (default 4) — block nesting depth. **`max-lines-per-function` / `max-lines` / `max-statements`** — length/statement caps (the Long Function smell). **`max-params`** (default 3) — Long Parameter List. **`max-nested-callbacks`** — pyramid of doom.
@@ -63,13 +68,14 @@
 - **`eslint-plugin-sonarjs` `cognitive-complexity`** — Sonar's metric inside ESLint.
 - **RuboCop `Metrics/AbcSize`** (Assignments-Branches-Conditions; **default Max 17**), **`Metrics/PerceivedComplexity`** (**Max 8**; Ruby's cognitive-style metric), **`Metrics/CyclomaticComplexity`** (Max 7 `(verify current)`), **`Metrics/MethodLength`, `Metrics/BlockLength`, `Metrics/ParameterLists`**.
 - **Reek `TooManyStatements`, `NestedIterators`, `ControlParameter`, `TooManyBranches`** — long-method, deep-nesting, flag-argument, branch-heavy smells (Ruby).
-- **Pylint `too-many-branches` (R0912)`, `too-many-statements` (R0915)`, `too-many-nested-blocks` (R1702)`, `too-many-arguments` (R0913)`, `too-many-locals` (R0914)`** — Python local-complexity caps; R1702 is a direct nesting gate.
-- **Pylint `magic-value-comparison` (R2004)** — comparisons against magic literals; **opt-in extension** (`pylint.extensions.magic_value`); `valid-magic-values` default `(0, -1, 1, "", "__main__")`. Ruff equivalent **`PLR2004`**. **`no-else-return` (R1705)`, `inconsistent-return-statements` (R1710)`** — nudge toward guard-clause / symmetry.
+- **Pylint `too-many-branches` (R0912)`,`too-many-statements`(R0915)`, `too-many-nested-blocks` (R1702)`,`too-many-arguments`(R0913)`, `too-many-locals` (R0914)`** — Python local-complexity caps; R1702 is a direct nesting gate.
+- **Pylint `magic-value-comparison` (R2004)** — comparisons against magic literals; **opt-in extension** (`pylint.extensions.magic_value`); `valid-magic-values` default `(0, -1, 1, "", "__main__")`. Ruff equivalent **`PLR2004`**. **`no-else-return` (R1705)`,`inconsistent-return-statements`(R1710)`** — nudge toward guard-clause / symmetry.
 - **golangci-lint: `gocyclo`** (cyclomatic), **`gocognit`** (cognitive), **`nestif`** (deeply-nested if), **`funlen`** (function length), **`cyclop`** (func+package cyclomatic), **`mnd`** (magic-number detector; **replaces the old `gomnd`**). A near-complete map of this category in one toolchain.
 - **PMD `CyclomaticComplexity`, `CognitiveComplexity`, `NPathComplexity`, `ExcessiveMethodLength`, `ExcessiveParameterList`, `AvoidDeeplyNestedIfStmts`** (Java) — incl. **NPath** (acyclic execution paths), a stricter cousin of cyclomatic.
 - **Lizard / radon** — language-agnostic cyclomatic + token-count + function-length reporters; radon grades a Maintainability Index. Good "metrics across the diff" framing.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Does this function do *one* thing at *one* level of abstraction? (Altitude: if it mixes high-level policy with low-level byte/string twiddling, extract the low part.)
 - Can you state the function's job in a single verb phrase without "and"? If not, likely SRP violation — split.
 - Nesting depth ≤ ~3? Replace arrow-shaped nesting with **guard clauses / early returns**; invert conditions to de-nest the happy path.
@@ -88,6 +94,7 @@
 ## #7 Comments & inline docs — why-not-what, docstring accuracy, comment rot, dead code
 
 ### Key references
+
 - **Robert C. Martin — *Clean Code*, ch. 4 "Comments"** → mine: "comments don't make up for bad code"; *good* comments (intent, warning of consequences, TODO, legal, amplification, public-API docs) vs. *bad* (redundant, misleading, mandated noise, commented-out code, journal/attribution now in VCS). The "explain *why*, not *what*" thesis operationalized.
 - **"Comments should say WHY, not WHAT"** (community canon; *Pragmatic Programmer*, McConnell, Coding Horror) → mine: the *what* is the code's job; comments earn their keep capturing intent, rationale, constraints, road-not-taken.
 - **Andrew Hunt & David Thomas — *The Pragmatic Programmer*** → mine: DRY applies to comments — a comment duplicating code is a second source of truth that *will* drift; prefer self-documenting code, reserve comments for the non-obvious *why*.
@@ -96,7 +103,8 @@
 - **Docstring conventions — PEP 257, JSDoc, Javadoc, rustdoc, KDoc** → mine: what "complete" looks like per ecosystem (summary, params, returns, raises, examples) so a reviewer can judge *completeness & accuracy*.
 
 ### Tooling rules worth lifting
-- **Pylint `missing-function-docstring` (C0116)`, `missing-class-docstring` (C0115)`, `missing-module-docstring` (C0112)`** — presence gates. **`fixme` (W0511)** — flags `TODO`/`FIXME`/`XXX`.
+
+- **Pylint `missing-function-docstring` (C0116)`,`missing-class-docstring`(C0115)`, `missing-module-docstring` (C0112)`** — presence gates. **`fixme` (W0511)** — flags `TODO`/`FIXME`/`XXX`.
 - **Ruff / pydocstyle `D` rules (D1xx–D4xx, PEP 257)** — docstring style & completeness. **`undocumented-param` (D417)** — docstring doesn't document all params (only fires when an `Args` section exists; on the google convention). ([Ruff D417](https://docs.astral.sh/ruff/rules/undocumented-param/))
 - **Ruff `commented-out-code` (ERA001)** (from PyCQA `eradicate`) — detects **commented-out code** specifically. ([Ruff ERA001](https://docs.astral.sh/ruff/rules/commented-out-code/)) Direct hit on that facet.
 - **Ruff/flake8 `flake8-todos` / `flake8-fixme`** — flag `TODO`/`FIXME`/`XXX`/`HACK`, sometimes requiring author/issue link.
@@ -108,6 +116,7 @@
 - **Vulture (Python)** — dead-code detector; adjacent to commented-out code as deletable cruft.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Does each comment explain **why** (intent, constraint, trade-off, gotcha, issue link) rather than restate **what**? Delete pure restatements.
 - Any **commented-out code**? Delete it — VCS is the archive. Flag every block.
 - Do docstrings/JSDoc/Javadoc **match the current signature**? Every `@param`/`@return`/`@raises` exists and is accurate; no param undocumented or renamed (comment rot).
@@ -125,6 +134,7 @@
 ## #8 Consistency & idiom — project conventions, idiomatic language/framework use, pattern consistency
 
 ### Key references
+
 - **Language & org style guides** — **PEP 8**, **Google Style Guides** (google.github.io/styleguide), **Airbnb JavaScript**, **Effective Go / Go Code Review Comments**, **Rust API Guidelines**, **Ruby Style Guide** → mine: each is a curated, battle-tested list of "in this ecosystem, do it *this* way." We don't adopt one; we mine the *recurring* checks.
 - **Effective Go + "Go Code Review Comments"** → mine: an *idiom* guide written as review comments (error shape, naming, receiver names, interface size, `gofmt` non-negotiable) — a template for the "idiomatic use" half.
 - **Andrew Hunt & David Thomas — *The Pragmatic Programmer* (Orthogonality, DRY, least surprise)** → mine: consistency is least-surprise; learning one part should predict the rest.
@@ -133,6 +143,7 @@
 - **Opinionated-reviewer prior art** (../prior-art.md): `dhh-rails`, `kieran-*`, `pattern-recognition-specialist` → mine: the *named-perspective* pattern — strong ecosystem-specific taste catches idiom violations a generic linter misses. Worth replicating per ecosystem (see map-gaps G6).
 
 ### Tooling rules worth lifting
+
 - **Formatters as the floor: Prettier, Black, gofmt/goimports, rustfmt, clang-format, dotnet format** → the strongest consistency mechanism: mechanical, non-negotiable. Heuristic to lift: *if a formatter exists and isn't applied, that's the finding* — don't spend review attention on it.
 - **Biome / Ruff / golangci-lint / RuboCop as aggregate idiom gates** → meta-rule: *the project's own linter config is the source of truth for its conventions — read it, then check the diff against it.*
 - **RuboCop `Style/*` department** (`Style/GuardClause`, `Style/StringLiterals`, `Style/HashSyntax`, `Style/FrozenStringLiteralComment`, `Style/NumericLiterals`) — Ruby idiom; `Style/GuardClause` bridges to #6.
@@ -145,6 +156,7 @@
 - **EditorConfig + pre-commit/lint-staged gates** — `.editorconfig` (charset, indent, line-ending) and hooks running the above; *presence and enforcement* is itself the control to check for.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Does the change **follow the project's own conventions**? Read `.eslintrc`/`.rubocop.yml`/`ruff.toml`/`.editorconfig`/style guide first; the codebase's established choice wins over personal preference.
 - Is the code **formatted** by the project's formatter? (Unformatted code where Prettier/Black/gofmt exists is an automatic finding.)
 - Does it use the **idiomatic construct** for this language/framework, or a clumsy non-native equivalent? (comprehension vs. manual loop; `Result`/error-as-value vs. exceptions where one was chosen; framework router/ORM idiom vs. hand-rolled.)

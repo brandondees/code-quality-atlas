@@ -58,7 +58,7 @@ Normalize every lens finding to this shape before merging — it is what makes d
 
 ## Output format
 
-```
+```text
 Verdict: <block | approve with changes | approve> — <one-line reason>
 
 Blocker

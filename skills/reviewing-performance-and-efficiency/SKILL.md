@@ -11,7 +11,7 @@ provenance:
   built_from:
   - category: 15
     source: docs/research/cluster-4-runtime.md#15
-    hash: 95468df6094ec91160285d106ef87d4c7f1de2709ea9f0befebe9aa676028351
+    hash: edbac0e3b11b41a9af4c9b8797940b20a90918f40e173c9229c3dbea4e073acc
 ---
 
 # reviewing-performance-and-efficiency

@@ -9,7 +9,7 @@ provenance:
   built_from:
   - category: 21
     source: docs/research/cluster-6-evolution.md#21
-    hash: a9146894743cfe64e936fd9995aaf7498d7d694fe1e1873c6d375d981d4eaca7
+    hash: e05463da683114d3b89971a92025fe650fe0579d060a11de66779506d3b1b9ce
 ---
 
 # finding-maintainability-hotspots

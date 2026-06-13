@@ -3,6 +3,7 @@
 **Input:** "Review this PR: adds a worker that consumes payment events from a queue and writes results to the orders table."
 
 **Good selection:**
+
 1. `reviewing-concurrency-and-async` — queue consumer: idempotency, redelivery, interleaving.
 2. `tracing-correctness-and-invariants` — the write logic and its edge cases.
 3. `hunting-silent-failures` — what happens when the provider call or the write fails.

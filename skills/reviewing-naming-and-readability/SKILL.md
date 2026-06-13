@@ -9,13 +9,13 @@ provenance:
   built_from:
   - category: 5
     source: docs/research/cluster-2-readability.md#5
-    hash: 4fd8ccbcd0d75b9096e4eef4473c4094359580c70d674fbd1d4ab8812e447de3
+    hash: bed0a9380176c7dba9c8db79f4210b17fe0c0394535b60b13f4a03ad9f363be0
   - category: 6
     source: docs/research/cluster-2-readability.md#6
-    hash: 83d93caa4375a3edb09084a4f9e70173aca94284a7d20fecca4d3ede457ff669
+    hash: fbcdaa81071892f915f9c0153acab661785875cfc1bd85dce73cf751479baad4
   - category: 7
     source: docs/research/cluster-2-readability.md#7
-    hash: 71929b9f969c7303f581d400195ba89e99059f0288f6a2701a2cefdcdac125b0
+    hash: 834a07c39d7656d1186eb6d5990f09f1e3cb3689a86a2002532d7391c7015134
 ---
 
 # reviewing-naming-and-readability

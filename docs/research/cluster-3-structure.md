@@ -7,6 +7,7 @@
 ## #9 Module / unit design
 
 ### Key references
+
 - **David Parnas — "On the Criteria To Be Used in Decomposing Systems into Modules" (1972)** → mine: decompose by **information hiding** — each module hides a design decision likely to change — not by flowchart/processing steps. The foundational cohesion/encapsulation argument.
 - **Meilir Page-Jones — Connascence** (catalog: https://connascence.io/) → mine: a *precise* vocabulary for coupling. Nine types — **static**: Name, Type, Meaning/Convention, Position, Algorithm; **dynamic**: Execution (order), Timing, Value, Identity — each evaluated by **Strength** (harder to refactor = worse), **Degree** (how many entities), **Locality** (near is better than far). Operational rule: *prefer weaker connascence; keep stronger connascence local.* Far more actionable than "reduce coupling."
 - **John Ousterhout — *A Philosophy of Software Design* (deep modules)** → mine: a good module is a **simple interface over substantial behavior**; shallow modules (interface ≈ implementation) are negative-value ("classitis").
@@ -14,6 +15,7 @@
 - **Rust API Guidelines — "hard to misuse"** `(verify URL)` → mine: type-driven misuse-resistance (newtypes, builders, typestate) so wrong usage won't compile.
 
 ### Tooling rules worth lifting
+
 - **dependency-cruiser** (JS/TS) — `no-circular`, `no-orphans`, custom `forbidden` rules for cross-module reach-ins. (https://github.com/sverweij/dependency-cruiser)
 - **madge** (JS/TS) — `--circular` flags dependency cycles; graphs fan-in/out.
 - **eslint-plugin-import `import/no-cycle`**, **eslint-plugin-boundaries** — module-boundary enforcement in lint.
@@ -23,6 +25,7 @@
 - **PMD** (Java) — `CouplingBetweenObjects`, `ExcessiveImports`, `LawOfDemeter`.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Does the unit have **one** clear responsibility (high cohesion)? State its job in a sentence without "and."
 - Is the interface **narrow relative to the behavior** behind it (deep module), or a shallow pass-through adding no value?
 - What is the **strongest connascence crossing the boundary**, and is it local? (Position/Algorithm connascence across modules is a smell; prefer Name/Type.)
@@ -41,6 +44,7 @@
 ## #10 Type & data modeling
 
 ### Key references
+
 - **Alexis King — "Parse, Don't Validate" (2019)** — https://lexi-lambda.github.io/blog/2019/11/05/parse-don-t-validate/ `(verify URL)` → mine: parse untrusted input into a **constrained type once** at the boundary; downstream relies on the type's guarantees. "Shotgun parsing" (validate-then-pass-raw, re-checked everywhere) is the antipattern.
 - **Yaron Minsky — "Make Illegal States Unrepresentable" (Effective ML, 2010; Jane Street/OCaml)** → mine: model the domain so invalid/nonsensical states **cannot be expressed**; the type system is the enforcement mechanism, not runtime checks or docs.
 - **Scott Wlaschin — "Designing with Types" (F# for Fun and Profit)** — https://fsharpforfunandprofit.com/posts/designing-with-types-making-illegal-states-unrepresentable/ → mine: practical recipes — replace primitives with domain types, sum types for state machines, encode optionality explicitly.
@@ -48,12 +52,14 @@
 - **Hillel Wayne — type-driven design / lightweight formal methods** `(verify)` → mine: types as cheap proofs; let the compiler check invariants you'd otherwise test.
 
 ### Tooling rules worth lifting
+
 - **TypeScript** `strict` (`strictNullChecks`, `noImplicitAny`); **typescript-eslint** `strict-boolean-expressions`, `no-unnecessary-condition`, `switch-exhaustiveness-check` (compiler-checked exhaustive unions), `no-non-null-assertion` (no `!` papering over null).
 - **Python** — `mypy --strict` / **pyright** strict; **Pydantic** (runtime parse-into-type at boundaries); `typing.NewType`, `Literal`, `Enum`, frozen dataclasses for value objects.
 - **Rust** — newtype pattern, `#[non_exhaustive]`, exhaustive `match`, clippy.
 - *Note:* "primitive obsession" itself is weakly tooled → largely a judgment heuristic (map-gaps G5).
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Are **invalid states representable**? Could you construct a value the domain forbids (an order both `draft` and `shipped`)? Model with a tagged union / state machine instead.
 - Is untrusted input **parsed into a precise type at the boundary** (parse-don't-validate), or validated then passed onward as raw primitives (re-validatable downstream)?
 - **Primitive obsession**: are domain concepts (email, money, id, %) raw `string`/`number`, or wrapped in domain types carrying invariants/units (cross #4)?
@@ -69,6 +75,7 @@
 ## #11 Abstraction & simplicity  *(counterweight category)*
 
 ### Key references
+
 - **Sandi Metz — "The Wrong Abstraction" (2016)** — https://sandimetz.com/blog/2016/1/20/the-wrong-abstraction → mine: **"duplication is far cheaper than the wrong abstraction."** When an abstraction is proven wrong (callers keep adding flags/conditionals), the fastest way forward is *back*: re-inline into callers and let the right abstraction emerge. The premier counterweight.
 - **Kent C. Dodds — "AHA Programming" (Avoid Hasty Abstractions)** — https://kentcdodds.com/blog/aha-programming → mine: don't abstract impulsively; prefer some duplication until the shared shape is clear; thoughtful > hasty.
 - **Martin Fowler — "Rule of Three" (*Refactoring*) + "Yagni"** — https://martinfowler.com/bliki/Yagni.html → mine: extract on the **third** occurrence; don't build speculative generality you may never need (or that won't match the real need).
@@ -76,11 +83,13 @@
 - **Moseley & Marks — "Out of the Tar Pit"** (cross #1) → mine: minimize state and accidental complexity; the simplest design that works.
 
 ### Tooling rules worth lifting
+
 - **Duplication detectors:** jscpd (Rabin-Karp, 150+ languages, pmd-cpd report format), PMD **CPD**, SonarQube **`S4144`** (methods should not have identical implementations) + duplication-density, Simian. *Caveat:* these find duplication, but the counterweight says **not all duplication should be DRY'd** — coincidental duplication that evolves separately should stay duplicated.
 - **Dead/unused-code:** knip, ts-prune, Vulture (Python), staticcheck `U1000`, RuboCop `Lint/UselessAssignment` — find speculative/unused abstractions and config.
 - *Over-abstraction itself is largely un-tooled* → an LLM-judgment heuristic (map-gaps G5).
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is this abstraction introduced on **real, repeated need** (rule of three), or speculatively for one/two uses (YAGNI)?
 - Does it have a single, nameable responsibility — or is it a grab-bag taking flags/conditionals to fit multiple callers (the **wrong-abstraction** smell)?
 - Is there an **existing** abstraction this duplicates/competes with (reuse/extend it, don't fork — cross #8)?
@@ -95,6 +104,7 @@
 ## #12 System architecture
 
 ### Key references
+
 - **Robert C. Martin — *Clean Architecture* / The Dependency Rule + Acyclic Dependencies Principle** → mine: source dependencies point inward toward policy; **no cycles** between components. (Treat the dogma critically; mine the dependency-direction and ADP checks.)
 - **Mark Richards & Neal Ford — *Fundamentals of Software Architecture*** → mine: architecture *characteristics* (the "-ilities") as first-class, architecture quanta, and the menu of styles with their explicit trade-offs.
 - **Neal Ford, Rebecca Parsons, Patrick Kua — *Building Evolutionary Architectures*** → mine: **fitness functions** — automated, objective checks that the architecture still holds ("domain imports no infra", "no package cycles"). Directly inspires architecture-as-test behavior.
@@ -102,11 +112,13 @@
 - **Eric Evans — *DDD* (bounded contexts, context mapping)** → mine: module/service boundaries follow **domain** boundaries; cross-context integration via explicit contracts, never shared internals.
 
 ### Tooling rules worth lifting
+
 - **dependency-cruiser, madge `--circular`** (JS/TS), **import-linter** layers/independence contracts (Python), **ArchUnit** (Java), **NetArchTest** (.NET), **pydeps**, **jdepend** — enforce layering, detect cycles, god modules, fan-in/out.
 - **`@nx/enforce-module-boundaries`** (Nx) / Turborepo boundaries — monorepo module-boundary tags.
 - **SonarQube** — cyclic-dependency / package-tangle measures.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Do source dependencies respect the **intended direction** (domain doesn't import infrastructure; UI→app→domain, not back)?
 - Any **dependency cycles** between modules/packages/services (ADP)?
 - Is there a **god module / hub** with huge fan-in *and* fan-out that everything routes through?
@@ -123,6 +135,7 @@
 ## #13 API & contract design
 
 ### Key references
+
 - **Joshua Bloch — "How to Design a Good API and Why It Matters" (2006)** — https://research.google.com/pubs/archive/32713.pdf → mine: easy to use & hard to misuse; "when in doubt, leave it out" (you can add later, can't remove); minimize accessibility/mutability; don't let implementation leak into the API.
 - **Jon Postel — Robustness Principle** ("be conservative in what you send, liberal in what you accept") → mine: a **contested** principle — liberal acceptance can entrench bugs and ambiguity; modern guidance is "be conservative in what you *accept* too." Carry the nuance into review (cross #2).
 - **Leonard Richardson — Richardson Maturity Model** (via Fowler) — https://martinfowler.com/articles/richardsonMaturityModel.html → mine: levels of REST maturity (resources → verbs+status codes → hypermedia) as a consistency yardstick.
@@ -130,6 +143,7 @@
 - **Consumer-Driven Contracts / Pact** — https://docs.pact.io/ → mine: verify the provider against *real consumer expectations*; only the parts consumers actually use get tested.
 
 ### Tooling rules worth lifting
+
 - **Spectral** (Stoplight) — lint OpenAPI/AsyncAPI against a style guide (naming, required fields, consistency). (https://stoplight.io/open-source/spectral)
 - **oasdiff** — OpenAPI **breaking-change detection** (470+ change types) + diff; CLI + GitHub Action. (https://www.oasdiff.com/)
 - **buf** — Protobuf breaking-change detection (`WIRE`, `WIRE_JSON`, `PACKAGE`, `FILE` categories) + lint. (https://buf.build/docs/breaking/)
@@ -138,6 +152,7 @@
 - **Google api-linter** (AIP rules) for gRPC/REST conventions.
 
 ### Reviewable heuristics (skill-checklist seeds)
+
 - Is the change to a public contract **backward-compatible**? If breaking, is it versioned and communicated (semver, deprecation window)?
 - Is the API **easy to use, hard to misuse**? Required things required by the type; invalid combinations impossible; sensible defaults.
 - **"When in doubt, leave it out":** any field/endpoint/param being added that isn't clearly needed? (You can add later; you can't remove.)

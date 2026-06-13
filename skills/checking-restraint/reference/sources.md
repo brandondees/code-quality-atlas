@@ -1,12 +1,14 @@
 # References to mine — checking-restraint
 
 ## Contents
+
 - From category #11
 - From category #15
 
 ## From category #11
 
 ### Key references
+
 - **Sandi Metz — "The Wrong Abstraction" (2016)** — https://sandimetz.com/blog/2016/1/20/the-wrong-abstraction → mine: **"duplication is far cheaper than the wrong abstraction."** When an abstraction is proven wrong (callers keep adding flags/conditionals), the fastest way forward is *back*: re-inline into callers and let the right abstraction emerge. The premier counterweight.
 - **Kent C. Dodds — "AHA Programming" (Avoid Hasty Abstractions)** — https://kentcdodds.com/blog/aha-programming → mine: don't abstract impulsively; prefer some duplication until the shared shape is clear; thoughtful > hasty.
 - **Martin Fowler — "Rule of Three" (*Refactoring*) + "Yagni"** — https://martinfowler.com/bliki/Yagni.html → mine: extract on the **third** occurrence; don't build speculative generality you may never need (or that won't match the real need).
@@ -16,6 +18,7 @@
 ## From category #15
 
 ### Key references
+
 - **Brendan Gregg — Systems Performance (and the USE method)** — http://www.brendangregg.com/usemethod.html → mine: measure before optimizing; for each resource check Utilization, Saturation, Errors. Anchors the "profile, don't guess" discipline reviews should enforce.
 - **Donald Knuth — "Structured Programming with go to Statements" (1974)** → mine: the actual provenance of "premature optimization is the root of all evil (97% of the time)" — and its often-dropped corollary: *do* optimize the critical 3%. Use to keep the counterweight balanced, not absolutist.
 - **Martin Fowler — "Yet Another Optimization Article" / refactoring + performance writing** → mine: optimize against a measured performance profile, not intuition; keep code clean first because clean code is easier to make fast.

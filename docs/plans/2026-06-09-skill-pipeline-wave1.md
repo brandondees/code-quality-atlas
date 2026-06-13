@@ -13,6 +13,7 @@
 ## File Structure
 
 **Tooling (one responsibility per file):**
+
 - `tooling/sections.py` — parse research markdown: extract a `## #n` section, its `### …` subsections, and hash them.
 - `tooling/manifest.py` — `Manifest`/`Skill`/`Source` dataclasses; load + validate `skills/manifest.yaml`.
 - `tooling/generate.py` — build a skill directory (SKILL.md + reference/* + eval stub) from a `Skill` + research.
@@ -21,10 +22,12 @@
 - `tooling/cli.py` — argparse entry point: `generate` / `drift` / `eval`.
 
 **Tests + fixtures:**
+
 - `tests/fixtures/research_sample.md`, `tests/fixtures/manifest_sample.yaml`
 - `tests/test_sections.py`, `tests/test_manifest.py`, `tests/test_generate.py`, `tests/test_drift.py`, `tests/test_evals.py`, `tests/test_cli.py`
 
 **Artifacts produced:**
+
 - `skills/manifest.yaml` — the 6 wave-1 skills.
 - `skills/<name>/…` — generated scaffolds; `skills/hunting-silent-failures/` fully refined.
 - `docs/runbooks/regenerating-skills.md` — the proven loop.
@@ -36,6 +39,7 @@
 ## Task 1: Project scaffolding
 
 **Files:**
+
 - Create: `requirements.txt`, `conftest.py`, `tooling/__init__.py`, `tests/__init__.py`
 - Create: `tests/fixtures/research_sample.md`, `tests/fixtures/manifest_sample.yaml`
 
@@ -123,6 +127,7 @@ git commit -m "chore: scaffold tooling package, test fixtures, and deps"
 ## Task 2: `sections.extract_section`
 
 **Files:**
+
 - Create: `tooling/sections.py`
 - Test: `tests/test_sections.py`
 
@@ -189,6 +194,7 @@ git commit -m "feat(sections): extract a numbered research section"
 ## Task 3: `sections.extract_subsection`
 
 **Files:**
+
 - Modify: `tooling/sections.py`
 - Test: `tests/test_sections.py`
 
@@ -260,6 +266,7 @@ git commit -m "feat(sections): extract a typed subsection (refs/tooling/heuristi
 ## Task 4: `sections.section_hash`
 
 **Files:**
+
 - Modify: `tooling/sections.py`
 - Test: `tests/test_sections.py`
 
@@ -317,6 +324,7 @@ git commit -m "feat(sections): stable sha256 hash per research section"
 ## Task 5: `manifest` dataclasses + loader
 
 **Files:**
+
 - Create: `tooling/manifest.py`
 - Test: `tests/test_manifest.py`
 
@@ -424,6 +432,7 @@ git commit -m "feat(manifest): load skill manifest into typed dataclasses"
 ## Task 6: `manifest.validate`
 
 **Files:**
+
 - Modify: `tooling/manifest.py`
 - Test: `tests/test_manifest.py`
 
@@ -528,6 +537,7 @@ git commit -m "feat(manifest): validate names, descriptions, shape, and source r
 ## Task 7: `generate` reference-file builder
 
 **Files:**
+
 - Create: `tooling/generate.py`
 - Test: `tests/test_generate.py`
 
@@ -610,6 +620,7 @@ git commit -m "feat(generate): build per-skill reference files from research sub
 ## Task 8: `generate` SKILL.md builder (with provenance)
 
 **Files:**
+
 - Modify: `tooling/generate.py`
 - Test: `tests/test_generate.py`
 
@@ -693,6 +704,7 @@ git commit -m "feat(generate): build lean SKILL.md with provenance frontmatter"
 ## Task 9: `generate.generate_skill` writes the directory
 
 **Files:**
+
 - Modify: `tooling/generate.py`
 - Test: `tests/test_generate.py`
 
@@ -769,6 +781,7 @@ git commit -m "feat(generate): write the full skill directory tree"
 ## Task 10: `drift.check_drift`
 
 **Files:**
+
 - Create: `tooling/drift.py`
 - Test: `tests/test_drift.py`
 
@@ -869,6 +882,7 @@ git commit -m "feat(drift): detect skills whose source research sections changed
 ## Task 11: `evals` loader + validator
 
 **Files:**
+
 - Create: `tooling/evals.py`
 - Test: `tests/test_evals.py`
 
@@ -963,6 +977,7 @@ git commit -m "feat(evals): load and validate per-skill eval files (>=3 scenario
 ## Task 12: `cli` entry point
 
 **Files:**
+
 - Create: `tooling/cli.py`
 - Test: `tests/test_cli.py`
 
@@ -1064,6 +1079,7 @@ git commit -m "feat(cli): generate and drift subcommands"
 ## Task 13: Author the real manifest (6 wave-1 skills) and generate scaffolds
 
 **Files:**
+
 - Create: `skills/manifest.yaml`
 - Generate: `skills/<6 skill dirs>/`
 
@@ -1178,6 +1194,7 @@ git commit -m "feat(skills): declare 6 wave-1 skills and generate their scaffold
 ## Task 14: Refine the exemplar skill (`hunting-silent-failures`) with examples + evals
 
 **Files:**
+
 - Modify: `skills/hunting-silent-failures/examples.md`
 - Modify: `skills/hunting-silent-failures/evals/eval.json`
 
@@ -1196,6 +1213,7 @@ except Exception:
     pass
 order.mark_paid()
 ```
+
 **Expected finding:** Swallowed exception: the `except Exception: pass` hides charge
 failures, and `order.mark_paid()` runs even when the charge failed. Fail loud — let
 the error propagate, or handle the specific failure and do NOT mark the order paid.
@@ -1203,10 +1221,12 @@ the error propagate, or handle the specific failure and do NOT mark the order pa
 ## Bad → finding
 
 **Input (diff):**
+
 ```js
 const res = await fetch(url);   // no timeout, no error handling
 return res.json();
 ```
+
 **Expected finding:** No timeout and no failure handling on a remote call. Add an
 AbortController timeout and handle non-OK responses / network errors with a defined
 fallback; bare `await fetch` can hang indefinitely.
@@ -1214,6 +1234,7 @@ fallback; bare `await fetch` can hang indefinitely.
 ## Good → no finding
 
 **Input (diff):**
+
 ```python
 try:
     charge = payments.charge(order.total)
@@ -1222,9 +1243,11 @@ except PaymentDeclined as e:
     return CheckoutResult.declined(e.code)   # specific, surfaced, no false "paid"
 order.mark_paid()
 ```
+
 **Expected finding:** None — narrow exception, surfaced with context, no silent
 fallthrough.
-```
+
+```text
 
 - [ ] **Step 2: Write `evals/eval.json`** with ≥3 scenarios
 
@@ -1283,6 +1306,7 @@ Eval results: 3/3 pass on Sonnet; <record small-model results here>."
 ## Task 15: Prove the regeneration loop + write the runbook
 
 **Files:**
+
 - Create: `docs/runbooks/regenerating-skills.md`
 - (Temporarily edit then revert a research section to demonstrate drift)
 
@@ -1341,6 +1365,7 @@ git commit -m "docs: runbook for the docs->drift->regenerate->evals loop"
 ## Self-Review
 
 **Spec coverage** (against `docs/phase-2-skill-suite-design.md`):
+
 - §2.1 manifest → Tasks 5, 6, 13. §2.2 generator → Tasks 7–9, 13. §2.4 drift → Tasks 10, 15. §2.5 evals → Tasks 11, 14. §3 skill anatomy (lean SKILL.md + one-level-deep reference/* + examples + evals) → Tasks 8, 9, 14. §6 adaptation loop → Task 15 + runbook. §8 DoD: manifest with 6 ★ (Task 13), tooling end-to-end (Tasks 2–12), one fully-refined skill with ≥3 evals tested on two tiers (Task 14), regeneration runbook (Task 15). **Deferred (stated up front):** full refinement + cross-model eval tuning of skills 2–6 → follow-on plan. Provenance `taxonomy_version` carried via manifest (Task 5/8). G1 single-owner fields (`primary_owner`/`cross_ref`) are parsed (Task 5) but not yet enforced — acceptable for wave 1 (the 6 ★ don't collide); enforcement is a follow-on.
 - **Placeholder scan:** every code step shows complete code; the only intentional human-judgment step is Task 14 Step 4 (manual cross-model eval run — unavoidable, no automated grader exists) and the `examples.md` content is fully provided.
 - **Type consistency:** `extract_section(markdown, n)`, `extract_subsection(section_text, kind)`, `section_hash(markdown, n)`, `Source(category, source).path/.section`, `Skill`, `Manifest(taxonomy_version, skills)`, `validate(manifest, docs_root)`, `build_reference(skill, kind, docs_root)`, `build_skill_md(skill, taxonomy_version, docs_root)`, `generate_skill(skill, taxonomy_version, docs_root, skills_root)`, `check_drift(skills_root, docs_root)`, `DriftReport(skill, changed)`, `load_evals`/`validate_evals`/`EvalDoc`, `main(argv)` — names/signatures are consistent across tasks.

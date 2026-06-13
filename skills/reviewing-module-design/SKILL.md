@@ -9,10 +9,10 @@ provenance:
   built_from:
   - category: 9
     source: docs/research/cluster-3-structure.md#9
-    hash: 920b16f870efcf593612b37ea17cab42ea05eec36f269b9b2b9c5f53e0fbbc6f
+    hash: 6cb643404c9ef20b018a2ec28db796be4e8f16635f6ee298f755448504fd4999
   - category: 10
     source: docs/research/cluster-3-structure.md#10
-    hash: 1c888a10ae9486b6847ee871fea455cde8e1b4c46db42200a751e589301839b3
+    hash: ff175300df2b146d5d226fef720a42eb2ade21d990ac1f022fe7d2e6df51707a
 ---
 
 # reviewing-module-design

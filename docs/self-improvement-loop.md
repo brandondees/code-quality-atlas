@@ -27,7 +27,7 @@ for consumers.
 The crucial observation is that the atlas already has the **back half** of this loop, built
 and CI-gated:
 
-```
+```text
             ┌────────────────  MISSING: front half  ────────────────┐
             │                                                       │
  real usage ─► signals ─► distillation ─► research-doc edit ─► drift flags skills

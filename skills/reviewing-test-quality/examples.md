@@ -6,6 +6,7 @@ the checklist and report each distinct issue as its own numbered finding. When t
 ## Bad → finding
 
 **Input (diff):**
+
 ```js
 test("processOrder", () => {
   const validator = { check: jest.fn().mockReturnValue(true) };
@@ -16,7 +17,9 @@ test("processOrder", () => {
   expect(repo.save).toHaveBeenCalledBefore(mailer.send);
 });
 ```
+
 **Expected finding:**
+
 1. **Over-mocked, implementation-coupled test:** every collaborator is a mock and
    the assertions only verify which internals were called and in what order — any
    refactor breaks it while a real bug (wrong total, wrong recipient) passes.
@@ -28,6 +31,7 @@ test("processOrder", () => {
 ## Bad → finding
 
 **Input (diff):**
+
 ```python
 processed = []
 
@@ -39,7 +43,9 @@ def test_batch():
     processed.append(process(next_item()))     # appends to module-level list
     assert len(processed) == 1                 # passes only if run first
 ```
+
 **Expected finding:**
+
 1. **Shared mutable state:** `test_batch` appends to a module-level list, so it
    passes only when run first/alone (order dependence) — isolate with a fixture.
 2. **Real clock:** `test_expiry` uses `datetime.now()` — inject/freeze time.
@@ -49,6 +55,7 @@ def test_batch():
 ## Good → no finding
 
 **Input (diff):**
+
 ```python
 def test_refund_rejected_after_30_days():
     # regression test for #842
@@ -61,6 +68,7 @@ def test_refund_allowed_on_day_30():
     order = make_order(paid_at=fixed_now - timedelta(days=30))
     assert request_refund(order, now=fixed_now).approved
 ```
+
 **Expected finding:** None — behavior-level assertions, injected clock
 (deterministic), both sides of the boundary covered, regression test linked to its
 bug. Report "No findings". Do NOT demand mocks for collaborators that are already

@@ -9,6 +9,7 @@
 ## 1. Purpose
 
 Turn the verified research into a **suite of code-review & maintenance agent skills** that:
+
 1. are **derived from** and **traceable to** the taxonomy + research (the canonical source);
 2. **regenerate/refine** as the research improves — async doc critique compounds into better skills, instead of skills drifting;
 3. follow **Agent-Skills best practices** and work **across models down to ~8B local** (not Claude-only);
@@ -20,7 +21,7 @@ Non-goal: build all behaviors at once, or hand-author skills that lose their lin
 
 Four moving parts, with one **adaptation lever** (the manifest):
 
-```
+```text
  SOURCE OF TRUTH                 ADAPTATION LEVER            DERIVED ARTIFACTS
  docs/taxonomy.md        ┐                                   skills/<gerund>/
  docs/research/          ├──▶  skills/manifest.yaml  ──gen──▶   SKILL.md (+provenance)
@@ -66,7 +67,7 @@ Each skill ships ≥3 scenarios (`query` + `expected_behavior`, with a no-skill 
 
 ## 3. Skill anatomy (D7 — progressive disclosure + portability)
 
-```
+```text
 skills/hunting-silent-failures/
 ├── SKILL.md            # LEAN entry point (<500 lines, aim ≪) — loaded on trigger
 │                       #   frontmatter: name · description · provenance{taxonomy_version, built_from[]{category,source,hash}}
@@ -80,6 +81,7 @@ skills/hunting-silent-failures/
 ```
 
 Rules (from best-practices doc):
+
 - `SKILL.md` body **< 500 lines**; references **one level deep**; reference files **>100 lines get a ToC**.
 - `description`: third person, specific, "what it does AND when," explicit trigger keywords.
 - `name`: gerund, lowercase-hyphen, ≤64 chars, no `claude`/`anthropic`.
@@ -92,6 +94,7 @@ Rules (from best-practices doc):
 22 behaviors covering all 27 categories. ★ = build-first (LLM-judgment where linters don't help, map-gaps G5). The manifest holds the authoritative list; this is the seed.
 
 **Diff-shaped (run on a change):**
+
 1. Tracing correctness & invariants — #1,#4
 2. ★ Hunting silent failures & resilience — #2 (#4)
 3. Reviewing concurrency & async — #3
@@ -121,7 +124,7 @@ Rules (from best-practices doc):
 
 ## 5. Repo additions
 
-```
+```text
 skills/
 ├── manifest.yaml            # the adaptation lever
 └── <gerund-name>/ …         # generated + refined skills
