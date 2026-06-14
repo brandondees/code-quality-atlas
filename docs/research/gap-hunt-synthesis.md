@@ -47,6 +47,7 @@ The practical consequence: **the two primitives (G23, G26) and the overlay (Q13)
 ## The sequence (four waves)
 
 ### Wave A — foundations: the primitives + near-free synthesizer wins
+
 Low cost, high leverage, all manifest/synthesizer/contract edits that regenerate cleanly (no per-lens hand-editing, no drift). **Do these first; they unblock the rest.**
 
 - **G23** route axis on the finding contract + synthesizer.
@@ -56,6 +57,7 @@ Low cost, high leverage, all manifest/synthesizer/contract edits that regenerate
 - **Q19** the `mechanize-with:` generator pass + coverage/perf/complexity presence checks in `auditing-config-and-build-hygiene`.
 
 ### Wave B — high-value add-factors (regenerate from the manifest; low risk)
+
 Pure heuristic additions to existing lenses — the cheapest way to bank real coverage, and the model the G9 fixes already use.
 
 - **G27** SoD/maker-checker → #14 *(highest value-per-cost in the whole pile)*.
@@ -68,6 +70,7 @@ Pure heuristic additions to existing lenses — the cheapest way to bank real co
 - **G12** acceptance-criteria traceability — *start* as a factor on the bug-fix/feature routes; promote to a lens (Wave C) if it earns it.
 
 ### Wave C — high-value new lenses (each gets the full research + ≥3-eval pass, D6/D8)
+
 - **G14** AI-authored-code defects — *highest-priority new lens*: high base rate, strong prior art, reflexively important (the suite is AI-built). Cross-refs #18/#1/restraint.
 - **G27** *(if treated as a dedicated check rather than a #14 factor)*.
 - **G16** ethical / responsible-design (non-ML) — needs G23; detect-and-route.
@@ -76,6 +79,7 @@ Pure heuristic additions to existing lenses — the cheapest way to bank real co
 - **G18-interoperability** as a consolidated lens (or a factor sweep across #4/#8/#13/#26).
 
 ### Wave D — bigger bets: new shapes, clusters, substrates
+
 Higher cost, longer horizon, often gated on an enabling build.
 
 - **G24 Cluster VII** — *incremental*: ship **VII-A (usability/Nielsen) + VII-F (value/outcome instrumentation)** first; needs G23 + G26 + Q13; **VII-H (conceptual integrity)** is the cluster's own counterweight and should land early.
