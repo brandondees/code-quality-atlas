@@ -763,3 +763,37 @@ each major revision of an external quality standard.
 **Changes:** new `docs/research/taxonomy-gap-hunt-round-3.md`; `docs/map-gaps.md`
 (+G14–G19); `docs/open-questions.md` (live-state pointer). Docs-only; the
 gap-hunt docs are not skill `built_from` sources, so no drift.
+
+---
+
+## 2026-06-14 — Session (cont.): the agent vantage (G20)
+
+**Goal:** owner asked whether the suite covers code agents (a) as code-owners /
+maintainers and (b) as users/operators — LLM-centric readability, context-window
+awareness, agent config/instruction files, discoverability, RAG; and SKILL.md /
+MCP tools, LLM-accessible UI, UI parity for agents.
+
+**Finding — a vantage rotation round-3 under-exploited.** Method 2 (vantage
+rotation) had stopped at the end user and the reviewer's epistemics; it missed the
+rotation that matters most to an agent-run suite: the AI agent as reader/operator.
+
+- **Code-owner role → G20, a genuine framing gap.** Cluster II is titled "Can
+  humans understand it?" — never rotated to "Can an *agent* understand/navigate/
+  modify this within a context budget?" Absent: LLM-centric readability, context
+  economy of reviewed code, agent discoverability/navigability, RAG-friendliness.
+  Partial: AGENTS.md/CLAUDE.md (drift covered #22/#24; authoring unbuilt #30/D15).
+  It's the **mirror of G14** (quality *of* AI-authored code ↔ quality of code
+  *for* AI readers) and **the G11 pattern again** (we optimize our own artifacts
+  for agent-legibility via D7 but never review for it). Lean: promote.
+- **Operator role → mostly mapped; restraint held.** #24 agent-native parity
+  (G9-thin), #32 agentic safety + #30/D15 SKILL.md/MCP authoring (mapped, unbuilt),
+  #23/#24 for LLM-accessible UI. New small bits: `llms.txt`-style agent
+  discoverability + LLM-accessible UI affordance as add-factors. Not a new category.
+
+Also gave the owner a full ISO/IEC 25010 explainer (lineage 9126→25010:2011→2023;
+product vs quality-in-use split to 25019; the 9 characteristics + 2023 deltas;
+why it served as round-3's external completeness model).
+
+**Changes:** `taxonomy-gap-hunt-round-3.md` (+G20 under Method 2-revisited,
+disposition table, synthesis point 5), `map-gaps.md` (+G20), `open-questions.md`
+(live-state pointer). Docs-only; no drift.

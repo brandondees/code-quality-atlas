@@ -84,6 +84,35 @@ The atlas is OLTP-app-centric. #20 owns migration/persistence *safety*; #13 owns
 All four existing shapes are **source-derived** — diff, repo, decision, artifact. None consumes the **running system's own signals** as a review input: error-rate deltas on the changed path, slow-query/trace evidence, real metric cardinality, actual usage of the code being modified. The suite reviews observability *code* (#16) but never *reads telemetry to find defects that only exist at runtime.* Prior art validates the underlying premise (telemetry as ground truth) but mostly **shift-left** — [observability-driven development](https://opensource.com/article/22/10/observability-driven-development-opentelemetry), [trace-based testing](https://tracetest.io/learn/top-9-tools-for-observability-driven-development) — and SRE **Production Readiness Reviews** shift-right but as a pre-launch checklist. The specific move — *feeding live production evidence back into the review of a change* — has thin prior art (signal: genuinely novel, while ODD confirms the value of the underlying signal).
 **Disposition (lean):** **promote as a shape** (`shape: runtime` / "production-informed"), sibling to diff/repo/decision/artifact — the same kind of result as round 2's decision shape. Lower priority than the topic gaps (needs a telemetry-access substrate, an orchestration concern like D12's advisory fan-out). Confidence: medium (high novelty, higher build cost).
 
+### Method 2 (revisited) — the agent vantage (owner-surfaced, 2026-06-14)
+
+The vantage rotation above stopped at the *end user* and the *reviewer's own epistemics*. It missed the rotation that matters most to a suite whose own users are agents: **the AI agent as a first-class reader/operator.** Rotating to it splits cleanly into two roles, with very different coverage.
+
+**G20 — The codebase/repo as a working environment for AI maintainers** *(vantage: the agent as code-owner/reader).*
+Cluster II of the taxonomy is titled *"Can humans understand it?"* — the entire readability/clarity axis (#5–#8) was never rotated to *"Can an **agent** understand, navigate, and safely modify this within a context budget?"* The per-item check:
+
+| Concern | Coverage | Verdict |
+|---|---|---|
+| LLM-centric readability | #5–#8 are human-framed | **absent** |
+| Context-window economy of the *reviewed* code (self-containment, depth-first-sliceability, no whole-repo load to understand a change) | exists in-repo **only** as the suite's *own* design tax (artifact-scoped-lenses.md: RAG-MCP, lost-in-the-middle) — never as a property of reviewed code | **absent as a review behavior** |
+| Discoverability / navigability for agents (structure, naming, retrieval surfaces the right chunk) | human onboarding/navigability in #21/#22 | **absent (agent-framed)** |
+| RAG / retrieval-friendliness | "RAG" appears only re: routing the suite's own tools | **absent** |
+| Agent config/instruction files (AGENTS.md / CLAUDE.md) present, accurate, scoped | **drift** covered (#22/#24); **authoring quality** designed-unbuilt (#30 / D15 / G11) | **partial** — "does the repo *provide good, scoped* agent onboarding" (the agent analog of #22's README front-door) is thin |
+
+Two reasons to promote rather than fold: **(1)** it is the **mirror image of G14** — G14 is *quality of AI-**authored** code*; G20 is *quality of code **for** AI readers* — same axis, opposite direction, neither subsumes the other; **(2)** it is **the G11 pattern again** — the project already optimizes its *own* artifacts for agent-legibility (D7: progressive disclosure, context budget, model-portability) but never made agent-legibility a **review behavior** for the codebases it reviews ("we hold ourselves to it but never review for it"). Prior art: ["AI-friendly codebases"](https://medium.com/@dconsonni/creating-ai-friendly-codebases-82cb3203c118); [coding-agents-as-a-first-class project-structure concern](https://dev.to/somedood/coding-agents-as-a-first-class-consideration-in-project-structures-2a6b) (the "40% context rule," depth-first slices, self-contained modules, AST-grounded agent interfaces); the empirical finding that LLM code is "superficially clean but intrinsically complex."
+**Disposition (lean): promote** — a vantage-rotation of cluster II into an agent-legibility lens: a **diff arm** (is this change agent-legible and context-economical?) + a **repo arm** (is the tree agent-navigable; AGENTS.md/CLAUDE.md present/accurate/scoped; an `llms.txt`-style index present?). Distinct from G14, #32, and the operator surface below. Confidence: med-high (genuine framing gap; strong emerging prior art).
+
+**The operator role (agent as user of the *product*) — mostly mapped, do not over-promote.** The restraint check passes here: the suite *did* anticipate agents-as-operators, just thinly and scattered.
+
+| Concern | Coverage | Action |
+|---|---|---|
+| UI parity for agents ("any action a user can take, an agent can too") | **#24 agent-native parity** — surfaced check in `reviewing-pr-and-process-hygiene`, but G9-flagged **thin** | **G9 deepen** (thin → surfaced) |
+| SKILL.md / MCP tool surfaces | authoring quality → #30 + `shape: artifact` (D15/G11), **unbuilt**; safety → #32, **unbuilt** | **build the already-mapped lenses** |
+| LLM-accessible UI surfaces / affordances | oblique only — #23 a11y (semantic markup/ARIA doubles as agent affordance) + #24 | **add-factor #23/#24** |
+| Product/docs discoverability for agents | none — `llms.txt` is an emerging standard ([Anthropic requested it; Google A2A includes it](https://buildwithfern.com/learn/docs/ai-features/llms-txt)) | **add-factor #22/#24** |
+
+**Disposition (operator role): no new category** — a **G9-class deepening** (#24 parity) + **build the mapped-but-unbuilt** #32/#30 lenses + **two add-factors** (`llms.txt` discoverability; LLM-accessible UI affordance). Calling this a second framing gap would over-reach.
+
 ### Weaker / fold candidates (logged; not recommended for promotion)
 
 | Candidate | Nearest owner | Disposition |
@@ -109,6 +138,7 @@ Round 2 fenced governance explicitly with detect-and-escalate; these deserve the
 2. **The substrate is widening faster than the map.** Two of the strongest finds (G14 machine-authored code, G17 the data plane) are not new *topics* so much as **the map's app-code-in-a-repo assumption breaking down**. AI-authored code is now the median diff; the data/analytics plane is a first-class engineering discipline. The map should state its substrate assumptions and where they end.
 3. **A fifth shape is plausible but not yet forced.** G15 (production-evidence) is the round-3 analog of round 2's decision shape — a whole vantage that is absent — but unlike decision-time it lacks a flood of strong prior art and carries a real substrate cost (telemetry access). Log it; do not rush it.
 4. **The human-axis discipline check passed again.** As in round 2, the socio-technical sweep mostly resolved to *covered* or *escalate* — except **G16**, which is genuinely diff-visible and genuinely unowned. The restraint counterweight held: the real gaps are structural (an external characteristic, a substrate, a shape, a vantage), not ideological.
+5. **The agent vantage is the suite's own blind spot (G20).** The most consequential rotation for an agent-run suite — *the AI agent as reader/operator* — was nearly missed and only the owner's prompt surfaced it. The **code-owner role is a genuine framing gap** (cluster II was never rotated off "Can humans understand it?"), and it mirrors G14 exactly (quality *of* AI-authored code ↔ quality of code *for* AI readers). The **operator role**, by contrast, was already anticipated (#24/#32/#30) — confirming the suite under-reached on the agent *as reader*, not the agent *as user*. Methodological note: vantage rotation must explicitly enumerate *all* reader/operator classes, agents included, or it stops at the human.
 
 ## Disposition summary (provisional — owner-gated)
 
@@ -120,6 +150,7 @@ Round 2 fenced governance explicitly with detect-and-escalate; these deserve the
 | **G17** | Data-engineering & data-contract quality | substrate | diff + repo/cron | **promote** (paired lens) | med-high |
 | **G18** | Interoperability + Safety (ISO 25010:2023) | external model | diff (+ escalate) | interop **promote/consolidate**; safety **add-factor + escalate** | med-high / medium |
 | **G19** | Review-coverage transparency / known-unknowns | vantage (meta) | synthesizer | **fold into synthesizer contract** | high |
+| **G20** | Codebase/repo as a working environment for AI maintainers | vantage (agent-as-reader) | diff + repo/cron | **promote** (cluster-II rotation; mirror of G14). Operator role → G9-deepen #24 + build #32/#30 + add-factors | med-high |
 
 **Recommendation.** The two highest-value, lowest-controversy moves are **G14 (AI-authored-code defects)** — high base rate, strong prior art, and reflexively important to a suite that is itself AI-built — and **G19** (a synthesizer coverage block, near-free). **G17** and **G16** are strong but widen scope (a new substrate; a detect-and-escalate ethics surface) and want their own design pass. **G18-interoperability** is a clean consolidation of existing factor-notes; **G18-safety** is boundary-drawing. **G15** is the most intellectually significant (a fifth shape) but the least forced — log and revisit. Net candidate surface: **3–5 new behaviors + 1 new shape + ~2 add-factors/folds**, all gated on the owner's restraint call, exactly as v0.3 was.
 

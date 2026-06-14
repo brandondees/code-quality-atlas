@@ -45,8 +45,11 @@ then added **G14–G19** via gap-finding methods that reason from outside the ma
 shape-axis extrapolation): G14 AI-authored-code defects, G15 production-evidence
 review (a candidate 5th shape), G16 ethical/responsible-design, G17
 data-engineering & data-contracts, G18 the two unowned ISO-25010:2023
-characteristics (interoperability, safety), G19 review-coverage transparency —
-all **provisional, owner-gated**, web-verified. A factor-level coverage audit
+characteristics (interoperability, safety), G19 review-coverage transparency, and
+G20 the codebase/repo as a working environment for AI maintainers (the agent
+vantage — a cluster-II rotation, mirror of G14; the agent-as-*operator* role is
+mostly already mapped via #24/#32/#30) — all **provisional, owner-gated**,
+web-verified. A factor-level coverage audit
 ([`map-gaps.md`](map-gaps.md) G9) also found ~10 categories only partially
 surfaced at the factor level — fixable through the manifest/research, with the
 router half tracked as Q14. Everything else here is historical context kept for
