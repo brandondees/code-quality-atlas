@@ -918,3 +918,21 @@ prohibited regardless of any apply-automation.
 **Changes:** map-gaps (+G26, refined G13 disposition), open-questions (Q3 refined,
 Q8 narrowed, live-state pointer), product-experience-value-cluster.md (synthesis
 point 4). Docs-only; no drift.
+
+---
+
+## 2026-06-14 — Session (cont.): G26 refinement — valence as a team preference + anti-churn
+
+Owner refined G26: (1) the defect-only guard is a legitimate *team preference*,
+not a universal — so it becomes a strict default plus a **preference-tier dial**
+in the Q13 team-preferences overlay (the `valence` axis is the mechanism; the
+overlay is the policy). (2) A built-in **anti-churn / value-threshold /
+convergence** discipline the overlay cannot relax: an improvement must cross a
+value+confidence bar (improve, not merely differ — no change-for-change's-sake)
+and converge (once a dimension is as good as we can confidently make it, no
+further/lateral/oscillating suggestion). Same termination guarantee REVIEW.md
+convergence gives the review loop, applied to improvement nits.
+
+Folded into the pending team-preferences-overlay design (new directive kind §4.6
+improvement-valence verbosity + §4a anti-churn built-in) and Q13. map-gaps G26
+disposition updated accordingly. Docs-only; no drift.

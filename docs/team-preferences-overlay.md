@@ -3,6 +3,7 @@
 **Status:** design, 2026-06-12. Awaiting review before implementation planning.
 **Depends on:** phase-3 skill suite (23 lenses + `choosing-review-lenses` router + `synthesizing-review-findings`), D6 (docs are source of truth; skills derived & regenerable), D7 (model portability), D9 (plugin packaging), D12 (the synthesizer — where `acknowledge`d deviations land in the verdict).
 **Decisions captured (user, 2026-06-12):** tiered precedence; both bootstrap paths (template + inference) but inference is **proposal-only, never auto-applied**. See open-questions Q13.
+**Added (user, 2026-06-14, [`map-gaps.md`](map-gaps.md) G26):** an **improvement-valence verbosity** dial (§4.6) — the defect-only guard is a team *preference*, default strict — plus a built-in **anti-churn / convergence** discipline (§4a) the overlay cannot relax.
 
 ---
 
@@ -99,6 +100,30 @@ Five directive kinds, each mapping onto the verbs above:
    "generated/** is not reviewed"). (`suppress` for preference-tier; `acknowledge` for floor-tier.)
 5. **Standing acknowledgements** — known, accepted floor-tier deviations with rationale
    ("we ship our own crypto for <documented reason>, escalated and accepted"). (`acknowledge`.)
+6. **Improvement-valence verbosity** *(added 2026-06-14; see [`map-gaps.md`](map-gaps.md) G26)* — how
+   much *improvement*-valence (vs *defect*-valence) the suite surfaces. Every lens ships defect-only by
+   construction (the guard *"do not suggest changes to code that is already correct"*); G26 adds a
+   `valence: defect | improvement` axis so a lens *can* offer opt-in, nit-level tidyings (reorder for
+   cohesion, remove dead code, bump a stale-but-working dep). This directive sets the policy per
+   repo/team: **`defects-only`** (the default — preserves the earned "clean PR → No findings" trust),
+   **`improvements-opt-in`** (surface improvement nits, `route: implementer`, apply/defer/ignore), or
+   finer per-lens settings. (`set`, preference-tier — a team that wants a quiet review keeps the
+   default; a team that wants active tidy-up dials it up. Floor-tier defects are unaffected.)
+
+### 4a. The anti-churn discipline (built-in, not a knob)
+
+Independent of the verbosity setting above, improvement-valence findings obey a **convergence floor the
+overlay cannot relax** (a team can turn verbosity up, but cannot configure the suite to churn):
+
+- **Value + confidence bar.** An improvement suggestion must *improve*, not merely offer an equivalent
+  alternative — no change-for-change's-sake. A non-functional reorder is admissible only when it raises
+  readability/cohesion, not when it trades one acceptable arrangement for another.
+- **Convergence / termination.** Once a dimension is "as good as we can confidently make it," there is
+  no further suggestion on it; never a lateral re-order to an equivalent state; never oscillation
+  (suggest A→B one round, B→A the next). This is the same termination guarantee `REVIEW.md` convergence
+  gives the review loop (escalating severity floor, round cap), applied to improvement nits — without
+  it, an improvement-capable reviewer never settles, which is exactly the failure the original guard
+  was protecting against.
 
 ## 5. How skills consume it
 
