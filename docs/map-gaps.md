@@ -115,3 +115,27 @@ Surfaced 2026-06-12 (owner question: *do we have anything correlating to Anthrop
 | *How* to host many artifact lenses without top-level context bloat (the pattern) | **→ a new `shape: artifact`** (D15, Q18 option b) — one entry-point lens + manifest `artifacts:` table + bundled on-demand rubrics; `SKILL.md`-authoring is the first instance. |
 
 Full research — the artifact-standard catalog (the references beyond the one guide), the context-cost evidence (lost-in-the-middle, context rot, RAG-MCP, the 128-tool ceiling), the presence-based-activation prior art (MegaLinter/ESLint-overrides/Spectral), and the three hosting options — is in [`research/artifact-scoped-lenses.md`](research/artifact-scoped-lenses.md). **Status: gap logged + researched; both decisions made (D15, Q18 RESOLVED); build pending.**
+
+## G12 — Validation vs. verification: the suite checks "does it match the intent," never "is the intent right"
+
+Surfaced 2026-06-14 (owner question: *are we accounting for alignment with stakeholder intentions at any level?*). A framing-class gap (the G10 kind — invisible to a taxonomy-vs-skills diff, because the whole map presupposes intent-as-given).
+
+The taxonomy is rooted at **Cluster I — Does it work?** — conformance to a *stated* intent is the floor of the entire atlas. Every correctness check takes that intent as a given: `tracing-correctness-and-invariants` asks *"does the implementation match the spec/PR description's stated intent"* ([`cluster-1-correctness.md`](research/cluster-1-correctness.md) #46, billed as "the check no linter can do"), but the spec itself is never questioned. That is **verification** (build the thing right), not **validation** (build the right thing).
+
+The suite *does* ask "is this the right thing?" in exactly one place — `reviewing-decision-lifecycle` / the decision-time shape (*"is this the right dependency / framework / platform to adopt vs. a smaller option or building it"*, [`decision-time-review-shape.md`](decision-time-review-shape.md):18) — but scoped to **decisions** (ADR/RFC/adoption), never to a feature **diff**. So the suite already owns "right thing?" for one shape and withholds it for the rest.
+
+Nothing reviews whether a diff **satisfies the acceptance criteria of its linked issue**, traces to a stated **stakeholder/user need**, or whether the intent it conforms to is itself sound. Acceptance-criteria / requirements-traceability on a diff (*does this PR deliver what the issue asked — no more, no less*) is a recognized review dimension with no owner here. Distinct from #1 (matches the stated intent) and #29 (decision soundness): this is *diff*-time alignment of the change to the requirement behind it.
+
+**Disposition (user, 2026-06-14): in-scope gap — a candidate review behavior, not a scope boundary.** (The decision-lifecycle precedent cuts against treating "right thing?" as out of scope.) Candidate placement and shape — a diff-time acceptance-criteria/requirements-traceability lens vs. folding a "is the requirement sound" facet into the decision-time shape — left to a disposition pass.
+
+## G13 — *Tidy First?*: the tidyings are in as review hints; the economics and the proactive mode are not
+
+Surfaced 2026-06-14 (owner question: *do we have equivalents to Kent Beck's* Tidy First? *catalog of tidyings and heuristics?*). *Tidy First?* is already cited ([`references.md`](references.md):22) and mined into [`cluster-2-readability.md`](research/cluster-2-readability.md) #59 — but only **one of its three parts** landed:
+
+1. **The tidyings as review heuristics — covered.** Guard clauses, explaining variables, dead-code removal, reading order, normalize symmetries, symmetry-of-expression all live in `reviewing-naming-and-readability` (alongside Fowler's smell→refactoring names). When reviewing a diff, the suite will recommend these.
+2. **The tidyings as a proactive maintenance *action* — unbuilt.** Applying small structural refactorings rather than only flagging them in someone else's diff. This is the open half of **Q3** (review-vs-maintenance) / **Q8** (the fixing mode): detection ships, fixing does not. A named tidyings catalog is the natural content of that mode.
+3. **The economic heuristic — the book's actual thesis — unowned.** *Now / after / never* timing, **coupling-and-cohesion as the cost driver**, the option value of structure, batch size, and **separating structural changes from behavioral ones** (own commit/PR). Pieces are scattered — connascence in `reviewing-module-design`; churn × complexity ("where it pays to tidy") in `finding-maintainability-hotspots`; "atomic commits / single purpose" in `reviewing-pr-and-process-hygiene` — but Beck's sequencing rule (*tidy first, separately, before the behavior change*) has no owner, and the now/after/never economics is nowhere.
+
+The structural-vs-behavioral split (3) is **adjacent to but not the same as** #24's "atomic commits / no drive-by scope creep": hygiene wants one purpose per PR; Beck wants structural and behavioral changes in *separate* PRs even when they serve one feature. Worth deciding whether #24 absorbs it or it belongs to the tidying mode.
+
+**Disposition: open.** (2) folds into the Q3/Q8 maintenance/fixing mode when that is built; (3) is a candidate factor — likely #21 (maintainability economics) and/or #24 (commit sequencing) — pending a disposition pass.

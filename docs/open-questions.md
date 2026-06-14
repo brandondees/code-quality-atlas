@@ -31,9 +31,14 @@ Q17 (self-improving loop — design exploration written, awaiting review),
 Q13 (team preferences overlay — designed, not yet built),
 Q14 (router intent / matching-and-ranking / review-depth modes — new),
 Q15 (a decision-time review shape — new, the round-2 gap-hunt headline),
-Q3 (review-vs-maintenance modes), Q4 (findings-vs-scores), Q6 (idiom packs),
+Q19 (ship the latent tool-mechanization nudge + close the coverage/perf-benchmark
+presence holes — new), Q3 (review-vs-maintenance modes), Q4 (findings-vs-scores),
+Q6 (idiom packs),
 Q8 (proactive/cron-shaped maintenance — partially built as the repo audits),
-and the Q2 residual low-priority candidates. A factor-level coverage audit
+and the Q2 residual low-priority candidates. Two new framing-class gaps were
+also logged this pass ([`map-gaps.md`](map-gaps.md) **G12** validation-vs-verification /
+stakeholder-intent — disposition: in-scope; **G13** *Tidy First?* economics &
+proactive tidying mode — disposition open). A factor-level coverage audit
 ([`map-gaps.md`](map-gaps.md) G9) also found ~10 categories only partially
 surfaced at the factor level — fixable through the manifest/research, with the
 router half tracked as Q14. Everything else here is historical context kept for
@@ -97,6 +102,46 @@ artifact-scoped lenses at near-zero idle cost?**
 **Relation to prior decisions.** Refines D7 (we become a reviewer of the standard we author to),
 D10/D12 (router/synthesizer), and Q14 (the cleanest signal-based-matching case). Evidence: G11 +
 the research doc. **Status: RESOLVED (D15) — option (b), the `artifact` shape; G11 factor → #30. Build pending.**
+
+### Q19 — Ship the latent tool-mechanization nudge + close the coverage / perf-benchmark presence holes *(new, 2026-06-14)*
+
+**Trigger.** Owner expected the suite to flag gaps in *deterministic* tooling — linters, complexity
+scoring, coverage reporting, performance benchmarking, security scans — and hadn't seen it come up.
+Audit confirms the state is **mixed, not "left to the repo owner":**
+
+- `auditing-config-and-build-hygiene` **already** flags missing/disabled gates — *"Does CI run the
+  full gate — lint, format-check, type-check, tests, dep/security scan — and is passing **required**
+  to merge?"* plus soft-fail detection (`continue-on-error` / `|| true` / `allow_failure`)
+  (`auditing-config-and-build-hygiene/SKILL.md:38,41`). So "no linter / no security scan in CI" **is**
+  caught — by that one repo-shaped audit, when it's run.
+- **coverage reporting** and **performance benchmarking** are **not** in that gate list, and
+  complexity scoring / perf benchmarks have **no presence check anywhere**.
+- the cross-lens nudge — **G10 item 1**'s `mechanize-with:` line (*"you detect this by hand; tool X
+  gates it in CI, consider wiring it up"*), appended to each lens's finding contract from its existing
+  `reference/tool-rules.md` — was **decided as an action but never built**: zero `SKILL.md` files carry
+  it and it is absent from `tooling/generate.py` (parked in [`session-log.md`](session-log.md):272 and
+  [`research/taxonomy-gap-hunt-round-2.md`](research/taxonomy-gap-hunt-round-2.md):153). Today
+  `tool-rules.md` is positioned as a *wiring aid* ("for wiring up linters, not needed for the judgment
+  review itself"), not a finding source — which is why the suite leans on the owner by omission, not by
+  intent.
+
+**The question.** Two small, advisory builds: **(a)** ship the `mechanize-with:` generator pass (G10
+item 1) so every lens surfaces its tool-mechanization as advisory output; **(b)** extend
+`auditing-config-and-build-hygiene`'s gate list with **coverage-reporting** and **perf-benchmark**
+presence (and **complexity-scoring**, if it earns a check).
+
+**Open sub-questions.**
+
+- Is *"the repo has no coverage gate / no perf benchmark"* a finding the owner wants, or noise on repos
+  that deliberately skip it? Ties to the **Q13** team-preferences overlay (a preference-tier finding the
+  team can tune/suppress, not a floor-tier one).
+- Does `mechanize-with:` belong in **every** lens's finding contract, or only the repo audits?
+- New advisory output ⇒ a light cross-model eval pass before ship (no over-flagging regression on clean
+  repos).
+
+**Relation to prior decisions.** Implements the unbuilt half of **G10 item 1**; refines D12 (the finding
+contract) and D10 (the generator). **Status: open — decided-in-spirit (G10) but unbuilt; the
+coverage/perf/complexity presence holes are newly named here.**
 
 ### Q17 — Self-improving loop: usage signals → learnings → research edits *(new, 2026-06-12)*
 

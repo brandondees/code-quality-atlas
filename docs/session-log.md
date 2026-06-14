@@ -687,3 +687,34 @@ with `#` or a stray bullet.
 SHA-pinned, v23.2.0) and a `.pre-commit-config.yaml` hook (markdownlint-cli2
 v0.22.1) — both read the same config, so commit-time and CI agree. Lint clean (0),
 no drift, 85 tests pass. Generator output is idempotent.
+
+---
+
+## 2026-06-14 — Session: quality-lens coverage-gap hunt (three owner questions)
+
+**Goal:** owner asked whether the suite covers (1) alignment with stakeholder
+intentions, (2) Kent Beck's *Tidy First?* tidyings + heuristics, and (3) flagging
+gaps in deterministic tooling (linters, complexity, coverage, perf benchmarks,
+security scans). Audit, then log gaps in the established style.
+
+**Findings:**
+
+- **(1) Validation vs. verification — a true blind spot.** The atlas is rooted at
+  *"Does it work?"* — it checks code against a *stated* intent
+  (`tracing-correctness-and-invariants`, "the check no linter can do") but never
+  questions the intent. The only "is this the right thing?" lives in
+  `reviewing-decision-lifecycle`, scoped to decisions, never a diff. No
+  acceptance-criteria / requirements-traceability behavior. → **map-gaps G12**;
+  disposition **in-scope gap** (user).
+- **(2) *Tidy First?* — one of three parts in.** The readability tidyings are
+  mined into `reviewing-naming-and-readability`; the proactive tidying *action*
+  (Q3/Q8 fixing mode) and the now/after/never **economics** + structural-vs-
+  behavioral commit split are unowned. → **map-gaps G13**; disposition open.
+- **(3) Deterministic-tooling presence — mixed, not punted to the owner.**
+  `auditing-config-and-build-hygiene` already flags missing/disabled lint/type/
+  test/security gates; coverage-reporting, perf-benchmark, and complexity-scoring
+  presence are not checked anywhere; and the cross-lens `mechanize-with:` nudge
+  (G10 item 1) was decided but never built. → **open-questions Q19**.
+
+**Changes:** `docs/map-gaps.md` (+G12, +G13), `docs/open-questions.md` (+Q19,
+live-state updated). Docs-only; no manifest/research/skill edits, so no drift.
