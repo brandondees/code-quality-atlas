@@ -31,7 +31,7 @@ Q17 (self-improving loop — design exploration written, awaiting review),
 Q13 (team preferences overlay — designed, not yet built),
 Q14 (router intent / matching-and-ranking / review-depth modes — new),
 Q15 (a decision-time review shape — new, the round-2 gap-hunt headline),
-Q19 (ship the latent tool-mechanization nudge + close the coverage/perf-benchmark
+Q19 (ship the latent tool-mechanization nudge + close the deterministic-tooling
 presence holes — new), Q3 (review-vs-maintenance modes), Q4 (findings-vs-scores),
 Q6 (idiom packs),
 Q8 (proactive/cron-shaped maintenance — partially built as the repo audits),
@@ -103,7 +103,7 @@ artifact-scoped lenses at near-zero idle cost?**
 D10/D12 (router/synthesizer), and Q14 (the cleanest signal-based-matching case). Evidence: G11 +
 the research doc. **Status: RESOLVED (D15) — option (b), the `artifact` shape; G11 factor → #30. Build pending.**
 
-### Q19 — Ship the latent tool-mechanization nudge + close the coverage / perf-benchmark presence holes *(new, 2026-06-14)*
+### Q19 — Ship the latent tool-mechanization nudge + close the deterministic-tooling presence holes *(new, 2026-06-14)*
 
 **Trigger.** Owner expected the suite to flag gaps in *deterministic* tooling — linters, complexity
 scoring, coverage reporting, performance benchmarking, security scans — and hadn't seen it come up.
@@ -122,8 +122,8 @@ Audit confirms the state is **mixed, not "left to the repo owner":**
   it and it is absent from `tooling/generate.py` (parked in [`session-log.md`](session-log.md):272 and
   [`research/taxonomy-gap-hunt-round-2.md`](research/taxonomy-gap-hunt-round-2.md):153). Today
   `tool-rules.md` is positioned as a *wiring aid* ("for wiring up linters, not needed for the judgment
-  review itself"), not a finding source — which is why the suite leans on the owner by omission, not by
-  intent.
+  review itself"), not a finding source — which is why the suite leaves this judgment to the owner by
+  default: not by design decision, but because the `mechanize-with:` feature was never built.
 
 **The question.** Two small, advisory builds: **(a)** ship the `mechanize-with:` generator pass (G10
 item 1) so every lens surfaces its tool-mechanization as advisory output; **(b)** extend
