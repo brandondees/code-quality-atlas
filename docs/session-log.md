@@ -936,3 +936,30 @@ convergence gives the review loop, applied to improvement nits.
 Folded into the pending team-preferences-overlay design (new directive kind §4.6
 improvement-valence verbosity + §4a anti-churn built-in) and Q13. map-gaps G26
 disposition updated accordingly. Docs-only; no drift.
+
+---
+
+## 2026-06-14 — Session (cont.): cross-discipline review-analog sweep (G27–G29)
+
+New method — import mature *review practices* from other assurance disciplines
+(financial audit, scientific peer review, manufacturing QA, clinical, aviation,
+civil-eng), the inverse of the ISO/Nielsen quality-model sweep. Mostly confirmed
+the atlas is well-grounded (poka-yoke ≡ #9/#10; checklist discipline ≡ the suite's
+whole form, externally validated; adversarial ≡ #14/#32; reproducibility ≡ #1/#19)
+— restraint held. Three net-new:
+
+- **G27** segregation of duties / maker-checker / four-eyes in authz logic (no
+  single actor completes a sensitive workflow alone) — SOX §404, anti-fraud;
+  distinct from #14's IDOR/least-privilege. add-factor #14, detect-and-route.
+- **G28** claims-vs-evidence verification, generalized from the one place the
+  atlas already does it (perf lens "demand a profile"): an unsupported PR claim
+  is itself a finding. cross-cutting factor / synthesizer principle.
+- **G29** root-cause vs symptom (band-aid detection) for fixes — does the change
+  resolve the cause or mask the symptom. add-factor (#1 / hunting-silent-failures).
+
+Feeds-existing: materiality/sampling → Q14 (the depth axis's missing name);
+differential-diagnosis → G19; safety-margin → #28/G21; four-eyes-on-irreversible
+→ #24; blameless M&M → Q17/G15.
+
+**Changes:** new `docs/research/cross-discipline-review-analogs.md`; map-gaps
+(+G27–G29); open-questions (live-state pointer). Docs-only; no drift.

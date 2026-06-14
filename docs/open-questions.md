@@ -64,7 +64,17 @@ no-artifact axis; sustainability + FinOps upgraded to routed #15 factors), and
 **G26** (detect-and-suggest ≠ apply, defect ≠ improvement — the suite is
 defect-only by a guard in every lens; improvement-suggestion is review-time;
 refines Q3, narrows Q8). The recurring meta-lesson: reviewability is orthogonal
-to authority (G23), reader identity (G20), and application-timing/valence (G26). A factor-level coverage audit
+to authority (G23), reader identity (G20), and application-timing/valence (G26). A
+**cross-discipline review-analog sweep** (importing mature review *practices* from
+audit / science / manufacturing / clinical / aviation —
+[`research/cross-discipline-review-analogs.md`](research/cross-discipline-review-analogs.md))
+then added **G27** (segregation-of-duties / maker-checker dual-control in authz —
+add-factor #14), **G28** (claims-vs-evidence verification, generalized from the
+perf lens), and **G29** (root-cause vs symptom / band-aid detection); plus
+feeds-existing notes (materiality → Q14; differential-diagnosis → G19;
+safety-margin → #28/G21). The sweep mostly *confirmed* the atlas (poka-yoke maps
+to #9/#10; checklists ≡ the whole form), so it yielded add-factors, not a new
+cluster. A factor-level coverage audit
 ([`map-gaps.md`](map-gaps.md) G9) also found ~10 categories only partially
 surfaced at the factor level — fixable through the manifest/research, with the
 router half tracked as Q14. Everything else here is historical context kept for
