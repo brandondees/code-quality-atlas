@@ -139,3 +139,41 @@ Surfaced 2026-06-14 (owner question: *do we have equivalents to Kent Beck's* Tid
 The structural-vs-behavioral split (3) is **adjacent to but not the same as** #24's "atomic commits / no drive-by scope creep": hygiene wants one purpose per PR; Beck wants structural and behavioral changes in *separate* PRs even when they serve one feature. Worth deciding whether #24 absorbs it or it belongs to the tidying mode.
 
 **Disposition: open.** (2) folds into the Q3/Q8 maintenance/fixing mode when that is built; (3) is a candidate factor — likely #21 (maintainability economics) and/or #24 (commit sequencing) — pending a disposition pass.
+
+## Round-3 gap hunt (G14–G19)
+
+Surfaced 2026-06-14 by a third gap hunt that reasons from *outside* the map — full method, prior art, and dispositions in [`research/taxonomy-gap-hunt-round-3.md`](research/taxonomy-gap-hunt-round-3.md). Each entry below is the yield of a distinct new gap-finding method (external completeness model, stakeholder-vantage rotation, substrate sweep, shape-axis extrapolation). All **provisional — owner-gated**, web-verified prior art cited in the research doc. No `taxonomy.md` edit or version bump yet.
+
+## G14 — Characteristic defects of AI-authored code
+
+Surfaced via the **substrate sweep** (and reflexively — this suite is itself AI-built). The map reviews code that *calls* an LLM (#25) and tracks AI *provenance markers* (#27), but has no lens for the **failure signature of machine-authored code itself**, regardless of author: hallucinated/misused APIs, plausible-but-wrong logic that reads fluently, over-helpful unrequested additions (ties `checking-restraint`), and package hallucination → slopsquatting (~20% of LLM-recommended packages are non-existent; ~45% of LLM code carried security flaws in a 100+-model study — sources in the research doc). Distinct from #25 (code that *uses* AI) and #27 (a provenance *marker*). Diff-reviewable, high present-day base rate.
+**Disposition (lean): promote (diff lens)** — package-hallucination leg xref #18, plausible-wrong/over-helpful legs xref #1 and `checking-restraint`. Confidence: high.
+
+## G15 — Production-evidence / runtime-informed review (a candidate fifth shape)
+
+Surfaced via **shape-axis extrapolation** (the move that found round 2's decision shape). All four shapes — diff / repo / decision / artifact — are **source-derived**; none consumes the *running system's own signals* (error-rate deltas on the changed path, slow-query/trace evidence, real cardinality, actual usage) as a review input. The suite reviews observability *code* (#16) but never *reads telemetry to find defects that only manifest at runtime.* Prior art validates telemetry-as-truth (observability-driven development, trace-based testing) but mostly shift-left; the shift-right move of feeding live evidence into a change review is thinly precedented (signal: novel).
+**Disposition (lean): promote as `shape: runtime`** (sibling to the existing four), lower priority — needs a telemetry-access substrate and D12-style orchestration. Confidence: medium.
+
+## G16 — Ethical / responsible-design defects in non-ML code
+
+Surfaced via **stakeholder-vantage rotation** (the end user as a *subject of behavior*, not a buyer). Ethics is reviewed today **only** where it is legal (#27) or ML-output (#25 harmful-output). The diff-visible, code-level class is unowned: dark patterns / deceptive flows, manipulative defaults (pre-checked consent, asymmetric opt-out), obstruction/sneaking/forced-action in ordinary control flow, and **discriminatory business logic in plain conditionals** (a hardcoded threshold disadvantaging a group — no model in sight). Operational taxonomies (Mathur 7-category; EDPB 6-family/16-subcategory) and live regulation make this concrete, not hand-wavy.
+**Disposition (lean): promote, detect-and-escalate (G8)** — flag with evidence; consent-as-legal defers to #27, pure-product judgment escalates to humans. Confidence: med-high.
+
+## G17 — Data-engineering & data-contract quality
+
+Surfaced via the **substrate sweep** (the data/analytics plane). The map is OLTP-app-centric: #20 owns migration/persistence *safety*, #13 owns *service* API contracts, but nothing owns SQL/dbt **transformation correctness**, **data tests** (freshness/completeness/uniqueness/distribution), or **producer↔consumer data contracts** for events and analytics schemas — the silent break when an upstream field changes and downstream pipelines rot. Mature, standardizing prior art (data contracts, schema-registry compatibility, dbt + Great Expectations + Soda, CI enforcement).
+**Disposition (lean): promote** — a diff lens (transformation correctness + data-test adequacy) paired with a repo/cron arm (contract drift), mirroring the #13/#20 split; scope to data-as-code in the repo (warehouse governance escalates). Confidence: med-high.
+
+## G18 — The two ISO/IEC 25010:2023 characteristics with no owner: Interoperability and Safety
+
+Surfaced via the **external completeness model** (a new standing method — sweep an independent standard, not the map's own categories). Mapping the atlas onto all nine ISO 25010:2023 product-quality characteristics, every one has an owner **except two**:
+
+- **Interoperability / compatibility** (the missing "-ility"): #13 reviews the contract *we publish*, #8 reviews idiom, but nothing reviews whether the code **correctly speaks an external standard** — HTTP caching/idempotency semantics, OAuth/OIDC, semver, RFC date/email/URI formats, Unicode normalization & encoding, cron syntax, OpenTelemetry semconv, standard file formats. Scattered today as factor-notes across #4/#8/#13/#26.
+- **Safety** (new top-level characteristic in the 2023 revision; distinct from #14 *security* — harm-prevention vs. attacker-prevention): fail-safe defaults, safe-mode-on-error, operational guardrails on dangerous actions, hazard warnings, risk identification for harm-causing state. #2 owns fail-loud-vs-degrade and #28 owns overload degradation, but neither asks "does this fail toward *harm* or toward *safe*?"
+
+**Disposition (lean):** interoperability → **promote or consolidate** the scattered factor-notes into one lens/factor; safety → **add-factor to #2/#28 + a detect-and-escalate boundary**, with full hazard analysis (ISO 26262 / IEC 61508 / DO-178C) **out-of-scope**. Confidence: med-high (interop) / medium (safety). **Method note:** re-run the external-model sweep on each major revision of an external quality standard — it caught a characteristic ISO itself only promoted in 2023.
+
+## G19 — Review-coverage transparency / known-unknowns
+
+Surfaced via **vantage rotation** turned on the suite itself (the reviewer's own epistemics; the meta-analog of #30). The synthesizer (D12) emits a verdict but never states **what the review did *not* examine** — lenses skipped and why, areas it could not verify, claims it had no evidence for. A confident review silent on its own gaps manufactures false assurance, itself a defect *of the review*. Thin prior art as a named practice (nearest: audit "scope & limitations", model-card "known limitations").
+**Disposition (lean): fold into the synthesizer** as a required "coverage & limitations" contract field — not a new category. Confidence: high (additive, low-risk).

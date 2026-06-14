@@ -38,7 +38,15 @@ Q8 (proactive/cron-shaped maintenance — partially built as the repo audits),
 and the Q2 residual low-priority candidates. Two new framing-class gaps were
 also logged this pass ([`map-gaps.md`](map-gaps.md) **G12** validation-vs-verification /
 stakeholder-intent — disposition: in-scope; **G13** *Tidy First?* economics &
-proactive tidying mode — disposition open). A factor-level coverage audit
+proactive tidying mode — disposition open). A **round-3 gap hunt** (2026-06-14,
+[`research/taxonomy-gap-hunt-round-3.md`](research/taxonomy-gap-hunt-round-3.md))
+then added **G14–G19** via gap-finding methods that reason from outside the map
+(external completeness model, stakeholder-vantage rotation, substrate sweep,
+shape-axis extrapolation): G14 AI-authored-code defects, G15 production-evidence
+review (a candidate 5th shape), G16 ethical/responsible-design, G17
+data-engineering & data-contracts, G18 the two unowned ISO-25010:2023
+characteristics (interoperability, safety), G19 review-coverage transparency —
+all **provisional, owner-gated**, web-verified. A factor-level coverage audit
 ([`map-gaps.md`](map-gaps.md) G9) also found ~10 categories only partially
 surfaced at the factor level — fixable through the manifest/research, with the
 router half tracked as Q14. Everything else here is historical context kept for

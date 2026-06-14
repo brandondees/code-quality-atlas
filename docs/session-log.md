@@ -718,3 +718,48 @@ security scans). Audit, then log gaps in the established style.
 
 **Changes:** `docs/map-gaps.md` (+G12, +G13), `docs/open-questions.md` (+Q19,
 live-state updated). Docs-only; no manifest/research/skill edits, so no drift.
+
+---
+
+## 2026-06-14 — Session (cont.): round-3 gap hunt
+
+**Goal:** while PR #39 awaited review, the owner asked to locate *additional*
+candidate gap areas by extrapolation, first-principles re-orientation, and
+holistic perspectives.
+
+**Method (the contribution):** three gap-finding methods the project had not used
+before — all reasoning from *outside* the map rather than diffing taxonomy ↔
+skills — plus an extension of round 2's most productive axis:
+
+1. **External completeness model** — sweep ISO/IEC 25010:2023 characteristic by
+   characteristic; find the ones with no owner.
+2. **Stakeholder-vantage rotation** — review through eyes the suite never takes
+   (the end user as a subject of behavior; the reviewer's own epistemics).
+3. **Substrate sweep** — "software" beyond app-code-in-a-repo (machine-authored
+   code, the data/analytics plane).
+4. **Shape-axis extrapolation** — what vantage is still missing after diff / repo
+   / decision / artifact (round 2's headline move).
+
+**Findings (G14–G19, all provisional/owner-gated, web-verified):**
+
+- **G14** AI-authored-code defects (substrate; reflexive) — promote (diff lens).
+- **G15** production-evidence / runtime-informed review — a candidate **5th shape**.
+- **G16** ethical / responsible-design in non-ML code — promote, detect-and-escalate.
+- **G17** data-engineering & data-contract quality — promote (paired lens).
+- **G18** the two unowned ISO-25010:2023 characteristics: **interoperability**
+  (the missing "-ility") + **safety** (ISO added it as a top characteristic in
+  2023, distinct from #14 security).
+- **G19** review-coverage transparency / known-unknowns — fold into the synthesizer.
+
+Plus weaker/fold candidates (quality-trajectory → Q4; domain-model fidelity;
+non-app substrates → the artifact shape) and scope boundaries worth writing down
+(end-user product validation; functional-safety certification; org-level DevEx).
+
+**Cross-cutting lesson:** an external completeness model earns its keep — one
+ISO-25010 pass caught two characteristics the self-referential framing-hunt of
+rounds 1–2 missed. Adopt the external-model sweep as a standing method, re-run on
+each major revision of an external quality standard.
+
+**Changes:** new `docs/research/taxonomy-gap-hunt-round-3.md`; `docs/map-gaps.md`
+(+G14–G19); `docs/open-questions.md` (live-state pointer). Docs-only; the
+gap-hunt docs are not skill `built_from` sources, so no drift.
