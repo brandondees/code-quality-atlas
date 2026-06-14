@@ -11,6 +11,8 @@ Round 2 hunted framing gaps by re-asking *what kinds of reviewable surface exist
 2. **Stakeholder-vantage rotation (new).** The atlas reviews through the eyes of the maintainer (clusters II/III/VI), operator (#16/#28), attacker (#14/#32), and consumer (#13). Rotate to vantages it never takes: the **end user as a subject of the software's behavior** (not as a buyer), and the **reviewer's own epistemics**.
 3. **Substrate sweep (new).** "Software" is not only application code in a repo. Extend to substrates the map treats as edge cases: machine-authored code, the data/analytics plane, notebooks.
 4. **Shape-axis extrapolation (extends round 2).** The decision-time shape was round 2's headline. Ask again: what *vantage/temporality* of review is still missing after diff / repo / decision / artifact?
+5. **Failure-grounded completeness model (added in continuation, 2026-06-14).** ISO 25010 is *attribute*-grounded. Complement it with a *failure*-grounded model — the corpus of what actually causes outages (post-mortem collections, SRE retrospectives) — which catches recurring failure modes that are not a "quality attribute" but a specific way systems detonate.
+6. **Adversarial / inversion (added in continuation, 2026-06-14).** Instead of "what does quality look like," design the defect that most easily *evades this suite*, then name the assumption that let it through.
 
 ## Evaluation rubric (reused from round 2, to avoid re-flagging covered facets)
 
@@ -24,7 +26,7 @@ For each candidate omission, answer:
 
 ## Findings
 
-Six strong candidates (G14–G19), grouped by the method that surfaced them, plus weaker/fold candidates and scope boundaries that deserve to be *written down*.
+Candidates G14–G22, grouped by the method that surfaced them, plus weaker/fold candidates and scope boundaries that deserve to be *written down*. (G20 and G21–G22 were added in continuation on 2026-06-14, applying methods 5–6 and the agent-vantage rotation.)
 
 ### Method 1 — External completeness model (ISO/IEC 25010:2023)
 
@@ -113,6 +115,38 @@ Two reasons to promote rather than fold: **(1)** it is the **mirror image of G14
 
 **Disposition (operator role): no new category** — a **G9-class deepening** (#24 parity) + **build the mapped-but-unbuilt** #32/#30 lenses + **two add-factors** (`llms.txt` discoverability; LLM-accessible UI affordance). Calling this a second framing gap would over-reach.
 
+### Method 5 — Failure-grounded completeness model (incident corpus)
+
+ISO 25010 (method 1) is *attribute*-grounded — it asks what good looks like. A complementary external model is *failure*-grounded: the corpus of what actually takes systems down ([danluu post-mortem collection](https://github.com/danluu/post-mortems) and [its lessons](https://danluu.com/postmortem-lessons/), SRE retrospectives). It catches a class the attribute model structurally misses — recurring **failure modes** that aren't a quality attribute but a specific way systems detonate. Sweeping the canonical outage-cause list against the map:
+
+**G21 — Operational time-bombs & exhaustion classes (latent "correct-now, broken-later" defects).**
+
+| Incident class (frequency) | Atlas coverage | Verdict |
+|---|---|---|
+| **Config change** (~50% of severe outages — "config bugs, not code bugs, cause the worst outages") | #26 config validation/parity/safe-defaults | covered; *reinforces* #26 surfacing (G9-deepen) — the outage-frequency framing is the lesson |
+| **Expired TLS certs / OAuth tokens / API keys; missing rotation/renewal path** (Microsoft, Spotify, Google, Bank of England) | #14 = *hardcoded* secrets; NIST note = password rotation | **absent** — the single most preventable major-outage class has no home |
+| **Calendar/clock time-bombs** (leap year/second, DST transitions, epoch-2038, year rollover) | #4 has timezone/UTC/monotonic | **thin** — not enumerated as detonation triggers |
+| **Retry storms / thundering herd / cache stampede; retry budgets** | backoff+jitter (cluster-1:74), #28 backpressure | **partial** — the named coordinated-failure patterns + retry *budget* are not surfaced |
+| **Resource exhaustion** (disk-full, file-descriptor/socket, ephemeral-port, connection-pool) | pool bounded (cluster-1:147), #4 leaks, #28 unbounded | **partial** — specific exhaustion classes not enumerated |
+
+The cohesion worth noting: several share a **temporal signature — correct at merge, detonates later** by the passage of time (expiry, calendar) or accumulation (quota/capacity creep). No current lens asks *"will this be fine today and page someone in 90 days?"* (the #29 ADR-assumption-expiry and #30 suppression-expiry checks are the same shape, narrowly applied).
+Prior art: [SSL-expiry outage retrospectives](https://www.configclarity.dev/incidents/ssl-expiry-outages/); [danluu post-mortems](https://github.com/danluu/post-mortems); cert-renewal-window misconfig → retry storm ([Let's Encrypt rate-limit postmortem](https://johal.in/postmortem-lets-encrypt-rate-limit-prevented-certificate-renewal/)).
+**Disposition (lean):** primarily **add-factors** — credential/cert **expiry & rotation** → #14/#26; **calendar/clock time-bombs** → #4; **coordinated-retry patterns + retry budget** → #2/#28; **exhaustion classes** → #4/#28 (restraint: facets of existing categories, not a cohesive new behavior). **Flag the cohesive option:** a "latent / time-delayed defect" thread that asks the *correct-now-broken-later* question explicitly. **Method note:** run the failure-grounded sweep *alongside* the attribute-grounded ISO sweep — they catch disjoint classes. Confidence: high (the thin/absent items are real and high-frequency).
+
+### Method 6 — Adversarial / inversion
+
+Design the defect that most easily *evades this suite*, then name the assumption that let it through. The suite's load-bearing assumption is **the diff is the unit of review.**
+
+**G22 — Diff-isolation blindness: interaction & composition defects.**
+The suite reviews a single diff (diff-lenses) or repo *state* (cron audits); neither reviews the **composition of multiple changes across time and space.** Evasive defect classes:
+
+- **Semantic / logical merge conflicts** — two independently-correct changes that break *when combined*: textually merge-clean, behaviorally broken. Explicitly noted in the literature as "hard to detect through typical quality-assurance practices like code review and testing" ([Detecting Semantic Conflicts with Unit Tests, arXiv 2310.02395](https://arxiv.org/pdf/2310.02395); [logical merge conflicts](https://medium.com/@elischleifer/what-is-a-logical-merge-conflict-c6525acead85)).
+- **Assumption invalidation across in-flight changes** — change A is correct against an assumption a parallel/recent change B silently breaks.
+- **Load-bearing deletions** — a removal that is locally fine but breaks a caller/relier *outside the diff* (diffs foreground additions; removals are under-scrutinized).
+
+This is a **unit/granularity gap** — the change-set across time/space is an un-owned review *unit*, the analog of round 2's decision *shape* gap (a missing unit rather than a missing topic). Relates to G7 (some skills need history, not just the diff) and #21 change-coupling, but neither owns *cross-change interaction at review time*.
+**Disposition (lean): promote (scoped).** The deep detection is tool-territory (variability-aware execution, static/pointer analysis); the LLM-review slice is *"trace the ripple of deletions and assumption-changes beyond the diff, and flag where this change interacts with concurrent/recent ones"* — orchestrate/escalate the heavy detection (G8). Confidence: medium (real gap, strong prior art, detection partly tool-owned).
+
 ### Weaker / fold candidates (logged; not recommended for promotion)
 
 | Candidate | Nearest owner | Disposition |
@@ -139,6 +173,8 @@ Round 2 fenced governance explicitly with detect-and-escalate; these deserve the
 3. **A fifth shape is plausible but not yet forced.** G15 (production-evidence) is the round-3 analog of round 2's decision shape — a whole vantage that is absent — but unlike decision-time it lacks a flood of strong prior art and carries a real substrate cost (telemetry access). Log it; do not rush it.
 4. **The human-axis discipline check passed again.** As in round 2, the socio-technical sweep mostly resolved to *covered* or *escalate* — except **G16**, which is genuinely diff-visible and genuinely unowned. The restraint counterweight held: the real gaps are structural (an external characteristic, a substrate, a shape, a vantage), not ideological.
 5. **The agent vantage is the suite's own blind spot (G20).** The most consequential rotation for an agent-run suite — *the AI agent as reader/operator* — was nearly missed and only the owner's prompt surfaced it. The **code-owner role is a genuine framing gap** (cluster II was never rotated off "Can humans understand it?"), and it mirrors G14 exactly (quality *of* AI-authored code ↔ quality of code *for* AI readers). The **operator role**, by contrast, was already anticipated (#24/#32/#30) — confirming the suite under-reached on the agent *as reader*, not the agent *as user*. Methodological note: vantage rotation must explicitly enumerate *all* reader/operator classes, agents included, or it stops at the human.
+6. **Failure-grounded and attribute-grounded models catch disjoint classes (G21).** The ISO-25010 sweep finds missing *quality attributes*; the incident-corpus sweep finds missing *failure modes* (cert expiry, calendar time-bombs, exhaustion) that no attribute-model names because they are not attributes. Both external sweeps belong in the standing toolkit, and they do not overlap.
+7. **The diff is an unexamined unit assumption (G22).** Round 2 found a missing *shape* (decision-time); the adversarial method finds a missing *unit* — the change-set across time/space. The suite's three units (diff / repo-state / decision) all assume a single change in isolation; defects of *composition* (semantic conflicts, assumption invalidation, load-bearing deletions) fall between them. Unit, like shape, is an axis orthogonal to topic.
 
 ## Disposition summary (provisional — owner-gated)
 
@@ -151,6 +187,8 @@ Round 2 fenced governance explicitly with detect-and-escalate; these deserve the
 | **G18** | Interoperability + Safety (ISO 25010:2023) | external model | diff (+ escalate) | interop **promote/consolidate**; safety **add-factor + escalate** | med-high / medium |
 | **G19** | Review-coverage transparency / known-unknowns | vantage (meta) | synthesizer | **fold into synthesizer contract** | high |
 | **G20** | Codebase/repo as a working environment for AI maintainers | vantage (agent-as-reader) | diff + repo/cron | **promote** (cluster-II rotation; mirror of G14). Operator role → G9-deepen #24 + build #32/#30 + add-factors | med-high |
+| **G21** | Operational time-bombs & exhaustion classes (cert/credential expiry & rotation, calendar/clock time-bombs, coordinated retries, exhaustion) | failure-grounded model | diff (+ cron) | **add-factors** (#4/#14/#26/#28); flag a cohesive "latent / time-delayed defect" thread | high |
+| **G22** | Diff-isolation blindness — interaction & composition defects (semantic/logical merge conflicts, assumption invalidation, load-bearing deletions) | adversarial / inversion | a missing **change-set unit** | **promote (scoped)** — LLM ripple-trace; escalate heavy detection | medium |
 
 **Recommendation.** The two highest-value, lowest-controversy moves are **G14 (AI-authored-code defects)** — high base rate, strong prior art, and reflexively important to a suite that is itself AI-built — and **G19** (a synthesizer coverage block, near-free). **G17** and **G16** are strong but widen scope (a new substrate; a detect-and-escalate ethics surface) and want their own design pass. **G18-interoperability** is a clean consolidation of existing factor-notes; **G18-safety** is boundary-drawing. **G15** is the most intellectually significant (a fifth shape) but the least forced — log and revisit. Net candidate surface: **3–5 new behaviors + 1 new shape + ~2 add-factors/folds**, all gated on the owner's restraint call, exactly as v0.3 was.
 
@@ -162,3 +200,6 @@ Round 2 fenced governance explicitly with detect-and-escalate; these deserve the
 - Mathur et al., *Dark Patterns at Scale* — <https://www.researchgate.net/publication/337134584_Dark_Patterns_at_Scale_Findings_from_a_Crawl_of_11K_Shopping_Websites>; regulation review — <https://www.sciencedirect.com/science/article/pii/S2212473X25000975>; deceptive-design detection — <https://dl.acm.org/doi/10.1145/3688459.3688475>; *Deception at Scale* (arXiv 2502.13499) — <https://arxiv.org/pdf/2502.13499>
 - Data contracts (DataHub) — <https://datahub.com/blog/the-what-why-and-how-of-data-contracts/>; dbt + Great Expectations data contracts — <https://astrafy.io/the-hub/blog/technical/implementation-of-the-data-contracts-with-dbt-google-cloud-great-expectations-part-1>
 - Observability-driven development — <https://opensource.com/article/22/10/observability-driven-development-opentelemetry>; trace-based testing tools — <https://tracetest.io/learn/top-9-tools-for-observability-driven-development>
+- Agent-as-reader: AI-friendly codebases — <https://medium.com/@dconsonni/creating-ai-friendly-codebases-82cb3203c118>; coding-agents-as-first-class project structure — <https://dev.to/somedood/coding-agents-as-a-first-class-consideration-in-project-structures-2a6b>; `llms.txt` — <https://buildwithfern.com/learn/docs/ai-features/llms-txt>
+- Incident corpus: danluu post-mortems — <https://github.com/danluu/post-mortems> and lessons — <https://danluu.com/postmortem-lessons/>; SSL-expiry outages — <https://www.configclarity.dev/incidents/ssl-expiry-outages/>; Let's Encrypt rate-limit postmortem — <https://johal.in/postmortem-lets-encrypt-rate-limit-prevented-certificate-renewal/>
+- Interaction defects: Detecting Semantic Conflicts with Unit Tests (arXiv 2310.02395) — <https://arxiv.org/pdf/2310.02395>; logical merge conflicts — <https://medium.com/@elischleifer/what-is-a-logical-merge-conflict-c6525acead85>

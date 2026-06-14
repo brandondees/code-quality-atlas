@@ -188,3 +188,27 @@ Two reasons to promote: it is the **mirror image of G14** (G14 = quality *of* AI
 **Disposition (lean): promote** — a cluster-II rotation into an agent-legibility lens: a diff arm (is this change agent-legible/context-economical?) + a repo arm (agent-navigable tree; AGENTS.md/CLAUDE.md present/accurate/scoped; `llms.txt`-style index). Confidence: med-high.
 
 **Operator role (agent as user of the *product*) — mostly mapped; do not over-promote.** The restraint check passes: UI parity for agents is **#24 agent-native parity** (surfaced but G9-thin); SKILL.md/MCP authoring → #30/D15 and safety → #32 (both mapped, unbuilt); LLM-accessible UI affordance is oblique (#23 a11y + #24); product/docs discoverability for agents (`llms.txt`, an emerging standard — [Anthropic requested it; Google A2A includes it](https://buildwithfern.com/learn/docs/ai-features/llms-txt)) has no home yet. **Disposition: no new category** — a G9-class deepening (#24) + build the mapped-but-unbuilt #32/#30 lenses + two add-factors (`llms.txt` discoverability; LLM-accessible UI affordance, → #22/#23/#24). Full reasoning in [`research/taxonomy-gap-hunt-round-3.md`](research/taxonomy-gap-hunt-round-3.md).
+
+## G21 — Operational time-bombs & exhaustion classes (latent "correct-now, broken-later" defects)
+
+Surfaced 2026-06-14 via a **failure-grounded completeness model** (an incident/outage corpus, complementing the attribute-grounded ISO-25010 sweep of G18) — full method in [`research/taxonomy-gap-hunt-round-3.md`](research/taxonomy-gap-hunt-round-3.md) §Method 5. An attribute model can't see these because they're not quality *attributes* but recurring *failure modes*. Sweep result:
+
+- **Config change** (~50% of severe outages) — covered by #26; the outage-frequency framing **reinforces #26 surfacing** (G9-deepen).
+- **Expired TLS certs / OAuth tokens / API keys; missing rotation/renewal path** — **absent** (#14 owns *hardcoded* secrets, not expiry/rotation). The single most preventable major-outage class (Microsoft/Spotify/Google/Bank of England).
+- **Calendar/clock time-bombs** (leap year/second, DST, epoch-2038, year rollover) — **thin** (#4 has timezone/UTC/monotonic, not these triggers).
+- **Retry storms / thundering herd / cache stampede; retry budgets** — **partial** (backoff+jitter present; #28 backpressure).
+- **Resource exhaustion** (disk-full, file-descriptor/socket, ephemeral-port, connection-pool) — **partial** (pool bounded; #4 leaks; #28 unbounded).
+
+Cohesion: several share a **temporal signature — correct at merge, detonates later** by passage of time (expiry, calendar) or accumulation (quota/capacity creep); the #29 ADR-assumption-expiry and #30 suppression-expiry checks are the same shape applied narrowly.
+**Disposition (lean):** primarily **add-factors** — expiry/rotation → #14/#26; calendar/clock time-bombs → #4; coordinated-retry patterns + retry budget → #2/#28; exhaustion classes → #4/#28. **Flag the cohesive option:** a "latent / time-delayed defect" thread asking *"will this be fine today and page someone in 90 days?"* — a question no current lens asks. Confidence: high.
+
+## G22 — Diff-isolation blindness: interaction & composition defects
+
+Surfaced 2026-06-14 via the **adversarial / inversion** method (design the defect that most easily evades the suite; name the assumption that let it through) — [`research/taxonomy-gap-hunt-round-3.md`](research/taxonomy-gap-hunt-round-3.md) §Method 6. The load-bearing assumption is **the diff is the unit of review.** The suite reviews a single diff (diff-lenses) or repo *state* (cron audits); neither reviews the **composition of multiple changes across time and space**:
+
+- **Semantic / logical merge conflicts** — two independently-correct changes that break *when combined*; textually merge-clean, behaviorally broken — explicitly noted in the literature as hard to catch in code review/testing.
+- **Assumption invalidation across in-flight changes** — change A correct against an assumption a parallel/recent change B silently breaks.
+- **Load-bearing deletions** — a removal locally fine but breaking a relier *outside the diff* (diffs foreground additions; removals are under-scrutinized).
+
+A **unit/granularity gap** — the change-set across time/space is an un-owned review *unit*, the analog of round 2's decision *shape* gap (a missing unit, not a missing topic). Relates to G7 (history-shaped skills) and #21 change-coupling, but neither owns *cross-change interaction at review time*.
+**Disposition (lean): promote (scoped)** — heavy detection is tool-territory (variability-aware execution, static/pointer analysis); the LLM-review slice is *"trace the ripple of deletions and assumption-changes beyond the diff; flag interaction with concurrent/recent changes"*, escalating the rest (G8). Confidence: medium.

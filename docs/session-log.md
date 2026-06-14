@@ -797,3 +797,37 @@ why it served as round-3's external completeness model).
 **Changes:** `taxonomy-gap-hunt-round-3.md` (+G20 under Method 2-revisited,
 disposition table, synthesis point 5), `map-gaps.md` (+G20), `open-questions.md`
 (live-state pointer). Docs-only; no drift.
+
+---
+
+## 2026-06-14 — Session (cont.): round-4 methods (G21, G22)
+
+**Goal:** "keep going" — two more gap-finding methods, folded into the round-3 doc
+(it is explicitly a multi-method hunt).
+
+- **Method 5 — failure-grounded completeness model** (incident/outage corpus,
+  complementing the attribute-grounded ISO-25010 sweep) → **G21 operational
+  time-bombs & exhaustion classes.** Absent: cert/credential/token **expiry &
+  rotation** (the most preventable major-outage class — #14 owns only *hardcoded*
+  secrets). Thin: calendar/clock time-bombs (leap/DST/epoch-2038); coordinated
+  retries (thundering herd / stampede / retry budget); exhaustion classes
+  (disk/fd/port/pool). Shared temporal signature: correct-at-merge, detonates
+  later. Lean: add-factors (#4/#14/#26/#28) + flag a cohesive "latent /
+  time-delayed defect" thread. Verified: danluu post-mortems (~50% of severe
+  outages are config; expired-cert outages at Microsoft/Spotify/Google/BoE).
+- **Method 6 — adversarial / inversion** (design the defect that evades the suite)
+  → **G22 diff-isolation blindness.** The load-bearing assumption is "the diff is
+  the unit." Un-owned: semantic/logical merge conflicts (independently-correct
+  changes that break combined), assumption invalidation across in-flight changes,
+  load-bearing deletions. A missing **change-set unit** (the analog of round-2's
+  missing decision *shape*). Lean: promote (scoped) — LLM ripple-trace, escalate
+  heavy detection. Verified: semantic-conflict literature (arXiv 2310.02395 et al.).
+
+**Synthesis additions:** (6) failure-grounded and attribute-grounded external
+sweeps catch disjoint classes — keep both standing; (7) *unit* is an axis
+orthogonal to topic, like *shape* — the diff/repo/decision units all assume a
+single isolated change.
+
+**Changes:** `taxonomy-gap-hunt-round-3.md` (+Methods 5–6, +G21/G22, disposition
+table, synthesis 6–7, sources), `map-gaps.md` (+G21/G22), `open-questions.md`
+(pointer). Docs-only; no drift.
