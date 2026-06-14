@@ -83,9 +83,12 @@ Findings below the current round's floor are reported as an advisory list in the
 re-raised thread-to-thread. They are informational: the build / auto-fix session
 **may** optionally address them but is not required to; they do **not** block, do
 **not** count as actionable for convergence, and do **not** on their own earn a new
-round. Keep each to one line — *severity · location · one-clause description*. To
-stay concise, include the list when it **changes** (and on the first approve and
-in the cap notice); don't re-dump an unchanged advisory list on every quiet push.
+round. Keep each to one line — *severity · location · one-clause description*. To stay
+concise, include the list **only in a summary you're already posting** — the first
+approve, the cap notice, or a round you're posting because of new at/above-floor
+findings — and within those, refresh it when it has changed rather than re-dumping
+an unchanged list. A changed advisory list is **never on its own** a reason to post
+on an otherwise-quiet push.
 This keeps the actionable surface (inline, at/above floor — "what must change")
 cleanly separate from the advisory surface (summary, below floor — "what could be
 tidied").

@@ -88,8 +88,10 @@ findings to the ACK.
   visible for optional tidy-up without driving the fix loop. These are advisory:
   don't `resolve`/re-raise them as threads, and the build session is free to ignore
   them. (This mirrors how Copilot and CodeRabbit surface their non-blocking notes.)
-  To stay concise, include the list when it **changes** (and on the first approve
-  and in the cap notice); don't re-dump an unchanged advisory list on every quiet push.
+  To stay concise, include the list **only in a summary you're already posting**
+  (the first approve, the cap notice, or a round you're posting because of new
+  findings) and refresh it only when it changed; a changed advisory list is never
+  on its own a reason to break silence on a quiet push.
 - Open your review summary with the marker `<!-- atlas-review round:N -->` so the
   next run can read the round count and carry the advisory list forward.
 - **If no new finding survives the floor**, behave by whether the PR has already
