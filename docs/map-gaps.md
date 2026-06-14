@@ -302,4 +302,29 @@ Surfaced 2026-06-14: re-running **shape-axis extrapolation** on *security* (wher
 Auditing D12's own apparatus: the `synthesizer.tensions:` table is **entirely restraint-centric** — every entry is `checking-restraint ↔ X` (module-design / performance / test-quality / api-contract / resilience) plus one `performance ↔ readability`. Tensions where **neither side is restraint** have no default resolution and fall back to the generic *"prefer safer and simpler."* As the map grows these multiply: **observability ↔ privacy** (log detail vs PII — #16 vs #27), **security ↔ usability** (friction vs safety — #14 vs G24 VII-A), **transparency ↔ security** (explainability vs information-disclosure — G24 VII-G vs #14), **performance ↔ accessibility**, **consistency ↔ evolvability** (#8 vs #21). Not broken (the fallback handles it), but under-specified, and the new Cluster VII (G24) + G16 sharply increase cross-quality collisions.
 **Disposition (lean): enrich the manifest `synthesizer.tensions:` table** with the cross-quality pairs above (additive; regenerates like the router/synthesizer — no docs drift). Low-risk. Confidence: high (the table is demonstrably under-populated).
 
+## Round-3 cont. — the conflation audit, run deliberately (G32 + closure)
+
+Now that "reviewability is orthogonal to X" is a named method (G23/G20/G26), this pass **enumerates every axis** `X` that *"is this reviewable at review time?"* could be wrongly collapsed with, and tests each. One net-new find; the rest test as already-handled — a **closure signal** that the framing seam is largely mined.
+
+| Axis `X` (reviewability ⊥ X) | Status |
+|---|---|
+| **Authority** (who decides) | **G23** — product/UX detect-and-route |
+| **Reader identity** (who/what reads/operates) | **G20** — the agent vantage |
+| **Application-timing / valence** (when applied; defect vs improvement) | **G26** — the `valence` axis |
+| **Attribution** (who/what *introduced* it; "is it in the diff") | **G32 — new** (below) |
+| Tooling/automatability ("a tool does/doesn't do it") | handled — G5 (LLM-only factors) + Q19 (mechanize-with) |
+| Subjectivity ("it's a matter of taste") | handled — Q13 preference-tier + nit severity |
+| Composition unit ("not in *one* diff") | handled — G22 (diff-isolation) |
+| Lifecycle phase ("design not code", "runtime not source") | handled — the shape axis (Q15 decision, G15 runtime) |
+| Localizability ("no single line to anchor it") | handled — G24 VII-H (conceptual integrity) + the repo audits |
+| Ownership ("third-party / generated, not ours") | handled — #18 deps, #30 codegen |
+| Valence-positive ("affirm good code") | considered, **declined** (restraint — noise risk outweighs value) |
+
+## G32 — Reviewability ⊥ attribution: pre-existing / adjacent defects suppressed by the diff-only filter
+
+The diff-only convention conflates **"what changed"** (attribution) with **"what's reviewable."** A pre-existing defect *visible in the context the reviewer is already reading* — the touched file/function or immediately adjacent code — is reviewable and worth **surfacing**, even though this PR didn't introduce it. This is the **Boy Scout rule / opportunistic improvement** ("leave it better than you found it"); the consensus is that pre-existing issues *in touched code* are fair to flag, balanced against scope ([Boy Scout rule](https://snappify.com/blog/boy-scout-rule); [opportunistic refactoring](https://medium.com/javarevisited/our-take-on-opportunistic-refactoring-e606bb76e8c8)). Today the suite reviews "the diff" and has no surfacing path for a latent bug it *notices* in touched code; the repo audits own *whole-repo* hunting, but not the *opportunistic, in-context* surface.
+**Disposition (lean): detect-and-route** — surface tagged **"pre-existing — not introduced by this change,"** non-blocking, **scoped to code the PR actually touches** (not a repo-wide sweep — that's the audits' job), and governed by the **anti-churn / scope discipline (G26)** + **Q13 verbosity** (it is un-attributed improvement-valence, so opt-in, default-quiet — never expand the PR's scope, just inform the implementer's fix-now / file / ignore call). The fourth instance of the conflation pattern. Confidence: med-high.
+
+**Closure.** Run deliberately, the conflation audit returns **one** new gap (G32) and otherwise confirms the prior axes are covered — evidence the high-value *framing* seam (rounds 1–3's richest vein) is largely exhausted. Remaining yield is shifting from framing gaps to add-factors and validations; the bottleneck is moving from *finding* to *deciding* (→ the consolidation synthesis).
+
 **The meta-principle (why this keeps recurring).** Three times now a real gap hid behind a conflation: **reviewability is orthogonal to authority (G23), to the reader's identity (G20), and to application-timing/valence (G26).** Standing rule: test *"is X reviewable / surfaceable at review time?"* **independently** of *who decides X*, *who reads X*, *when X is applied*, and *whether X is a defect or an improvement*. Each conflation predicts an under-reach; auditing for them is a generative gap-finding method in its own right (the "conflation audit").

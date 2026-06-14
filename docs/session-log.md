@@ -988,3 +988,28 @@ Two more passes:
 no drift. Remaining mining queue: cross-quality is now partly done; open frontiers
 are thinning — next candidates are second-order/feedback-loop effects and a
 deliberate full conflation-audit pass.
+
+---
+
+## 2026-06-14 — Session (cont.): deliberate conflation audit (G32 + closure)
+
+Ran the conflation audit as a named method: enumerate every axis X for which a
+gap could hide behind collapsing "is it reviewable?" with X. One net-new:
+
+- **G32** reviewability ⊥ *attribution* — the diff-only convention conflates
+  "what changed" with "what's reviewable." A pre-existing defect visible in
+  touched code is reviewable and worth surfacing (Boy Scout / opportunistic
+  rule), tagged "pre-existing — not introduced here," non-blocking, scoped to
+  touched code (the repo audits own whole-repo hunting), governed by the G26
+  anti-churn/scope discipline + Q13 verbosity. Verified prior art.
+
+The other axes test as already-handled: tooling→G5/Q19; subjectivity→Q13;
+composition-unit→G22; phase→shape axis (Q15/G15); localizability→G24 VII-H +
+repo audits; ownership→#18/#30; positive/affirming findings considered and
+declined (restraint). **Closure signal:** the framing seam (rounds 1-3's richest
+vein) is largely mined; remaining yield is add-factors/validations, and the
+bottleneck has moved from finding to deciding → next is the consolidation
+synthesis across G12-G32 (owner to allow).
+
+**Changes:** map-gaps (+conflation-audit table, +G32, closure), open-questions
+(live-state pointer). Docs-only; no drift. End of the mining phase.

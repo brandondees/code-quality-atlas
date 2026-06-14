@@ -79,7 +79,14 @@ synthesizer's own apparatus then added **G30** (threat modeling — STRIDE / DFD
 trust boundaries / abuse cases — as a *design-time* security discipline, distinct
 from #14's diff-time vuln sweep; a strong instance of the Q15 decision shape) and
 **G31** (the synthesizer's tension table is restraint-centric; enrich it with
-cross-quality pairs like observability↔privacy, security↔usability). A
+cross-quality pairs like observability↔privacy, security↔usability). A final
+**deliberate conflation audit** (enumerate every axis `X` for which
+reviewability⊥X) then returned one net-new gap, **G32** (reviewability ⊥
+*attribution* — pre-existing defects in touched code suppressed by the diff-only
+filter; the Boy-Scout / opportunistic-surfacing principle, detect-and-route,
+scope-bounded), and otherwise **confirmed the prior axes are covered** — a closure
+signal that the framing seam is largely mined and the bottleneck is shifting from
+finding to deciding (→ a consolidation synthesis across G12–G32). A
 factor-level coverage audit
 ([`map-gaps.md`](map-gaps.md) G9) also found ~10 categories only partially
 surfaced at the factor level — fixable through the manifest/research, with the
