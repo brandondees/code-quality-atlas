@@ -138,7 +138,7 @@ Surfaced 2026-06-14 (owner question: *do we have equivalents to Kent Beck's* Tid
 
 The structural-vs-behavioral split (3) is **adjacent to but not the same as** #24's "atomic commits / no drive-by scope creep": hygiene wants one purpose per PR; Beck wants structural and behavioral changes in *separate* PRs even when they serve one feature. Worth deciding whether #24 absorbs it or it belongs to the tidying mode.
 
-**Disposition: open.** (2) folds into the Q3/Q8 maintenance/fixing mode when that is built; (3) is a candidate factor — likely #21 (maintainability economics) and/or #24 (commit sequencing) — pending a disposition pass.
+**Disposition: open.** (2) **refined by G26** — the *suggestion* of a tidying is review-time (gated only by the defect-only guard, not by the unbuilt fixing capability); only auto-*application* is Q8. (3) is a candidate factor — likely #21 (maintainability economics) and/or #24 (commit sequencing) — pending a disposition pass.
 
 ## Round-3 gap hunt (G14–G19)
 
@@ -249,3 +249,18 @@ Surfaced 2026-06-14. G23's reviewable-vs-authority test must apply to **every** 
 - **Build-vs-buy TCO / procurement** → **boundary held** (right axis): TCO has no diff artifact; the decision record is #29.
 
 **Net:** the reframe sharpens the boundary rather than erasing it (restraint preserved). Only sustainability + FinOps were mis-folded (under-surfaced); the genuine no-artifact exclusions stand. **Disposition (lean): upgrade green + FinOps to routed #15 factors; confirm the rest out.** Confidence: high. Detail in [`research/product-experience-value-cluster.md`](research/product-experience-value-cluster.md).
+
+## G26 — Detect-and-suggest ≠ apply; defect ≠ improvement (the suite is defect-only by construction)
+
+Surfaced 2026-06-14 (owner: aren't tidyings / dead-code / dep-bumps decidable *at review time* — reviewer suggests a nit, implementer applies/defers/ignores?). Yes. This is the **same wrong-axis error as G23**, a third time: "is it reviewable?" was collapsed with an orthogonal axis — here, *when it is applied* and *whether it is a defect or an improvement*.
+
+**The actual blocker is not the unbuilt fixing capability (Q8) — it is a guard.** Every `SKILL.md` carries the identical generated reviewer-discipline line: *"…do not suggest changes to code that is already correct. This guards against false positives on correct code."* So the suite is **defect-only by construction**: improving-valence findings on already-correct code (reorder symbols for cohesion, remove dead code, bump a stale-but-working dep, extract an explaining variable) are *prohibited in every lens*, independent of any apply-automation. "Maintenance" actually decomposes into three orthogonal things, only one of which is genuinely unbuilt:
+
+1. **Improvement *detection + suggestion*** — review-time, detect-and-route (route: implementer; decision: apply/defer/ignore). **Currently suppressed by the guard**, not by missing capability.
+2. **Improvement *application*** (the agent edits) — the Q8 *capability* axis; partly served already by the broader `simplify` / `code-review --fix` skills.
+3. **Proactive *scanning*** with no triggering diff — the cron/repo shape; partly built (the repo audits, `finding-maintainability-hotspots`).
+
+**The tension to honor.** The guard is not wrong — it prevents nagging and false positives, and it is *why the suite earned trust* (clean PRs return "No findings"). The fix is not to delete it but to **add a valence axis** to the finding contract (alongside severity and G23's route): `valence: defect | improvement`. Defects keep the strict anti-false-positive bar; improvements are admissible only as **opt-in, `nit`-severity, `route: implementer`, volume-bounded** suggestions ("could tidy / could remove / could bump — apply, defer, or ignore"). Volume is already controllable: the synthesizer's severity floor and `REVIEW.md` convergence (which keeps *suppressed nits visible for optional tidy-up*) are the throttle, so improvement-valence findings need not bury a review.
+**Disposition (lean):** **refine the guard + add a `valence` axis.** This **largely resolves Q3** (review-vs-maintenance is mostly a valence toggle *at review time*, not a separate mode) and **narrows Q8** to genuine auto-application only. Confidence: high (grounded in the verbatim guard across all ~24 lenses).
+
+**The meta-principle (why this keeps recurring).** Three times now a real gap hid behind a conflation: **reviewability is orthogonal to authority (G23), to the reader's identity (G20), and to application-timing/valence (G26).** Standing rule: test *"is X reviewable / surfaceable at review time?"* **independently** of *who decides X*, *who reads X*, *when X is applied*, and *whether X is a defect or an improvement*. Each conflation predicts an under-reach; auditing for them is a generative gap-finding method in its own right (the "conflation audit").

@@ -58,7 +58,13 @@ findings are surfaced and routed to the right decider, not excluded) and **G24**
 (candidate **Cluster VII — Product, Experience & Value**: usability, perceived
 quality, UX consistency/content, inclusion, value/outcome instrumentation, trust/
 transparency, conceptual integrity, i18n-of-experience, feature-value lifecycle —
-[`research/product-experience-value-cluster.md`](research/product-experience-value-cluster.md)). A factor-level coverage audit
+[`research/product-experience-value-cluster.md`](research/product-experience-value-cluster.md)),
+**G25** (re-audit of the rest of the exclusion pile — most exclusions held on the
+no-artifact axis; sustainability + FinOps upgraded to routed #15 factors), and
+**G26** (detect-and-suggest ≠ apply, defect ≠ improvement — the suite is
+defect-only by a guard in every lens; improvement-suggestion is review-time;
+refines Q3, narrows Q8). The recurring meta-lesson: reviewability is orthogonal
+to authority (G23), reader identity (G20), and application-timing/valence (G26). A factor-level coverage audit
 ([`map-gaps.md`](map-gaps.md) G9) also found ~10 categories only partially
 surfaced at the factor level — fixable through the manifest/research, with the
 router half tracked as Q14. Everything else here is historical context kept for
@@ -265,6 +271,7 @@ Promote any of these to first-class categories? config management; logging-as-fi
 ### Q3 — Review vs. maintenance split
 
 "Review" (assess a diff) and "maintenance" (improve existing code over time) are different activities that touch the same categories differently. Should skills be dual-mode, or should we have a review-facing and a maintenance-facing variant per area?
+**Refined by [`map-gaps.md`](map-gaps.md) G26 (2026-06-14):** the split is largely a *valence toggle at review time*, not a separate mode. Improvement *detection + suggestion* (tidyings, dead code, stale deps) is review-time and detect-and-route (route: implementer); it is currently suppressed only by the defect-only reviewer-discipline guard, not by a missing mode. The genuinely separate "maintenance" activity is just auto-*application* (Q8) and proactive *scanning* (the repo audits). Resolution proposed in G26: refine the guard + add a `valence: defect | improvement` axis to the finding contract.
 
 ### Q4 — Findings vs. scores
 
@@ -288,3 +295,4 @@ First answer shipped (D10): the `choosing-review-lenses` router (situation → l
 
 Does maintenance include proactive hygiene (dead-code sweeps, dependency bumps, doc staleness) on a schedule, not just review-time? If so, some skills are *cron-shaped*, not *diff-shaped*.
 **Yes, and the cron shape is built for detection:** the six repo-shaped audits + `finding-maintainability-hotspots` are scheduled, whole-repo *detectors* (dead-code/debt, dep CVEs, doc staleness, …). **Still open:** the *fixing* half — skills that don't just flag but apply the change (sweep the dead code, bump the dep, refresh the stale doc). That residual is the same gap as Q3 (a maintenance/fixing mode vs. review/detection mode).
+**Narrowed by [`map-gaps.md`](map-gaps.md) G26 (2026-06-14):** the "fixing half" is *only auto-application*, and is partly served already by the broader `simplify` / `code-review --fix` skills. *Suggesting* the fix (apply/defer/ignore to the implementer) is review-time, not part of this residual — it's gated by the defect-only guard (G26), not by missing capability.

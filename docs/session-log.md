@@ -888,3 +888,33 @@ DevEx-as-a-system, deep model-fairness auditing, and build-vs-buy TCO stay out
 (genuinely no review-time artifact; diff-visible slices already covered by the
 existing #19/#21, G16, and #29). Net: the reframe sharpens the boundary, it does
 not erase it. → map-gaps G25; detail in product-experience-value-cluster.md.
+
+---
+
+## 2026-06-14 — Session (cont.): detect-vs-apply / defect-vs-improvement (G26)
+
+Owner caught the same wrong-axis error a third time: I'd filed tidyings /
+dead-code / dep-bumps under the unbuilt "fixing mode," but *detecting and
+suggesting* them is review-time (reviewer suggests a nit; implementer applies/
+defers/ignores). Grep confirmed the real blocker: every SKILL.md carries the
+generated guard "do not suggest changes to code that is already correct" — the
+suite is **defect-only by construction**, so improvement-valence findings are
+prohibited regardless of any apply-automation.
+
+- "Maintenance" decomposes into three orthogonal things; only auto-*application*
+  (Q8) is genuinely unbuilt (and partly served by simplify / code-review --fix).
+  Improvement *detection+suggestion* is review-time (detect-and-route, route:
+  implementer), gated only by the guard. Proactive *scanning* is the cron shape
+  (repo audits).
+- Fix (G26): refine the guard + add a `valence: defect | improvement` axis to the
+  finding contract; improvements admissible as opt-in, nit-severity, route:
+  implementer, volume-bounded (throttled by the synthesizer floor + REVIEW.md
+  convergence, which already keeps suppressed nits visible for optional tidy-up).
+  Largely resolves Q3; narrows Q8 to auto-application only.
+- **Meta-principle (3rd instance):** reviewability is orthogonal to authority
+  (G23), reader identity (G20), and application-timing/valence (G26). The
+  "conflation audit" is itself a standing gap-finding method.
+
+**Changes:** map-gaps (+G26, refined G13 disposition), open-questions (Q3 refined,
+Q8 narrowed, live-state pointer), product-experience-value-cluster.md (synthesis
+point 4). Docs-only; no drift.
