@@ -237,3 +237,15 @@ Surfaced 2026-06-14, enabled by G23. The six clusters are all about **the code a
 
 Restraint guardrails: skip-when-no-user-surface; detect-and-route (never blocks the engineering merge on a taste call); a separate routed synthesizer section so product findings neither drown nor are drowned by correctness/security; and VII-H as the cluster's own counterweight.
 **Disposition (lean): promote a Cluster VII**, built incrementally (VII-A + VII-F highest-leverage; VII-E/VII-I → #23; VII-C → #8). Granularity (lenses vs factors) is the open call, as Q1 was for the original map. Confidence: med-high (the cluster is a real hole). Full enumeration + external models in [`research/product-experience-value-cluster.md`](research/product-experience-value-cluster.md).
+
+## G25 — Re-audit of the remaining exclusion pile (applying G23's two-axis test)
+
+Surfaced 2026-06-14. G23's reviewable-vs-authority test must apply to **every** prior exclusion, not just product, or the reframe is special-pleading. Result: most prior out-of-scope calls were correctly drawn on the no-artifact axis; only two were mis-folded.
+
+- **Sustainability / green-software** (was "a carbon *label* on #15") → **upgrade**: diff-visible (inefficient queries, egress, over-provisioning) with carbon/cost weight → a routed factor (route: eng/leadership), more than a label.
+- **FinOps / cloud cost** (#15 residual, thin) → **upgrade thin→surfaced**: per-request cost/egress/over-provisioning are reviewable → first-class routed factor.
+- **Contributor DevEx as a system** → **boundary held** (right axis): the org-level metric has no review-time artifact; diff-visible dev-friction is already #19/#21.
+- **Deep model-fairness auditing** → **split confirmed**: diff-visible fairness smells → G16/detect-and-route (in); dataset/metric auditing → out (no artifact).
+- **Build-vs-buy TCO / procurement** → **boundary held** (right axis): TCO has no diff artifact; the decision record is #29.
+
+**Net:** the reframe sharpens the boundary rather than erasing it (restraint preserved). Only sustainability + FinOps were mis-folded (under-surfaced); the genuine no-artifact exclusions stand. **Disposition (lean): upgrade green + FinOps to routed #15 factors; confirm the rest out.** Confidence: high. Detail in [`research/product-experience-value-cluster.md`](research/product-experience-value-cluster.md).

@@ -874,3 +874,17 @@ scope); conceptual integrity is the missing *product* counterweight.
 **Changes:** new `docs/research/product-experience-value-cluster.md`; `map-gaps.md`
 (+G23/G24); `taxonomy-gap-hunt-round-3.md` (reframe fixes); `open-questions.md`
 (pointer). Docs-only; no drift.
+
+---
+
+## 2026-06-14 — Session (cont.): exclusion re-audit (G25)
+
+Applied G23's two-axis test to the *rest* of the out-of-scope/fold pile (so the
+reframe isn't special-pleading). Result confirms restraint: most prior exclusions
+were correctly on the no-artifact axis. Only **sustainability/green** (was a
+"carbon label on #15") and **FinOps/cloud cost** (#15 thin residual) were
+mis-folded (under-surfaced, not mis-axised) → upgrade to routed #15 factors.
+DevEx-as-a-system, deep model-fairness auditing, and build-vs-buy TCO stay out
+(genuinely no review-time artifact; diff-visible slices already covered by the
+existing #19/#21, G16, and #29). Net: the reframe sharpens the boundary, it does
+not erase it. → map-gaps G25; detail in product-experience-value-cluster.md.

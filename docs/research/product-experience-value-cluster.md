@@ -48,6 +48,20 @@ The six existing clusters are all about **the code and its lifecycle** (does it 
 2. **Detect-and-route unlocks a whole quadrant.** Once surfacing is decoupled from deciding (G23), the entire human-value half of software — usability, trust, coherence, outcomes — becomes reviewable without the suite overstepping into product authority. This is the single largest scope expansion since the v0.2 maximal-scope decision.
 3. **Conceptual integrity is the missing top-level value.** The map embeds two *code* counterweights (premature abstraction #11, premature optimization #15) but no *product* counterweight. Brooks's conceptual integrity (VII-H) is that brake, and it argues the cluster is not just additive surface but a coherence discipline.
 
+## G25 — Re-auditing the rest of the exclusion pile with the two-axis test
+
+G23's test (*reviewable at review time?* vs *who decides?*) must be applied to **every** prior exclusion, not just product — otherwise the reframe is special-pleading. Result: most prior out-of-scope calls were in fact drawn on the right axis (no artifact at review time), and only two were mis-folded.
+
+| Prior exclusion | Reviewable at review time? | Re-audit verdict |
+|---|---|---|
+| **Sustainability / green-software** (was: "a carbon *label* on #15") | **Yes** — inefficient queries, egress, over-provisioning are diff-visible and carry carbon/cost weight | **Upgrade** — a *routed* factor (route: eng/leadership), more than a label |
+| **FinOps / cloud cost** (#15 residual, thin) | **Yes** — per-request cost, egress, over-provisioned resources | **Upgrade thin→surfaced** — first-class routed factor under #15 |
+| Contributor **DevEx as a system** | **No** (the *system metric* has no review artifact); diff-visible dev-friction already in #19/#21 | **Boundary held** (right axis — no-artifact) |
+| **Deep model-fairness auditing** | **No** for the dataset/metric audit; **Yes** for diff-visible fairness smells (protected attr in a decision, hardcoded demographic threshold) | **Split confirmed** — smells → G16/detect-and-route (in); auditing → out (no artifact) |
+| **Build-vs-buy TCO / procurement** | **No** (TCO numbers have no diff artifact); the decision record is #29 | **Boundary held** (right axis); ADR slice already #29 |
+
+**Net:** the reframe *sharpens* the boundary rather than erasing it — restraint preserved. Only **sustainability** and **FinOps** were mis-folded (under-surfaced, not mis-axised) and get upgraded to routed factors; the genuine no-artifact exclusions stand. **Disposition (lean): upgrade green + FinOps to routed #15 factors; confirm the rest out.** Confidence: high.
+
 ## What remains genuinely out of scope (boundary now drawn on the right axis)
 
 Only concerns with **no artifact visible at review time**: market/TAM sizing, pricing strategy, headcount/org-political decisions, and other pure-business calls that never touch a diff, repo, ADR, or design doc. The moment any of these is *written down* as a decision record, it re-enters as #29 (decision-shaped). Authority-only concerns (an engineer can't decide it) are **in scope via detect-and-route**, not out.
