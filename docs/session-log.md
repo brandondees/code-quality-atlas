@@ -963,3 +963,28 @@ differential-diagnosis → G19; safety-margin → #28/G21; four-eyes-on-irrevers
 
 **Changes:** new `docs/research/cross-discipline-review-analogs.md`; map-gaps
 (+G27–G29); open-questions (live-state pointer). Docs-only; no drift.
+
+---
+
+## 2026-06-14 — Session (cont.): shape & synthesizer sweeps (G30–G31)
+
+Two more passes:
+
+- Re-ran shape-axis extrapolation on *security*: where is security reviewed at
+  *design* time? → **G30 threat modeling** (STRIDE / DFD+trust-boundaries / attack
+  trees / abuse cases) as a design/decision-time discipline, distinct from #14's
+  diff-time vuln sweep (#14 has design:true but running diff-heuristics over prose
+  ≠ generative threat enumeration). Grep confirmed absence ("trust boundary" only
+  in the parse-don't-validate sense). Verified design-time framing (STRIDE 1999;
+  Shostack's four questions). Lean: promote a design-shaped security lens / #14
+  decision-arm, detect-and-route the high-stakes slice. The security analog of #28.
+- Audited the synthesizer's own apparatus → **G31**: the tensions table is
+  entirely restraint-centric; cross-quality tensions (observability↔privacy,
+  security↔usability, transparency↔security, perf↔a11y, consistency↔evolvability)
+  have no default and fall back to "safer+simpler." Cluster VII (G24) + G16 make
+  these collisions more frequent. Lean: enrich the manifest tensions table.
+
+**Changes:** map-gaps (+G30/G31), open-questions (live-state pointer). Docs-only;
+no drift. Remaining mining queue: cross-quality is now partly done; open frontiers
+are thinning — next candidates are second-order/feedback-loop effects and a
+deliberate full conflation-audit pass.

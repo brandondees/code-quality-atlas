@@ -74,7 +74,13 @@ perf lens), and **G29** (root-cause vs symptom / band-aid detection); plus
 feeds-existing notes (materiality → Q14; differential-diagnosis → G19;
 safety-margin → #28/G21). The sweep mostly *confirmed* the atlas (poka-yoke maps
 to #9/#10; checklists ≡ the whole form), so it yielded add-factors, not a new
-cluster. A factor-level coverage audit
+cluster. Re-running shape-extrapolation on *security* and auditing the
+synthesizer's own apparatus then added **G30** (threat modeling — STRIDE / DFD /
+trust boundaries / abuse cases — as a *design-time* security discipline, distinct
+from #14's diff-time vuln sweep; a strong instance of the Q15 decision shape) and
+**G31** (the synthesizer's tension table is restraint-centric; enrich it with
+cross-quality pairs like observability↔privacy, security↔usability). A
+factor-level coverage audit
 ([`map-gaps.md`](map-gaps.md) G9) also found ~10 categories only partially
 surfaced at the factor level — fixable through the manifest/research, with the
 router half tracked as Q14. Everything else here is historical context kept for
