@@ -112,18 +112,23 @@ In the Claude Code web app → **Routines** → **New routine**:
   synthesizing-review-findings, apply REVIEW.md's policy, and post inline findings
   under the `<!-- atlas-review round:N -->` marker).
 
+  On round 1, before running lenses, post the one-line ACK (`<!-- atlas-review-ack -->`)
+  so the author knows a reviewer is attached — once per PR, not on later pushes.
+
   After that first review, do not exit — stay resident and watch this PR until it
   is merged or closed. Subscribe to its activity and re-run the review on each new
   push, in this same session. Keep the round count and the findings you have already
   raised in memory across pushes: resolve threads that later pushes addressed, and
   never re-litigate ones that still stand. Each round, apply REVIEW.md's convergence
-  policy — raise the severity floor as rounds accumulate (round 1: all; round 2:
-  Major+; round 3+: Blocker-only), and post a single APPROVE when nothing meets the
-  floor. Approving does NOT end your watch: stay subscribed and keep reviewing later
-  pushes, so a change pushed after you approved still gets reviewed. After an
-  approval, only speak again if a later push introduces a finding at or above the
-  floor — don't re-post APPROVE on every subsequent quiet push. Stop watching only
-  when the PR is merged or closed, or the hard round cap is reached. Note: a bare
+  policy — raise the severity floor once after the first pass and then hold it at
+  Major (round 1: all; round 2+: Major+, so genuine Majors keep getting surfaced),
+  post inline only findings that are NEW this round, and submit a single APPROVE the
+  first time nothing new meets the floor. Approving does NOT end your watch: stay
+  subscribed and keep reviewing later pushes, so a change pushed after you approved
+  still gets reviewed. After an approval, only speak again if a later push introduces
+  a NEW finding at or above the floor — stay silent on quiet pushes rather than
+  re-posting APPROVE or re-dumping the advisory list. Stop watching only when the PR
+  is merged or closed, or the hard round cap (default 10) is reached. Note: a bare
   push with no CI or comment activity may not wake the subscription; if you suspect
   you missed pushes, re-fetch the PR head before deciding you are done.
   ```
@@ -208,16 +213,22 @@ instead. (On PRs opened by a *different* identity, the reviewer posts a real
 Two autonomous sessions reacting to each other will ping-pong without a brake.
 The brakes live in `REVIEW.md` and are enforced by `/atlas-review-pr`:
 
-- **Escalating severity floor** — round 1 posts everything; later rounds post only
-  Major+, then Blocker-only *as inline comments*. Fewer inline comments each round ⇒
-  fewer fixes ⇒ fewer pushes. Findings below the floor aren't dropped silently:
-  they're carried as a **non-blocking advisory list** in the review summary (and in
-  the cap notice), so suppressed nits stay visible for optional tidy-up without
-  re-driving the loop.
-- **Approve-on-clean** — a round with nothing above its floor posts a single
-  `APPROVE` (with the advisory list, if any). The build session then has no
-  actionable inline comments and goes quiet. This is the real terminal state.
-- **Hard round cap** — a backstop (default 4) that hands a still-churning PR to a
+- **Severity floor that plateaus at Major** — round 1 posts everything; round 2+
+  posts only Major+ *as inline comments*, and **holds** there rather than climbing to
+  Blocker-only. A Major-only stream is already low-noise, so each further round is
+  cheap, and a real regression introduced by a late fix still gets surfaced however
+  many rounds in. Findings below the floor aren't dropped silently: they're carried
+  as a **non-blocking advisory list** in the review summary (and in the cap notice),
+  so suppressed nits stay visible for optional tidy-up without re-driving the loop.
+- **Only new findings earn a comment** — a push earns inline comments only for
+  findings new that round (not ones a standing thread already records). This, not an
+  ever-rising floor, is the main brake: quiet pushes stay quiet, so the higher round
+  cap costs nothing when there's nothing new to say.
+- **Approve-on-clean** — the first round with nothing new above its floor posts a
+  single `APPROVE` (with the advisory list, if any). The build session then has no
+  actionable inline comments and goes quiet. Subsequent quiet pushes stay silent —
+  no repeated APPROVE. This is the real terminal state.
+- **Hard round cap** — a backstop (default 10) that hands a still-churning PR to a
   human rather than burning another machine round. The cap notice carries the
   outstanding advisory findings forward so the human inherits the open list. The cap
   is enforced by the instructions, not the platform — the reviewer decides each

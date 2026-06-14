@@ -191,9 +191,10 @@ installs to a `skulto.json` manifest that `skulto sync` reproduces.
 
 Beyond running lenses by hand, the plugin ships two slash commands that turn the
 suite into a hands-off pull-request loop on cloud sandbox sessions: a GitHub-event
-**reviewer** that posts inline findings on every push and re-reviews until it
-converges, and a cheap scheduled **poller** that rebases stale PRs and pokes
-conflicts (the gap GitHub webhooks don't cover).
+**reviewer** that re-reviews each push — posting inline findings when a push
+introduces them and going quiet when it doesn't — until it converges, and a cheap
+scheduled **poller** that rebases stale PRs and pokes conflicts (the gap GitHub
+webhooks don't cover).
 
 - [`commands/atlas-review-pr.md`](commands/atlas-review-pr.md) — `/atlas-review-pr`
 - [`commands/atlas-rebase-stale.md`](commands/atlas-rebase-stale.md) — `/atlas-rebase-stale`
@@ -201,8 +202,9 @@ conflicts (the gap GitHub webhooks don't cover).
 - [`docs/runbooks/pr-review-automation.md`](docs/runbooks/pr-review-automation.md) — **how to wire the two routines** in the web app
 
 The commands install with the plugin; the routines/triggers are account-side config
-you create once (the runbook walks through it). Convergence — escalating severity
-floor, approve-on-clean, round cap — is what stops the reviewer and a build/auto-fix
+you create once (the runbook walks through it). Convergence — a severity floor that
+settles at Major, comments only for genuinely-new findings (quiet on no news),
+approve-on-clean, and a round cap — is what stops the reviewer and a build/auto-fix
 session from ping-ponging forever.
 
 ## Approach
