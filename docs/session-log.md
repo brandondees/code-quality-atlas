@@ -1013,3 +1013,35 @@ synthesis across G12-G32 (owner to allow).
 
 **Changes:** map-gaps (+conflation-audit table, +G32, closure), open-questions
 (live-state pointer). Docs-only; no drift. End of the mining phase.
+
+---
+
+## 2026-06-14 — Session (cont.): consolidation synthesis (G12–G32)
+
+Mining phase closed; produced the decision-support synthesis
+`docs/research/gap-hunt-synthesis.md` — the whole pile (21 gaps + Q19 + the
+enabling open questions) ranked and dependency-sequenced into four build waves:
+
+- **Wave A — foundations:** the two primitives (G23 detect-and-route axis, G26
+  valence axis + anti-churn), the cheap synthesizer upgrades (G19 coverage block,
+  G31 tensions enrichment), and Q19 (mechanize-with + presence checks). All
+  manifest/synthesizer/contract edits that regenerate cleanly; they unblock the rest.
+- **Wave B — high-value add-factors:** G27 (SoD, best value-per-cost), G21
+  (time-bombs), G28 (claims-vs-evidence), G29 (root-cause), G25 (green/FinOps),
+  G13 (tidy suggestions via G26), G32 (attribution), G12-as-factor.
+- **Wave C — new lenses:** G14 (AI-authored, top), G16 (ethical, needs G23), G20
+  (agent-legibility), G30 (threat-modeling, needs Q15), G18-interop.
+- **Wave D — bigger bets:** G24 Cluster VII (incremental: VII-A + VII-F + VII-H
+  first; needs G23+G26+Q13), G17 (data-eng), G22 (scoped), G15 (runtime shape,
+  longest horizon).
+
+Dependency headline: G23 + G26 (+ Q13) are upstream of most high-value lenses —
+build the primitives before the lenses. Top-five and the G1 single-owner
+boundaries (ethics triad G16/VII-G/#27; the claims/criteria/intent family
+G28/G12/#1; contracts G17/#13/#20; etc.) are called out for the decision pass.
+Also recorded: the hunt's reusable deliverables — three standing gap-finding
+methods plus two primitives — compound beyond this pile.
+
+**Changes:** new `docs/research/gap-hunt-synthesis.md`; map-gaps + open-questions
+pointers. Docs-only; no drift. This closes the gap-hunt + synthesis arc; decisions
+(promote/fold/sequence) are the owner's separate pass.

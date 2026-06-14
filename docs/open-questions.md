@@ -86,8 +86,11 @@ reviewability⊥X) then returned one net-new gap, **G32** (reviewability ⊥
 filter; the Boy-Scout / opportunistic-surfacing principle, detect-and-route,
 scope-bounded), and otherwise **confirmed the prior axes are covered** — a closure
 signal that the framing seam is largely mined and the bottleneck is shifting from
-finding to deciding (→ a consolidation synthesis across G12–G32). A
-factor-level coverage audit
+finding to deciding. The pile is now consolidated into a ranked, dependency-
+sequenced **synthesis** ([`research/gap-hunt-synthesis.md`](research/gap-hunt-synthesis.md))
+— four build waves (foundations → add-factors → new lenses → bigger bets), with
+the G23/G26 primitives and Q13/Q14/Q15 flagged as the upstream enablers most of
+the high-value lenses depend on. A factor-level coverage audit
 ([`map-gaps.md`](map-gaps.md) G9) also found ~10 categories only partially
 surfaced at the factor level — fixable through the manifest/research, with the
 router half tracked as Q14. Everything else here is historical context kept for
