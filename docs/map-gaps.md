@@ -212,3 +212,28 @@ Surfaced 2026-06-14 via the **adversarial / inversion** method (design the defec
 
 A **unit/granularity gap** — the change-set across time/space is an un-owned review *unit*, the analog of round 2's decision *shape* gap (a missing unit, not a missing topic). Relates to G7 (history-shaped skills) and #21 change-coupling, but neither owns *cross-change interaction at review time*.
 **Disposition (lean): promote (scoped)** — heavy detection is tool-territory (variability-aware execution, static/pointer analysis); the LLM-review slice is *"trace the ripple of deletions and assumption-changes beyond the diff; flag interaction with concurrent/recent changes"*, escalating the rest (G8). Confidence: medium.
+
+## G23 — Detect-and-route: surfacing ≠ deciding (a scope-principle fix)
+
+Surfaced 2026-06-14 (owner challenge to the recurring "product/UX is out of scope" boundary) via a new method — **auditing the exclusions themselves**. The "out of scope" label conflated two independent questions: **(1) is it reviewable at review time?** and **(2) who has authority to decide it?** Product/UX/value findings often answer *no* to (2) but *yes* to (1) — a confusing error message, a missing empty-state, a deceptive default are right there in the diff. The map already owns the resolution for this shape: **G8 detect-and-escalate** (the compliance lens surfaces legal exposure and routes the decision to a human, never adjudicating).
+
+**Generalize G8 into a map-wide primitive — detect-and-route.** A holistic review *surfaces* a finding with evidence and *routes the decision* to the right stakeholder (`route: product / design / legal / leadership / eng`), never silently dropping it for "not our call." Add a decider/route axis to the synthesizer (D12) alongside severity. Only concerns with **no artifact at review time** (market sizing, pricing, org politics) stay out — and those re-enter as #29 once written into a decision record. Consistent with the project's own rationale ([`overview.md`](overview.md)): a narrow scope "would push the most expensive failure modes out of scope" — and product/UX/value failures are often the most expensive of all.
+**Disposition (lean): adopt** (low-risk, additive; formalizes existing G8 + the D12 contract). Confidence: high. Full write-up: [`research/product-experience-value-cluster.md`](research/product-experience-value-cluster.md).
+
+## G24 — Candidate Cluster VII: Product, Experience & Value
+
+Surfaced 2026-06-14, enabled by G23. The six clusters are all about **the code and its lifecycle**; **none is about the product as experienced and valued by its users** — a topic-cluster-sized hole (not a shape or unit, a genuine *topic* axis). The only user-facing lens today is #23 (a11y mechanics) + #24 (agent-native *reachability*, not UX). Candidate lenses, each **skip-when no user-facing surface** and **detect-and-route** (G23):
+
+- **VII-A Usability & interaction quality** — Nielsen's 10 heuristics (the canonical UX completeness model); net-new. **promote, route: design/product.**
+- **VII-B Experiential / perceived quality** — empty/loading/error states, perceived performance, optimistic UI (≠ #15 *measured* perf). **promote/add-factor.**
+- **VII-C UX consistency / design-system conformance** — off-token, bespoke-vs-system components (UI analog of #8). **add-factor/lens.**
+- **VII-D Content & UX writing** — error-copy helpfulness, voice/tone, jargon. **add-factor.**
+- **VII-E Inclusion & equitable access** — ISO 25010:2023 *inclusivity*, cognitive a11y, low-end/low-bandwidth, affordability. **add-factor #23.**
+- **VII-F Product value & outcome instrumentation** — is the change tied to a measurable outcome / falsifiable hypothesis (outcome metrics ≠ #16 ops metrics; overlaps G12). **promote, route: product.**
+- **VII-G Trust, transparency & user-facing accountability** — automated-decision explainability (GDPR Art. 22), data-use transparency, honest defaults (overlaps G16/#27). **promote, route: product/legal.**
+- **VII-H Conceptual integrity / product coherence** — Brooks's "most important consideration in system design"; the *product* counterweight to sprawl (as #11/#15 are the *code* counterweights). **promote (design-shaped).**
+- **VII-I Internationalization of experience** — cultural fit, locale-correct flows, full RTL (beyond #23 strings). **add-factor #23.**
+- **VII-J Feature value lifecycle** — unused/dead *features* (product analog of #1 dead-code; cross #29 retire). **add-factor (repo/cron).**
+
+Restraint guardrails: skip-when-no-user-surface; detect-and-route (never blocks the engineering merge on a taste call); a separate routed synthesizer section so product findings neither drown nor are drowned by correctness/security; and VII-H as the cluster's own counterweight.
+**Disposition (lean): promote a Cluster VII**, built incrementally (VII-A + VII-F highest-leverage; VII-E/VII-I → #23; VII-C → #8). Granularity (lenses vs factors) is the open call, as Q1 was for the original map. Confidence: med-high (the cluster is a real hole). Full enumeration + external models in [`research/product-experience-value-cluster.md`](research/product-experience-value-cluster.md).

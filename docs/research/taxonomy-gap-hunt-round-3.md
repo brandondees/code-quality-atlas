@@ -37,7 +37,7 @@ The 2023 edition defines **nine** product-quality characteristics: functional su
 | Functional suitability (completeness/correctness/appropriateness) | #1 (+ G12 for appropriateness/validation) | covered (G12 already logged) |
 | Performance efficiency | #15 | covered |
 | **Compatibility (co-existence + interoperability)** | — | **absent → G18** |
-| Interaction capability (was usability) | #23 (a11y) + #9 (dev-UX); end-user usability out of scope | partial; product slice out of scope |
+| Interaction capability (was usability) | #23 (a11y) + #9 (dev-UX) | partial; end-user usability **reopened → G24 Cluster VII** (was "out of scope") |
 | Reliability | #2, #28 | covered |
 | Security | #14, #32 | covered |
 | Maintainability | #9–#12, #21, #17 | covered |
@@ -162,7 +162,7 @@ This is a **unit/granularity gap** — the change-set across time/space is an un
 
 Round 2 fenced governance explicitly with detect-and-escalate; these deserve the same treatment so they are recorded decisions rather than invisible holes:
 
-- **End-user product validation** beyond G12's acceptance-criteria traceability ("is this the *right feature* / does it move the metric") — the upstream edge where engineering review stops.
+- **End-user product validation** beyond G12's acceptance-criteria traceability ("is this the *right feature* / does it move the metric") — ~~the upstream edge where engineering review stops~~ **REOPENED 2026-06-14 (owner): in scope via detect-and-route → G23 + G24 (Cluster VII / [`product-experience-value-cluster.md`](product-experience-value-cluster.md)).** The exclusion was drawn on the wrong axis (who-decides vs reviewable); only concerns with *no artifact at review time* (market sizing, pricing) stay out.
 - **Functional-safety certification** (ISO 26262 / IEC 61508 / DO-178C, full hazard analysis) — domain-specific; the diff-visible fail-safe slice is G18, the certification machinery escalates.
 - **Org/team-level measures** (DevEx-as-a-system, delivery velocity, build-vs-buy TCO) — already held out of scope in round 2; consolidate the statement.
 

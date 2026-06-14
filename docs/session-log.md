@@ -831,3 +831,46 @@ single isolated change.
 **Changes:** `taxonomy-gap-hunt-round-3.md` (+Methods 5–6, +G21/G22, disposition
 table, synthesis 6–7, sources), `map-gaps.md` (+G21/G22), `open-questions.md`
 (pointer). Docs-only; no drift.
+
+---
+
+## 2026-06-14 — Session (cont.): scope re-audit → product/experience/value (G23, G24)
+
+**Goal:** owner challenged the recurring "product/UX out of scope" boundary — the
+suite is meant to navigate toward the best possible software *holistically*, not
+just dev-time logic/hygiene; needing a different stakeholder to decide shouldn't
+mean a finding isn't surfaced.
+
+**New method — audit the exclusions themselves.** Rounds 1–3 found gaps inside
+scope; this pass questions the *edge*. The "out of scope" label conflated two
+axes: (1) reviewable at review time? vs (2) who has authority to decide? Product/
+UX/value findings often answer no to (2) but yes to (1) — they're in the diff.
+
+- **G23 — detect-and-route (scope-principle fix).** Generalize G8 from a
+  compliance footnote to a map-wide primitive: surface the finding with evidence,
+  route the *decision* to the right stakeholder (product/design/legal/leadership),
+  never drop it for "not our call." Add a route axis to the synthesizer alongside
+  severity. Only concerns with *no artifact at review time* (market/pricing/org)
+  stay out — and those re-enter as #29 once written down. Lean: adopt.
+- **G24 — candidate Cluster VII: Product, Experience & Value.** The six clusters
+  are all about the code and its lifecycle; none is about the product as
+  experienced/valued by users (only #23 a11y is user-facing). Ten candidate
+  lenses (VII-A usability [Nielsen's 10], VII-B perceived quality, VII-C
+  design-system conformance, VII-D UX writing, VII-E inclusion [ISO inclusivity],
+  VII-F value/outcome instrumentation, VII-G trust/transparency, VII-H conceptual
+  integrity [Brooks — the *product* counterweight], VII-I i18n-of-experience,
+  VII-J feature-value lifecycle). All skip-when-no-user-surface + detect-and-route.
+  Lean: promote a cluster, built incrementally (VII-A + VII-F first; E/I→#23, C→#8).
+
+Verified: Nielsen's 10 usability heuristics (canonical UX completeness model);
+Brooks conceptual integrity; perceived-performance/optimistic-UI. Fixed the now-
+contradicted "out of scope" notes in round-3 (G18 interaction-capability;
+scope-boundaries) to point at G23/G24.
+
+**Synthesis:** the exclusion-audit is a standing method; detect-and-route unlocks
+the human-value half of software (largest scope expansion since v0.2 maximal
+scope); conceptual integrity is the missing *product* counterweight.
+
+**Changes:** new `docs/research/product-experience-value-cluster.md`; `map-gaps.md`
+(+G23/G24); `taxonomy-gap-hunt-round-3.md` (reframe fixes); `open-questions.md`
+(pointer). Docs-only; no drift.

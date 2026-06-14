@@ -52,7 +52,13 @@ mostly already mapped via #24/#32/#30), G21 operational time-bombs & exhaustion
 classes (a failure-grounded sweep — cert/credential expiry & rotation, calendar/
 clock time-bombs; add-factors), and G22 diff-isolation blindness (interaction /
 composition defects — a missing change-set *unit*) — all **provisional,
-owner-gated**, web-verified. A factor-level coverage audit
+owner-gated**, web-verified. A scope re-audit (2026-06-14, owner) then added
+**G23** (detect-and-route: surfacing ≠ deciding — generalize G8; product/UX/value
+findings are surfaced and routed to the right decider, not excluded) and **G24**
+(candidate **Cluster VII — Product, Experience & Value**: usability, perceived
+quality, UX consistency/content, inclusion, value/outcome instrumentation, trust/
+transparency, conceptual integrity, i18n-of-experience, feature-value lifecycle —
+[`research/product-experience-value-cluster.md`](research/product-experience-value-cluster.md)). A factor-level coverage audit
 ([`map-gaps.md`](map-gaps.md) G9) also found ~10 categories only partially
 surfaced at the factor level — fixable through the manifest/research, with the
 router half tracked as Q14. Everything else here is historical context kept for
