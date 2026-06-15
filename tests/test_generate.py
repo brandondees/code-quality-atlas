@@ -94,6 +94,41 @@ def test_top_checks_cap_cross_ref_categories():
     assert len(from_4) <= 2
 
 
+def _research_with_deep_priority(tmp_path):
+    # one section, a long heuristics list, a high-value factor marked priority
+    # well past the ~8-check budget so position alone would never surface it.
+    bullets = "\n".join(f"- Ordinary check number {i}?" for i in range(1, 13))
+    doc = (
+        "# Research — Marker Sample\n\n"
+        "## #7 Some category\n\n"
+        "### Reviewable heuristics (skill-checklist seeds)\n\n"
+        f"{bullets}\n"
+        "- ★ Deep but high-value factor that must surface?\n"
+    )
+    p = tmp_path / "research.md"
+    p.write_text(doc, encoding="utf-8")
+    return Skill(name="some-lens", description="x", shape="diff", wave=1,
+                 built_from=[Source(7, "research.md#7")])
+
+
+def test_priority_marked_deep_factor_surfaces_in_top_checks(tmp_path):
+    # G9: a marked bullet inlines even though its position is past the budget,
+    # and the marker is stripped from the rendered check.
+    skill = _research_with_deep_priority(tmp_path)
+    checks = top_checks(skill, docs_root=str(tmp_path))
+    assert "Deep but high-value factor that must surface?" in checks
+    assert "★" not in " ".join(checks)
+    # an *unmarked* check at the same deep position is still excluded
+    assert "Ordinary check number 12?" not in checks
+
+
+def test_priority_marker_stripped_from_heuristics_reference(tmp_path):
+    skill = _research_with_deep_priority(tmp_path)
+    ref = build_reference(skill, kind="heuristics", docs_root=str(tmp_path))
+    assert "Deep but high-value factor that must surface?" in ref
+    assert "★" not in ref
+
+
 def test_picker_renders_as_scannable_tagline():
     # The one-line picker is surfaced at the top of the body so the lens is
     # recognizable at a glance, above the trigger-rich description.

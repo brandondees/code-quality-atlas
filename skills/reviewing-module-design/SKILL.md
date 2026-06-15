@@ -9,7 +9,7 @@ provenance:
   built_from:
   - category: 9
     source: docs/research/cluster-3-structure.md#9
-    hash: 6cb643404c9ef20b018a2ec28db796be4e8f16635f6ee298f755448504fd4999
+    hash: 38ffd004ead3132595eb8c0abef6604be65c2ff741e304912c5fe25a0356ef3e
   - category: 10
     source: docs/research/cluster-3-structure.md#10
     hash: ff175300df2b146d5d226fef720a42eb2ade21d990ac1f022fe7d2e6df51707a
@@ -35,6 +35,7 @@ Report only real problems. If the code correctly handles the case, reply "No fin
 
 The head of the full checklist — enough for a first pass without opening any reference file:
 
+- Is it **hard to misuse** — invalid argument/call-sequence prevented by types, not docs (caller ergonomics / pit of success)?
 - Does the unit have **one** clear responsibility (high cohesion)? State its job in a sentence without "and."
 - Is the interface **narrow relative to the behavior** behind it (deep module), or a shallow pass-through adding no value?
 - What is the **strongest connascence crossing the boundary**, and is it local? (Position/Algorithm connascence across modules is a smell; prefer Name/Type.)

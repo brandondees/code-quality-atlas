@@ -1216,3 +1216,19 @@ The cohesive "latent / time-delayed defect" thread is threaded into each factor 
 **Verification:** `pytest tests/` 90 pass; `cli drift` clean; `cli eval` OK (+4 scenarios: tracing 4, security 6, resilience 4, pr-hygiene 4); markdownlint 0 errors. Cross-model re-gate pending (add-factor heuristics; batch with the next Wave B items).
 
 **Resolves:** G21, G28 → shipped. Wave B remaining: G29 (root-cause-vs-symptom), G25 (green/FinOps), G13 (tidyings, now that G26 valence exists), G32 (pre-existing/adjacent defects, needs G23+G26 — both shipped), G12 (acceptance-criteria traceability).
+
+### 2026-06-15 (cont.) — G9 budget layer: inline-priority marker (deep factors now surface)
+
+The Wave A/B add-factors kept landing in the **full checklist** (`reference/heuristics.md`) but not the inlined **Top checks**, because a bundled lens splits the ~8-check budget across its categories and a factor past position ~4 never makes the head. That is the G9 propagation leak — "category ownership is complete, factor *surfacing* leaks." Fixed the budget layer of G9 (the router/Q14 and severity-trim layers remain open).
+
+**Mechanism — an inline-priority marker (`★`).** A research heuristic bullet may be flagged `- ★ …`; `tooling/sections.py` exposes `is_priority`/`strip_priority` and `tooling/generate.py` `top_checks` inlines every marked bullet **additively** (marker stripped). Design choices, each deliberate:
+
+- **Additive, not displacing.** A marked factor is added on top of the normal position-based head, so promoting a deep factor never knocks a foundational check (money-as-minor-units, float-comparison, breaking-change-signaling) out of Top checks. A lens grows only by its mark count (the marked lenses now run 9-10 inlined checks vs 8); unmarked lenses are untouched — keeping this targeted rather than the blanket budget bump the marker was chosen over.
+- **Owner-only.** Cross-ref categories ignore the marker, so a factor force-surfaces only in the lens that *owns* the category, not in every lens that shares it (e.g. calendar/overflow surface in `tracing-correctness-and-invariants`, not in `hunting-silent-failures` which cross-refs #4).
+- **Directive, not content.** The marker is stripped from both SKILL.md Top checks and heuristics.md; `section_hash` still hashes the raw source (incl. `★`), so drift stays clean and the source doc carries a visible "headline check" cue for human readers.
+
+**Promoted the demonstrated leakers** (verified each was absent from Top checks before, present after): calendar/clock time-bombs + numeric overflow (#4), claims-vs-evidence + agent-native parity (#24), caller-ergonomics/pit-of-success (#9), portability (#26), symmetry of expression (#6). `altitude` (#6), `SLO/error-budget` (#16), `change-amplification` (#21) already surfaced — left unmarked.
+
+**Verification:** `pytest tests/` 93 pass (new: marker detection/stripping in test_sections; additive-surfacing + heuristics-strip in test_generate); `cli drift` clean; `cli eval` OK; markdownlint 0 errors. Generator-logic + research-annotation only — no hand-edited skills.
+
+**Resolves:** G9 **budget layer** (partial — router under-selection Q14 and severity-trimming remain). Unblocks the rest of Wave B: future add-factors can be marked to surface immediately.

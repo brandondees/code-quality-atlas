@@ -6,7 +6,8 @@ import yaml
 from pathlib import Path
 from tooling.manifest import Manifest, Skill, Source
 from tooling.sections import (extract_bullets, extract_section,
-                              extract_subsection, section_hash)
+                              extract_subsection, section_hash,
+                              is_priority, strip_priority)
 
 _KIND_TITLE = {
     "heuristics": "Reviewable heuristics",
@@ -38,7 +39,8 @@ def build_reference(skill: Skill, kind: str, docs_root: str = ".") -> str:
     entries = []
     for src in skill.built_from:
         text = Path(docs_root, src.path).read_text(encoding="utf-8")
-        body = extract_subsection(extract_section(text, src.section), kind).strip()
+        body = strip_priority(
+            extract_subsection(extract_section(text, src.section), kind).strip())
         if body:
             entries.append((src.section, body))
     toc = "\n".join(f"- From category #{n}" for n, _ in entries)
@@ -68,11 +70,22 @@ def top_checks(skill: Skill, docs_root: str = ".") -> list[str]:
     if primaries:
         budget = max(_TOP_CHECKS_BUDGET - _CROSS_REF_QUOTA * len(crosses),
                      len(primaries))
+        # Priority-marked bullets always inline (G9), marker stripped — they are
+        # *additive*, so promoting a deep factor never displaces a foundational
+        # position-based check. Only a lens that carries a marker grows (by the
+        # number of marks), which keeps the promotion targeted rather than a
+        # blanket budget increase across every lens.
+        for bullets in primaries:
+            checks.extend(strip_priority(b) for b in bullets if is_priority(b))
         base, rem = divmod(budget, len(primaries))
         for i, bullets in enumerate(primaries):
-            checks.extend(bullets[:base + (1 if i < rem else 0)])
+            non_prio = [b for b in bullets if not is_priority(b)]
+            checks.extend(non_prio[:base + (1 if i < rem else 0)])
+    # Cross-ref categories keep their small position-based quota and ignore the
+    # priority marker — a factor is force-surfaced only in the lens that *owns*
+    # it, not in every lens that shares the category. Markers are still stripped.
     for bullets in crosses:
-        checks.extend(bullets[:_CROSS_REF_QUOTA])
+        checks.extend(strip_priority(b) for b in bullets[:_CROSS_REF_QUOTA])
     return checks
 
 

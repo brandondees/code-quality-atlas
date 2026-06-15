@@ -139,10 +139,10 @@ Each taxonomy category gets three sections:
 - Does anything that grows (logs, cache, queue, temp files, sessions) have a bound / eviction / TTL (steady state)?
 - Money/currency stored as integer minor units or a decimal `Money` type — never binary float — and currency carried?
 - Float comparisons use a tolerance, not `==`?
-- Are numeric overflow/underflow and counter wraparound considered for the actual value ranges?
+- ★ Are numeric overflow/underflow and counter wraparound considered for the actual value ranges?
 - Time stored/compared in UTC; timezone/DST handled only at edges; no "always 24h/365d" assumptions?
 - Are elapsed durations measured with a **monotonic** clock, not wall-clock (which can jump backward)?
-- **Calendar/clock time-bombs (correct at merge, detonates on a future date):** does date/time logic survive the triggers that pass review only because today is an ordinary day — leap year (Feb 29) and leap second, DST spring-forward/fall-back gaps and overlaps, month/year rollover, and the 32-bit `time_t` **epoch-2038** ceiling? Flag hardcoded years/dates, `day + 1`-style arithmetic that ignores real calendars, and "always 365 days / 24 hours" assumptions — latent defects that a clock eventually arms.
+- ★ **Calendar/clock time-bombs (correct at merge, detonates on a future date):** does date/time logic survive the triggers that pass review only because today is an ordinary day — leap year (Feb 29) and leap second, DST spring-forward/fall-back gaps and overlaps, month/year rollover, and the 32-bit `time_t` **epoch-2038** ceiling? Flag hardcoded years/dates, `day + 1`-style arithmetic that ignores real calendars, and "always 365 days / 24 hours" assumptions — latent defects that a clock eventually arms.
 - Is mutable shared state minimized and is ownership (who may mutate) clear?
 - Are caches invalidated correctly on the underlying change (cross #15)?
 - Are connection pools bounded and reused, with no per-request unbounded resource creation?

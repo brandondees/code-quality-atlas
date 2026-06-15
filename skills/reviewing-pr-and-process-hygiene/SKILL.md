@@ -11,7 +11,7 @@ provenance:
   built_from:
   - category: 24
     source: docs/research/cluster-6-evolution.md#24
-    hash: 89380592de0002e015df9a0284efd8cd7a2b4e6ab5dd23e7e9613bee1a8fa7ec
+    hash: 6afbfef9d6b84164c306f133c1ed33daf2983a77f8eba5af2a569c1872ed9f12
   - category: 22
     source: docs/research/cluster-6-evolution.md#22
     hash: a7e66646fdd831a46d37765f29794abebc92ef33369b97723210bcdc9647d25d
@@ -37,6 +37,8 @@ Report only real problems. If the code correctly handles the case, reply "No fin
 
 The head of the full checklist — enough for a first pass without opening any reference file:
 
+- **Claims vs. evidence:** is every claim the PR makes checkable against evidence *in the diff*? "Fixes X" / "closes #N" wants a regression test that fails without the change; "faster" / "optimizes" wants a benchmark or profile, not an assertion; "no behavior change" / "pure refactor" wants the diff to be genuinely behavior-preserving (no logic quietly changed alongside the move). An unsupported claim is itself a finding — flag it and name the missing evidence rather than taking the description's word (generalizes the perf lens's profile-demand; cross #1 stated-intent, #15 perf, #17 tests).
+- **Agent-native parity:** does a new user-facing action also have a programmatic path (API/CLI/tool), and is it documented for automation — not UI-only?
 - **PR size & focus:** is the PR small and single-purpose (roughly ≤~400 net LOC, one concern)? If it mixes refactor + feature + format churn, suggest splitting — mixed diffs hide bugs.
 - **Atomic commits:** does each commit represent one logical change that builds and (ideally) passes tests on its own, enabling clean `revert`/`bisect`? No "fix typo"/"wip"/"address review" noise left in final history.
 - **Commit message hygiene:** imperative-mood subject within length limit; body explains *why* and trade-offs, not a restatement of the diff; links the issue/ticket.

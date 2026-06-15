@@ -83,7 +83,7 @@
 - Cyclomatic within budget (commonly ≤10) and cognitive ≤ ~15? Flag outliers for decomposition.
 - Parameter count ≤ ~3; else a parameter object? No boolean flag params that fork the body (split into two functions).
 - Is the **happy path** the un-indented main line, with edge cases returned early at the top?
-- **Symmetry of expression**: parallel concepts in parallel form (all branches `return x`); paired operations adjacent and mirror-shaped (`acquire`/`release`); consistent argument ordering across sibling calls.
+- ★ **Symmetry of expression**: parallel concepts in parallel form (all branches `return x`); paired operations adjacent and mirror-shaped (`acquire`/`release`); consistent argument ordering across sibling calls.
 - Are there "explaining variables" for opaque sub-expressions?
 - No long runs of near-duplicated lines begging for a loop/helper (local DRY — but watch the #11 premature-abstraction counterweight: extract only on *real* repetition).
 - Does control flow avoid surprising jumps a reader can't track?
