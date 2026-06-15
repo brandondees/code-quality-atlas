@@ -51,6 +51,32 @@ def render_user_template(request):
 3. **Weak hash for an integrity check:** MD5 is broken for security purposes — use
    an HMAC with a server-side key.
 
+## Bad → finding
+
+**Input (diff):**
+
+```python
+@router.post("/refunds/{refund_id}/approve")
+def approve_refund(refund_id, request):
+    refund = Refund.objects.get(id=refund_id)
+    refund.status = "approved"
+    refund.approved_by = request.user.id     # whoever calls becomes the approver
+    refund.save()
+    process_payout(refund)                    # money leaves immediately
+    return {"ok": True}
+```
+
+**Expected finding:**
+
+1. **Missing segregation of duties (maker-checker):** nothing stops the same actor
+   who created the refund from approving it — one principal completes a
+   high-consequence payout alone. Require the approver to be a distinct actor from
+   the requester (reject when `refund.requested_by == request.user.id`) and gate
+   approval behind the appropriate role. This is a workflow-authorization control,
+   distinct from least-privilege and IDOR; *which* operations need dual-control is a
+   business-policy call, so surface it to security/compliance rather than deciding
+   the threshold here.
+
 ## Good → no finding
 
 **Input (diff):**

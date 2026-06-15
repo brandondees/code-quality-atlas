@@ -20,6 +20,14 @@
       ]
     },
     {
+      "query": "Review this change:\n```python\n@router.post(\"/refunds/{refund_id}/approve\")\ndef approve_refund(refund_id, request):\n    refund = Refund.objects.get(id=refund_id)\n    refund.status = \"approved\"\n    refund.approved_by = request.user.id\n    refund.save()\n    process_payout(refund)\n    return {\"ok\": True}\n```\nThe Refund row records who requested it in `requested_by`.",
+      "expected_behavior": [
+        "Flags missing segregation of duties / maker-checker: the same actor who requested the refund can approve it, completing a high-consequence payout alone",
+        "Recommends enforcing two distinct actors (e.g. reject when requested_by == request.user.id) plus an approver-role check, framed as orthogonal to least-privilege and IDOR",
+        "Surfaces it to security/compliance rather than deciding which operations require dual-control (a business-policy call)"
+      ]
+    },
+    {
       "query": "Review this change:\n```python\ndef delete_document(request, doc_id):\n    doc = Document.objects.get(id=doc_id, owner=request.user)\n    doc.delete()\n    log.info(\"document deleted\", doc_id=doc_id, user_id=request.user.id)\n    return HttpResponse(status=204)\n```",
       "expected_behavior": [
         "Reports no findings",
