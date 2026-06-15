@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # tests/test_generate.py
 from pathlib import Path
-from tooling.manifest import Manifest, Route, Router, Skill, Source
+from tooling.manifest import Manifest, Route, Router, Skill, Source, load_manifest
 from tooling.generate import build_reference
 
 
@@ -118,12 +118,18 @@ def test_scope_line_marks_design_capability():
 
 def test_mechanize_with_nudge_present_in_every_lens():
     # Q19(a): each lens reframes its tool-rules as an advisory mechanization
-    # source — surfaced as a non-blocking route: implementer suggestion.
-    md = build_skill_md(_skill(), taxonomy_version="v0.2", docs_root=".")
-    assert "## Mechanizing these checks" in md
-    assert "route: implementer" in md
-    assert "reference/tool-rules.md" in md
-    assert "not a defect" in md  # never blocks a verdict
+    # source — a non-blocking route: implementer suggestion. Check every real
+    # lens, and scope the assertions to the mechanization section so a stray
+    # match elsewhere in the doc can't mask a regression.
+    manifest = load_manifest("skills/manifest.yaml")
+    for skill in manifest.skills:
+        md = build_skill_md(skill, taxonomy_version=manifest.taxonomy_version,
+                            docs_root=".")
+        assert "## Mechanizing these checks" in md, skill.name
+        section = md.partition("## Mechanizing these checks")[2].split("\n## ", 1)[0]
+        assert "route: implementer" in section, skill.name
+        assert "reference/tool-rules.md" in section, skill.name
+        assert "not a defect" in section, skill.name  # never blocks a verdict
 
 
 def test_reviewer_discipline_is_defect_default_with_anti_churn_optin():
@@ -245,9 +251,12 @@ def test_synthesizer_contract_carries_route_and_valence_axes():
     # the report carries dedicated Routed / Improvements sections
     assert "Routed — non-defect decisions outside engineering" in md
     assert "Improvements — opt-in, optional" in md
-    # G19: a coverage & limitations block is required, even on "No findings"
+    # G19: a coverage & limitations block is required, even on "No findings",
+    # and carries its two named bullets (not just the heading phrase).
     assert "Coverage & limitations" in md
     assert "always present" in md
+    assert "- Lenses run:" in md
+    assert "- Not verifiable from this diff:" in md
 
 
 def test_router_points_forward_to_synthesizer_when_present():

@@ -52,9 +52,16 @@ def test_real_manifest_has_cross_quality_tensions():
     m = load_manifest("skills/manifest.yaml")
     cross_quality = [t for t in m.synthesizer.tensions
                      if "checking-restraint" not in t.between]
-    # the restraint-centric originals plus the G31 enrichment
-    assert any("accessibility" in lens for t in cross_quality for lens in t.between)
-    assert any("compliance" in lens for t in cross_quality for lens in t.between)
+    # enforce pair-level coverage, not loose substrings: the three G31 pairs
+    # whose lenses exist today must all be present.
+    pairs = {tuple(sorted(t.between)) for t in cross_quality}
+    assert len(cross_quality) >= 3
+    assert tuple(sorted(["reviewing-performance-and-efficiency",
+                         "reviewing-accessibility-and-i18n"])) in pairs
+    assert tuple(sorted(["reviewing-observability-and-operability",
+                         "auditing-compliance-and-provenance"])) in pairs
+    assert tuple(sorted(["checking-idioms-and-consistency",
+                         "finding-maintainability-hotspots"])) in pairs
     validate(m)  # the new tensions reference real, distinct lenses
 
 def test_load_manifest_parses_skill_and_sources():
