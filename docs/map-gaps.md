@@ -176,7 +176,7 @@ Surfaced via the **external completeness model** (a new standing method — swee
 ## G19 — Review-coverage transparency / known-unknowns
 
 Surfaced via **vantage rotation** turned on the suite itself (the reviewer's own epistemics; the meta-analog of #30). The synthesizer (D12) emits a verdict but never states **what the review did *not* examine** — lenses skipped and why, areas it could not verify, claims it had no evidence for. A confident review silent on its own gaps manufactures false assurance, itself a defect *of the review*. Thin prior art as a named practice (nearest: audit "scope & limitations", model-card "known limitations").
-**Disposition (lean): fold into the synthesizer** as a required "coverage & limitations" contract field — not a new category. Confidence: high (additive, low-risk).
+**Disposition (lean): fold into the synthesizer** as a required "coverage & limitations" contract field — not a new category. Confidence: high (additive, low-risk). **✅ Shipped 2026-06-15** (Wave A): a synthesis step + a **Coverage & limitations** report block that names which lenses ran, which the router did not select, and what could not be verified from the diff alone — always present, even on a "No findings" report. Generator prose only; eval added.
 
 ## G20 — The codebase/repo as a working environment for AI maintainers
 
@@ -305,7 +305,7 @@ Surfaced 2026-06-14: re-running **shape-axis extrapolation** on *security* (wher
 ## G31 — The synthesizer's tension table is restraint-centric; cross-quality tensions go unmanaged
 
 Auditing D12's own apparatus: the `synthesizer.tensions:` table is **entirely restraint-centric** — every entry is `checking-restraint ↔ X` (module-design / performance / test-quality / api-contract / resilience) plus one `performance ↔ readability`. Tensions where **neither side is restraint** have no default resolution and fall back to the generic *"prefer safer and simpler."* As the map grows these multiply: **observability ↔ privacy** (log detail vs PII — #16 vs #27), **security ↔ usability** (friction vs safety — #14 vs G24 VII-A), **transparency ↔ security** (explainability vs information-disclosure — G24 VII-G vs #14), **performance ↔ accessibility**, **consistency ↔ evolvability** (#8 vs #21). Not broken (the fallback handles it), but under-specified, and the new Cluster VII (G24) + G16 sharply increase cross-quality collisions.
-**Disposition (lean): enrich the manifest `synthesizer.tensions:` table** with the cross-quality pairs above (additive; regenerates like the router/synthesizer — no docs drift). Low-risk. Confidence: high (the table is demonstrably under-populated).
+**Disposition (lean): enrich the manifest `synthesizer.tensions:` table** with the cross-quality pairs above (additive; regenerates like the router/synthesizer — no docs drift). Low-risk. Confidence: high (the table is demonstrably under-populated). **✅ Shipped 2026-06-15** (Wave A): added the three cross-quality pairs whose both lenses exist today — observability ↔ privacy (`reviewing-observability-and-operability` ↔ `auditing-compliance-and-provenance`), performance ↔ accessibility (`reviewing-performance-and-efficiency` ↔ `reviewing-accessibility-and-i18n`), and consistency ↔ evolvability (`checking-idioms-and-consistency` ↔ `finding-maintainability-hotspots`). The two G24-dependent pairs (security ↔ usability, transparency ↔ security) wait on the unbuilt Cluster VII lenses.
 
 ## Round-3 cont. — the conflation audit, run deliberately (G32 + closure)
 

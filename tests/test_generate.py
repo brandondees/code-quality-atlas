@@ -116,6 +116,16 @@ def test_scope_line_marks_design_capability():
     assert "Shape: repo" in repo
 
 
+def test_mechanize_with_nudge_present_in_every_lens():
+    # Q19(a): each lens reframes its tool-rules as an advisory mechanization
+    # source — surfaced as a non-blocking route: implementer suggestion.
+    md = build_skill_md(_skill(), taxonomy_version="v0.2", docs_root=".")
+    assert "## Mechanizing these checks" in md
+    assert "route: implementer" in md
+    assert "reference/tool-rules.md" in md
+    assert "not a defect" in md  # never blocks a verdict
+
+
 def test_reviewer_discipline_is_defect_default_with_anti_churn_optin():
     # G26: every lens stays defect-only by default, but names the opt-in
     # improvement path bounded by the non-configurable anti-churn floor.
@@ -235,6 +245,9 @@ def test_synthesizer_contract_carries_route_and_valence_axes():
     # the report carries dedicated Routed / Improvements sections
     assert "Routed — non-defect decisions outside engineering" in md
     assert "Improvements — opt-in, optional" in md
+    # G19: a coverage & limitations block is required, even on "No findings"
+    assert "Coverage & limitations" in md
+    assert "always present" in md
 
 
 def test_router_points_forward_to_synthesizer_when_present():

@@ -192,8 +192,16 @@ presence (and **complexity-scoring**, if it earns a check).
   repos).
 
 **Relation to prior decisions.** Implements the unbuilt half of **G10 item 1**; refines D12 (the finding
-contract) and D10 (the generator). **Status: open — decided-in-spirit (G10) but unbuilt; the
-coverage/perf/complexity presence holes are newly named here.**
+contract) and D10 (the generator). **Status: ✅ RESOLVED / built (2026-06-15, Wave A).**
+**(a)** the `mechanize-with:` nudge shipped as a generated **"Mechanizing these checks"** section in
+every lens — it reframes `reference/tool-rules.md` as an advisory mechanization source surfaced as a
+non-blocking `route: implementer` note, integrating with the G23/G26 route+valence axes (so it answers
+the "every lens?" sub-question: yes, uniformly). **(b)** `auditing-config-and-build-hygiene` gained a
+**coverage-reporting / perf-benchmark / complexity-scoring presence** check, framed as a
+**preference-tunable advisory** (not a floor-tier block) so a repo that deliberately skips them can
+suppress the note — this is the Q13-overlay-aligned answer to the "finding or noise?" sub-question.
+Remaining: the **light cross-model eval pass** (over-flagging regression check on clean repos) is
+**pending**, same as the other Wave A mechanism work — the structural evals pass.
 
 ### Q17 — Self-improving loop: usage signals → learnings → research edits *(new, 2026-06-12)*
 

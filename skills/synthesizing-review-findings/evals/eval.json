@@ -58,6 +58,14 @@
         "Tags the finding route: legal and escalates the remediation decision (remove / exception / relicense) to the legal owner rather than adjudicating which option to take",
         "Keeps the finding in its severity section with the route tag (so it carries verdict weight) rather than tucking a real defect into a non-defect Routed section"
       ]
+    },
+    {
+      "query": "I ran two lenses (tracing-correctness-and-invariants and reviewing-naming-and-readability) on a PR that also adds a background job and a DB migration. They found one Major bug. The router did not select a concurrency or migration lens, and neither lens can confirm runtime behavior of the new job from the diff alone. Synthesize the review.",
+      "expected_behavior": [
+        "Reports the Major bug and ends on a verdict, then includes a Coverage & limitations block stating which lenses ran and that concurrency/migration lenses were not selected",
+        "Names what could not be verified from the diff alone (e.g. the background job's runtime behavior) rather than implying the review was exhaustive",
+        "Keeps the limitations block to a few honest lines and does not manufacture findings for the unreviewed areas"
+      ]
     }
   ]
 }
