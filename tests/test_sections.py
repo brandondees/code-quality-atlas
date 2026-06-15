@@ -12,6 +12,9 @@ def test_priority_marker_detection_and_stripping():
     assert not is_priority("Are caches bounded?")
     # stripped at a bullet boundary and inline; a no-op when absent
     assert strip_priority(f"- {PRIORITY_MARKER}Calendar?") == "- Calendar?"
+    # inline form (no "- " prefix) — the path top_checks takes on an already-
+    # extracted bullet
+    assert strip_priority(f"{PRIORITY_MARKER}Calendar?") == "Calendar?"
     assert strip_priority("- Are caches bounded?") == "- Are caches bounded?"
 
 def test_extract_section_returns_named_section_only():
