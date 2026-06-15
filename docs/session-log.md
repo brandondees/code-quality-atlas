@@ -1045,3 +1045,52 @@ methods plus two primitives — compound beyond this pile.
 **Changes:** new `docs/research/gap-hunt-synthesis.md`; map-gaps + open-questions
 pointers. Docs-only; no drift. This closes the gap-hunt + synthesis arc; decisions
 (promote/fold/sequence) are the owner's separate pass.
+
+---
+
+## 2026-06-15 — Session: promote G27 (segregation of duties) — first Wave B build
+
+Owner picked G27 off the synthesis backlog — the highest value-per-cost item in
+the pile and an SOX-grade control the suite simply lacked. Promoted as an
+**add-factor on `sweeping-for-security` (#14)** via the compounding loop:
+
+- **Research source:** added a `Reviewable heuristics` seed + a `Key references`
+  entry (maker-checker / four-eyes / SoX SoD) to `cluster-4-runtime.md#14`. The
+  heuristic asks whether the *same actor can both initiate and approve* a
+  high-consequence action (payment/refund, role grant, deploy, bulk delete), and
+  frames SoD as orthogonal to least-privilege (*how much*) and IDOR (*whose*).
+- **Detect-and-route, in prose:** the G23 route-axis primitive isn't built yet, so
+  the factor surfaces the missing dual-control to security/compliance and notes
+  that *which* ops require it is a business-policy call — capturing the
+  detect-and-route spirit without depending on the unbuilt mechanism.
+- **Regenerated** the skill: SoD is now the **3rd Top check** in `SKILL.md`
+  (grouped with the IDOR/authz check; PII-in-logs moves to the full list). Added a
+  numbered-list **example** (refund self-approval) and a 4th **eval scenario**
+  (plus the existing good-case held intact).
+- **Gates:** `drift` clean, `eval` structural pass (4 scenarios), full test suite
+  85 passed. **Live cross-model re-gate deferred** — no Ollama/llama-server tier in
+  this sandbox; tracked here per prior re-gate precedent.
+
+Also confirmed in passing: open issues **#23/#24** are already fixed on `main`
+(commit `3a3c55d`) and just need closing on GitHub — pure housekeeping, left for
+the owner.
+
+**Changes:** `cluster-4-runtime.md` (+heuristic, +reference), regenerated
+`sweeping-for-security` (SKILL/heuristics/sources), hand-edited examples + eval,
+map-gaps (G27 shipped marker), gap-hunt-synthesis (Wave B status). No drift.
+
+**Round-1 atlas review (PR #41, approve-with-changes) addressed:**
+
+- *PII dropped from Top checks* (Minor): reordered the #14 source so PII-in-logs
+  sits at #8 (ahead of the more framework-defaulted CSRF, now #9) — SoD enters the
+  8-budget window without evicting a higher-base-rate check.
+- *Description frontmatter stale* (Minor): added SoD/maker-checker to the manifest
+  `description` + "authorization workflows" to the trigger list, so routers/catalog
+  match it; regenerated.
+- *Eval scenario latent IDOR* (Minor): isolated the SoD bad case behind an
+  explicit `@require_role("refund_approver")` gate so self-approval is the *sole*
+  defect (the role-gated lookup is correct for an approver) — removes the
+  IDOR/SoD ambiguity rather than testing two things loosely.
+- *No positive SoD scenario* (Nit): added a good→no-finding eval **and** a matching
+  `examples.md` pair (approver≠requester enforced) to pin the false-positive rate.
+  Eval now 5 scenarios.

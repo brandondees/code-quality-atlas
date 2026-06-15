@@ -279,6 +279,7 @@ Surfaced 2026-06-14 via a new method — **import mature *review practices* from
 
 From financial-audit internal controls. Reviewable in code: can the **same principal both initiate and approve** a high-consequence action (payment, refund, role/permission grant, deletion, deploy)? Are sensitive ops gated by **dual-authorization / maker-checker** (two distinct actors)? Distinct from #14, which owns authn/IDOR/least-*privilege* — SoD is the orthogonal control that **no single actor completes a sensitive workflow alone**, a business-logic authorization *pattern*, not an access bug. SOX §404-mandated; the canonical anti-fraud/anti-collusion control. Prior art: [maker-checker](https://en.wikipedia.org/wiki/Maker-checker); [SoD for SOX](https://www.securends.com/blog/segregation-of-duties-for-sox-compliance/).
 **Disposition (lean): add-factor #14** (or a dedicated check), **detect-and-route** (the policy of which ops need dual-control is a business call). Confidence: high — recognized, reviewable, currently unowned.
+**Shipped 2026-06-15 (Wave B):** promoted as an add-factor on `sweeping-for-security` (#14) — heuristic + Key reference in `cluster-4-runtime.md#14`, regenerated into the skill (now a Top check), with an example and an eval scenario. Phrased detect-and-route in prose (surface to security/compliance; threshold is a business call) ahead of the G23 route-axis primitive. Structural eval passes (4 scenarios); live cross-model re-gate deferred (no model tier in-session).
 
 ## G28 — Claims-vs-evidence verification (generalized)
 

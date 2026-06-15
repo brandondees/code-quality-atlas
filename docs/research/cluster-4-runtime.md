@@ -14,6 +14,7 @@
 - **OWASP — Cheat Sheet Series** — https://cheatsheetseries.owasp.org/ → mine: concrete "do this / not that" remediation patterns (parameterized queries, output encoding contexts, password storage with bcrypt/argon2/scrypt, CSP construction) — the fix half of each finding.
 - **OWASP — Proactive Controls** → mine: framing that reviewers should reward positive controls (parameterize, encode, validate, use vetted crypto) rather than only flag negatives.
 - **NIST — SP 800-63B Digital Identity Guidelines** → mine: authoritative source for authn rules (password length over composition, no forced periodic rotation, breached-password checks, MFA guidance) — counters folklore review comments.
+- **Maker-checker / four-eyes & segregation of duties (SOX)** — https://en.wikipedia.org/wiki/Maker-checker ; https://www.securends.com/blog/segregation-of-duties-for-sox-compliance/ → mine: the canonical anti-fraud / anti-collusion control that no single actor both initiates and approves a sensitive operation. A business-logic authorization *pattern* (distinct from authn, IDOR, and least-privilege), SOX §404-mandated; review high-consequence workflows for a dual-control / two-actor gate. Detect-and-route: *which* operations require dual-control is a business-policy call, not a code default.
 
 ### Tooling rules worth lifting
 
@@ -32,12 +33,13 @@
 
 - Does any query/command/HTML/path get built by string concatenation or interpolation of request-derived data? If so, demand parameterized queries / contextual output encoding / allow-listed path resolution.
 - Every state-changing or data-returning endpoint: is there an explicit authorization check tied to the *resource owner*, not just authentication? (IDOR = authenticated but not authorized.) Object references taken from the request (IDs, filenames) must be authorized, never trusted.
+- Can the *same actor* both initiate and approve a high-consequence action (a payment/refund, a role or permission grant, a deploy, a bulk delete)? Sensitive workflows need *segregation of duties / maker-checker* — two distinct actors, so no single actor completes the workflow alone. This is orthogonal to least-privilege (*how much* one actor may do) and IDOR (*whose* resource): flag the missing dual-control and surface it to security/compliance — *which* operations require it is a business-policy call, not a code default. (SOX §404; maps A01 Broken Access Control / A04 Insecure Design.)
 - Are secrets (keys, tokens, passwords, connection strings) absent from source, config-in-repo, and log output? Real secrets belong in a secrets manager / env injected at runtime.
 - Is crypto delegated to a vetted library with modern algorithms (AES-GCM/ChaCha20-Poly1305, argon2/bcrypt/scrypt for passwords, ECDSA/Ed25519)? Flag homegrown crypto, ECB mode, MD5/SHA1 for security, static IVs/nonces, and `Math.random()`/non-CSPRNG for tokens.
 - Is untrusted input ever deserialized with a format that can instantiate arbitrary types (Java/Python `pickle`/PHP unserialize/unsafe YAML)? Prefer data-only formats (JSON) with schema validation.
 - For any server-side fetch of a URL/host derived from user input: is the target allow-listed and are internal/metadata addresses (169.254.169.254, link-local, RFC1918, localhost) blocked? (SSRF / A10.)
-- Are state-changing requests protected against CSRF (same-site cookies + token, or non-cookie auth)? Are cookies `HttpOnly`, `Secure`, `SameSite`?
 - Is PII/sensitive data minimized, encrypted at rest/in transit, and kept out of logs, URLs, and error messages? (Cross-links #27 and #16.)
+- Are state-changing requests protected against CSRF (same-site cookies + token, or non-cookie auth)? Are cookies `HttpOnly`, `Secure`, `SameSite`?
 - Safe defaults: deny-by-default access, TLS verification on, debug/stack traces off in prod, CORS not `*` with credentials, no default/sample credentials shipped.
 - Least privilege: does the code/service request the narrowest scopes, file perms, DB grants, and cloud IAM roles it needs? Flag wildcard IAM policies and over-broad DB users.
 - New/updated dependency: is it from a reputable source, recently maintained, free of known CVEs, and pinned via lockfile? (Cross-links #18.)

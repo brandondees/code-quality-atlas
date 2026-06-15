@@ -51,6 +51,34 @@ def render_user_template(request):
 3. **Weak hash for an integrity check:** MD5 is broken for security purposes — use
    an HMAC with a server-side key.
 
+## Bad → finding
+
+**Input (diff):**
+
+```python
+@require_role("refund_approver")              # caller is authorized to approve any refund
+@router.post("/refunds/{refund_id}/approve")
+def approve_refund(refund_id, request):
+    refund = Refund.objects.get(id=refund_id)
+    refund.status = "approved"
+    refund.approved_by = request.user.id      # but nothing checks they aren't the requester
+    refund.save()
+    process_payout(refund)                     # money leaves immediately
+    return {"ok": True}
+```
+
+**Expected finding:**
+
+1. **Missing segregation of duties (maker-checker):** the approver role gates *who*
+   may approve, but nothing stops the same actor who requested the refund from
+   approving their own — one principal completes a high-consequence payout alone.
+   Require the approver to be a distinct actor from the requester (reject when
+   `refund.requested_by == request.user.id`). This is a workflow-authorization
+   control, distinct from least-privilege and IDOR — the role-gated lookup itself is
+   appropriate for an approver acting on others' refunds, so don't flag it as IDOR;
+   *which* operations need dual-control is a business-policy call, so surface it to
+   security/compliance rather than deciding the threshold here.
+
 ## Good → no finding
 
 **Input (diff):**
@@ -68,3 +96,27 @@ scoped to the resource owner, so there is no injection and no IDOR. Report
 manual sanitizing once parameterized; authentication is the framework's job), and
 do NOT flag reading a request parameter as inherently unsafe — what matters is how
 it reaches the sink.
+
+## Good → no finding
+
+**Input (diff):**
+
+```python
+@require_role("refund_approver")
+@router.post("/refunds/{refund_id}/approve")
+def approve_refund(refund_id, request):
+    refund = Refund.objects.get(id=refund_id)
+    if refund.requested_by == request.user.id:        # maker-checker enforced
+        raise PermissionDenied("approver must differ from requester")
+    refund.status = "approved"
+    refund.approved_by = request.user.id
+    refund.save()
+    process_payout(refund)
+    return {"ok": True}
+```
+
+**Expected finding:** None — segregation of duties is enforced: an approver-role
+gate plus an explicit check that the approver is not the requester, so no single
+actor completes the payout alone. Report "No findings". Do NOT invent further
+dual-control requirements, and do NOT flag the role-gated `get(id=...)` as an IDOR
+— an approver is meant to act on others' refunds.
