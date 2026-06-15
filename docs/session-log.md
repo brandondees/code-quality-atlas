@@ -1094,3 +1094,44 @@ map-gaps (G27 shipped marker), gap-hunt-synthesis (Wave B status). No drift.
 - *No positive SoD scenario* (Nit): added a good→no-finding eval **and** a matching
   `examples.md` pair (approver≠requester enforced) to pin the false-positive rate.
   Eval now 5 scenarios.
+
+**Live cross-model re-gate (the deferred D6/D8 step), run in-session via Ollama:**
+
+Environment work first: this sandbox had no model server, but egress is open, so
+installed Ollama + pulled `qwen2.5-coder:7b` (floor) and `llama3.2:3b` (low). Two
+traps cleared:
+
+- **Ollama 0.30.8 segfaults** on every model load here (broken inference build,
+  not a CPU gap — box has AVX2/AVX512). Pinning **Ollama 0.5.7** fixed it.
+- **Harness bug — silent context truncation.** `run_evals.py`'s Ollama path never
+  set `num_ctx`, so Ollama's 2048 default truncated the ~3.1k-token assembled skill
+  context; the model reviewed against a partial prompt and produced generic "here
+  are improvements" reviews that *looked* like results. Re-ran with `num_ctx 8192`
+  (via a driver reusing the harness's own `assemble_context`) → responses snapped to
+  the skill's format. **Fixed in the harness**: pin `OLLAMA_NUM_CTX = 8192` in the
+  Ollama options + raise the per-call timeout to 600s (CPU prompt-eval on a large
+  context exceeded the old 180s).
+
+Graded results (temp 0, num_ctx 8192):
+
+- **7B floor — first valid pass: 4/5.** S1 injection ✓, S2 secret/CSPRNG/SQL ✓,
+  **S3 bad-SoD MISS** ("No findings" — treated the `@require_role` gate as
+  sufficient), S4 good-SoD ✓, S5 good-delete ✓. Precision clean; the new factor's
+  *recall* missed — the documented "pattern-match beats reading" 7B ceiling
+  (role-gate-present → fine, missing the relational inference that one identity is
+  both requester and approver).
+- **Tuning pass** (general, not test-specific): added the decision rule *a
+  role/permission gate authorizes who may act and is not segregation of duties —
+  if an action records an initiator and an approver but never compares their
+  identities, the maker-checker control is missing even with a role gate present*
+  to the #14 heuristic (regenerated) + `examples.md`.
+- **7B floor — re-run: S3 MISS → PASS**, S4/S5 still clean. **Net 5/5 on the
+  documented floor.**
+- **3B low tier: fails the SoD scenarios both ways** (confabulated a non-existent
+  self-check on the bad case; false-positived the good case) and over-flags clean
+  code — below the 7–8B precision floor, consistent with prior runbook findings; not
+  a regression from this factor.
+
+Net: G27 **passes the cross-model gate at the documented floor.** Follow-up worth
+considering: the `num_ctx` harness fix means earlier Ollama-based eval runs in the
+repo's history may have been silently truncated too — worth a spot re-check.
