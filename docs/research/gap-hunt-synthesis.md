@@ -50,8 +50,8 @@ The practical consequence: **the two primitives (G23, G26) and the overlay (Q13)
 
 Low cost, high leverage, all manifest/synthesizer/contract edits that regenerate cleanly (no per-lens hand-editing, no drift). **Do these first; they unblock the rest.**
 
-- **G23** route axis on the finding contract + synthesizer.
-- **G26** `valence` axis + the built-in anti-churn/convergence floor (defaults strict).
+- **G23** route axis on the finding contract + synthesizer. **✅ Shipped 2026-06-15** — `route:` axis + detect-and-route principle + a Routed report section; generator prose, regenerates cleanly.
+- **G26** `valence` axis + the built-in anti-churn/convergence floor (defaults strict). **✅ Shipped 2026-06-15** — `valence:` axis, refined per-lens guard (defect-only default, improvements opt-in), non-configurable anti-churn floor, Improvements report section; the team verbosity dial still waits on Q13.
 - **G19** synthesizer "coverage & limitations" block.
 - **G31** enrich the tensions table with cross-quality pairs.
 - **Q19** the `mechanize-with:` generator pass + coverage/perf/complexity presence checks in `auditing-config-and-build-hygiene`.

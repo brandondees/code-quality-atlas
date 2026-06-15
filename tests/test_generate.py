@@ -116,6 +116,18 @@ def test_scope_line_marks_design_capability():
     assert "Shape: repo" in repo
 
 
+def test_reviewer_discipline_is_defect_default_with_anti_churn_optin():
+    # G26: every lens stays defect-only by default, but names the opt-in
+    # improvement path bounded by the non-configurable anti-churn floor.
+    md = build_skill_md(_skill(), taxonomy_version="v0.2", docs_root=".")
+    assert "Defects are the default; improvements are opt-in" in md
+    assert "defect-only" in md
+    assert "anti-churn floor" in md
+    assert "route: implementer" in md
+    # convergence/no-oscillation is part of the floor
+    assert "converge" in md
+
+
 def test_cross_ref_note_names_primary_owner():
     md = build_skill_md(_skill(cross_ref=[4]), taxonomy_version="v0.2", docs_root=".",
                         owners={2: "hunting-silent-failures", 4: "some-other-skill"})
@@ -202,6 +214,25 @@ def test_build_synthesizer_md_carries_severity_tensions_and_no_provenance():
     assert "favor safety" in md
     # closes the loop back to the router
     assert "choosing-review-lenses" in md
+
+
+def test_synthesizer_contract_carries_route_and_valence_axes():
+    # G23 + G26: the finding contract gains a route axis (detect-and-route) and a
+    # valence axis (defect vs improvement) alongside severity.
+    md = build_synthesizer_md(_manifest_with_synthesizer())
+    # valence axis + defaults
+    assert "**valence**" in md
+    assert "`defect`" in md and "`improvement`" in md
+    # route axis + the non-engineering owners
+    assert "**route**" in md
+    for owner in ("product", "design", "legal", "leadership", "implementer"):
+        assert owner in md
+    # detect-and-route principle and the anti-churn floor
+    assert "surfacing ≠ deciding" in md.replace("≠", "≠")
+    assert "anti-churn floor" in md
+    # the report carries dedicated Routed / Improvements sections
+    assert "Routed — decide outside engineering" in md
+    assert "Improvements — opt-in, optional" in md
 
 
 def test_router_points_forward_to_synthesizer_when_present():

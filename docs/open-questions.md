@@ -298,6 +298,7 @@ Promote any of these to first-class categories? config management; logging-as-fi
 
 "Review" (assess a diff) and "maintenance" (improve existing code over time) are different activities that touch the same categories differently. Should skills be dual-mode, or should we have a review-facing and a maintenance-facing variant per area?
 **Refined by [`map-gaps.md`](map-gaps.md) G26 (2026-06-14):** the split is largely a *valence toggle at review time*, not a separate mode. Improvement *detection + suggestion* (tidyings, dead code, stale deps) is review-time and detect-and-route (route: implementer); it is currently suppressed only by the defect-only reviewer-discipline guard, not by a missing mode. The genuinely separate "maintenance" activity is just auto-*application* (Q8) and proactive *scanning* (the repo audits). Resolution proposed in G26: refine the guard + add a `valence: defect | improvement` axis to the finding contract.
+**→ LARGELY RESOLVED (2026-06-15, G26 shipped — Wave A).** The `valence` axis and the refined "defect-only by default, improvements opt-in" guard shipped; the review/maintenance split is now a valence toggle, not a separate skill mode. The remaining open residue is **Q8** (auto-application) and the **Q13** verbosity dial that decides *how much* improvement-valence a team surfaces — both tracked under their own entries, not here.
 
 ### Q4 — Findings vs. scores
 

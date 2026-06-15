@@ -34,6 +34,22 @@
         "Collapses the two duplicate null-check notes into a single finding attributed to one (primary) owner",
         "Groups remaining findings by severity with nits last, keeping each finding to a line rather than restating full lens detail"
       ]
+    },
+    {
+      "query": "Findings from a checkout-flow PR: tracing-correctness flags an off-by-one at checkout/cart.py:60 that drops the last line item (a real bug). A reviewer also notes the error shown to users on a declined card just says 'Error 4012' with no guidance — a confusing, product-owned UX call, not an engineering one. And the cancel button sits below the fold on mobile, a design concern. Merge these into one review and tell me what blocks.",
+      "expected_behavior": [
+        "Blocks (or approve-with-changes) on the off-by-one as a defect that engineering owns and sets the verdict",
+        "Surfaces the 'Error 4012' message and the below-the-fold cancel button under a Routed section tagged route: product and route: design rather than silently dropping them as out of scope",
+        "Does not let the product/design routed findings set the engineering block/approve verdict by themselves, and does not adjudicate the product/UX calls itself — it routes the decision to the right owner"
+      ]
+    },
+    {
+      "query": "A PR adds a feature correctly. The team has opted into improvement suggestions. Lenses report: no defects; checking-restraint notes a now-dead helper at utils/legacy.py:12 left after the refactor; reviewing-naming suggests renaming `d` to `delay` at worker.py:30; and one lens suggests reordering two independent methods into a different but equivalent arrangement 'for cohesion'. Synthesize the review.",
+      "expected_behavior": [
+        "Reports the dead-code removal and the `d`->`delay` rename as improvement-valence, nit-severity, route: implementer suggestions (apply/defer/ignore) under an Improvements section, and ends on approve (no defects means it does not block or force changes)",
+        "Drops the method-reorder suggestion because it offers a merely equivalent arrangement, not a genuine improvement (the anti-churn / value bar), rather than surfacing change-for-change's-sake",
+        "Keeps improvements clearly separated from defects and does not inflate the verdict on account of the optional nits"
+      ]
     }
   ]
 }
