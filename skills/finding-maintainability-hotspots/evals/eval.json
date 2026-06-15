@@ -27,6 +27,14 @@
         "Recognizes churn is spread across multiple authors, complexity is modest, and the one TODO is tracked",
         "Does not invent a hotspot from the merely-highest numbers in a healthy table"
       ]
+    },
+    {
+      "query": "Review this PR: it renames `calc` to `compute_total` across 9 files, reorders the methods in billing.py for readability, AND changes the rounding rule from banker's rounding to round-half-up \u2014 all in one commit. The behavior change is the actual goal; the rename and reorder are cleanup the author did along the way.",
+      "expected_behavior": [
+        "Flags that a structural tidying (rename across 9 files + method reorder) is mixed with a behavioral change (rounding rule) in one commit, burying the one behavioral line in a large structural diff",
+        "Recommends Beck's tidy-first sequencing: land the rename/reorder first and separately, then the rounding change as a small reviewable diff",
+        "Applies the now/after/never economics to the decision (doesn't just say 'always separate' or 'always combine') and explains why the structural changes should or shouldn't land first"
+      ]
     }
   ]
 }

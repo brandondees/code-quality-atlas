@@ -1,5 +1,7 @@
 {
-  "skills": ["hunting-silent-failures"],
+  "skills": [
+    "hunting-silent-failures"
+  ],
   "scenarios": [
     {
       "query": "Review this change:\n```python\ntry:\n    charge = payments.charge(order.total)\nexcept Exception:\n    pass\norder.mark_paid()\n```",
@@ -22,6 +24,14 @@
       "expected_behavior": [
         "Reports no silent-failure issue",
         "Recognizes the exception is narrow, surfaced with context, and avoids a false 'paid' state"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\n# Bug: /report 500s intermittently when a user has no orders.\ndef monthly_report(user):\n    try:\n        return build_report(user.orders)\n    except Exception:\n        return {}   # just return empty so the page stops 500ing\n```\nThe ticket says the report should show zero-state for users with no orders.",
+      "expected_behavior": [
+        "Flags this as a band-aid: the blanket except swallows the real cause (build_report not handling an empty/!None orders case) and papers over the symptom to stop the 500",
+        "Asks what actually produces the failure (5-whys) and pushes the fix to the root level \u2014 handle the no-orders/zero-state case in build_report rather than catching-and-returning {}",
+        "Notes the swallow also hides unrelated future failures (blanket except), so even the symptom patch is unsafe"
       ]
     }
   ]

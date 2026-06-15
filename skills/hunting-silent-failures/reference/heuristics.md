@@ -17,6 +17,7 @@
 - Is there a fallback / circuit breaker for a dependency that fails repeatedly?
 - On partial failure, is state left consistent / rolled back (transaction boundaries — cross #20)?
 - Is the error handled at the layer that can actually do something, vs. caught-and-rethrown noise?
+- **Root cause vs. band-aid (esp. bug fixes):** does the fix resolve the underlying cause, or paper over a symptom — catch-and-ignore the error, special-case the one bad input, retry a flaky call, bump a timeout, drop a null guard at the crash site? A symptom-level patch that leaves the cause live is a finding even when it makes the reported case pass; ask what *produced* the bad state (5-whys) and whether this change addresses that level, not just the visible failure.
 - Is input validated once at the trust boundary (parse-don't-validate)?
 - Are all async rejections handled (no floating promises)?
 - Are *bugs* (assertion-worthy) treated differently from *recoverable errors*?

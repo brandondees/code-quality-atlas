@@ -128,7 +128,7 @@ The suite *does* ask "is this the right thing?" in exactly one place — `review
 
 Nothing reviews whether a diff **satisfies the acceptance criteria of its linked issue**, traces to a stated **stakeholder/user need**, or whether the intent it conforms to is itself sound. Acceptance-criteria / requirements-traceability on a diff (*does this PR deliver what the issue asked — no more, no less*) is a recognized review dimension with no owner here. Distinct from #1 (matches the stated intent) and #29 (decision soundness): this is *diff*-time alignment of the change to the requirement behind it.
 
-**Disposition (user, 2026-06-14): in-scope gap — a candidate review behavior, not a scope boundary.** (The decision-lifecycle precedent cuts against treating "right thing?" as out of scope.) Candidate placement and shape — a diff-time acceptance-criteria/requirements-traceability lens vs. folding a "is the requirement sound" facet into the decision-time shape — left to a disposition pass.
+**Disposition (user, 2026-06-14): in-scope gap — a candidate review behavior, not a scope boundary.** (The decision-lifecycle precedent cuts against treating "right thing?" as out of scope.) Candidate placement and shape — a diff-time acceptance-criteria/requirements-traceability lens vs. folding a "is the requirement sound" facet into the decision-time shape — left to a disposition pass. **✅ Shipped 2026-06-15 as a factor** (Wave B, per the synthesis: start as a factor, earn a lens later): "acceptance-criteria traceability" on `reviewing-pr-and-process-hygiene` (#24) — does the PR deliver what its linked issue asked, *no less* (criteria met) and *no more* (no unrequested scope)? Framed as **validation**, distinct from #1 (code-vs-stated-intent) and #29 (decision soundness). Unmarked (full checklist); promote to a dedicated lens if it earns it. Eval added.
 
 ## G13 — *Tidy First?*: the tidyings are in as review hints; the economics and the proactive mode are not
 
@@ -140,7 +140,7 @@ Surfaced 2026-06-14 (owner question: *do we have equivalents to Kent Beck's* Tid
 
 The structural-vs-behavioral split (3) is **adjacent to but not the same as** #24's "atomic commits / no drive-by scope creep": hygiene wants one purpose per PR; Beck wants structural and behavioral changes in *separate* PRs even when they serve one feature. Worth deciding whether #24 absorbs it or it belongs to the tidying mode.
 
-**Disposition: open.** (2) **refined by G26** — the *suggestion* of a tidying is review-time (gated only by the defect-only guard, not by the unbuilt fixing capability); only auto-*application* is Q8. (3) is a candidate factor — likely #21 (maintainability economics) and/or #24 (commit sequencing) — pending a disposition pass.
+**Disposition: open.** (2) **refined by G26** — the *suggestion* of a tidying is review-time (gated only by the defect-only guard, not by the unbuilt fixing capability); only auto-*application* is Q8. (3) is a candidate factor — likely #21 (maintainability economics) and/or #24 (commit sequencing) — pending a disposition pass. **✅ Part (3) shipped 2026-06-15** (Wave B): the now/after/never **economics** + coupling-as-cost-driver → `finding-maintainability-hotspots` (#21); the **structural-vs-behavioral separation** (Beck's stronger-than-atomic-commits rule: refactoring and the feature it enables in *separate* changes) → `reviewing-pr-and-process-hygiene` (#24, which absorbs it). Both unmarked (full checklist) — #21/#24 are already well-surfaced. Part (2) auto-application remains Q8.
 
 ## Round-3 gap hunt (G14–G22)
 
@@ -254,7 +254,7 @@ Surfaced 2026-06-14. G23's reviewable-vs-authority test must apply to **every** 
 - **Deep model-fairness auditing** → **split confirmed**: diff-visible fairness smells → G16/detect-and-route (in); dataset/metric auditing → out (no artifact).
 - **Build-vs-buy TCO / procurement** → **boundary held** (right axis): TCO has no diff artifact; the decision record is #29.
 
-**Net:** the reframe sharpens the boundary rather than erasing it (restraint preserved). Only sustainability + FinOps were mis-folded (under-surfaced); the genuine no-artifact exclusions stand. **Disposition (lean): upgrade green + FinOps to routed #15 factors; confirm the rest out.** Confidence: high. Detail in [`research/product-experience-value-cluster.md`](research/product-experience-value-cluster.md).
+**Net:** the reframe sharpens the boundary rather than erasing it (restraint preserved). Only sustainability + FinOps were mis-folded (under-surfaced); the genuine no-artifact exclusions stand. **Disposition (lean): upgrade green + FinOps to routed #15 factors; confirm the rest out.** Confidence: high. Detail in [`research/product-experience-value-cluster.md`](research/product-experience-value-cluster.md). **✅ Shipped 2026-06-15** (Wave B): green and FinOps share one diff signal (wasted work per request), so unified into a single routed factor on `reviewing-performance-and-efficiency` (#15) — **"cost & carbon efficiency (FinOps + green), `route: eng/leadership`"** (chatty egress, unbounded fan-out, over-provisioning, polling-vs-events, over-scanning queries). Marked priority; diff-visible inefficiency in scope, org-level target out. Eval added.
 
 ## G26 — Detect-and-suggest ≠ apply; defect ≠ improvement (the suite is defect-only by construction)
 
@@ -291,7 +291,7 @@ From scientific peer review. Every PR *claim* — "fixes X", "faster", "no behav
 ## G29 — Root-cause vs symptom (band-aid detection)
 
 From manufacturing 5-whys + clinical differential diagnosis. For bug fixes: does the change address the **root cause** or paper over a **symptom** (catch-and-ignore, special-case the one bad input, retry a flaky call, bump a timeout)? Existing lenses verify a fix is *correct*; none asks whether it is at the *right level*. `hunting-silent-failures` is adjacent (dislikes swallowing errors); band-aid detection generalizes to *"is this masking the problem rather than resolving it?"*
-**Disposition (lean): add-factor** to `tracing-correctness-and-invariants` / `hunting-silent-failures` + the bug-fix router route. Confidence: medium.
+**Disposition (lean): add-factor** to `tracing-correctness-and-invariants` / `hunting-silent-failures` + the bug-fix router route. Confidence: medium. **✅ Shipped 2026-06-15** (Wave B): single-owner add-factor on `hunting-silent-failures` (#2) — "root cause vs. band-aid": catch-and-ignore, special-case the one bad input, retry a flaky call, bump a timeout, drop a guard at the crash site → ask what *produced* the bad state (5-whys) and whether the fix is at the right level. Marked priority (surfaces as a top-check on bug-fix review); eval added.
 
 **Feeds-existing (not new gaps):** materiality/sampling → **Q14** (the depth axis's missing name); differential-diagnosis → **G19** (enumerate alternative causes before concluding); safety-margin/headroom → **#28/G21**; four-eyes-on-irreversible-ops → **#24**; blameless M&M → **Q17/G15**.
 

@@ -19,6 +19,7 @@
 - **Connascence locality:** does the change introduce connascence (of position, meaning, value, timing…) that crosses a module boundary? Stronger/longer-distance connascence = higher amplification.
 - **Reversibility:** is this change easy to undo, or does it bake in a one-way decision (data format, public API, migration)? One-way doors deserve more scrutiny.
 - **Complexity trend:** does the diff raise cyclomatic/cognitive complexity of an already-hot function, or reduce it? Net direction matters more than absolute number.
+- **Tidy-first economics (timing & sequencing):** if the diff mixes a structural tidying (rename, extract, reorder, dedupe) with a behavioral change, should the tidying land *first and separately* so the behavioral diff stays small and reviewable? Judge the *now / after / never* call by coupling-and-cohesion — tidy **now** when it removes coupling the change must otherwise fight, **defer** when the payoff is speculative, **never** on leaf/stable code — rather than tidying reflexively. (Beck, *Tidy First?*; the *sequencing* lives in #24, the *economics* here.)
 - **Speculative generality (counterweight):** is added "flexibility" (config knobs, plugin points, abstract base) justified by a *present* second use, or is it pre-emptive and itself future maintenance cost?
 
 ---

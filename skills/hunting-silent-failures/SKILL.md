@@ -10,7 +10,7 @@ provenance:
   built_from:
   - category: 2
     source: docs/research/cluster-1-correctness.md#2
-    hash: e57d4915e49200d858adbbc56c972154fb6dacf73a988c58de734ea8693339c0
+    hash: f3544ba46872ca9fb6eadfeb5d13f6f8cb22edc9036229c26c1e3eb2b13480c4
   - category: 4
     source: docs/research/cluster-1-correctness.md#4
     hash: 63ae9d27a00a6a9575d63c6bc8a91c2d785f7d0ba313fd9416e3f61f8f730043
@@ -36,6 +36,7 @@ Report only real problems. If the code correctly handles the case, reply "No fin
 
 The head of the full checklist — enough for a first pass without opening any reference file:
 
+- **Root cause vs. band-aid (esp. bug fixes):** does the fix resolve the underlying cause, or paper over a symptom — catch-and-ignore the error, special-case the one bad input, retry a flaky call, bump a timeout, drop a null guard at the crash site? A symptom-level patch that leaves the cause live is a finding even when it makes the reported case pass; ask what *produced* the bad state (5-whys) and whether this change addresses that level, not just the visible failure.
 - Is any error swallowed — empty catch/`rescue`, `except: pass`, ignored Go `err`, discarded Result?
 - Does each handler narrow to the *expected* exception type, not a blanket catch-all?
 - On failure does it **fail loud** (surface + log with context) or **degrade intentionally** — never silently?

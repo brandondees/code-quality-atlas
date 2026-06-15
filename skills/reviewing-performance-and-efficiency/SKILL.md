@@ -11,7 +11,7 @@ provenance:
   built_from:
   - category: 15
     source: docs/research/cluster-4-runtime.md#15
-    hash: edbac0e3b11b41a9af4c9b8797940b20a90918f40e173c9229c3dbea4e073acc
+    hash: a5e2b6c50fe7043fed8828b7b6e1a33123f348ae55dcb0ce95ffb061b1231586
 ---
 
 # reviewing-performance-and-efficiency
@@ -34,6 +34,7 @@ Report only real problems. If the code correctly handles the case, reply "No fin
 
 The head of the full checklist — enough for a first pass without opening any reference file:
 
+- **Cost & carbon efficiency (FinOps + green) — `route: eng/leadership`:** does the change add per-request **cost *and* energy/carbon** that scale badly — chatty cross-AZ/egress traffic, unbounded fan-out, over-provisioned or always-on instances, polling instead of events, queries that scan far more than they return? These are one diff signal (wasted work per request) with two weights; surface the waste and **route** the spend/footprint trade-off to eng/leadership rather than adjudicating it here. Diff-visible inefficiency is in scope; an org-level carbon/cost *target* is not.
 - Is there a loop that issues a query/RPC/HTTP call per iteration? (N+1.) Push to a single batched/`IN`/join query or a bulk endpoint. Flag `await` inside `for` over independent items.
 - What is the worst-case complexity on the hot path as input grows? Flag accidental O(n²) (nested loops over the same collection, `Array.includes` inside a loop → use a Set/Map), and unbounded growth.
 - Is the same expensive value (DB read, computed result, parsed config, compiled regex) recomputed when it could be hoisted or memoized? Conversely, is anything memoized that's cheap and rarely reused (premature)?

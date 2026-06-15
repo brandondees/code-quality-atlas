@@ -1232,3 +1232,18 @@ The Wave A/B add-factors kept landing in the **full checklist** (`reference/heur
 **Verification:** `pytest tests/` 93 pass (new: marker detection/stripping in test_sections; additive-surfacing + heuristics-strip in test_generate); `cli drift` clean; `cli eval` OK; markdownlint 0 errors. Generator-logic + research-annotation only — no hand-edited skills.
 
 **Resolves:** G9 **budget layer** (partial — router under-selection Q14 and severity-trimming remain). Unblocks the rest of Wave B: future add-factors can be marked to surface immediately.
+
+### 2026-06-15 (cont.) — Wave B wave 2: G29 band-aid, G25 cost+carbon, G13 economics, G12 acceptance-criteria
+
+Four more Wave B add-factors, each at a single G1 owner, regenerated from research (drift clean), with evals. The G9 priority marker (shipped earlier today) is now used to surface the two highest-value ones as top-checks.
+
+- **G29 — root cause vs. band-aid** → `hunting-silent-failures` (#2), **marked priority**. Does a bug fix resolve the cause or paper over a symptom (catch-and-ignore, special-case the one bad input, retry a flaky call, bump a timeout, drop a guard at the crash site)? Existing lenses verify a fix is *correct*; none asked if it is at the *right level*. 5-whys framing.
+- **G25 — cost & carbon efficiency** → `reviewing-performance-and-efficiency` (#15), **marked priority**, `route: eng/leadership`. Green and FinOps share one diff signal (wasted work per request) with two weights, so unified into a single routed factor rather than two near-duplicate bullets (restraint) — upgrades the pre-existing thin FinOps line. Diff-visible inefficiency in scope; org-level target out.
+- **G13 — tidy-first economics** (Beck part 3). The *now/after/never* timing + coupling-as-cost-driver → `finding-maintainability-hotspots` (#21); the *structural-vs-behavioral separation* (refactoring and the feature it enables in separate changes — stronger than #24's atomic-commits) → `reviewing-pr-and-process-hygiene` (#24, which absorbs it). Both unmarked (those lenses are already well-surfaced). Part 2 (auto-apply) stays Q8.
+- **G12 — acceptance-criteria traceability** → `reviewing-pr-and-process-hygiene` (#24), as a factor (per the synthesis: start as a factor, earn a lens later). Does the PR deliver what its linked issue asked — no less (criteria met), no more (no unrequested scope)? Framed as **validation**, distinct from #1 (code-vs-intent) and #29 (decision soundness). Unmarked.
+
+**Marking discipline:** only G29 and G25 marked priority — high value, currently leaking, owning lens at <=8 top-checks. G13/G12 land in the full checklist; #21/#24 are already heavily surfaced and G12 is explicitly meant to earn a lens before claiming a top slot. Both marked lenses now run 9 top-checks (additive, no foundational displaced).
+
+**Verification:** `pytest tests/` 94 pass; `cli drift` clean; `cli eval` OK (+4 scenarios: hunting 4, performance 4, maintainability 4, pr-hygiene 5); markdownlint 0 errors. **Cross-model re-gate: target Wave B close-out (the G32 PR), no earlier than 2026-06-16** — batched rather than per-factor (mechanism/prose, no new judgment lens); the G32 PR is the trigger to run it across #48 / #50 / G32 together.
+
+**Resolves:** G29, G25 → shipped; G13 parts (1)+(3) shipped (part 2 = Q8); G12 shipped as factor. **Wave B remaining: G32** (pre-existing/adjacent defects — the attribution axis, its own PR next).
