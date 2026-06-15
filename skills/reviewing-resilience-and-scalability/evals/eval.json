@@ -16,7 +16,7 @@
       "query": "Review this design:\n```text\nRFC: Notifications service. Single Postgres primary, no replica. A single global\nrow `counters.next_notification_id` is incremented on every send to assign IDs.\nBackups: nightly pg_dump to S3 (never restored in a drill). Stated target: 8,000\nnotifications/sec at peak and 99.95% availability.\n```",
       "expected_behavior": [
         "Flags the single global counter row as a single-writer bottleneck that serializes every insert and caps throughput far below 8,000/sec regardless of scaling; recommends a sequence, UUID, or sharded ID generation",
-        "Flags that a single primary with no replica cannot meet the stated 99.95% availability — any primary failure is full downtime; requires a replica with automated failover and a stated RTO",
+        "Flags that a single primary with no replica cannot meet the stated 99.95% availability \u2014 any primary failure is full downtime; requires a replica with automated failover and a stated RTO",
         "Flags the backup/recovery gap: nightly pg_dump gives up to ~24h RPO and the restore has never been tested, so it is not recoverability; recommends stating the acceptable RPO, testing the restore, and adding PITR/WAL if 24h is too much",
         "Judges against the design's own stated targets (8,000/sec, 99.95%) rather than inventing requirements"
       ]
@@ -27,6 +27,14 @@
         "Reports no findings",
         "Recognizes the call is bounded (timeout), has a defined failure path (circuit breaker plus cached fallback / graceful degradation), and holds no instance-local state that blocks horizontal scaling",
         "Does not demand multi-region, extra replicas, or more redundancy absent a stated availability or scale requirement"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\n# Refresh the homepage feed cache. All web nodes call this.\nCACHE_TTL = 300  # seconds\ndef get_feed():\n    v = cache.get(\"home_feed\")\n    if v is None:\n        v = db.expensive_feed_query()   # ~2s\n        cache.set(\"home_feed\", v, CACHE_TTL)\n    return v\n```\nThe TTL is the same for every node and the key is shared.",
+      "expected_behavior": [
+        "Flags the cache stampede / thundering herd: one shared key with a single TTL expires for all nodes at once, so every node runs the 2s query concurrently on each expiry",
+        "Recommends single-flight / request coalescing on the recompute plus jittered/staggered TTLs so a miss doesn't become N concurrent recomputes",
+        "Treats it as a coordinated-client failure mode (correct under light load, detonates under concurrency) rather than a simple missing-cache issue"
       ]
     }
   ]

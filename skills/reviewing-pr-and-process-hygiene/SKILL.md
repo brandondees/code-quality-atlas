@@ -11,7 +11,7 @@ provenance:
   built_from:
   - category: 24
     source: docs/research/cluster-6-evolution.md#24
-    hash: f106f5c51f5efe28d03862fad73418ed7245525c1e35b31bf4e591e8aec75f68
+    hash: 89380592de0002e015df9a0284efd8cd7a2b4e6ab5dd23e7e9613bee1a8fa7ec
   - category: 22
     source: docs/research/cluster-6-evolution.md#22
     hash: a7e66646fdd831a46d37765f29794abebc92ef33369b97723210bcdc9647d25d

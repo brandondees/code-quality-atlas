@@ -1196,3 +1196,23 @@ surfaces:
 
 **Verdict: Wave A passes the cross-model gate at the 7-8B floor; the core
 no-over-flagging property holds even at 3B.** Q19's pending eval pass is now done.
+
+### 2026-06-15 (cont.) — Wave B wave 1: G21 operational time-bombs + G28 claims-vs-evidence
+
+First Wave B add-factors from [`research/gap-hunt-synthesis.md`](research/gap-hunt-synthesis.md) — pure heuristic additions to existing lenses, edited at the research source and regenerated (drift clean), each with a single G1 owner and an eval.
+
+**G21 — operational time-bombs (the "correct at merge, detonates later" class).** A failure-grounded gap (incident-corpus method, round-3): defects that pass review because today is an ordinary day, then detonate by passage of time or accumulation. Split to single owners:
+
+- **Credential & certificate expiry / rotation** → #14 `sweeping-for-security` (cluster-4 #14). TLS/mTLS certs, OAuth tokens, API/signing keys with no renewal path or pre-expiry alert — the single most preventable major-outage class. Distinct from the existing "secrets absent from source" check (lifecycle, not leakage).
+- **Calendar/clock time-bombs** → #4 `tracing-correctness-and-invariants` (cluster-1 #4). Leap year/second, DST gaps/overlaps, month/year rollover, epoch-2038; hardcoded years and `day+1` calendar-blind arithmetic. Sharpens the existing UTC/DST bullet with the actual detonation triggers.
+- **Thundering herd / cache stampede** and **resource-exhaustion classes** → #28 `reviewing-resilience-and-scalability` (cluster-4 #28). Synchronized clients (aligned TTLs/timers/reconnects) beyond per-client backoff → want single-flight + jitter; finite ceilings that creep under load (disk/inode, fd/socket, ephemeral port, pool slots).
+
+The cohesive "latent / time-delayed defect" thread is threaded into each factor as framing rather than spun into a new lens (restraint — the synthesis flagged it as an *option*, not a mandate).
+
+**G28 — claims-vs-evidence** → #24 `reviewing-pr-and-process-hygiene` (cluster-6 #24, its single owner — it reviews the PR's stated claims). Generalizes the perf lens's lone "demand a profile" into the broad discipline: every PR claim ("fixes X"/"closes #N", "faster", "pure refactor / no behavior change") must be checkable against evidence *in the diff*; an unsupported claim is itself a finding. Kept as a per-lens factor, **not** a synthesizer check — the synthesizer adds no checks of its own.
+
+**Surfacing note (G9-aware).** #14 expiry and #28 herd/exhaustion landed high enough to inline as **top-checks**; #4 calendar and #24 claims are domain-conditional and live in the **full checklist** (`reference/heuristics.md`), which evals load and which a lens opens when the change is in-domain. Broader top-check surfacing for the deeper factors is the separate **G9 budget rebalance**, not this PR.
+
+**Verification:** `pytest tests/` 90 pass; `cli drift` clean; `cli eval` OK (+4 scenarios: tracing 4, security 6, resilience 4, pr-hygiene 4); markdownlint 0 errors. Cross-model re-gate pending (add-factor heuristics; batch with the next Wave B items).
+
+**Resolves:** G21, G28 → shipped. Wave B remaining: G29 (root-cause-vs-symptom), G25 (green/FinOps), G13 (tidyings, now that G26 valence exists), G32 (pre-existing/adjacent defects, needs G23+G26 — both shipped), G12 (acceptance-criteria traceability).

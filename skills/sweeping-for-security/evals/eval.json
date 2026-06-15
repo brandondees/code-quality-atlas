@@ -31,7 +31,7 @@
       "query": "Review this change:\n```python\n@require_role(\"refund_approver\")\n@router.post(\"/refunds/{refund_id}/approve\")\ndef approve_refund(refund_id, request):\n    refund = Refund.objects.get(id=refund_id)\n    if refund.requested_by == request.user.id:\n        raise PermissionDenied(\"approver must differ from requester\")\n    refund.status = \"approved\"\n    refund.approved_by = request.user.id\n    refund.save()\n    process_payout(refund)\n    return {\"ok\": True}\n```",
       "expected_behavior": [
         "Reports no findings",
-        "Recognizes the maker-checker control is enforced — the approver must differ from the requester, behind an approver-role gate",
+        "Recognizes the maker-checker control is enforced \u2014 the approver must differ from the requester, behind an approver-role gate",
         "Does not invent extra dual-control requirements or flag the role-gated lookup as an IDOR"
       ]
     },
@@ -41,6 +41,14 @@
         "Reports no findings",
         "Recognizes the ownership-scoped, ORM-parameterized lookup (no IDOR, no injection) and that the log records ids, not sensitive payloads",
         "Does not invent missing defenses or flag the use of a URL parameter as inherently unsafe"
+      ]
+    },
+    {
+      "query": "Review this change:\n```yaml\n# deploy/tls.yaml \u2014 pin the gateway cert we generated for prod\ngateway_cert: /etc/certs/prod-gateway.pem   # self-managed, valid 1 year\noauth_token: ${PROD_PARTNER_TOKEN}          # long-lived partner API token, no refresh flow\n```\nNo other auth changes.",
+      "expected_behavior": [
+        "Flags the credential/certificate expiry-and-rotation gap: a 1-year self-managed TLS cert and a long-lived OAuth token with no renewal/rotation path or pre-expiry alert",
+        "Names this as the high-severity 'works today, silently expires later' outage class, not a hardcoded-secret-in-source issue",
+        "Asks for an owner, expiry monitoring, and a rotation runbook (or automated renewal) rather than adjudicating the exact rotation interval"
       ]
     }
   ]

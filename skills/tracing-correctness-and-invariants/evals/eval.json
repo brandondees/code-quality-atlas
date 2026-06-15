@@ -26,6 +26,14 @@
         "Recognizes the validated inputs, the documented half-open convention, and the clamped end bound",
         "Does not invent off-by-one issues in correct boundary math"
       ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef cert_expiry_banner(now: date) -> str:\n    # Renew reminder: show when we're inside the last 30 days of the year\n    if now.month == 12 and now.day >= 1:\n        days_left = 31 - now.day\n        return f\"{days_left} days left this year\"\n    return \"\"\n```\nContext: also there's a scheduler that computes `next_run = today.replace(year=today.year, month=2, day=29)` for an annual job.",
+      "expected_behavior": [
+        "Flags the calendar/clock time-bomb: `date(year, 2, 29)` raises on non-leap years (and the annual-job scheduler will throw 3 years out of 4)",
+        "Notes the Dec-only day arithmetic assumes a 31-day frame and the 'days left this year' logic is brittle across month/year rollover",
+        "Frames these as latent defects that detonate on a specific future date rather than failing at merge time"
+      ]
     }
   ]
 }

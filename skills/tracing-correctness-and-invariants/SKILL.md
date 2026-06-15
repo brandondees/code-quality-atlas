@@ -15,7 +15,7 @@ provenance:
     hash: a731dbba0203ecaecbea20b4f5fd55e427df59cff4565a35e865895ab4557a64
   - category: 4
     source: docs/research/cluster-1-correctness.md#4
-    hash: 9a8288ba9a0155c5b816ae033497849954224582cc461daf7baeb8b6af4e5afc
+    hash: edbaae06053db06279effec1209035390274cf3e8a4946afc0050e91f7be7ea2
 ---
 
 # tracing-correctness-and-invariants
