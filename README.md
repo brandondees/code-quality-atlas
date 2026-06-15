@@ -22,9 +22,9 @@ scenarios:
   naming & readability, module design, concurrency, migrations & data safety,
   security, performance, tests, API contracts, accessibility & i18n, observability,
   LLM-integration, resilience, plus repo-shaped audits for architecture,
-  dependencies, config/build, docs, compliance, infrastructure-as-code, …). Each
-  leads with a one-line tagline and an explicit *Skip when…* clause, runs on its
-  own, and carries its full checklist in `reference/heuristics.md`.
+  dependencies, config/build, docs, compliance, infrastructure-as-code, and 7
+  more). Each leads with a one-line tagline and an explicit *Skip when…* clause,
+  runs on its own, and carries its full checklist in `reference/heuristics.md`.
 - **`choosing-review-lenses`** — a router that maps a change to the 2-4 lenses worth
   running, so you don't have to know the catalog.
 - **`synthesizing-review-findings`** — merges multiple lenses (and any other
