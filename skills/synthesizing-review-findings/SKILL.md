@@ -31,7 +31,7 @@ Fan-out is **advisory by default**: you run each lens the router named, collect 
 2. **Dedupe** — two findings at the **same location with the same root cause** are one finding. Keep the most specific wording and attribute it to the category's **primary owner** (named in each lens's *Shared categories* note); list the other lens only if it adds a distinct angle. Never report a shared finding twice.
 3. **Reconcile** — when two lenses pull opposite ways, do not silently drop one. Surface the tension and apply the default below, noting the trade-off so the author can override with evidence.
 4. **Rank** — order by severity (**Blocker** > **Major** > **Minor** > **Nit**). A Blocker-level finding floats to the top no matter which lens raised it; correctness, security, and data-loss findings outrank style and nits.
-5. **Verdict** — one line at the top: **block**, **approve with changes**, or **approve**. A single Blocker is enough to block; only nits left means approve. **Defect** findings set the verdict; **improvement** nits never block or force changes, and findings **routed outside engineering** are surfaced and escalated but do not by themselves set the engineering verdict. If every lens found nothing, the whole report is "No findings" — do not manufacture a harsher verdict than the findings justify.
+5. **Verdict** — one line at the top: **block**, **approve with changes**, or **approve**. A single Blocker is enough to block; only nits left means approve. **Valence governs the verdict, not route.** A `defect` sets the verdict per its severity *even when its remediation decision is routed elsewhere* — a GPL-incompatible dependency is a blocking defect **and** a `route: legal` escalation, not an "approve" that quietly defers to legal. Route only changes *who decides the fix*, never whether the diff has a problem. Only `improvement` nits and **non-defect** routed findings (a product, design, or leadership judgment call with no defect behind it) are surfaced and escalated without setting the engineering verdict. If every lens found nothing, the whole report is "No findings" — do not manufacture a harsher verdict than the findings justify.
 
 ## Reconciling lens tensions
 
@@ -64,7 +64,7 @@ Normalize every lens finding to this shape before merging — it is what makes d
 
 Two axes sit alongside severity and govern what the merged report does with each finding:
 
-- **Detect-and-route (surfacing ≠ deciding).** A holistic review surfaces every reviewable finding with its evidence and routes the *decision* to the right owner via `route:`. It never silently drops a finding because "that's not engineering's call," and never adjudicates a call that is not engineering's — legal exposure, a product trade-off, a leadership priority are surfaced under their route and escalated, not decided here. The only thing that stays out is a concern with no artifact at review time (market sizing, pricing, org politics); it re-enters once written into a decision record.
+- **Detect-and-route (surfacing ≠ deciding).** A holistic review surfaces every reviewable finding with its evidence and routes the *decision* to the right owner via `route:`. It never silently drops a finding because "that's not engineering's call," and never adjudicates a call that is not engineering's — legal exposure, a product trade-off, a leadership priority are surfaced under their route and escalated, not decided here. Routing names *who decides the remediation*; it never downgrades a finding's severity or valence. A finding that is both a `defect` and routed (a GPL dependency: `valence: defect, route: legal`) keeps its verdict weight in its severity section **and** carries the route tag for escalation. The only thing that stays out is a concern with no artifact at review time (market sizing, pricing, org politics); it re-enters once written into a decision record.
 - **Valence + anti-churn.** `defect` findings carry the strict anti-false-positive bar and set the verdict. `improvement` findings are admissible only when the team has opted up — the default is defect-only — and only as `nit`-severity, `route: implementer` suggestions the author may apply, defer, or ignore. Every improvement must clear a non-configurable **anti-churn floor**: it must genuinely improve (never a merely equivalent alternative) and must converge — no oscillation (A→B then B→A) and no lateral re-ordering once a dimension is as good as it can confidently be made. A team can turn improvement verbosity up; it cannot configure the suite to churn.
 
 ## Output format
@@ -76,9 +76,9 @@ Blocker
 - <location> — <finding> (<lens>). <fix>
 
 Major
-- <location> — <finding> (<lens>). <fix>
+- <location> — <finding> (<lens>) [route: legal]. <fix> — escalate the decision to <owner>
 
-Routed — decide outside engineering
+Routed — non-defect decisions outside engineering
 - <location> — <finding> (<lens>) [route: product|design|legal|leadership]. <what must be decided, and by whom>
 
 Improvements — opt-in, optional

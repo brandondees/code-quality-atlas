@@ -228,10 +228,12 @@ def test_synthesizer_contract_carries_route_and_valence_axes():
     for owner in ("product", "design", "legal", "leadership", "implementer"):
         assert owner in md
     # detect-and-route principle and the anti-churn floor
-    assert "surfacing ≠ deciding" in md.replace("≠", "≠")
+    assert "surfacing ≠ deciding" in md
     assert "anti-churn floor" in md
+    # valence — not route — governs the verdict (a defect blocks even when routed)
+    assert "Valence governs the verdict, not route" in md
     # the report carries dedicated Routed / Improvements sections
-    assert "Routed — decide outside engineering" in md
+    assert "Routed — non-defect decisions outside engineering" in md
     assert "Improvements — opt-in, optional" in md
 
 

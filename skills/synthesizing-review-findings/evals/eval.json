@@ -50,6 +50,14 @@
         "Drops the method-reorder suggestion because it offers a merely equivalent arrangement, not a genuine improvement (the anti-churn / value bar), rather than surfacing change-for-change's-sake",
         "Keeps improvements clearly separated from defects and does not inflate the verdict on account of the optional nits"
       ]
+    },
+    {
+      "query": "auditing-compliance-and-provenance flags that a newly added dependency at requirements.txt:14 is GPL-3.0, incompatible with this project's proprietary license — a real license violation, but whether to remove it, seek an exception, or relicense is the legal team's call. No other findings. Synthesize the review and give the verdict.",
+      "expected_behavior": [
+        "Treats the GPL incompatibility as a defect that sets the verdict (block or approve-with-changes), not an 'approve' that silently defers to legal — valence governs the verdict, not route",
+        "Tags the finding route: legal and escalates the remediation decision (remove / exception / relicense) to the legal owner rather than adjudicating which option to take",
+        "Keeps the finding in its severity section with the route tag (so it carries verdict weight) rather than tucking a real defect into a non-defect Routed section"
+      ]
     }
   ]
 }
