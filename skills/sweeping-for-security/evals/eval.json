@@ -20,11 +20,19 @@
       ]
     },
     {
-      "query": "Review this change:\n```python\n@router.post(\"/refunds/{refund_id}/approve\")\ndef approve_refund(refund_id, request):\n    refund = Refund.objects.get(id=refund_id)\n    refund.status = \"approved\"\n    refund.approved_by = request.user.id\n    refund.save()\n    process_payout(refund)\n    return {\"ok\": True}\n```\nThe Refund row records who requested it in `requested_by`.",
+      "query": "Review this change:\n```python\n@require_role(\"refund_approver\")\n@router.post(\"/refunds/{refund_id}/approve\")\ndef approve_refund(refund_id, request):\n    refund = Refund.objects.get(id=refund_id)\n    refund.status = \"approved\"\n    refund.approved_by = request.user.id\n    refund.save()\n    process_payout(refund)\n    return {\"ok\": True}\n```\nThe Refund row records who requested it in `requested_by`. The `@require_role(\"refund_approver\")` gate already authorizes the caller to act on any refund.",
       "expected_behavior": [
-        "Flags missing segregation of duties / maker-checker: the same actor who requested the refund can approve it, completing a high-consequence payout alone",
-        "Recommends enforcing two distinct actors (e.g. reject when requested_by == request.user.id) plus an approver-role check, framed as orthogonal to least-privilege and IDOR",
-        "Surfaces it to security/compliance rather than deciding which operations require dual-control (a business-policy call)"
+        "Flags missing segregation of duties / maker-checker: an approver can approve a refund they themselves requested (nothing checks requested_by != request.user.id), completing a high-consequence payout alone",
+        "Recommends enforcing two distinct actors (e.g. reject when refund.requested_by == request.user.id) on top of the existing approver-role gate, framed as orthogonal to least-privilege and IDOR",
+        "Treats the role-gated lookup as appropriate for an approver acting on others' refunds (not an IDOR) and surfaces the dual-control threshold to security/compliance as a business-policy call"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\n@require_role(\"refund_approver\")\n@router.post(\"/refunds/{refund_id}/approve\")\ndef approve_refund(refund_id, request):\n    refund = Refund.objects.get(id=refund_id)\n    if refund.requested_by == request.user.id:\n        raise PermissionDenied(\"approver must differ from requester\")\n    refund.status = \"approved\"\n    refund.approved_by = request.user.id\n    refund.save()\n    process_payout(refund)\n    return {\"ok\": True}\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes the maker-checker control is enforced — the approver must differ from the requester, behind an approver-role gate",
+        "Does not invent extra dual-control requirements or flag the role-gated lookup as an IDOR"
       ]
     },
     {

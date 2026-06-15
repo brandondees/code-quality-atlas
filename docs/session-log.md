@@ -1078,3 +1078,19 @@ the owner.
 **Changes:** `cluster-4-runtime.md` (+heuristic, +reference), regenerated
 `sweeping-for-security` (SKILL/heuristics/sources), hand-edited examples + eval,
 map-gaps (G27 shipped marker), gap-hunt-synthesis (Wave B status). No drift.
+
+**Round-1 atlas review (PR #41, approve-with-changes) addressed:**
+
+- *PII dropped from Top checks* (Minor): reordered the #14 source so PII-in-logs
+  sits at #8 (ahead of the more framework-defaulted CSRF, now #9) — SoD enters the
+  8-budget window without evicting a higher-base-rate check.
+- *Description frontmatter stale* (Minor): added SoD/maker-checker to the manifest
+  `description` + "authorization workflows" to the trigger list, so routers/catalog
+  match it; regenerated.
+- *Eval scenario latent IDOR* (Minor): isolated the SoD bad case behind an
+  explicit `@require_role("refund_approver")` gate so self-approval is the *sole*
+  defect (the role-gated lookup is correct for an approver) — removes the
+  IDOR/SoD ambiguity rather than testing two things loosely.
+- *No positive SoD scenario* (Nit): added a good→no-finding eval **and** a matching
+  `examples.md` pair (approver≠requester enforced) to pin the false-positive rate.
+  Eval now 5 scenarios.

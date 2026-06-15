@@ -38,8 +38,8 @@
 - Is crypto delegated to a vetted library with modern algorithms (AES-GCM/ChaCha20-Poly1305, argon2/bcrypt/scrypt for passwords, ECDSA/Ed25519)? Flag homegrown crypto, ECB mode, MD5/SHA1 for security, static IVs/nonces, and `Math.random()`/non-CSPRNG for tokens.
 - Is untrusted input ever deserialized with a format that can instantiate arbitrary types (Java/Python `pickle`/PHP unserialize/unsafe YAML)? Prefer data-only formats (JSON) with schema validation.
 - For any server-side fetch of a URL/host derived from user input: is the target allow-listed and are internal/metadata addresses (169.254.169.254, link-local, RFC1918, localhost) blocked? (SSRF / A10.)
-- Are state-changing requests protected against CSRF (same-site cookies + token, or non-cookie auth)? Are cookies `HttpOnly`, `Secure`, `SameSite`?
 - Is PII/sensitive data minimized, encrypted at rest/in transit, and kept out of logs, URLs, and error messages? (Cross-links #27 and #16.)
+- Are state-changing requests protected against CSRF (same-site cookies + token, or non-cookie auth)? Are cookies `HttpOnly`, `Secure`, `SameSite`?
 - Safe defaults: deny-by-default access, TLS verification on, debug/stack traces off in prod, CORS not `*` with credentials, no default/sample credentials shipped.
 - Least privilege: does the code/service request the narrowest scopes, file perms, DB grants, and cloud IAM roles it needs? Flag wildcard IAM policies and over-broad DB users.
 - New/updated dependency: is it from a reputable source, recently maintained, free of known CVEs, and pinned via lockfile? (Cross-links #18.)
