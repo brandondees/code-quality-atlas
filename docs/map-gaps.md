@@ -140,9 +140,9 @@ The structural-vs-behavioral split (3) is **adjacent to but not the same as** #2
 
 **Disposition: open.** (2) **refined by G26** — the *suggestion* of a tidying is review-time (gated only by the defect-only guard, not by the unbuilt fixing capability); only auto-*application* is Q8. (3) is a candidate factor — likely #21 (maintainability economics) and/or #24 (commit sequencing) — pending a disposition pass.
 
-## Round-3 gap hunt (G14–G19)
+## Round-3 gap hunt (G14–G22)
 
-Surfaced 2026-06-14 by a third gap hunt that reasons from *outside* the map — full method, prior art, and dispositions in [`research/taxonomy-gap-hunt-round-3.md`](research/taxonomy-gap-hunt-round-3.md). Each entry below is the yield of a distinct new gap-finding method (external completeness model, stakeholder-vantage rotation, substrate sweep, shape-axis extrapolation). All **provisional — owner-gated**, web-verified prior art cited in the research doc. No `taxonomy.md` edit or version bump yet.
+Surfaced 2026-06-14 by a third gap hunt that reasons from *outside* the map — full method, prior art, and dispositions in [`research/taxonomy-gap-hunt-round-3.md`](research/taxonomy-gap-hunt-round-3.md). Each entry below is the yield of a distinct new gap-finding method (external completeness model, stakeholder-vantage rotation incl. the agent-as-reader vantage → G20, substrate sweep, shape-axis extrapolation, the failure-grounded model → G21, and adversarial/inversion → G22). All **provisional — owner-gated**, web-verified prior art cited in the research doc. No `taxonomy.md` edit or version bump yet.
 
 ## G14 — Characteristic defects of AI-authored code
 
@@ -212,6 +212,10 @@ Surfaced 2026-06-14 via the **adversarial / inversion** method (design the defec
 
 A **unit/granularity gap** — the change-set across time/space is an un-owned review *unit*, the analog of round 2's decision *shape* gap (a missing unit, not a missing topic). Relates to G7 (history-shaped skills) and #21 change-coupling, but neither owns *cross-change interaction at review time*.
 **Disposition (lean): promote (scoped)** — heavy detection is tool-territory (variability-aware execution, static/pointer analysis); the LLM-review slice is *"trace the ripple of deletions and assumption-changes beyond the diff; flag interaction with concurrent/recent changes"*, escalating the rest (G8). Confidence: medium.
+
+## Round-3 cont. — scope re-audit: the exclusion pile (G23–G26)
+
+Surfaced 2026-06-14 via a distinct method — **auditing the exclusions/conflations themselves** (the inverse of hunting *inside* scope): when something was fenced off or folded, was it on the right axis? Yields the detect-and-route principle (G23), candidate Cluster VII (G24), the exclusion re-audit (G25), and the defect-only-by-construction finding (G26). Full write-up in [`research/product-experience-value-cluster.md`](research/product-experience-value-cluster.md).
 
 ## G23 — Detect-and-route: surfacing ≠ deciding (a scope-principle fix)
 
