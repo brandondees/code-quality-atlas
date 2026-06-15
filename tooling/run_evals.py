@@ -23,6 +23,18 @@ from tooling.evals import load_evals
 OLLAMA_HOST = "http://localhost:11434"
 OPENAI_HOST = "http://localhost:8080"  # llama-server default
 
+# Ollama defaults to a 2048-token context and *silently truncates* anything
+# longer — which drops the head of the assembled skill context (SKILL.md's
+# discipline + Top checks), so the model reviews against a partial prompt and
+# the run looks valid while being meaningless. Pin a window that comfortably
+# fits the largest assembled context (~3k tokens today) with headroom. The
+# OpenAI-compatible path sets its window server-side (llama-server -c), so this
+# only applies to Ollama. (The llama.cpp runbook uses -c 16384 for the same
+# reason.) Revisit if a skill's assembled context outgrows this — `len(
+# assemble_context(skill_dir)) // 4` estimates its tokens; bump well above the
+# largest before it can clip.
+OLLAMA_NUM_CTX = 8192
+
 _REVIEWER_DIRECTIVE = (
     "\n\n---\n\nYou are a code reviewer applying the skill above. Review the "
     "user's code change and report concrete findings (or state there are none). "
@@ -66,7 +78,9 @@ def _post_json(url: str, payload: dict, timeout: int, label: str) -> object:
 
 
 def query_ollama(model: str, system: str, user: str,
-                 host: str = OLLAMA_HOST, timeout: int = 180) -> str:
+                 host: str = OLLAMA_HOST, timeout: int = 600) -> str:
+    """Ollama /api/chat with sampling pinned and the context window widened so
+    the full skill prompt isn't silently truncated (see OLLAMA_NUM_CTX)."""
     payload = {
         "model": model,
         "messages": [
@@ -74,8 +88,9 @@ def query_ollama(model: str, system: str, user: str,
             {"role": "user", "content": user},
         ],
         "stream": False,
-        # evals must be reproducible — never inherit a server's sampling default
-        "options": {"temperature": 0},
+        # evals must be reproducible — never inherit a server's sampling default;
+        # num_ctx must fit the whole skill context or Ollama silently truncates it.
+        "options": {"temperature": 0, "num_ctx": OLLAMA_NUM_CTX},
     }
     data = _post_json(f"{host}/api/chat", payload, timeout, "Ollama")
     if isinstance(data, dict) and data.get("error"):

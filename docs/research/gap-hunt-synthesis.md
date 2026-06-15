@@ -60,7 +60,7 @@ Low cost, high leverage, all manifest/synthesizer/contract edits that regenerate
 
 Pure heuristic additions to existing lenses — the cheapest way to bank real coverage, and the model the G9 fixes already use.
 
-- **G27** SoD/maker-checker → #14 *(highest value-per-cost in the whole pile)*. **✅ Shipped 2026-06-15** — add-factor on `sweeping-for-security`; structural eval passing, live re-gate deferred.
+- **G27** SoD/maker-checker → #14 *(highest value-per-cost in the whole pile)*. **✅ Shipped 2026-06-15** — add-factor on `sweeping-for-security`; cross-model re-gate passed on the 7–8B floor (5/5) after a "role-gate ≠ dual-control" tuning pass; 3B below the precision floor (expected).
 - **G21** operational time-bombs → #4/#14/#26/#28 (assign each factor a single owner).
 - **G28** claims-vs-evidence → generalize across lenses (+ synthesizer).
 - **G29** root-cause-vs-symptom → tracing-correctness / hunting-silent-failures + bug-fix route.

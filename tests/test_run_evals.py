@@ -48,7 +48,7 @@ def test_run_skill_evals_assembles_context_and_collects(tmp_path, monkeypatch):
 
     captured = {}
 
-    def fake_query(model, system, user, host=run_evals.OLLAMA_HOST, timeout=180):
+    def fake_query(model, system, user, host=run_evals.OLLAMA_HOST, timeout=600):
         captured["system"] = system
         captured["model"] = model
         return f"reviewed: {user}"
@@ -100,6 +100,21 @@ def test_query_ollama_returns_content(monkeypatch):
     _patch_urlopen(monkeypatch,
                    body=json.dumps({"message": {"content": "a finding"}}).encode())
     assert run_evals.query_ollama("m", "sys", "usr") == "a finding"
+
+
+def test_query_ollama_sends_num_ctx(monkeypatch):
+    # The num_ctx fix is itself silent-failure-prone: drop or misspell it and the
+    # run still "works" against a truncated context. Assert it reaches the payload.
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["payload"] = json.loads(req.data)
+        return _FakeResp(json.dumps({"message": {"content": "ok"}}).encode())
+
+    monkeypatch.setattr(run_evals.urllib.request, "urlopen", fake_urlopen)
+    run_evals.query_ollama("m", "sys", "usr")
+    assert captured["payload"]["options"]["num_ctx"] == run_evals.OLLAMA_NUM_CTX
+    assert captured["payload"]["options"]["temperature"] == 0
 
 
 def test_query_ollama_network_error_raises_runtimeerror(monkeypatch):
