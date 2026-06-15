@@ -50,6 +50,7 @@ Scope: change amplification (one change → many edits); blast radius / ripple e
 - **Connascence locality:** does the change introduce connascence (of position, meaning, value, timing…) that crosses a module boundary? Stronger/longer-distance connascence = higher amplification.
 - **Reversibility:** is this change easy to undo, or does it bake in a one-way decision (data format, public API, migration)? One-way doors deserve more scrutiny.
 - **Complexity trend:** does the diff raise cyclomatic/cognitive complexity of an already-hot function, or reduce it? Net direction matters more than absolute number.
+- **Tidy-first economics (timing & sequencing):** if the diff mixes a structural tidying (rename, extract, reorder, dedupe) with a behavioral change, should the tidying land *first and separately* so the behavioral diff stays small and reviewable? Judge the *now / after / never* call by coupling-and-cohesion — tidy **now** when it removes coupling the change must otherwise fight, **defer** when the payoff is speculative, **never** on leaf/stable code — rather than tidying reflexively. (Beck, *Tidy First?*; the *sequencing* lives in #24, the *economics* here.)
 - **Speculative generality (counterweight):** is added "flexibility" (config knobs, plugin points, abstract base) justified by a *present* second use, or is it pre-emptive and itself future maintenance cost?
 
 ---
@@ -205,6 +206,8 @@ Scope: PR size & reviewability; commit atomicity & message hygiene; risk signali
 - **Definition of done:** tests added/updated, docs/changelog updated, lint/type/CI green, no debug/console/commented-out code, no TODOs without tracked issues — all present before merge.
 - **Reviewability aids:** PR description, screenshots/recordings for UI, and a self-review pass; large mechanical changes separated from logic changes so reviewers can focus.
 - **No drive-by scope creep:** unrelated reformatting/renames bundled into a feature PR — flag to separate so the diff stays reviewable.
+- **Structural vs. behavioral separation:** beyond "one purpose," are structure-only changes (renames, moves, extractions, formatting) kept in a *separate* commit/PR from behavior changes — even when both serve one feature — so each is independently reviewable and revertible? (Beck's tidy-first sequencing; the *economics* of when to tidy is #21.)
+- **Acceptance-criteria traceability:** does the PR deliver what its linked issue/ticket actually asked — *no less* (every acceptance criterion met) and *no more* (no unrequested scope riding along)? An unlinked PR, or one that silently under- or over-delivers against its criteria, is a finding. This is **validation** (did we build the right thing), distinct from #1's "code matches the stated intent" and #29's decision soundness; the "no more" half cross-links checking-restraint.
 - ★ **Agent-native parity:** does a new user-facing action also have a programmatic path (API/CLI/tool), and is it documented for automation — not UI-only?
 - **Secrets / artifacts in commits:** no credentials, `.env`, large binaries, or generated files committed (links #14/#19).
 

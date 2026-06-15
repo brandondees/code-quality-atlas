@@ -34,6 +34,14 @@
         "Flags the 'pure refactor / no behavior change' claim as false: the `>=`\u2192`>` change in tax.py is a behavior change smuggled into a rename",
         "Flags the '~30% faster' claim as having no benchmark or profile \u2014 an unsupported performance claim is itself a finding"
       ]
+    },
+    {
+      "query": "Review this PR against its linked issue. Issue #240 acceptance criteria: '(1) users can export to CSV; (2) export is rate-limited to 5/min.' The PR adds CSV export and also adds a new XLSX export format and a redesign of the export button, but there is no rate limiting anywhere in the diff.",
+      "expected_behavior": [
+        "Flags the 'no less' gap: acceptance criterion (2) rate-limiting is unmet, so the PR under-delivers against its issue",
+        "Flags the 'no more' gap: the XLSX format and button redesign are unrequested scope riding along, not in the issue's criteria",
+        "Frames this as acceptance-criteria traceability / validation (did we build what was asked), distinct from whether the code matches its own stated intent"
+      ]
     }
   ]
 }

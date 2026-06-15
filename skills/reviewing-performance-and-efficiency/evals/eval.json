@@ -14,8 +14,8 @@
     {
       "query": "Review this change:\n```js\nfunction findDuplicates(emailsA, emailsB) {\n  const dupes = [];\n  for (const e of emailsA) {\n    if (emailsB.indexOf(e) !== -1) dupes.push(e);\n  }\n  return dupes;\n}\napp.get('/report', (req, res) => {\n  const config = JSON.parse(fs.readFileSync('./rules-2mb.json'));  // every request\n  res.json(run(config, findDuplicates(load('a'), load('b'))));\n});\n```",
       "expected_behavior": [
-        "Flags the O(n²) membership test (indexOf inside the loop) and recommends a Set",
-        "Flags re-reading and re-parsing the 2MB config file on every request — hoist it (load once at startup or memoize)",
+        "Flags the O(n\u00b2) membership test (indexOf inside the loop) and recommends a Set",
+        "Flags re-reading and re-parsing the 2MB config file on every request \u2014 hoist it (load once at startup or memoize)",
         "Notes the synchronous readFileSync blocks the event loop on a request path"
       ]
     },
@@ -25,6 +25,14 @@
         "Reports no findings",
         "Recognizes this is a cold path (weekly cron) where the simple loop is appropriate",
         "Does not recommend caching, parallelism, or other optimization unjustified by any profile"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\n# new dashboard widget: poll every 5s for each open tab, cross-region\ndef poll_metrics(account):\n    for region in ALL_REGIONS:            # 18 regions\n        r = http.get(f\"https://{region}.metrics/internal/{account}/full\")  # returns full 2MB blob\n    return merge(...)\n```\nCalled from the browser on a 5s timer.",
+      "expected_behavior": [
+        "Flags the per-request cost and carbon: 18 cross-region full-blob fetches every 5s per tab is chatty egress + wasted work that scales badly with users and tabs",
+        "Routes the spend/footprint trade-off (route: eng/leadership) rather than adjudicating it, and suggests event/push or a scoped delta endpoint over polling the full blob",
+        "Frames it as diff-visible inefficiency (in scope), not an org-level carbon target (out of scope)"
       ]
     }
   ]

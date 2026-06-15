@@ -63,11 +63,11 @@ Pure heuristic additions to existing lenses — the cheapest way to bank real co
 - **G27** SoD/maker-checker → #14 *(highest value-per-cost in the whole pile)*. **✅ Shipped 2026-06-15** — add-factor on `sweeping-for-security`; cross-model re-gate passed on the 7–8B floor (5/5) after a "role-gate ≠ dual-control" tuning pass; 3B below the precision floor (expected).
 - **G21** operational time-bombs → #4/#14/#26/#28 (assign each factor a single owner). **✅ Shipped 2026-06-15** — expiry/rotation → #14, calendar/clock → #4, thundering-herd + exhaustion → #28; each with an eval; cross-model re-gate pending.
 - **G28** claims-vs-evidence → generalize across lenses (+ synthesizer). **✅ Shipped 2026-06-15** — factor on #24 `reviewing-pr-and-process-hygiene`; kept as a per-lens factor (not a synthesizer check); eval added; cross-model re-gate pending.
-- **G29** root-cause-vs-symptom → tracing-correctness / hunting-silent-failures + bug-fix route.
-- **G25** green + FinOps → routed #15 factors.
-- **G13** tidying *suggestions* (now that G26 exists) + the now/after/never economics → #21/#24.
+- **G29** root-cause-vs-symptom → tracing-correctness / hunting-silent-failures + bug-fix route. **✅ Shipped 2026-06-15** — band-aid factor on `hunting-silent-failures` (#2), marked priority; eval added.
+- **G25** green + FinOps → routed #15 factors. **✅ Shipped 2026-06-15** — unified into one routed cost+carbon factor on `reviewing-performance-and-efficiency` (#15), marked priority; eval added.
+- **G13** tidying *suggestions* (now that G26 exists) + the now/after/never economics → #21/#24. **✅ Economics + sequencing shipped 2026-06-15** — now/after/never → #21, structural-vs-behavioral split → #24; auto-apply remains Q8.
 - **G32** pre-existing/adjacent defects → an opt-in, route-tagged factor (needs G23 + G26).
-- **G12** acceptance-criteria traceability — *start* as a factor on the bug-fix/feature routes; promote to a lens (Wave C) if it earns it.
+- **G12** acceptance-criteria traceability — *start* as a factor on the bug-fix/feature routes; promote to a lens (Wave C) if it earns it. **✅ Shipped 2026-06-15 as a factor** on `reviewing-pr-and-process-hygiene` (#24); eval added.
 
 ### Wave C — high-value new lenses (each gets the full research + ≥3-eval pass, D6/D8)
 
