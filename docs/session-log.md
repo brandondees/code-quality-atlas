@@ -1135,3 +1135,16 @@ Graded results (temp 0, num_ctx 8192):
 Net: G27 **passes the cross-model gate at the documented floor.** Follow-up worth
 considering: the `num_ctx` harness fix means earlier Ollama-based eval runs in the
 repo's history may have been silently truncated too — worth a spot re-check.
+
+### 2026-06-15 (cont.) — Wave A primitives: G23 detect-and-route + G26 valence axis
+
+**Goal:** build the two Wave A foundation primitives from [`research/gap-hunt-synthesis.md`](research/gap-hunt-synthesis.md) — they sit upstream of most high-value lenses, so they go first.
+
+**What shipped (one PR, generator-prose only — no manifest schema change):**
+
+- **G23 detect-and-route.** Added a `route:` axis (`eng | implementer | product | design | legal | leadership`) to the synthesizer finding contract, generalizing the G8 detect-and-escalate pattern into a map-wide principle: a holistic review *surfaces* every reviewable finding with evidence and *routes the decision* to its owner — never silently dropping a non-engineering call, never self-adjudicating one. New **Routed — non-defect decisions outside engineering** report section. Valence (not route) governs the verdict — a defect that is also routed (a GPL dep → `valence: defect, route: legal`) still blocks in its severity section *and* escalates; only non-defect routed findings are surfaced without setting the verdict. *(Clarified in PR review — the original wording let a routed defect produce a false "approve.")*
+- **G26 valence axis.** Added `valence: defect | improvement` to the contract. Refined the per-lens *Reviewer discipline* guard (in `generate.py`, so it regenerates across all ~26 lenses) from an absolute "do not suggest changes to correct code" into "**defect-only by default; improvements opt-in**." Improvements are admissible only as `nit`-severity, `route: implementer`, and must clear a **non-configurable anti-churn floor** (genuine-improvement bar + convergence/no-oscillation). New **Improvements — opt-in, optional** report section. Default behavior unchanged (strict); the team verbosity dial still depends on the Q13 overlay (designed, unbuilt).
+
+**Verification:** `pytest tests/` 88 pass (added guard + contract assertions); `cli drift` clean (regenerated in sync); `cli eval` OK (2 new synthesizer scenarios — a product/design routed case, an improvement-valence + anti-churn case — for 6 total); markdownlint 0 errors. Cross-model eval re-gate pending (lighter than a new lens — mechanism/prose, not new judgment).
+
+**Resolves:** G23, G26 dispositions → shipped; **Q3 largely resolved** (review/maintenance is a valence toggle, not a separate mode). Remaining Wave A: G19 (synthesizer coverage/limitations block), G31 (tensions enrichment), Q19 (mechanize-with nudge).
