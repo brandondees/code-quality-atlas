@@ -77,6 +77,8 @@ def _post_json(url: str, payload: dict, timeout: int, label: str) -> object:
 
 def query_ollama(model: str, system: str, user: str,
                  host: str = OLLAMA_HOST, timeout: int = 600) -> str:
+    """Ollama /api/chat with sampling pinned and the context window widened so
+    the full skill prompt isn't silently truncated (see OLLAMA_NUM_CTX)."""
     payload = {
         "model": model,
         "messages": [
