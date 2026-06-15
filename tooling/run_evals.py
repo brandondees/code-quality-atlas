@@ -30,7 +30,9 @@ OPENAI_HOST = "http://localhost:8080"  # llama-server default
 # fits the largest assembled context (~3k tokens today) with headroom. The
 # OpenAI-compatible path sets its window server-side (llama-server -c), so this
 # only applies to Ollama. (The llama.cpp runbook uses -c 16384 for the same
-# reason.)
+# reason.) Revisit if a skill's assembled context outgrows this — `len(
+# assemble_context(skill_dir)) // 4` estimates its tokens; bump well above the
+# largest before it can clip.
 OLLAMA_NUM_CTX = 8192
 
 _REVIEWER_DIRECTIVE = (
