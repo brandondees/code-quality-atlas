@@ -54,6 +54,7 @@ The code review / quality review entrypoint for code-quality-atlas. Use for any 
 | Design doc / plan / RFC (no code yet) | `tracing-correctness-and-invariants`, `reviewing-concurrency-and-async`, `reviewing-migration-and-data-safety`, `reviewing-api-contract-safety` — pick by the design's domain, from design-capable (◆) lenses only |
 | Dependency add or bump | `auditing-dependencies-and-supply-chain`, `checking-restraint` |
 | CI / build / config change | `auditing-config-and-build-hygiene`, `sweeping-for-security` |
+| Install / setup / packaging change, an upgrade or migration guide, a config or CLI surface, or anything a downstream project adopts (a tool, plugin, template, or library) | `reviewing-install-and-upgrade-experience`, `reviewing-api-contract-safety`, `auditing-documentation-health` — the adopter-facing experience — setup friction, config UX, and a version-bump a consumer or an agent can complete and verify |
 | Infrastructure-as-code change (Terraform/OpenTofu, Kubernetes/Helm, CloudFormation manifests) | `auditing-infrastructure-as-code`, `sweeping-for-security` — repo-shaped — judges blast radius, public exposure, IAM scope, and declared-vs-live drift; #14 owns the security verdict |
 | Any pull request (the PR artifact itself, on top of content lenses) | `reviewing-pr-and-process-hygiene` |
 | Whole-repo health audit (scheduled / cron) | `finding-maintainability-hotspots`, `auditing-architecture-conformance`, `auditing-dependencies-and-supply-chain`, `auditing-config-and-build-hygiene`, `auditing-documentation-health`, `auditing-compliance-and-provenance`, `auditing-enforcement-and-meta-artifacts`, `auditing-infrastructure-as-code` — the eight repo-shaped audits; run independently, not as one pass (auditing-infrastructure-as-code only where IaC manifests exist) |
@@ -83,6 +84,7 @@ The code review / quality review entrypoint for code-quality-atlas. Use for any 
 - `reviewing-observability-and-operability` ◆ — Can you debug this in production at 3am? Logs, traces, health checks, kill switches, rollback.
 - `reviewing-pr-and-process-hygiene` — Is the PR itself reviewable? Size, atomic commits, description, scope creep, changelog.
 - `reviewing-resilience-and-scalability` ◆ — Will it survive failure and scale? Unbounded queues, timeouts and blast radius, retries, statelessness, RTO/RPO — design-time, not #16's runtime.
+- `reviewing-install-and-upgrade-experience` ◆ — Can a consumer install, configure, and upgrade this cleanly — even hand it to an agent? Setup friction, config UX, version-bump smoothness, migration path.
 
 **Repo-shaped — run on the whole repository, scheduled or on demand:**
 

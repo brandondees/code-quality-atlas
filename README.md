@@ -18,12 +18,13 @@ supports the `SKILL.md` format** (Cursor, Windsurf, Copilot, …). The plugin wr
 **28 review skills**, generated from a researched taxonomy and refined against eval
 scenarios:
 
-- **26 review lenses** — each a narrow, self-contained reviewer (correctness,
+- **27 review lenses** — each a narrow, self-contained reviewer (correctness,
   naming & readability, module design, concurrency, migrations & data safety,
   security, performance, tests, API contracts, accessibility & i18n, observability,
-  LLM-integration, resilience, plus repo-shaped audits for architecture,
-  dependencies, config/build, docs, compliance, infrastructure-as-code, and 7
-  more). Each leads with a one-line tagline and an explicit *Skip when…* clause,
+  LLM-integration, resilience, install/upgrade experience, plus repo-shaped audits
+  for architecture, dependencies, config/build, docs, compliance,
+  infrastructure-as-code, and 7 more). Each leads with a one-line tagline and an
+  explicit *Skip when…* clause,
   runs on its own, and carries its full checklist in `reference/heuristics.md`.
 - **`choosing-review-lenses`** — a router that maps a change to the 2-4 lenses worth
   running, so you don't have to know the catalog.
@@ -138,7 +139,7 @@ re-gate.
 
 | Path | What's in it |
 |---|---|
-| [`skills/`](skills/) | The 26 lenses + `choosing-review-lenses` (router) + `synthesizing-review-findings` (synthesizer) |
+| [`skills/`](skills/) | The 27 lenses + `choosing-review-lenses` (router) + `synthesizing-review-findings` (synthesizer) |
 | [`commands/`](commands/) | Slash commands: `/atlas-review-pr`, `/atlas-code-review`, `/atlas-init`, `/atlas-rebase-stale` |
 | [`hooks/`](hooks/) | `SessionStart` routing hook (side-effect-free) |
 | [`templates/`](templates/) | `REVIEW.md` convergence policy + `agents-routing-snippet.md` routing block |

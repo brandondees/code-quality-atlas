@@ -478,6 +478,32 @@ skills:
     built_from:
       - { category: 31, source: docs/research/cluster-5-verification.md#31 }
 
+  - name: reviewing-install-and-upgrade-experience
+    description: >
+      Reviews a change for the experience of the people who consume this software
+      — installing, configuring, and upgrading it — distinct from the
+      decision-lifecycle lens's "should we adopt this dependency" call and from
+      end-user product UX. Covers setup friction and undocumented prerequisites;
+      configuration ergonomics (safe defaults, schema validation, fail-fast
+      actionable errors, backward-compatible keys); and upgrade/migration
+      smoothness — especially whether a consumer or a code agent can complete and
+      verify the upgrade from the docs alone: a codemod or migration command,
+      SemVer-correct breaking-change signaling, deprecation windows over silent
+      removals, and a downgrade path. Use when reviewing installers, setup/init
+      scripts, packaging, CLI and config surfaces, upgrade or migration guides, or
+      release/versioning changes — or anything a downstream project adopts (a
+      tool, plugin, template, or library). Skip when the change has no
+      consumer-facing install, config, or upgrade surface.
+    picker: >
+      Can a consumer install, configure, and upgrade this cleanly — even hand it
+      to an agent? Setup friction, config UX, version-bump smoothness, migration
+      path.
+    shape: diff
+    design: true
+    wave: 4
+    built_from:
+      - { category: 33, source: docs/research/cluster-6-evolution.md#33 }
+
 # The composition layer (Q7): maps "what am I reviewing" to the lenses worth
 # running, so neither a human nor an agent has to know the whole catalog to
 # select well. Generated into skills/<name>/SKILL.md from this section alone.
@@ -573,6 +599,13 @@ router:
       run: [auditing-dependencies-and-supply-chain, checking-restraint]
     - when: CI / build / config change
       run: [auditing-config-and-build-hygiene, sweeping-for-security]
+    - when: Install / setup / packaging change, an upgrade or migration guide, a
+            config or CLI surface, or anything a downstream project adopts (a
+            tool, plugin, template, or library)
+      run: [reviewing-install-and-upgrade-experience, reviewing-api-contract-safety,
+            auditing-documentation-health]
+      note: the adopter-facing experience — setup friction, config UX, and a
+            version-bump a consumer or an agent can complete and verify
     - when: Infrastructure-as-code change (Terraform/OpenTofu, Kubernetes/Helm,
             CloudFormation manifests)
       run: [auditing-infrastructure-as-code, sweeping-for-security]
@@ -672,6 +705,15 @@ synthesizer:
         away. Keep the accessible markup and hit the performance target another
         way (lazy-load, code-split, cache). Drop a11y only against a measured
         budget proving no other path exists — which is almost never.
+    - between: [checking-restraint, reviewing-install-and-upgrade-experience]
+      about: backward-compat shims and deprecation windows for consumers vs.
+        removing the old path now
+      resolve: >
+        Keep the old path working for one deprecation window with a warning that
+        names the replacement whenever the project has external consumers; remove
+        in place only for internal-only or never-released surface. Consumer
+        smoothness wins while real adopters exist; restraint wins when there are
+        none.
     - between: [checking-idioms-and-consistency, finding-maintainability-hotspots]
       about: matching the existing pattern vs. changing it to reduce future churn
       resolve: >
