@@ -61,8 +61,8 @@ Low cost, high leverage, all manifest/synthesizer/contract edits that regenerate
 Pure heuristic additions to existing lenses — the cheapest way to bank real coverage, and the model the G9 fixes already use.
 
 - **G27** SoD/maker-checker → #14 *(highest value-per-cost in the whole pile)*. **✅ Shipped 2026-06-15** — add-factor on `sweeping-for-security`; cross-model re-gate passed on the 7–8B floor (5/5) after a "role-gate ≠ dual-control" tuning pass; 3B below the precision floor (expected).
-- **G21** operational time-bombs → #4/#14/#26/#28 (assign each factor a single owner).
-- **G28** claims-vs-evidence → generalize across lenses (+ synthesizer).
+- **G21** operational time-bombs → #4/#14/#26/#28 (assign each factor a single owner). **✅ Shipped 2026-06-15** — expiry/rotation → #14, calendar/clock → #4, thundering-herd + exhaustion → #28; each with an eval; cross-model re-gate pending.
+- **G28** claims-vs-evidence → generalize across lenses (+ synthesizer). **✅ Shipped 2026-06-15** — factor on #24 `reviewing-pr-and-process-hygiene`; kept as a per-lens factor (not a synthesizer check); eval added; cross-model re-gate pending.
 - **G29** root-cause-vs-symptom → tracing-correctness / hunting-silent-failures + bug-fix route.
 - **G25** green + FinOps → routed #15 factors.
 - **G13** tidying *suggestions* (now that G26 exists) + the now/after/never economics → #21/#24.

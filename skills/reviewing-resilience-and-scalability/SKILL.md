@@ -15,7 +15,7 @@ provenance:
   built_from:
   - category: 28
     source: docs/research/cluster-4-runtime.md#28
-    hash: 91b12107f4499137fe81ce85cf1be3a0ebbb75d73a22c4312f5e882c156dc9fa
+    hash: a9ec957e871bdbc6e2afcd50c49d6126673e73229d9b5ca64c61617cf88d2ef2
 ---
 
 # reviewing-resilience-and-scalability
@@ -42,10 +42,10 @@ The head of the full checklist — enough for a first pass without opening any r
 - **Dependency failure plan:** does every synchronous call to another service / DB / third-party API have a **timeout** and a defined behavior when it is slow or down (circuit-breaker, fallback, fail-fast)? A bare call with no timeout blocks a thread indefinitely and cascades (Integration Points → Cascading Failure).
 - **Blast radius & bulkheading:** if this component fails or slows, what else goes with it? Is the failure **isolated** (separate pool/bulkhead/process), or does it share a resource (thread pool, connection pool, event loop) whose exhaustion takes down unrelated work?
 - **Retry safety:** do retries have a **budget, backoff, and jitter**, and is the retried operation **idempotent** (cross #3)? Naive immediate retries amplify a partial outage into a retry storm.
+- **Coordinated-client failure modes (thundering herd / cache stampede):** even with per-client backoff, can clients **synchronize** into a herd — aligned retry timers, a cache key that expires for everyone at once, a cron/restart that fires every instance together, or all reconnecting the moment a dependency recovers? Want jittered/staggered timing and **request coalescing / single-flight** on the recompute so one miss doesn't become N concurrent recomputes.
+- **Resource-exhaustion classes (correct at merge, detonates as usage accumulates):** does the change risk hitting a **hard, finite ceiling** that creeps up under real load rather than failing immediately — disk/inode space (logs, temp files, spool), **file descriptors / sockets**, ephemeral ports, connection-pool slots, thread/worker counts, or memory? Name the bounded resource and the back-pressure or quota that keeps it from filling silently (cross #4 leaks, #26 limits).
 - **Statelessness / horizontal scale:** does the change add **in-process state** (a local cache, session affinity, an in-memory counter, local-disk write) that prevents running N identical instances or surviving an instance restart? Push durable/shared state to a backing store.
 - **Single-writer bottleneck:** is there a global lock, a leader-only path, a single sequence/counter, or a hot row that **caps throughput** no matter how many instances run? Name it as the scaling ceiling.
-- **Recoverability (RTO/RPO):** for a change touching durable state, are the **RTO and RPO** stated and met by the chosen backup/DR strategy, and has the **restore actually been tested**? "Backups are taken" without a tested restore is not recoverability.
-- **Graceful degradation under overload:** when a dependency is down or load spikes, does the system **shed load / degrade to a cached-or-partial response**, or does it collapse? Is there a kill switch / feature flag to shed a non-critical path (cross #16)?
 
 ## Mechanizing these checks
 
