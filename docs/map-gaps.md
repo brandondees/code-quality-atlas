@@ -115,3 +115,224 @@ Surfaced 2026-06-12 (owner question: *do we have anything correlating to Anthrop
 | *How* to host many artifact lenses without top-level context bloat (the pattern) | **→ a new `shape: artifact`** (D15, Q18 option b) — one entry-point lens + manifest `artifacts:` table + bundled on-demand rubrics; `SKILL.md`-authoring is the first instance. |
 
 Full research — the artifact-standard catalog (the references beyond the one guide), the context-cost evidence (lost-in-the-middle, context rot, RAG-MCP, the 128-tool ceiling), the presence-based-activation prior art (MegaLinter/ESLint-overrides/Spectral), and the three hosting options — is in [`research/artifact-scoped-lenses.md`](research/artifact-scoped-lenses.md). **Status: gap logged + researched; both decisions made (D15, Q18 RESOLVED); build pending.**
+
+## G12 — Validation vs. verification: the suite checks "does it match the intent," never "is the intent right"
+
+Surfaced 2026-06-14 (owner question: *are we accounting for alignment with stakeholder intentions at any level?*). A framing-class gap (the G10 kind — invisible to a taxonomy-vs-skills diff, because the whole map presupposes intent-as-given).
+
+The taxonomy is rooted at **Cluster I — Does it work?** — conformance to a *stated* intent is the floor of the entire atlas. Every correctness check takes that intent as a given: `tracing-correctness-and-invariants` asks *"does the implementation match the spec/PR description's stated intent"* ([`cluster-1-correctness.md`](research/cluster-1-correctness.md) #46, billed as "the check no linter can do"), but the spec itself is never questioned. That is **verification** (build the thing right), not **validation** (build the right thing).
+
+The suite *does* ask "is this the right thing?" in exactly one place — `reviewing-decision-lifecycle` / the decision-time shape (*"is this the right dependency / framework / platform to adopt vs. a smaller option or building it"*, [`decision-time-review-shape.md`](decision-time-review-shape.md):18) — but scoped to **decisions** (ADR/RFC/adoption), never to a feature **diff**. So the suite already owns "right thing?" for one shape and withholds it for the rest.
+
+Nothing reviews whether a diff **satisfies the acceptance criteria of its linked issue**, traces to a stated **stakeholder/user need**, or whether the intent it conforms to is itself sound. Acceptance-criteria / requirements-traceability on a diff (*does this PR deliver what the issue asked — no more, no less*) is a recognized review dimension with no owner here. Distinct from #1 (matches the stated intent) and #29 (decision soundness): this is *diff*-time alignment of the change to the requirement behind it.
+
+**Disposition (user, 2026-06-14): in-scope gap — a candidate review behavior, not a scope boundary.** (The decision-lifecycle precedent cuts against treating "right thing?" as out of scope.) Candidate placement and shape — a diff-time acceptance-criteria/requirements-traceability lens vs. folding a "is the requirement sound" facet into the decision-time shape — left to a disposition pass.
+
+## G13 — *Tidy First?*: the tidyings are in as review hints; the economics and the proactive mode are not
+
+Surfaced 2026-06-14 (owner question: *do we have equivalents to Kent Beck's* Tidy First? *catalog of tidyings and heuristics?*). *Tidy First?* is already cited ([`references.md`](references.md):22) and mined into [`cluster-2-readability.md`](research/cluster-2-readability.md) #59 — but only **one of its three parts** landed:
+
+1. **The tidyings as review heuristics — covered.** Guard clauses, explaining variables, dead-code removal, reading order, normalize symmetries, symmetry-of-expression all live in `reviewing-naming-and-readability` (alongside Fowler's smell→refactoring names). When reviewing a diff, the suite will recommend these.
+2. **The tidyings as a proactive maintenance *action* — unbuilt.** Applying small structural refactorings rather than only flagging them in someone else's diff. This is the open half of **Q3** (review-vs-maintenance) / **Q8** (the fixing mode): detection ships, fixing does not. A named tidyings catalog is the natural content of that mode.
+3. **The economic heuristic — the book's actual thesis — unowned.** *Now / after / never* timing, **coupling-and-cohesion as the cost driver**, the option value of structure, batch size, and **separating structural changes from behavioral ones** (own commit/PR). Pieces are scattered — connascence in `reviewing-module-design`; churn × complexity ("where it pays to tidy") in `finding-maintainability-hotspots`; "atomic commits / single purpose" in `reviewing-pr-and-process-hygiene` — but Beck's sequencing rule (*tidy first, separately, before the behavior change*) has no owner, and the now/after/never economics is nowhere.
+
+The structural-vs-behavioral split (3) is **adjacent to but not the same as** #24's "atomic commits / no drive-by scope creep": hygiene wants one purpose per PR; Beck wants structural and behavioral changes in *separate* PRs even when they serve one feature. Worth deciding whether #24 absorbs it or it belongs to the tidying mode.
+
+**Disposition: open.** (2) **refined by G26** — the *suggestion* of a tidying is review-time (gated only by the defect-only guard, not by the unbuilt fixing capability); only auto-*application* is Q8. (3) is a candidate factor — likely #21 (maintainability economics) and/or #24 (commit sequencing) — pending a disposition pass.
+
+## Round-3 gap hunt (G14–G22)
+
+Surfaced 2026-06-14 by a third gap hunt that reasons from *outside* the map — full method, prior art, and dispositions in [`research/taxonomy-gap-hunt-round-3.md`](research/taxonomy-gap-hunt-round-3.md). Each entry below is the yield of a distinct new gap-finding method (external completeness model, stakeholder-vantage rotation incl. the agent-as-reader vantage → G20, substrate sweep, shape-axis extrapolation, the failure-grounded model → G21, and adversarial/inversion → G22). All **provisional — owner-gated**, web-verified prior art cited in the research doc. No `taxonomy.md` edit or version bump yet.
+
+## G14 — Characteristic defects of AI-authored code
+
+Surfaced via the **substrate sweep** (and reflexively — this suite is itself AI-built). The map reviews code that *calls* an LLM (#25) and tracks AI *provenance markers* (#27), but has no lens for the **failure signature of machine-authored code itself**, regardless of author: hallucinated/misused APIs, plausible-but-wrong logic that reads fluently, over-helpful unrequested additions (ties `checking-restraint`), and package hallucination → slopsquatting (~20% of LLM-recommended packages are non-existent; ~45% of LLM code carried security flaws in a 100+-model study — sources in the research doc). Distinct from #25 (code that *uses* AI) and #27 (a provenance *marker*). Diff-reviewable, high present-day base rate.
+**Disposition (lean): promote (diff lens)** — package-hallucination leg xref #18, plausible-wrong/over-helpful legs xref #1 and `checking-restraint`. Confidence: high.
+
+## G15 — Production-evidence / runtime-informed review (a candidate fifth shape)
+
+Surfaced via **shape-axis extrapolation** (the move that found round 2's decision shape). All four shapes — diff / repo / decision / artifact — are **source-derived**; none consumes the *running system's own signals* (error-rate deltas on the changed path, slow-query/trace evidence, real cardinality, actual usage) as a review input. The suite reviews observability *code* (#16) but never *reads telemetry to find defects that only manifest at runtime.* Prior art validates telemetry-as-truth (observability-driven development, trace-based testing) but mostly shift-left; the shift-right move of feeding live evidence into a change review is thinly precedented (signal: novel).
+**Disposition (lean): promote as `shape: runtime`** (sibling to the existing four), lower priority — needs a telemetry-access substrate and D12-style orchestration. Confidence: medium.
+
+## G16 — Ethical / responsible-design defects in non-ML code
+
+Surfaced via **stakeholder-vantage rotation** (the end user as a *subject of behavior*, not a buyer). Ethics is reviewed today **only** where it is legal (#27) or ML-output (#25 harmful-output). The diff-visible, code-level class is unowned: dark patterns / deceptive flows, manipulative defaults (pre-checked consent, asymmetric opt-out), obstruction/sneaking/forced-action in ordinary control flow, and **discriminatory business logic in plain conditionals** (a hardcoded threshold disadvantaging a group — no model in sight). Operational taxonomies (Mathur 7-category; EDPB 6-family/16-subcategory) and live regulation make this concrete, not hand-wavy.
+**Disposition (lean): promote, detect-and-escalate (G8)** — flag with evidence; consent-as-legal defers to #27, pure-product judgment escalates to humans. Confidence: med-high.
+
+## G17 — Data-engineering & data-contract quality
+
+Surfaced via the **substrate sweep** (the data/analytics plane). The map is OLTP-app-centric: #20 owns migration/persistence *safety*, #13 owns *service* API contracts, but nothing owns SQL/dbt **transformation correctness**, **data tests** (freshness/completeness/uniqueness/distribution), or **producer↔consumer data contracts** for events and analytics schemas — the silent break when an upstream field changes and downstream pipelines rot. Mature, standardizing prior art (data contracts, schema-registry compatibility, dbt + Great Expectations + Soda, CI enforcement).
+**Disposition (lean): promote** — a diff lens (transformation correctness + data-test adequacy) paired with a repo/cron arm (contract drift), mirroring the #13/#20 split; scope to data-as-code in the repo (warehouse governance escalates). Confidence: med-high.
+
+## G18 — The two ISO/IEC 25010:2023 characteristics with no owner: Interoperability and Safety
+
+Surfaced via the **external completeness model** (a new standing method — sweep an independent standard, not the map's own categories). Mapping the atlas onto all nine ISO 25010:2023 product-quality characteristics, every one has an owner **except two**:
+
+- **Interoperability / compatibility** (the missing "-ility"): #13 reviews the contract *we publish*, #8 reviews idiom, but nothing reviews whether the code **correctly speaks an external standard** — HTTP caching/idempotency semantics, OAuth/OIDC, semver, RFC date/email/URI formats, Unicode normalization & encoding, cron syntax, OpenTelemetry semconv, standard file formats. Scattered today as factor-notes across #4/#8/#13/#26.
+- **Safety** (new top-level characteristic in the 2023 revision; distinct from #14 *security* — harm-prevention vs. attacker-prevention): fail-safe defaults, safe-mode-on-error, operational guardrails on dangerous actions, hazard warnings, risk identification for harm-causing state. #2 owns fail-loud-vs-degrade and #28 owns overload degradation, but neither asks "does this fail toward *harm* or toward *safe*?"
+
+**Disposition (lean):** interoperability → **promote or consolidate** the scattered factor-notes into one lens/factor; safety → **add-factor to #2/#28 + a detect-and-escalate boundary**, with full hazard analysis (ISO 26262 / IEC 61508 / DO-178C) **out-of-scope**. Confidence: med-high (interop) / medium (safety). **Method note:** re-run the external-model sweep on each major revision of an external quality standard — it caught a characteristic ISO itself only promoted in 2023.
+
+## G19 — Review-coverage transparency / known-unknowns
+
+Surfaced via **vantage rotation** turned on the suite itself (the reviewer's own epistemics; the meta-analog of #30). The synthesizer (D12) emits a verdict but never states **what the review did *not* examine** — lenses skipped and why, areas it could not verify, claims it had no evidence for. A confident review silent on its own gaps manufactures false assurance, itself a defect *of the review*. Thin prior art as a named practice (nearest: audit "scope & limitations", model-card "known limitations").
+**Disposition (lean): fold into the synthesizer** as a required "coverage & limitations" contract field — not a new category. Confidence: high (additive, low-risk).
+
+## G20 — The codebase/repo as a working environment for AI maintainers
+
+Surfaced 2026-06-14 (owner question: do we cover code agents as code-owners and as operators?). A **vantage rotation** the round-3 pass under-exploited — the AI agent as a first-class reader/operator — splitting into two roles with very different coverage.
+
+**Code-owner / maintainer role — a genuine framing gap.** Cluster II of the taxonomy is titled *"Can humans understand it?"*; the whole readability/clarity axis (#5–#8) was never rotated to *"Can an **agent** understand, navigate, and safely modify this within a context budget?"* **Absent:** LLM-centric readability; context-window economy of the *reviewed* code (self-containment, depth-first-sliceability — the concept exists in-repo only as the suite's *own* design tax, never as a reviewed property); discoverability/navigability for agents; RAG/retrieval-friendliness. **Partial:** agent-instruction files (AGENTS.md/CLAUDE.md) — *drift* covered (#22/#24), *authoring* designed-unbuilt (#30/D15/G11), but "does the repo *provide good, scoped* agent onboarding" (the agent analog of #22's README front-door) is thin.
+
+Two reasons to promote: it is the **mirror image of G14** (G14 = quality *of* AI-authored code; G20 = quality of code *for* AI readers — same axis, opposite direction), and it is **the G11 pattern again** (the project optimizes its own artifacts for agent-legibility via D7 but never made it a review behavior). Prior art: ["AI-friendly codebases"](https://medium.com/@dconsonni/creating-ai-friendly-codebases-82cb3203c118); [coding-agents-as-a-first-class project-structure concern](https://dev.to/somedood/coding-agents-as-a-first-class-consideration-in-project-structures-2a6b) (the "40% context rule," depth-first slices, AST-grounded agent interfaces).
+**Disposition (lean): promote** — a cluster-II rotation into an agent-legibility lens: a diff arm (is this change agent-legible/context-economical?) + a repo arm (agent-navigable tree; AGENTS.md/CLAUDE.md present/accurate/scoped; `llms.txt`-style index). Confidence: med-high.
+
+**Operator role (agent as user of the *product*) — mostly mapped; do not over-promote.** The restraint check passes: UI parity for agents is **#24 agent-native parity** (surfaced but G9-thin); SKILL.md/MCP authoring → #30/D15 and safety → #32 (both mapped, unbuilt); LLM-accessible UI affordance is oblique (#23 a11y + #24); product/docs discoverability for agents (`llms.txt`, an emerging standard — [Anthropic requested it; Google A2A includes it](https://buildwithfern.com/learn/docs/ai-features/llms-txt)) has no home yet. **Disposition: no new category** — a G9-class deepening (#24) + build the mapped-but-unbuilt #32/#30 lenses + two add-factors (`llms.txt` discoverability; LLM-accessible UI affordance, → #22/#23/#24). Full reasoning in [`research/taxonomy-gap-hunt-round-3.md`](research/taxonomy-gap-hunt-round-3.md).
+
+## G21 — Operational time-bombs & exhaustion classes (latent "correct-now, broken-later" defects)
+
+Surfaced 2026-06-14 via a **failure-grounded completeness model** (an incident/outage corpus, complementing the attribute-grounded ISO-25010 sweep of G18) — full method in [`research/taxonomy-gap-hunt-round-3.md`](research/taxonomy-gap-hunt-round-3.md) §Method 5. An attribute model can't see these because they're not quality *attributes* but recurring *failure modes*. Sweep result:
+
+- **Config change** (~50% of severe outages) — covered by #26; the outage-frequency framing **reinforces #26 surfacing** (G9-deepen).
+- **Expired TLS certs / OAuth tokens / API keys; missing rotation/renewal path** — **absent** (#14 owns *hardcoded* secrets, not expiry/rotation). The single most preventable major-outage class (Microsoft/Spotify/Google/Bank of England).
+- **Calendar/clock time-bombs** (leap year/second, DST, epoch-2038, year rollover) — **thin** (#4 has timezone/UTC/monotonic, not these triggers).
+- **Retry storms / thundering herd / cache stampede; retry budgets** — **partial** (backoff+jitter present; #28 backpressure).
+- **Resource exhaustion** (disk-full, file-descriptor/socket, ephemeral-port, connection-pool) — **partial** (pool bounded; #4 leaks; #28 unbounded).
+
+Cohesion: several share a **temporal signature — correct at merge, detonates later** by passage of time (expiry, calendar) or accumulation (quota/capacity creep); the #29 ADR-assumption-expiry and #30 suppression-expiry checks are the same shape applied narrowly.
+**Disposition (lean):** primarily **add-factors** — expiry/rotation → #14/#26; calendar/clock time-bombs → #4; coordinated-retry patterns + retry budget → #2/#28; exhaustion classes → #4/#28. **Flag the cohesive option:** a "latent / time-delayed defect" thread asking *"will this be fine today and page someone in 90 days?"* — a question no current lens asks. Confidence: high.
+
+## G22 — Diff-isolation blindness: interaction & composition defects
+
+Surfaced 2026-06-14 via the **adversarial / inversion** method (design the defect that most easily evades the suite; name the assumption that let it through) — [`research/taxonomy-gap-hunt-round-3.md`](research/taxonomy-gap-hunt-round-3.md) §Method 6. The load-bearing assumption is **the diff is the unit of review.** The suite reviews a single diff (diff-lenses) or repo *state* (cron audits); neither reviews the **composition of multiple changes across time and space**:
+
+- **Semantic / logical merge conflicts** — two independently-correct changes that break *when combined*; textually merge-clean, behaviorally broken — explicitly noted in the literature as hard to catch in code review/testing.
+- **Assumption invalidation across in-flight changes** — change A correct against an assumption a parallel/recent change B silently breaks.
+- **Load-bearing deletions** — a removal locally fine but breaking a relier *outside the diff* (diffs foreground additions; removals are under-scrutinized).
+
+A **unit/granularity gap** — the change-set across time/space is an un-owned review *unit*, the analog of round 2's decision *shape* gap (a missing unit, not a missing topic). Relates to G7 (history-shaped skills) and #21 change-coupling, but neither owns *cross-change interaction at review time*.
+**Disposition (lean): promote (scoped)** — heavy detection is tool-territory (variability-aware execution, static/pointer analysis); the LLM-review slice is *"trace the ripple of deletions and assumption-changes beyond the diff; flag interaction with concurrent/recent changes"*, escalating the rest (G8). Confidence: medium.
+
+## Round-3 cont. — scope re-audit: the exclusion pile (G23–G26)
+
+Surfaced 2026-06-14 via a distinct method — **auditing the exclusions/conflations themselves** (the inverse of hunting *inside* scope): when something was fenced off or folded, was it on the right axis? Yields the detect-and-route principle (G23), candidate Cluster VII (G24), the exclusion re-audit (G25), and the defect-only-by-construction finding (G26). Full write-up in [`research/product-experience-value-cluster.md`](research/product-experience-value-cluster.md).
+
+## G23 — Detect-and-route: surfacing ≠ deciding (a scope-principle fix)
+
+Surfaced 2026-06-14 (owner challenge to the recurring "product/UX is out of scope" boundary) via a new method — **auditing the exclusions themselves**. The "out of scope" label conflated two independent questions: **(1) is it reviewable at review time?** and **(2) who has authority to decide it?** Product/UX/value findings often answer *no* to (2) but *yes* to (1) — a confusing error message, a missing empty-state, a deceptive default are right there in the diff. The map already owns the resolution for this shape: **G8 detect-and-escalate** (the compliance lens surfaces legal exposure and routes the decision to a human, never adjudicating).
+
+**Generalize G8 into a map-wide primitive — detect-and-route.** A holistic review *surfaces* a finding with evidence and *routes the decision* to the right stakeholder (`route: product / design / legal / leadership / eng`), never silently dropping it for "not our call." Add a decider/route axis to the synthesizer (D12) alongside severity. Only concerns with **no artifact at review time** (market sizing, pricing, org politics) stay out — and those re-enter as #29 once written into a decision record. Consistent with the project's own rationale ([`overview.md`](overview.md)): a narrow scope "would push the most expensive failure modes out of scope" — and product/UX/value failures are often the most expensive of all.
+**Disposition (lean): adopt** (low-risk, additive; formalizes existing G8 + the D12 contract). Confidence: high. Full write-up: [`research/product-experience-value-cluster.md`](research/product-experience-value-cluster.md).
+
+## G24 — Candidate Cluster VII: Product, Experience & Value
+
+Surfaced 2026-06-14, enabled by G23. The six clusters are all about **the code and its lifecycle**; **none is about the product as experienced and valued by its users** — a topic-cluster-sized hole (not a shape or unit, a genuine *topic* axis). The only user-facing lens today is #23 (a11y mechanics) + #24 (agent-native *reachability*, not UX). Candidate lenses, each **skip-when no user-facing surface** and **detect-and-route** (G23):
+
+- **VII-A Usability & interaction quality** — Nielsen's 10 heuristics (the canonical UX completeness model); net-new. **promote, route: design/product.**
+- **VII-B Experiential / perceived quality** — empty/loading/error states, perceived performance, optimistic UI (≠ #15 *measured* perf). **promote/add-factor.**
+- **VII-C UX consistency / design-system conformance** — off-token, bespoke-vs-system components (UI analog of #8). **add-factor/lens.**
+- **VII-D Content & UX writing** — error-copy helpfulness, voice/tone, jargon. **add-factor.**
+- **VII-E Inclusion & equitable access** — ISO 25010:2023 *inclusivity*, cognitive a11y, low-end/low-bandwidth, affordability. **add-factor #23.**
+- **VII-F Product value & outcome instrumentation** — is the change tied to a measurable outcome / falsifiable hypothesis (outcome metrics ≠ #16 ops metrics; overlaps G12). **promote, route: product.**
+- **VII-G Trust, transparency & user-facing accountability** — automated-decision explainability (GDPR Art. 22), data-use transparency, honest defaults (overlaps G16/#27). **promote, route: product/legal.**
+- **VII-H Conceptual integrity / product coherence** — Brooks's "most important consideration in system design"; the *product* counterweight to sprawl (as #11/#15 are the *code* counterweights). **promote (design-shaped).**
+- **VII-I Internationalization of experience** — cultural fit, locale-correct flows, full RTL (beyond #23 strings). **add-factor #23.**
+- **VII-J Feature value lifecycle** — unused/dead *features* (product analog of #1 dead-code; cross #29 retire). **add-factor (repo/cron).**
+
+Restraint guardrails: skip-when-no-user-surface; detect-and-route (never blocks the engineering merge on a taste call); a separate routed synthesizer section so product findings neither drown nor are drowned by correctness/security; and VII-H as the cluster's own counterweight.
+**Disposition (lean): promote a Cluster VII**, built incrementally (VII-A + VII-F highest-leverage; VII-E/VII-I → #23; VII-C → #8). Granularity (lenses vs factors) is the open call, as Q1 was for the original map. Confidence: med-high (the cluster is a real hole). Full enumeration + external models in [`research/product-experience-value-cluster.md`](research/product-experience-value-cluster.md).
+
+## G25 — Re-audit of the remaining exclusion pile (applying G23's two-axis test)
+
+Surfaced 2026-06-14. G23's reviewable-vs-authority test must apply to **every** prior exclusion, not just product, or the reframe is special-pleading. Result: most prior out-of-scope calls were correctly drawn on the no-artifact axis; only two were mis-folded.
+
+- **Sustainability / green-software** (was "a carbon *label* on #15") → **upgrade**: diff-visible (inefficient queries, egress, over-provisioning) with carbon/cost weight → a routed factor (route: eng/leadership), more than a label.
+- **FinOps / cloud cost** (#15 residual, thin) → **upgrade thin→surfaced**: per-request cost/egress/over-provisioning are reviewable → first-class routed factor.
+- **Contributor DevEx as a system** → **boundary held** (right axis): the org-level metric has no review-time artifact; diff-visible dev-friction is already #19/#21.
+- **Deep model-fairness auditing** → **split confirmed**: diff-visible fairness smells → G16/detect-and-route (in); dataset/metric auditing → out (no artifact).
+- **Build-vs-buy TCO / procurement** → **boundary held** (right axis): TCO has no diff artifact; the decision record is #29.
+
+**Net:** the reframe sharpens the boundary rather than erasing it (restraint preserved). Only sustainability + FinOps were mis-folded (under-surfaced); the genuine no-artifact exclusions stand. **Disposition (lean): upgrade green + FinOps to routed #15 factors; confirm the rest out.** Confidence: high. Detail in [`research/product-experience-value-cluster.md`](research/product-experience-value-cluster.md).
+
+## G26 — Detect-and-suggest ≠ apply; defect ≠ improvement (the suite is defect-only by construction)
+
+Surfaced 2026-06-14 (owner: aren't tidyings / dead-code / dep-bumps decidable *at review time* — reviewer suggests a nit, implementer applies/defers/ignores?). Yes. This is the **same wrong-axis error as G23**, a third time: "is it reviewable?" was collapsed with an orthogonal axis — here, *when it is applied* and *whether it is a defect or an improvement*.
+
+**The actual blocker is not the unbuilt fixing capability (Q8) — it is a guard.** Every `SKILL.md` carries the identical generated reviewer-discipline line: *"…do not suggest changes to code that is already correct. This guards against false positives on correct code."* So the suite is **defect-only by construction**: improving-valence findings on already-correct code (reorder symbols for cohesion, remove dead code, bump a stale-but-working dep, extract an explaining variable) are *prohibited in every lens*, independent of any apply-automation. "Maintenance" actually decomposes into three orthogonal things, only one of which is genuinely unbuilt:
+
+1. **Improvement *detection + suggestion*** — review-time, detect-and-route (route: implementer; decision: apply/defer/ignore). **Currently suppressed by the guard**, not by missing capability.
+2. **Improvement *application*** (the agent edits) — the Q8 *capability* axis; partly served already by the broader `simplify` / `code-review --fix` skills.
+3. **Proactive *scanning*** with no triggering diff — the cron/repo shape; partly built (the repo audits, `finding-maintainability-hotspots`).
+
+**The tension to honor.** The guard is not wrong — it prevents nagging and false positives, and it is *why the suite earned trust* (clean PRs return "No findings"). The fix is not to delete it but to **add a valence axis** to the finding contract (alongside severity and G23's route): `valence: defect | improvement`. Defects keep the strict anti-false-positive bar; improvements are admissible only as **opt-in, `nit`-severity, `route: implementer`, volume-bounded** suggestions ("could tidy / could remove / could bump — apply, defer, or ignore"). Volume is already controllable: the synthesizer's severity floor and `REVIEW.md` convergence (which keeps *suppressed nits visible for optional tidy-up*) are the throttle, so improvement-valence findings need not bury a review.
+
+**The guard is also a legitimate *team preference*, not a universal (owner, 2026-06-14).** Some teams will want defect-only; that is a valid stance, not a misconfiguration. So the resolution is two-layered: the `valence` axis is the **mechanism**; the **policy** — how much improvement-valence to surface — is a **preference-tier dial in the Q13 team-preferences overlay** (which is designed and pending review). Default stays **strict / defect-only** (preserves the earned trust); teams opt *up* into improvement nits. Floor-tier (defects) is never dialed down.
+
+**Plus a built-in anti-churn discipline that holds at *every* verbosity setting (owner, 2026-06-14).** An improvement suggestion must clear a **value + confidence bar** — it must *improve*, not merely offer an equivalent alternative (no change-for-change's-sake) — and must **converge**: once a dimension is "as good as we can confidently make it," no further suggestion on it, never a lateral re-order to an equivalent state, never oscillation (suggest A→B one round, B→A the next). This is the same *termination* guarantee `REVIEW.md` convergence gives the review loop, applied to improvement-valence nits — without it, an improvement-capable reviewer never settles. It is a built-in floor on *how* improvements may be suggested, not a team knob (a team can turn verbosity up, but cannot configure the suite to churn).
+**Disposition (lean):** keep the guard as the **strict default**; expose improvement-valence as a **Q13 preference-tier dial** (mechanism = the `valence` axis); make the **anti-churn / value-threshold / convergence** discipline a non-configurable built-in. **Largely resolves Q3** (review-vs-maintenance is mostly a valence toggle at review time, not a separate mode) and **narrows Q8** to genuine auto-application. Confidence: high (grounded in the verbatim guard across all ~24 lenses).
+
+## Round-3 cont. — cross-discipline review-analog sweep (G27–G29)
+
+Surfaced 2026-06-14 via a new method — **import mature *review practices* from other assurance disciplines** (financial audit, scientific peer review, manufacturing QA, clinical, aviation, civil-eng), the inverse of the ISO/Nielsen *quality-model* sweep. Full map + validations in [`research/cross-discipline-review-analogs.md`](research/cross-discipline-review-analogs.md). The sweep mostly **confirmed** the atlas (poka-yoke ≡ #9/#10; checklists ≡ the whole form; adversarial ≡ #14/#32) and yielded three sharp net-new disciplines.
+
+## G27 — Segregation of duties / dual-control (maker-checker, four-eyes) in authorization logic
+
+From financial-audit internal controls. Reviewable in code: can the **same principal both initiate and approve** a high-consequence action (payment, refund, role/permission grant, deletion, deploy)? Are sensitive ops gated by **dual-authorization / maker-checker** (two distinct actors)? Distinct from #14, which owns authn/IDOR/least-*privilege* — SoD is the orthogonal control that **no single actor completes a sensitive workflow alone**, a business-logic authorization *pattern*, not an access bug. SOX §404-mandated; the canonical anti-fraud/anti-collusion control. Prior art: [maker-checker](https://en.wikipedia.org/wiki/Maker-checker); [SoD for SOX](https://www.securends.com/blog/segregation-of-duties-for-sox-compliance/).
+**Disposition (lean): add-factor #14** (or a dedicated check), **detect-and-route** (the policy of which ops need dual-control is a business call). Confidence: high — recognized, reviewable, currently unowned.
+
+## G28 — Claims-vs-evidence verification (generalized)
+
+From scientific peer review. Every PR *claim* — "fixes X", "faster", "no behavior change", "closes #N" — should be **checkable against evidence in the diff** (a regression test for a fix, a benchmark for a speed claim, genuine non-functionality for a "pure refactor"). The atlas does this in exactly **one** place today — `reviewing-performance-and-efficiency` *"demands a profile before accepting optimization claims"* — and nowhere generalizes it. Overlaps #1 (code-vs-stated-*intent*, not claim-vs-*evidence*), G12, #17, without any owning the general discipline: **an unsupported claim is itself a finding.**
+**Disposition (lean): a cross-cutting factor / synthesizer principle** (generalize the perf lens's profile-demand; pairs with G12 + G19). Confidence: med-high.
+
+## G29 — Root-cause vs symptom (band-aid detection)
+
+From manufacturing 5-whys + clinical differential diagnosis. For bug fixes: does the change address the **root cause** or paper over a **symptom** (catch-and-ignore, special-case the one bad input, retry a flaky call, bump a timeout)? Existing lenses verify a fix is *correct*; none asks whether it is at the *right level*. `hunting-silent-failures` is adjacent (dislikes swallowing errors); band-aid detection generalizes to *"is this masking the problem rather than resolving it?"*
+**Disposition (lean): add-factor** to `tracing-correctness-and-invariants` / `hunting-silent-failures` + the bug-fix router route. Confidence: medium.
+
+**Feeds-existing (not new gaps):** materiality/sampling → **Q14** (the depth axis's missing name); differential-diagnosis → **G19** (enumerate alternative causes before concluding); safety-margin/headroom → **#28/G21**; four-eyes-on-irreversible-ops → **#24**; blameless M&M → **Q17/G15**.
+
+## Round-3 cont. — shape & synthesizer sweeps (G30–G31)
+
+Surfaced 2026-06-14: re-running **shape-axis extrapolation** on *security* (where is security reviewed at *design* time?) and **auditing the synthesizer's own apparatus** (is its tension table complete?).
+
+## G30 — Threat modeling as a design/decision-time security discipline
+
+`sweeping-for-security` (#14) is **diff-shaped vulnerability detection** — it pattern-matches existing code for injection, IDOR, secrets, crypto. #32 covers agentic action-safety. Neither does **proactive, structured threat *enumeration* at design time**, before code exists: **STRIDE** (Spoofing / Tampering / Repudiation / Information-disclosure / DoS / Elevation per component), **data-flow-diagram + trust-boundary** analysis, **attack trees**, and **abuse/misuse cases**. Threat modeling is explicitly *design-time* ("examines what could go wrong before implementation begins… unlike vulnerability scanning, which evaluates systems after they are built") and answers Shostack's four questions (what are we building / what can go wrong / what do we do about it / did we do a good enough job). The `design: true` flag lets #14 *run on* a design doc, but executing diff-heuristics over prose is **not** the generative enumeration discipline. Grep confirms absence — "trust boundary" appears only in the *parse-don't-validate* (input-validation) sense, never as a security method. Prior art: [STRIDE](https://inventivehq.com/blog/threat-modeling-stride-dread-complete-guide) (Kohnfelder & Garg, MS 1999); [Shostack, *Threat Modeling*](https://shostack.org/resources/threat-modeling); the Threat Modeling Manifesto; pytm (threat-modeling-as-code, mechanization).
+**Disposition (lean): promote a decision/design-shaped security lens** (threat-model an RFC / design doc / new feature), or add a decision-arm to #14; **detect-and-route** the high-stakes slice to human security review (G8). The security analog of #28's design-time operability and a strong instance of the Q15 decision shape. Cross #14/#32/#28/#13. Confidence: med-high.
+
+## G31 — The synthesizer's tension table is restraint-centric; cross-quality tensions go unmanaged
+
+Auditing D12's own apparatus: the `synthesizer.tensions:` table is **entirely restraint-centric** — every entry is `checking-restraint ↔ X` (module-design / performance / test-quality / api-contract / resilience) plus one `performance ↔ readability`. Tensions where **neither side is restraint** have no default resolution and fall back to the generic *"prefer safer and simpler."* As the map grows these multiply: **observability ↔ privacy** (log detail vs PII — #16 vs #27), **security ↔ usability** (friction vs safety — #14 vs G24 VII-A), **transparency ↔ security** (explainability vs information-disclosure — G24 VII-G vs #14), **performance ↔ accessibility**, **consistency ↔ evolvability** (#8 vs #21). Not broken (the fallback handles it), but under-specified, and the new Cluster VII (G24) + G16 sharply increase cross-quality collisions.
+**Disposition (lean): enrich the manifest `synthesizer.tensions:` table** with the cross-quality pairs above (additive; regenerates like the router/synthesizer — no docs drift). Low-risk. Confidence: high (the table is demonstrably under-populated).
+
+## Round-3 cont. — the conflation audit, run deliberately (G32 + closure)
+
+Now that "reviewability is orthogonal to X" is a named method (G23/G20/G26), this pass **enumerates every axis** `X` that *"is this reviewable at review time?"* could be wrongly collapsed with, and tests each. One net-new find; the rest test as already-handled — a **closure signal** that the framing seam is largely mined.
+
+| Axis `X` (reviewability ⊥ X) | Status |
+|---|---|
+| **Authority** (who decides) | **G23** — product/UX detect-and-route |
+| **Reader identity** (who/what reads/operates) | **G20** — the agent vantage |
+| **Application-timing / valence** (when applied; defect vs improvement) | **G26** — the `valence` axis |
+| **Attribution** (who/what *introduced* it; "is it in the diff") | **G32 — new** (below) |
+| Tooling/automatability ("a tool does/doesn't do it") | handled — G5 (LLM-only factors) + Q19 (mechanize-with) |
+| Subjectivity ("it's a matter of taste") | handled — Q13 preference-tier + nit severity |
+| Composition unit ("not in *one* diff") | handled — G22 (diff-isolation) |
+| Lifecycle phase ("design not code", "runtime not source") | handled — the shape axis (Q15 decision, G15 runtime) |
+| Localizability ("no single line to anchor it") | handled — G24 VII-H (conceptual integrity) + the repo audits |
+| Ownership ("third-party / generated, not ours") | handled — #18 deps, #30 codegen |
+| Valence-positive ("affirm good code") | considered, **declined** (restraint — noise risk outweighs value) |
+
+## G32 — Reviewability ⊥ attribution: pre-existing / adjacent defects suppressed by the diff-only filter
+
+The diff-only convention conflates **"what changed"** (attribution) with **"what's reviewable."** A pre-existing defect *visible in the context the reviewer is already reading* — the touched file/function or immediately adjacent code — is reviewable and worth **surfacing**, even though this PR didn't introduce it. This is the **Boy Scout rule / opportunistic improvement** ("leave it better than you found it"); the consensus is that pre-existing issues *in touched code* are fair to flag, balanced against scope ([Boy Scout rule](https://snappify.com/blog/boy-scout-rule); [opportunistic refactoring](https://medium.com/javarevisited/our-take-on-opportunistic-refactoring-e606bb76e8c8)). Today the suite reviews "the diff" and has no surfacing path for a latent bug it *notices* in touched code; the repo audits own *whole-repo* hunting, but not the *opportunistic, in-context* surface.
+**Disposition (lean): detect-and-route** — surface tagged **"pre-existing — not introduced by this change,"** non-blocking, **scoped to code the PR actually touches** (not a repo-wide sweep — that's the audits' job), and governed by the **anti-churn / scope discipline (G26)** + **Q13 verbosity** (it is un-attributed improvement-valence, so opt-in, default-quiet — never expand the PR's scope, just inform the implementer's fix-now / file / ignore call). The fourth instance of the conflation pattern. Confidence: med-high.
+
+**Closure.** Run deliberately, the conflation audit returns **one** new gap (G32) and otherwise confirms the prior axes are covered — evidence the high-value *framing* seam (rounds 1–3's richest vein) is largely exhausted. Remaining yield is shifting from framing gaps to add-factors and validations; the bottleneck is moving from *finding* to *deciding*.
+
+## Synthesis — what to promote first (G12–G32)
+
+The mining phase is consolidated into a ranked, dependency-sequenced, decision-ready view in [`research/gap-hunt-synthesis.md`](research/gap-hunt-synthesis.md): each gap typed (mechanism / new-lens / add-factor / tooling / fold), scored value × cost × confidence, deduped against overlaps, and placed in four waves — **A** foundations (the G23 route + G26 valence primitives, G19/G31 synthesizer upgrades, Q19), **B** high-value add-factors (G27, G21, G25, G28, G29, G13, G32, G12-as-factor), **C** new lenses (G14, G16, G20, G30, G18), **D** bigger bets (G24 Cluster VII incremental, G17, G22 scoped, G15 runtime shape). Top-five and the G1 single-owner boundaries to settle are called out there. Decision-support only — every item stays owner-gated.
+
+**The meta-principle (why this keeps recurring).** Three times now a real gap hid behind a conflation: **reviewability is orthogonal to authority (G23), to the reader's identity (G20), and to application-timing/valence (G26).** Standing rule: test *"is X reviewable / surfaceable at review time?"* **independently** of *who decides X*, *who reads X*, *when X is applied*, and *whether X is a defect or an improvement*. Each conflation predicts an under-reach; auditing for them is a generative gap-finding method in its own right (the "conflation audit").

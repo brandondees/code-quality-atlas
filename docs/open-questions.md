@@ -31,9 +31,66 @@ Q17 (self-improving loop — design exploration written, awaiting review),
 Q13 (team preferences overlay — designed, not yet built),
 Q14 (router intent / matching-and-ranking / review-depth modes — new),
 Q15 (a decision-time review shape — new, the round-2 gap-hunt headline),
-Q3 (review-vs-maintenance modes), Q4 (findings-vs-scores), Q6 (idiom packs),
+Q19 (ship the latent tool-mechanization nudge + close the deterministic-tooling
+presence holes — new), Q3 (review-vs-maintenance modes), Q4 (findings-vs-scores),
+Q6 (idiom packs),
 Q8 (proactive/cron-shaped maintenance — partially built as the repo audits),
-and the Q2 residual low-priority candidates. A factor-level coverage audit
+and the Q2 residual low-priority candidates. Two new framing-class gaps were
+also logged this pass ([`map-gaps.md`](map-gaps.md) **G12** validation-vs-verification /
+stakeholder-intent — disposition: in-scope; **G13** *Tidy First?* economics &
+proactive tidying mode — disposition open). A **round-3 gap hunt** (2026-06-14,
+[`research/taxonomy-gap-hunt-round-3.md`](research/taxonomy-gap-hunt-round-3.md))
+then added **G14–G19** via gap-finding methods that reason from outside the map
+(external completeness model, stakeholder-vantage rotation, substrate sweep,
+shape-axis extrapolation): G14 AI-authored-code defects, G15 production-evidence
+review (a candidate 5th shape), G16 ethical/responsible-design, G17
+data-engineering & data-contracts, G18 the two unowned ISO-25010:2023
+characteristics (interoperability, safety), G19 review-coverage transparency, and
+G20 the codebase/repo as a working environment for AI maintainers (the agent
+vantage — a cluster-II rotation, mirror of G14; the agent-as-*operator* role is
+mostly already mapped via #24/#32/#30), G21 operational time-bombs & exhaustion
+classes (a failure-grounded sweep — cert/credential expiry & rotation, calendar/
+clock time-bombs; add-factors), and G22 diff-isolation blindness (interaction /
+composition defects — a missing change-set *unit*) — all **provisional,
+owner-gated**, web-verified. A scope re-audit (2026-06-14, owner) then added
+**G23** (detect-and-route: surfacing ≠ deciding — generalize G8; product/UX/value
+findings are surfaced and routed to the right decider, not excluded) and **G24**
+(candidate **Cluster VII — Product, Experience & Value**: usability, perceived
+quality, UX consistency/content, inclusion, value/outcome instrumentation, trust/
+transparency, conceptual integrity, i18n-of-experience, feature-value lifecycle —
+[`research/product-experience-value-cluster.md`](research/product-experience-value-cluster.md)),
+**G25** (re-audit of the rest of the exclusion pile — most exclusions held on the
+no-artifact axis; sustainability + FinOps upgraded to routed #15 factors), and
+**G26** (detect-and-suggest ≠ apply, defect ≠ improvement — the suite is
+defect-only by a guard in every lens; improvement-suggestion is review-time;
+refines Q3, narrows Q8). The recurring meta-lesson: reviewability is orthogonal
+to authority (G23), reader identity (G20), and application-timing/valence (G26). A
+**cross-discipline review-analog sweep** (importing mature review *practices* from
+audit / science / manufacturing / clinical / aviation —
+[`research/cross-discipline-review-analogs.md`](research/cross-discipline-review-analogs.md))
+then added **G27** (segregation-of-duties / maker-checker dual-control in authz —
+add-factor #14), **G28** (claims-vs-evidence verification, generalized from the
+perf lens), and **G29** (root-cause vs symptom / band-aid detection); plus
+feeds-existing notes (materiality → Q14; differential-diagnosis → G19;
+safety-margin → #28/G21). The sweep mostly *confirmed* the atlas (poka-yoke maps
+to #9/#10; checklists ≡ the whole form), so it yielded add-factors, not a new
+cluster. Re-running shape-extrapolation on *security* and auditing the
+synthesizer's own apparatus then added **G30** (threat modeling — STRIDE / DFD /
+trust boundaries / abuse cases — as a *design-time* security discipline, distinct
+from #14's diff-time vuln sweep; a strong instance of the Q15 decision shape) and
+**G31** (the synthesizer's tension table is restraint-centric; enrich it with
+cross-quality pairs like observability↔privacy, security↔usability). A final
+**deliberate conflation audit** (enumerate every axis `X` for which
+reviewability⊥X) then returned one net-new gap, **G32** (reviewability ⊥
+*attribution* — pre-existing defects in touched code suppressed by the diff-only
+filter; the Boy-Scout / opportunistic-surfacing principle, detect-and-route,
+scope-bounded), and otherwise **confirmed the prior axes are covered** — a closure
+signal that the framing seam is largely mined and the bottleneck is shifting from
+finding to deciding. The pile is now consolidated into a ranked, dependency-
+sequenced **synthesis** ([`research/gap-hunt-synthesis.md`](research/gap-hunt-synthesis.md))
+— four build waves (foundations → add-factors → new lenses → bigger bets), with
+the G23/G26 primitives and Q13/Q14/Q15 flagged as the upstream enablers most of
+the high-value lenses depend on. A factor-level coverage audit
 ([`map-gaps.md`](map-gaps.md) G9) also found ~10 categories only partially
 surfaced at the factor level — fixable through the manifest/research, with the
 router half tracked as Q14. Everything else here is historical context kept for
@@ -98,6 +155,46 @@ artifact-scoped lenses at near-zero idle cost?**
 D10/D12 (router/synthesizer), and Q14 (the cleanest signal-based-matching case). Evidence: G11 +
 the research doc. **Status: RESOLVED (D15) — option (b), the `artifact` shape; G11 factor → #30. Build pending.**
 
+### Q19 — Ship the latent tool-mechanization nudge + close the deterministic-tooling presence holes *(new, 2026-06-14)*
+
+**Trigger.** Owner expected the suite to flag gaps in *deterministic* tooling — linters, complexity
+scoring, coverage reporting, performance benchmarking, security scans — and hadn't seen it come up.
+Audit confirms the state is **mixed, not "left to the repo owner":**
+
+- `auditing-config-and-build-hygiene` **already** flags missing/disabled gates — *"Does CI run the
+  full gate — lint, format-check, type-check, tests, dep/security scan — and is passing **required**
+  to merge?"* plus soft-fail detection (`continue-on-error` / `|| true` / `allow_failure`)
+  (`auditing-config-and-build-hygiene/SKILL.md:38,41`). So "no linter / no security scan in CI" **is**
+  caught — by that one repo-shaped audit, when it's run.
+- **coverage reporting** and **performance benchmarking** are **not** in that gate list, and
+  complexity scoring / perf benchmarks have **no presence check anywhere**.
+- the cross-lens nudge — **G10 item 1**'s `mechanize-with:` line (*"you detect this by hand; tool X
+  gates it in CI, consider wiring it up"*), appended to each lens's finding contract from its existing
+  `reference/tool-rules.md` — was **decided as an action but never built**: zero `SKILL.md` files carry
+  it and it is absent from `tooling/generate.py` (parked in [`session-log.md`](session-log.md):272 and
+  [`research/taxonomy-gap-hunt-round-2.md`](research/taxonomy-gap-hunt-round-2.md):153). Today
+  `tool-rules.md` is positioned as a *wiring aid* ("for wiring up linters, not needed for the judgment
+  review itself"), not a finding source — which is why the suite leaves this judgment to the owner by
+  default: not by design decision, but because the `mechanize-with:` feature was never built.
+
+**The question.** Two small, advisory builds: **(a)** ship the `mechanize-with:` generator pass (G10
+item 1) so every lens surfaces its tool-mechanization as advisory output; **(b)** extend
+`auditing-config-and-build-hygiene`'s gate list with **coverage-reporting** and **perf-benchmark**
+presence (and **complexity-scoring**, if it earns a check).
+
+**Open sub-questions.**
+
+- Is *"the repo has no coverage gate / no perf benchmark"* a finding the owner wants, or noise on repos
+  that deliberately skip it? Ties to the **Q13** team-preferences overlay (a preference-tier finding the
+  team can tune/suppress, not a floor-tier one).
+- Does `mechanize-with:` belong in **every** lens's finding contract, or only the repo audits?
+- New advisory output ⇒ a light cross-model eval pass before ship (no over-flagging regression on clean
+  repos).
+
+**Relation to prior decisions.** Implements the unbuilt half of **G10 item 1**; refines D12 (the finding
+contract) and D10 (the generator). **Status: open — decided-in-spirit (G10) but unbuilt; the
+coverage/perf/complexity presence holes are newly named here.**
+
 ### Q17 — Self-improving loop: usage signals → learnings → research edits *(new, 2026-06-12)*
 
 Make the suite self-improving: agents running the skills reflect on how the review process worked, detect routing misses / false positives / escapes / coverage gaps, and propagate learnings back to this repo — opt-in for consumers, mostly automated. Key insight: the **back half already exists** (D6/D8: research edit → drift → regenerate → evals → ship); what's missing is signal collection, distillation, and consented transport. Design exploration: [`self-improvement-loop.md`](self-improvement-loop.md) — a signal taxonomy (S1–S8, with taste S7 firewalled to the Q13 overlay, never upstreamed), the mechanism substrate (plugin hooks incl. a `PostToolUse` Skill-matcher invocation logger, a generated synthesizer "Process notes" appendix via a manifest `feedback:` section, `/atlas-retro` transcript digestion, a GitHub **outcome-auditor** routine joining reviews to merges/reverts as ground truth, an eval-first intake routine here), a **learning contract** mirroring D12's finding contract (stamped with the plugin commit SHA, enabling champion/challenger measurement across regenerations), four opt-in tiers (`off`/`local`/`draft`/`auto`) with the privacy boundary at record *creation* (abstracted evidence, never raw code), and the meta-loop's own failure modes (heuristic bloat, self-report bias, taste laundering, poisoned reports) countered by evidence thresholds + the eval-first ratchet as immune system. Staged rollout (§7): process-notes + local log first; full automation keeps exactly two human gates (consumer filing approval, atlas merge). Feeds Q14 (the invocation log is the missing lens-usage evidence) and depends on Q13. Status: **brainstorm captured, awaiting user review.**
@@ -109,7 +206,7 @@ Map-gaps G2's candidate now has standards-grade external backing: OWASP released
 
 ### Q13 — Team preferences overlay *(new, 2026-06-12)*
 
-The suite pushes research-derived "objectively better" defaults but has no home for the **codebase owner's / team's considered opinion** (only `checking-idioms-and-consistency` bends, and only to linter configs). Design write-up: [`team-preferences-overlay.md`](team-preferences-overlay.md). Decisions captured from the user this session: **(a) tiered precedence** — preference-tier findings (taste/thresholds/idioms) the team may tune or silently suppress; floor-tier findings (security, correctness, data/migration safety, concurrency) can never be silently dropped, only `acknowledge`d with a recorded rationale that still surfaces; **(b) bootstrap = template + inference, but inference is proposal-only** — it emits a ratification *interview*, never writes the overlay, and never runs by accident, so a haphazard/vibe-coded repo can't launder unconsidered "approve-click" patterns into ratified standards. Overlay lives in the *reviewed* repo (`.code-quality-atlas/preferences.md`), is read at review time by the router, and stays out of generated-skill provenance (D6). Status: **design APPROVED (user, 2026-06-12) as the implementation basis; build DEFERRED** — sequenced after the v0.3 / #32 builds rather than next, so the keystone unblock of Q17/Q18/Q14 waits. The genuinely-open §9 residuals (tier-tag granularity — per-check vs per-lens; overlay-vs-linter-config precedence; monorepo discovery; `acknowledge` expiry) are **left to implementation-planning** when the build is picked up.
+The suite pushes research-derived "objectively better" defaults but has no home for the **codebase owner's / team's considered opinion** (only `checking-idioms-and-consistency` bends, and only to linter configs). Design write-up: [`team-preferences-overlay.md`](team-preferences-overlay.md). Decisions captured from the user this session: **(a) tiered precedence** — preference-tier findings (taste/thresholds/idioms) the team may tune or silently suppress; floor-tier findings (security, correctness, data/migration safety, concurrency) can never be silently dropped, only `acknowledge`d with a recorded rationale that still surfaces; **(b) bootstrap = template + inference, but inference is proposal-only** — it emits a ratification *interview*, never writes the overlay, and never runs by accident, so a haphazard/vibe-coded repo can't launder unconsidered "approve-click" patterns into ratified standards. Overlay lives in the *reviewed* repo (`.code-quality-atlas/preferences.md`), is read at review time by the router, and stays out of generated-skill provenance (D6). Status: **design APPROVED (user, 2026-06-12) as the implementation basis; build DEFERRED** — sequenced after the v0.3 / #32 builds rather than next, so the keystone unblock of Q17/Q18/Q14 waits. The genuinely-open §9 residuals (tier-tag granularity — per-check vs per-lens; overlay-vs-linter-config precedence; monorepo discovery; `acknowledge` expiry) are **left to implementation-planning** when the build is picked up. **Extended (user, 2026-06-14, G26):** the overlay also carries an **improvement-valence verbosity** dial (§4.6 — the defect-only guard is a team preference, default strict) plus a built-in **anti-churn / convergence** discipline (§4a) it cannot relax; this is where G26's valence policy lives.
 
 ### Q14 — Router intent, matching/ranking, and review-depth modes *(new, 2026-06-12)*
 
@@ -200,6 +297,7 @@ Promote any of these to first-class categories? config management; logging-as-fi
 ### Q3 — Review vs. maintenance split
 
 "Review" (assess a diff) and "maintenance" (improve existing code over time) are different activities that touch the same categories differently. Should skills be dual-mode, or should we have a review-facing and a maintenance-facing variant per area?
+**Refined by [`map-gaps.md`](map-gaps.md) G26 (2026-06-14):** the split is largely a *valence toggle at review time*, not a separate mode. Improvement *detection + suggestion* (tidyings, dead code, stale deps) is review-time and detect-and-route (route: implementer); it is currently suppressed only by the defect-only reviewer-discipline guard, not by a missing mode. The genuinely separate "maintenance" activity is just auto-*application* (Q8) and proactive *scanning* (the repo audits). Resolution proposed in G26: refine the guard + add a `valence: defect | improvement` axis to the finding contract.
 
 ### Q4 — Findings vs. scores
 
@@ -223,3 +321,4 @@ First answer shipped (D10): the `choosing-review-lenses` router (situation → l
 
 Does maintenance include proactive hygiene (dead-code sweeps, dependency bumps, doc staleness) on a schedule, not just review-time? If so, some skills are *cron-shaped*, not *diff-shaped*.
 **Yes, and the cron shape is built for detection:** the six repo-shaped audits + `finding-maintainability-hotspots` are scheduled, whole-repo *detectors* (dead-code/debt, dep CVEs, doc staleness, …). **Still open:** the *fixing* half — skills that don't just flag but apply the change (sweep the dead code, bump the dep, refresh the stale doc). That residual is the same gap as Q3 (a maintenance/fixing mode vs. review/detection mode).
+**Narrowed by [`map-gaps.md`](map-gaps.md) G26 (2026-06-14):** the "fixing half" is *only auto-application*, and is partly served already by the broader `simplify` / `code-review --fix` skills. *Suggesting* the fix (apply/defer/ignore to the implementer) is review-time, not part of this residual — it's gated by the defect-only guard (G26), not by missing capability.
