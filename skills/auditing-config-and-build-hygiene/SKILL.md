@@ -14,7 +14,7 @@ provenance:
     hash: 6beb4e0197f9d737af372f8b572900ed9c6ca3fdb9a5534d77704009afd0bed5
   - category: 26
     source: docs/research/cluster-5-verification.md#26
-    hash: 332a4105b73167f5473ffd530cded8ae14cab373ebaa46588b191bc68a47d980
+    hash: 42e2be56b6d2859933b1a540245ad825af444334b08d1524956437dd6afc3f4a
 ---
 
 # auditing-config-and-build-hygiene
@@ -37,6 +37,7 @@ Report only real problems. If the code correctly handles the case, reply "No fin
 
 The head of the full checklist — enough for a first pass without opening any reference file:
 
+- **Portability**: any hardcoded paths, OS/arch assumptions, locale/encoding/timezone assumptions, or non-portable shell?
 - Does CI run the full gate on the diff — lint, format-check, type-check, tests, dep/security scan — and is passing **required** to merge?
 - Beyond that required floor, are the **deterministic quality signals** this stack benefits from actually present — **coverage reporting** (with a branch/diff threshold, not a vanity global %), a **performance benchmark** on the hot paths, and **complexity/maintainability scoring**? Their absence is a **preference-tunable advisory** (`route: implementer`), not a floor-tier block: surface "no coverage gate / no perf benchmark / no complexity budget" as a gap worth wiring up, and let a repo that deliberately skips it suppress the note (cross #17, #21).
 - Is the build **reproducible/hermetic** enough to not depend on machine-local state (pinned toolchain, lockfiles, no network in build)?

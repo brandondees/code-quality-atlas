@@ -6,6 +6,25 @@ import hashlib
 _SECTION_START = re.compile(r"^## #(\d+)\b", re.MULTILINE)
 _ANY_H2 = re.compile(r"^## ", re.MULTILINE)
 
+# A heuristic bullet may be flagged with this leading marker to force it into the
+# inlined Top checks regardless of its position in the list — G9: deep but
+# high-value factors otherwise never surface past the ~8-check budget in a
+# bundled lens. The marker is a generator directive only: it is stripped from all
+# rendered output (SKILL.md Top checks and reference/heuristics.md), while
+# section_hash still hashes the raw source, so drift stays consistent.
+PRIORITY_MARKER = "★ "
+
+
+def is_priority(bullet: str) -> bool:
+    """True if a bullet (leading '- ' already stripped) carries the marker."""
+    return bullet.startswith(PRIORITY_MARKER)
+
+
+def strip_priority(text: str) -> str:
+    """Remove the priority marker wherever it leads a bullet, for clean output.
+    A no-op on text that carries no marker."""
+    return text.replace("- " + PRIORITY_MARKER, "- ").replace(PRIORITY_MARKER, "")
+
 
 def extract_section(markdown: str, n: int) -> str:
     """Return the text of the `## #n …` section, from its heading up to the

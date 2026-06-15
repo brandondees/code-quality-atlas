@@ -13,7 +13,7 @@ provenance:
     hash: e57d4915e49200d858adbbc56c972154fb6dacf73a988c58de734ea8693339c0
   - category: 4
     source: docs/research/cluster-1-correctness.md#4
-    hash: edbaae06053db06279effec1209035390274cf3e8a4946afc0050e91f7be7ea2
+    hash: 63ae9d27a00a6a9575d63c6bc8a91c2d785f7d0ba313fd9416e3f61f8f730043
 ---
 
 # hunting-silent-failures

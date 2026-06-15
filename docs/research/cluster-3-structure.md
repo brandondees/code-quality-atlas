@@ -30,7 +30,7 @@
 - Is the interface **narrow relative to the behavior** behind it (deep module), or a shallow pass-through adding no value?
 - What is the **strongest connascence crossing the boundary**, and is it local? (Position/Algorithm connascence across modules is a smell; prefer Name/Type.)
 - Does it **hide its implementation** so internals can change without breaking callers?
-- Is it **hard to misuse** — invalid argument/call-sequence prevented by types, not docs (caller ergonomics / pit of success)?
+- ★ Is it **hard to misuse** — invalid argument/call-sequence prevented by types, not docs (caller ergonomics / pit of success)?
 - Any **Feature Envy** (method mostly manipulates another object's data → move it there)?
 - Any **Data Clump** (the same field/param cluster traveling together → extract a type)?
 - Law of Demeter respected (no `a.b.c.d` train-wreck reach-through)?

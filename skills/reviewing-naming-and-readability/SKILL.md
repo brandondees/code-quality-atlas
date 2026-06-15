@@ -12,7 +12,7 @@ provenance:
     hash: bed0a9380176c7dba9c8db79f4210b17fe0c0394535b60b13f4a03ad9f363be0
   - category: 6
     source: docs/research/cluster-2-readability.md#6
-    hash: fbcdaa81071892f915f9c0153acab661785875cfc1bd85dce73cf751479baad4
+    hash: 89afcabd80accc6737f64bc5a565165ad39c008b4a5f1408d1379c8f5303b135
   - category: 7
     source: docs/research/cluster-2-readability.md#7
     hash: 834a07c39d7656d1186eb6d5990f09f1e3cb3689a86a2002532d7391c7015134
@@ -38,6 +38,7 @@ Report only real problems. If the code correctly handles the case, reply "No fin
 
 The head of the full checklist — enough for a first pass without opening any reference file:
 
+- **Symmetry of expression**: parallel concepts in parallel form (all branches `return x`); paired operations adjacent and mirror-shaped (`acquire`/`release`); consistent argument ordering across sibling calls.
 - Does each name state *intent* (what/why) rather than *mechanism* or type? (`activeUsers` over `userListFiltered`; `retryBudget` over `n`.)
 - Is name length proportional to scope? (One letter fine for a 3-line loop; a field or exported symbol needs a descriptive name.)
 - Any placeholder/temporary name surviving into the diff? (`tmp`, `data`, `data2`, `obj`, `foo`, `handleStuff`, `Manager`, `Helper`, `Util`.) Flag as "stage: nonsense/honest-incomplete — refine one stage."

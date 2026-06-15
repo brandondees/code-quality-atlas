@@ -94,6 +94,72 @@ def test_top_checks_cap_cross_ref_categories():
     assert len(from_4) <= 2
 
 
+def _research_with_deep_priority(tmp_path):
+    # one section, a long heuristics list, a high-value factor marked priority
+    # well past the ~8-check budget so position alone would never surface it.
+    bullets = "\n".join(f"- Ordinary check number {i}?" for i in range(1, 13))
+    doc = (
+        "# Research — Marker Sample\n\n"
+        "## #7 Some category\n\n"
+        "### Reviewable heuristics (skill-checklist seeds)\n\n"
+        f"{bullets}\n"
+        "- ★ Deep but high-value factor that must surface?\n"
+    )
+    p = tmp_path / "research.md"
+    p.write_text(doc, encoding="utf-8")
+    return Skill(name="some-lens", description="x", shape="diff", wave=1,
+                 built_from=[Source(7, "research.md#7")])
+
+
+def test_priority_marked_deep_factor_surfaces_in_top_checks(tmp_path):
+    # G9: a marked bullet inlines even though its position is past the budget,
+    # and the marker is stripped from the rendered check.
+    skill = _research_with_deep_priority(tmp_path)
+    checks = top_checks(skill, docs_root=str(tmp_path))
+    assert "Deep but high-value factor that must surface?" in checks
+    assert "★" not in " ".join(checks)
+    # an *unmarked* check at the same deep position is still excluded
+    assert "Ordinary check number 12?" not in checks
+    # additive, not displacing: the marker GROWS the list (1 priority + the full
+    # 8-check position budget = 9) instead of dropping a position-based check to
+    # "make room". A substituting impl that kept the total at 8 would fail here.
+    assert len(checks) == 9
+    assert "Ordinary check number 8?" in checks  # last position-based check kept
+
+
+def test_priority_marker_stripped_from_heuristics_reference(tmp_path):
+    skill = _research_with_deep_priority(tmp_path)
+    ref = build_reference(skill, kind="heuristics", docs_root=str(tmp_path))
+    assert "Deep but high-value factor that must surface?" in ref
+    assert "★" not in ref
+
+
+def test_priority_marker_ignored_in_cross_ref_categories(tmp_path):
+    # owner-only: a marked bullet in a CROSS-REF category, sitting past the
+    # positional quota, must NOT force-surface — a factor is promoted only in the
+    # lens that owns the category, not in every lens that shares it.
+    doc = (
+        "# Research — Cross-ref Marker Sample\n\n"
+        "## #7 Owned category\n\n"
+        "### Reviewable heuristics (skill-checklist seeds)\n\n"
+        "- Primary check one?\n- Primary check two?\n\n"
+        "## #8 Shared category\n\n"
+        "### Reviewable heuristics (skill-checklist seeds)\n\n"
+        "- Shared one?\n- Shared two?\n- Shared three?\n"
+        "- ★ Marked shared factor deep in the cross-ref list?\n"
+    )
+    p = tmp_path / "xref.md"
+    p.write_text(doc, encoding="utf-8")
+    skill = Skill(name="xref-lens", description="x", shape="diff", wave=1,
+                  built_from=[Source(7, "xref.md#7"), Source(8, "xref.md#8")],
+                  cross_ref=[8])
+    checks = top_checks(skill, docs_root=str(tmp_path))
+    assert "Marked shared factor deep in the cross-ref list?" not in checks
+    assert "★" not in " ".join(checks)
+    # the cross-ref still contributes its positional quota, marker-free
+    assert "Shared one?" in checks and "Shared two?" in checks
+
+
 def test_picker_renders_as_scannable_tagline():
     # The one-line picker is surfaced at the top of the body so the lens is
     # recognizable at a glance, above the trigger-rich description.

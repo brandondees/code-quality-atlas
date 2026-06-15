@@ -78,6 +78,8 @@ Three mechanisms drive the leak:
 
 **Fix surface** (spans three layers): the **manifest** (promote dropped/thin factors into inlined checks; rebalance the bundled-category budgets), the **research docs** (the two genuinely-missing #12 factors need research before they can be a check), and the **router** (stop the under-selection — Q14). Diff-shaped factors regenerate from the manifest; #12 scalability/feature-flag-design need a research pass first.
 
+**✅ Partial fix shipped 2026-06-15 (the budget layer).** Added an **inline-priority marker** (`★`) the generator honors: a research heuristic bullet flagged with it is *additively* inlined into the owning lens's **Top checks** regardless of position (marker stripped from all output; cross-ref lenses ignore it so a factor surfaces only in its owner; `section_hash` unchanged so drift stays clean). Because it is additive, promoting a deep factor never displaces a foundational position-based check — only a marked lens grows, by the number of marks, keeping it targeted rather than a blanket budget raise. Promoted the demonstrated leakers: **calendar/clock time-bombs** + **numeric overflow** (#4), **claims-vs-evidence** + **agent-native parity** (#24), **caller-ergonomics / pit-of-success** (#9), **portability** (#26), **symmetry of expression** (#6). Still open: the **router under-selection** (Q14) and **severity-trimming** layers — a lens still has to be *selected* to apply its now-surfaced factor.
+
 ## G10 — The enforcement apparatus (and the meta-layer generally) was never framed as a reviewable surface
 
 Surfaced 2026-06-12 chasing "where would *set up a vuln scanner* or *tidy up linter ignores* live?" The answer split three ways and exposed a **framing**-level gap deeper than G9's propagation gap:

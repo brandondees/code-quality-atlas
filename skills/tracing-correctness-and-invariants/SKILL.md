@@ -15,7 +15,7 @@ provenance:
     hash: a731dbba0203ecaecbea20b4f5fd55e427df59cff4565a35e865895ab4557a64
   - category: 4
     source: docs/research/cluster-1-correctness.md#4
-    hash: edbaae06053db06279effec1209035390274cf3e8a4946afc0050e91f7be7ea2
+    hash: 63ae9d27a00a6a9575d63c6bc8a91c2d785f7d0ba313fd9416e3f61f8f730043
 ---
 
 # tracing-correctness-and-invariants
@@ -38,6 +38,8 @@ Report only real problems. If the code correctly handles the case, reply "No fin
 
 The head of the full checklist — enough for a first pass without opening any reference file:
 
+- Are numeric overflow/underflow and counter wraparound considered for the actual value ranges?
+- **Calendar/clock time-bombs (correct at merge, detonates on a future date):** does date/time logic survive the triggers that pass review only because today is an ordinary day — leap year (Feb 29) and leap second, DST spring-forward/fall-back gaps and overlaps, month/year rollover, and the 32-bit `time_t` **epoch-2038** ceiling? Flag hardcoded years/dates, `day + 1`-style arithmetic that ignores real calendars, and "always 365 days / 24 hours" assumptions — latent defects that a clock eventually arms.
 - Does every branch and early return preserve the function's stated invariant/postcondition?
 - Are boundary values (0, 1, n−1, n, empty, max, negative) explicitly handled — and tested?
 - Any off-by-one in ranges, slices, loop bounds, inclusive/exclusive ends?

@@ -1,9 +1,21 @@
 # SPDX-License-Identifier: MIT
 # tests/test_sections.py
 from pathlib import Path
-from tooling.sections import extract_section
+from tooling.sections import (extract_section, is_priority, strip_priority,
+                             PRIORITY_MARKER)
 
 SAMPLE = Path("tests/fixtures/research_sample.md").read_text()
+
+
+def test_priority_marker_detection_and_stripping():
+    assert is_priority(PRIORITY_MARKER + "Calendar time-bombs?")
+    assert not is_priority("Are caches bounded?")
+    # stripped at a bullet boundary and inline; a no-op when absent
+    assert strip_priority(f"- {PRIORITY_MARKER}Calendar?") == "- Calendar?"
+    # inline form (no "- " prefix) — the path top_checks takes on an already-
+    # extracted bullet
+    assert strip_priority(f"{PRIORITY_MARKER}Calendar?") == "Calendar?"
+    assert strip_priority("- Are caches bounded?") == "- Are caches bounded?"
 
 def test_extract_section_returns_named_section_only():
     text = extract_section(SAMPLE, 2)

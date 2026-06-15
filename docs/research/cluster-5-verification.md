@@ -173,7 +173,7 @@
 - Are **safe, secure defaults** used (deny-by-default, TLS on, debug off in prod — cross #14)?
 - **Dev/prod parity**: does the change keep environments close (same backing services, same config shape), avoiding env-specific code branches?
 - New **feature flag**: does it have an owner and a **removal plan**? Are stale/dead flags being cleaned up (debt — cross #21)?
-- **Portability**: any hardcoded paths, OS/arch assumptions, locale/encoding/timezone assumptions, or non-portable shell?
+- ★ **Portability**: any hardcoded paths, OS/arch assumptions, locale/encoding/timezone assumptions, or non-portable shell?
 - Are **secrets** sourced from a manager/env (never repo or logs) and rotatable?
 - Is configuration **documented** (each var's purpose, required vs optional, default)?
 
