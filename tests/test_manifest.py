@@ -44,6 +44,26 @@ def test_real_manifest_passes_comment_truncation_guard():
     # the shipped manifest must stay clean (and load_manifest enforces the guard)
     load_manifest("skills/manifest.yaml")
 
+
+def test_real_manifest_has_cross_quality_tensions():
+    # G31: the tensions table must cover pairs where neither side is restraint,
+    # so cross-quality collisions get a default instead of falling back to the
+    # generic "safer and simpler".
+    m = load_manifest("skills/manifest.yaml")
+    cross_quality = [t for t in m.synthesizer.tensions
+                     if "checking-restraint" not in t.between]
+    # enforce pair-level coverage, not loose substrings: the three G31 pairs
+    # whose lenses exist today must all be present.
+    pairs = {tuple(sorted(t.between)) for t in cross_quality}
+    assert len(cross_quality) >= 3
+    assert tuple(sorted(["reviewing-performance-and-efficiency",
+                         "reviewing-accessibility-and-i18n"])) in pairs
+    assert tuple(sorted(["reviewing-observability-and-operability",
+                         "auditing-compliance-and-provenance"])) in pairs
+    assert tuple(sorted(["checking-idioms-and-consistency",
+                         "finding-maintainability-hotspots"])) in pairs
+    validate(m)  # the new tensions reference real, distinct lenses
+
 def test_load_manifest_parses_skill_and_sources():
     m = load_manifest("tests/fixtures/manifest_sample.yaml")
     assert isinstance(m, Manifest)

@@ -11,7 +11,7 @@ provenance:
   built_from:
   - category: 19
     source: docs/research/cluster-5-verification.md#19
-    hash: 10e8a2c0840226222cb146a50f937358eb30bedab3c75a57a0f87a63754a9914
+    hash: 6beb4e0197f9d737af372f8b572900ed9c6ca3fdb9a5534d77704009afd0bed5
   - category: 26
     source: docs/research/cluster-5-verification.md#26
     hash: 332a4105b73167f5473ffd530cded8ae14cab373ebaa46588b191bc68a47d980
@@ -38,13 +38,17 @@ Report only real problems. If the code correctly handles the case, reply "No fin
 The head of the full checklist — enough for a first pass without opening any reference file:
 
 - Does CI run the full gate on the diff — lint, format-check, type-check, tests, dep/security scan — and is passing **required** to merge?
+- Beyond that required floor, are the **deterministic quality signals** this stack benefits from actually present — **coverage reporting** (with a branch/diff threshold, not a vanity global %), a **performance benchmark** on the hot paths, and **complexity/maintainability scoring**? Their absence is a **preference-tunable advisory** (`route: implementer`), not a floor-tier block: surface "no coverage gate / no perf benchmark / no complexity budget" as a gap worth wiring up, and let a repo that deliberately skips it suppress the note (cross #17, #21).
 - Is the build **reproducible/hermetic** enough to not depend on machine-local state (pinned toolchain, lockfiles, no network in build)?
 - Is CI **fast and reliable**? A new slow/flaky job is a defect — parallelized, cached, deterministic?
-- Is any **quality gate disabled or soft-failed** (`continue-on-error`, `|| true`, `allow_failure`, a skipped/excluded check) — a deliberate, tracked decision or silent debt? A gate that's off because its tool broke on the current toolchain (language/runtime version, build) is a **gap to close**: fix it or swap in a maintained equivalent — often a younger, less well-known one — not a permanent `continue-on-error` (cross #21).
 - Is config **separated from code** and injected via env — no secrets or env-specific values hardcoded/committed?
 - Is config **validated at startup** (fail fast, clear message), not lazily at first use?
 - Are **safe, secure defaults** used (deny-by-default, TLS on, debug off in prod — cross #14)?
 - **Dev/prod parity**: does the change keep environments close (same backing services, same config shape), avoiding env-specific code branches?
+
+## Mechanizing these checks
+
+Where a finding here is one a tool can catch deterministically, surface that as an advisory `route: implementer` note next to the finding: the hand review caught it this time, and wiring the matching tool from [reference/tool-rules.md](reference/tool-rules.md) into CI gates it going forward. This is a suggestion to mechanize, not a defect — it never blocks a verdict, and it falls away on a repo that already runs the tool.
 
 ## Going deeper
 

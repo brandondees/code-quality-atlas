@@ -32,6 +32,7 @@ Fan-out is **advisory by default**: you run each lens the router named, collect 
 3. **Reconcile** — when two lenses pull opposite ways, do not silently drop one. Surface the tension and apply the default below, noting the trade-off so the author can override with evidence.
 4. **Rank** — order by severity (**Blocker** > **Major** > **Minor** > **Nit**). A Blocker-level finding floats to the top no matter which lens raised it; correctness, security, and data-loss findings outrank style and nits.
 5. **Verdict** — one line at the top: **block**, **approve with changes**, or **approve**. A single Blocker is enough to block; only nits left means approve. **Valence governs the verdict, not route.** A `defect` sets the verdict per its severity *even when its remediation decision is routed elsewhere* — a GPL-incompatible dependency is a blocking defect **and** a `route: legal` escalation, not an "approve" that quietly defers to legal. Route only changes *who decides the fix*, never whether the diff has a problem. Only `improvement` nits and **non-defect** routed findings (a product, design, or leadership judgment call with no defect behind it) are surfaced and escalated without setting the engineering verdict. If every lens found nothing, the whole report is "No findings" — do not manufacture a harsher verdict than the findings justify.
+6. **State coverage & limitations** — close the report with what the review did *not* establish: which lenses ran and which the router did not select, anything that could not be verified from the diff alone (needs runtime behavior, production data, or repo-wide context), and any finding asserted without direct evidence. A confident verdict silent on its own blind spots manufactures false assurance — itself a defect of the review. Name the gaps so the reader knows the review's edges. Keep it to a few lines; if coverage was complete and nothing was unverifiable, say so in one line rather than padding. This block is **always present**, including on a "No findings" report.
 
 ## Reconciling lens tensions
 
@@ -45,6 +46,9 @@ When the change trips one of these known opposing pairs, apply the default and s
 | `checking-restraint` ↔ `reviewing-api-contract-safety` | new validation or surface "to be safe" vs. leaving it out | "When in doubt, leave it out" — minimal new public surface wins; add validation only on surface that actually ships now. |
 | `reviewing-performance-and-efficiency` ↔ `reviewing-naming-and-readability` | a fast but cryptic form vs. a clear but slower one | Keep the readable form unless a profile proves the clear version is the bottleneck; if the fast form must stay, require a comment explaining why. |
 | `checking-restraint` ↔ `reviewing-resilience-and-scalability` | defensive resilience machinery (retries, circuit breakers, multi-region, extra replicas) vs. simplicity | Add resilience in proportion to the availability/scale target and the failure modes the system will actually face; do not engineer for scale or failures with no stated requirement. Restraint wins absent an SLO or scale target — but a real unbounded queue, missing timeout, or untested restore is a correctness/operability defect, not gold-plating, and stands. |
+| `reviewing-observability-and-operability` ↔ `auditing-compliance-and-provenance` | how much to log for operability vs. keeping PII and secrets out of logs | Log enough to operate and debug, but never PII, secrets, or regulated data in the clear — redact or tokenize at the logging boundary. Privacy wins on any field that could identify a person; add scrubbed, structured fields rather than dropping the observability. |
+| `reviewing-performance-and-efficiency` ↔ `reviewing-accessibility-and-i18n` | a leaner/faster UI vs. accessible markup and assistive-tech support | Accessibility is a correctness requirement, not an optimization to trade away. Keep the accessible markup and hit the performance target another way (lazy-load, code-split, cache). Drop a11y only against a measured budget proving no other path exists — which is almost never. |
+| `checking-idioms-and-consistency` ↔ `finding-maintainability-hotspots` | matching the existing pattern vs. changing it to reduce future churn | Stay consistent with the established idiom by default; diverge only when the current pattern is a demonstrated maintenance hotspot (high change-amplification or repeated edits) and the new form measurably lowers that cost. Consistency wins until evolvability has evidence. |
 
 For a tension not in this table, prefer the **safer and simpler** option, and say what evidence would change the call.
 
@@ -86,9 +90,13 @@ Improvements — opt-in, optional
 
 Tensions
 - <lens> ↔ <lens>: <how it was resolved here>
+
+Coverage & limitations
+- Lenses run: <names>. Not selected: <names, or "none">.
+- Not verifiable from this diff: <what needs runtime, data, or repo-wide context to confirm, or "nothing">.
 ```
 
-Omit any section with no findings — including **Routed** and **Improvements** (the latter is absent entirely unless the team opted into improvement-valence suggestions). Keep each finding to one or two lines; the detail lives in the originating lens's output, not restated here.
+Omit any **findings** section with nothing in it — including **Routed** and **Improvements** (the latter is absent entirely unless the team opted into improvement-valence suggestions). **Coverage & limitations** is the exception: it is always present, even on a "No findings" report. Keep each finding to one or two lines; the detail lives in the originating lens's output, not restated here.
 
 ## Reviewer discipline
 

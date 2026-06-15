@@ -658,3 +658,24 @@ synthesizer:
         failures with no stated requirement. Restraint wins absent an SLO or scale
         target — but a real unbounded queue, missing timeout, or untested restore
         is a correctness/operability defect, not gold-plating, and stands.
+    - between: [reviewing-observability-and-operability, auditing-compliance-and-provenance]
+      about: how much to log for operability vs. keeping PII and secrets out of logs
+      resolve: >
+        Log enough to operate and debug, but never PII, secrets, or regulated
+        data in the clear — redact or tokenize at the logging boundary. Privacy
+        wins on any field that could identify a person; add scrubbed, structured
+        fields rather than dropping the observability.
+    - between: [reviewing-performance-and-efficiency, reviewing-accessibility-and-i18n]
+      about: a leaner/faster UI vs. accessible markup and assistive-tech support
+      resolve: >
+        Accessibility is a correctness requirement, not an optimization to trade
+        away. Keep the accessible markup and hit the performance target another
+        way (lazy-load, code-split, cache). Drop a11y only against a measured
+        budget proving no other path exists — which is almost never.
+    - between: [checking-idioms-and-consistency, finding-maintainability-hotspots]
+      about: matching the existing pattern vs. changing it to reduce future churn
+      resolve: >
+        Stay consistent with the established idiom by default; diverge only when
+        the current pattern is a demonstrated maintenance hotspot (high
+        change-amplification or repeated edits) and the new form measurably lowers
+        that cost. Consistency wins until evolvability has evidence.

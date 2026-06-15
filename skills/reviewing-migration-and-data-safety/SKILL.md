@@ -44,6 +44,10 @@ The head of the full checklist — enough for a first pass without opening any r
 - Are **transaction boundaries** correct — multi-step writes atomic, no partial commit on failure (cross #2)?
 - Is **destructive DDL** (DROP column/table) gated until the new path is verified live and old code drained?
 
+## Mechanizing these checks
+
+Where a finding here is one a tool can catch deterministically, surface that as an advisory `route: implementer` note next to the finding: the hand review caught it this time, and wiring the matching tool from [reference/tool-rules.md](reference/tool-rules.md) into CI gates it going forward. This is a suggestion to mechanize, not a defect — it never blocks a verdict, and it falls away on a repo that already runs the tool.
+
 ## Going deeper
 
 - [reference/heuristics.md](reference/heuristics.md) — the full checklist; open it when the change sits squarely in this lens's domain.
