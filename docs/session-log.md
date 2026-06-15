@@ -1244,6 +1244,6 @@ Four more Wave B add-factors, each at a single G1 owner, regenerated from resear
 
 **Marking discipline:** only G29 and G25 marked priority — high value, currently leaking, owning lens at <=8 top-checks. G13/G12 land in the full checklist; #21/#24 are already heavily surfaced and G12 is explicitly meant to earn a lens before claiming a top slot. Both marked lenses now run 9 top-checks (additive, no foundational displaced).
 
-**Verification:** `pytest tests/` 94 pass; `cli drift` clean; `cli eval` OK (+4 scenarios: hunting 4, performance 4, maintainability 4, pr-hygiene 5); markdownlint 0 errors. Cross-model re-gate pending (batch with G32).
+**Verification:** `pytest tests/` 94 pass; `cli drift` clean; `cli eval` OK (+4 scenarios: hunting 4, performance 4, maintainability 4, pr-hygiene 5); markdownlint 0 errors. **Cross-model re-gate: target Wave B close-out (the G32 PR), no earlier than 2026-06-16** — batched rather than per-factor (mechanism/prose, no new judgment lens); the G32 PR is the trigger to run it across #48 / #50 / G32 together.
 
 **Resolves:** G29, G25 → shipped; G13 parts (1)+(3) shipped (part 2 = Q8); G12 shipped as factor. **Wave B remaining: G32** (pre-existing/adjacent defects — the attribution axis, its own PR next).
