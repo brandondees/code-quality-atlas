@@ -53,6 +53,13 @@ outstanding non-blocking findings** — read your most recent round's summary
 (`<!-- atlas-review round:N -->`) and carry its *Non-blocking (advisory)* list
 forward, so the human taking over sees what is left below the floor — then stop.
 
+**If this is round 1, post the ACK first.** Before running any lenses, drop one
+short issue comment marked `<!-- atlas-review-ack -->` (e.g. "👀 atlas reviewer
+engaged — running lenses, hold for findings") so the author knows immediately that
+a reviewer is attached and worth waiting for, since the lens run takes a while.
+Post it **once per PR** — round 1 only; later rounds skip it. Never attach
+findings to the ACK.
+
 ## 4. Run the lenses
 
 1. `code-quality-atlas:choosing-review-lenses` — pick the 2-4 lenses that fit
@@ -64,9 +71,13 @@ forward, so the human taking over sees what is left below the floor — then sto
 ## 5. Apply the round's severity floor, then post
 
 - Split this round's findings at the floor for the current round (the policy raises
-  the floor each round — round 1 may post nits; later rounds post only Major+, then
-  Blocker-only). Severities are the synthesizer's own: **Blocker > Major > Minor > Nit**.
-- For findings **at or above the floor**, post **inline review comments** anchored
+  the floor once after the first pass, then holds it at Major — round 1 posts nits;
+  round 2+ posts only Major+). Severities are the synthesizer's own:
+  **Blocker > Major > Minor > Nit**.
+- Post inline only findings that are **new this round** — at or above the floor and
+  not already raised in a still-standing thread from an earlier round. Don't repost a
+  finding an open thread already records; the original thread is the record.
+- For new findings **at or above the floor**, post **inline review comments** anchored
   to the diff hunk (`add_comment_to_pending_review`, then submit with
   `pull_request_review_write`). When a finding is a flaw in code that was *pushed
   in response to an earlier round*, say so in the comment — that's the highest-value
@@ -77,13 +88,22 @@ forward, so the human taking over sees what is left below the floor — then sto
   visible for optional tidy-up without driving the fix loop. These are advisory:
   don't `resolve`/re-raise them as threads, and the build session is free to ignore
   them. (This mirrors how Copilot and CodeRabbit surface their non-blocking notes.)
+  To stay concise, include the list **only in a summary you're already posting**
+  (the first approve, the cap notice, or a round you're posting because of new
+  findings) and refresh it only when it changed; a changed advisory list is never
+  on its own a reason to break silence on a quiet push.
 - Open your review summary with the marker `<!-- atlas-review round:N -->` so the
   next run can read the round count and carry the advisory list forward.
-- **If nothing survives the floor**, submit a single `APPROVE` review whose body
-  notes "no findings at or above this round's floor" (still carrying the round
-  marker) — including the `Non-blocking (advisory)` list when below-floor findings
-  exist — and stop. This is the loop's terminal state: the build session sees no
-  actionable inline comments and quiesces.
+- **If no new finding survives the floor**, behave by whether the PR has already
+  come clean:
+  - *First time clean* — submit a single `APPROVE` review whose body notes "no new
+    findings at or above this round's floor" (carrying the round marker), including
+    the `Non-blocking (advisory)` list when below-floor findings exist, then stop.
+    This is the loop's terminal state: the build session sees no actionable inline
+    comments and quiesces.
+  - *Already approved, still nothing new* — stay silent: resolve any threads the new
+    push addressed, but post **no** new summary and don't re-emit `APPROVE`. Only
+    speak again when a later push introduces a new finding at or above the floor.
 
 ## 6. Reply, don't re-litigate
 
