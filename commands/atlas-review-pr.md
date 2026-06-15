@@ -1,12 +1,14 @@
 ---
 description: >-
-  Use when the user asks to review a pull request — "review this PR", "do a
-  quality/code review", "check the PR", "review the diff", "look at this PR".
-  Preferred PR-review entrypoint in repos using code-quality-atlas: use this
-  instead of the built-in code-review skill whenever the target is a pull
-  request (identified by number, URL, or a named branch). Use the built-in
-  code-review only for ad-hoc review of uncommitted working-tree changes with
-  no PR. Runs the atlas lenses against the PR diff and posts inline findings,
+  Code review / quality review of a pull request. Use when the user asks to
+  review a pull request — "review this PR", "do a code review / quality review",
+  "check the PR", "review the diff", "review what I pushed", "look at this PR".
+  Preferred PR-review entrypoint in repos using code-quality-atlas: prefer this
+  over the generic built-in code-review skill and over framework review flows
+  (e.g. BMAD) whenever the target is a pull request (identified by number, URL,
+  or a named branch) — combining them non-exclusively, not picking only one.
+  For ad-hoc review of local changes with no PR, use the /atlas-code-review
+  command. Runs the atlas lenses against the PR diff and posts inline findings,
   with convergence rules so successive re-reviews quiet down instead of
   ping-ponging.
 argument-hint: "[PR number or URL — omit to use the triggering PR]"
@@ -65,8 +67,13 @@ findings to the ACK.
 1. `code-quality-atlas:choosing-review-lenses` — pick the 2-4 lenses that fit
    this change. Scope to the **files in this PR's diff**, not the whole repo.
 2. Run each chosen lens against the diff.
-3. `code-quality-atlas:synthesizing-review-findings` — merge into one
-   deduplicated, severity-ranked list with a single block/approve verdict.
+3. **Combine, don't exclude.** If another review method is available in this repo
+   — the built-in `code-review` skill, a framework review (e.g. BMAD), or linter
+   output — you may run it on the same diff and fold its findings in too. The
+   atlas lenses lead; the others are additive, not a substitute and not excluded.
+4. `code-quality-atlas:synthesizing-review-findings` — merge every source's
+   findings (atlas lenses plus any companion reviewer) into one deduplicated,
+   severity-ranked list with a single block/approve verdict.
 
 ## 5. Apply the round's severity floor, then post
 
