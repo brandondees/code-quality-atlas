@@ -2,11 +2,15 @@
 
 ## Skill routing
 
-When working in this repository, use these instead of the built-in equivalents. (Plugin consumers: copy the *Skill routing* section to your project's CLAUDE.md to apply this policy there — Claude Code reads CLAUDE.md from your working directory, not from plugin repos.)
+For **any code review, quality review, or "review this PR / diff / change / what I pushed" request, the code-quality-atlas suite is the primary path** — prefer it over the generic built-in `code-review` skill and over framework review flows (e.g. BMAD), which it subsumes with deeper coverage. This is a precedence rule, **not** an exclusivity rule: combine the methods **non-exclusively** — you may still run the built-in `code-review` or a framework review on the same change, then fold every source's findings through `synthesizing-review-findings` for one ranked verdict.
 
 | Task | Use |
 |---|---|
-| Review a pull request (number, URL, or branch) | the `/code-quality-atlas:atlas-review-pr` **command** |
-| Ad-hoc review of uncommitted local changes (no PR) | built-in `code-review` |
+| Review a pull request (number, URL, or named branch) | the `/code-quality-atlas:atlas-review-pr` **command** |
+| Code review of local changes with no PR (working tree, or a pushed branch without a PR) | the `/code-quality-atlas:atlas-code-review` **command** |
+| Unsure which lenses a change needs | the `choosing-review-lenses` skill, then the lenses it names |
+| Merge several reviewers' findings into one verdict | the `synthesizing-review-findings` skill |
 
-`atlas-review-pr` is a **slash command** (`commands/atlas-review-pr.md`), not a Skill-tool skill — invoke it as `/code-quality-atlas:atlas-review-pr`. The built-in `code-review` skill is for working-tree diffs; the command is for anything with a PR. In routine/web sessions where slash commands don't resolve, read and follow `commands/atlas-review-pr.md` from the clone instead — see [`docs/runbooks/pr-review-automation.md`](docs/runbooks/pr-review-automation.md).
+`atlas-review-pr` and `atlas-code-review` are **slash commands** (`commands/`), not Skill-tool skills — invoke them as `/code-quality-atlas:atlas-review-pr` / `/code-quality-atlas:atlas-code-review`. In routine/web sessions where slash commands don't resolve, read and follow the matching file from the clone instead — see [`docs/runbooks/pr-review-automation.md`](docs/runbooks/pr-review-automation.md).
+
+**Plugin consumers:** don't hand-copy this section — run the `/code-quality-atlas:atlas-init` command, which writes the routing block into your repo's `CLAUDE.md` **and** `AGENTS.md` (agents read different files) and keeps it current. The canonical block lives in [`templates/agents-routing-snippet.md`](templates/agents-routing-snippet.md). This repo's own [`AGENTS.md`](AGENTS.md) mirrors the block as a dogfood.

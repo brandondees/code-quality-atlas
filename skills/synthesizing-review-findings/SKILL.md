@@ -1,11 +1,13 @@
 ---
 name: synthesizing-review-findings
-description: 'Merges the findings of several code-quality-atlas lenses into one review:
-  deduplicates issues raised by more than one lens, reconciles lenses that pull opposite
-  ways (e.g. restraint vs. coverage, cache vs. profile), ranks by severity, and ends
-  on a single block/approve verdict. Use after running 2-4 review lenses on a change,
-  when assembling multi-lens output into one report, or when overlapping reviewers''
-  findings need deduplicating and prioritizing.'
+description: 'Merges the findings of several code-quality-atlas lenses — and of any
+  other review method run alongside them (the built-in code-review skill, a framework
+  review like BMAD, linter output, or human notes) — into one review: deduplicates
+  issues raised by more than one source, reconciles lenses that pull opposite ways
+  (e.g. restraint vs. coverage, cache vs. profile), ranks by severity, and ends on
+  a single block/approve verdict. Use after running 2-4 review lenses (and any companion
+  reviewers) on a change, when assembling multi-source review output into one report,
+  or when overlapping findings need deduplicating and prioritizing.'
 provenance:
   taxonomy_version: v0.3
   built_from: []
@@ -15,7 +17,7 @@ provenance:
 
 ## When to use
 
-Merges the findings of several code-quality-atlas lenses into one review: deduplicates issues raised by more than one lens, reconciles lenses that pull opposite ways (e.g. restraint vs. coverage, cache vs. profile), ranks by severity, and ends on a single block/approve verdict. Use after running 2-4 review lenses on a change, when assembling multi-lens output into one report, or when overlapping reviewers' findings need deduplicating and prioritizing.
+Merges the findings of several code-quality-atlas lenses — and of any other review method run alongside them (the built-in code-review skill, a framework review like BMAD, linter output, or human notes) — into one review: deduplicates issues raised by more than one source, reconciles lenses that pull opposite ways (e.g. restraint vs. coverage, cache vs. profile), ranks by severity, and ends on a single block/approve verdict. Use after running 2-4 review lenses (and any companion reviewers) on a change, when assembling multi-source review output into one report, or when overlapping findings need deduplicating and prioritizing.
 
 **Shape: composition.** Runs after `choosing-review-lenses` has picked the lenses and you have each lens's findings in hand; it produces the single review a human or agent actually reads. It adds no new checks of its own — it only merges.
 
@@ -25,7 +27,7 @@ Fan-out is **advisory by default**: you run each lens the router named, collect 
 
 ## How to synthesize
 
-1. **Collect** — gather every lens's findings, tagging each with the lens that raised it. A lens that reported "No findings" contributes nothing; do not pad the report on its behalf.
+1. **Collect** — gather every lens's findings, tagging each with the lens that raised it. Fold in findings from any **companion reviewer** run alongside the atlas lenses — the built-in code-review skill, a framework review (e.g. BMAD), linter or scanner output, or human notes — tagging each with its source so the merge is non-exclusive rather than atlas-only. A source that reported "No findings" contributes nothing; do not pad the report on its behalf.
 2. **Dedupe** — two findings at the **same location with the same root cause** are one finding. Keep the most specific wording and attribute it to the category's **primary owner** (named in each lens's *Shared categories* note); list the other lens only if it adds a distinct angle. Never report a shared finding twice.
 3. **Reconcile** — when two lenses pull opposite ways, do not silently drop one. Surface the tension and apply the default below, noting the trade-off so the author can override with evidence.
 4. **Rank** — order by severity (**Blocker** > **Major** > **Minor** > **Nit**). A Blocker-level finding floats to the top no matter which lens raised it; correctness, security, and data-loss findings outrank style and nits.

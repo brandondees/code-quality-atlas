@@ -38,7 +38,9 @@ All **22 behaviors / 27 categories** from the [phase-2 design](docs/phase-2-skil
 
 ## Using the suite
 
-Start with **`choosing-review-lenses`** when you are unsure which lenses apply — it maps the change shape (bug fix, migration, async code, API change, design doc, repo audit, …) to the right 2-4 lenses and carries a one-line catalog of all of them. When the relevant lenses are already obvious (an async change → `reviewing-concurrency-and-async`), call them directly; every lens is built to run on its own and now leads with a one-line summary and explicit *Skip when…* guidance. Each lens's `SKILL.md` is self-sufficient for a first pass; its `reference/heuristics.md` holds the full checklist. When you've run more than one lens, finish with **`synthesizing-review-findings`** to fold their findings into one deduplicated, ranked, single-verdict review — and to fan the suite across **many repos** at once, see the [multi-repo audit runbook](docs/runbooks/multi-repo-audit.md).
+For a whole PR, the fastest entrypoint is the **`/atlas-review-pr`** command; for ad-hoc local changes with no PR (a working tree, or a branch pushed without a PR), use **`/atlas-code-review`**. Both lead with the atlas lenses and **combine non-exclusively** — they're built to supersede the generic built-in `code-review` skill and framework reviews (e.g. BMAD) as the *primary* path while still letting you fold those other methods' findings in through the synthesizer, rather than picking only one. Wire that preference into a repo for good with **`/atlas-init`** (see [Install](#wire-routing-into-claudemd--agentsmd-recommended-default)).
+
+Working a change by hand, start with **`choosing-review-lenses`** when you are unsure which lenses apply — it maps the change shape (bug fix, migration, async code, API change, design doc, repo audit, …) to the right 2-4 lenses and carries a one-line catalog of all of them. When the relevant lenses are already obvious (an async change → `reviewing-concurrency-and-async`), call them directly; every lens is built to run on its own and now leads with a one-line summary and explicit *Skip when…* guidance. Each lens's `SKILL.md` is self-sufficient for a first pass; its `reference/heuristics.md` holds the full checklist. When you've run more than one lens, finish with **`synthesizing-review-findings`** to fold their findings into one deduplicated, ranked, single-verdict review — and to fan the suite across **many repos** at once, see the [multi-repo audit runbook](docs/runbooks/multi-repo-audit.md).
 
 ## Install
 
@@ -103,6 +105,39 @@ on the install path:
 > marketplace update`, see the opt-in
 > [`tooling/keep-plugin-current.sh`](tooling/keep-plugin-current.sh) helper below.
 
+#### Wire routing into CLAUDE.md / AGENTS.md (recommended default)
+
+Installing the plugin makes the suite *available*; it does not guarantee an agent
+*reaches for it*. On a plain "code review this" or "review PR #50" request, the
+model does keyword matching over the skills it can see, and the shorter-named
+built-in `code-review` skill (or a framework review like BMAD) can win that race
+over the atlas entrypoints — even though the atlas coverage is deeper. The
+**deterministic fix is a routing block in the consuming repo's memory files**,
+which agents read at session start and which outranks keyword matching.
+
+Make this a default step of setup. In a session **inside the repo you want
+reviewed**, run:
+
+```text
+/code-quality-atlas:atlas-init
+```
+
+It writes a marked routing block into that repo's `CLAUDE.md` **and** `AGENTS.md`
+(both, because different agents read different files), creating either if missing
+and refreshing the block in place if it is already there — idempotent, so re-run
+it after a plugin update to pick up routing changes. The block tells agents that
+the atlas suite is the **primary path** for any code review / quality review / PR
+review, to **prefer it over the built-in `code-review` skill and over framework
+reviews (e.g. BMAD)** — and, crucially, to **combine them non-exclusively**: you
+may still run those other methods, but fold every finding through
+`synthesizing-review-findings` for one ranked verdict rather than picking only one.
+
+The canonical text lives in
+[`templates/agents-routing-snippet.md`](templates/agents-routing-snippet.md) if
+you prefer to paste it by hand. This pairs with the SessionStart hook below: the
+hook is a per-session nudge that works even before the repo is wired; the
+committed routing block is the durable, deterministic override.
+
 #### Keeping an interactive install current (opt-in)
 
 If you stay on an interactive install and don't want to enable auto-update,
@@ -150,8 +185,14 @@ without a git fetch. Drop the guard if you want it to run every session.
 The plugin ships a `SessionStart` hook ([`hooks/hooks.json`](hooks/hooks.json) →
 [`hooks/route.sh`](hooks/route.sh)) so the suite is used as designed without you
 having to name a skill first. On each session it injects one line of guidance —
-*"for a review or audit, start with `choosing-review-lenses`, then finish with
-`synthesizing-review-findings`"* — directly into context.
+that the atlas suite is the **primary path** for any code/quality/PR review and
+should be **preferred over the built-in `code-review` skill and framework reviews
+(e.g. BMAD), combined non-exclusively**; that a PR routes to `atlas-review-pr`,
+ad-hoc local changes to `atlas-code-review`, and an unsure pick to
+`choosing-review-lenses`; and that multiple reviewers are merged with
+`synthesizing-review-findings` — directly into context. (This is the per-session
+nudge; the committed routing block from `/atlas-init` above is the durable
+override.)
 
 This exists because, with 24+ skills, individual skill **descriptions** can be
 dropped from the model's skill listing (it is budgeted to ~1% of context and is
@@ -225,9 +266,9 @@ Built fresh from **first principles**. Existing skills, plugins, linters, and re
 | [`docs/plans/`](docs/plans/) | Implementation plans (e.g. the wave-1 pipeline build) |
 | [`docs/session-log.md`](docs/session-log.md) | Chronological record of how this evolved |
 | [`skills/`](skills/) | The 22 generated + refined lenses **+ the `choosing-review-lenses` router** (see `manifest.yaml`) |
-| [`commands/`](commands/) | Slash commands for hands-off PR review automation (`/atlas-review-pr`, `/atlas-rebase-stale`) |
+| [`commands/`](commands/) | Slash commands: `/atlas-review-pr` (review a PR), `/atlas-code-review` (ad-hoc no-PR review), `/atlas-init` (wire routing into a repo's CLAUDE.md/AGENTS.md), `/atlas-rebase-stale` (poll stale PRs) |
 | [`hooks/`](hooks/) | `SessionStart` hook that injects routing guidance so the suite is used without naming a skill (side-effect-free) |
-| [`templates/`](templates/) | `REVIEW.md` convergence policy to copy into a reviewed repo |
+| [`templates/`](templates/) | `REVIEW.md` convergence policy + `agents-routing-snippet.md` (the CLAUDE.md/AGENTS.md routing block) to copy into a consuming repo |
 | [`tooling/`](tooling/) | The pipeline: generator, drift-checker, eval validator, cross-model runner |
 
 ## License
