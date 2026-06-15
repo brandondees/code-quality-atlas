@@ -486,8 +486,10 @@ router:
   # `description` is the terse listing surface (shown in the skill catalogue);
   # `body` is the richer "When to use" text the model reads once the skill
   # loads. Keeping them separate lets the listing stay scannable while the body
-  # carries examples — see PR #30 (router repositioned as an uncertainty helper,
-  # not a mandatory front door).
+  # carries examples (PR #30). The router now leads as the primary code-review
+  # entrypoint (it should win the keyword match over the generic built-in
+  # code-review skill) while staying skippable when the right lenses are already
+  # clear — earlier framing as a purely optional uncertainty helper is superseded.
   description: >
     The code review entrypoint for code-quality-atlas — use for any code review,
     quality review, or "review this PR / diff / change / what I pushed" request.

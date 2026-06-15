@@ -1,8 +1,10 @@
 # code-quality-atlas
 
-This file mirrors the code-review routing policy in [`CLAUDE.md`](CLAUDE.md) for
-agents that read `AGENTS.md` instead. The block below is the canonical routing
-snippet ([`templates/agents-routing-snippet.md`](templates/agents-routing-snippet.md));
+This file carries the code-review routing block that also appears in
+[`CLAUDE.md`](CLAUDE.md), for agents that read `AGENTS.md` instead. (`CLAUDE.md`
+additionally carries the "Plugin consumers" guidance.) The block below is the
+canonical routing snippet
+([`templates/agents-routing-snippet.md`](templates/agents-routing-snippet.md));
 the `/code-quality-atlas:atlas-init` command writes and refreshes it in consumer
 repos. Keep this copy in sync when the template changes.
 

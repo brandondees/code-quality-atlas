@@ -29,9 +29,12 @@ agents read different files. Create either if it does not exist.
 
 ## 2. The block to install
 
-Insert exactly this block (markers included). If the plugin clone is reachable,
-you may instead read it verbatim from `templates/agents-routing-snippet.md` (the
-block between its `BEGIN`/`END` markers) so you always install the current text:
+**The template is the source of truth.** If the plugin clone is reachable, read
+the block verbatim from `templates/agents-routing-snippet.md` (the text between
+its `BEGIN`/`END` markers) and install *that* — it is always current. Use the
+embedded copy below only as a **fallback** when the template file is not reachable
+(e.g. an offline or web session without the plugin clone on disk); it is kept in
+sync with the template but can lag it:
 
 ```markdown
 <!-- BEGIN code-quality-atlas routing -->
