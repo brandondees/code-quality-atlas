@@ -79,6 +79,13 @@ def approve_refund(refund_id, request):
    *which* operations need dual-control is a business-policy call, so surface it to
    security/compliance rather than deciding the threshold here.
 
+**Decision rule:** a role or permission check (`@require_role`, an `is_admin` gate,
+a scope) authorizes *who* may act — it is **not** segregation of duties. When a
+high-consequence action records an initiator (`requested_by`, `created_by`) and an
+approver but never compares their identities, the maker-checker control is missing
+and you must report it, *even though* an authorization gate is present. "Auth is
+handled" is not evidence of dual-control.
+
 ## Good → no finding
 
 **Input (diff):**
