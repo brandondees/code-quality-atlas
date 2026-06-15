@@ -54,7 +54,7 @@ Low cost, high leverage, all manifest/synthesizer/contract edits that regenerate
 - **G26** `valence` axis + the built-in anti-churn/convergence floor (defaults strict). **✅ Shipped 2026-06-15** — `valence:` axis, refined per-lens guard (defect-only default, improvements opt-in), non-configurable anti-churn floor, Improvements report section; the team verbosity dial still waits on Q13.
 - **G19** synthesizer "coverage & limitations" block. **✅ Shipped 2026-06-15** — required block naming lenses run/skipped + what's unverifiable from the diff; always present.
 - **G31** enrich the tensions table with cross-quality pairs. **✅ Shipped 2026-06-15** — added the 3 pairs whose lenses exist (observability↔privacy, performance↔accessibility, consistency↔evolvability); the 2 G24-dependent pairs wait on Cluster VII.
-- **Q19** the `mechanize-with:` generator pass + coverage/perf/complexity presence checks in `auditing-config-and-build-hygiene`. **✅ Shipped 2026-06-15** — mechanize-with nudge in every lens (advisory, `route: implementer`); coverage/perf/complexity presence as a preference-tunable advisory. Cross-model re-gate pending.
+- **Q19** the `mechanize-with:` generator pass + coverage/perf/complexity presence checks in `auditing-config-and-build-hygiene`. **✅ Shipped 2026-06-15** — mechanize-with nudge in every lens (advisory, `route: implementer`); coverage/perf/complexity presence as a preference-tunable advisory. Cross-model re-gate passed (2026-06-15, qwen2.5:7b + llama3.2:3b — no over-flagging on a healthy repo).
 
 ### Wave B — high-value add-factors (regenerate from the manifest; low risk)
 

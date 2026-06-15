@@ -1160,3 +1160,39 @@ Closed out Wave A from [`research/gap-hunt-synthesis.md`](research/gap-hunt-synt
 **Verification:** `pytest tests/` 90 pass (added mechanize-with, coverage-block, and cross-quality-tension assertions); `cli drift` clean; `cli eval` OK (synthesizer 8 scenarios, config-hygiene 3); markdownlint 0 errors. Cross-model eval re-gate pending (mechanism/prose + one advisory heuristic — light, no new judgment lens).
 
 **Resolves:** G19, G31 dispositions → shipped; **Q19 → resolved/built**. Wave A is complete. Next per the synthesis: **Wave B add-factors** (G21 operational time-bombs, G28 claims-vs-evidence, G29 root-cause, G25 green/FinOps, G13 tidyings, G32 pre-existing defects, G12 acceptance-criteria) — cheap, regenerate from the manifest.
+
+### 2026-06-15 (cont.) — Wave A cross-model re-gate (#45 + #46)
+
+Closed the deferred D6/D8 ratchet on the Wave A mechanism work. Ran on local
+Ollama 0.23.2 with **qwen2.5:7b** (the documented 7-8B floor) and **llama3.2:3b**
+(the over-flagging canary), via `python -m tooling.run_evals` (num_ctx 8192).
+
+**Primary concern — over-flagging regression on clean code — did not appear.** The
+Wave A changes touched all 26 lenses (the amended defect-default guard + the
+mechanize-with section) plus the synthesizer contract and one config-hygiene
+heuristic, so the re-gate targeted the widest-blast-radius and the new-judgment
+surfaces:
+
+- **`checking-restraint` (guard-change canary), 7B + 3B.** Over-engineering and
+  premature-optimization scenarios flagged correctly on both tiers; the **clean**
+  scenario returned "No findings" on **both** 7B and 3B. The new "improvements
+  opt-in" guard language and the mechanize-with section did **not** inject
+  improvement-churn or tool nudges onto correct code. (3B was verbose/template-
+  dumping on the bad cases as previously documented — not a Wave A regression.)
+- **`auditing-config-and-build-hygiene` (Q19 presence check), 7B.** Bad-config and
+  stale-flag/curl-pipe-bash scenarios caught; the **healthy-repo** scenario returned
+  "No findings" — the new coverage/perf/complexity presence heuristic stayed
+  advisory and did **not** manufacture a "missing coverage gate" finding on a clean
+  repo. This was the exact Q19 over-flagging worry; it is clear.
+- **`synthesizing-review-findings` (route/valence/coverage contract), 7B — 8
+  scenarios.** 6 clean passes including the #45-review GPL `defect + route: legal`
+  case (verdict "approve with changes", not a false approve) and the G19 coverage
+  block. Two soft recall gaps at the floor: the G23 routed case kept route tags
+  **inline** rather than under a dedicated Routed section, and the G26 anti-churn
+  case **surfaced** the equivalent-reorder as an explicitly-optional suggestion
+  instead of **dropping** it. Both preserve the information and are consistent with
+  the documented 7B ceiling on the subtlest disciplines; the deployment tier
+  (Claude) handles them. Not regressions, logged as known floor limitations.
+
+**Verdict: Wave A passes the cross-model gate at the 7-8B floor; the core
+no-over-flagging property holds even at 3B.** Q19's pending eval pass is now done.

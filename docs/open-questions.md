@@ -200,8 +200,11 @@ the "every lens?" sub-question: yes, uniformly). **(b)** `auditing-config-and-bu
 **coverage-reporting / perf-benchmark / complexity-scoring presence** check, framed as a
 **preference-tunable advisory** (not a floor-tier block) so a repo that deliberately skips them can
 suppress the note — this is the Q13-overlay-aligned answer to the "finding or noise?" sub-question.
-Remaining: the **light cross-model eval pass** (over-flagging regression check on clean repos) is
-**pending**, same as the other Wave A mechanism work — the structural evals pass.
+The **light cross-model eval pass** (over-flagging regression check on clean repos) **ran 2026-06-15**
+on Ollama (qwen2.5:7b floor + llama3.2:3b canary): `auditing-config-and-build-hygiene`'s new presence
+check did **not** fire on a healthy repo (clean scenario → "No findings" on the 7B floor), and the
+per-lens guard + mechanize-with change kept clean-code precision on both tiers. **No over-flagging
+regression.** See the 2026-06-15 re-gate entry in [`session-log.md`](session-log.md).
 
 ### Q17 — Self-improving loop: usage signals → learnings → research edits *(new, 2026-06-12)*
 
