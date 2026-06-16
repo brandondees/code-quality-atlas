@@ -1,0 +1,42 @@
+{
+  "skills": [
+    "reviewing-install-and-upgrade-experience"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this release for the consumer upgrade experience.\n```text\nPR: \"acme-cli v2.8.0\"\n- Renamed config keys: `outputDir` → `output.dir`, `retries` → `retry.max`. The loader reads only the new keys; old keys are silently ignored.\n- `acme init` now overwrites an existing acme.config.json in place — no backup, no prompt.\n- package.json: 2.7.4 → 2.8.0 (minor bump). CHANGELOG: one line, \"rework config\".\n- No migration script and no upgrade notes.\n```",
+      "expected_behavior": [
+        "Flags that consumer-facing breaks (renamed config keys, changed init behavior) shipped under a minor bump — SemVer-aware tooling and agents will automerge it as safe; demands a major (3.0.0) bump marked BREAKING",
+        "Flags the renamed config with no migration and no backward-compatibility — existing adopters' config silently stops working; expects the old keys kept (deprecated, with a warning naming the replacement) or a migration command",
+        "Flags `acme init` overwriting an existing config in place as destructive and non-idempotent (clobbers consumer edits on re-run); wants a prompt/backup/merge",
+        "Flags the absence of any upgrade path (no migration, no upgrade notes) — the bump cannot be completed from the docs alone, only by reverse-engineering the diff",
+        "Does not approve; treats this as a blocking adoption/upgrade regression"
+      ]
+    },
+    {
+      "query": "Review this configuration change.\n```text\nThe service now requires a new setting DB_POOL_SIZE. It is read lazily the first time a query runs; if unset, Node throws `TypeError: cannot read properties of undefined` from inside the pool module. There is no default and no startup validation. README is unchanged.\n```",
+      "expected_behavior": [
+        "Flags the new required setting with no safe default as setup friction — a fresh adopter cannot start without discovering it by hitting a crash",
+        "Flags that config is validated late and unactionably (a deep TypeError at first query) instead of failing fast at startup with a message naming DB_POOL_SIZE and the fix",
+        "Flags the missing README/docs update for a new required setup step (adoption regression)",
+        "Recommends a safe default (or startup schema validation with an actionable error), not just documenting the variable"
+      ]
+    },
+    {
+      "query": "Review this upgrade/migration plan for a library.\n```text\nRFC: rename the public option `cacheTtl` → `cache.ttlSeconds` in v4.\n- v4 is a major release; CHANGELOG has a \"Upgrading to v4\" section with before→after.\n- `cacheTtl` keeps working in v4, emitting a deprecation warning that names `cache.ttlSeconds` and a removal target of v5.\n- a codemod `npx acme-codemod v4` rewrites call sites; it is run in CI against the examples repo.\n- downgrade to v3 is documented and the on-disk cache format is unchanged across v3/v4.\n```",
+      "expected_behavior": [
+        "Reports no substantive findings — the break is a major bump, signposted, with the old option kept through a deprecation window and an automated codemod for the upgrade",
+        "Confirms the upgrade is mechanical and hand-off-able (a consumer or an agent can run the codemod and verify) and that a downgrade/rollback path exists",
+        "Does not invent friction or demand more process for an already-clean, well-signaled upgrade"
+      ]
+    },
+    {
+      "query": "Review this change.\n```text\nInternal refactor: extracted the request-retry logic in src/http/retry.ts into a private helper `withRetry()` and updated the three internal call sites. No public API, CLI flag, config key, install step, or package version changed. No exported symbol added or removed.\n```",
+      "expected_behavior": [
+        "Recognizes there is no consumer-facing install, config, or upgrade surface in this change and skips — reports no findings for this lens",
+        "Does not invent install/upgrade/config concerns for a purely internal refactor",
+        "Reports exactly the no-finding result rather than manufacturing adoption friction"
+      ]
+    }
+  ]
+}

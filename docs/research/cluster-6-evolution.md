@@ -310,6 +310,57 @@ Scope: decisions reviewed *as they are made* — adoption / build-vs-buy / techn
 
 ---
 
+## #33 Install, upgrade & configuration experience
+
+Scope: the experience of a *consumer* adopting, configuring, and upgrading this software — distinct from #29 (our own decision to adopt a dependency) and from end-user product UX. First-run install/setup friction & undocumented prerequisites; configuration ergonomics (safe defaults, schema validation, fail-fast actionable errors, backward-compatible keys); version-upgrade & migration smoothness — especially whether a consumer *or a code agent* can complete and verify the upgrade from the docs alone; deprecation windows and downgrade/rollback paths. The *adopter*-facing half of #22 (docs), #13 (contract), and #26 (config), pulled together as one reviewable experience. Natural shape `diff`, design-capable (a proposed config schema or upgrade flow reviews the same way before code exists); a whole-repo "is this project pleasant to adopt" audit arm is a noted follow-up.
+
+### Key references
+
+- **Twelve-Factor App — III. Config / X. Dev-prod parity** — https://12factor.net/config
+  → mine: config strictly separated from code and injected via the environment; minimize divergence between an adopter's environment and the developer's. A new *required*, environment-specific setting with no safe default is adoption friction, not a feature.
+- **Semantic Versioning 2.0.0** — https://semver.org
+  → mine: the machine-readable promise that lets a consumer — and Renovate/Dependabot, and an agent — tell a safe patch/minor from a breaking major. A consumer-facing break shipped under a non-major bump silently breaks every *automated* upgrade; SemVer correctness is what makes upgrades delegable.
+- **Keep a Changelog** — https://keepachangelog.com
+  → mine: newest-first, categorized (Added/Changed/Deprecated/Removed/Fixed/Security) changelog with an `Unreleased` section; the migration/"Upgrading" notes are what an adopter (or their agent) actually reads to move versions. A changelog entry is necessary but not sufficient — a *rename* needs an upgrade instruction, not just a line (cross #22).
+- **Rich Hickey — "Spec-ulation" (2016)** `(verify)`
+  → mine: "don't break, only accrete" — relax requirements / strengthen promises, never the reverse. Renaming or removing a consumer-facing name is a breaking change even when the code still runs. The discipline behind upgrades that don't require consumer rework.
+- **Codemod & migration-tooling practice** — jscodeshift, OpenRewrite, Rector, Rust `cargo fix --edition`, Go `go fix` / API migration guides, the **Django deprecation policy + system checks**, React codemods `(verify)`
+  → mine: ship the upgrade as *runnable tooling*, not just prose. An automated migration is what turns a version bump into a mechanical step a consumer or a code agent can run and verify, instead of a hand-translation of the diff.
+- **RFC 8594 (Sunset) / RFC 8631 (deprecation links) + library deprecation warnings** — https://www.rfc-editor.org/rfc/rfc8594
+  → mine: deprecation is a dated, signposted activity that names the replacement *at the point of use* (warning, header, `@deprecated`), giving consumers a migration window instead of a surprise removal discovered as a broken build (cross #29).
+- **Developer-experience / "time to first success" writing (Stripe, Heroku, Twilio "time to hello world")** `(verify)`
+  → mine: the highest-leverage adoption metric is steps-to-first-working-result; every required step before that is friction that loses adopters. The README quickstart that *actually runs* is the artifact to protect (cross #22 runnable example).
+- **Configuration-as-schema / fail-fast validation (JSON Schema, pydantic-settings, envalid, viper, CUE)** `(verify)`
+  → mine: validate config at startup against a declared schema and fail with a message that names the offending key *and the fix* — not a deep stack trace, and not a silent wrong default that surfaces three steps later (cross #26).
+
+### Tooling rules worth lifting
+
+- **Fresh-install / quickstart CI job** — a job that starts from a clean checkout or an empty environment and runs *only* the documented install + quickstart steps (`npx`, `pipx run`, `docker run`, a scratch container), so an undocumented prerequisite or a rotted quickstart fails CI rather than the adopter. `(verify)`
+- **Config-schema validators** — `ajv` / JSON Schema, **pydantic-settings** / **envalid** / **viper** + struct validation, **confuse** (Python), **`cue vet`** — declare and validate config, surfacing unknown or missing keys with actionable messages at startup. `(verify)`
+- **API/surface break detectors** — **`cargo-semver-checks`** (Rust), **`@microsoft/api-extractor`** + **`@arethetypeswrong/cli`** (TS), **`griffe check`** (Python), **`gorelease`** (Go), **`japicmp`/`revapi`** (Java) — catch a consumer-facing break and assert the SemVer bump matches it. `(verify)`
+- **Migration / codemod runners** — **jscodeshift**, **OpenRewrite**, **Rector** (PHP), **`cargo fix --edition`**, **`go fix`**, **`pyupgrade`/`ruff --fix`** — distribute the upgrade as a command the consumer (or an agent) runs, not a prose diff to re-apply by hand. `(verify)`
+- **Release + upgrade-notes automation** — **release-please** / **changesets** / **git-cliff** with a `BREAKING`/`Migration` section keyed off Conventional Commits, so the changelog and upgrade notes can't lag the release. `(verify)` (cross #22, #24)
+- **Deprecation surfacing** — runtime deprecation warnings (`util.deprecate`, Python `DeprecationWarning`, `@deprecated`), `Deprecation`/`Sunset` HTTP headers, OpenAPI `deprecated: true` — make the deprecation visible at the point of use with the replacement named. `(verify)` (cross #29)
+- **Reproducible install** — lockfiles (`package-lock.json`, `poetry.lock`, `Cargo.lock`, `uv.lock`) + pinned base images / toolchains, so two adopters and CI install the same bytes. `(verify)` (cross #18, #19)
+- **Consumer-side upgrade automation** — Renovate / Dependabot with automerge of clean (passing, non-major) upgrades — the workflow a well-versioned, well-tested project *enables* for its own consumers; review whether this change keeps the project friendly to it. `(verify)`
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- **Install from scratch still works:** following only the documented steps from a clean checkout / empty environment, does setup succeed — no undocumented prerequisite, no manual step the change silently introduced? A new setup step with no installer or doc update is an adoption regression (cross #22 README front-door).
+- ★ **Upgrade is mechanical and hand-off-able:** can a consumer move from the previous version to this one by following a single documented path — ideally a codemod / `migrate` command, otherwise a copy-pasteable checklist — without reverse-engineering the diff? A change that renames, moves, or removes a consumer-facing knob needs an automated migration or an explicit "to upgrade: …" note, not just a changelog line. This is the gap between a version bump an agent can complete-and-verify and one a human must babysit.
+- **Breaking changes are signaled and versioned:** is every consumer-facing break (config key, CLI flag, public default, file layout, output format) reflected in a SemVer-major bump and called out as `BREAKING` with before→after, so SemVer-aware upgrade tooling and agents can detect and gate on it (cross #13, #24)? A break under a patch/minor bump silently breaks every automated upgrade.
+- **Config is validated, fail-fast, and actionable:** is new configuration validated at startup against a schema, failing with a message that names the offending key *and the fix* — not a deep stack trace, and not a silent wrong default that surfaces much later (cross #26)?
+- **Existing config keeps working or is migrated:** does a current adopter's existing configuration still load after this change — new keys optional with safe defaults, no silent semantic change to an existing key — or is there an automatic migration and a clear rename path?
+- **Safe defaults; zero-config common case:** does the change work out of the box for the common case with little or no configuration, keeping new complexity behind optional knobs, rather than requiring the adopter to set several values before first success (cross #11 restraint — a new *required* knob is the friction to question)?
+- **Time-to-first-success stays low:** does the quickstart still get a new adopter to a working result in a few steps, and does this change avoid adding required steps to that path? Prefer a quickstart that runs in CI so it cannot rot (cross #22 runnable example).
+- **Deprecate, don't yank:** is a removed or renamed consumer surface kept working for a deprecation window with a runtime warning that names the replacement, rather than removed in place (cross #29 retirement-on-a-schedule)?
+- **Install / setup is idempotent and reproducible:** is the installer / `init` safe to re-run — no duplicate writes, no clobbering of the consumer's own edits — and does it pin what it installs so two adopters get the same result? An `init` that overwrites a consumer's customizations on re-run is a trap.
+- **Upgrade has a downgrade / rollback path:** if the upgrade goes wrong, can a consumer return to the prior version — is the config/data format forward-and-backward compatible across one version (expand/contract), or is it a one-way door with no downgrade (cross #20, #29)?
+- **Setup and migration failures are diagnosable, not half-applied:** when install or migration fails, does it say what failed and how to recover, and avoid leaving a half-migrated, wedged state (cross #2 silent failures)?
+- ★ **The consumer path was actually exercised:** for a tool, plugin, template, or library, was the install/upgrade run against a real sample consumer (a fresh-adopter dry run), not only unit-tested in-repo? The smoothest adoptions come from dogfooding the exact path a new adopter — or their agent — will take.
+
+---
+
 ## Open threads   (gaps / mis-placements / sub-topics worth deeper research)
 
 - **Citation status (was a gap):** the standards spines and high-traffic tool IDs are now **web-verified (2026-06-09)** — WCAG 2.2 SCs (2.4.11, 2.5.8, 1.4.3), axe-core / jsx-a11y rule ids, Conventional Commits + commitlint, the SmartBear/Cisco review-size numbers, Diátaxis, ADR, Keep a Changelog, SPDX/AGPL, REUSE, EAA (2025-06-28), GDPR. Residual `(verify)`: some SonarQube squids and formatjs/i18next/html-validate plugin rule names — confirm at skill-build time.
