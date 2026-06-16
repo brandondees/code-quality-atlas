@@ -92,6 +92,14 @@ in [`docs/install.md`](docs/install.md).
 
 ## Use it
 
+**Most of the time you want one command.** Built a feature and want it reviewed? Run
+**`/atlas-review-pr <pr>`** if it's a pull request, or **`/atlas-code-review`** for
+local or pushed-branch changes with no PR. That's the whole happy path — the command
+**picks the 2–4 lenses your change actually needs and merges their findings into one
+ranked verdict for you.** You don't pick lenses by hand or run the synthesizer
+yourself; reach for an individual lens (the rows below) only when you already know
+which one you want. If you ran a command and got useful feedback, you used it right.
+
 | Situation | Reach for |
 |---|---|
 | A whole PR | `/atlas-review-pr` |
@@ -125,7 +133,7 @@ Built fresh from **first principles**, treating existing skills, linters, and re
 tools as prior art to learn from — not constraints. Docs are the source of truth;
 skills are *generated* from [`skills/manifest.yaml`](skills/manifest.yaml) with
 provenance hashes, a drift-checker, and eval-first refinement. The underlying map is
-**6 clusters / 31 categories / ~95 factors** (taxonomy v0.3). Ongoing work is the
+**6 clusters / 33 categories / ~100 factors** (taxonomy v0.3). Ongoing work is the
 compounding loop: critique the research, let drift flag affected skills, regenerate,
 re-gate.
 
