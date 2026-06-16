@@ -15,7 +15,7 @@ supports the `SKILL.md` format** (Cursor, Windsurf, Copilot, …). The plugin wr
 
 ## What you get
 
-**28 review skills**, generated from a researched taxonomy and refined against eval
+**29 review skills**, generated from a researched taxonomy and refined against eval
 scenarios:
 
 - **27 review lenses** — each a narrow, self-contained reviewer (correctness,
