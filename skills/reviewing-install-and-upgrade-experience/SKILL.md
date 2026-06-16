@@ -17,7 +17,7 @@ provenance:
   built_from:
   - category: 33
     source: docs/research/cluster-6-evolution.md#33
-    hash: 0926758d26634b69a52bb327b509587f42bd5bc05d9d8a4ac50b33361041bafc
+    hash: bed0e0fed59d2f2d4d499b0cd7064b399dca5d23840f94c366edfe2ddc02c4c6
 ---
 
 # reviewing-install-and-upgrade-experience
@@ -41,6 +41,8 @@ Report only real problems. If the code correctly handles the case, reply "No fin
 The head of the full checklist — enough for a first pass without opening any reference file:
 
 - **Upgrade is mechanical and hand-off-able:** can a consumer move from the previous version to this one by following a single documented path — ideally a codemod / `migrate` command (dry-run-able, idempotent), otherwise a copy-pasteable checklist — without reverse-engineering the diff? A rename/move/removal of a consumer-facing knob needs an automated migration or an explicit "to upgrade: …" note, not just a changelog line — *and* a verification step (tests green / build passes / re-run diff empty) an agent can run to confirm a clean result. This is the gap between a version bump an agent can complete-and-verify and one a human must babysit.
+- **Version vs. changelog/bump are consistent:** does the proposed version bump and the changelog (and the Conventional-Commit `!`/footer) actually match the break surface in the diff? A correctly-implemented but mis-versioned change still mis-drives downstream automation (cross #24).
+- **No co-existence / co-installability collision:** does the change hardcode a port, host path, temp-file name, or global resource that collides with another instance/app on the same host, or add a dependency with an unsatisfiable peer/transitive constraint (resolved only via `--legacy-peer-deps`/`--force`)? (catches "breaks a system that already has X installed".)
 - **The consumer path was actually exercised:** for a tool, plugin, template, or library, was the install/upgrade run against a real sample consumer (a fresh-adopter dry run), not only unit-tested in-repo? The smoothest adoptions come from dogfooding the exact path a new adopter — or their agent — will take.
 - **Install from scratch still works:** following only the documented steps from a clean checkout / empty environment, does setup succeed — no undocumented prerequisite, no manual step the change silently introduced? A new setup step with no installer or doc update is an adoption regression (cross #22 README front-door).
 - **Breaking changes are signaled and versioned (the whole contract):** is every consumer-facing break — not just typed API, but CLI flags, exit codes, env vars, config keys *and their semantics*, default values, output/serialization format, log format, file/dir layout (the Hyrum's-law surface) — reflected in a SemVer-major bump and called out as `BREAKING` with before→after, so SemVer-aware tooling and agents can gate on it (cross #13, #24)? A break under a patch/minor bump auto-merges into consumers.

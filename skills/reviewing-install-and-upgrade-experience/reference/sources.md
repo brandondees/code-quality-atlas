@@ -8,7 +8,7 @@
 
 ### Key references
 
-> Web-verified 2026-06-16. The full per-topic synthesis (ISO models, break-detection tooling, codemod ecosystems, deprecation policies, distribution lifecycle, prior-art reconciliation, and a net-new-angle inventory) lives in [`adopter-experience-cluster.md`](adopter-experience-cluster.md); this section carries the curated head that the lens is built from.
+> Web-verified 2026-06-16. The full per-topic synthesis (ISO models, break-detection tooling, codemod ecosystems, deprecation policies, distribution lifecycle, prior-art reconciliation, and a net-new-angle inventory) lives in `adopter-experience-cluster.md`; this section carries the curated head that the lens is built from.
 
 - **Twelve-Factor App — III. Config / X. Dev-prod parity** — https://12factor.net/config (open-sourced Nov 2024)
   → mine: config strictly separated from code and injected via the environment; a new *required*, environment-specific setting with no safe default is adoption friction; an `if env == "prod"` branch widens the parity gap and escapes CI.
@@ -21,7 +21,7 @@
 - **Hyrum's Law** — https://www.hyrumslaw.com
   → mine: with enough users, *all observable behaviors* get depended on — so CLI flags, exit codes, env vars, output/serialization format, log lines, file layout, and grep-able error strings are part of the contract a compiler does not guard (the highest-yield break blind spot).
 - **ISO/IEC 25010:2023 — product quality model** — https://www.iso.org/obp/ui/en/#!iso:std:78176:en
-  → mine: the 2023 revision renamed Portability→**Flexibility** (installability, replaceability, adaptability, scalability as *peers*) and put **co-existence + interoperability** under **Compatibility** — naming installability/replaceability/co-installability as distinct adopter properties (the reconciliation that reopened this surface; see [`adopter-experience-cluster.md`](adopter-experience-cluster.md) §10).
+  → mine: the 2023 revision renamed Portability→**Flexibility** (installability, replaceability, adaptability, scalability as *peers*) and put **co-existence + interoperability** under **Compatibility** — naming installability/replaceability/co-installability as distinct adopter properties (the reconciliation that reopened this surface; see `adopter-experience-cluster.md` §10).
 - **Codemod & migration tooling** — jscodeshift, **OpenRewrite** (`rewriteDryRun`), Rust `cargo fix --edition` (migrates, then prints what it can't fix), Angular `ng update` schematics, `npx @next/codemod upgrade`, React codemods — https://docs.openrewrite.org/concepts-and-explanations/recipes
   → mine: ship the upgrade as *runnable, dry-run-able* tooling, not prose; an automated migration turns a version bump into a step a consumer or agent runs and diffs. Cautionary: `2to3` shows automation can't rescue a big-bang break across an incompatible runtime — expand/contract + dated-version-with-dry-run exist to avoid that cliff.
 - **Stripe — `upgrade-stripe` Agent Skill + `.well-known/skills/index.json`** — https://docs.stripe.com/building-with-ai `(verify exact index contents)`
@@ -29,7 +29,7 @@
 - **RFC 9745 (Deprecation header, 2025) / RFC 8594 (Sunset) / RFC 8631 (links) + runtime deprecation warnings** — https://www.rfc-editor.org/rfc/rfc9745.html
   → mine: deprecation is a dated, signposted activity that names the replacement *at the point of use* (`@deprecated`, `#[deprecated(note)]`, `Deprecation`/`Sunset` headers), passing through a warning tier *before* an error/removal tier, giving a migration window instead of a surprise broken build (cross #29).
 - **Adopter DX / "time to first success"** — DevEx, ACM Queue 21(2), 2023 https://dl.acm.org/doi/10.1145/3595878 ; TTFHW https://www.moesif.com/blog/technical/api-product-management/What-is-TTFHW/
-  → mine: the highest-leverage adoption metric is steps-to-first-working-result; a diff adding a step/gate/undocumented prerequisite to the clone→first-success path is a DX regression. (Adopter DX is diff-visible and in scope; contributor-DevEx-as-a-metric stays out — see [`adopter-experience-cluster.md`](adopter-experience-cluster.md) §10.)
+  → mine: the highest-leverage adoption metric is steps-to-first-working-result; a diff adding a step/gate/undocumented prerequisite to the clone→first-success path is a DX regression. (Adopter DX is diff-visible and in scope; contributor-DevEx-as-a-metric stays out — see `adopter-experience-cluster.md` §10.)
 - **Config-as-schema / fail-fast validation** — pydantic-settings https://docs.pydantic.dev/latest/concepts/pydantic_settings/ ; envalid/znv/convict/zod (JS), viper/envconfig (Go), CUE, Dhall, HCL `validation {}`
   → mine: validate config at startup against a declared schema (`extra='forbid'` rejects typo'd keys) and fail with a message naming the offending key *and the fix* — not a deep stack trace, not a silent wrong default surfacing three steps later (cross #26).
 - **Reproducible & idempotent install** — Reproducible Builds (`SOURCE_DATE_EPOCH`) https://reproducible-builds.org/specs/source-date-epoch/ ; Ansible/Molecule idempotency (run-twice ⇒ `changed=0`); npm install-script default-off (2026) `(verify rollout)`
