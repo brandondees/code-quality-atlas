@@ -616,9 +616,8 @@ router:
             change that adds dependencies or confident-looking constants/APIs
       run: [reviewing-ai-authored-code, tracing-correctness-and-invariants,
             sweeping-for-security]
-      note: "attribution-agnostic failure signature — hallucinated/typosquatted
-            packages, invented APIs, plausible-but-wrong logic, over-helpful scope;
-            #18 owns the supply-chain verdict, #14 the security one"
+      note: "attribution-agnostic; #18 owns the supply-chain verdict, #14 the
+            security one"
     - when: Logging, metrics, alerts, feature flags, deploy/rollback paths
       run: [reviewing-observability-and-operability, sweeping-for-security]
     - when: Tests-only change

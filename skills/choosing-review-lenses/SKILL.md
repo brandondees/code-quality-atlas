@@ -49,7 +49,7 @@ The code review / quality review entrypoint for code-quality-atlas. Use for any 
 | Auth, user input, or anything handling untrusted data | `sweeping-for-security`, `hunting-silent-failures`, `tracing-correctness-and-invariants` |
 | Performance-motivated change ("this makes it faster") | `reviewing-performance-and-efficiency`, `checking-restraint`, `tracing-correctness-and-invariants` |
 | LLM / agent / model-API integration | `reviewing-llm-integration`, `sweeping-for-security`, `checking-restraint` |
-| AI-generated or AI-assisted change, a large or unfamiliar diff, or any change that adds dependencies or confident-looking constants/APIs | `reviewing-ai-authored-code`, `tracing-correctness-and-invariants`, `sweeping-for-security` — attribution-agnostic failure signature — hallucinated/typosquatted packages, invented APIs, plausible-but-wrong logic, over-helpful scope; #18 owns the supply-chain verdict, #14 the security one |
+| AI-generated or AI-assisted change, a large or unfamiliar diff, or any change that adds dependencies or confident-looking constants/APIs | `reviewing-ai-authored-code`, `tracing-correctness-and-invariants`, `sweeping-for-security` — attribution-agnostic; #18 owns the supply-chain verdict, #14 the security one |
 | Logging, metrics, alerts, feature flags, deploy/rollback paths | `reviewing-observability-and-operability`, `sweeping-for-security` |
 | Tests-only change | `reviewing-test-quality`, `checking-idioms-and-consistency` |
 | Design doc / plan / RFC (no code yet) | `tracing-correctness-and-invariants`, `reviewing-concurrency-and-async`, `reviewing-migration-and-data-safety`, `reviewing-api-contract-safety` — pick by the design's domain, from design-capable (◆) lenses only |
