@@ -1,7 +1,7 @@
 # The Code Quality Map
 
 **Status:** v0.4 (2026-06-17 — round-3 gap hunt, Wave C). Maximal scope.
-**Shape:** 6 clusters → 34 categories → ~100 factors. Three **review shapes**: diff, repo/cron, and (new in v0.3) **decision-time** ([`decision-time-review-shape.md`](decision-time-review-shape.md)).
+**Shape:** 6 clusters → 34 categories → ~100 factors. Four **review shapes**: diff, repo/cron, **decision-time** ([`decision-time-review-shape.md`](decision-time-review-shape.md)), and **artifact** (D15 — designed; [`research/artifact-scoped-lenses.md`](research/artifact-scoped-lenses.md)).
 
 Cross-links between factors are deliberate; quality dimensions genuinely overlap. Where a category is partly covered by existing prior art, see [`prior-art.md`](prior-art.md) for the mapping (kept out of this file so the map stays tool-agnostic).
 

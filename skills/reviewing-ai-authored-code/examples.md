@@ -47,8 +47,8 @@ session = OAuth2Session(client_id=CID, client_secret=CSECRET, auto_refresh=True)
 ## Bad → finding (over-helpful scope creep)
 
 **Input (diff):** a PR asked only to reword one validation message also adds a new
-`/admin/users/export` endpoint, a `RETRY_ENABLED` flag, and a bare-except retry
-helper.
+`/admin/users/export` endpoint, a `RETRY_ENABLED` flag, and a broad-`except
+Exception` retry helper.
 
 **Expected finding:**
 
@@ -56,8 +56,9 @@ helper.
    endpoint, a global flag, and a retry wrapper — scope creep that widens the diff
    and blast radius beyond the stated task. Route the keep-or-defer call to
    `checking-restraint`; the smuggled-in export endpoint needs its own
-   security/contract review (and the bare `except: continue` swallows errors) rather
-   than riding in on a typo fix. Scope the PR back to the message change.
+   security/contract review (and the broad `except Exception: continue` swallows
+   errors) rather than riding in on a typo fix. Scope the PR back to the message
+   change.
 
 ## Good → no finding
 

@@ -23,7 +23,7 @@
       "query": "Review this change. The PR was asked only to fix the wording of one validation error message.\n```diff\n  def validate_email(addr):\n-     raise ValueError(\"bad email\")\n+     raise ValueError(\"Please enter a valid email address.\")\n\n+ @app.post(\"/admin/users/export\")\n+ def export_users():\n+     return {\"users\": [u.to_dict() for u in User.query.all()]}\n+\n+ RETRY_ENABLED = True\n+ def _with_retries(fn, n=3):\n+     for i in range(n):\n+         try: return fn()\n+         except Exception: continue\n```",
       "expected_behavior": [
         "Flags the over-helpful, unrequested additions: a typo-fix PR also ships a new `/admin/users/export` endpoint, a global RETRY_ENABLED flag, and a retry helper — scope creep that widens the diff and blast radius beyond the stated task",
-        "Routes the keep-or-defer verdict on the unrequested additions to checking-restraint, and notes the smuggled-in admin export endpoint needs its own security/contract review (and the bare-except retry swallows errors) rather than riding in on a typo fix",
+        "Routes the keep-or-defer verdict on the unrequested additions to checking-restraint, and notes the smuggled-in admin export endpoint needs its own security/contract review (and the broad `except Exception` retry swallows errors) rather than riding in on a typo fix",
         "Recommends the PR be scoped back to the message change, with the extras split into their own reviewed PRs"
       ]
     },
