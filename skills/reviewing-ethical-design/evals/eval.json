@@ -22,7 +22,7 @@
     {
       "query": "Review this change.\n```python\n@app.post(\"/account/delete\")\ndef delete_account(user, confirmation):\n    if confirmation != \"DELETE\":          # confirm a destructive, irreversible action\n        return error(\"Type DELETE to confirm\")\n    purge(user)\n\n# settings form: marketing_opt_in defaults to False; toggling it off stops sends immediately\n```",
       "expected_behavior": [
-        "Reports no findings",
+        "Outputs exactly: \"No findings\"",
         "Recognizes the confirmation step guards a destructive, irreversible action (legitimate protective friction, not obstruction), consent defaults to off, and declining actually stops the behavior — the user-favorable path is not obstructed",
         "Does not flag the destructive-action confirmation as a dark pattern and does not invent ethical findings on a flow that treats the user honestly"
       ]

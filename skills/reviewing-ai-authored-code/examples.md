@@ -73,8 +73,9 @@ def get_user(client: httpx.Client, user_id: int) -> dict:
     return resp.json()
 ```
 
-**Expected finding:** None — a real, already-present pinned dependency used with a
-correct, current API (timeout set, `raise_for_status` before parsing), no
-hallucinated symbols, no scope creep, no confident-but-wrong constants. Report "No
-findings". Do NOT invent AI-defect findings on correct code, and do NOT flag the
-f-string path or the URL parameter as inherently unsafe.
+**Expected finding:** No findings
+
+Note: a real, already-present pinned dependency used with a correct, current API
+(timeout set, `raise_for_status` before parsing), no hallucinated symbols, no scope
+creep, no confident-but-wrong constants. Do NOT invent AI-defect findings on correct
+code, and do NOT flag the f-string path or the URL parameter as inherently unsafe.

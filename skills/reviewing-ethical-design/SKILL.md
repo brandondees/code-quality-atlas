@@ -18,7 +18,7 @@ provenance:
   built_from:
   - category: 36
     source: docs/research/cluster-4-runtime.md#36
-    hash: d32e9e653092600bc1a0fc821b62d7d5b8e65d7e66b03300f7805e6264d09217
+    hash: c454ac4bb51dff97993fa5759ac150755d28d20daecfda0b4675599482c03815
 ---
 
 # reviewing-ethical-design

@@ -30,7 +30,7 @@
     {
       "query": "Review this change:\n```python\nimport httpx  # already a pinned dependency in requirements.txt\n\ndef get_user(client: httpx.Client, user_id: int) -> dict:\n    resp = client.get(f\"/users/{user_id}\", timeout=5.0)\n    resp.raise_for_status()\n    return resp.json()\n```",
       "expected_behavior": [
-        "Reports no findings",
+        "Outputs exactly: \"No findings\"",
         "Recognizes httpx is a real, already-present pinned dependency used with a correct, current API (timeout set, raise_for_status before parsing), with no hallucinated symbols, no scope creep, and no confident-but-wrong constants",
         "Does not invent AI-authored-defect findings on correct code, and does not flag the use of an f-string path or a URL parameter as inherently unsafe"
       ]

@@ -98,8 +98,10 @@ def cents_to_display(amount_cents: int, *, currency: str = "USD") -> str:
 + - `pricing.py` — money formatting helpers (pure functions).
 ```
 
-**Expected finding:** None — a self-contained depth-first slice (typed signature, a
-local contract docstring, no distant context needed), a retrieval-friendly name, and
-the onboarding file kept accurate and scoped. Report "No findings". Do NOT invent
-agent-legibility findings on correct code, and do NOT demand an `llms.txt` index or
-extra structure this small change doesn't need.
+**Expected finding:** No findings
+
+Note: a self-contained depth-first slice (typed signature, a local contract
+docstring, no distant context needed), a retrieval-friendly name, and the onboarding
+file kept accurate and scoped. Do NOT invent agent-legibility findings on correct
+code, and do NOT demand an `llms.txt` index or extra structure this small change
+doesn't need.

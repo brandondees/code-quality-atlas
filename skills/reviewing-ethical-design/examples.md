@@ -77,8 +77,10 @@ def delete_account(user, confirmation):
 # settings form: marketing_opt_in defaults to False; toggling it off stops sends immediately
 ```
 
-**Expected finding:** None — the confirmation guards a destructive, irreversible
-action (legitimate protective friction, not obstruction), consent defaults to off,
-and declining actually stops the behavior. Report "No findings". Do NOT flag the
-destructive-action confirmation as a dark pattern, and do NOT invent ethical
-findings on a flow that treats the user honestly.
+**Expected finding:** No findings
+
+Note: the confirmation guards a destructive, irreversible action (legitimate
+protective friction, not obstruction), consent defaults to off, and declining
+actually stops the behavior. Do NOT flag the destructive-action confirmation as a
+dark pattern, and do NOT invent ethical findings on a flow that treats the user
+honestly.
