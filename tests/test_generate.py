@@ -222,6 +222,22 @@ def test_reviewer_discipline_surfaces_pre_existing_defects_in_touched_code():
     assert "audits' job" in md
 
 
+def test_attribution_guard_is_diff_shaped_only():
+    # G32 is diff-specific ("this PR", "touched code", "the audits' job"), so it
+    # must not render on repo-shaped audits (repo-wide hunting IS their job) or on
+    # the decision shape (reviews an ADR, not a diff). Mirrors _scope_line gating.
+    marker = "Pre-existing defects in touched code are surfaceable"
+    assert marker in build_skill_md(_skill(shape="diff"), taxonomy_version="v0.2",
+                                    docs_root=".")
+    assert marker not in build_skill_md(_skill(shape="repo"), taxonomy_version="v0.2",
+                                        docs_root=".")
+    assert marker not in build_skill_md(_skill(shape="decision"),
+                                        taxonomy_version="v0.2", docs_root=".")
+    # the defect/improvement valence guard stays shape-neutral (unchanged)
+    assert "Defects are the default" in build_skill_md(
+        _skill(shape="repo"), taxonomy_version="v0.2", docs_root=".")
+
+
 def test_cross_ref_note_names_primary_owner():
     md = build_skill_md(_skill(cross_ref=[4]), taxonomy_version="v0.2", docs_root=".",
                         owners={2: "hunting-silent-failures", 4: "some-other-skill"})

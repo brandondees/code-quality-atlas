@@ -145,6 +145,25 @@ def build_skill_md(skill: Skill, taxonomy_version: str, docs_root: str = ".",
     # surfaced at the top of each lens so the lens is recognizable at a glance
     # without reading the full trigger-rich description below it.
     tagline = f"*{skill.picker.strip()}*\n\n" if skill.picker else ""
+    # The attribution (Boy-Scout) guard is diff-specific — it talks about "this
+    # PR", "touched code", and "a repo-wide hunt is the audits' job". That framing
+    # has no referent on a repo-shaped audit (everything is pre-existing; repo-wide
+    # hunting *is* its job) or the decision shape (it reviews an ADR, not a diff),
+    # so emit it only on diff-shaped lenses — mirroring how `_scope_line` already
+    # differentiates by shape.
+    attribution_guard = (
+        "**Pre-existing defects in touched code are surfaceable, not yours to "
+        "fix.** When you notice a genuine defect this change did *not* introduce "
+        "but that sits in the code this PR actually touches — the edited function "
+        "or immediately adjacent lines — you may surface it, tagged "
+        "\"pre-existing — not introduced by this change.\" Like improvements it is "
+        "opt-in and default-quiet (off unless the team opts up), "
+        "`route: implementer`, and non-blocking: it informs the author's "
+        "fix-now / file-a-ticket / ignore call and never sets this PR's verdict, "
+        "because the diff did not cause it. Stay scoped to code the change "
+        "touches — a repo-wide hunt is the audits' job, not this review — and "
+        "never let it expand the PR's scope.\n\n"
+    ) if skill.shape == "diff" else ""
     body = (
         f"# {skill.name}\n\n"
         f"{tagline}"
@@ -166,17 +185,7 @@ def build_skill_md(skill: Skill, taxonomy_version: str, docs_root: str = ".",
         "dimension is as good as you can confidently make it, stop; never oscillate "
         "A→B then B→A, never re-order to an equivalent state). Defects keep "
         "the strict bar above regardless of this setting.\n\n"
-        "**Pre-existing defects in touched code are surfaceable, not yours to "
-        "fix.** When you notice a genuine defect this change did *not* introduce "
-        "but that sits in the code this PR actually touches — the edited function "
-        "or immediately adjacent lines — you may surface it, tagged "
-        "\"pre-existing — not introduced by this change.\" Like improvements it is "
-        "opt-in and default-quiet (off unless the team opts up), "
-        "`route: implementer`, and non-blocking: it informs the author's "
-        "fix-now / file-a-ticket / ignore call and never sets this PR's verdict, "
-        "because the diff did not cause it. Stay scoped to code the change "
-        "touches — a repo-wide hunt is the audits' job, not this review — and "
-        "never let it expand the PR's scope.\n\n"
+        f"{attribution_guard}"
         "## Top checks\n\n"
         "The head of the full checklist — enough for a first pass without opening "
         "any reference file:\n\n"
