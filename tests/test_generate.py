@@ -210,6 +210,18 @@ def test_reviewer_discipline_is_defect_default_with_anti_churn_optin():
     assert "converge" in md
 
 
+def test_reviewer_discipline_surfaces_pre_existing_defects_in_touched_code():
+    # G32: the attribution axis. A defect this change did not introduce but that
+    # sits in touched code is surfaceable — tagged, opt-in/default-quiet,
+    # route: implementer, non-blocking, scoped to touched code.
+    md = build_skill_md(_skill(), taxonomy_version="v0.2", docs_root=".")
+    assert "pre-existing — not introduced by this change" in md
+    assert "default-quiet" in md
+    # scoped to touched code, never a repo-wide sweep, never expands PR scope
+    assert "expand the PR's scope" in md
+    assert "audits' job" in md
+
+
 def test_cross_ref_note_names_primary_owner():
     md = build_skill_md(_skill(cross_ref=[4]), taxonomy_version="v0.2", docs_root=".",
                         owners={2: "hunting-silent-failures", 4: "some-other-skill"})
@@ -317,6 +329,12 @@ def test_synthesizer_contract_carries_route_and_valence_axes():
     # the report carries dedicated Routed / Improvements sections
     assert "Routed — non-defect decisions outside engineering" in md
     assert "Improvements — opt-in, optional" in md
+    # G32: the attribution axis — a pre-existing-defect field, a surfacing
+    # principle, and a dedicated (opt-in) report section that does not set verdict
+    assert "**attribution**" in md
+    assert "`pre-existing`" in md
+    assert "Attribution (Boy-Scout, scoped)" in md
+    assert "Pre-existing — noticed in touched code, not introduced here" in md
     # G19: a coverage & limitations block is required, even on "No findings",
     # and carries its two named bullets (not just the heading phrase).
     assert "Coverage & limitations" in md

@@ -66,7 +66,7 @@ Pure heuristic additions to existing lenses — the cheapest way to bank real co
 - **G29** root-cause-vs-symptom → tracing-correctness / hunting-silent-failures + bug-fix route. **✅ Shipped 2026-06-15** — band-aid factor on `hunting-silent-failures` (#2), marked priority; eval added.
 - **G25** green + FinOps → routed #15 factors. **✅ Shipped 2026-06-15** — unified into one routed cost+carbon factor on `reviewing-performance-and-efficiency` (#15), marked priority; eval added.
 - **G13** tidying *suggestions* (now that G26 exists) + the now/after/never economics → #21/#24. **✅ Economics + sequencing shipped 2026-06-15** — now/after/never → #21, structural-vs-behavioral split → #24; auto-apply remains Q8.
-- **G32** pre-existing/adjacent defects → an opt-in, route-tagged factor (needs G23 + G26).
+- **G32** pre-existing/adjacent defects → an opt-in, route-tagged factor (needs G23 + G26). **✅ Shipped 2026-06-16** (Wave B close-out) — shipped as the **attribution axis** (cross-cutting generator prose, the fourth conflation-pattern primitive after G23/G26), not a single-lens factor: a per-lens *Reviewer discipline* clause + an `attribution: introduced | pre-existing` field, *Boy-Scout (scoped)* principle, verdict rule, and a dedicated opt-in *Pre-existing* report section on the synthesizer. Drift clean; tests + eval added. **Closes Wave B.**
 - **G12** acceptance-criteria traceability — *start* as a factor on the bug-fix/feature routes; promote to a lens (Wave C) if it earns it. **✅ Shipped 2026-06-15 as a factor** on `reviewing-pr-and-process-hygiene` (#24); eval added.
 
 ### Wave C — high-value new lenses (each gets the full research + ≥3-eval pass, D6/D8)

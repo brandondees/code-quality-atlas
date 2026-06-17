@@ -1247,3 +1247,18 @@ Four more Wave B add-factors, each at a single G1 owner, regenerated from resear
 **Verification:** `pytest tests/` 94 pass; `cli drift` clean; `cli eval` OK (+4 scenarios: hunting 4, performance 4, maintainability 4, pr-hygiene 5); markdownlint 0 errors. **Cross-model re-gate: target Wave B close-out (the G32 PR), no earlier than 2026-06-16** — batched rather than per-factor (mechanism/prose, no new judgment lens); the G32 PR is the trigger to run it across #48 / #50 / G32 together.
 
 **Resolves:** G29, G25 → shipped; G13 parts (1)+(3) shipped (part 2 = Q8); G12 shipped as factor. **Wave B remaining: G32** (pre-existing/adjacent defects — the attribution axis, its own PR next).
+
+### 2026-06-16 — Wave B close-out: G32 pre-existing/adjacent defects (the attribution axis)
+
+The last Wave B item from [`research/gap-hunt-synthesis.md`](research/gap-hunt-synthesis.md). G32 is **the fourth instance of the conflation pattern** — *reviewability ⊥ attribution* — after G23 (⊥ authority/route) and G26 (⊥ application-timing/valence). Its three predecessors shipped in Wave A as **cross-cutting generator prose** (the per-lens *Reviewer discipline* guard + the synthesizer finding contract), so G32 lands the same way rather than as a single-lens topic heuristic. This keeps it a true primitive (every lens) and keeps `built_from` untouched, so drift stays clean.
+
+**The diff-only convention conflates "what changed" (attribution) with "what's reviewable."** A genuine defect a change did *not* introduce, but that sits in the code the PR *touches* (the edited function or immediately adjacent lines), is reviewable and worth surfacing — the Boy-Scout / opportunistic-improvement rule — without expanding the PR's scope. It is *un-attributed improvement-valence*: opt-in, default-quiet, `route: implementer`, non-blocking.
+
+**What shipped (generator prose only):**
+
+- **Per-lens guard.** Every lens's *Reviewer discipline* section gains a clause: a pre-existing defect noticed in touched code may be surfaced, tagged "pre-existing — not introduced by this change," opt-in/default-quiet, `route: implementer`, non-blocking; stay scoped to touched code (a repo-wide hunt is the audits' job) and never expand the PR's scope. All 27 lenses regenerated.
+- **Synthesizer finding contract.** New **`attribution: introduced | pre-existing`** field; an *Attribution (Boy-Scout, scoped)* surfacing principle alongside detect-and-route and valence; a verdict rule (a `pre-existing` defect is surfaced and routed to the implementer **without** setting this PR's verdict — the diff did not cause it); and a dedicated opt-in **"Pre-existing — noticed in touched code, not introduced here"** report section (absent unless the team opted into Boy-Scout surfacing).
+
+**Verification:** `pytest tests/` 95 pass (+1: pre-existing-in-touched-code guard clause; extended the synthesizer-contract test for the attribution field/principle/section); `cli drift` clean; `cli eval` OK (synthesizer now 9 scenarios — added an opted-in Boy-Scout case asserting the pre-existing finding is tagged, routed to the implementer, and does not set the verdict); markdownlint 0 errors. Generator-logic + prose only — no hand-edited skills, no research-section edits.
+
+**Resolves:** G32 → shipped. **Wave B is closed** (G27, G21, G28, G29, G25, G13(1)+(3), G12, G32 all shipped; G13 part 2 = Q8 auto-apply). **Cross-model re-gate still owed** — batched across the Wave B add-factor PRs (#48 / #50) + this G32 close-out; it needs Ollama/local models (qwen2.5:7b floor + a 3B canary) and so runs on a machine with that substrate, not in this environment. Next strategic step is Wave C, led by **G14** (AI-authored-code-defects lens).
