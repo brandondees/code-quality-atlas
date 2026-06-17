@@ -1,0 +1,39 @@
+{
+  "skills": [
+    "reviewing-ethical-design"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this change (the signup handler).\n```python\n@app.post(\"/signup\")\ndef signup(form):\n    user = User(email=form.email)\n    user.marketing_opt_in = True   # defaulted on; the form shows no way to decline\n    user.save()\n```",
+      "expected_behavior": [
+        "Flags the manipulative default: marketing consent is defaulted to True (a pre-checked / opt-out pattern) with no symmetric, equally-easy way to decline — a recognized deceptive-design defect set right in the code that writes the default",
+        "Detect-and-route: routes the consent-as-law facet (opt-in must be freely given, GDPR Art. 7) to auditing-compliance-and-provenance (#27) / legal and the product call to product, surfacing the code as evidence rather than adjudicating it here",
+        "Recommends defaulting marketing_opt_in to False with a symmetric opt-in, not deciding the business trade-off unilaterally"
+      ]
+    },
+    {
+      "query": "Review this change (premium pricing).\n```python\n# pricing.py\ndef quote(applicant):\n    base = 100\n    if applicant.zip_code in HIGH_RISK_ZIPS:   # neighborhood proxy\n        base *= 1.5\n    if applicant.surname in FOREIGN_SOUNDING:   # explicit proxy\n        base *= 1.2\n    return base\n```",
+      "expected_behavior": [
+        "Flags discriminatory business logic in plain conditionals: surcharges keyed on ZIP code and on surname are proxies for protected attributes (race / national origin) with a foreseeable disparate effect — no model in sight, a code-level ethical defect",
+        "Detect-and-route: routes the legal/fairness adjudication to #27 / legal and the pricing-policy call to product / leadership, citing the specific conditionals as evidence and not deciding the fairness question itself",
+        "Does not require a dataset/metric fairness audit (out of scope) to surface the plain-conditional signal, and does not invent a statistical claim it cannot support from the diff"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\n@app.post(\"/account/delete\")\ndef delete_account(user, confirmation):\n    if confirmation != \"DELETE\":          # confirm a destructive, irreversible action\n        return error(\"Type DELETE to confirm\")\n    purge(user)\n\n# settings form: marketing_opt_in defaults to False; toggling it off stops sends immediately\n```",
+      "expected_behavior": [
+        "Outputs exactly: \"No findings\"",
+        "Recognizes the confirmation step guards a destructive, irreversible action (legitimate protective friction, not obstruction), consent defaults to off, and declining actually stops the behavior — the user-favorable path is not obstructed",
+        "Does not flag the destructive-action confirmation as a dark pattern and does not invent ethical findings on a flow that treats the user honestly"
+      ]
+    },
+    {
+      "query": "Review this change (checkout + subscription cancel).\n```python\n# checkout.py\ntimer = {\"ends_at\": now() + 600}   # \"Offer ends in 10:00\" — re-seeded on every page load\ndef render_checkout():\n    return {\"countdown\": timer, \"stock_label\": \"Only 2 left!\"}   # stock_label is a constant\n\n@app.get(\"/cancel\")\ndef cancel():\n    return redirect(\"/call-us\")   # cancellation is phone-only; sign-up is one click\n```",
+      "expected_behavior": [
+        "Flags fabricated urgency/scarcity (sneaking): the countdown is re-seeded each page load so the deadline is fake, and \"Only 2 left!\" is a hardcoded constant rather than real inventory — recognized dark patterns, cited at the code that fabricates them",
+        "Flags obstruction (roach motel): cancellation is gated behind a phone call while sign-up is one click — asymmetric friction serving the business against the user's clear intent, distinct from legitimate protective friction",
+        "Detect-and-route: routes the keep-or-kill product judgment to product (and any auto-renew/consent-law facet to #27 / legal), naming each pattern with evidence rather than deciding the trade-off"
+      ]
+    }
+  ]
+}

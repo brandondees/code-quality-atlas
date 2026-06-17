@@ -1,0 +1,18 @@
+# Tool rules to triage — reviewing-ethical-design
+
+> **Selecting tools for this stack.** The tools named below are field-tested starting points, not a mandate. Pick the one that fits this codebase's language version, build, and CI — and verify it actually runs on your toolchain before relying on it. A listed tool that is broken, abandoned, or noisy on your setup is a gap to close, not a permanent `continue-on-error`: prefer a working, maintained equivalent (often a younger, less well-known one) over a canonical-but-broken default. The capability is the requirement; the specific tool is replaceable.
+
+## Contents
+
+- From category #36
+
+## From category #36
+
+### Tooling rules worth lifting
+
+*(Detection caps below ~50% coverage — this is mostly LLM/human judgment, not lint. The mechanical subset triages candidates; named tools `(verify)` on your stack.)*
+
+- **Consent / CMP configuration checks** — lint the consent-management config and the code that sets defaults: a pre-checked consent box, a default-true marketing flag, or an "accept all" with no symmetric "reject all" is mechanically detectable at the point the default is written.
+- **Dark-pattern candidate detectors** — research prototypes and heuristic scanners (countdown-timer / fake-scarcity / confirmshaming-copy detectors) flag *candidates*; treat a hit as a prompt to review, not a verdict (sub-50% recall, false positives common).
+- **Accessibility tooling as an obstruction proxy** — `axe-core` / Lighthouse: a cancel/opt-out/consent control that fails a11y (not keyboard-operable, hidden from assistive tech, sub-threshold contrast) is often *obstruction delivered through an a11y gap*; route the a11y mechanics to #23, keep the deceptive-intent verdict here.
+- **Copy / microcopy linters** — confirmshaming and pressure copy ("No, I don't want to save money") are catchable with a wordlist/regex pass over user-facing strings (cross-links #23 hardcoded-string extraction).

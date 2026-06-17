@@ -22,7 +22,7 @@
     {
       "query": "Review this change.\n```python\n# pricing.py  (new module)\ndef cents_to_display(amount_cents: int, *, currency: str = \"USD\") -> str:\n    \"\"\"Format integer minor units as a display string. Pure; no I/O.\"\"\"\n    return f\"{amount_cents / 100:.2f} {currency}\"\n```\n```diff\n# AGENTS.md\n  ## Modules\n+ - `pricing.py` — money formatting helpers (pure functions).\n```",
       "expected_behavior": [
-        "Reports no findings",
+        "Outputs exactly: \"No findings\"",
         "Recognizes the change is a self-contained depth-first slice — a typed signature and a local contract docstring make it understandable without distant context, the name is retrieval-friendly, and the onboarding file was kept accurate and scoped",
         "Does not invent agent-legibility findings on correct code, and does not demand an llms.txt index or extra structure this small change does not need"
       ]

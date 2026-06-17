@@ -1,0 +1,15 @@
+# References to mine — reviewing-ethical-design
+
+## Contents
+
+- From category #36
+
+## From category #36
+
+### Key references
+
+- **Mathur et al. — "Dark Patterns at Scale: Findings from a Crawl of 11K Shopping Websites" (CSCW 2019)** — https://www.researchgate.net/publication/337134584_Dark_Patterns_at_Scale_Findings_from_a_Crawl_of_11K_Shopping_Websites → mine: the operational **7-category taxonomy** — sneaking, urgency, misdirection, social proof, scarcity, obstruction, forced action — the spine for naming a finding precisely rather than "this feels manipulative." Each category maps to concrete, code-visible mechanisms.
+- **EDPB — "Guidelines 03/2022 on deceptive design patterns in social media platform interfaces: how to recognise and avoid them" (Version 2.0, adopted February 2023)** — https://www.edpb.europa.eu/our-work-tools/our-documents/guidelines/guidelines-032022-deceptive-design-patterns-social-media_en → mine: the regulator's **6 families / 16 subcategories** (overloading, skipping, stirring, hindering, fickle, left-in-the-dark) and the binding framing under GDPR (fairness, Art. 5(1)(a)) — the basis for the consent-symmetry and obstruction checks, and for routing the consent-law facet to #27.
+- **FTC — "Bringing Dark Patterns to Light" staff report (2022)** — https://www.ftc.gov/reports/bringing-dark-patterns-light → mine: the enforcement view (FTC Act §5 "unfair or deceptive"), negative-option / auto-renew, and fabricated urgency/scarcity as actionable — grounds the honest-state and asymmetric-friction checks in live US regulation, not just taxonomy.
+- **"Automated detection of dark patterns" (ESORICS/EuroUSEC 2024)** — https://dl.acm.org/doi/10.1145/3688459.3688475 → mine: the empirical ceiling — automated detection caps **below ~50% coverage**, so this is a **judgment lens with a thin mechanical subset**, not a lint rule. Sets the expectation that the reviewer (human or LLM) carries the call and tooling only triages.
+- **"Deception at Scale: How AI-generated UIs reproduce dark patterns" (arXiv 2502.13499, 2025)** — https://arxiv.org/pdf/2502.13499 → mine: dark patterns recur even in **AI-generated UI** — reflexively important (this suite's mirror of #34/#35: machine-authored interfaces inherit the manipulative defaults of their training data), so the base rate on generated diffs is high.

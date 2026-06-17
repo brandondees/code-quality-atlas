@@ -9,7 +9,7 @@ description: 'Reviews public API and contract changes for safety: backward compa
   internal-only with no consumer-facing surface — private helpers or implementation
   details no external caller depends on.'
 provenance:
-  taxonomy_version: v0.5
+  taxonomy_version: v0.6
   built_from:
   - category: 13
     source: docs/research/cluster-3-structure.md#13

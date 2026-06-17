@@ -13,7 +13,7 @@ description: 'Reviews a change for agent-legibility — whether an AI agent can 
   any large or scattered change whose context economy matters. Defers human readability
   to #5–#8, agent-operator parity to #24, and runtime tool-safety to #32.'
 provenance:
-  taxonomy_version: v0.5
+  taxonomy_version: v0.6
   built_from:
   - category: 35
     source: docs/research/cluster-2-readability.md#35

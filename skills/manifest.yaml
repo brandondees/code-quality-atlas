@@ -1,4 +1,4 @@
-taxonomy_version: v0.5
+taxonomy_version: v0.6
 skills:
   - name: hunting-silent-failures
     description: >
@@ -139,6 +139,30 @@ skills:
     wave: 5
     built_from:
       - { category: 35, source: docs/research/cluster-2-readability.md#35 }
+
+  - name: reviewing-ethical-design
+    description: >
+      Reviews a change for diff-visible, code-level ethical / responsible-design
+      defects — the non-ML analog of harmful-output review, a sibling of security
+      (harm to the user/subject, not via an attacker): dark patterns and deceptive
+      flows (sneaking, fabricated urgency/scarcity, misdirection/confirmshaming,
+      obstruction, forced action, nagging), manipulative defaults and asymmetric
+      choices (pre-checked consent, opt-out harder than opt-in, auto-renew),
+      discriminatory business logic in plain conditionals (a hardcoded threshold or
+      proxy disadvantaging a group, no model in sight), dishonest state/signals,
+      and consent theater. Strictly detect-and-route: name the pattern with
+      evidence, then route the decision — consent-as-law to #27/legal, product
+      trade-offs to product, a11y mechanics to #23. Use when reviewing
+      consent/opt-out flows, defaults, pricing/eligibility conditionals, or
+      onboarding/checkout/cancellation funnels. Skip internal code with no
+      user-facing behavior; deep model-fairness auditing is out of scope.
+    picker: >
+      Does this manipulate or disadvantage the user? Dark patterns, manipulative
+      defaults, discriminatory conditionals — detect-and-route to product/legal.
+    shape: diff
+    wave: 5
+    built_from:
+      - { category: 36, source: docs/research/cluster-4-runtime.md#36 }
 
   - name: finding-maintainability-hotspots
     description: >
@@ -650,6 +674,14 @@ router:
             checking-restraint]
       note: "the agent-as-reader vantage — mirror of #34; context economy,
             retrieval-friendly structure, scoped agent onboarding"
+    - when: User-facing flow that could manipulate or disadvantage a person —
+            consent / opt-out, defaults, pricing or eligibility conditionals,
+            onboarding / checkout / cancellation funnels
+      run: [reviewing-ethical-design, reviewing-accessibility-and-i18n,
+            sweeping-for-security]
+      note: "detect-and-route — dark patterns, manipulative defaults,
+            discriminatory conditionals; consent-as-law routes to #27, product
+            trade-offs to product, a11y mechanics to #23"
     - when: Logging, metrics, alerts, feature flags, deploy/rollback paths
       run: [reviewing-observability-and-operability, sweeping-for-security]
     - when: Tests-only change
@@ -784,3 +816,13 @@ synthesizer:
         the current pattern is a demonstrated maintenance hotspot (high
         change-amplification or repeated edits) and the new form measurably lowers
         that cost. Consistency wins until evolvability has evidence.
+    - between: [sweeping-for-security, reviewing-ethical-design]
+      about: added friction or a confirmation step — a protective safety control
+        vs. manipulative obstruction
+      resolve: >
+        Keep friction that protects the user or prevents abuse (confirmations on
+        destructive or irreversible actions, step-up auth on high-consequence
+        operations, a cooling-off period); cut friction that serves the business
+        against the user's clear intent (hard-to-cancel, buried opt-out,
+        roach-motel flows). Security's protective friction wins; obstruction does
+        not — the test is whose interest the friction serves, not its presence.
