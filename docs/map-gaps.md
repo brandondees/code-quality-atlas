@@ -149,7 +149,7 @@ Surfaced 2026-06-14 by a third gap hunt that reasons from *outside* the map — 
 ## G14 — Characteristic defects of AI-authored code
 
 Surfaced via the **substrate sweep** (and reflexively — this suite is itself AI-built). The map reviews code that *calls* an LLM (#25) and tracks AI *provenance markers* (#27), but has no lens for the **failure signature of machine-authored code itself**, regardless of author: hallucinated/misused APIs, plausible-but-wrong logic that reads fluently, over-helpful unrequested additions (ties `checking-restraint`), and package hallucination → slopsquatting (~20% of LLM-recommended packages are non-existent; ~45% of LLM code carried security flaws in a 100+-model study — sources in the research doc). Distinct from #25 (code that *uses* AI) and #27 (a provenance *marker*). Diff-reviewable, high present-day base rate.
-**Disposition (lean): promote (diff lens)** — package-hallucination leg xref #18, plausible-wrong/over-helpful legs xref #1 and `checking-restraint`. Confidence: high.
+**Disposition (lean): promote (diff lens)** — package-hallucination leg xref #18, plausible-wrong/over-helpful legs xref #1 and `checking-restraint`. Confidence: high. **✅ Shipped 2026-06-17** (Wave C, taxonomy **v0.4**) as `reviewing-ai-authored-code` — new category **#34** (research [`cluster-4-runtime.md#34`](research/cluster-4-runtime.md)), primary-owns #34 and cross-refs #18 (the slopsquat leg dedupes under the supply-chain owner); attribution-agnostic, defers the deep verdict to #18/#14/#1/#11. Dedicated router route added; 4 evals; drift clean.
 
 ## G15 — Production-evidence / runtime-informed review (a candidate fifth shape)
 

@@ -1,0 +1,38 @@
+# Reviewable heuristics — reviewing-ai-authored-code
+
+## Contents
+
+- From category #34
+- From category #18
+
+## From category #34
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- **Package is real and intended (slopsquat guard, xref #18):** Does every **newly added import or dependency** resolve to a package that actually **exists on the real index, predates this PR, and is the project you meant** — not a plausible-sounding hallucination or a one-character typosquat of a popular name? An unrecognized new dependency in a generated diff is a *supply-chain security event*: confirm existence + provenance, pin the version, and hand the reputation verdict to #18. Never assume a package is real because the code reads as if it is.
+- **Confident-but-wrong constants and APIs:** Treat fluent, authoritative-looking code as *unverified*, not *correct*. Are invented or misused **APIs, methods, parameters, or flags** checked against the library's actual current signature (docs, not memory)? Are magic constants, regexes, format strings, status codes, crypto parameters, and limits **verified against the spec** rather than trusted because they look right? LLM defects are characteristically plausible — the review must distrust plausibility.
+- **Over-helpful, unrequested additions (xref #11/#1):** Did the change add scope nobody asked for — extra endpoints, config knobs, "just in case" branches, defensive layers, a drive-by refactor — that widens the diff and the blast radius beyond the stated task? Over-helpfulness is the generated-code signature of premature generality; surface it (route to restraint for the verdict) and keep the change to its purpose.
+- **Hallucinated internal references:** Do referenced **variables, functions, files, config keys, env vars, or imports actually exist in *this* codebase** with those exact names — or did the model invent a plausible-but-absent symbol (or use a name defined slightly differently elsewhere)? Inconsistent internal state — defined one way, used another — is a named LLM failure mode.
+- **Plausible-but-wrong logic on the happy path:** Does the change *actually* implement what its description and comments claim, on every branch — or does it read correctly while quietly mishandling an edge, an ordering, an inverted condition, or an off-by-one? Re-derive the logic from intent rather than from the (fluent, confident) code; this is the #1 correctness check applied with extra suspicion to machine-authored prose.
+- **Security-weakness signature (xref #14):** Does the change carry the weak-default classes generated code over-produces — unparameterized queries, unescaped output, missing authz checks, permissive CORS/TLS, disabled verification, weak / `Math.random` tokens, secrets inline? Flag the signature and hand the verdict to `sweeping-for-security`; ~45% of LLM code carries at least one such flaw, so this is a high-prior, not an edge case.
+- **Tests that assert the bug, not the spec:** Were the change's tests written *against the implementation* (so they pass trivially, mirror the code's mistake, or assert a tautology) rather than against the intended behavior? Generated tests frequently encode "what the code does" as "what is correct." Confirm a failing case exists, the assertions are meaningful, and a regression test pins the actual requirement (route detail to `reviewing-test-quality`).
+- **Fabricated comments, docs, and citations:** Do comments / docstrings describe behavior the code **actually has** (not an intended-but-absent feature), and do any cited issue numbers, RFCs, links, or "as documented in…" references **resolve to real, on-point sources**? A confident comment for code that does something else — or a dead / invented citation — is a strong tell to read the surrounding logic with extra care.
+- **Duplication instead of reuse:** Did the change re-implement a helper, constant, type, or pattern that **already exists** in the codebase, rather than importing it — adding a parallel, soon-to-diverge copy? Regenerated boilerplate that ignores existing abstractions is the measured churn / duplication signature of AI-assisted edits (route detail to `checking-idioms-and-consistency` / restraint).
+
+---
+
+## From category #18
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- Is the new dependency **necessary**, or could stdlib/a few lines do it (avoid trivial deps and transitive bloat)?
+- Is it **healthy**: recently maintained, broadly used, reasonable Scorecard, not single-maintainer abandonware?
+- Any **known CVEs** in it or its transitive tree (run the scanner)? Is the version **pinned via lockfile** and honored in CI (`npm ci`)?
+- Does it pull in a large transitive subtree or **duplicate** an existing dependency's capability?
+- License **compatible** with the project (cross #27)?
+- Does the install run scripts or request network/filesystem access it shouldn't (malicious-package surface)?
+- Are updates **automated** (Dependabot/Renovate) with the lockfile committed and enforced?
+- Version bump → are breaking changes reviewed (changelog), especially across a major version?
+- **Vendor lock-in**: does this couple us to a proprietary API where a standard/portable option exists?
+
+---

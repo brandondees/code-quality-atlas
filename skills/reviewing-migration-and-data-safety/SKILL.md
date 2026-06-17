@@ -8,7 +8,7 @@ description: 'Reviews schema migrations and data changes for safety: backward co
   persistence. Skip when the change touches no schema, migration, backfill, or persisted
   data format — pure in-memory or stateless logic with no durable store behind it.'
 provenance:
-  taxonomy_version: v0.3
+  taxonomy_version: v0.4
   built_from:
   - category: 20
     source: docs/research/cluster-5-verification.md#20

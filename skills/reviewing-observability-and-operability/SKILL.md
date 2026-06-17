@@ -7,7 +7,7 @@ description: 'Reviews changes for production operability: structured logs with c
   and metric cardinality discipline. Use when reviewing logging, metrics, tracing,
   alerts, health checks, feature flags, or deploy/rollback paths.'
 provenance:
-  taxonomy_version: v0.3
+  taxonomy_version: v0.4
   built_from:
   - category: 16
     source: docs/research/cluster-4-runtime.md#16

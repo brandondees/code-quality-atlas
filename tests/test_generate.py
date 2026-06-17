@@ -2,7 +2,7 @@
 # tests/test_generate.py
 from pathlib import Path
 from tooling.manifest import Manifest, Route, Router, Skill, Source, load_manifest
-from tooling.generate import build_reference
+from tooling.generate import build_reference, build_skill_md, primary_owners
 
 
 def _skill(**kw):
@@ -236,6 +236,26 @@ def test_attribution_guard_is_diff_shaped_only():
     # the defect/improvement valence guard stays shape-neutral (unchanged)
     assert "Defects are the default" in build_skill_md(
         _skill(shape="repo"), taxonomy_version="v0.2", docs_root=".")
+
+
+def test_ai_authored_lens_owns_34_and_crossrefs_supply_chain():
+    # G14 (Wave C, v0.4): the AI-authored-code lens primary-owns the new #34
+    # category and cross-refs #18 (so the slopsquat leg dedupes under the
+    # supply-chain owner rather than double-reporting).
+    m = load_manifest("skills/manifest.yaml")
+    lens = next(s for s in m.skills if s.name == "reviewing-ai-authored-code")
+    assert lens.shape == "diff"
+    owners = primary_owners(m)
+    assert owners[34] == "reviewing-ai-authored-code"   # owns the new category
+    assert owners[18] == "auditing-dependencies-and-supply-chain"  # not stolen
+    assert 18 in lens.cross_ref
+    md = build_skill_md(lens, taxonomy_version=m.taxonomy_version, docs_root=".",
+                        owners=owners)
+    # the two priority-marked checks surface in Top checks (G9)
+    assert "slopsquat guard" in md
+    assert "Confident-but-wrong constants and APIs" in md
+    # shared-category note points to the supply-chain owner for dedupe
+    assert "auditing-dependencies-and-supply-chain" in md
 
 
 def test_cross_ref_note_names_primary_owner():

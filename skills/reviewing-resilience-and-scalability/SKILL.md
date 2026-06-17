@@ -11,7 +11,7 @@ description: 'Reviews a change or design for operational resilience and scale: u
   Skip when the change is a small, stateless local edit with no new dependency call,
   queue, shared state, or scaling/recovery surface.'
 provenance:
-  taxonomy_version: v0.3
+  taxonomy_version: v0.4
   built_from:
   - category: 28
     source: docs/research/cluster-4-runtime.md#28

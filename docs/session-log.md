@@ -1266,3 +1266,21 @@ The last Wave B item from [`research/gap-hunt-synthesis.md`](research/gap-hunt-s
 ### 2026-06-16 (cont.) — dogfood fix: shape-gate the G32 attribution guard
 
 Ran the atlas suite against PR #53 itself (the feature route: tracing-correctness, checking-restraint, test-quality, naming-readability, + pr-hygiene). The restraint+correctness lenses surfaced one Minor that CodeRabbit's clean pass missed: `build_skill_md` emitted the diff-specific attribution guard ("this PR", "touched code", "a repo-wide hunt is the audits' job") onto **all** lenses, including the 8 repo-shaped audits (where repo-wide hunting *is* the job — self-referential) and the decision lens (which reviews an ADR, not a diff). Fixed by gating the paragraph on `skill.shape == "diff"`, mirroring `_scope_line`. The guard now renders on the 18 diff lenses only; the defect/improvement valence guard stays shape-neutral (unchanged). Test added (`test_attribution_guard_is_diff_shaped_only`). `pytest` 96 pass; drift clean; eval OK; markdownlint 0 errors.
+
+### 2026-06-17 — Wave C opens: G14 AI-authored-code defects (taxonomy v0.4, new lens #34)
+
+First **Wave C** new lens, and the first **v0.4** taxonomy promotion. Unlike the Wave B add-factors (cross-cutting prose that regenerates), a new lens carries the full compounding loop (D6/D8): a dedicated research section → taxonomy category → manifest entry → generate → evals. G14 is the highest-base-rate new lens and **reflexively important — this suite is itself AI-built**, so it should hold its own output to this bar.
+
+**The gap:** the map reviews code that *calls* a model (#25) and tracks AI *provenance markers* (#27), but nothing owned the **failure signature of machine-authored code itself**, independent of author. AI-assisted code is now the median diff and fails in characteristic, diff-reviewable ways fluent prose hides.
+
+**What shipped:**
+
+- **Research §#34** in [`cluster-4-runtime.md`](research/cluster-4-runtime.md) (next to its sibling #25), grounded in cited prior art: Spracklen et al. package-hallucination (~20% non-existent, ~43% recur → slopsquatting), *Beyond Functional Correctness* (invented/misused APIs, plausible-but-wrong logic, inconsistent state), Veracode (~45% of LLM code carries a security flaw), Willison on slopsquatting, GitClear churn/duplication. 9 reviewable heuristics, 2 priority-marked (G9): the slopsquat guard and confident-but-wrong constants/APIs.
+- **Taxonomy v0.4** — new category **#34 AI-authored-code defects** in Cluster IV; version header + changes note updated.
+- **Lens `reviewing-ai-authored-code`** (shape: diff, wave 5) — **primary-owns #34, cross-refs #18** so the package-existence/slopsquat leg dedupes under the supply-chain owner rather than double-reporting; **attribution-agnostic** (it does not require knowing a model wrote the code) and **defers the deep verdict** to the owning lens (#18 supply-chain, #14 security, #1 correctness, #11 restraint).
+- **Router** — a dedicated route ("AI-generated/assisted change, large/unfamiliar diff, or any change adding dependencies or confident-looking constants/APIs" → `reviewing-ai-authored-code` + correctness + security); auto-listed in the diff catalog.
+- **4 evals** — slopsquat dependency, confident-but-wrong constant (84600≠86400), over-helpful scope creep, and a clean control guarding false positives; `examples.md` populated.
+
+**Verification:** `pytest tests/` 97 pass (+1: `test_ai_authored_lens_owns_34_and_crossrefs_supply_chain` — owns #34, #18 not stolen, priority checks + shared-owner note present); `cli drift` clean; `cli eval` OK (new lens 4 scenarios); markdownlint 0 errors.
+
+**Resolves:** G14 → shipped. **Wave C opened.** Remaining Wave C (each a full research+eval pass): G16 ethical/responsible-design (needs G23), G20 agent-legibility (cluster-II rotation), G30 threat-modeling (decision-shape, needs Q15), G18-interoperability. **Cross-model re-gate still owed** — now also covers this new lens; batch on a machine with the Ollama substrate (qwen2.5:7b floor + 3B canary), not this environment.

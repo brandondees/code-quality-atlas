@@ -9,7 +9,7 @@ description: 'Merges the findings of several code-quality-atlas lenses — and o
   reviewers) on a change, when assembling multi-source review output into one report,
   or when overlapping findings need deduplicating and prioritizing.'
 provenance:
-  taxonomy_version: v0.3
+  taxonomy_version: v0.4
   built_from: []
 ---
 
