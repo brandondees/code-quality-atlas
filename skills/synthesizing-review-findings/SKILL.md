@@ -9,7 +9,7 @@ description: 'Merges the findings of several code-quality-atlas lenses — and o
   reviewers) on a change, when assembling multi-source review output into one report,
   or when overlapping findings need deduplicating and prioritizing.'
 provenance:
-  taxonomy_version: v0.5
+  taxonomy_version: v0.6
   built_from: []
 ---
 
@@ -50,6 +50,7 @@ When the change trips one of these known opposing pairs, apply the default and s
 | `reviewing-performance-and-efficiency` ↔ `reviewing-accessibility-and-i18n` | a leaner/faster UI vs. accessible markup and assistive-tech support | Accessibility is a correctness requirement, not an optimization to trade away. Keep the accessible markup and hit the performance target another way (lazy-load, code-split, cache). Drop a11y only against a measured budget proving no other path exists — which is almost never. |
 | `checking-restraint` ↔ `reviewing-install-and-upgrade-experience` | backward-compat shims and deprecation windows for consumers vs. removing the old path now | Keep the old path working for one deprecation window with a warning that names the replacement whenever the project has external consumers; remove in place only for internal-only or never-released surface. Consumer smoothness wins while real adopters exist; restraint wins when there are none. |
 | `checking-idioms-and-consistency` ↔ `finding-maintainability-hotspots` | matching the existing pattern vs. changing it to reduce future churn | Stay consistent with the established idiom by default; diverge only when the current pattern is a demonstrated maintenance hotspot (high change-amplification or repeated edits) and the new form measurably lowers that cost. Consistency wins until evolvability has evidence. |
+| `sweeping-for-security` ↔ `reviewing-ethical-design` | added friction or a confirmation step — a protective safety control vs. manipulative obstruction | Keep friction that protects the user or prevents abuse (confirmations on destructive or irreversible actions, step-up auth on high-consequence operations, a cooling-off period); cut friction that serves the business against the user's clear intent (hard-to-cancel, buried opt-out, roach-motel flows). Security's protective friction wins; obstruction does not — the test is whose interest the friction serves, not its presence. |
 
 For a tension not in this table, prefer the **safer and simpler** option, and say what evidence would change the call.
 

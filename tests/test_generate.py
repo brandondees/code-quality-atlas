@@ -279,6 +279,36 @@ def test_agent_legibility_lens_owns_35_as_mirror_of_ai_authored():
     assert "Shared categories" not in md
 
 
+def test_ethical_design_lens_owns_36_detect_and_route():
+    # G16 (Wave C, v0.6): the ethical/responsible-design lens primary-owns the new
+    # #36 category — the diff-visible non-ML ethics class (dark patterns,
+    # manipulative defaults, discriminatory conditionals), strictly detect-and-route.
+    # Single-category lens, no cross_ref; both ★-marked checks surface (G9).
+    m = load_manifest("skills/manifest.yaml")
+    lens = next(s for s in m.skills if s.name == "reviewing-ethical-design")
+    assert lens.shape == "diff"
+    assert not lens.cross_ref
+    owners = primary_owners(m)
+    assert owners[36] == "reviewing-ethical-design"
+    # the sibling harm lenses still own their categories (not disturbed)
+    assert owners[14] == "sweeping-for-security"
+    md = build_skill_md(lens, taxonomy_version=m.taxonomy_version, docs_root=".",
+                        owners=owners)
+    assert "Dark pattern / deceptive flow" in md            # ★ priority check 1
+    assert "Manipulative defaults & asymmetric choices" in md  # ★ priority check 2
+    assert "Shared categories" not in md  # single-category lens
+
+
+def test_security_ethical_design_tension_present():
+    # G16 + G31: now that reviewing-ethical-design exists, the long-noted
+    # security ↔ usability cross-quality collision (protective friction vs.
+    # manipulative obstruction) becomes buildable and is added to the table.
+    m = load_manifest("skills/manifest.yaml")
+    pairs = {tuple(sorted(t.between)) for t in m.synthesizer.tensions}
+    assert tuple(sorted(["sweeping-for-security",
+                         "reviewing-ethical-design"])) in pairs
+
+
 def test_cross_ref_note_names_primary_owner():
     md = build_skill_md(_skill(cross_ref=[4]), taxonomy_version="v0.2", docs_root=".",
                         owners={2: "hunting-silent-failures", 4: "some-other-skill"})

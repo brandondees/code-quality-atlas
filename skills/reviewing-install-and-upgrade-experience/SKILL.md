@@ -13,7 +13,7 @@ description: 'Reviews a change for the experience of the people who consume this
   a downstream project adopts (a tool, plugin, template, or library). Skip when the
   change has no consumer-facing install, config, or upgrade surface.'
 provenance:
-  taxonomy_version: v0.5
+  taxonomy_version: v0.6
   built_from:
   - category: 33
     source: docs/research/cluster-6-evolution.md#33

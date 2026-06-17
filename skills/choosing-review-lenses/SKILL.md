@@ -12,7 +12,7 @@ description: 'The code review entrypoint for code-quality-atlas — use for any 
   lens; skip and call individual lenses directly when the relevant ones are already
   clear.'
 provenance:
-  taxonomy_version: v0.5
+  taxonomy_version: v0.6
   built_from: []
 ---
 
@@ -51,6 +51,7 @@ The code review / quality review entrypoint for code-quality-atlas. Use for any 
 | LLM / agent / model-API integration | `reviewing-llm-integration`, `sweeping-for-security`, `checking-restraint` |
 | AI-generated or AI-assisted change, a large or unfamiliar diff, or any change that adds dependencies or confident-looking constants/APIs | `reviewing-ai-authored-code`, `tracing-correctness-and-invariants`, `sweeping-for-security` — attribution-agnostic; #18 owns the supply-chain verdict, #14 the security one |
 | Change to an AI-/agent-maintained codebase, to agent-onboarding files (AGENTS.md/CLAUDE.md, llms.txt) or repo structure an agent must navigate, or a large/scattered change whose context economy matters | `reviewing-agent-legibility`, `reviewing-naming-and-readability`, `checking-restraint` — the agent-as-reader vantage — mirror of #34; context economy, retrieval-friendly structure, scoped agent onboarding |
+| User-facing flow that could manipulate or disadvantage a person — consent / opt-out, defaults, pricing or eligibility conditionals, onboarding / checkout / cancellation funnels | `reviewing-ethical-design`, `reviewing-accessibility-and-i18n`, `sweeping-for-security` — detect-and-route — dark patterns, manipulative defaults, discriminatory conditionals; consent-as-law routes to #27, product trade-offs to product, a11y mechanics to #23 |
 | Logging, metrics, alerts, feature flags, deploy/rollback paths | `reviewing-observability-and-operability`, `sweeping-for-security` |
 | Tests-only change | `reviewing-test-quality`, `checking-idioms-and-consistency` |
 | Design doc / plan / RFC (no code yet) | `tracing-correctness-and-invariants`, `reviewing-concurrency-and-async`, `reviewing-migration-and-data-safety`, `reviewing-api-contract-safety` — pick by the design's domain, from design-capable (◆) lenses only |
@@ -76,6 +77,7 @@ The code review / quality review entrypoint for code-quality-atlas. Use for any 
 - `reviewing-llm-integration` ◆ — Is the model call safe and bounded? Injection surface, output validation, evals, token cost, PII.
 - `reviewing-ai-authored-code` — Does this carry the AI-authored failure signature? Hallucinated/typosquatted packages, invented APIs, confident-but-wrong constants, over-helpful scope.
 - `reviewing-agent-legibility` — Can an AI agent read, navigate, and safely change this within a context budget? Context economy, retrieval-friendly structure, scoped AGENTS.md/CLAUDE.md.
+- `reviewing-ethical-design` — Does this manipulate or disadvantage the user? Dark patterns, manipulative defaults, discriminatory conditionals — detect-and-route to product/legal.
 - `sweeping-for-security` ◆ — Can an attacker abuse this? Injection, authorization, secrets, crypto, untrusted data.
 - `reviewing-performance-and-efficiency` ◆ — Will this be slow or expensive at scale? N+1, O(n²) hot paths, caching, payload buffering.
 - `reviewing-test-quality` — Do the tests prove anything? Behavior coupling, over-mocking, edge coverage, determinism.

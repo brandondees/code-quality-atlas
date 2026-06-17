@@ -6,7 +6,7 @@ description: Reviews changes for over-engineering — premature abstraction, spe
   knobs, generality, or hand-optimized code, or when asking whether a change is doing
   too much.
 provenance:
-  taxonomy_version: v0.5
+  taxonomy_version: v0.6
   built_from:
   - category: 11
     source: docs/research/cluster-3-structure.md#11
