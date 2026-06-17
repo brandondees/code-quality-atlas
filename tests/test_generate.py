@@ -258,6 +258,27 @@ def test_ai_authored_lens_owns_34_and_crossrefs_supply_chain():
     assert "auditing-dependencies-and-supply-chain" in md
 
 
+def test_agent_legibility_lens_owns_35_as_mirror_of_ai_authored():
+    # G20 (Wave C, v0.5): the agent-legibility lens primary-owns the new #35
+    # category — the agent-as-reader vantage rotation of Cluster II, the mirror of
+    # #34 (quality of code *for* AI readers vs. *by* them). Single-category lens,
+    # no cross_ref; both ★-marked checks must surface in Top checks (G9).
+    m = load_manifest("skills/manifest.yaml")
+    lens = next(s for s in m.skills if s.name == "reviewing-agent-legibility")
+    assert lens.shape == "diff"
+    assert not lens.cross_ref
+    owners = primary_owners(m)
+    assert owners[35] == "reviewing-agent-legibility"
+    # the AI-authored mirror lens still owns its own category (not disturbed)
+    assert owners[34] == "reviewing-ai-authored-code"
+    md = build_skill_md(lens, taxonomy_version=m.taxonomy_version, docs_root=".",
+                        owners=owners)
+    assert "Context economy / self-containment" in md          # ★ priority check 1
+    assert "Agent-onboarding files present, accurate, and scoped" in md  # ★ check 2
+    # a single-category lens names no shared-category note
+    assert "Shared categories" not in md
+
+
 def test_cross_ref_note_names_primary_owner():
     md = build_skill_md(_skill(cross_ref=[4]), taxonomy_version="v0.2", docs_root=".",
                         owners={2: "hunting-silent-failures", 4: "some-other-skill"})
