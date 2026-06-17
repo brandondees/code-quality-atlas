@@ -66,6 +66,14 @@
         "Names what could not be verified from the diff alone (e.g. the background job's runtime behavior) rather than implying the review was exhaustive",
         "Keeps the limitations block to a few honest lines and does not manufacture findings for the unreviewed areas"
       ]
+    },
+    {
+      "query": "The team has opted into Boy-Scout surfacing. A PR fixes a real off-by-one at billing/invoice.py:40 (a defect this change introduces and corrects). While editing that same function, tracing-correctness also notices an unrelated, pre-existing bug three lines down at billing/invoice.py:43 — a currency rounding error that was already there before this PR. Synthesize the review and give the verdict.",
+      "expected_behavior": [
+        "Sets the verdict from the introduced findings (the off-by-one the PR addresses), not from the pre-existing one",
+        "Surfaces the rounding bug under a Pre-existing section tagged 'pre-existing — not introduced by this change', route: implementer (fix now / file a ticket / ignore), and does NOT let it set or harden this PR's verdict because the diff did not introduce it",
+        "Keeps the pre-existing finding scoped to the touched function rather than expanding into a repo-wide hunt, and does not restate it as if this change caused it"
+      ]
     }
   ]
 }
