@@ -1,10 +1,12 @@
 # The Code Quality Map
 
-**Status:** v0.3 (2026-06-12 — round-2 gap hunt). Maximal scope.
-**Shape:** 6 clusters → 33 categories → ~100 factors. Three **review shapes**: diff, repo/cron, and (new in v0.3) **decision-time** ([`decision-time-review-shape.md`](decision-time-review-shape.md)).
+**Status:** v0.4 (2026-06-17 — round-3 gap hunt, Wave C). Maximal scope.
+**Shape:** 6 clusters → 34 categories → ~100 factors. Three **review shapes**: diff, repo/cron, and (new in v0.3) **decision-time** ([`decision-time-review-shape.md`](decision-time-review-shape.md)).
 
 Cross-links between factors are deliberate; quality dimensions genuinely overlap. Where a category is partly covered by existing prior art, see [`prior-art.md`](prior-art.md) for the mapping (kept out of this file so the map stays tool-agnostic).
 
+> **v0.4 changes:** promoted the first round-3 (Wave C) new lens — #34 AI-authored-code defects (the failure signature of machine-authored code, gap G14); attribution-agnostic, cross-refs #18/#1/#11/#14. Rationale in [`research/taxonomy-gap-hunt-round-3.md`](research/taxonomy-gap-hunt-round-3.md) and [`research/gap-hunt-synthesis.md`](research/gap-hunt-synthesis.md).
+>
 > **v0.3 changes:** promoted four categories from the round-2 gap hunt — #28 Operational & resilience design, #29 Decision lifecycle, #30 Enforcement apparatus & meta-artifacts, #31 Infrastructure-as-code; added factors to #16/#17/#19/#20/#22/#25/#27; named **decision-time** as a third review shape. Resolves the G9 #12 drops (folded into #28) and the G10 framing gap (#30). Rationale in [`open-questions.md`](open-questions.md) (D13) and [`research/taxonomy-gap-hunt-round-2.md`](research/taxonomy-gap-hunt-round-2.md).
 >
 > **v0.2 changes:** promoted three categories (#25 AI/LLM-integration, #26 Configuration & environment, #27 Compliance/licensing/provenance); broadened #3 (distributed correctness) and #9 (caller ergonomics / internal-API DX); cross-linked money/units between #4 and #23; kept logging folded in #16. Rationale in [`open-questions.md`](open-questions.md) (D5).
@@ -100,6 +102,10 @@ The **action/tool surface** of agent systems — what the model is permitted to 
 ### 28. Operational & resilience design  *(promoted v0.3)*
 
 Design-time operability, distinct from #16's *runtime* operability. **Resilience as design:** failure-mode / blast-radius analysis, bulkheads, graceful degradation, dependency-failure plans (beyond #2/#3 code-level handling). **Recoverability:** RTO/RPO, *tested* restore — not just backups taken (absorbs #20's backup-note). **Scalability as design:** statelessness, horizontal-scaling readiness, single-writer bottlenecks, backpressure on unbounded queues (resolves the dropped #12 factor; absorbs system-wide rate-limit/quota). **Multi-tenancy isolation** (noisy-neighbour, per-tenant quotas). Reviewed at *decision time* (RFC/design doc) and on a diff (a new stateful singleton or unbounded queue). Cross-links #12, #16, #2/#3.
+
+### 34. AI-authored-code defects  *(promoted v0.4)*
+
+The **failure signature of machine-authored code itself**, independent of who or what wrote it — distinct from #25 (code that *calls* a model) and #27 (a provenance *marker*). Now that AI-assisted code is the median diff, these recur and are diff-reviewable: **package hallucination → slopsquatting** (~20% of LLM-recommended packages don't exist, ~43% recur — a registration target); **plausible-but-wrong** constants/APIs and logic that reads fluently; **invented/misused APIs** and **hallucinated internal references** (a symbol used but never defined here); **over-helpful, unrequested additions** (scope creep as a generation artifact); the **weak-default security signature** (~45% of LLM code carries a flaw); **tests that assert the implementation** rather than the spec; fabricated comments/citations; and **duplication instead of reuse**. Does *not* require knowing the author was a model — the signature is attribution-agnostic — but the base rate is highest on generated diffs. **G1 single-owner:** #34 owns the attribution-agnostic AI-defect *signature* and names the overlap, deferring the deep verdict to the owning lens — the *package-existence/slopsquat* leg cross-refs **#18** supply-chain, *plausible-wrong logic* is adjacent to **#1**, *over-helpful additions* to **#11** restraint, the *security* leg to **#14**. Natural shape `diff`. *(Resolves map-gaps G14.)*
 
 ---
 

@@ -1,4 +1,4 @@
-taxonomy_version: v0.3
+taxonomy_version: v0.4
 skills:
   - name: hunting-silent-failures
     description: >
@@ -89,6 +89,31 @@ skills:
     built_from:
       - { category: 25, source: docs/research/cluster-4-runtime.md#25 }
       - { category: 27, source: docs/research/cluster-6-evolution.md#27 }
+
+  - name: reviewing-ai-authored-code
+    description: >
+      Reviews a change for the failure signature of AI-/machine-authored code,
+      independent of who wrote it: hallucinated or typosquatted dependencies
+      (slopsquatting), invented or misused APIs and parameters, plausible-but-wrong
+      constants and logic that reads fluently, hallucinated internal references to
+      symbols that don't exist here, over-helpful unrequested additions (scope
+      creep as a generation artifact), the weak-default security signature, tests
+      that assert the implementation instead of the spec, fabricated
+      comments/citations, and duplication instead of reuse. Flags the signature and
+      hands the deep verdict to the owning lens (#18 supply-chain, #14 security, #1
+      correctness, #11 restraint). Use when reviewing AI-generated or AI-assisted
+      code, a large or unfamiliar diff, or any change that adds dependencies or
+      confident-looking constants and APIs — the defects are attribution-agnostic,
+      so you need not know a model wrote it.
+    picker: >
+      Does this carry the AI-authored failure signature? Hallucinated/typosquatted
+      packages, invented APIs, confident-but-wrong constants, over-helpful scope.
+    shape: diff
+    wave: 5
+    cross_ref: [18]   # primary owner: auditing-dependencies-and-supply-chain
+    built_from:
+      - { category: 34, source: docs/research/cluster-4-runtime.md#34 }
+      - { category: 18, source: docs/research/cluster-5-verification.md#18 }
 
   - name: finding-maintainability-hotspots
     description: >
@@ -587,6 +612,13 @@ router:
             tracing-correctness-and-invariants]
     - when: LLM / agent / model-API integration
       run: [reviewing-llm-integration, sweeping-for-security, checking-restraint]
+    - when: AI-generated or AI-assisted change, a large or unfamiliar diff, or any
+            change that adds dependencies or confident-looking constants/APIs
+      run: [reviewing-ai-authored-code, tracing-correctness-and-invariants,
+            sweeping-for-security]
+      note: "attribution-agnostic failure signature — hallucinated/typosquatted
+            packages, invented APIs, plausible-but-wrong logic, over-helpful scope;
+            #18 owns the supply-chain verdict, #14 the security one"
     - when: Logging, metrics, alerts, feature flags, deploy/rollback paths
       run: [reviewing-observability-and-operability, sweeping-for-security]
     - when: Tests-only change

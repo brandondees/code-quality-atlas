@@ -21,7 +21,7 @@
 | **G32** | Pre-existing/adjacent defects (Boy-Scout, attribution axis) | add-factor (opt-in) | promote | Med | Low | Med-High |
 | **G18** | Interoperability (consolidate) + Safety (add-factor + escalate) | add-factor / new-lens | promote | Med-High | Med | Med-High |
 | **G12** | Acceptance-criteria / requirements traceability | new-lens / add-factor | promote | High | Med | Med |
-| **G14** | Characteristic defects of AI-authored code | new-lens | promote | High | Med | High |
+| **G14** | Characteristic defects of AI-authored code | new-lens | **✅ shipped** (v0.4, #34) | High | Med | High |
 | **G27→** | *(SoD listed above)* | | | | | |
 | **G16** | Ethical / responsible-design (non-ML) | new-lens | promote (route) | High | Med | Med-High |
 | **G20** | Codebase as a working environment for AI maintainers | new-lens | promote | Med-High | Med | Med-High |
@@ -71,7 +71,7 @@ Pure heuristic additions to existing lenses — the cheapest way to bank real co
 
 ### Wave C — high-value new lenses (each gets the full research + ≥3-eval pass, D6/D8)
 
-- **G14** AI-authored-code defects — *highest-priority new lens*: high base rate, strong prior art, reflexively important (the suite is AI-built). Cross-refs #18/#1/restraint.
+- **G14** AI-authored-code defects — *highest-priority new lens*: high base rate, strong prior art, reflexively important (the suite is AI-built). Cross-refs #18/#1/restraint. **✅ Shipped 2026-06-17 (v0.4)** as `reviewing-ai-authored-code` — new category #34, primary-owns #34 + cross-refs #18, attribution-agnostic, dedicated router route, 4 evals. **Wave C opened.**
 - **G27** *(if treated as a dedicated check rather than a #14 factor)*.
 - **G16** ethical / responsible-design (non-ML) — needs G23; detect-and-route.
 - **G20** agent-legibility (cluster-II rotation) — diff arm + repo arm.

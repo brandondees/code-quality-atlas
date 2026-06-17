@@ -9,7 +9,7 @@ description: 'Reviews a decision as it is made — an ADR, RFC, design doc, adop
   RFC, a dependency or technology adoption, a vendor or build-vs-buy choice, or a
   deprecation/sunset plan.'
 provenance:
-  taxonomy_version: v0.3
+  taxonomy_version: v0.4
   built_from:
   - category: 29
     source: docs/research/cluster-6-evolution.md#29

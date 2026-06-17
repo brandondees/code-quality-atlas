@@ -1,0 +1,39 @@
+{
+  "skills": [
+    "reviewing-ai-authored-code"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this change (the PR adds OAuth token refresh):\n```diff\n# requirements.txt\n+ requests-oauth2client-helper==0.3.1   # handy OAuth2 refresh wrapper\n```\n```python\n# auth.py\n+ from requests_oauth2client_helper import OAuth2Session\n+ session = OAuth2Session(client_id=CID, client_secret=CSECRET, auto_refresh=True)\n```",
+      "expected_behavior": [
+        "Flags the newly added dependency as a package-existence / slopsquat risk: verify `requests-oauth2client-helper` actually exists on the real index, predates this PR, and is the intended project — it is a plausible-but-unverified name sitting near real packages (e.g. `requests-oauth2client`), exactly the recurring-hallucination pattern attackers register",
+        "Treats an unrecognized new dependency in a change as a supply-chain security event — confirm existence and provenance, pin/lock it, and hand the reputation/CVE verdict to auditing-dependencies-and-supply-chain (#18) rather than deciding it here",
+        "Does not assume the package is real because the import and constructor read plausibly"
+      ]
+    },
+    {
+      "query": "Review this change:\n```diff\n+ # responses are valid for one day\n+ CACHE_TTL_SECONDS = 84600\n+ redis.setex(key, CACHE_TTL_SECONDS, payload)\n```",
+      "expected_behavior": [
+        "Flags the confident-but-wrong constant: 84600 is not one day — one day is 86400 seconds — so the fluent comment and the value disagree (a transposed-digit slip that reads correctly)",
+        "Recommends verifying magic constants/limits against the spec rather than trusting the surrounding confident comment, since plausibility is the characteristic AI-code failure mode",
+        "Does not invent unrelated problems with the otherwise-correct setex call"
+      ]
+    },
+    {
+      "query": "Review this change. The PR was asked only to fix the wording of one validation error message.\n```diff\n  def validate_email(addr):\n-     raise ValueError(\"bad email\")\n+     raise ValueError(\"Please enter a valid email address.\")\n\n+ @app.post(\"/admin/users/export\")\n+ def export_users():\n+     return {\"users\": [u.to_dict() for u in User.query.all()]}\n+\n+ RETRY_ENABLED = True\n+ def _with_retries(fn, n=3):\n+     for i in range(n):\n+         try: return fn()\n+         except Exception: continue\n```",
+      "expected_behavior": [
+        "Flags the over-helpful, unrequested additions: a typo-fix PR also ships a new `/admin/users/export` endpoint, a global RETRY_ENABLED flag, and a retry helper — scope creep that widens the diff and blast radius beyond the stated task",
+        "Routes the keep-or-defer verdict on the unrequested additions to checking-restraint, and notes the smuggled-in admin export endpoint needs its own security/contract review (and the bare-except retry swallows errors) rather than riding in on a typo fix",
+        "Recommends the PR be scoped back to the message change, with the extras split into their own reviewed PRs"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\nimport httpx  # already a pinned dependency in requirements.txt\n\ndef get_user(client: httpx.Client, user_id: int) -> dict:\n    resp = client.get(f\"/users/{user_id}\", timeout=5.0)\n    resp.raise_for_status()\n    return resp.json()\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes httpx is a real, already-present pinned dependency used with a correct, current API (timeout set, raise_for_status before parsing), with no hallucinated symbols, no scope creep, and no confident-but-wrong constants",
+        "Does not invent AI-authored-defect findings on correct code, and does not flag the use of an f-string path or a URL parameter as inherently unsafe"
+      ]
+    }
+  ]
+}
