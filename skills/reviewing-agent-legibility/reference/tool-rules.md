@@ -1,0 +1,18 @@
+# Tool rules to triage — reviewing-agent-legibility
+
+> **Selecting tools for this stack.** The tools named below are field-tested starting points, not a mandate. Pick the one that fits this codebase's language version, build, and CI — and verify it actually runs on your toolchain before relying on it. A listed tool that is broken, abandoned, or noisy on your setup is a gap to close, not a permanent `continue-on-error`: prefer a working, maintained equivalent (often a younger, less well-known one) over a canonical-but-broken default. The capability is the requirement; the specific tool is replaceable.
+
+## Contents
+
+- From category #35
+
+## From category #35
+
+### Tooling rules worth lifting
+
+*(Most of this signature is judgment, not lint — "can an agent reason about this within a budget" has no rule. The mechanical subset is about measuring size/structure and checking the onboarding files; named tools `(verify)` on your stack.)*
+
+- **Context/size & token measurement** — repo-packers that show what an agent would actually have to read (`repomix`, `gitingest`) and token counters (`tiktoken`-based) to flag files or change-slices that blow a sensible context budget; a single giant file or a change spread thin across many files is the measurable form of the 40% rule.
+- **Structural / AST navigation** — `ast-grep`, tree-sitter, `ctags`/LSP indexers: the agent's navigation substrate. If these cannot cleanly index a symbol (dynamic dispatch, stringly-typed indirection, generated megafiles), an agent navigating by retrieval can't either — treat an un-indexable surface as a navigability finding.
+- **Onboarding-file health** — link-checkers (`lychee` / `markdown-link-check`) and markdown structure linting over `AGENTS.md` / `CLAUDE.md` / `llms.txt`: dead links, references to renamed commands, or a missing/empty file are mechanical tells; pair with a "does the documented build/test command actually run" smoke check (shared spirit with #22 runnable-examples).
+- **Duplication / churn detectors** — `jscpd`, `pmd-cpd`, SonarQube duplication (shared with #34/#21): parallel copies make an agent edit the wrong one; surface duplicated blocks an agent would have to disambiguate.

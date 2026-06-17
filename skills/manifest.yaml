@@ -1,4 +1,4 @@
-taxonomy_version: v0.4
+taxonomy_version: v0.5
 skills:
   - name: hunting-silent-failures
     description: >
@@ -114,6 +114,31 @@ skills:
     built_from:
       - { category: 34, source: docs/research/cluster-4-runtime.md#34 }
       - { category: 18, source: docs/research/cluster-5-verification.md#18 }
+
+  - name: reviewing-agent-legibility
+    description: >
+      Reviews a change for agent-legibility — whether an AI agent can understand,
+      navigate, and safely modify this code within a context budget. The mirror of
+      reviewing-ai-authored-code (quality of code *for* AI readers, not *by* them):
+      context economy and self-containment (a depth-first slice understandable
+      without loading the whole repo — the "40% context rule"), retrieval-friendly
+      and AST-navigable structure, local self-explanation at the edit site,
+      agent-onboarding files (AGENTS.md / CLAUDE.md) present, accurate, and scoped
+      with do-not-touch guardrails, an llms.txt-style index for agent-consumed
+      repos, and no agent-hostile patterns (context-budget-blowing megafiles,
+      bloated scaffolding, duplicated parallel copies). Use when reviewing a change
+      to an AI-/agent-maintained codebase, to agent-onboarding files or repo
+      structure an agent must navigate, or any large or scattered change whose
+      context economy matters. Defers human readability to #5–#8, agent-operator
+      parity to #24, and runtime tool-safety to #32.
+    picker: >
+      Can an AI agent read, navigate, and safely change this within a context
+      budget? Context economy, retrieval-friendly structure, scoped
+      AGENTS.md/CLAUDE.md.
+    shape: diff
+    wave: 5
+    built_from:
+      - { category: 35, source: docs/research/cluster-2-readability.md#35 }
 
   - name: finding-maintainability-hotspots
     description: >
@@ -618,6 +643,13 @@ router:
             sweeping-for-security]
       note: "attribution-agnostic; #18 owns the supply-chain verdict, #14 the
             security one"
+    - when: Change to an AI-/agent-maintained codebase, to agent-onboarding files
+            (AGENTS.md/CLAUDE.md, llms.txt) or repo structure an agent must
+            navigate, or a large/scattered change whose context economy matters
+      run: [reviewing-agent-legibility, reviewing-naming-and-readability,
+            checking-restraint]
+      note: "the agent-as-reader vantage — mirror of #34; context economy,
+            retrieval-friendly structure, scoped agent onboarding"
     - when: Logging, metrics, alerts, feature flags, deploy/rollback paths
       run: [reviewing-observability-and-operability, sweeping-for-security]
     - when: Tests-only change

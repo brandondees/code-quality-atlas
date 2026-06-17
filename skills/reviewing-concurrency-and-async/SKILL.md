@@ -9,7 +9,7 @@ description: 'Reviews concurrent and async code for races and ordering bugs: sha
   the code is single-threaded and synchronous with no shared mutable state, async/await,
   or message handling — nothing two callers race on.'
 provenance:
-  taxonomy_version: v0.4
+  taxonomy_version: v0.5
   built_from:
   - category: 3
     source: docs/research/cluster-1-correctness.md#3

@@ -1,0 +1,39 @@
+{
+  "skills": [
+    "reviewing-agent-legibility"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this change. The PR renames the test target and changes how tests run, but the repo's AGENTS.md still documents the old command.\n```diff\n# Makefile\n- test:\n- \tpytest tests/\n+ check:\n+ \tpython -m tooling.cli eval && pytest tests/\n```\n```\n# AGENTS.md (unchanged in this PR)\n## Working here\nRun the tests with `make test` before pushing.\n```",
+      "expected_behavior": [
+        "Flags that AGENTS.md now misleads an agent: the documented `make test` target no longer exists (renamed to `make check` with a different command), so an autonomous agent following the onboarding file will run a dead target and skip the new eval gate",
+        "Notes that keeping the agent-onboarding front-door accurate and scoped is owned here (the agent analog of #22's README front-door), distinct from generic doc-drift, and that the fix belongs in this same PR",
+        "Recommends updating AGENTS.md/CLAUDE.md to the new `make check` command rather than leaving an agent to rediscover it"
+      ]
+    },
+    {
+      "query": "Review this change, which adds a new export format.\n```python\n# formats/registry.py  (existing)\nREGISTRY = {}\ndef register(name):\n    def deco(fn): REGISTRY[name] = fn; return fn\n    return deco\n\n# exporters/csv_v2.py  (new)\n@register(\"csv_v2\")\ndef _export(rows): ...\n\n# api/handler.py  (new branch)\nfmt = request.args.get(\"format\")\nreturn REGISTRY[fmt](rows)   # reached only when fmt == \"csv_v2\"\n```",
+      "expected_behavior": [
+        "Flags the context-economy / self-containment problem: to understand or safely modify the new `csv_v2` path an agent must load three distant files (registry, exporter, handler) joined only by a bare string — not a depth-first slice understandable within a context budget",
+        "Flags that the stringly-typed dynamic dispatch defeats AST/retrieval navigation — a grep for the literal `\"csv_v2\"` is the only way to find the binding, and an agent cannot follow the call statically from the handler to the exporter",
+        "Suggests making the binding structurally addressable (a direct import or a typed enum) and co-locating the slice so the change is legible without a fragmented whole-repo read"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\n# pricing.py  (new module)\ndef cents_to_display(amount_cents: int, *, currency: str = \"USD\") -> str:\n    \"\"\"Format integer minor units as a display string. Pure; no I/O.\"\"\"\n    return f\"{amount_cents / 100:.2f} {currency}\"\n```\n```diff\n# AGENTS.md\n  ## Modules\n+ - `pricing.py` — money formatting helpers (pure functions).\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes the change is a self-contained depth-first slice — a typed signature and a local contract docstring make it understandable without distant context, the name is retrieval-friendly, and the onboarding file was kept accurate and scoped",
+        "Does not invent agent-legibility findings on correct code, and does not demand an llms.txt index or extra structure this small change does not need"
+      ]
+    },
+    {
+      "query": "Review this change. The PR vendors a generated API client into the source tree and adds a retry helper.\n```diff\n+ client_generated.py        # 6,200 lines, single file, no module split, checked into src\n  # api/users.py\n+ def _retry(fn, n=3):        # near-duplicate of the existing utils.retry, slightly different\n+     for _ in range(n):\n+         try: return fn()\n+         except Exception: pass\n```",
+      "expected_behavior": [
+        "Flags the 6,200-line single file as an agent-hostile context-budget hazard: an agent working anywhere near it must scan a file far larger than a sensible context window; recommend splitting it, or keeping the generated artifact out of the navigable tree (generate-on-build or a separate package)",
+        "Flags the duplicated `_retry` sitting parallel to the existing `utils.retry`: a divergent copy invites an agent editing the wrong one — a legibility regression (xref #21 change-amplification, #34 duplication) — and recommends importing the existing helper",
+        "Keeps the verdict to the legibility regressions, routing the duplication-vs-reuse detail to checking-idioms-and-consistency / restraint and any deep dependency verdict to its owner"
+      ]
+    }
+  ]
+}

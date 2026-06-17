@@ -24,7 +24,7 @@
 | **G14** | Characteristic defects of AI-authored code | new-lens | **✅ shipped** (v0.4, #34) | High | Med | High |
 | **G27→** | *(SoD listed above)* | | | | | |
 | **G16** | Ethical / responsible-design (non-ML) | new-lens | promote (route) | High | Med | Med-High |
-| **G20** | Codebase as a working environment for AI maintainers | new-lens | promote | Med-High | Med | Med-High |
+| **G20** | Codebase as a working environment for AI maintainers | new-lens | **✅ shipped** (v0.5, #35) | Med-High | Med | Med-High |
 | **G30** | Threat modeling (STRIDE) as a design-time discipline | new-lens (decision-shape) | promote | High | Med-High | Med-High |
 | **G24** | Cluster VII — Product, Experience & Value (10 lenses) | new-cluster | promote (incremental) | High | High | Med-High |
 | **G17** | Data-engineering & data-contract quality | new-lens (paired) | promote | High | High | Med-High |
@@ -74,7 +74,7 @@ Pure heuristic additions to existing lenses — the cheapest way to bank real co
 - **G14** AI-authored-code defects — *highest-priority new lens*: high base rate, strong prior art, reflexively important (the suite is AI-built). Cross-refs #18/#1/restraint. **✅ Shipped 2026-06-17 (v0.4)** as `reviewing-ai-authored-code` — new category #34, primary-owns #34 + cross-refs #18, attribution-agnostic, dedicated router route, 4 evals. **Wave C opened.**
 - **G27** *(if treated as a dedicated check rather than a #14 factor)*.
 - **G16** ethical / responsible-design (non-ML) — needs G23; detect-and-route.
-- **G20** agent-legibility (cluster-II rotation) — diff arm + repo arm.
+- **G20** agent-legibility (cluster-II rotation) — diff arm + repo arm. **✅ Shipped 2026-06-17 (v0.5)** as `reviewing-agent-legibility` — new Cluster II category #35, the mirror of #34; ships the **diff arm** (context economy / 40%-rule, retrieval-friendly + AST-navigable structure, scoped AGENTS.md/CLAUDE.md onboarding, `llms.txt`), 2 ★ top-checks, dedicated router route, 4 evals. The repo arm (agent-navigability audit) is a noted follow-up; the operator role stays #24/#32/#30. Cross-model re-gate pending.
 - **G30** threat modeling — needs Q15 (decision shape); the security analog of #28.
 - **G18-interoperability** as a consolidated lens (or a factor sweep across #4/#8/#13/#26).
 

@@ -6,7 +6,7 @@ description: Reviews changes for swallowed or silently-handled errors — empty 
   Use when reviewing error handling, exceptions, try/catch, rescue, fallback, resilience,
   timeouts, or resource cleanup on failure paths.
 provenance:
-  taxonomy_version: v0.4
+  taxonomy_version: v0.5
   built_from:
   - category: 2
     source: docs/research/cluster-1-correctness.md#2
