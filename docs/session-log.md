@@ -1652,7 +1652,7 @@ tiers.
   **Fix applied:** added a *Coordinated-client failure* clause to the decision rule
   (name the stampede, not isolation/write-serialization) plus a dedicated bad→finding
   worked example (a shared `"dashboard"` key, single TTL, ~3s recompute → single-flight
-  + jittered TTL) — isomorphic to, not identical to, the eval scenario so it
+  plus jittered TTL) — isomorphic to, not identical to, the eval scenario so it
   generalizes. **Re-ran both tiers: #28 S4 now caught on qwen2.5:7b and llama3.1:8b**,
   with the clean scenarios held (S1/S2 full recall both tiers; S3 clean on qwen; llama
   led with "No finding" then offered one optional improvement-valence suggestion — not
