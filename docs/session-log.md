@@ -1723,7 +1723,8 @@ documented gate-of-record, previously absent on this machine) and re-ran both le
 ran the general `qwen2.5:7b` + `llama3.1:8b`.
 
 - **`qwen2.5-coder:7b` (floor of record): clean sweep** — hunting-silent-failures 6/6,
-  resilience 5/5. New safety scenarios pass (fail-open caught; fail-closed → "No findings";
+  resilience 6/6 (the degrade-toward-safe clean control added during PR review re-verified
+  clean on the coder floor and general qwen). New safety scenarios pass (fail-open caught; fail-closed → "No findings";
   degrade-toward-harm caught with the safe-fallback recommendation + detect-and-route), and
   every pre-existing scenario held, including the narrow-PaymentDeclined clean case.
 - **General `qwen2.5:7b` + `llama3.1:8b`:** the new safety **factors work on both** —
