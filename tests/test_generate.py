@@ -319,6 +319,52 @@ def test_agentic_safety_lens_owns_32_action_surface():
     assert "Shared categories" not in md  # single-category lens
 
 
+def test_artifact_lens_renders_detect_table_not_top_checks():
+    # D15 (Q18 / map-gaps G11): the artifact-shaped lens replaces the inlined
+    # "Top checks" with a detect→rubric table; its checks live in per-artifact
+    # bundled rubric files loaded on a presence hit.
+    m = load_manifest("skills/manifest.yaml")
+    lens = next(s for s in m.skills if s.name == "reviewing-artifact-conventions")
+    assert lens.shape == "artifact"
+    assert lens.artifacts and lens.artifacts[0].slug == "skill-md"
+    md = build_skill_md(lens, taxonomy_version=m.taxonomy_version, docs_root=".")
+    assert "**Shape: artifact.**" in md
+    assert "## Artifacts" in md
+    assert "## Top checks" not in md                       # replaced by the table
+    assert "SKILL.md / agent skill" in md                  # the artifact row
+    assert "[reference/skill-md.md](reference/skill-md.md)" in md  # rubric link
+    assert "## Mechanizing these checks" in md             # shared section still present
+    # the attribution (Boy-Scout) guard is diff-only and must not appear here
+    assert "pre-existing — not introduced by this change" not in md
+
+
+def test_generate_artifact_lens_writes_per_artifact_rubric(tmp_path):
+    # The artifact lens writes one bundled rubric per artifact instead of the
+    # single concatenated heuristics.md; tool-rules.md / sources.md still back the
+    # Mechanizing / Going-deeper links, and provenance tracks the rubric section
+    # (#101) so the existing drift checker covers it.
+    m = load_manifest("skills/manifest.yaml")
+    lens = next(s for s in m.skills if s.name == "reviewing-artifact-conventions")
+    out = generate_skill(lens, taxonomy_version=m.taxonomy_version, docs_root=".",
+                         skills_root=str(tmp_path))
+    assert (out / "reference" / "skill-md.md").exists()
+    assert not (out / "reference" / "heuristics.md").exists()
+    assert (out / "reference" / "tool-rules.md").exists()
+    assert (out / "reference" / "sources.md").exists()
+    rubric = (out / "reference" / "skill-md.md").read_text()
+    assert rubric.startswith("# Rubric — SKILL.md / agent skill")
+    assert "Frontmatter is well-formed and within limits" in rubric
+    front = yaml.safe_load((out / "SKILL.md").read_text().split("---\n")[1])
+    assert front["provenance"]["built_from"][0]["category"] == 101
+
+
+def test_router_catalog_lists_artifact_shape():
+    m = load_manifest("skills/manifest.yaml")
+    md = build_router_md(m)
+    assert "Artifact-shaped" in md
+    assert "- `reviewing-artifact-conventions`" in md
+
+
 def test_interoperability_lens_owns_37_consolidating_conformance():
     # G18-interop (Wave C, v0.7): the interoperability lens primary-owns the new
     # #37 category — the first of the two ISO/IEC 25010:2023 characteristics with
