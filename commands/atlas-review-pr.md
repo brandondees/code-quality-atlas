@@ -48,7 +48,12 @@ approve-on-clean behavior. The repo's own `REVIEW.md` always wins.
 
 Count this reviewer's prior reviews on the PR — your past review summaries carry
 the marker line `<!-- atlas-review round:N -->`. The current round is the highest
-N seen, plus one (first review is **round 1**). If the round would exceed the cap
+N seen, plus one (first review is **round 1**). **Paginate through all pages** of
+reviews and review threads before counting — `mcp__github__pull_request_read`
+caps results per call, and on a PR with many rounds the `<!-- atlas-review
+round:N -->` marker (and the round-1 `<!-- atlas-review-ack -->`) can sit on a
+later page; reading only the first page undercounts the round and re-raises
+findings already recorded in standing threads. If the round would exceed the cap
 in the convergence policy, **run no new lenses and post no new inline comments**;
 instead post a single summary that notes the cap is reached **and re-surfaces the
 outstanding non-blocking findings** — read your most recent round's summary
@@ -107,7 +112,13 @@ findings to the ACK.
     findings at or above this round's floor" (carrying the round marker), including
     the `Non-blocking (advisory)` list when below-floor findings exist, then stop.
     This is the loop's terminal state: the build session sees no actionable inline
-    comments and quiesces.
+    comments and quiesces. **Own-PR fallback:** GitHub forbids approving your own
+    PR, so if this reviewer runs as the **same identity that opened the PR**, the
+    `APPROVE` review state is rejected — submit a `COMMENT` review instead whose
+    body starts `## Round N — APPROVE (own-PR, posted as comment)` (still carrying
+    the round marker). A merge gate keyed on the review *body* (see the
+    pr-review-automation runbook) detects the approval by that text; a real
+    `APPROVE` state is emitted only on PRs opened by a different identity.
   - *Already approved, still nothing new* — stay silent: resolve any threads the new
     push addressed, but post **no** new summary and don't re-emit `APPROVE`. Only
     speak again when a later push introduces a new finding at or above the floor.

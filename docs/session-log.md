@@ -1321,3 +1321,53 @@ Third **Wave C** new lens, first **v0.6** promotion. The first Wave-C lens whose
 **Verification:** `pytest tests/` 100 pass (+2: `test_ethical_design_lens_owns_36_detect_and_route` and `test_security_ethical_design_tension_present`); `cli drift` clean; `cli eval` OK (new lens 4 scenarios); markdownlint 0 errors.
 
 **Resolves:** G16 → shipped. Remaining Wave C: G30 threat-modeling (decision-shape, needs Q15), G18-interoperability; plus the noted G20 repo arm and G16 design-time arm follow-ups. **Cross-model re-gate still owed** — now also covers this lens; batch on the Ollama substrate (qwen2.5:7b floor + 3B canary), not this environment.
+
+### 2026-06-24 — bug-backlog sweep: clear-cut issues + count reconciliation
+
+Cleared the unambiguous slice of the open-issue backlog (no PRs were open) in one
+pass, and **flagged the issues that turned out to be non-bugs or design calls**
+rather than forcing a fix.
+
+**Fixed:**
+
+- **#59 (stale skill count) — reconciled past what the issue assumed.** The issue
+  said "28 → 29"; ground truth had drifted further: Wave C added 3 lenses, so the
+  manifest now carries **30 lenses → 32 total** (incl. router + synthesizer). Updated
+  every count to ground truth under each file's own framing: `README.md` 29→32 total /
+  27→30 lenses / "7 more"→"10 more" / catalog row "27 lenses"→"30"; `docs/install.md`
+  29→32 (and "29+"→"32+"); `.claude-plugin/plugin.json` 29→30 (its number is the
+  domain-lens count — router + synthesizer are "plus").
+- **#60 (`mergeable_state`).** Removed the invalid `conflicting` value (GitHub only
+  returns `dirty` for conflicts) from `commands/atlas-rebase-stale.md` and the
+  poller prompt in `docs/runbooks/pr-review-automation.md`.
+- **#58 (negative top-checks budget).** Made the squeeze **non-silent** with a
+  `warnings.warn` when `_CROSS_REF_QUOTA × len(crosses) ≥ _TOP_CHECKS_BUDGET`, rather
+  than changing the floor — no current skill has >1 cross_ref, so the floor change
+  would have altered generated output and caused drift; the warning fixes the "silent"
+  complaint with zero drift.
+- **#66 (llama.cpp `<tag>` placeholder).** Resolved the placeholder in
+  `docs/runbooks/regenerating-skills.md`: documented the `b<NNNN>` tag format, an
+  in-shell latest-tag fetch, the `ggerganov` → `ggml-org` repo move (kept `ggml-org`,
+  the current canonical), and an asset-name caveat.
+- **#62 (own-PR APPROVE fallback).** Added the documented `COMMENT`-fallback note to
+  `commands/atlas-review-pr.md` step 5 so an interactive same-identity run matches the
+  merge-gate's body-text signal (previously only in the runbook).
+- **#63 (pagination).** Added "paginate through all pages of reviews/threads before
+  counting rounds" guidance to `atlas-review-pr.md` step 3.
+- **#65 (session lifetime).** Added a *Session lifetime* boundary to the
+  pr-review-automation Known boundaries — a resident `opened` watch dies on session
+  timeout; prefer the `synchronize` trigger for long-lived PRs.
+
+**Flagged, not fixed:**
+
+- **#57 — not a bug.** Verified against the Claude Code hooks docs: `clear` **and**
+  `compact` are valid `SessionStart` matcher source values (the hook fires after both),
+  so the matchers in `hooks/hooks.json` are live, not dead config. Applying the
+  proposed "fix" would have removed working behavior.
+- **#64 / #61 / #67 — design decisions.** atlas-init fallback sync (pick lint vs
+  remove vs generate), the choosing-review-lenses "2-4 vs 8-audit" reframing (regenerates
+  the router + touches front-matter), and the advisory-list refresh-vs-carry policy
+  (command ↔ REVIEW.md wording) each need a maintainer call before editing.
+
+**Verification:** `pytest tests/` 100 pass; `cli drift` clean (the #58 warning changes
+no output); `cli eval` OK; markdownlint 0 errors.

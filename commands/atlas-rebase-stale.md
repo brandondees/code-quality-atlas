@@ -23,7 +23,7 @@ label/author filter if given). For each, read its mergeable state via
   bring it up to date with `mcp__github__update_pull_request_branch`. This emits
   a `synchronize` event, which re-triggers the reviewer and any auto-fix session
   naturally — no comment needed.
-- **Conflicted** (`mergeable_state` = `dirty`/`conflicting`): do **not** try to
+- **Conflicted** (`mergeable_state` = `dirty`): do **not** try to
   resolve it — that's a code judgment for a full session. Flag it where the PR
   author's auto-fix subscription will actually see it: that subscription reads
   **review threads**, not issue comments, so post the poke as an **inline review
