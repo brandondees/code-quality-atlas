@@ -177,7 +177,7 @@ run checks them all:
      mergeable state (mcp__github__pull_request_read).
   2. "behind" + no conflicts → bring up to date with
      mcp__github__update_pull_request_branch (no comment; emits a synchronize event).
-     "dirty"/conflicting → do NOT resolve; post the poke as an INLINE REVIEW COMMENT
+     "dirty" → do NOT resolve; post the poke as an INLINE REVIEW COMMENT
      (read the diff, anchor to a line on the RIGHT side, submit as a COMMENT review)
      so the author's auto-fix subscription — which reads review threads, not issue
      comments — sees it; body = a whole-PR conflict notice asking them to rebase onto
@@ -283,5 +283,15 @@ you own, and resets daily.
   head as a guard. If closing this gap matters more than the per-push run cost, swap
   the trigger to **`Pull request synchronize`** (one run per push), or add a second
   reviewer routine triggered on `synchronize` alongside the `opened` one.
+- **Session lifetime.** A resident `opened`-triggered watch is not an
+  indefinitely-lived process — cloud sessions time out after a platform-defined
+  usage/inactivity limit. A PR developed across more than one session lifetime
+  loses its resident reviewer when the session ends: the `<!-- atlas-review-ack -->`
+  comment and the prior review threads stay on the PR, but the watch is gone and a
+  push after the timeout gets no review, with no notice that coverage lapsed. For
+  long-lived PRs, prefer the **`Pull request synchronize`** trigger (one fresh
+  session per push, above) over relying on a single long-lived `opened` session, or
+  re-trigger the reviewer manually (re-open the PR, or run `/atlas-review-pr`
+  interactively) when you notice the watch has ended.
 - A subscription/routine can't share context with the build session — they're
   separate sessions communicating only through the PR (comments, reviews, commits).

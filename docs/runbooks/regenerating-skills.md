@@ -48,18 +48,29 @@ python -m tooling.run_evals --skill <name> --model llama3.2:3b
 server works via `--api openai`. The lightest path is llama.cpp's `llama-server`
 with a GGUF from Hugging Face — no install, just a prebuilt binary:
 
+llama.cpp release tags are **not** semver — they look like `b5263`. Find the
+latest at <https://github.com/ggml-org/llama.cpp/releases> (the canonical repo
+moved from `ggerganov/llama.cpp` to `ggml-org/llama.cpp`; the old URL still
+redirects), or resolve it in-shell as below. The `bin-ubuntu-x64` asset name has
+changed across releases — confirm the asset exists on the release page if the
+download 404s.
+
 ```text
-curl -sLO https://github.com/ggml-org/llama.cpp/releases/download/<tag>/llama-<tag>-bin-ubuntu-x64.tar.gz
-tar xzf llama-<tag>-bin-ubuntu-x64.tar.gz
+# resolve the latest release tag (format `b<NNNN>`, e.g. b5263) — or set it by hand
+tag=$(curl -s https://api.github.com/repos/ggml-org/llama.cpp/releases/latest | jq -r .tag_name)
+[ -n "$tag" ] && [ "$tag" != null ] || { echo "failed to resolve llama.cpp tag (network/API/rate-limit?)" >&2; exit 1; }
+curl -sLO "https://github.com/ggml-org/llama.cpp/releases/download/$tag/llama-$tag-bin-ubuntu-x64.tar.gz"
+tar xzf "llama-$tag-bin-ubuntu-x64.tar.gz"
 curl -sLO https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf
-./llama-<tag>/llama-server -m qwen2.5-coder-7b-instruct-q4_k_m.gguf -c 16384 --port 8080 &
+"./llama-$tag/llama-server" -m qwen2.5-coder-7b-instruct-q4_k_m.gguf -c 16384 --port 8080 &
 python -m tooling.run_evals --skill <name> --model qwen2.5-coder-7b --api openai
 ```
 
 Verify what you downloaded before running it: check the binary against the
-checksum/digest on the llama.cpp release page (`gh release view <tag>` or the
-asset's `digest` in the releases API) and the GGUF against the SHA256 shown on
-its Hugging Face file page — these are unsigned third-party artifacts.
+checksum/digest on the llama.cpp release page (`gh release view "$tag"
+--repo ggml-org/llama.cpp` or the asset's `digest` in the releases API) and the
+GGUF against the SHA256 shown on its Hugging Face file page — these are unsigned
+third-party artifacts.
 
 CPU-only inference is slow (~5 tok/s on 4 cores for a 7B Q4) but fine for
 eval-scenario volumes; `llama-server` caches the shared system prefix across a

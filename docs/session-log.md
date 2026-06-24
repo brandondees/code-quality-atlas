@@ -1321,3 +1321,83 @@ Third **Wave C** new lens, first **v0.6** promotion. The first Wave-C lens whose
 **Verification:** `pytest tests/` 100 pass (+2: `test_ethical_design_lens_owns_36_detect_and_route` and `test_security_ethical_design_tension_present`); `cli drift` clean; `cli eval` OK (new lens 4 scenarios); markdownlint 0 errors.
 
 **Resolves:** G16 → shipped. Remaining Wave C: G30 threat-modeling (decision-shape, needs Q15), G18-interoperability; plus the noted G20 repo arm and G16 design-time arm follow-ups. **Cross-model re-gate still owed** — now also covers this lens; batch on the Ollama substrate (qwen2.5:7b floor + 3B canary), not this environment.
+
+### 2026-06-24 — bug-backlog sweep: clear-cut issues + count reconciliation
+
+Cleared the unambiguous slice of the open-issue backlog (no PRs were open) in one
+pass, and **flagged the issues that turned out to be non-bugs or design calls**
+rather than forcing a fix.
+
+**Fixed:**
+
+- **#59 (stale skill count) — reconciled past what the issue assumed.** The issue
+  said "28 → 29"; ground truth had drifted further: Wave C added 3 lenses, so the
+  manifest now carries **30 lenses → 32 total** (incl. router + synthesizer). Updated
+  every count to ground truth under each file's own framing: `README.md` 29→32 total /
+  27→30 lenses / "7 more"→"10 more" / catalog row "27 lenses"→"30"; `docs/install.md`
+  29→32 (and "29+"→"32+"); `.claude-plugin/plugin.json` 29→30 (its number is the
+  domain-lens count — router + synthesizer are "plus").
+- **#60 (`mergeable_state`).** Removed the invalid `conflicting` value (GitHub only
+  returns `dirty` for conflicts) from `commands/atlas-rebase-stale.md` and the
+  poller prompt in `docs/runbooks/pr-review-automation.md`.
+- **#58 (negative top-checks budget).** Made the squeeze **non-silent** with a
+  `warnings.warn` when `_CROSS_REF_QUOTA × len(crosses) ≥ _TOP_CHECKS_BUDGET`, rather
+  than changing the floor — no current skill has >1 cross_ref, so the floor change
+  would have altered generated output and caused drift; the warning fixes the "silent"
+  complaint with zero drift.
+- **#66 (llama.cpp `<tag>` placeholder).** Resolved the placeholder in
+  `docs/runbooks/regenerating-skills.md`: documented the `b<NNNN>` tag format, an
+  in-shell latest-tag fetch, the `ggerganov` → `ggml-org` repo move (kept `ggml-org`,
+  the current canonical), and an asset-name caveat.
+- **#62 (own-PR APPROVE fallback).** Added the documented `COMMENT`-fallback note to
+  `commands/atlas-review-pr.md` step 5 so an interactive same-identity run matches the
+  merge-gate's body-text signal (previously only in the runbook).
+- **#63 (pagination).** Added "paginate through all pages of reviews/threads before
+  counting rounds" guidance to `atlas-review-pr.md` step 3.
+- **#65 (session lifetime).** Added a *Session lifetime* boundary to the
+  pr-review-automation Known boundaries — a resident `opened` watch dies on session
+  timeout; prefer the `synchronize` trigger for long-lived PRs.
+
+**Flagged, not fixed:**
+
+- **#57 — not a bug.** Verified against the Claude Code hooks docs: `clear` **and**
+  `compact` are valid `SessionStart` matcher source values (the hook fires after both),
+  so the matchers in `hooks/hooks.json` are live, not dead config. Applying the
+  proposed "fix" would have removed working behavior.
+- **#64 / #61 / #67 — design decisions.** atlas-init fallback sync (pick lint vs
+  remove vs generate), the choosing-review-lenses "2-4 vs 8-audit" reframing (regenerates
+  the router + touches front-matter), and the advisory-list refresh-vs-carry policy
+  (command ↔ REVIEW.md wording) each need a maintainer call before editing.
+
+**Verification:** `pytest tests/` 100 pass; `cli drift` clean (the #58 warning changes
+no output); `cli eval` OK; markdownlint 0 errors.
+
+### 2026-06-24 (cont.) — backlog sweep, round 2: the flagged design-decision issues
+
+Followed up the clear-cut batch by resolving the three issues previously flagged as
+needing a maintainer call, making the conventional choice on each and documenting it:
+
+- **#67 (advisory-list refresh ambiguity) — made deterministic.** The command said
+  "carry the advisory list forward" while `REVIEW.md` said "refresh when it changed";
+  these only conflict if you ignore *whether the lenses ran*. Pinned the rule in both
+  `templates/REVIEW.md` and `commands/atlas-review-pr.md`: **refresh when the lenses
+  ran this round** (first approve / new-findings round), **carry verbatim when they
+  did not** (the cap notice, where you cannot recompute the below-floor set).
+- **#61 (2-4 vs 8-audit framing) — option (a).** Led the router's *How to pick* with
+  the distinction (`generate.py` `build_router_md`): the 2-4 figure is per-change
+  only and is **not** a cap on the whole-repo audit route, which runs all eight
+  repo-shaped audits. Added the same carve-out to the router `description` in
+  `manifest.yaml`; regenerated `choosing-review-lenses` (drift clean).
+- **#64 (atlas-init fallback drift) — option (a), CI lint.** Added
+  `tests/test_routing_snippet_sync.py`: extracts the `BEGIN…END` routing block from
+  both `templates/agents-routing-snippet.md` (source of truth) and the embedded
+  fallback in `commands/atlas-init.md` and fails the build if they diverge — so an
+  offline `/atlas-init` can never silently install a stale block. The CI gate already
+  runs `pytest tests/`, so the check is enforced with no workflow change.
+
+**#57 stays closed-as-not-a-bug** (explained on the issue): `clear` and `compact`
+are valid `SessionStart` matcher source values.
+
+**Verification:** `pytest tests/` 101 pass (+1: the routing-snippet sync test);
+`cli drift` clean (regeneration touched only the router); `cli eval` OK; markdownlint
+0 errors.

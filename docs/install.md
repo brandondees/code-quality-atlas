@@ -66,7 +66,7 @@ anyone who trusts the folder gets the suite, **including Claude Code web session
 
 ## How updates reach you
 
-All 28 skills load with provenance intact, and updates ship with every merged
+All 32 skills load with provenance intact, and updates ship with every merged
 commit (commit-SHA versioning — no version bumps). Which install path you used
 decides how those updates arrive:
 
@@ -133,7 +133,7 @@ For Claude Code, the plugin ships a `SessionStart` hook
 so the suite is used as designed without you having to name a skill first. On each
 session it injects one line of routing guidance into context.
 
-This exists because, with 28+ skills, individual skill **descriptions** can be
+This exists because, with 32+ skills, individual skill **descriptions** can be
 dropped from the model's skill listing (budgeted to ~1% of context, not re-injected
 after `/compact`), which makes the lenses easy to overlook on a plain "review this"
 request; the hook's `additionalContext` is injected verbatim before the first

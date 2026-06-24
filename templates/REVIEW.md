@@ -87,8 +87,12 @@ round. Keep each to one line — *severity · location · one-clause description
 concise, include the list **only in a summary you're already posting** — the first
 approve, the cap notice, or a round you're posting because of new at/above-floor
 findings — and within those, refresh it when it has changed rather than re-dumping
-an unchanged list. A changed advisory list is **never on its own** a reason to post
-on an otherwise-quiet push.
+an unchanged list. **Refresh vs. carry is decided by whether the lenses ran this
+round:** when they ran (the first approve, or a new-findings round), recompute the
+below-floor set and post the refreshed list; when they did **not** run (the cap
+notice — see [Round cap](#round-cap)), you cannot recompute it, so carry the last
+lens-running round's advisory list forward **verbatim**. A changed advisory list is
+**never on its own** a reason to post on an otherwise-quiet push.
 This keeps the actionable surface (inline, at/above floor — "what must change")
 cleanly separate from the advisory surface (summary, below floor — "what could be
 tidied").

@@ -48,12 +48,19 @@ approve-on-clean behavior. The repo's own `REVIEW.md` always wins.
 
 Count this reviewer's prior reviews on the PR — your past review summaries carry
 the marker line `<!-- atlas-review round:N -->`. The current round is the highest
-N seen, plus one (first review is **round 1**). If the round would exceed the cap
+N seen, plus one (first review is **round 1**). **Paginate through all pages** of
+reviews and review threads before counting — `mcp__github__pull_request_read`
+caps results per call, and on a PR with many rounds the `<!-- atlas-review
+round:N -->` marker (and the round-1 `<!-- atlas-review-ack -->`) can sit on a
+later page; reading only the first page undercounts the round and re-raises
+findings already recorded in standing threads. If the round would exceed the cap
 in the convergence policy, **run no new lenses and post no new inline comments**;
 instead post a single summary that notes the cap is reached **and re-surfaces the
 outstanding non-blocking findings** — read your most recent round's summary
 (`<!-- atlas-review round:N -->`) and carry its *Non-blocking (advisory)* list
-forward, so the human taking over sees what is left below the floor — then stop.
+forward **verbatim** (no lenses run this round, so you cannot recompute the
+below-floor set), so the human taking over sees what is left below the floor —
+then stop.
 
 **If this is round 1, post the ACK first.** Before running any lenses, drop one
 short issue comment marked `<!-- atlas-review-ack -->` (e.g. "👀 atlas reviewer
@@ -97,8 +104,11 @@ findings to the ACK.
   them. (This mirrors how Copilot and CodeRabbit surface their non-blocking notes.)
   To stay concise, include the list **only in a summary you're already posting**
   (the first approve, the cap notice, or a round you're posting because of new
-  findings) and refresh it only when it changed; a changed advisory list is never
-  on its own a reason to break silence on a quiet push.
+  findings). **Refresh vs. carry depends on whether the lenses ran this round:**
+  when they ran (first approve, or a new-findings round), recompute and post the
+  refreshed below-floor set; on the cap notice (no lenses run) carry the last
+  lens-running round's list verbatim. A changed advisory list is never on its own
+  a reason to break silence on a quiet push.
 - Open your review summary with the marker `<!-- atlas-review round:N -->` so the
   next run can read the round count and carry the advisory list forward.
 - **If no new finding survives the floor**, behave by whether the PR has already
@@ -107,7 +117,13 @@ findings to the ACK.
     findings at or above this round's floor" (carrying the round marker), including
     the `Non-blocking (advisory)` list when below-floor findings exist, then stop.
     This is the loop's terminal state: the build session sees no actionable inline
-    comments and quiesces.
+    comments and quiesces. **Own-PR fallback:** GitHub forbids approving your own
+    PR, so if this reviewer runs as the **same identity that opened the PR**, the
+    `APPROVE` review state is rejected — submit a `COMMENT` review instead whose
+    body starts `## Round N — APPROVE (own-PR, posted as comment)` (still carrying
+    the round marker). A merge gate keyed on the review *body* (see the
+    pr-review-automation runbook) detects the approval by that text; a real
+    `APPROVE` state is emitted only on PRs opened by a different identity.
   - *Already approved, still nothing new* — stay silent: resolve any threads the new
     push addressed, but post **no** new summary and don't re-emit `APPROVE`. Only
     speak again when a later push introduces a new finding at or above the floor.

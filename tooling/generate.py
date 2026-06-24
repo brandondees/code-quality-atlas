@@ -2,6 +2,7 @@
 # tooling/generate.py
 from __future__ import annotations
 import json
+import warnings
 import yaml
 from pathlib import Path
 from tooling.manifest import Manifest, Skill, Source
@@ -68,6 +69,21 @@ def top_checks(skill: Skill, docs_root: str = ".") -> list[str]:
     crosses = [b for n, b in per_cat if n in skill.cross_ref]
     checks: list[str] = []
     if primaries:
+        # When a lens carries enough cross_ref categories that the quota would
+        # consume the whole budget, the raw subtraction goes <= 0 and the max()
+        # floor below silently collapses the budget to len(primaries) — one check
+        # per primary category. No current skill has more than one cross_ref, so
+        # this never fires today; warn rather than clamp silently if it ever does,
+        # so a future manifest edit that squeezes the budget is visible at
+        # generate time instead of quietly shipping half-length checklists.
+        if _CROSS_REF_QUOTA * len(crosses) >= _TOP_CHECKS_BUDGET:
+            warnings.warn(
+                f"{skill.name}: cross-ref quota ({_CROSS_REF_QUOTA} x "
+                f"{len(crosses)}) meets or exceeds the top-checks budget "
+                f"({_TOP_CHECKS_BUDGET}); primary categories will fall back to "
+                f"~1 check each. Consider raising _TOP_CHECKS_BUDGET or reducing "
+                f"cross_ref breadth for this lens.",
+                stacklevel=2)
         budget = max(_TOP_CHECKS_BUDGET - _CROSS_REF_QUOTA * len(crosses),
                      len(primaries))
         # Priority-marked bullets always inline (G9), marker stripped — they are
@@ -283,13 +299,16 @@ def build_router_md(manifest: Manifest) -> str:
         "## When to use\n\n"
         f"{r.body or r.description}\n\n"
         "## How to pick\n\n"
-        "- This skill recommends **2-4 content lenses** for a focused "
-        "single-pass review. If you already know which lenses are relevant, or "
-        "if comprehensive coverage is the goal, call them directly — the 2-4 "
-        "figure is this router's own recommendation, not a hard cap on direct "
-        "lens selection. `reviewing-pr-and-process-hygiene` is **additive** — on "
-        "any PR it rides on top of the content lenses and does not spend one of "
-        "the 2-4 slots.\n"
+        "- **The 2-4 figure is for focused single-change review only.** For a "
+        "single change, this skill recommends **2-4 content lenses**. It is "
+        "**not** a cap on the whole-repo health-audit route, which runs **all "
+        "eight repo-shaped audits** (see Routes) — apply the 2-4 figure to "
+        "per-change review, never to the audit set. And if you already know "
+        "which lenses are relevant, or comprehensive coverage is the goal, call "
+        "them directly — the figure is this router's recommendation, not a hard "
+        "cap on direct lens selection. `reviewing-pr-and-process-hygiene` is "
+        "**additive** — on any PR it rides on top of the content lenses and does "
+        "not spend one of the 2-4 slots.\n"
         "- Match the change against the routes below; when a change is several "
         "things at once, combine rows.\n"
         "- **Keep the brake pedal.** When a change ships abstraction, generality, "
