@@ -632,8 +632,8 @@ skills:
       Reviews a standardized non-source artifact against its own published
       "well-formed X" standard rather than as application code — the artifact
       review shape (D15), presence-activated. On detecting a supported artifact it
-      loads that artifact's rubric and reviews against it. First supported
-      artifact: a SKILL.md / agent-skill definition against Anthropic's
+      loads that artifact's rubric and reviews against it. Supported artifact: a
+      SKILL.md / agent-skill definition, reviewed against Anthropic's
       skill-authoring best practices (trigger-rich frontmatter within limits, a
       lean progressive-disclosure body with detail bundled, a single default
       approach, no time-sensitive text, one-level-deep references, eval-first).

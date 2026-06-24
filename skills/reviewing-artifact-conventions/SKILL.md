@@ -3,8 +3,8 @@ name: reviewing-artifact-conventions
 description: 'Reviews a standardized non-source artifact against its own published
   "well-formed X" standard rather than as application code — the artifact review shape
   (D15), presence-activated. On detecting a supported artifact it loads that artifact''s
-  rubric and reviews against it. First supported artifact: a SKILL.md / agent-skill
-  definition against Anthropic''s skill-authoring best practices (trigger-rich frontmatter
+  rubric and reviews against it. Supported artifact: a SKILL.md / agent-skill definition,
+  reviewed against Anthropic''s skill-authoring best practices (trigger-rich frontmatter
   within limits, a lean progressive-disclosure body with detail bundled, a single
   default approach, no time-sensitive text, one-level-deep references, eval-first).
   Use when reviewing a SKILL.md or agent-skill definition (or another listed authored
@@ -25,7 +25,7 @@ provenance:
 
 ## When to use
 
-Reviews a standardized non-source artifact against its own published "well-formed X" standard rather than as application code — the artifact review shape (D15), presence-activated. On detecting a supported artifact it loads that artifact's rubric and reviews against it. First supported artifact: a SKILL.md / agent-skill definition against Anthropic's skill-authoring best practices (trigger-rich frontmatter within limits, a lean progressive-disclosure body with detail bundled, a single default approach, no time-sensitive text, one-level-deep references, eval-first). Use when reviewing a SKILL.md or agent-skill definition (or another listed authored artifact) against the standard it should follow. Skip when none of the listed artifacts are present — ordinary source code is the other lenses' job, and this is authoring quality, distinct from doc-drift (#22) and runtime agent-safety (#32).
+Reviews a standardized non-source artifact against its own published "well-formed X" standard rather than as application code — the artifact review shape (D15), presence-activated. On detecting a supported artifact it loads that artifact's rubric and reviews against it. Supported artifact: a SKILL.md / agent-skill definition, reviewed against Anthropic's skill-authoring best practices (trigger-rich frontmatter within limits, a lean progressive-disclosure body with detail bundled, a single default approach, no time-sensitive text, one-level-deep references, eval-first). Use when reviewing a SKILL.md or agent-skill definition (or another listed authored artifact) against the standard it should follow. Skip when none of the listed artifacts are present — ordinary source code is the other lenses' job, and this is authoring quality, distinct from doc-drift (#22) and runtime agent-safety (#32).
 
 **Shape: artifact.** Presence-activated: run only when one of the artifacts in the table below is present in the change or repo. Detect the artifact, open its rubric, and review the artifact against that published standard — not the surrounding application code. Skip entirely when none of the listed artifacts are present.
 

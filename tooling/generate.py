@@ -5,7 +5,7 @@ import json
 import warnings
 import yaml
 from pathlib import Path
-from tooling.manifest import Manifest, Skill, Source
+from tooling.manifest import Artifact, Manifest, Skill, Source
 from tooling.sections import (extract_bullets, extract_section,
                               extract_subsection, section_hash,
                               is_priority, strip_priority)
@@ -268,7 +268,7 @@ def build_skill_md(skill: Skill, taxonomy_version: str, docs_root: str = ".",
     return f"---\n{fm}\n---\n\n{body}"
 
 
-def build_artifact_rubric(skill: Skill, artifact, docs_root: str = ".") -> str:
+def build_artifact_rubric(skill: Skill, artifact: Artifact, docs_root: str = ".") -> str:
     """The bundled rubric file for one artifact of an artifact-shaped lens: the
     heuristics, references, and tooling of that artifact's rubric section, loaded
     on a presence hit. Subsection headings are promoted ### → ## so the file's

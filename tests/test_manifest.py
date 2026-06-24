@@ -269,6 +269,21 @@ def test_artifacts_only_on_artifact_shape(tmp_path):
         validate(Manifest("v0", [bad]), docs_root="/")
 
 
+def test_artifact_slug_must_be_lowercase_hyphen(tmp_path):
+    bad = _artifact_skill(tmp_path,
+                          artifacts=[Artifact(name="X", detect="y", rubric=101,
+                                              slug="INVALID_slug")])
+    with pytest.raises(ValidationError, match="lowercase"):
+        validate(Manifest("v0", [bad]), docs_root="/")
+
+
+def test_artifact_duplicate_slug_rejected(tmp_path):
+    a = Artifact(name="X", detect="y", rubric=101, slug="skill-md")
+    bad = _artifact_skill(tmp_path, artifacts=[a, a])
+    with pytest.raises(ValidationError, match="duplicate"):
+        validate(Manifest("v0", [bad]), docs_root="/")
+
+
 from tooling.manifest import Route, Router
 
 def test_design_flag_only_on_diff_lenses():
