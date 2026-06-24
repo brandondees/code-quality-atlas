@@ -1614,3 +1614,69 @@ the deployment tier (Claude). The 3B canary was not run this pass (it is below t
 clean-code precision floor by long-standing documentation; the two 7-8B tiers are the
 gate of record). **The re-gate debt carried across the Wave B/C/D14/D15 builds is
 cleared.**
+
+### 2026-06-24 (cont.) — Cross-model re-gate: the Wave B add-factors (G21 + G28)
+
+Closed the *other* half of the owed re-gate — the Wave B add-factor heuristics that
+shipped 2026-06-15 onto four existing lenses and were marked "cross-model re-gate
+pending" in [`gap-hunt-synthesis.md`](research/gap-hunt-synthesis.md). Same harness and
+tiers as the six-lens pass above (qwen2.5:7b floor + llama3.1:8b cross-confirm, num_ctx
+8192, temp 0). Lenses: `sweeping-for-security` (#14, G21 expiry/rotation), `tracing-
+correctness-and-invariants` (#4, G21 calendar/clock), `reviewing-resilience-and-
+scalability` (#28, G21 thundering-herd/exhaustion), `reviewing-pr-and-process-hygiene`
+(#24, G28 claims-vs-evidence + the G12 acceptance-criteria factor). 19 scenarios × 2
+tiers.
+
+**Three of the four G21/G28 factors pass both tiers; one is below the 7-8B floor.**
+
+- **G21 expiry/rotation (#14)** — ✅ both tiers. qwen flagged the 1-year self-managed
+  cert with no renewal path as the "detonates when the clock runs out" class; llama
+  caught both the cert and the long-lived no-refresh OAuth token.
+- **G21 calendar/clock (#4)** — ✅ both tiers. Both flagged the `date(year, 2, 29)`
+  leap-year time-bomb in the annual-job scheduler.
+- **G28 claims-vs-evidence (#24)** — ✅ both tiers. Each tier caught the "pure
+  refactor / no behavior change" + "30% faster, no benchmark" claims (different
+  secondary legs dropped per tier — qwen softer on the `>=`→`>` smuggled change, llama
+  softer on the closes-#812-no-test leg; union covers it). The G12 acceptance-criteria
+  factor (S5) caught the under-delivery (unmet rate-limit AC) on both tiers; the "no
+  more" over-delivery leg (unrequested XLSX + button) dropped at the floor — a
+  documented secondary-finding drop.
+- **G21 thundering-herd / cache-stampede (#28)** — ❌ **missed on both tiers.** Both
+  models engaged the shared-key + single-TTL setup but **misdiagnosed** the failure
+  mode (qwen → "multi-tenancy isolation"; llama → "bulkheading / single-writer
+  bottleneck") rather than naming the stampede (one shared key with one TTL expires for
+  all nodes at once → N concurrent 2s recomputes). This is coordinated-timing inference
+  — the same data-flow-reasoning class the runbook already documents as the 7-8B
+  ceiling (multi-sink tracking, the third independent finding in a multi-issue diff).
+  Not a heuristic regression (the factor is present and the deployment tier catches it),
+  but a newly-confirmed floor recall gap. **Tuning candidate:** a targeted
+  `reviewing-resilience-and-scalability/examples.md` decision rule — "a shared cache key
+  with a single TTL across N callers is a stampede; recommend single-flight/coalescing +
+  jittered TTL" — mirroring the cold-path and "a maximum is not a finding" decision
+  rules that fixed analogous floor misdiagnoses. May not stick (coordinated-timing is
+  ceiling-adjacent); attempt-and-measure, don't assume.
+
+**Two substrate findings (not regressions, recorded for the runbook):**
+
+- **G27 SoD is model-variant-sensitive.** The general `qwen2.5:7b` *missed* the
+  missing-segregation-of-duties case (#14 S3) and rationalized it as enforced;
+  `llama3.1:8b` caught it cleanly. The original G27 re-gate (2026-06-15) passed on
+  `qwen2.5-coder:7b` — the **code-tuned** variant. So G27 holds on the coder model and
+  on llama, but not the general qwen2.5:7b. The documented floor is `qwen2.5-coder:7b`
+  for exactly this reason; the general qwen2.5:7b is a slightly weaker substrate for
+  authorization-pattern reasoning.
+- **`llama3.1:8b` over-flags clean security/boundary code.** It invented findings on
+  the clean #14 S4 (SoD correctly enforced — it pattern-matched "SoD missing" onto a
+  correct control even after echoing the decision rule), the clean #14 S5 (ownership-
+  scoped delete — 6 spurious findings), and the clean #4 S3 (correct 1-based page math
+  — invented a wrong off-by-one). `qwen2.5:7b` returned "No findings" on all three.
+  This is the documented general-vs-code-tuned precision gap — it is why the floor of
+  record is the *coder* variant. The qwen tier held clean-code precision throughout.
+
+**Verdict: G21 expiry, G21 calendar/clock, and G28 claims-vs-evidence pass the
+cross-model gate; G21 thundering-herd (#28) is detection-at-deployment-tier-only,
+logged as a floor recall gap with a tuning candidate. The Wave B add-factor re-gate
+debt is resolved** (with the one tuning follow-up noted). Substrate caveat: this pass
+used the general `qwen2.5:7b` (the only qwen on this machine), not the documented
+`qwen2.5-coder:7b` floor — the SoD and clean-precision deltas above are attributable to
+that substrate difference, not to the heuristics.
