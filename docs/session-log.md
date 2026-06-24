@@ -1552,3 +1552,65 @@ taxonomy category; #30 already documents the artifact-authoring factor.
 `artifacts:` row, **no new always-on description**. **Cross-model re-gate still owed** — now
 also covers this lens (new behavior); batch on the Ollama substrate (qwen2.5:7b floor + 3B
 canary), not this environment.
+
+### 2026-06-24 (cont.) — Cross-model re-gate: the six Wave C / D14 / D15 lenses
+
+Closed the deferred D6/D8 re-gate that had been **owed since 2026-06-15** across every
+lens shipped 2026-06-17→24 — the substrate (local Ollama) turned out to be available
+in this environment after all, contrary to the standing "not this environment" note on
+each owed marker. Ran on **Ollama 0.30.10** with **qwen2.5:7b** (the documented 7-8B
+floor) and **llama3.1:8b** (a second 7-8B family, the cross-confirm tier the prior
+v0.3 re-gate used), via `python -m tooling.run_evals` (num_ctx 8192, temperature 0).
+Six lenses × 4 scenarios × 2 tiers = 48 runs. Assembled-context sizes checked first
+(largest ~4.5k tokens, comfortably inside the 8192 window — no silent truncation).
+
+**Scope:** `reviewing-ai-authored-code` (#34), `reviewing-agent-legibility` (#35),
+`reviewing-ethical-design` (#36), `reviewing-interoperability` (#37),
+`reviewing-agentic-safety` (#32), `reviewing-artifact-conventions` (#101 / `shape:
+artifact`).
+
+**Primary concern — over-flagging on clean code — did not appear on either tier.**
+Every lens's clean / well-formed / no-artifact-present scenario returned "No findings"
+on both qwen2.5:7b and llama3.1:8b (12/12 clean scenarios across the six lenses, both
+tiers). The presence-activated artifact lens correctly returned "No findings" on a
+source-only diff (no SKILL.md present) — it did not review `.ts` source against the
+authoring rubric.
+
+**Per-lens (both tiers pass):**
+
+- **#34 ai-authored-code** — slopsquat (xref #18), transposed-digit constant
+  (84600≠86400), and scope-creep all caught; clean httpx scenario → "No findings".
+  qwen dropped the secondary `except Exception` leg on the scope-creep diff (7B
+  top-findings-only ceiling); llama caught it *and* over-generated two low-value
+  findings on that same defect diff (a hallucinated `httpx` import not in the
+  snippet, plus a borderline `n=3` magic-number) — small-model noise on a
+  multi-issue **defect** case, not on clean code.
+- **#35 agent-legibility** — AGENTS.md drift, stringly-typed dispatch, and the giant
+  generated file + duplicate helper all caught with full recall on both tiers; clean
+  scenario → "No findings" (did not over-demand an `llms.txt`).
+- **#36 ethical-design** — manipulative default, discriminatory plain-conditionals
+  (ZIP/surname proxies), and the fake-urgency + roach-motel dark patterns all caught
+  and correctly detect-and-routed (#27/legal, product); clean delete-confirmation
+  read as legitimate protective friction → "No findings".
+- **#37 interoperability** — RFC 3339 wire-format violation, missing OAuth `state`,
+  and Quartz-vs-POSIX cron-dialect mismatch all caught; clean idempotency-key +
+  RFC-3339 scenario → "No findings". llama dropped the explicit `route: #14` tag on
+  the OAuth case (named ownership here, omitted the security hand-off) — a
+  secondary-detail drop at the floor.
+- **#32 agentic-safety** — tool least-privilege (ASI02/03), unbounded-loop +
+  missing-approval (ASI01/08), and MCP token-passthrough / confused-deputy (ASI03)
+  all caught on both tiers; bounded-and-gated clean scenario → "No findings".
+- **#101 artifact-conventions** — first-person/no-trigger frontmatter and the
+  no-progressive-disclosure mega-body caught; well-formed control and no-artifact
+  diff → "No findings". qwen dropped the secondary gerund-`name` leg on the
+  frontmatter case (7B ceiling); llama caught both legs.
+
+**Verdict: all six lenses pass the cross-model gate at the 7-8B floor and cross-confirm
+on a second family.** The only gaps are the already-documented model-capability
+ceilings — qwen's "top findings only" secondary-finding drops on multi-issue diffs, the
+known qwen cosmetic trailing-sentence after "No findings", and small-model plausible-
+noise on a defect scenario (llama #34 S3) — none a heuristic regression, all handled by
+the deployment tier (Claude). The 3B canary was not run this pass (it is below the
+clean-code precision floor by long-standing documentation; the two 7-8B tiers are the
+gate of record). **The re-gate debt carried across the Wave B/C/D14/D15 builds is
+cleared.**
