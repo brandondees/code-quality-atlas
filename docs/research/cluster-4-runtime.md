@@ -144,6 +144,7 @@
 - **Microsoft — Responsible AI / Azure AI Content Safety + "LLM-as-judge" eval guidance** → mine: layered guardrails (input + output classifiers) around the model, not just inside the prompt; using a separate model/rubric to grade outputs at scale.
 - **Eugene Yan — "Patterns for Building LLM-based Systems & Products" / "evals" writing** — https://eugeneyan.com/ → mine: concrete engineering patterns — evals first, guardrails, caching, defensive UX for wrong answers, and keeping a golden-set regression suite for prompts.
 - **Chip Huyen — "Building LLM applications for production" / *AI Engineering*** — https://huyenchip.com/ → mine: production concerns — prompt versioning, eval pipelines, cost/latency tradeoffs, and treating prompts + models as versioned, testable artifacts.
+
 ### Tooling rules worth lifting
 
 *(This space is young; many "rules" are validators/frameworks/scanners rather than classic lint IDs. IDs `(verify)`.)*
