@@ -1641,20 +1641,25 @@ tiers.
   factor (S5) caught the under-delivery (unmet rate-limit AC) on both tiers; the "no
   more" over-delivery leg (unrequested XLSX + button) dropped at the floor — a
   documented secondary-finding drop.
-- **G21 thundering-herd / cache-stampede (#28)** — ❌ **missed on both tiers.** Both
+- **G21 thundering-herd / cache-stampede (#28)** — ❌ initially **missed on both
+  tiers** → ✅ **fixed by an examples.md tune, now passes both tiers.** First pass: both
   models engaged the shared-key + single-TTL setup but **misdiagnosed** the failure
   mode (qwen → "multi-tenancy isolation"; llama → "bulkheading / single-writer
   bottleneck") rather than naming the stampede (one shared key with one TTL expires for
-  all nodes at once → N concurrent 2s recomputes). This is coordinated-timing inference
-  — the same data-flow-reasoning class the runbook already documents as the 7-8B
-  ceiling (multi-sink tracking, the third independent finding in a multi-issue diff).
-  Not a heuristic regression (the factor is present and the deployment tier catches it),
-  but a newly-confirmed floor recall gap. **Tuning candidate:** a targeted
-  `reviewing-resilience-and-scalability/examples.md` decision rule — "a shared cache key
-  with a single TTL across N callers is a stampede; recommend single-flight/coalescing +
-  jittered TTL" — mirroring the cold-path and "a maximum is not a finding" decision
-  rules that fixed analogous floor misdiagnoses. May not stick (coordinated-timing is
-  ceiling-adjacent); attempt-and-measure, don't assume.
+  all nodes at once → N concurrent 2s recomputes). Root cause: `examples.md` had **no
+  worked stampede case**, and the decision rule's "a shared resource whose exhaustion
+  has no bulkhead" line actively steered the models toward "isolation/bulkheading."
+  **Fix applied:** added a *Coordinated-client failure* clause to the decision rule
+  (name the stampede, not isolation/write-serialization) plus a dedicated bad→finding
+  worked example (a shared `"dashboard"` key, single TTL, ~3s recompute → single-flight
+  + jittered TTL) — isomorphic to, not identical to, the eval scenario so it
+  generalizes. **Re-ran both tiers: #28 S4 now caught on qwen2.5:7b and llama3.1:8b**,
+  with the clean scenarios held (S1/S2 full recall both tiers; S3 clean on qwen; llama
+  led with "No finding" then offered one optional improvement-valence suggestion — not
+  a defect false-positive). `examples.md` is not provenance-hashed, so drift stays
+  clean and no regenerate was needed. This is the cold-path / "a maximum is not a
+  finding" decision-rule playbook applied again — the coordinated-timing ceiling was
+  reachable with a concrete worked example after all.
 
 **Two substrate findings (not regressions, recorded for the runbook):**
 
@@ -1673,10 +1678,11 @@ tiers.
   This is the documented general-vs-code-tuned precision gap — it is why the floor of
   record is the *coder* variant. The qwen tier held clean-code precision throughout.
 
-**Verdict: G21 expiry, G21 calendar/clock, and G28 claims-vs-evidence pass the
-cross-model gate; G21 thundering-herd (#28) is detection-at-deployment-tier-only,
-logged as a floor recall gap with a tuning candidate. The Wave B add-factor re-gate
-debt is resolved** (with the one tuning follow-up noted). Substrate caveat: this pass
+**Verdict: all four G21/G28 factors now pass the cross-model gate** — G21 expiry, G21
+calendar/clock, and G28 claims-vs-evidence passed outright; G21 thundering-herd (#28)
+missed initially and was lifted to a both-tier pass by the examples.md decision-rule +
+worked-example tune above. **The Wave B add-factor re-gate debt is fully resolved, no
+follow-up owed.** Substrate caveat: this pass
 used the general `qwen2.5:7b` (the only qwen on this machine), not the documented
 `qwen2.5-coder:7b` floor — the SoD and clean-precision deltas above are attributable to
 that substrate difference, not to the heuristics.

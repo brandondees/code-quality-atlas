@@ -14,6 +14,17 @@ new in-process state that blocks horizontal scaling or surviving a restart, a
 single-writer / global-lock throughput ceiling, durable state with no stated
 RTO/RPO or an untested restore, or one tenant able to starve a shared resource.
 
+**Coordinated-client failure (read this before diagnosing a shared cache).** When a
+**single shared cache key** has **one TTL** and an **expensive recompute on miss**,
+the hazard is a **cache stampede / thundering herd**, *not* "isolation" or
+"bulkheading" or a "single-writer bottleneck": the key expires for every caller at
+the same instant, so on each expiry **all N callers run the expensive recompute
+concurrently**. It looks fine under light load and detonates under concurrency. The
+fix is **single-flight / request coalescing** (one caller recomputes, the rest wait
+or serve stale) **plus jittered / staggered TTLs** so one miss does not fan out into
+N recomputes. Do not misread it as a per-tenant isolation problem or a write
+serialization problem — name the stampede.
+
 **Match the check to the surface.** Recoverability (RTO/RPO, tested restore) and
 HA apply **only** to changes that introduce or touch **durable state or a DR /
 capacity design** — a datastore, a backup plan, a stateful service. A stateless
@@ -76,6 +87,33 @@ pg_dump to S3. Target: 5k orders/sec at peak, 99.95% availability."
    — up to 24h of data loss (RPO) and no evidence the restore has been exercised.
    State the RPO the business accepts, test the restore, and add PITR/WAL archiving
    if 24h is too much.
+
+## Bad → finding (a cache stampede / coordinated-client failure)
+
+**Input (review this change):**
+
+```python
+# every web node serves the dashboard from one shared cache key, same TTL
+DASH_TTL = 600
+def get_dashboard():
+    v = cache.get("dashboard")          # one key, shared by all nodes
+    if v is None:
+        v = db.expensive_rollup()       # ~3s
+        cache.set("dashboard", v, DASH_TTL)
+    return v
+```
+
+**Expected finding:**
+
+1. **Cache stampede / thundering herd:** one shared key (`"dashboard"`) with a single
+   TTL expires for every node at the same instant, so on each expiry **all** nodes run
+   the ~3s `expensive_rollup()` concurrently — a coordinated recompute that looks fine
+   under light load and detonates under concurrency (the DB takes N simultaneous
+   expensive queries, latency spikes, the miss storm can cascade). Add **single-flight
+   / request coalescing** (one caller recomputes, the rest wait or serve stale) plus
+   **jittered / staggered TTLs** so a single expiry does not fan out into N recomputes.
+   This is a coordinated-client failure mode, not a per-tenant isolation or
+   write-serialization problem.
 
 ## Good → no finding
 
