@@ -1,0 +1,15 @@
+# References to mine — reviewing-interoperability
+
+## Contents
+
+- From category #37
+
+## From category #37
+
+### Key references
+
+- **ISO/IEC 25010:2023 — Product quality model** — https://www.iso.org/standard/78176.html (overview: [arc42 quality-model update](https://quality.arc42.org/articles/iso-25010-update-2023)) → mine: the external completeness model itself. **Compatibility** decomposes into **co-existence** (share an environment without detriment) and **interoperability** (exchange information and use it correctly). The 2023 revision is the standing reason to re-run this sweep — it is the characteristic against which the gap was found.
+- **RFC 9110 (HTTP Semantics) + RFC 9111 (HTTP Caching)** — https://www.rfc-editor.org/rfc/rfc9110 / https://www.rfc-editor.org/rfc/rfc9111 → mine: the spec for **safe vs. idempotent methods**, status-code semantics, conditional requests (`ETag` / `If-None-Match` / `If-Modified-Since`), and `Cache-Control` / `Vary` correctness. The basis for "this `POST` is treated as idempotent," "this 200 should be a 201/409," and "this cache key ignores `Vary`." Idempotency-key discipline: [draft-ietf-httpapi-idempotency-key-header](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/).
+- **OAuth 2.0 Security Best Current Practice (RFC 9700, 2025) + OpenID Connect Core** — https://www.rfc-editor.org/rfc/rfc9700 / https://openid.net/specs/openid-connect-core-1_0.html → mine: the flow-conformance checks — **exact `redirect_uri` matching**, the `state` (CSRF) and `nonce` (replay) parameters actually validated, **PKCE** (RFC 7636) on public clients, no tokens in the front channel. A login that "works" but skips `state` is interoperable-looking and broken.
+- **Semantic Versioning 2.0.0** — https://semver.org → mine: the version-contract spec — a breaking change demands a major bump, `^`/`~` range semantics, pre-release/build precedence. Grounds "this is a breaking change shipped as a patch" and wire/format back-compat reasoning.
+- **Unicode UAX #15 (Normalization) + UTS #39 (Security Mechanisms) + the RFC format spines** — https://www.unicode.org/reports/tr15/ / https://www.unicode.org/reports/tr39/ → mine: normalize before compare/store/index (NFC), case-fold safely, watch confusables and mixed-script identifiers; plus RFC **3339** (date-time), **3986** (URI), **5321/5322** (email), **4180** (CSV), **8259** (JSON — duplicate keys, number precision). The "parse and emit the format the way the spec says" spine. Encoding edges: UTF-8 validation, BOM handling, surrogate pairs, the YAML "Norway problem" (`NO` → `false`).

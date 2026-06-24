@@ -11,7 +11,7 @@ description: 'Audits infrastructure-as-code manifests (Terraform/OpenTofu, Kuber
   when auditing Terraform, Kubernetes, Helm, or CloudFormation. Skip when the repo
   or change contains no infrastructure-as-code manifests.'
 provenance:
-  taxonomy_version: v0.6
+  taxonomy_version: v0.7
   built_from:
   - category: 31
     source: docs/research/cluster-5-verification.md#31

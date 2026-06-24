@@ -299,6 +299,28 @@ def test_ethical_design_lens_owns_36_detect_and_route():
     assert "Shared categories" not in md  # single-category lens
 
 
+def test_interoperability_lens_owns_37_consolidating_conformance():
+    # G18-interop (Wave C, v0.7): the interoperability lens primary-owns the new
+    # #37 category — the first of the two ISO/IEC 25010:2023 characteristics with
+    # no owner (compatibility). Consolidates the "does the code correctly speak an
+    # external standard" factor-notes scattered across #4/#8/#13/#26 into one
+    # owner. Single-category lens, no cross_ref; both ★-marked checks surface (G9).
+    m = load_manifest("skills/manifest.yaml")
+    lens = next(s for s in m.skills if s.name == "reviewing-interoperability")
+    assert lens.shape == "diff"
+    assert not lens.cross_ref
+    owners = primary_owners(m)
+    assert owners[37] == "reviewing-interoperability"
+    # the neighbours whose factor-notes it consolidates still own their categories
+    assert owners[4] == "tracing-correctness-and-invariants"   # internal correctness
+    assert owners[13] == "reviewing-api-contract-safety"       # the contract we author
+    md = build_skill_md(lens, taxonomy_version=m.taxonomy_version, docs_root=".",
+                        owners=owners)
+    assert "Standard protocol semantics" in md   # ★ priority check 1
+    assert "RFC / format conformance" in md       # ★ priority check 2
+    assert "Shared categories" not in md  # single-category lens
+
+
 def test_security_ethical_design_tension_present():
     # G16 + G31: now that reviewing-ethical-design exists, the long-noted
     # security ↔ usability cross-quality collision (protective friction vs.

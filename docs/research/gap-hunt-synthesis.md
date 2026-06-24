@@ -19,7 +19,7 @@
 | **G29** | Root-cause vs symptom (band-aid detection) | add-factor #1/silent-failures | promote | Med | Low | Med |
 | **G13** | *Tidy First?* economics + tidying *suggestions* (via G26) | add-factor #21/#24 | promote | Med | Low | Med |
 | **G32** | Pre-existing/adjacent defects (Boy-Scout, attribution axis) | add-factor (opt-in) | promote | Med | Low | Med-High |
-| **G18** | Interoperability (consolidate) + Safety (add-factor + escalate) | add-factor / new-lens | promote | Med-High | Med | Med-High |
+| **G18** | Interoperability (consolidate) + Safety (add-factor + escalate) | add-factor / new-lens | interop **✅ shipped** (v0.7, #37); safety pending | Med-High | Med | Med-High |
 | **G12** | Acceptance-criteria / requirements traceability | new-lens / add-factor | promote | High | Med | Med |
 | **G14** | Characteristic defects of AI-authored code | new-lens | **✅ shipped** (v0.4, #34) | High | Med | High |
 | **G27→** | *(SoD listed above)* | | | | | |
@@ -76,7 +76,7 @@ Pure heuristic additions to existing lenses — the cheapest way to bank real co
 - **G16** ethical / responsible-design (non-ML) — needs G23; detect-and-route. **✅ Shipped 2026-06-17 (v0.6)** as `reviewing-ethical-design` — new Cluster IV category #36, the non-ML analog of #25 / sibling of #14; dark patterns, manipulative defaults, discriminatory conditionals, consent theater. Strictly detect-and-route on the shipped G23 axis (consent→#27/legal, product→product, a11y→#23); 2 ★ top-checks, dedicated router route, a security↔ethical-design tension, 4 evals. Design-time arm noted as a follow-up.
 - **G20** agent-legibility (cluster-II rotation) — diff arm + repo arm. **✅ Shipped 2026-06-17 (v0.5)** as `reviewing-agent-legibility` — new Cluster II category #35, the mirror of #34; ships the **diff arm** (context economy / 40%-rule, retrieval-friendly + AST-navigable structure, scoped AGENTS.md/CLAUDE.md onboarding, `llms.txt`), 2 ★ top-checks, dedicated router route, 4 evals. The repo arm (agent-navigability audit) is a noted follow-up; the operator role stays #24/#32/#30. Cross-model re-gate pending.
 - **G30** threat modeling — needs Q15 (decision shape); the security analog of #28.
-- **G18-interoperability** as a consolidated lens (or a factor sweep across #4/#8/#13/#26).
+- **G18-interoperability** as a consolidated lens (or a factor sweep across #4/#8/#13/#26). **✅ Shipped 2026-06-24 (v0.7)** as `reviewing-interoperability` — new Cluster IV category #37, the first of the two unowned ISO/IEC 25010:2023 characteristics. Consolidated (a single-category lens, not a factor sweep): HTTP/OAuth/OIDC semantics, SemVer, RFC date/URI/email/JSON/CSV formats, Unicode normalization, cron dialects, OTel semconv, co-existence; 2 ★ top-checks, dedicated router route, 4 evals. Owns external-standard conformance, defers internal correctness (#4) / idiom (#8) / the contract we author (#13) / config (#26), routes the auth-flow security verdict to #14. **The safety arm stays open** (add-factor #2/#28 + detect-and-escalate). Cross-model re-gate pending.
 
 ### Wave D — bigger bets: new shapes, clusters, substrates
 
@@ -93,7 +93,7 @@ Higher cost, longer horizon, often gated on an enabling build.
 - **Ethics/transparency triad:** G16 (non-ML ethical defects, *detection*) ↔ G24 VII-G (user-facing transparency *UX*) ↔ #27 (legal/privacy *adjudication*). Three distinct owners; draw the lines explicitly.
 - **"Matches what's claimed/required" family:** G28 (claims-vs-evidence) ↔ G12 (acceptance-criteria) ↔ #1 (matches stated intent). Candidate to unify as one lens family rather than three factors.
 - **Contracts:** G17 (data/event contracts) ↔ #13 (service API contracts) ↔ #20 (persistence). Boundary needed.
-- **Safety vs reliability:** G18-safety (fail-toward-safe / harm) ↔ #2 (fail-loud) ↔ #28 (degradation).
+- **Safety vs reliability:** G18-safety (fail-toward-safe / harm) ↔ #2 (fail-loud) ↔ #28 (degradation). *(Still owed: the interoperability arm shipped as #37 v0.7; the safety add-factor pass against #2/#28 is the remaining half of G18.)*
 - **Security design vs detection:** G30 (threat enumeration, design-time) ↔ #14 (vuln detection, diff-time) ↔ #32 (agentic).
 - **Time-bombs:** G21's factors span #4/#14/#26/#28 — assign each to one owner.
 - **Agent surfaces:** G20-operator ↔ #24/#32/#30 (already mapped).

@@ -15,10 +15,10 @@ supports the `SKILL.md` format** (Cursor, Windsurf, Copilot, …). The plugin wr
 
 ## What you get
 
-**32 review skills**, generated from a researched taxonomy and refined against eval
+**33 review skills**, generated from a researched taxonomy and refined against eval
 scenarios:
 
-- **30 review lenses** — each a narrow, self-contained reviewer (correctness,
+- **31 review lenses** — each a narrow, self-contained reviewer (correctness,
   naming & readability, module design, concurrency, migrations & data safety,
   security, performance, tests, API contracts, accessibility & i18n, observability,
   LLM-integration, resilience, install/upgrade experience, plus repo-shaped audits
@@ -147,7 +147,7 @@ re-gate.
 
 | Path | What's in it |
 |---|---|
-| [`skills/`](skills/) | The 30 lenses + `choosing-review-lenses` (router) + `synthesizing-review-findings` (synthesizer) |
+| [`skills/`](skills/) | The 31 lenses + `choosing-review-lenses` (router) + `synthesizing-review-findings` (synthesizer) |
 | [`commands/`](commands/) | Slash commands: `/atlas-review-pr`, `/atlas-code-review`, `/atlas-init`, `/atlas-rebase-stale` |
 | [`hooks/`](hooks/) | `SessionStart` routing hook (side-effect-free) |
 | [`templates/`](templates/) | `REVIEW.md` convergence policy + `agents-routing-snippet.md` routing block |

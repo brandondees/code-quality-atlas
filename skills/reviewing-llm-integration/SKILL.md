@@ -7,7 +7,7 @@ description: Reviews LLM/AI integration code for prompt-injection surface, the l
   tools. Skip when the change has no model/LLM call, prompt construction, or model-output
   handling — ordinary code that never touches an AI API.
 provenance:
-  taxonomy_version: v0.6
+  taxonomy_version: v0.7
   built_from:
   - category: 25
     source: docs/research/cluster-4-runtime.md#25

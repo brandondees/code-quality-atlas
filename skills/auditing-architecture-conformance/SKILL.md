@@ -7,7 +7,7 @@ description: 'Audits a repository for architecture conformance: dependency direc
   Use when auditing layering, module boundaries, dependency rules, or architecture
   drift.'
 provenance:
-  taxonomy_version: v0.6
+  taxonomy_version: v0.7
   built_from:
   - category: 12
     source: docs/research/cluster-3-structure.md#12

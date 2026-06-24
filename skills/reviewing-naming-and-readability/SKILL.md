@@ -5,7 +5,7 @@ description: 'Reviews code for naming and local readability: intention-revealing
   magic numbers/strings, mixed levels of abstraction, and comment accuracy. Use when
   reviewing readability, naming, complexity, nesting, magic values, or comments.'
 provenance:
-  taxonomy_version: v0.6
+  taxonomy_version: v0.7
   built_from:
   - category: 5
     source: docs/research/cluster-2-readability.md#5
