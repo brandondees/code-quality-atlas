@@ -58,6 +58,7 @@ download 404s.
 ```text
 # resolve the latest release tag (format `b<NNNN>`, e.g. b5263) — or set it by hand
 tag=$(curl -s https://api.github.com/repos/ggml-org/llama.cpp/releases/latest | jq -r .tag_name)
+[ -n "$tag" ] && [ "$tag" != null ] || { echo "failed to resolve llama.cpp tag (network/API/rate-limit?)" >&2; exit 1; }
 curl -sLO "https://github.com/ggml-org/llama.cpp/releases/download/$tag/llama-$tag-bin-ubuntu-x64.tar.gz"
 tar xzf "llama-$tag-bin-ubuntu-x64.tar.gz"
 curl -sLO https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf

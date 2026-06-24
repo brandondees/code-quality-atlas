@@ -78,11 +78,12 @@ def top_checks(skill: Skill, docs_root: str = ".") -> list[str]:
         # generate time instead of quietly shipping half-length checklists.
         if _CROSS_REF_QUOTA * len(crosses) >= _TOP_CHECKS_BUDGET:
             warnings.warn(
-                f"{skill.name}: cross-ref quota ({_CROSS_REF_QUOTA} × "
+                f"{skill.name}: cross-ref quota ({_CROSS_REF_QUOTA} x "
                 f"{len(crosses)}) meets or exceeds the top-checks budget "
                 f"({_TOP_CHECKS_BUDGET}); primary categories will fall back to "
                 f"~1 check each. Consider raising _TOP_CHECKS_BUDGET or reducing "
-                f"cross_ref breadth for this lens.")
+                f"cross_ref breadth for this lens.",
+                stacklevel=2)
         budget = max(_TOP_CHECKS_BUDGET - _CROSS_REF_QUOTA * len(crosses),
                      len(primaries))
         # Priority-marked bullets always inline (G9), marker stripped — they are
