@@ -115,6 +115,32 @@ def get_dashboard():
    This is a coordinated-client failure mode, not a per-tenant isolation or
    write-serialization problem.
 
+## Bad → finding (degrade toward safe, not just toward available)
+
+**Input (review this change):**
+
+```python
+# Keep checkout fast when we're busy.
+def checkout(order):
+    if load_high():
+        return approve(order)            # skip fraud scoring under load
+    if fraud_score(order) > THRESHOLD:
+        return decline(order)
+    return approve(order)
+```
+
+**Expected finding:**
+
+1. **Degrade-toward-harm (drops a safety check under load):** the high-load path
+   **bypasses fraud scoring** to stay fast, so the system fails **open** under exactly
+   the conditions an attacker would create load to trigger. Graceful degradation
+   optimizes *availability*, but the degraded path must stay **harm-safe** — degrade to
+   a safe fallback (queue / hold the order for async review, or apply a stricter default
+   decision) rather than removing the guard. This is the ISO/IEC 25010:2023 *safety*
+   direction (distinct from #14 attacker-facing security, and from #2's code-level
+   fail-closed default). Surface it and route the acceptable-risk threshold to a human
+   owner; do not decide it here.
+
 ## Good → no finding
 
 **Input (review this change):**

@@ -12,6 +12,7 @@
 - Is any error swallowed — empty catch/`rescue`, `except: pass`, ignored Go `err`, discarded Result?
 - Does each handler narrow to the *expected* exception type, not a blanket catch-all?
 - On failure does it **fail loud** (surface + log with context) or **degrade intentionally** — never silently?
+- **Fail toward safe, not toward harm (ISO/IEC 25010:2023 *safety*):** when an operation fails or a guard cannot be evaluated, does control land in a *safe* state or a *harmful* one? Fail **closed** on an auth / permission / quota / limit check that errors or times out (deny, do not default-allow); a destructive, financial, or physical action defaults to the **no-op / abort**, not the action; a failed validation **rejects** rather than passing the value through unchecked; a missing or disabled safety control **blocks** rather than bypasses. This is *harm-prevention* — distinct from fail-*loud* (visibility, above) and from #14 security (attacker-prevention). Surface the harmful default; the acceptable-risk threshold and any formal hazard analysis (ISO 26262 / IEC 61508 / DO-178C) escalate to a human owner (detect-and-route), out of scope here.
 - Do error messages carry actionable context (what failed, key inputs, remediation) without leaking secrets/PII (cross #14/#16)?
 - Does every remote/IO call have a timeout? Retries with capped backoff + jitter, not unbounded?
 - Is there a fallback / circuit breaker for a dependency that fails repeatedly?

@@ -13,6 +13,7 @@
 - **Joe Duffy — "The Error Model" (2016)** `(verify URL)` → mine: separate *bugs* (programmer errors → fail-fast/abandon) from *recoverable conditions* (→ typed, handled errors); design which is which rather than catching everything.
 - **The Go Blog — "Error handling and Go"** `(verify URL)` → mine: errors are values; wrap with context; handle at the layer that can act.
 - **Alexis King — "Parse, Don't Validate"** `(verify URL)` (cross #10) → mine: validate once at the boundary and encode success in the type so downstream code can't re-fail.
+- **ISO/IEC 25010:2023 — *Safety* (new top-level product-quality characteristic)** — https://iso25000.com/index.php/en/iso-25000-standards/iso-25010 → mine: the 2023 revision adds **safety** — freedom from unacceptable risk of *harm* to people, property, or environment — as a characteristic distinct from **security** (freedom from *attacker* misuse). The diff-visible slice is **fail-safe / fail-closed defaults**: when an operation fails, control should resolve toward a *safe* state, not a harmful one. Deep hazard analysis (ISO 26262, IEC 61508, DO-178C) is specialist work that escalates to a human owner; the reviewable question is the *direction* a failure resolves.
 
 ## From category #4
 

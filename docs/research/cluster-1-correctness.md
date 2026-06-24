@@ -55,6 +55,7 @@ Each taxonomy category gets three sections:
 - **Joe Duffy — "The Error Model" (2016)** `(verify URL)` → mine: separate *bugs* (programmer errors → fail-fast/abandon) from *recoverable conditions* (→ typed, handled errors); design which is which rather than catching everything.
 - **The Go Blog — "Error handling and Go"** `(verify URL)` → mine: errors are values; wrap with context; handle at the layer that can act.
 - **Alexis King — "Parse, Don't Validate"** `(verify URL)` (cross #10) → mine: validate once at the boundary and encode success in the type so downstream code can't re-fail.
+- **ISO/IEC 25010:2023 — *Safety* (new top-level product-quality characteristic)** — https://iso25000.com/index.php/en/iso-25000-standards/iso-25010 → mine: the 2023 revision adds **safety** — freedom from unacceptable risk of *harm* to people, property, or environment — as a characteristic distinct from **security** (freedom from *attacker* misuse). The diff-visible slice is **fail-safe / fail-closed defaults**: when an operation fails, control should resolve toward a *safe* state, not a harmful one. Deep hazard analysis (ISO 26262, IEC 61508, DO-178C) is specialist work that escalates to a human owner; the reviewable question is the *direction* a failure resolves.
 
 ### Tooling rules worth lifting
 
@@ -70,6 +71,7 @@ Each taxonomy category gets three sections:
 - Is any error swallowed — empty catch/`rescue`, `except: pass`, ignored Go `err`, discarded Result?
 - Does each handler narrow to the *expected* exception type, not a blanket catch-all?
 - On failure does it **fail loud** (surface + log with context) or **degrade intentionally** — never silently?
+- ★ **Fail toward safe, not toward harm (ISO/IEC 25010:2023 *safety*):** when an operation fails or a guard cannot be evaluated, does control land in a *safe* state or a *harmful* one? Fail **closed** on an auth / permission / quota / limit check that errors or times out (deny, do not default-allow); a destructive, financial, or physical action defaults to the **no-op / abort**, not the action; a failed validation **rejects** rather than passing the value through unchecked; a missing or disabled safety control **blocks** rather than bypasses. This is *harm-prevention* — distinct from fail-*loud* (visibility, above) and from #14 security (attacker-prevention). Surface the harmful default; the acceptable-risk threshold and any formal hazard analysis (ISO 26262 / IEC 61508 / DO-178C) escalate to a human owner (detect-and-route), out of scope here.
 - Do error messages carry actionable context (what failed, key inputs, remediation) without leaking secrets/PII (cross #14/#16)?
 - Does every remote/IO call have a timeout? Retries with capped backoff + jitter, not unbounded?
 - Is there a fallback / circuit breaker for a dependency that fails repeatedly?

@@ -10,7 +10,7 @@ provenance:
   built_from:
   - category: 2
     source: docs/research/cluster-1-correctness.md#2
-    hash: f3544ba46872ca9fb6eadfeb5d13f6f8cb22edc9036229c26c1e3eb2b13480c4
+    hash: a030966c208eb1b1dad0436e954ff5582f44e9f15ac37ccf0cbeba4d0f66ad1c
   - category: 4
     source: docs/research/cluster-1-correctness.md#4
     hash: 63ae9d27a00a6a9575d63c6bc8a91c2d785f7d0ba313fd9416e3f61f8f730043
@@ -38,6 +38,7 @@ Report only real problems. If the code correctly handles the case, reply "No fin
 
 The head of the full checklist — enough for a first pass without opening any reference file:
 
+- **Fail toward safe, not toward harm (ISO/IEC 25010:2023 *safety*):** when an operation fails or a guard cannot be evaluated, does control land in a *safe* state or a *harmful* one? Fail **closed** on an auth / permission / quota / limit check that errors or times out (deny, do not default-allow); a destructive, financial, or physical action defaults to the **no-op / abort**, not the action; a failed validation **rejects** rather than passing the value through unchecked; a missing or disabled safety control **blocks** rather than bypasses. This is *harm-prevention* — distinct from fail-*loud* (visibility, above) and from #14 security (attacker-prevention). Surface the harmful default; the acceptable-risk threshold and any formal hazard analysis (ISO 26262 / IEC 61508 / DO-178C) escalate to a human owner (detect-and-route), out of scope here.
 - **Root cause vs. band-aid (esp. bug fixes):** does the fix resolve the underlying cause, or paper over a symptom — catch-and-ignore the error, special-case the one bad input, retry a flaky call, bump a timeout, drop a null guard at the crash site? A symptom-level patch that leaves the cause live is a finding even when it makes the reported case pass; ask what *produced* the bad state (5-whys) and whether this change addresses that level, not just the visible failure.
 - Is any error swallowed — empty catch/`rescue`, `except: pass`, ignored Go `err`, discarded Result?
 - Does each handler narrow to the *expected* exception type, not a blanket catch-all?

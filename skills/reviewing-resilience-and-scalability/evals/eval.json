@@ -36,6 +36,14 @@
         "Recommends single-flight / request coalescing on the recompute plus jittered/staggered TTLs so a miss doesn't become N concurrent recomputes",
         "Treats it as a coordinated-client failure mode (correct under light load, detonates under concurrency) rather than a simple missing-cache issue"
       ]
+    },
+    {
+      "query": "Review this change:\n```python\n# Keep checkout fast when we're busy.\ndef checkout(order):\n    if load_high():\n        return approve(order)              # skip fraud scoring under load\n    if fraud_score(order) > THRESHOLD:\n        return decline(order)\n    return approve(order)\n```",
+      "expected_behavior": [
+        "Flags degrade-toward-harm: the high-load degraded path drops a safety-critical fraud check, so the system fails OPEN under exactly the conditions an attacker would exploit — it buys availability by removing a guard",
+        "Distinguishes it from graceful degradation (which optimizes availability): degrading must stay harm-safe — degrade to a safe fallback (queue/hold for async review, stricter default) rather than bypassing the check (ISO/IEC 25010:2023 safety)",
+        "Surfaces it and routes the acceptable-risk threshold to a human owner (detect-and-route) rather than deciding it, and does not fold it into attacker-facing #14 security"
+      ]
     }
   ]
 }

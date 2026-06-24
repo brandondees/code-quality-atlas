@@ -33,6 +33,22 @@
         "Asks what actually produces the failure (5-whys) and pushes the fix to the root level \u2014 handle the no-orders/zero-state case in build_report rather than catching-and-returning {}",
         "Notes the swallow also hides unrelated future failures (blanket except), so even the symptom patch is unsafe"
       ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef can_access(user, doc):\n    try:\n        return authz.check(user, doc)        # returns True/False\n    except AuthzServiceError:\n        return True   # authz service down \u2014 let them through so the page still works\n```",
+      "expected_behavior": [
+        "Flags the fail-open default: when the authorization check cannot be evaluated (service error/timeout) the code defaults to allow, so an outage silently grants access",
+        "Frames it as fail-toward-harm vs fail-toward-safe (ISO/IEC 25010:2023 safety): a permission/auth check must fail CLOSED \u2014 deny on error \u2014 not default-allow; recommends returning False (and surfacing the error)",
+        "Treats the acceptable-risk call as a detect-and-route to a human owner rather than adjudicating it, and does not conflate it with attacker-facing #14 security"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef can_access(user, doc):\n    try:\n        return authz.check(user, doc)\n    except AuthzServiceError as e:\n        log.error('authz unavailable', user=user.id, doc=doc.id, err=str(e))\n        return False   # deny on failure\n```",
+      "expected_behavior": [
+        "Reports no finding",
+        "Recognizes the check fails CLOSED (denies when it cannot be evaluated) and surfaces the error with context \u2014 the safe, fail-loud direction",
+        "Does not invent a fail-open or swallowed-error issue on code that already denies and logs"
+      ]
     }
   ]
 }
