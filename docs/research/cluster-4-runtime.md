@@ -177,7 +177,7 @@
 - **System-prompt secrecy (don't over-rely):** System prompts and "hidden" instructions can leak (LLM07) — don't put secrets, credentials, or the only security control inside the prompt. Treat the prompt as visible.
 - **Supply chain (LLM03/LLM04):** Are third-party models, fine-tunes, embeddings, and prompt/tool plugins from trusted, pinned sources? Untrusted models/datasets can be poisoned.
 
-*(The action/tool-surface heuristics — tool least-privilege, approval gates & autonomy bounds, tool-metadata-as-untrusted-input, agent identity & tokens, sandboxed execution, inter-agent auth, memory hygiene, audit trail, and the trifecta's exfil/action-leg mitigations — moved to **#32 Agentic & tool-use safety** (D14). #25 keeps the model-call concerns above.)*
+*(The action/tool-surface heuristics — tool least-privilege, approval gates & autonomy bounds, tool-metadata-as-untrusted-input, agent identity & tokens, sandboxed execution, inter-agent auth, memory hygiene, audit trail — moved to **#32 Agentic & tool-use safety** (D14), which also adds an explicit exfil/action-leg mitigation split out of the lethal-trifecta check above. #25 keeps the model-call concerns above.)*
 
 ---
 
