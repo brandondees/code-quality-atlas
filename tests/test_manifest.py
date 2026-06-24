@@ -229,6 +229,61 @@ def test_duplicate_built_from_category_rejected(tmp_path):
         validate(Manifest(taxonomy_version="v0", skills=[a]), docs_root="/")
 
 
+from tooling.manifest import Artifact
+
+
+def _artifact_skill(tmp_path, **kw):
+    doc = tmp_path / "rubrics.md"
+    doc.write_text("## #101 SKILL.md\n\n"
+                   "### Reviewable heuristics (skill-checklist seeds)\n- x\n")
+    base = dict(name="reviewing-artifact-conventions", description="d",
+                shape="artifact", wave=5,
+                built_from=[Source(101, f"{doc}#101")],
+                artifacts=[Artifact(name="SKILL.md", detect="a SKILL.md changes",
+                                    rubric=101, slug="skill-md")])
+    base.update(kw)
+    return Skill(**base)
+
+
+def test_validate_accepts_artifact_shape(tmp_path):
+    validate(Manifest("v0", [_artifact_skill(tmp_path)]), docs_root="/")  # no raise
+
+
+def test_artifact_shape_requires_artifacts_table(tmp_path):
+    with pytest.raises(ValidationError, match="non-empty `artifacts`"):
+        validate(Manifest("v0", [_artifact_skill(tmp_path, artifacts=[])]),
+                 docs_root="/")
+
+
+def test_artifact_rubric_must_be_in_built_from(tmp_path):
+    bad = _artifact_skill(tmp_path,
+                          artifacts=[Artifact(name="X", detect="y", rubric=999,
+                                              slug="x")])
+    with pytest.raises(ValidationError, match="rubric #999 is not in built_from"):
+        validate(Manifest("v0", [bad]), docs_root="/")
+
+
+def test_artifacts_only_on_artifact_shape(tmp_path):
+    bad = _artifact_skill(tmp_path, shape="diff")
+    with pytest.raises(ValidationError, match="only valid on an artifact-shaped"):
+        validate(Manifest("v0", [bad]), docs_root="/")
+
+
+def test_artifact_slug_must_be_lowercase_hyphen(tmp_path):
+    bad = _artifact_skill(tmp_path,
+                          artifacts=[Artifact(name="X", detect="y", rubric=101,
+                                              slug="INVALID_slug")])
+    with pytest.raises(ValidationError, match="lowercase"):
+        validate(Manifest("v0", [bad]), docs_root="/")
+
+
+def test_artifact_duplicate_slug_rejected(tmp_path):
+    a = Artifact(name="X", detect="y", rubric=101, slug="skill-md")
+    bad = _artifact_skill(tmp_path, artifacts=[a, a])
+    with pytest.raises(ValidationError, match="duplicate"):
+        validate(Manifest("v0", [bad]), docs_root="/")
+
+
 from tooling.manifest import Route, Router
 
 def test_design_flag_only_on_diff_lenses():

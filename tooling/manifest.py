@@ -38,6 +38,18 @@ class Source:
 
 
 @dataclass
+class Artifact:
+    """One row of an artifact-shaped lens's detect→rubric table (D15). `rubric`
+    is the research section the artifact is reviewed against and must also appear
+    in the lens's `built_from` (so the existing drift checker tracks it); `slug`
+    names the bundled rubric file `reference/<slug>.md`."""
+    name: str        # human label, e.g. "SKILL.md / agent skill"
+    detect: str      # the presence signal, e.g. "a SKILL.md file is added or changed"
+    rubric: int      # the rubric research section (also in built_from)
+    slug: str        # filename stem for the bundled rubric, e.g. "skill-md"
+
+
+@dataclass
 class Skill:
     name: str
     description: str
@@ -48,6 +60,7 @@ class Skill:
     cross_ref: list[int] = field(default_factory=list)
     design: bool = False     # diff lens that also applies to design docs/plans
     picker: str = ""         # one-line differentiator for the router catalog
+    artifacts: list[Artifact] = field(default_factory=list)  # shape: artifact only
 
 
 @dataclass
@@ -109,11 +122,35 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
         seen.add(s.name)
         if not s.description or len(s.description) > 1024:
             raise ValidationError(f"{s.name}: description must be non-empty and <=1024 chars")
-        if s.shape not in ("diff", "repo", "decision"):
-            raise ValidationError(f"{s.name}: shape must be diff|repo|decision, got {s.shape!r}")
+        if s.shape not in ("diff", "repo", "decision", "artifact"):
+            raise ValidationError(
+                f"{s.name}: shape must be diff|repo|decision|artifact, got {s.shape!r}")
         if s.design and s.shape != "diff":
             raise ValidationError(
                 f"{s.name}: design applies only to diff-shaped lenses")
+        if s.shape == "artifact":
+            if not s.artifacts:
+                raise ValidationError(
+                    f"{s.name}: an artifact-shaped lens needs a non-empty `artifacts` table")
+            built_cats = {src.category for src in s.built_from}
+            seen_slugs: set[str] = set()
+            for a in s.artifacts:
+                if not a.name or not a.detect:
+                    raise ValidationError(
+                        f"{s.name}: each artifact needs `name` and `detect`")
+                if not _NAME_RE.match(a.slug):
+                    raise ValidationError(
+                        f"{s.name}: artifact slug must be lowercase/hyphen, got {a.slug!r}")
+                if a.slug in seen_slugs:
+                    raise ValidationError(
+                        f"{s.name}: duplicate artifact slug {a.slug!r}")
+                seen_slugs.add(a.slug)
+                if a.rubric not in built_cats:
+                    raise ValidationError(
+                        f"{s.name}: artifact {a.name!r} rubric #{a.rubric} is not in built_from")
+        elif s.artifacts:
+            raise ValidationError(
+                f"{s.name}: `artifacts` is only valid on an artifact-shaped lens")
         if len(s.picker) > 160:
             raise ValidationError(f"{s.name}: picker must be <=160 chars")
         if not s.built_from:
@@ -259,6 +296,9 @@ def load_manifest(path: str) -> Manifest:
     for i, s in enumerate(data["skills"]):
         try:
             built = [Source(category=b["category"], source=b["source"]) for b in s["built_from"]]
+            artifacts = [Artifact(name=a["name"], detect=a["detect"],
+                                  rubric=a["rubric"], slug=a["slug"])
+                         for a in s.get("artifacts", [])]
             skills.append(Skill(
                 name=s["name"],
                 description=s["description"].strip(),
@@ -269,6 +309,7 @@ def load_manifest(path: str) -> Manifest:
                 cross_ref=s.get("cross_ref", []),
                 design=s.get("design", False),
                 picker=s.get("picker", "").strip(),
+                artifacts=artifacts,
             ))
         except KeyError as e:
             raise ValidationError(f"skill #{i}: missing field {e}") from e

@@ -1,0 +1,39 @@
+{
+  "skills": [
+    "reviewing-artifact-conventions"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this changed SKILL.md frontmatter.\n```yaml\n---\nname: helper\ndescription: I help with reviewing things.\n---\n```",
+      "expected_behavior": [
+        "Detects the artifact is a SKILL.md and reviews it against the skill-authoring rubric, not as source code",
+        "Flags the description as a non-trigger: first-person, vague, and naming no concrete situations/keywords or skip clause — so the model cannot tell when to activate the skill; recommends a specific third-person description with triggers",
+        "Flags that `name: helper` is not a gerund, lowercase-hyphen name the standard expects"
+      ]
+    },
+    {
+      "query": "Review this SKILL.md (the body is ~700 lines: it inlines the full checklist, every tool rule, and all references inline; the skill has no reference/ files at all).",
+      "expected_behavior": [
+        "Flags a progressive-disclosure violation: the body far exceeds the ~500-line lean-entry-point target and inlines detail that belongs in bundled, one-level-deep reference files loaded on demand",
+        "Explains the cost: an inlined mega-body taxes every session's context, not just the reviewing one",
+        "Recommends moving the heuristics/tool-rules/references into reference/*.md and keeping the body to when-to-use plus a short checklist"
+      ]
+    },
+    {
+      "query": "Review this SKILL.md: gerund `name`, a specific third-person `description` (~300 chars) with explicit triggers and a 'skip when' clause, a ~90-line body, bundled reference/heuristics.md and examples.md, three eval scenarios, and no time-sensitive wording.",
+      "expected_behavior": [
+        "Outputs exactly: \"No findings\"",
+        "Recognizes the artifact already meets the authoring standard on every rubric line (frontmatter, progressive disclosure, triggers, examples, evals)",
+        "Does not invent a deviation on a well-formed artifact"
+      ]
+    },
+    {
+      "query": "Review this change: a diff that only modifies src/payments.ts — there is no SKILL.md or other authored artifact anywhere in the change.",
+      "expected_behavior": [
+        "Outputs exactly: \"No findings\"",
+        "Recognizes this is presence-activated and none of its artifacts are present, so there is nothing for it to review",
+        "Does not review the .ts source against an artifact rubric — ordinary source code is the other lenses' job"
+      ]
+    }
+  ]
+}

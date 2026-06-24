@@ -5,7 +5,7 @@ import json
 import warnings
 import yaml
 from pathlib import Path
-from tooling.manifest import Manifest, Skill, Source
+from tooling.manifest import Artifact, Manifest, Skill, Source
 from tooling.sections import (extract_bullets, extract_section,
                               extract_subsection, section_hash,
                               is_priority, strip_priority)
@@ -115,6 +115,12 @@ def _scope_line(skill: Skill) -> str:
                 "of implementation code. Apply the checks to the decision and its "
                 "record (rationale, assumptions, alternatives, exit/rollback), not "
                 "to lines of code.")
+    if skill.shape == "artifact":
+        return ("**Shape: artifact.** Presence-activated: run only when one of the "
+                "artifacts in the table below is present in the change or repo. "
+                "Detect the artifact, open its rubric, and review the artifact "
+                "against that published standard — not the surrounding application "
+                "code. Skip entirely when none of the listed artifacts are present.")
     if skill.design:
         return ("**Shape: diff — design-capable.** Also works on design docs and "
                 "plans: apply the same checks to the proposed states, data flows, "
@@ -156,7 +162,6 @@ def build_skill_md(skill: Skill, taxonomy_version: str, docs_root: str = ".",
     }
     fm = yaml.safe_dump(front, sort_keys=False, default_flow_style=False,
                         allow_unicode=True).strip()
-    checks = "\n".join(f"- {c}" for c in top_checks(skill, docs_root))
     # A one-line scannable summary (the same `picker` the router catalog uses),
     # surfaced at the top of each lens so the lens is recognizable at a glance
     # without reading the full trigger-rich description below it.
@@ -180,6 +185,53 @@ def build_skill_md(skill: Skill, taxonomy_version: str, docs_root: str = ".",
         "touches — a repo-wide hunt is the audits' job, not this review — and "
         "never let it expand the PR's scope.\n\n"
     ) if skill.shape == "diff" else ""
+    # The "checks" surface differs by shape: a diff/repo/decision lens inlines the
+    # head of its checklist; an artifact lens instead lists its detect→rubric table,
+    # because its checks live in per-artifact bundled rubrics loaded on a presence hit
+    # (D15 — pay only when the artifact is present).
+    if skill.shape == "artifact":
+        rows = "\n".join(
+            f"| {a.name} | {a.detect} | [reference/{a.slug}.md](reference/{a.slug}.md) |"
+            for a in skill.artifacts)
+        core_block = (
+            "## Artifacts\n\n"
+            "Detect which artifact the change adds or touches, then open its rubric "
+            "and review the artifact against that published standard:\n\n"
+            "| Artifact | Activate when | Rubric to apply |\n"
+            "|---|---|---|\n"
+            f"{rows}\n\n")
+        going_deeper = (
+            "## Going deeper\n\n"
+            + "".join(
+                f"- [reference/{a.slug}.md](reference/{a.slug}.md) — the rubric for "
+                f"{a.name}; open it on a presence hit and review against it.\n"
+                for a in skill.artifacts)
+            + "- [examples.md](examples.md) — concrete good/bad findings, and the "
+            "output format to match.\n"
+            "- [reference/tool-rules.md](reference/tool-rules.md) — the tools that "
+            "mechanize part of each rubric; for wiring up checks, not needed for the "
+            "judgment review itself.\n"
+            "- [reference/sources.md](reference/sources.md) — the published standards "
+            "behind each rubric; for provenance, not needed during a review.\n")
+    else:
+        checks = "\n".join(f"- {c}" for c in top_checks(skill, docs_root))
+        core_block = (
+            "## Top checks\n\n"
+            "The head of the full checklist — enough for a first pass without opening "
+            "any reference file:\n\n"
+            f"{checks}\n"
+            f"{_cross_ref_note(skill, owners)}\n")
+        going_deeper = (
+            "## Going deeper\n\n"
+            "- [reference/heuristics.md](reference/heuristics.md) — the full checklist; "
+            "open it when the change sits squarely in this lens's domain.\n"
+            "- [examples.md](examples.md) — concrete good/bad findings, and the output "
+            "format to match.\n"
+            "- [reference/tool-rules.md](reference/tool-rules.md) — static-analysis rules "
+            "covering the mechanical subset; for wiring up linters, not needed for the "
+            "judgment review itself.\n"
+            "- [reference/sources.md](reference/sources.md) — the research behind each "
+            "check; for provenance, not needed during a review.\n")
     body = (
         f"# {skill.name}\n\n"
         f"{tagline}"
@@ -202,11 +254,7 @@ def build_skill_md(skill: Skill, taxonomy_version: str, docs_root: str = ".",
         "A→B then B→A, never re-order to an equivalent state). Defects keep "
         "the strict bar above regardless of this setting.\n\n"
         f"{attribution_guard}"
-        "## Top checks\n\n"
-        "The head of the full checklist — enough for a first pass without opening "
-        "any reference file:\n\n"
-        f"{checks}\n"
-        f"{_cross_ref_note(skill, owners)}\n"
+        f"{core_block}"
         "## Mechanizing these checks\n\n"
         "Where a finding here is one a tool can catch deterministically, surface "
         "that as an advisory `route: implementer` note next to the finding: the "
@@ -215,18 +263,33 @@ def build_skill_md(skill: Skill, taxonomy_version: str, docs_root: str = ".",
         "forward. This is a suggestion to mechanize, not a defect — it never "
         "blocks a verdict, and it falls away on a repo that already runs the "
         "tool.\n\n"
-        "## Going deeper\n\n"
-        "- [reference/heuristics.md](reference/heuristics.md) — the full checklist; "
-        "open it when the change sits squarely in this lens's domain.\n"
-        "- [examples.md](examples.md) — concrete good/bad findings, and the output "
-        "format to match.\n"
-        "- [reference/tool-rules.md](reference/tool-rules.md) — static-analysis rules "
-        "covering the mechanical subset; for wiring up linters, not needed for the "
-        "judgment review itself.\n"
-        "- [reference/sources.md](reference/sources.md) — the research behind each "
-        "check; for provenance, not needed during a review.\n"
+        f"{going_deeper}"
     )
     return f"---\n{fm}\n---\n\n{body}"
+
+
+def build_artifact_rubric(skill: Skill, artifact: Artifact, docs_root: str = ".") -> str:
+    """The bundled rubric file for one artifact of an artifact-shaped lens: the
+    heuristics, references, and tooling of that artifact's rubric section, loaded
+    on a presence hit. Subsection headings are promoted ### → ## so the file's
+    heading levels increment by one (H1 title → H2 sections)."""
+    src = next(s for s in skill.built_from if s.section == artifact.rubric)
+    section = extract_section(
+        Path(docs_root, src.path).read_text(encoding="utf-8"), src.section)
+
+    def block(kind: str) -> str:
+        body = strip_priority(extract_subsection(section, kind).strip())
+        return ("## " + body[4:]) if body.startswith("### ") else body
+
+    parts = [
+        f"# Rubric — {artifact.name}",
+        f"Review a **{artifact.name}** against its published standard. Activate "
+        f"when {artifact.detect}. Report only real deviations from the standard; "
+        "if the artifact is well-formed, reply \"No findings\".",
+    ]
+    parts += [b for b in (block("heuristics"), block("references"),
+                          block("tooling")) if b]
+    return "\n\n".join(parts) + "\n"
 
 
 def generate_skill(skill: Skill, taxonomy_version: str,
@@ -237,8 +300,16 @@ def generate_skill(skill: Skill, taxonomy_version: str,
     (out / "evals").mkdir(parents=True, exist_ok=True)
     (out / "SKILL.md").write_text(
         build_skill_md(skill, taxonomy_version, docs_root, owners), encoding="utf-8")
-    (out / "reference" / "heuristics.md").write_text(
-        build_reference(skill, "heuristics", docs_root), encoding="utf-8")
+    # An artifact lens replaces the single concatenated heuristics.md with one
+    # bundled rubric file per artifact (loaded on a presence hit); the combined
+    # tool-rules.md / sources.md still back the Mechanizing and Going-deeper links.
+    if skill.shape == "artifact":
+        for a in skill.artifacts:
+            (out / "reference" / f"{a.slug}.md").write_text(
+                build_artifact_rubric(skill, a, docs_root), encoding="utf-8")
+    else:
+        (out / "reference" / "heuristics.md").write_text(
+            build_reference(skill, "heuristics", docs_root), encoding="utf-8")
     (out / "reference" / "tool-rules.md").write_text(
         build_reference(skill, "tooling", docs_root), encoding="utf-8")
     (out / "reference" / "sources.md").write_text(
@@ -337,7 +408,10 @@ def build_router_md(manifest: Manifest) -> str:
         f"{catalog('repo')}\n\n"
         "**Decision-shaped — run on a decision or plan (ADR, RFC, adoption, "
         "deprecation, capacity/DR design), not a diff:**\n\n"
-        f"{catalog('decision')}\n"
+        f"{catalog('decision')}\n\n"
+        "**Artifact-shaped — run when a standardized non-source artifact is "
+        "present; detect the artifact, then load and apply its rubric:**\n\n"
+        f"{catalog('artifact')}\n"
     )
     return f"---\n{fm}\n---\n\n{body}"
 

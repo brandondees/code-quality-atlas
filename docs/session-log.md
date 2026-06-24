@@ -1503,3 +1503,52 @@ bump — #32 already lives in v0.7's taxonomy.
 `shape: artifact` lens (D15) is now the oldest decided-but-unbuilt item. **Cross-model
 re-gate still owed** — now also covers this lens; batch on the Ollama substrate (qwen2.5:7b
 floor + 3B canary), not this environment.
+
+### 2026-06-24 (cont.) — build: the `shape: artifact` family (D15 / Q18 / map-gaps G11)
+
+**Goal (after merging #70 / #32):** ship the second decided-but-unbuilt backlog item — the
+**artifact review shape**. Not just a lens: a new *shape* (sibling to diff / repo / decision)
+that hosts an open-ended set of artifact-scoped rubrics at one always-on description's cost,
+the pattern the owner asked to strengthen.
+
+**Design that made it fit the existing machinery:** an artifact lens is a normal skill with
+`shape: artifact` whose `built_from` points at **rubric sections numbered ≥101** in a new
+`docs/research/artifact-rubrics.md`. Numbering above the 1–37 taxonomy range keeps the rubrics
+out of the manifest's G1 single-owner bookkeeping while still flowing through the **same
+`built_from` → `section_hash` → drift** path — so rubric drift is tracked for free, no
+`drift.py` change. A manifest `artifacts:` table (`name` / `detect` / `slug` / `rubric`) maps
+each artifact to its detector and its rubric section.
+
+**What shipped:**
+
+- **Tooling** — `manifest.py`: an `Artifact` dataclass + `artifacts` field on `Skill`,
+  `artifact` added to the shape enum, and validation (artifact shape needs a non-empty
+  `artifacts` table; every artifact's `rubric` must be in `built_from`; slugs lowercase-hyphen
+  and unique; `artifacts` rejected on non-artifact shapes). `generate.py`: an artifact branch
+  in `_scope_line` and `build_skill_md` (a detect→rubric **Artifacts table** replaces the
+  inlined Top checks; no diff-only Boy-Scout guard), a `build_artifact_rubric` that emits one
+  bundled `reference/<slug>.md` per artifact (heading levels promoted ### → ## so the file
+  increments cleanly), and an **artifact catalog block** in the router.
+- **Research** — `docs/research/artifact-rubrics.md` **#101 SKILL.md / agent-skill authoring**,
+  mined from Anthropic's skill-authoring best practices (the standard our own
+  generator/validator already enforces): nine heuristics — frontmatter-within-limits and
+  progressive-disclosure ★-marked — plus references and a tooling list.
+- **Lens `reviewing-artifact-conventions`** (`shape: artifact`, wave 5) — presence-activated:
+  detect a supported artifact, open its rubric, review against it; first artifact is `SKILL.md`.
+  Distinct from #22 doc-drift and #32 runtime agent-safety (authoring quality). A dedicated
+  router route + the new artifact catalog section.
+- **4 evals + examples.md** — a weak first-person/no-trigger frontmatter, a no-progressive-
+  disclosure mega-body, a well-formed control → "No findings", and a no-artifact-present diff →
+  "No findings" (exercises presence-activation).
+- **7 new tests** (110 pass total): artifact-shape validation (4) and generation/router (3).
+
+**Verification:** `pytest tests/` **110 pass**; `cli drift` clean; `cli eval` OK (new lens 4
+scenarios); markdownlint 0 errors. Counts reconciled (README/install/plugin/marketplace:
+32→33 lenses, 34→35 total). No `taxonomy_version` bump — a shape is a capability, not a
+taxonomy category; #30 already documents the artifact-authoring factor.
+
+**Resolves:** D15 / Q18 / map-gaps G11 → shipped. The shape generalizes: each further artifact
+(Dockerfile → hadolint, OpenAPI → Spectral, Terraform → tflint, …) is a research section + an
+`artifacts:` row, **no new always-on description**. **Cross-model re-gate still owed** — now
+also covers this lens (new behavior); batch on the Ollama substrate (qwen2.5:7b floor + 3B
+canary), not this environment.
