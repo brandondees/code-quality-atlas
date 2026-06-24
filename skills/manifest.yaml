@@ -90,6 +90,31 @@ skills:
       - { category: 25, source: docs/research/cluster-4-runtime.md#25 }
       - { category: 27, source: docs/research/cluster-6-evolution.md#27 }
 
+  - name: reviewing-agentic-safety
+    description: >
+      Reviews the action/tool surface of agent and tool-using systems — what the
+      model is permitted to *do*, distinct from reviewing-llm-integration's review
+      of the *model call*: tool least-privilege, approval gates and step/spend
+      budgets on autonomous loops, tool metadata and MCP server descriptions as
+      untrusted input (tool poisoning), confused-deputy and token-audience
+      discipline (no token passthrough), inter-agent authentication,
+      sandboxed code execution (no ambient credentials, egress allow-list),
+      agent-memory hygiene, action audit trails, and the action-leg mitigations of
+      the lethal trifecta. Grounded in OWASP's Top 10 for Agentic Applications
+      (ASI01–ASI10) and the MCP security spec. Use when reviewing tool or function
+      definitions exposed to a model, an MCP server or client, an autonomous or
+      multi-agent loop, agent memory, or code that lets a model take actions. Skip
+      when the change has no tools, agents, MCP, or autonomous loop — an ordinary
+      model call with no action surface is reviewing-llm-integration's job.
+    picker: >
+      Is the agent's action surface safe? Tool least-privilege, approval gates &
+      step budgets, untrusted tool metadata, sandboxed exec, egress control.
+    shape: diff
+    design: true
+    wave: 5
+    built_from:
+      - { category: 32, source: docs/research/cluster-4-runtime.md#32 }
+
   - name: reviewing-ai-authored-code
     description: >
       Reviews a change for the failure signature of AI-/machine-authored code,
@@ -684,8 +709,16 @@ router:
     - when: Performance-motivated change ("this makes it faster")
       run: [reviewing-performance-and-efficiency, checking-restraint,
             tracing-correctness-and-invariants]
-    - when: LLM / agent / model-API integration
+    - when: LLM / model-API integration (a model call, prompt construction, or
+            model-output handling — no tools or autonomous loop)
       run: [reviewing-llm-integration, sweeping-for-security, checking-restraint]
+    - when: Agent / tool-use change — a tool or function definition exposed to a
+            model, an MCP server or client, an autonomous or multi-agent loop,
+            agent memory, or any code that lets a model take actions
+      run: [reviewing-agentic-safety, reviewing-llm-integration,
+            sweeping-for-security]
+      note: "the action/tool surface (what the model may *do*) — #32 owns it; the
+            model call itself is #25, the authz verdict #14"
     - when: AI-generated or AI-assisted change, a large or unfamiliar diff, or any
             change that adds dependencies or confident-looking constants/APIs
       run: [reviewing-ai-authored-code, tracing-correctness-and-invariants,

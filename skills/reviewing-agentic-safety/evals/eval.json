@@ -1,0 +1,39 @@
+{
+  "skills": [
+    "reviewing-agentic-safety"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this change (a tool exposed to an LLM agent).\n```python\n# tools.py\n@tool\ndef run_sql(query: str) -> list:\n    \"\"\"Run any SQL the model asks for.\"\"\"\n    return db.execute(query)   # full read/write, arbitrary statements\n```",
+      "expected_behavior": [
+        "Flags a tool least-privilege violation (ASI02/ASI03, LLM06 Excessive Agency): the agent is handed an arbitrary read/write execute_sql-class capability where a narrow lookup would do — excessive functionality/permissions on the tool surface is the finding before any exploit",
+        "Recommends a narrow, single-purpose, parameterized tool (e.g. lookup_order(order_id), read-only role, statement allow-list) instead of arbitrary SQL",
+        "Frames it as the action/tool surface (#32), distinct from the model call itself (#25)"
+      ]
+    },
+    {
+      "query": "Review this change (an autonomous agent loop).\n```python\nwhile not done:                      # no iteration cap\n    step = agent.next()\n    if step.tool == \"send_refund\":\n        issue_refund(step.amount)    # irreversible, no approval\n```",
+      "expected_behavior": [
+        "Flags the missing autonomy bound (ASI01/ASI08, LLM10): the loop has no step budget, recursion limit, spend cap, or wall-clock timeout, so a hijacked or confused agent can run away",
+        "Flags the missing approval gate on a state-changing, irreversible action (issue_refund) — it fires with no human approval, policy check, or allow-list",
+        "Recommends bounding the loop and gating the money-moving action behind human approval or a thresholded allow-list"
+      ]
+    },
+    {
+      "query": "Review this change (an MCP server proxying to an upstream API).\n```python\n# mcp_server.py\ndef handle(req):\n    upstream.get(\"/data\", headers={\"Authorization\": req.headers[\"Authorization\"]})\n    #                                  forwards the inbound token unchanged\n```",
+      "expected_behavior": [
+        "Flags token passthrough / confused deputy (ASI03): the server forwards the inbound Authorization token to an upstream service without validating its audience — explicitly prohibited by the MCP security spec",
+        "Explains the risk: a token issued for this server is replayed against another service, so the server spends its trust on a lower-trust caller's behalf",
+        "Detect-and-route: recommends audience validation / token exchange or acting under the server's own scoped identity, and routes the authz security verdict to sweeping-for-security (#14) while owning the agentic token-discipline defect here"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\n@tool\ndef lookup_order(order_id: str) -> dict:   # narrow, read-only, single purpose\n    return orders.get_readonly(order_id)\n\nresult = agent.run(task, max_steps=8, on_action=require_approval)  # bounded + gated\n```",
+      "expected_behavior": [
+        "Outputs exactly: \"No findings\"",
+        "Recognizes the tool is least-privilege (read-only, single-purpose), the loop is bounded (max_steps), and actions are gated (require_approval)",
+        "Does not invent an agentic-safety defect on an action surface that is already narrow, bounded, and gated"
+      ]
+    }
+  ]
+}
