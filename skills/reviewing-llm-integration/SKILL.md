@@ -11,7 +11,7 @@ provenance:
   built_from:
   - category: 25
     source: docs/research/cluster-4-runtime.md#25
-    hash: e60c6f74226c78b2f9f79123b2c5f59f18c42f7cf591b52a9f3e37dcebbf7e50
+    hash: 7276f33bef295124d72c5f4158ab4e8117f0dae84f6219bdcb02a572ec6817bd
   - category: 27
     source: docs/research/cluster-6-evolution.md#27
     hash: ba00467edc777fed0fce3439c40c1d7cede1c341eafc278465121b57c67c3ccc
