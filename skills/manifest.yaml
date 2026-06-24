@@ -1,4 +1,4 @@
-taxonomy_version: v0.6
+taxonomy_version: v0.7
 skills:
   - name: hunting-silent-failures
     description: >
@@ -578,6 +578,30 @@ skills:
     built_from:
       - { category: 33, source: docs/research/cluster-6-evolution.md#33 }
 
+  - name: reviewing-interoperability
+    description: >
+      Reviews a change for interoperability — whether the code correctly speaks
+      the external standards and protocols it claims to (ISO/IEC 25010:2023).
+      Consolidates conformance checks scattered across other
+      lenses: HTTP semantics (safe/idempotent methods, status codes, conditional
+      requests, caching); OAuth 2.0 / OIDC flow correctness (exact redirect_uri,
+      state/nonce, PKCE); Semantic Versioning and wire/format back-compat; RFC
+      formats (date, URI, email, JSON, CSV); Unicode normalization and encoding
+      (NFC, UTF-8, the YAML "Norway" class); cron dialects (POSIX vs. Quartz);
+      OpenTelemetry semantic conventions; and co-existence (ports, global state,
+      shared paths). Use when a change parses or emits a standard format, calls or
+      implements an external protocol or auth flow, versions a published surface,
+      or serializes data another system reads. Owns conformance to an external
+      standard; defers the contract we author to #13, internal correctness to #4,
+      idiom to #8, config to #26. Skip changes with no boundary-crossing standard.
+    picker: >
+      Does the code correctly speak external standards? HTTP/OAuth semantics,
+      SemVer, RFC date/URI/email formats, Unicode, cron dialects, OTel semconv.
+    shape: diff
+    wave: 5
+    built_from:
+      - { category: 37, source: docs/research/cluster-4-runtime.md#37 }
+
 # The composition layer (Q7): maps "what am I reviewing" to the lenses worth
 # running, so neither a human nor an agent has to know the whole catalog to
 # select well. Generated into skills/<name>/SKILL.md from this section alone.
@@ -702,6 +726,17 @@ router:
             auditing-documentation-health]
       note: the adopter-facing experience — setup friction, config UX, and a
             version-bump a consumer or an agent can complete and verify
+    - when: Change that parses or emits a standard format or speaks an external
+            protocol — an HTTP/REST client or handler, an OAuth/OIDC or other
+            auth flow, date / URL / email / CSV / JSON serialization, a version
+            bump on a published surface, a cron expression, or telemetry
+            attributes
+      run: [reviewing-interoperability, reviewing-api-contract-safety,
+            tracing-correctness-and-invariants]
+      note: "does the code correctly speak the external standard — HTTP/OAuth
+            semantics, RFC formats, SemVer, Unicode, cron dialect, OTel semconv;
+            #13 owns the contract we author, #4 internal correctness, #14 the
+            auth-flow security verdict"
     - when: Infrastructure-as-code change (Terraform/OpenTofu, Kubernetes/Helm,
             CloudFormation manifests)
       run: [auditing-infrastructure-as-code, sweeping-for-security]

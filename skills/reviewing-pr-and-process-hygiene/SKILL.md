@@ -7,7 +7,7 @@ description: 'Reviews the PR itself rather than just the code: size and single p
   Use when reviewing a pull request''s structure, commits, description, changelog,
   or readiness to merge.'
 provenance:
-  taxonomy_version: v0.6
+  taxonomy_version: v0.7
   built_from:
   - category: 24
     source: docs/research/cluster-6-evolution.md#24

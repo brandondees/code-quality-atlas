@@ -1401,3 +1401,58 @@ are valid `SessionStart` matcher source values.
 **Verification:** `pytest tests/` 101 pass (+1: the routing-snippet sync test);
 `cli drift` clean (regeneration touched only the router); `cli eval` OK; markdownlint
 0 errors.
+
+### 2026-06-24 (cont.) — Wave C: G18 interoperability arm (taxonomy v0.7, new lens #37)
+
+Fourth **Wave C** new lens, first **v0.7** promotion, and the **last clearly-scoped
+Wave C item with a built dependency**. Resolves the **interoperability arm** of gap
+G18 — the first of the two ISO/IEC 25010:2023 characteristics the external-completeness
+sweep found unowned. (The **safety arm** is deliberately deferred to a follow-up: it is
+add-factor work against #2/#28 + a detect-and-escalate boundary, a different shape from
+this consolidated lens. Scope confirmed with the owner this session.)
+
+**The gap:** #13 reviews the contract **we** design and publish; #8 reviews **internal**
+idiom; #4 owns **internal** time/encoding/number correctness — but none asks whether a
+value crossing the boundary actually conforms to the **external** standard a third party
+parses. "We emit a date no downstream RFC-3339 parser accepts," "our OAuth callback never
+validates `state`," "this Quartz cron string silently no-ops on POSIX cron" had no owner;
+the checks existed only as scattered factor-notes across #4/#8/#13/#26. This is a
+**consolidation**, not a net-new topic — exactly the disposition the round-3 hunt logged.
+
+**What shipped:**
+
+- **Research §#37** in [`cluster-4-runtime.md`](research/cluster-4-runtime.md) (the
+  cross-cutting-runtime cluster, alongside the other ISO-derived promotions #34/#36),
+  grounded in cited prior art: ISO/IEC 25010:2023 (the external model that found the gap),
+  RFC 9110/9111 (HTTP semantics & caching), RFC 9700 + OIDC Core (OAuth/OIDC BCP),
+  SemVer 2.0.0, Unicode UAX #15 / UTS #39, and the RFC format spines (3339 date, 3986 URI,
+  5321/5322 email, 8259 JSON, 4180 CSV). 8 heuristics, 2 priority-marked (G9): **standard
+  protocol semantics** (HTTP/OAuth/OIDC) and **RFC/format conformance at the boundary**.
+- **Taxonomy v0.7** — new category **#37 Interoperability & external-standard conformance**
+  in Cluster IV; version header, count (36→37), changes note updated.
+- **Lens `reviewing-interoperability`** (shape: diff, wave 5) — a **single-category lens**
+  (built_from #37, no cross_ref): the boundary-conformance vantage is genuinely new, so the
+  checks live in #37 rather than being shared. **G1 single-owner:** owns conformance to an
+  *external/published* standard and cross-links the neighbours whose factor-notes it
+  consolidates — #4 (internal correctness), #8 (idiom), #13 (the contract we author), #26
+  (config validity) — deferring each verdict; the auth-flow security verdict routes to #14.
+- **Router** — a dedicated route ("a change that parses or emits a standard format or
+  speaks an external protocol — HTTP/REST, OAuth/OIDC, date/URL/email/CSV/JSON
+  serialization, a version bump on a published surface, a cron expression, or telemetry
+  attributes" → `reviewing-interoperability` + api-contract-safety + correctness);
+  auto-listed in the diff catalog.
+- **4 evals** — a non-RFC-3339 timestamp emitted to a partner webhook, an OAuth callback
+  that never validates `state` (detect-and-route to #14), a clean control (an
+  idempotency-key plus an RFC-3339 offset → "No findings"), and a Quartz 6-field cron
+  string handed to 5-field POSIX cron; `examples.md` populated.
+
+**Verification:** `pytest tests/` 102 pass (+1: `test_interoperability_lens_owns_37_consolidating_conformance`
+— owns #37, neighbours #4/#13 undisturbed, both ★ checks surface, no shared-category note);
+`cli drift` clean; `cli eval` OK (new lens 4 scenarios); markdownlint 0 errors. Counts
+reconciled (README/install/plugin: 30→31 lenses, 32→33 total).
+
+**Resolves:** G18 interoperability arm → shipped. **Remaining Wave C:** G30 threat-modeling
+(decision-shape, needs Q15); **G18 safety arm** (add-factor #2/#28 + detect-and-escalate);
+plus the noted G20 repo arm and G16 design-time arm follow-ups. **Cross-model re-gate still
+owed** — now also covers this lens; batch on the Ollama substrate (qwen2.5:7b floor + 3B
+canary), not this environment.

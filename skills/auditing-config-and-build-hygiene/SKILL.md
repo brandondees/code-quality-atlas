@@ -7,7 +7,7 @@ description: 'Audits configuration and build/CI health: config schema-validated 
   audit. Use when auditing CI pipelines, Dockerfiles, build scripts, env vars, or
   config files.'
 provenance:
-  taxonomy_version: v0.6
+  taxonomy_version: v0.7
   built_from:
   - category: 19
     source: docs/research/cluster-5-verification.md#19

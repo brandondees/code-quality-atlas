@@ -1,0 +1,39 @@
+{
+  "skills": [
+    "reviewing-interoperability"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this change (a webhook payload sent to a partner system).\n```python\n# api.py\ndef serialize(event):\n    return {\"id\": event.id, \"ts\": str(event.created_at)}   # -> \"2026-06-24 12:00:00.123456\"\n```",
+      "expected_behavior": [
+        "Flags non-RFC-3339 date serialization on the wire: str(datetime) emits 'YYYY-MM-DD HH:MM:SS' with a space separator and no timezone offset/Z, which a strict RFC 3339 parser (the partner's) rejects or misreads — the core boundary-conformance defect",
+        "Distinguishes this from internal clock correctness (#4): the timestamp may be correct in-process but is un-interoperable because the emitted format violates the external standard",
+        "Recommends emitting RFC 3339 — an aware datetime's .isoformat() with an explicit offset (e.g. 2026-06-24T12:00:00.123456+00:00) or a 'T'…'Z' form — not str()"
+      ]
+    },
+    {
+      "query": "Review this change (the OAuth login callback).\n```python\n@app.get(\"/oauth/callback\")\ndef callback(code, state):\n    token = exchange_code(code)          # no comparison of `state` to the value we issued\n    session[\"user\"] = userinfo(token)\n    return redirect(\"/\")\n```",
+      "expected_behavior": [
+        "Flags missing OAuth/OIDC `state` validation: the callback exchanges the code without comparing the returned `state` to the per-session value issued at authorization start — a CSRF / login-forgery hole the protocol (RFC 9700 / OIDC Core) requires closing",
+        "Detect-and-route: names the protocol-conformance defect here (#37) and hands the security verdict to sweeping-for-security (#14); recommends generating, storing, and constant-time-comparing `state` (and validating `nonce` / using PKCE on public clients)",
+        "Surfaces the defect from the visible absence of the check, without needing the auth library internals"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\n@app.post(\"/charge\")\ndef charge(req):\n    key = req.headers[\"Idempotency-Key\"]      # retries dedupe on this key\n    if seen(key):\n        return stored_response(key)\n    resp = do_charge(req)\n    return remember(key, resp)\n\ndef serialize(event):\n    return {\"ts\": event.created_at.astimezone(timezone.utc).isoformat()}   # 2026-06-24T12:00:00+00:00\n```",
+      "expected_behavior": [
+        "Outputs exactly: \"No findings\"",
+        "Recognizes the POST is made retry-safe via an Idempotency-Key (correct HTTP semantics) and the timestamp is emitted in RFC 3339 with an explicit UTC offset",
+        "Does not invent a conformance defect on code that already speaks the external standards correctly"
+      ]
+    },
+    {
+      "query": "Review this change (a scheduled job that runs under Unix/Vixie cron).\n```python\n# scheduler.py — backend uses standard 5-field POSIX cron\nCRON = \"0 0 12 * * ?\"   # copied from a Quartz example\nschedule(CRON, nightly_report)\n```",
+      "expected_behavior": [
+        "Flags a cron-dialect mismatch: '0 0 12 * * ?' is a 6-field Quartz expression (leading seconds field, '?' day-of-week) but the runner is 5-field POSIX/Vixie cron, which cannot parse it (or misreads the fields) — the job silently never fires or fires at the wrong time",
+        "Identifies it as an interoperability / external-standard-conformance defect — a valid-looking expression written in the wrong dialect for the engine that runs it",
+        "Recommends the correct POSIX expression for 'noon daily' ('0 12 * * *'), or switching to a Quartz-compatible scheduler if the seconds/year fields are actually needed"
+      ]
+    }
+  ]
+}

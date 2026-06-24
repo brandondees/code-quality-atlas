@@ -12,7 +12,7 @@ description: 'The code review entrypoint for code-quality-atlas — use for any 
   lenses apply, or asked to review without naming a lens; skip and call individual
   lenses directly when the relevant ones are already clear.'
 provenance:
-  taxonomy_version: v0.6
+  taxonomy_version: v0.7
   built_from: []
 ---
 
@@ -58,6 +58,7 @@ The code review / quality review entrypoint for code-quality-atlas. Use for any 
 | Dependency add or bump | `auditing-dependencies-and-supply-chain`, `checking-restraint` |
 | CI / build / config change | `auditing-config-and-build-hygiene`, `sweeping-for-security` |
 | Install / setup / packaging change, an upgrade or migration guide, a config or CLI surface, or anything a downstream project adopts (a tool, plugin, template, or library) | `reviewing-install-and-upgrade-experience`, `reviewing-api-contract-safety`, `auditing-documentation-health` — the adopter-facing experience — setup friction, config UX, and a version-bump a consumer or an agent can complete and verify |
+| Change that parses or emits a standard format or speaks an external protocol — an HTTP/REST client or handler, an OAuth/OIDC or other auth flow, date / URL / email / CSV / JSON serialization, a version bump on a published surface, a cron expression, or telemetry attributes | `reviewing-interoperability`, `reviewing-api-contract-safety`, `tracing-correctness-and-invariants` — does the code correctly speak the external standard — HTTP/OAuth semantics, RFC formats, SemVer, Unicode, cron dialect, OTel semconv; #13 owns the contract we author, #4 internal correctness, #14 the auth-flow security verdict |
 | Infrastructure-as-code change (Terraform/OpenTofu, Kubernetes/Helm, CloudFormation manifests) | `auditing-infrastructure-as-code`, `sweeping-for-security` — repo-shaped — judges blast radius, public exposure, IAM scope, and declared-vs-live drift; #14 owns the security verdict |
 | Any pull request (the PR artifact itself, on top of content lenses) | `reviewing-pr-and-process-hygiene` |
 | Whole-repo health audit (scheduled / cron) | `finding-maintainability-hotspots`, `auditing-architecture-conformance`, `auditing-dependencies-and-supply-chain`, `auditing-config-and-build-hygiene`, `auditing-documentation-health`, `auditing-compliance-and-provenance`, `auditing-enforcement-and-meta-artifacts`, `auditing-infrastructure-as-code` — the eight repo-shaped audits; run independently, not as one pass (auditing-infrastructure-as-code only where IaC manifests exist) |
@@ -91,6 +92,7 @@ The code review / quality review entrypoint for code-quality-atlas. Use for any 
 - `reviewing-pr-and-process-hygiene` — Is the PR itself reviewable? Size, atomic commits, description, scope creep, changelog.
 - `reviewing-resilience-and-scalability` ◆ — Will it survive failure and scale? Unbounded queues, timeouts and blast radius, retries, statelessness, RTO/RPO — design-time, not #16's runtime.
 - `reviewing-install-and-upgrade-experience` ◆ — Can a consumer install, configure, and upgrade this cleanly — even hand it to an agent? Setup friction, config UX, version-bump smoothness, migration path.
+- `reviewing-interoperability` — Does the code correctly speak external standards? HTTP/OAuth semantics, SemVer, RFC date/URI/email formats, Unicode, cron dialects, OTel semconv.
 
 **Repo-shaped — run on the whole repository, scheduled or on demand:**
 
