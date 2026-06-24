@@ -1656,10 +1656,14 @@ tiers.
   generalizes. **Re-ran both tiers: #28 S4 now caught on qwen2.5:7b and llama3.1:8b**,
   with the clean scenarios held (S1/S2 full recall both tiers; S3 clean on qwen; llama
   led with "No finding" then offered one optional improvement-valence suggestion — not
-  a defect false-positive). `examples.md` is not provenance-hashed, so drift stays
-  clean and no regenerate was needed. This is the cold-path / "a maximum is not a
-  finding" decision-rule playbook applied again — the coordinated-timing ceiling was
-  reachable with a concrete worked example after all.
+  a defect false-positive). **Acceptance criterion for the tune (the bar it had to
+  clear to be kept):** lift #28 S4 to a both-tier catch *without* regressing the clean
+  scenarios (S3 stays "No findings"; S1/S2 keep full recall) — met, so the change was
+  kept; had it lifted S4 only by also flagging the clean fx-breaker case, it would have
+  been reverted and the gap logged as a confirmed ceiling. `examples.md` is not
+  provenance-hashed, so drift stays clean and no regenerate was needed. This is the
+  cold-path / "a maximum is not a finding" decision-rule playbook applied again — the
+  coordinated-timing ceiling was reachable with a concrete worked example after all.
 
 **Two substrate findings (not regressions, recorded for the runbook):**
 
