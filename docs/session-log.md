@@ -1456,3 +1456,50 @@ reconciled (README/install/plugin: 30→31 lenses, 32→33 total).
 plus the noted G20 repo arm and G16 design-time arm follow-ups. **Cross-model re-gate still
 owed** — now also covers this lens; batch on the Ollama substrate (qwen2.5:7b floor + 3B
 canary), not this environment.
+
+### 2026-06-24 (cont.) — build: #32 Agentic & tool-use safety lens (D14, closes the oldest build-backlog item)
+
+**Goal (from "what's ready to work on?" → "yep 32"):** ship `reviewing-agentic-safety`,
+the longest-standing decided-but-unbuilt item — #32 was promoted at D14/v0.3 with the
+taxonomy entry in place but no skill. The build splits agentic action-safety out of #25.
+
+**What shipped:**
+
+- **Research §#32** in [`cluster-4-runtime.md`](research/cluster-4-runtime.md) — the 8
+  ASI-tagged action/tool-surface heuristics **moved out of #25** (tool least-privilege,
+  approval gates & autonomy bounds, tool-metadata-as-untrusted-input, agent identity &
+  tokens, sandboxed exec, inter-agent auth, memory hygiene, audit trail), **plus a 9th**
+  for the lethal-trifecta **exfil/action leg** (the framing stays #25; #32 owns the
+  mitigation). 2 ★ priority checks (tool least-privilege; approval gates). Its own
+  references (OWASP Agentic Top 10 ASI01–ASI10, the Threats-and-Mitigations companion, the
+  MCP security spec — all moved from #25) and a fresh agentic tooling list (MCP scanners,
+  permission/scope auditors, sandbox runtimes, framework approval-gate hooks, action
+  tracing). #25 keeps the model-call concerns behind a new **boundary note** and a pointer
+  where the heuristics moved.
+- **Lens `reviewing-agentic-safety`** (`shape: diff`, design-capable, wave 5) — a
+  single-category lens (`built_from #32`, no cross_ref): the action-surface vantage is
+  genuinely new. **G1 single-owner:** owns the action/tool surface; defers the model call
+  to #25, the authz verdict to #14, and tool *contracts* to #13 (named in the description +
+  examples, not via cross_ref). All 9 heuristics inline as Top checks.
+- **Router** — a dedicated route ("Agent / tool-use change — a tool/function definition
+  exposed to a model, an MCP server or client, an autonomous/multi-agent loop, agent
+  memory, or any code that lets a model take actions" → `reviewing-agentic-safety` +
+  `reviewing-llm-integration` + `sweeping-for-security`); the existing LLM route was
+  narrowed to the model-call case so the two no longer conflate.
+- **4 evals** — an over-broad `execute_sql` tool (least-privilege), an unbounded loop with
+  an ungated `issue_refund` (autonomy bound + approval gate), an MCP server forwarding the
+  inbound token (token passthrough / confused deputy, detect-and-route to #14), and a clean
+  control (narrow read-only tool + `max_steps` + `require_approval` → "No findings");
+  `examples.md` populated.
+
+**Verification:** `pytest tests/` 103 pass (+1: `test_agentic_safety_lens_owns_32_action_surface`
+— owns #32, #25/#14 undisturbed, both ★ checks surface, no shared-category note);
+`cli drift` clean (the #25 split re-hashed `reviewing-llm-integration`, regenerated cleanly);
+`cli eval` OK (new lens 4 scenarios). Counts reconciled (README 31→32 lenses / 33→34 total;
+install.md, plugin.json, and the stale-since-interop marketplace.json). No `taxonomy_version`
+bump — #32 already lives in v0.7's taxonomy.
+
+**Resolves:** the D14/Q16/map-gaps-G2 build backlog → shipped. **Remaining backlog:** the
+`shape: artifact` lens (D15) is now the oldest decided-but-unbuilt item. **Cross-model
+re-gate still owed** — now also covers this lens; batch on the Ollama substrate (qwen2.5:7b
+floor + 3B canary), not this environment.

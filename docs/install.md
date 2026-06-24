@@ -66,7 +66,7 @@ anyone who trusts the folder gets the suite, **including Claude Code web session
 
 ## How updates reach you
 
-All 33 skills load with provenance intact, and updates ship with every merged
+All 34 skills load with provenance intact, and updates ship with every merged
 commit (commit-SHA versioning — no version bumps). Which install path you used
 decides how those updates arrive:
 

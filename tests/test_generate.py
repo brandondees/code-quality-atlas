@@ -299,6 +299,26 @@ def test_ethical_design_lens_owns_36_detect_and_route():
     assert "Shared categories" not in md  # single-category lens
 
 
+def test_agentic_safety_lens_owns_32_action_surface():
+    # D14 (Q16 / map-gaps G2): the agentic-safety lens primary-owns the new #32
+    # category — the action/tool surface (what the model may *do*), split from #25's
+    # model call. Single-category lens, no cross_ref; both ★-marked checks surface (G9).
+    m = load_manifest("skills/manifest.yaml")
+    lens = next(s for s in m.skills if s.name == "reviewing-agentic-safety")
+    assert lens.shape == "diff"
+    assert not lens.cross_ref
+    owners = primary_owners(m)
+    assert owners[32] == "reviewing-agentic-safety"
+    # the model-call and authz siblings still own their categories (not disturbed)
+    assert owners[25] == "reviewing-llm-integration"
+    assert owners[14] == "sweeping-for-security"
+    md = build_skill_md(lens, taxonomy_version=m.taxonomy_version, docs_root=".",
+                        owners=owners)
+    assert "Tool least-privilege" in md          # ★ priority check 1
+    assert "Approval gates & autonomy bounds" in md  # ★ priority check 2
+    assert "Shared categories" not in md  # single-category lens
+
+
 def test_interoperability_lens_owns_37_consolidating_conformance():
     # G18-interop (Wave C, v0.7): the interoperability lens primary-owns the new
     # #37 category — the first of the two ISO/IEC 25010:2023 characteristics with
