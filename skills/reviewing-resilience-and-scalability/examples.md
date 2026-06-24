@@ -115,7 +115,54 @@ def get_dashboard():
    This is a coordinated-client failure mode, not a per-tenant isolation or
    write-serialization problem.
 
-## Good → no finding
+## Bad → finding (degrade toward safe, not just toward available)
+
+**Input (review this change):**
+
+```python
+# Keep checkout fast when we're busy.
+def checkout(order):
+    if load_high():
+        return approve(order)            # skip fraud scoring under load
+    if fraud_score(order) > THRESHOLD:
+        return decline(order)
+    return approve(order)
+```
+
+**Expected finding:**
+
+1. **Degrade-toward-harm (drops a safety check under load):** the high-load path
+   **bypasses fraud scoring** to stay fast, so the system fails **open** under exactly
+   the conditions an attacker would create load to trigger. Graceful degradation
+   optimizes *availability*, but the degraded path must stay **harm-safe** — degrade to
+   a safe fallback (queue / hold the order for async review, or apply a stricter default
+   decision) rather than removing the guard. This is the ISO/IEC 25010:2023 *safety*
+   direction (distinct from #14 attacker-facing security, and from #2's code-level
+   fail-closed default). Surface it and route the acceptable-risk threshold to a human
+   owner; do not decide it here.
+
+## Good → no finding (degradation stays safe)
+
+**Input (review this change):**
+
+```python
+# Keep checkout responsive under load — defer, don't bypass.
+def checkout(order):
+    if load_high():
+        return hold_for_async_review(order)   # queue for the SAME fraud check, run async
+    if fraud_score(order) > THRESHOLD:
+        return decline(order)
+    return approve(order)
+```
+
+**Expected finding:** None — the degraded path stays **harm-safe**: under load it
+**holds** the order for asynchronous review rather than approving it, so the fraud
+check is **deferred, not dropped** (it fails toward safe, not open). Do not flag a safe
+degradation (queue / hold / stricter default) as a violation, and do not demand the
+full check run synchronously under load when a safe deferral is in place. Report "No
+findings".
+
+## Good → no finding (bounded, with a defined failure path)
 
 **Input (review this change):**
 

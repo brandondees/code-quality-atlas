@@ -37,7 +37,47 @@ return res.json();
 2. **No failure handling:** non-OK responses and network errors are unhandled —
    handle them with a defined fallback.
 
-## Good → no finding
+## Bad → finding (fail-open: fails toward harm, not toward safe)
+
+**Input (diff):**
+
+```python
+def can_access(user, doc):
+    try:
+        return authz.check(user, doc)        # True/False
+    except AuthzServiceError:
+        return True   # authz down — let them through so the page still works
+```
+
+**Expected finding:**
+
+1. **Fail-open on an authorization check (fails toward harm):** when `authz.check`
+   cannot be evaluated the code defaults to **allow**, so an authz outage silently
+   grants access. A permission / auth / quota / limit check must **fail closed** —
+   `return False` on error (and surface the error) — not default-allow. This is the
+   *direction* the failure resolves (ISO/IEC 25010:2023 *safety* / harm-prevention),
+   distinct from attacker-facing #14 security. The acceptable-risk call is a
+   detect-and-route to a human owner, not a verdict to settle here.
+
+## Good → no finding (fail-closed on auth check)
+
+**Input (diff):**
+
+```python
+def can_access(user, doc):
+    try:
+        return authz.check(user, doc)
+    except AuthzServiceError as e:
+        log.error("authz unavailable", user=user.id, doc=doc.id, err=str(e))
+        return False   # deny on failure — fail closed
+```
+
+**Expected finding:** None — the check **fails closed** (denies when it cannot be
+evaluated) and surfaces the error with context: the safe, fail-loud direction. Do not
+invent a fail-open or swallowed-error issue, and do not suggest defaulting to allow
+"for availability." Report "No findings".
+
+## Good → no finding (narrow exception, no false success)
 
 **Input (diff):**
 
@@ -58,7 +98,7 @@ exception (`PaymentDeclined`) and letting any other exception propagate is corre
 fail-loud behavior** — do NOT flag it as "incomplete" and do NOT recommend broadening
 the `except` to catch more types. Report "No findings".
 
-## Good → no finding
+## Good → no finding (timeout + raise_for_status)
 
 **Input (diff):**
 

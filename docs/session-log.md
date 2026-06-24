@@ -1690,3 +1690,53 @@ follow-up owed.** Substrate caveat: this pass
 used the general `qwen2.5:7b` (the only qwen on this machine), not the documented
 `qwen2.5-coder:7b` floor — the SoD and clean-precision deltas above are attributable to
 that substrate difference, not to the heuristics.
+
+### 2026-06-24 (cont.) — Build: G18 safety arm (fail-toward-safe add-factors on #2/#28) — closes G18
+
+Built the **second and final arm of round-3 gap G18** — the ISO/IEC 25010:2023 **safety**
+characteristic (harm-prevention, distinct from #14 security = attacker-prevention). The
+interoperability arm shipped as #37 (v0.7); the disposition for safety was an **add-factor
+pass against #2/#28 + detect-and-escalate**, deep hazard analysis (ISO 26262 / IEC 61508 /
+DO-178C) out of scope. No new category, no `taxonomy_version` bump.
+
+**What shipped (research → regenerate, the D6 pipeline):**
+
+- **#2 `hunting-silent-failures` (cluster-1 #2)** — a ★ Top-check heuristic **"Fail toward
+  safe, not toward harm"**: fail **closed** on an auth/permission/quota/limit check that
+  errors or times out; a destructive/financial/physical action defaults to no-op/abort; a
+  failed validation rejects; a missing safety control blocks not bypasses. Distinct from
+  fail-*loud* (visibility) and #14 (attacker). Plus an ISO 25010:2023 *safety* key
+  reference and an examples.md fail-open→finding / fail-closed→no-finding pair.
+- **#28 `reviewing-resilience-and-scalability` (cluster-4 #28)** — a full-checklist
+  heuristic **"Degrade toward safe, not just toward available"**: a degraded/fallback path
+  must stay harm-safe (don't fail-open a fraud/authz check under load, don't serve stale
+  data where staleness harms, don't kill a guard instead of a feature). Distinct from the
+  adjacent "graceful degradation" (availability) and #2's code-level default. Plus an
+  examples.md degrade-unsafe→finding pair.
+- Both detect-and-route the acceptable-risk threshold to a human owner. Two new evals each
+  (a bad case + a clean control): hunting-silent-failures 4→6 scenarios, resilience 4→6.
+- `taxonomy.md` updated: the safety arm marked shipped; **both ISO/IEC 25010:2023 unowned
+  characteristics now closed.**
+
+**Cross-model re-gate — clean on the documented floor.** Pulled **`qwen2.5-coder:7b`** (the
+documented gate-of-record, previously absent on this machine) and re-ran both lenses; also
+ran the general `qwen2.5:7b` + `llama3.1:8b`.
+
+- **`qwen2.5-coder:7b` (floor of record): clean sweep** — hunting-silent-failures 6/6,
+  resilience 6/6 (the degrade-toward-safe clean control added during PR review re-verified
+  clean on the coder floor and general qwen). New safety scenarios pass (fail-open caught; fail-closed → "No findings";
+  degrade-toward-harm caught with the safe-fallback recommendation + detect-and-route), and
+  every pre-existing scenario held, including the narrow-PaymentDeclined clean case.
+- **General `qwen2.5:7b` + `llama3.1:8b`:** the new safety **factors work on both** —
+  fail-open (#2 S5) and degrade-toward-harm (#28 S5) caught on every tier; resilience fully
+  clean both tiers. **Two clean-code over-flags appeared only on the general models:** the
+  pre-existing narrow-PaymentDeclined case (#2 S3) over-flagged on both general tiers, and
+  the new clean fail-closed control (#2 S6) over-flagged on llama (it misread `return False`
+  as `return True`). **Both are control-flow/value misreads that the `qwen2.5-coder:7b`
+  floor gets right** — the documented general-vs-code-tuned precision gap (the reason the
+  floor of record is the *coder* variant), not a regression from the safety heuristic.
+
+**Verdict: G18 safety arm passes the cross-model gate on the floor of record; G18 is
+complete (both ISO 25010:2023 characteristics owned).** The general-model over-flags are the
+known substrate caveat, now first-hand confirmed against the coder model side by side. The
+machine now has `qwen2.5-coder:7b` so future re-gates can use the documented floor directly.
