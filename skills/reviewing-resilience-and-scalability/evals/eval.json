@@ -44,6 +44,14 @@
         "Distinguishes it from graceful degradation (which optimizes availability): degrading must stay harm-safe — degrade to a safe fallback (queue/hold for async review, stricter default) rather than bypassing the check (ISO/IEC 25010:2023 safety)",
         "Surfaces it and routes the acceptable-risk threshold to a human owner (detect-and-route) rather than deciding it, and does not fold it into attacker-facing #14 security"
       ]
+    },
+    {
+      "query": "Review this change:\n```python\n# Keep checkout responsive under load — defer, don't bypass.\ndef checkout(order):\n    if load_high():\n        return hold_for_async_review(order)   # queue for the SAME fraud check, run async\n    if fraud_score(order) > THRESHOLD:\n        return decline(order)\n    return approve(order)\n```",
+      "expected_behavior": [
+        "Reports no finding",
+        "Recognizes the degraded path stays harm-safe: under load it HOLDS the order for asynchronous review rather than approving it — the fraud check is deferred, not dropped, so the fallback fails toward safe (no approve-without-scoring)",
+        "Does not flag a safe degradation (queue/hold/stricter default) as a violation, and does not demand the full check run synchronously under load when a safe deferral is in place"
+      ]
     }
   ]
 }

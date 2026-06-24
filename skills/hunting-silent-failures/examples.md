@@ -59,7 +59,7 @@ def can_access(user, doc):
    distinct from attacker-facing #14 security. The acceptable-risk call is a
    detect-and-route to a human owner, not a verdict to settle here.
 
-## Good → no finding
+## Good → no finding (fail-closed on auth check)
 
 **Input (diff):**
 
@@ -77,7 +77,7 @@ evaluated) and surfaces the error with context: the safe, fail-loud direction. D
 invent a fail-open or swallowed-error issue, and do not suggest defaulting to allow
 "for availability." Report "No findings".
 
-## Good → no finding
+## Good → no finding (narrow exception, no false success)
 
 **Input (diff):**
 
@@ -98,7 +98,7 @@ exception (`PaymentDeclined`) and letting any other exception propagate is corre
 fail-loud behavior** — do NOT flag it as "incomplete" and do NOT recommend broadening
 the `except` to catch more types. Report "No findings".
 
-## Good → no finding
+## Good → no finding (timeout + raise_for_status)
 
 **Input (diff):**
 

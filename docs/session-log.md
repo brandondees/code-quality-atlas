@@ -1714,7 +1714,7 @@ DO-178C) out of scope. No new category, no `taxonomy_version` bump.
   adjacent "graceful degradation" (availability) and #2's code-level default. Plus an
   examples.md degrade-unsafe→finding pair.
 - Both detect-and-route the acceptable-risk threshold to a human owner. Two new evals each
-  (a bad case + a clean control): hunting-silent-failures 4→6 scenarios, resilience 4→5.
+  (a bad case + a clean control): hunting-silent-failures 4→6 scenarios, resilience 4→6.
 - `taxonomy.md` updated: the safety arm marked shipped; **both ISO/IEC 25010:2023 unowned
   characteristics now closed.**
 

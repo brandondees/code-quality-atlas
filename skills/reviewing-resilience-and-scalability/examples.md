@@ -141,7 +141,28 @@ def checkout(order):
    fail-closed default). Surface it and route the acceptable-risk threshold to a human
    owner; do not decide it here.
 
-## Good → no finding
+## Good → no finding (degradation stays safe)
+
+**Input (review this change):**
+
+```python
+# Keep checkout responsive under load — defer, don't bypass.
+def checkout(order):
+    if load_high():
+        return hold_for_async_review(order)   # queue for the SAME fraud check, run async
+    if fraud_score(order) > THRESHOLD:
+        return decline(order)
+    return approve(order)
+```
+
+**Expected finding:** None — the degraded path stays **harm-safe**: under load it
+**holds** the order for asynchronous review rather than approving it, so the fraud
+check is **deferred, not dropped** (it fails toward safe, not open). Do not flag a safe
+degradation (queue / hold / stricter default) as a violation, and do not demand the
+full check run synchronously under load when a safe deferral is in place. Report "No
+findings".
+
+## Good → no finding (bounded, with a defined failure path)
 
 **Input (review this change):**
 
