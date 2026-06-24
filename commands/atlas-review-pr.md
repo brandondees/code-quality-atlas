@@ -58,7 +58,9 @@ in the convergence policy, **run no new lenses and post no new inline comments**
 instead post a single summary that notes the cap is reached **and re-surfaces the
 outstanding non-blocking findings** — read your most recent round's summary
 (`<!-- atlas-review round:N -->`) and carry its *Non-blocking (advisory)* list
-forward, so the human taking over sees what is left below the floor — then stop.
+forward **verbatim** (no lenses run this round, so you cannot recompute the
+below-floor set), so the human taking over sees what is left below the floor —
+then stop.
 
 **If this is round 1, post the ACK first.** Before running any lenses, drop one
 short issue comment marked `<!-- atlas-review-ack -->` (e.g. "👀 atlas reviewer
@@ -102,8 +104,11 @@ findings to the ACK.
   them. (This mirrors how Copilot and CodeRabbit surface their non-blocking notes.)
   To stay concise, include the list **only in a summary you're already posting**
   (the first approve, the cap notice, or a round you're posting because of new
-  findings) and refresh it only when it changed; a changed advisory list is never
-  on its own a reason to break silence on a quiet push.
+  findings). **Refresh vs. carry depends on whether the lenses ran this round:**
+  when they ran (first approve, or a new-findings round), recompute and post the
+  refreshed below-floor set; on the cap notice (no lenses run) carry the last
+  lens-running round's list verbatim. A changed advisory list is never on its own
+  a reason to break silence on a quiet push.
 - Open your review summary with the marker `<!-- atlas-review round:N -->` so the
   next run can read the round count and carry the advisory list forward.
 - **If no new finding survives the floor**, behave by whether the PR has already

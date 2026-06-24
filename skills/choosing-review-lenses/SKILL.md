@@ -7,10 +7,10 @@ description: 'The code review entrypoint for code-quality-atlas — use for any 
   rather than picking only one. Picks which atlas review lenses to run for the change
   (bug fix, feature, refactor, migration, async or concurrent code, API change, UI
   change, error handling, LLM integration, design doc, dependency bump, CI/config
-  change, or a whole-repo audit), mapping what is being reviewed to the most relevant
-  lenses. Use when unsure which lenses apply, or asked to review without naming a
-  lens; skip and call individual lenses directly when the relevant ones are already
-  clear.'
+  change, or a whole-repo audit — which runs all eight repo-shaped audits, not 2-4),
+  mapping what is being reviewed to the most relevant lenses. Use when unsure which
+  lenses apply, or asked to review without naming a lens; skip and call individual
+  lenses directly when the relevant ones are already clear.'
 provenance:
   taxonomy_version: v0.6
   built_from: []
@@ -24,7 +24,7 @@ The code review / quality review entrypoint for code-quality-atlas. Use for any 
 
 ## How to pick
 
-- This skill recommends **2-4 content lenses** for a focused single-pass review. If you already know which lenses are relevant, or if comprehensive coverage is the goal, call them directly — the 2-4 figure is this router's own recommendation, not a hard cap on direct lens selection. `reviewing-pr-and-process-hygiene` is **additive** — on any PR it rides on top of the content lenses and does not spend one of the 2-4 slots.
+- **The 2-4 figure is for focused single-change review only.** For a single change, this skill recommends **2-4 content lenses**. It is **not** a cap on the whole-repo health-audit route, which runs **all eight repo-shaped audits** (see Routes) — apply the 2-4 figure to per-change review, never to the audit set. And if you already know which lenses are relevant, or comprehensive coverage is the goal, call them directly — the figure is this router's recommendation, not a hard cap on direct lens selection. `reviewing-pr-and-process-hygiene` is **additive** — on any PR it rides on top of the content lenses and does not spend one of the 2-4 slots.
 - Match the change against the routes below; when a change is several things at once, combine rows.
 - **Keep the brake pedal.** When a change ships abstraction, generality, or infrastructure ahead of the consumer that needs it (a generic with one impl, a crate with no caller yet), retain `checking-restraint` in the set — under the cap it is the lens most often dropped, and the one that catches building ahead of need.
 - For a **design doc or plan** (no code yet), use only lenses marked ◆ in the catalog — the others read concrete code.

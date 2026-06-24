@@ -1371,3 +1371,33 @@ rather than forcing a fix.
 
 **Verification:** `pytest tests/` 100 pass; `cli drift` clean (the #58 warning changes
 no output); `cli eval` OK; markdownlint 0 errors.
+
+### 2026-06-24 (cont.) — backlog sweep, round 2: the flagged design-decision issues
+
+Followed up the clear-cut batch by resolving the three issues previously flagged as
+needing a maintainer call, making the conventional choice on each and documenting it:
+
+- **#67 (advisory-list refresh ambiguity) — made deterministic.** The command said
+  "carry the advisory list forward" while `REVIEW.md` said "refresh when it changed";
+  these only conflict if you ignore *whether the lenses ran*. Pinned the rule in both
+  `templates/REVIEW.md` and `commands/atlas-review-pr.md`: **refresh when the lenses
+  ran this round** (first approve / new-findings round), **carry verbatim when they
+  did not** (the cap notice, where you cannot recompute the below-floor set).
+- **#61 (2-4 vs 8-audit framing) — option (a).** Led the router's *How to pick* with
+  the distinction (`generate.py` `build_router_md`): the 2-4 figure is per-change
+  only and is **not** a cap on the whole-repo audit route, which runs all eight
+  repo-shaped audits. Added the same carve-out to the router `description` in
+  `manifest.yaml`; regenerated `choosing-review-lenses` (drift clean).
+- **#64 (atlas-init fallback drift) — option (a), CI lint.** Added
+  `tests/test_routing_snippet_sync.py`: extracts the `BEGIN…END` routing block from
+  both `templates/agents-routing-snippet.md` (source of truth) and the embedded
+  fallback in `commands/atlas-init.md` and fails the build if they diverge — so an
+  offline `/atlas-init` can never silently install a stale block. The CI gate already
+  runs `pytest tests/`, so the check is enforced with no workflow change.
+
+**#57 stays closed-as-not-a-bug** (explained on the issue): `clear` and `compact`
+are valid `SessionStart` matcher source values.
+
+**Verification:** `pytest tests/` 101 pass (+1: the routing-snippet sync test);
+`cli drift` clean (regeneration touched only the router); `cli eval` OK; markdownlint
+0 errors.
