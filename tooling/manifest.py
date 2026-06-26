@@ -94,11 +94,29 @@ class Synthesizer:
 
 
 @dataclass
+class Mode:
+    """A review-depth mode: how *much* to run and at what severity floor.
+
+    `breadth` is a human-readable selector label rendered into the router.
+    `floor` is a severity level from the synthesizer's `severity_order`
+    (pin the floor at that level) or the literal "escalating" (the
+    round-based default). `triggers` are natural-language phrases that
+    select this mode in the entrypoint/router body (D7-portable).
+    """
+    name: str
+    breadth: str
+    floor: str
+    triggers: list[str]
+    note: str = ""
+
+
+@dataclass
 class Manifest:
     taxonomy_version: str
     skills: list[Skill]
     router: Router | None = None
     synthesizer: Synthesizer | None = None
+    modes: list[Mode] = field(default_factory=list)
 
 
 _NAME_RE = re.compile(r"^[a-z0-9-]+$")
@@ -343,5 +361,17 @@ def load_manifest(path: str) -> Manifest:
             )
         except KeyError as e:
             raise ValidationError(f"synthesizer: missing field {e}") from e
+    modes: list[Mode] = []
+    for i, raw_mode in enumerate(data.get("modes", []) or []):
+        try:
+            modes.append(Mode(
+                name=raw_mode["name"],
+                breadth=raw_mode["breadth"],
+                floor=raw_mode["floor"],
+                triggers=list(raw_mode.get("triggers", [])),
+                note=raw_mode.get("note", ""),
+            ))
+        except (KeyError, TypeError) as e:
+            raise ValidationError(f"modes[{i}] in {path}: malformed mode ({e})")
     return Manifest(taxonomy_version=data["taxonomy_version"], skills=skills,
-                    router=router, synthesizer=synthesizer)
+                    router=router, synthesizer=synthesizer, modes=modes)

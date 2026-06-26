@@ -2,7 +2,7 @@
 import pytest
 
 from tooling.manifest import (
-    Manifest, Skill, Source, ValidationError, load_manifest, validate,
+    Manifest, Mode, Skill, Source, ValidationError, load_manifest, validate,
     _check_comment_truncation,
 )
 
@@ -365,3 +365,48 @@ def test_valid_synthesizer_accepted_and_real_manifest_loads():
     assert real.synthesizer is not None
     assert real.synthesizer.severity_order[0] == "Blocker"
     assert all(t.between[0] != t.between[1] for t in real.synthesizer.tensions)
+
+
+# --- Depth modes (Plan 1) ---
+
+def _manifest_with_body(tmp_path, body: str) -> str:
+    p = tmp_path / "manifest.yaml"
+    p.write_text(
+        "taxonomy_version: v0\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        + body
+    )
+    return str(p)
+
+
+def test_load_manifest_parses_modes(tmp_path):
+    body = (
+        "modes:\n"
+        "  - name: triage\n"
+        "    breadth: critical tier only\n"
+        "    floor: Major\n"
+        "    triggers: [triage, quick review]\n"
+        "  - name: review\n"
+        "    breadth: top 2-4 by relevance\n"
+        "    floor: escalating\n"
+        "    triggers: [review, review this PR]\n"
+        "  - name: comprehensive\n"
+        "    breadth: every relevant lens, uncapped\n"
+        "    floor: Nit\n"
+        "    triggers: [thorough, use all relevant lenses]\n"
+    )
+    m = load_manifest(_manifest_with_body(tmp_path, body))
+    assert [mode.name for mode in m.modes] == ["triage", "review", "comprehensive"]
+    assert m.modes[0].floor == "Major"
+    assert m.modes[2].triggers == ["thorough", "use all relevant lenses"]
+
+
+def test_load_manifest_defaults_modes_to_empty(tmp_path):
+    m = load_manifest(_manifest_with_body(tmp_path, ""))
+    assert m.modes == []
