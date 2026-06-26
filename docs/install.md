@@ -43,6 +43,23 @@ claude plugin marketplace add brandondees/code-quality-atlas
 claude plugin install code-quality-atlas@code-quality-atlas
 ```
 
+### Collapsed form (4 entrypoints)
+
+The same marketplace also offers a **collapsed** plugin —
+`code-quality-atlas-collapsed` — that installs the suite as **4 entrypoint
+skills** (`reviewing-a-change`, `auditing-a-repository`, `reviewing-a-decision`,
+`reviewing-an-artifact`) instead of 35, bundling each shape's lenses and loading
+them on demand. It suits **cloud / account-skill / context-budget-constrained**
+surfaces; the standalone form keeps the richest top-level discoverability. Install
+**one form, not both**:
+
+```text
+/plugin install code-quality-atlas-collapsed@code-quality-atlas
+```
+
+See [`distribution.md`](distribution.md) (*Two forms*) for which form fits which
+surface, and the `--collapsed` flag on the packaging/vendoring scripts.
+
 Or per-repo via settings — commit this to a project's `.claude/settings.json`,
 which installs the plugin for **local CLI / desktop / IDE** sessions that trust
 the folder (it avoids the interactive `/plugin` command):

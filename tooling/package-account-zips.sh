@@ -17,6 +17,7 @@
 #
 # Usage:
 #   tooling/package-account-zips.sh                 # one ZIP per skill -> dist/account-skills/
+#   tooling/package-account-zips.sh --collapsed     # the 4 collapsed entrypoints instead of the 35 skills
 #   tooling/package-account-zips.sh --bundle        # also a single all-skills archive (NOT GUI-uploadable)
 #   tooling/package-account-zips.sh --bundle-only   # only that archive
 #   tooling/package-account-zips.sh --out DIR        # write ZIPs to DIR
@@ -34,6 +35,9 @@ OUT_DIR="dist/account-skills"
 EMIT_PER_SKILL=1
 EMIT_BUNDLE=0
 BUNDLE_NAME="code-quality-atlas-skills.zip"
+# Which tree to package: the 35 standalone skills (default) or the 4 collapsed
+# entrypoints (--collapsed). Both live under the repo root.
+SKILLS_SUBDIR="skills"
 
 usage() {
   cat <<'EOF'
@@ -44,6 +48,8 @@ Each per-skill ZIP holds <name>/SKILL.md plus reference/ and examples.md;
 evals/ is excluded. Run from anywhere inside the repo.
 
 Options:
+  --collapsed    Package the 4 collapsed entrypoints (collapsed/skills/) instead
+                 of the 35 standalone skills (skills/)
   --bundle       Also emit a single all-skills archive (convenience; the
                  claude.ai GUI will NOT accept a multi-skill ZIP)
   --bundle-only  Emit ONLY that archive, no per-skill ZIPs
@@ -78,6 +84,7 @@ check_requirements() {
 parse_args() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
+      --collapsed) SKILLS_SUBDIR="collapsed/skills" ;;
       --bundle) EMIT_BUNDLE=1 ;;
       --bundle-only)
         EMIT_BUNDLE=1
@@ -129,13 +136,13 @@ repo_root() {
 collect_skill_names() {
   SKILL_NAMES=()
   local md name
-  for md in skills/*/SKILL.md; do
+  for md in "$SKILLS_SUBDIR"/*/SKILL.md; do
     [ -e "$md" ] || continue
     name=$(basename "$(dirname "$md")")
     SKILL_NAMES+=("$name")
   done
   if [ "${#SKILL_NAMES[@]}" -eq 0 ]; then
-    printf 'Error: no skills/*/SKILL.md found under %s\n' "$(pwd)" >&2
+    printf 'Error: no %s/*/SKILL.md found under %s\n' "$SKILLS_SUBDIR" "$(pwd)" >&2
     return 1
   fi
 }
@@ -145,7 +152,7 @@ collect_skill_names() {
 warn_on_name_mismatch() {
   local name=$1
   local declared
-  declared=$(grep -m1 '^name:' "skills/$name/SKILL.md" 2>/dev/null | sed 's/^name:[[:space:]]*//; s/[[:space:]]*$//; s/^["'\'']//; s/["'\'']$//' || true)
+  declared=$(grep -m1 '^name:' "$SKILLS_SUBDIR/$name/SKILL.md" 2>/dev/null | sed 's/^name:[[:space:]]*//; s/[[:space:]]*$//; s/^["'\'']//; s/["'\'']$//' || true)
   if [ -n "$declared" ] && [ "$declared" != "$name" ]; then
     printf '  ! warning: %s/SKILL.md declares name: "%s" (folder differs)\n' "$name" "$declared" >&2
   fi
@@ -154,8 +161,9 @@ warn_on_name_mismatch() {
 zip_one() {
   local name=$1 dest=$2
   rm -f "$dest"
-  # Zip from within skills/ so the archive root is <name>/… as the GUI expects.
-  (cd skills && zip -q -r -X "$dest" "$name" -x "${EXCLUDE_GLOBS[@]}")
+  # Zip from within the skills source dir so the archive root is <name>/… as the
+  # GUI expects.
+  (cd "$SKILLS_SUBDIR" && zip -q -r -X "$dest" "$name" -x "${EXCLUDE_GLOBS[@]}")
 }
 
 main() {
@@ -190,7 +198,7 @@ main() {
     local bundle="$abs_out/$BUNDLE_NAME"
     rm -f "$bundle"
     printf 'Packaging all-skills bundle -> %s\n' "$bundle"
-    (cd skills && zip -q -r -X "$bundle" "${SKILL_NAMES[@]}" -x "${EXCLUDE_GLOBS[@]}")
+    (cd "$SKILLS_SUBDIR" && zip -q -r -X "$bundle" "${SKILL_NAMES[@]}" -x "${EXCLUDE_GLOBS[@]}")
     printf '  + %s\n' "$BUNDLE_NAME"
     printf 'Note: the claude.ai GUI REJECTS a multi-skill ZIP (one top-level folder only).\n'
     printf '      This bundle is a convenience archive, not for GUI upload; upload the\n'
