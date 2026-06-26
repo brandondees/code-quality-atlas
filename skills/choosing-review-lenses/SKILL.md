@@ -24,13 +24,23 @@ The code review / quality review entrypoint for code-quality-atlas. Use for any 
 
 ## How to pick
 
-- **The 2-4 figure is for focused single-change review only.** For a single change, this skill recommends **2-4 content lenses**. It is **not** a cap on the whole-repo health-audit route, which runs **all eight repo-shaped audits** (see Routes) — apply the 2-4 figure to per-change review, never to the audit set. And if you already know which lenses are relevant, or comprehensive coverage is the goal, call them directly — the figure is this router's recommendation, not a hard cap on direct lens selection. `reviewing-pr-and-process-hygiene` is **additive** — on any PR it rides on top of the content lenses and does not spend one of the 2-4 slots.
+- **The 2-4 figure is for focused single-change review only.** For a single change, this skill recommends **2-4 content lenses**. It is **not** a cap on the whole-repo health-audit route, which runs **all eight repo-shaped audits** (see Routes) — apply the 2-4 figure to per-change review, never to the audit set. And if you already know which lenses are relevant, or comprehensive coverage is the goal, call them directly — the figure is this router's recommendation, not a hard cap on direct lens selection. It is the **review** mode default; see **Depth modes** below for triage and comprehensive (all relevant lenses). `reviewing-pr-and-process-hygiene` is **additive** — on any PR it rides on top of the content lenses and does not spend one of the 2-4 slots.
 - Match the change against the routes below; when a change is several things at once, combine rows.
 - **Keep the brake pedal.** When a change ships abstraction, generality, or infrastructure ahead of the consumer that needs it (a generic with one impl, a crate with no caller yet), retain `checking-restraint` in the set — under the cap it is the lens most often dropped, and the one that catches building ahead of need.
 - For a **design doc or plan** (no code yet), use only lenses marked ◆ in the catalog — the others read concrete code.
 - Lenses that share a research category name their primary owner in their SKILL.md; report each shared finding once, under the owner.
 - Nothing matches: default to `tracing-correctness-and-invariants` + `reviewing-naming-and-readability` + `checking-restraint`.
 - After the lenses run, merge their findings with `synthesizing-review-findings` — one deduplicated, ranked report with a single verdict.
+
+## Depth modes
+
+Routing first ranks **every** lens whose scope the change touches by **relevance** — it is no longer a hard 2-4 cap. A depth mode then sets the **breadth** (how far down the ranked list to run) and the severity floor. Pick the mode from the request; default to **review**.
+
+| Mode | Breadth | Triggers |
+|---|---|---|
+| **triage** | the critical tier only — correctness, security, data-safety, and concurrency | "triage", "quick review", "fast check", "pre-merge gate" |
+| **review** | the top 2-4 lenses by relevance (the default; overridable) | "review", "review this", "code review", "review this PR", "review the diff" |
+| **comprehensive** | every relevant lens, uncapped — the full audit set at repo scope | "thorough", "comprehensive", "deep review", "use all relevant lenses", "review everything" |
 
 ## Routes
 

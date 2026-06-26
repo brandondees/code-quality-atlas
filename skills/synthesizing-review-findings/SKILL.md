@@ -105,6 +105,16 @@ Coverage & limitations
 
 Omit any **findings** section with nothing in it — including **Routed**, **Improvements**, and **Pre-existing** (the last two are absent entirely unless the team opted into improvement-valence / Boy-Scout surfacing). **Coverage & limitations** is the exception: it is always present, even on a "No findings" report. Keep each finding to one or two lines; the detail lives in the originating lens's output, not restated here.
 
+## Severity floor by mode
+
+The merged report's severity floor depends on the active depth mode. Below the floor, findings are omitted from the verdict.
+
+| Mode | Floor | Effect |
+|---|---|---|
+| **triage** | Major | pinned at Major — report everything down to Major, nothing below |
+| **review** | escalating | round-based escalation (as today) — later re-review rounds raise the floor |
+| **comprehensive** | Nit | pinned at Nit — report everything down to Nit, nothing below |
+
 ## Reviewer discipline
 
 Synthesis must not inflate. Do not raise a finding no lens reported, do not upgrade a severity to seem thorough, and do not turn "No findings" into a verdict with changes. The merged report is exactly the union of real lens findings, deduplicated and ordered — nothing added.
