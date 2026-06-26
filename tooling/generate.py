@@ -740,3 +740,68 @@ def generate_synthesizer(manifest: Manifest, skills_root: str = "skills") -> Pat
             {"skills": [manifest.synthesizer.name], "scenarios": []}, indent=2) + "\n",
             encoding="utf-8")
     return out
+
+
+def build_collapsed_synthesis(manifest: Manifest) -> str:
+    """The synthesizer procedure as a bundled reference file (no frontmatter).
+    Reuses build_synthesizer_md (which already includes mode_floor_policy) and
+    strips only the LEADING YAML frontmatter block so an entrypoint can Read it
+    directly — robust even if the synthesis body itself contains a '---' line."""
+    full = build_synthesizer_md(manifest)
+    if full.startswith("---\n"):
+        end = full.find("\n---\n", len("---\n"))   # closing fence of the first block only
+        if end != -1:
+            return full[end + len("\n---\n"):].lstrip("\n")
+    return full
+
+
+def build_entrypoint_md(manifest: Manifest, entrypoint) -> str:
+    lenses = entrypoint_lenses(manifest, entrypoint)
+    lens_names = {s.name for s in lenses}
+    front = {
+        "name": entrypoint.name,
+        "description": entrypoint.description,
+        "provenance": {"taxonomy_version": manifest.taxonomy_version, "built_from": []},
+    }
+    fm = yaml.safe_dump(front, sort_keys=False, default_flow_style=False,
+                        allow_unicode=True).strip()
+
+    # Routes from the router that touch this entrypoint's lenses.
+    rows = []
+    if manifest.router:
+        for route in manifest.router.routes:
+            if any(lens in lens_names for lens in route.run):
+                run = ", ".join(f"`{lens}`" for lens in route.run if lens in lens_names)
+                rows.append(f"| {route.when} | {run} |")
+    routes_table = "\n".join(rows) if rows else "| (any item in scope) | all lenses below |"
+
+    # Each lens links to its loadable bundle, so the entrypoint can Read it on
+    # demand; ◆ marks design-capable lenses and the picker gives the one-liner.
+    catalog = "\n".join(
+        f"- [`{s.name}`](reference/lenses/{s.name}/body.md){' ◆' if s.design else ''}"
+        + (f" — {s.picker}" if s.picker else "")
+        for s in lenses)
+
+    body = (
+        f"# {entrypoint.name}\n\n"
+        "## When to use\n\n"
+        f"{entrypoint.body or entrypoint.description}\n\n"
+        "## How this works\n\n"
+        "Rank the relevant lenses below by relevance to what is being reviewed, "
+        "pick the breadth from the depth mode (default **review**), then for each "
+        "selected lens **load its bundle** and apply it:\n\n"
+        "- Read `reference/lenses/<lens>/body.md` — the lens's checklist and examples. "
+        "Open `reference/lenses/<lens>/tool-rules.md` or `sources.md` only if deeper "
+        "tooling/provenance is called for.\n"
+        "- After the lenses run, merge their findings with the procedure in "
+        "`reference/synthesis.md` — one deduplicated, ranked report with a single verdict.\n\n"
+        + modes_section(manifest)
+        + "## Routes\n\n"
+        "| When reviewing… | Run |\n"
+        "|---|---|\n"
+        f"{routes_table}\n\n"
+        "## Lenses\n\n"
+        "◆ = design-capable.\n\n"
+        f"{catalog}\n"
+    )
+    return f"---\n{fm}\n---\n\n{body}"

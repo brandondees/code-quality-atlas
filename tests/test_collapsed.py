@@ -43,3 +43,37 @@ def test_generate_lens_bundle_writes_three_files(tmp_path):
     assert (dest / "body.md").exists()
     assert (dest / "tool-rules.md").exists()
     assert (dest / "sources.md").exists()
+
+
+# --- Task 5: entrypoint SKILL.md + collapsed synthesis ---
+from tooling.manifest import Route, Router, Synthesizer, Mode
+from tooling.generate import build_entrypoint_md, build_collapsed_synthesis
+
+
+def _full_manifest():
+    a = _skill(name="hunting-silent-failures", shape="diff", picker="Where do errors vanish?")
+    router = Router(name="choosing-review-lenses", description="route",
+                    routes=[Route(when="Bug fix", run=["hunting-silent-failures"])], body="")
+    syn = Synthesizer(name="synthesizing-review-findings", description="merge",
+                      severity_order=["Blocker", "Major", "Minor", "Nit"], tensions=[])
+    modes = [Mode(name="review", breadth="top 2-4", floor="escalating", triggers=["review"]),
+             Mode(name="comprehensive", breadth="all relevant", floor="Nit", triggers=["thorough"])]
+    ep = Entrypoint(name="reviewing-a-change", description="review a change", shapes=["diff"])
+    return Manifest("v0", [a], router=router, synthesizer=syn, modes=modes, entrypoints=[ep])
+
+
+def test_build_entrypoint_md_has_trigger_routing_modes_and_load_instructions():
+    m = _full_manifest()
+    md = build_entrypoint_md(m, m.entrypoints[0])
+    assert md.startswith("---\n")                       # frontmatter
+    assert "name: reviewing-a-change" in md
+    assert "## Depth modes" in md                       # reuses modes_section
+    assert "reference/lenses/hunting-silent-failures/body.md" in md  # load instruction
+    assert "reference/synthesis.md" in md               # synthesize pointer
+    assert "Bug fix" in md                              # the in-shape route
+
+
+def test_build_collapsed_synthesis_carries_floor_policy_without_frontmatter():
+    md = build_collapsed_synthesis(_full_manifest())
+    assert not md.startswith("---")                     # bundled body, no frontmatter
+    assert "## Severity floor by mode" in md            # reuses mode_floor_policy
