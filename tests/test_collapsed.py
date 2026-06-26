@@ -94,3 +94,34 @@ def test_generate_collapsed_writes_full_tree(tmp_path):
     plugin = json.loads((tmp_path / ".claude-plugin" / "plugin.json").read_text())
     assert plugin["name"] == "code-quality-atlas-collapsed"
     assert any(p == ep_dir for p in outs)
+
+
+# --- Task 8: drift/regeneration gate across the collapsed tree ---
+import os
+
+
+def test_committed_collapsed_matches_regeneration(tmp_path):
+    from tooling.cli import main
+    rc = main(["generate", "--manifest", "skills/manifest.yaml", "--docs-root", ".",
+               "--skills-root", "skills", "--collapsed-root", str(tmp_path)])
+    assert rc == 0
+    # compare every generated SKILL.md / body.md against the committed collapsed/ tree
+    for root, _dirs, files in os.walk(tmp_path / "skills"):
+        for f in files:
+            gen = Path(root) / f
+            rel = gen.relative_to(tmp_path)
+            committed = Path("collapsed") / rel
+            assert committed.exists(), f"missing committed file: {committed}"
+            # eval.json drafts are scaffolds; skip if hand-authored later
+            if gen.name == "eval.json":
+                continue
+            assert gen.read_text() == committed.read_text(), f"drift in {rel}"
+    # reverse: every committed non-eval file must have a regenerated counterpart
+    # (catches a stale file left in collapsed/ that generation no longer produces)
+    for root, _dirs, files in os.walk(Path("collapsed") / "skills"):
+        for f in files:
+            committed = Path(root) / f
+            if committed.name == "eval.json":
+                continue
+            rel = committed.relative_to("collapsed")
+            assert (tmp_path / rel).exists(), f"stale committed file (not regenerated): {committed}"
