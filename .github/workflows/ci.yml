@@ -18,6 +18,8 @@ jobs:
         run: python -m pytest tests/ -q
       - name: eval structure (all skills)
         run: python -m tooling.cli eval
+      - name: eval structure (collapsed entrypoints)
+        run: python -m tooling.cli eval --skills-root collapsed/skills
       - name: provenance drift
         run: python -m tooling.cli drift
       - name: Generated trees are in sync
