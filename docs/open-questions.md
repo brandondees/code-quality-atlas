@@ -31,6 +31,8 @@ approved, build deferred). A later sweep (2026-06-24) closed **Q14 → D16**
 (review-depth modes: separate relevance from depth; three tiers; manifest-driven —
 design [`review-depth-modes.md`](review-depth-modes.md), build deferred).
 **Genuinely still open (undecided):**
+Q20 (top-level skill-count vs. context budget — collapse to a few entrypoints +
+nested disclosure; new 2026-06-25, design-deferred),
 Q17 (self-improving loop — design exploration written, awaiting review),
 Q13 (team preferences overlay — designed, not yet built),
 Q15 (a decision-time review shape — new, the round-2 gap-hunt headline),
@@ -113,6 +115,49 @@ cosmetic format-leak on qwen — a trailing "No findings:" sentence after real
 findings, absent on llama). Per the runbook these are model-capability limits,
 not heuristic regressions, so no tuning was applied. See the session-log entry
 of the same date.
+
+### Q20 — Too many top-level skills: collapse to a few entrypoints + nested disclosure? *(new, 2026-06-25)*
+
+**Trigger.** Distribution work (see [`distribution.md`](distribution.md)) surfaced a
+cost that scales with **skill count**, not skill quality: (1) Claude Code auto-truncates
+the installed-skill listing beyond a context budget (~1% of context — already noted in
+[`install.md`](install.md), the reason the `SessionStart` routing hook exists), so with
+35 top-level lenses individual descriptions get dropped and the suite is easy to overlook;
+(2) the only repo-independent cloud channel (claude.ai account skills) is **one zip upload
+per skill** — the GUI rejects multi-skill bundles — so onboarding is 35 tedious, error-prone
+manual uploads; (3) 35 always-on `description`s are themselves top-level context overhead.
+
+**The idea.** Restructure to **one (or a few) entrypoint skills** that **progressively
+disclose** the individual lenses as **nested, on-demand resources** (D7's
+disclosure model applied to the *suite*, not just within a lens) — e.g. the
+`choosing-review-lenses` router becomes the single always-on entry point, and the
+35 lens bodies move to bundled files it loads only for the lenses a given change
+needs. One top-level description, one upload, one listing entry.
+
+**Why it's genuinely open (not already done).** D10 built the router as a *selection*
+layer (situation → 2-4 lenses) but every lens still ships as its **own top-level skill** —
+the router reduced *what runs*, never *how many skills exist*. So the count pressure above
+is unaddressed by design, not by oversight.
+
+**Tensions to resolve in a dedicated design pass (do not build blind):**
+
+- **Auto-trigger vs. nesting.** A nested lens loses its own auto-trigger `description`;
+  routing on a plain "review this" must then come entirely from the entrypoint(s). This is
+  the same gap the `SessionStart` hook patches — folding 35 triggers into one description has
+  recall risk. May argue for a *few* entrypoints (e.g. by shape: diff / repo / decision /
+  artifact) rather than exactly one.
+- **D7 portability.** Disclosure must stay plain-markdown + bundled files (no harness/Claude
+  assumption); a router that *reads* bundled lens files on demand is portable, an orchestrated
+  fan-out is not.
+- **Eval-first (D8) & regeneration (D6).** Each lens keeps its evals and manifest provenance;
+  the generator would emit nested bundles instead of (or alongside) standalone `SKILL.md`s.
+- **Multi-surface consumers.** Skulto and other `SKILL.md` agents expect one `SKILL.md` per
+  skill; collapsing may need a *dual emission* (standalone skills for filesystem installs,
+  bundled entrypoints for the GUI/context-budget case) rather than replacing the current layout.
+
+**Disposition: design-deferred.** Needs its own brainstorming/design write-up (interacts with
+D7, D10, D12, D16) before any manifest/generator change. Logged here so the distribution PR
+captures the motivation without scoping the rebuild.
 
 ### Q18 — Artifact-scoped lens hosting: many per-artifact lenses without context bloat *(new, 2026-06-12)*
 
