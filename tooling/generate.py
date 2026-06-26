@@ -452,6 +452,30 @@ def generate_router(manifest: Manifest, skills_root: str = "skills") -> Path:
     return out
 
 
+def mode_floor_policy(manifest: Manifest) -> str:
+    """The synthesizer's per-mode severity-floor policy. Empty when no modes.
+    `escalating` keeps today's round-based floor; any other value pins the floor
+    at that severity level (findings below it are dropped from the merged report)."""
+    if not manifest.modes:
+        return ""
+    lines = [
+        "## Severity floor by mode",
+        "",
+        "The merged report's severity floor depends on the active depth mode. "
+        "Below the floor, findings are omitted from the verdict.",
+        "",
+        "| Mode | Floor | Effect |",
+        "|---|---|---|",
+    ]
+    for mode in manifest.modes:
+        if mode.floor == "escalating":
+            effect = "round-based escalation (as today) — later re-review rounds raise the floor"
+        else:
+            effect = f"pinned at {mode.floor} — report everything down to {mode.floor}, nothing below"
+        lines.append(f"| **{mode.name}** | {mode.floor} | {effect} |")
+    return "\n".join(lines).rstrip() + "\n\n"   # block ends with a blank line; "" when no modes
+
+
 def build_synthesizer_md(manifest: Manifest) -> str:
     """The back half of composition: merges the findings of the 2-4 lenses the
     router picked into one report — deduplicated, conflicts reconciled,
@@ -631,7 +655,8 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "is the exception: it is always present, even on a \"No findings\" report. "
         "Keep each finding to one or two lines; the detail lives in the "
         "originating lens's output, not restated here.\n\n"
-        "## Reviewer discipline\n\n"
+        + mode_floor_policy(manifest)
+        + "## Reviewer discipline\n\n"
         "Synthesis must not inflate. Do not raise a finding no lens reported, do "
         "not upgrade a severity to seem thorough, and do not turn \"No findings\" "
         "into a verdict with changes. The merged report is exactly the union of "

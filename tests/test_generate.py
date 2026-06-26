@@ -576,3 +576,33 @@ def test_build_router_md_includes_modes_section():
 def test_router_points_2to4_at_review_mode():
     md = build_router_md(_router_manifest(_modes()))
     assert "review** mode default" in md or "review mode default" in md
+
+
+# --- Per-mode severity floor policy (Plan 1) ---
+from tooling.generate import build_synthesizer_md, mode_floor_policy
+
+
+def _syn_manifest(modes=None):
+    from tooling.manifest import Synthesizer
+    syn = Synthesizer(name="synthesizing-review-findings", description="merge findings",
+                      severity_order=["Blocker", "Major", "Minor", "Nit"], tensions=[])
+    return Manifest("v0", [_skill(picker="p")], synthesizer=syn, modes=modes or [])
+
+
+def test_mode_floor_policy_maps_each_mode_to_a_floor():
+    md = mode_floor_policy(_syn_manifest(_modes()))
+    assert "## Severity floor by mode" in md
+    assert "triage" in md and "Major" in md
+    assert "review" in md and "escalating" in md
+    # comprehensive pins at the least-severe level
+    assert "comprehensive" in md and "Nit" in md
+    assert "pinned" in md.lower()      # comprehensive shows everything down to the floor
+
+
+def test_mode_floor_policy_empty_when_no_modes():
+    assert mode_floor_policy(_syn_manifest([])) == ""
+
+
+def test_build_synthesizer_md_includes_floor_policy():
+    md = build_synthesizer_md(_syn_manifest(_modes()))
+    assert "## Severity floor by mode" in md
