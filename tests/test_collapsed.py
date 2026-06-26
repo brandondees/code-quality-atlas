@@ -77,3 +77,20 @@ def test_build_collapsed_synthesis_carries_floor_policy_without_frontmatter():
     md = build_collapsed_synthesis(_full_manifest())
     assert not md.startswith("---")                     # bundled body, no frontmatter
     assert "## Severity floor by mode" in md            # reuses mode_floor_policy
+
+
+# --- Task 6: generate_collapsed writes the tree + plugin manifest ---
+
+def test_generate_collapsed_writes_full_tree(tmp_path):
+    from tooling.generate import generate_collapsed
+    m = _full_manifest()
+    outs = generate_collapsed(m, docs_root=".", skills_root="skills",
+                              collapsed_root=str(tmp_path))
+    ep_dir = tmp_path / "skills" / "reviewing-a-change"
+    assert (ep_dir / "SKILL.md").exists()
+    assert (ep_dir / "reference" / "synthesis.md").exists()
+    assert (ep_dir / "reference" / "lenses" / "hunting-silent-failures" / "body.md").exists()
+    assert (ep_dir / "evals" / "eval.json").exists()              # draft scaffold
+    plugin = json.loads((tmp_path / ".claude-plugin" / "plugin.json").read_text())
+    assert plugin["name"] == "code-quality-atlas-collapsed"
+    assert any(p == ep_dir for p in outs)

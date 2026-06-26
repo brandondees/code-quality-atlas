@@ -2,6 +2,7 @@
 # tooling/generate.py
 from __future__ import annotations
 import json
+import shutil
 import warnings
 import yaml
 from pathlib import Path
@@ -805,3 +806,55 @@ def build_entrypoint_md(manifest: Manifest, entrypoint) -> str:
         f"{catalog}\n"
     )
     return f"---\n{fm}\n---\n\n{body}"
+
+
+def collapsed_plugin_manifest(root_plugin_path: str = ".claude-plugin/plugin.json") -> dict:
+    """Derive the collapsed plugin manifest from the root one (single source) so
+    metadata stays in sync; only name/displayName/description differ."""
+    p = Path(root_plugin_path)
+    if not p.exists():
+        raise FileNotFoundError(
+            f"root plugin manifest not found at {root_plugin_path}; "
+            "cannot derive the collapsed plugin manifest")
+    base = json.loads(p.read_text(encoding="utf-8"))
+    base["name"] = "code-quality-atlas-collapsed"
+    base["displayName"] = base.get("displayName", "Code Quality Atlas") + " (collapsed)"
+    base["description"] = ("Collapsed 4-entrypoint form of the code-quality-atlas "
+                           "suite for cloud / account-skill / context-budget installs. "
+                           "Lenses are bundled and loaded on demand.")
+    return base
+
+
+def generate_collapsed(manifest: Manifest, docs_root: str = ".", skills_root: str = "skills",
+                       collapsed_root: str = "collapsed") -> list[Path]:
+    """Emit the collapsed form: 4 entrypoint skills (each bundling its shape's
+    lenses + synthesis) plus a generated .claude-plugin/plugin.json. Prunes any
+    entrypoint directory no longer in the manifest so the committed tree can't go
+    stale."""
+    written: list[Path] = []
+    skills_dir = Path(collapsed_root, "skills")
+    current = {ep.name for ep in manifest.entrypoints}
+    if skills_dir.exists():
+        for child in skills_dir.iterdir():
+            if child.is_dir() and child.name not in current:
+                shutil.rmtree(child)   # prune a removed entrypoint
+    for ep in manifest.entrypoints:
+        out = Path(collapsed_root, "skills", ep.name)
+        (out / "reference" / "lenses").mkdir(parents=True, exist_ok=True)
+        (out / "evals").mkdir(parents=True, exist_ok=True)
+        (out / "SKILL.md").write_text(build_entrypoint_md(manifest, ep), encoding="utf-8")
+        (out / "reference" / "synthesis.md").write_text(
+            build_collapsed_synthesis(manifest), encoding="utf-8")
+        for skill in entrypoint_lenses(manifest, ep):
+            generate_lens_bundle(skill, out / "reference" / "lenses",
+                                 docs_root=docs_root, skills_root=skills_root)
+        if not (out / "evals" / "eval.json").exists():
+            (out / "evals" / "eval.json").write_text(
+                json.dumps({"skills": [ep.name], "scenarios": []}, indent=2) + "\n",
+                encoding="utf-8")
+        written.append(out)
+    pm_dir = Path(collapsed_root, ".claude-plugin")
+    pm_dir.mkdir(parents=True, exist_ok=True)
+    (pm_dir / "plugin.json").write_text(
+        json.dumps(collapsed_plugin_manifest(), indent=2) + "\n", encoding="utf-8")
+    return written
