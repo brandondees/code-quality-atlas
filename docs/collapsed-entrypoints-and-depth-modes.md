@@ -50,6 +50,12 @@ with **all** relevant lenses," up to the full set at repo scope, and cannot get 
   long-tail findings actually surface). The floor policy lives in the synthesizer.
 - **D-Q20-6 — Non-goal:** removing the standalone 35. Dual-emit keeps them for
   filesystem / Skulto / other-agent installs and direct per-lens auto-triggering.
+- **Revisit trigger.** Reopen the dual-emit decision if **both** original pains go
+  away: the claude.ai GUI gains multi-skill-bundle upload (removing the ~35-upload
+  cost) **and** the CLI skill-listing context budget stops truncating descriptions
+  (e.g. a larger listing budget or on-demand skill discovery). If both hold, the
+  collapsed form's maintenance + repo-size overhead may no longer be justified —
+  re-evaluate collapsing back to the standalone form alone.
 
 ## Architecture
 

@@ -333,7 +333,9 @@ Run: `python -m tooling.cli generate --manifest skills/manifest.yaml --docs-root
 Expected: exits 0 (validation passes — proves the new `modes:` block is well-formed and the floors are valid against `severity_order`). This regenerates skills; the router/synthesizer changes land in Tasks 4–5, so for now just confirm exit 0, then discard unintended regen noise:
 
 ```bash
-git checkout -- skills/   # discard regen output; modes render is added in Tasks 4-5
+# discard only the generated composition skills — NOT skills/manifest.yaml (which
+# lives under skills/ and holds the modes: section just added):
+git checkout -- skills/choosing-review-lenses/SKILL.md skills/synthesizing-review-findings/SKILL.md
 ```
 
 - [ ] **Step 5: Commit (manifest data only)**

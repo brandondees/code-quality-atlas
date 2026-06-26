@@ -310,7 +310,7 @@ Run: `python -m pytest tests/test_manifest.py::test_real_manifest_declares_four_
 Expected: PASS.
 
 Run: `python -m tooling.cli generate --manifest skills/manifest.yaml --docs-root . --skills-root skills`
-Expected: exit 0 (validation passes — proves coverage + no name collisions). Then discard any standalone regen noise: `git checkout -- skills/`.
+Expected: exit 0 (validation passes — proves coverage + no name collisions). Then discard any standalone regen noise **without** reverting the manifest (which lives under `skills/`): `git checkout -- skills/*/SKILL.md` (matches `skills/<name>/SKILL.md`, never `skills/manifest.yaml`).
 
 - [ ] **Step 5: Commit**
 
@@ -361,9 +361,13 @@ def test_entrypoint_lenses_membership_by_shape_and_design():
 
 def test_lens_bundle_body_has_checklist_and_deeper_links():
     body = lens_bundle_body(_skill(), docs_root=".", skills_root="skills")
+    # Assert the bundle's *structure* (independent of research-fixture wording) so
+    # the first red/green is for the right reason — function unimplemented, not a
+    # mismatched fixture string.
+    assert body.startswith("# hunting-silent-failures")  # H1 = lens name
     assert "## When to use" in body
     assert "## Checklist" in body
-    assert "Is any error swallowed" in body            # heuristics from the fixture/docs
+    assert "## From category #2" in body   # heuristics embedded (fixture's built_from category), not fixture wording
     assert "(tool-rules.md)" in body and "(sources.md)" in body   # deeper disclosure links
 
 
@@ -435,7 +439,7 @@ def generate_lens_bundle(skill: Skill, lenses_dir: Path, docs_root: str = ".",
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `python -m pytest tests/test_collapsed.py -v`
-Expected: PASS (adjust the heuristics-content assertion to a real string first).
+Expected: PASS.
 
 - [ ] **Step 5: Full suite + commit**
 
