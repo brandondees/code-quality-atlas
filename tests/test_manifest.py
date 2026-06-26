@@ -410,3 +410,39 @@ def test_load_manifest_parses_modes(tmp_path):
 def test_load_manifest_defaults_modes_to_empty(tmp_path):
     m = load_manifest(_manifest_with_body(tmp_path, ""))
     assert m.modes == []
+
+
+def _syn():
+    from tooling.manifest import Synthesizer
+    return Synthesizer(name="synthesizing-review-findings", description="d",
+                       severity_order=["Blocker", "Major", "Minor", "Nit"], tensions=[])
+
+
+def test_validate_accepts_modes_with_known_floors():
+    modes = [
+        Mode(name="triage", breadth="critical tier only", floor="Major", triggers=["triage"]),
+        Mode(name="review", breadth="top 2-4", floor="escalating", triggers=["review"]),
+        Mode(name="comprehensive", breadth="all relevant", floor="Nit", triggers=["thorough"]),
+    ]
+    validate(Manifest("v0", [_skill()], synthesizer=_syn(), modes=modes))  # no raise
+
+
+def test_validate_rejects_unknown_mode_floor():
+    bad = [Mode(name="triage", breadth="critical tier only", floor="Bogus", triggers=["triage"])]
+    with pytest.raises(ValidationError, match="floor"):
+        validate(Manifest("v0", [_skill()], synthesizer=_syn(), modes=bad))
+
+
+def test_validate_rejects_duplicate_mode_names():
+    dup = [
+        Mode(name="review", breadth="b", floor="escalating", triggers=["review"]),
+        Mode(name="review", breadth="b2", floor="Nit", triggers=["thorough"]),
+    ]
+    with pytest.raises(ValidationError, match="duplicate mode"):
+        validate(Manifest("v0", [_skill()], synthesizer=_syn(), modes=dup))
+
+
+def test_validate_rejects_mode_without_triggers():
+    bad = [Mode(name="review", breadth="b", floor="escalating", triggers=[])]
+    with pytest.raises(ValidationError, match="trigger"):
+        validate(Manifest("v0", [_skill()], synthesizer=_syn(), modes=bad))

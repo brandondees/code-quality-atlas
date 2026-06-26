@@ -246,6 +246,25 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
             if not t.about or not t.resolve:
                 raise ValidationError(
                     f"synthesizer: tension {t.between} needs `about` and `resolve`")
+    if manifest.modes:
+        allowed_floors = set()
+        if manifest.synthesizer:
+            allowed_floors = set(manifest.synthesizer.severity_order)
+        allowed_floors.add("escalating")
+        seen_modes: set[str] = set()
+        for mode in manifest.modes:
+            if mode.name in seen_modes:
+                raise ValidationError(f"duplicate mode name: {mode.name}")
+            seen_modes.add(mode.name)
+            if not mode.breadth.strip():
+                raise ValidationError(f"mode {mode.name}: breadth must be non-empty")
+            if not mode.triggers:
+                raise ValidationError(f"mode {mode.name}: needs at least one trigger phrase")
+            if mode.floor not in allowed_floors:
+                raise ValidationError(
+                    f"mode {mode.name}: floor {mode.floor!r} is not a severity level "
+                    f"in severity_order nor 'escalating' ({sorted(allowed_floors)})"
+                )
 
 
 # Plain-scalar prose fields. A bare " #" inside one is read by YAML as a comment
