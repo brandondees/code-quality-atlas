@@ -951,3 +951,36 @@ modes:
     note: >
       On-demand or scheduled: run all relevant lenses and pin the floor at Nit so
       readability-class and other long-tail findings surface instead of being trimmed.
+entrypoints:
+  - name: reviewing-a-change
+    description: >
+      Review a diff, pull request, or code change with the code-quality-atlas
+      lenses. Use for "review this PR / diff / change / what I pushed". Ranks the
+      relevant diff lenses by relevance and runs them at the chosen depth
+      (review = top few; comprehensive = all relevant), then synthesizes one
+      verdict. The collapsed, repo-independent entrypoint for change review.
+    shapes: [diff]
+  - name: auditing-a-repository
+    description: >
+      Run a whole-repository health audit with the code-quality-atlas repo-shaped
+      audits (architecture, dependencies, config/build, docs, compliance,
+      enforcement, infrastructure-as-code, maintainability hotspots). Use for a
+      scheduled or on-demand repo audit, not a single diff. Runs the applicable
+      audits and synthesizes one report.
+    shapes: [repo]
+  - name: reviewing-a-decision
+    description: >
+      Review a decision rather than code — an ADR, RFC, design doc, dependency or
+      technology adoption, build-vs-buy or vendor choice, or a deprecation/sunset
+      plan. Reviews the choice and its record (rationale, lock-in, exit, revisit
+      trigger) with the decision lens plus the design-capable lenses for the
+      decision's domain.
+    shapes: [decision]
+    include_design: true
+  - name: reviewing-an-artifact
+    description: >
+      Review a standardized authored artifact against its own published standard
+      rather than as application code — e.g. a SKILL.md / agent-skill definition.
+      Detects the artifact and applies its rubric. The collapsed entrypoint for
+      artifact-shaped review.
+    shapes: [artifact]

@@ -517,3 +517,16 @@ def test_validate_rejects_orphaned_lens():
     eps = [Entrypoint(name="auditing-a-repository", description="d", shapes=["repo"])]
     with pytest.raises(ValidationError, match="not covered by any entrypoint"):
         validate(Manifest("v0", skills, entrypoints=eps))
+
+
+def test_real_manifest_declares_four_entrypoints_covering_all_lenses():
+    m = load_manifest("skills/manifest.yaml")
+    assert {e.name for e in m.entrypoints} == {
+        "reviewing-a-change", "auditing-a-repository",
+        "reviewing-a-decision", "reviewing-an-artifact"}
+    covered = set()
+    for ep in m.entrypoints:
+        for s in m.skills:
+            if s.shape in ep.shapes or (ep.include_design and s.design):
+                covered.add(s.name)
+    assert {s.name for s in m.skills} <= covered   # every lens covered
