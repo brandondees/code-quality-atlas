@@ -65,8 +65,11 @@ skulto install brandondees/code-quality-atlas -y
 /plugin install code-quality-atlas@code-quality-atlas
 ```
 
-For Claude Code **web sessions** and always-fresh installs, commit a marketplace
-snippet to `.claude/settings.json` instead — see [`docs/install.md`](docs/install.md).
+The plugin and the `.claude/settings.json` marketplace snippet are **CLI-local** —
+they do **not** load in Claude Code **web/cloud** sessions (the cloud runtime
+doesn't run the plugin-install step). For cloud, enable the suite as **account
+skills on claude.ai** or **vendor `.claude/skills/`** into the repo — see
+[`docs/distribution.md`](docs/distribution.md).
 
 ## Wire it into your repo
 

@@ -17,5 +17,8 @@ venv/
 scratch/
 *.tmp
 
+# Generated artifacts (e.g. tooling/package-account-zips.sh output)
+dist/
+
 # Machine-local Claude Code settings (never committed)
 .claude/settings.local.json

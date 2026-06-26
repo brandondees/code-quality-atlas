@@ -43,9 +43,19 @@ claude plugin marketplace add brandondees/code-quality-atlas
 claude plugin install code-quality-atlas@code-quality-atlas
 ```
 
-Or per-repo via settings — commit this to a project's `.claude/settings.json` and
-anyone who trusts the folder gets the suite, **including Claude Code web sessions**
-(which don't expose the interactive `/plugin` command):
+Or per-repo via settings — commit this to a project's `.claude/settings.json`,
+which installs the plugin for **local CLI / desktop / IDE** sessions that trust
+the folder (it avoids the interactive `/plugin` command):
+
+> **Does not work in Claude Code web/cloud.** `enabledPlugins` /
+> `extraKnownMarketplaces` is a CLI-local mechanism — the cloud runtime does not
+> run the plugin-install step, so committing this snippet has **no effect** in
+> web sessions or routines (the
+> [routines docs](https://code.claude.com/docs/en/routines) list "skills
+> committed to the cloned repository" and connectors as what loads; plugins are
+> not included). For the suite in cloud, see [`distribution.md`](distribution.md):
+> enable it as **account skills on claude.ai** (repo-independent, loads in cloud
+> automatically) and/or **vendor `.claude/skills/`** into the repo.
 
 ```json
 {
