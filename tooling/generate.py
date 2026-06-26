@@ -6,7 +6,7 @@ import shutil
 import warnings
 import yaml
 from pathlib import Path
-from tooling.manifest import Artifact, Manifest, Skill, Source
+from tooling.manifest import Artifact, Entrypoint, Manifest, Skill, Source
 from tooling.sections import (extract_bullets, extract_section,
                               extract_subsection, section_hash,
                               is_priority, strip_priority)
@@ -326,7 +326,7 @@ def generate_skill(skill: Skill, taxonomy_version: str,
     return out
 
 
-def entrypoint_lenses(manifest: Manifest, entrypoint) -> list[Skill]:
+def entrypoint_lenses(manifest: Manifest, entrypoint: Entrypoint) -> list[Skill]:
     """The lenses an entrypoint bundles: by shape, plus design-capable lenses
     when include_design (e.g. the decision entrypoint carries the ◆ diff lenses)."""
     out = []
@@ -415,6 +415,10 @@ def modes_section(manifest: Manifest) -> str:
     for mode in manifest.modes:
         triggers = ", ".join(f"\"{t}\"" for t in mode.triggers)
         lines.append(f"| **{mode.name}** | {mode.breadth.strip()} | {triggers} |")
+    notes = [(m.name, m.note.strip()) for m in manifest.modes if m.note.strip()]
+    if notes:
+        lines.append("")
+        lines.extend(f"- **{name}** — {note}" for name, note in notes)
     return "\n".join(lines).rstrip() + "\n\n"   # block ends with a blank line; "" when no modes
 
 
@@ -746,17 +750,33 @@ def generate_synthesizer(manifest: Manifest, skills_root: str = "skills") -> Pat
 def build_collapsed_synthesis(manifest: Manifest) -> str:
     """The synthesizer procedure as a bundled reference file (no frontmatter).
     Reuses build_synthesizer_md (which already includes mode_floor_policy) and
-    strips only the LEADING YAML frontmatter block so an entrypoint can Read it
-    directly — robust even if the synthesis body itself contains a '---' line."""
+    strips the LEADING YAML frontmatter block so an entrypoint can Read it
+    directly. Also drops the standalone "Going deeper" section, whose relative
+    links (../<router>/SKILL.md, ../../docs/...) point outside the collapsed
+    bundle and would 404 when an agent follows them — the entrypoint SKILL.md
+    already links the lenses, and this file is loaded directly, not navigated
+    from."""
     full = build_synthesizer_md(manifest)
-    if full.startswith("---\n"):
-        end = full.find("\n---\n", len("---\n"))   # closing fence of the first block only
-        if end != -1:
-            return full[end + len("\n---\n"):].lstrip("\n")
-    return full
+    # Raise loudly rather than silently shipping a frontmatter-laden bundle if the
+    # synthesizer's output shape ever changes.
+    if not full.startswith("---\n"):
+        raise ValueError("build_synthesizer_md output has no leading frontmatter to strip")
+    end = full.find("\n---\n", len("---\n"))   # closing fence of the first block only
+    if end == -1:
+        raise ValueError("build_synthesizer_md frontmatter block is not terminated")
+    body = full[end + len("\n---\n"):].lstrip("\n")
+    marker = "\n## Going deeper\n"
+    idx = body.find(marker)
+    if idx != -1:
+        body = body[:idx].rstrip() + "\n"
+    # The Fan-out-model prose cross-refs the now-removed section; drop the dangling
+    # "under *Going deeper*" pointer so the bundle is self-consistent (no-op if the
+    # phrase ever changes).
+    body = body.replace(" under *Going deeper*", "")
+    return body
 
 
-def build_entrypoint_md(manifest: Manifest, entrypoint) -> str:
+def build_entrypoint_md(manifest: Manifest, entrypoint: Entrypoint) -> str:
     lenses = entrypoint_lenses(manifest, entrypoint)
     lens_names = {s.name for s in lenses}
     front = {
@@ -856,5 +876,7 @@ def generate_collapsed(manifest: Manifest, docs_root: str = ".", skills_root: st
     pm_dir = Path(collapsed_root, ".claude-plugin")
     pm_dir.mkdir(parents=True, exist_ok=True)
     (pm_dir / "plugin.json").write_text(
-        json.dumps(collapsed_plugin_manifest(), indent=2) + "\n", encoding="utf-8")
+        json.dumps(collapsed_plugin_manifest(
+            root_plugin_path=str(Path(docs_root, ".claude-plugin", "plugin.json"))),
+            indent=2) + "\n", encoding="utf-8")
     return written

@@ -79,6 +79,15 @@ def test_build_collapsed_synthesis_carries_floor_policy_without_frontmatter():
     assert "## Severity floor by mode" in md            # reuses mode_floor_policy
 
 
+def test_build_collapsed_synthesis_drops_going_deeper_and_broken_links():
+    # The standalone "Going deeper" links (../<router>/SKILL.md, ../../docs/...)
+    # don't exist inside a collapsed bundle and would 404; they must be dropped.
+    md = build_collapsed_synthesis(_full_manifest())
+    assert "Going deeper" not in md                       # heading and dangling prose ref both gone
+    assert "/SKILL.md" not in md
+    assert "docs/runbooks/multi-repo-audit.md" not in md
+
+
 # --- Task 6: generate_collapsed writes the tree + plugin manifest ---
 
 def test_generate_collapsed_writes_full_tree(tmp_path):
@@ -101,10 +110,18 @@ import os
 
 
 def test_committed_collapsed_matches_regeneration(tmp_path):
-    from tooling.cli import main
-    rc = main(["generate", "--manifest", "skills/manifest.yaml", "--docs-root", ".",
-               "--skills-root", "skills", "--collapsed-root", str(tmp_path)])
-    assert rc == 0
+    from tooling.manifest import load_manifest, validate
+    from tooling.generate import generate_collapsed
+    # Regenerate ONLY the collapsed tree into tmp_path — generate_collapsed reads
+    # the real committed skills/ (for each lens's examples.md) but writes nowhere
+    # but tmp_path, so this never overwrites the live skills/ tree as a side effect.
+    m = load_manifest("skills/manifest.yaml")
+    validate(m, docs_root=".")
+    generate_collapsed(m, docs_root=".", skills_root="skills", collapsed_root=str(tmp_path))
+    # the generated plugin.json must match the committed one (catches manifest drift)
+    gen_plugin = (tmp_path / ".claude-plugin" / "plugin.json").read_text()
+    committed_plugin = (Path("collapsed") / ".claude-plugin" / "plugin.json").read_text()
+    assert gen_plugin == committed_plugin, "drift in collapsed/.claude-plugin/plugin.json"
     # compare every generated SKILL.md / body.md against the committed collapsed/ tree
     for root, _dirs, files in os.walk(tmp_path / "skills"):
         for f in files:

@@ -268,6 +268,8 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
         allowed_floors.add("escalating")
         seen_modes: set[str] = set()
         for mode in manifest.modes:
+            if not mode.name or not _NAME_RE.match(mode.name):
+                raise ValidationError(f"invalid mode name: {mode.name!r}")
             if mode.name in seen_modes:
                 raise ValidationError(f"duplicate mode name: {mode.name}")
             seen_modes.add(mode.name)
@@ -281,6 +283,9 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
                     f"in severity_order nor 'escalating' ({sorted(allowed_floors)})"
                 )
     if manifest.entrypoints:
+        if manifest.synthesizer is None:
+            raise ValidationError(
+                "entrypoints require a synthesizer (synthesis.md is bundled into every entrypoint)")
         skill_names = {s.name for s in manifest.skills}
         reserved = set(skill_names)
         if manifest.router:
@@ -300,6 +305,8 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
                 raise ValidationError(
                     f"entrypoint {ep.name!r}: name must be 1-64 lowercase letters, digits, "
                     "or hyphens (it becomes a directory under collapsed/skills/)")
+            if not ep.description:
+                raise ValidationError(f"entrypoint {ep.name}: description must be non-empty")
             if len(ep.description) > 1024:
                 raise ValidationError(f"entrypoint {ep.name}: description exceeds 1024 chars")
             if not ep.shapes:

@@ -567,6 +567,13 @@ def test_modes_section_empty_when_no_modes():
     assert modes_section(_router_manifest([])) == ""
 
 
+def test_modes_section_renders_mode_notes():
+    modes = [Mode(name="triage", breadth="critical tier", floor="Major",
+                  triggers=["triage"], note="A pre-merge gate: critical-tier only.")]
+    md = modes_section(_router_manifest(modes))
+    assert "A pre-merge gate: critical-tier only." in md   # Mode.note is rendered, not dead data
+
+
 def test_build_router_md_includes_modes_section():
     md = build_router_md(_router_manifest(_modes()))
     assert "## Depth modes" in md

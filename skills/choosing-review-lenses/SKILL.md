@@ -42,6 +42,10 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 | **review** | the top 2-4 lenses by relevance (the default; overridable) | "review", "review this", "code review", "review this PR", "review the diff" |
 | **comprehensive** | every relevant lens, uncapped — the full audit set at repo scope | "thorough", "comprehensive", "deep review", "use all relevant lenses", "review everything" |
 
+- **triage** — A pre-merge gate: run only the critical-tier lenses and report Major and above.
+- **review** — Default per-PR depth: relevance-ranked top-N with the round-based escalating floor.
+- **comprehensive** — On-demand or scheduled: run all relevant lenses and pin the floor at Nit so readability-class and other long-tail findings surface instead of being trimmed.
+
 ## Routes
 
 | When reviewing… | Run |

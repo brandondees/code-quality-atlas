@@ -496,19 +496,19 @@ def _eps():
 
 def test_validate_accepts_well_formed_entrypoints():
     skills = [_skill(name="hunting-silent-failures", shape="diff", picker="p")]
-    validate(Manifest("v0", skills, entrypoints=_eps()))  # no raise
+    validate(Manifest("v0", skills, synthesizer=_syn(), entrypoints=_eps()))  # no raise
 
 
 def test_validate_rejects_entrypoint_name_colliding_with_skill():
     eps = [Entrypoint(name="hunting-silent-failures", description="d", shapes=["diff"])]
     with pytest.raises(ValidationError, match="collides"):
-        validate(Manifest("v0", [_skill(picker="p")], entrypoints=eps))
+        validate(Manifest("v0", [_skill(picker="p")], synthesizer=_syn(), entrypoints=eps))
 
 
 def test_validate_rejects_unknown_entrypoint_shape():
     eps = [Entrypoint(name="reviewing-a-change", description="d", shapes=["bogus"])]
     with pytest.raises(ValidationError, match="shape"):
-        validate(Manifest("v0", [_skill(picker="p")], entrypoints=eps))
+        validate(Manifest("v0", [_skill(picker="p")], synthesizer=_syn(), entrypoints=eps))
 
 
 def test_validate_rejects_orphaned_lens():
@@ -516,7 +516,7 @@ def test_validate_rejects_orphaned_lens():
     skills = [_skill(name="hunting-silent-failures", shape="diff", picker="p")]
     eps = [Entrypoint(name="auditing-a-repository", description="d", shapes=["repo"])]
     with pytest.raises(ValidationError, match="not covered by any entrypoint"):
-        validate(Manifest("v0", skills, entrypoints=eps))
+        validate(Manifest("v0", skills, synthesizer=_syn(), entrypoints=eps))
 
 
 def test_real_manifest_declares_four_entrypoints_covering_all_lenses():
@@ -530,3 +530,23 @@ def test_real_manifest_declares_four_entrypoints_covering_all_lenses():
             if s.shape in ep.shapes or (ep.include_design and s.design):
                 covered.add(s.name)
     assert {s.name for s in m.skills} <= covered   # every lens covered
+
+
+def test_validate_rejects_entrypoints_without_synthesizer():
+    skills = [_skill(name="hunting-silent-failures", shape="diff", picker="p")]
+    eps = [Entrypoint(name="reviewing-a-change", description="d", shapes=["diff"])]
+    with pytest.raises(ValidationError, match="entrypoints require a synthesizer"):
+        validate(Manifest("v0", skills, entrypoints=eps))  # no synthesizer
+
+
+def test_validate_rejects_empty_entrypoint_description():
+    skills = [_skill(name="hunting-silent-failures", shape="diff", picker="p")]
+    eps = [Entrypoint(name="reviewing-a-change", description="", shapes=["diff"])]
+    with pytest.raises(ValidationError, match="description must be non-empty"):
+        validate(Manifest("v0", skills, synthesizer=_syn(), entrypoints=eps))
+
+
+def test_validate_rejects_bad_mode_name():
+    bad = [Mode(name="Quick Review", breadth="b", floor="escalating", triggers=["review"])]
+    with pytest.raises(ValidationError, match="invalid mode name"):
+        validate(Manifest("v0", [_skill()], synthesizer=_syn(), modes=bad))
