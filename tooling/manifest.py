@@ -111,12 +111,27 @@ class Mode:
 
 
 @dataclass
+class Entrypoint:
+    """A collapsed-form entrypoint skill that bundles a review shape's lenses.
+
+    Membership = skills whose `shape` is in `shapes`, plus (when `include_design`)
+    the design-capable lenses regardless of shape (so the decision entrypoint can
+    carry the ◆ diff lenses). `body` is optional richer when-to-use text."""
+    name: str
+    description: str
+    shapes: list[str]
+    include_design: bool = False
+    body: str = ""
+
+
+@dataclass
 class Manifest:
     taxonomy_version: str
     skills: list[Skill]
     router: Router | None = None
     synthesizer: Synthesizer | None = None
     modes: list[Mode] = field(default_factory=list)
+    entrypoints: list[Entrypoint] = field(default_factory=list)
 
 
 _NAME_RE = re.compile(r"^[a-z0-9-]+$")
@@ -265,6 +280,40 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
                     f"mode {mode.name}: floor {mode.floor!r} is not a severity level "
                     f"in severity_order nor 'escalating' ({sorted(allowed_floors)})"
                 )
+    if manifest.entrypoints:
+        skill_names = {s.name for s in manifest.skills}
+        reserved = set(skill_names)
+        if manifest.router:
+            reserved.add(manifest.router.name)
+        if manifest.synthesizer:
+            reserved.add(manifest.synthesizer.name)
+        seen_eps: set[str] = set()
+        covered: set[str] = set()
+        for ep in manifest.entrypoints:
+            if ep.name in seen_eps:
+                raise ValidationError(f"duplicate entrypoint name: {ep.name}")
+            seen_eps.add(ep.name)
+            if ep.name in reserved:
+                raise ValidationError(
+                    f"entrypoint {ep.name} collides with an existing skill/router/synthesizer name")
+            if not re.fullmatch(r"[a-z0-9-]{1,64}", ep.name):
+                raise ValidationError(
+                    f"entrypoint {ep.name!r}: name must be 1-64 lowercase letters, digits, "
+                    "or hyphens (it becomes a directory under collapsed/skills/)")
+            if len(ep.description) > 1024:
+                raise ValidationError(f"entrypoint {ep.name}: description exceeds 1024 chars")
+            if not ep.shapes:
+                raise ValidationError(f"entrypoint {ep.name}: shapes must be non-empty")
+            for shape in ep.shapes:
+                if shape not in {"diff", "repo", "decision", "artifact"}:
+                    raise ValidationError(f"entrypoint {ep.name}: unknown shape {shape!r}")
+            for s in manifest.skills:
+                if s.shape in ep.shapes or (ep.include_design and s.design):
+                    covered.add(s.name)
+        orphans = skill_names - covered
+        if orphans:
+            raise ValidationError(
+                f"lenses not covered by any entrypoint: {sorted(orphans)}")
 
 
 # Plain-scalar prose fields. A bare " #" inside one is read by YAML as a comment
@@ -392,5 +441,23 @@ def load_manifest(path: str) -> Manifest:
             ))
         except (KeyError, TypeError) as e:
             raise ValidationError(f"modes[{i}] in {path}: malformed mode ({e})")
+    entrypoints: list[Entrypoint] = []
+    for i, raw_ep in enumerate(data.get("entrypoints", []) or []):
+        try:
+            shapes = raw_ep["shapes"]
+            if not isinstance(shapes, list) or not all(isinstance(x, str) for x in shapes):
+                raise ValidationError(
+                    f"entrypoints[{i}] in {path}: 'shapes' must be a list of strings "
+                    f"(got {shapes!r}) — use 'shapes: [diff]', not 'shapes: diff'")
+            entrypoints.append(Entrypoint(
+                name=raw_ep["name"],
+                description=raw_ep["description"].strip(),
+                shapes=list(shapes),
+                include_design=bool(raw_ep.get("include_design", False)),
+                body=raw_ep.get("body", "").strip(),
+            ))
+        except (KeyError, TypeError) as e:
+            raise ValidationError(f"entrypoints[{i}] in {path}: malformed entrypoint ({e})")
     return Manifest(taxonomy_version=data["taxonomy_version"], skills=skills,
-                    router=router, synthesizer=synthesizer, modes=modes)
+                    router=router, synthesizer=synthesizer, modes=modes,
+                    entrypoints=entrypoints)

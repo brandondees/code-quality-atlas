@@ -2,7 +2,7 @@
 import pytest
 
 from tooling.manifest import (
-    Manifest, Mode, Skill, Source, ValidationError, load_manifest, validate,
+    Entrypoint, Manifest, Mode, Skill, Source, ValidationError, load_manifest, validate,
     _check_comment_truncation,
 )
 
@@ -459,3 +459,61 @@ def test_real_manifest_declares_three_modes():
     assert comprehensive.floor == least_severe
     review = next(mode for mode in m.modes if mode.name == "review")
     assert review.floor == "escalating"
+
+
+# --- Collapsed entrypoints (Plan 2) ---
+
+def test_load_manifest_parses_entrypoints(tmp_path):
+    body = (
+        "entrypoints:\n"
+        "  - name: reviewing-a-change\n"
+        "    description: review a diff/PR/change\n"
+        "    shapes: [diff]\n"
+        "  - name: reviewing-a-decision\n"
+        "    description: review an ADR/RFC/decision\n"
+        "    shapes: [decision]\n"
+        "    include_design: true\n"
+    )
+    m = load_manifest(_manifest_with_body(tmp_path, body))
+    assert [e.name for e in m.entrypoints] == ["reviewing-a-change", "reviewing-a-decision"]
+    assert m.entrypoints[0].shapes == ["diff"]
+    assert m.entrypoints[1].include_design is True
+    assert m.entrypoints[0].include_design is False  # default
+
+
+def test_load_manifest_defaults_entrypoints_to_empty(tmp_path):
+    assert load_manifest(_manifest_with_body(tmp_path, "")).entrypoints == []
+
+
+def _eps():
+    return [
+        Entrypoint(name="reviewing-a-change", description="d", shapes=["diff"]),
+        Entrypoint(name="auditing-a-repository", description="d", shapes=["repo"]),
+        Entrypoint(name="reviewing-a-decision", description="d", shapes=["decision"], include_design=True),
+        Entrypoint(name="reviewing-an-artifact", description="d", shapes=["artifact"]),
+    ]
+
+
+def test_validate_accepts_well_formed_entrypoints():
+    skills = [_skill(name="hunting-silent-failures", shape="diff", picker="p")]
+    validate(Manifest("v0", skills, entrypoints=_eps()))  # no raise
+
+
+def test_validate_rejects_entrypoint_name_colliding_with_skill():
+    eps = [Entrypoint(name="hunting-silent-failures", description="d", shapes=["diff"])]
+    with pytest.raises(ValidationError, match="collides"):
+        validate(Manifest("v0", [_skill(picker="p")], entrypoints=eps))
+
+
+def test_validate_rejects_unknown_entrypoint_shape():
+    eps = [Entrypoint(name="reviewing-a-change", description="d", shapes=["bogus"])]
+    with pytest.raises(ValidationError, match="shape"):
+        validate(Manifest("v0", [_skill(picker="p")], entrypoints=eps))
+
+
+def test_validate_rejects_orphaned_lens():
+    # a diff lens exists but no entrypoint covers the diff shape → orphan
+    skills = [_skill(name="hunting-silent-failures", shape="diff", picker="p")]
+    eps = [Entrypoint(name="auditing-a-repository", description="d", shapes=["repo"])]
+    with pytest.raises(ValidationError, match="not covered by any entrypoint"):
+        validate(Manifest("v0", skills, entrypoints=eps))
