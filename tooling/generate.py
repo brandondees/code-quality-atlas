@@ -335,6 +335,28 @@ def primary_owners(manifest: Manifest) -> dict[int, str]:
     return owners
 
 
+def modes_section(manifest: Manifest) -> str:
+    """The 'Depth modes' block for the router: separates relevance (which lenses
+    apply) from breadth (how many to run). Empty string when no modes declared."""
+    if not manifest.modes:
+        return ""
+    lines = [
+        "## Depth modes",
+        "",
+        "Routing first ranks **every** lens whose scope the change touches by "
+        "**relevance** — it is no longer a hard 2-4 cap. A depth mode then sets the "
+        "**breadth** (how far down the ranked list to run) and the severity floor. "
+        "Pick the mode from the request; default to **review**.",
+        "",
+        "| Mode | Breadth | Triggers |",
+        "|---|---|---|",
+    ]
+    for mode in manifest.modes:
+        triggers = ", ".join(f"\"{t}\"" for t in mode.triggers)
+        lines.append(f"| **{mode.name}** | {mode.breadth.strip()} | {triggers} |")
+    return "\n".join(lines).rstrip() + "\n\n"   # block ends with a blank line; "" when no modes
+
+
 def build_router_md(manifest: Manifest) -> str:
     """The composition layer: routes a 'what am I reviewing' situation to the
     2-4 lenses worth running, plus a one-line catalog of every lens. Built
@@ -377,7 +399,9 @@ def build_router_md(manifest: Manifest) -> str:
         "per-change review, never to the audit set. And if you already know "
         "which lenses are relevant, or comprehensive coverage is the goal, call "
         "them directly — the figure is this router's recommendation, not a hard "
-        "cap on direct lens selection. `reviewing-pr-and-process-hygiene` is "
+        "cap on direct lens selection. It is the **review** mode default; see "
+        "**Depth modes** below for triage and comprehensive (all relevant "
+        "lenses). `reviewing-pr-and-process-hygiene` is "
         "**additive** — on any PR it rides on top of the content lenses and does "
         "not spend one of the 2-4 slots.\n"
         "- Match the change against the routes below; when a change is several "
@@ -396,7 +420,8 @@ def build_router_md(manifest: Manifest) -> str:
         + (f"- After the lenses run, merge their findings with "
            f"`{manifest.synthesizer.name}` — one deduplicated, ranked report "
            "with a single verdict.\n" if manifest.synthesizer else "")
-        + "\n## Routes\n\n"
+        + "\n" + modes_section(manifest)
+        + "## Routes\n\n"
         "| When reviewing… | Run |\n"
         "|---|---|\n"
         f"{routes_table}\n\n"

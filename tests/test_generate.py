@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # tests/test_generate.py
 from pathlib import Path
-from tooling.manifest import Manifest, Route, Router, Skill, Source, load_manifest
+from tooling.manifest import Manifest, Mode, Route, Router, Skill, Source, load_manifest
 from tooling.generate import build_reference, build_skill_md, primary_owners
 
 
@@ -529,3 +529,50 @@ def test_generate_synthesizer_writes_skill_and_draft_eval(tmp_path):
     assert (out / "SKILL.md").exists()
     eval_doc = json.loads((out / "evals" / "eval.json").read_text())
     assert eval_doc["skills"] == ["synthesizing-review-findings"]
+
+
+# --- Depth modes rendering (Plan 1) ---
+from tooling.generate import modes_section, build_router_md
+
+
+def _router_manifest(modes=None):
+    skill = _skill(picker="Where do errors vanish?")
+    router = Router(
+        name="choosing-review-lenses", description="route a change to lenses",
+        routes=[Route(when="Bug fix", run=["hunting-silent-failures"])], body="",
+    )
+    return Manifest("v0", [skill], router=router, modes=modes or [])
+
+
+def _modes():
+    return [
+        Mode(name="triage", breadth="the critical tier only", floor="Major", triggers=["triage", "quick review"]),
+        Mode(name="review", breadth="the top 2-4 lenses by relevance", floor="escalating", triggers=["review"]),
+        Mode(name="comprehensive", breadth="every relevant lens, uncapped", floor="Nit",
+             triggers=["thorough", "use all relevant lenses"]),
+    ]
+
+
+def test_modes_section_renders_three_modes_and_triggers():
+    md = modes_section(_router_manifest(_modes()))
+    assert "## Depth modes" in md
+    for name in ("triage", "review", "comprehensive"):
+        assert name in md
+    assert "every relevant lens, uncapped" in md
+    assert "use all relevant lenses" in md           # a trigger phrase is shown
+    assert "relevance" in md and "breadth" in md      # separates relevance from breadth
+
+
+def test_modes_section_empty_when_no_modes():
+    assert modes_section(_router_manifest([])) == ""
+
+
+def test_build_router_md_includes_modes_section():
+    md = build_router_md(_router_manifest(_modes()))
+    assert "## Depth modes" in md
+    assert "comprehensive" in md
+
+
+def test_router_points_2to4_at_review_mode():
+    md = build_router_md(_router_manifest(_modes()))
+    assert "review** mode default" in md or "review mode default" in md
