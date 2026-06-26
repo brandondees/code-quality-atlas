@@ -1,0 +1,90 @@
+# auditing-documentation-health
+
+Do the docs still tell the truth? API parity, stale examples, ADR coverage, changelog discipline.
+
+## When to use
+
+**Shape: repo.** Run against the whole repository (scheduled or on demand), not a single diff.
+
+## Checklist
+
+## From category #22
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- **API surface ↔ docs parity:** does every new/changed public function, endpoint, CLI flag, or config key have a docstring/doc updated in the same diff? Stale signature-vs-doc = drift.
+- **Docstring accuracy:** do param names, types, return, and `raises`/`throws` in the docstring match the actual signature *after* this change? (params renamed but docstring not — flag.)
+- **Diátaxis coverage:** for a new feature, is there at least the right *mode* of doc — a how-to for a task, reference for an API? Don't accept a tutorial as a substitute for reference.
+- **README front-door:** does the README still answer what/why/install/minimal-example/next-steps after this change? New setup step but no README update = onboarding regression.
+- **Runnable example:** does the example actually run against the new code (compiles, imports resolve, no removed API)? Prefer doctests/CI-checked snippets.
+- **ADR for non-obvious decisions:** does an architecturally significant or surprising choice (new dependency, pattern, boundary, trade-off) have an ADR capturing context/decision/consequences? Code comments are not a substitute for the *why*.
+- **Changelog discipline:** does a user-facing change add a CHANGELOG entry in the right category, and is the SemVer impact (patch/minor/major, esp. breaking) correct?
+- **Runbook for operability:** for a new operational surface (job, queue, feature flag, alert), is there a runbook saying how to detect, diagnose, and remediate / roll back?
+- **Diagrams as code & current:** are diagrams diffable text (Mermaid/PlantUML), and do they still reflect the components after this change, or are they now stale?
+- **No orphaned/contradictory docs:** does this change delete or supersede docs it invalidates (removed endpoint still documented; deprecated path still in tutorial)?
+- **Comment rot:** are nearby comments/docstrings that the change falsifies updated or removed (not left lying)?
+- **Discoverability:** is the new doc linked from an index/nav/README, not just dropped in a folder?
+- **Agent-instructions drift:** if the repo carries an agent-instructions file (AGENTS.md / CLAUDE.md / equivalent), does this change keep it true — build/test/lint commands still correct, conventions and layout still accurate, subproject files updated where nearest-file-wins applies? Same drift class as README rot, but higher blast radius: agents follow stale instructions literally (cross #24 agent-native parity).
+
+---
+
+## Examples
+
+This skill is repo-shaped: its input is a docs-vs-code parity scan. Report each
+distinct issue as its own numbered finding. When the scan is healthy, the entire response is exactly this skill's no-finding sentence given in the decision rule below — never a numbered list of findings for a healthy scan.
+
+**Decision rule (apply before flagging):** a docs finding needs a concrete
+mismatch or gap — a documented thing that no longer exists, an existing public
+surface with no doc, an example that can't run, a docstring contradicting its
+signature. "Could have more docs" is not a finding. If the surface and the docs
+agree and examples run, report exactly "No findings: documentation is healthy".
+
+## Bad → finding
+
+**Input (docs parity scan):**
+
+```text
+README quickstart:   `pip install acme && acme init` — `acme init` was removed in v3
+                     (replaced by `acme setup`); install example imports acme.legacy
+public API:          14 endpoints; docs cover 9; /v1/exports (added 4 months ago) undocumented
+docstrings:          rotate_keys(key_id, *, force=False) — docstring documents `dry_run`
+                     param that was removed; says "returns bool", returns RotationReport
+CHANGELOG:           last entry 11 months ago; 6 user-facing releases since
+diagrams/arch.png:   binary image, references services deleted in Q1
+```
+
+**Expected finding:**
+
+1. **Broken front door:** the README quickstart fails on the first command
+   (`acme init` removed) and imports a deleted module — a new user cannot onboard;
+   fix and add a CI-checked runnable example.
+2. **Undocumented public surface:** 5 of 14 endpoints, including 4-month-old
+   `/v1/exports`, have no reference docs.
+3. **Docstring contradicts the signature:** `rotate_keys` documents a removed
+   `dry_run` param and the wrong return type — worse than no docstring; fix both.
+4. **Changelog abandoned:** 6 user-facing releases with no entries — consumers
+   can't track changes.
+5. **Stale binary diagram:** references deleted services and can't be diffed —
+   redraw as text (Mermaid) so drift shows up in review.
+
+## Good → no finding
+
+**Input (docs parity scan):**
+
+```text
+README quickstart:   runs in CI (doctest job green)
+public API:          22/22 endpoints documented; reference regenerated from schema
+docstrings:          signature parity check green
+CHANGELOG:           entry per release, categories + semver impact
+ADRs:                12, latest covers the queue migration decision
+```
+
+**Expected finding:** None — surface and docs agree, examples are CI-checked, the
+changelog is current. Report "No findings: documentation is healthy". Do NOT
+demand more documentation volume for its own sake — parity and accuracy are the
+bar, not page count.
+
+## Going deeper
+
+- [tool-rules.md](tool-rules.md) — static-analysis rules for the mechanical subset; for wiring linters, not needed for the judgment review.
+- [sources.md](sources.md) — the research behind each check; for provenance.

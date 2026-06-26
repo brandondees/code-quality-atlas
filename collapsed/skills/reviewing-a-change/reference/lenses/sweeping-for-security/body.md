@@ -1,0 +1,165 @@
+# sweeping-for-security
+
+Can an attacker abuse this? Injection, authorization, secrets, crypto, untrusted data.
+
+## When to use
+
+**Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists.
+
+## Checklist
+
+## From category #14
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- Does any query/command/HTML/path get built by string concatenation or interpolation of request-derived data? If so, demand parameterized queries / contextual output encoding / allow-listed path resolution.
+- Every state-changing or data-returning endpoint: is there an explicit authorization check tied to the *resource owner*, not just authentication? (IDOR = authenticated but not authorized.) Object references taken from the request (IDs, filenames) must be authorized, never trusted.
+- Can the *same actor* both initiate and approve a high-consequence action (a payment/refund, a role or permission grant, a deploy, a bulk delete)? Sensitive workflows need *segregation of duties / maker-checker* — two distinct actors, so no single actor completes the workflow alone. A role/permission gate authorizes *who* may act and is **not** itself dual-control: if the action records an initiator (e.g. `requested_by`) and an approver but never compares their identities, the maker-checker control is missing even when a role check is present. This is orthogonal to least-privilege (*how much* one actor may do) and IDOR (*whose* resource): flag the missing dual-control and surface it to security/compliance — *which* operations require it is a business-policy call, not a code default. (SOX §404; maps A01 Broken Access Control / A04 Insecure Design.)
+- Are secrets (keys, tokens, passwords, connection strings) absent from source, config-in-repo, and log output? Real secrets belong in a secrets manager / env injected at runtime.
+- **Credential & certificate expiry / rotation (correct at merge, detonates when the clock runs out):** does anything time-limited this change introduces or depends on — TLS/mTLS certs, OAuth tokens and refresh flows, API keys, signing/JWT keys, service-account creds — have a defined **renewal or rotation path**, and an alert before it lapses? A credential that works today and silently expires in N days is the single most preventable major-outage class; flag a hardcoded-and-unrotated secret or a cert/token with no owner, no expiry monitoring, and no rotation runbook (cross #26, #28).
+- Is crypto delegated to a vetted library with modern algorithms (AES-GCM/ChaCha20-Poly1305, argon2/bcrypt/scrypt for passwords, ECDSA/Ed25519)? Flag homegrown crypto, ECB mode, MD5/SHA1 for security, static IVs/nonces, and `Math.random()`/non-CSPRNG for tokens.
+- Is untrusted input ever deserialized with a format that can instantiate arbitrary types (Java/Python `pickle`/PHP unserialize/unsafe YAML)? Prefer data-only formats (JSON) with schema validation.
+- For any server-side fetch of a URL/host derived from user input: is the target allow-listed and are internal/metadata addresses (169.254.169.254, link-local, RFC1918, localhost) blocked? (SSRF / A10.)
+- Is PII/sensitive data minimized, encrypted at rest/in transit, and kept out of logs, URLs, and error messages? (Cross-links #27 and #16.)
+- Are state-changing requests protected against CSRF (same-site cookies + token, or non-cookie auth)? Are cookies `HttpOnly`, `Secure`, `SameSite`?
+- Safe defaults: deny-by-default access, TLS verification on, debug/stack traces off in prod, CORS not `*` with credentials, no default/sample credentials shipped.
+- Least privilege: does the code/service request the narrowest scopes, file perms, DB grants, and cloud IAM roles it needs? Flag wildcard IAM policies and over-broad DB users.
+- New/updated dependency: is it from a reputable source, recently maintained, free of known CVEs, and pinned via lockfile? (Cross-links #18.)
+- Is security-relevant activity (auth success/failure, access-control denials, high-value mutations) logged in a way that's actually monitorable (A09) — without logging the sensitive payload itself?
+
+---
+
+## Examples
+
+A diff often contains several independent vulnerabilities. Check every untrusted
+input against every sink it reaches and report each issue as its own numbered
+finding — finding one does not end the sweep. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
+
+## Bad → finding
+
+**Input (diff):**
+
+```python
+API_KEY = "prod-payments-secret-EXAMPLE-NOT-REAL"   # hardcoded production credential
+
+def get_invoice(request):
+    inv_id = request.GET["id"]
+    rows = db.execute(f"SELECT * FROM invoices WHERE id = {inv_id}")
+    return JsonResponse(rows[0])
+```
+
+**Expected finding:**
+
+1. **SQL injection:** `inv_id` comes from the request and is interpolated into the
+   query — use a parameterized query
+   (`db.execute("SELECT * FROM invoices WHERE id = %s", [inv_id])`).
+2. **Missing authorization (IDOR):** any authenticated user can fetch any invoice
+   by id; scope the lookup to the resource owner.
+3. **Hardcoded production secret** `API_KEY` in source — move to a secrets
+   manager / runtime env and rotate the exposed key.
+
+## Bad → finding
+
+**Input (diff):**
+
+```python
+def render_user_template(request):
+    name = request.GET["template"]
+    body = open(f"/srv/templates/{name}").read()        # user-controlled path
+    html = os.popen(f"render-md {name}").read()          # user input in a shell
+    if hashlib.md5(request.GET["sig"].encode()).hexdigest() == body[:32]:
+        return HttpResponse(html)
+```
+
+**Expected finding:**
+
+1. **Path traversal:** the user-supplied `name` reaches a filesystem path —
+   `../../etc/passwd` escapes `/srv/templates`. Resolve the path and confine it to
+   the directory, or allow-list known template names.
+2. **Command injection:** the same untrusted value is interpolated into a shell
+   command via `os.popen` — use `subprocess.run([...])` with an argument list and
+   no shell.
+3. **Weak hash for an integrity check:** MD5 is broken for security purposes — use
+   an HMAC with a server-side key.
+
+## Bad → finding
+
+**Input (diff):**
+
+```python
+@require_role("refund_approver")              # caller is authorized to approve any refund
+@router.post("/refunds/{refund_id}/approve")
+def approve_refund(refund_id, request):
+    refund = Refund.objects.get(id=refund_id)
+    refund.status = "approved"
+    refund.approved_by = request.user.id      # but nothing checks they aren't the requester
+    refund.save()
+    process_payout(refund)                     # money leaves immediately
+    return {"ok": True}
+```
+
+**Expected finding:**
+
+1. **Missing segregation of duties (maker-checker):** the approver role gates *who*
+   may approve, but nothing stops the same actor who requested the refund from
+   approving their own — one principal completes a high-consequence payout alone.
+   Require the approver to be a distinct actor from the requester (reject when
+   `refund.requested_by == request.user.id`). This is a workflow-authorization
+   control, distinct from least-privilege and IDOR — the role-gated lookup itself is
+   appropriate for an approver acting on others' refunds, so don't flag it as IDOR;
+   *which* operations need dual-control is a business-policy call, so surface it to
+   security/compliance rather than deciding the threshold here.
+
+**Decision rule:** a role or permission check (`@require_role`, an `is_admin` gate,
+a scope) authorizes *who* may act — it is **not** segregation of duties. When a
+high-consequence action records an initiator (`requested_by`, `created_by`) and an
+approver but never compares their identities, the maker-checker control is missing
+and you must report it, *even though* an authorization gate is present. "Auth is
+handled" is not evidence of dual-control.
+
+## Good → no finding
+
+**Input (diff):**
+
+```python
+def get_invoice(request):
+    invoice = Invoice.objects.get(
+        id=request.GET["id"], owner=request.user)   # ownership enforced, ORM-parameterized
+    return JsonResponse(invoice.as_dict())
+```
+
+**Expected finding:** None — the ORM parameterizes the lookup and the query is
+scoped to the resource owner, so there is no injection and no IDOR. Report
+"No findings". Do NOT demand extra defenses that add nothing here (the id needs no
+manual sanitizing once parameterized; authentication is the framework's job), and
+do NOT flag reading a request parameter as inherently unsafe — what matters is how
+it reaches the sink.
+
+## Good → no finding
+
+**Input (diff):**
+
+```python
+@require_role("refund_approver")
+@router.post("/refunds/{refund_id}/approve")
+def approve_refund(refund_id, request):
+    refund = Refund.objects.get(id=refund_id)
+    if refund.requested_by == request.user.id:        # maker-checker enforced
+        raise PermissionDenied("approver must differ from requester")
+    refund.status = "approved"
+    refund.approved_by = request.user.id
+    refund.save()
+    process_payout(refund)
+    return {"ok": True}
+```
+
+**Expected finding:** None — segregation of duties is enforced: an approver-role
+gate plus an explicit check that the approver is not the requester, so no single
+actor completes the payout alone. Report "No findings". Do NOT invent further
+dual-control requirements, and do NOT flag the role-gated `get(id=...)` as an IDOR
+— an approver is meant to act on others' refunds.
+
+## Going deeper
+
+- [tool-rules.md](tool-rules.md) — static-analysis rules for the mechanical subset; for wiring linters, not needed for the judgment review.
+- [sources.md](sources.md) — the research behind each check; for provenance.

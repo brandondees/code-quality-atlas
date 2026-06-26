@@ -1,0 +1,16 @@
+# References to mine — reviewing-agent-legibility
+
+## Contents
+
+- From category #35
+
+## From category #35
+
+### Key references
+
+- **"Creating AI-friendly codebases" (D. Consonni, 2024)** — https://medium.com/@dconsonni/creating-ai-friendly-codebases-82cb3203c118 → mine: the practitioner framing for agent-legible structure — self-contained modules, clear boundaries, and naming/layout an agent can navigate without loading the whole tree. The spine of the diff-arm checks.
+- **"Coding agents as a first-class consideration in project structures" (somedood, dev.to, 2024)** — https://dev.to/somedood/coding-agents-as-a-first-class-consideration-in-project-structures-2a6b → mine: the **"40% context rule"** (a change a reader must understand should fit well within a fraction of a working context window), **depth-first slices** (the function plus its key callees/types sit together rather than scattered), **self-contained modules**, and **AST-grounded agent interfaces** (structurally-addressable surfaces an agent can target). The concrete heuristics for context economy and navigability.
+- **Liu et al. — "Lost in the Middle: How Language Models Use Long Contexts" (arXiv 2307.03172, 2023)** — https://arxiv.org/abs/2307.03172 → mine: the empirical grounding for *why* context economy is a legibility property, not a style preference — models retrieve far worse from the middle of a long context, so a change that forces a large, scattered read is genuinely harder (and less safe) to reason about. Justifies treating "needs the whole repo loaded to understand" as a defect for agent and human alike.
+- **`llms.txt` proposal (J. Howard / Answer.AI, llmstxt.org, 2024)** — https://llmstxt.org/ → mine: the emerging machine-readable index standard — a top-level file pointing an agent at canonical entry points and docs. Adoption signal: requested/used across the ecosystem ([buildwithfern overview](https://buildwithfern.com/learn/docs/ai-features/llms-txt)). Grounds the index-presence check; surface as an improvement absent a stated agent-consumption need.
+- **GitClear — "AI Copilot Code Quality" research (annual; 2024 and 2025 editions)** — https://www.gitclear.com → mine: the measured "**superficially clean but intrinsically complex**" signature of AI-assisted code (rising duplication and quickly-reverted churn). Read here from the *reader's* side: code that passes line-by-line but is expensive to reason about within a budget is an agent-legibility defect — the mirror of #34's authorship-side reading.
+- **Anthropic — agent-skill / `AGENTS.md` authoring guidance** (the same best-practices spine #30/D7 builds on) → mine: what *good, scoped* agent onboarding looks like — the right run/test/convention commands and guardrails, progressively disclosed, not an absent file or a bloated dump. The rubric for the onboarding-file checks (authoring *conformance* stays #30; *fit for working in this repo* is here).

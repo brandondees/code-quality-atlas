@@ -1,0 +1,13 @@
+# References to mine — reviewing-artifact-conventions
+
+## Contents
+
+- From category #101
+
+## From category #101
+
+### Key references
+
+- **Anthropic — Agent Skill authoring best practices** — https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices → mine: the canonical standard. Frontmatter `name` (gerund, lowercase-hyphen) + a specific third-person `description` ≤1024 chars carrying explicit trigger keywords; a lean `SKILL.md` body (<500 lines, aim far less); progressive disclosure (detail in bundled, one-level-deep files loaded on demand; a ToC for files >100 lines); a single default approach over option-menus; no time-sensitive text; forward-slash paths; consistent terminology; model-portability (don't assume the reader is Claude).
+- **Anthropic — Equipping agents for the real world with Agent Skills** — https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills → mine: the three-tier progressive-disclosure cost model — metadata (always-on) → body (on relevance) → bundled files (on demand, "effectively unbounded"). Grounds why the body must stay lean and detail must be bundled, not inlined.
+- **Anthropic — Writing effective tools for AI agents** — https://www.anthropic.com/engineering/writing-tools-for-agents → mine: the description is the activation surface — specific, situation-naming triggers beat vague ones; too many/overlapping descriptions degrade selection. Grounds the trigger-richness and skip-clause checks.

@@ -1,0 +1,136 @@
+# reviewing-module-design
+
+Are the boundaries right? Coupling, encapsulation, interfaces that are hard to misuse, illegal states unrepresentable.
+
+## When to use
+
+**Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists.
+
+## Checklist
+
+## From category #9
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- Does the unit have **one** clear responsibility (high cohesion)? State its job in a sentence without "and."
+- Is the interface **narrow relative to the behavior** behind it (deep module), or a shallow pass-through adding no value?
+- What is the **strongest connascence crossing the boundary**, and is it local? (Position/Algorithm connascence across modules is a smell; prefer Name/Type.)
+- Does it **hide its implementation** so internals can change without breaking callers?
+- Is it **hard to misuse** — invalid argument/call-sequence prevented by types, not docs (caller ergonomics / pit of success)?
+- Any **Feature Envy** (method mostly manipulates another object's data → move it there)?
+- Any **Data Clump** (the same field/param cluster traveling together → extract a type)?
+- Law of Demeter respected (no `a.b.c.d` train-wreck reach-through)?
+- Mutability minimized; value objects immutable?
+- Composition preferred over inheritance; inheritance shallow and not used purely for reuse?
+- Any cyclic dependency between units (break via dependency inversion)?
+- "When in doubt, leave it out": is speculative public surface being added (cross #11)?
+
+---
+
+## From category #10
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- Are **invalid states representable**? Could you construct a value the domain forbids (an order both `draft` and `shipped`)? Model with a tagged union / state machine instead.
+- Is untrusted input **parsed into a precise type at the boundary** (parse-don't-validate), or validated then passed onward as raw primitives (re-validatable downstream)?
+- **Primitive obsession**: are domain concepts (email, money, id, %) raw `string`/`number`, or wrapped in domain types carrying invariants/units (cross #4)?
+- Are optional/nullable fields modeled explicitly (`Option`/`Maybe`/`| null`) rather than sentinel values (`-1`, `""`)?
+- Are unions/enums **exhaustively** handled (compiler-checked)?
+- Do (smart) constructors enforce invariants so an invalid instance can't exist?
+- Is `null`/`undefined` controlled (`strictNullChecks` on; no non-null assertions)?
+- Are mutually-exclusive nullable fields collapsed into a tagged union?
+- Do the **types and the persistence schema agree** on constraints (cross #20)?
+
+---
+
+## Examples
+
+Report each distinct issue as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
+
+## Bad → finding
+
+**Input (diff):**
+
+```python
+class Order:
+    def __init__(self):
+        self.status = "draft"          # "draft" | "paid" | "shipped" | "cancelled"
+        self.shipped_at = None         # set when shipped
+        self.cancelled_reason = None   # set when cancelled
+        self.tracking_number = ""      # "" until shipped
+```
+
+**Expected finding:**
+
+1. **Illegal states are representable:** nothing stops `status == "cancelled"` with
+   a `shipped_at`, or `status == "shipped"` with no tracking number. Model the
+   lifecycle as a tagged union / state machine (e.g.
+   `Shipped(shipped_at, tracking_number)` vs `Cancelled(reason)`) so each state
+   carries exactly its own data.
+2. **Stringly-typed status** invites typos — use an enum or the tagged union's tag.
+3. **Sentinel values** (`""`, `None`) stand in for "absent" — use explicit optional
+   types tied to the state that owns them.
+
+## Bad → finding
+
+**Input (diff):**
+
+```js
+function applyDiscount(customer) {
+  const tier = customer.account.subscription.plan.tier;   // reach-through
+  if (tier === "gold") {
+    customer.cart.total = customer.cart.total * 0.9;      // mutates another object's data
+  }
+}
+```
+
+**Expected finding:**
+
+1. **Law-of-Demeter violation:** the four-hop reach-through
+   (`customer.account.subscription.plan.tier`) couples this function to the
+   internal structure of three other objects — any reshuffle breaks it. Ask, don't
+   take: `customer.discountTier()`.
+2. **Feature Envy / broken encapsulation:** the function mutates `cart`'s data from
+   outside — move the discount onto the cart (or have the customer apply it).
+
+## Good → no finding
+
+**Input (diff):**
+
+```python
+@dataclass(frozen=True)
+class EmailAddress:
+    value: str
+
+    @classmethod
+    def parse(cls, raw: str) -> "EmailAddress":
+        if "@" not in raw:
+            raise InvalidEmail(raw)
+        return cls(raw.strip().lower())
+```
+
+**Expected finding:** None — untrusted input is parsed once into a precise immutable
+type at the boundary (parse-don't-validate); downstream code can't hold an invalid
+`EmailAddress`. Report "No findings". Do NOT flag the small surface as "needs more
+methods," do NOT suggest an interface/abstract base for a single implementation, and
+do NOT call a deliberately narrow value object "anemic."
+
+## Good → no finding
+
+**Input (diff):**
+
+```ts
+type PaymentState =
+  | { kind: "pending" }
+  | { kind: "settled"; settledAt: Date }
+  | { kind: "failed"; reason: string };
+```
+
+**Expected finding:** None — a tagged union where each state carries exactly its own
+data; illegal combinations are unrepresentable and `switch` over `kind` is
+compiler-checked for exhaustiveness. Report "No findings"; do not invent issues.
+
+## Going deeper
+
+- [tool-rules.md](tool-rules.md) — static-analysis rules for the mechanical subset; for wiring linters, not needed for the judgment review.
+- [sources.md](sources.md) — the research behind each check; for provenance.

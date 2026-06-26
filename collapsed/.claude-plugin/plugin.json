@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "code-quality-atlas-collapsed",
+  "displayName": "Code Quality Atlas (collapsed)",
+  "description": "Collapsed 4-entrypoint form of the code-quality-atlas suite for cloud / account-skill / context-budget installs. Lenses are bundled and loaded on demand.",
+  "author": {
+    "name": "Brandon Dees",
+    "url": "https://github.com/brandondees"
+  },
+  "repository": "https://github.com/brandondees/code-quality-atlas",
+  "license": "MIT AND CC-BY-4.0",
+  "keywords": [
+    "code-review",
+    "code-quality",
+    "security",
+    "performance",
+    "testing",
+    "accessibility",
+    "maintenance",
+    "audit"
+  ]
+}

@@ -1,0 +1,18 @@
+# References to mine — reviewing-performance-and-efficiency
+
+## Contents
+
+- From category #15
+
+## From category #15
+
+### Key references
+
+- **Brendan Gregg — Systems Performance (and the USE method)** — http://www.brendangregg.com/usemethod.html → mine: measure before optimizing; for each resource check Utilization, Saturation, Errors. Anchors the "profile, don't guess" discipline reviews should enforce.
+- **Donald Knuth — "Structured Programming with go to Statements" (1974)** → mine: the actual provenance of "premature optimization is the root of all evil (97% of the time)" — and its often-dropped corollary: *do* optimize the critical 3%. Use to keep the counterweight balanced, not absolutist.
+- **Martin Fowler — "Yet Another Optimization Article" / refactoring + performance writing** → mine: optimize against a measured performance profile, not intuition; keep code clean first because clean code is easier to make fast.
+- **Brendan Gregg — Flame Graphs** — https://www.brendangregg.com/flamegraphs.html → mine: hot-path identification is visual and data-driven; a review claiming a perf problem should be able to point at a profile, not a vibe.
+- **web.dev — Core Web Vitals (LCP, INP, CLS)** — https://web.dev/articles/vitals/ → mine: the canonical, user-centric frontend perf budget, judged at the **p75** of real users. Thresholds: **LCP ≤ 2.5s** (loading), **INP ≤ 200ms** (responsiveness — **replaced FID on 2024-03-12**), **CLS ≤ 0.1** (visual stability). Bundle/startup work should be justified against these.
+- **AWS / FinOps Foundation — FinOps Framework** — https://www.finops.org/ → mine: cloud-cost as a first-class efficiency axis (right-sizing, egress, idle resources, per-request cost) — the FinOps facet of #15.
+- **FinOps Foundation — FOCUS (FinOps Open Cost & Usage Specification)** — https://focus.finops.org/ → mine: a vendor-neutral schema for cloud/SaaS billing data (v1.0 GA 2024; v1.2 ratified 2025-05-29; v1.3 2025-12-04) — cost per service/feature becomes *queryable and comparable*, so "does this change add per-request cost" is answerable from data, not vibes. Upgrades the FinOps facet from folklore to a standard.
+- **Green Software Foundation — Software Carbon Intensity (SCI), ISO/IEC 21031:2024** — https://greensoftware.foundation/standards/sci/ → mine: carbon as a *rate* per functional unit (per user, per transaction, per API call) rather than an absolute total — the same review posture as performance budgets: efficiency regressions show up as a rate change. First ISO standard for software carbon measurement (March 2024); the energy/carbon twin of the FinOps facet.

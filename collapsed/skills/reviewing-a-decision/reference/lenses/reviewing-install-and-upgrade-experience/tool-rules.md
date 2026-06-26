@@ -1,0 +1,21 @@
+# Tool rules to triage — reviewing-install-and-upgrade-experience
+
+> **Selecting tools for this stack.** The tools named below are field-tested starting points, not a mandate. Pick the one that fits this codebase's language version, build, and CI — and verify it actually runs on your toolchain before relying on it. A listed tool that is broken, abandoned, or noisy on your setup is a gap to close, not a permanent `continue-on-error`: prefer a working, maintained equivalent (often a younger, less well-known one) over a canonical-but-broken default. The capability is the requirement; the specific tool is replaceable.
+
+## Contents
+
+- From category #33
+
+## From category #33
+
+### Tooling rules worth lifting
+
+- **Fresh-install / quickstart CI job** — start from a clean checkout / empty container and run *only* the documented install + quickstart (`npx`, `pipx run`, `docker run`), so an undocumented prerequisite or rotted quickstart fails CI not the adopter; executable-README harnesses (`cargo test --doc` via `include_str!`, Python `doctest`, **phmdoctest**, **markdown-doctest**, **mdsh**, **cram**).
+- **Config-schema validators** — **pydantic-settings** (`extra='forbid'`), **confuse** (Python), **envalid** / **znv** / **convict** / **zod** (JS/TS), **viper** + **kelseyhightower/envconfig** (Go), **`cue vet`** / **Dhall**, **HCL `validation { condition, error_message }`** — validate at startup, surface unknown/missing keys with actionable messages. `(verify)`
+- **API/ABI break detectors (CI gate)** — **`cargo-semver-checks`** / **`cargo-public-api`** (Rust), **`@microsoft/api-extractor`** + **`@arethetypeswrong/cli`** (TS), **`griffe check`** (Python), **`apidiff`/`gorelease`/`go-apidiff`** (Go), **`japicmp`/`revapi`** (Java), **.NET `EnablePackageValidation`**, **`elm diff`** (compiler-enforced semver) — catch a consumer-facing break and assert the version bump matches it.
+- **Migration / codemod runners** — **jscodeshift**, **ts-morph**, **OpenRewrite** (`rewriteDryRun`), **Rector** (PHP), **`cargo fix --edition`**, **`go fix`** / **`gofmt -r`**, **`pyupgrade`** / **`ruff check --fix`** (classifies safe vs unsafe fixes), **`ng update`**, **`@next/codemod`**, **`kubectl convert`** — distribute the upgrade as a command the consumer/agent runs and diffs.
+- **Packaging-shape & distribution validators** — **publint**, **`@arethetypeswrong/cli`**, **package-json-validator**, **Knip** (dead files/deps/exports before publish), **`vsce`** (VS Code manifest), **`mcpb`** (MCP bundle manifest: capabilities/permissions/config); registry deprecation via **`npm deprecate`** (reversible) vs `unpublish`/`yank`. `(verify)`
+- **Provenance / supply-chain on publish & install** — **`npm publish --provenance`** + Trusted Publishing (OIDC, GA 2025) with **`npm audit signatures`** / **slsa-verifier** verify; **`npm ci --ignore-scripts`** + **`can-i-ignore-scripts`**; **`pip --require-hashes`** + `pip-compile --generate-hashes`; **`cargo build --locked`**; **`go mod verify`** (cross #18). `(verify)`
+- **Reproducible-install / idempotency gates** — **hadolint** pin rules **DL3008**/**DL3013**/**DL3016**/**DL3018**/**DL3028** (+ footprint **DL3009**/**DL3015**/**DL3059**); **ShellCheck** **SC2039**/**SC2086** + `shell=sh`; **Molecule `idempotence`** / **`ansible-lint`** (run-twice ⇒ no change); pinned toolchains (`rust-toolchain.toml`, `mise.lock`, `.nvmrc`); **`.gitattributes` `eol=lf`**; **`docker buildx --platform`**. `(verify exact DL numbers)`
+- **Deprecation surfacing & EOL** — runtime warnings (`util.deprecate`, Python `DeprecationWarning`, `@deprecated`, `#[deprecated]`, `[Obsolete]`), `Deprecation`/`Sunset` HTTP headers, OpenAPI `deprecated: true`; linters **`staticcheck SA1019`** (Go), **`@typescript-eslint/no-deprecated`**, **`javac -Xlint:deprecation`/`jdeprscan`**; **endoflife.date** API + Renovate `endoflife-date` datasource (don't pin to an EOL release). `(verify IDs)`
+- **Release + upgrade-notes automation** — **release-please** / **changesets** / **git-cliff** with a `BREAKING`/`Migration` section keyed off Conventional Commits; **Renovate `automerge`** scoped by update-type (auto-merge clean patch/minor, hold majors) — the workflow a well-versioned project *enables* for its consumers (cross #22, #24).

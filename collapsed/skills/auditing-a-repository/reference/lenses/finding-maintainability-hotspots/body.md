@@ -1,0 +1,107 @@
+# finding-maintainability-hotspots
+
+Where does the repo hurt most? Churn × complexity, change-coupling, bus factor, untracked debt.
+
+## When to use
+
+**Shape: repo.** Run against the whole repository (scheduled or on demand), not a single diff.
+
+## Checklist
+
+## From category #21
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- **Change amplification:** did one conceptual change force edits in N>3 files/modules? If so, is that essential (one concept, many sites) or accidental (a missing abstraction / leaked detail)?
+- **Shotgun surgery smell:** the same constant, enum case, validation, or shape is edited in multiple places in this diff — flag for consolidation.
+- **Blast radius:** does the change touch a high fan-in module (many importers)? Is there a contract/compat note or test proving downstream callers still hold?
+- **Refactorability gate:** is the changed code covered by tests *before* the change? If not, was a characterization/pin-down test added first?
+- **Debt visibility:** new `TODO`/`FIXME`/`HACK` — does it link to a tracked issue and say *why* (Fowler quadrant: deliberate+prudent is OK if recorded)? Reject silent/untracked debt.
+- **Knowledge concentration / bus factor:** does this PR touch a file with a single historical author or a long-abandoned area? Flag for a second reviewer / knowledge-spreading.
+- **Onboarding cost:** would a new engineer understand *why* this exists from the code + nearby docs alone, or only from tribal knowledge?
+- **Hidden coupling:** are two files that "shouldn't" know about each other being changed together again (change-coupling)? Name the implicit contract.
+- **Connascence locality:** does the change introduce connascence (of position, meaning, value, timing…) that crosses a module boundary? Stronger/longer-distance connascence = higher amplification.
+- **Reversibility:** is this change easy to undo, or does it bake in a one-way decision (data format, public API, migration)? One-way doors deserve more scrutiny.
+- **Complexity trend:** does the diff raise cyclomatic/cognitive complexity of an already-hot function, or reduce it? Net direction matters more than absolute number.
+- **Tidy-first economics (timing & sequencing):** if the diff mixes a structural tidying (rename, extract, reorder, dedupe) with a behavioral change, should the tidying land *first and separately* so the behavioral diff stays small and reviewable? Judge the *now / after / never* call by coupling-and-cohesion — tidy **now** when it removes coupling the change must otherwise fight, **defer** when the payoff is speculative, **never** on leaf/stable code — rather than tidying reflexively. (Beck, *Tidy First?*; the *sequencing* lives in #24, the *economics* here.)
+- **Speculative generality (counterweight):** is added "flexibility" (config knobs, plugin points, abstract base) justified by a *present* second use, or is it pre-emptive and itself future maintenance cost?
+
+---
+
+## Examples
+
+This skill is repo-shaped: its input is repository history/scan data (churn,
+complexity, authorship, co-change), not a single diff. Report each distinct issue
+as its own numbered finding. When the scan is healthy, the entire response is exactly this skill's no-finding sentence given in the decision rule below — never a numbered list of findings for a healthy scan.
+
+## Bad → finding
+
+**Input (repo scan, last 12 months):**
+
+```text
+file                          commits  authors  cognitive-complexity  todo/hack
+billing/invoice_engine.py        87       1            142               9
+api/routes.py                    41       6             18               0
+models/user.py                   12       4              9               1
+```
+
+**Expected finding:**
+
+1. **Hotspot:** `billing/invoice_engine.py` — highest churn × highest complexity;
+   refactoring it pays for itself fastest.
+2. **Bus factor 1:** a single author owns 87 commits of a 142-complexity file —
+   require a second reviewer and knowledge-spreading.
+3. **Untracked debt:** nine `TODO/HACK` markers with no linked issues — link them
+   to tracked issues or schedule them.
+4. `api/routes.py` churns a lot but is simple and shared — fine; not a hotspot.
+
+## Bad → finding
+
+**Input (repo scan, co-change analysis):**
+
+```text
+pair                                          co-change rate   import link?
+orders/checkout.py <-> email/templates.py          91%              no
+orders/checkout.py <-> orders/cart.py              74%              yes
+```
+
+**Expected finding:**
+
+1. **Hidden coupling:** `checkout.py` and `email/templates.py` change together in
+   91% of commits with no code-level dependency — an implicit contract, likely
+   duplicated order-summary formatting. Name the contract and make it explicit
+   (shared type or template input builder) so a checkout change can't silently
+   break emails.
+2. The `checkout <-> cart` coupling is expected — they share a declared import.
+
+## Good → no finding
+
+**Input (repo scan, last 12 months):**
+
+```text
+file                          commits  authors  cognitive-complexity  todo/hack
+api/handlers.py                  23       5             11           1 (linked #482)
+core/pricing.py                  18       4             14           0
+lib/utils.py                      9       6              6           0
+```
+
+**Expected finding:** None — churn is spread across files with multiple authors,
+complexity is modest everywhere, and the one TODO is tracked against an issue.
+Report "No findings: no maintainability hotspots in this scan". Do NOT invent a
+hotspot from the merely-highest number in a healthy table — hotspot means churn AND
+complexity AND concentration compounding, not "something has to be worst."
+
+**Decision rule (apply before naming any hotspot):** a file is a hotspot only when
+risk factors *compound* — e.g. cognitive complexity well above a healthy bound
+(roughly ≥ 40–50) **together with** heavy churn, or ownership concentrated in 1–2
+authors, or a pile of untracked debt markers. A file with modest complexity
+(≤ ~20), several authors, and tracked TODOs is healthy **even if it has the highest
+numbers in the table** — every table has a maximum row; a maximum is not a finding.
+When asked "what should we act on?" and the scan is healthy, the correct,
+complete answer is "No findings: no maintainability hotspots in this scan" — do not
+pad it with refactoring recommendations for the biggest healthy file.
+
+## Going deeper
+
+- [tool-rules.md](tool-rules.md) — static-analysis rules for the mechanical subset; for wiring linters, not needed for the judgment review.
+- [sources.md](sources.md) — the research behind each check; for provenance.
