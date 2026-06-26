@@ -71,10 +71,13 @@ same generated content — no lens prose is authored twice.
 
 ```text
 collapsed/skills/reviewing-a-change/
-├── SKILL.md                 # shape-scoped trigger + relevance routing + mode rules + "load lens, synthesize"
+├── SKILL.md                      # shape-scoped trigger + relevance routing + mode rules + "load lens, synthesize"
 └── reference/
-    ├── lenses/<lens>.md      # each in-shape lens: when-to-use + full heuristics + examples, self-contained
-    └── synthesis.md          # synthesizer procedure incl. the per-mode severity-floor policy
+    ├── lenses/<lens>/
+    │   ├── body.md               # when-to-use + full heuristics + examples — the review content (what the entrypoint Reads)
+    │   ├── tool-rules.md         # static-analysis rules — deeper level, linked from body.md, opened on demand
+    │   └── sources.md            # research provenance — deeper level, linked from body.md, opened on demand
+    └── synthesis.md              # synthesizer procedure incl. the per-mode severity-floor policy
 ```
 
 - **Lens membership** is derived from each skill's existing `shape` and `design`
@@ -83,10 +86,13 @@ collapsed/skills/reviewing-a-change/
   `reviewing-artifact-conventions` + its rubrics → `reviewing-an-artifact`. A
   design-capable lens is bundled in more than one entrypoint — duplication in
   bundled files has no context cost until read.
-- **Each `reference/lenses/<lens>.md`** is composed from the same `built_from`
-  sections the standalone lens uses (when-to-use + full `heuristics` + `examples`;
-  `tool-rules`/`sources` folded or omitted as deeper detail), so content parity is
-  structural.
+- **Progressive disclosure is preserved per lens.** `body.md` (composed from the
+  same `built_from` `heuristics` + `examples` the standalone lens uses) is what the
+  entrypoint loads when a lens is selected. `tool-rules.md` and `sources.md` are a
+  *further* level down — **linked from `body.md`, tightly folded, zero context cost
+  until the agent or user calls for deeper provenance/tooling**. This mirrors the
+  standalone lens's `SKILL.md → reference/*` disclosure, just nested under the
+  entrypoint, so content parity is structural.
 
 ### Agent flow (collapsed form)
 
@@ -191,13 +197,17 @@ doc updates. Resolves Q20 and D16.
 selection (Q13 team-preferences overlay sets it when built); content-sniffing
 artifact detection (unchanged from D15).
 
+## Resolved sub-questions
+
+- **Lens-bundle composition (resolved):** `body.md` = when-to-use + heuristics +
+  examples; `tool-rules.md` and `sources.md` ship as a deeper, tightly-folded
+  disclosure level linked from `body.md` — reachable when deeper context is called
+  for, zero overhead until then. (Not omitted.)
+- **Collapsed `plugin.json` (resolved):** generated from a single source alongside
+  `marketplace.json` (not hand-kept), to avoid drift.
+
 ## Open implementation sub-questions
 
-- Exact `reference/lenses/<lens>.md` composition (include `tool-rules`/`sources`, or
-  keep those as deeper nested files?). Lean: when-to-use + heuristics + examples;
-  omit tool-rules/sources from the bundle (advisory, not needed for the judgment).
-- Whether the second plugin's `plugin.json` is hand-kept or generated from
-  `marketplace.json` (prefer generated to avoid drift).
 - Command sugar naming for CLI installs (`/atlas-triage`, `/atlas-review --depth`,
   `/atlas-audit-comprehensive`) — finalize in the implementation plan.
 
