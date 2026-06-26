@@ -1,5 +1,9 @@
 # Collapsed Entrypoint Emission Implementation Plan
 
+**Status: implemented** (PR #80, branch `claude/plans-implementation-5abwaw`). The
+unchecked task boxes below are the original execution plan, kept as the historical
+record; the shipped behavior is the source of truth.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a second emission target — a **collapsed form** of 4 entrypoint skills (`reviewing-a-change`, `auditing-a-repository`, `reviewing-a-decision`, `reviewing-an-artifact`) that bundle the suite's lenses as on-demand `reference/lenses/<lens>/body.md` files — so the suite installs into cloud/account-skill and context-budget-constrained surfaces as 4 skills instead of 35, while the standalone 35 keep shipping unchanged.

@@ -49,16 +49,18 @@ The same marketplace also offers a **collapsed** plugin —
 `code-quality-atlas-collapsed` — that installs the suite as **4 entrypoint
 skills** (`reviewing-a-change`, `auditing-a-repository`, `reviewing-a-decision`,
 `reviewing-an-artifact`) instead of 35, bundling each shape's lenses and loading
-them on demand. It suits **cloud / account-skill / context-budget-constrained**
-surfaces; the standalone form keeps the richest top-level discoverability. Install
-**one form, not both**:
+them on demand. The collapsed **form** is the one to reach for on
+**cloud / account-skill / context-budget-constrained** surfaces; the standalone
+form keeps the richest top-level discoverability. Install **one form, not both**.
+
+The `/plugin install` below is the **local CLI / desktop / IDE** path (like the
+standalone plugin, it does **not** load in web/cloud — see the callout below). For
+the collapsed form **in cloud**, enable it as account skills or vendor it with the
+`--collapsed` flag, per [`distribution.md`](distribution.md) (*Two forms*).
 
 ```text
 /plugin install code-quality-atlas-collapsed@code-quality-atlas
 ```
-
-See [`distribution.md`](distribution.md) (*Two forms*) for which form fits which
-surface, and the `--collapsed` flag on the packaging/vendoring scripts.
 
 Or per-repo via settings — commit this to a project's `.claude/settings.json`,
 which installs the plugin for **local CLI / desktop / IDE** sessions that trust
@@ -87,6 +89,11 @@ the folder (it avoids the interactive `/plugin` command):
 }
 ```
 
+For the **collapsed** form instead, keep the same `extraKnownMarketplaces` block
+(one marketplace serves both) and swap the `enabledPlugins` key to
+`"code-quality-atlas-collapsed@code-quality-atlas": true` — enable one form, not
+both.
+
 > **Note:** if installing from a private copy/fork of this repo, the installing
 > machine needs git credentials that can read it (`gh` auth or SSH keys; web
 > sessions clone with your GitHub credentials).
@@ -104,6 +111,15 @@ decides how those updates arrive:
   and do **not** auto-refresh by default. Either pull manually with
   `/plugin marketplace update code-quality-atlas`, or enable auto-update once
   (`/plugin` → **Marketplaces** → `code-quality-atlas` → **Enable auto-update**).
+
+The same mechanics apply to the **collapsed** plugin
+(`code-quality-atlas-collapsed`): the settings snippet below installs and refreshes
+it per session on local CLI, and an interactive `/plugin install` caches it until you
+update or enable auto-update. Both plugins share the one marketplace, so
+`/plugin marketplace update code-quality-atlas` (and `keep-plugin-current.sh`)
+refresh whichever form you installed. In **cloud**, neither plugin loads — refresh
+the collapsed form by re-enabling its account skills or re-running
+`vendor-skills.sh --collapsed` and committing, exactly as for the standalone form.
 
 > **Stale-install gotcha (esp. for routines).** An interactive cached install with
 > auto-update *off* stays pinned to whatever commit it was installed at and can

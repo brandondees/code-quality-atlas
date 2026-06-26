@@ -28,8 +28,9 @@ scenarios:
   authored artifacts like `SKILL.md` against their own standard, and 10 more). Each
   leads with a one-line tagline and an explicit *Skip when…* clause,
   runs on its own, and carries its full checklist in `reference/heuristics.md`.
-- **`choosing-review-lenses`** — a router that maps a change to the 2-4 lenses worth
-  running, so you don't have to know the catalog.
+- **`choosing-review-lenses`** — a router that ranks a change's relevant lenses and
+  runs the top few by default, with **triage** and **comprehensive** depth modes for
+  fewer or all of them, so you don't have to know the catalog.
 - **`synthesizing-review-findings`** — merges multiple lenses (and any other
   reviewer) into one deduplicated, severity-ranked, single-verdict report.
 
@@ -100,8 +101,9 @@ in [`docs/install.md`](docs/install.md).
 **Most of the time you want one command.** Built a feature and want it reviewed? Run
 **`/atlas-review-pr <pr>`** if it's a pull request, or **`/atlas-code-review`** for
 local or pushed-branch changes with no PR. That's the whole happy path — the command
-**picks the 2–4 lenses your change actually needs and merges their findings into one
-ranked verdict for you.** You don't pick lenses by hand or run the synthesizer
+**picks the lenses your change actually needs — a few by default, or every relevant
+one in comprehensive mode — and merges their findings into one ranked verdict for
+you.** You don't pick lenses by hand or run the synthesizer
 yourself; reach for an individual lens (the rows below) only when you already know
 which one you want. If you ran a command and got useful feedback, you used it right.
 
@@ -109,7 +111,7 @@ which one you want. If you ran a command and got useful feedback, you used it ri
 |---|---|
 | A whole PR | `/atlas-review-pr` |
 | Local changes with no PR (working tree, or a pushed branch) | `/atlas-code-review` |
-| By hand, unsure which lenses apply | `choosing-review-lenses` (maps the change to 2-4 lenses) |
+| By hand, unsure which lenses apply | `choosing-review-lenses` (ranks the change's relevant lenses; top few by default) |
 | The relevant lens is obvious | call it directly (async change → `reviewing-concurrency-and-async`) |
 | You ran more than one lens | finish with `synthesizing-review-findings` |
 | Many repos at once | the [multi-repo audit runbook](docs/runbooks/multi-repo-audit.md) |
@@ -153,6 +155,7 @@ re-gate.
 | Path | What's in it |
 |---|---|
 | [`skills/`](skills/) | The 33 lenses + `choosing-review-lenses` (router) + `synthesizing-review-findings` (synthesizer) |
+| [`collapsed/`](collapsed/) | Generated 4-entrypoint form of the suite for cloud / account-skill installs; each entrypoint bundles its shape's lenses and loads them on demand |
 | [`commands/`](commands/) | Slash commands: `/atlas-review-pr`, `/atlas-code-review`, `/atlas-init`, `/atlas-rebase-stale` |
 | [`hooks/`](hooks/) | `SessionStart` routing hook (side-effect-free) |
 | [`templates/`](templates/) | `REVIEW.md` convergence policy + `agents-routing-snippet.md` routing block |
