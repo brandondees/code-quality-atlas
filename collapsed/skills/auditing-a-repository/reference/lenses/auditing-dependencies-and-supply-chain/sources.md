@@ -1,0 +1,36 @@
+# References to mine — auditing-dependencies-and-supply-chain
+
+## Contents
+
+- From category #18
+- From category #27
+
+## From category #18
+
+### Key references
+
+- **SLSA — Supply-chain Levels for Software Artifacts (OpenSSF)** — https://slsa.dev/ → mine: a build-integrity ladder (v1.0 Build L1–L3: provenance → signed/hosted → isolated/non-forgeable). Can you *prove* the artifact came from this source via this build?
+- **OpenSSF Scorecard** — https://securityscorecards.dev/ `(verify URL)` → mine: 18+ automated checks of a dependency's security hygiene (branch protection, code review, maintained, pinned deps, fuzzing) — a vetting rubric for "should we depend on this?"
+- **SBOM — SPDX & CycloneDX (OWASP)** — https://cyclonedx.org/ → mine: the component inventory (packages, versions, licenses, relationships); the basis for both vuln scanning and license review (cross #27).
+- **OSV.dev / OSV-Scanner (Google), pip-audit, npm audit, govulncheck, OWASP Dependency-Check, Trivy, Grype, Snyk** → mine: known-CVE detection across declared *and transitive* deps.
+- **Russ Cox — "Our Software Dependency Problem" (2019)** — https://research.swtch.com/deps `(verify URL)` → mine: a discipline for *evaluating* a dependency before adding it (cost, maintenance, transitive weight, security surface).
+- **left-pad / event-stream / xz-utils (CVE-2024-3094)** → mine: the canonical cautionary tales — trivial dep removal breakage, account-takeover injection, a backdoor planted by a "maintainer."
+
+## From category #27
+
+### Key references
+
+- **SPDX — license identifiers + SBOM** — https://spdx.org/licenses/ (standard short IDs + permanent URLs).
+  → mine: standard license IDs (`MIT`, `Apache-2.0`, `GPL-3.0-only`, `LGPL-3.0`, `AGPL-3.0-only`, `BSD-3-Clause`, `MPL-2.0`) and `SPDX-License-Identifier:` headers; SBOM (SPDX / CycloneDX) as the provenance artifact a review can check against.
+- **FSF "copyleft" guidance + Blue Oak / choosealicense.com**
+  → mine: copyleft strength ladder — permissive (MIT/BSD/Apache-2.0) → weak/file-level (MPL-2.0, LGPL) → strong (GPL) → network/strong (AGPL). **AGPL triggers on *network interaction*, not just distribution** — the classic SaaS surprise: modifying AGPL software and offering it as a service obliges you to provide its source to users who interact with it. Apache-2.0 carries an explicit patent grant; GPLv2-only ↔ Apache-2.0 is a known incompatibility.
+- **OpenChain / OWASP Dependency-Track + CycloneDX** `(verify)`.
+  → mine: continuous SBOM-based license + vulnerability + policy monitoring; treat license policy as a gate, not a one-time audit. (Vuln side cross-links #18.)
+- **GDPR (EU 2016/679) & CCPA/CPRA**
+  → mine: lawful basis + consent, **data minimization**, purpose limitation, storage-limitation/**retention**, data-subject rights (access/erasure/portability), **data residency**/cross-border transfer, breach-notification timelines. Code that collects/stores/transfers PII must map to these (cross-links #14 PII handling, #16 telemetry).
+- **REUSE Specification (FSFE)** — https://reuse.software/spec/ (`reuse lint` makes per-file SPDX+copyright machine-checkable).
+  → mine: every file should declare copyright + SPDX license (header or `.license` sidecar); `reuse lint` makes provenance machine-checkable. A new source file with no license header is a provenance gap.
+- **DCO (Developer Certificate of Origin) / `Signed-off-by` + AI-codegen provenance debates** `(verify)`.
+  → mine: contributor attestation of right-to-contribute; the open question of attribution/licensing for AI-generated code and training-data provenance — at minimum, label AI-assisted contributions and run license/secret/IP checks on them as untrusted input.
+- **Accessibility-as-law: ADA / Section 508 / EN 301 549 / EAA (EU 2019/882, in force 2025-06-28)**
+  → mine: WCAG 2.x AA conformance is the de facto legal yardstick (cross-links #23) — a11y findings can carry legal, not just UX, weight.

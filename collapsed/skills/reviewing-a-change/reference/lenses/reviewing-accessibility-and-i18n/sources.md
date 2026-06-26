@@ -1,0 +1,22 @@
+# References to mine — reviewing-accessibility-and-i18n
+
+## Contents
+
+- From category #23
+
+## From category #23
+
+### Key references
+
+- **W3C — WCAG 2.2** — https://www.w3.org/TR/WCAG22/ — POUR: Perceivable, Operable, Understandable, Robust; conformance levels A / AA / AAA (AA is the common legal bar).
+  → mine: AA is the common legal/contractual bar. High-value SCs to check: **1.1.1 Non-text Content** (alt text), **1.4.3 Contrast (Minimum)** (4.5:1 text / 3:1 large), **2.1.1 Keyboard** (all functionality via keyboard), **2.4.7 Focus Visible**, **2.4.3 Focus Order**, **4.1.2 Name, Role, Value**, **3.3.2 Labels or Instructions**, **1.3.1 Info and Relationships**, **2.5.3 Label in Name**, and 2.2-added **2.4.11 Focus Not Obscured (Minimum)** (AA), **2.5.8 Target Size (Minimum)** 24×24 CSS px (AA). *(SC numbers verified against w3.org/TR/WCAG22.)*
+- **WAI-ARIA Authoring Practices Guide (APG)** `(verify)`.
+  → mine: "first rule of ARIA — use native HTML if you can"; correct roles/states/keyboard interaction patterns for widgets (dialog, menu, combobox, tabs). Misused ARIA is worse than none.
+- **MDN — Accessibility & Internationalization; `Intl` API** `(verify)`.
+  → mine: use `Intl.NumberFormat`, `Intl.DateTimeFormat`, `Intl.PluralRules`, `Intl.Collator` instead of hand-rolled formatting; locale + currency are inputs, never hardcoded. Cross-links #4 (money/units correctness).
+- **Unicode CLDR / ICU MessageFormat** `(verify)`.
+  → mine: locale data (plural categories beyond singular/plural, date/number patterns, RTL) belongs to CLDR; pluralization and gender/select via ICU MessageFormat, not string concatenation. Don't assume two plural forms.
+- **EN 301 549 / ADA / Section 508 / European Accessibility Act (EAA)**
+  → mine: accessibility is frequently a *legal* requirement (cross-links #27), typically anchored to WCAG 2.x AA. The **EAA (EU Directive 2019/882) came into full effect 2025-06-28**, applying to products/services sold into the EU regardless of where the company is based — raising the stakes materially for consumer products.
+- **Deque "axe" rules / WebAIM (contrast, screen-reader surveys)** `(verify)`.
+  → mine: the most common real-world failures cluster in low contrast, missing alt, empty links/buttons, missing form labels, missing document language — prioritize checks there.

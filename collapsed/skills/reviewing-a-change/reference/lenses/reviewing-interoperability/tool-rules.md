@@ -1,0 +1,19 @@
+# Tool rules to triage — reviewing-interoperability
+
+> **Selecting tools for this stack.** The tools named below are field-tested starting points, not a mandate. Pick the one that fits this codebase's language version, build, and CI — and verify it actually runs on your toolchain before relying on it. A listed tool that is broken, abandoned, or noisy on your setup is a gap to close, not a permanent `continue-on-error`: prefer a working, maintained equivalent (often a younger, less well-known one) over a canonical-but-broken default. The capability is the requirement; the specific tool is replaceable.
+
+## Contents
+
+- From category #37
+
+## From category #37
+
+### Tooling rules worth lifting
+
+*(Format/protocol conformance has a real mechanical subset — schema and contract validators catch much of it — but flow semantics, idempotency, and "is this the standard you meant" stay judgment; named tools `(verify)` on your stack.)*
+
+- **Contract / schema validators** — OpenAPI (Spectral), JSON Schema, Avro/Protobuf/JSON-Schema **registry compatibility** checks, and `openapi-diff` / breaking-change linters catch wire-format drift and incompatible schema evolution at the boundary (cross-links #13 for the contract we author).
+- **Protocol & header linters** — HTTP conformance/conditional-request test suites, `cache-control` analyzers, and OAuth/OIDC conformance suites (the OpenID Foundation certification tests) exercise flow and caching semantics a unit test usually skips.
+- **Format validators** — RFC-3339 date parsers in strict mode, `idna`/`punycode` libraries for IDN/email, URI normalizers (RFC 3986), CSV (RFC 4180) and strict-JSON (RFC 8259, reject duplicate keys) validators, and a **YAML loader that quotes the Norway class** — prefer a spec-strict parser over a lenient one at trust boundaries.
+- **Versioning & changelog gates** — semver-aware release tooling (`semantic-release`, `cargo-semver-checks`, `api-extractor`) flags a breaking change shipped under a non-major bump deterministically.
+- **Unicode / encoding checks** — normalization and confusable/mixed-script linters (ICU, `unicodedata`, `confusable_homoglyphs`); validate UTF-8 and reject lone surrogates at ingest.

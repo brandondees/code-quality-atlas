@@ -1,0 +1,165 @@
+# hunting-silent-failures
+
+Where do errors vanish? Swallowed exceptions, silent fallbacks, missing timeouts and retries.
+
+## When to use
+
+**Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists.
+
+## Checklist
+
+## From category #2
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- Is any error swallowed — empty catch/`rescue`, `except: pass`, ignored Go `err`, discarded Result?
+- Does each handler narrow to the *expected* exception type, not a blanket catch-all?
+- On failure does it **fail loud** (surface + log with context) or **degrade intentionally** — never silently?
+- **Fail toward safe, not toward harm (ISO/IEC 25010:2023 *safety*):** when an operation fails or a guard cannot be evaluated, does control land in a *safe* state or a *harmful* one? Fail **closed** on an auth / permission / quota / limit check that errors or times out (deny, do not default-allow); a destructive, financial, or physical action defaults to the **no-op / abort**, not the action; a failed validation **rejects** rather than passing the value through unchecked; a missing or disabled safety control **blocks** rather than bypasses. This is *harm-prevention* — distinct from fail-*loud* (visibility, above) and from #14 security (attacker-prevention). Surface the harmful default; the acceptable-risk threshold and any formal hazard analysis (ISO 26262 / IEC 61508 / DO-178C) escalate to a human owner (detect-and-route), out of scope here.
+- Do error messages carry actionable context (what failed, key inputs, remediation) without leaking secrets/PII (cross #14/#16)?
+- Does every remote/IO call have a timeout? Retries with capped backoff + jitter, not unbounded?
+- Is there a fallback / circuit breaker for a dependency that fails repeatedly?
+- On partial failure, is state left consistent / rolled back (transaction boundaries — cross #20)?
+- Is the error handled at the layer that can actually do something, vs. caught-and-rethrown noise?
+- **Root cause vs. band-aid (esp. bug fixes):** does the fix resolve the underlying cause, or paper over a symptom — catch-and-ignore the error, special-case the one bad input, retry a flaky call, bump a timeout, drop a null guard at the crash site? A symptom-level patch that leaves the cause live is a finding even when it makes the reported case pass; ask what *produced* the bad state (5-whys) and whether this change addresses that level, not just the visible failure.
+- Is input validated once at the trust boundary (parse-don't-validate)?
+- Are all async rejections handled (no floating promises)?
+- Are *bugs* (assertion-worthy) treated differently from *recoverable errors*?
+
+---
+
+## From category #4
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- Is every acquired resource (file, socket, connection, lock, cursor) released on **all** paths including errors (`with`/`using`/`defer`/`ensure`)?
+- Does anything that grows (logs, cache, queue, temp files, sessions) have a bound / eviction / TTL (steady state)?
+- Money/currency stored as integer minor units or a decimal `Money` type — never binary float — and currency carried?
+- Float comparisons use a tolerance, not `==`?
+- Are numeric overflow/underflow and counter wraparound considered for the actual value ranges?
+- Time stored/compared in UTC; timezone/DST handled only at edges; no "always 24h/365d" assumptions?
+- Are elapsed durations measured with a **monotonic** clock, not wall-clock (which can jump backward)?
+- **Calendar/clock time-bombs (correct at merge, detonates on a future date):** does date/time logic survive the triggers that pass review only because today is an ordinary day — leap year (Feb 29) and leap second, DST spring-forward/fall-back gaps and overlaps, month/year rollover, and the 32-bit `time_t` **epoch-2038** ceiling? Flag hardcoded years/dates, `day + 1`-style arithmetic that ignores real calendars, and "always 365 days / 24 hours" assumptions — latent defects that a clock eventually arms.
+- Is mutable shared state minimized and is ownership (who may mutate) clear?
+- Are caches invalidated correctly on the underlying change (cross #15)?
+- Are connection pools bounded and reused, with no per-request unbounded resource creation?
+
+---
+
+## Examples
+
+Report each distinct issue as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
+
+## Bad → finding
+
+**Input (diff):**
+
+```python
+try:
+    charge = payments.charge(order.total)
+except Exception:
+    pass
+order.mark_paid()
+```
+
+**Expected finding:**
+
+1. **Swallowed exception:** the `except Exception: pass` hides charge failures —
+   fail loud (let the error propagate) or handle the specific failure.
+2. **False success state:** `order.mark_paid()` runs even when the charge failed —
+   the failure path must NOT fall through to marking the order paid.
+
+## Bad → finding
+
+**Input (diff):**
+
+```js
+const res = await fetch(url);   // no timeout, no error handling
+return res.json();
+```
+
+**Expected finding:**
+
+1. **No timeout on a remote call:** bare `await fetch` can hang indefinitely — add
+   an AbortController timeout.
+2. **No failure handling:** non-OK responses and network errors are unhandled —
+   handle them with a defined fallback.
+
+## Bad → finding (fail-open: fails toward harm, not toward safe)
+
+**Input (diff):**
+
+```python
+def can_access(user, doc):
+    try:
+        return authz.check(user, doc)        # True/False
+    except AuthzServiceError:
+        return True   # authz down — let them through so the page still works
+```
+
+**Expected finding:**
+
+1. **Fail-open on an authorization check (fails toward harm):** when `authz.check`
+   cannot be evaluated the code defaults to **allow**, so an authz outage silently
+   grants access. A permission / auth / quota / limit check must **fail closed** —
+   `return False` on error (and surface the error) — not default-allow. This is the
+   *direction* the failure resolves (ISO/IEC 25010:2023 *safety* / harm-prevention),
+   distinct from attacker-facing #14 security. The acceptable-risk call is a
+   detect-and-route to a human owner, not a verdict to settle here.
+
+## Good → no finding (fail-closed on auth check)
+
+**Input (diff):**
+
+```python
+def can_access(user, doc):
+    try:
+        return authz.check(user, doc)
+    except AuthzServiceError as e:
+        log.error("authz unavailable", user=user.id, doc=doc.id, err=str(e))
+        return False   # deny on failure — fail closed
+```
+
+**Expected finding:** None — the check **fails closed** (denies when it cannot be
+evaluated) and surfaces the error with context: the safe, fail-loud direction. Do not
+invent a fail-open or swallowed-error issue, and do not suggest defaulting to allow
+"for availability." Report "No findings".
+
+## Good → no finding (narrow exception, no false success)
+
+**Input (diff):**
+
+```python
+try:
+    charge = payments.charge(order.total)
+except PaymentDeclined as e:
+    log.warning("charge declined", order_id=order.id, reason=e.code)
+    return CheckoutResult.declined(e.code)   # specific, surfaced, no false "paid"
+order.mark_paid()
+```
+
+**Expected finding:** None — narrow exception, surfaced with context, no silent
+fallthrough. The early `return` is intentional and correct: a declined charge must
+NOT fall through to `order.mark_paid()`. Do not suggest replacing it with `raise` or
+removing it — that would break the declined-checkout path. **Catching one specific
+exception (`PaymentDeclined`) and letting any other exception propagate is correct
+fail-loud behavior** — do NOT flag it as "incomplete" and do NOT recommend broadening
+the `except` to catch more types. Report "No findings".
+
+## Good → no finding (timeout + raise_for_status)
+
+**Input (diff):**
+
+```python
+resp = client.get(url, timeout=5)
+resp.raise_for_status()
+return resp.json()
+```
+
+**Expected finding:** None — the call has a timeout and `raise_for_status()` surfaces
+non-2xx responses loudly. Report "No findings"; do not invent issues.
+
+## Going deeper
+
+- [tool-rules.md](tool-rules.md) — static-analysis rules for the mechanical subset; for wiring linters, not needed for the judgment review.
+- [sources.md](sources.md) — the research behind each check; for provenance.

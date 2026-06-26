@@ -2,7 +2,7 @@
 import pytest
 
 from tooling.manifest import (
-    Manifest, Skill, Source, ValidationError, load_manifest, validate,
+    Entrypoint, Manifest, Mode, Skill, Source, ValidationError, load_manifest, validate,
     _check_comment_truncation,
 )
 
@@ -365,3 +365,188 @@ def test_valid_synthesizer_accepted_and_real_manifest_loads():
     assert real.synthesizer is not None
     assert real.synthesizer.severity_order[0] == "Blocker"
     assert all(t.between[0] != t.between[1] for t in real.synthesizer.tensions)
+
+
+# --- Depth modes (Plan 1) ---
+
+def _manifest_with_body(tmp_path, body: str) -> str:
+    p = tmp_path / "manifest.yaml"
+    p.write_text(
+        "taxonomy_version: v0\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        + body
+    )
+    return str(p)
+
+
+def test_load_manifest_parses_modes(tmp_path):
+    body = (
+        "modes:\n"
+        "  - name: triage\n"
+        "    breadth: critical tier only\n"
+        "    floor: Major\n"
+        "    triggers: [triage, quick review]\n"
+        "  - name: review\n"
+        "    breadth: top 2-4 by relevance\n"
+        "    floor: escalating\n"
+        "    triggers: [review, review this PR]\n"
+        "  - name: comprehensive\n"
+        "    breadth: every relevant lens, uncapped\n"
+        "    floor: Nit\n"
+        "    triggers: [thorough, use all relevant lenses]\n"
+    )
+    m = load_manifest(_manifest_with_body(tmp_path, body))
+    assert [mode.name for mode in m.modes] == ["triage", "review", "comprehensive"]
+    assert m.modes[0].floor == "Major"
+    assert m.modes[2].triggers == ["thorough", "use all relevant lenses"]
+
+
+def test_load_manifest_defaults_modes_to_empty(tmp_path):
+    m = load_manifest(_manifest_with_body(tmp_path, ""))
+    assert m.modes == []
+
+
+def _syn():
+    from tooling.manifest import Synthesizer
+    return Synthesizer(name="synthesizing-review-findings", description="d",
+                       severity_order=["Blocker", "Major", "Minor", "Nit"], tensions=[])
+
+
+def test_validate_accepts_modes_with_known_floors():
+    modes = [
+        Mode(name="triage", breadth="critical tier only", floor="Major", triggers=["triage"]),
+        Mode(name="review", breadth="top 2-4", floor="escalating", triggers=["review"]),
+        Mode(name="comprehensive", breadth="all relevant", floor="Nit", triggers=["thorough"]),
+    ]
+    validate(Manifest("v0", [_skill()], synthesizer=_syn(), modes=modes))  # no raise
+
+
+def test_validate_rejects_unknown_mode_floor():
+    bad = [Mode(name="triage", breadth="critical tier only", floor="Bogus", triggers=["triage"])]
+    with pytest.raises(ValidationError, match="floor"):
+        validate(Manifest("v0", [_skill()], synthesizer=_syn(), modes=bad))
+
+
+def test_validate_rejects_duplicate_mode_names():
+    dup = [
+        Mode(name="review", breadth="b", floor="escalating", triggers=["review"]),
+        Mode(name="review", breadth="b2", floor="Nit", triggers=["thorough"]),
+    ]
+    with pytest.raises(ValidationError, match="duplicate mode"):
+        validate(Manifest("v0", [_skill()], synthesizer=_syn(), modes=dup))
+
+
+def test_validate_rejects_mode_without_triggers():
+    bad = [Mode(name="review", breadth="b", floor="escalating", triggers=[])]
+    with pytest.raises(ValidationError, match="trigger"):
+        validate(Manifest("v0", [_skill()], synthesizer=_syn(), modes=bad))
+
+
+def test_real_manifest_declares_three_modes():
+    m = load_manifest("skills/manifest.yaml")
+    names = [mode.name for mode in m.modes]
+    assert names == ["triage", "review", "comprehensive"]
+    # comprehensive must pin the floor at the least-severe level so long-tail findings surface
+    assert m.synthesizer is not None
+    least_severe = m.synthesizer.severity_order[-1]
+    comprehensive = next(mode for mode in m.modes if mode.name == "comprehensive")
+    assert comprehensive.floor == least_severe
+    review = next(mode for mode in m.modes if mode.name == "review")
+    assert review.floor == "escalating"
+
+
+# --- Collapsed entrypoints (Plan 2) ---
+
+def test_load_manifest_parses_entrypoints(tmp_path):
+    body = (
+        "entrypoints:\n"
+        "  - name: reviewing-a-change\n"
+        "    description: review a diff/PR/change\n"
+        "    shapes: [diff]\n"
+        "  - name: reviewing-a-decision\n"
+        "    description: review an ADR/RFC/decision\n"
+        "    shapes: [decision]\n"
+        "    include_design: true\n"
+    )
+    m = load_manifest(_manifest_with_body(tmp_path, body))
+    assert [e.name for e in m.entrypoints] == ["reviewing-a-change", "reviewing-a-decision"]
+    assert m.entrypoints[0].shapes == ["diff"]
+    assert m.entrypoints[1].include_design is True
+    assert m.entrypoints[0].include_design is False  # default
+
+
+def test_load_manifest_defaults_entrypoints_to_empty(tmp_path):
+    assert load_manifest(_manifest_with_body(tmp_path, "")).entrypoints == []
+
+
+def _eps():
+    return [
+        Entrypoint(name="reviewing-a-change", description="d", shapes=["diff"]),
+        Entrypoint(name="auditing-a-repository", description="d", shapes=["repo"]),
+        Entrypoint(name="reviewing-a-decision", description="d", shapes=["decision"], include_design=True),
+        Entrypoint(name="reviewing-an-artifact", description="d", shapes=["artifact"]),
+    ]
+
+
+def test_validate_accepts_well_formed_entrypoints():
+    skills = [_skill(name="hunting-silent-failures", shape="diff", picker="p")]
+    validate(Manifest("v0", skills, synthesizer=_syn(), entrypoints=_eps()))  # no raise
+
+
+def test_validate_rejects_entrypoint_name_colliding_with_skill():
+    eps = [Entrypoint(name="hunting-silent-failures", description="d", shapes=["diff"])]
+    with pytest.raises(ValidationError, match="collides"):
+        validate(Manifest("v0", [_skill(picker="p")], synthesizer=_syn(), entrypoints=eps))
+
+
+def test_validate_rejects_unknown_entrypoint_shape():
+    eps = [Entrypoint(name="reviewing-a-change", description="d", shapes=["bogus"])]
+    with pytest.raises(ValidationError, match="shape"):
+        validate(Manifest("v0", [_skill(picker="p")], synthesizer=_syn(), entrypoints=eps))
+
+
+def test_validate_rejects_orphaned_lens():
+    # a diff lens exists but no entrypoint covers the diff shape → orphan
+    skills = [_skill(name="hunting-silent-failures", shape="diff", picker="p")]
+    eps = [Entrypoint(name="auditing-a-repository", description="d", shapes=["repo"])]
+    with pytest.raises(ValidationError, match="not covered by any entrypoint"):
+        validate(Manifest("v0", skills, synthesizer=_syn(), entrypoints=eps))
+
+
+def test_real_manifest_declares_four_entrypoints_covering_all_lenses():
+    m = load_manifest("skills/manifest.yaml")
+    assert {e.name for e in m.entrypoints} == {
+        "reviewing-a-change", "auditing-a-repository",
+        "reviewing-a-decision", "reviewing-an-artifact"}
+    covered = set()
+    for ep in m.entrypoints:
+        for s in m.skills:
+            if s.shape in ep.shapes or (ep.include_design and s.design):
+                covered.add(s.name)
+    assert {s.name for s in m.skills} <= covered   # every lens covered
+
+
+def test_validate_rejects_entrypoints_without_synthesizer():
+    skills = [_skill(name="hunting-silent-failures", shape="diff", picker="p")]
+    eps = [Entrypoint(name="reviewing-a-change", description="d", shapes=["diff"])]
+    with pytest.raises(ValidationError, match="entrypoints require a synthesizer"):
+        validate(Manifest("v0", skills, entrypoints=eps))  # no synthesizer
+
+
+def test_validate_rejects_empty_entrypoint_description():
+    skills = [_skill(name="hunting-silent-failures", shape="diff", picker="p")]
+    eps = [Entrypoint(name="reviewing-a-change", description="", shapes=["diff"])]
+    with pytest.raises(ValidationError, match="description must be non-empty"):
+        validate(Manifest("v0", skills, synthesizer=_syn(), entrypoints=eps))
+
+
+def test_validate_rejects_bad_mode_name():
+    bad = [Mode(name="Quick Review", breadth="b", floor="escalating", triggers=["review"])]
+    with pytest.raises(ValidationError, match="invalid mode name"):
+        validate(Manifest("v0", [_skill()], synthesizer=_syn(), modes=bad))

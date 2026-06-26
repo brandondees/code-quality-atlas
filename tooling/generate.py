@@ -2,10 +2,11 @@
 # tooling/generate.py
 from __future__ import annotations
 import json
+import shutil
 import warnings
 import yaml
 from pathlib import Path
-from tooling.manifest import Artifact, Manifest, Skill, Source
+from tooling.manifest import Artifact, Entrypoint, Manifest, Skill, Source
 from tooling.sections import (extract_bullets, extract_section,
                               extract_subsection, section_hash,
                               is_priority, strip_priority)
@@ -325,6 +326,66 @@ def generate_skill(skill: Skill, taxonomy_version: str,
     return out
 
 
+def entrypoint_lenses(manifest: Manifest, entrypoint: Entrypoint) -> list[Skill]:
+    """The lenses an entrypoint bundles: by shape, plus design-capable lenses
+    when include_design (e.g. the decision entrypoint carries the ◆ diff lenses)."""
+    out = []
+    for s in manifest.skills:
+        if s.shape in entrypoint.shapes or (entrypoint.include_design and s.design):
+            out.append(s)
+    return out
+
+
+def _checklist_body(skill: Skill, docs_root: str = ".") -> str:
+    """The heuristics checklist for a bundle, without build_reference's own H1
+    title and Contents ToC — so the lens bundle keeps a single top-level heading
+    (`# <lens>`) and stays markdownlint-clean (MD025)."""
+    doc = build_reference(skill, "heuristics", docs_root=docs_root)
+    idx = doc.find("## From category")
+    return doc[idx:].strip() if idx != -1 else ""
+
+
+def lens_bundle_body(skill: Skill, docs_root: str = ".", skills_root: str = "skills") -> str:
+    """The `body.md` an entrypoint loads for one lens: when-to-use + the full
+    heuristics checklist + curated examples + links to the deeper bundled files.
+    Examples come from the standalone tree's hand-refined examples.md (canonical);
+    tool-rules/sources are a further disclosure level, linked not inlined."""
+    picker = f"{skill.picker}\n\n" if skill.picker else ""
+    heuristics = _checklist_body(skill, docs_root=docs_root)
+    examples_path = Path(skills_root, skill.name, "examples.md")
+    examples = examples_path.read_text(encoding="utf-8") if examples_path.exists() else ""
+    # The standalone examples.md carries its own `# Examples — <lens>` H1; strip a
+    # leading H1 so the bundle keeps one top-level heading.
+    examples = examples.strip()
+    if examples.startswith("# "):
+        examples = examples.split("\n", 1)[1].strip() if "\n" in examples else ""
+    examples_block = f"## Examples\n\n{examples}\n\n" if examples else ""
+    return (
+        f"# {skill.name}\n\n"
+        f"{picker}"
+        "## When to use\n\n"
+        f"{_scope_line(skill)}\n\n"
+        "## Checklist\n\n"
+        f"{heuristics}\n\n"
+        f"{examples_block}"
+        "## Going deeper\n\n"
+        "- [tool-rules.md](tool-rules.md) — static-analysis rules for the mechanical "
+        "subset; for wiring linters, not needed for the judgment review.\n"
+        "- [sources.md](sources.md) — the research behind each check; for provenance.\n"
+    )
+
+
+def generate_lens_bundle(skill: Skill, lenses_dir: Path, docs_root: str = ".",
+                         skills_root: str = "skills") -> Path:
+    """Write reference/lenses/<skill>/{body,tool-rules,sources}.md and return the dir."""
+    dest = Path(lenses_dir, skill.name)
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "body.md").write_text(lens_bundle_body(skill, docs_root, skills_root), encoding="utf-8")
+    (dest / "tool-rules.md").write_text(build_reference(skill, "tooling", docs_root), encoding="utf-8")
+    (dest / "sources.md").write_text(build_reference(skill, "references", docs_root), encoding="utf-8")
+    return dest
+
+
 def primary_owners(manifest: Manifest) -> dict[int, str]:
     """category -> the skill that primarily owns it (G1 guarantees uniqueness)."""
     owners: dict[int, str] = {}
@@ -333,6 +394,32 @@ def primary_owners(manifest: Manifest) -> dict[int, str]:
             if src.category not in s.cross_ref:
                 owners[src.category] = s.name
     return owners
+
+
+def modes_section(manifest: Manifest) -> str:
+    """The 'Depth modes' block for the router: separates relevance (which lenses
+    apply) from breadth (how many to run). Empty string when no modes declared."""
+    if not manifest.modes:
+        return ""
+    lines = [
+        "## Depth modes",
+        "",
+        "Routing first ranks **every** lens whose scope the change touches by "
+        "**relevance** — it is no longer a hard 2-4 cap. A depth mode then sets the "
+        "**breadth** (how far down the ranked list to run) and the severity floor. "
+        "Pick the mode from the request; default to **review**.",
+        "",
+        "| Mode | Breadth | Triggers |",
+        "|---|---|---|",
+    ]
+    for mode in manifest.modes:
+        triggers = ", ".join(f"\"{t}\"" for t in mode.triggers)
+        lines.append(f"| **{mode.name}** | {mode.breadth.strip()} | {triggers} |")
+    notes = [(m.name, m.note.strip()) for m in manifest.modes if m.note.strip()]
+    if notes:
+        lines.append("")
+        lines.extend(f"- **{name}** — {note}" for name, note in notes)
+    return "\n".join(lines).rstrip() + "\n\n"   # block ends with a blank line; "" when no modes
 
 
 def build_router_md(manifest: Manifest) -> str:
@@ -377,7 +464,9 @@ def build_router_md(manifest: Manifest) -> str:
         "per-change review, never to the audit set. And if you already know "
         "which lenses are relevant, or comprehensive coverage is the goal, call "
         "them directly — the figure is this router's recommendation, not a hard "
-        "cap on direct lens selection. `reviewing-pr-and-process-hygiene` is "
+        "cap on direct lens selection. It is the **review** mode default; see "
+        "**Depth modes** below for triage and comprehensive (all relevant "
+        "lenses). `reviewing-pr-and-process-hygiene` is "
         "**additive** — on any PR it rides on top of the content lenses and does "
         "not spend one of the 2-4 slots.\n"
         "- Match the change against the routes below; when a change is several "
@@ -396,7 +485,8 @@ def build_router_md(manifest: Manifest) -> str:
         + (f"- After the lenses run, merge their findings with "
            f"`{manifest.synthesizer.name}` — one deduplicated, ranked report "
            "with a single verdict.\n" if manifest.synthesizer else "")
-        + "\n## Routes\n\n"
+        + "\n" + modes_section(manifest)
+        + "## Routes\n\n"
         "| When reviewing… | Run |\n"
         "|---|---|\n"
         f"{routes_table}\n\n"
@@ -425,6 +515,30 @@ def generate_router(manifest: Manifest, skills_root: str = "skills") -> Path:
             {"skills": [manifest.router.name], "scenarios": []}, indent=2) + "\n",
             encoding="utf-8")
     return out
+
+
+def mode_floor_policy(manifest: Manifest) -> str:
+    """The synthesizer's per-mode severity-floor policy. Empty when no modes.
+    `escalating` keeps today's round-based floor; any other value pins the floor
+    at that severity level (findings below it are dropped from the merged report)."""
+    if not manifest.modes:
+        return ""
+    lines = [
+        "## Severity floor by mode",
+        "",
+        "The merged report's severity floor depends on the active depth mode. "
+        "Below the floor, findings are omitted from the verdict.",
+        "",
+        "| Mode | Floor | Effect |",
+        "|---|---|---|",
+    ]
+    for mode in manifest.modes:
+        if mode.floor == "escalating":
+            effect = "round-based escalation (as today) — later re-review rounds raise the floor"
+        else:
+            effect = f"pinned at {mode.floor} — report everything down to {mode.floor}, nothing below"
+        lines.append(f"| **{mode.name}** | {mode.floor} | {effect} |")
+    return "\n".join(lines).rstrip() + "\n\n"   # block ends with a blank line; "" when no modes
 
 
 def build_synthesizer_md(manifest: Manifest) -> str:
@@ -606,7 +720,8 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "is the exception: it is always present, even on a \"No findings\" report. "
         "Keep each finding to one or two lines; the detail lives in the "
         "originating lens's output, not restated here.\n\n"
-        "## Reviewer discipline\n\n"
+        + mode_floor_policy(manifest)
+        + "## Reviewer discipline\n\n"
         "Synthesis must not inflate. Do not raise a finding no lens reported, do "
         "not upgrade a severity to seem thorough, and do not turn \"No findings\" "
         "into a verdict with changes. The merged report is exactly the union of "
@@ -630,3 +745,140 @@ def generate_synthesizer(manifest: Manifest, skills_root: str = "skills") -> Pat
             {"skills": [manifest.synthesizer.name], "scenarios": []}, indent=2) + "\n",
             encoding="utf-8")
     return out
+
+
+def build_collapsed_synthesis(manifest: Manifest) -> str:
+    """The synthesizer procedure as a bundled reference file (no frontmatter).
+    Reuses build_synthesizer_md (which already includes mode_floor_policy) and
+    strips the LEADING YAML frontmatter block so an entrypoint can Read it
+    directly. Also drops the standalone "Going deeper" section, whose relative
+    links (../<router>/SKILL.md, ../../docs/...) point outside the collapsed
+    bundle and would 404 when an agent follows them — the entrypoint SKILL.md
+    already links the lenses, and this file is loaded directly, not navigated
+    from."""
+    full = build_synthesizer_md(manifest)
+    # Raise loudly rather than silently shipping a frontmatter-laden bundle if the
+    # synthesizer's output shape ever changes.
+    if not full.startswith("---\n"):
+        raise ValueError("build_synthesizer_md output has no leading frontmatter to strip")
+    end = full.find("\n---\n", len("---\n"))   # closing fence of the first block only
+    if end == -1:
+        raise ValueError("build_synthesizer_md frontmatter block is not terminated")
+    body = full[end + len("\n---\n"):].lstrip("\n")
+    marker = "\n## Going deeper\n"
+    idx = body.find(marker)
+    if idx != -1:
+        body = body[:idx].rstrip() + "\n"
+    # The Fan-out-model prose cross-refs the now-removed section; drop the dangling
+    # "under *Going deeper*" pointer so the bundle is self-consistent (no-op if the
+    # phrase ever changes).
+    body = body.replace(" under *Going deeper*", "")
+    return body
+
+
+def build_entrypoint_md(manifest: Manifest, entrypoint: Entrypoint) -> str:
+    lenses = entrypoint_lenses(manifest, entrypoint)
+    lens_names = {s.name for s in lenses}
+    front = {
+        "name": entrypoint.name,
+        "description": entrypoint.description,
+        "provenance": {"taxonomy_version": manifest.taxonomy_version, "built_from": []},
+    }
+    fm = yaml.safe_dump(front, sort_keys=False, default_flow_style=False,
+                        allow_unicode=True).strip()
+
+    # Routes from the router that touch this entrypoint's lenses.
+    rows = []
+    if manifest.router:
+        for route in manifest.router.routes:
+            if any(lens in lens_names for lens in route.run):
+                run = ", ".join(f"`{lens}`" for lens in route.run if lens in lens_names)
+                rows.append(f"| {route.when} | {run} |")
+    routes_table = "\n".join(rows) if rows else "| (any item in scope) | all lenses below |"
+
+    # Each lens links to its loadable bundle, so the entrypoint can Read it on
+    # demand; ◆ marks design-capable lenses and the picker gives the one-liner.
+    catalog = "\n".join(
+        f"- [`{s.name}`](reference/lenses/{s.name}/body.md){' ◆' if s.design else ''}"
+        + (f" — {s.picker}" if s.picker else "")
+        for s in lenses)
+
+    body = (
+        f"# {entrypoint.name}\n\n"
+        "## When to use\n\n"
+        f"{entrypoint.body or entrypoint.description}\n\n"
+        "## How this works\n\n"
+        "Rank the relevant lenses below by relevance to what is being reviewed, "
+        "pick the breadth from the depth mode (default **review**), then for each "
+        "selected lens **load its bundle** and apply it:\n\n"
+        "- Read `reference/lenses/<lens>/body.md` — the lens's checklist and examples. "
+        "Open `reference/lenses/<lens>/tool-rules.md` or `sources.md` only if deeper "
+        "tooling/provenance is called for.\n"
+        "- After the lenses run, merge their findings with the procedure in "
+        "`reference/synthesis.md` — one deduplicated, ranked report with a single verdict.\n\n"
+        + modes_section(manifest)
+        + "## Routes\n\n"
+        "| When reviewing… | Run |\n"
+        "|---|---|\n"
+        f"{routes_table}\n\n"
+        "## Lenses\n\n"
+        "◆ = design-capable.\n\n"
+        f"{catalog}\n"
+    )
+    return f"---\n{fm}\n---\n\n{body}"
+
+
+def collapsed_plugin_manifest(root_plugin_path: str = ".claude-plugin/plugin.json") -> dict:
+    """Derive the collapsed plugin manifest from the root one (single source) so
+    metadata stays in sync; only name/displayName/description differ."""
+    p = Path(root_plugin_path)
+    if not p.exists():
+        raise FileNotFoundError(
+            f"root plugin manifest not found at {root_plugin_path}; "
+            "cannot derive the collapsed plugin manifest")
+    base = json.loads(p.read_text(encoding="utf-8"))
+    base["name"] = "code-quality-atlas-collapsed"
+    base["displayName"] = base.get("displayName", "Code Quality Atlas") + " (collapsed)"
+    base["description"] = ("Collapsed 4-entrypoint form of the code-quality-atlas "
+                           "suite for cloud / account-skill / context-budget installs. "
+                           "Lenses are bundled and loaded on demand.")
+    return base
+
+
+def generate_collapsed(manifest: Manifest, docs_root: str = ".", skills_root: str = "skills",
+                       collapsed_root: str = "collapsed") -> list[Path]:
+    """Emit the collapsed form: 4 entrypoint skills (each bundling its shape's
+    lenses + synthesis) plus a generated .claude-plugin/plugin.json. Prunes any
+    entrypoint directory no longer in the manifest so the committed tree can't go
+    stale."""
+    written: list[Path] = []
+    skills_dir = Path(collapsed_root, "skills")
+    current = {ep.name for ep in manifest.entrypoints}
+    if skills_dir.exists():
+        for child in skills_dir.iterdir():
+            if child.is_dir() and child.name not in current:
+                shutil.rmtree(child)   # prune a removed entrypoint
+    for ep in manifest.entrypoints:
+        out = Path(collapsed_root, "skills", ep.name)
+        (out / "reference" / "lenses").mkdir(parents=True, exist_ok=True)
+        (out / "evals").mkdir(parents=True, exist_ok=True)
+        (out / "SKILL.md").write_text(build_entrypoint_md(manifest, ep), encoding="utf-8")
+        (out / "reference" / "synthesis.md").write_text(
+            build_collapsed_synthesis(manifest), encoding="utf-8")
+        for skill in entrypoint_lenses(manifest, ep):
+            generate_lens_bundle(skill, out / "reference" / "lenses",
+                                 docs_root=docs_root, skills_root=skills_root)
+        if not (out / "evals" / "eval.json").exists():
+            (out / "evals" / "eval.json").write_text(
+                json.dumps({"skills": [ep.name], "scenarios": []}, indent=2) + "\n",
+                encoding="utf-8")
+        written.append(out)
+    pm_dir = Path(collapsed_root, ".claude-plugin")
+    pm_dir.mkdir(parents=True, exist_ok=True)
+    plugin_json = pm_dir / "plugin.json"
+    plugin_json.write_text(
+        json.dumps(collapsed_plugin_manifest(
+            root_plugin_path=str(Path(docs_root, ".claude-plugin", "plugin.json"))),
+            indent=2) + "\n", encoding="utf-8")
+    written.append(plugin_json)   # the generated manifest is an emitted artifact too
+    return written

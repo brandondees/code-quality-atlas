@@ -1,0 +1,96 @@
+# reviewing-artifact-conventions
+
+Is this authored artifact well-formed per its own standard? Detect the artifact (e.g. SKILL.md), load its rubric, review against it.
+
+## When to use
+
+**Shape: artifact.** Presence-activated: run only when one of the artifacts in the table below is present in the change or repo. Detect the artifact, open its rubric, and review the artifact against that published standard — not the surrounding application code. Skip entirely when none of the listed artifacts are present.
+
+## Checklist
+
+## From category #101
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- **Frontmatter is well-formed and within limits:** Does the skill have YAML frontmatter with a **gerund**, lowercase-hyphen `name` and a **specific, third-person `description` ≤1024 characters** that names the concrete situations and keywords that should trigger it? A missing, vague, first-person, or over-long description is the most common and most damaging defect — it is the always-on activation surface.
+- **Progressive disclosure — a lean entry point, detail bundled:** Is the `SKILL.md` body a **lean entry point** (well under ~500 lines: when-to-use + a short checklist) with the heavy detail (full heuristics, tool rules, references, examples) in **one-level-deep bundled files loaded on demand**, rather than one long inlined wall? Bundled context is effectively free until read; an inlined mega-body taxes every session.
+- **Trigger-rich description with a skip clause:** Beyond being present, does the description read like an activation trigger — concrete situations, file types, and keywords — and state **when *not* to use it** (a skip/"use when… skip when…" clause), so the model selects it precisely and doesn't fire it on every change?
+- **A single default approach, not an option-menu:** Does the skill prescribe **one concrete recommended path** rather than a buffet of alternatives ("you could A, or B, or C")? Option-menus raise ambiguity and hurt portability to smaller models; pick a sensible default and name it.
+- **Concrete good/bad examples and an output format:** Does a bundled `examples.md` (or equivalent) show **input → expected-finding pairs** and the **output format** to match, rather than only abstract prose? Concrete examples are what make the behavior reproducible across models.
+- **No time-sensitive or environment-bound text:** Is the skill free of text that **rots** — "new", "currently", version numbers, dates, "as of" — and of harness/OS assumptions (use forward-slash paths, consistent terminology)? Time-sensitive wording silently goes stale.
+- **One-level-deep references with a ToC for long files:** Are bundled files **one level deep** (not a nested tree the model must traverse), and does any bundled file **over ~100 lines open with a table of contents** so the model can navigate it without reading all of it?
+- **Eval-first regression net:** Does the skill ship **≥3 evaluation scenarios** (query + expected behavior, ideally with a no-skill baseline) so its behavior is pinned and a later edit can be regression-checked rather than vibe-checked?
+- **Model-portable, plain-markdown form:** Is the skill **plain Markdown + files with no Claude/harness-specific assumptions**, written as explicit, concrete, low-ambiguity checklists so it degrades gracefully on smaller or non-Claude models? Portability is a stated goal of the standard, not a nicety.
+
+## Examples
+
+This lens is **presence-activated**: first detect a supported artifact (the Artifacts
+table in `SKILL.md`), then open that artifact's rubric (`reference/<slug>.md`) and
+review the artifact against it. Report each deviation as its own numbered finding,
+naming the specific rule of the standard it breaks. When the artifact is well-formed —
+or when no supported artifact is present in the change — the whole response is exactly
+"No findings". This is **authoring quality**, distinct from doc-drift (#22) and runtime
+agent-safety (#32).
+
+## Bad → finding (SKILL.md — weak frontmatter description)
+
+**Input (a changed `SKILL.md` frontmatter):**
+
+```yaml
+---
+name: helper
+description: I help with reviewing things.
+---
+```
+
+**Expected findings:**
+
+1. **Frontmatter description is not a trigger (rubric: frontmatter limits):** the
+   `description` is **first-person** ("I help…"), vague, and names **no concrete
+   situations, file types, or keywords**, so the model cannot tell when to activate the
+   skill. Rewrite it third-person and specific — what it reviews, the triggers, and a
+   skip clause (e.g. "Reviews X for Y; use when …; skip when …").
+2. **`name` is not a gerund (rubric: frontmatter limits):** `helper` is a noun; the
+   standard wants a gerund, lowercase-hyphen name (e.g. `reviewing-helpers`).
+
+## Bad → finding (SKILL.md — no progressive disclosure)
+
+**Input:** a `SKILL.md` whose body is ~700 lines, inlining the full checklist, every
+tool rule, and all references, with **no bundled `reference/` files**.
+
+**Expected finding:**
+
+1. **Body violates progressive disclosure (rubric: lean entry point):** the `SKILL.md`
+   body far exceeds the ~500-line target and inlines detail that belongs in **bundled,
+   one-level-deep files loaded on demand**. An inlined mega-body taxes every session's
+   context, not just the reviewing one. Move the full heuristics, tool rules, and
+   references into `reference/*.md` and keep the body to when-to-use plus a short
+   checklist.
+
+## Good → no finding (well-formed SKILL.md)
+
+**Input:** a `SKILL.md` with a gerund `name`, a specific third-person `description`
+(≤1024 chars) carrying triggers and a skip clause, a ~90-line body, bundled
+`reference/heuristics.md` + `examples.md`, three eval scenarios, and no time-sensitive
+text.
+
+**Expected finding:** No findings
+
+Note: the artifact already meets the authoring standard on every rubric line. Do NOT
+invent a deviation on a well-formed artifact.
+
+## Good → no finding (no supported artifact present)
+
+**Input:** a diff that only touches `src/payments.ts` — no `SKILL.md` or other listed
+artifact anywhere in the change.
+
+**Expected finding:** No findings
+
+Note: this lens is presence-activated; with none of its artifacts in the change there is
+nothing for it to review — the source code itself is the other lenses' job. Do not
+review `.ts` source against an artifact rubric.
+
+## Going deeper
+
+- [tool-rules.md](tool-rules.md) — static-analysis rules for the mechanical subset; for wiring linters, not needed for the judgment review.
+- [sources.md](sources.md) — the research behind each check; for provenance.

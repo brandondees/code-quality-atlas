@@ -51,3 +51,13 @@ def test_cli_eval_reports_valid_and_invalid(tmp_path, capsys):
 
     rc = main(["eval", "--skills-root", str(tmp_path), "--skill", "good-skill"])
     assert rc == 0                      # filtering to the valid one passes
+
+
+def test_cli_generate_emits_collapsed(tmp_path):
+    from tooling.cli import main
+    rc = main(["generate", "--manifest", "skills/manifest.yaml", "--docs-root", ".",
+               "--skills-root", str(tmp_path / "skills"),
+               "--collapsed-root", str(tmp_path / "collapsed")])
+    assert rc == 0
+    assert (tmp_path / "collapsed" / "skills" / "reviewing-a-change" / "SKILL.md").exists()
+    assert (tmp_path / "collapsed" / ".claude-plugin" / "plugin.json").exists()

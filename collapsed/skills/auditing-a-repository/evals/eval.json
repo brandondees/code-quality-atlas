@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "auditing-a-repository"
+  ],
+  "scenarios": [
+    {
+      "query": "Run a full health audit of this repository.",
+      "expected_behavior": [
+        "Recognizes a repo-shaped audit, not a single-diff review",
+        "Ranks the applicable repo audits (architecture, dependencies, config/build, docs, compliance, enforcement, IaC, maintainability) by relevance",
+        "Synthesizes the audit findings into one ranked report via reference/synthesis.md"
+      ]
+    },
+    {
+      "query": "Thorough, comprehensive audit — use all relevant lenses across the whole repo.",
+      "expected_behavior": [
+        "Recognizes comprehensive mode from 'thorough / all relevant lenses'",
+        "Runs every relevant repo audit uncapped rather than a top few",
+        "Applies the comprehensive Nit-pinned floor so long-tail maintainability findings surface"
+      ]
+    },
+    {
+      "query": "We just added a new third-party dependency and a Dockerfile — audit the supply-chain and infra implications.",
+      "expected_behavior": [
+        "Ranks auditing-dependencies-and-supply-chain and auditing-infrastructure-as-code highest by relevance",
+        "Loads reference/lenses/auditing-dependencies-and-supply-chain/body.md and reference/lenses/auditing-infrastructure-as-code/body.md",
+        "Produces one synthesized report rather than per-lens fragments"
+      ]
+    }
+  ]
+}

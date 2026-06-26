@@ -69,6 +69,26 @@ clone.
 
 ✅ works · ⚠️ conditional · ❌ doesn't apply
 
+## Two forms: standalone (35) vs collapsed (4)
+
+Every channel above can ship the suite in **either of two forms** — install **one
+form, not both** (they cover the same lenses):
+
+- **Standalone (35 skills)** — the default. One `SKILL.md` per lens plus the
+  `choosing-review-lenses` router and `synthesizing-review-findings` synthesizer.
+  Richest top-level discoverability; the most skills to upload/list.
+- **Collapsed (4 entrypoints)** — `reviewing-a-change`, `auditing-a-repository`,
+  `reviewing-a-decision`, `reviewing-an-artifact`. Each entrypoint bundles its
+  shape's lenses under `reference/lenses/<lens>/body.md` and loads them on demand,
+  carrying the same relevance-ranked routing, depth modes, and synthesis. Best for
+  **cloud / account-skill / context-budget-constrained** surfaces — 4 uploads or 4
+  vendored folders instead of 35, at the cost of one extra `Read` per lens.
+
+The collapsed form ships as its own marketplace plugin,
+**`code-quality-atlas-collapsed`** (see [`install.md`](install.md)), and the
+distribution scripts take `--collapsed` to package/vendor it. Pick the form per
+surface; do not install both into the same session.
+
 ## Recommendation for a "both" workflow
 
 You review **a known set of your own repos** *and* **occasional arbitrary repos**
@@ -114,8 +134,14 @@ specifics:
 upload-ready zips with exactly that inclusion rule:
 
 ```bash
-tooling/package-account-zips.sh   # 35 zips -> dist/account-skills/
+tooling/package-account-zips.sh               # 35 zips -> dist/account-skills/
+tooling/package-account-zips.sh --collapsed   # 4 zips (the collapsed entrypoints)
 ```
+
+The `--collapsed` flag packages the **4 collapsed entrypoints**
+(`collapsed/skills/`) instead of the 35 standalone skills — far fewer GUI uploads,
+with the lenses bundled and loaded on demand. Pick **one form**: the 35 standalone
+skills *or* the 4 collapsed entrypoints, not both (see *Two forms* below).
 
 There is **no bulk path** through the GUI: no multi-skill zip, and (per the note
 below) no usable API. The ~35 uploads are unavoidable today, which is the cost
@@ -159,9 +185,13 @@ code-quality-atlas clone:
 
 ```bash
 # from inside the code-quality-atlas clone; pass the OTHER repo
-tooling/vendor-skills.sh ~/code/my-service
+tooling/vendor-skills.sh ~/code/my-service              # 35 standalone skills
+tooling/vendor-skills.sh ~/code/my-service --collapsed  # OR the 4 collapsed entrypoints
 ( cd ~/code/my-service && git add .claude/skills && git commit -m "vendor code-quality-atlas review suite" )
 ```
+
+`--collapsed` vendors the 4 collapsed entrypoints instead of the 35 standalone
+skills. **Vendor one form, not both** — the two cover the same lenses.
 
 `skulto install brandondees/code-quality-atlas -y` run inside the target repo is
 an equivalent alternative.
@@ -181,15 +211,18 @@ expect the plugin to appear in cloud sessions — it won't.
 
 - **Channel A — [`tooling/package-account-zips.sh`](../tooling/package-account-zips.sh):**
   emits one upload-ready zip per lens (`<name>/SKILL.md` + `reference/` +
-  `examples.md`, no `evals/`) for the claude.ai GUI.
+  `examples.md`, no `evals/`) for the claude.ai GUI. `--collapsed` emits the 4
+  collapsed-entrypoint zips instead.
 - **Channel B — [`tooling/vendor-skills.sh`](../tooling/vendor-skills.sh):**
   copies the same runtime resources into a target repo's `.claude/skills/`,
   idempotently, ready to commit. `--prune` safely drops only previously-vendored
   skills that have left the suite (tracked via a `.atlas-vendored` marker; never
-  touches the target repo's own skills). The `skulto` flow above is an
-  alternative.
+  touches the target repo's own skills). `--collapsed` vendors the 4
+  collapsed entrypoints instead of the 35 standalone skills. The `skulto` flow
+  above is an alternative.
 
 ```bash
 tooling/vendor-skills.sh ~/code/my-service          # vendor/refresh into that repo
 tooling/vendor-skills.sh ~/code/my-service --prune   # also drop stale vendored skills
+tooling/vendor-skills.sh ~/code/my-service --collapsed  # the 4 collapsed entrypoints
 ```

@@ -1,0 +1,106 @@
+# reviewing-performance-and-efficiency
+
+Will this be slow or expensive at scale? N+1, O(n²) hot paths, caching, payload buffering.
+
+## When to use
+
+**Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists.
+
+## Checklist
+
+## From category #15
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- Is there a loop that issues a query/RPC/HTTP call per iteration? (N+1.) Push to a single batched/`IN`/join query or a bulk endpoint. Flag `await` inside `for` over independent items.
+- What is the worst-case complexity on the hot path as input grows? Flag accidental O(n²) (nested loops over the same collection, `Array.includes` inside a loop → use a Set/Map), and unbounded growth.
+- Is the same expensive value (DB read, computed result, parsed config, compiled regex) recomputed when it could be hoisted or memoized? Conversely, is anything memoized that's cheap and rarely reused (premature)?
+- Caching correctness: is there a clear invalidation story (TTL, event-based, or write-through)? A cache without an invalidation answer is a future stale-data bug. Check key construction includes everything that affects the value (tenant, locale, version).
+- I/O batching: are round-trips minimized (batch reads/writes, pipelining, HTTP keep-alive/connection pooling) rather than chatty per-item calls?
+- Streaming vs buffering: for large payloads/files, is data streamed rather than fully loaded into memory? Flag "read entire file/response into a string then process."
+- Allocation/GC pressure on hot paths: avoidable per-iteration allocations, boxing, large defensive copies, building huge intermediate collections? (Especially in tight loops and request handlers.)
+- Lazy vs eager: is work deferred until needed (and *only* the needed work done), without re-triggering N+1 via lazy loading inside a loop?
+- Frontend: does this change grow the bundle or block startup (new heavy dep, non-code-split route, render-blocking resource, large synchronous work on the main thread hurting INP)? Is the dep tree-shakeable and the import scoped?
+- **Cost & carbon efficiency (FinOps + green) — `route: eng/leadership`:** does the change add per-request **cost *and* energy/carbon** that scale badly — chatty cross-AZ/egress traffic, unbounded fan-out, over-provisioned or always-on instances, polling instead of events, queries that scan far more than they return? These are one diff signal (wasted work per request) with two weights; surface the waste and **route** the spend/footprint trade-off to eng/leadership rather than adjudicating it here. Diff-visible inefficiency is in scope; an org-level carbon/cost *target* is not.
+- **Premature-optimization smell test (counterweight):** Is this off a measured hot path, justified by no profile/benchmark, and does it trade real readability/correctness risk for unmeasured gains (hand-rolled cache, micro-bit-twiddling, denormalization, custom data structure)? If yes, push back and ask for a profile or a benchmark. "Make it correct and clear first; optimize the measured 3%."
+- Did a perf claim (either "this is slow" or "this is faster") come with a number — benchmark, profile, or Big-O argument — rather than intuition?
+
+---
+
+## Examples
+
+Report each distinct issue as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
+
+**Decision rule (apply before flagging):** a performance finding needs a path that
+is plausibly hot — a request handler, a loop over unbounded data, a render path.
+Code on a cold path (cron jobs, admin tools, startup, once-a-day batch) with small
+bounded inputs is fine as plain readable code: report "No findings" and do NOT
+suggest batching, caching, or parallelism there. Conversely, an *optimization*
+without a profile is a finding the other way (premature optimization).
+
+## Bad → finding
+
+**Input (diff):**
+
+```python
+def order_summaries(user):
+    summaries = []
+    for order_id in db.query("SELECT id FROM orders WHERE user_id = %s", [user.id]):
+        order = db.query("SELECT * FROM orders WHERE id = %s", [order_id])   # per-row query
+        items = db.query("SELECT * FROM items WHERE order_id = %s", [order_id])
+        summaries.append(render(order, items))
+    return summaries
+```
+
+**Expected finding:**
+
+1. **N+1 queries:** one query per order (×2) inside the loop — a user with 500
+   orders issues 1001 round-trips. Fetch all orders in one query and all items
+   with a single `WHERE order_id IN (...)` (or a join), then group in memory.
+
+## Bad → finding
+
+**Input (diff):**
+
+```js
+async function tagActiveUsers(users, activeIds) {
+  for (const u of users) {
+    if (activeIds.includes(u.id)) {            // O(n²): includes() scans per user
+      u.active = true;
+      await api.patch(`/users/${u.id}`, { active: true });   // await per item
+    }
+  }
+}
+```
+
+**Expected finding:**
+
+1. **Accidental O(n²):** `Array.includes` inside the loop scans `activeIds` per
+   user — build a `Set` once and use `set.has(u.id)`.
+2. **Serialized I/O:** `await` per item turns independent requests into sequential
+   round-trips — batch via a bulk endpoint, or bound the concurrency
+   (`Promise.all` over chunks).
+3. **Repeated work that belongs outside the loop** (the Set construction) — hoist
+   per-iteration recomputation of anything loop-invariant.
+
+## Good → no finding
+
+**Input (diff):**
+
+```python
+def nightly_export():
+    # runs once per night from the scheduler
+    rows = [serialize(r) for r in load_completed_jobs()]
+    write_csv("/exports/jobs.csv", rows)
+```
+
+**Expected finding:** None — a once-a-night batch on bounded data is a cold path;
+the simple loop is appropriate. Report "No findings". Do NOT recommend streaming,
+caching, parallelism, or batching that no profile has justified — an unforced
+"make it faster" suggestion is itself a finding-quality failure (premature
+optimization).
+
+## Going deeper
+
+- [tool-rules.md](tool-rules.md) — static-analysis rules for the mechanical subset; for wiring linters, not needed for the judgment review.
+- [sources.md](sources.md) — the research behind each check; for provenance.

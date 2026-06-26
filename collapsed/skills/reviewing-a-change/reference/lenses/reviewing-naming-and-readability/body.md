@@ -1,0 +1,159 @@
+# reviewing-naming-and-readability
+
+Can a newcomer read this function? Names, length, nesting, magic values, comment accuracy.
+
+## When to use
+
+**Shape: diff.** Written for concrete code; not meant for design docs or plans.
+
+## Checklist
+
+## From category #5
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- Does each name state *intent* (what/why) rather than *mechanism* or type? (`activeUsers` over `userListFiltered`; `retryBudget` over `n`.)
+- Is name length proportional to scope? (One letter fine for a 3-line loop; a field or exported symbol needs a descriptive name.)
+- Any placeholder/temporary name surviving into the diff? (`tmp`, `data`, `data2`, `obj`, `foo`, `handleStuff`, `Manager`, `Helper`, `Util`.) Flag as "stage: nonsense/honest-incomplete — refine one stage."
+- Do booleans read as predicates? (`isReady`, `hasAccess`, `canRetry` — not `flag`, `status`, `check`.)
+- Do collections read as plurals and scalars as singulars? (mismatch signals type/contents confusion.)
+- Is domain language used, and used *consistently*? (Pick one of `customer`/`client`/`account`; don't mix synonyms for one concept.)
+- Are units/qualifiers in the name when ambiguous? (`timeoutMs`, `sizeBytes`, `priceCents` — cross-links #4, #6.)
+- No disinformation: name doesn't imply a type/structure it isn't (`accountList` that's a `Map`).
+- Consistent antonym pairs and verb tense across the API surface (`open`/`close`, `enable`/`disable`).
+- Abbreviations domain-standard or spelled out (`cust`, `usr`); initialisms cased per language idiom (`URL`, `ID`).
+- Does the name avoid encoding the *how* so it survives refactors? (`fetchUser` over `userViaHttpGet`.)
+- When a name is hard to choose, is that a smell pointing at over-broad responsibility? (cross-links #6.)
+
+---
+
+## From category #6
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- Does this function do *one* thing at *one* level of abstraction? (Altitude: if it mixes high-level policy with low-level byte/string twiddling, extract the low part.)
+- Can you state the function's job in a single verb phrase without "and"? If not, likely SRP violation — split.
+- Nesting depth ≤ ~3? Replace arrow-shaped nesting with **guard clauses / early returns**; invert conditions to de-nest the happy path.
+- Any unexplained literal (number or string) beyond `0`/`1`/`""`/obvious? Promote to a named constant whose name carries the *why* (`MAX_RETRIES`, `HTTP_TOO_MANY_REQUESTS`).
+- Cyclomatic within budget (commonly ≤10) and cognitive ≤ ~15? Flag outliers for decomposition.
+- Parameter count ≤ ~3; else a parameter object? No boolean flag params that fork the body (split into two functions).
+- Is the **happy path** the un-indented main line, with edge cases returned early at the top?
+- **Symmetry of expression**: parallel concepts in parallel form (all branches `return x`); paired operations adjacent and mirror-shaped (`acquire`/`release`); consistent argument ordering across sibling calls.
+- Are there "explaining variables" for opaque sub-expressions?
+- No long runs of near-duplicated lines begging for a loop/helper (local DRY — but watch the #11 premature-abstraction counterweight: extract only on *real* repetition).
+- Does control flow avoid surprising jumps a reader can't track?
+- Function length "screenful-ish," decomposing at natural seams — but resist so many one-line helpers that the reader page-hops (Ousterhout counterweight).
+
+---
+
+## From category #7
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- Does each comment explain **why** (intent, constraint, trade-off, gotcha, issue link) rather than restate **what**? Delete pure restatements.
+- Any **commented-out code**? Delete it — VCS is the archive. Flag every block.
+- Do docstrings/JSDoc/Javadoc **match the current signature**? Every `@param`/`@return`/`@raises` exists and is accurate; no param undocumented or renamed (comment rot).
+- For public/exported API, is the doc **complete**: summary, params, return, errors, and an example where non-trivial?
+- Does the comment **agree with the code**? "// retries 3 times" next to a bound of 5 is worse than no comment — flag contradictions as bugs.
+- Are `TODO`/`FIXME`/`HACK` attributed/linked and not silently growing?
+- No journal/changelog/author comments VCS already tracks; no banner/noise comments.
+- Is a *needed* warning present? (Non-obvious side effects, ordering, thread-safety, units, "do not call before X.")
+- When a comment is needed to explain confusing code, ask first whether **renaming/restructuring** removes the need (cross-links #5/#6).
+- Are units, ranges, invariants documented where the type system can't express them (cross-links #4, #10)?
+- Are licensing/attribution comments correct where required (cross-links #27)?
+
+---
+
+## Examples
+
+A diff often contains several independent readability problems. Check every line
+and report each distinct issue as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
+
+## Bad → finding
+
+**Input (diff):**
+
+```python
+def process(data, flag):
+    if data is not None:
+        if flag == 3:
+            tmp = []
+            for d in data:
+                if d.status == 2:
+                    if d.amount > 10000:
+                        tmp.append(d)
+            return tmp
+    return None
+```
+
+**Expected finding:**
+
+1. **Placeholder names** (`process`, `data`, `tmp`, `flag`, `d`) hide intent — name
+   the domain concept (e.g. `find_large_settled_orders`).
+2. **Magic numbers** `3`, `2`, `10000` need named constants (`MODE_AUDIT`,
+   `STATUS_SETTLED`, `LARGE_ORDER_THRESHOLD_CENTS` — with units).
+3. **Four levels of nesting:** invert to guard clauses
+   (`if data is None: return ...`) so the happy path is un-indented.
+
+## Bad → finding
+
+**Input (diff):**
+
+```js
+// Retries the request 3 times before giving up.
+async function fetchUserViaHttpGet(id) {
+  const MAX_ATTEMPTS = 5;
+  // const legacy = await oldFetchUser(id);
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) { /* ... */ }
+}
+```
+
+**Expected finding:**
+
+1. **Comment contradicts the code:** the comment says "3 times" but the code allows
+   5 — a contradicting comment is worse than none; fix one of them.
+2. **Commented-out code** (`oldFetchUser`) — delete it; version control is the
+   archive.
+3. **Mechanism-encoding name:** `fetchUserViaHttpGet` bakes the transport into the
+   name; `fetchUser` survives a transport change. (This check applies in every
+   language: any name embedding the transport, library, or storage mechanism —
+   `saveViaJdbc`, `loadFromRedis` — should state intent instead, so always scan
+   function names for embedded mechanism, not just the obvious smells.)
+
+## Good → no finding
+
+**Input (diff):**
+
+```python
+MAX_LOGIN_ATTEMPTS = 5
+
+def is_locked_out(account: Account) -> bool:
+    if account.failed_logins < MAX_LOGIN_ATTEMPTS:
+        return False
+    return account.lock_expiry > clock.now()
+```
+
+**Expected finding:** None — intention-revealing names, a predicate boolean
+(`is_locked_out`), the literal is a named constant, guard clause keeps nesting flat.
+Report "No findings". Do NOT flag the short body as "needs comments" — clear code
+needs no restating comment. Do NOT flag `0`/`1`-style obvious literals or demand
+longer names for already-clear ones.
+
+## Good → no finding
+
+**Input (diff):**
+
+```js
+for (let i = 0; i < rows.length; i++) {
+  total += rows[i].amountCents;
+}
+```
+
+**Expected finding:** None — a one-letter index is fine for a three-line loop (name
+length proportional to scope), and `amountCents` already carries its unit. Report
+"No findings"; do not invent issues.
+
+## Going deeper
+
+- [tool-rules.md](tool-rules.md) — static-analysis rules for the mechanical subset; for wiring linters, not needed for the judgment review.
+- [sources.md](sources.md) — the research behind each check; for provenance.

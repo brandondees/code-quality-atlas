@@ -1,0 +1,132 @@
+# tracing-correctness-and-invariants
+
+Does the code do what it claims? Invariants, boundaries, off-by-one, resource cleanup.
+
+## When to use
+
+**Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists.
+
+## Checklist
+
+## From category #1
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- Does every branch and early return preserve the function's stated invariant/postcondition?
+- Are boundary values (0, 1, n−1, n, empty, max, negative) explicitly handled — and tested?
+- Any off-by-one in ranges, slices, loop bounds, inclusive/exclusive ends?
+- Is every externally-sourced value null/undefined-checked at the boundary, or typed non-null?
+- Does every `switch`/`match` cover all cases or carry a safe, explicit default?
+- Any always-true/false condition (dead branch) or unreachable code after a terminator?
+- Right comparison operator everywhere (value vs identity; never exact-`==` on floats — see #4)?
+- Is behavior deterministic — no reliance on map iteration order, unseeded randomness, or wall-clock (cross #3, #25)?
+- For each loop: does it always make progress and terminate?
+- Does the change keep the function total over its input type, or is partiality documented?
+- Does the implementation actually match the spec/PR description's stated intent (the check no linter can do)?
+
+---
+
+## From category #4
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- Is every acquired resource (file, socket, connection, lock, cursor) released on **all** paths including errors (`with`/`using`/`defer`/`ensure`)?
+- Does anything that grows (logs, cache, queue, temp files, sessions) have a bound / eviction / TTL (steady state)?
+- Money/currency stored as integer minor units or a decimal `Money` type — never binary float — and currency carried?
+- Float comparisons use a tolerance, not `==`?
+- Are numeric overflow/underflow and counter wraparound considered for the actual value ranges?
+- Time stored/compared in UTC; timezone/DST handled only at edges; no "always 24h/365d" assumptions?
+- Are elapsed durations measured with a **monotonic** clock, not wall-clock (which can jump backward)?
+- **Calendar/clock time-bombs (correct at merge, detonates on a future date):** does date/time logic survive the triggers that pass review only because today is an ordinary day — leap year (Feb 29) and leap second, DST spring-forward/fall-back gaps and overlaps, month/year rollover, and the 32-bit `time_t` **epoch-2038** ceiling? Flag hardcoded years/dates, `day + 1`-style arithmetic that ignores real calendars, and "always 365 days / 24 hours" assumptions — latent defects that a clock eventually arms.
+- Is mutable shared state minimized and is ownership (who may mutate) clear?
+- Are caches invalidated correctly on the underlying change (cross #15)?
+- Are connection pools bounded and reused, with no per-request unbounded resource creation?
+
+---
+
+## Examples
+
+Report each distinct issue as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code. Trace the code against
+what it *claims* to do (name, docstring, PR description) — the spec-vs-implementation
+check is the one no linter can do.
+
+## Bad → finding
+
+**Input (diff):**
+
+```js
+// Buckets events by month index (0..monthCount-1).
+function monthlyBuckets(events, monthCount) {
+  const buckets = [];
+  for (let m = 0; m <= monthCount; m++) buckets.push([]);
+  for (const e of events) buckets[e.month].push(e);
+  return buckets;
+}
+```
+
+**Expected finding:**
+
+1. **Off-by-one:** `m <= monthCount` creates `monthCount + 1` buckets — the comment
+   promises indices `0..monthCount-1`; use `m < monthCount`.
+2. **Unvalidated boundary:** `e.month` outside `0..monthCount-1` either lands in the
+   phantom extra bucket or throws on `undefined.push` — validate or clamp at the
+   boundary, and handle the empty-`events` and `monthCount = 0` cases explicitly.
+
+## Bad → finding
+
+**Input (diff):**
+
+```python
+def export_and_time(path, rows):
+    start = time.time()
+    f = open(path, "w")
+    for r in rows:
+        f.write(f"{r.id},{r.price * 1.07}\n")
+    f.close()
+    return time.time() - start
+```
+
+**Expected finding:**
+
+1. **Resource leak on the error path:** if a write raises, `f.close()` never runs —
+   use `with open(path, "w") as f:` so cleanup happens on all paths.
+2. **Float arithmetic on money:** `r.price * 1.07` in binary float accumulates
+   rounding error — use integer minor units or `Decimal`, and carry the currency.
+3. **Wall clock for a duration:** `time.time()` can jump (NTP); measure elapsed time
+   with the monotonic clock (`time.monotonic()`).
+
+## Good → no finding
+
+**Input (diff):**
+
+```python
+def clamp_percent(value: int) -> int:
+    """Clamp to 0..100 inclusive."""
+    return max(0, min(value, 100))
+```
+
+**Expected finding:** None — total over its input type, boundaries inclusive as
+documented, no hidden partiality. Report "No findings". Do NOT invent boundary
+issues the code already handles, and do NOT demand defensive checks for conditions
+the type system or the function's contract already excludes.
+
+## Good → no finding
+
+**Input (diff):**
+
+```python
+with db.connection() as conn:
+    deadline = time.monotonic() + TIMEOUT_S
+    while time.monotonic() < deadline:
+        if poll(conn):
+            return True
+    return False
+```
+
+**Expected finding:** None — connection released on all paths, monotonic clock for
+the deadline, loop provably terminates. Report "No findings"; do not invent issues.
+
+## Going deeper
+
+- [tool-rules.md](tool-rules.md) — static-analysis rules for the mechanical subset; for wiring linters, not needed for the judgment review.
+- [sources.md](sources.md) — the research behind each check; for provenance.

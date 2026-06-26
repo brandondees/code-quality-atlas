@@ -1,0 +1,138 @@
+# reviewing-agent-legibility
+
+Can an AI agent read, navigate, and safely change this within a context budget? Context economy, retrieval-friendly structure, scoped AGENTS.md/CLAUDE.md.
+
+## When to use
+
+**Shape: diff.** Written for concrete code; not meant for design docs or plans.
+
+## Checklist
+
+## From category #35
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- **Context economy / self-containment (the 40% rule):** Can this change be understood — and safely modified — *without* loading the whole repo into context? Is the unit of change a **depth-first slice** (the function plus the key callees, types, and constants it depends on sit together or are reachable in one hop) rather than logic scattered across many files each needing the rest to make sense? A change that only makes sense after a large, fragmented read is a legibility defect for an agent *and* a human (models retrieve worst from the middle of a long context); prefer the self-contained shape.
+- **Agent-onboarding files present, accurate, and scoped (AGENTS.md / CLAUDE.md):** If the change alters the build/test/run/convention surface, does the repo's agent-instruction file still tell an agent the truth — and is it **scoped** (the right commands, conventions, and do-not-touch guardrails) rather than absent, stale, or a bloated everything-dump? This is the agent analog of #22's README front-door: file *drift* is #22/#24 and artifact *conformance* is #30, but *"does the repo provide good, scoped agent onboarding to work here"* is owned here. A missing or misleading onboarding file makes every later agent edit start from a worse prior.
+- **Retrieval-friendly / discoverable structure (xref #5):** Would a grep / retrieval / AST query land on the right chunk? Are names, file paths, and module boundaries **intention-revealing for a reader who arrives by retrieval**, not by having read the whole tree — the file where a reader (human or agent) expects it, named for what it does? An agent reads by search; structure that defeats search defeats the agent.
+- **Structurally-addressable interfaces (AST-navigable):** Does the change expose behavior through **stable, structurally-addressable surfaces** — named exports, typed signatures, clear module entry points an agent can target — rather than dynamic/stringly-typed indirection (reflection, runtime-assembled names, monkey-patching) that defeats static navigation and makes a safe edit guesswork?
+- **Local self-explanation over whole-system context (xref #7):** Does the change carry the *why* an agent needs **in place** — a type, a docstring stating the contract, an invariant comment at the edit site — so an editor doesn't have to reconstruct intent from distant files? Distinct from #7's human "why-not-what": here the audience is a **context-bounded** reader, so locality of the explanation is the property, not just its presence.
+- **LLM-centric readability — superficially clean, intrinsically complex (xref #6):** Does the code read fine line-by-line yet carry hidden reasoning cost — deep parameter coupling, long-range data dependencies, control flow that only resolves across several files? This is #34's "superficially clean but intrinsically complex" signature read from the *reader's* side; flag where a simpler shape lowers the cost of reasoning about it within a budget (route decomposition detail to #6, restraint counterweight to #11).
+- **No agent-hostile patterns introduced:** Does the change add things that make the tree *harder* for an agent to work in — a giant single file that blows the context budget, generated scaffolding/config that bloats what an agent must scan, or duplicated parallel copies that invite editing the wrong one (xref #21 change-amplification, #34 duplication)? Surface these as legibility regressions even when each line is individually fine.
+- **Scoped guardrails for autonomous edits:** Do the onboarding files (or equivalent) name the **do-not-touch zones, required checks, and project conventions** an agent must honor, so an autonomous edit *fails safe* rather than confidently wrong? Distinct from #32 runtime agent/tool-safety and #24 operator parity — this is the quality of the *written guidance content*, the agent analog of a good CONTRIBUTING guide.
+- **`llms.txt`-style index for agent-consumed repos:** For a library/product that publishes for agent consumption, is there an `llms.txt` (or equivalent machine-readable map) pointing an agent at canonical entry points and docs — present and current, not stale? Emerging standard; surface as an improvement/nit absent a stated agent-consumption need, not a blocker.
+
+---
+
+## Examples
+
+Report each distinct issue as its own numbered finding. When the change is already agent-legible, the entire response is exactly "No findings" — never manufacture a legibility finding for correct, self-contained code.
+
+## Bad → finding (stale agent onboarding)
+
+**Input (diff):** a PR renames the test target but leaves `AGENTS.md` pointing at the old command.
+
+```diff
+# Makefile
+- test:
+-     pytest tests/
++ check:
++     python -m tooling.cli eval && pytest tests/
+```
+
+`AGENTS.md` still says: "Run the tests with `make test` before pushing."
+
+**Expected finding:**
+
+1. **Agent-onboarding file now misleads an agent:** the change renamed `make test`
+   to `make check` (and added the eval gate), but `AGENTS.md` still documents
+   `make test`. An autonomous agent following the onboarding front-door will run a
+   dead target and skip the new gate. Keeping the agent onboarding accurate and
+   scoped is owned here (the agent analog of #22's README front-door); update
+   `AGENTS.md`/`CLAUDE.md` in this same PR.
+
+## Bad → finding (context economy / AST-navigability)
+
+**Input (diff):** a new export format wired through a stringly-keyed registry.
+
+```python
+# formats/registry.py  (existing)
+REGISTRY = {}
+def register(name):
+    def deco(fn): REGISTRY[name] = fn; return fn
+    return deco
+
+# exporters/csv_v2.py  (new)
+@register("csv_v2")
+def _export(rows): ...
+
+# api/handler.py  (new branch)
+fmt = request.args.get("format")
+return REGISTRY[fmt](rows)   # reached only when fmt == "csv_v2"
+```
+
+**Expected finding:**
+
+1. **Not a depth-first slice (context economy):** understanding or safely modifying
+   the new `csv_v2` path forces an agent to load three distant files — registry,
+   exporter, handler — joined only by a bare string. That fragmented read defeats a
+   context budget (models retrieve worst from the middle of a long context).
+2. **Stringly-typed dispatch defeats navigation:** a grep for `"csv_v2"` is the only
+   way to find the binding; an agent can't follow the call statically from handler
+   to exporter. Make the binding structurally addressable (direct import or a typed
+   enum) and co-locate the slice.
+
+## Bad → finding (agent-hostile megafile + duplication)
+
+**Input (diff):** a PR vendors a 6,200-line generated client as one file and
+re-implements an existing helper.
+
+```diff
++ client_generated.py        # 6,200 lines, single file, checked into src
+  # api/users.py
++ def _retry(fn, n=3):        # near-duplicate of utils.retry, slightly different
++     for _ in range(n):
++         try: return fn()
++         except Exception: pass
+```
+
+**Expected finding:**
+
+1. **Context-budget hazard (giant single file):** the 6,200-line `client_generated.py`
+   makes an agent scan a file far larger than a sensible context window to work
+   nearby. Split it, or keep the generated artifact out of the navigable tree
+   (generate-on-build, or a separate package).
+2. **Duplicated parallel copy:** `_retry` diverges from the existing `utils.retry`,
+   inviting an agent to edit the wrong one — a legibility regression (xref #21
+   change-amplification, #34 duplication). Import the existing helper; route the
+   duplication-vs-reuse detail to `checking-idioms-and-consistency` / restraint.
+
+## Good → no finding
+
+**Input (diff):**
+
+```python
+# pricing.py  (new module)
+def cents_to_display(amount_cents: int, *, currency: str = "USD") -> str:
+    """Format integer minor units as a display string. Pure; no I/O."""
+    return f"{amount_cents / 100:.2f} {currency}"
+```
+
+```diff
+# AGENTS.md
+  ## Modules
++ - `pricing.py` — money formatting helpers (pure functions).
+```
+
+**Expected finding:** No findings
+
+Note: a self-contained depth-first slice (typed signature, a local contract
+docstring, no distant context needed), a retrieval-friendly name, and the onboarding
+file kept accurate and scoped. Do NOT invent agent-legibility findings on correct
+code, and do NOT demand an `llms.txt` index or extra structure this small change
+doesn't need.
+
+## Going deeper
+
+- [tool-rules.md](tool-rules.md) — static-analysis rules for the mechanical subset; for wiring linters, not needed for the judgment review.
+- [sources.md](sources.md) — the research behind each check; for provenance.

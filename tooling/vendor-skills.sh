@@ -30,10 +30,13 @@ TARGET=""
 PRUNE=0
 SUBDIR=".claude/skills"
 MARKER_NAME=".atlas-vendored"
+# Which tree to vendor: the 35 standalone skills (default) or the 4 collapsed
+# entrypoints (--collapsed).
+SRC_SUBDIR="skills"
 
 usage() {
   cat <<'EOF'
-Usage: tooling/vendor-skills.sh <target-repo-dir> [--prune]
+Usage: tooling/vendor-skills.sh <target-repo-dir> [--collapsed] [--prune]
 
 Copies skills/<name>/{SKILL.md, reference/, examples.md} (no evals/) into
 <target-repo-dir>/.claude/skills/<name>/. Run the script from inside the
@@ -43,6 +46,8 @@ Arguments:
   target-repo-dir   Repo to vendor the suite into (its .claude/skills/ is written)
 
 Options:
+  --collapsed   Vendor the 4 collapsed entrypoints (collapsed/skills/) instead of
+                the 35 standalone skills (skills/)
   --prune       Remove skills previously vendored by this tool that are no longer
                 in the suite (safe: only touches names recorded in the marker)
   -h, --help    Show this help
@@ -75,6 +80,7 @@ check_requirements() {
 parse_args() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
+      --collapsed) SRC_SUBDIR="collapsed/skills" ;;
       --prune) PRUNE=1 ;;
       -h | --help)
         usage
@@ -129,13 +135,13 @@ repo_root() {
 collect_skill_names() {
   SKILL_NAMES=()
   local md name
-  for md in skills/*/SKILL.md; do
+  for md in "$SRC_SUBDIR"/*/SKILL.md; do
     [ -e "$md" ] || continue
     name=$(basename "$(dirname "$md")")
     SKILL_NAMES+=("$name")
   done
   if [ "${#SKILL_NAMES[@]}" -eq 0 ]; then
-    printf 'Error: no skills/*/SKILL.md found under %s\n' "$(pwd)" >&2
+    printf 'Error: no %s/*/SKILL.md found under %s\n' "$SRC_SUBDIR" "$(pwd)" >&2
     return 1
   fi
 }
@@ -152,7 +158,7 @@ contains() {
 
 vendor_one() {
   local name=$1 dest_root=$2
-  local src="skills/$name"
+  local src="$SRC_SUBDIR/$name"
   local dest="$dest_root/$name"
   rm -rf "$dest"
   mkdir -p "$dest"

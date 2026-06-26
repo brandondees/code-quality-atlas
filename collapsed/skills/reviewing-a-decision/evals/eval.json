@@ -1,0 +1,31 @@
+{
+  "skills": [
+    "reviewing-a-decision"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this ADR proposing we adopt Kafka for our event pipeline.",
+      "expected_behavior": [
+        "Recognizes a decision-shaped review (an ADR), not a code diff",
+        "Loads reference/lenses/reviewing-decision-lifecycle/body.md and checks rationale, lock-in, exit, and revisit trigger",
+        "Pulls in the design-capable lenses relevant to the decision's domain (e.g. resilience/scalability, observability)"
+      ]
+    },
+    {
+      "query": "Thorough review of this build-vs-buy RFC — use all relevant lenses.",
+      "expected_behavior": [
+        "Recognizes comprehensive mode and runs every relevant decision/design lens uncapped",
+        "Reviews the choice and its record (alternatives, assumptions, rollback) rather than implementation code",
+        "Applies the comprehensive Nit-pinned floor and synthesizes one verdict"
+      ]
+    },
+    {
+      "query": "Quick triage of this deprecation plan before we announce it.",
+      "expected_behavior": [
+        "Recognizes triage mode and runs only the critical-tier decision concerns",
+        "Flags missing exit/rollback or migration-safety gaps via reference/lenses/reviewing-migration-and-data-safety/body.md",
+        "Reports at the Major+ floor"
+      ]
+    }
+  ]
+}

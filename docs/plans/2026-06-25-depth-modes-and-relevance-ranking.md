@@ -1,5 +1,9 @@
 # Depth Modes & Relevance Ranking Implementation Plan
 
+**Status: implemented** (PR #80, branch `claude/plans-implementation-5abwaw`). The
+unchecked task boxes below are the original execution plan, kept as the historical
+record; the shipped behavior is the source of truth.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the router's 2–4 lens *cap* with a relevance-**ranked** list plus three depth **modes** (triage / review / comprehensive), each with a severity floor, all declared in a new manifest `modes:` section and rendered into the generated router and synthesizer — so a reviewer can ask for "all relevant lenses" and the long-tail findings actually surface.

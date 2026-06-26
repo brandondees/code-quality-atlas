@@ -1,0 +1,95 @@
+# auditing-compliance-and-provenance
+
+Any licensing, PII, or provenance exposure? Detect and escalate to humans — never decide legal questions.
+
+## When to use
+
+**Shape: repo.** Run against the whole repository (scheduled or on demand), not a single diff.
+
+## Checklist
+
+## From category #27
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- **New dependency license check:** does an added dependency (and its transitive tree) carry a license compatible with the project's distribution model? Block/strongly-flag GPL/AGPL pulled into a permissive or proprietary product.
+- **Copyleft contamination / linkage:** does the change *link* or *combine* with copyleft code in a way that triggers obligations (esp. AGPL over a network service)? Static vs. dynamic linking and "mere aggregation" matter — flag for legal if unsure.
+- **License/attribution preservation:** are upstream license texts, copyright notices, and NOTICE files retained when vendoring/copying code? Removed attribution = violation.
+- **Provenance of copied code:** does this diff include code pasted from Stack Overflow, a blog, another repo, or AI generation without attribution/license clarity? Treat as untrusted: verify license, run secret/IP scan, label it.
+- **Per-file license header:** do new source files have an `SPDX-License-Identifier` + copyright (REUSE)? Missing header = provenance gap.
+- **PII data-flow:** does new code collect, store, log, or transmit personal data? If so — lawful basis/consent present, **minimized** to what's needed, not logged in plaintext, and not sent to a third party/region without basis (cross-links #14, #16, #25).
+- **Retention & deletion:** is there a retention limit and an erasure path for new personal data (right-to-be-forgotten), or does it accumulate indefinitely?
+- **Data residency / cross-border:** does the change move PII to a new region, vendor, or third-party model (incl. LLM APIs) — is that transfer permitted and documented? (cross-links #25 PII-to-model.)
+- **Consent & purpose:** for new tracking/telemetry/analytics, is consent gating in place and is use limited to the stated purpose? No silent expansion of data use.
+- **Accessibility-as-legal:** for regulated/consumer surfaces, does the change keep WCAG 2.x AA conformance (cross-links #23) given its legal weight?
+- **Export / sanctions / crypto constraints:** does new cryptography, or distribution to restricted regions, hit export-control or compliance obligations? Flag for review (don't assume).
+- **SBOM currency:** if dependencies changed, is the SBOM / license inventory regenerated so provenance stays accurate?
+
+---
+
+## Examples
+
+This skill is repo-shaped: its input is a license / PII / provenance scan. Its job
+is to **detect and escalate, not decide** — legal questions (copyleft linkage,
+lawful basis, export control) go to humans with the evidence attached. Report each
+distinct issue as its own numbered finding. When the scan is healthy, the entire response is exactly this skill's no-finding sentence given in the decision rule below — never a numbered list of findings for a healthy scan.
+
+**Decision rule (apply before flagging):** a compliance finding needs concrete
+evidence — an incompatible license in the tree, missing attribution/SPDX, code of
+unknown origin, a PII flow without minimization/retention, ungated telemetry.
+Don't speculate beyond the scan; escalate ambiguity rather than ruling on it. If
+licenses are compatible and attributed, provenance is clean, and PII flows are
+minimized with retention paths, report exactly
+"No findings: compliance and provenance are clean".
+
+## Bad → finding
+
+**Input (compliance scan; product: proprietary SaaS, EU customers):**
+
+```text
+licenses:    vendored/chart-lib/ (copied from GitHub, LICENSE file deleted, author header stripped)
+             dep `pdf-magic` AGPL-3.0 — imported by the web rendering service
+spdx:        41/180 source files missing SPDX-License-Identifier headers
+pii:         new analytics.py sends user_id, email, full search history to thirdparty.example
+             retention: no TTL; deletion: no erasure path implemented
+telemetry:   enabled by default, no consent gate, EU traffic included
+```
+
+**Expected finding:**
+
+1. **Stripped attribution on vendored code:** the deleted LICENSE and author
+   headers in `vendored/chart-lib/` violate the upstream license regardless of
+   which permissive license it was — restore the license text and attribution.
+2. **AGPL in a proprietary network service:** `pdf-magic` (AGPL-3.0) imported by
+   the web service plausibly triggers network-copyleft obligations — escalate to
+   legal with the import graph; do not ship until resolved.
+3. **PII over-collection to a third party:** email + full search history exceed
+   what analytics needs (minimization), with no retention TTL and no erasure path
+   (right-to-be-forgotten) — minimize fields, add TTL and deletion.
+4. **Consent gap:** default-on telemetry for EU users with no consent gate —
+   escalate; gate collection on consent.
+5. **SPDX coverage gap:** 41 files missing license headers — add them (REUSE) so
+   provenance stays machine-checkable.
+
+## Good → no finding
+
+**Input (compliance scan; product: MIT-licensed library):**
+
+```text
+licenses:   all deps MIT/BSD/Apache-2.0; tree scan clean; NOTICE retained for the
+            one Apache dep
+spdx:       180/180 files carry SPDX headers (REUSE check green)
+pii:        none collected (library code; no telemetry)
+provenance: no vendored code; SBOM regenerated on release
+```
+
+**Expected finding:** None — compatible licenses with attribution retained, full
+SPDX coverage, no PII surface, current SBOM. Report
+"No findings: compliance and provenance are clean". Do NOT speculate about legal
+risk the scan shows no evidence for, and do NOT rule on genuinely legal questions —
+escalating those is correct, deciding them is not.
+
+## Going deeper
+
+- [tool-rules.md](tool-rules.md) — static-analysis rules for the mechanical subset; for wiring linters, not needed for the judgment review.
+- [sources.md](sources.md) — the research behind each check; for provenance.

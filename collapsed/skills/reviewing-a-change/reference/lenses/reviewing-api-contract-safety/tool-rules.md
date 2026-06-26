@@ -1,0 +1,18 @@
+# Tool rules to triage — reviewing-api-contract-safety
+
+> **Selecting tools for this stack.** The tools named below are field-tested starting points, not a mandate. Pick the one that fits this codebase's language version, build, and CI — and verify it actually runs on your toolchain before relying on it. A listed tool that is broken, abandoned, or noisy on your setup is a gap to close, not a permanent `continue-on-error`: prefer a working, maintained equivalent (often a younger, less well-known one) over a canonical-but-broken default. The capability is the requirement; the specific tool is replaceable.
+
+## Contents
+
+- From category #13
+
+## From category #13
+
+### Tooling rules worth lifting
+
+- **Spectral** (Stoplight) — lint OpenAPI/AsyncAPI against a style guide (naming, required fields, consistency). (https://stoplight.io/open-source/spectral)
+- **oasdiff** — OpenAPI **breaking-change detection** (470+ change types) + diff; CLI + GitHub Action. (https://www.oasdiff.com/)
+- **buf** — Protobuf breaking-change detection (`WIRE`, `WIRE_JSON`, `PACKAGE`, `FILE` categories) + lint. (https://buf.build/docs/breaking/)
+- **Pact / Pactflow** — consumer-driven contract tests across the consumer-provider boundary.
+- **GraphQL** — graphql-inspector (schema breaking changes), graphql-schema-linter.
+- **Google api-linter** (AIP rules) for gRPC/REST conventions.

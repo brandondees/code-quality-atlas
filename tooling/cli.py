@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from tooling.manifest import load_manifest, validate
-from tooling.generate import (generate_router, generate_skill,
+from tooling.generate import (generate_collapsed, generate_router, generate_skill,
                               generate_synthesizer, primary_owners)
 from tooling.drift import check_drift
 from tooling.evals import load_evals, validate_evals, EvalError
@@ -18,6 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--manifest", default="skills/manifest.yaml")
     g.add_argument("--docs-root", default=".")
     g.add_argument("--skills-root", default="skills")
+    g.add_argument("--collapsed-root", default="collapsed")
 
     d = sub.add_parser("drift")
     d.add_argument("--skills-root", default="skills")
@@ -44,6 +45,11 @@ def main(argv: list[str] | None = None) -> int:
         if manifest.synthesizer is not None:
             out = generate_synthesizer(manifest, skills_root=args.skills_root)
             print(f"generated {out}")
+        if manifest.entrypoints:
+            for out in generate_collapsed(manifest, docs_root=args.docs_root,
+                                          skills_root=args.skills_root,
+                                          collapsed_root=args.collapsed_root):
+                print(f"generated {out}")
         return 0
 
     if args.cmd == "drift":
