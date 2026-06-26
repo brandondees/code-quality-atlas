@@ -100,9 +100,9 @@ collapsed/skills/reviewing-a-change/
    the diff-review trigger surface).
 2. Its SKILL.md ranks the applicable lenses by relevance to the change's scope and
    selects per the active **mode** (default **review** = top 2–4).
-3. Agent **`Read`s** `reference/lenses/<lens>.md` for each selected lens and applies
-   it — `Read` replaces the Skill-invocation; no new mechanism (skills already point
-   at `reference/*.md`).
+3. Agent **`Read`s** `reference/lenses/<lens>/body.md` for each selected lens and
+   applies it — `Read` replaces the Skill-invocation; no new mechanism (skills
+   already point at `reference/*.md`).
 4. Agent merges findings via `reference/synthesis.md`, applying the mode's severity
    floor, to one ranked verdict.
 

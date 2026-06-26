@@ -97,10 +97,15 @@ In `load_manifest`, next to the `modes` parsing block (from Plan 1), add:
     entrypoints: list[Entrypoint] = []
     for i, raw_ep in enumerate(data.get("entrypoints", []) or []):
         try:
+            shapes = raw_ep["shapes"]
+            if not isinstance(shapes, list) or not all(isinstance(x, str) for x in shapes):
+                raise ValidationError(
+                    f"entrypoints[{i}] in {path}: 'shapes' must be a list of strings "
+                    f"(got {shapes!r}) — use 'shapes: [diff]', not 'shapes: diff'")
             entrypoints.append(Entrypoint(
                 name=raw_ep["name"],
                 description=raw_ep["description"],
-                shapes=list(raw_ep["shapes"]),
+                shapes=list(shapes),
                 include_design=bool(raw_ep.get("include_design", False)),
                 body=raw_ep.get("body", ""),
             ))
@@ -195,8 +200,14 @@ Add after the modes block in `validate`:
             if ep.name in reserved:
                 raise ValidationError(
                     f"entrypoint {ep.name} collides with an existing skill/router/synthesizer name")
+            if not re.fullmatch(r"[a-z0-9-]{1,64}", ep.name):
+                raise ValidationError(
+                    f"entrypoint {ep.name!r}: name must be 1-64 lowercase letters, digits, "
+                    "or hyphens (it becomes a directory under collapsed/skills/)")
             if len(ep.description) > 1024:
                 raise ValidationError(f"entrypoint {ep.name}: description exceeds 1024 chars")
+            if not ep.shapes:
+                raise ValidationError(f"entrypoint {ep.name}: shapes must be non-empty")
             for shape in ep.shapes:
                 if shape not in {"diff", "repo", "decision", "artifact"}:
                     raise ValidationError(f"entrypoint {ep.name}: unknown shape {shape!r}")
@@ -491,11 +502,14 @@ Expected: FAIL — import error for `build_entrypoint_md`.
 def build_collapsed_synthesis(manifest: Manifest) -> str:
     """The synthesizer procedure as a bundled reference file (no frontmatter).
     Reuses build_synthesizer_md (which already includes mode_floor_policy) and
-    strips its YAML frontmatter so an entrypoint can Read it directly."""
+    strips only the LEADING YAML frontmatter block so an entrypoint can Read it
+    directly — robust even if the synthesis body itself contains a '---' line."""
     full = build_synthesizer_md(manifest)
-    # frontmatter is the first `---\n...\n---\n\n` block
-    marker = "\n---\n\n"
-    return full.split(marker, 1)[1] if marker in full else full
+    if full.startswith("---\n"):
+        end = full.find("\n---\n", len("---\n"))   # closing fence of the first block only
+        if end != -1:
+            return full[end + len("\n---\n"):].lstrip("\n")
+    return full
 
 
 def build_entrypoint_md(manifest: Manifest, entrypoint) -> str:
@@ -516,10 +530,11 @@ def build_entrypoint_md(manifest: Manifest, entrypoint) -> str:
             if any(lens in lens_names for lens in route.run):
                 run = ", ".join(f"`{lens}`" for lens in route.run if lens in lens_names)
                 rows.append(f"| {route.when} | {run} |")
-    routes_table = "\n".join(rows) if rows else "| (any change in scope) | all lenses below |"
+    routes_table = "\n".join(rows) if rows else "| (any item in scope) | all lenses below |"
 
     catalog = "\n".join(
-        f"- `{s.name}`{' ◆' if s.design else ''} — {s.picker}" for s in lenses)
+        f"- `{s.name}`{' ◆' if s.design else ''}" + (f" — {s.picker}" if s.picker else "")
+        for s in lenses)
 
     body = (
         f"# {entrypoint.name}\n\n"
@@ -596,7 +611,12 @@ Expected: FAIL — import error for `generate_collapsed`.
 def collapsed_plugin_manifest(root_plugin_path: str = ".claude-plugin/plugin.json") -> dict:
     """Derive the collapsed plugin manifest from the root one (single source) so
     metadata stays in sync; only name/displayName/description differ."""
-    base = json.loads(Path(root_plugin_path).read_text(encoding="utf-8"))
+    p = Path(root_plugin_path)
+    if not p.exists():
+        raise FileNotFoundError(
+            f"root plugin manifest not found at {root_plugin_path}; "
+            "cannot derive the collapsed plugin manifest")
+    base = json.loads(p.read_text(encoding="utf-8"))
     base["name"] = "code-quality-atlas-collapsed"
     base["displayName"] = base.get("displayName", "Code Quality Atlas") + " (collapsed)"
     base["description"] = ("Collapsed 4-entrypoint form of the code-quality-atlas "
@@ -608,8 +628,16 @@ def collapsed_plugin_manifest(root_plugin_path: str = ".claude-plugin/plugin.jso
 def generate_collapsed(manifest: Manifest, docs_root: str = ".", skills_root: str = "skills",
                        collapsed_root: str = "collapsed") -> list[Path]:
     """Emit the collapsed form: 4 entrypoint skills (each bundling its shape's
-    lenses + synthesis) plus a generated .claude-plugin/plugin.json."""
+    lenses + synthesis) plus a generated .claude-plugin/plugin.json. Prunes any
+    entrypoint directory no longer in the manifest so the committed tree can't go
+    stale (requires `import shutil` at the top of generate.py)."""
     written: list[Path] = []
+    skills_dir = Path(collapsed_root, "skills")
+    current = {ep.name for ep in manifest.entrypoints}
+    if skills_dir.exists():
+        for child in skills_dir.iterdir():
+            if child.is_dir() and child.name not in current:
+                shutil.rmtree(child)   # prune a removed entrypoint
     for ep in manifest.entrypoints:
         out = Path(collapsed_root, "skills", ep.name)
         (out / "reference" / "lenses").mkdir(parents=True, exist_ok=True)
@@ -769,6 +797,15 @@ def test_committed_collapsed_matches_regeneration(tmp_path):
             if gen.name == "eval.json":
                 continue
             assert gen.read_text() == committed.read_text(), f"drift in {rel}"
+    # reverse: every committed non-eval file must have a regenerated counterpart
+    # (catches a stale file left in collapsed/ that generation no longer produces)
+    for root, _dirs, files in os.walk(Path("collapsed") / "skills"):
+        for f in files:
+            committed = Path(root) / f
+            if committed.name == "eval.json":
+                continue
+            rel = committed.relative_to("collapsed")
+            assert (tmp_path / rel).exists(), f"stale committed file (not regenerated): {committed}"
 ```
 
 - [ ] **Step 2: Run to verify it passes (tree already committed in Task 7)**
@@ -781,10 +818,11 @@ Expected: PASS (the committed tree was just generated). If it FAILS, regenerate 
 If `.github/workflows/` exists, add a step to the existing test/lint workflow (after checkout + install):
 
 ```yaml
-      - name: Collapsed tree is in sync
+      - name: Generated trees are in sync
         run: |
           python -m tooling.cli generate --manifest skills/manifest.yaml --docs-root . --skills-root skills
-          git diff --exit-code skills/ collapsed/
+          git diff --exit-code skills/    || { echo "::error::standalone skills/ drifted — regenerate and commit"; exit 1; }
+          git diff --exit-code collapsed/ || { echo "::error::collapsed/ drifted — regenerate and commit"; exit 1; }
 ```
 
 (If CI lives in `.pre-commit-config.yaml` instead, add an equivalent local hook; match the repo's existing pattern.)
@@ -888,6 +926,8 @@ Replace each empty `scenarios: []` with ≥3 scenarios validating routing + mode
 ```
 
 Author equivalent ≥3-scenario sets for `auditing-a-repository`, `reviewing-a-decision`, `reviewing-an-artifact` (each exercising relevance + at least one mode).
+
+> Newlines in a `query` must be escaped as `\n` (the example above is valid JSON as written); backticks need no escaping. `python -m tooling.cli eval` (Step 2) will surface a malformed JSON file.
 
 - [ ] **Step 2: Validate evals**
 
