@@ -875,8 +875,10 @@ def generate_collapsed(manifest: Manifest, docs_root: str = ".", skills_root: st
         written.append(out)
     pm_dir = Path(collapsed_root, ".claude-plugin")
     pm_dir.mkdir(parents=True, exist_ok=True)
-    (pm_dir / "plugin.json").write_text(
+    plugin_json = pm_dir / "plugin.json"
+    plugin_json.write_text(
         json.dumps(collapsed_plugin_manifest(
             root_plugin_path=str(Path(docs_root, ".claude-plugin", "plugin.json"))),
             indent=2) + "\n", encoding="utf-8")
+    written.append(plugin_json)   # the generated manifest is an emitted artifact too
     return written

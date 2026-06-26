@@ -142,3 +142,34 @@ def test_committed_collapsed_matches_regeneration(tmp_path):
                 continue
             rel = committed.relative_to("collapsed")
             assert (tmp_path / rel).exists(), f"stale committed file (not regenerated): {committed}"
+
+
+# --- Round-2 advisory follow-ups: prune path, body override, plugin.json in return ---
+
+def test_generate_collapsed_returns_plugin_json_path(tmp_path):
+    from tooling.generate import generate_collapsed
+    outs = generate_collapsed(_full_manifest(), docs_root=".", skills_root="skills",
+                              collapsed_root=str(tmp_path))
+    assert (tmp_path / ".claude-plugin" / "plugin.json") in outs
+
+
+def test_generate_collapsed_prunes_stale_entrypoint(tmp_path):
+    from tooling.generate import generate_collapsed
+    skills_dir = tmp_path / "skills"
+    stale = skills_dir / "reviewing-an-obsolete-thing"
+    stale.mkdir(parents=True)
+    (stale / "SKILL.md").write_text("stale", encoding="utf-8")
+    generate_collapsed(_full_manifest(), docs_root=".", skills_root="skills",
+                       collapsed_root=str(tmp_path))
+    assert not stale.exists()                          # pruned: not in the manifest
+    assert (skills_dir / "reviewing-a-change").exists()  # current entrypoint written
+
+
+def test_build_entrypoint_md_uses_body_override_when_present():
+    m = _full_manifest()
+    ep = Entrypoint(name="reviewing-a-change", description="the description",
+                    shapes=["diff"], body="A richer hand-written when-to-use body.")
+    md = build_entrypoint_md(m, ep)
+    # body wins over description in the When-to-use section (description still
+    # appears in the frontmatter, which is correct and separate).
+    assert "## When to use\n\nA richer hand-written when-to-use body." in md
