@@ -928,3 +928,26 @@ synthesizer:
         against the user's clear intent (hard-to-cancel, buried opt-out,
         roach-motel flows). Security's protective friction wins; obstruction does
         not — the test is whose interest the friction serves, not its presence.
+modes:
+  - name: triage
+    breadth: >
+      the critical tier only — correctness, security, data-safety, and concurrency
+    floor: Major
+    triggers: [triage, quick review, fast check, pre-merge gate]
+    note: >
+      A pre-merge gate: run only the critical-tier lenses and report Major and above.
+  - name: review
+    breadth: >
+      the top 2-4 lenses by relevance (the default; overridable)
+    floor: escalating
+    triggers: [review, review this, code review, review this PR, review the diff]
+    note: >
+      Default per-PR depth: relevance-ranked top-N with the round-based escalating floor.
+  - name: comprehensive
+    breadth: >
+      every relevant lens, uncapped — the full audit set at repo scope
+    floor: Nit
+    triggers: [thorough, comprehensive, deep review, use all relevant lenses, review everything]
+    note: >
+      On-demand or scheduled: run all relevant lenses and pin the floor at Nit so
+      readability-class and other long-tail findings surface instead of being trimmed.

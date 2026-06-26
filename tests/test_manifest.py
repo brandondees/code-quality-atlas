@@ -446,3 +446,16 @@ def test_validate_rejects_mode_without_triggers():
     bad = [Mode(name="review", breadth="b", floor="escalating", triggers=[])]
     with pytest.raises(ValidationError, match="trigger"):
         validate(Manifest("v0", [_skill()], synthesizer=_syn(), modes=bad))
+
+
+def test_real_manifest_declares_three_modes():
+    m = load_manifest("skills/manifest.yaml")
+    names = [mode.name for mode in m.modes]
+    assert names == ["triage", "review", "comprehensive"]
+    # comprehensive must pin the floor at the least-severe level so long-tail findings surface
+    assert m.synthesizer is not None
+    least_severe = m.synthesizer.severity_order[-1]
+    comprehensive = next(mode for mode in m.modes if mode.name == "comprehensive")
+    assert comprehensive.floor == least_severe
+    review = next(mode for mode in m.modes if mode.name == "review")
+    assert review.floor == "escalating"
