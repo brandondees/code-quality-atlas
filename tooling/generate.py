@@ -325,6 +325,66 @@ def generate_skill(skill: Skill, taxonomy_version: str,
     return out
 
 
+def entrypoint_lenses(manifest: Manifest, entrypoint) -> list[Skill]:
+    """The lenses an entrypoint bundles: by shape, plus design-capable lenses
+    when include_design (e.g. the decision entrypoint carries the ◆ diff lenses)."""
+    out = []
+    for s in manifest.skills:
+        if s.shape in entrypoint.shapes or (entrypoint.include_design and s.design):
+            out.append(s)
+    return out
+
+
+def _checklist_body(skill: Skill, docs_root: str = ".") -> str:
+    """The heuristics checklist for a bundle, without build_reference's own H1
+    title and Contents ToC — so the lens bundle keeps a single top-level heading
+    (`# <lens>`) and stays markdownlint-clean (MD025)."""
+    doc = build_reference(skill, "heuristics", docs_root=docs_root)
+    idx = doc.find("## From category")
+    return doc[idx:].strip() if idx != -1 else ""
+
+
+def lens_bundle_body(skill: Skill, docs_root: str = ".", skills_root: str = "skills") -> str:
+    """The `body.md` an entrypoint loads for one lens: when-to-use + the full
+    heuristics checklist + curated examples + links to the deeper bundled files.
+    Examples come from the standalone tree's hand-refined examples.md (canonical);
+    tool-rules/sources are a further disclosure level, linked not inlined."""
+    picker = f"{skill.picker}\n\n" if skill.picker else ""
+    heuristics = _checklist_body(skill, docs_root=docs_root)
+    examples_path = Path(skills_root, skill.name, "examples.md")
+    examples = examples_path.read_text(encoding="utf-8") if examples_path.exists() else ""
+    # The standalone examples.md carries its own `# Examples — <lens>` H1; strip a
+    # leading H1 so the bundle keeps one top-level heading.
+    examples = examples.strip()
+    if examples.startswith("# "):
+        examples = examples.split("\n", 1)[1].strip() if "\n" in examples else ""
+    examples_block = f"## Examples\n\n{examples}\n\n" if examples else ""
+    return (
+        f"# {skill.name}\n\n"
+        f"{picker}"
+        "## When to use\n\n"
+        f"{_scope_line(skill)}\n\n"
+        "## Checklist\n\n"
+        f"{heuristics}\n\n"
+        f"{examples_block}"
+        "## Going deeper\n\n"
+        "- [tool-rules.md](tool-rules.md) — static-analysis rules for the mechanical "
+        "subset; for wiring linters, not needed for the judgment review.\n"
+        "- [sources.md](sources.md) — the research behind each check; for provenance.\n"
+    )
+
+
+def generate_lens_bundle(skill: Skill, lenses_dir: Path, docs_root: str = ".",
+                         skills_root: str = "skills") -> Path:
+    """Write reference/lenses/<skill>/{body,tool-rules,sources}.md and return the dir."""
+    dest = Path(lenses_dir, skill.name)
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "body.md").write_text(lens_bundle_body(skill, docs_root, skills_root), encoding="utf-8")
+    (dest / "tool-rules.md").write_text(build_reference(skill, "tooling", docs_root), encoding="utf-8")
+    (dest / "sources.md").write_text(build_reference(skill, "references", docs_root), encoding="utf-8")
+    return dest
+
+
 def primary_owners(manifest: Manifest) -> dict[int, str]:
     """category -> the skill that primarily owns it (G1 guarantees uniqueness)."""
     owners: dict[int, str] = {}
