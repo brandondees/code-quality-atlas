@@ -8,6 +8,8 @@ Enumerate what an adversary could do, boundary by boundary — STRIDE, trust bou
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #38
 
 ### Reviewable heuristics (skill-checklist seeds)
