@@ -30,11 +30,14 @@ pointer to the decision or skill that closed them). A **decision sweep
 approved, build deferred). A later sweep (2026-06-24) closed **Q14 → D16**
 (review-depth modes: separate relevance from depth; three tiers; manifest-driven —
 design [`review-depth-modes.md`](review-depth-modes.md), build deferred).
+**Recently resolved by build (kept here for context, no longer open):** Q20
+(top-level skill-count → collapse to a few entrypoints + nested disclosure —
+design approved & **✅ built 2026-06-26, PR #80**; see the Q20 section below),
+which also resolved D16.
+
 **Genuinely still open (undecided):**
 Q21 (suite-wide eval comprehensiveness — raise the bar beyond "≥3 scenarios" to a
 per-lens adversarial/red-team pass; new 2026-06-27, design-deferred),
-Q20 (top-level skill-count vs. context budget — collapse to a few entrypoints +
-nested disclosure; new 2026-06-25 — design approved & **✅ built 2026-06-26, PR #80**),
 Q17 (self-improving loop — design exploration written, awaiting review),
 Q13 (team preferences overlay — designed, not yet built),
 Q15 (a decision-time review shape — new, the round-2 gap-hunt headline),
