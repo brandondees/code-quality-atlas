@@ -8,6 +8,8 @@ Is the PR itself reviewable? Size, atomic commits, description, scope creep, cha
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #24
 
 ### Reviewable heuristics (skill-checklist seeds)

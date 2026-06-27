@@ -8,6 +8,8 @@ Does the code do what it claims? Invariants, boundaries, off-by-one, resource cl
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #1
 
 ### Reviewable heuristics (skill-checklist seeds)

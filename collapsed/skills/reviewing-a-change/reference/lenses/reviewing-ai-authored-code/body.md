@@ -8,6 +8,8 @@ Does this carry the AI-authored failure signature? Hallucinated/typosquatted pac
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #34
 
 ### Reviewable heuristics (skill-checklist seeds)

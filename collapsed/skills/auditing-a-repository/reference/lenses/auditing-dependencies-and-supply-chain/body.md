@@ -8,6 +8,8 @@ Is the dependency tree safe? CVEs, pinning, typosquats, install scripts, license
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #18
 
 ### Reviewable heuristics (skill-checklist seeds)

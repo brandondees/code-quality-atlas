@@ -8,6 +8,8 @@ Can a newcomer read this function? Names, length, nesting, magic values, comment
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #5
 
 ### Reviewable heuristics (skill-checklist seeds)

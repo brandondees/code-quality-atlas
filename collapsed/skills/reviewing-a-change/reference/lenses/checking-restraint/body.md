@@ -8,6 +8,8 @@ Is this change too much? Premature abstraction or optimization — the brake ped
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #11
 
 ### Reviewable heuristics (skill-checklist seeds)

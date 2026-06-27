@@ -8,6 +8,8 @@ Do the tests prove anything? Behavior coupling, over-mocking, edge coverage, det
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #17
 
 ### Reviewable heuristics (skill-checklist seeds)

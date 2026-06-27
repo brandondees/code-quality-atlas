@@ -8,6 +8,8 @@ Can everyone use this UI? Keyboard, screen readers, contrast, locales, RTL.
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #23
 
 ### Reviewable heuristics (skill-checklist seeds)

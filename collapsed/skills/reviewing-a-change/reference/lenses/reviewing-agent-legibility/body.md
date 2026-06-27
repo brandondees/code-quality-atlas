@@ -8,6 +8,8 @@ Can an AI agent read, navigate, and safely change this within a context budget? 
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #35
 
 ### Reviewable heuristics (skill-checklist seeds)

@@ -8,6 +8,8 @@ Any licensing, PII, or provenance exposure? Detect and escalate to humans — ne
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #27
 
 ### Reviewable heuristics (skill-checklist seeds)

@@ -8,6 +8,8 @@ Is this decision sound and recorded? Adoption justification, lock-in/exit, ADR a
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #29
 
 ### Reviewable heuristics (skill-checklist seeds)

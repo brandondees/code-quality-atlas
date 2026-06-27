@@ -8,6 +8,8 @@ Is the enforcement apparatus healthy? Suppression hygiene & baseline trend, acti
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #30
 
 ### Reviewable heuristics (skill-checklist seeds)
