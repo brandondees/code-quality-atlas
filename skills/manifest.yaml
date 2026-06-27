@@ -132,7 +132,8 @@ skills:
     shape: diff
     design: true
     wave: 4
-    cross_ref: [14]    # primary owner of diff-time vuln detection: sweeping-for-security
+    # cross_ref intentionally absent: reviewing-threat-model is the sole primary owner of #38.
+    # sweeping-for-security (#14) owns diff-time vuln detection; these are complementary, not overlapping.
     built_from:
       - { category: 38, source: docs/research/cluster-4-runtime.md#38 }
 

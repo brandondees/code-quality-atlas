@@ -7,7 +7,7 @@ description: 'Audits compliance, licensing, and provenance: dependency licenses 
   rather than deciding legal questions. A repo-wide / scheduled audit. Use when auditing
   licenses, PII handling, data retention, or provenance.'
 provenance:
-  taxonomy_version: v0.7
+  taxonomy_version: v0.8
   built_from:
   - category: 27
     source: docs/research/cluster-6-evolution.md#27

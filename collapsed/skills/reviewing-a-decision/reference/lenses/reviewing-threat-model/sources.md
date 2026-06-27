@@ -1,0 +1,15 @@
+# References to mine — reviewing-threat-model
+
+## Contents
+
+- From category #38
+
+## From category #38
+
+### Key references
+
+- **Shostack — *Threat Modeling: Designing for Security* (Wiley, 2014) & the Four Question Frame** — https://shostack.org/resources/threat-modeling → mine: the four questions (what are we building / what can go wrong / what do we do / did we do a good enough job) as the lens's spine; threat modeling is explicitly *design-time* ("what could go wrong before implementation begins").
+- **Microsoft — STRIDE (Kohnfelder & Garg, 1999)** — https://learn.microsoft.com/en-us/azure/security/develop/threat-modeling-tool-threats → mine: the six threat classes mapped to security properties — **S**poofing↔authentication, **T**ampering↔integrity, **R**epudiation↔non-repudiation, **I**nformation disclosure↔confidentiality, **D**enial of service↔availability, **E**levation of privilege↔authorization. Enumerate per component crossing a trust boundary.
+- **Threat Modeling Manifesto (2020)** — https://www.threatmodelingmanifesto.org/ → mine: values/principles — a model is a means not an end; do it iteratively; favor people+collaboration; a system-grounded model over a checklist.
+- **OWASP — Threat Modeling Process & data-flow/trust-boundary technique** — https://owasp.org/www-community/Threat_Modeling_Process → mine: DFD elements (external entity, process, data store, data flow) and **trust boundaries** as the lines threats cross; abuse/misuse cases as the attacker's user stories.
+- **#14/#32/#25 boundary — see those sections.** #38 names a threat and **delegates** the deep verdict; it never re-runs their checklists.
