@@ -125,6 +125,7 @@ of the same date.
 **The question.** Should that philosophy be generalized **across all skills**? Today D8's bar is *"≥3 evaluation scenarios (query + expected_behavior, with a no-skill baseline)."* The ambition: a deliberate **per-lens adversarial/red-team pass** (camouflaged defects, injection-in-the-reviewed-content, distractor overload, sycophancy/rubber-stamp pressure, wrong-layer mitigations, over-flagging discipline), weighted by each lens's asymmetric cost, with the inputs that fooled early drafts kept as permanent regression scenarios.
 
 **Open sub-questions.**
+
 - Is this a uniform raise (every lens) or risk-tiered (security/correctness/migration lenses first)?
 - Does it warrant a manifest/generator affordance (e.g. an `evals:` adversarial section), or stay authored per-lens?
 - How does it interact with the cross-model re-gate cost (more scenarios × more models)?

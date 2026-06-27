@@ -66,6 +66,7 @@ Secondary to the artifact, **each un-mitigated / weak / wrong-layer threat is em
 ### 5.1 Scenario groups (≥ ~20 scenarios, vs the usual 3–4)
 
 **A — Core shape-flexible firing**
+
 1. RFC for an agent feature *with a design doc*, missing a trust boundary → produces component map + STRIDE table, surfaces the boundary gap.
 2. Agent app **with no design doc** (code/config only) → **reconstruct-then-model** fires; boundaries inferred from code; threats enumerated.
 3. Clean, adequately-mitigated design → model shows mitigations present; **"No findings"**; no invented threats.
