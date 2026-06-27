@@ -34,8 +34,26 @@ def test_lens_bundle_body_has_checklist_and_deeper_links():
     assert body.startswith("# hunting-silent-failures")  # H1 = lens name
     assert "## When to use" in body
     assert "## Checklist" in body
+    # Pin the lead-in itself: `## Checklist` was present before the lead-in fix too,
+    # so the header assertion alone would not catch its regression. The second guard
+    # fails on the exact bug — a bare header sitting directly on the `## From category`
+    # sub-header with no body between.
+    assert "The full review checklist" in body
+    assert "## Checklist\n\n## From category" not in body
     assert "## From category #2" in body   # heuristics embedded (fixture's built_from category)
     assert "(tool-rules.md)" in body and "(sources.md)" in body   # deeper disclosure links
+
+
+def test_lens_bundle_omits_checklist_when_no_heuristics(monkeypatch):
+    # A lens with no heuristics must not ship a bare `## Checklist`; the whole
+    # section (header + lead-in) is suppressed. No real lens is heuristics-less
+    # today, so exercise the branch by stubbing _checklist_body to empty.
+    import tooling.generate as g
+    monkeypatch.setattr(g, "_checklist_body", lambda *a, **k: "")
+    body = g.lens_bundle_body(_skill(), docs_root=".", skills_root="skills")
+    assert "## Checklist" not in body
+    assert "The full review checklist" not in body
+    assert "## When to use" in body and "## Going deeper" in body   # rest still renders
 
 
 def test_generate_lens_bundle_writes_three_files(tmp_path):
