@@ -12,7 +12,7 @@ description: 'Reviews a standardized non-source artifact against its own publish
   are present — ordinary source code is the other lenses'' job, and this is authoring
   quality, distinct from doc-drift (#22) and runtime agent-safety (#32).'
 provenance:
-  taxonomy_version: v0.7
+  taxonomy_version: v0.8
   built_from:
   - category: 101
     source: docs/research/artifact-rubrics.md#101

@@ -5,7 +5,7 @@ description: Run a whole-repository health audit with the code-quality-atlas rep
   infrastructure-as-code, maintainability hotspots). Use for a scheduled or on-demand
   repo audit, not a single diff. Runs the applicable audits and synthesizes one report.
 provenance:
-  taxonomy_version: v0.7
+  taxonomy_version: v0.8
   built_from: []
 ---
 

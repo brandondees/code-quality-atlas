@@ -8,7 +8,7 @@ description: 'Traces whether a change actually does what it claims: invariants a
   logic, algorithms, loops, conditionals, edge cases, or whether the implementation
   matches the stated intent.'
 provenance:
-  taxonomy_version: v0.7
+  taxonomy_version: v0.8
   built_from:
   - category: 1
     source: docs/research/cluster-1-correctness.md#1

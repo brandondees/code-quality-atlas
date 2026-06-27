@@ -11,7 +11,7 @@ description: 'Audits the enforcement apparatus and meta-artifacts wrapped around
   scheduled audit rather than a single-diff review. Use when auditing lint/type suppressions,
   alert rules, dashboards, or checked-in generated code.'
 provenance:
-  taxonomy_version: v0.7
+  taxonomy_version: v0.8
   built_from:
   - category: 30
     source: docs/research/cluster-5-verification.md#30
