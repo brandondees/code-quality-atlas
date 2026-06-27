@@ -26,7 +26,7 @@ Running `#14`'s diff heuristics over a prose design (today's passive `design: tr
 | D-a | **Primary object / when it fires** | **Both, one lens.** Artifact present (ADR/RFC/design doc) → threat-model it. Artifact absent → **reconstruct** the implied design from the system (entry points, tools, data stores, external calls, trust boundaries) and threat-model that. The friend's-app path is the absent case. |
 | D-b | **Taxonomy home** | **New sibling category `#38` — "Threat modeling / design-time security"** in Cluster IV, alongside `#14`/`#25`/`#32`/`#36`/`#37`. Owns design-time threat *enumeration*; `#14` keeps diff-time vuln detection. `taxonomy_version` → **v0.8**. |
 | D-c | **Output shape** | **Full structured threat-model artifact as the primary deliverable**, with each un/weakly-mitigated threat *also* emitted as a standard atlas finding for the synthesizer. |
-| D-d | **Boundary** | **Detect-and-route.** The lens owns *enumeration*, not line-level confirmation: concrete vuln → route `#14`; agent action/tool threat → route `#32`; LLM prompt-injection/output threat → route `#25`; high-stakes auth/crypto/safety-critical → **route to human security review**, never auto-bless. |
+| D-d | **Boundary** | **Detect, then delegate or escalate** (distinct from the finding `route:` decision-owner axis). The lens owns *enumeration*, not line-level confirmation: concrete vuln → **delegate to lens `#14`**; agent action/tool threat → **delegate to `#32`**; LLM prompt-injection/output threat → **delegate to `#25`**; high-stakes auth/crypto/safety-critical → **detect-and-escalate to human security review** (G8), never auto-bless. The emitted finding still carries its own `route:` owner and `valence: defect` independently — *delegate-to-lens* (which lens owns the deep verdict) is a different axis from *route* (who decides the remediation). |
 
 ## 3. The lens — `reviewing-threat-model`
 
@@ -43,7 +43,7 @@ Running `#14`'s diff heuristics over a prose design (today's passive `design: tr
 2. **Build the model** (the deliverable, §4): component / trust-boundary map + STRIDE table + abuse cases.
 3. **Enumerate threats** per component using STRIDE; for the highest-risk capabilities, sketch an **attack tree** and **abuse/misuse cases**.
 4. **Check mitigations.** For each threat: is there a mitigation, and is it at the **right boundary**? (A defense at the wrong layer — e.g. client-side-only validation — counts as un-mitigated.)
-5. **Route, don't re-derive** (D-d): name the threat; hand depth verification to the owning lens or a human.
+5. **Delegate, don't re-derive** (D-d): name the threat; hand depth verification to the owning sibling lens (`#14`/`#32`/`#25`) or escalate to a human (G8).
 6. **Coverage check** (Shostack Q4): note components/flows not yet modelled and residual risk.
 
 ## 4. Output — the threat-model artifact
@@ -53,13 +53,13 @@ Plain markdown (D7-portable), emitted as the lens's primary output:
 - **Trust-boundary / data-flow map** — a markdown list or table: each component, what it talks to, and where a trust boundary is crossed (untrusted → trusted).
 - **STRIDE enumeration table** — rows = components/flows, columns = Spoofing / Tampering / Repudiation / Information-disclosure / Denial-of-service / Elevation. Each cell: the identified threat (or "—") and **mitigation status** (present / weak / absent / wrong-layer).
 - **Abuse / misuse cases** — for the agent's high-risk capabilities (tool invocation, code execution, data egress, autonomous loops): how the capability is turned against the user/system.
-- **Routing & residual risk** — which threats were routed (`#14`/`#32`/`#25`/human) and which components remain unmodelled (Shostack Q4).
+- **Delegation & residual risk** — which threats were delegated to a sibling lens (`#14`/`#32`/`#25`) or escalated to a human (G8), and which components remain unmodelled (Shostack Q4).
 
-Secondary to the artifact, **each un-mitigated / weak / wrong-layer threat is emitted as a standard atlas finding** (`location / severity / lens / finding / fix`, plus the `route` and `attribution` axes) so `synthesizing-review-findings` can rank and merge them with other lenses' output. The artifact is the human deliverable; the findings are the merge-able units.
+Secondary to the artifact, **each un-mitigated / weak / wrong-layer threat is emitted as a standard atlas finding** (`location / severity / valence / lens / finding / fix`, plus the `route` and `attribution` axes) so `synthesizing-review-findings` can rank and merge them with other lenses' output. Threat findings are **`valence: defect`** (un/weak/wrong-layer mitigation is something wrong, not an optional improvement), so they drive the synthesizer verdict per their severity. The artifact is the human deliverable; the findings are the merge-able units.
 
 ## 5. Evaluation strategy — thorough and adversarial (the false-negative is the enemy)
 
-**Asymmetric cost.** For a security lens, a **false negative** (a flawed design rated "looks secure") is far more dangerous than a false positive (an over-flagged non-threat). The eval suite is therefore weighted toward **catching missed threats**, and the lens's decision rule **biases toward surface-and-route under uncertainty** (consistent with the fail-toward-safe G18 add-factors on `#2`/`#28`). A missed threat in the eval set is a **gate failure**; an over-flag is a tuning issue.
+**Asymmetric cost.** For a security lens, a **false negative** (a flawed design rated "looks secure") is far more dangerous than a false positive (an over-flagged non-threat). The eval suite is therefore weighted toward **catching missed threats**, and the lens's decision rule **biases toward surface-and-escalate under uncertainty** (consistent with the fail-toward-safe G18 add-factors on `#2`/`#28`). A missed threat in the eval set is a **gate failure**; an over-flag is a tuning issue.
 
 **Eval-first (D8).** All scenarios below are authored **before** the lens prose.
 
@@ -79,11 +79,11 @@ Secondary to the artifact, **each un-mitigated / weak / wrong-layer threat is em
 8. **Denial of service** — unbounded agent loop / token / cost exhaustion (no step budget).
 9. **Elevation of privilege** — tool over-privilege / confused deputy / token-audience confusion.
 
-**C — Detect-and-route boundary** (owns enumeration, routes confirmation)
-10. Concrete code-level vuln present (e.g. SQLi in a tool impl) → **named in the model and routed to `#14`**, not re-derived in depth.
-11. Agent tool/action-safety threat → routed to `#32`.
-12. LLM prompt-injection threat in the data path → routed to `#25`.
-13. High-stakes auth/crypto architecture → **detect-and-route to human security review**; never auto-bless.
+**C — Delegate / escalate boundary** (owns enumeration, delegates deep confirmation)
+10. Concrete code-level vuln present (e.g. SQLi in a tool impl) → **named in the model and delegated to lens `#14`**, not re-derived in depth.
+11. Agent tool/action-safety threat → delegated to `#32`.
+12. LLM prompt-injection threat in the data path → delegated to `#25`.
+13. High-stakes auth/crypto architecture → **detect-and-escalate to human security review** (G8); never auto-bless.
 
 **D — Adversarial / red-team ("ways to break it" — false-negative hunting)**
 14. **Security theater** — the design *says* "we authenticate and encrypt," but the auth gate sits *after* the sensitive action / encryption is on the wrong channel → the lens must **not be reassured by security vocabulary**; it flags the misplaced mitigation.
@@ -118,7 +118,7 @@ Run the **full** set — especially group D — across the **7–8B floor** (`qw
 ## 7. Open sub-questions (for implementation planning)
 
 - **Reconstruct-step depth:** how much system-scanning the lens does when no doc exists, before it's doing the audits' job — bound it to the architecture/boundary level, not a line-by-line repo sweep.
-- **Severity mapping:** an un-mitigated Elevation/Info-disclosure threat vs. a routed-to-human high-stakes item — how each lands on the `severity_order` scale and the synthesizer verdict.
+- **Severity mapping:** an un-mitigated Elevation/Info-disclosure threat vs. an escalated-to-human high-stakes item — how each lands on the `severity_order` scale and the synthesizer verdict.
 - **Does the collapsed `reviewing-a-decision` entrypoint need its lens-bundle regenerated** to include this lens, or is it automatic from the manifest? (Confirm during build.)
 - **Floor outcome:** if §5.3 shows the 7–8B floor can't hold the adversarial set, document the raised floor for this lens explicitly.
 
