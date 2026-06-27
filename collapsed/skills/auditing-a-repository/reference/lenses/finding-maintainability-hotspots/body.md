@@ -8,6 +8,8 @@ Where does the repo hurt most? Churn × complexity, change-coupling, bus factor,
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #21
 
 ### Reviewable heuristics (skill-checklist seeds)

@@ -8,6 +8,8 @@ Can an attacker abuse this? Injection, authorization, secrets, crypto, untrusted
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #14
 
 ### Reviewable heuristics (skill-checklist seeds)

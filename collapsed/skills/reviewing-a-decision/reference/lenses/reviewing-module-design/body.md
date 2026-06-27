@@ -8,6 +8,8 @@ Are the boundaries right? Coupling, encapsulation, interfaces that are hard to m
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #9
 
 ### Reviewable heuristics (skill-checklist seeds)

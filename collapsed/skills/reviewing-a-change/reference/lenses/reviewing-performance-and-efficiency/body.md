@@ -8,6 +8,8 @@ Will this be slow or expensive at scale? N+1, O(n²) hot paths, caching, payload
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #15
 
 ### Reviewable heuristics (skill-checklist seeds)

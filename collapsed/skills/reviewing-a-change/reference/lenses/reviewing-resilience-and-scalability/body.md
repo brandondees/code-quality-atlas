@@ -8,6 +8,8 @@ Will it survive failure and scale? Unbounded queues, timeouts and blast radius, 
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #28
 
 ### Reviewable heuristics (skill-checklist seeds)

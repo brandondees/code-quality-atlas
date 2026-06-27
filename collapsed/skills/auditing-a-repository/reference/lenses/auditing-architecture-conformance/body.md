@@ -8,6 +8,8 @@ Does the import graph still match the intended architecture? Layers, cycles, rea
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #12
 
 ### Reviewable heuristics (skill-checklist seeds)

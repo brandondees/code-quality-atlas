@@ -8,6 +8,8 @@ Will this break a consumer? Compatibility, error contracts, idempotency, paginat
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #13
 
 ### Reviewable heuristics (skill-checklist seeds)

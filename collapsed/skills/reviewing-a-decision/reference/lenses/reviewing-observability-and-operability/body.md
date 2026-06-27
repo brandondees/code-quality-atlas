@@ -8,6 +8,8 @@ Can you debug this in production at 3am? Logs, traces, health checks, kill switc
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #16
 
 ### Reviewable heuristics (skill-checklist seeds)

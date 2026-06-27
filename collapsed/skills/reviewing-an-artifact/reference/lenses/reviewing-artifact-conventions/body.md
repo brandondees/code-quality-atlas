@@ -8,6 +8,8 @@ Is this authored artifact well-formed per its own standard? Detect the artifact 
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #101
 
 ### Reviewable heuristics (skill-checklist seeds)

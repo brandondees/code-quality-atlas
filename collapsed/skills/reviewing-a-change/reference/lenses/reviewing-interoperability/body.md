@@ -8,6 +8,8 @@ Does the code correctly speak external standards? HTTP/OAuth semantics, SemVer, 
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #37
 
 ### Reviewable heuristics (skill-checklist seeds)

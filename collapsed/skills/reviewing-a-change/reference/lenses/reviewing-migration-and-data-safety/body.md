@@ -8,6 +8,8 @@ Can this migration lock tables or lose data? Expand/contract, backfills, reversi
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #20
 
 ### Reviewable heuristics (skill-checklist seeds)

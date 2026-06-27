@@ -8,6 +8,8 @@ What breaks when two run at once? Races, lost updates, unawaited promises, idemp
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #3
 
 ### Reviewable heuristics (skill-checklist seeds)

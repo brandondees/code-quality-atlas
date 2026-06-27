@@ -360,13 +360,23 @@ def lens_bundle_body(skill: Skill, docs_root: str = ".", skills_root: str = "ski
     if examples.startswith("# "):
         examples = examples.split("\n", 1)[1].strip() if "\n" in examples else ""
     examples_block = f"## Examples\n\n{examples}\n\n" if examples else ""
+    # Give `## Checklist` a lead-in before the per-category heuristics, mirroring how
+    # `## Examples` opens with prose rather than dropping straight onto a sub-header.
+    # Without it the section header sits directly on `## From category #NN`, reading as
+    # an empty header. Suppress the whole section if a lens carries no heuristics, so a
+    # future heuristics-less lens never ships a bare `## Checklist`.
+    checklist_block = (
+        "## Checklist\n\n"
+        "The full review checklist, grouped by the research category each check "
+        "draws from:\n\n"
+        f"{heuristics}\n\n"
+    ) if heuristics else ""
     return (
         f"# {skill.name}\n\n"
         f"{picker}"
         "## When to use\n\n"
         f"{_scope_line(skill)}\n\n"
-        "## Checklist\n\n"
-        f"{heuristics}\n\n"
+        f"{checklist_block}"
         f"{examples_block}"
         "## Going deeper\n\n"
         "- [tool-rules.md](tool-rules.md) — static-analysis rules for the mechanical "

@@ -8,6 +8,8 @@ Do the docs still tell the truth? API parity, stale examples, ADR coverage, chan
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #22
 
 ### Reviewable heuristics (skill-checklist seeds)

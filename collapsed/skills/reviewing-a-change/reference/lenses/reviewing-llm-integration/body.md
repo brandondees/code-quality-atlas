@@ -8,6 +8,8 @@ Is the model call safe and bounded? Injection surface, output validation, evals,
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #25
 
 ### Reviewable heuristics (skill-checklist seeds)

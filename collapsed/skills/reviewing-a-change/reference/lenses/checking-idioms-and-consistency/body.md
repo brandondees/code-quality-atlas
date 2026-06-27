@@ -8,6 +8,8 @@ Does this look like the rest of the codebase? Conventions, idioms, no second par
 
 ## Checklist
 
+The full review checklist, grouped by the research category each check draws from:
+
 ## From category #8
 
 ### Reviewable heuristics (skill-checklist seeds)
