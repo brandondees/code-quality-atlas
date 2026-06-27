@@ -6,7 +6,7 @@ description: 'Reviews tests for quality: behavior vs implementation coupling, ov
   per the pyramid/trophy, and disabled/focused tests sneaking in. Use when reviewing
   test files, test coverage, mocks, fixtures, flaky tests, or a bug fix''s tests.'
 provenance:
-  taxonomy_version: v0.7
+  taxonomy_version: v0.8
   built_from:
   - category: 17
     source: docs/research/cluster-5-verification.md#17

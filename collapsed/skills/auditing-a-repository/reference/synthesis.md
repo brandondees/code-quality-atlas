@@ -43,7 +43,7 @@ For a tension not in this table, prefer the **safer and simpler** option, and sa
 
 Normalize every lens finding to this shape before merging — it is what makes dedupe and ranking mechanical:
 
-- **location** — file and line/range (the dedupe key, with root cause)
+- **location** — file and line/range, or a design-time `boundary:<from>→<to>` / `component:<name>` reference when a finding lives at an architecture boundary rather than a code line (the dedupe key, with root cause — two findings at the same location and root cause merge regardless of which lens raised them)
 - **severity** — one of the levels above
 - **valence** — `defect` (something is wrong) or `improvement` (a correct thing could be better). Defects are the default and drive the verdict; improvements are opt-in, `nit`-severity, and `route: implementer`.
 - **route** — who decides: `eng` (the default — engineering owns it), `implementer` (the change's author applies/defers/ignores), or `product` / `design` / `legal` / `leadership` when the decision authority sits outside engineering.

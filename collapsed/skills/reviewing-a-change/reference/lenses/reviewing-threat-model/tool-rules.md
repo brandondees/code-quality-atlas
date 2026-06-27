@@ -1,0 +1,18 @@
+# Tool rules to triage — reviewing-threat-model
+
+> **Selecting tools for this stack.** The tools named below are field-tested starting points, not a mandate. Pick the one that fits this codebase's language version, build, and CI — and verify it actually runs on your toolchain before relying on it. A listed tool that is broken, abandoned, or noisy on your setup is a gap to close, not a permanent `continue-on-error`: prefer a working, maintained equivalent (often a younger, less well-known one) over a canonical-but-broken default. The capability is the requirement; the specific tool is replaceable.
+
+## Contents
+
+- From category #38
+
+## From category #38
+
+### Tooling rules worth lifting
+
+*(Threat modeling is judgment-led and generative; tooling assists enumeration but cannot replace it. Treat the tools as scaffolds; `(verify)` names against your stack.)*
+
+- **Threat-modeling-as-code** — `pytm` (OWASP) and `threagile` let a system be described declaratively and emit a DFD + a STRIDE-per-element threat list; useful to *seed* enumeration and keep a model in version control. `(verify)`
+- **DFD / diagram aids** — OWASP Threat Dragon, the Microsoft Threat Modeling Tool — draw components, data flows, and trust boundaries and auto-suggest STRIDE categories per element. The reviewer's job is the *judgment*, not the drawing.
+- **Attack-tree / library references** — MITRE ATT&CK and CAPEC as a catalogue of concrete attacker techniques to ground "what can go wrong" beyond the six abstract classes.
+- **For the reconstruct path (no design doc):** infer boundaries from **imports, network/IPC call sites, and config files** — grep for socket/HTTP/DB/subprocess/`exec` call sites and external-credential reads; do **not** recurse into function bodies unless they contain an explicit external call or auth check; stop at the component/module level.
