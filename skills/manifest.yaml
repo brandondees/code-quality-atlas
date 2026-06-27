@@ -125,7 +125,9 @@ skills:
       code/config when absent. Use when asked for a threat model, a security
       architecture review, an attack-surface review, or "what could go wrong" on a
       system, service, or AI agent app — especially one with tools, autonomy, or
-      external/untrusted inputs.
+      external/untrusted inputs. Skip when the change is a pure code fix with no
+      new trust boundaries, components, or data-flows — diff-time vulnerability
+      detection is sweeping-for-security's job.
     picker: >
       Enumerate what an adversary could do, boundary by boundary — STRIDE, trust
       boundaries, abuse cases — and whether each threat is mitigated.

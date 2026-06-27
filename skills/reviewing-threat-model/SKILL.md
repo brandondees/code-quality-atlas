@@ -7,7 +7,9 @@ description: Threat-models a system or design for security at design time — en
   reconstructs the implied design from the code/config when absent. Use when asked
   for a threat model, a security architecture review, an attack-surface review, or
   "what could go wrong" on a system, service, or AI agent app — especially one with
-  tools, autonomy, or external/untrusted inputs.
+  tools, autonomy, or external/untrusted inputs. Skip when the change is a pure code
+  fix with no new trust boundaries, components, or data-flows — diff-time vulnerability
+  detection is sweeping-for-security's job.
 provenance:
   taxonomy_version: v0.8
   built_from:
@@ -22,7 +24,7 @@ provenance:
 
 ## When to use
 
-Threat-models a system or design for security at design time — enumerates what an adversary could do boundary by boundary (STRIDE, trust boundaries, data-flow, attack trees, abuse cases) and whether each threat is mitigated, rather than pattern-matching existing code for vulnerabilities. Works on a design doc or RFC when present, and reconstructs the implied design from the code/config when absent. Use when asked for a threat model, a security architecture review, an attack-surface review, or "what could go wrong" on a system, service, or AI agent app — especially one with tools, autonomy, or external/untrusted inputs.
+Threat-models a system or design for security at design time — enumerates what an adversary could do boundary by boundary (STRIDE, trust boundaries, data-flow, attack trees, abuse cases) and whether each threat is mitigated, rather than pattern-matching existing code for vulnerabilities. Works on a design doc or RFC when present, and reconstructs the implied design from the code/config when absent. Use when asked for a threat model, a security architecture review, an attack-surface review, or "what could go wrong" on a system, service, or AI agent app — especially one with tools, autonomy, or external/untrusted inputs. Skip when the change is a pure code fix with no new trust boundaries, components, or data-flows — diff-time vulnerability detection is sweeping-for-security's job.
 
 **Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists.
 

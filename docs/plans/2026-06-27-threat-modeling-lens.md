@@ -1,5 +1,7 @@
 # Threat-Modeling Lens (#38) Implementation Plan
 
+**Status: complete — 2026-06-27 (PR #92).** Executed via subagent-driven development; the unchecked `- [ ]` boxes below are the original execution plan, kept as the historical record — the shipped lens is the source of truth.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the `reviewing-threat-model` lens — taxonomy category **#38**, the generative design-time threat-enumeration discipline (STRIDE / trust boundaries / abuse cases) — from the merged spec [`docs/threat-modeling-design-time-security.md`](../threat-modeling-design-time-security.md), eval-first, and prove it on the 7–8B floor.
