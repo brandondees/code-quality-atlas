@@ -142,9 +142,9 @@ Built fresh from **first principles**, treating existing skills, linters, and re
 tools as prior art to learn from — not constraints. Docs are the source of truth;
 skills are *generated* from [`skills/manifest.yaml`](skills/manifest.yaml) with
 provenance hashes, a drift-checker, and eval-first refinement. The underlying map is
-**6 clusters / 33 categories / ~100 factors** (taxonomy v0.3). Ongoing work is the
-compounding loop: critique the research, let drift flag affected skills, regenerate,
-re-gate.
+a broad, layered taxonomy — clusters of quality categories, each decomposed into
+concrete factors — that every skill traces back to. Ongoing work is the compounding
+loop: critique the research, let drift flag affected skills, regenerate, re-gate.
 
 - Project intent, scope, phases, principles → [`docs/overview.md`](docs/overview.md)
 - The master map → [`docs/taxonomy.md`](docs/taxonomy.md); per-cluster research → [`docs/research/`](docs/research/)
