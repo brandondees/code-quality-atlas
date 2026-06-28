@@ -40,7 +40,7 @@
       "query": "Review this change:\n```js\ntest('discount pricing', () => {\n  const cases = [[100, 'gold', 80], [50, 'silver', 47.5], [0, 'none', 0]];\n  for (const [amount, tier, expected] of cases) {\n    if (tier === 'none') {\n      expect(price(amount, tier)).toBe(amount);\n    } else {\n      expect(price(amount, tier)).toBeCloseTo(expected);\n    }\n  }\n});\n```",
       "expected_behavior": [
         "Flags Conditional Test Logic: the if/else and loop inside the test mean a branch can silently not run and a failure does not identify which case broke",
-        "Recommends a DAMP, table-driven form (e.g. it.each / parameterized cases) with one case per row so each failure localizes the cause",
+        "Recommends a readable, table-driven form (e.g. it.each / parameterized cases) with one case per row so each failure localizes the cause",
         "Notes the single test bundles several behaviors (not atomic / single reason to fail)"
       ]
     }

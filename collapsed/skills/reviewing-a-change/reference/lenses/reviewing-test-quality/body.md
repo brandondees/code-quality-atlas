@@ -27,7 +27,7 @@ The full review checklist, grouped by the research category each check draws fro
 - Is each test readable — clear arrange/act/assert, one behavior per test, name reads as a spec?
 - Does each test have a **single reason to fail** — assertions that localize the cause when it breaks? Flag **Assertion Roulette** (a pile of asserts with no messages, so a failure doesn't say which expectation broke) and tests that bundle several unrelated behaviors (Beck *specific*; Farley *atomic*).
 - Is the test **self-contained**, or a **Mystery Guest** — does it lean on a hidden external resource (file, DB, network) or a fixture defined far from the test, obscuring what's exercised and risking nondeterminism (cross isolation)?
-- Is the test **DAMP** (readable at a glance) rather than over-DRY'd — does **Conditional Test Logic** (branches/loops in the test) or deep helper/fixture indirection hide what actually runs? In tests, readability beats deduplication (Beck *writable*).
+- Is the test **readable and descriptive** rather than over-DRY'd — does **Conditional Test Logic** (branches/loops in the test) or deep helper/fixture indirection hide what actually runs? In tests, readability beats deduplication (Beck *writable*).
 - Beyond the happy path, does the suite use **inverse/round-trip** checks (encode→decode), a **cross-check** against an independent oracle, and **forced error conditions** (Right-BICEP) — not a single positive assertion?
 
 ---
