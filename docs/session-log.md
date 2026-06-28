@@ -1752,3 +1752,46 @@ Shipped `reviewing-threat-model` (#38), the generative design-time threat-enumer
 - **`qwen2.5-coder:7b` (floor-of-record) — NOT obtained.** Attempted 3× (cold; then warmed; then warmed + the other models evicted from GPU). Every attempt aborted with an Ollama `/api/chat` request timeout specific to this model — the same harness ran both general families cleanly to 21/21, so it is a model/harness interaction, not memory pressure. Deferred to a follow-up with a harness-timeout / `num_ctx` investigation. **This does not change the verdict:** the decisive failure class is *multi-hop threat composition* (a reasoning limit), not the control-flow/value-read precision gap the coder variant specifically improves — so the coder floor is not expected to clear S1/S18 where two families both failed.
 
 **Verdict: SHIP with a RAISED supported-model floor for this lens.** Both independent families confirm the ~7-8B re-gate tier reliably misses the lethal-trifecta composition (the single most important threat class for an agentic-security lens) and under-fires the delegate/escalate routing — while the clean cases, injection traps, and theater traps hold, and in every miss the EXPECTED behavior is unambiguous and correctly specified by the lens. That is a **model-capability floor, not a heuristic defect**: the structure, delegation targets, and escalation predicates are right and are followed whenever the model is strong enough to see the threat locally; the trifecta-composition miss (false negatives) and the template-filling inflation (false positives, llama) are both floor effects of the tier. Per spec §5.3, this lens's supported floor is therefore set **above the standard 7-8B re-gate substrate** — real reviews should run on a stronger model (the standard cloud model). Two follow-ups tracked (spec §8 / Q21): (1) obtain the `qwen2.5-coder:7b` floor-of-record run once the harness timeout is resolved; (2) strengthen the lens's proportionality guard for no-/low-surface inputs (the S19/S20 over-flag wobble) — the one place the lens may marginally over-prompt toward noise. **Heuristics are NOT tuned** — they fire correctly; the failures are model execution, not lens specification.
+
+### 2026-06-28 — Threat-model lens follow-up (2): proportionality guard for no-/low-surface inputs
+
+Closed **follow-up (2)** of the two tracked at the end of the 2026-06-27 #38 re-gate
+(spec §8 / Q21): the S19/S20 over-flag wobble — the one place the lens marginally
+over-prompts toward noise. On a change with **no security-relevant surface** (a UX/
+presentation change, S19; a benign no-input local script, S20) the 7-8B tier — llama3.1:8b
+especially — tended to **mechanically fill a full STRIDE table and invent "Defect" findings**
+rather than judge the surface and stop.
+
+**Root cause (the examples-template steer, not a heuristic defect).** `examples.md` carried
+only *one* clean case — an adequately-**mitigated** design that still has real trust
+boundaries, so it walks a full boundary map + STRIDE *and then* says "No findings." Used as
+the de-facto output template, that case actively teaches "build the table, then conclude
+clean" — which on a **no-boundary** input produces exactly the table-filling over-flag. There
+was no worked example for "no boundary exists → no table."
+
+**Fix (examples.md only — the cold-path decision-rule + worked-example playbook, same as
+the `#28` thundering-herd tune).** Added a **proportionality rule** ("apply *before* building the
+model": triage whether the change introduces a new trust boundary / cross-boundary data flow /
+untrusted input / egress / secret / agent capability — if **none**, the proportional output is
+a one-line surface note + "No security findings", *not* a STRIDE table, and non-security
+concerns route out with `route:`) plus **two worked clean→minimal examples** isomorphic to but
+not identical to S19/S20 (a chart-library/restyle/copy change; a `scripts/tidy_fixtures.py`
+no-input local script) so it teaches the pattern without teaching the eval answers. The new
+section is explicitly framed against the existing one: the first clean case is "mitigated
+boundaries exist → No findings"; this one is "**no boundary exists → no table**."
+
+`examples.md` is hand-authored and **not** provenance-hashed (drift stays clean), but the
+collapsed bundles inline it, so regenerated: the change propagated to both collapsed
+entrypoints (`reviewing-a-change` + `reviewing-a-decision` lens bodies) and the standalone
+examples.md. **Drift clean, 152 tests pass, eval structure valid.** No heuristics/SKILL.md
+edit, no `taxonomy_version` change, no regenerate of the provenance-hashed surface — a
+precision tune of the output template, consistent with the "heuristics fire correctly; this is
+execution shaping" framing of the 2026-06-27 verdict.
+
+**Follow-up (1) — `qwen2.5-coder:7b` floor-of-record run — remains deferred.** No Ollama
+substrate in this remote environment (`command -v ollama` → none; no local `:11434`), so the
+floor-of-record re-run + harness-timeout / `num_ctx` investigation still owes, to be done on a
+machine with the Ollama substrate per the standing runbook. The proportionality tune itself is
+an output-template change (not a heuristic change), so per the playbook it does not gate on a
+cross-model re-gate to ship; the S19/S20 cases should simply be re-scored alongside follow-up
+(1)'s run when the substrate is next available, to confirm the over-flag is gone on the floor.
