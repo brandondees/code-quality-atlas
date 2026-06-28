@@ -147,6 +147,12 @@ To self-heal every session, add a throttled (once-a-day) `SessionStart` hook to
 your **personal** `~/.claude/settings.json` (not committed to any repo),
 backgrounded so it never blocks startup:
 
+> **Replace `/abs/path/to/code-quality-atlas/`** in the command below with the
+> absolute path to your code-quality-atlas clone — for example,
+> `$HOME/code/code-quality-atlas/`. It is a placeholder, not a real path: left
+> as-is, the backgrounded command fails silently (`No such file or directory`,
+> swallowed by `>/dev/null 2>&1 &`) and the updater never runs.
+
 ```json
 {
   "hooks": {

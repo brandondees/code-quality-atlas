@@ -5,9 +5,10 @@ description: 'Merges the findings of several code-quality-atlas lenses — and o
   review like BMAD, linter output, or human notes) — into one review: deduplicates
   issues raised by more than one source, reconciles lenses that pull opposite ways
   (e.g. restraint vs. coverage, cache vs. profile), ranks by severity, and ends on
-  a single block/approve verdict. Use after running 2-4 review lenses (and any companion
-  reviewers) on a change, when assembling multi-source review output into one report,
-  or when overlapping findings need deduplicating and prioritizing.'
+  a single block/approve verdict. Use after running any set of atlas review lenses
+  (and any companion reviewers) on a change — typically 2-4 in standard review mode,
+  uncapped in comprehensive mode — when assembling multi-source review output into
+  one report, or when overlapping findings need deduplicating and prioritizing.'
 provenance:
   taxonomy_version: v0.8
   built_from: []
@@ -17,7 +18,7 @@ provenance:
 
 ## When to use
 
-Merges the findings of several code-quality-atlas lenses — and of any other review method run alongside them (the built-in code-review skill, a framework review like BMAD, linter output, or human notes) — into one review: deduplicates issues raised by more than one source, reconciles lenses that pull opposite ways (e.g. restraint vs. coverage, cache vs. profile), ranks by severity, and ends on a single block/approve verdict. Use after running 2-4 review lenses (and any companion reviewers) on a change, when assembling multi-source review output into one report, or when overlapping findings need deduplicating and prioritizing.
+Merges the findings of several code-quality-atlas lenses — and of any other review method run alongside them (the built-in code-review skill, a framework review like BMAD, linter output, or human notes) — into one review: deduplicates issues raised by more than one source, reconciles lenses that pull opposite ways (e.g. restraint vs. coverage, cache vs. profile), ranks by severity, and ends on a single block/approve verdict. Use after running any set of atlas review lenses (and any companion reviewers) on a change — typically 2-4 in standard review mode, uncapped in comprehensive mode — when assembling multi-source review output into one report, or when overlapping findings need deduplicating and prioritizing.
 
 **Shape: composition.** Runs after `choosing-review-lenses` has picked the lenses and you have each lens's findings in hand; it produces the single review a human or agent actually reads. It adds no new checks of its own — it only merges.
 
