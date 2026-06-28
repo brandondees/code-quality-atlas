@@ -23,7 +23,7 @@
 # Wire it up yourself (NOT shipped as an auto-running plugin hook — it runs
 # update commands and so is deliberately left to the operator). Example: throttle
 # it to ~once/day from your personal ~/.claude/settings.json SessionStart hook —
-# see the README "Keeping an interactive install current" section.
+# see docs/install.md "Keeping an interactive install current" section.
 #
 # bash 3.2 compatible (macOS default).
 
