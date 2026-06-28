@@ -8,7 +8,7 @@
     {
       "name": "code-quality-atlas",
       "source": "./",
-      "description": "35 code-review and maintenance skills derived from a verified code-quality research atlas: 23 diff-shaped review lenses, 8 repo-shaped audits, a decision-time lens, an artifact-conventions lens (reviews authored artifacts like SKILL.md against their own standard), a router that picks the right lenses for a change, and a synthesizer that merges their findings into one ranked verdict, with provenance, examples, and cross-model evals.",
+      "description": "36 code-review and maintenance skills derived from a verified code-quality research atlas: 24 diff-shaped review lenses, 8 repo-shaped audits, a decision-time lens, an artifact-conventions lens (reviews authored artifacts like SKILL.md against their own standard), a router that picks the right lenses for a change, and a synthesizer that merges their findings into one ranked verdict, with provenance, examples, and cross-model evals.",
       "category": "code-review",
       "tags": ["code-review", "code-quality", "audit"]
     },

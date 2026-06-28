@@ -114,12 +114,21 @@ In the Claude Code web app → **Routines** → **New routine**:
 
   On round 1, before running lenses, post the one-line ACK (`<!-- atlas-review-ack -->`)
   so the author knows a reviewer is attached — once per PR, not on later pushes.
+  Before posting it, check the PR's issue comments for an existing
+  `<!-- atlas-review-ack -->`; if one is already there, skip it regardless of what
+  memory says — a compacted or restarted session must not re-post it.
 
   After that first review, do not exit — stay resident and watch this PR until it
   is merged or closed. Subscribe to its activity and re-run the review on each new
-  push, in this same session. Keep the round count and the findings you have already
-  raised in memory across pushes: resolve threads that later pushes addressed, and
-  never re-litigate ones that still stand. Each round, apply REVIEW.md's convergence
+  push, in this same session. GitHub is the source of truth for round state, not
+  memory: on each push, re-derive the current round from the
+  `<!-- atlas-review round:N -->` markers on your prior reviews (paginate through
+  all reviews and use the highest N seen + 1). Keep the round count and the findings
+  you have already raised in memory only as a performance cache, and always defer to
+  GitHub when they differ — especially after a `/compact`, which drops in-memory
+  state and would otherwise restart the loop from round 1, re-post the ACK, and
+  re-raise settled findings. Resolve threads that later pushes addressed, and never
+  re-litigate ones that still stand. Each round, apply REVIEW.md's convergence
   policy — raise the severity floor once after the first pass and then hold it at
   Major (round 1: all; round 2+: Major+, so genuine Majors keep getting surfaced),
   post inline only findings that are NEW this round, and submit a single APPROVE the

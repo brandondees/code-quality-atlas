@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "code-quality-atlas",
   "displayName": "Code Quality Atlas",
-  "description": "A research-derived suite of 33 code-review and maintenance skills covering correctness, readability, structure, security, performance, tests, migrations, accessibility, observability, LLM and agentic/tool-use safety, install/upgrade experience, authored-artifact conventions (e.g. SKILL.md), and repo-wide audits (architecture, dependencies, config, docs, compliance), plus a router that picks the right lenses for a given change or design doc and a synthesizer that merges their findings into one ranked verdict. Each skill is generated from a verified research atlas with provenance, refined examples, and cross-model evals.",
+  "description": "A research-derived suite of 34 code-review and maintenance skills covering correctness, readability, structure, security, performance, tests, migrations, accessibility, observability, LLM and agentic/tool-use safety, install/upgrade experience, authored-artifact conventions (e.g. SKILL.md), and repo-wide audits (architecture, dependencies, config, docs, compliance), plus a router that picks the right lenses for a given change or design doc and a synthesizer that merges their findings into one ranked verdict. Each skill is generated from a verified research atlas with provenance, refined examples, and cross-model evals.",
   "author": {
     "name": "Brandon Dees",
     "url": "https://github.com/brandondees"

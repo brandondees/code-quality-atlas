@@ -15,10 +15,10 @@ supports the `SKILL.md` format** (Cursor, Windsurf, Copilot, …). The plugin wr
 
 ## What you get
 
-**35 review skills**, generated from a researched taxonomy and refined against eval
+**36 review skills**, generated from a researched taxonomy and refined against eval
 scenarios:
 
-- **33 review lenses** — each a narrow, self-contained reviewer (correctness,
+- **34 review lenses** — each a narrow, self-contained reviewer (correctness,
   naming & readability, module design, concurrency, migrations & data safety,
   security, performance, tests, API contracts, accessibility & i18n, observability,
   LLM-integration, agentic & tool-use safety, resilience, install/upgrade
@@ -142,9 +142,9 @@ Built fresh from **first principles**, treating existing skills, linters, and re
 tools as prior art to learn from — not constraints. Docs are the source of truth;
 skills are *generated* from [`skills/manifest.yaml`](skills/manifest.yaml) with
 provenance hashes, a drift-checker, and eval-first refinement. The underlying map is
-**6 clusters / 33 categories / ~100 factors** (taxonomy v0.3). Ongoing work is the
-compounding loop: critique the research, let drift flag affected skills, regenerate,
-re-gate.
+a broad, layered taxonomy — clusters of quality categories, each decomposed into
+concrete factors — that every skill traces back to. Ongoing work is the compounding
+loop: critique the research, let drift flag affected skills, regenerate, re-gate.
 
 - Project intent, scope, phases, principles → [`docs/overview.md`](docs/overview.md)
 - The master map → [`docs/taxonomy.md`](docs/taxonomy.md); per-cluster research → [`docs/research/`](docs/research/)
@@ -156,7 +156,7 @@ re-gate.
 
 | Path | What's in it |
 |---|---|
-| [`skills/`](skills/) | The 33 lenses + `choosing-review-lenses` (router) + `synthesizing-review-findings` (synthesizer) |
+| [`skills/`](skills/) | The 34 lenses + `choosing-review-lenses` (router) + `synthesizing-review-findings` (synthesizer) |
 | [`collapsed/`](collapsed/) | Generated 4-entrypoint form of the suite for cloud / account-skill installs; each entrypoint bundles its shape's lenses and loads them on demand |
 | [`commands/`](commands/) | Slash commands: `/atlas-review-pr`, `/atlas-code-review`, `/atlas-init`, `/atlas-rebase-stale` |
 | [`hooks/`](hooks/) | `SessionStart` routing hook (side-effect-free) |

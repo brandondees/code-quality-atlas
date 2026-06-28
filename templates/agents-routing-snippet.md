@@ -26,7 +26,12 @@ shorter-named default win on keyword match alone.
 | Unsure which lenses a change needs | the `choosing-review-lenses` skill, then the lenses it names |
 | Merge several reviewers' findings into one verdict | the `synthesizing-review-findings` skill |
 
-In routine / web sessions where slash commands don't resolve, read and follow the
-matching file from the plugin clone (`commands/atlas-review-pr.md` or
-`commands/atlas-code-review.md`) instead of invoking the bare command.
+`/code-quality-atlas:atlas-review-pr` and `/code-quality-atlas:atlas-code-review`
+are **Claude Code slash commands** — invoke them with the leading `/`, not as
+Skill-tool skill names. In routine / web sessions where slash commands don't
+resolve, fetch and follow the command file directly: call
+`mcp__github__get_file_contents` with `owner: brandondees`, `repo:
+code-quality-atlas`, and `path: commands/atlas-review-pr.md` (or `path:
+commands/atlas-code-review.md` for local changes) to retrieve the current
+instructions, then follow them exactly.
 <!-- END code-quality-atlas routing -->
