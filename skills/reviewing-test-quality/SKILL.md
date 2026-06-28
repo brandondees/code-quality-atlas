@@ -10,7 +10,7 @@ provenance:
   built_from:
   - category: 17
     source: docs/research/cluster-5-verification.md#17
-    hash: f2a005307668d757c7af9a94a4053f25db9dc8133d2ca027e1c3bcce8f8d9b15
+    hash: f0616b31db4d8d43239b0d9bf58badf4d25568a4f6d45542055ea74b168ad174
 ---
 
 # reviewing-test-quality
@@ -35,13 +35,14 @@ Report only real problems. If the code correctly handles the case, reply "No fin
 
 The head of the full checklist — enough for a first pass without opening any reference file:
 
+- Does each test have a **single reason to fail** — assertions that localize the cause when it breaks? Flag **Assertion Roulette** (a pile of asserts with no messages, so a failure doesn't say which expectation broke) and tests that bundle several unrelated behaviors (Beck *specific*; Farley *atomic*).
 - Do new/changed tests assert **observable behavior** (inputs→outputs, side effects), not internal calls/private state (refactor-resistant)?
-- Is coverage **meaningful** on the new code — branches and edge cases, not just lines executed? Don't chase a % with assertion-free tests.
+- Is coverage **meaningful** on the new code — branches and edge cases, not just lines executed? Don't chase a % with assertion-free or **tautological** tests (asserting the mock, restating the framework, or a **Sensitive Equality** check on a whole serialized blob that breaks on unrelated change), and don't keep tests that pin no real requirement (Farley *necessary*).
 - Bug fix → is there a **regression test** that fails before the fix and passes after?
 - Are tests **isolated and deterministic** — no shared mutable state, order dependence, or real clock/network/unseeded random (flaky risk)?
 - Is the test at the **right level** (pyramid/trophy) — logic in fast unit/integration, e2e reserved for critical journeys?
-- **Over-mocking smell**: do mocks assert on implementation calls so a refactor breaks tests without behavior changing? Prefer real collaborators / fakes (cross #11).
-- Are **edge/boundary** cases covered (empty, null, max, error paths) — where the bugs live (cross #1)?
+- **Over-mocking smell**: do mocks assert on implementation calls so a refactor breaks tests without behavior changing? Reach for the least-powerful **test double** — prefer a real collaborator, fake, or stub, and reserve a behavior-verifying mock for true outgoing commands (don't mock queries or value objects) (cross #11).
+- Are **edge/boundary** cases covered (empty, null, max, error paths) — where the bugs live? Walk the **CORRECT** dimensions (Conformance, Ordering, Range, Reference, Existence, Cardinality, Time) to surface the missing edge (cross #1).
 - Would the suite **catch a real bug**, not just execute lines? Apply mutation intuition — for a pure, deterministic, fast-to-test unit, prefer actually running a mutation tool (cheap, high-signal) over eyeballing it; otherwise high coverage masks weak assertions.
 
 ## Mechanizing these checks
