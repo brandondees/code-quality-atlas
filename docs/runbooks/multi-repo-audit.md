@@ -34,11 +34,12 @@ in mind — wide fan-out is faster but costs more context and more sandboxes.
 
 1. **Pick the lenses once, up front.** Decide what the audit is *for* and select
    the lenses before fanning out — every agent runs the **same** set so findings
-   are comparable across repos. For a whole-repo health sweep this is the seven
+   are comparable across repos. For a whole-repo health sweep this is the eight
    repo-shaped audits (`finding-maintainability-hotspots`,
    `auditing-architecture-conformance`, `auditing-dependencies-and-supply-chain`,
    `auditing-config-and-build-hygiene`, `auditing-documentation-health`,
-   `auditing-compliance-and-provenance`, `auditing-enforcement-and-meta-artifacts`);
+   `auditing-compliance-and-provenance`, `auditing-enforcement-and-meta-artifacts`,
+   `auditing-infrastructure-as-code`);
    for a targeted sweep ("error handling across our services") it may be one or
    two lenses. `choosing-review-lenses` is for the *per-change* case — for a
    fleet audit you are choosing the lens set deliberately, not routing.

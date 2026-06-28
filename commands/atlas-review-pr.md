@@ -40,9 +40,13 @@ methods as needed).
 ## 2. Load the convergence policy
 
 Read `REVIEW.md` from the **PR's repo root** if it exists (via
-`mcp__github__get_file_contents`); fall back to `templates/REVIEW.md` in this
-plugin. It defines the severity floor per round, the round cap, and the
-approve-on-clean behavior. The repo's own `REVIEW.md` always wins.
+`mcp__github__get_file_contents`). If it does not, fall back to the canonical
+template at `templates/REVIEW.md` — read it from the plugin clone if you can locate
+it, otherwise fetch it from the source repo with `mcp__github__get_file_contents`
+(`owner: brandondees`, `repo: code-quality-atlas`, `path: templates/REVIEW.md`),
+which is a fixed, locatable path that works in web/routine sessions where the plugin
+clone location is unknown. It defines the severity floor per round, the round cap,
+and the approve-on-clean behavior. The repo's own `REVIEW.md` always wins.
 
 ## 3. Determine the review round
 

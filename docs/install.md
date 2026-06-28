@@ -183,6 +183,19 @@ request; the hook's `additionalContext` is injected verbatim before the first
 prompt, so it's reliable where the listing isn't. The hook is **side-effect-free** —
 it only prints to stdout and writes nothing to your repo.
 
+**How the wiring loads.** The hook needs no `hooks` key in
+[`../.claude-plugin/plugin.json`](../.claude-plugin/plugin.json): Claude Code
+**auto-discovers** a plugin's hook config at the conventional path `hooks/hooks.json`
+under the plugin root, so the omission is intentional, not a missing registration
+([plugins reference](https://code.claude.com/docs/en/plugins-reference) — *File
+locations*). The hook command runs `"${CLAUDE_PLUGIN_ROOT}/hooks/route.sh"`;
+`CLAUDE_PLUGIN_ROOT` is a **Claude-Code-provided** environment variable set to the
+plugin's install directory for the duration of hook (and command) execution — it is
+not something you configure, and it is quoted so the path survives spaces. Outside a
+Claude Code plugin install (e.g. a `SKILL.md`-only Skulto install), there is no
+plugin runtime, so this hook does not apply — the committed `/atlas-init` routing
+block is the portable fallback.
+
 The hook is a per-session *nudge* that works even before a repo is wired; the
 committed routing block from `/atlas-init` is the durable, deterministic override.
 The two pair together.
