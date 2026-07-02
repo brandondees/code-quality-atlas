@@ -25,6 +25,8 @@
   → mine: parity check — new user-facing capabilities should also be reachable programmatically (API/CLI/tool), not UI-only, so agents and automation aren't second-class. (Project-specific principle; map to a reviewable check.)
 - **AGENTS.md / Agentic AI Foundation (Linux Foundation, 2025-12)** — https://agents.md/ (see #22 for the doc-artifact side).
   → mine: industry grounding for treating agents as first-class contributors to the development process — the ecosystem now standardizes how repos onboard automated collaborators. Strengthens the agent-native-parity principle from "house rule" toward industry practice; the *docs* obligation lives in #22, the *process* stance (agents can do what contributors can do) lives here.
+- **GitHub Docs — "Linking a pull request to an issue"** — https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/linking-a-pull-request-to-an-issue.
+  → mine: a closing keyword (`close`/`closes`/`closed`/`fix`/`fixes`/`fixed`/`resolve`/`resolves`/`resolved`) only auto-closes the **single issue reference immediately following it**. A comma-separated list after one keyword (`Closes #12, #13, #14`) closes only #12 — #13/#14 are inert plain-text references GitHub never links or closes. Each issue needs its own keyword (`Closes #12, closes #13, closes #14`, or one per line); this is a well-known, easy-to-miss GitHub parsing gotcha, not an obscure edge case.
 
 ## From category #22
 

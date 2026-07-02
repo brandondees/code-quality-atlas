@@ -42,6 +42,14 @@
         "Flags the 'no more' gap: the XLSX format and button redesign are unrequested scope riding along, not in the issue's criteria",
         "Frames this as acceptance-criteria traceability / validation (did we build what was asked), distinct from whether the code matches its own stated intent"
       ]
+    },
+    {
+      "query": "Review this PR description: 'This change consolidates the retry logic across three failing paths. Closes #401, #402, #403.' The diff fixes all three underlying bugs (#401, #402, #403) with a matching regression test for each.",
+      "expected_behavior": [
+        "Flags the closing-keyword syntax: 'Closes #401, #402, #403' only auto-closes #401 on merge — #402 and #403 are plain-text references GitHub will not close",
+        "Recommends repeating the keyword per issue ('Closes #401, closes #402, closes #403', or one per line) so all three actually close",
+        "Does not conflate this with the claims-vs-evidence check — the fixes here ARE backed by regression tests; the defect is purely that the linkage syntax silently drops two of the three issues"
+      ]
     }
   ]
 }

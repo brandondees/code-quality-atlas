@@ -11,7 +11,7 @@ provenance:
   built_from:
   - category: 24
     source: docs/research/cluster-6-evolution.md#24
-    hash: 16b09ebeeb234ade7c6ed64276549fec745f4f2f5fbfde4699da1f8a85a087ed
+    hash: 47c009db96ba9d0a572ab88fe8c3cf0bf1039bb4c2ad95659da8c4ad8092d054
   - category: 22
     source: docs/research/cluster-6-evolution.md#22
     hash: a7e66646fdd831a46d37765f29794abebc92ef33369b97723210bcdc9647d25d
@@ -40,6 +40,7 @@ Report only real problems. If the code correctly handles the case, reply "No fin
 The head of the full checklist — enough for a first pass without opening any reference file:
 
 - **Claims vs. evidence:** is every claim the PR makes checkable against evidence *in the diff*? "Fixes X" / "closes #N" wants a regression test that fails without the change; "faster" / "optimizes" wants a benchmark or profile, not an assertion; "no behavior change" / "pure refactor" wants the diff to be genuinely behavior-preserving (no logic quietly changed alongside the move). An unsupported claim is itself a finding — flag it and name the missing evidence rather than taking the description's word (generalizes the perf lens's profile-demand; cross #1 stated-intent, #15 perf, #17 tests).
+- **Closing-keyword syntax, one per issue:** when the PR body or a commit message links **more than one** issue with a closing keyword (`closes`/`fixes`/`resolves`, any tense), does **every** linked issue carry its **own** keyword — not a keyword followed by a bare comma/`and`-separated list? `Closes #12, #13, #14` only auto-closes #12; the rest silently stay open at merge. Correct forms repeat the keyword per issue (`Closes #12, closes #13, closes #14`, or one per line). Distinct from claims-vs-evidence above: this is a GitHub-parsing correctness check (does the stated linkage actually take effect), not a does-the-fix-have-a-test check — and it is the single most common way an AI-authored PR description silently under-delivers on "closes #A, #B, #C."
 - **Agent-native parity:** does a new user-facing action also have a programmatic path (API/CLI/tool), and is it documented for automation — not UI-only?
 - **PR size & focus:** is the PR small and single-purpose (roughly ≤~400 net LOC, one concern)? If it mixes refactor + feature + format churn, suggest splitting — mixed diffs hide bugs.
 - **Atomic commits:** does each commit represent one logical change that builds and (ideally) passes tests on its own, enabling clean `revert`/`bisect`? No "fix typo"/"wip"/"address review" noise left in final history.
