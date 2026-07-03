@@ -46,12 +46,13 @@ def check_drift(skills_root: str = "skills", docs_root: str = ".") -> list[Drift
         changed: list[Source] = []
         for b in built_from:
             src = Source(category=b["category"], source=b["source"])
-            # A renamed/missing source file would otherwise escape as a bare
-            # OSError with no skill/path context; surface it as a DriftError the
-            # CLI can report cleanly.
+            # A renamed/missing source file (OSError) or one that isn't valid
+            # UTF-8 (UnicodeDecodeError, a ValueError subclass — not an OSError)
+            # would otherwise escape with no skill/path context; surface both as
+            # a DriftError the CLI can report cleanly.
             try:
                 source_text = Path(docs_root, src.path).read_text(encoding="utf-8")
-            except OSError as exc:
+            except (OSError, UnicodeDecodeError) as exc:
                 raise DriftError(
                     f"{name}: cannot read source {src.path!r}: {exc}") from exc
             current = section_hash(source_text, src.section)

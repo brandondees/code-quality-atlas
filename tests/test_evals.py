@@ -52,9 +52,9 @@ def test_load_evals_wraps_missing_file_as_eval_error(tmp_path):
         load_evals(str(tmp_path / "does_not_exist.json"))
 
 def test_load_evals_wraps_non_object_json_as_eval_error(tmp_path):
-    """Valid JSON that isn't an object (a bare array/scalar) must raise EvalError,
-    not a raw TypeError from subscripting."""
+    """Valid JSON that isn't an object (a bare array/scalar) must raise EvalError
+    with an actionable message, not a raw TypeError from subscripting."""
     p = tmp_path / "eval.json"
     p.write_text("[1, 2, 3]")
-    with pytest.raises(EvalError, match="eval.json"):
+    with pytest.raises(EvalError, match="must be a JSON object"):
         load_evals(str(p))

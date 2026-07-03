@@ -98,3 +98,18 @@ def test_drift_missing_source_file_raises_clear_drift_error(tmp_path):
         check_drift(skills_root=str(tmp_path), docs_root=str(empty_docs))
     assert "hunting-silent-failures" in str(exc.value)
     assert "research_sample.md" in str(exc.value)
+
+
+def test_drift_non_utf8_source_file_raises_clear_drift_error(tmp_path):
+    """A source file that exists but isn't valid UTF-8 raises UnicodeDecodeError
+    (a ValueError, not an OSError); it must still surface as a clean DriftError."""
+    import pytest
+    from tooling.drift import DriftError
+    generate_skill(_skill(), "v0.2", docs_root=".", skills_root=str(tmp_path))
+    bad_docs = tmp_path / "bad_docs"
+    (bad_docs / "tests" / "fixtures").mkdir(parents=True)
+    # invalid UTF-8 bytes at the referenced source path
+    (bad_docs / "tests" / "fixtures" / "research_sample.md").write_bytes(b"\xff\xfe\x00bad")
+    with pytest.raises(DriftError) as exc:
+        check_drift(skills_root=str(tmp_path), docs_root=str(bad_docs))
+    assert "hunting-silent-failures" in str(exc.value)
