@@ -51,6 +51,14 @@ def test_load_evals_wraps_missing_file_as_eval_error(tmp_path):
     with pytest.raises(EvalError):
         load_evals(str(tmp_path / "does_not_exist.json"))
 
+def test_load_evals_wraps_non_utf8_as_eval_error(tmp_path):
+    """A non-UTF-8 eval.json raises UnicodeDecodeError (a ValueError, not OSError)
+    on read; it must still surface as EvalError, not a raw traceback."""
+    p = tmp_path / "eval.json"
+    p.write_bytes(b"\xff\xfe\x00not utf-8")
+    with pytest.raises(EvalError, match="eval.json"):
+        load_evals(str(p))
+
 def test_load_evals_wraps_non_object_json_as_eval_error(tmp_path):
     """Valid JSON that isn't an object (a bare array/scalar) must raise EvalError
     with an actionable message, not a raw TypeError from subscripting."""

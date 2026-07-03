@@ -29,7 +29,7 @@ def load_evals(path: str) -> EvalDoc:
             raise EvalError(
                 f"{path}: eval doc must be a JSON object, got {type(data).__name__}")
         return EvalDoc(skills=data["skills"], scenarios=data["scenarios"])
-    except (OSError, json.JSONDecodeError, KeyError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError) as exc:
         raise EvalError(f"{path}: {exc}") from exc
 
 

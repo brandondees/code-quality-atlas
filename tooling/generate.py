@@ -11,6 +11,13 @@ from tooling.sections import (extract_bullets, extract_section,
                               extract_subsection, section_hash,
                               is_priority, strip_priority)
 
+class CollapsedOverlapError(ValueError):
+    """Raised when generate_collapsed's prune target would overlap the standalone
+    skills tree — an operator misconfiguration, not an internal failure. Subclasses
+    ValueError so it reads as the bad-argument condition it is, while giving the CLI
+    a precise type to catch (so unrelated internal ValueErrors still surface)."""
+
+
 _KIND_TITLE = {
     "heuristics": "Reviewable heuristics",
     "tooling": "Tool rules to triage",
@@ -900,7 +907,7 @@ def generate_collapsed(manifest: Manifest, docs_root: str = ".", skills_root: st
     skills_root_resolved = Path(skills_root).resolve()
     skills_dir_resolved = skills_dir.resolve()
     if skills_root_resolved.is_relative_to(skills_dir_resolved):
-        raise ValueError(
+        raise CollapsedOverlapError(
             f"refusing to generate collapsed output into {skills_dir}: its prune "
             f"step would delete the standalone skills tree at {skills_root}; "
             f"collapsed_root must not overlap skills_root")
