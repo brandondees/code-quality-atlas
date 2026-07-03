@@ -4,9 +4,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from tooling.manifest import load_manifest, validate
-from tooling.generate import (generate_collapsed, generate_router, generate_skill,
+from tooling.generate import (CollapsedOverlapError, generate_collapsed,
+                              generate_router, generate_skill,
                               generate_synthesizer, primary_owners)
-from tooling.drift import check_drift
+from tooling.drift import check_drift, DriftError
 from tooling.evals import load_evals, validate_evals, EvalError
 
 
@@ -46,14 +47,27 @@ def main(argv: list[str] | None = None) -> int:
             out = generate_synthesizer(manifest, skills_root=args.skills_root)
             print(f"generated {out}")
         if manifest.entrypoints:
-            for out in generate_collapsed(manifest, docs_root=args.docs_root,
-                                          skills_root=args.skills_root,
-                                          collapsed_root=args.collapsed_root):
+            # generate_collapsed refuses when its prune target would overlap the
+            # standalone skills tree; report that cleanly instead of leaking a
+            # traceback, matching the drift/eval branches. Catch the specific
+            # error so an unrelated internal ValueError still surfaces as a bug.
+            try:
+                collapsed = generate_collapsed(manifest, docs_root=args.docs_root,
+                                               skills_root=args.skills_root,
+                                               collapsed_root=args.collapsed_root)
+            except CollapsedOverlapError as exc:
+                print(f"ERROR: {exc}")
+                return 1
+            for out in collapsed:
                 print(f"generated {out}")
         return 0
 
     if args.cmd == "drift":
-        reports = check_drift(skills_root=args.skills_root, docs_root=args.docs_root)
+        try:
+            reports = check_drift(skills_root=args.skills_root, docs_root=args.docs_root)
+        except DriftError as exc:
+            print(f"ERROR: {exc}")
+            return 1
         if not reports:
             print("No drift: all skills are in sync with their source research.")
             return 0

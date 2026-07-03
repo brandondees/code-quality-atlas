@@ -11,6 +11,13 @@ from tooling.sections import (extract_bullets, extract_section,
                               extract_subsection, section_hash,
                               is_priority, strip_priority)
 
+class CollapsedOverlapError(ValueError):
+    """Raised when generate_collapsed's prune target would overlap the standalone
+    skills tree — an operator misconfiguration, not an internal failure. Subclasses
+    ValueError so it reads as the bad-argument condition it is, while giving the CLI
+    a precise type to catch (so unrelated internal ValueErrors still surface)."""
+
+
 _KIND_TITLE = {
     "heuristics": "Reviewable heuristics",
     "tooling": "Tool rules to triage",
@@ -891,6 +898,19 @@ def generate_collapsed(manifest: Manifest, docs_root: str = ".", skills_root: st
     stale."""
     written: list[Path] = []
     skills_dir = Path(collapsed_root, "skills")
+    # Guard the prune below: it rmtree's every child of `skills_dir` not in the
+    # manifest. If a miscall points `skills_dir` at — or above — the standalone
+    # skills tree (e.g. collapsed_root="." with skills_root="skills"), that prune
+    # would silently delete the real skills. Refuse instead. `is_relative_to` is
+    # already true when the two paths are equal, so it covers both the
+    # same-directory and skills-nested-under-prune-target cases in one check.
+    skills_root_resolved = Path(skills_root).resolve()
+    skills_dir_resolved = skills_dir.resolve()
+    if skills_root_resolved.is_relative_to(skills_dir_resolved):
+        raise CollapsedOverlapError(
+            f"refusing to generate collapsed output into {skills_dir}: its prune "
+            f"step would delete the standalone skills tree at {skills_root}; "
+            f"collapsed_root must not overlap skills_root")
     current = {ep.name for ep in manifest.entrypoints}
     if skills_dir.exists():
         for child in skills_dir.iterdir():

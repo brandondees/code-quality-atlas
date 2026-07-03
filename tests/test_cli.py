@@ -61,3 +61,16 @@ def test_cli_generate_emits_collapsed(tmp_path):
     assert rc == 0
     assert (tmp_path / "collapsed" / "skills" / "reviewing-a-change" / "SKILL.md").exists()
     assert (tmp_path / "collapsed" / ".claude-plugin" / "plugin.json").exists()
+
+
+def test_cli_generate_reports_collapsed_overlap_cleanly(tmp_path, capsys):
+    """The generate_collapsed overlap guard must reach the CLI as a clean
+    `ERROR:` + exit 1, not a raw traceback — matching the drift/eval branches.
+    collapsed_root=tmp_path makes <collapsed_root>/skills == skills_root."""
+    rc = main(["generate", "--manifest", "skills/manifest.yaml", "--docs-root", ".",
+               "--skills-root", str(tmp_path / "skills"),
+               "--collapsed-root", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "ERROR:" in out
+    assert "overlap" in out

@@ -29,3 +29,40 @@ def test_validate_requires_expected_behavior(tmp_path):
     doc = _good(); doc["scenarios"][0].pop("expected_behavior")
     with pytest.raises(EvalError, match="expected_behavior"):
         validate_evals(load_evals(_write(tmp_path, doc)))
+
+def test_load_evals_wraps_bad_json_as_eval_error(tmp_path):
+    """Malformed JSON must surface as a clean, path-tagged EvalError, not a raw
+    JSONDecodeError that escapes the CLI's `except EvalError` handler."""
+    p = tmp_path / "eval.json"
+    p.write_text("{not valid json")
+    with pytest.raises(EvalError, match="eval.json"):
+        load_evals(str(p))
+
+def test_load_evals_wraps_missing_key_as_eval_error(tmp_path):
+    """A JSON file missing a required top-level key must raise EvalError, not a
+    bare KeyError."""
+    p = tmp_path / "eval.json"
+    p.write_text(json.dumps({"scenarios": []}))  # missing "skills"
+    with pytest.raises(EvalError, match="skills"):
+        load_evals(str(p))
+
+def test_load_evals_wraps_missing_file_as_eval_error(tmp_path):
+    """An unreadable/absent file must raise EvalError, not a raw OSError."""
+    with pytest.raises(EvalError):
+        load_evals(str(tmp_path / "does_not_exist.json"))
+
+def test_load_evals_wraps_non_utf8_as_eval_error(tmp_path):
+    """A non-UTF-8 eval.json raises UnicodeDecodeError (a ValueError, not OSError)
+    on read; it must still surface as EvalError, not a raw traceback."""
+    p = tmp_path / "eval.json"
+    p.write_bytes(b"\xff\xfe\x00not utf-8")
+    with pytest.raises(EvalError, match="eval.json"):
+        load_evals(str(p))
+
+def test_load_evals_wraps_non_object_json_as_eval_error(tmp_path):
+    """Valid JSON that isn't an object (a bare array/scalar) must raise EvalError
+    with an actionable message, not a raw TypeError from subscripting."""
+    p = tmp_path / "eval.json"
+    p.write_text("[1, 2, 3]")
+    with pytest.raises(EvalError, match="must be a JSON object"):
+        load_evals(str(p))
