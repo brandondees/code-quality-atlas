@@ -83,3 +83,18 @@ def test_drift_rejects_frontmatter_without_provenance(tmp_path):
     (skill_dir / "SKILL.md").write_text("---\nname: noprov\n---\n\nbody\n")
     with pytest.raises(ValueError, match="provenance"):
         check_drift(skills_root=str(tmp_path), docs_root=".")
+
+
+def test_drift_missing_source_file_raises_clear_drift_error(tmp_path):
+    """A referenced source file that can't be read must raise a clear DriftError
+    naming the skill and path, not a bare FileNotFoundError traceback."""
+    import pytest
+    from tooling.drift import DriftError
+    generate_skill(_skill(), "v0.2", docs_root=".", skills_root=str(tmp_path))
+    # Point docs-root at an empty dir so the referenced source file is missing.
+    empty_docs = tmp_path / "empty_docs"
+    empty_docs.mkdir()
+    with pytest.raises(DriftError) as exc:
+        check_drift(skills_root=str(tmp_path), docs_root=str(empty_docs))
+    assert "hunting-silent-failures" in str(exc.value)
+    assert "research_sample.md" in str(exc.value)

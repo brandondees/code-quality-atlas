@@ -613,3 +613,34 @@ def test_mode_floor_policy_empty_when_no_modes():
 def test_build_synthesizer_md_includes_floor_policy():
     md = build_synthesizer_md(_syn_manifest(_modes()))
     assert "## Severity floor by mode" in md
+
+
+# --- generate_collapsed destructive-prune guard ---
+from tooling.generate import generate_collapsed
+
+
+def test_generate_collapsed_refuses_to_prune_standalone_skills_tree(tmp_path):
+    """Guard: generate_collapsed prunes <collapsed_root>/skills of entries not in
+    the manifest. If that prune target resolves onto the standalone skills tree,
+    it must refuse (ValueError) rather than rmtree the real skills."""
+    import pytest
+    skills_root = tmp_path / "skills"
+    sentinel = skills_root / "some-standalone-skill"
+    sentinel.mkdir(parents=True)
+    (sentinel / "SKILL.md").write_text("# do not delete me\n")
+    m = load_manifest("skills/manifest.yaml")
+    # collapsed_root=tmp_path makes Path(collapsed_root, "skills") == skills_root.
+    with pytest.raises(ValueError, match="skills"):
+        generate_collapsed(m, docs_root=".", skills_root=str(skills_root),
+                           collapsed_root=str(tmp_path))
+    assert sentinel.exists()  # nothing was pruned
+
+
+def test_generate_collapsed_normal_roots_do_not_trip_guard(tmp_path):
+    """The guard must not fire for legitimately distinct roots (the default shape
+    collapsed_root/skills != skills_root)."""
+    m = load_manifest("skills/manifest.yaml")
+    written = generate_collapsed(m, docs_root=".", skills_root="skills",
+                                 collapsed_root=str(tmp_path / "collapsed"))
+    assert written  # generation proceeded
+    assert (tmp_path / "collapsed" / "skills").exists()

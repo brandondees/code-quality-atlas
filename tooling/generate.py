@@ -891,6 +891,18 @@ def generate_collapsed(manifest: Manifest, docs_root: str = ".", skills_root: st
     stale."""
     written: list[Path] = []
     skills_dir = Path(collapsed_root, "skills")
+    # Guard the prune below: it rmtree's every child of `skills_dir` not in the
+    # manifest. If a miscall points `skills_dir` at (or above) the standalone
+    # skills tree — e.g. collapsed_root="." with skills_root="skills" — that
+    # prune would silently delete the real skills. Refuse instead.
+    skills_root_resolved = Path(skills_root).resolve()
+    skills_dir_resolved = skills_dir.resolve()
+    if (skills_dir_resolved == skills_root_resolved
+            or skills_root_resolved.is_relative_to(skills_dir_resolved)):
+        raise ValueError(
+            f"refusing to generate collapsed output into {skills_dir}: its prune "
+            f"step would delete the standalone skills tree at {skills_root}; "
+            f"collapsed_root and skills_root must be distinct")
     current = {ep.name for ep in manifest.entrypoints}
     if skills_dir.exists():
         for child in skills_dir.iterdir():

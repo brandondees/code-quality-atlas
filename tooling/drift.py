@@ -8,6 +8,12 @@ from tooling.manifest import Source
 from tooling.sections import section_hash
 
 
+class DriftError(Exception):
+    """Raised when drift cannot be computed — e.g. a referenced source research
+    file is missing or unreadable. Distinct from a *detected* drift (which is a
+    normal DriftReport result)."""
+
+
 @dataclass
 class DriftReport:
     skill: str
@@ -40,8 +46,15 @@ def check_drift(skills_root: str = "skills", docs_root: str = ".") -> list[Drift
         changed: list[Source] = []
         for b in built_from:
             src = Source(category=b["category"], source=b["source"])
-            current = section_hash(Path(docs_root, src.path).read_text(encoding="utf-8"),
-                                   src.section)
+            # A renamed/missing source file would otherwise escape as a bare
+            # OSError with no skill/path context; surface it as a DriftError the
+            # CLI can report cleanly.
+            try:
+                source_text = Path(docs_root, src.path).read_text(encoding="utf-8")
+            except OSError as exc:
+                raise DriftError(
+                    f"{name}: cannot read source {src.path!r}: {exc}") from exc
+            current = section_hash(source_text, src.section)
             if current != b["hash"]:
                 changed.append(src)
         if changed:

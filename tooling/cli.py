@@ -6,7 +6,7 @@ from pathlib import Path
 from tooling.manifest import load_manifest, validate
 from tooling.generate import (generate_collapsed, generate_router, generate_skill,
                               generate_synthesizer, primary_owners)
-from tooling.drift import check_drift
+from tooling.drift import check_drift, DriftError
 from tooling.evals import load_evals, validate_evals, EvalError
 
 
@@ -53,7 +53,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "drift":
-        reports = check_drift(skills_root=args.skills_root, docs_root=args.docs_root)
+        try:
+            reports = check_drift(skills_root=args.skills_root, docs_root=args.docs_root)
+        except DriftError as exc:
+            print(f"ERROR: {exc}")
+            return 1
         if not reports:
             print("No drift: all skills are in sync with their source research.")
             return 0

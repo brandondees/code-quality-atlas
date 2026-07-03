@@ -16,9 +16,17 @@ class EvalDoc:
 
 
 def load_evals(path: str) -> EvalDoc:
-    with open(path, encoding="utf-8") as fh:
-        data = json.loads(fh.read())
-    return EvalDoc(skills=data["skills"], scenarios=data["scenarios"])
+    # A missing file (OSError), malformed JSON (JSONDecodeError), a JSON body
+    # missing a required key (KeyError), or a non-object body such as a bare
+    # array/scalar (TypeError from subscripting) must all surface as EvalError so
+    # the CLI's `except EvalError` handler renders a clean "INVALID:" line instead
+    # of leaking a raw traceback to the operator.
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.loads(fh.read())
+        return EvalDoc(skills=data["skills"], scenarios=data["scenarios"])
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise EvalError(f"{path}: {exc}") from exc
 
 
 def validate_evals(doc: EvalDoc) -> None:
