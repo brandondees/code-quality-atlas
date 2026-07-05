@@ -12,7 +12,7 @@ def run_vendor(target, *extra_args):
     result = subprocess.run(
         [str(SCRIPT), str(target), *extra_args],
         cwd=str(REPO_ROOT),
-        capture_output=True, text=True,
+        capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, result.stderr
     return result
