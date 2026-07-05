@@ -1,6 +1,9 @@
 # Decision-time review — the third shape (design)
 
-**Status:** design, 2026-06-12. Awaiting review before it's locked into taxonomy v0.3.
+**Status:** design, 2026-06-12; §5 items 1 and 4 built 2026-06-12 (`shape: decision`,
+`reviewing-decision-lifecycle`, the router's decision route); **§5 item 2 (the shared
+decision-record checklist) built 2026-07-05** — see the note after §5. Item 3's
+remaining decision-native lenses are unbuilt; see the note.
 **Motivation:** the round-2 gap hunt ([`research/taxonomy-gap-hunt-round-2.md`](research/taxonomy-gap-hunt-round-2.md)) found that the single biggest omission is not a topic but a **shape** — see [Q15](open-questions.md#q15). This doc resolves *how* that shape enters the suite, which gates how the proposed #29 (decision lifecycle) is modelled.
 **Depends on:** the router (D10), the `design:` flag already in `skills/manifest.yaml`, the synthesizer (D12), the proposed taxonomy v0.3 categories #28/#29.
 
@@ -58,6 +61,47 @@ A topic and its natural shape are different axes — the same way #21 (maintaina
 2. **A shared `decision-record checklist`** (rationale / assumptions-still-valid / revisit-trigger / exit-rollback-sunset / alternatives) that every decision-capable lens appends — generated once, reused, like the synthesizer's finding contract.
 3. **New decision-native lenses** (gated on the v0.3 category decisions): adoption-&-exit (#29), decision-record audit (#29, `shape: repo` cron over ADRs), operational-design review (#28).
 4. **Router:** upgrade the thin "design doc / RFC" route into a decision-time *family* selector, and add routes for adoption-PRs, deprecation plans, and capacity/DR designs.
+
+## 5a. §5 item 2 — built 2026-07-05
+
+The shared decision-record checklist landed as a generator-level addition rather
+than a research section: `tooling/generate.py`'s `_scope_line` now appends it to
+every `design: true` lens's scope line (`skill.design` branch) — *"When the design
+doc is specifically a decision record (an ADR, RFC, or adoption/deprecation plan),
+also run the shared decision-record checklist: is the rationale actually recorded
+(not just the outcome); are the stated assumptions still current; is there a
+revisit-trigger; is an exit, rollback, or sunset path defined; were real
+alternatives weighed, not just the chosen option justified after the fact?"* — and
+states the finding is reported the same way as a topical one, not a separate
+report. This closes §2's original complaint that design-capable lenses applied
+their diff judgment to a decision "passively," without asking the decision-native
+questions.
+
+Chosen as generator prose (mirroring the existing "Reviewer discipline" and
+"Mechanizing these checks" blocks) rather than a `built_from` research section,
+because it is cross-cutting infrastructure applying uniformly to all 15
+design-capable lenses, not a topic owned by one taxonomy category — the same
+precedent as the router and synthesizer (`built_from: []`). It required no
+manifest schema change: every design-capable lens already regenerates it for
+free. Two representative lenses named in the router's decision route —
+`tracing-correctness-and-invariants` and `checking-restraint` — gained a new eval
+scenario each (an ADR input) demonstrating the checklist firing alongside the
+lens's own topical finding; `python -m tooling.cli generate`/`drift`/`eval` and
+the full pytest suite are clean. **Not yet cross-model re-gated** (no local model
+runtime available in the building session) — pending per the
+[regeneration runbook](runbooks/regenerating-skills.md)'s cross-model gate before
+the next release lands; the remaining 13 design-capable lenses did not get a new
+eval scenario (their existing scenarios are unaffected since none target decision
+input) and can gain one opportunistically as decision-shaped review gets used.
+
+§5 item 3's `decision-record-audit` (a `shape: repo` cron over existing ADRs — does
+an accepted decision still hold?) and a standalone `adoption-&-exit` lens remain
+unbuilt; `reviewing-decision-lifecycle` currently folds adoption/exit judgment and
+one-off staleness review into a single decision-shaped lens rather than splitting
+them. Operational design shipped as `reviewing-resilience-and-scalability`, but as
+`shape: diff` + `design: true` (not `shape: decision`) — it reviews a concrete
+system or its design doc, not a decision record, so it now also carries the
+decision-record checklist via this same mechanism when applied to a design doc.
 
 ## 6. Open sub-questions
 

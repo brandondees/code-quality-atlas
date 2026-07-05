@@ -26,6 +26,14 @@
         "Does not recommend adding a CSV library, abstraction layer, config options, or speculative edge-case handling for the trusted fixed-format input",
         "Recognizes a direct concrete implementation as appropriate restraint"
       ]
+    },
+    {
+      "query": "Review this ADR:\n```text\nADR-7: Adopt a microservices split\n\nDecision: split the monolith into 12 services (users, billing, notifications,\nsearch, ...), each with its own datastore and deploy pipeline, to \"scale the\nteam and the system together.\"\nTeam size: 6 engineers. Current load: ~40 req/s peak.\n```",
+      "expected_behavior": [
+        "Flags the restraint concern on the decision itself: a 12-way split for a 6-person team at 40 req/s is scope/infrastructure well ahead of the need it serves (premature distribution, not justified by current load or team size)",
+        "Also applies the shared decision-record checklist: no smaller alternative (modular monolith, splitting 2-3 services first) is recorded as considered, and no revisit-trigger or reversal path is defined if the split doesn't pay off",
+        "Reports both as this lens's own findings, not deferred to a separate report"
+      ]
     }
   ]
 }

@@ -34,6 +34,14 @@
         "Notes the Dec-only day arithmetic assumes a 31-day frame and the 'days left this year' logic is brittle across month/year rollover",
         "Frames these as latent defects that detonate on a specific future date rather than failing at merge time"
       ]
+    },
+    {
+      "query": "Review this ADR:\n```text\nADR-19: Adopt Redis for session storage\n\nContext: sessions currently live in each app instance's memory, so a restart or\ndeploy silently logs every active user out.\n\nDecision: store sessions in a shared Redis instance. Session TTL is set once\nat login (`SETEX session:<id> 86400 <blob>`) and is never refreshed.\n```",
+      "expected_behavior": [
+        "Flags the correctness/invariant gap: the TTL is set once at login and never refreshed on activity, so a user active past 24 hours is logged out mid-session — undermining the stated goal of not silently losing sessions",
+        "Also applies the shared decision-record checklist on top of that topical finding: the ADR records no alternatives considered (sticky sessions, a DB-backed store), no revisit-trigger, and no exit/rollback plan if Redis becomes unavailable or a bottleneck",
+        "Reports the decision-record gap as this lens's own finding alongside the correctness one, not as a separate report"
+      ]
     }
   ]
 }

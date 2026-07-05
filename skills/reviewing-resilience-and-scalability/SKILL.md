@@ -26,7 +26,7 @@ provenance:
 
 Reviews a change or design for operational resilience and scale: unbounded queues/buffers/result sets, missing timeouts and failure plans on calls to other services, blast radius and bulkheading, retry budgets and idempotency, in-process state that blocks horizontal scaling, single-writer bottlenecks, recoverability (RTO/RPO and tested restore), graceful degradation under overload, and multi-tenant isolation. Design-time operability — distinct from #16's runtime observability. Use when reviewing a new queue, cache, stateful service, failover/HA/DR design, capacity or scaling plan, or a call to a dependency that could be slow or down. Skip when the change is a small, stateless local edit with no new dependency call, queue, shared state, or scaling/recovery surface.
 
-**Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists.
+**Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists. When the design doc is specifically a decision record (an ADR, RFC, or adoption/deprecation plan), also run the shared **decision-record checklist** on top of this lens's own topical checks: is the rationale actually recorded (not just the outcome); are the stated assumptions still current; is there a revisit-trigger; is an exit, rollback, or sunset path defined; were real alternatives weighed, not just the chosen option justified after the fact? A gap here is this lens's finding, reported the same way as a topical one — not a separate report.
 
 ## Reviewer discipline
 
