@@ -43,9 +43,9 @@ surfaced no matter how many rounds in.
 ## Depth modes
 
 The reviewer picks a depth mode from the request (see
-`choosing-review-lenses/SKILL.md`'s Depth modes table for the exact trigger
-phrases) and applies that mode's floor **instead of** the round-based table
-above:
+`code-quality-atlas:choosing-review-lenses`'s Depth modes table for the exact
+trigger phrases) and applies that mode's floor **instead of** the round-based
+table above:
 
 | Mode | Floor | Escalates by round? |
 |---|---|---|
@@ -53,9 +53,9 @@ above:
 | **review** (default) | round-based (table above) | Yes — Nit at round 1, Major at round 2+ |
 | **comprehensive** | Nit, every round | No — pinned at Nit so long-tail findings never get trimmed |
 
-Triage and comprehensive still use the rest of this policy unchanged — only-new-
-findings, the round cap, and approve-on-clean all still apply; just the floor
-itself is fixed instead of escalating.
+Triage and comprehensive still use the rest of this policy unchanged —
+only-new-findings, the round cap, and approve-on-clean all still apply; just
+the floor itself is fixed instead of escalating.
 
 Earlier versions of this policy climbed to **Blocker-only** at round 3+. That
 suppressed real Major regressions (e.g. a bug introduced by a late fix) just

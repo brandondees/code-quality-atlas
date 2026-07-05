@@ -64,7 +64,8 @@ through the picker is optional.
 Run `code-quality-atlas:synthesizing-review-findings` to merge every source's
 findings (atlas lenses plus any companion reviewer) into one deduplicated,
 severity-ranked report with a single block / approve-with-changes / approve
-verdict, applying the mode's severity floor: **triage** pins at Major, **review**
-pins at Nit (there's no round history for an ad-hoc diff, so no escalation
-applies), and **comprehensive** pins at Nit. Report only real problems; if the
-change is clean, say "No findings" and stop rather than inventing issues.
+verdict, applying the mode's severity floor: **triage** pins at Major,
+**comprehensive** pins at Nit, and **review** uses the round-1 floor (Nit and
+above) for this single pass, since an ad-hoc diff has no round history to
+escalate across. Report only real problems; if the change is clean, say "No
+findings" and stop rather than inventing issues.

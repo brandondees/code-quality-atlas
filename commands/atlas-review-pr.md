@@ -96,7 +96,7 @@ findings to the ACK.
 5. `code-quality-atlas:synthesizing-review-findings` — merge every source's
    findings (atlas lenses plus any companion reviewer) into one deduplicated,
    severity-ranked list with a single block/approve verdict, applying the
-   active depth mode's severity floor (see step 5 below).
+   active depth mode's severity floor (see the next section).
 
 ## 5. Apply the mode's severity floor, then post
 
