@@ -83,11 +83,12 @@ self-hosting/on-prem story as unknown, not as "doesn't exist."
 
 ### Known limitation
 
-Multiple independent sources (including a comparison from a competitor, Sourcegraph, so read with
-appropriate skepticism, but consistent with the architecture) describe CodeRabbit as **weaker on
-cross-repo/cross-file context** — it primarily sees the diff plus a small surrounding window,
-not a full-codebase index. This is the one place a specific Greptile-superiority claim was
-refuted (0-3) but the qualitative limitation itself survived (2-1).
+Multiple independent sources describe CodeRabbit as **weaker on cross-repo/cross-file context** —
+it primarily sees the diff plus a small surrounding window, not a full-codebase index. One of
+those sources, Sourcegraph, is itself a competitor, so read that specific source with appropriate
+skepticism — but the limitation is consistent with the confirmed architecture above and this is
+the one place a specific Greptile-superiority claim was refuted (0-3) while the qualitative
+limitation itself survived (2-1).
 
 ---
 
@@ -171,10 +172,12 @@ Ranked by (my estimate of) value ÷ implementation cost, using the confirmed fin
    ([`map-gaps.md`](../map-gaps.md) G26 — the "defect-only by construction" finding is about a
    different axis, *which findings* are surfaced by default, not *whether* a surfaced finding can
    be applied; G13/G26 both name auto-application as the still-open half of Q8, the fixing mode).
-   This tier-1 placement
-   is about the **narrower, safer slice**: mechanical, low-risk fixes (a committable one-line
-   patch for a clearly-scoped nit) — not the broader "should the agent edit code" question, which
-   stays gated behind Q8.
+   This tier-1 placement is about the **narrower, safer slice**: mechanical, low-risk fixes (a
+   committable one-line patch for a clearly-scoped nit) — not the broader "should the agent edit
+   code" question, which stays gated behind Q8. **Caveat: unlike items 1–2, this one doesn't
+   actually fit "no new infrastructure"** — applying a fix to a branch needs write/commit access
+   plus safety rails (a revert path, scope limits on what counts as "mechanically safe") the atlas
+   doesn't have today; it's grouped here on value/cost, not on infrastructure-free-ness.
 
 ### Tier 2 — real value, moderate cost, mostly config/prompt-engineering work
 
