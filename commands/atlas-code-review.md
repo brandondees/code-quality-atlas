@@ -35,12 +35,21 @@ Pick the smallest diff that captures what the user means:
 Keep scope to the changed files, not the whole repo (whole-repo health is what the
 `auditing-*` skills are for).
 
-## 2. Pick the lenses
+## 2. Pick the depth mode and lenses
 
-Run `code-quality-atlas:choosing-review-lenses` to map the change to the 2-4 most
-relevant lenses. If the relevant lenses are already obvious (an async change →
-`reviewing-concurrency-and-async`), call them directly — routing through the
-picker is optional.
+Determine the **depth mode** from the request, matching the triggers table in
+`code-quality-atlas:choosing-review-lenses`'s Depth modes section: **triage**
+("triage", "quick review", "fast check", "pre-merge gate"), **comprehensive**
+("thorough", "comprehensive", "deep review", "use all relevant lenses", "review
+everything"), otherwise **review** (the default).
+
+Run `code-quality-atlas:choosing-review-lenses` to rank every lens the change
+touches by relevance, then take as many as the mode's breadth allows: triage
+runs the critical tier only (correctness, security, data-safety, concurrency);
+review runs the top 2-4 by relevance (the default); comprehensive runs every
+relevant lens, uncapped. If the relevant lenses are already obvious (an async
+change → `reviewing-concurrency-and-async`), call them directly — routing
+through the picker is optional.
 
 ## 3. Run the lenses, and combine non-exclusively
 
@@ -55,5 +64,8 @@ picker is optional.
 Run `code-quality-atlas:synthesizing-review-findings` to merge every source's
 findings (atlas lenses plus any companion reviewer) into one deduplicated,
 severity-ranked report with a single block / approve-with-changes / approve
-verdict. Report only real problems; if the change is clean, say "No findings" and
-stop rather than inventing issues.
+verdict, applying the mode's severity floor: **triage** pins at Major,
+**comprehensive** pins at Nit, and **review** uses the round-1 floor (Nit and
+above) for this single pass, since an ad-hoc diff has no round history to
+escalate across. Report only real problems; if the change is clean, say "No
+findings" and stop rather than inventing issues.

@@ -76,23 +76,42 @@ findings to the ACK.
 
 ## 4. Run the lenses
 
-1. `code-quality-atlas:choosing-review-lenses` — pick the 2-4 lenses that fit
-   this change. Scope to the **files in this PR's diff**, not the whole repo.
-2. Run each chosen lens against the diff.
-3. **Combine, don't exclude.** If another review method is available in this repo
+1. Determine the **depth mode** from the request (the PR description, the
+   triggering comment, or `$ARGUMENTS`), matching the triggers table in
+   `code-quality-atlas:choosing-review-lenses`'s Depth modes section:
+   **triage** ("triage", "quick review", "fast check", "pre-merge gate"),
+   **comprehensive** ("thorough", "comprehensive", "deep review", "use all
+   relevant lenses", "review everything"), otherwise **review** (the default).
+2. `code-quality-atlas:choosing-review-lenses` — rank every lens the change
+   touches by relevance, then take as many as the mode's breadth allows:
+   triage runs the critical tier only (correctness, security, data-safety,
+   concurrency); review runs the top 2-4 by relevance; comprehensive runs
+   every relevant lens, uncapped. Scope to the **files in this PR's diff**, not
+   the whole repo.
+3. Run each chosen lens against the diff.
+4. **Combine, don't exclude.** If another review method is available in this repo
    — the built-in `code-review` skill, a framework review (e.g. BMAD), or linter
    output — you may run it on the same diff and fold its findings in too. The
    atlas lenses lead; the others are additive, not a substitute and not excluded.
-4. `code-quality-atlas:synthesizing-review-findings` — merge every source's
+5. `code-quality-atlas:synthesizing-review-findings` — merge every source's
    findings (atlas lenses plus any companion reviewer) into one deduplicated,
-   severity-ranked list with a single block/approve verdict.
+   severity-ranked list with a single block/approve verdict, applying the
+   active depth mode's severity floor (see the next section).
 
-## 5. Apply the round's severity floor, then post
+## 5. Apply the mode's severity floor, then post
 
-- Split this round's findings at the floor for the current round (the policy raises
-  the floor once after the first pass, then holds it at Major — round 1 posts nits;
-  round 2+ posts only Major+). Severities are the synthesizer's own:
-  **Blocker > Major > Minor > Nit**.
+- The floor policy depends on the depth mode picked in step 4:
+  - **review** (default) — the round-based escalating floor: round 1 posts Nit
+    and above; round 2+ posts only Major and above. This is the policy
+    described below and in `REVIEW.md`.
+  - **triage** — pinned at **Major**, every round — no escalation, since a
+    triage pass never runs a low-severity round 1 to begin with.
+  - **comprehensive** — pinned at **Nit**, every round — no escalation, so
+    readability-class and other long-tail findings always surface.
+- For **review** mode, split this round's findings at the floor for the current
+  round (the policy raises the floor once after the first pass, then holds it
+  at Major — round 1 posts nits; round 2+ posts only Major+). Severities are
+  the synthesizer's own: **Blocker > Major > Minor > Nit**.
 - Post inline only findings that are **new this round** — at or above the floor and
   not already raised in a still-standing thread from an earlier round. Don't repost a
   finding an open thread already records; the original thread is the record.

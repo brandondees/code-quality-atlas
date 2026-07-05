@@ -1,8 +1,12 @@
 # Review-depth modes (Q14 resolution / D16)
 
-**Status:** resolved (user, 2026-06-24) — decision recorded; build deferred (the
-manifest/generator/synthesizer changes are a separate implementation pass, well-suited
-to a cloud/scheduled session). Supersedes the open framing in
+**Status:** resolved (user, 2026-06-24); manifest/generator/synthesizer layer
+**built 2026-06-26 (PR #80)**, folded into
+[`collapsed-entrypoints-and-depth-modes.md`](collapsed-entrypoints-and-depth-modes.md)
+— see `docs/open-questions.md` D16. The commands' and `REVIEW.md`'s surfacing
+that lets `/atlas-review-pr` and `/atlas-code-review` actually select a mode from the
+request landed later (issue #114) — both entrypoints now detect the mode and
+apply its floor policy. Supersedes the open framing in
 [`open-questions.md`](open-questions.md) Q14.
 
 ## The problem this resolves
