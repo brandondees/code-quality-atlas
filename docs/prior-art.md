@@ -65,3 +65,15 @@ Each encodes hundreds of concrete checks. To be expanded with *specific rules wo
 2. **The opinionated-reviewer pattern** — `dhh-rails`, `kieran-*` show value in a *named perspective* with strong taste, not just a checklist.
 3. **Quantitative scoring** — `type-design-analyzer` rates dimensions; consider whether the suite reports scores or only findings.
 4. **Orchestration** — how multi-agent review toolkits fan out and synthesize; relevant to phase 2 composition.
+
+---
+
+## Commercial AI-native review products (a different kind of prior art)
+
+The above is agent skills/plugins and classic static-analysis tools. A third, distinct kind of
+prior art is the commercial **AI-native review products** (CodeRabbit, GitHub Copilot code
+review, Greptile, and peers) — not a checklist to mine, but a **competing architecture**
+(hybrid deterministic-tool + LLM pipelines, some with auto-fix and persistent preference memory)
+worth benchmarking the suite's own design against. See
+[`research/competitor-landscape.md`](research/competitor-landscape.md) for verified findings and
+[`map-gaps.md`](map-gaps.md) **G34** for the resulting gap analysis and disposition.
