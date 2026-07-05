@@ -44,7 +44,7 @@ docs confirm specific tool integrations:
 
 - **Infer** (C/C++/Java) — null dereferences, resource leaks, concurrency issues.
 - **ast-grep** — multi-language AST structural pattern matching; also exposed to users as a
-  **custom-rule mechanism** (`docs.coderabbit.ai/configuration/ast-grep-instructions`) — write an
+  **custom-rule mechanism** (<https://docs.coderabbit.ai/configuration/ast-grep-instructions>) — write an
   AST pattern once, it becomes a repo-specific lint rule enforced on every PR.
 - **PMD** (Java) — auto-generates a default ruleset for repos with no existing PMD config.
 - A broader bundle independently reported at **40+ linters/SAST tools** (ESLint, Pylint, Golint,
@@ -167,9 +167,11 @@ Ranked by (my estimate of) value ÷ implementation cost, using the confirmed fin
    LLM to notice the same repo-specific anti-pattern every time.
 3. **Auto-applied fixes for high-confidence findings.** Both CodeRabbit (Autofix,
    `autofix stacked pr`) and Copilot (one-click, batchable suggested changes) ship this; the atlas
-   is explicitly **detect-only by construction today** ([`map-gaps.md`](../map-gaps.md) G26 — the
-   "defect-only by construction" finding covers *suggesting* improvements, not *applying* fixes,
-   which G13/G26 both name as the still-open half of Q8, the fixing mode). This tier-1 placement
+   is explicitly **detect-and-suggest only, with no auto-apply, today**
+   ([`map-gaps.md`](../map-gaps.md) G26 — the "defect-only by construction" finding is about a
+   different axis, *which findings* are surfaced by default, not *whether* a surfaced finding can
+   be applied; G13/G26 both name auto-application as the still-open half of Q8, the fixing mode).
+   This tier-1 placement
    is about the **narrower, safer slice**: mechanical, low-risk fixes (a committable one-line
    patch for a clearly-scoped nit) — not the broader "should the agent edit code" question, which
    stays gated behind Q8.
