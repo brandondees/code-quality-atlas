@@ -217,11 +217,30 @@ main() {
     done
   fi
 
-  # Rewrite the marker to the current set.
+  # Rewrite the marker: everything vendored this run, plus any name from the
+  # previous marker not covered by this run and not just pruned above.
+  # Previously this unconditionally overwrote the marker with only
+  # SKILL_NAMES, so switching modes (standalone <-> --collapsed) against the
+  # same target silently dropped the other form's names from the marker —
+  # orphaning those directories beyond --prune's reach (issue #112).
+  local marker_names=("${SKILL_NAMES[@]}")
+  if [ "${#OLD_NAMES[@]}" -gt 0 ]; then
+    local old
+    for old in "${OLD_NAMES[@]}"; do
+      if contains "$old" "${SKILL_NAMES[@]}"; then
+        continue
+      fi
+      if [ "$PRUNE" -eq 1 ]; then
+        continue  # removed from disk above; drop from the marker too
+      fi
+      marker_names+=("$old")
+    done
+  fi
+
   {
     printf '# code-quality-atlas vendored skills — do not hand-edit; regenerate with tooling/vendor-skills.sh\n'
     printf '# source=brandondees/code-quality-atlas@%s\n' "$sha"
-    for name in "${SKILL_NAMES[@]}"; do
+    for name in "${marker_names[@]}"; do
       printf '%s\n' "$name"
     done
   } >"$marker"
