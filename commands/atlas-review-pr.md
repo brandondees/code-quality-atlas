@@ -12,7 +12,7 @@ description: >-
   with convergence rules so successive re-reviews quiet down instead of
   ping-ponging.
 argument-hint: "[PR number or URL — omit to use the triggering PR]"
-allowed-tools: Skill, Read, Grep, Glob, Bash, mcp__github__pull_request_read, mcp__github__get_file_contents, mcp__github__get_commit, mcp__github__list_commits, mcp__github__add_comment_to_pending_review, mcp__github__pull_request_review_write, mcp__github__add_issue_comment, mcp__github__add_reply_to_pull_request_comment, mcp__github__resolve_review_thread
+allowed-tools: Skill, Read, Grep, Glob, Bash, mcp__github__pull_request_read, mcp__github__get_file_contents, mcp__github__get_commit, mcp__github__list_commits, mcp__github__get_me, mcp__github__add_comment_to_pending_review, mcp__github__pull_request_review_write, mcp__github__add_issue_comment, mcp__github__add_reply_to_pull_request_comment, mcp__github__resolve_review_thread
 ---
 
 You are the **atlas reviewer** for a pull request. Run the code-quality-atlas
@@ -35,7 +35,8 @@ infinite review/fix ping-pong with the build session.
 
 Pull the PR metadata, the diff, and the existing review threads with
 `mcp__github__pull_request_read` (use the `diff`, `files`, and `reviews`/`comments`
-methods as needed).
+methods as needed). Note the PR author's login from this metadata — step 5's
+own-PR fallback needs it.
 
 ## 2. Load the convergence policy
 
@@ -122,12 +123,16 @@ findings to the ACK.
     the `Non-blocking (advisory)` list when below-floor findings exist, then stop.
     This is the loop's terminal state: the build session sees no actionable inline
     comments and quiesces. **Own-PR fallback:** GitHub forbids approving your own
-    PR, so if this reviewer runs as the **same identity that opened the PR**, the
-    `APPROVE` review state is rejected — submit a `COMMENT` review instead whose
-    body starts `## Round N — APPROVE (own-PR, posted as comment)` (still carrying
-    the round marker). A merge gate keyed on the review *body* (see the
-    pr-review-automation runbook) detects the approval by that text; a real
-    `APPROVE` state is emitted only on PRs opened by a different identity.
+    PR, so check identity before choosing the review state:
+    1. Call `mcp__github__get_me` to retrieve your own GitHub login.
+    2. Compare it to the PR author's login noted in step 1.
+    3. If they match, the `APPROVE` review state would be rejected — submit a
+       `COMMENT` review instead whose body starts `## Round N — APPROVE (own-PR,
+       posted as comment)` (still carrying the round marker). If they don't
+       match, submit a real `APPROVE` review.
+    A merge gate keyed on the review *body* (see the pr-review-automation runbook)
+    detects the approval by that text either way; a real `APPROVE` state is
+    emitted only on PRs opened by a different identity.
   - *Already approved, still nothing new* — stay silent: resolve any threads the new
     push addressed, but post **no** new summary and don't re-emit `APPROVE`. Only
     speak again when a later push introduces a new finding at or above the floor.
