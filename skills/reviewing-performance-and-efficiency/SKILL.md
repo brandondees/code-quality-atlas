@@ -22,7 +22,7 @@ provenance:
 
 Reviews changes for performance and efficiency problems: N+1 queries, await-in-loop and chatty per-item I/O, accidental O(n²) on hot paths, recomputed expensive values, caches without invalidation, buffering whole payloads instead of streaming, allocation pressure, bundle/startup bloat, and per-request cloud cost. Demands a profile before accepting optimization claims. Use when reviewing queries in loops, hot paths, caching, large payloads, or anything justified by "performance."
 
-**Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists.
+**Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists. When the design doc is specifically a decision record (an ADR, RFC, or adoption/deprecation plan), also run the shared **decision-record checklist** on top of this lens's own topical checks: is the rationale actually recorded (not just the outcome); are the stated assumptions still current; is there a revisit-trigger; is an exit, rollback, or sunset path defined; were real alternatives weighed, not just the chosen option justified after the fact? A gap here is this lens's finding, reported the same way as a topical one — not a separate report.
 
 ## Reviewer discipline
 

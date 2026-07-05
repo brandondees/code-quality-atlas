@@ -24,7 +24,7 @@ provenance:
 
 Reviews concurrent and async code for races and ordering bugs: shared mutable state without synchronization, check-then-act spanning an await, lost updates from interleaved requests, lock ordering, unawaited promises, accidental sequential awaits, non-idempotent message consumers, exactly-once assumptions, and missing cancellation/timeout propagation. Use when reviewing threads, async/await, promises, locks, queues, message handlers, or anything two callers can run at once. Skip when the code is single-threaded and synchronous with no shared mutable state, async/await, or message handling — nothing two callers race on.
 
-**Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists.
+**Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists. When the design doc is specifically a decision record (an ADR, RFC, or adoption/deprecation plan), also run the shared **decision-record checklist** on top of this lens's own topical checks: is the rationale actually recorded (not just the outcome); are the stated assumptions still current; is there a revisit-trigger; is an exit, rollback, or sunset path defined; were real alternatives weighed, not just the chosen option justified after the fact? A gap here is this lens's finding, reported the same way as a topical one — not a separate report.
 
 ## Reviewer discipline
 
