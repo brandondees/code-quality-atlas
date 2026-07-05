@@ -25,6 +25,11 @@ knows the reviewer is live. Keep it to one line; never attach findings to the AC
 
 ## Severity floor per round
 
+Everything below applies to the default **review** depth mode — the one
+`/atlas-review-pr` runs unless the request asks for a different depth. See
+[Depth modes](#depth-modes) for **triage** and **comprehensive**, which use a
+fixed floor instead of the round-based escalation described here.
+
 Each round, drop every finding below the floor. The floor rises once after the
 first pass, then holds at **Major** — high enough to stay quiet on polish, low
 enough that any real problem (including one introduced by a fix) still gets
@@ -34,6 +39,23 @@ surfaced no matter how many rounds in.
 |---|---|---|
 | 1 | Nit and above (everything) | First pass — say it all once. |
 | 2+ | Major and above | Nits and minors were the reviewer's one chance; from here on interrupt only for substance — but **keep** interrupting for it, since a Major-only stream is already low-noise. |
+
+## Depth modes
+
+The reviewer picks a depth mode from the request (see
+`choosing-review-lenses/SKILL.md`'s Depth modes table for the exact trigger
+phrases) and applies that mode's floor **instead of** the round-based table
+above:
+
+| Mode | Floor | Escalates by round? |
+|---|---|---|
+| **triage** | Major, every round | No — pinned at Major from round 1 |
+| **review** (default) | round-based (table above) | Yes — Nit at round 1, Major at round 2+ |
+| **comprehensive** | Nit, every round | No — pinned at Nit so long-tail findings never get trimmed |
+
+Triage and comprehensive still use the rest of this policy unchanged — only-new-
+findings, the round cap, and approve-on-clean all still apply; just the floor
+itself is fixed instead of escalating.
 
 Earlier versions of this policy climbed to **Blocker-only** at round 3+. That
 suppressed real Major regressions (e.g. a bug introduced by a late fix) just
