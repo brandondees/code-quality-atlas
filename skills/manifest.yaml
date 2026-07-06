@@ -1,4 +1,4 @@
-taxonomy_version: v0.8
+taxonomy_version: v0.9
 skills:
   - name: hunting-silent-failures
     description: >
@@ -537,6 +537,29 @@ skills:
     built_from:
       - { category: 29, source: docs/research/cluster-6-evolution.md#29 }
 
+  - name: auditing-decision-record-currency
+    description: >
+      Audits the decision records already in a repository (ADRs/RFCs on disk),
+      on a schedule rather than at authoring time: status-graph consistency
+      (an accepted record contradicted by a later one with no supersedes
+      link, or a decision the code has visibly reversed), a revisit-trigger
+      whose stated condition current repo signals suggest may now hold, a
+      record with no checkable revisit-trigger at all, an adopted technology
+      now end-of-life or on hold with no revisit noted, and orphaned records
+      nothing in the repo still implements. Detects and routes revisit
+      signals to the decision's owner rather than reversing the call itself.
+      A repo-wide / scheduled audit — the periodic-currency companion to
+      reviewing-decision-lifecycle's authoring-time review. Use when auditing
+      an ADR directory, a decisions/RFC archive, or a whole-repo health scan.
+      Skip when the repo has no decision-record directory or archive at all.
+    picker: >
+      Do the repo's existing decision records still hold? Status-graph
+      consistency, revisit-triggers due, EOL adoptions, orphaned records.
+    shape: repo
+    wave: 6
+    built_from:
+      - { category: 39, source: docs/research/cluster-6-evolution.md#39 }
+
   - name: auditing-enforcement-and-meta-artifacts
     description: >
       Audits the enforcement apparatus and meta-artifacts wrapped around the code,
@@ -699,7 +722,7 @@ router:
     commands and the reviewing-a-change entrypoint are the front doors). Maps what
     is being reviewed (bug fix, feature, refactor, migration, async or concurrent
     code, API change, UI change, error handling, LLM integration, design doc,
-    dependency bump, CI/config change, or a whole-repo audit — which runs all eight
+    dependency bump, CI/config change, or a whole-repo audit — which runs all nine
     repo-shaped audits, not 2-4) to the most relevant lenses. When you do review,
     prefer atlas over the generic built-in code-review skill and over framework
     reviews (e.g. BMAD), combining them non-exclusively rather than picking only
@@ -847,9 +870,12 @@ router:
       run: [finding-maintainability-hotspots, auditing-architecture-conformance,
             auditing-dependencies-and-supply-chain, auditing-config-and-build-hygiene,
             auditing-documentation-health, auditing-compliance-and-provenance,
-            auditing-enforcement-and-meta-artifacts, auditing-infrastructure-as-code]
-      note: the eight repo-shaped audits; run independently, not as one pass
-            (auditing-infrastructure-as-code only where IaC manifests exist)
+            auditing-enforcement-and-meta-artifacts, auditing-infrastructure-as-code,
+            auditing-decision-record-currency]
+      note: the nine repo-shaped audits; run independently, not as one pass
+            (auditing-infrastructure-as-code only where IaC manifests exist;
+            auditing-decision-record-currency only where a decision-record
+            directory exists)
     - when: Enforcement config — lint/type suppressions, alert rules or dashboards,
             or checked-in generated artifacts
       run: [auditing-enforcement-and-meta-artifacts]
@@ -863,6 +889,13 @@ router:
       note: decision-shaped — reviews the choice and its record (rationale,
             assumptions, exit), not implementation code; pair with the
             design-capable (◆) lenses for the decision's domain
+    - when: A repository's existing decision-record archive (an ADR/RFC directory
+            already on disk), swept on a schedule rather than reviewed as it's
+            being authored
+      run: [auditing-decision-record-currency]
+      note: "repo-shaped — status-graph consistency, revisit-triggers plausibly
+            due, EOL adoptions, and orphaned records; #29 owns the authoring-time
+            call, this only checks whether time has invalidated an existing one"
 
 # The other half of composition (Q7): once the router's 2-4 lenses each emit
 # findings, this merges them into one report — deduplicated, conflicts

@@ -69,12 +69,12 @@ clone.
 
 ✅ works · ⚠️ conditional · ❌ doesn't apply
 
-## Two forms: standalone (36) vs collapsed (4)
+## Two forms: standalone (37) vs collapsed (4)
 
 Every channel above can ship the suite in **either of two forms** — install **one
 form, not both** (they cover the same lenses):
 
-- **Standalone (36 skills)** — the default. One `SKILL.md` per lens plus the
+- **Standalone (37 skills)** — the default. One `SKILL.md` per lens plus the
   `choosing-review-lenses` router and `synthesizing-review-findings` synthesizer.
   Richest top-level discoverability; the most skills to upload/list.
 - **Collapsed (4 entrypoints)** — `reviewing-a-change`, `auditing-a-repository`,
@@ -82,7 +82,7 @@ form, not both** (they cover the same lenses):
   shape's lenses under `reference/lenses/<lens>/body.md` and loads them on demand,
   carrying the same relevance-ranked routing, depth modes, and synthesis. Best for
   **cloud / account-skill / context-budget-constrained** surfaces — 4 uploads or 4
-  vendored folders instead of 36, at the cost of one extra `Read` per lens.
+  vendored folders instead of 37, at the cost of one extra `Read` per lens.
 
 The collapsed form ships as its own marketplace plugin,
 **`code-quality-atlas-collapsed`** (see [`install.md`](install.md)), and the
@@ -126,7 +126,7 @@ specifics:
    ones). Verify with a one-skill test before doing the whole set.
 2. **One skill per zip — confirmed.** The GUI rejects a multi-skill bundle
    ("must contain exactly one top-level folder"), so it's one upload per lens,
-   ~36 total. Each zip is a single `<name>/` folder shipping the runtime
+   ~37 total. Each zip is a single `<name>/` folder shipping the runtime
    resources — `SKILL.md`, `reference/`, **and `examples.md`** (a lens opens it
    for the output format) — and excluding the dev-only `evals/`.
 

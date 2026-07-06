@@ -11,7 +11,7 @@ description: Threat-models a system or design for security at design time — en
   fix with no new trust boundaries, components, or data-flows — diff-time vulnerability
   detection is sweeping-for-security's job.
 provenance:
-  taxonomy_version: v0.8
+  taxonomy_version: v0.9
   built_from:
   - category: 38
     source: docs/research/cluster-4-runtime.md#38

@@ -7,7 +7,7 @@ description: 'Checks that a change follows the project''s own conventions and th
   layout. Use when reviewing style, conventions, idioms, framework usage, or consistency
   with the rest of the codebase.'
 provenance:
-  taxonomy_version: v0.8
+  taxonomy_version: v0.9
   built_from:
   - category: 8
     source: docs/research/cluster-2-readability.md#8

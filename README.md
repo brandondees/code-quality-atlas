@@ -15,17 +15,18 @@ supports the `SKILL.md` format** (Cursor, Windsurf, Copilot, …). The plugin wr
 
 ## What you get
 
-**36 review skills**, generated from a researched taxonomy and refined against eval
+**37 review skills**, generated from a researched taxonomy and refined against eval
 scenarios:
 
-- **34 review lenses** — each a narrow, self-contained reviewer (correctness,
+- **35 review lenses** — each a narrow, self-contained reviewer (correctness,
   naming & readability, module design, concurrency, migrations & data safety,
   security, performance, tests, API contracts, accessibility & i18n, observability,
   LLM-integration, agentic & tool-use safety, resilience, install/upgrade
   experience, plus repo-shaped audits
   for architecture, dependencies, config/build, docs, compliance,
-  infrastructure-as-code, a decision-time lens, and an artifact lens that reviews
-  authored artifacts like `SKILL.md` against their own standard, and 10 more). Each
+  infrastructure-as-code, decision-record currency, a decision-time lens, and an
+  artifact lens that reviews authored artifacts like `SKILL.md` against their own
+  standard, and 9 more). Each
   leads with a one-line tagline, runs on its own, and carries its full checklist in
   `reference/heuristics.md` (the artifact lens uses artifact-specific rubric files
   instead); the narrowly-scoped lenses add an explicit *Skip when…* clause so the

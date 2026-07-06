@@ -5,7 +5,7 @@ description: Run a whole-repository health audit with the code-quality-atlas rep
   infrastructure-as-code, maintainability hotspots). Use for a scheduled or on-demand
   repo audit, not a single diff. Runs the applicable audits and synthesizes one report.
 provenance:
-  taxonomy_version: v0.8
+  taxonomy_version: v0.9
   built_from: []
 ---
 
@@ -44,8 +44,9 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 | CI / build / config change | `auditing-config-and-build-hygiene` |
 | Install / setup / packaging change, an upgrade or migration guide, a config or CLI surface, or anything a downstream project adopts (a tool, plugin, template, or library) | `auditing-documentation-health` |
 | Infrastructure-as-code change (Terraform/OpenTofu, Kubernetes/Helm, CloudFormation manifests) | `auditing-infrastructure-as-code` |
-| Whole-repo health audit (scheduled / cron) | `finding-maintainability-hotspots`, `auditing-architecture-conformance`, `auditing-dependencies-and-supply-chain`, `auditing-config-and-build-hygiene`, `auditing-documentation-health`, `auditing-compliance-and-provenance`, `auditing-enforcement-and-meta-artifacts`, `auditing-infrastructure-as-code` |
+| Whole-repo health audit (scheduled / cron) | `finding-maintainability-hotspots`, `auditing-architecture-conformance`, `auditing-dependencies-and-supply-chain`, `auditing-config-and-build-hygiene`, `auditing-documentation-health`, `auditing-compliance-and-provenance`, `auditing-enforcement-and-meta-artifacts`, `auditing-infrastructure-as-code`, `auditing-decision-record-currency` |
 | Enforcement config — lint/type suppressions, alert rules or dashboards, or checked-in generated artifacts | `auditing-enforcement-and-meta-artifacts` |
+| A repository's existing decision-record archive (an ADR/RFC directory already on disk), swept on a schedule rather than reviewed as it's being authored | `auditing-decision-record-currency` |
 
 ## Lenses
 
@@ -57,5 +58,6 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 - [`auditing-config-and-build-hygiene`](reference/lenses/auditing-config-and-build-hygiene/body.md) — Are config and CI trustworthy? Secrets, env parity, reproducible pinned builds, cache correctness.
 - [`auditing-documentation-health`](reference/lenses/auditing-documentation-health/body.md) — Do the docs still tell the truth? API parity, stale examples, ADR coverage, changelog discipline.
 - [`auditing-compliance-and-provenance`](reference/lenses/auditing-compliance-and-provenance/body.md) — Any licensing, PII, or provenance exposure? Detect and escalate to humans — never decide legal questions.
+- [`auditing-decision-record-currency`](reference/lenses/auditing-decision-record-currency/body.md) — Do the repo's existing decision records still hold? Status-graph consistency, revisit-triggers due, EOL adoptions, orphaned records.
 - [`auditing-enforcement-and-meta-artifacts`](reference/lenses/auditing-enforcement-and-meta-artifacts/body.md) — Is the enforcement apparatus healthy? Suppression hygiene & baseline trend, actionable alerts/monitoring-as-code, codegen-source drift gate.
 - [`auditing-infrastructure-as-code`](reference/lenses/auditing-infrastructure-as-code/body.md) — Does this infra change expose or destroy something? Blast radius, public access, wildcard IAM, secrets in state, drift.

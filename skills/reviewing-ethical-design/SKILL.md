@@ -14,7 +14,7 @@ description: 'Reviews a change for diff-visible, code-level ethical / responsibl
   internal code with no user-facing behavior; deep model-fairness auditing is out
   of scope.'
 provenance:
-  taxonomy_version: v0.8
+  taxonomy_version: v0.9
   built_from:
   - category: 36
     source: docs/research/cluster-4-runtime.md#36

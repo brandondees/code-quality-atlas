@@ -5,7 +5,7 @@ description: Review a standardized authored artifact against its own published s
   the artifact and applies its rubric. The collapsed entrypoint for artifact-shaped
   review.
 provenance:
-  taxonomy_version: v0.8
+  taxonomy_version: v0.9
   built_from: []
 ---
 

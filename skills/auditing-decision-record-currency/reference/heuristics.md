@@ -1,0 +1,22 @@
+# Reviewable heuristics — auditing-decision-record-currency
+
+## Contents
+
+- From category #39
+
+## From category #39
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- **Status-graph consistency:** does any decision record's status contradict another's — two `accepted` records making incompatible choices with no `supersedes`/`superseded-by` link between them — or is a record marked `accepted` for a choice the codebase has visibly reversed (the named technology is no longer a dependency, no longer referenced in config/infra)?
+- **Revisit-trigger condition plausibly met:** where a record names a concrete, checkable revisit condition (a scale threshold, a team-size figure, a vendor-support date), does anything visible in the repo (config, infra manifests, dependency graph, `CODEOWNERS` size) suggest that condition may now hold — flagged as "revisit due," not resolved unilaterally?
+- **No checkable revisit-trigger recorded:** does the record state only a vague "revisit periodically" with no date or measurable condition — the base case the sweep can't check further, worth flagging once per record rather than silently skipping?
+- **Adopted technology now EOL or on Hold:** does a record's chosen dependency/framework/platform appear on an end-of-life feed, or would the adoption read as `Hold` on a technology-radar-style scale today, with no revisit noted since?
+- **Orphaned or contradicted record:** is a decision record referenced by nothing else in the repo (no code, config, or doc still implements what it decided) and left `accepted` rather than marked `superseded`/`deprecated` — a stale entry cluttering the log worse than an absent one?
+- **Stalled proposed record:** is a record left in `proposed` status for a long time with no resolution — neither accepted nor rejected — while downstream work proceeds as though it were settled? A decision that never closes is its own currency defect, distinct from an accepted one going stale.
+- **Duplicate or conflicting record identifiers:** do two records share the same ID, or does the archive's own index/table-of-contents omit a file present on disk? A drifted index means the sweep itself may be walking an incomplete set — surface it as a scan-reliability finding, not a decision-content one.
+- **Silent supersession (naming-only, no cross-reference):** does a newer record's title/content clearly replace an older one's subject, but neither carries a `supersedes`/`superseded-by` field linking them — a convention followed in spirit but not in the machine-checkable field the rest of this sweep depends on?
+- **Trigger condition not checkable from repo signals at all:** does a record's revisit-trigger name a real, specific condition, but one that lives outside anything a repo scan can see (e.g. "revisit when the vendor announces EOL," "revisit after next security audit")? Distinguish this from "no trigger recorded" — the record did its job; the sweep's evidence sources simply can't evaluate this one, so flag it as unverifiable-from-repo rather than silently treating it the same as a missing trigger.
+- **Escalate the judgment call, don't resolve it:** a plausibly-met revisit-trigger or an EOL adoption is evidence a human should re-open the decision, not a verdict that the original choice was wrong — report the signal and route to the decision's owner (cross #29, the G8 boundary), never assert the ADR should be reversed.
+
+---

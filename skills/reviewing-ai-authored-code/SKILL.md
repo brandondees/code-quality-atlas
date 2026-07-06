@@ -13,7 +13,7 @@ description: 'Reviews a change for the failure signature of AI-/machine-authored
   constants and APIs — the defects are attribution-agnostic, so you need not know
   a model wrote it.'
 provenance:
-  taxonomy_version: v0.8
+  taxonomy_version: v0.9
   built_from:
   - category: 34
     source: docs/research/cluster-4-runtime.md#34

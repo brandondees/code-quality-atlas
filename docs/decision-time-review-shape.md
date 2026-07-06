@@ -1,9 +1,11 @@
 # Decision-time review — the third shape (design)
 
 **Status:** design, 2026-06-12; §5 items 1 and 4 built 2026-06-12 (`shape: decision`,
-`reviewing-decision-lifecycle`, the router's decision route); **§5 item 2 (the shared
-decision-record checklist) built 2026-07-05** — see the note after §5. Item 3's
-remaining decision-native lenses are unbuilt; see the note.
+`reviewing-decision-lifecycle`, the router's decision route); §5 item 2 (the shared
+decision-record checklist) built 2026-07-05 — see §5a. **§5 item 3's
+`decision-record-audit` half built 2026-07-06** as `auditing-decision-record-currency`
+(taxonomy #39, `shape: repo`) — see §5b. The standalone `adoption-&-exit` lens was
+deliberately **not** split out (see §5b's rationale); Q15 is now fully resolved.
 **Motivation:** the round-2 gap hunt ([`research/taxonomy-gap-hunt-round-2.md`](research/taxonomy-gap-hunt-round-2.md)) found that the single biggest omission is not a topic but a **shape** — see [Q15](open-questions.md#q15). This doc resolves *how* that shape enters the suite, which gates how the proposed #29 (decision lifecycle) is modelled.
 **Depends on:** the router (D10), the `design:` flag already in `skills/manifest.yaml`, the synthesizer (D12), the proposed taxonomy v0.3 categories #28/#29.
 
@@ -94,18 +96,53 @@ the next release lands; the remaining 13 design-capable lenses did not get a new
 eval scenario (their existing scenarios are unaffected since none target decision
 input) and can gain one opportunistically as decision-shaped review gets used.
 
-§5 item 3's `decision-record-audit` (a `shape: repo` cron over existing ADRs — does
-an accepted decision still hold?) and a standalone `adoption-&-exit` lens remain
-unbuilt; `reviewing-decision-lifecycle` currently folds adoption/exit judgment and
-one-off staleness review into a single decision-shaped lens rather than splitting
-them. Operational design shipped as `reviewing-resilience-and-scalability`, but as
+Operational design shipped as `reviewing-resilience-and-scalability`, but as
 `shape: diff` + `design: true` (not `shape: decision`) — it reviews a concrete
 system or its design doc, not a decision record, so it now also carries the
 decision-record checklist via this same mechanism when applied to a design doc.
 
+## 5b. §5 item 3's `decision-record-audit` — built 2026-07-06; `adoption-&-exit` deliberately not split out
+
+Resolved the §6 sub-question ("cron or decision-time re-run?") as **cron**, per the
+original lean: `auditing-decision-record-currency` (taxonomy **#39 Decision-record
+currency**, `shape: repo`) sweeps a repository's *existing* decision records —
+status-graph consistency across the record set, a revisit-trigger whose stated
+condition current repo signals suggest may now hold, an adopted technology past
+end-of-life with no revisit noted, and orphaned records nothing in the repo still
+implements. It detects and routes revisit signals to the decision's owner rather
+than reversing the call itself (the same G8 escalation posture as #29). Built via
+the standard doc-driven pipeline: a new `## #39` research section in
+[`research/cluster-6-evolution.md`](research/cluster-6-evolution.md), a
+`taxonomy.md` v0.9 entry, a manifest skill entry, a dedicated router route plus the
+whole-repo-audit route updated from eight to nine audits, 5 eval scenarios, and
+`examples.md`. `generate`/`drift`/`eval` and the full pytest suite (165 tests,
+including the doc-count consistency tests) are clean.
+
+**Given a new taxonomy category, not folded into #29 or made `cross_ref: [29]`,**
+because the manifest's G1 single-primary-owner-per-category rule forbids two
+lenses both claiming #29 as primary, and `cross_ref` caps a lens's inlined checks
+at 2 borrowed bullets — unworkable for a lens whose entire content is this sweep.
+The new category's scope note explicitly draws the boundary against both #29
+(doesn't re-judge the original adoption call) and #22 (doesn't check whether a
+non-obvious decision has a record *at all* — that's #22's "ADR coverage" factor; #39
+only checks whether an *existing* record's currency has rotted).
+
+**The standalone `adoption-&-exit` lens (the other half of §5 item 3) was
+deliberately not built**, after an explicit scope check: `reviewing-decision-lifecycle`
+already fully owns adoption justification, lock-in/exit cost, and ADR-assumption
+judgment *at authoring time* (its description names all three). Splitting them into
+a separate lens would duplicate that content wholesale — exactly what G1 exists to
+prevent — for no behavior the existing lens doesn't already cover. The genuine gap
+was the *cadence* difference (authoring-time review vs. a periodic sweep of records
+already on disk), which #39/`auditing-decision-record-currency` now covers. This
+closes Q15: both a `shape: decision` capability and its `shape: repo` audit
+companion exist, decision-time review is no longer "passive," and no further split
+is planned unless a repo-scale adoption/exit audit (distinct from ADR currency)
+proves to need one.
+
 ## 6. Open sub-questions
 
-- Does the decision-record audit (does an ADR still hold?) live as a `shape: repo` cron lens, or as a decision-time lens re-run? (Lean: cron — it's a periodic sweep, like the other repo audits.)
+- ~~Does the decision-record audit (does an ADR still hold?) live as a `shape: repo` cron lens, or as a decision-time lens re-run?~~ **Resolved 2026-07-06 (§5b): cron**, as `auditing-decision-record-currency`.
 - How does `shape: decision` interact with the team-preferences overlay (Q13) — can a team set which decisions *require* a recorded ADR?
 - Granularity of the decision-record checklist: one shared section, or per-domain variants? (Lean: one shared, per D7's single-default-approach rule.)
 - Does the synthesizer (D12) need a decision-specific verdict vocabulary (e.g. *adopt / adopt-with-conditions / revisit-by-date / reject*) distinct from block/approve?
