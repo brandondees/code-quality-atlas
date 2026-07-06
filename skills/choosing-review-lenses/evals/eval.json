@@ -8,7 +8,7 @@
       "expected_behavior": [
         "Recommends reviewing-migration-and-data-safety as the primary lens",
         "Adds tracing-correctness-and-invariants and hunting-silent-failures for the backfill logic and its failure paths",
-        "Keeps the selection to 2-4 lenses instead of recommending the whole suite"
+        "Keeps the selection to roughly 3-8 lenses instead of recommending the whole suite"
       ]
     },
     {
@@ -22,7 +22,7 @@
     {
       "query": "Which lenses should I run for a docs-only PR that fixes typos in the README?",
       "expected_behavior": [
-        "Recommends at most reviewing-pr-and-process-hygiene (or auditing-documentation-health if a docs audit is wanted), not code lenses",
+        "Recommends reviewing-pr-and-process-hygiene plus auditing-documentation-health, since a docs-only change auto-includes the documentation lens regardless of ranking",
         "Does not fan out correctness, security, or performance lenses onto a typo-only change",
         "Keeps the recommendation minimal and says why the other lenses don't apply"
       ]
@@ -31,7 +31,7 @@
       "query": "This PR makes our checkout endpoint faster by adding a Redis cache in front of the pricing query, and it also rewrites the retry logic around the payment-provider call. What should review it?",
       "expected_behavior": [
         "Combines the performance route (reviewing-performance-and-efficiency, checking-restraint) with the resilience route (hunting-silent-failures) for the retry rewrite",
-        "Caps the combined selection at about 4 lenses rather than taking both rows in full",
+        "Keeps the combined selection within the 3-8 default range rather than taking both rows in full plus every possible extra",
         "Notes that shared findings (e.g. caching checks appearing in both restraint and performance) are reported once, under the primary owner"
       ]
     }

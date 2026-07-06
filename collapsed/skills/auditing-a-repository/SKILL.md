@@ -24,16 +24,16 @@ Rank the relevant lenses below by relevance to what is being reviewed, pick the 
 
 ## Depth modes
 
-Routing first ranks **every** lens whose scope the change touches by **relevance** — it is no longer a hard 2-4 cap. A depth mode then sets the **breadth** (how far down the ranked list to run) and the severity floor. Pick the mode from the request; default to **review**.
+Routing first ranks **every** lens whose scope the change touches by **relevance** — it is no longer a hard cap. A depth mode then sets the **breadth** (how far down the ranked list to run, plus room for judgment calls above that floor) and the severity floor. Pick the mode from the request; default to **review**.
 
 | Mode | Breadth | Triggers |
 |---|---|---|
 | **triage** | the critical tier only — correctness, security, data-safety, and concurrency | "triage", "quick review", "fast check", "pre-merge gate" |
-| **review** | the top 2-4 lenses by relevance (the default; overridable) | "review", "review this", "code review", "review this PR", "review the diff" |
+| **review** | the top 3-8 lenses by relevance, plus any additional relevant lenses the reviewer judges worthwhile (the default; not a strict cap) | "review", "review this", "code review", "review this PR", "review the diff" |
 | **comprehensive** | every relevant lens, uncapped — the full audit set at repo scope | "thorough", "comprehensive", "deep review", "use all relevant lenses", "review everything" |
 
 - **triage** — A pre-merge gate: run only the critical-tier lenses and report Major and above.
-- **review** — Default per-PR depth: relevance-ranked top-N with the round-based escalating floor.
+- **review** — Default per-PR depth: relevance-ranked top-N (3-8) with the round-based escalating floor; extend past N when the change's scope genuinely calls for another lens.
 - **comprehensive** — On-demand or scheduled: run all relevant lenses and pin the floor at Nit so readability-class and other long-tail findings surface instead of being trimmed.
 
 ## Routes
@@ -42,11 +42,11 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 |---|---|
 | Dependency add or bump | `auditing-dependencies-and-supply-chain` |
 | CI / build / config change | `auditing-config-and-build-hygiene` |
-| Install / setup / packaging change, an upgrade or migration guide, a config or CLI surface, or anything a downstream project adopts (a tool, plugin, template, or library) | `auditing-documentation-health` |
-| Infrastructure-as-code change (Terraform/OpenTofu, Kubernetes/Helm, CloudFormation manifests) | `auditing-infrastructure-as-code` |
-| Whole-repo health audit (scheduled / cron) | `finding-maintainability-hotspots`, `auditing-architecture-conformance`, `auditing-dependencies-and-supply-chain`, `auditing-config-and-build-hygiene`, `auditing-documentation-health`, `auditing-compliance-and-provenance`, `auditing-enforcement-and-meta-artifacts`, `auditing-infrastructure-as-code`, `auditing-decision-record-currency` |
-| Enforcement config — lint/type suppressions, alert rules or dashboards, or checked-in generated artifacts | `auditing-enforcement-and-meta-artifacts` |
-| A repository's existing decision-record archive (an ADR/RFC directory already on disk), swept on a schedule rather than reviewed as it's being authored | `auditing-decision-record-currency` |
+| Install / setup / packaging change, an upgrade or migration guide, a config or CLI surface, or anything a downstream project adopts (a tool, plugin, template, or library) | `auditing-documentation-health` — the adopter-facing experience — setup friction, config UX, and a version-bump a consumer or an agent can complete and verify |
+| Infrastructure-as-code change (Terraform/OpenTofu, Kubernetes/Helm, CloudFormation manifests) | `auditing-infrastructure-as-code` — repo-shaped — judges blast radius, public exposure, IAM scope, and declared-vs-live drift; #14 owns the security verdict |
+| Whole-repo health audit (scheduled / cron) | `finding-maintainability-hotspots`, `auditing-architecture-conformance`, `auditing-dependencies-and-supply-chain`, `auditing-config-and-build-hygiene`, `auditing-documentation-health`, `auditing-compliance-and-provenance`, `auditing-enforcement-and-meta-artifacts`, `auditing-infrastructure-as-code`, `auditing-decision-record-currency` — the nine repo-shaped audits; run independently, not as one pass (auditing-infrastructure-as-code only where IaC manifests exist; auditing-decision-record-currency only where a decision-record directory exists) |
+| Enforcement config — lint/type suppressions, alert rules or dashboards, or checked-in generated artifacts | `auditing-enforcement-and-meta-artifacts` — repo-shaped — scans suppression accretion and codegen/monitoring drift across the tree, not a single diff |
+| A repository's existing decision-record archive (an ADR/RFC directory already on disk), swept on a schedule rather than reviewed as it's being authored | `auditing-decision-record-currency` — repo-shaped — status-graph consistency, revisit-triggers plausibly due, EOL adoptions, and orphaned records; #29 owns the authoring-time call, this only checks whether time has invalidated an existing one |
 
 ## Lenses
 

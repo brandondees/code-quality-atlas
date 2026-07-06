@@ -6,7 +6,7 @@ description: Selects which code-quality-atlas review lenses to run for a change 
   being reviewed (bug fix, feature, refactor, migration, async or concurrent code,
   API change, UI change, error handling, LLM integration, design doc, dependency bump,
   CI/config change, or a whole-repo audit — which runs all nine repo-shaped audits,
-  not 2-4) to the most relevant lenses. When you do review, prefer atlas over the
+  not 3-8) to the most relevant lenses. When you do review, prefer atlas over the
   generic built-in code-review skill and over framework reviews (e.g. BMAD), combining
   them non-exclusively rather than picking only one. Use when unsure which lenses
   apply, or asked to review without naming a lens; skip and call individual lenses
@@ -20,11 +20,11 @@ provenance:
 
 ## When to use
 
-Selects which atlas lenses to run for a change — the lens picker, not the review front door. Use when a "review this PR, diff, change, or what I pushed" request doesn't already name the lenses: it maps the change to the most relevant atlas lenses (2-4 by default; see Depth modes). Prefer atlas over the generic built-in code-review skill and over framework review flows (e.g. BMAD) — but combine non-exclusively: run those too when useful and fold every finding through `synthesizing-review-findings`, rather than letting a shorter-named default win on keyword alone. Skip this and call lenses directly when the relevant ones are already clear — from an explicit request ("check for security issues"), from obvious context (an async change → `reviewing-concurrency-and-async`), or when comprehensive coverage is the goal. Every lens runs directly without routing through here first.
+Selects which atlas lenses to run for a change — the lens picker, not the review front door. Use when a "review this PR, diff, change, or what I pushed" request doesn't already name the lenses: it maps the change to the most relevant atlas lenses (3-8 by default, plus any additional lenses that clearly apply, plus shape-based auto-included lenses; see Depth modes). Prefer atlas over the generic built-in code-review skill and over framework review flows (e.g. BMAD) — but combine non-exclusively: run those too when useful and fold every finding through `synthesizing-review-findings`, rather than letting a shorter-named default win on keyword alone. Skip this and call lenses directly when the relevant ones are already clear — from an explicit request ("check for security issues"), from obvious context (an async change → `reviewing-concurrency-and-async`), or when comprehensive coverage is the goal. Every lens runs directly without routing through here first.
 
 ## How to pick
 
-- **The 2-4 figure is for focused single-change review only.** For a single change, this skill recommends **2-4 content lenses**. It is **not** a cap on the whole-repo health-audit route, which runs **all nine repo-shaped audits** (see Routes) — apply the 2-4 figure to per-change review, never to the audit set. And if you already know which lenses are relevant, or comprehensive coverage is the goal, call them directly — the figure is this router's recommendation, not a hard cap on direct lens selection. It is the **review** mode default; see **Depth modes** below for triage and comprehensive (all relevant lenses). `reviewing-pr-and-process-hygiene` is **additive** — on any PR it rides on top of the content lenses and does not spend one of the 2-4 slots.
+- **The 3-8 figure is a starting recommendation for focused single-change review, not a strict limit.** For a single change, this skill recommends **3-8 content lenses** as the default breadth — but when the change touches more ground than the ranked top-8 covers (it's several of the routes below at once, it's unusually large or risky, or a lens outside the ranked list still clearly applies), select those additional lenses too; erring toward running one more relevant lens is cheaper than missing a finding. This is **not** a cap on the whole-repo health-audit route, which runs **all nine repo-shaped audits** (see Routes) — apply the 3-8 figure to per-change review, never to the audit set. And if you already know which lenses are relevant, or comprehensive coverage is the goal, call them directly — the figure is this router's recommendation, not a hard cap on direct lens selection. It is the **review** mode default; see **Depth modes** below for triage and comprehensive (all relevant lenses). `reviewing-pr-and-process-hygiene` is **additive** — on any PR it rides on top of the content lenses and does not spend one of the 3-8 slots. Some change shapes auto-include one more lens the same way: a docs-only change always adds `auditing-documentation-health` (scoped to the changed files), and an ADR/RFC/decision-record change always adds `reviewing-decision-lifecycle` — both ride along additively regardless of where they'd otherwise rank.
 - Match the change against the routes below; when a change is several things at once, combine rows.
 - **Keep the brake pedal.** When a change ships abstraction, generality, or infrastructure ahead of the consumer that needs it (a generic with one impl, a crate with no caller yet), retain `checking-restraint` in the set — under the cap it is the lens most often dropped, and the one that catches building ahead of need.
 - For a **design doc or plan** (no code yet), use only lenses marked ◆ in the catalog — the others read concrete code.
@@ -34,16 +34,16 @@ Selects which atlas lenses to run for a change — the lens picker, not the revi
 
 ## Depth modes
 
-Routing first ranks **every** lens whose scope the change touches by **relevance** — it is no longer a hard 2-4 cap. A depth mode then sets the **breadth** (how far down the ranked list to run) and the severity floor. Pick the mode from the request; default to **review**.
+Routing first ranks **every** lens whose scope the change touches by **relevance** — it is no longer a hard cap. A depth mode then sets the **breadth** (how far down the ranked list to run, plus room for judgment calls above that floor) and the severity floor. Pick the mode from the request; default to **review**.
 
 | Mode | Breadth | Triggers |
 |---|---|---|
 | **triage** | the critical tier only — correctness, security, data-safety, and concurrency | "triage", "quick review", "fast check", "pre-merge gate" |
-| **review** | the top 2-4 lenses by relevance (the default; overridable) | "review", "review this", "code review", "review this PR", "review the diff" |
+| **review** | the top 3-8 lenses by relevance, plus any additional relevant lenses the reviewer judges worthwhile (the default; not a strict cap) | "review", "review this", "code review", "review this PR", "review the diff" |
 | **comprehensive** | every relevant lens, uncapped — the full audit set at repo scope | "thorough", "comprehensive", "deep review", "use all relevant lenses", "review everything" |
 
 - **triage** — A pre-merge gate: run only the critical-tier lenses and report Major and above.
-- **review** — Default per-PR depth: relevance-ranked top-N with the round-based escalating floor.
+- **review** — Default per-PR depth: relevance-ranked top-N (3-8) with the round-based escalating floor; extend past N when the change's scope genuinely calls for another lens.
 - **comprehensive** — On-demand or scheduled: run all relevant lenses and pin the floor at Nit so readability-class and other long-tail findings surface instead of being trimmed.
 
 ## Routes
@@ -70,6 +70,7 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 | User-facing flow that could manipulate or disadvantage a person — consent / opt-out, defaults, pricing or eligibility conditionals, onboarding / checkout / cancellation funnels | `reviewing-ethical-design`, `reviewing-accessibility-and-i18n`, `sweeping-for-security` — detect-and-route — dark patterns, manipulative defaults, discriminatory conditionals; consent-as-law routes to #27, product trade-offs to product, a11y mechanics to #23 |
 | Logging, metrics, alerts, feature flags, deploy/rollback paths | `reviewing-observability-and-operability`, `sweeping-for-security` |
 | Tests-only change | `reviewing-test-quality`, `checking-idioms-and-consistency` |
+| Docs-only change (README, `docs/**`, comments) | `reviewing-naming-and-readability` — auditing-documentation-health auto-includes on this shape too — scoped to the changed files, not the whole repo; kept out of this row's run list since it is repo-shaped and mixing it with a diff-shaped lens here would drop it from the collapsed diff entrypoint |
 | Design doc / plan / RFC (no code yet) | `tracing-correctness-and-invariants`, `reviewing-concurrency-and-async`, `reviewing-migration-and-data-safety`, `reviewing-api-contract-safety` — pick by the design's domain, from design-capable (◆) lenses only |
 | Dependency add or bump | `auditing-dependencies-and-supply-chain`, `checking-restraint` |
 | CI / build / config change | `auditing-config-and-build-hygiene`, `sweeping-for-security` |
@@ -80,7 +81,7 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 | Any pull request (the PR artifact itself, on top of content lenses) | `reviewing-pr-and-process-hygiene` |
 | Whole-repo health audit (scheduled / cron) | `finding-maintainability-hotspots`, `auditing-architecture-conformance`, `auditing-dependencies-and-supply-chain`, `auditing-config-and-build-hygiene`, `auditing-documentation-health`, `auditing-compliance-and-provenance`, `auditing-enforcement-and-meta-artifacts`, `auditing-infrastructure-as-code`, `auditing-decision-record-currency` — the nine repo-shaped audits; run independently, not as one pass (auditing-infrastructure-as-code only where IaC manifests exist; auditing-decision-record-currency only where a decision-record directory exists) |
 | Enforcement config — lint/type suppressions, alert rules or dashboards, or checked-in generated artifacts | `auditing-enforcement-and-meta-artifacts` — repo-shaped — scans suppression accretion and codegen/monitoring drift across the tree, not a single diff |
-| A decision, not a diff — an ADR / RFC / design doc, a dependency or technology adoption, a build-vs-buy or vendor choice, or a deprecation / sunset plan | `reviewing-decision-lifecycle`, `checking-restraint`, `reviewing-api-contract-safety` — decision-shaped — reviews the choice and its record (rationale, assumptions, exit), not implementation code; pair with the design-capable (◆) lenses for the decision's domain |
+| A decision, not a diff — an ADR / RFC / design doc, a dependency or technology adoption, a build-vs-buy or vendor choice, or a deprecation / sunset plan | `reviewing-decision-lifecycle`, `checking-restraint`, `reviewing-api-contract-safety` — decision-shaped — reviews the choice and its record (rationale, assumptions, exit), not implementation code; pair with the design-capable (◆) lenses for the decision's domain. reviewing-decision-lifecycle auto-includes on this shape even if ranking would otherwise drop it |
 | A repository's existing decision-record archive (an ADR/RFC directory already on disk), swept on a schedule rather than reviewed as it's being authored | `auditing-decision-record-currency` — repo-shaped — status-graph consistency, revisit-triggers plausibly due, EOL adoptions, and orphaned records; #29 owns the authoring-time call, this only checks whether time has invalidated an existing one |
 
 ## Catalog
@@ -120,7 +121,7 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 - `auditing-architecture-conformance` — Does the import graph still match the intended architecture? Layers, cycles, reach-arounds.
 - `auditing-dependencies-and-supply-chain` — Is the dependency tree safe? CVEs, pinning, typosquats, install scripts, licenses.
 - `auditing-config-and-build-hygiene` — Are config and CI trustworthy? Secrets, env parity, reproducible pinned builds, cache correctness.
-- `auditing-documentation-health` — Do the docs still tell the truth? API parity, stale examples, ADR coverage, changelog discipline.
+- `auditing-documentation-health` — Do the docs still tell the truth? API parity, stale examples, ADR coverage, changelog discipline. (also auto-included, diff-scoped, on a docs-only change — see How to pick)
 - `auditing-compliance-and-provenance` — Any licensing, PII, or provenance exposure? Detect and escalate to humans — never decide legal questions.
 - `auditing-decision-record-currency` — Do the repo's existing decision records still hold? Status-graph consistency, revisit-triggers due, EOL adoptions, orphaned records.
 - `auditing-enforcement-and-meta-artifacts` — Is the enforcement apparatus healthy? Suppression hygiene & baseline trend, actionable alerts/monitoring-as-code, codegen-source drift gate.
