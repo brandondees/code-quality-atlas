@@ -62,9 +62,10 @@ class Skill:
     picker: str = ""         # one-line differentiator for the router catalog
     artifacts: list[Artifact] = field(default_factory=list)  # shape: artifact only
     # Q13 team-preferences overlay: whole-lens tier (coarse; per-check granularity
-    # is a later refinement, see docs/team-preferences-overlay.md#9). "floor" lenses
-    # assert broken/unsafe and can only be `acknowledge`d, never silently
-    # `suppress`ed, by a repo's .code-quality-atlas/preferences.md.
+    # is a later refinement, see docs/team-preferences-overlay.md, section 9,
+    # "Open questions"). "floor" lenses assert broken/unsafe and can only be
+    # `acknowledge`d, never silently `suppress`ed, by a repo's
+    # .code-quality-atlas/preferences.md.
     tier: str = "preference"
 
 

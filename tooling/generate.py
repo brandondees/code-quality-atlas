@@ -149,9 +149,10 @@ def _scope_line(skill: Skill) -> str:
 def _team_preferences_note(skill: Skill) -> str:
     """Q13: how this lens defers to a repo's `.code-quality-atlas/preferences.md`.
     Tier is coarse (whole-lens, not per-check — see
-    docs/team-preferences-overlay.md#9): a floor-tier lens can only be
-    `acknowledge`d, never silently `suppress`ed, so a team can't make a
-    security/correctness/data-safety/concurrency finding vanish outright."""
+    docs/team-preferences-overlay.md, section 9, "Open questions"): a
+    floor-tier lens can only be `acknowledge`d, never silently `suppress`ed,
+    so a team can't make a security/correctness/data-safety/concurrency
+    finding vanish outright."""
     if skill.tier == "floor":
         allowance = (
             "a repo's `.code-quality-atlas/preferences.md` may `set`/`tune` this "
