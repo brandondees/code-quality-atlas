@@ -1,9 +1,36 @@
 # Team Preferences Overlay — design
 
-**Status:** design, 2026-06-12. Awaiting review before implementation planning.
+**Status:** design approved 2026-06-12; **Wave A built 2026-07-06** (see below). Waves B+ (inference bootstrap, per-check tier granularity, monorepo discovery, acknowledge-expiry) remain design-only.
 **Depends on:** phase-3 skill suite (23 lenses + `choosing-review-lenses` router + `synthesizing-review-findings`), D6 (docs are source of truth; skills derived & regenerable), D7 (model portability), D9 (plugin packaging), D12 (the synthesizer — where `acknowledge`d deviations land in the verdict).
 **Decisions captured (user, 2026-06-12):** tiered precedence; both bootstrap paths (template + inference) but inference is **proposal-only, never auto-applied**. See open-questions Q13.
 **Added (user, 2026-06-14, [`map-gaps.md`](map-gaps.md) G26):** an **improvement-valence verbosity** dial (§4.6) — the defect-only guard is a team *preference*, default strict — plus a built-in **anti-churn / convergence** discipline (§4a) the overlay cannot relax.
+
+**✅ Wave A shipped 2026-07-06** — the concrete reading mechanism, scoped to whole-lens
+(coarse) tier granularity, since the fine-grained per-check tagging in §9 was left as a
+later refinement:
+
+- A manifest `tier: floor | preference` field per lens (default `preference`); the five
+  lenses §3 names as floor-tier (`sweeping-for-security`, `tracing-correctness-and-invariants`,
+  `reviewing-migration-and-data-safety`, `reviewing-concurrency-and-async`,
+  `hunting-silent-failures`) are marked explicitly in `skills/manifest.yaml`.
+- Every generated lens `SKILL.md` carries a tier-aware **Team preferences** clause: it
+  reads `.code-quality-atlas/preferences.md` when present, applies `set`/`tune` always,
+  and applies `suppress` only on a preference-tier lens — a floor-tier lens's strongest
+  override is `acknowledge` (visible, non-blocking). Absent the file, behavior is
+  unchanged (`tooling/generate.py::_team_preferences_note`).
+- The router (`choosing-review-lenses`) gains a first "How to pick" step: load the
+  overlay, apply lens-selection/weighting, pass the rest to each selected lens.
+- The synthesizer (`synthesizing-review-findings`) documents that an `acknowledge`d
+  floor-tier finding still surfaces (tagged `acknowledged deviation: <reason>`) without
+  itself driving the verdict to block, mirroring the existing route/valence distinction.
+- A hand-authored bootstrap skeleton, [`templates/preferences-template.md`](../templates/preferences-template.md),
+  covering all six directive kinds (§4) with the ratification guardrail (§6) spelled out
+  inline; `commands/atlas-init.md` gained an optional step offering to copy it in.
+
+**Deferred to a later wave** (unchanged from the open §9 residuals): the
+`proposing-team-preferences` inference/interview skill; per-check tier granularity;
+monorepo discovery of multiple overlay files; `acknowledge` expiry / re-ratification;
+overlay-vs-linter-config precedence.
 
 ---
 

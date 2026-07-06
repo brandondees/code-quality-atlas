@@ -146,6 +146,39 @@ def _scope_line(skill: Skill) -> str:
             "docs or plans.")
 
 
+def _team_preferences_note(skill: Skill) -> str:
+    """Q13: how this lens defers to a repo's `.code-quality-atlas/preferences.md`.
+    Tier is coarse (whole-lens, not per-check — see
+    docs/team-preferences-overlay.md, section 9, "Open questions"): a
+    floor-tier lens can only be `acknowledge`d, never silently `suppress`ed,
+    so a team can't make a security/correctness/data-safety/concurrency
+    finding vanish outright."""
+    if skill.tier == "floor":
+        allowance = (
+            "a repo's `.code-quality-atlas/preferences.md` may `set`/`tune` this "
+            "lens's thresholds or selection, but this is a **floor-tier** lens: it "
+            "can never `suppress` a finding outright. The strongest override "
+            "available is `acknowledge` — a recorded rationale that keeps the "
+            "finding visible, tagged `acknowledged deviation: <reason>`, and "
+            "non-blocking rather than removing it."
+        )
+    else:
+        allowance = (
+            "a repo's `.code-quality-atlas/preferences.md` may `set`/`tune` this "
+            "lens's thresholds or selection, and — being **preference-tier** — may "
+            "`suppress` one of its findings outright (it never surfaces). Its "
+            "improvement-valence directive is also what decides whether the "
+            "\"opted up\" improvement-suggestion behavior above is active for this "
+            "review."
+        )
+    return (
+        f"**Team preferences.** If the reviewed repo has "
+        f"`.code-quality-atlas/preferences.md`, apply it before reporting: "
+        f"{allowance} Absent the file, apply this lens's defaults exactly as "
+        f"written above.\n\n"
+    )
+
+
 def _cross_ref_note(skill: Skill, owners: dict[int, str] | None) -> str:
     if not skill.cross_ref or not owners:
         return ""
@@ -270,6 +303,7 @@ def build_skill_md(skill: Skill, taxonomy_version: str, docs_root: str = ".",
         "dimension is as good as you can confidently make it, stop; never oscillate "
         "A→B then B→A, never re-order to an equivalent state). Defects keep "
         "the strict bar above regardless of this setting.\n\n"
+        f"{_team_preferences_note(skill)}"
         f"{attribution_guard}"
         f"{core_block}"
         "## Mechanizing these checks\n\n"
@@ -519,6 +553,18 @@ def build_router_md(manifest: Manifest) -> str:
         "## When to use\n\n"
         f"{r.body or r.description}\n\n"
         "## How to pick\n\n"
+        "- **Load team preferences first.** If the reviewed repo has "
+        "`.code-quality-atlas/preferences.md`, read it before ranking: apply any "
+        "lens-selection/weighting directives to which lenses run and how they're "
+        "prioritized within the active depth mode's breadth (a preference "
+        "re-ranks or mutes within that breadth; it does not widen or override "
+        "the depth mode itself), then pass the remaining directives (thresholds, "
+        "house conventions, scoped exemptions, standing "
+        "acknowledgements, improvement-valence verbosity) down to each selected "
+        "lens — each lens applies what's relevant to its own checks, honoring its "
+        "tier (floor lenses accept `acknowledge`, never a silent `suppress`; see "
+        "each lens's own Team preferences note). Absent the file, route exactly "
+        "as below — today's defaults, unchanged.\n"
         "- **The 3-8 figure is a starting recommendation for focused "
         "single-change review, not a strict limit.** For a single change, this "
         "skill recommends **3-8 content lenses** as the default breadth — but "
@@ -682,8 +728,15 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "judgment call with no defect behind it) are surfaced and escalated "
         "without setting the engineering verdict. Likewise a `pre-existing` defect "
         "noticed in touched code is surfaced and routed to the implementer "
-        "*without* setting this PR's verdict — the diff did not introduce it. If "
-        "every lens found nothing, the whole report is \"No findings\" — do not "
+        "*without* setting this PR's verdict — the diff did not introduce it. "
+        "Same for a floor-tier finding the repo's `.code-quality-atlas/"
+        "preferences.md` has `acknowledge`d (Q13): it still appears in the "
+        "report, tagged `acknowledged deviation: <reason>`, but the "
+        "acknowledgement alone does not drive the verdict to block — the team "
+        "recorded and accepted it. A `suppress`ed preference-tier finding never "
+        "reaches this report at all; only `acknowledge` (floor-tier) leaves a "
+        "visible trace. If every lens found nothing, the whole report is \"No "
+        "findings\" — do not "
         "manufacture a harsher verdict than the findings justify.\n"
         "6. **State coverage & limitations** — close the report with what the "
         "review did *not* establish: which lenses ran and which the router did "

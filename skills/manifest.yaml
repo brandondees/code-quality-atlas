@@ -14,6 +14,7 @@ skills:
     shape: diff
     design: true
     wave: 1
+    tier: floor
     cross_ref: [4]    # primary owner: tracing-correctness-and-invariants
     built_from:
       - { category: 2, source: docs/research/cluster-1-correctness.md#2 }
@@ -244,6 +245,7 @@ skills:
     shape: diff
     design: true
     wave: 2
+    tier: floor
     built_from:
       - { category: 14, source: docs/research/cluster-4-runtime.md#14 }
 
@@ -298,6 +300,7 @@ skills:
     shape: diff
     design: true
     wave: 2
+    tier: floor
     built_from:
       - { category: 20, source: docs/research/cluster-5-verification.md#20 }
 
@@ -336,6 +339,7 @@ skills:
     shape: diff
     design: true
     wave: 3
+    tier: floor
     built_from:
       - { category: 1, source: docs/research/cluster-1-correctness.md#1 }
       - { category: 4, source: docs/research/cluster-1-correctness.md#4 }
@@ -357,6 +361,7 @@ skills:
     shape: diff
     design: true
     wave: 3
+    tier: floor
     built_from:
       - { category: 3, source: docs/research/cluster-1-correctness.md#3 }
 
