@@ -20,7 +20,12 @@ always pulls in `reviewing-decision-lifecycle` (plus
 riding along additively like `reviewing-pr-and-process-hygiene` already did.
 The rest of this document's "2-4" language is left as the historical record of
 the original decision; treat **3-8, non-strict** as the current figure
-wherever the two disagree.
+wherever the two disagree. **Revisit-trigger for 3-8 itself:** if review-mode
+rounds are observed converging back to the bottom of the range (3-4) on
+changes that plainly span multiple routes — the same symptom that motivated
+this widening — or conversely if reviewers are routinely running the full 8
+plus overrides on ordinary single-route changes, that is the signal to
+re-open this figure rather than nudge it again by feel.
 
 ## The problem this resolves
 
@@ -51,19 +56,19 @@ replaced by "rank by relevance, then take as many as the depth mode asks for."
 | Mode | What runs | Severity floor | When |
 |---|---|---|---|
 | **triage** | the **critical tier** only — correctness, security, data-safety, concurrency | raised to **Major+** (blockers only) | fast pre-merge gate / smoke |
-| **review** *(default)* | the relevance-ranked **top-N** (the 2-4 cap survives here as the default depth, overridable — widened to **3-8** per the 2026-07-06 addendum above) | today's **round-based escalation** | per-PR |
+| **review** *(default)* | the relevance-ranked **top-N**, default breadth **3-8**, overridable (see the 2026-07-06 addendum above; originally 2-4, see §3 below) | today's **round-based escalation** | per-PR |
 | **comprehensive** | **every applicable lens, uncapped** | pinned at **Nit** (no per-round escalation) | on-demand / scheduled |
 
 The six repo-shaped audits are the **repo arm** of the comprehensive tier; comprehensive
 adds the missing **diff arm** (every applicable diff lens in parallel).
 
-### 3. The 2-4 cap survives — but only as the review-mode default depth
+### 3. The default-breadth top-N survives — but only as the review-mode default depth
 
 It is now a *default top-N*, overridable, not a hard turnstile. Triage = critical tier;
-comprehensive = uncapped. (See the 2026-07-06 addendum: the default range is now 3-8,
-and the reviewer is expected to select further lenses past that range when context
-warrants — the cap was always meant as a recommendation, not a limit, and this made
-that explicit rather than leaving it to be read as a hard number.)
+comprehensive = uncapped. (Originally set at 2-4; the 2026-07-06 addendum widened the
+default range to 3-8, and the reviewer is expected to select further lenses past that
+range when context warrants — the figure was always meant as a recommendation, not a
+limit, and this made that explicit rather than leaving it to be read as a hard number.)
 
 ### 4. The severity-floor interaction is the actual G9 fix
 

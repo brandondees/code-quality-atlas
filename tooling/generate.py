@@ -494,13 +494,24 @@ def build_router_md(manifest: Manifest) -> str:
         rows.append(f"| {route.when} | {run} |")
     routes_table = "\n".join(rows)
 
+    # Repo-shaped lenses that also auto-include at diff scope (see the How to
+    # pick auto-include callout) get a one-clause caveat here so the Catalog
+    # doesn't read as though they never run against a single change.
+    _diff_scoped_exception = {
+        "auditing-documentation-health": (
+            "also auto-included, diff-scoped, on a docs-only change — see "
+            "How to pick"),
+    }
+
     def catalog(shape: str) -> str:
         lines = []
         for s in manifest.skills:
             if s.shape != shape:
                 continue
             mark = " ◆" if s.design else ""
-            lines.append(f"- `{s.name}`{mark} — {s.picker}")
+            exception = _diff_scoped_exception.get(s.name)
+            suffix = f" ({exception})" if exception else ""
+            lines.append(f"- `{s.name}`{mark} — {s.picker}{suffix}")
         return "\n".join(lines)
 
     body = (

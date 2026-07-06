@@ -40,7 +40,6 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 
 | When reviewing… | Run |
 |---|---|
-| Docs-only change (README, `docs/**`, comments) | `auditing-documentation-health` |
 | Dependency add or bump | `auditing-dependencies-and-supply-chain` |
 | CI / build / config change | `auditing-config-and-build-hygiene` |
 | Install / setup / packaging change, an upgrade or migration guide, a config or CLI surface, or anything a downstream project adopts (a tool, plugin, template, or library) | `auditing-documentation-health` |

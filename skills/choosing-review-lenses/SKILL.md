@@ -70,7 +70,7 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 | User-facing flow that could manipulate or disadvantage a person — consent / opt-out, defaults, pricing or eligibility conditionals, onboarding / checkout / cancellation funnels | `reviewing-ethical-design`, `reviewing-accessibility-and-i18n`, `sweeping-for-security` — detect-and-route — dark patterns, manipulative defaults, discriminatory conditionals; consent-as-law routes to #27, product trade-offs to product, a11y mechanics to #23 |
 | Logging, metrics, alerts, feature flags, deploy/rollback paths | `reviewing-observability-and-operability`, `sweeping-for-security` |
 | Tests-only change | `reviewing-test-quality`, `checking-idioms-and-consistency` |
-| Docs-only change (README, `docs/**`, comments) | `auditing-documentation-health`, `reviewing-naming-and-readability` — auditing-documentation-health auto-includes on this shape even if ranking would otherwise drop it — scope it to the changed files, not the whole repo |
+| Docs-only change (README, `docs/**`, comments) | `reviewing-naming-and-readability` — auditing-documentation-health auto-includes on this shape too (see How to pick) — scoped to the changed files, not the whole repo; kept out of this row's run list since it is repo-shaped and mixing it with a diff-shaped lens here would drop it from the collapsed diff entrypoint |
 | Design doc / plan / RFC (no code yet) | `tracing-correctness-and-invariants`, `reviewing-concurrency-and-async`, `reviewing-migration-and-data-safety`, `reviewing-api-contract-safety` — pick by the design's domain, from design-capable (◆) lenses only |
 | Dependency add or bump | `auditing-dependencies-and-supply-chain`, `checking-restraint` |
 | CI / build / config change | `auditing-config-and-build-hygiene`, `sweeping-for-security` |
@@ -121,7 +121,7 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 - `auditing-architecture-conformance` — Does the import graph still match the intended architecture? Layers, cycles, reach-arounds.
 - `auditing-dependencies-and-supply-chain` — Is the dependency tree safe? CVEs, pinning, typosquats, install scripts, licenses.
 - `auditing-config-and-build-hygiene` — Are config and CI trustworthy? Secrets, env parity, reproducible pinned builds, cache correctness.
-- `auditing-documentation-health` — Do the docs still tell the truth? API parity, stale examples, ADR coverage, changelog discipline.
+- `auditing-documentation-health` — Do the docs still tell the truth? API parity, stale examples, ADR coverage, changelog discipline. (also auto-included, diff-scoped, on a docs-only change — see How to pick)
 - `auditing-compliance-and-provenance` — Any licensing, PII, or provenance exposure? Detect and escalate to humans — never decide legal questions.
 - `auditing-decision-record-currency` — Do the repo's existing decision records still hold? Status-graph consistency, revisit-triggers due, EOL adoptions, orphaned records.
 - `auditing-enforcement-and-meta-artifacts` — Is the enforcement apparatus healthy? Suppression hygiene & baseline trend, actionable alerts/monitoring-as-code, codegen-source drift gate.

@@ -97,7 +97,7 @@ findings to the ACK.
    comprehensive runs every relevant lens, uncapped. On top of that set, add
    any **auto-include** lens the change shape triggers (e.g. a docs-only PR
    always pulls in `auditing-documentation-health`, an ADR/RFC change always
-   pulls in `reviewing-decision-lifecycle` — see the picker's Auto-include
+   pulls in `reviewing-decision-lifecycle` — see the picker's How to pick
    section) — these ride along additively and don't count against the 3-8.
    Scope to the **files in this PR's diff**, not the whole repo.
 3. Run each chosen lens against the diff.
