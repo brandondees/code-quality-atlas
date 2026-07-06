@@ -124,8 +124,8 @@ lenses both claiming #29 as primary, and `cross_ref` caps a lens's inlined check
 at 2 borrowed bullets — unworkable for a lens whose entire content is this sweep.
 The new category's scope note explicitly draws the boundary against both #29
 (doesn't re-judge the original adoption call) and #22 (doesn't check whether a
-non-obvious decision has a record *at all* — that's #22's "ADR coverage" factor;
-#39 only checks whether an *existing* record's currency has rotted).
+non-obvious decision has a record *at all* — that's #22's "ADR coverage" factor; #39
+only checks whether an *existing* record's currency has rotted).
 
 **The standalone `adoption-&-exit` lens (the other half of §5 item 3) was
 deliberately not built**, after an explicit scope check: `reviewing-decision-lifecycle`
