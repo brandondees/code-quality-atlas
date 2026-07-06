@@ -244,7 +244,7 @@ Configured in the consumer repo — natural home: a `feedback:` key in the Q13 o
 (`.code-quality-atlas/preferences.md`), since that file is already the per-repo,
 owner-ratified control surface; an env var can override for harness-level setup.
 
-| Tier | Name | What happens | Leaves the consumer's machine? |
+| Tier | Name | What happens | Reaches code-quality-atlas (upstream)? |
 |---|---|---|---|
 | 0 | `off` (default) | nothing; hooks no-op | no |
 | 1 | `local` | invocation log + learnings JSONL in `.code-quality-atlas/learnings/`; feeds the team's own overlay and retro | no |
@@ -254,6 +254,15 @@ owner-ratified control surface; an env var can override for harness-level setup.
 The privacy boundary lives at **record creation, not transmission**: even tier-1 local
 records are written abstracted, so promotion to tier 2/3 never requires re-scrubbing, and
 a leaked learnings file is not a leaked codebase.
+
+**D17 note (2026-07-06):** the "reaches upstream?" column above is about the atlas
+project, not the consumer's own infrastructure. D17 commits the tier-1 log to the
+consumer repo, so on a repo with a shared remote it will typically be pushed and become
+visible to that team — the column's "no" means *never reaches code-quality-atlas*, not
+*never leaves this laptop*. That's the intended boundary (tier 1 is "share with your own
+team," tiers 2/3 are "share with the atlas project"), and it's exactly why record
+creation, not transmission, is the privacy boundary: a tier-1 record is written safe to
+share within the team from the moment it's created.
 
 Tier 3 deserves its own threat model before it's built: it pairs untrusted-content
 processing (transcripts, §3.4) with an autonomous write path to a shared upstream repo —
