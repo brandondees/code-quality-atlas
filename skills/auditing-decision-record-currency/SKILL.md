@@ -10,13 +10,13 @@ description: 'Audits the decision records already in a repository (ADRs/RFCs on 
   decision''s owner rather than reversing the call itself. A repo-wide / scheduled
   audit — the periodic-currency companion to reviewing-decision-lifecycle''s authoring-time
   review. Use when auditing an ADR directory, a decisions/RFC archive, or a whole-repo
-  health scan.'
+  health scan. Skip when the repo has no decision-record directory or archive at all.'
 provenance:
   taxonomy_version: v0.9
   built_from:
   - category: 39
     source: docs/research/cluster-6-evolution.md#39
-    hash: 18744a28ce80a74fdac4c5ff320e9afc2f78b772d5f0401ddce88bd4051ea487
+    hash: 671362ba00b61ca6e5956c293bc0befef32384fb72b299045b6cd6e1ad934e56
 ---
 
 # auditing-decision-record-currency
@@ -25,7 +25,7 @@ provenance:
 
 ## When to use
 
-Audits the decision records already in a repository (ADRs/RFCs on disk), on a schedule rather than at authoring time: status-graph consistency (an accepted record contradicted by a later one with no supersedes link, or a decision the code has visibly reversed), a revisit-trigger whose stated condition current repo signals suggest may now hold, a record with no checkable revisit-trigger at all, an adopted technology now end-of-life or on hold with no revisit noted, and orphaned records nothing in the repo still implements. Detects and routes revisit signals to the decision's owner rather than reversing the call itself. A repo-wide / scheduled audit — the periodic-currency companion to reviewing-decision-lifecycle's authoring-time review. Use when auditing an ADR directory, a decisions/RFC archive, or a whole-repo health scan.
+Audits the decision records already in a repository (ADRs/RFCs on disk), on a schedule rather than at authoring time: status-graph consistency (an accepted record contradicted by a later one with no supersedes link, or a decision the code has visibly reversed), a revisit-trigger whose stated condition current repo signals suggest may now hold, a record with no checkable revisit-trigger at all, an adopted technology now end-of-life or on hold with no revisit noted, and orphaned records nothing in the repo still implements. Detects and routes revisit signals to the decision's owner rather than reversing the call itself. A repo-wide / scheduled audit — the periodic-currency companion to reviewing-decision-lifecycle's authoring-time review. Use when auditing an ADR directory, a decisions/RFC archive, or a whole-repo health scan. Skip when the repo has no decision-record directory or archive at all.
 
 **Shape: repo.** Run against the whole repository (scheduled or on demand), not a single diff.
 
@@ -43,8 +43,10 @@ The head of the full checklist — enough for a first pass without opening any r
 - **Revisit-trigger condition plausibly met:** where a record names a concrete, checkable revisit condition (a scale threshold, a team-size figure, a vendor-support date), does anything visible in the repo (config, infra manifests, dependency graph, `CODEOWNERS` size) suggest that condition may now hold — flagged as "revisit due," not resolved unilaterally?
 - **No checkable revisit-trigger recorded:** does the record state only a vague "revisit periodically" with no date or measurable condition — the base case the sweep can't check further, worth flagging once per record rather than silently skipping?
 - **Adopted technology now EOL or on Hold:** does a record's chosen dependency/framework/platform appear on an end-of-life feed, or would the adoption read as `Hold` on a technology-radar-style scale today, with no revisit noted since?
-- **Orphaned or contradicted record:** is a decision record referenced by nothing else in the repo (no code, config, or doc still implements what it decided) and left `accepted` rather than marked `superseded`/`deprecated` — a stale entry cluttering the log worse than an absent one (per Azure Well-Architected's framing)?
-- **Escalate the judgment call, don't resolve it:** a plausibly-met revisit-trigger or an EOL adoption is evidence a human should re-open the decision, not a verdict that the original choice was wrong — report the signal and route to the decision's owner (cross #29, the G8 boundary), never assert the ADR should be reversed.
+- **Orphaned or contradicted record:** is a decision record referenced by nothing else in the repo (no code, config, or doc still implements what it decided) and left `accepted` rather than marked `superseded`/`deprecated` — a stale entry cluttering the log worse than an absent one?
+- **Stalled proposed record:** is a record left in `proposed` status for a long time with no resolution — neither accepted nor rejected — while downstream work proceeds as though it were settled? A decision that never closes is its own currency defect, distinct from an accepted one going stale.
+- **Duplicate or conflicting record identifiers:** do two records share the same ID, or does the archive's own index/table-of-contents omit a file present on disk? A drifted index means the sweep itself may be walking an incomplete set — surface it as a scan-reliability finding, not a decision-content one.
+- **Silent supersession (naming-only, no cross-reference):** does a newer record's title/content clearly replace an older one's subject, but neither carries a `supersedes`/`superseded-by` field linking them — a convention followed in spirit but not in the machine-checkable field the rest of this sweep depends on?
 
 ## Mechanizing these checks
 

@@ -551,6 +551,7 @@ skills:
       A repo-wide / scheduled audit — the periodic-currency companion to
       reviewing-decision-lifecycle's authoring-time review. Use when auditing
       an ADR directory, a decisions/RFC archive, or a whole-repo health scan.
+      Skip when the repo has no decision-record directory or archive at all.
     picker: >
       Do the repo's existing decision records still hold? Status-graph
       consistency, revisit-triggers due, EOL adoptions, orphaned records.
