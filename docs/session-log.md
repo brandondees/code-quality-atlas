@@ -1819,3 +1819,11 @@ Closed out Q15's last remaining piece — §5 item 3's `decision-record-audit` �
 `python -m tooling.cli generate`/`drift`/`eval` clean; full pytest suite (165 tests) passes. **Cross-model re-gate not run** — no Ollama/local-model substrate in this remote session, same standing gap as the 2026-07-05 entry; deferred to the next session with the substrate available.
 
 **Q15 is now fully resolved** — see [`decision-time-review-shape.md`](decision-time-review-shape.md)§5b and [`open-questions.md`](open-questions.md) Q15.
+
+### 2026-07-06 — Q17 review: self-improvement loop, stage 1 approved (D17)
+
+Reviewed [`self-improvement-loop.md`](self-improvement-loop.md) end to end (brainstorm since 2026-06-12) with the owner. Assessment: the signal taxonomy (S1–S8), the reuse of the existing docs→drift→regenerate→evals→ship pipeline as the "back half," and the named mitigations for the meta-loop's own failure modes (self-report bias, taste-laundering via S7, poisoned tier-3 input) all held up — no design gaps found.
+
+Two calls made, recorded as **D17**: (a) the tier-1 local learnings log is **committed** to the consumer repo, not gitignored — small, creation-time-abstracted records make this safe, and it gives the team's own retro history and Q13-overlay tuning something durable to point at; (b) **approval is scoped to stage 1 only** (the manifest `feedback:` section → synthesizer "Process notes" appendix + lens footer, plus the `PostToolUse`/`SessionEnd` invocation-logger hooks, opt-in tier ≥ `local`, no network/infra). Stages 2-5 (`/atlas-retro` transcript digestion, the outcome auditor, the intake routine, tier-3 auto-filing) stay design-only pending real stage-1 usage evidence — mirrors the Q15 pattern of approving a shape/scope first and reviewing each subsequent piece individually, rather than pre-approving stage-2/3's transcript-injection and autonomous-filing risk surfaces before any evidence the loop is worth building further.
+
+Docs updated: [`open-questions.md`](open-questions.md) (D17 added, Q17 marked partially resolved) and `self-improvement-loop.md` (status header, §8 sub-question 2 resolved inline). **Build not started** — next session can pick up stage 1 (generator `feedback:` section + hooks) as its own scoped task.

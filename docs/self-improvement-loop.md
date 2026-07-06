@@ -1,7 +1,15 @@
 # Self-Improving Loop — design exploration
 
-**Status:** brainstorm / design exploration, 2026-06-12. Awaiting user review before any
-decisions; nothing here is committed design. See open-questions Q17.
+**Status:** brainstorm 2026-06-12; **reviewed 2026-07-06 (D17).** **Stage 1 (§7) is
+approved for build:** the manifest `feedback:` section (synthesizer "Process notes"
+appendix + one-line lens footer) and the `PostToolUse`/`SessionEnd` invocation-logger
+hooks, gated on opt-in tier ≥ `local`. The tier-1 learnings log is **committed** to the
+consumer repo (resolves §8 sub-question 2). **Stages 2-5 remain design-only** — the
+`/atlas-retro` transcript digestion, the outcome auditor, the intake routine, and tier-3
+auto-filing each carry their own risk surface (transcript injection, autonomous filing)
+and will be re-reviewed individually once stage 1 produces real usage evidence, rather
+than approved as one bundle ahead of any evidence the loop pays for itself. See
+open-questions Q17 / D17.
 **Depends on:** D6 (docs are source of truth; skills derived & regenerable), D8 (eval-first),
 D9 (plugin packaging, commit-SHA versioning), D12 (synthesizer + finding contract), the
 PR-review-automation runbook (routines/triggers), Q13 (team preferences overlay — the
@@ -236,7 +244,7 @@ Configured in the consumer repo — natural home: a `feedback:` key in the Q13 o
 (`.code-quality-atlas/preferences.md`), since that file is already the per-repo,
 owner-ratified control surface; an env var can override for harness-level setup.
 
-| Tier | Name | What happens | Leaves the consumer's machine? |
+| Tier | Name | What happens | Reaches code-quality-atlas (upstream)? |
 |---|---|---|---|
 | 0 | `off` (default) | nothing; hooks no-op | no |
 | 1 | `local` | invocation log + learnings JSONL in `.code-quality-atlas/learnings/`; feeds the team's own overlay and retro | no |
@@ -246,6 +254,15 @@ owner-ratified control surface; an env var can override for harness-level setup.
 The privacy boundary lives at **record creation, not transmission**: even tier-1 local
 records are written abstracted, so promotion to tier 2/3 never requires re-scrubbing, and
 a leaked learnings file is not a leaked codebase.
+
+**D17 note (2026-07-06):** the "reaches upstream?" column above is about the atlas
+project, not the consumer's own infrastructure. D17 commits the tier-1 log to the
+consumer repo, so on a repo with a shared remote it will typically be pushed and become
+visible to that team — the column's "no" means *never reaches code-quality-atlas*, not
+*never leaves this laptop*. That's the intended boundary (tier 1 is "share with your own
+team," tiers 2/3 are "share with the atlas project"), and it's exactly why record
+creation, not transmission, is the privacy boundary: a tier-1 record is written safe to
+share within the team from the moment it's created.
 
 Tier 3 deserves its own threat model before it's built: it pairs untrusted-content
 processing (transcripts, §3.4) with an autonomous write path to a shared upstream repo —
@@ -328,8 +345,10 @@ The atlas's own principles, applied reflexively:
 1. Process notes vs. Stop-hook reflection — is the generated skill footer enough, or do
    long sessions lose the instruction (the same ~1%-budget problem the SessionStart hook
    works around)? Measure before adding the heavier hook.
-2. Does the learnings log live gitignored or committed in the consumer repo? (Committed
-   = the team's own retro history and Q13 evidence; gitignored = zero footprint.)
+2. ~~Does the learnings log live gitignored or committed in the consumer repo?~~
+   **Resolved 2026-07-06 (D17): committed** — the team's own retro history and Q13
+   overlay evidence outweighs the zero-footprint case, especially given the design's
+   own creation-time abstraction already makes committed records safe.
 3. Dedup identity across consumers — what makes two abstracted reports "the same
    failure mode"? Probably lens + signal + a normalized evidence fingerprint, fuzzy-
    matched by the intake model rather than hashed.
