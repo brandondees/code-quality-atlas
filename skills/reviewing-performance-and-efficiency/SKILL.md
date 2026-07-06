@@ -7,7 +7,7 @@ description: 'Reviews changes for performance and efficiency problems: N+1 queri
   Demands a profile before accepting optimization claims. Use when reviewing queries
   in loops, hot paths, caching, large payloads, or anything justified by "performance."'
 provenance:
-  taxonomy_version: v0.8
+  taxonomy_version: v0.9
   built_from:
   - category: 15
     source: docs/research/cluster-4-runtime.md#15

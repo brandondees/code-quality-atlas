@@ -10,7 +10,7 @@ description: 'Merges the findings of several code-quality-atlas lenses — and o
   uncapped in comprehensive mode — when assembling multi-source review output into
   one report, or when overlapping findings need deduplicating and prioritizing.'
 provenance:
-  taxonomy_version: v0.8
+  taxonomy_version: v0.9
   built_from: []
 ---
 

@@ -6,7 +6,7 @@ description: 'Audits dependencies and the supply chain: known CVEs in direct and
   and SBOM currency. A repo-wide / scheduled audit. Use when auditing package.json,
   lockfiles, requirements, vendored code, or supply-chain risk.'
 provenance:
-  taxonomy_version: v0.8
+  taxonomy_version: v0.9
   built_from:
   - category: 18
     source: docs/research/cluster-5-verification.md#18

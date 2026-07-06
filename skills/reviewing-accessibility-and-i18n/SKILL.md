@@ -8,7 +8,7 @@ description: 'Reviews UI changes for accessibility and internationalization: sem
   or anything user-facing. Skip when the change has no user-facing surface — backend,
   CLI, library, or infra code with no rendered UI or localized strings.'
 provenance:
-  taxonomy_version: v0.8
+  taxonomy_version: v0.9
   built_from:
   - category: 23
     source: docs/research/cluster-6-evolution.md#23

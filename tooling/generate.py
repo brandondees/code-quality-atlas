@@ -510,7 +510,7 @@ def build_router_md(manifest: Manifest) -> str:
         "- **The 2-4 figure is for focused single-change review only.** For a "
         "single change, this skill recommends **2-4 content lenses**. It is "
         "**not** a cap on the whole-repo health-audit route, which runs **all "
-        "eight repo-shaped audits** (see Routes) — apply the 2-4 figure to "
+        "nine repo-shaped audits** (see Routes) — apply the 2-4 figure to "
         "per-change review, never to the audit set. And if you already know "
         "which lenses are relevant, or comprehensive coverage is the goal, call "
         "them directly — the figure is this router's recommendation, not a hard "

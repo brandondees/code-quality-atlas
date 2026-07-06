@@ -1,0 +1,16 @@
+# Tool rules to triage — auditing-decision-record-currency
+
+> **Selecting tools for this stack.** The tools named below are field-tested starting points, not a mandate. Pick the one that fits this codebase's language version, build, and CI — and verify it actually runs on your toolchain before relying on it. A listed tool that is broken, abandoned, or noisy on your setup is a gap to close, not a permanent `continue-on-error`: prefer a working, maintained equivalent (often a younger, less well-known one) over a canonical-but-broken default. The capability is the requirement; the specific tool is replaceable.
+
+## Contents
+
+- From category #39
+
+## From category #39
+
+### Tooling rules worth lifting
+
+- **`adr-tools` / Log4brains / MADR templates** (see #29) — the same indexing tools that scaffold ADRs also enumerate the full set a sweep needs to walk; several ship a `status` field a script can grep. `(verify)`
+- **`endoflife.date` API / Renovate `endoflife-date` datasource** — feed an ADR's named technology through to surface EOL/near-EOL adoption decisions with no recorded revisit.
+- **Dependency-manifest diffing (`npm ls`, `pipdeptree`, `cargo tree`, `go list -m all`)** — cross-reference an ADR's "we adopted X" claim against whether X is still a live dependency; its quiet disappearance with the ADR still `accepted` is an undocumented reversal.
+- **Git blame / last-modified on the ADR directory** — a purely mechanical staleness proxy (an ADR untouched for years next to heavy churn in the area it governs) worth surfacing as a prompt to re-read, not a verdict on its own.

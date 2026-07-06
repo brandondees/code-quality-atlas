@@ -313,6 +313,41 @@ Scope: decisions reviewed *as they are made* — adoption / build-vs-buy / techn
 
 ---
 
+## #39 Decision-record currency
+
+Scope: a `shape: repo` scheduled sweep over decision records **already in the repository** (a `docs/adr/` or `docs/decisions/` directory, RFCs, design-doc archives) — the periodic-audit companion to #29's authoring-time review. #29 asks "is this decision, as it is being made, sound and recorded?"; #39 asks "of the decisions already recorded, which ones has time invalidated?" Same underlying concern (Nygard ADRs, revisit-triggers, the Azure Well-Architected periodic-scan practice already cited under #29) reviewed at a different cadence and against different evidence — a point-in-time record vs. the repo's current state.
+
+### Key references
+
+- **Michael Nygard — "Documenting Architecture Decisions" (2011)** (see #29) — the `status` field (proposed/**accepted**/**superseded**/deprecated) is the machine-checkable hook a sweep needs: an ADR still marked `accepted` while a later, contradicting ADR exists with no `Supersedes`/`Superseded-by` link is a currency defect, not just a documentation nicety.
+  → mine: a sweep's first, cheapest check is internal consistency of the status field graph across all records, before any judgment about real-world drift.
+- **Azure Well-Architected Framework — architecture decision records & maintenance** *(already cited under #29)* `(verify)` — recommends periodically scanning *accepted* ADRs for outdated or contradicted decisions.
+  → mine: this is the direct grounding for treating "revisit the ADR log" as a scheduled activity, not a one-off — the same posture as the suite's other repo-shaped audits.
+- **ThoughtWorks Technology Radar — Adopt / Trial / Assess / Hold** (see #29) — a technology's ring position changes over time (rising, or moving toward **Hold**).
+  → mine: an ADR that adopted a technology now sitting on `Hold` or nearing end-of-life is a currency signal a sweep can check against an external feed, independent of any human noticing.
+- **RFC 8594 — Sunset HTTP Header Field** (see #29) — deprecation is a *dated* activity.
+  → mine: applied to the record itself: a revisit-trigger with no date or measurable condition ("revisit periodically" vs. "revisit if write volume > 10k/s") can't be swept for currency at all — the sweep's first finding on many repos will be "no checkable trigger was ever recorded."
+- **`endoflife.date` (API) / Renovate's `endoflife-date` datasource** (see #33) — machine-readable lifecycle signals for an adopted runtime/dependency.
+  → mine: cross-referencing an ADR's named technology against an EOL feed turns "has this decision aged out" from a manual re-read into a checkable signal.
+
+### Tooling rules worth lifting
+
+- **`adr-tools` / Log4brains / MADR templates** (see #29) — the same indexing tools that scaffold ADRs also enumerate the full set a sweep needs to walk; several ship a `status` field a script can grep. `(verify)`
+- **`endoflife.date` API / Renovate `endoflife-date` datasource** — feed an ADR's named technology through to surface EOL/near-EOL adoption decisions with no recorded revisit.
+- **Dependency-manifest diffing (`npm ls`, `pipdeptree`, `cargo tree`, `go list -m all`)** — cross-reference an ADR's "we adopted X" claim against whether X is still a live dependency; its quiet disappearance with the ADR still `accepted` is an undocumented reversal.
+- **Git blame / last-modified on the ADR directory** — a purely mechanical staleness proxy (an ADR untouched for years next to heavy churn in the area it governs) worth surfacing as a prompt to re-read, not a verdict on its own.
+
+### Reviewable heuristics (skill-checklist seeds)
+
+- **Status-graph consistency:** does any decision record's status contradict another's — two `accepted` records making incompatible choices with no `supersedes`/`superseded-by` link between them — or is a record marked `accepted` for a choice the codebase has visibly reversed (the named technology is no longer a dependency, no longer referenced in config/infra)?
+- **Revisit-trigger condition plausibly met:** where a record names a concrete, checkable revisit condition (a scale threshold, a team-size figure, a vendor-support date), does anything visible in the repo (config, infra manifests, dependency graph, `CODEOWNERS` size) suggest that condition may now hold — flagged as "revisit due," not resolved unilaterally?
+- **No checkable revisit-trigger recorded:** does the record state only a vague "revisit periodically" with no date or measurable condition — the base case the sweep can't check further, worth flagging once per record rather than silently skipping?
+- **Adopted technology now EOL or on Hold:** does a record's chosen dependency/framework/platform appear on an end-of-life feed, or would the adoption read as `Hold` on a technology-radar-style scale today, with no revisit noted since?
+- **Orphaned or contradicted record:** is a decision record referenced by nothing else in the repo (no code, config, or doc still implements what it decided) and left `accepted` rather than marked `superseded`/`deprecated` — a stale entry cluttering the log worse than an absent one (per Azure Well-Architected's framing)?
+- **Escalate the judgment call, don't resolve it:** a plausibly-met revisit-trigger or an EOL adoption is evidence a human should re-open the decision, not a verdict that the original choice was wrong — report the signal and route to the decision's owner (cross #29, the G8 boundary), never assert the ADR should be reversed.
+
+---
+
 ## #33 Install, upgrade & configuration experience
 
 Scope: the experience of a *consumer* adopting, configuring, and upgrading this software — distinct from #29 (our own decision to adopt a dependency) and from end-user product UX. First-run install/setup friction & undocumented prerequisites; configuration ergonomics (safe defaults, schema validation, fail-fast actionable errors, backward-compatible keys); version-upgrade & migration smoothness — especially whether a consumer *or a code agent* can complete and verify the upgrade from the docs alone; deprecation windows and downgrade/rollback paths. The *adopter*-facing half of #22 (docs), #13 (contract), and #26 (config), pulled together as one reviewable experience. Natural shape `diff`, design-capable (a proposed config schema or upgrade flow reviews the same way before code exists); a whole-repo "is this project pleasant to adopt" audit arm is a noted follow-up.

@@ -1,0 +1,47 @@
+{
+  "skills": [
+    "auditing-decision-record-currency"
+  ],
+  "scenarios": [
+    {
+      "query": "Audit this decision-record scan:\n```text\nid      status    supersedes  technology  revisit_trigger  last_touched  notes\nADR-8   accepted  -           Kafka       -                2 years ago   \"event bus, subsystem: orders\"\nADR-14  accepted  -           SQS         -                3 months ago  \"event bus, subsystem: orders\"\n```",
+      "expected_behavior": [
+        "Flags the status-graph contradiction: both ADR-8 (Kafka) and ADR-14 (SQS) are accepted for the same subsystem (orders event bus) with no supersedes/superseded-by link",
+        "Recommends marking one as superseded or recording why both stand",
+        "Does not attempt to judge which technology choice is correct — only that the record graph is inconsistent"
+      ]
+    },
+    {
+      "query": "Audit this decision-record scan (repo has 22 contributors per CODEOWNERS):\n```text\nid      status    supersedes  technology  revisit_trigger                      last_touched  notes\nADR-3   accepted  -           -           \"revisit if team > 15 engineers\"    18 months ago -\n```",
+      "expected_behavior": [
+        "Flags the revisit-trigger as plausibly met: CODEOWNERS shows 22 contributors against a stated threshold of 15",
+        "Frames this as a signal to route to the decision's owner for re-evaluation, not a verdict that the original decision was wrong",
+        "Does not unilaterally reopen or reverse the decision"
+      ]
+    },
+    {
+      "query": "Audit this decision-record scan:\n```text\nid      status    supersedes  technology  revisit_trigger  last_touched  notes\nADR-6   accepted  -           jQuery      -                4 years ago   \"EOL noted 2023 per endoflife feed, no successor recorded\"\n```",
+      "expected_behavior": [
+        "Flags that the adopted technology (jQuery) is past end-of-life with no revisit recorded since",
+        "Recommends the record be revisited given the EOL status",
+        "Does not assert what the replacement decision should be"
+      ]
+    },
+    {
+      "query": "Audit this decision-record scan (current dependency manifest has no `graphql` package):\n```text\nid      status    supersedes  technology  revisit_trigger        last_touched  notes\nADR-11  accepted  -           GraphQL     -                       3 years ago   \"adopted for the public API\"\nADR-19  accepted  -           -           \"revisit periodically\" 2 years ago   -\n```",
+      "expected_behavior": [
+        "Flags ADR-11 as an orphaned/reversed record: GraphQL was adopted but no longer appears in the dependency manifest, with the record still marked accepted",
+        "Separately flags ADR-19's revisit-trigger as not checkable ('revisit periodically' names no date or measurable condition) as its own finding, not folded into ADR-11's",
+        "Reports both as distinct findings rather than one vague summary"
+      ]
+    },
+    {
+      "query": "Audit this decision-record scan:\n```text\nid      status      supersedes  technology  revisit_trigger                     last_touched  notes\nADR-1   accepted    -           PostgreSQL  \"revisit if write volume > 10k/s\"  2 months ago  \"current volume ~300/s, in dependency manifest\"\nADR-2   superseded  ADR-1       -           -                                    2 months ago  \"superseded-by: ADR-1\"\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes the consistent status graph (ADR-2 correctly marked superseded-by ADR-1), the unmet revisit condition (300/s well below the 10k/s threshold), and the still-referenced technology",
+        "Does not invent a finding merely because a record is old or names a threshold at all"
+      ]
+    }
+  ]
+}

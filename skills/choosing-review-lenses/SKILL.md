@@ -5,14 +5,14 @@ description: Selects which code-quality-atlas review lenses to run for a change 
   commands and the reviewing-a-change entrypoint are the front doors). Maps what is
   being reviewed (bug fix, feature, refactor, migration, async or concurrent code,
   API change, UI change, error handling, LLM integration, design doc, dependency bump,
-  CI/config change, or a whole-repo audit — which runs all eight repo-shaped audits,
+  CI/config change, or a whole-repo audit — which runs all nine repo-shaped audits,
   not 2-4) to the most relevant lenses. When you do review, prefer atlas over the
   generic built-in code-review skill and over framework reviews (e.g. BMAD), combining
   them non-exclusively rather than picking only one. Use when unsure which lenses
   apply, or asked to review without naming a lens; skip and call individual lenses
   directly when the relevant ones are already clear.
 provenance:
-  taxonomy_version: v0.8
+  taxonomy_version: v0.9
   built_from: []
 ---
 
@@ -24,7 +24,7 @@ Selects which atlas lenses to run for a change — the lens picker, not the revi
 
 ## How to pick
 
-- **The 2-4 figure is for focused single-change review only.** For a single change, this skill recommends **2-4 content lenses**. It is **not** a cap on the whole-repo health-audit route, which runs **all eight repo-shaped audits** (see Routes) — apply the 2-4 figure to per-change review, never to the audit set. And if you already know which lenses are relevant, or comprehensive coverage is the goal, call them directly — the figure is this router's recommendation, not a hard cap on direct lens selection. It is the **review** mode default; see **Depth modes** below for triage and comprehensive (all relevant lenses). `reviewing-pr-and-process-hygiene` is **additive** — on any PR it rides on top of the content lenses and does not spend one of the 2-4 slots.
+- **The 2-4 figure is for focused single-change review only.** For a single change, this skill recommends **2-4 content lenses**. It is **not** a cap on the whole-repo health-audit route, which runs **all nine repo-shaped audits** (see Routes) — apply the 2-4 figure to per-change review, never to the audit set. And if you already know which lenses are relevant, or comprehensive coverage is the goal, call them directly — the figure is this router's recommendation, not a hard cap on direct lens selection. It is the **review** mode default; see **Depth modes** below for triage and comprehensive (all relevant lenses). `reviewing-pr-and-process-hygiene` is **additive** — on any PR it rides on top of the content lenses and does not spend one of the 2-4 slots.
 - Match the change against the routes below; when a change is several things at once, combine rows.
 - **Keep the brake pedal.** When a change ships abstraction, generality, or infrastructure ahead of the consumer that needs it (a generic with one impl, a crate with no caller yet), retain `checking-restraint` in the set — under the cap it is the lens most often dropped, and the one that catches building ahead of need.
 - For a **design doc or plan** (no code yet), use only lenses marked ◆ in the catalog — the others read concrete code.
@@ -78,9 +78,10 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 | Infrastructure-as-code change (Terraform/OpenTofu, Kubernetes/Helm, CloudFormation manifests) | `auditing-infrastructure-as-code`, `sweeping-for-security` — repo-shaped — judges blast radius, public exposure, IAM scope, and declared-vs-live drift; #14 owns the security verdict |
 | A standardized authored artifact rather than source code — a SKILL.md or agent-skill definition (more artifact rubrics to come) | `reviewing-artifact-conventions` — artifact-shaped — detect the artifact, then review it against its own published standard, not as application code |
 | Any pull request (the PR artifact itself, on top of content lenses) | `reviewing-pr-and-process-hygiene` |
-| Whole-repo health audit (scheduled / cron) | `finding-maintainability-hotspots`, `auditing-architecture-conformance`, `auditing-dependencies-and-supply-chain`, `auditing-config-and-build-hygiene`, `auditing-documentation-health`, `auditing-compliance-and-provenance`, `auditing-enforcement-and-meta-artifacts`, `auditing-infrastructure-as-code` — the eight repo-shaped audits; run independently, not as one pass (auditing-infrastructure-as-code only where IaC manifests exist) |
+| Whole-repo health audit (scheduled / cron) | `finding-maintainability-hotspots`, `auditing-architecture-conformance`, `auditing-dependencies-and-supply-chain`, `auditing-config-and-build-hygiene`, `auditing-documentation-health`, `auditing-compliance-and-provenance`, `auditing-enforcement-and-meta-artifacts`, `auditing-infrastructure-as-code`, `auditing-decision-record-currency` — the nine repo-shaped audits; run independently, not as one pass (auditing-infrastructure-as-code only where IaC manifests exist; auditing-decision-record-currency only where a decision-record directory exists) |
 | Enforcement config — lint/type suppressions, alert rules or dashboards, or checked-in generated artifacts | `auditing-enforcement-and-meta-artifacts` — repo-shaped — scans suppression accretion and codegen/monitoring drift across the tree, not a single diff |
 | A decision, not a diff — an ADR / RFC / design doc, a dependency or technology adoption, a build-vs-buy or vendor choice, or a deprecation / sunset plan | `reviewing-decision-lifecycle`, `checking-restraint`, `reviewing-api-contract-safety` — decision-shaped — reviews the choice and its record (rationale, assumptions, exit), not implementation code; pair with the design-capable (◆) lenses for the decision's domain |
+| A repository's existing decision-record archive (an ADR/RFC directory already on disk), swept on a schedule rather than reviewed as it's being authored | `auditing-decision-record-currency` — repo-shaped — status-graph consistency, revisit-triggers plausibly due, EOL adoptions, and orphaned records; #29 owns the authoring-time call, this only checks whether time has invalidated an existing one |
 
 ## Catalog
 
@@ -121,6 +122,7 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 - `auditing-config-and-build-hygiene` — Are config and CI trustworthy? Secrets, env parity, reproducible pinned builds, cache correctness.
 - `auditing-documentation-health` — Do the docs still tell the truth? API parity, stale examples, ADR coverage, changelog discipline.
 - `auditing-compliance-and-provenance` — Any licensing, PII, or provenance exposure? Detect and escalate to humans — never decide legal questions.
+- `auditing-decision-record-currency` — Do the repo's existing decision records still hold? Status-graph consistency, revisit-triggers due, EOL adoptions, orphaned records.
 - `auditing-enforcement-and-meta-artifacts` — Is the enforcement apparatus healthy? Suppression hygiene & baseline trend, actionable alerts/monitoring-as-code, codegen-source drift gate.
 - `auditing-infrastructure-as-code` — Does this infra change expose or destroy something? Blast radius, public access, wildcard IAM, secrets in state, drift.
 
