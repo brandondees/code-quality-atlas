@@ -1,7 +1,15 @@
 # Self-Improving Loop — design exploration
 
-**Status:** brainstorm / design exploration, 2026-06-12. Awaiting user review before any
-decisions; nothing here is committed design. See open-questions Q17.
+**Status:** brainstorm 2026-06-12; **reviewed 2026-07-06 (D17).** **Stage 1 (§7) is
+approved for build:** the manifest `feedback:` section (synthesizer "Process notes"
+appendix + one-line lens footer) and the `PostToolUse`/`SessionEnd` invocation-logger
+hooks, gated on opt-in tier ≥ `local`. The tier-1 learnings log is **committed** to the
+consumer repo (resolves §8 sub-question 2). **Stages 2-5 remain design-only** — the
+`/atlas-retro` transcript digestion, the outcome auditor, the intake routine, and tier-3
+auto-filing each carry their own risk surface (transcript injection, autonomous filing)
+and will be re-reviewed individually once stage 1 produces real usage evidence, rather
+than approved as one bundle ahead of any evidence the loop pays for itself. See
+open-questions Q17 / D17.
 **Depends on:** D6 (docs are source of truth; skills derived & regenerable), D8 (eval-first),
 D9 (plugin packaging, commit-SHA versioning), D12 (synthesizer + finding contract), the
 PR-review-automation runbook (routines/triggers), Q13 (team preferences overlay — the
@@ -328,8 +336,10 @@ The atlas's own principles, applied reflexively:
 1. Process notes vs. Stop-hook reflection — is the generated skill footer enough, or do
    long sessions lose the instruction (the same ~1%-budget problem the SessionStart hook
    works around)? Measure before adding the heavier hook.
-2. Does the learnings log live gitignored or committed in the consumer repo? (Committed
-   = the team's own retro history and Q13 evidence; gitignored = zero footprint.)
+2. ~~Does the learnings log live gitignored or committed in the consumer repo?~~
+   **Resolved 2026-07-06 (D17): committed** — the team's own retro history and Q13
+   overlay evidence outweighs the zero-footprint case, especially given the design's
+   own creation-time abstraction already makes committed records safe.
 3. Dedup identity across consumers — what makes two abstracted reports "the same
    failure mode"? Probably lens + signal + a normalized evidence fingerprint, fuzzy-
    matched by the intake model rather than hashed.
