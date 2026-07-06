@@ -195,16 +195,16 @@ In the Claude Code web app → **Routines** → **New routine**:
   **Generic instructions are a floor, not a ceiling — never let them silently
   overrule a repo's own review policy.** The prompt above only names atlas
   because that's what this runbook ships; if the target repo's own
-  `CLAUDE.md`/`AGENTS.md` directs combining atlas with another reviewer (e.g. a
-  BMAD workflow) non-exclusively, the routine should read and follow that
-  directive too, not just the generic prompt. Add a line telling the session to
-  check the repo's own agent-guidance file for such a directive before treating
-  atlas as the whole review — don't hardcode "also run BMAD" into the prompt
-  itself (that couples this generic runbook to one repo's specific stack); state
-  the check, and let each repo's own file supply what to combine. Making this a
-  routine-level setting instead of prompt prose would remove the need to restate
-  even the check per repo — worth revisiting if this pattern shows up often
-  enough to justify it.
+  `CLAUDE.md`/`AGENTS.md` directs combining atlas with another reviewer
+  non-exclusively, the routine should read and follow that directive too, not
+  just the generic prompt. Add a line telling the session to check the repo's
+  own agent-guidance file for such a directive before treating atlas as the
+  whole review — don't name any specific other reviewer in the prompt itself
+  (that couples this generic runbook to one repo's specific stack); state the
+  check only, and let each repo's own file supply what to combine, if anything.
+  Making this a routine-level setting instead of prompt prose would remove the
+  need to restate even the check per repo — worth revisiting if this pattern
+  shows up often enough to justify it.
 
 - **Connectors:** the form attaches **all your account connectors by default** and
   warns they can be used (including writes) without per-call approval during a run.
