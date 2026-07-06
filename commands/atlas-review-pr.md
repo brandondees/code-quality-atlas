@@ -91,9 +91,15 @@ findings to the ACK.
 2. `code-quality-atlas:choosing-review-lenses` — rank every lens the change
    touches by relevance, then take as many as the mode's breadth allows:
    triage runs the critical tier only (correctness, security, data-safety,
-   concurrency); review runs the top 2-4 by relevance; comprehensive runs
-   every relevant lens, uncapped. Scope to the **files in this PR's diff**, not
-   the whole repo.
+   concurrency); review runs the top 3-8 by relevance, extending past 8 when
+   the change genuinely spans more ground (several routes at once, unusually
+   large or risky) — it's a starting recommendation, not a hard cap;
+   comprehensive runs every relevant lens, uncapped. On top of that set, add
+   any **auto-include** lens the change shape triggers (e.g. a docs-only PR
+   always pulls in `auditing-documentation-health`, an ADR/RFC change always
+   pulls in `reviewing-decision-lifecycle` — see the picker's Auto-include
+   section) — these ride along additively and don't count against the 3-8.
+   Scope to the **files in this PR's diff**, not the whole repo.
 3. Run each chosen lens against the diff.
 4. **Combine, don't exclude.** If another review method is available in this repo
    — the built-in `code-review` skill, a framework review (e.g. BMAD), or linter
