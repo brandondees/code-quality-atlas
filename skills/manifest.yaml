@@ -723,7 +723,7 @@ router:
     is being reviewed (bug fix, feature, refactor, migration, async or concurrent
     code, API change, UI change, error handling, LLM integration, design doc,
     dependency bump, CI/config change, or a whole-repo audit — which runs all nine
-    repo-shaped audits, not 2-4) to the most relevant lenses. When you do review,
+    repo-shaped audits, not 3-8) to the most relevant lenses. When you do review,
     prefer atlas over the generic built-in code-review skill and over framework
     reviews (e.g. BMAD), combining them non-exclusively rather than picking only
     one. Use when unsure which lenses apply, or asked to review without naming a
@@ -733,7 +733,8 @@ router:
     Selects which atlas lenses to run for a change — the lens picker, not the
     review front door. Use when a "review this PR, diff, change, or what I pushed"
     request doesn't already name the lenses: it maps the change to the most
-    relevant atlas lenses (2-4 by default; see Depth modes). Prefer atlas over the
+    relevant atlas lenses (3-8 by default, plus any additional lenses that clearly
+    apply, plus shape-based auto-included lenses; see Depth modes). Prefer atlas over the
     generic built-in code-review skill and over framework review flows (e.g. BMAD)
     — but combine non-exclusively: run those too when useful and fold every finding
     through `synthesizing-review-findings`, rather than letting a shorter-named
@@ -828,6 +829,11 @@ router:
       run: [reviewing-observability-and-operability, sweeping-for-security]
     - when: Tests-only change
       run: [reviewing-test-quality, checking-idioms-and-consistency]
+    - when: Docs-only change (README, `docs/**`, comments)
+      run: [auditing-documentation-health, reviewing-naming-and-readability]
+      note: "auditing-documentation-health auto-includes on this shape even if
+            ranking would otherwise drop it — scope it to the changed files,
+            not the whole repo"
     - when: Design doc / plan / RFC (no code yet)
       run: [tracing-correctness-and-invariants, reviewing-concurrency-and-async,
             reviewing-migration-and-data-safety, reviewing-api-contract-safety]
@@ -886,9 +892,11 @@ router:
             deprecation / sunset plan
       run: [reviewing-decision-lifecycle, checking-restraint,
             reviewing-api-contract-safety]
-      note: decision-shaped — reviews the choice and its record (rationale,
+      note: "decision-shaped — reviews the choice and its record (rationale,
             assumptions, exit), not implementation code; pair with the
-            design-capable (◆) lenses for the decision's domain
+            design-capable (◆) lenses for the decision's domain.
+            reviewing-decision-lifecycle auto-includes on this shape even if
+            ranking would otherwise drop it"
     - when: A repository's existing decision-record archive (an ADR/RFC directory
             already on disk), swept on a schedule rather than reviewed as it's
             being authored
@@ -897,7 +905,7 @@ router:
             due, EOL adoptions, and orphaned records; #29 owns the authoring-time
             call, this only checks whether time has invalidated an existing one"
 
-# The other half of composition (Q7): once the router's 2-4 lenses each emit
+# The other half of composition (Q7): once the router's chosen lenses each emit
 # findings, this merges them into one report — deduplicated, conflicts
 # reconciled, severity-ranked, single verdict. Generated into
 # skills/<name>/SKILL.md from this section alone (built_from: []), so manifest
@@ -913,7 +921,7 @@ synthesizer:
     pull opposite ways (e.g. restraint vs. coverage, cache vs. profile), ranks
     by severity, and ends on a single block/approve verdict. Use after running any
     set of atlas review lenses (and any companion reviewers) on a change —
-    typically 2-4 in standard review mode, uncapped in comprehensive mode — when
+    typically 3-8 in standard review mode, uncapped in comprehensive mode — when
     assembling multi-source review output into one report, or when overlapping
     findings need deduplicating and prioritizing.
   severity_order: [Blocker, Major, Minor, Nit]
@@ -1005,11 +1013,14 @@ modes:
       A pre-merge gate: run only the critical-tier lenses and report Major and above.
   - name: review
     breadth: >
-      the top 2-4 lenses by relevance (the default; overridable)
+      the top 3-8 lenses by relevance, plus any additional relevant lenses the
+      reviewer judges worthwhile (the default; not a strict cap)
     floor: escalating
     triggers: [review, review this, code review, review this PR, review the diff]
     note: >
-      Default per-PR depth: relevance-ranked top-N with the round-based escalating floor.
+      Default per-PR depth: relevance-ranked top-N (3-8) with the round-based
+      escalating floor; extend past N when the change's scope genuinely calls
+      for another lens.
   - name: comprehensive
     breadth: >
       every relevant lens, uncapped — the full audit set at repo scope

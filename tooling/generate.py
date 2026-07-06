@@ -455,9 +455,10 @@ def modes_section(manifest: Manifest) -> str:
         "## Depth modes",
         "",
         "Routing first ranks **every** lens whose scope the change touches by "
-        "**relevance** — it is no longer a hard 2-4 cap. A depth mode then sets the "
-        "**breadth** (how far down the ranked list to run) and the severity floor. "
-        "Pick the mode from the request; default to **review**.",
+        "**relevance** — it is no longer a hard cap. A depth mode then sets the "
+        "**breadth** (how far down the ranked list to run, plus room for judgment "
+        "calls above that floor) and the severity floor. Pick the mode from the "
+        "request; default to **review**.",
         "",
         "| Mode | Breadth | Triggers |",
         "|---|---|---|",
@@ -474,9 +475,9 @@ def modes_section(manifest: Manifest) -> str:
 
 def build_router_md(manifest: Manifest) -> str:
     """The composition layer: routes a 'what am I reviewing' situation to the
-    2-4 lenses worth running, plus a one-line catalog of every lens. Built
-    entirely from the manifest — provenance carries no research sections, so
-    regeneration is triggered by manifest edits, not docs drift."""
+    recommended range of lenses worth running, plus a one-line catalog of every
+    lens. Built entirely from the manifest — provenance carries no research
+    sections, so regeneration is triggered by manifest edits, not docs drift."""
     r = manifest.router
     front = {
         "name": r.name,
@@ -507,18 +508,28 @@ def build_router_md(manifest: Manifest) -> str:
         "## When to use\n\n"
         f"{r.body or r.description}\n\n"
         "## How to pick\n\n"
-        "- **The 2-4 figure is for focused single-change review only.** For a "
-        "single change, this skill recommends **2-4 content lenses**. It is "
-        "**not** a cap on the whole-repo health-audit route, which runs **all "
-        "nine repo-shaped audits** (see Routes) — apply the 2-4 figure to "
-        "per-change review, never to the audit set. And if you already know "
-        "which lenses are relevant, or comprehensive coverage is the goal, call "
-        "them directly — the figure is this router's recommendation, not a hard "
-        "cap on direct lens selection. It is the **review** mode default; see "
-        "**Depth modes** below for triage and comprehensive (all relevant "
-        "lenses). `reviewing-pr-and-process-hygiene` is "
-        "**additive** — on any PR it rides on top of the content lenses and does "
-        "not spend one of the 2-4 slots.\n"
+        "- **The 3-8 figure is a starting recommendation for focused "
+        "single-change review, not a strict limit.** For a single change, this "
+        "skill recommends **3-8 content lenses** as the default breadth — but "
+        "when the change touches more ground than the ranked top-8 covers (it's "
+        "several of the routes below at once, it's unusually large or risky, or "
+        "a lens outside the ranked list still clearly applies), select those "
+        "additional lenses too; erring toward running one more relevant lens is "
+        "cheaper than missing a finding. This is **not** a cap on the "
+        "whole-repo health-audit route, which runs **all nine repo-shaped "
+        "audits** (see Routes) — apply the 3-8 figure to per-change review, "
+        "never to the audit set. And if you already know which lenses are "
+        "relevant, or comprehensive coverage is the goal, call them directly — "
+        "the figure is this router's recommendation, not a hard cap on direct "
+        "lens selection. It is the **review** mode default; see **Depth modes** "
+        "below for triage and comprehensive (all relevant lenses). "
+        "`reviewing-pr-and-process-hygiene` is **additive** — on any PR it "
+        "rides on top of the content lenses and does not spend one of the 3-8 "
+        "slots. Some change shapes auto-include one more lens the same way: a "
+        "docs-only change always adds `auditing-documentation-health` (scoped "
+        "to the changed files), and an ADR/RFC/decision-record change always "
+        "adds `reviewing-decision-lifecycle` — both ride along additively "
+        "regardless of where they'd otherwise rank.\n"
         "- Match the change against the routes below; when a change is several "
         "things at once, combine rows.\n"
         "- **Keep the brake pedal.** When a change ships abstraction, generality, "
@@ -592,7 +603,7 @@ def mode_floor_policy(manifest: Manifest) -> str:
 
 
 def build_synthesizer_md(manifest: Manifest) -> str:
-    """The back half of composition: merges the findings of the 2-4 lenses the
+    """The back half of composition: merges the findings of the lenses the
     router picked into one report — deduplicated, conflicts reconciled,
     severity-ranked, single verdict. Like the router, it is built entirely from
     the manifest (provenance carries no research sections), so regeneration is
