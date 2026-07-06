@@ -43,20 +43,29 @@ label/author filter if given). For each, read its mergeable state via
 
 ## 3. Check reviewer coverage of the current HEAD
 
-For each open PR that carries an `<!-- atlas-review-ack -->` comment (i.e. an
-atlas reviewer has engaged with it at some point), compare the HEAD commit SHA
-(`mcp__github__pull_request_read`) against the commit each `<!-- atlas-review
-round:N -->` review was posted against (`mcp__github__get_commit` / the review's
-`commit_id`). If HEAD has moved past every posted round with no unaddressed
-`<!-- atlas-coverage-poke -->` from you already on the PR, the reviewer's watch
-has lapsed on this push (missed subscription wakeup, or the resident session was
-reclaimed) — post a single issue comment marked `<!-- atlas-coverage-poke -->`
-that says review coverage may have lapsed for this push and a fresh review is
-needed; do **not** attempt the review yourself. A PR with no ack comment yet has
-simply not been picked up (e.g. the reviewer routine hasn't fired) — leave it to
-its own trigger, this step only covers a **lapsed** watch, not a missing one.
+**Precondition: only run this check when the PR has at least one posted
+`<!-- atlas-review round:N -->` review.** An `<!-- atlas-review-ack -->` comment
+with **zero** round reviews behind it (e.g. the reviewer crashed right after
+posting the ack, or is still mid-flight on round 1) has no baseline commit to
+compare HEAD against — "moved past every posted round" is vacuously true over an
+empty set and would false-positive on a PR that's simply still being reviewed.
+Skip those PRs in this step entirely; don't poke them.
 
-## 5. Stay idempotent
+For each open PR that has **at least one** posted round review, compare the HEAD
+commit SHA (`mcp__github__pull_request_read`) against the commit the
+**most recent** `<!-- atlas-review round:N -->` review was posted against
+(`mcp__github__get_commit` / the review's `commit_id`). If HEAD has moved past
+that round with no unaddressed `<!-- atlas-coverage-poke -->` from you already on
+the PR, the reviewer's watch has lapsed on this push (missed subscription
+wakeup, or the resident session was reclaimed) — post a single issue comment
+marked `<!-- atlas-coverage-poke -->` that says review coverage may have lapsed
+for this push and a fresh review is needed; do **not** attempt the review
+yourself. A PR with no ack comment yet has simply not been picked up (e.g. the
+reviewer routine hasn't fired) — leave it to its own trigger, this step only
+covers a **lapsed** watch with an established baseline, not a missing or
+still-in-flight one.
+
+## 4. Stay idempotent
 
 Mark every conflict poke with `<!-- atlas-rebase-poke -->` (review-comment body)
 and every coverage poke with `<!-- atlas-coverage-poke -->` (issue-comment body).
@@ -65,7 +74,7 @@ skip if an unaddressed poke of that kind from you is already there — this comm
 runs often and must never spam. Branch updates are naturally idempotent (an
 up-to-date branch reports as up to date and is skipped).
 
-## 6. Report
+## 5. Report
 
 End with a one-line summary: how many PRs were updated, conflict-poked,
 coverage-poked, and skipped. Post nothing to GitHub beyond the pokes above.

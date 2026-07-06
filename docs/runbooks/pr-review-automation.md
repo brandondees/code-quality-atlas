@@ -257,12 +257,15 @@ run checks them all:
      comments — sees it; body = a whole-PR conflict notice asking them to rebase onto
      base and resolve, only if no unaddressed <!-- atlas-rebase-poke --> review thread
      from you exists. Clean/up-to-date/draft → skip silently.
-  3. For any PR carrying an <!-- atlas-review-ack --> comment, compare HEAD against
-     the commit each <!-- atlas-review round:N --> review was posted against — if
-     HEAD has moved past every posted round with no unaddressed
+  3. For any PR with at least one posted <!-- atlas-review round:N --> review
+     (not just an ack — an ack with zero rounds behind it has no baseline commit
+     to compare against and would false-positive on a PR still mid-flight on
+     round 1), compare HEAD against the commit the MOST RECENT round review was
+     posted against — if HEAD has moved past it with no unaddressed
      <!-- atlas-coverage-poke --> already there, post one issue comment marked
      <!-- atlas-coverage-poke --> flagging that review coverage may have lapsed;
-     do NOT review it yourself. Skip PRs with no ack yet (not picked up, not lapsed).
+     do NOT review it yourself. Skip PRs with no ack, or an ack but no round
+     review yet (not picked up / still in flight, not lapsed).
   4. Mark every poke with its marker and never double-poke either kind.
   5. End with a one-line summary across all repos: counts of updated,
      conflict-poked, coverage-poked, and skipped.
