@@ -92,7 +92,21 @@ trigger) and has no `REVIEW.md` at its root, mention that copying
 policy (see `docs/runbooks/pr-review-automation.md`). Only copy it if the user
 asks — it is not needed for interactive review.
 
-## 5. Report
+## 5. (Optional) Team preferences overlay
+
+If the user wants to start recording the team's own ratified opinions — house
+conventions a lens would otherwise nag against, threshold tweaks, scoped
+exemptions for frozen/legacy/generated paths, or dialing up improvement-nit
+suggestions — mention that copying `templates/preferences-template.md` from the
+plugin to `.code-quality-atlas/preferences.md` in the repo root bootstraps this
+(see `docs/team-preferences-overlay.md`). Only copy it if the user asks, and only
+fill in entries the user actually confirms — an unratified guess in this file is
+worse than an empty one (see the template's own guardrail comment). It has no
+effect on floor-tier findings (security, correctness, migration/data safety,
+concurrency) beyond `acknowledge`, which keeps them visible and non-blocking, never
+silent.
+
+## 6. Report
 
 Summarize what changed: for each file, whether it was created, had its block
 inserted, or had an existing block refreshed (and note "no change" if the block

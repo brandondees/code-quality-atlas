@@ -31,7 +31,7 @@
 | **G22** | Diff-isolation blindness (interaction/composition) | new-lens (scoped) | promote (scoped) | Med-High | High | Med |
 | **G15** | Production-evidence / runtime-informed review | new-shape | promote | High | Very High | Med |
 
-Enabling builds already in the backlog that several of the above depend on: **Q13** team-preferences overlay (designed, deferred), **Q14** review-depth modes (**resolved D16** 2026-06-24 — design [`review-depth-modes.md`](../review-depth-modes.md), build deferred), **Q15** decision shape (resolved, lenses pending), plus **#32** agentic-safety and the `shape: artifact` lens (D14/D15, both shipped 2026-06-24).
+Enabling builds already in the backlog that several of the above depend on: **Q13** team-preferences overlay (**Wave A shipped 2026-07-06** — tier + reading mechanism + template; inference bootstrap and finer tiering still deferred), **Q14** review-depth modes (**resolved D16** 2026-06-24 — design [`review-depth-modes.md`](../review-depth-modes.md), build deferred), **Q15** decision shape (resolved, lenses pending), plus **#32** agentic-safety and the `shape: artifact` lens (D14/D15, both shipped 2026-06-24).
 
 ## Dependency graph (what unlocks what)
 

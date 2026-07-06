@@ -166,6 +166,34 @@ def test_validate_rejects_duplicate_names():
     with pytest.raises(ValidationError, match="duplicate"):
         validate(Manifest("v0.2", [_skill(), _skill()]))
 
+def test_skill_defaults_to_preference_tier():
+    assert _skill().tier == "preference"
+
+def test_validate_accepts_floor_tier():
+    validate(Manifest("v0.2", [_skill(tier="floor")]))  # no raise
+
+def test_validate_rejects_bad_tier():
+    with pytest.raises(ValidationError, match=r"tier must be floor\|preference"):
+        validate(Manifest("v0.2", [_skill(tier="bogus")]))
+
+def test_load_manifest_parses_tier(tmp_path):
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    tier: floor\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
+    m = load_manifest(path)
+    assert m.skills[0].tier == "floor"
+
+def test_load_manifest_defaults_tier_when_absent():
+    m = load_manifest("tests/fixtures/manifest_sample.yaml")
+    assert m.skills[0].tier == "preference"
+
 def test_validate_rejects_unresolvable_source():
     bad = _skill(built_from=[Source(99, "tests/fixtures/research_sample.md#99")])
     with pytest.raises(ValidationError, match="section #99"):

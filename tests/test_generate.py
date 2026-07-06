@@ -644,3 +644,41 @@ def test_generate_collapsed_normal_roots_do_not_trip_guard(tmp_path):
                                  collapsed_root=str(tmp_path / "collapsed"))
     assert written  # generation proceeded
     assert (tmp_path / "collapsed" / "skills").exists()
+
+
+# --- Q13 team-preferences overlay (Wave A) ---
+
+def test_floor_tier_skill_forbids_silent_suppress():
+    md = build_skill_md(_skill(tier="floor"), taxonomy_version="v0.2", docs_root=".")
+    assert "Team preferences" in md
+    assert "floor-tier" in md
+    assert "can never `suppress` a finding outright" in md
+    assert "`acknowledge`" in md
+    assert "acknowledged deviation" in md
+
+
+def test_preference_tier_skill_allows_suppress_and_gates_valence():
+    md = build_skill_md(_skill(tier="preference"), taxonomy_version="v0.2", docs_root=".")
+    assert "Team preferences" in md
+    assert "preference-tier" in md
+    assert "may `suppress` one of its findings outright" in md
+    assert "improvement-valence directive" in md
+
+
+def test_skill_defaults_to_preference_tier_note():
+    # _skill() doesn't pass tier=, so this exercises the Skill dataclass default.
+    md = build_skill_md(_skill(), taxonomy_version="v0.2", docs_root=".")
+    assert "may `suppress` one of its findings outright" in md
+
+
+def test_build_router_md_includes_preferences_loading_step():
+    md = build_router_md(_manifest_with_router())
+    assert "Load team preferences first" in md
+    assert ".code-quality-atlas/preferences.md" in md
+    assert "does not widen or override the depth mode itself" in md
+
+
+def test_build_synthesizer_md_includes_acknowledged_deviation_clause():
+    md = build_synthesizer_md(_manifest_with_synthesizer())
+    assert "acknowledged deviation" in md
+    assert "`suppress`ed preference-tier finding never" in md

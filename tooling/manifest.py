@@ -61,6 +61,11 @@ class Skill:
     design: bool = False     # diff lens that also applies to design docs/plans
     picker: str = ""         # one-line differentiator for the router catalog
     artifacts: list[Artifact] = field(default_factory=list)  # shape: artifact only
+    # Q13 team-preferences overlay: whole-lens tier (coarse; per-check granularity
+    # is a later refinement, see docs/team-preferences-overlay.md#9). "floor" lenses
+    # assert broken/unsafe and can only be `acknowledge`d, never silently
+    # `suppress`ed, by a repo's .code-quality-atlas/preferences.md.
+    tier: str = "preference"
 
 
 @dataclass
@@ -158,6 +163,9 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
         if s.shape not in ("diff", "repo", "decision", "artifact"):
             raise ValidationError(
                 f"{s.name}: shape must be diff|repo|decision|artifact, got {s.shape!r}")
+        if s.tier not in ("floor", "preference"):
+            raise ValidationError(
+                f"{s.name}: tier must be floor|preference, got {s.tier!r}")
         if s.design and s.shape != "diff":
             raise ValidationError(
                 f"{s.name}: design applies only to diff-shaped lenses")
@@ -403,6 +411,7 @@ def load_manifest(path: str) -> Manifest:
                 design=s.get("design", False),
                 picker=s.get("picker", "").strip(),
                 artifacts=artifacts,
+                tier=s.get("tier", "preference"),
             ))
         except KeyError as e:
             raise ValidationError(f"skill #{i}: missing field {e}") from e
