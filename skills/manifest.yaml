@@ -831,11 +831,11 @@ router:
       run: [reviewing-test-quality, checking-idioms-and-consistency]
     - when: Docs-only change (README, `docs/**`, comments)
       run: [reviewing-naming-and-readability]
-      note: "auditing-documentation-health auto-includes on this shape too (see
-            How to pick) — scoped to the changed files, not the whole repo;
-            kept out of this row's run list since it is repo-shaped and mixing
-            it with a diff-shaped lens here would drop it from the collapsed
-            diff entrypoint"
+      note: "auditing-documentation-health auto-includes on this shape too —
+            scoped to the changed files, not the whole repo; kept out of this
+            row's run list since it is repo-shaped and mixing it with a
+            diff-shaped lens here would drop it from the collapsed diff
+            entrypoint"
     - when: Design doc / plan / RFC (no code yet)
       run: [tracing-correctness-and-invariants, reviewing-concurrency-and-async,
             reviewing-migration-and-data-safety, reviewing-api-contract-safety]

@@ -863,12 +863,19 @@ def build_entrypoint_md(manifest: Manifest, entrypoint: Entrypoint) -> str:
     fm = yaml.safe_dump(front, sort_keys=False, default_flow_style=False,
                         allow_unicode=True).strip()
 
-    # Routes from the router that touch this entrypoint's lenses.
+    # Routes from the router that touch this entrypoint's lenses. A route's
+    # note travels with it even when the note calls out a lens the shape
+    # filter excluded from `run` (e.g. a repo-shaped auto-include on a
+    # diff-shaped entrypoint) — otherwise that lens has no path into this
+    # entrypoint at all: not bundled (shape-filtered), not in the run list
+    # (shape-filtered), and silently missing from the note too.
     rows = []
     if manifest.router:
         for route in manifest.router.routes:
             if any(lens in lens_names for lens in route.run):
                 run = ", ".join(f"`{lens}`" for lens in route.run if lens in lens_names)
+                if route.note:
+                    run += f" — {route.note}"
                 rows.append(f"| {route.when} | {run} |")
     routes_table = "\n".join(rows) if rows else "| (any item in scope) | all lenses below |"
 

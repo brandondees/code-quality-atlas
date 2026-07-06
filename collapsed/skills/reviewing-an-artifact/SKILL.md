@@ -40,7 +40,7 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 
 | When reviewing… | Run |
 |---|---|
-| A standardized authored artifact rather than source code — a SKILL.md or agent-skill definition (more artifact rubrics to come) | `reviewing-artifact-conventions` |
+| A standardized authored artifact rather than source code — a SKILL.md or agent-skill definition (more artifact rubrics to come) | `reviewing-artifact-conventions` — artifact-shaped — detect the artifact, then review it against its own published standard, not as application code |
 
 ## Lenses
 
