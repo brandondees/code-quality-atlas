@@ -46,10 +46,16 @@ everything"), otherwise **review** (the default).
 Run `code-quality-atlas:choosing-review-lenses` to rank every lens the change
 touches by relevance, then take as many as the mode's breadth allows: triage
 runs the critical tier only (correctness, security, data-safety, concurrency);
-review runs the top 2-4 by relevance (the default); comprehensive runs every
-relevant lens, uncapped. If the relevant lenses are already obvious (an async
-change → `reviewing-concurrency-and-async`), call them directly — routing
-through the picker is optional.
+review runs the top 3-8 by relevance (the default) — extend past 8 when the
+change genuinely spans more ground (several routes at once, unusually large or
+risky); it's a starting recommendation, not a hard cap. comprehensive runs
+every relevant lens, uncapped. On top of that set, add any **auto-include**
+lens the change shape triggers (e.g. a docs-only change always pulls in
+`auditing-documentation-health`, an ADR/RFC change always pulls in
+`reviewing-decision-lifecycle` — see the picker's Auto-include section); these
+ride along additively and don't count against the 3-8. If the relevant lenses
+are already obvious (an async change → `reviewing-concurrency-and-async`),
+call them directly — routing through the picker is optional.
 
 ## 3. Run the lenses, and combine non-exclusively
 
