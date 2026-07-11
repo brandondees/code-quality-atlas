@@ -81,9 +81,10 @@ _LIVING_COUNT_FILES = (
     "tooling/vendor-skills.sh",
     "tooling/package-account-zips.sh",
 )
-# A "3x" token not glued to a taxonomy/issue ref ("#38") or another digit/letter
-# on either side (so "2026", "v0.35" etc. never match).
-_CANDIDATE_RE = re.compile(r"(?<![#\w])3[0-9](?!\w)")
+# A "3x" token not glued to a taxonomy/issue ref ("#38"), another digit/letter,
+# or a decimal point on either side (so "2026", "v0.35", "35.2" etc. never
+# match).
+_CANDIDATE_RE = re.compile(r"(?<![#\w.])3[0-9](?![\w.])")
 _KEYWORD_RE = re.compile(r"\b(skills?|lens(?:es)?|zips?|uploads?)\b", re.IGNORECASE)
 # "33+" is a threshold phrase ("once past 33"), not a claimed current count.
 _THRESHOLD_SUFFIX = "+"
@@ -117,3 +118,14 @@ def test_living_docs_count_sweep():
     assert not failures, "stale skill/lens count(s) found by the living-docs sweep:\n" + "\n".join(
         failures
     )
+
+
+def test_candidate_re_ignores_decimal_versions():
+    # Regression: (?<![#\w]) alone doesn't exclude a preceding "." (a decimal
+    # point is neither a word char nor "#"), so "v0.35" / "35.2"-style version
+    # numbers next to a keyword would previously be misread as a claimed
+    # current count. Both sides of the decimal point must be excluded.
+    assert _CANDIDATE_RE.findall("v0.35 skills released") == []
+    assert _CANDIDATE_RE.findall("35.2 lenses") == []
+    # A real bare count is still matched.
+    assert _CANDIDATE_RE.findall("37 skills") == ["37"]
