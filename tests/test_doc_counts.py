@@ -95,6 +95,16 @@ _ARROW_RE = re.compile(r"\d\s*(?:→|->)\s*\d")
 
 def test_living_docs_count_sweep():
     c = _counts()
+    # _CANDIDATE_RE only matches 2-digit "3x" tokens. This repo's own history
+    # (31->32->33/34->35/36->37) shows the count climbs steadily, so assert
+    # it's still inside the decade this sweep covers -- if a future skill
+    # addition pushes either count to 40+, this fails loudly instead of the
+    # sweep silently going blind to new drift.
+    assert 30 <= c["lenses"] < 40 and 30 <= c["total"] < 40, (
+        f"lenses={c['lenses']} total={c['total']} have crossed out of the 30-39 "
+        "range _CANDIDATE_RE covers -- widen the regex (and this range) before "
+        "relying on the living-docs sweep further"
+    )
     valid = {c["lenses"], c["total"]}
     failures: list[str] = []
     for rel in _LIVING_COUNT_FILES:
