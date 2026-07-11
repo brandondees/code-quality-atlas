@@ -48,7 +48,7 @@ claude plugin install code-quality-atlas@code-quality-atlas
 The same marketplace also offers a **collapsed** plugin —
 `code-quality-atlas-collapsed` — that installs the suite as **4 entrypoint
 skills** (`reviewing-a-change`, `auditing-a-repository`, `reviewing-a-decision`,
-`reviewing-an-artifact`) instead of 35, bundling each shape's lenses and loading
+`reviewing-an-artifact`) instead of 37, bundling each shape's lenses and loading
 them on demand. The collapsed **form** is the one to reach for on
 **cloud / account-skill / context-budget-constrained** surfaces; the standalone
 form keeps the richest top-level discoverability. Install **one form, not both**.
@@ -100,7 +100,7 @@ both.
 
 ## How updates reach you
 
-All 35 skills load with provenance intact, and updates ship with every merged
+All 37 skills load with provenance intact, and updates ship with every merged
 commit (commit-SHA versioning — no version bumps). Which install path you used
 decides how those updates arrive:
 

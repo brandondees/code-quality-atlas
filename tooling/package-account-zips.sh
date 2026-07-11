@@ -17,7 +17,7 @@
 #
 # Usage:
 #   tooling/package-account-zips.sh                 # one ZIP per skill -> dist/account-skills/
-#   tooling/package-account-zips.sh --collapsed     # the 4 collapsed entrypoints instead of the 35 skills
+#   tooling/package-account-zips.sh --collapsed     # the 4 collapsed entrypoints instead of the 37 skills
 #   tooling/package-account-zips.sh --bundle        # also a single all-skills archive (NOT GUI-uploadable)
 #   tooling/package-account-zips.sh --bundle-only   # only that archive
 #   tooling/package-account-zips.sh --out DIR        # write ZIPs to DIR
@@ -35,7 +35,7 @@ OUT_DIR="dist/account-skills"
 EMIT_PER_SKILL=1
 EMIT_BUNDLE=0
 BUNDLE_NAME="code-quality-atlas-skills.zip"
-# Which tree to package: the 35 standalone skills (default) or the 4 collapsed
+# Which tree to package: the 37 standalone skills (default) or the 4 collapsed
 # entrypoints (--collapsed). Both live under the repo root.
 SKILLS_SUBDIR="skills"
 
@@ -49,7 +49,7 @@ evals/ is excluded. Run from anywhere inside the repo.
 
 Options:
   --collapsed    Package the 4 collapsed entrypoints (collapsed/skills/) instead
-                 of the 35 standalone skills (skills/)
+                 of the 37 standalone skills (skills/)
   --bundle       Also emit a single all-skills archive (convenience; the
                  claude.ai GUI will NOT accept a multi-skill ZIP)
   --bundle-only  Emit ONLY that archive, no per-skill ZIPs
