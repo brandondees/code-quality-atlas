@@ -178,7 +178,7 @@ is unaddressed by design, not by oversight.
 
 **Disposition: design approved 2026-06-25 → [`collapsed-entrypoints-and-depth-modes.md`](collapsed-entrypoints-and-depth-modes.md); ✅ BUILT 2026-06-26 (PR #80).**
 Resolved as **dual-emit**: the manifest stays the single source; `generate.py` keeps emitting the
-35 standalone skills *and* adds a **collapsed form** of **4 entrypoints by review shape**
+37 standalone skills *and* adds a **collapsed form** of **4 entrypoints by review shape**
 (change / repo-audit / decision / artifact), both committed and marketplace-installable (a
 second plugin), so either form installs and auto-updates. The collapsed entrypoints absorb the
 router + synthesizer and load lenses as on-demand bundled `reference/lenses/*.md`. The design also

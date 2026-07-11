@@ -134,17 +134,17 @@ specifics:
 upload-ready zips with exactly that inclusion rule:
 
 ```bash
-tooling/package-account-zips.sh               # 36 zips -> dist/account-skills/
+tooling/package-account-zips.sh               # 37 zips -> dist/account-skills/
 tooling/package-account-zips.sh --collapsed   # 4 zips (the collapsed entrypoints)
 ```
 
 The `--collapsed` flag packages the **4 collapsed entrypoints**
-(`collapsed/skills/`) instead of the 36 standalone skills — far fewer GUI uploads,
-with the lenses bundled and loaded on demand. Pick **one form**: the 36 standalone
+(`collapsed/skills/`) instead of the 37 standalone skills — far fewer GUI uploads,
+with the lenses bundled and loaded on demand. Pick **one form**: the 37 standalone
 skills *or* the 4 collapsed entrypoints, not both (see *Two forms* below).
 
 There is **no bulk path** through the GUI: no multi-skill zip, and (per the note
-below) no usable API. The ~36 uploads are unavoidable today, which is the cost
+below) no usable API. The ~37 uploads are unavoidable today, which is the cost
 that motivates the structural rethink in
 [`open-questions.md`](open-questions.md) (fewer top-level skills, more nesting).
 
@@ -185,12 +185,12 @@ code-quality-atlas clone:
 
 ```bash
 # from inside the code-quality-atlas clone; pass the OTHER repo
-tooling/vendor-skills.sh ~/code/my-service              # 36 standalone skills
+tooling/vendor-skills.sh ~/code/my-service              # 37 standalone skills
 tooling/vendor-skills.sh ~/code/my-service --collapsed  # OR the 4 collapsed entrypoints
 ( cd ~/code/my-service && git add .claude/skills && git commit -m "vendor code-quality-atlas review suite" )
 ```
 
-`--collapsed` vendors the 4 collapsed entrypoints instead of the 36 standalone
+`--collapsed` vendors the 4 collapsed entrypoints instead of the 37 standalone
 skills. **Vendor one form, not both** — the two cover the same lenses.
 
 `skulto install brandondees/code-quality-atlas -y` run inside the target repo is
@@ -218,7 +218,7 @@ expect the plugin to appear in cloud sessions — it won't.
   idempotently, ready to commit. `--prune` safely drops only previously-vendored
   skills that have left the suite (tracked via a `.atlas-vendored` marker; never
   touches the target repo's own skills). `--collapsed` vendors the 4
-  collapsed entrypoints instead of the 36 standalone skills. The `skulto` flow
+  collapsed entrypoints instead of the 37 standalone skills. The `skulto` flow
   above is an alternative.
 
 ```bash
