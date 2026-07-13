@@ -6,9 +6,9 @@
 # structural quirk: with dozens of skills installed, individual skill
 # descriptions can be dropped from the model's skill listing (it is budgeted to
 # ~1% of context and not re-injected after /compact), which makes the lenses
-# easy to overlook on a fresh "review this" request. additionalContext is
-# injected verbatim before the first prompt, so it is reliable where the skill
-# listing is not.
+# easy to overlook on a fresh "review this" request. The hook's
+# additionalContext field is injected verbatim before the first prompt, so it
+# is reliable where the skill listing is not.
 #
 # This hook is deliberately side-effect-free: it writes nothing to disk and only
 # prints JSON to stdout. It does not touch the consumer's repository.
