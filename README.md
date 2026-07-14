@@ -26,7 +26,7 @@ scenarios:
   for architecture, dependencies, config/build, docs, compliance,
   infrastructure-as-code, decision-record currency, a decision-time lens, and an
   artifact lens that reviews authored artifacts like `SKILL.md` against their own
-  standard, and 9 more). Each
+  standard, and 11 more). Each
   leads with a one-line tagline, runs on its own, and carries its full checklist in
   `reference/heuristics.md` (the artifact lens uses artifact-specific rubric files
   instead); the narrowly-scoped lenses add an explicit *Skip when…* clause so the
