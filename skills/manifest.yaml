@@ -1049,9 +1049,9 @@ entrypoints:
     description: >
       Run a whole-repository health audit with the code-quality-atlas repo-shaped
       audits (architecture, dependencies, config/build, docs, compliance,
-      enforcement, infrastructure-as-code, maintainability hotspots). Use for a
-      scheduled or on-demand repo audit, not a single diff. Runs the applicable
-      audits and synthesizes one report.
+      enforcement, infrastructure-as-code, decision-record currency,
+      maintainability hotspots). Use for a scheduled or on-demand repo audit, not
+      a single diff. Runs the applicable audits and synthesizes one report.
     shapes: [repo]
   - name: reviewing-a-decision
     description: >
