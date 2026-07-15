@@ -194,6 +194,109 @@ def test_load_manifest_defaults_tier_when_absent():
     m = load_manifest("tests/fixtures/manifest_sample.yaml")
     assert m.skills[0].tier == "preference"
 
+def test_load_manifest_treats_bare_cross_ref_as_empty_list(tmp_path):
+    # #140: a bare "cross_ref:" (no value) parses as YAML null, not [] --
+    # dict.get(key, []) only substitutes the default when the key is
+    # *absent*, so a present-but-null key used to crash validate()'s
+    # `for c in s.cross_ref:` with a bare TypeError.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    cross_ref:\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
+    m = load_manifest(path)
+    assert m.skills[0].cross_ref == []
+    validate(m)  # no raise
+
+def test_load_manifest_treats_bare_artifacts_as_empty_list(tmp_path):
+    # #140: same YAML-null-vs-absent-key gap for "artifacts:" on a
+    # diff-shaped skill, where it used to crash inside load_manifest's own
+    # list comprehension before validate() was even reached.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    artifacts:\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
+    m = load_manifest(path)
+    assert m.skills[0].artifacts == []
+    validate(m)  # no raise
+
+def test_load_manifest_rejects_non_list_cross_ref(tmp_path):
+    # Review follow-up on #140/#142: `or []` would have silently normalized
+    # any falsy value (not just null) into an empty list, hiding a malformed
+    # manifest instead of raising. `cross_ref: false` must still error.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    cross_ref: false\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
+    with pytest.raises(ValidationError, match="'cross_ref' must be a list"):
+        load_manifest(path)
+
+def test_load_manifest_rejects_non_list_artifacts(tmp_path):
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    artifacts: \"\"\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
+    with pytest.raises(ValidationError, match="'artifacts' must be a list"):
+        load_manifest(path)
+
+def test_load_manifest_treats_bare_picker_as_empty_string(tmp_path):
+    # Review follow-up on #142: picker=s.get("picker", "").strip() has the
+    # same bare-null gap cross_ref/artifacts had -- .get(key, "") only
+    # substitutes "" when the key is *absent*, not present-but-null, so a
+    # bare "picker:" used to crash with AttributeError: 'NoneType' object
+    # has no attribute 'strip'.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    picker:\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
+    m = load_manifest(path)
+    assert m.skills[0].picker == ""
+
+def test_load_manifest_treats_bare_description_as_empty_string(tmp_path):
+    # Same crash class, one field over: description is required (KeyError
+    # caught if the key is absent), but a *present* bare "description:"
+    # null slipped past that guard the same way picker's did.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description:\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
+    m = load_manifest(path)
+    assert m.skills[0].description == ""
+
 def test_validate_rejects_unresolvable_source():
     bad = _skill(built_from=[Source(99, "tests/fixtures/research_sample.md#99")])
     with pytest.raises(ValidationError, match="section #99"):
