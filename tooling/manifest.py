@@ -377,6 +377,21 @@ def _raise_truncation(path: str, line_no: int, key: str) -> None:
         f'(e.g. note: "… pairs with #16 …").')
 
 
+def _list_field(s: dict, key: str, skill_index: int) -> list:
+    # A missing key or an explicit YAML null (bare "key:") both normalize to
+    # [] -- but any other non-list value (e.g. `cross_ref: false`) is a
+    # malformed manifest, not a normalization case, and must raise the same
+    # actionable ValidationError every other malformed field gets here (#140,
+    # #142 review).
+    value = s.get(key)
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValidationError(
+            f"skill #{skill_index}: {key!r} must be a list, got {type(value).__name__}")
+    return value
+
+
 def load_manifest(path: str) -> Manifest:
     with open(path, encoding="utf-8") as fh:
         raw = fh.read()
@@ -400,7 +415,7 @@ def load_manifest(path: str) -> Manifest:
             built = [Source(category=b["category"], source=b["source"]) for b in s["built_from"]]
             artifacts = [Artifact(name=a["name"], detect=a["detect"],
                                   rubric=a["rubric"], slug=a["slug"])
-                         for a in (s.get("artifacts") or [])]
+                         for a in _list_field(s, "artifacts", i)]
             skills.append(Skill(
                 name=s["name"],
                 description=s["description"].strip(),
@@ -408,7 +423,7 @@ def load_manifest(path: str) -> Manifest:
                 wave=s["wave"],
                 built_from=built,
                 primary_owner=s.get("primary_owner"),
-                cross_ref=s.get("cross_ref") or [],
+                cross_ref=_list_field(s, "cross_ref", i),
                 design=s.get("design", False),
                 picker=s.get("picker", "").strip(),
                 artifacts=artifacts,
