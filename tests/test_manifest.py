@@ -262,6 +262,41 @@ def test_load_manifest_rejects_non_list_artifacts(tmp_path):
     with pytest.raises(ValidationError, match="'artifacts' must be a list"):
         load_manifest(path)
 
+def test_load_manifest_treats_bare_picker_as_empty_string(tmp_path):
+    # Review follow-up on #142: picker=s.get("picker", "").strip() has the
+    # same bare-null gap cross_ref/artifacts had -- .get(key, "") only
+    # substitutes "" when the key is *absent*, not present-but-null, so a
+    # bare "picker:" used to crash with AttributeError: 'NoneType' object
+    # has no attribute 'strip'.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    picker:\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
+    m = load_manifest(path)
+    assert m.skills[0].picker == ""
+
+def test_load_manifest_treats_bare_description_as_empty_string(tmp_path):
+    # Same crash class, one field over: description is required (KeyError
+    # caught if the key is absent), but a *present* bare "description:"
+    # null slipped past that guard the same way picker's did.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description:\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
+    m = load_manifest(path)
+    assert m.skills[0].description == ""
+
 def test_validate_rejects_unresolvable_source():
     bad = _skill(built_from=[Source(99, "tests/fixtures/research_sample.md#99")])
     with pytest.raises(ValidationError, match="section #99"):

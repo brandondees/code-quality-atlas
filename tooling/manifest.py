@@ -418,14 +418,21 @@ def load_manifest(path: str) -> Manifest:
                          for a in _list_field(s, "artifacts", i)]
             skills.append(Skill(
                 name=s["name"],
-                description=s["description"].strip(),
+                # description is a required key (KeyError -> ValidationError
+                # below if absent), but a *present* bare `description:` null
+                # slips past that guard -- `None.strip()` would crash the
+                # same way picker's did (review follow-up on #142).
+                description=(s["description"] or "").strip(),
                 shape=s["shape"],
                 wave=s["wave"],
                 built_from=built,
                 primary_owner=s.get("primary_owner"),
                 cross_ref=_list_field(s, "cross_ref", i),
                 design=s.get("design", False),
-                picker=s.get("picker", "").strip(),
+                # Same bare-null gap as cross_ref/artifacts: .get(key, "")
+                # only substitutes "" when the key is absent, not when it's
+                # present-but-null (#142 review).
+                picker=(s.get("picker") or "").strip(),
                 artifacts=artifacts,
                 tier=s.get("tier", "preference"),
             ))
