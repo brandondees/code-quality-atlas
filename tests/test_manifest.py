@@ -194,6 +194,43 @@ def test_load_manifest_defaults_tier_when_absent():
     m = load_manifest("tests/fixtures/manifest_sample.yaml")
     assert m.skills[0].tier == "preference"
 
+def test_load_manifest_treats_bare_cross_ref_as_empty_list(tmp_path):
+    # #140: a bare "cross_ref:" (no value) parses as YAML null, not [] --
+    # dict.get(key, []) only substitutes the default when the key is
+    # *absent*, so a present-but-null key used to crash validate()'s
+    # `for c in s.cross_ref:` with a bare TypeError.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    cross_ref:\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
+    m = load_manifest(path)
+    assert m.skills[0].cross_ref == []
+    validate(m)  # no raise
+
+def test_load_manifest_treats_bare_artifacts_as_empty_list(tmp_path):
+    # #140: same YAML-null-vs-absent-key gap for "artifacts:" on a
+    # diff-shaped skill, where it used to crash inside load_manifest's own
+    # list comprehension before validate() was even reached.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    artifacts:\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
+    m = load_manifest(path)
+    assert m.skills[0].artifacts == []
+    validate(m)  # no raise
+
 def test_validate_rejects_unresolvable_source():
     bad = _skill(built_from=[Source(99, "tests/fixtures/research_sample.md#99")])
     with pytest.raises(ValidationError, match="section #99"):

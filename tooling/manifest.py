@@ -400,7 +400,7 @@ def load_manifest(path: str) -> Manifest:
             built = [Source(category=b["category"], source=b["source"]) for b in s["built_from"]]
             artifacts = [Artifact(name=a["name"], detect=a["detect"],
                                   rubric=a["rubric"], slug=a["slug"])
-                         for a in s.get("artifacts", [])]
+                         for a in (s.get("artifacts") or [])]
             skills.append(Skill(
                 name=s["name"],
                 description=s["description"].strip(),
@@ -408,7 +408,7 @@ def load_manifest(path: str) -> Manifest:
                 wave=s["wave"],
                 built_from=built,
                 primary_owner=s.get("primary_owner"),
-                cross_ref=s.get("cross_ref", []),
+                cross_ref=s.get("cross_ref") or [],
                 design=s.get("design", False),
                 picker=s.get("picker", "").strip(),
                 artifacts=artifacts,
