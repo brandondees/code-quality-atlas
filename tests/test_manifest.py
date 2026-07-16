@@ -471,6 +471,80 @@ def test_load_manifest_treats_bare_router_description_as_empty_string(tmp_path):
     assert m.router.description == ""
 
 
+def test_load_manifest_treats_bare_router_body_as_empty_string(tmp_path):
+    # Same bare-null gap, one field over: router.body=r.get("body", "")
+    # only substitutes "" when the key is absent, not when it's
+    # present-but-null, so `.strip()` would crash on None (CodeRabbit
+    # review on #145).
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    picker: p\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        "router:\n"
+        "  name: choosing-review-lenses\n"
+        "  description: d\n"
+        "  routes:\n"
+        "    - when: Bug fix\n"
+        "      run: [hunting-silent-failures]\n"
+        "  body:\n")
+    m = load_manifest(path)
+    assert m.router.body == ""
+
+
+def test_load_manifest_treats_bare_route_note_as_empty_string(tmp_path):
+    # Same bare-null gap, on a route's note field: note=x.get("note", "")
+    # only substitutes "" when the key is absent, not when it's
+    # present-but-null, leaking None where a str is expected (CodeRabbit
+    # review on #145).
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    picker: p\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        "router:\n"
+        "  name: choosing-review-lenses\n"
+        "  description: d\n"
+        "  routes:\n"
+        "    - when: Bug fix\n"
+        "      run: [hunting-silent-failures]\n"
+        "      note:\n")
+    m = load_manifest(path)
+    assert m.router.routes[0].note == ""
+
+
+def test_load_manifest_treats_bare_router_routes_as_empty_list(tmp_path):
+    # A present-but-null "routes:" key used to crash `for x in
+    # r["routes"]` with TypeError: 'NoneType' object is not iterable
+    # (CodeRabbit review on #145).
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    picker: p\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        "router:\n"
+        "  name: choosing-review-lenses\n"
+        "  description: d\n"
+        "  routes:\n")
+    m = load_manifest(path)
+    assert m.router.routes == []
+
+
 from tooling.manifest import Synthesizer, Tension
 
 def _two_lens_skills():
@@ -565,6 +639,30 @@ def test_load_manifest_treats_bare_tension_about_and_resolve_as_empty_string(tmp
     m = load_manifest(path)
     assert m.synthesizer.tensions[0].about == ""
     assert m.synthesizer.tensions[0].resolve == ""
+
+
+def test_load_manifest_treats_bare_synthesizer_tensions_as_empty_list(tmp_path):
+    # A present-but-null "tensions:" key used to crash the list
+    # comprehension `for t in sy.get("tensions", [])` with TypeError:
+    # 'NoneType' object is not iterable -- .get(key, []) only substitutes
+    # [] when the key is *absent*, not present-but-null (CodeRabbit
+    # review on #145).
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        "synthesizer:\n"
+        "  name: synthesizing-review-findings\n"
+        "  description: d\n"
+        "  severity_order: [Blocker, Major, Minor, Nit]\n"
+        "  tensions:\n")
+    m = load_manifest(path)
+    assert m.synthesizer.tensions == []
 
 
 # --- Depth modes (Plan 1) ---
@@ -679,6 +777,27 @@ def test_load_manifest_treats_bare_mode_note_as_empty_string(tmp_path):
     assert m.modes[0].note == ""
 
 
+def test_load_manifest_treats_bare_mode_triggers_as_empty_list(tmp_path):
+    # A present-but-null "triggers:" key used to crash
+    # `list(raw_mode.get("triggers", []))` with TypeError: 'NoneType'
+    # object is not iterable -- .get(key, []) only substitutes [] when
+    # the key is absent, not present-but-null (CodeRabbit review on
+    # #145). Downstream, validate() requires modes to have at least one
+    # trigger, so this manifest is expected to load but then fail
+    # validation with a clear message rather than crash at load time.
+    body = (
+        "modes:\n"
+        "  - name: triage\n"
+        "    breadth: critical tier only\n"
+        "    floor: Major\n"
+        "    triggers:\n"
+    )
+    m = load_manifest(_manifest_with_body(tmp_path, body))
+    assert m.modes[0].triggers == []
+    with pytest.raises(ValidationError, match="trigger"):
+        validate(m)
+
+
 # --- Collapsed entrypoints (Plan 2) ---
 
 def test_load_manifest_parses_entrypoints(tmp_path):
@@ -716,6 +835,22 @@ def test_load_manifest_treats_bare_entrypoint_description_as_empty_string(tmp_pa
     )
     m = load_manifest(_manifest_with_body(tmp_path, body))
     assert m.entrypoints[0].description == ""
+
+
+def test_load_manifest_treats_bare_entrypoint_body_as_empty_string(tmp_path):
+    # Same bare-null gap, one field over: entrypoint.body=raw_ep.get(
+    # "body", "") only substitutes "" when the key is absent, not when
+    # it's present-but-null, so `.strip()` would crash on None
+    # (CodeRabbit review on #145).
+    body = (
+        "entrypoints:\n"
+        "  - name: reviewing-a-change\n"
+        "    description: d\n"
+        "    shapes: [diff]\n"
+        "    body:\n"
+    )
+    m = load_manifest(_manifest_with_body(tmp_path, body))
+    assert m.entrypoints[0].body == ""
 
 
 def _eps():

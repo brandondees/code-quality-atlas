@@ -450,9 +450,17 @@ def load_manifest(path: str) -> Manifest:
                 # a present-but-null "description:" slips past the KeyError
                 # guard and would crash `.strip()` on None.
                 description=(r["description"] or "").strip(),
-                routes=[Route(when=x["when"], run=x["run"], note=x.get("note", ""))
-                        for x in r["routes"]],
-                body=r.get("body", "").strip(),
+                # Same bare-null gap, two fields over: a present-but-null
+                # "routes:" would crash `for x in r["routes"]` with
+                # TypeError, and a present-but-null "note:" on a route
+                # would leak None past a caller expecting str (CodeRabbit
+                # review on #145).
+                routes=[Route(when=x["when"], run=x["run"], note=x.get("note") or "")
+                        for x in (r["routes"] or [])],
+                # Same bare-null gap as description above: .get(key, "")
+                # only substitutes "" when the key is absent, not when
+                # it's present-but-null (CodeRabbit review on #145).
+                body=(r.get("body") or "").strip(),
             )
         except KeyError as e:
             raise ValidationError(f"router: missing field {e}") from e
@@ -472,7 +480,11 @@ def load_manifest(path: str) -> Manifest:
                                   # required prose fields (#142 review).
                                   about=(t["about"] or "").strip(),
                                   resolve=(t["resolve"] or "").strip())
-                          for t in sy.get("tensions", [])],
+                          # .get(key, []) only substitutes [] when the key
+                          # is absent, not when it's present-but-null; a
+                          # bare "tensions:" would crash the iteration with
+                          # TypeError (CodeRabbit review on #145).
+                          for t in (sy.get("tensions") or [])],
             )
         except KeyError as e:
             raise ValidationError(f"synthesizer: missing field {e}") from e
@@ -483,7 +495,10 @@ def load_manifest(path: str) -> Manifest:
                 name=raw_mode["name"],
                 breadth=raw_mode["breadth"],
                 floor=raw_mode["floor"],
-                triggers=list(raw_mode.get("triggers", [])),
+                # Same bare-null gap as tensions above: a present-but-null
+                # "triggers:" would crash `list(...)` with TypeError
+                # (CodeRabbit review on #145).
+                triggers=list(raw_mode.get("triggers") or []),
                 # Same bare-null gap as skill.picker (#142 review): .get(key,
                 # "") only substitutes "" when the key is absent, not when
                 # it's present-but-null. A bare "note:" doesn't crash here
@@ -510,7 +525,10 @@ def load_manifest(path: str) -> Manifest:
                 description=(raw_ep["description"] or "").strip(),
                 shapes=list(shapes),
                 include_design=bool(raw_ep.get("include_design", False)),
-                body=raw_ep.get("body", "").strip(),
+                # Same bare-null gap as description above: .get(key, "")
+                # only substitutes "" when the key is absent, not when
+                # it's present-but-null (CodeRabbit review on #145).
+                body=(raw_ep.get("body") or "").strip(),
             ))
         except (KeyError, TypeError) as e:
             raise ValidationError(f"entrypoints[{i}] in {path}: malformed entrypoint ({e})")
