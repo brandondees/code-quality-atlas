@@ -215,10 +215,14 @@ tools available):
   (`<!-- atlas-review round:N -->` with your same N).** Two fires can legitimately
   overlap on the same PR (a fix pushed and re-fired before the previous fire's
   session has finished) — if a review already carries that marker, another
-  session won this race while you were working; silently discard your draft and
-  exit without posting rather than double-posting a duplicate or conflicting
-  round. This is not an error state, just two fires racing on one PR — nothing to
-  report or retry.
+  session won this race while you were working; **call `pull_request_review_write`
+  with `method: delete_pending` to release the pending review you built via
+  `add_comment_to_pending_review`/`create`, then exit without posting.** GitHub
+  allows only one pending review per user per PR — abandoning your draft without
+  deleting it leaves it dangling under the reviewer's identity and can break the
+  *next* fire's own `create` call for round N+1. This is not an error state, just
+  two fires racing on one PR — nothing to report or retry, just clean up before
+  you exit.
 
   After posting, **exit** — do not subscribe to the PR's activity, do not
   schedule a self-check-in, do not wait around for the next push. The next review
@@ -342,10 +346,12 @@ a single scheduled run checks them all:
      to compare against and would false-positive on a PR still mid-flight on
      round 1), compare HEAD against the commit the MOST RECENT round review was
      posted against — if HEAD has moved past it with no unaddressed
-     <!-- atlas-coverage-poke --> already there, first check for an
-     <!-- atlas-review-skip --> marker comment posted after that commit: if one
-     exists, the author already triaged this push as not warranting re-review —
-     skip silently, do NOT poke. Otherwise post one issue comment marked
+     <!-- atlas-coverage-poke --> already there, first check for a comment posted
+     after that commit whose body CONTAINS "<!-- atlas-review-skip" as a prefix
+     (it's always followed by ": reason -->", never posted bare — match the
+     prefix, not the full marker verbatim): if one exists, the author already
+     triaged this push as not warranting re-review — skip silently, do NOT poke.
+     Otherwise post one issue comment marked
      <!-- atlas-coverage-poke --> flagging that review coverage may have lapsed;
      do NOT review it yourself. Skip PRs with no ack, or an ack but no round
      review yet (not picked up / still in flight, not lapsed).
