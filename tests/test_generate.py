@@ -682,3 +682,112 @@ def test_build_synthesizer_md_includes_acknowledged_deviation_clause():
     md = build_synthesizer_md(_manifest_with_synthesizer())
     assert "acknowledged deviation" in md
     assert "`suppress`ed preference-tier finding never" in md
+
+
+# --- #141: escape literal "|" (and collapse embedded newlines) in generated
+# Markdown pipe-table cells. Unescaped, a literal "|" in a manifest-sourced
+# prose field splits the row into an extra column; an embedded newline (e.g.
+# from a YAML "|"-style block scalar) breaks the row structure entirely.
+
+import re
+
+
+def _row_columns(line):
+    """Split a rendered Markdown table row on UNESCAPED pipes only (a `\\|`
+    doesn't count as a column delimiter), dropping the empty fragments before
+    the leading and after the trailing pipe. Lets a test assert the row still
+    has the right column count even when a cell's content contains an
+    escaped pipe."""
+    parts = re.split(r"(?<!\\)\|", line)
+    return parts[1:-1]
+
+
+def test_escape_table_cell_escapes_pipe_and_collapses_newlines():
+    from tooling.generate import _escape_table_cell
+    assert _escape_table_cell("a | b") == "a \\| b"
+    assert _escape_table_cell("a\nb") == "a b"
+    assert _escape_table_cell("a\n\nb  c") == "a b c"
+    assert _escape_table_cell("plain text") == "plain text"
+
+
+def test_build_skill_md_artifact_table_escapes_pipe_and_newline():
+    # D15 artifact-table row (issue #141): `a.name` / `a.detect` are
+    # manifest-sourced prose and must not be interpolated raw.
+    from tooling.manifest import Artifact
+    skill = _skill(shape="artifact", artifacts=[
+        Artifact(name="Weird | Artifact", detect="a file with a\nnewline and | pipe",
+                 rubric=2, slug="weird-artifact"),
+    ])
+    md = build_skill_md(skill, taxonomy_version="v0.2", docs_root=".")
+    row = next(line for line in md.splitlines() if line.startswith("| Weird"))
+    assert len(_row_columns(row)) == 3          # name | detect | rubric link
+    assert "Weird \\| Artifact" in md            # pipe escaped
+    assert "a file with a newline and \\| pipe" in md  # newline collapsed, pipe escaped
+    assert "\n" not in row                       # the row itself is a single line
+
+
+def test_build_router_md_escapes_pipe_and_newline_in_route_when_and_note():
+    m = _manifest_with_router()
+    m.router.routes.append(Route(when="Reviewing a | weird change\nacross files",
+                                 run=["hunting-silent-failures"],
+                                 note="see also | this note"))
+    md = build_router_md(m)
+    row = next(line for line in md.splitlines() if "Reviewing a \\| weird change" in line)
+    assert len(_row_columns(row)) == 2           # when | run
+    assert "Reviewing a \\| weird change across files" in md
+    assert "see also \\| this note" in md
+
+
+def test_build_entrypoint_md_escapes_pipe_and_newline_in_route_fields():
+    from tooling.manifest import Entrypoint
+    from tooling.generate import build_entrypoint_md
+    skill = _skill(picker="Where do errors vanish?")
+    router = Router(
+        name="choosing-review-lenses", description="route",
+        routes=[Route(when="Reviewing a | weird change",
+                      run=["hunting-silent-failures"],
+                      note="see also | this note\nwith a newline")],
+    )
+    ep = Entrypoint(name="reviewing-a-change", description="review a change", shapes=["diff"])
+    m = Manifest("v0", [skill], router=router, entrypoints=[ep])
+    md = build_entrypoint_md(m, ep)
+    row = next(line for line in md.splitlines() if "Reviewing a \\| weird change" in line)
+    assert len(_row_columns(row)) == 2           # when | run
+    assert "see also \\| this note with a newline" in md
+
+
+def test_build_synthesizer_md_escapes_pipe_and_newline_in_tension_fields():
+    m = _manifest_with_synthesizer()
+    m.synthesizer.tensions.append(
+        Tension(between=["hunting-silent-failures", "checking-restraint"],
+                about="a weird | disagreement", resolve="prefer\n| safety"))
+    md = build_synthesizer_md(m)
+    row = next(line for line in md.splitlines() if "a weird \\| disagreement" in line)
+    assert len(_row_columns(row)) == 3           # lens <-> lens | about | resolve
+    assert "prefer \\| safety" in md              # newline collapsed, pipe escaped
+
+
+def test_modes_section_escapes_pipe_in_breadth_and_triggers():
+    modes = [Mode(name="triage", breadth="the critical | tier only", floor="Major",
+                  triggers=["quick | review"])]
+    md = modes_section(_router_manifest(modes))
+    row = next(line for line in md.splitlines() if line.startswith("| **triage**"))
+    assert len(_row_columns(row)) == 3           # mode | breadth | triggers
+    assert "the critical \\| tier only" in md
+    assert "quick \\| review" in md
+
+
+def test_mode_floor_policy_escapes_pipe_in_floor_value():
+    # `floor` is validated to be a value from the synthesizer's severity_order
+    # (or "escalating"), itself an unconstrained manifest-sourced list — a
+    # weird severity-level name could still carry a literal pipe.
+    from tooling.manifest import Synthesizer
+    syn = Synthesizer(name="synthesizing-review-findings", description="merge findings",
+                      severity_order=["Weird | Level", "Nit"], tensions=[])
+    m = Manifest("v0", [_skill(picker="p")], synthesizer=syn,
+                modes=[Mode(name="triage", breadth="b", floor="Weird | Level",
+                            triggers=["triage"])])
+    md = mode_floor_policy(m)
+    row = next(line for line in md.splitlines() if line.startswith("| **triage**"))
+    assert len(_row_columns(row)) == 3           # mode | floor | effect
+    assert "Weird \\| Level" in md
