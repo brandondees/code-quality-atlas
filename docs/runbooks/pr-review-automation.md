@@ -1,11 +1,22 @@
 # Runbook — Hands-off PR review automation
 
 This wires the atlas suite into a self-driving pull-request loop on **Claude Code
-on the web** (cloud sandbox sessions): a build session opens a PR and auto-fixes
-feedback, an event-triggered reviewer posts findings and re-reviews each push, and a
-scheduled poller covers the merge-conflict gap that webhooks don't. It replaces a
-manually spun-up second review session, and it isn't budget/rate-limited the way the
-CodeRabbit/Copilot PR integrations are.
+on the web** (cloud sandbox sessions): a build session opens a PR, **fires the
+reviewer itself** right after `create_pull_request` succeeds (and again after each
+fix push), and a scheduled poller covers the merge-conflict and coverage-lapse gaps
+that fires alone don't. It replaces a manually spun-up second review session, and
+it isn't budget/rate-limited the way the CodeRabbit/Copilot PR integrations are.
+
+**Why author-triggered, not a GitHub "PR opened" event trigger.** An earlier
+version of this runbook wired the reviewer off a GitHub-event trigger (`Pull
+request opened`). That's racy: the trigger only tells you *an* event fired, not
+which session should treat it as *the* review target, so PRs opening close
+together can get double-reviewed or skipped — and a routine can carry only one
+GitHub event, so `synchronize` couldn't ride along for re-review either. Having
+the **authoring agent itself** call `fire_trigger` with the exact `owner/repo#N`
+it just created removes the ambiguity entirely — the caller always knows which
+PR — and hands the author cadence control (re-fire after a fix push, skip a
+trivial one) instead of a passive webhook deciding for it.
 
 ## What's in the plugin vs. what you wire up
 
@@ -20,38 +31,47 @@ So:
 | `/atlas-review-pr` command | this plugin (`commands/`) | plugin install |
 | `/atlas-rebase-stale` command | this plugin (`commands/`) | plugin install |
 | `REVIEW.md` convergence policy | the **reviewed repo's** root | you copy `templates/REVIEW.md` |
-| Reviewer routine (GitHub trigger + watch instructions) | Claude Code web app | you, once (below) |
+| Reviewer routine (unscheduled, author-fired) | Claude Code web app | you, once (below) |
 | Poller routine (schedule trigger) | Claude Code web app | you, once (below) |
 | Build + auto-fix session | a live web session | you start it / your existing flow |
 
 ## The three moving parts
 
 ```text
-                 PR opened (GitHub trigger)
+                 fire_trigger("owner/repo#N")
 build+autofix ──────────────────────────►  reviewer routine
-  session     ◄──── inline findings ───────  one session: first review, then
-     ▲                                        subscribes & re-reviews each push
-     │  reacts to review comments / CI
+  session     ◄──── inline findings ───────  fresh session per fire: one review
+     ▲                                        round, then exits — no watching
+     │  reacts to review comments / CI,       (round state lives on GitHub, not
+     │  fires again after each fix push        in any session's memory)
      │
-     └──── poller routine (hourly/daily) ── rebases "behind" PRs, pokes conflicts
+     └──── poller routine (hourly/daily) ── rebases "behind" PRs, pokes conflicts,
+                                              flags review coverage that lapsed
 ```
 
 1. **Build + auto-fix session** — your existing flow. One web session opens the PR
    and watches it via PR-activity subscription (the `/autofix-pr` / "watch this PR"
-   mechanism), reacting to **new review comments and CI failures**. Nothing new here.
-2. **Reviewer routine** — a routine with a **GitHub trigger** on `Pull request
-   opened`. Fires within seconds of a PR opening, spins up one session that follows
-   the `atlas-review-pr` command (inlined in the routine prompt — slash commands
-   don't resolve in routine sessions, see [Setup](#setup)), then **stays resident and
-   watches the PR**, re-reviewing each push in the same session. A routine can carry only **one GitHub event** (see
-   [Setup §1](#1-reviewer-routine-event-driven-no-cron-lag)), so `synchronize` can't
-   be a second trigger here — the in-session subscription covers re-review instead.
-   The watch behavior lives in the routine's prompt, not the command, so it's set up
-   per-routine.
+   mechanism), reacting to **new review comments and CI failures**. That
+   subscription is unrelated plumbing that happens to fire on the same PR — see
+   [§1a](#1a-author-side-wiring-what-every-authoring-agent-must-do) for the one
+   thing that *is* new here: this session also fires the reviewer routine itself.
+2. **Reviewer routine** — an **unscheduled** routine (`create_new_session_on_fire`,
+   no `cron_expression`/`run_once_at`) created **once**. The **build+auto-fix
+   session fires it** (`fire_trigger`, `text: "owner/repo#N"`) immediately after
+   `create_pull_request` returns, and again after every fix push it makes. Each
+   fire spins up a **fresh, isolated session** that follows the `atlas-review-pr`
+   command (inlined in the routine prompt — slash commands don't resolve in
+   routine sessions, see [Setup](#setup)), runs **one review round**, and
+   **exits** — it never stays resident, so round state must come entirely from
+   GitHub (the `<!-- atlas-review round:N -->` markers), never from session
+   memory. No GitHub event trigger is involved at all, so there's nothing to
+   race: the fire always names the exact PR.
 3. **Poller routine** — a **scheduled** routine on a cheap fast model running the
    `atlas-rebase-stale` sweep (also inlined in the prompt). Catches PRs that fell
-   **behind or into conflict**, which GitHub never delivers as a webhook, so neither
-   (1) nor (2) can see them.
+   **behind or into conflict** (no webhook for either), and PRs whose HEAD moved
+   past the last reviewed round with no new fire in between — e.g. a human pushed
+   directly, or the authoring session died before it could call `fire_trigger`
+   again.
 
 ## Setup
 
@@ -87,44 +107,57 @@ build+autofix ──────────────────────
     atlas-review-pr.md` itself is **never vendored** (only skills are), so even a
     fully-vendored repo still fetches the command file this way — that's expected,
     not a gap.
-  - The routine prompt in [Setup §1](#1-reviewer-routine-event-driven-no-cron-lag)
+  - The routine prompt in [Setup §1](#1-reviewer-routine-author-triggered-no-race)
     below checks in that order — vendored copy, then account skills, then
     API-fetch — rather than assuming any one of them.
-- The **Claude GitHub App** installed on the repo (required for GitHub triggers).
-  The trigger setup prompts you to install it if it isn't already; if configuring
-  the trigger never prompts, it's already installed. Note that `/web-setup` grants
-  clone access but does **not** install the App or enable webhook delivery.
+- The **Claude GitHub App** installed on the repo — the reviewer session posts
+  reviews/comments through the GitHub API and needs read/write access to the PR
+  regardless of trigger type; attaching the repo to the routine is what unlocks
+  this. Note that `/web-setup` grants clone access but does **not** install the
+  App or enable API access on its own.
 - `cp templates/REVIEW.md REVIEW.md` in the reviewed repo, tune the floors/cap,
   commit it.
+- **Pin `environment_id` explicitly** when creating the reviewer Routine
+  (`list_environments` if you don't already have it) rather than relying on
+  whichever session happens to create it — every fire runs in that one
+  environment.
+- **Create the Routine idempotently.** Before creating, call `list_triggers`
+  (paginate with `cursor`, `limit` ≤ 100) and check for an existing Routine of
+  this shape (matching name, `create_new_session_on_fire: true`, no
+  `cron_expression`/`run_once_at`) bound to this repo — reuse its `trigger_id`
+  rather than creating a duplicate. Every authoring agent that opens a PR
+  against this repo needs that `trigger_id` to fire it, so record it wherever
+  the repo's automation config already lives (e.g. alongside `REVIEW.md`)
+  instead of re-discovering it via `list_triggers` on every PR.
 
-### 1. Reviewer routine (event-driven, no cron lag)
+### 1. Reviewer routine (author-triggered, no race)
 
-In the Claude Code web app → **Routines** → **New routine**:
+Created **once**, not per-PR. In the Claude Code web app → **Routines** → **New
+routine** (or via `create_trigger` from any session with `Claude_Code_Remote` MCP
+tools available):
 
 - **Name:** e.g. `Atlas PR reviewer`.
-- **Repository:** the reviewed repo. Selecting it is what **unlocks** the GitHub
-  trigger (it's greyed out until a repo is chosen).
+- **Repository:** the reviewed repo (needed for clone access and GitHub API
+  posting).
 - **Model:** a strong model (review quality matters here).
-- **Trigger:** **GitHub event** → **`Pull request opened`**.
-  - A routine allows **one GitHub event per trigger**, and **Add another trigger**
-    only offers Schedule/API — so you *cannot* put `opened` + `synchronize` on one
-    routine, and "Custom"/multi-select isn't available. Pick `opened` and let the
-    session watch for pushes itself (next bullet), or see the `synchronize`
-    alternative under [Known boundaries](#known-boundaries).
-  - Optionally add a **filter** (e.g. *Is draft = false*, or *Head branch contains
-    `claude/`*) so the reviewer only fires on PRs you actually want reviewed — each
-    fire is a run (see [Usage and run limits](#usage-and-run-limits)).
-- **Prompt / Instructions:** the slash command won't resolve (see the note above),
-  so the prompt **reads and follows the command file** from the clone, then adds an
-  in-session **watch block** so a single `opened`-triggered session re-reviews
-  subsequent pushes instead of exiting after the first pass. The command file is
-  written for the per-push-trigger model (it counts prior reviews via
-  `<!-- atlas-review round:N -->` markers); the watch block adapts it to one resident
-  session:
+- **Trigger:** **none.** No `cron_expression`, no `run_once_at`, no GitHub event —
+  set `create_new_session_on_fire: true` so every fire gets a **fresh session**,
+  never a shared or resident one. That isolation is what makes concurrent PRs
+  safe: two `fire_trigger` calls seconds apart spin up two independent sessions,
+  each scoped to the exact PR its `text` names, with no shared conversation state
+  to race over.
+- **Prompt / Instructions:** the slash command still won't resolve in a routine
+  session (see the note above), so the prompt **reads and follows the command
+  file** from the clone (or fetches it over the GitHub API), reviews **the PR
+  named in the appended fire text**, runs exactly **one round**, and **exits** —
+  no watch block, no resident subscription:
 
   ```text
-  You are the atlas reviewer for a pull request in this repo, running as an
-  unattended routine.
+  You are the atlas reviewer for a pull request, running as an unattended,
+  author-triggered routine. The PR to review is given in the text appended after
+  this prompt — a PR URL or "owner/repo#N". If no such text is present, stop and
+  say so; do not guess a PR, and do not treat any other PR you might happen to
+  have access to as the target.
 
   Locate the atlas suite before reviewing, checking in order and using the first
   that's available — don't assume any one of them without checking:
@@ -153,43 +186,23 @@ In the Claude Code web app → **Routines** → **New routine**:
   investigating and fixing CI failures or comments yourself, decline that
   mandate explicitly and stay in reviewer role; never push a commit here.
 
-  On round 1, before running lenses, post the one-line ACK (`<!-- atlas-review-ack -->`)
-  so the author knows a reviewer is attached — once per PR, not on later pushes.
-  Before posting it, check the PR's issue comments for an existing
-  `<!-- atlas-review-ack -->`; if one is already there, skip it regardless of what
-  memory says — a compacted or restarted session must not re-post it.
+  GitHub is the **only** source of truth for round state — you have no memory of
+  any earlier fire and never will, by design (each fire is a brand-new session).
+  Re-derive the current round from the PR's `<!-- atlas-review round:N -->`
+  markers (paginate through all reviews; the current round is the highest N seen,
+  plus one). Post the one-line ACK (`<!-- atlas-review-ack -->`) only if this is
+  round 1 and no ack already exists on the PR. Apply REVIEW.md's convergence
+  policy (round 1: all severities; round 2+: Major+), post inline only findings
+  that are NEW this round, and submit a single APPROVE (or its own-PR substitute)
+  the first time nothing new meets the floor.
 
-  After that first review, do not exit — stay resident and watch this PR until it
-  is merged or closed, so pushes get an instant re-review without waiting on a
-  poll cycle. Subscribe to its activity and re-run the review on each new push, in
-  this same session. GitHub is the source of truth for round state, not memory: on
-  each push, re-derive the current round from the `<!-- atlas-review round:N -->`
-  markers on your prior reviews (paginate through all reviews and use the highest N
-  seen + 1). Keep the round count and the findings you have already raised in
-  memory only as a performance cache, and always defer to GitHub when they differ —
-  especially after a `/compact`, which drops in-memory state and would otherwise
-  restart the loop from round 1, re-post the ACK, and re-raise settled findings.
-  Resolve threads that later pushes addressed, and never re-litigate ones that
-  still stand. Each round, apply REVIEW.md's convergence policy — raise the
-  severity floor once after the first pass and then hold it at Major (round 1:
-  all; round 2+: Major+, so genuine Majors keep getting surfaced), post inline
-  only findings that are NEW this round, and submit a single APPROVE (or its
-  own-PR substitute) the first time nothing new meets the floor. Approving does
-  NOT end your watch: stay subscribed and keep reviewing later pushes, so a
-  change pushed after you approved still gets reviewed. After an approval, only
-  speak again if a later push introduces a NEW finding at or above the floor —
-  stay silent on quiet pushes rather than re-posting APPROVE or re-dumping the
-  advisory list. Stop watching only when the PR is merged or closed, or the hard
-  round cap (default 10) is reached.
-
-  This session's own subscription is best-effort, not a durable guarantee — a bare
-  push with no CI/comment activity may not wake it, and the resident session
-  itself can be reclaimed after a period of inactivity, silently ending the watch
-  with no one told coverage lapsed. Don't try to patch this by self-scheduling
-  reminders inside this same session (a rearmed timer dies with its container the
-  same way the watch does) — instead rely on a separate scheduled poller routine
-  (below) that starts a fresh session per fire and doesn't depend on this one
-  staying alive.
+  After posting, **exit** — do not subscribe to the PR's activity, do not
+  schedule a self-check-in, do not wait around for the next push. The next review
+  round is triggered from outside this session: the authoring agent re-fires this
+  same routine after its next fix push, and a separate scheduled poller routine
+  catches any PR whose review coverage lapses because nobody re-fired. Staying
+  resident here would just recreate a second, redundant watch on top of those
+  two.
   ```
 
   **Generic instructions are a floor, not a ceiling — never let them silently
@@ -215,12 +228,44 @@ In the Claude Code web app → **Routines** → **New routine**:
   and **Save** — that edit sticks.
 - **Permissions:** leave **Allow unrestricted branch pushes** *off*. The reviewer
   only posts reviews/comments via the GitHub API; it never pushes commits.
+- **Notifications:** unlike a self-bind Routine, a `create_new_session_on_fire`
+  one supports `push`/`email` completion notifications (the `notifications`
+  param on `create_trigger`/`update_trigger`) — worth turning on if a human
+  should hear about a genuine Blocker/Major finding without checking the PR
+  themselves.
+
+### 1a. Author-side wiring (what every authoring agent must do)
+
+This half lives **outside** this plugin — it's a habit for whatever agent opens
+PRs against a repo wired this way, not something the reviewer Routine can enforce
+on its own:
+
+1. **Right after `create_pull_request` returns**, look up the reviewer Routine's
+   `trigger_id` (from wherever it's recorded per the Setup §0 idempotency bullet,
+   or `list_triggers` if it isn't recorded anywhere) and call
+   `fire_trigger(trigger_id, text: "owner/repo#N")` — the same identifier the
+   routine's prompt expects. Do this **in addition to**, not instead of,
+   `subscribe_pr_activity` (the `github` MCP server's tool): that subscription
+   drives the build session's own CI/comment-reaction loop and is unrelated
+   plumbing that happens to fire on the same PR, not a substitute for firing the
+   reviewer.
+2. **After pushing a fix in response to review feedback**, fire the same routine
+   again with the same PR reference — that's what earns the next review round, in
+   place of a webhook or a resident watch.
+3. **Skip firing** on a push that doesn't warrant a fresh look (a CI-only retry
+   with no code change, a trivial rebase) — the author controls cadence directly
+   now, so there's no passive trigger to override.
+4. Never repurpose `send_later`/self-check-in Routines for this — those are a
+   different, session-bound mechanism (a self-bind, `run_once_at` Routine that
+   always targets the *calling* session) and firing the reviewer through one
+   would nest a fresh review session inside the build session's own binding,
+   defeating the isolation this design exists for.
 
 ### 2. Poller routine (the conflict/stale/coverage backstop)
 
-A second routine. Unlike the reviewer's per-repo GitHub trigger, **one poller can
-sweep many repos at once** — attach every repo you want swept and a single scheduled
-run checks them all:
+A second routine. Unlike the reviewer (which is fired per-PR against one repo),
+**one poller can sweep many repos at once** — attach every repo you want swept and
+a single scheduled run checks them all:
 
 - **Trigger:** **Schedule**. The web presets are **hourly / daily / weekdays /
   weekly**, and the minimum interval is **one hour** — sub-hour schedules are
@@ -239,8 +284,9 @@ run checks them all:
   ```text
   Sweep the open pull requests across EVERY repository attached to this routine —
   the polling backstop for PRs that fell behind, hit a conflict (no webhook for
-  either), or slipped past a resident reviewer's watch (missed subscription
-  wakeup, or its session got reclaimed). All attached repos are cloned into the
+  either), or whose review coverage lapsed because nobody re-fired the reviewer
+  routine after the last push (the author skipped it, or the authoring session
+  died before it could). All attached repos are cloned into the
   workspace, so first enumerate them (e.g. from the workspace root,
   `for d in */; do git -C "$d" remote get-url origin 2>/dev/null; done`), then run the
   sweep below for EACH repo. The full spec is commands/atlas-rebase-stale.md; the
@@ -326,11 +372,13 @@ at the time of writing — read your real number at `claude.ai/settings/usage` o
 `claude.ai/code/routines`). The cap is **per account, shared across every routine**
 you own, and resets daily.
 
-- Each GitHub event that matches a trigger starts its **own session** — there's no
-  session reuse across events. With an `opened`-only reviewer that's **one run per
-  PR opened**; the in-session watch re-reviews subsequent pushes inside that
-  already-counted session, so pushes don't each cost a run. (A `synchronize` trigger
-  would cost one run *per push* — the reason we don't use it.)
+- Each `fire_trigger` call starts its **own fresh session** — there's no session
+  reuse across fires, by design (that isolation is the whole point). So the run
+  cost is **one run per fire**, and the author controls how many fires happen: one
+  at PR-open, one per fix push it decides warrants re-review. Skipping a trivial
+  push (a CI-only retry, a no-op rebase) costs nothing, unlike a `synchronize`
+  GitHub-event trigger, which would fire — and cost a run — on every push
+  unconditionally.
 - Exactly what increments the included-run counter is **not documented and observed
   to be fuzzy**: in testing, ~10 scheduled fires in a day did not increment it 1:1
   (the counter read 0/15 just after a reset, and ~7/15 by end of a prior day). Treat
@@ -339,14 +387,23 @@ you own, and resets daily.
 - With **usage credits** enabled, runs past the daily cap continue on metered
   overage (bounded by your monthly spend limit) rather than failing — so the loop
   doesn't silently starve; heavy days just cost credits.
-- Trigger **filters** are the lever to conserve runs: scope the reviewer to the PRs
-  you actually care about, and prefer the loosest poller cadence that still works.
+- The reviewer has no trigger filters to scope it — there's no GitHub-event
+  trigger at all in this design — so conserving runs is entirely the author's
+  judgment call (skip firing on pushes that don't need a fresh look). The poller
+  still benefits from the loosest cadence that still catches stale/lapsed PRs in
+  time.
 
 ## Known boundaries
 
-- **Per-account hourly caps** on GitHub-triggered sessions (research preview). A PR
-  that pushes many times an hour can starve the trigger; the escalating floor keeps
-  push volume down.
+- **No passive backstop if the author doesn't fire.** Unlike a GitHub-event
+  trigger, nothing here fires automatically on a bare push — if the authoring
+  session dies before calling `fire_trigger` again (reclaimed, crashed, or simply
+  never returns to the PR), or a human pushes directly to the PR without going
+  through an agent that knows to fire the reviewer, that push gets **no review at
+  all** until the poller notices. Tightening the poller's schedule (down to
+  hourly, the platform minimum) is the available lever if that gap matters more
+  than the extra runs — there is no faster GitHub-trigger alternative in this
+  design.
 - **Merge conflicts have no webhook** — only the poller catches them; it pokes (it
   does **not** auto-resolve, since that's a code judgment).
 - **Conflict pokes are review comments, so the author session sees them.** The GUI
@@ -360,22 +417,19 @@ you own, and resets daily.
   *resolving* a merge conflict may exceed what an auto-fix session does for a routine
   lint/CI fix — if it can't, the unresolved poke thread stays as a human-visible flag.
   (`behind` PRs are still auto-rebased with no comment.)
-- **CI *success* and bare pushes** aren't reliably delivered to a PR-activity
-  subscription, and the resident `opened`-triggered session isn't an
-  indefinitely-lived process either — cloud sessions get reclaimed after a
-  platform-defined inactivity limit, silently ending the watch (the ack comment
-  and prior reviews stay on the PR; nothing marks the watch as dead). Observed
-  directly: several resident-session watches in the wild ended with
-  `auto_disabled_session_gone` before their next scheduled check-in fired.
-  **Don't try to fix this from inside the resident session** — a self-rearmed
-  reminder is exactly as vulnerable to the container being reclaimed as the watch
-  it's meant to protect. The poller routine's coverage-check step (§2, backed by
-  `atlas-rebase-stale.md` §3) is the actual fix: it runs in a **fresh session per
-  scheduled fire**, so it isn't vulnerable to any prior session's container being
-  gone, and it flags (doesn't silently lose) a PR whose HEAD has moved past every
-  reviewed round. If closing the gap faster than the poller's cadence matters more
-  than the per-push run cost, swap the reviewer's trigger to **`Pull request
-  synchronize`** (one fresh run per push) instead of relying on a long-lived
-  `opened` watch at all.
-- A subscription/routine can't share context with the build session — they're
-  separate sessions communicating only through the PR (comments, reviews, commits).
+- **The reviewer session itself is not vulnerable to the old resident-watch
+  failure mode** (a long-lived session silently reclaimed after an inactivity
+  limit, ending the watch with nothing to mark it dead) — it never stays
+  resident, so there's nothing to reclaim between fires. **Don't try to
+  reintroduce a watch or a self-rearmed check-in inside the reviewer session** —
+  that would just recreate the failure mode this design removed. The poller
+  routine's coverage-check step (§2, backed by `atlas-rebase-stale.md` §3) is the
+  intended backstop instead: it runs in a **fresh session per scheduled fire**, so
+  it isn't vulnerable to any prior session's container being gone, and it flags
+  (doesn't silently lose) a PR whose HEAD has moved past every reviewed round with
+  no new fire in between.
+- A fired reviewer session shares **no** context with the build session or with
+  any of its own prior fires — they communicate only through the PR (comments,
+  reviews, commits, and the round markers). This is deliberate: it's exactly what
+  makes concurrent PRs safe, since no two fires can ever race over shared state
+  that doesn't exist.
