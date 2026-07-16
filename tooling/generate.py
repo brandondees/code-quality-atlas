@@ -24,6 +24,18 @@ _KIND_TITLE = {
     "references": "References to mine",
 }
 
+
+def _escape_table_cell(value: str) -> str:
+    """Escape a manifest-sourced prose field before interpolating it into a
+    Markdown pipe-table cell (#141). Unescaped, a literal `|` in the field
+    splits the row into an extra column — silently corrupting every column
+    after it — rather than failing loudly; an embedded newline (e.g. from a
+    YAML `|`-style block scalar) breaks the row structure outright. Collapse
+    any run of whitespace, including newlines, to a single space, then escape
+    `|` as `\\|` so it renders as a literal pipe inside the cell."""
+    return " ".join(value.split()).replace("|", "\\|")
+
+
 # Standing guidance prepended to every tool-rules.md. The named tools in each
 # list are concrete starting points, not a mandate — this keeps a reviewer from
 # cargo-culting a canonical-but-broken tool instead of finding the equivalent
@@ -241,7 +253,8 @@ def build_skill_md(skill: Skill, taxonomy_version: str, docs_root: str = ".",
     # (D15 — pay only when the artifact is present).
     if skill.shape == "artifact":
         rows = "\n".join(
-            f"| {a.name} | {a.detect} | [reference/{a.slug}.md](reference/{a.slug}.md) |"
+            f"| {_escape_table_cell(a.name)} | {_escape_table_cell(a.detect)} | "
+            f"[reference/{a.slug}.md](reference/{a.slug}.md) |"
             for a in skill.artifacts)
         core_block = (
             "## Artifacts\n\n"
@@ -498,8 +511,9 @@ def modes_section(manifest: Manifest) -> str:
         "|---|---|---|",
     ]
     for mode in manifest.modes:
-        triggers = ", ".join(f"\"{t}\"" for t in mode.triggers)
-        lines.append(f"| **{mode.name}** | {mode.breadth.strip()} | {triggers} |")
+        triggers = ", ".join(f"\"{_escape_table_cell(t)}\"" for t in mode.triggers)
+        lines.append(
+            f"| **{mode.name}** | {_escape_table_cell(mode.breadth.strip())} | {triggers} |")
     notes = [(m.name, m.note.strip()) for m in manifest.modes if m.note.strip()]
     if notes:
         lines.append("")
@@ -524,8 +538,8 @@ def build_router_md(manifest: Manifest) -> str:
     for route in r.routes:
         run = ", ".join(f"`{lens}`" for lens in route.run)
         if route.note:
-            run += f" — {route.note}"
-        rows.append(f"| {route.when} | {run} |")
+            run += f" — {_escape_table_cell(route.note)}"
+        rows.append(f"| {_escape_table_cell(route.when)} | {run} |")
     routes_table = "\n".join(rows)
 
     # Repo-shaped lenses that also auto-include at diff scope (see the How to
@@ -651,11 +665,12 @@ def mode_floor_policy(manifest: Manifest) -> str:
         "|---|---|---|",
     ]
     for mode in manifest.modes:
+        floor = _escape_table_cell(mode.floor)
         if mode.floor == "escalating":
             effect = "round-based escalation (as today) — later re-review rounds raise the floor"
         else:
-            effect = f"pinned at {mode.floor} — report everything down to {mode.floor}, nothing below"
-        lines.append(f"| **{mode.name}** | {mode.floor} | {effect} |")
+            effect = f"pinned at {floor} — report everything down to {floor}, nothing below"
+        lines.append(f"| **{mode.name}** | {floor} | {effect} |")
     return "\n".join(lines).rstrip() + "\n\n"   # block ends with a blank line; "" when no modes
 
 
@@ -676,7 +691,8 @@ def build_synthesizer_md(manifest: Manifest) -> str:
     severity = " > ".join(f"**{s}**" for s in sy.severity_order)
     top, *_ = sy.severity_order
     tension_rows = "\n".join(
-        f"| `{t.between[0]}` ↔ `{t.between[1]}` | {t.about} | {t.resolve} |"
+        f"| `{t.between[0]}` ↔ `{t.between[1]}` | {_escape_table_cell(t.about)} | "
+        f"{_escape_table_cell(t.resolve)} |"
         for t in sy.tensions)
     router_name = manifest.router.name if manifest.router else "choosing-review-lenses"
     body = (
@@ -928,8 +944,8 @@ def build_entrypoint_md(manifest: Manifest, entrypoint: Entrypoint) -> str:
             if any(lens in lens_names for lens in route.run):
                 run = ", ".join(f"`{lens}`" for lens in route.run if lens in lens_names)
                 if route.note:
-                    run += f" — {route.note}"
-                rows.append(f"| {route.when} | {run} |")
+                    run += f" — {_escape_table_cell(route.note)}"
+                rows.append(f"| {_escape_table_cell(route.when)} | {run} |")
     routes_table = "\n".join(rows) if rows else "| (any item in scope) | all lenses below |"
 
     # Each lens links to its loadable bundle, so the entrypoint can Read it on
