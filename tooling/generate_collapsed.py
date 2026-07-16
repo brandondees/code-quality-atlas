@@ -11,6 +11,7 @@ import yaml
 from pathlib import Path
 from tooling.manifest import Entrypoint, Manifest, Skill
 from tooling.generate_common import _escape_table_cell, _scope_line, build_reference, modes_section
+from tooling.generate_skill import build_artifact_rubric
 from tooling.generate_synthesizer import build_synthesizer_md
 
 
@@ -40,13 +41,33 @@ def _checklist_body(skill: Skill, docs_root: str = ".") -> str:
     return doc[idx:].strip() if idx != -1 else ""
 
 
+def _artifacts_block(skill: Skill) -> str:
+    """The `## Artifacts` detect→rubric table for an artifact-shaped lens's
+    bundle, mirroring build_skill_md's artifact branch but with links relative
+    to the bundle directory (the rubric files sit alongside body.md as
+    `<slug>.md`, not under a `reference/` subdirectory)."""
+    rows = "\n".join(
+        f"| {_escape_table_cell(a.name)} | {_escape_table_cell(a.detect)} | "
+        f"[{a.slug}.md]({a.slug}.md) |"
+        for a in skill.artifacts)
+    return (
+        "## Artifacts\n\n"
+        "Detect which artifact the change adds or touches, then open its rubric "
+        "and review the artifact against that published standard:\n\n"
+        "| Artifact | Activate when | Rubric to apply |\n"
+        "|---|---|---|\n"
+        f"{rows}\n\n")
+
+
 def lens_bundle_body(skill: Skill, docs_root: str = ".", skills_root: str = "skills") -> str:
     """The `body.md` an entrypoint loads for one lens: when-to-use + the full
-    heuristics checklist + curated examples + links to the deeper bundled files.
-    Examples come from the standalone tree's hand-refined examples.md (canonical);
-    tool-rules/sources are a further disclosure level, linked not inlined."""
+    heuristics checklist (or, for an artifact-shaped lens, the detect→rubric
+    table — its checks live in the per-artifact rubric files generate_lens_bundle
+    writes alongside this one, loaded on a presence hit, mirroring build_skill_md)
+    + curated examples + links to the deeper bundled files. Examples come from
+    the standalone tree's hand-refined examples.md (canonical); tool-rules/sources
+    are a further disclosure level, linked not inlined."""
     picker = f"{skill.picker}\n\n" if skill.picker else ""
-    heuristics = _checklist_body(skill, docs_root=docs_root)
     examples_path = Path(skills_root, skill.name, "examples.md")
     examples = examples_path.read_text(encoding="utf-8") if examples_path.exists() else ""
     # The standalone examples.md carries its own `# Examples — <lens>` H1; strip a
@@ -55,28 +76,47 @@ def lens_bundle_body(skill: Skill, docs_root: str = ".", skills_root: str = "ski
     if examples.startswith("# "):
         examples = examples.split("\n", 1)[1].strip() if "\n" in examples else ""
     examples_block = f"## Examples\n\n{examples}\n\n" if examples else ""
-    # Give `## Checklist` a lead-in before the per-category heuristics, mirroring how
-    # `## Examples` opens with prose rather than dropping straight onto a sub-header.
-    # Without it the section header sits directly on `## From category #NN`, reading as
-    # an empty header. Suppress the whole section if a lens carries no heuristics, so a
-    # future heuristics-less lens never ships a bare `## Checklist`.
-    checklist_block = (
-        "## Checklist\n\n"
-        "The full review checklist, grouped by the research category each check "
-        "draws from:\n\n"
-        f"{heuristics}\n\n"
-    ) if heuristics else ""
+    if skill.shape == "artifact":
+        core_block = _artifacts_block(skill)
+        going_deeper = (
+            "## Going deeper\n\n"
+            + "".join(f"- [{a.slug}.md]({a.slug}.md) — the rubric for {a.name}; "
+                     f"open it on a presence hit and review against it.\n"
+                     for a in skill.artifacts)
+            + "- [tool-rules.md](tool-rules.md) — the tools that mechanize part of "
+            "each rubric; for wiring up checks, not needed for the judgment review "
+            "itself.\n"
+            "- [sources.md](sources.md) — the published standards behind each "
+            "rubric; for provenance, not needed during a review.\n")
+    else:
+        heuristics = _checklist_body(skill, docs_root=docs_root)
+        # Give `## Checklist` a lead-in before the per-category heuristics, mirroring
+        # how `## Examples` opens with prose rather than dropping straight onto a
+        # sub-header. Without it the section header sits directly on `## From
+        # category #NN`, reading as an empty header. Suppress the whole section if a
+        # lens carries no heuristics, so a future heuristics-less lens never ships a
+        # bare `## Checklist`.
+        core_block = (
+            "## Checklist\n\n"
+            "The full review checklist, grouped by the research category each check "
+            "draws from:\n\n"
+            f"{heuristics}\n\n"
+        ) if heuristics else ""
+        going_deeper = (
+            "## Going deeper\n\n"
+            "- [tool-rules.md](tool-rules.md) — static-analysis rules for the "
+            "mechanical subset; for wiring linters, not needed for the judgment "
+            "review.\n"
+            "- [sources.md](sources.md) — the research behind each check; for "
+            "provenance.\n")
     return (
         f"# {skill.name}\n\n"
         f"{picker}"
         "## When to use\n\n"
         f"{_scope_line(skill)}\n\n"
-        f"{checklist_block}"
+        f"{core_block}"
         f"{examples_block}"
-        "## Going deeper\n\n"
-        "- [tool-rules.md](tool-rules.md) — static-analysis rules for the mechanical "
-        "subset; for wiring linters, not needed for the judgment review.\n"
-        "- [sources.md](sources.md) — the research behind each check; for provenance.\n"
+        f"{going_deeper}"
     )
 
 
@@ -101,13 +141,21 @@ def _gen_header(skill: Skill, *, with_examples: bool = False) -> str:
 
 def generate_lens_bundle(skill: Skill, lenses_dir: Path, docs_root: str = ".",
                          skills_root: str = "skills") -> Path:
-    """Write reference/lenses/<skill>/{body,tool-rules,sources}.md and return the dir."""
+    """Write reference/lenses/<skill>/{body,tool-rules,sources}.md and return the
+    dir. An artifact-shaped lens additionally gets one rubric file per artifact
+    (<slug>.md, loaded on a presence hit — see _artifacts_block), mirroring how
+    generate_skill replaces the standalone tree's heuristics.md the same way."""
     dest = Path(lenses_dir, skill.name)
     dest.mkdir(parents=True, exist_ok=True)
     # Only body.md inlines examples.md; tool-rules.md / sources.md draw from docs/research only.
     (dest / "body.md").write_text(
         _gen_header(skill, with_examples=True) + lens_bundle_body(skill, docs_root, skills_root),
         encoding="utf-8")
+    if skill.shape == "artifact":
+        for a in skill.artifacts:
+            (dest / f"{a.slug}.md").write_text(
+                _gen_header(skill) + build_artifact_rubric(skill, a, docs_root),
+                encoding="utf-8")
     (dest / "tool-rules.md").write_text(
         _gen_header(skill) + build_reference(skill, "tooling", docs_root), encoding="utf-8")
     (dest / "sources.md").write_text(
@@ -248,13 +296,23 @@ def generate_collapsed(manifest: Manifest, docs_root: str = ".", skills_root: st
                 shutil.rmtree(child)   # prune a removed entrypoint
     for ep in manifest.entrypoints:
         out = Path(collapsed_root, "skills", ep.name)
-        (out / "reference" / "lenses").mkdir(parents=True, exist_ok=True)
+        lenses_dir = out / "reference" / "lenses"
+        lenses_dir.mkdir(parents=True, exist_ok=True)
         (out / "evals").mkdir(parents=True, exist_ok=True)
         (out / "SKILL.md").write_text(build_entrypoint_md(manifest, ep), encoding="utf-8")
         (out / "reference" / "synthesis.md").write_text(
             build_collapsed_synthesis(manifest), encoding="utf-8")
-        for skill in entrypoint_lenses(manifest, ep):
-            generate_lens_bundle(skill, out / "reference" / "lenses",
+        ep_lenses = entrypoint_lenses(manifest, ep)
+        current_lens_names = {skill.name for skill in ep_lenses}
+        # Prune a lens dropped from this entrypoint (deleted, reshaped, or
+        # unbundled) the same way the loop above prunes a removed entrypoint —
+        # otherwise its stale reference/lenses/<name>/ lingers in the committed
+        # tree forever with nothing to remove it.
+        for child in lenses_dir.iterdir():
+            if child.is_dir() and child.name not in current_lens_names:
+                shutil.rmtree(child)
+        for skill in ep_lenses:
+            generate_lens_bundle(skill, lenses_dir,
                                  docs_root=docs_root, skills_root=skills_root)
         if not (out / "evals" / "eval.json").exists():
             (out / "evals" / "eval.json").write_text(
