@@ -13,7 +13,17 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt
+          cache: 'pip'
+      - run: pip install --require-hashes -r requirements.txt
+      - name: requirements.txt is in sync with requirements.in
+        run: |
+          pip install pip-tools
+          mkdir -p /tmp/reqcheck && cp requirements.in /tmp/reqcheck/
+          ( cd /tmp/reqcheck && pip-compile --generate-hashes --output-file=requirements.txt requirements.in )
+          diff -u requirements.txt /tmp/reqcheck/requirements.txt || {
+            echo "::error::requirements.txt is not pip-compile --generate-hashes's current output for requirements.in — recompile and commit"
+            exit 1
+          }
       - name: tests
         run: python -m pytest tests/ -q
       - name: eval structure (all skills)

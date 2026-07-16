@@ -219,7 +219,11 @@ expect the plugin to appear in cloud sessions — it won't.
   skills that have left the suite (tracked via a `.atlas-vendored` marker; never
   touches the target repo's own skills). `--collapsed` vendors the 4
   collapsed entrypoints instead of the 37 standalone skills. The `skulto` flow
-  above is an alternative.
+  above is an alternative. Every run also writes/refreshes a `NOTICE.md`
+  alongside the vendored skills — the vendored content is CC BY 4.0 (see
+  [License](../LICENSE)), which requires attribution on redistribution; the
+  notice's link back to this repository satisfies that. Commit it along with
+  the vendored skills and don't remove it while they stay in the target repo.
 
 ```bash
 tooling/vendor-skills.sh ~/code/my-service          # vendor/refresh into that repo

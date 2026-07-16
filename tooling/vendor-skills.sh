@@ -14,6 +14,11 @@
 # source commit, so --prune can safely remove only previously-vendored skills that
 # have since left the suite — never the target repo's own skills.
 #
+# The vendored content (docs/ and skills/, per LICENSE) is CC BY 4.0, which
+# requires attribution on redistribution — satisfied by a link back to this
+# repository. Each run writes/refreshes a NOTICE file alongside the vendored
+# skills so that attribution travels with the copy.
+#
 # Usage:
 #   tooling/vendor-skills.sh <target-repo-dir>            # vendor/refresh
 #   tooling/vendor-skills.sh <target-repo-dir> --prune    # also drop stale vendored skills
@@ -168,6 +173,27 @@ vendor_one() {
   return 0
 }
 
+# The skill content copied by vendor_one is CC BY 4.0 (LICENSE-CC-BY-4.0), which
+# requires attribution on redistribution. A link back to the source repo satisfies
+# it (per LICENSE); write that notice alongside the vendored skills.
+write_attribution() {
+  local dest_root=$1 sha=$2
+  cat >"$dest_root/NOTICE.md" <<EOF
+# Attribution notice
+
+The skill content in this directory was vendored from
+[brandondees/code-quality-atlas](https://github.com/brandondees/code-quality-atlas)
+(commit \`$sha\`) by \`tooling/vendor-skills.sh\`.
+
+It is licensed under CC BY 4.0 (see
+[LICENSE-CC-BY-4.0](https://github.com/brandondees/code-quality-atlas/blob/$sha/LICENSE-CC-BY-4.0)
+in the source repository, pinned to the vendored commit so the license text
+matches what was actually vendored). This notice satisfies the attribution
+requirement for this vendored copy; do not remove it while the content remains
+here.
+EOF
+}
+
 main() {
   parse_args "$@"
   check_requirements || exit 1
@@ -203,6 +229,7 @@ main() {
   for name in "${SKILL_NAMES[@]}"; do
     vendor_one "$name" "$dest_root"
   done
+  write_attribution "$dest_root" "$sha"
   printf 'Vendored %s skill(s) -> %s\n' "${#SKILL_NAMES[@]}" "$dest_root"
 
   local pruned=0

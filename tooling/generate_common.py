@@ -1,0 +1,141 @@
+# SPDX-License-Identifier: MIT
+# tooling/generate_common.py
+"""Helpers shared by the generate_skill / generate_router / generate_synthesizer /
+generate_collapsed modules: reference-file assembly, table-cell escaping, the
+diff/repo/decision/artifact scope line, depth-mode rendering, and category
+ownership. Split out of tooling/generate.py so each generation concern's edits
+land in the file that owns it.
+
+The leading underscore on names here (`_KIND_TITLE`, `_escape_table_cell`,
+`_TOOLING_PREAMBLE`, `_scope_line`) marks them internal to skill generation,
+not part of the manifest/skill-authoring API — not "local to this file"; they
+are imported across the sibling generate_*.py modules by design."""
+from __future__ import annotations
+from pathlib import Path
+from tooling.manifest import Manifest, Skill
+from tooling.sections import (extract_section, extract_subsection,
+                              strip_priority)
+
+_KIND_TITLE = {
+    "heuristics": "Reviewable heuristics",
+    "tooling": "Tool rules to triage",
+    "references": "References to mine",
+}
+
+
+def _escape_table_cell(value: str) -> str:
+    """Escape a manifest-sourced prose field before interpolating it into a
+    Markdown pipe-table cell (#141). Unescaped, a literal `|` in the field
+    splits the row into an extra column — silently corrupting every column
+    after it — rather than failing loudly; an embedded newline (e.g. from a
+    YAML `|`-style block scalar) breaks the row structure outright. Collapse
+    any run of whitespace, including newlines, to a single space, then escape
+    `|` as `\\|` so it renders as a literal pipe inside the cell."""
+    return " ".join(value.split()).replace("|", "\\|")
+
+
+# Standing guidance prepended to every tool-rules.md. The named tools in each
+# list are concrete starting points, not a mandate — this keeps a reviewer from
+# cargo-culting a canonical-but-broken tool instead of finding the equivalent
+# that fits the stack.
+_TOOLING_PREAMBLE = (
+    "> **Selecting tools for this stack.** The tools named below are "
+    "field-tested starting points, not a mandate. Pick the one that fits this "
+    "codebase's language version, build, and CI — and verify it actually runs "
+    "on your toolchain before relying on it. A listed tool that is broken, "
+    "abandoned, or noisy on your setup is a gap to close, not a permanent "
+    "`continue-on-error`: prefer a working, maintained equivalent (often a "
+    "younger, less well-known one) over a canonical-but-broken default. The "
+    "capability is the requirement; the specific tool is replaceable.\n"
+)
+
+
+def build_reference(skill: Skill, kind: str, docs_root: str = ".") -> str:
+    """Concatenate the `kind` subsection from each source category into one
+    reference file, each under a `## From category #n` header, with a ToC."""
+    if kind not in _KIND_TITLE:
+        raise ValueError(f"unknown kind {kind!r}; must be one of {list(_KIND_TITLE)}")
+    entries = []
+    for src in skill.built_from:
+        text = Path(docs_root, src.path).read_text(encoding="utf-8")
+        body = strip_priority(
+            extract_subsection(extract_section(text, src.section), kind).strip())
+        if body:
+            entries.append((src.section, body))
+    toc = "\n".join(f"- From category #{n}" for n, _ in entries)
+    parts = [f"## From category #{n}\n\n{body}" for n, body in entries]
+    preamble = f"{_TOOLING_PREAMBLE}\n" if kind == "tooling" else ""
+    header = f"# {_KIND_TITLE[kind]} — {skill.name}\n\n{preamble}## Contents\n\n{toc}\n"
+    return header + "\n" + "\n\n".join(parts) + "\n"
+
+
+def _scope_line(skill: Skill) -> str:
+    if skill.shape == "repo":
+        return ("**Shape: repo.** Run against the whole repository (scheduled or "
+                "on demand), not a single diff.")
+    if skill.shape == "decision":
+        return ("**Shape: decision.** Reviewed at decision time — an ADR, RFC, "
+                "design doc, adoption PR, or deprecation/rollout plan — not a diff "
+                "of implementation code. Apply the checks to the decision and its "
+                "record (rationale, assumptions, alternatives, exit/rollback), not "
+                "to lines of code.")
+    if skill.shape == "artifact":
+        return ("**Shape: artifact.** Presence-activated: run only when one of the "
+                "artifacts in the table below is present in the change or repo. "
+                "Detect the artifact, open its rubric, and review the artifact "
+                "against that published standard — not the surrounding application "
+                "code. Skip entirely when none of the listed artifacts are present.")
+    if skill.design:
+        return ("**Shape: diff — design-capable.** Also works on design docs and "
+                "plans: apply the same checks to the proposed states, data flows, "
+                "and failure paths before any code exists. When the design doc is "
+                "specifically a decision record (an ADR, RFC, or adoption/"
+                "deprecation plan), also run the shared **decision-record "
+                "checklist** on top of this lens's own topical checks: is the "
+                "rationale actually recorded (not just the outcome); are the "
+                "stated assumptions still current; is there a revisit-trigger; is "
+                "an exit, rollback, or sunset path defined; were real alternatives "
+                "weighed, not just the chosen option justified after the fact? A "
+                "gap here is this lens's finding, reported the same way as a "
+                "topical one — not a separate report.")
+    return ("**Shape: diff.** Written for concrete code; not meant for design "
+            "docs or plans.")
+
+
+def modes_section(manifest: Manifest) -> str:
+    """The 'Depth modes' block for the router/entrypoints: separates relevance
+    (which lenses apply) from breadth (how many to run). Empty string when no
+    modes declared."""
+    if not manifest.modes:
+        return ""
+    lines = [
+        "## Depth modes",
+        "",
+        "Routing first ranks **every** lens whose scope the change touches by "
+        "**relevance** — it is no longer a hard cap. A depth mode then sets the "
+        "**breadth** (how far down the ranked list to run, plus room for judgment "
+        "calls above that floor) and the severity floor. Pick the mode from the "
+        "request; default to **review**.",
+        "",
+        "| Mode | Breadth | Triggers |",
+        "|---|---|---|",
+    ]
+    for mode in manifest.modes:
+        triggers = ", ".join(f"\"{_escape_table_cell(t)}\"" for t in mode.triggers)
+        lines.append(
+            f"| **{mode.name}** | {_escape_table_cell(mode.breadth.strip())} | {triggers} |")
+    notes = [(m.name, m.note.strip()) for m in manifest.modes if m.note.strip()]
+    if notes:
+        lines.append("")
+        lines.extend(f"- **{name}** — {note}" for name, note in notes)
+    return "\n".join(lines).rstrip() + "\n\n"   # block ends with a blank line; "" when no modes
+
+
+def primary_owners(manifest: Manifest) -> dict[int, str]:
+    """category -> the skill that primarily owns it (G1 guarantees uniqueness)."""
+    owners: dict[int, str] = {}
+    for s in manifest.skills:
+        for src in s.built_from:
+            if src.category not in s.cross_ref:
+                owners[src.category] = s.name
+    return owners
