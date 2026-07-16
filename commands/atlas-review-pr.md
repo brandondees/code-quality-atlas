@@ -31,10 +31,13 @@ routine (`create_new_session_on_fire`, no GitHub event) that the authoring agent
 fires itself (`fire_trigger`) right after `create_pull_request` returns, and again
 after each fix push — each fire spins up a fresh session that runs this command
 once and exits, never watching the PR itself. (Two older wiring models are also
-described there for context — a GitHub `opened`+`synchronize` trigger, or a single
-`opened`-triggered session that stays resident and re-reviews pushes itself — but
-both race across PRs opening close together in a way the author-triggered model
-doesn't, so prefer it for new setups.) Whichever wiring is in use, each invocation
+named there for context, though only the first is described in any mechanical
+detail: a GitHub `opened`+`synchronize` trigger, and a single `opened`-triggered
+session that stayed resident and re-reviewed pushes itself — the latter is
+mentioned only in passing, as the failure mode this design removes, not
+re-documented in full. Both race across PRs opening close together in a way the
+author-triggered model doesn't, so prefer it for new setups.) Whichever wiring is
+in use, each invocation
 earns a fresh round computed **entirely from GitHub state** (never session
 memory — a fired session has no memory of any earlier round); the convergence
 rules below are what keep repeated rounds from becoming an infinite review/fix

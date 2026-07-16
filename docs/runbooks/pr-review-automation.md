@@ -129,6 +129,14 @@ build+autofix ──────────────────────
   against this repo needs that `trigger_id` to fire it, so record it wherever
   the repo's automation config already lives (e.g. alongside `REVIEW.md`)
   instead of re-discovering it via `list_triggers` on every PR.
+- **Migrating from an older wiring model?** If this repo already has a reviewer
+  Routine set up as a GitHub `Pull request opened`/`synchronize` trigger, or as a
+  resident `opened`-triggered session that watches and re-reviews pushes itself,
+  **retire it first** (`list_triggers` to find it, then disable or delete it) —
+  a resident-session Routine in particular can be watching a PR indefinitely by
+  design, so leaving it running alongside the new author-triggered Routine means
+  both could review the same push and post conflicting or duplicate rounds. Stand
+  up the new Routine only after the old one is gone.
 
 ### 1. Reviewer routine (author-triggered, no race)
 
@@ -142,10 +150,16 @@ tools available):
 - **Model:** a strong model (review quality matters here).
 - **Trigger:** **none.** No `cron_expression`, no `run_once_at`, no GitHub event —
   set `create_new_session_on_fire: true` so every fire gets a **fresh session**,
-  never a shared or resident one. That isolation is what makes concurrent PRs
-  safe: two `fire_trigger` calls seconds apart spin up two independent sessions,
-  each scoped to the exact PR its `text` names, with no shared conversation state
-  to race over.
+  never a shared or resident one. That isolation is what makes concurrent
+  *different* PRs safe: two `fire_trigger` calls naming different PRs spin up two
+  independent sessions, each scoped to the exact PR its `text` names, with no
+  shared conversation state to race over. It does **not** by itself serialize two
+  fires naming the **same** PR — `fire_trigger` dispatches and returns without
+  waiting for the fired session to finish, so a push fired-and-reviewed can still
+  overlap a second push fired moments later. See the round-idempotency check in
+  the prompt below and the "don't overlap your own fires" note in
+  [§1a](#1a-author-side-wiring-what-every-authoring-agent-must-do) for how that
+  same-PR case is handled.
 - **Prompt / Instructions:** the slash command still won't resolve in a routine
   session (see the note above), so the prompt **reads and follows the command
   file** from the clone (or fetches it over the GitHub API), reviews **the PR
@@ -195,6 +209,16 @@ tools available):
   policy (round 1: all severities; round 2+: Major+), post inline only findings
   that are NEW this round, and submit a single APPROVE (or its own-PR substitute)
   the first time nothing new meets the floor.
+
+  **Immediately before submitting your review, re-fetch the PR's reviews one more
+  time and re-check for the exact round marker you are about to post
+  (`<!-- atlas-review round:N -->` with your same N).** Two fires can legitimately
+  overlap on the same PR (a fix pushed and re-fired before the previous fire's
+  session has finished) — if a review already carries that marker, another
+  session won this race while you were working; silently discard your draft and
+  exit without posting rather than double-posting a duplicate or conflicting
+  round. This is not an error state, just two fires racing on one PR — nothing to
+  report or retry.
 
   After posting, **exit** — do not subscribe to the PR's activity, do not
   schedule a self-check-in, do not wait around for the next push. The next review
@@ -251,10 +275,20 @@ on its own:
    reviewer.
 2. **After pushing a fix in response to review feedback**, fire the same routine
    again with the same PR reference — that's what earns the next review round, in
-   place of a webhook or a resident watch.
+   place of a webhook or a resident watch. **Don't fire again for the same PR
+   while an earlier fire for it may still be in flight** (`fire_trigger` returns
+   as soon as it dispatches, not when the fired session finishes reviewing) — if
+   your own pace of pushes regularly outruns review turnaround, prefer a short
+   wait before re-firing rather than firing on every push regardless. The
+   reviewer's own round-idempotency check (§1) is the backstop if this happens
+   anyway, not the primary defense.
 3. **Skip firing** on a push that doesn't warrant a fresh look (a CI-only retry
    with no code change, a trivial rebase) — the author controls cadence directly
-   now, so there's no passive trigger to override.
+   now, so there's no passive trigger to override. **When you skip, post a short
+   marker comment** (e.g. `<!-- atlas-review-skip: reason -->`) on the PR noting
+   why re-review wasn't warranted — the poller's coverage check (§2) looks for
+   this marker before flagging a lapse, so an unmarked skip reads as a missed
+   review, not an intentional one.
 4. Never repurpose `send_later`/self-check-in Routines for this — those are a
    different, session-bound mechanism (a self-bind, `run_once_at` Routine that
    always targets the *calling* session) and firing the reviewer through one
@@ -308,7 +342,10 @@ a single scheduled run checks them all:
      to compare against and would false-positive on a PR still mid-flight on
      round 1), compare HEAD against the commit the MOST RECENT round review was
      posted against — if HEAD has moved past it with no unaddressed
-     <!-- atlas-coverage-poke --> already there, post one issue comment marked
+     <!-- atlas-coverage-poke --> already there, first check for an
+     <!-- atlas-review-skip --> marker comment posted after that commit: if one
+     exists, the author already triaged this push as not warranting re-review —
+     skip silently, do NOT poke. Otherwise post one issue comment marked
      <!-- atlas-coverage-poke --> flagging that review coverage may have lapsed;
      do NOT review it yourself. Skip PRs with no ack, or an ack but no round
      review yet (not picked up / still in flight, not lapsed).
