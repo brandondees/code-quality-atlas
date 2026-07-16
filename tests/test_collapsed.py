@@ -48,7 +48,7 @@ def test_lens_bundle_omits_checklist_when_no_heuristics(monkeypatch):
     # A lens with no heuristics must not ship a bare `## Checklist`; the whole
     # section (header + lead-in) is suppressed. No real lens is heuristics-less
     # today, so exercise the branch by stubbing _checklist_body to empty.
-    import tooling.generate as g
+    import tooling.generate_collapsed as g
     monkeypatch.setattr(g, "_checklist_body", lambda *a, **k: "")
     body = g.lens_bundle_body(_skill(), docs_root=".", skills_root="skills")
     assert "## Checklist" not in body
