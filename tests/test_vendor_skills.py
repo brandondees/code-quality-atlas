@@ -76,3 +76,52 @@ def test_prune_after_mode_switch_removes_orphaned_standalone_dirs(tmp_path):
     for name in standalone_names:
         assert not (collapsed_dir / name).exists()
         assert name not in final_names
+
+
+def notice_text(target):
+    return (target / ".claude" / "skills" / "NOTICE.md").read_text()
+
+
+def test_vendor_writes_attribution_notice(tmp_path):
+    """The vendored content is CC BY 4.0 (issue #134); each run must write an
+    attribution notice alongside it, naming the source repo and the vendored
+    commit, with the license link pinned to that same commit (not a moving
+    branch, so the linked text matches what was actually vendored)."""
+    target = tmp_path / "target-repo"
+    target.mkdir()
+
+    run_vendor(target)
+    notice = notice_text(target)
+    assert "brandondees/code-quality-atlas" in notice
+    assert "CC BY 4.0" in notice
+
+    result = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10, check=True)
+    sha = result.stdout.strip()
+    assert sha in notice
+    assert f"blob/{sha}/LICENSE-CC-BY-4.0" in notice
+
+
+def test_vendor_refreshes_attribution_notice_on_rerun(tmp_path):
+    """A second run must rewrite NOTICE.md (refresh), not leave a stale one from
+    an earlier commit — mirroring how vendor_one refreshes the skill dirs."""
+    target = tmp_path / "target-repo"
+    target.mkdir()
+
+    run_vendor(target)
+    first_mtime = (target / ".claude" / "skills" / "NOTICE.md").stat().st_mtime_ns
+
+    run_vendor(target)
+    second_mtime = (target / ".claude" / "skills" / "NOTICE.md").stat().st_mtime_ns
+    assert second_mtime >= first_mtime
+    assert notice_text(target)  # still present and non-empty
+
+
+def test_collapsed_vendor_also_writes_attribution_notice(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+
+    run_vendor(target, "--collapsed")
+    notice = notice_text(target)
+    assert "brandondees/code-quality-atlas" in notice

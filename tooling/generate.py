@@ -6,7 +6,14 @@ entirely in this module; it is now split by concern into generate_common.py
 and generate_collapsed.py, so each concern's edits land in one file instead of
 all landing here. Import from those modules directly in new code — this module
 exists so `from tooling.generate import X` keeps working for existing callers
-(tooling/cli.py, tests/)."""
+(tooling/cli.py, tests/).
+
+This facade supports *calling* a re-exported name, not *patching* it. A name
+like `_checklist_body` resolves inside `generate_collapsed`'s own globals when
+called from `generate_collapsed.lens_bundle_body`, so `monkeypatch.setattr`
+(or any rebind) on `tooling.generate._checklist_body` does not reach that call
+— patch the defining submodule directly instead, as tests/test_collapsed.py
+does for this exact name."""
 from __future__ import annotations
 
 from tooling.generate_common import (

@@ -4,7 +4,12 @@
 generate_collapsed modules: reference-file assembly, table-cell escaping, the
 diff/repo/decision/artifact scope line, depth-mode rendering, and category
 ownership. Split out of tooling/generate.py so each generation concern's edits
-land in the file that owns it."""
+land in the file that owns it.
+
+The leading underscore on names here (`_KIND_TITLE`, `_escape_table_cell`,
+`_TOOLING_PREAMBLE`, `_scope_line`) marks them internal to skill generation,
+not part of the manifest/skill-authoring API — not "local to this file"; they
+are imported across the sibling generate_*.py modules by design."""
 from __future__ import annotations
 from pathlib import Path
 from tooling.manifest import Manifest, Skill
