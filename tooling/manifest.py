@@ -446,7 +446,10 @@ def load_manifest(path: str) -> Manifest:
         try:
             router = Router(
                 name=r["name"],
-                description=r["description"].strip(),
+                # Same bare-null gap as skill.description/picker (#142 review):
+                # a present-but-null "description:" slips past the KeyError
+                # guard and would crash `.strip()` on None.
+                description=(r["description"] or "").strip(),
                 routes=[Route(when=x["when"], run=x["run"], note=x.get("note", ""))
                         for x in r["routes"]],
                 body=r.get("body", "").strip(),
@@ -459,11 +462,16 @@ def load_manifest(path: str) -> Manifest:
         try:
             synthesizer = Synthesizer(
                 name=sy["name"],
-                description=sy["description"].strip(),
+                # Same bare-null gap as skill.description/picker (#142 review):
+                # a present-but-null "description:" slips past the KeyError
+                # guard and would crash `.strip()` on None.
+                description=(sy["description"] or "").strip(),
                 severity_order=sy["severity_order"],
                 tensions=[Tension(between=t["between"],
-                                  about=t["about"].strip(),
-                                  resolve=t["resolve"].strip())
+                                  # Same gap, one field over, for a tension's
+                                  # required prose fields (#142 review).
+                                  about=(t["about"] or "").strip(),
+                                  resolve=(t["resolve"] or "").strip())
                           for t in sy.get("tensions", [])],
             )
         except KeyError as e:
@@ -476,7 +484,13 @@ def load_manifest(path: str) -> Manifest:
                 breadth=raw_mode["breadth"],
                 floor=raw_mode["floor"],
                 triggers=list(raw_mode.get("triggers", [])),
-                note=raw_mode.get("note", ""),
+                # Same bare-null gap as skill.picker (#142 review): .get(key,
+                # "") only substitutes "" when the key is absent, not when
+                # it's present-but-null. A bare "note:" doesn't crash here
+                # (nothing calls .strip() on it in this function), but it
+                # would crash downstream in generate.py's modes_section,
+                # which does `m.note.strip()`.
+                note=raw_mode.get("note") or "",
             ))
         except (KeyError, TypeError) as e:
             raise ValidationError(f"modes[{i}] in {path}: malformed mode ({e})")
@@ -490,7 +504,10 @@ def load_manifest(path: str) -> Manifest:
                     f"(got {shapes!r}) — use 'shapes: [diff]', not 'shapes: diff'")
             entrypoints.append(Entrypoint(
                 name=raw_ep["name"],
-                description=raw_ep["description"].strip(),
+                # Same bare-null gap as skill.description/picker (#142
+                # review): a present-but-null "description:" slips past the
+                # KeyError guard and would crash `.strip()` on None.
+                description=(raw_ep["description"] or "").strip(),
                 shapes=list(shapes),
                 include_design=bool(raw_ep.get("include_design", False)),
                 body=raw_ep.get("body", "").strip(),

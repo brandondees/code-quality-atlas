@@ -446,6 +446,30 @@ def test_valid_router_accepted_and_real_manifest_loads():
     assert real.router is not None
     assert all(s.picker for s in real.skills)
 
+def test_load_manifest_treats_bare_router_description_as_empty_string(tmp_path):
+    # Same bare-null gap as skill.description/picker (#142 review), one
+    # struct over: router.description=r["description"].strip() used to
+    # crash with AttributeError: 'NoneType' object has no attribute 'strip'
+    # when "description:" was present but null.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    picker: p\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        "router:\n"
+        "  name: choosing-review-lenses\n"
+        "  description:\n"
+        "  routes:\n"
+        "    - when: Bug fix\n"
+        "      run: [hunting-silent-failures]\n")
+    m = load_manifest(path)
+    assert m.router.description == ""
+
 
 from tooling.manifest import Synthesizer, Tension
 
@@ -496,6 +520,51 @@ def test_valid_synthesizer_accepted_and_real_manifest_loads():
     assert real.synthesizer is not None
     assert real.synthesizer.severity_order[0] == "Blocker"
     assert all(t.between[0] != t.between[1] for t in real.synthesizer.tensions)
+
+def test_load_manifest_treats_bare_synthesizer_description_as_empty_string(tmp_path):
+    # Same bare-null gap as skill.description/picker (#142 review), one
+    # struct over: synthesizer.description=sy["description"].strip() used
+    # to crash with AttributeError: 'NoneType' object has no attribute
+    # 'strip' when "description:" was present but null.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        "synthesizer:\n"
+        "  name: synthesizing-review-findings\n"
+        "  description:\n"
+        "  severity_order: [Blocker, Major, Minor, Nit]\n")
+    m = load_manifest(path)
+    assert m.synthesizer.description == ""
+
+def test_load_manifest_treats_bare_tension_about_and_resolve_as_empty_string(tmp_path):
+    # Same crash class, one field over: Tension.about/resolve had the
+    # identical `t["about"].strip()` / `t["resolve"].strip()` gap.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        "synthesizer:\n"
+        "  name: synthesizing-review-findings\n"
+        "  description: d\n"
+        "  severity_order: [Blocker, Major, Minor, Nit]\n"
+        "  tensions:\n"
+        "    - between: [hunting-silent-failures, checking-restraint]\n"
+        "      about:\n"
+        "      resolve:\n")
+    m = load_manifest(path)
+    assert m.synthesizer.tensions[0].about == ""
+    assert m.synthesizer.tensions[0].resolve == ""
 
 
 # --- Depth modes (Plan 1) ---
@@ -592,6 +661,24 @@ def test_real_manifest_declares_three_modes():
     assert review.floor == "escalating"
 
 
+def test_load_manifest_treats_bare_mode_note_as_empty_string(tmp_path):
+    # Same bare-null gap as skill.picker (#142 review): note=raw_mode.get(
+    # "note", "") only substitutes "" when the key is absent, not when it's
+    # present-but-null. A bare "note:" didn't crash here (nothing calls
+    # .strip() on it in load_manifest), but it would crash downstream in
+    # generate.py's modes_section, which does `m.note.strip()`.
+    body = (
+        "modes:\n"
+        "  - name: triage\n"
+        "    breadth: critical tier only\n"
+        "    floor: Major\n"
+        "    triggers: [triage]\n"
+        "    note:\n"
+    )
+    m = load_manifest(_manifest_with_body(tmp_path, body))
+    assert m.modes[0].note == ""
+
+
 # --- Collapsed entrypoints (Plan 2) ---
 
 def test_load_manifest_parses_entrypoints(tmp_path):
@@ -614,6 +701,21 @@ def test_load_manifest_parses_entrypoints(tmp_path):
 
 def test_load_manifest_defaults_entrypoints_to_empty(tmp_path):
     assert load_manifest(_manifest_with_body(tmp_path, "")).entrypoints == []
+
+
+def test_load_manifest_treats_bare_entrypoint_description_as_empty_string(tmp_path):
+    # Same bare-null gap as skill.description/picker (#142 review), one
+    # struct over: entrypoint.description=raw_ep["description"].strip()
+    # used to crash with AttributeError: 'NoneType' object has no
+    # attribute 'strip' when "description:" was present but null.
+    body = (
+        "entrypoints:\n"
+        "  - name: reviewing-a-change\n"
+        "    description:\n"
+        "    shapes: [diff]\n"
+    )
+    m = load_manifest(_manifest_with_body(tmp_path, body))
+    assert m.entrypoints[0].description == ""
 
 
 def _eps():
