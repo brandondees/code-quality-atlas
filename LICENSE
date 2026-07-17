@@ -2,17 +2,26 @@
 
 This repository is dual-licensed by content type.
 
-- **Content — CC BY 4.0.** The research atlas and the skills derived from it —
-  everything under `docs/` and `skills/`, plus `README.md` — is licensed under
-  the Creative Commons Attribution 4.0 International License. Full text:
+- **Content — CC BY 4.0.** The research atlas and the skills derived from
+  it — everything under `docs/`, `skills/`, `collapsed/` (a generated,
+  byte-derived repackaging of `skills/`), `commands/` (the slash-command
+  reviewer instructions, prose like the skills they invoke), and
+  `templates/` (the `REVIEW.md` convergence policy and the routing-snippet
+  prose), plus `README.md` — is licensed under the Creative Commons
+  Attribution 4.0 International License. Full text:
   [`LICENSE-CC-BY-4.0`](LICENSE-CC-BY-4.0). Reuse, adapt, and redistribute
   freely, including commercially, with attribution to **Brandon Dees /
   code-quality-atlas** (a link to this repository satisfies it).
 
 - **Code — MIT.** Everything else — the generation/drift/eval pipeline under
-  `tooling/`, the tests, and the repo's CI and configuration files — is
-  licensed under the MIT License. Full text: [`LICENSE-MIT`](LICENSE-MIT).
-  Python sources carry `SPDX-License-Identifier: MIT` headers.
+  `tooling/`, the `hooks/` routing script, the tests, and the repo's CI and
+  configuration files — is licensed under the MIT License. Full text:
+  [`LICENSE-MIT`](LICENSE-MIT). Python sources carry
+  `SPDX-License-Identifier: MIT` headers.
+
+This enumerates every top-level content/code directory in the repository;
+`tests/test_license_paths_exhaustive.py` fails the build if a new one is
+added without being classified here.
 
 The installable plugin bundle contains both kinds of material; its manifest
 declares the combined SPDX expression `MIT AND CC-BY-4.0`.

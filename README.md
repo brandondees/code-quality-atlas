@@ -168,6 +168,6 @@ loop: critique the research, let drift flag affected skills, regenerate, re-gate
 ## License
 
 Dual-licensed by content type: the research atlas and skills (`docs/`, `skills/`,
-this README) are [CC BY 4.0](LICENSE-CC-BY-4.0) — reuse freely with attribution; the
-pipeline code (`tooling/`, `tests/`, CI/config) is [MIT](LICENSE-MIT). Details in
-[LICENSE](LICENSE).
+`collapsed/`, `commands/`, `templates/`, this README) are [CC BY 4.0](LICENSE-CC-BY-4.0)
+— reuse freely with attribution; the pipeline code (`tooling/`, `hooks/`, `tests/`,
+CI/config) is [MIT](LICENSE-MIT). Details in [LICENSE](LICENSE).
