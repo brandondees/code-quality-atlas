@@ -22,6 +22,7 @@ _EXEMPT = {
     ".claude",
     ".claude-plugin",
     ".serena",
+    ".pytest_cache",
     "__pycache__",
 }
 
@@ -31,7 +32,7 @@ _PROSE_ALIASES = {
 }
 
 
-def _top_level_dirs():
+def _top_level_dirs() -> list[str]:
     return sorted(
         p.name
         for p in ROOT.iterdir()
@@ -45,7 +46,7 @@ def test_every_top_level_directory_is_named_in_license():
         name
         for name in _top_level_dirs()
         if f"`{name}/`" not in license_text
-        and _PROSE_ALIASES.get(name, "") not in license_text
+        and (name not in _PROSE_ALIASES or _PROSE_ALIASES[name] not in license_text)
     ]
     assert not missing, (
         f"Top-level director{'y' if len(missing) == 1 else 'ies'} "
