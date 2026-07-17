@@ -24,6 +24,8 @@ _EXEMPT = {
     ".serena",
     ".pytest_cache",
     "__pycache__",
+    ".venv",
+    "venv",
 }
 
 # Directories LICENSE names in prose rather than as a literal `name/` path.
