@@ -2,6 +2,7 @@
 # tooling/cli.py
 from __future__ import annotations
 import argparse
+import contextlib
 from pathlib import Path
 from tooling.manifest import load_manifest, validate, ValidationError
 from tooling.generate import (CollapsedOverlapError, generate_collapsed,
@@ -91,13 +92,11 @@ def main(argv: list[str] | None = None) -> int:
         # manifest can't be read — those all fall back to D8's baseline of 3,
         # exactly today's behavior.
         eval_min_by_skill: dict[str, int] = {}
-        try:
+        with contextlib.suppress(OSError, ValidationError):
             eval_min_by_skill = {
                 s.name: s.eval_min for s in load_manifest(args.manifest).skills
                 if s.eval_min is not None
             }
-        except (OSError, ValidationError):
-            pass
         ok = True
         for path in eval_files:
             name = path.parent.parent.name
