@@ -29,11 +29,14 @@ This command is explicitly invoked — never run it as part of a normal review,
 and never auto-generate a proposal just because `.code-quality-atlas/preferences.md`
 is absent.
 
-## 1. Check for an existing overlay
+## 1. Check for an existing overlay or staged proposal
 
-If `.code-quality-atlas/preferences.md` already exists at the repo root, tell
-the user and ask whether they want a **fresh proposal** (to review alongside
-the existing file) or to stop. Do not overwrite the live overlay yourself —
+Check for both `.code-quality-atlas/preferences.md` (the live overlay) and
+`.code-quality-atlas/preferences.proposed.md` (a prior staged proposal) at the
+repo root. If either exists, tell the user which one and ask whether they want
+a **fresh proposal** or to stop — do not regenerate `preferences.proposed.md`
+without explicit confirmation, since it may hold a prior run's candidates the
+user hasn't finished triaging yet. Never overwrite the live overlay yourself —
 only the human, editing it directly, ever does that.
 
 ## 2. Gather evidence
@@ -67,7 +70,8 @@ not conclusions:
   ones the repo already documents as a conscious, accepted risk.
 - **Improvement-valence verbosity** — no code signal for this one; always
   propose it as a plain question (defects-only is the safe default), never
-  infer a mode from repo state.
+  infer a mode from repo state. This section is exempt from the "skip if no
+  evidence" rule in step 3 below — it always gets a candidate, evidence or not.
 
 Read `CLAUDE.md` / `AGENTS.md` and any `docs/adr/` or `docs/decisions/`
 directory for explicit statements of team intent — these are the strongest
@@ -98,11 +102,14 @@ Order the proposal by the six directive-kind sections from
 `templates/preferences-template.md`, so it reads as a companion document the
 human can ratify section by section. Skip sections with no evidence rather
 than padding with weak/low-confidence candidates — a short honest proposal
-beats a long speculative one.
+beats a long speculative one — **except improvement-valence verbosity, which
+always gets a candidate** (there is no repo evidence for it by design; see
+step 2).
 
 ## 4. Write the proposal, not the overlay
 
-Write the proposal to `.code-quality-atlas/preferences.proposed.md` (never
+Create the `.code-quality-atlas/` directory if it doesn't already exist. Write
+the proposal to `.code-quality-atlas/preferences.proposed.md` (never
 `.code-quality-atlas/preferences.md`) — a `proposed:` staging file distinct
 from the live, ratified overlay per §6's optional-staging note. Include a
 header:
@@ -123,7 +130,11 @@ Summarize what you found: how many candidates per directive kind, and the
 single strongest one (the entry with the most consistent evidence). Tell the
 user the proposal file's path and that **nothing takes effect** until they
 copy ratified entries — with a `decided:` line — into
-`.code-quality-atlas/preferences.md` themselves (or ask you to, item by item,
-in a follow-up). If you found no meaningful candidates for a section, say so
-plainly rather than inventing weak ones — an empty section is a valid,
-honest result.
+`.code-quality-atlas/preferences.md` themselves. This command never performs
+that copy, in this turn or a later one — per step 1 and
+`docs/team-preferences-overlay.md` §6, only a human editing the live overlay
+directly ever writes it; a later "copy items 1 and 3 in for me" request is a
+distinct, human-initiated edit outside this command's contract, not a
+follow-up action it takes. If you found no meaningful candidates for a
+section, say so plainly rather than inventing weak ones — an empty section is
+a valid, honest result.
