@@ -43,8 +43,7 @@ per-lens adversarial/red-team pass; new 2026-06-27, design-deferred),
 Q17 (self-improving loop — stage 1 approved 2026-07-06 (D17), unbuilt; stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
-Q19 (ship the latent tool-mechanization nudge + close the deterministic-tooling
-presence holes — new), Q3 (review-vs-maintenance modes), Q6 (idiom packs),
+Q3 (review-vs-maintenance modes), Q6 (idiom packs),
 Q8 (proactive/cron-shaped maintenance — partially built as the repo audits),
 and the Q2 residual low-priority candidates. Two new framing-class gaps were
 also logged this pass ([`map-gaps.md`](map-gaps.md) **G12** validation-vs-verification /
@@ -230,7 +229,7 @@ artifact-scoped lenses at near-zero idle cost?**
 D10/D12 (router/synthesizer), and Q14 (the cleanest signal-based-matching case). Evidence: G11 +
 the research doc. **Status: RESOLVED (D15) — option (b), the `artifact` shape; G11 factor → #30. ✅ Built 2026-06-24** as `reviewing-artifact-conventions` (first rubric: `SKILL.md` authoring); see the D15 entry above.
 
-### Q19 — Ship the latent tool-mechanization nudge + close the deterministic-tooling presence holes *(new, 2026-06-14)*
+### Q19 — Ship the latent tool-mechanization nudge + close the deterministic-tooling presence holes  → RESOLVED (built 2026-06-15, Wave A) *(new, 2026-06-14)*
 
 **Trigger.** Owner expected the suite to flag gaps in *deterministic* tooling — linters, complexity
 scoring, coverage reporting, performance benchmarking, security scans — and hadn't seen it come up.
