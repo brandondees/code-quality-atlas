@@ -43,8 +43,9 @@ per-lens adversarial/red-team pass; new 2026-06-27, design-deferred),
 Q17 (self-improving loop — stage 1 approved 2026-07-06 (D17), unbuilt; stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
-Q3 (review-vs-maintenance modes), Q6 (idiom packs),
-Q8 (proactive/cron-shaped maintenance — partially built as the repo audits),
+Q6 (idiom packs),
+Q8 (proactive/cron-shaped maintenance — partially built as the repo audits; the
+Q3 residue — auto-application of flagged tidyings — lives here too),
 and the Q2 residual low-priority candidates. Two new framing-class gaps were
 also logged this pass ([`map-gaps.md`](map-gaps.md) **G12** validation-vs-verification /
 stakeholder-intent — disposition: in-scope; **G13** *Tidy First?* economics &
@@ -289,7 +290,7 @@ Make the suite self-improving: agents running the skills reflect on how the revi
 Map-gaps G2's candidate now has standards-grade external backing: OWASP released a dedicated **Top 10 for Agentic Applications** (ASI01–ASI10, 2025-12-09) separate from the LLM Top 10, alongside the Agentic AI Threats & Mitigations companion and the MCP spec's security-best-practices page (confused deputy / token passthrough / tool poisoning). The research-expansion pass (2026-06-12) filed the references + nine agentic heuristics under **#25** in cluster-4, so the suite reviews this material today either way. The open call: promote to a new category **#32** (cross-cutting #13 tool contracts, #14 authz, #24 agent process) — clearer ownership and a sharper lens trigger for agent-heavy codebases, at the cost of taxonomy churn and skill re-mapping — or keep it a #25 facet.
 **Resolved (user, 2026-06-12) — promoted to #32 (D14).** The trigger gap was the decider (agent-heavy repos that don't read as "LLM integration" can slip #25's trigger); G1 cross-cutting ownership and OWASP's separate Agentic Top 10 sealed it. Scoped to the action/tool surface with a model-call↔action boundary; the lethal-trifecta framing stays in #25. `taxonomy.md` carries #32; **the `reviewing-agentic-safety` lens shipped 2026-06-24** (research section + manifest + skill + 4 evals + router route; drift clean). The cheaper "sharpen #25's trigger only" middle path was considered and rejected (leaves G1 ownership unresolved, keeps the bundled-budget crowding).
 
-### Q13 — Team preferences overlay *(new, 2026-06-12)* → Wave A RESOLVED (built 2026-07-06); Waves B+ open
+### Q13 — Team preferences overlay *(new, 2026-06-12)* → Wave A RESOLVED (built 2026-07-06); Wave B partial (inference bootstrap built 2026-07-18); §9 residuals still open
 
 The suite pushes research-derived "objectively better" defaults but has no home for the **codebase owner's / team's considered opinion** (only `checking-idioms-and-consistency` bends, and only to linter configs). Design write-up: [`team-preferences-overlay.md`](team-preferences-overlay.md). Decisions captured from the user this session: **(a) tiered precedence** — preference-tier findings (taste/thresholds/idioms) the team may tune or silently suppress; floor-tier findings (security, correctness, data/migration safety, concurrency) can never be silently dropped, only `acknowledge`d with a recorded rationale that still surfaces; **(b) bootstrap = template + inference, but inference is proposal-only** — it emits a ratification *interview*, never writes the overlay, and never runs by accident, so a haphazard/vibe-coded repo can't launder unconsidered "approve-click" patterns into ratified standards. Overlay lives in the *reviewed* repo (`.code-quality-atlas/preferences.md`), is read at review time by the router, and stays out of generated-skill provenance (D6). **Extended (user, 2026-06-14, G26):** the overlay also carries an **improvement-valence verbosity** dial (§4.6 — the defect-only guard is a team preference, default strict) plus a built-in **anti-churn / convergence** discipline (§4a) it cannot relax; this is where G26's valence policy lives.
 
@@ -385,7 +386,7 @@ In-repo `skills/` dir? A Claude Code plugin? How are they versioned relative to 
 *(Earlier verbatim copy of Q2; resolved by D5 — promoted AI/LLM-integration #25, config #26, compliance #27; the rest folded. Residual low-priority candidates tracked under the resolved Q2 at the top.)*
 Promote any of these to first-class categories? config management; logging-as-first-class; i18n money/units; licensing/compliance/provenance; **AI/LLM-specific code quality**; internal-API DX/ergonomics; portability & environment assumptions. *(AI/LLM-specific feels most likely to be genuinely under-served by all prior art.)*
 
-### Q3 — Review vs. maintenance split
+### Q3 — Review vs. maintenance split  → LARGELY RESOLVED (see G26; residue tracked under Q8/Q13)
 
 "Review" (assess a diff) and "maintenance" (improve existing code over time) are different activities that touch the same categories differently. Should skills be dual-mode, or should we have a review-facing and a maintenance-facing variant per area?
 **Refined by [`map-gaps.md`](map-gaps.md) G26 (2026-06-14):** the split is largely a *valence toggle at review time*, not a separate mode. Improvement *detection + suggestion* (tidyings, dead code, stale deps) is review-time and detect-and-route (route: implementer); it is currently suppressed only by the defect-only reviewer-discipline guard, not by a missing mode. The genuinely separate "maintenance" activity is just auto-*application* (Q8) and proactive *scanning* (the repo audits). Resolution proposed in G26: refine the guard + add a `valence: defect | improvement` axis to the finding contract.
