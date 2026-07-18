@@ -43,3 +43,6 @@ jobs:
         uses: DavidAnson/markdownlint-cli2-action@8de2aa07cae85fd17c0b35642db70cf5495f1d25 # v24.0.0
         with:
           globs: '**/*.md'
+      - name: shellcheck
+        run: |
+          shellcheck --source-path=SCRIPTDIR -x tooling/*.sh hooks/*.sh hooks/lib/*.sh
