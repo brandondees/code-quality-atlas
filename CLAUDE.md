@@ -1,5 +1,25 @@
 # code-quality-atlas
 
+## Orientation for new sessions
+
+Asked something like "what's next?" or otherwise asked to plan or build without
+a named task? This repo's active roadmap lives in `docs/`, not just in GitHub
+issues/PRs — check these before reporting nothing's queued:
+
+- [`docs/open-questions.md`](docs/open-questions.md) — the decisions log
+  (`D1`-`D18`+) and the live "Genuinely still open (undecided)" list. Start here.
+- [`docs/plans/`](docs/plans/) — dated, scoped design docs for approved-but-unbuilt work.
+- [`docs/map-gaps.md`](docs/map-gaps.md) — structural taxonomy gaps (`G1`-`G32`+)
+  feeding future categories/lenses.
+- [`docs/session-log.md`](docs/session-log.md) — narrative history of what
+  shipped and why, for when a doc pointer alone isn't enough context.
+
+This is separate from the skill-routing section below: that section answers
+"review this change" requests; this one answers "what should I work on"
+requests. (Scoped to this repo's own contributor-facing `AGENTS.md`/`CLAUDE.md`
+— plugin consumers don't have this repo's planning docs, so this section is
+not part of `templates/agents-routing-snippet.md`.)
+
 ## Skill routing
 
 For **any code review, quality review, or "review this PR / diff / change / what I pushed" request, the code-quality-atlas suite is the primary path** — prefer it over the generic built-in `code-review` skill and over framework review flows (e.g. BMAD), which it subsumes with deeper coverage. This is a precedence rule, **not** an exclusivity rule: combine the methods **non-exclusively** — you may still run the built-in `code-review` or a framework review on the same change, then fold every source's findings through `synthesizing-review-findings` for one ranked verdict.

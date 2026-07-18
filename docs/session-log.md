@@ -1848,3 +1848,11 @@ Worked through the findings in issue #134 still open (the markdownlint drift abo
 **Not done, and why:** the bus-factor finding is a staffing/process gap, not a code fix — out of scope for this session.
 
 Full pipeline clean: `generate`/`drift`/`eval` (standalone + collapsed) all pass, 192 tests, markdownlint 0 errors across the repo.
+
+### 2026-07-18 — Close issue #149: orientation pointer for cold "what's next?" sessions
+
+A prior session, asked "what's next?" cold, had no way to discover that this repo tracks its own active roadmap in `docs/` (`open-questions.md`'s decisions log + "genuinely still open" list, `docs/plans/`, `docs/map-gaps.md`) — it defaulted to scanning GitHub issues/PRs alone, closed out #134, fixed #147, and reported "nothing else queued" while a substantial pre-triaged backlog sat unread in the docs tree. Filed as issue #149 with a concrete suggested fix.
+
+Added a short **"Orientation for new sessions"** section to this repo's own `AGENTS.md` and `CLAUDE.md`, pointing at `docs/open-questions.md` (start here), `docs/plans/`, `docs/map-gaps.md`, and `docs/session-log.md`, and explicitly distinguishing it from the existing code-review routing block below it (different session intent: "what should I work on" vs. "review this change"). Scoped narrowly to this repo's contributor-facing files, per the issue's own note — **not** added to `templates/agents-routing-snippet.md`, since plugin consumers don't have this repo's planning docs and the template is the consumer-facing routing-only block covered by `test_routing_snippet_sync.py`. Verified that test (and the full suite) still pass unchanged since the new section sits outside the `BEGIN`/`END` markers it compares.
+
+`python -m pytest` (210 tests) and `markdownlint-cli2` both clean. This closes issue #149. Picked over the other genuinely-open items (Q21 eval-hardening, Q17 stage-1 build, Q13 §9 residuals, Q6 idiom packs) because it was the smallest, most concretely-specified, owner-filed gap — and, fittingly, exactly the meta-problem this session itself would otherwise have repeated.
