@@ -27,10 +27,27 @@ later refinement:
   covering all six directive kinds (§4) with the ratification guardrail (§6) spelled out
   inline; `commands/atlas-init.md` gained an optional step offering to copy it in.
 
-**Deferred to a later wave** (unchanged from the open §9 residuals): the
-`proposing-team-preferences` inference/interview skill; per-check tier granularity;
-monorepo discovery of multiple overlay files; `acknowledge` expiry / re-ratification;
-overlay-vs-linter-config precedence.
+**✅ Wave B (partial) shipped 2026-07-18** — the inference/interview path from §6:
+
+- [`/code-quality-atlas:atlas-propose-preferences`](../commands/atlas-propose-preferences.md)
+  (a hand-authored slash command, not a manifest-generated lens — it doesn't
+  review a diff/repo/decision/artifact, it interviews the repo and drafts a
+  config document, so it sits outside the taxonomy-driven generator pipeline
+  the same way `/atlas-init` does). Explicitly invoked only, never triggered by
+  a normal review or by the overlay's absence. Reads existing linter configs,
+  recurring code patterns, `CLAUDE.md`/`AGENTS.md`, and ADRs; emits candidates
+  per the six directive kinds (§4) framed as observation + proposed rule +
+  ratification question, kept structurally separate per §6's descriptive ≠
+  prescriptive rule.
+- Writes only to `.code-quality-atlas/preferences.proposed.md` — a staging
+  document, never the live `preferences.md` — so ratification stays per-item
+  and human, per §6's non-negotiable guardrail.
+- `commands/atlas-init.md`'s optional preferences step already pointed at the
+  template path; the inference path is a second, equally optional way in.
+
+**Still deferred to a later wave** (unchanged from the open §9 residuals):
+per-check tier granularity; monorepo discovery of multiple overlay files;
+`acknowledge` expiry / re-ratification; overlay-vs-linter-config precedence.
 
 ---
 
