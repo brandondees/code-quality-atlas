@@ -97,14 +97,23 @@ asks — it is not needed for interactive review.
 If the user wants to start recording the team's own ratified opinions — house
 conventions a lens would otherwise nag against, threshold tweaks, scoped
 exemptions for frozen/legacy/generated paths, or dialing up improvement-nit
-suggestions — mention that copying `templates/preferences-template.md` from the
-plugin to `.code-quality-atlas/preferences.md` in the repo root bootstraps this
-(see `docs/team-preferences-overlay.md`). Only copy it if the user asks, and only
-fill in entries the user actually confirms — an unratified guess in this file is
-worse than an empty one (see the template's own guardrail comment). It has no
-effect on floor-tier findings (security, correctness, migration/data safety,
-concurrency) beyond `acknowledge`, which keeps them visible and non-blocking, never
-silent.
+suggestions — there are two ways in, both optional, and neither auto-triggered
+by this command:
+
+- **Template** — copying `templates/preferences-template.md` from the plugin to
+  `.code-quality-atlas/preferences.md` in the repo root bootstraps a blank,
+  hand-authored skeleton (see `docs/team-preferences-overlay.md`).
+- **Inference** — running `/code-quality-atlas:atlas-propose-preferences`
+  interviews the repo (linter configs, recurring patterns, `CLAUDE.md`/ADRs)
+  and drafts candidate entries to `.code-quality-atlas/preferences.proposed.md`
+  for the user to ratify item by item.
+
+Mention both only if the user asks; only fill in `.code-quality-atlas/preferences.md`
+entries the user actually confirms — an unratified guess in this file is worse
+than an empty one (see the template's own guardrail comment, and the inference
+command's per-item ratification rule). It has no effect on floor-tier findings
+(security, correctness, migration/data safety, concurrency) beyond
+`acknowledge`, which keeps them visible and non-blocking, never silent.
 
 ## 6. Report
 

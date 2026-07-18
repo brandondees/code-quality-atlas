@@ -159,7 +159,7 @@ loop: critique the research, let drift flag affected skills, regenerate, re-gate
 |---|---|
 | [`skills/`](skills/) | The 35 lenses + `choosing-review-lenses` (router) + `synthesizing-review-findings` (synthesizer) |
 | [`collapsed/`](collapsed/) | Generated 4-entrypoint form of the suite for cloud / account-skill installs; each entrypoint bundles its shape's lenses and loads them on demand |
-| [`commands/`](commands/) | Slash commands: `/atlas-review-pr`, `/atlas-code-review`, `/atlas-init`, `/atlas-rebase-stale` |
+| [`commands/`](commands/) | Slash commands: `/atlas-review-pr`, `/atlas-code-review`, `/atlas-init`, `/atlas-rebase-stale`, `/atlas-propose-preferences` |
 | [`hooks/`](hooks/) | `SessionStart` routing hook (side-effect-free) |
 | [`templates/`](templates/) | `REVIEW.md` convergence policy + `agents-routing-snippet.md` routing block |
 | [`tooling/`](tooling/) | The pipeline: generator, drift-checker, eval validator, cross-model runner |
