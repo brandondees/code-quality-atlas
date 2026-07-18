@@ -39,7 +39,7 @@ scenarios:
 
 The catalog lives in [`skills/manifest.yaml`](skills/manifest.yaml). For Claude
 Code, the plugin also adds slash commands, a side-effect-free `SessionStart` routing
-hook, and routing templates.
+hook, opt-in self-improvement telemetry hooks (off by default), and routing templates.
 
 The point of the suite is to **supersede the generic built-in `/code-review`** (and
 framework reviews like BMAD) as the *primary* review path — with deeper,
@@ -96,8 +96,9 @@ Paste [`templates/agents-routing-snippet.md`](templates/agents-routing-snippet.m
 hand.
 
 The plugin also ships a `SessionStart` hook that nudges agents toward the suite each
-session — a backstop for when skill descriptions get budgeted out of context. Details
-in [`docs/install.md`](docs/install.md).
+session — a backstop for when skill descriptions get budgeted out of context — plus a
+pair of opt-in, off-by-default hooks that feed the suite's self-improvement loop when a
+repo turns them on. Details in [`docs/install.md`](docs/install.md).
 
 ## Use it
 
@@ -160,7 +161,7 @@ loop: critique the research, let drift flag affected skills, regenerate, re-gate
 | [`skills/`](skills/) | The 35 lenses + `choosing-review-lenses` (router) + `synthesizing-review-findings` (synthesizer) |
 | [`collapsed/`](collapsed/) | Generated 4-entrypoint form of the suite for cloud / account-skill installs; each entrypoint bundles its shape's lenses and loads them on demand |
 | [`commands/`](commands/) | Slash commands: `/atlas-review-pr`, `/atlas-code-review`, `/atlas-init`, `/atlas-rebase-stale`, `/atlas-propose-preferences` |
-| [`hooks/`](hooks/) | `SessionStart` routing hook (side-effect-free) |
+| [`hooks/`](hooks/) | `SessionStart` routing hook (side-effect-free); opt-in, off-by-default `PostToolUse`/`SessionEnd` self-improvement telemetry hooks |
 | [`templates/`](templates/) | `REVIEW.md` convergence policy + `agents-routing-snippet.md` routing block |
 | [`tooling/`](tooling/) | The pipeline: generator, drift-checker, eval validator, cross-model runner |
 | [`docs/`](docs/) | Research, taxonomy, design, runbooks, install guide, decision log |

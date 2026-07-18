@@ -146,3 +146,28 @@ decided: 2026-01-01, @alice
 reason: team wants review noise low by default; individual reviewers can still
   ask for improvement-valence findings on a specific PR when they want them
 -->
+
+<!-- ============================================================
+     7. FEEDBACK & LEARNINGS
+     Verb: set (opt-in, off by default). Whether this repo's own sessions may
+     write local telemetry the suite's self-improvement loop can use — see
+     docs/self-improvement-loop.md (design; stage 1 built, D17) for the full
+     opt-in tier ladder and privacy boundary. Nothing here ever reaches the
+     code-quality-atlas project on its own; tiers 2/3 (upstreaming) are a
+     human- or agent-driven command run separately (unbuilt as of stage 1),
+     never this file by itself.
+     ============================================================ -->
+
+## Feedback & learnings
+
+<!--
+feedback: off      # off (default, hooks no-op) | local (invocation log +
+#                     a session-end retro queue land in
+#                     .code-quality-atlas/learnings/, read by this team's own
+#                     retro tooling — never transmitted anywhere by this
+#                     setting alone) | draft | auto (stages 2+, unbuilt)
+decided: 2026-01-01, @alice
+reason: local-only telemetry is safe by construction (abstracted at creation,
+  see the design doc) and feeds this team's own Q13 tuning; upstream tiers
+  wait until stage 2+ ships
+-->

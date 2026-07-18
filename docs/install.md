@@ -212,3 +212,28 @@ The two pair together.
 > arrive after your first message. Every subsequent session, the plugin is cached
 > and the hook fires at startup as intended. If a first session misses it, just
 > re-send your request or invoke `choosing-review-lenses` directly.
+
+## Self-improvement telemetry (PostToolUse / SessionEnd hooks) — opt-in, off by default
+
+The plugin also ships two more hooks, unrelated to routing: a `PostToolUse` hook
+scoped to the `Skill` tool ([`../hooks/log-skill-invocation.sh`](../hooks/log-skill-invocation.sh))
+and a `SessionEnd` hook ([`../hooks/queue-session-retro.sh`](../hooks/queue-session-retro.sh)).
+Both are stage 1 of the self-improvement loop
+([`self-improvement-loop.md`](self-improvement-loop.md), Q17/D17) and both **no-op by
+default** — installing the plugin does not turn them on.
+
+**Turning them on.** Add a `feedback:` line to this repo's own
+`.code-quality-atlas/preferences.md` (see the template's "Feedback & learnings"
+section) or set the `CODE_QUALITY_ATLAS_FEEDBACK_TIER` env var to `local`, `draft`, or
+`auto` (the tier ladder in the design doc §5; only `local` — invocation log + a
+session-end retro queue — is built so far). Anything else, including an unset or
+malformed value, resolves to `off`.
+
+**What `local` writes, and where.** Under `.code-quality-atlas/learnings/` in your
+project: `invocations.jsonl` (one line per skill invocation — timestamp, plugin commit
+SHA, session id, tool name, and the raw tool-input payload) and
+`pending-retro.jsonl` (one line per ended session — timestamp, plugin SHA, session id,
+transcript path, end reason). Nothing here is transmitted anywhere by itself; at tier
+`local` it stays a file in your own repo for your own team's use (design doc §5's "D17
+note"). Both hooks degrade to a clean no-op (never blocking or crashing the session) if
+`jq` is missing or a hook receives malformed input.
