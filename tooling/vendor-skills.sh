@@ -164,7 +164,10 @@ contains() {
 vendor_one() {
   local name=$1 dest_root=$2
   local src="$SRC_SUBDIR/$name"
-  local dest="$dest_root/$name"
+  # Guard dest_root directly, not just the concatenated dest: "$dest_root/$name"
+  # is never empty even when dest_root is (it's still "/$name"), so a dest-only
+  # guard can't catch an empty dest_root widening the delete to a rooted path.
+  local dest="${dest_root:?}/$name"
   rm -rf "${dest:?}"
   mkdir -p "$dest"
   cp "$src/SKILL.md" "$dest/SKILL.md"

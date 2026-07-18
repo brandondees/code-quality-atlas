@@ -125,3 +125,55 @@ def test_collapsed_vendor_also_writes_attribution_notice(tmp_path):
     run_vendor(target, "--collapsed")
     notice = notice_text(target)
     assert "brandondees/code-quality-atlas" in notice
+
+
+def _source_functions_only():
+    """The script's functions/vars, without the trailing `main "$@"` call, so
+    a caller can invoke individual functions (e.g. vendor_one) directly."""
+    lines = SCRIPT.read_text().splitlines()
+    assert lines[-1].strip() == 'main "$@"', \
+        "script's last line changed shape; update this helper"
+    return "\n".join(lines[:-1])
+
+
+def test_vendor_one_aborts_instead_of_deleting_rooted_path_on_empty_dest_root(tmp_path):
+    """Regression for the SC2115 hardening (#157): vendor_one's original fix
+    guarded `${dest:?}`, but dest is built as "$dest_root/$name" — string
+    concatenation with a literal "/" means dest can never actually be empty
+    even when dest_root is (it becomes "/$name" instead), so a dest-only
+    guard can't catch this. The fix now guards dest_root directly at the
+    point dest is built. Prove it: with dest_root empty and name="etc", a
+    dest-only guard would let `rm -rf "/etc"` through; the fixed script must
+    abort before ever running rm."""
+    canary = tmp_path / "etc"
+    canary.mkdir()
+    (canary / "canary-file").write_text("must survive")
+
+    bash_script = f"""
+set -euo pipefail
+{_source_functions_only()}
+cd {tmp_path}
+vendor_one "etc" ""
+"""
+    result = subprocess.run(
+        ["bash", "-c", bash_script],
+        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode != 0, (
+        f"vendor_one should have aborted on empty dest_root; "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert (canary / "canary-file").exists(), \
+        "empty dest_root must not delete an unintended rooted path"
+
+
+def test_prune_rm_guard_aborts_on_empty_dest_root(tmp_path):
+    """Companion regression for the prune loop's own `${dest_root:?}` guard
+    (the pattern vendor_one's fix above was brought in line with): an empty
+    dest_root there must abort rather than expand to `rm -rf "/$old"`."""
+    result = subprocess.run(
+        ["bash", "-c", 'dest_root=""; old="etc"; rm -rf "${dest_root:?}/$old"'],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode != 0
+    assert "dest_root" in result.stderr
