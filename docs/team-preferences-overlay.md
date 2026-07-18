@@ -131,7 +131,7 @@ from Q13: full flexibility on taste, an honest paper trail on safety.
 
 ## 4. What the overlay can express
 
-Five directive kinds, each mapping onto the verbs above:
+Six directive kinds, each mapping onto the verbs above:
 
 1. **Lens selection / weighting** — enable/disable lenses, or mark some advisory vs blocking.
    (`set`, capped by the router's 2-4 rule — preferences re-rank within the cap, they don't lift it.)
@@ -153,6 +153,13 @@ Five directive kinds, each mapping onto the verbs above:
    **`improvements-opt-in`** (surface improvement nits, `route: implementer`, apply/defer/ignore), or
    finer per-lens settings. (`set`, preference-tier — a team that wants a quiet review keeps the
    default; a team that wants active tidy-up dials it up. Floor-tier defects are unaffected.)
+
+**Not a seventh directive kind, but the same file:** `.code-quality-atlas/preferences.md` also
+carries a `feedback:` opt-in tier (off/local/draft/auto) for the self-improvement loop's stage 1
+build — [`self-improvement-loop.md`](self-improvement-loop.md)§5, D17. It's colocated for the same
+reason as the six above (one per-repo, human-ratified config surface), but it configures
+*telemetry*, not review findings, so it doesn't map onto the set/tune/suppress/acknowledge verbs
+above and stays out of this list.
 
 ### 4a. The anti-churn discipline (built-in, not a knob)
 
