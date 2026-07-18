@@ -2,7 +2,6 @@
 # tooling/cli.py
 from __future__ import annotations
 import argparse
-import contextlib
 from pathlib import Path
 from tooling.manifest import load_manifest, validate, ValidationError
 from tooling.generate import (CollapsedOverlapError, generate_collapsed,
@@ -30,8 +29,10 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--skills-root", default="skills")
     e.add_argument("--skill", default=None, help="validate one skill; default: all")
     e.add_argument("--manifest", default="skills/manifest.yaml",
-                   help="source of each lens's eval_min (Q21); absent/unreadable "
-                        "falls back to D8's baseline of 3 for every skill")
+                   help="source of each lens's eval_min (Q21); a missing or "
+                        "malformed manifest fails the eval command loudly rather "
+                        "than silently falling back to D8's baseline, since that "
+                        "would silently under-enforce every lens's raised floor")
 
     args = parser.parse_args(argv)
 
@@ -88,15 +89,21 @@ def main(argv: list[str] | None = None) -> int:
         # Q21: a lens can opt into a raised eval-scenario floor via the
         # manifest's `eval_min`. This lookup is by skill *name*, so it's a
         # harmless no-op against collapsed/entrypoint runs (different names,
-        # never present in manifest.skills) and against any run where the
-        # manifest can't be read — those all fall back to D8's baseline of 3,
-        # exactly today's behavior.
-        eval_min_by_skill: dict[str, int] = {}
-        with contextlib.suppress(OSError, ValidationError):
+        # never present in manifest.skills). A manifest that can't be loaded
+        # at all is NOT treated as harmless, though: silently falling back to
+        # D8's baseline of 3 would silently un-enforce every hardened lens's
+        # raised floor and still print "OK" — a CI gate must refuse to report
+        # success when it isn't sure what floor it just checked against
+        # (found by the atlas's own review of PR #159).
+        try:
             eval_min_by_skill = {
                 s.name: s.eval_min for s in load_manifest(args.manifest).skills
                 if s.eval_min is not None
             }
+        except (OSError, ValidationError) as exc:
+            print(f"ERROR: could not load {args.manifest} to resolve each lens's "
+                  f"eval-scenario floor (Q21): {exc}")
+            return 1
         ok = True
         for path in eval_files:
             name = path.parent.parent.name

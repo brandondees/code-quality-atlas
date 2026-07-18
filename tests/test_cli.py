@@ -90,21 +90,48 @@ def test_cli_eval_honors_manifest_eval_min(tmp_path, capsys):
     assert "OK: unlisted-skill (3 scenarios)" in out  # absent from manifest -> default baseline
 
 
-def test_cli_eval_falls_back_when_manifest_unreadable(tmp_path, capsys):
-    # A missing/bad --manifest path must not crash the eval gate; every skill
-    # falls back to D8's baseline of 3.
+def test_cli_eval_fails_loudly_when_manifest_missing(tmp_path, capsys):
+    # A missing --manifest path must fail the eval gate loudly, not silently
+    # fall back to D8's baseline — a CI gate must refuse to report "OK" when
+    # it can't confirm which eval-scenario floor it just checked against
+    # (found by the atlas's own review of PR #159: a fail-open fallback here
+    # would silently un-enforce every hardened lens's raised floor).
     import json
-    ok = tmp_path / "skills" / "some-skill" / "evals"
-    ok.mkdir(parents=True)
-    (ok / "eval.json").write_text(json.dumps({
+    some_skill = tmp_path / "skills" / "some-skill" / "evals"
+    some_skill.mkdir(parents=True)
+    (some_skill / "eval.json").write_text(json.dumps({
         "skills": ["some-skill"],
         "scenarios": [{"query": f"q{i}", "expected_behavior": ["b"]} for i in range(3)],
     }))
     rc = main(["eval", "--skills-root", str(tmp_path / "skills"),
                "--manifest", str(tmp_path / "does-not-exist.yaml")])
     out = capsys.readouterr().out
-    assert rc == 0
-    assert "OK: some-skill (3 scenarios)" in out
+    assert rc == 1
+    assert "ERROR" in out
+    assert "OK: some-skill" not in out
+
+
+def test_cli_eval_fails_loudly_on_malformed_manifest_yaml(tmp_path, capsys):
+    # Regression: syntactically-invalid YAML previously escaped as an uncaught
+    # yaml.parser.ParserError instead of being caught and reported. Confirms
+    # load_manifest's wrapping fix and the eval command's fail-loud handling
+    # together, end to end.
+    import json
+    some_skill = tmp_path / "skills" / "some-skill" / "evals"
+    some_skill.mkdir(parents=True)
+    (some_skill / "eval.json").write_text(json.dumps({
+        "skills": ["some-skill"],
+        "scenarios": [{"query": f"q{i}", "expected_behavior": ["b"]} for i in range(3)],
+    }))
+    bad_manifest = tmp_path / "bad_manifest.yaml"
+    bad_manifest.write_text("taxonomy_version: v0.2\nskills: [ { name: \"oops\"\n")
+
+    rc = main(["eval", "--skills-root", str(tmp_path / "skills"),
+               "--manifest", str(bad_manifest)])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "ERROR" in out
+    assert "OK: some-skill" not in out
 
 
 def test_cli_generate_emits_collapsed(tmp_path):

@@ -117,6 +117,17 @@ def test_load_manifest_rejects_missing_skills_key(tmp_path):
         load_manifest(path)
 
 
+def test_load_manifest_wraps_malformed_yaml_as_validation_error(tmp_path):
+    # Regression: syntactically-invalid YAML must raise ValidationError (like
+    # every other malformed-input case in this function), not let a raw
+    # yaml.YAMLError escape to a caller that only catches ValidationError
+    # (found by the atlas's own review of PR #159, reproduced against
+    # `tooling.cli eval --manifest <malformed>.yaml` crashing uncaught).
+    path = _write_manifest(tmp_path, 'taxonomy_version: v0.2\nskills: [ { name: "oops"\n')
+    with pytest.raises(ValidationError, match="invalid YAML"):
+        load_manifest(path)
+
+
 def test_load_manifest_rejects_missing_taxonomy_version(tmp_path):
     path = _write_manifest(tmp_path, "skills: []\n")
     with pytest.raises(ValidationError, match="missing required key 'taxonomy_version'"):

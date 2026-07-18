@@ -407,7 +407,16 @@ def load_manifest(path: str) -> Manifest:
     with open(path, encoding="utf-8") as fh:
         raw = fh.read()
     _check_comment_truncation(raw, path)
-    data = yaml.safe_load(raw)
+    # Syntactically-invalid YAML must surface the same way every other
+    # malformed-input case in this function does — as a ValidationError naming
+    # the file — not as a raw yaml.YAMLError escaping to a caller that only
+    # catches ValidationError (found by the atlas's own review of PR #159:
+    # a caller assuming "OSError or ValidationError covers every load failure"
+    # crashed uncaught on a bad manifest instead of degrading gracefully).
+    try:
+        data = yaml.safe_load(raw)
+    except yaml.YAMLError as exc:
+        raise ValidationError(f"{path}: invalid YAML: {exc}") from exc
     # Guard the parsed structure before indexing into it, so a malformed or
     # partially-written manifest yields a ValidationError naming the file and the
     # offending key rather than a raw TypeError/KeyError into manifest.py internals.
