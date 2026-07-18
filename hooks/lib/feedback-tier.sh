@@ -35,14 +35,21 @@ feedback_tier() {
   local prefs=".code-quality-atlas/preferences.md" file_tier
   if [ -f "$prefs" ]; then
     # The template ships every example commented out inside HTML comment
-    # blocks (only a ratified, uncommented line counts) with the `<!--`/`-->`
-    # markers each on their own line — this file's own convention. Strip
-    # those blocks, then take the first `feedback: <value>` line restricted
-    # to the four known tiers.
+    # blocks (only a ratified, uncommented line counts) — usually with the
+    # `<!--`/`-->` markers each on their own line, but a hand-edited file can
+    # just as well carry a self-contained single-line comment (e.g. `<!--
+    # ratified 2026-01-01 -->`). Strip those first (the `/<!--.*-->/ { next }`
+    # rule, checked before the multi-line-open rule so it wins via `next` when
+    # a line matches both) so a one-line comment earlier in the file can never
+    # leave `incomment` stuck on for everything after it — that previously let
+    # a single-line comment silently swallow a real, ratified `feedback:`
+    # line further down, resolving to "off" with no error. Then take the
+    # first `feedback: <value>` line restricted to the four known tiers.
     file_tier="$(awk '
-      /<!--/ { incomment=1; next }
-      /-->/  { incomment=0; next }
-      !incomment { print }
+      /<!--.*-->/ { next }
+      /<!--/      { incomment=1; next }
+      /-->/       { incomment=0; next }
+      !incomment  { print }
     ' "$prefs" 2>/dev/null \
       | grep -m1 -E '^[[:space:]]*feedback:[[:space:]]*(off|local|draft|auto)[[:space:]]*$' \
       | sed -E 's/^[[:space:]]*feedback:[[:space:]]*//; s/[[:space:]]*$//')"

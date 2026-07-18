@@ -96,6 +96,26 @@ def test_commented_out_template_example_does_not_activate(tmp_path):
     assert not _learnings_dir(tmp_path).exists()
 
 
+def test_earlier_single_line_comment_does_not_swallow_a_later_ratified_line(tmp_path):
+    # Regression for the atlas's own round-1 self-review of this PR: the awk
+    # comment-stripper's `incomment` flag previously never reset within a
+    # single line (`/<!--/ { incomment=1; next }` short-circuited before the
+    # same line's `-->` could be checked), so a self-contained one-line HTML
+    # comment anywhere earlier in the file left every subsequent line —
+    # including a validly-ratified `feedback:` line — treated as commented
+    # out, silently resolving to "off".
+    prefs_dir = tmp_path / ".code-quality-atlas"
+    prefs_dir.mkdir()
+    (prefs_dir / "preferences.md").write_text(
+        "# Team preferences\n"
+        "<!-- ratified 2026-01-01, see PR #42 -->\n\n"
+        "## Feedback & learnings\n\n"
+        "feedback: local\n"
+        "decided: 2026-07-18, @alice\n")
+    _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra={"CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)})
+    assert (_learnings_dir(tmp_path) / "invocations.jsonl").exists()
+
+
 def test_ratified_preferences_line_activates_logging(tmp_path):
     # An uncommented `feedback: local` line under the repo's own preferences
     # overlay must enable logging without any env var.
