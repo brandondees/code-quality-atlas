@@ -53,6 +53,60 @@ def test_cli_eval_reports_valid_and_invalid(tmp_path, capsys):
     assert rc == 0                      # filtering to the valid one passes
 
 
+def test_cli_eval_honors_manifest_eval_min(tmp_path, capsys):
+    # Q21: a lens with a manifest `eval_min` above D8's baseline must fail the
+    # eval gate below that bar and pass at or above it — while an unrelated
+    # skill absent from the manifest keeps the default baseline of 3.
+    import json
+    hardened = tmp_path / "skills" / "hardened-skill" / "evals"
+    hardened.mkdir(parents=True)
+    (hardened / "eval.json").write_text(json.dumps({
+        "skills": ["hardened-skill"],
+        "scenarios": [{"query": f"q{i}", "expected_behavior": ["b"]} for i in range(5)],
+    }))
+    unlisted = tmp_path / "skills" / "unlisted-skill" / "evals"
+    unlisted.mkdir(parents=True)
+    (unlisted / "eval.json").write_text(json.dumps({
+        "skills": ["unlisted-skill"],
+        "scenarios": [{"query": f"q{i}", "expected_behavior": ["b"]} for i in range(3)],
+    }))
+    manifest_path = tmp_path / "manifest.yaml"
+    manifest_path.write_text(
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hardened-skill\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    eval_min: 10\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
+
+    rc = main(["eval", "--skills-root", str(tmp_path / "skills"), "--manifest", str(manifest_path)])
+    out = capsys.readouterr().out
+    assert rc == 1                                   # hardened-skill's 5 < its eval_min of 10
+    assert "INVALID: hardened-skill" in out
+    assert "at least 10" in out
+    assert "OK: unlisted-skill (3 scenarios)" in out  # absent from manifest -> default baseline
+
+
+def test_cli_eval_falls_back_when_manifest_unreadable(tmp_path, capsys):
+    # A missing/bad --manifest path must not crash the eval gate; every skill
+    # falls back to D8's baseline of 3.
+    import json
+    ok = tmp_path / "skills" / "some-skill" / "evals"
+    ok.mkdir(parents=True)
+    (ok / "eval.json").write_text(json.dumps({
+        "skills": ["some-skill"],
+        "scenarios": [{"query": f"q{i}", "expected_behavior": ["b"]} for i in range(3)],
+    }))
+    rc = main(["eval", "--skills-root", str(tmp_path / "skills"),
+               "--manifest", str(tmp_path / "does-not-exist.yaml")])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "OK: some-skill (3 scenarios)" in out
+
+
 def test_cli_generate_emits_collapsed(tmp_path):
     from tooling.cli import main
     rc = main(["generate", "--manifest", "skills/manifest.yaml", "--docs-root", ".",

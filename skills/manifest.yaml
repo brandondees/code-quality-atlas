@@ -246,6 +246,10 @@ skills:
     design: true
     wave: 2
     tier: floor
+    # Q21: the first hardened, adversarial/red-team-weighted eval suite
+    # (docs/threat-modeling-design-time-security.md §5's A-E scenario groups),
+    # raised from D8's 3-scenario baseline. See open-questions.md Q21.
+    eval_min: 27
     built_from:
       - { category: 14, source: docs/research/cluster-4-runtime.md#14 }
 

@@ -38,9 +38,11 @@ design approved & **✅ built 2026-06-26, PR #80**; see the Q20 section below),
 which also resolved D16.
 
 **Genuinely still open (undecided):**
-Q21 (suite-wide eval comprehensiveness — raise the bar beyond "≥3 scenarios" to a
-per-lens adversarial/red-team pass; new 2026-06-27, design-deferred),
-Q17 (self-improving loop — stage 1 approved 2026-07-06 (D17), unbuilt; stages 2-5 still design-only),
+Q21 (suite-wide eval comprehensiveness — risk-tiered rollout + the opt-in `eval_min`
+mechanism ✅ built 2026-07-18, first hardened instance `sweeping-for-security`;
+generalizing to the rest of the floor tier, then preference-tier lenses, plus the
+cross-model re-gate, still open),
+Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
 Q6 (idiom packs),
@@ -122,7 +124,7 @@ findings, absent on llama). Per the runbook these are model-capability limits,
 not heuristic regressions, so no tuning was applied. See the session-log entry
 of the same date.
 
-### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios" *(new, 2026-06-27)*
+### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; second lens hardened, generalization to the rest still open) *(new, 2026-06-27)*
 
 **Trigger.** Building the G30 threat-modeling lens ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)) surfaced that for high-stakes lenses the dangerous failure mode is the **false negative**, and that 3–4 happy-path scenarios don't probe it. That spec's §5 introduces a **thorough, adversarial, false-negative-weighted** eval design — ~21 scenarios across core-firing / per-axis-coverage / detect-and-route / **red-team** / precision groups, plus a red-team generation pass and a hardened cross-model re-gate.
 
@@ -135,7 +137,17 @@ of the same date.
 - How does it interact with the cross-model re-gate cost (more scenarios × more models)?
 - Ties to **Q17** (self-improvement loop — real misses become regression evals) and **D8** (the eval-first ratchet).
 
-**Disposition: open — captured 2026-06-27, design-deferred to maintain momentum.** First instance (G30) is specced; the generalization is the open work.
+**Disposition: sub-questions 1-2 resolved 2026-07-18; sub-question 3 still open.**
+
+**(1) Risk-tiered, not uniform.** Rolls out to floor-tier lenses first — the same five the Q13 overlay already treats as highest-stakes (`sweeping-for-security`, `tracing-correctness-and-invariants`, `reviewing-migration-and-data-safety`, `reviewing-concurrency-and-async`, `hunting-silent-failures`) — rather than raising every lens's bar at once, which would have broken `tooling.cli eval`'s CI gate for every not-yet-hardened lens the moment a global minimum changed.
+
+**(2) A manifest/generator affordance: yes, but opt-in per lens.** Added `Skill.eval_min: int | None` (`tooling/manifest.py`) — `None` (the default) means "D8's baseline of 3"; a lens sets it only once its own eval suite has actually been raised to match. `tooling/evals.py`'s `validate_evals` takes an explicit `min_scenarios` parameter (default 3, unchanged for every caller that doesn't pass one); `tooling/cli.py`'s `eval` command resolves each skill's floor from the manifest (a name-keyed lookup, so it's a no-op against the collapsed/entrypoint eval run — different names, never in `manifest.skills` — and against any run where the manifest can't be read, both falling back to baseline exactly as before). Reversible, backward-compatible, zero blast radius on the 30+ lenses not yet touched.
+
+**First hardened instance: `sweeping-for-security`** (`eval_min: 27`, up from 6) — chosen because the threat-modeling lens's own A-E adversarial scenario-group taxonomy ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)§5.1) transfers most directly onto a general vuln-sweep lens: **A** core shape-flexible firing (a design-doc IDOR-gap scenario added, proving the lens's `design: true` capability is actually exercised, not just declared); **B** per-axis coverage (one scenario per major check the lens owns that wasn't already hit — XSS, IDOR, weak/homegrown crypto, unsafe deserialization, SSRF, CSRF, permissive CORS, sensitive data in logs/URLs); **C** delegate/escalate boundary (four scenarios proving the lens surfaces a security-relevant finding but hands the deeper judgment to the lens that owns it — `reviewing-llm-integration` for prompt-injection-shaped input, `reviewing-agentic-safety` for an over-broad tool definition, `auditing-compliance-and-provenance` for PII-retention policy, `reviewing-migration-and-data-safety` for backfill mechanics); **D** adversarial/red-team (six: security theater, an in-diff comment instructing the reviewer not to flag anything, distractor overload, an implicit trust boundary at a reused helper's new call site, sycophancy/time-pressure framing, and a client-side-only "right defense, wrong layer" check); **E** precision (two: a pure styling change and a benign local script, both "No findings"). 27 total, up from the original 6 (kept unchanged, still valid). `python -m tooling.cli eval` now enforces this floor for the lens; `python -m pytest` (229 tests, 9 new) confirms the mechanism itself (manifest parsing/validation, `validate_evals`'s parameter, and the CLI's name-keyed lookup + graceful fallback) via unit and CLI-integration tests.
+
+**(3) Cross-model re-gate cost — still open, deferred for the same standing reason as every other recent eval change.** No Ollama/local-model substrate in this remote session (the same gap noted in the 2026-06-28, 2026-07-05, and 2026-07-06 session-log entries), so the hardened `sweeping-for-security` suite has **not** been re-gated on the 7-8B floor — tracked as ordinary follow-up, to run alongside the threat-modeling lens's own still-deferred floor-of-record re-run when the substrate is next available.
+
+**Generalization to the remaining four floor-tier lenses (and eventually the preference-tier ones) is the next tracked step** — the mechanism now exists and one lens proves the pattern transfers; each additional lens is an independent, reversible follow-up (author its own A-E suite, set its own `eval_min`), not a blocking dependency on this entry.
 
 ### Q20 — Too many top-level skills: collapse to a few entrypoints + nested disclosure?  → RESOLVED (built, PR #80) *(new, 2026-06-25)*
 

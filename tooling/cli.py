@@ -3,7 +3,7 @@
 from __future__ import annotations
 import argparse
 from pathlib import Path
-from tooling.manifest import load_manifest, validate
+from tooling.manifest import load_manifest, validate, ValidationError
 from tooling.generate import (CollapsedOverlapError, generate_collapsed,
                               generate_router, generate_skill,
                               generate_synthesizer, primary_owners)
@@ -28,6 +28,9 @@ def main(argv: list[str] | None = None) -> int:
     e = sub.add_parser("eval")
     e.add_argument("--skills-root", default="skills")
     e.add_argument("--skill", default=None, help="validate one skill; default: all")
+    e.add_argument("--manifest", default="skills/manifest.yaml",
+                   help="source of each lens's eval_min (Q21); absent/unreadable "
+                        "falls back to D8's baseline of 3 for every skill")
 
     args = parser.parse_args(argv)
 
@@ -81,6 +84,20 @@ def main(argv: list[str] | None = None) -> int:
             eval_files = [Path(args.skills_root, args.skill, "evals", "eval.json")]
         else:
             eval_files = sorted(Path(args.skills_root).glob("*/evals/eval.json"))
+        # Q21: a lens can opt into a raised eval-scenario floor via the
+        # manifest's `eval_min`. This lookup is by skill *name*, so it's a
+        # harmless no-op against collapsed/entrypoint runs (different names,
+        # never present in manifest.skills) and against any run where the
+        # manifest can't be read — those all fall back to D8's baseline of 3,
+        # exactly today's behavior.
+        eval_min_by_skill: dict[str, int] = {}
+        try:
+            eval_min_by_skill = {
+                s.name: s.eval_min for s in load_manifest(args.manifest).skills
+                if s.eval_min is not None
+            }
+        except (OSError, ValidationError):
+            pass
         ok = True
         for path in eval_files:
             name = path.parent.parent.name
@@ -90,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             try:
                 doc = load_evals(str(path))
-                validate_evals(doc)
+                validate_evals(doc, min_scenarios=eval_min_by_skill.get(name, 3))
                 print(f"OK: {name} ({len(doc.scenarios)} scenarios)")
             except EvalError as exc:
                 print(f"INVALID: {name} — {exc}")

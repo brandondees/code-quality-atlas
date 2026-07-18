@@ -33,9 +33,12 @@ def load_evals(path: str) -> EvalDoc:
         raise EvalError(f"{path}: {exc}") from exc
 
 
-def validate_evals(doc: EvalDoc) -> None:
-    if len(doc.scenarios) < 3:
-        raise EvalError("a skill must ship at least 3 eval scenarios")
+def validate_evals(doc: EvalDoc, min_scenarios: int = 3) -> None:
+    # D8's baseline is 3; a lens can opt into a higher, hardened bar via the
+    # manifest's `eval_min` (Q21) — the caller resolves which applies and
+    # passes it in, so this function stays agnostic to *why* the bar differs.
+    if len(doc.scenarios) < min_scenarios:
+        raise EvalError(f"a skill must ship at least {min_scenarios} eval scenarios")
     for i, s in enumerate(doc.scenarios):
         if not s.get("query"):
             raise EvalError(f"scenario {i}: missing query")

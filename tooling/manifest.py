@@ -67,6 +67,14 @@ class Skill:
     # `acknowledge`d, never silently `suppress`ed, by a repo's
     # .code-quality-atlas/preferences.md.
     tier: str = "preference"
+    # Q21: an opt-in, per-lens raised eval-scenario floor (the hardened,
+    # adversarial/red-team-weighted bar from the threat-modeling lens's eval
+    # design, docs/threat-modeling-design-time-security.md §5), risk-tiered
+    # rather than applied uniformly so lenses not yet hardened keep passing
+    # `tooling.cli eval` at D8's baseline. None (the default) means "use the
+    # D8 baseline of 3" — set only on lenses whose eval suite has actually
+    # been raised to this bar.
+    eval_min: int | None = None
 
 
 @dataclass
@@ -167,6 +175,9 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
         if s.tier not in ("floor", "preference"):
             raise ValidationError(
                 f"{s.name}: tier must be floor|preference, got {s.tier!r}")
+        if s.eval_min is not None and s.eval_min < 3:
+            raise ValidationError(
+                f"{s.name}: eval_min must be >=3 (D8's baseline), got {s.eval_min!r}")
         if s.design and s.shape != "diff":
             raise ValidationError(
                 f"{s.name}: design applies only to diff-shaped lenses")
@@ -435,6 +446,7 @@ def load_manifest(path: str) -> Manifest:
                 picker=(s.get("picker") or "").strip(),
                 artifacts=artifacts,
                 tier=s.get("tier", "preference"),
+                eval_min=s.get("eval_min"),
             ))
         except KeyError as e:
             raise ValidationError(f"skill #{i}: missing field {e}") from e
