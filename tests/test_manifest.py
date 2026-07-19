@@ -117,6 +117,17 @@ def test_load_manifest_rejects_missing_skills_key(tmp_path):
         load_manifest(path)
 
 
+def test_load_manifest_wraps_malformed_yaml_as_validation_error(tmp_path):
+    # Regression: syntactically-invalid YAML must raise ValidationError (like
+    # every other malformed-input case in this function), not let a raw
+    # yaml.YAMLError escape to a caller that only catches ValidationError
+    # (found by the atlas's own review of PR #159, reproduced against
+    # `tooling.cli eval --manifest <malformed>.yaml` crashing uncaught).
+    path = _write_manifest(tmp_path, 'taxonomy_version: v0.2\nskills: [ { name: "oops"\n')
+    with pytest.raises(ValidationError, match="invalid YAML"):
+        load_manifest(path)
+
+
 def test_load_manifest_rejects_missing_taxonomy_version(tmp_path):
     path = _write_manifest(tmp_path, "skills: []\n")
     with pytest.raises(ValidationError, match="missing required key 'taxonomy_version'"):
@@ -193,6 +204,34 @@ def test_load_manifest_parses_tier(tmp_path):
 def test_load_manifest_defaults_tier_when_absent():
     m = load_manifest("tests/fixtures/manifest_sample.yaml")
     assert m.skills[0].tier == "preference"
+
+def test_skill_defaults_to_no_eval_min():
+    assert _skill().eval_min is None
+
+def test_validate_accepts_raised_eval_min():
+    validate(Manifest("v0.2", [_skill(eval_min=20)]))  # no raise
+
+def test_validate_rejects_eval_min_below_d8_baseline():
+    with pytest.raises(ValidationError, match="eval_min must be >=3"):
+        validate(Manifest("v0.2", [_skill(eval_min=2)]))
+
+def test_load_manifest_parses_eval_min(tmp_path):
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    eval_min: 27\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
+    m = load_manifest(path)
+    assert m.skills[0].eval_min == 27
+
+def test_load_manifest_defaults_eval_min_to_none_when_absent():
+    m = load_manifest("tests/fixtures/manifest_sample.yaml")
+    assert m.skills[0].eval_min is None
 
 def test_load_manifest_treats_bare_cross_ref_as_empty_list(tmp_path):
     # #140: a bare "cross_ref:" (no value) parses as YAML null, not [] --
