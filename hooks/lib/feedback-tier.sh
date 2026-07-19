@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # code-quality-atlas — shared feedback-tier resolution (Q17/D17 stage 1).
 #
 # Resolves which opt-in tier the reviewed repo has enabled for the

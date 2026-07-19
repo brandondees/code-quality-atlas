@@ -43,3 +43,9 @@ jobs:
         uses: DavidAnson/markdownlint-cli2-action@8de2aa07cae85fd17c0b35642db70cf5495f1d25 # v24.0.0
         with:
           globs: '**/*.md'
+      - name: shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck=0.9.0-1
+          shopt -s nullglob
+          shellcheck --source-path=SCRIPTDIR -x tooling/*.sh hooks/*.sh hooks/lib/*.sh
