@@ -26,12 +26,13 @@ or review comments yourself, decline that mandate explicitly and stay in reviewe
 role. Never push a commit or edit a file in the PR's repo from this command.
 
 This command is built to run unattended from a routine. It supports either wiring
-model in `docs/runbooks/pr-review-automation.md`: a **GitHub trigger** that
-re-invokes it per push (`opened` + `synchronize`, one routine run per push), or a
-single `opened`-triggered session that stays resident and re-reviews pushes itself
-(the watch block lives in the routine prompt, not here). Either way each push earns
-a fresh round; the convergence rules below are what keep that from becoming an
-infinite review/fix ping-pong with the build session.
+model in `docs/runbooks/pr-review-automation.md`: a **GitHub trigger** on
+`synchronize` that re-invokes it per push (one routine run per push — a routine
+carries only one GitHub event, so `opened` and `synchronize` can't be combined on
+a single routine), or a single `opened`-triggered session that stays resident and
+re-reviews pushes itself (the watch block lives in the routine prompt, not here).
+Either way each push earns a fresh round; the convergence rules below are what
+keep that from becoming an infinite review/fix ping-pong with the build session.
 
 ## 1. Resolve the target PR
 
