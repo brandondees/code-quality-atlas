@@ -7,6 +7,12 @@ deliverable; the findings are what the synthesizer merges and ranks.
 
 ---
 
+## Contents
+
+- [Bad — an agent design with an unwritten lethal-trifecta boundary](#bad--an-agent-design-with-an-unwritten-lethal-trifecta-boundary)
+- [Clean — adequately-mitigated design (the over-flagging guard)](#clean--adequately-mitigated-design-the-over-flagging-guard)
+- [Clean — no security-relevant surface (the proportionality guard)](#clean--no-security-relevant-surface-the-proportionality-guard)
+
 ## Bad — an agent design with an unwritten lethal-trifecta boundary
 
 **Input (review request):**

@@ -4,6 +4,14 @@ A diff often contains several independent vulnerabilities. Check every untrusted
 input against every sink it reaches and report each issue as its own numbered
 finding — finding one does not end the sweep. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
 
+## Contents
+
+- [Bad → finding](#bad--finding)
+- [Bad → finding](#bad--finding-1)
+- [Bad → finding](#bad--finding-2)
+- [Good → no finding](#good--no-finding)
+- [Good → no finding](#good--no-finding-1)
+
 ## Bad → finding
 
 **Input (diff):**
