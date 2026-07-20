@@ -12,6 +12,7 @@ Can an attacker abuse this? Injection, authorization, secrets, crypto, untrusted
 - [Checklist](#checklist)
 - [From category #14](#from-category-14)
 - [Examples](#examples)
+- [Contents](#contents)
 - [Bad → finding](#bad--finding)
 - [Bad → finding](#bad--finding-1)
 - [Bad → finding](#bad--finding-2)

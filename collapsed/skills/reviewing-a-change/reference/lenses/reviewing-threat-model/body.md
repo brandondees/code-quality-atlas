@@ -12,6 +12,7 @@ Enumerate what an adversary could do, boundary by boundary — STRIDE, trust bou
 - [Checklist](#checklist)
 - [From category #38](#from-category-38)
 - [Examples](#examples)
+- [Contents](#contents)
 - [Bad — an agent design with an unwritten lethal-trifecta boundary](#bad--an-agent-design-with-an-unwritten-lethal-trifecta-boundary)
 - [Clean — adequately-mitigated design (the over-flagging guard)](#clean--adequately-mitigated-design-the-over-flagging-guard)
 - [Clean — no security-relevant surface (the proportionality guard)](#clean--no-security-relevant-surface-the-proportionality-guard)

@@ -12,6 +12,7 @@ Will it survive failure and scale? Unbounded queues, timeouts and blast radius, 
 - [Checklist](#checklist)
 - [From category #28](#from-category-28)
 - [Examples](#examples)
+- [Contents](#contents)
 - [Bad → finding (a code diff)](#bad--finding-a-code-diff)
 - [Bad → finding (a design doc / RFC)](#bad--finding-a-design-doc--rfc)
 - [Bad → finding (a cache stampede / coordinated-client failure)](#bad--finding-a-cache-stampede--coordinated-client-failure)
