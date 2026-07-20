@@ -6,6 +6,18 @@
 
 Is the agent's action surface safe? Tool least-privilege, approval gates & step budgets, untrusted tool metadata, sandboxed exec, egress control.
 
+## Contents
+
+- [When to use](#when-to-use)
+- [Checklist](#checklist)
+- [From category #32](#from-category-32)
+- [Examples](#examples)
+- [Bad → finding (over-broad tool — ASI02 least-privilege)](#bad--finding-over-broad-tool--asi02-least-privilege)
+- [Bad → finding (unbounded loop + ungated action — ASI01/ASI08)](#bad--finding-unbounded-loop--ungated-action--asi01asi08)
+- [Bad → finding (token passthrough / confused deputy — ASI03, detect-and-route)](#bad--finding-token-passthrough--confused-deputy--asi03-detect-and-route)
+- [Good → no finding](#good--no-finding)
+- [Going deeper](#going-deeper)
+
 ## When to use
 
 **Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists. When the design doc is specifically a decision record (an ADR, RFC, or adoption/deprecation plan), also run the shared **decision-record checklist** on top of this lens's own topical checks: is the rationale actually recorded (not just the outcome); are the stated assumptions still current; is there a revisit-trigger; is an exit, rollback, or sunset path defined; were real alternatives weighed, not just the chosen option justified after the fact? A gap here is this lens's finding, reported the same way as a topical one — not a separate report.

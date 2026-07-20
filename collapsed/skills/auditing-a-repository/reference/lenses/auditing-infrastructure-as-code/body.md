@@ -6,6 +6,17 @@
 
 Does this infra change expose or destroy something? Blast radius, public access, wildcard IAM, secrets in state, drift.
 
+## Contents
+
+- [When to use](#when-to-use)
+- [Checklist](#checklist)
+- [From category #31](#from-category-31)
+- [Examples](#examples)
+- [Bad → finding (Terraform scan)](#bad--finding-terraform-scan)
+- [Bad → finding (Kubernetes scan)](#bad--finding-kubernetes-scan)
+- [Good → no finding](#good--no-finding)
+- [Going deeper](#going-deeper)
+
 ## When to use
 
 **Shape: repo.** Run against the whole repository (scheduled or on demand), not a single diff.

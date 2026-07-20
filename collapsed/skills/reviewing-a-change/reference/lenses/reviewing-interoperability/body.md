@@ -6,6 +6,18 @@
 
 Does the code correctly speak external standards? HTTP/OAuth semantics, SemVer, RFC date/URI/email formats, Unicode, cron dialects, OTel semconv.
 
+## Contents
+
+- [When to use](#when-to-use)
+- [Checklist](#checklist)
+- [From category #37](#from-category-37)
+- [Examples](#examples)
+- [Bad → finding (non-RFC-3339 date on the wire)](#bad--finding-non-rfc-3339-date-on-the-wire)
+- [Bad → finding (OAuth `state` not validated — detect-and-route)](#bad--finding-oauth-state-not-validated--detect-and-route)
+- [Bad → finding (cron-dialect mismatch)](#bad--finding-cron-dialect-mismatch)
+- [Good → no finding](#good--no-finding)
+- [Going deeper](#going-deeper)
+
 ## When to use
 
 **Shape: diff.** Written for concrete code; not meant for design docs or plans.

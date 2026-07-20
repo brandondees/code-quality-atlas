@@ -6,6 +6,18 @@
 
 Are config and CI trustworthy? Secrets, env parity, reproducible pinned builds, cache correctness.
 
+## Contents
+
+- [When to use](#when-to-use)
+- [Checklist](#checklist)
+- [From category #19](#from-category-19)
+- [From category #26](#from-category-26)
+- [Examples](#examples)
+- [Bad → finding (CI + image + config)](#bad--finding-ci--image--config)
+- [Bad → finding (build reproducibility + flags)](#bad--finding-build-reproducibility--flags)
+- [Good → no finding](#good--no-finding)
+- [Going deeper](#going-deeper)
+
 ## When to use
 
 **Shape: repo.** Run against the whole repository (scheduled or on demand), not a single diff.

@@ -6,6 +6,17 @@
 
 Enumerate what an adversary could do, boundary by boundary — STRIDE, trust boundaries, abuse cases — and whether each threat is mitigated.
 
+## Contents
+
+- [When to use](#when-to-use)
+- [Checklist](#checklist)
+- [From category #38](#from-category-38)
+- [Examples](#examples)
+- [Bad — an agent design with an unwritten lethal-trifecta boundary](#bad--an-agent-design-with-an-unwritten-lethal-trifecta-boundary)
+- [Clean — adequately-mitigated design (the over-flagging guard)](#clean--adequately-mitigated-design-the-over-flagging-guard)
+- [Clean — no security-relevant surface (the proportionality guard)](#clean--no-security-relevant-surface-the-proportionality-guard)
+- [Going deeper](#going-deeper)
+
 ## When to use
 
 **Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists. When the design doc is specifically a decision record (an ADR, RFC, or adoption/deprecation plan), also run the shared **decision-record checklist** on top of this lens's own topical checks: is the rationale actually recorded (not just the outcome); are the stated assumptions still current; is there a revisit-trigger; is an exit, rollback, or sunset path defined; were real alternatives weighed, not just the chosen option justified after the fact? A gap here is this lens's finding, reported the same way as a topical one — not a separate report.

@@ -87,6 +87,55 @@ def test_lens_bundle_omits_checklist_when_no_heuristics(monkeypatch):
     assert "## When to use" in body and "## Going deeper" in body   # rest still renders
 
 
+def test_lens_bundle_body_over_threshold_gets_contents_toc(tmp_path):
+    # #163: a lens whose rendered body exceeds ~100 lines must open with a
+    # `## Contents` ToC, the same rubric this suite applies to a third
+    # party's SKILL.md (skill-md.md category #101). Build a synthetic,
+    # oversized research fixture so the test doesn't depend on any real
+    # lens's current length.
+    bullets = "\n".join(f"- Heuristic bullet number {i}?" for i in range(120))
+    research = (
+        "# Research — Big\n\n"
+        "## #2 Big category\n\n"
+        "### Reviewable heuristics (skill-checklist seeds)\n\n"
+        f"{bullets}\n"
+    )
+    (tmp_path / "research.md").write_text(research, encoding="utf-8")
+    skill = _skill(built_from=[Source(2, "research.md#2")])
+    body = lens_bundle_body(skill, docs_root=str(tmp_path), skills_root="skills")
+    assert len(body.splitlines()) > 100
+    assert "## Contents" in body
+    # ToC sits before the first real section, and links every top-level
+    # heading actually present in the assembled body.
+    assert body.index("## Contents") < body.index("## When to use")
+    assert "[When to use](#when-to-use)" in body
+    assert "[Checklist](#checklist)" in body
+    assert "[Going deeper](#going-deeper)" in body
+
+
+def test_lens_bundle_body_under_threshold_has_no_toc(monkeypatch):
+    # A short bundle (no heuristics, no picker, a lens name with no
+    # examples.md on disk) must not grow a ToC it doesn't need.
+    import tooling.generate_collapsed as g
+    monkeypatch.setattr(g, "_checklist_body", lambda *_args, **_kwargs: "")
+    skill = _skill(name="nonexistent-lens-for-toc-test", picker="")
+    body = g.lens_bundle_body(skill, docs_root=".", skills_root="skills")
+    assert len(body.splitlines()) <= 100  # sanity: this fixture is intentionally short
+    assert "## Contents" not in body
+
+
+def test_toc_for_body_dedups_repeated_headings_with_github_style_suffixes():
+    # GitHub disambiguates repeated identical headings by appending -1, -2, ...
+    # to the anchor of each repeat — this must match, since #165 already
+    # shipped ToCs elsewhere in this repo relying on that exact scheme.
+    import tooling.generate_collapsed as g
+    body = "## Bad → finding\n\nx\n\n## Bad → finding\n\nx\n\n## Bad → finding\n\nx\n"
+    toc = g._toc_for_body(body)
+    assert "[Bad → finding](#bad--finding)" in toc
+    assert "[Bad → finding](#bad--finding-1)" in toc
+    assert "[Bad → finding](#bad--finding-2)" in toc
+
+
 def test_generate_lens_bundle_writes_three_files(tmp_path):
     dest = generate_lens_bundle(_skill(), tmp_path, docs_root=".", skills_root="skills")
     assert (dest / "body.md").exists()
