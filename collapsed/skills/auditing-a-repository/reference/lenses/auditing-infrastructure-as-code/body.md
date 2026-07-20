@@ -68,6 +68,12 @@ pinned, state is remote/locked/encrypted, access is least-privilege and private,
 and the scanner is maintained and required, report exactly
 "No findings: infrastructure-as-code is sound".
 
+## Contents
+
+- [Bad → finding (Terraform scan)](#bad--finding-terraform-scan)
+- [Bad → finding (Kubernetes scan)](#bad--finding-kubernetes-scan)
+- [Good → no finding](#good--no-finding)
+
 ## Bad → finding (Terraform scan)
 
 **Input (IaC scan):**

@@ -36,6 +36,15 @@ bounded, has timeouts and a failure plan where it calls out, and keeps no
 scaling-blocking state, report exactly "No findings" — even though this lens
 *could* ask RTO/RPO questions, they do not apply when nothing durable is at stake.
 
+## Contents
+
+- [Bad → finding (a code diff)](#bad--finding-a-code-diff)
+- [Bad → finding (a design doc / RFC)](#bad--finding-a-design-doc--rfc)
+- [Bad → finding (a cache stampede / coordinated-client failure)](#bad--finding-a-cache-stampede--coordinated-client-failure)
+- [Bad → finding (degrade toward safe, not just toward available)](#bad--finding-degrade-toward-safe-not-just-toward-available)
+- [Good → no finding (degradation stays safe)](#good--no-finding-degradation-stays-safe)
+- [Good → no finding (bounded, with a defined failure path)](#good--no-finding-bounded-with-a-defined-failure-path)
+
 ## Bad → finding (a code diff)
 
 **Input (review this change):**

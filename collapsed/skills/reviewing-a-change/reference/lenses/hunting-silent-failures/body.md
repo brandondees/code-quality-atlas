@@ -71,6 +71,15 @@ The full review checklist, grouped by the research category each check draws fro
 
 Report each distinct issue as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
 
+## Contents
+
+- [Bad → finding](#bad--finding)
+- [Bad → finding](#bad--finding-1)
+- [Bad → finding (fail-open: fails toward harm, not toward safe)](#bad--finding-fail-open-fails-toward-harm-not-toward-safe)
+- [Good → no finding (fail-closed on auth check)](#good--no-finding-fail-closed-on-auth-check)
+- [Good → no finding (narrow exception, no false success)](#good--no-finding-narrow-exception-no-false-success)
+- [Good → no finding (timeout + raise_for_status)](#good--no-finding-timeout--raise_for_status)
+
 ## Bad → finding
 
 **Input (diff):**
