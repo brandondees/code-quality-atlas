@@ -117,7 +117,7 @@ def test_lens_bundle_body_under_threshold_has_no_toc(monkeypatch):
     # A short bundle (no heuristics, no picker, a lens name with no
     # examples.md on disk) must not grow a ToC it doesn't need.
     import tooling.generate_collapsed as g
-    monkeypatch.setattr(g, "_checklist_body", lambda *a, **k: "")
+    monkeypatch.setattr(g, "_checklist_body", lambda *_args, **_kwargs: "")
     skill = _skill(name="nonexistent-lens-for-toc-test", picker="")
     body = g.lens_bundle_body(skill, docs_root=".", skills_root="skills")
     assert len(body.splitlines()) <= 100  # sanity: this fixture is intentionally short
