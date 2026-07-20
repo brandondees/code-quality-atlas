@@ -6,6 +6,20 @@
 
 Can a newcomer read this function? Names, length, nesting, magic values, comment accuracy.
 
+## Contents
+
+- [When to use](#when-to-use)
+- [Checklist](#checklist)
+- [From category #5](#from-category-5)
+- [From category #6](#from-category-6)
+- [From category #7](#from-category-7)
+- [Examples](#examples)
+- [Bad → finding](#bad--finding)
+- [Bad → finding](#bad--finding-1)
+- [Good → no finding](#good--no-finding)
+- [Good → no finding](#good--no-finding-1)
+- [Going deeper](#going-deeper)
+
 ## When to use
 
 **Shape: diff.** Written for concrete code; not meant for design docs or plans.

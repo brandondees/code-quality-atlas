@@ -6,6 +6,7 @@ sources}.md) plus the synthesis procedure, for cloud / account-skill /
 context-budget-constrained installs."""
 from __future__ import annotations
 import json
+import re
 import shutil
 import yaml
 from pathlib import Path
@@ -13,6 +14,11 @@ from tooling.manifest import Entrypoint, Manifest, Skill
 from tooling.generate_common import _escape_table_cell, _scope_line, build_reference, modes_section
 from tooling.generate_skill import build_artifact_rubric
 from tooling.generate_synthesizer import build_synthesizer_md
+
+# Matches skill-md.md's own ~100-line ToC rubric (category #101); a lens
+# bundle this long benefits from the same navigability the rubric demands
+# of a third party's SKILL.md.
+_TOC_LINE_THRESHOLD = 100
 
 
 class CollapsedOverlapError(ValueError):
@@ -57,6 +63,36 @@ def _artifacts_block(skill: Skill) -> str:
         "| Artifact | Activate when | Rubric to apply |\n"
         "|---|---|---|\n"
         f"{rows}\n\n")
+
+
+def _github_anchor(heading: str) -> str:
+    """Approximate GitHub's heading-anchor slug algorithm: lowercase, drop
+    everything except word characters, whitespace, and hyphens, then turn
+    whitespace into hyphens. Manually verified against GitHub's rendering for
+    the `## Contents` ToCs #165 added to examples.md (e.g. "Bad → finding
+    (Terraform scan)" → "bad--finding-terraform-scan")."""
+    slug = heading.strip().lower()
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    return re.sub(r"\s", "-", slug)
+
+
+def _toc_for_body(body: str) -> str:
+    """A `## Contents` heading list linking every `## ` heading in `body`, in
+    order, with GitHub's duplicate-heading dedup suffixing (`-1`, `-2`, ...
+    appended to the *n*th repeat of an identical slug). Returns "" if `body`
+    has no `## ` headings to link."""
+    headings = [line[3:].strip() for line in body.splitlines() if line.startswith("## ")]
+    if not headings:
+        return ""
+    seen: dict[str, int] = {}
+    lines = []
+    for heading in headings:
+        slug = _github_anchor(heading)
+        n = seen.get(slug, 0)
+        seen[slug] = n + 1
+        anchor = slug if n == 0 else f"{slug}-{n}"
+        lines.append(f"- [{heading}](#{anchor})")
+    return "## Contents\n\n" + "\n".join(lines) + "\n\n"
 
 
 def lens_bundle_body(skill: Skill, docs_root: str = ".", skills_root: str = "skills") -> str:
@@ -109,15 +145,18 @@ def lens_bundle_body(skill: Skill, docs_root: str = ".", skills_root: str = "ski
             "review.\n"
             "- [sources.md](sources.md) — the research behind each check; for "
             "provenance.\n")
-    return (
-        f"# {skill.name}\n\n"
-        f"{picker}"
+    header = f"# {skill.name}\n\n{picker}"
+    sections = (
         "## When to use\n\n"
         f"{_scope_line(skill)}\n\n"
         f"{core_block}"
         f"{examples_block}"
         f"{going_deeper}"
     )
+    toc = ""
+    if len((header + sections).splitlines()) > _TOC_LINE_THRESHOLD:
+        toc = _toc_for_body(sections)
+    return header + toc + sections
 
 
 def _gen_header(skill: Skill, *, with_examples: bool = False) -> str:

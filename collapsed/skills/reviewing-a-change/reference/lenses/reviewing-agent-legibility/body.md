@@ -6,6 +6,18 @@
 
 Can an AI agent read, navigate, and safely change this within a context budget? Context economy, retrieval-friendly structure, scoped AGENTS.md/CLAUDE.md.
 
+## Contents
+
+- [When to use](#when-to-use)
+- [Checklist](#checklist)
+- [From category #35](#from-category-35)
+- [Examples](#examples)
+- [Bad → finding (stale agent onboarding)](#bad--finding-stale-agent-onboarding)
+- [Bad → finding (context economy / AST-navigability)](#bad--finding-context-economy--ast-navigability)
+- [Bad → finding (agent-hostile megafile + duplication)](#bad--finding-agent-hostile-megafile--duplication)
+- [Good → no finding](#good--no-finding)
+- [Going deeper](#going-deeper)
+
 ## When to use
 
 **Shape: diff.** Written for concrete code; not meant for design docs or plans.
