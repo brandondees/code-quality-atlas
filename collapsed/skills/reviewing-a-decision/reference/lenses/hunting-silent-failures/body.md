@@ -13,6 +13,7 @@ Where do errors vanish? Swallowed exceptions, silent fallbacks, missing timeouts
 - [From category #2](#from-category-2)
 - [From category #4](#from-category-4)
 - [Examples](#examples)
+- [Contents](#contents)
 - [Bad → finding](#bad--finding)
 - [Bad → finding](#bad--finding-1)
 - [Bad → finding (fail-open: fails toward harm, not toward safe)](#bad--finding-fail-open-fails-toward-harm-not-toward-safe)

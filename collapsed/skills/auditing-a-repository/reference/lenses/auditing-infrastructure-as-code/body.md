@@ -12,6 +12,7 @@ Does this infra change expose or destroy something? Blast radius, public access,
 - [Checklist](#checklist)
 - [From category #31](#from-category-31)
 - [Examples](#examples)
+- [Contents](#contents)
 - [Bad → finding (Terraform scan)](#bad--finding-terraform-scan)
 - [Bad → finding (Kubernetes scan)](#bad--finding-kubernetes-scan)
 - [Good → no finding](#good--no-finding)

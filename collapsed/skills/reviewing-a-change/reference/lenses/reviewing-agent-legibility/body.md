@@ -12,6 +12,7 @@ Can an AI agent read, navigate, and safely change this within a context budget? 
 - [Checklist](#checklist)
 - [From category #35](#from-category-35)
 - [Examples](#examples)
+- [Contents](#contents)
 - [Bad → finding (stale agent onboarding)](#bad--finding-stale-agent-onboarding)
 - [Bad → finding (context economy / AST-navigability)](#bad--finding-context-economy--ast-navigability)
 - [Bad → finding (agent-hostile megafile + duplication)](#bad--finding-agent-hostile-megafile--duplication)
