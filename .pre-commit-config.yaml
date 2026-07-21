@@ -1,13 +1,1 @@
-# Local commit-time gate. One-time setup per clone:
-#   pip install pre-commit && pre-commit install
-# Mirrors the CI markdownlint gate (.github/workflows/ci.yml) so violations are
-# caught before they reach a PR. Rules live in .markdownlint-cli2.jsonc.
-#
-# Keep this rev aligned with the markdownlint-cli2 version bundled by
-# markdownlint-cli2-action in CI: action v24.0.0 bundles markdownlint-cli2
-# v0.23.0, so both gates run the same engine. Bump them together.
-repos:
-  - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: v0.23.0
-    hooks:
-      - id: markdownlint-cli2
+IyBMb2NhbCBjb21taXQtdGltZSBnYXRlLiBPbmUtdGltZSBzZXR1cCBwZXIgY2xvbmU6CiMgICBwaXAgaW5zdGFsbCBwcmUtY29tbWl0ICYmIHByZS1jb21taXQgaW5zdGFsbAojIE1pcnJvcnMgdGhlIENJIG1hcmtkb3dubGludCBnYXRlICguZ2l0aHViL3dvcmtmbG93cy9jaS55bWwpIHNvIHZpb2xhdGlvbnMgYXJlCiMgY2F1Z2h0IGJlZm9yZSB0aGV5IHJlYWNoIGEgUFIuIFJ1bGVzIGxpdmUgaW4gLm1hcmtkb3dubGludC1jbGkyLmpzb25jLgojCiMgS2VlcCB0aGlzIHJldiBhbGlnbmVkIHdpdGggdGhlIG1hcmtkb3dubGludC1jbGkyIHZlcnNpb24gYnVuZGxlZCBieQojIG1hcmtkb3dubGludC1jbGkyLWFjdGlvbiBpbiBDSTogYWN0aW9uIHYyNC4xLjAgYnVuZGxlcyBtYXJrZG93bmxpbnQtY2xpMgojIHYwLjIzLjEsIHNvIGJvdGggZ2F0ZXMgcnVuIHRoZSBzYW1lIGVuZ2luZS4gQnVtcCB0aGVtIHRvZ2V0aGVyLgpyZXBvczoKICAtIHJlcG86IGh0dHBzOi8vZ2l0aHViLmNvbS9EYXZpZEFuc29uL21hcmtkb3dubGludC1jbGkyCiAgICByZXY6IHYwLjIzLjEKICAgIGhvb2tzOgogICAgICAtIGlkOiBtYXJrZG93bmxpbnQtY2xpMgo=
