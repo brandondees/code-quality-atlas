@@ -6,6 +6,19 @@
 
 Does this carry the AI-authored failure signature? Hallucinated/typosquatted packages, invented APIs, confident-but-wrong constants, over-helpful scope.
 
+## Contents
+
+- [When to use](#when-to-use)
+- [Checklist](#checklist)
+- [From category #34](#from-category-34)
+- [From category #18](#from-category-18)
+- [Examples](#examples)
+- [Bad → finding](#bad--finding)
+- [Bad → finding](#bad--finding-1)
+- [Bad → finding (over-helpful scope creep)](#bad--finding-over-helpful-scope-creep)
+- [Good → no finding](#good--no-finding)
+- [Going deeper](#going-deeper)
+
 ## When to use
 
 **Shape: diff.** Written for concrete code; not meant for design docs or plans.

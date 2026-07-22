@@ -49,6 +49,8 @@ Detect which artifact the change adds or touches, then open its rubric and revie
 
 Where a finding here is one a tool can catch deterministically, surface that as an advisory `route: implementer` note next to the finding: the hand review caught it this time, and wiring the matching tool from [reference/tool-rules.md](reference/tool-rules.md) into CI gates it going forward. This is a suggestion to mechanize, not a defect — it never blocks a verdict, and it falls away on a repo that already runs the tool.
 
+**Process notes.** If this lens misfired on this change — flagged correct code, missed an obvious issue squarely in its own scope, or its checklist didn't fit the change shape — say so in one line under `synthesizing-review-findings`'s **Process notes** appendix; that is not a defect finding. Say nothing if the lens worked as intended — never invent a process note to fill the section.
+
 ## Going deeper
 
 - [reference/skill-md.md](reference/skill-md.md) — the rubric for SKILL.md / agent skill; open it on a presence hit and review against it.

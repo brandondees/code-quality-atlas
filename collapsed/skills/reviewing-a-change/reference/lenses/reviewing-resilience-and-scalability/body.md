@@ -6,6 +6,21 @@
 
 Will it survive failure and scale? Unbounded queues, timeouts and blast radius, retries, statelessness, RTO/RPO — design-time, not #16's runtime.
 
+## Contents
+
+- [When to use](#when-to-use)
+- [Checklist](#checklist)
+- [From category #28](#from-category-28)
+- [Examples](#examples)
+- [Contents](#contents)
+- [Bad → finding (a code diff)](#bad--finding-a-code-diff)
+- [Bad → finding (a design doc / RFC)](#bad--finding-a-design-doc--rfc)
+- [Bad → finding (a cache stampede / coordinated-client failure)](#bad--finding-a-cache-stampede--coordinated-client-failure)
+- [Bad → finding (degrade toward safe, not just toward available)](#bad--finding-degrade-toward-safe-not-just-toward-available)
+- [Good → no finding (degradation stays safe)](#good--no-finding-degradation-stays-safe)
+- [Good → no finding (bounded, with a defined failure path)](#good--no-finding-bounded-with-a-defined-failure-path)
+- [Going deeper](#going-deeper)
+
 ## When to use
 
 **Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists. When the design doc is specifically a decision record (an ADR, RFC, or adoption/deprecation plan), also run the shared **decision-record checklist** on top of this lens's own topical checks: is the rationale actually recorded (not just the outcome); are the stated assumptions still current; is there a revisit-trigger; is an exit, rollback, or sunset path defined; were real alternatives weighed, not just the chosen option justified after the fact? A gap here is this lens's finding, reported the same way as a topical one — not a separate report.
@@ -71,6 +86,15 @@ target — that is gold-plating (cross `checking-restraint`). If the change is
 bounded, has timeouts and a failure plan where it calls out, and keeps no
 scaling-blocking state, report exactly "No findings" — even though this lens
 *could* ask RTO/RPO questions, they do not apply when nothing durable is at stake.
+
+## Contents
+
+- [Bad → finding (a code diff)](#bad--finding-a-code-diff)
+- [Bad → finding (a design doc / RFC)](#bad--finding-a-design-doc--rfc)
+- [Bad → finding (a cache stampede / coordinated-client failure)](#bad--finding-a-cache-stampede--coordinated-client-failure)
+- [Bad → finding (degrade toward safe, not just toward available)](#bad--finding-degrade-toward-safe-not-just-toward-available)
+- [Good → no finding (degradation stays safe)](#good--no-finding-degradation-stays-safe)
+- [Good → no finding (bounded, with a defined failure path)](#good--no-finding-bounded-with-a-defined-failure-path)
 
 ## Bad → finding (a code diff)
 

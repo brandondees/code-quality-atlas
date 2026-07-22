@@ -6,6 +6,17 @@
 
 Does this look like the rest of the codebase? Conventions, idioms, no second parallel way.
 
+## Contents
+
+- [When to use](#when-to-use)
+- [Checklist](#checklist)
+- [From category #8](#from-category-8)
+- [Examples](#examples)
+- [Bad → finding](#bad--finding)
+- [Bad → finding](#bad--finding-1)
+- [Good → no finding](#good--no-finding)
+- [Going deeper](#going-deeper)
+
 ## When to use
 
 **Shape: diff.** Written for concrete code; not meant for design docs or plans.

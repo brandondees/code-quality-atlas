@@ -6,6 +6,17 @@
 
 Do the tests prove anything? Behavior coupling, over-mocking, edge coverage, determinism.
 
+## Contents
+
+- [When to use](#when-to-use)
+- [Checklist](#checklist)
+- [From category #17](#from-category-17)
+- [Examples](#examples)
+- [Bad → finding](#bad--finding)
+- [Bad → finding](#bad--finding-1)
+- [Good → no finding](#good--no-finding)
+- [Going deeper](#going-deeper)
+
 ## When to use
 
 **Shape: diff.** Written for concrete code; not meant for design docs or plans.

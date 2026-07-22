@@ -6,6 +6,18 @@
 
 Is the PR itself reviewable? Size, atomic commits, description, scope creep, changelog.
 
+## Contents
+
+- [When to use](#when-to-use)
+- [Checklist](#checklist)
+- [From category #24](#from-category-24)
+- [From category #22](#from-category-22)
+- [Examples](#examples)
+- [Bad → finding](#bad--finding)
+- [Bad → finding](#bad--finding-1)
+- [Good → no finding](#good--no-finding)
+- [Going deeper](#going-deeper)
+
 ## When to use
 
 **Shape: diff.** Written for concrete code; not meant for design docs or plans.

@@ -27,10 +27,27 @@ later refinement:
   covering all six directive kinds (§4) with the ratification guardrail (§6) spelled out
   inline; `commands/atlas-init.md` gained an optional step offering to copy it in.
 
-**Deferred to a later wave** (unchanged from the open §9 residuals): the
-`proposing-team-preferences` inference/interview skill; per-check tier granularity;
-monorepo discovery of multiple overlay files; `acknowledge` expiry / re-ratification;
-overlay-vs-linter-config precedence.
+**✅ Wave B (partial) shipped 2026-07-18** — the inference/interview path from §6:
+
+- [`/code-quality-atlas:atlas-propose-preferences`](../commands/atlas-propose-preferences.md)
+  (a hand-authored slash command, not a manifest-generated lens — it doesn't
+  review a diff/repo/decision/artifact, it interviews the repo and drafts a
+  config document, so it sits outside the taxonomy-driven generator pipeline
+  the same way `/atlas-init` does). Explicitly invoked only, never triggered by
+  a normal review or by the overlay's absence. Reads existing linter configs,
+  recurring code patterns, `CLAUDE.md`/`AGENTS.md`, and ADRs; emits candidates
+  per the six directive kinds (§4) framed as observation + proposed rule +
+  ratification question, kept structurally separate per §6's descriptive ≠
+  prescriptive rule.
+- Writes only to `.code-quality-atlas/preferences.proposed.md` — a staging
+  document, never the live `preferences.md` — so ratification stays per-item
+  and human, per §6's non-negotiable guardrail.
+- `commands/atlas-init.md`'s optional preferences step already pointed at the
+  template path; the inference path is a second, equally optional way in.
+
+**Still deferred to a later wave** (unchanged from the open §9 residuals):
+per-check tier granularity; monorepo discovery of multiple overlay files;
+`acknowledge` expiry / re-ratification; overlay-vs-linter-config precedence.
 
 ---
 
@@ -114,7 +131,7 @@ from Q13: full flexibility on taste, an honest paper trail on safety.
 
 ## 4. What the overlay can express
 
-Five directive kinds, each mapping onto the verbs above:
+Six directive kinds, each mapping onto the verbs above:
 
 1. **Lens selection / weighting** — enable/disable lenses, or mark some advisory vs blocking.
    (`set`, capped by the router's 2-4 rule — preferences re-rank within the cap, they don't lift it.)
@@ -136,6 +153,13 @@ Five directive kinds, each mapping onto the verbs above:
    **`improvements-opt-in`** (surface improvement nits, `route: implementer`, apply/defer/ignore), or
    finer per-lens settings. (`set`, preference-tier — a team that wants a quiet review keeps the
    default; a team that wants active tidy-up dials it up. Floor-tier defects are unaffected.)
+
+**Not a seventh directive kind, but the same file:** `.code-quality-atlas/preferences.md` also
+carries a `feedback:` opt-in tier (off/local/draft/auto) for the self-improvement loop's stage 1
+build — [`self-improvement-loop.md`](self-improvement-loop.md)§5, D17. It's colocated for the same
+reason as the six above (one per-repo, human-ratified config surface), but it configures
+*telemetry*, not review findings, so it doesn't map onto the set/tune/suppress/acknowledge verbs
+above and stays out of this list.
 
 ### 4a. The anti-churn discipline (built-in, not a knob)
 

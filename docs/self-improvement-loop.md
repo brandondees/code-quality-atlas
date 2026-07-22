@@ -1,23 +1,33 @@
 # Self-Improving Loop — design exploration
 
-**Status:** brainstorm 2026-06-12; **reviewed 2026-07-06 (D17).** **Stage 1 (§7) is
-approved for build:** the manifest `feedback:` section (synthesizer "Process notes"
-appendix + one-line lens footer) and the `PostToolUse`/`SessionEnd` invocation-logger
-hooks, gated on opt-in tier ≥ `local`. The tier-1 learnings log is **committed** to the
-consumer repo (resolves §8 sub-question 2). **Stages 2-5 remain design-only** — the
-`/atlas-retro` transcript digestion, the outcome auditor, the intake routine, and tier-3
-auto-filing each carry their own risk surface (transcript injection, autonomous filing)
-and will be re-reviewed individually once stage 1 produces real usage evidence, rather
-than approved as one bundle ahead of any evidence the loop pays for itself. See
-open-questions Q17 / D17.
+**Status:** brainstorm 2026-06-12; reviewed 2026-07-06 (D17); **stage 1 (§7) ✅ built
+2026-07-18.** The generator-level "Process notes" appendix (synthesizer) and one-line
+lens footer ship on every skill (no manifest schema change — generator-level, like the
+Q15 decision-record checklist), plus the opt-in `PostToolUse`/`SessionEnd`
+invocation-logger hooks (`hooks/log-skill-invocation.sh`, `hooks/queue-session-retro.sh`),
+gated on a `feedback:` tier resolved by `hooks/lib/feedback-tier.sh` — off by default,
+`local`/`draft`/`auto` via `.code-quality-atlas/preferences.md` or an env-var override.
+The tier-1 learnings log is **committed** to the consumer repo (resolves §8 sub-question
+2). **Stages 2-5 remain design-only** — the `/atlas-retro` transcript digestion, the
+outcome auditor, the intake routine, and tier-3 auto-filing each carry their own risk
+surface (transcript injection, autonomous filing) and will be re-reviewed individually
+once stage 1 produces real usage evidence, rather than approved as one bundle ahead of
+any evidence the loop pays for itself. See open-questions Q17 / D17, and
+[`session-log.md`](session-log.md) for the stage-1 build entry.
 **Depends on:** D6 (docs are source of truth; skills derived & regenerable), D8 (eval-first),
 D9 (plugin packaging, commit-SHA versioning), D12 (synthesizer + finding contract), the
 PR-review-automation runbook (routines/triggers), Q13 (team preferences overlay — the
 *local* arm of this loop), Q14 (depth modes — a consumer of this loop's usage signals).
 **Assumptions & revisit-triggers:** (a) Claude Code hook events keep their shape —
 specifically `SessionEnd` exposing `transcript_path` and `PostToolUse` matching the
-`Skill` tool; re-verify against the hooks docs at stage-1 build time, and revisit §3.1 if
-either is gone. (b) GitHub issues are viable transport — assumes the atlas repo stays
+`Skill` tool; **re-verified at stage-1 build time (2026-07-18):** the common envelope
+(`session_id`, `transcript_path`, `cwd`, `hook_event_name`, `tool_name`, `tool_input`) and
+the `"matcher": "Skill"` syntax are confirmed against the current hooks reference, but
+the *inner shape* of `tool_input` for the `Skill` tool specifically is undocumented as of
+this writing — the stage-1 hooks route around that gap by logging `tool_input` verbatim
+rather than parsing out a skill name, so a later analysis pass parses whatever shape it
+turns out to be, once. Revisit §3.1 if the common envelope itself changes. (b) GitHub
+issues are viable transport — assumes the atlas repo stays
 public-readable and report volume stays tens-per-week; revisit (§8.4, private channel) if
 either breaks. (c) Consumers opt in at all — the loop is worthless at zero tier-≥1
 adoption; if stage 1 ships and uptake stays nil for a few months, revisit the incentive

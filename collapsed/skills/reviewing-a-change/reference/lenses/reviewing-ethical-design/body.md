@@ -6,6 +6,18 @@
 
 Does this manipulate or disadvantage the user? Dark patterns, manipulative defaults, discriminatory conditionals — detect-and-route to product/legal.
 
+## Contents
+
+- [When to use](#when-to-use)
+- [Checklist](#checklist)
+- [From category #36](#from-category-36)
+- [Examples](#examples)
+- [Bad → finding (manipulative default + consent symmetry)](#bad--finding-manipulative-default--consent-symmetry)
+- [Bad → finding (discriminatory business logic)](#bad--finding-discriminatory-business-logic)
+- [Bad → finding (fabricated urgency + obstruction)](#bad--finding-fabricated-urgency--obstruction)
+- [Good → no finding](#good--no-finding)
+- [Going deeper](#going-deeper)
+
 ## When to use
 
 **Shape: diff.** Written for concrete code; not meant for design docs or plans.

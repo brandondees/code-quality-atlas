@@ -34,6 +34,7 @@ Fan-out is **advisory by default**: you run each lens the router named, collect 
 4. **Rank** — order by severity (**Blocker** > **Major** > **Minor** > **Nit**). A Blocker-level finding floats to the top no matter which lens raised it; correctness, security, and data-loss findings outrank style and nits.
 5. **Verdict** — one line at the top: **block**, **approve with changes**, or **approve**. A single Blocker is enough to block; only nits left means approve. **Valence governs the verdict, not route.** A `defect` sets the verdict per its severity *even when its remediation decision is routed elsewhere* — a GPL-incompatible dependency is a blocking defect **and** a `route: legal` escalation, not an "approve" that quietly defers to legal. Route only changes *who decides the fix*, never whether the diff has a problem. Only `improvement` nits and **non-defect** routed findings (a product, design, or leadership judgment call with no defect behind it) are surfaced and escalated without setting the engineering verdict. Likewise a `pre-existing` defect noticed in touched code is surfaced and routed to the implementer *without* setting this PR's verdict — the diff did not introduce it. Same for a floor-tier finding the repo's `.code-quality-atlas/preferences.md` has `acknowledge`d (Q13): it still appears in the report, tagged `acknowledged deviation: <reason>`, but the acknowledgement alone does not drive the verdict to block — the team recorded and accepted it. A `suppress`ed preference-tier finding never reaches this report at all; only `acknowledge` (floor-tier) leaves a visible trace. If every lens found nothing, the whole report is "No findings" — do not manufacture a harsher verdict than the findings justify.
 6. **State coverage & limitations** — close the report with what the review did *not* establish: which lenses ran and which the router did not select, anything that could not be verified from the diff alone (needs runtime behavior, production data, or repo-wide context), and any finding asserted without direct evidence. A confident verdict silent on its own blind spots manufactures false assurance — itself a defect of the review. Name the gaps so the reader knows the review's edges. Keep it to a few lines; if coverage was complete and nothing was unverifiable, say so in one line rather than padding. This block is **always present**, including on a "No findings" report.
+7. **Note the process** — close with 0-3 one-line observations on the *review process itself*, never on the reviewed code: a lens that should have run per the router's own criteria but didn't, a finding two lenses disagreed on with no entry in the tensions table above, or output that broke the finding contract. This is the suite's own self-improvement signal — every lens carries a one-line prompt to report a misfire here instead of inventing its own feedback format. When the process worked, write exactly "Process: clean" and stop — the same anti-invention discipline the lenses apply to findings, never a note manufactured to fill the section.
 
 ## Reconciling lens tensions
 
@@ -102,9 +103,12 @@ Tensions
 Coverage & limitations
 - Lenses run: <names>. Not selected: <names, or "none">.
 - Not verifiable from this diff: <what needs runtime, data, or repo-wide context to confirm, or "nothing">.
+
+Process notes
+- <one-line process observation>, or exactly "Process: clean" if none.
 ```
 
-Omit any **findings** section with nothing in it — including **Routed**, **Improvements**, and **Pre-existing** (the last two are absent entirely unless the team opted into improvement-valence / Boy-Scout surfacing). **Coverage & limitations** is the exception: it is always present, even on a "No findings" report. Keep each finding to one or two lines; the detail lives in the originating lens's output, not restated here.
+Omit any **findings** section with nothing in it — including **Routed**, **Improvements**, and **Pre-existing** (the last two are absent entirely unless the team opted into improvement-valence / Boy-Scout surfacing). **Coverage & limitations** and **Process notes** are the exceptions: both are always present, even on a "No findings" report. Keep each finding to one or two lines; the detail lives in the originating lens's output, not restated here.
 
 ## Severity floor by mode
 
@@ -124,3 +128,4 @@ Synthesis must not inflate. Do not raise a finding no lens reported, do not upgr
 
 - [choosing-review-lenses](../choosing-review-lenses/SKILL.md) — the front half: picks which lenses to run before you synthesize their output.
 - [multi-repo audit runbook](../../docs/runbooks/multi-repo-audit.md) — fan the suite out across many repositories with background agents and aggregate their findings through this contract.
+- [self-improvement loop](../../docs/self-improvement-loop.md) — why Process notes exist, the opt-in feedback tiers a repo can turn on to keep them (`.code-quality-atlas/preferences.md`), and where the signal goes from there.

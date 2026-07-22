@@ -63,7 +63,7 @@ Each encodes hundreds of concrete checks. To be expanded with *specific rules wo
 
 1. **Behaviors that work as self-contained skills** — e.g. silent-failure hunting, N+1 detection, secret scanning, migration-safety review. These have crisp triggers and outputs.
 2. **The opinionated-reviewer pattern** — `dhh-rails`, `kieran-*` show value in a *named perspective* with strong taste, not just a checklist.
-3. **Quantitative scoring** — `type-design-analyzer` rates dimensions; consider whether the suite reports scores or only findings.
+3. **Quantitative scoring** — `type-design-analyzer` rates dimensions. Resolved (see [`open-questions.md`](open-questions.md) D18): findings-only, no per-dimension scores — the built suite already used severity/tier/valence as non-scalar differentiators instead.
 4. **Orchestration** — how multi-agent review toolkits fan out and synthesize; relevant to phase 2 composition.
 
 ---

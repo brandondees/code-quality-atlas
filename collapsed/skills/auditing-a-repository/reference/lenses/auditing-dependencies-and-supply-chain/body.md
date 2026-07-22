@@ -6,6 +6,17 @@
 
 Is the dependency tree safe? CVEs, pinning, typosquats, install scripts, licenses.
 
+## Contents
+
+- [When to use](#when-to-use)
+- [Checklist](#checklist)
+- [From category #18](#from-category-18)
+- [From category #27](#from-category-27)
+- [Examples](#examples)
+- [Bad → finding](#bad--finding)
+- [Good → no finding](#good--no-finding)
+- [Going deeper](#going-deeper)
+
 ## When to use
 
 **Shape: repo.** Run against the whole repository (scheduled or on demand), not a single diff.

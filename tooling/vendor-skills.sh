@@ -164,8 +164,11 @@ contains() {
 vendor_one() {
   local name=$1 dest_root=$2
   local src="$SRC_SUBDIR/$name"
-  local dest="$dest_root/$name"
-  rm -rf "$dest"
+  # Guard dest_root directly, not just the concatenated dest: "$dest_root/$name"
+  # is never empty even when dest_root is (it's still "/$name"), so a dest-only
+  # guard can't catch an empty dest_root widening the delete to a rooted path.
+  local dest="${dest_root:?}/$name"
+  rm -rf "${dest:?}"
   mkdir -p "$dest"
   cp "$src/SKILL.md" "$dest/SKILL.md"
   [ -f "$src/examples.md" ] && cp "$src/examples.md" "$dest/examples.md"
@@ -237,7 +240,7 @@ main() {
     local old
     for old in "${OLD_NAMES[@]}"; do
       if ! contains "$old" "${SKILL_NAMES[@]}"; then
-        rm -rf "$dest_root/$old"
+        rm -rf "${dest_root:?}/$old"
         printf '  - pruned stale: %s\n' "$old"
         pruned=$((pruned + 1))
       fi

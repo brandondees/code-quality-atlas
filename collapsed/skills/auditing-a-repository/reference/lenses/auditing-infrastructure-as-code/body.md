@@ -6,6 +6,18 @@
 
 Does this infra change expose or destroy something? Blast radius, public access, wildcard IAM, secrets in state, drift.
 
+## Contents
+
+- [When to use](#when-to-use)
+- [Checklist](#checklist)
+- [From category #31](#from-category-31)
+- [Examples](#examples)
+- [Contents](#contents)
+- [Bad → finding (Terraform scan)](#bad--finding-terraform-scan)
+- [Bad → finding (Kubernetes scan)](#bad--finding-kubernetes-scan)
+- [Good → no finding](#good--no-finding)
+- [Going deeper](#going-deeper)
+
 ## When to use
 
 **Shape: repo.** Run against the whole repository (scheduled or on demand), not a single diff.
@@ -56,6 +68,12 @@ demand controls a repo's stated risk level doesn't warrant. If providers are
 pinned, state is remote/locked/encrypted, access is least-privilege and private,
 and the scanner is maintained and required, report exactly
 "No findings: infrastructure-as-code is sound".
+
+## Contents
+
+- [Bad → finding (Terraform scan)](#bad--finding-terraform-scan)
+- [Bad → finding (Kubernetes scan)](#bad--finding-kubernetes-scan)
+- [Good → no finding](#good--no-finding)
 
 ## Bad → finding (Terraform scan)
 

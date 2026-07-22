@@ -100,6 +100,23 @@ def _team_preferences_note(skill: Skill) -> str:
     )
 
 
+def _process_notes_footer() -> str:
+    """Q17/D17 stage 1: a one-line, uniform reflection prompt on every lens,
+    routing self-improvement signal through the synthesizer's Process notes
+    appendix rather than 24+ lenses each inventing a feedback format. Standalone
+    SKILL.md only, mirroring Team preferences / Reviewer discipline / Mechanizing
+    these checks, which the collapsed lens bundles (checklist + examples only)
+    likewise omit."""
+    return (
+        "**Process notes.** If this lens misfired on this change — flagged "
+        "correct code, missed an obvious issue squarely in its own scope, or "
+        "its checklist didn't fit the change shape — say so in one line under "
+        "`synthesizing-review-findings`'s **Process notes** appendix; that is "
+        "not a defect finding. Say nothing if the lens worked as intended — "
+        "never invent a process note to fill the section.\n\n"
+    )
+
+
 def _cross_ref_note(skill: Skill, owners: dict[int, str] | None) -> str:
     if not skill.cross_ref or not owners:
         return ""
@@ -236,6 +253,7 @@ def build_skill_md(skill: Skill, taxonomy_version: str, docs_root: str = ".",
         "forward. This is a suggestion to mechanize, not a defect — it never "
         "blocks a verdict, and it falls away on a repo that already runs the "
         "tool.\n\n"
+        f"{_process_notes_footer()}"
         f"{going_deeper}"
     )
     return f"---\n{fm}\n---\n\n{body}"

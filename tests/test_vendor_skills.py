@@ -125,3 +125,97 @@ def test_collapsed_vendor_also_writes_attribution_notice(tmp_path):
     run_vendor(target, "--collapsed")
     notice = notice_text(target)
     assert "brandondees/code-quality-atlas" in notice
+
+
+def _source_functions_only():
+    """The script's functions/vars, without the trailing `main "$@"` call, so
+    a caller can invoke individual functions (e.g. vendor_one) directly."""
+    lines = SCRIPT.read_text().splitlines()
+    assert lines[-1].strip() == 'main "$@"', \
+        "script's last line changed shape; update this helper"
+    return "\n".join(lines[:-1])
+
+
+# A fake `rm` shadowing the real binary as a shell function (bash resolves a
+# bare command name to a function before PATH lookup). Regardless of whether
+# the guard under test holds, no `rm` invocation in these tests can ever touch
+# a real path — the mock only logs what it *would* have deleted. This matters
+# specifically because these tests exist to exercise the failure mode where a
+# guard regresses and an absolute system path (e.g. "/etc") is computed; a
+# real `rm -rf` there would be catastrophic on whatever machine runs pytest.
+_MOCK_RM = 'rm() { printf "MOCK_RM_CALLED:%s\\n" "$*" >&2; return 1; }'
+
+
+def test_vendor_one_aborts_instead_of_deleting_rooted_path_on_empty_dest_root():
+    """Regression for the SC2115 hardening (#157): vendor_one's original fix
+    guarded `${dest:?}`, but dest is built as "$dest_root/$name" — string
+    concatenation with a literal "/" means dest can never actually be empty
+    even when dest_root is (it becomes "/$name" instead), so a dest-only
+    guard can't catch this. The fix now guards dest_root directly at the
+    point dest is built. Prove it: with dest_root empty and name="etc", a
+    dest-only guard would let `rm -rf "/etc"` through; the fixed script must
+    abort before `rm` (mocked below, never the real binary) is ever called."""
+    bash_script = f"""
+set -euo pipefail
+{_MOCK_RM}
+{_source_functions_only()}
+vendor_one "etc" ""
+"""
+    result = subprocess.run(
+        ["bash", "-c", bash_script],
+        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode != 0, (
+        f"vendor_one should have aborted on empty dest_root; "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "MOCK_RM_CALLED" not in result.stderr, (
+        "the guard should abort before rm is ever reached, mocked or not: "
+        f"stderr={result.stderr!r}"
+    )
+
+
+# The literal guarded expression from the prune loop in tooling/vendor-skills.sh
+# (main()'s --prune branch). Kept as a module-level constant, cross-checked
+# against the live script by test_prune_guard_expression_matches_script below,
+# so a future edit to the real guard's syntax fails loudly here instead of
+# leaving this test silently exercising a expression the script no longer has.
+_PRUNE_RM_GUARD_LINE = '        rm -rf "${dest_root:?}/$old"'
+
+
+def test_prune_guard_expression_matches_script():
+    """Guards against this test file drifting from the real prune loop: if
+    someone edits the guard in tooling/vendor-skills.sh without updating the
+    hand-typed expression below, this fails and says so explicitly."""
+    script_text = SCRIPT.read_text()
+    assert _PRUNE_RM_GUARD_LINE in script_text, (
+        "tooling/vendor-skills.sh's prune-loop rm guard no longer matches "
+        f"the expression this test exercises ({_PRUNE_RM_GUARD_LINE!r}); "
+        "update both together"
+    )
+
+
+def test_prune_rm_guard_aborts_on_empty_dest_root():
+    """Companion regression for the prune loop's own `${dest_root:?}` guard
+    (the pattern vendor_one's fix above was brought in line with): an empty
+    dest_root there must abort rather than expand to `rm -rf "/$old"`. Uses
+    the exact expression from tooling/vendor-skills.sh (kept in sync by
+    test_prune_guard_expression_matches_script above) with `rm` mocked, so a
+    regressed guard would be caught here rather than deleting a real path."""
+    bash_script = f"""
+set -euo pipefail
+{_MOCK_RM}
+dest_root=""
+old="etc"
+{_PRUNE_RM_GUARD_LINE.strip()}
+"""
+    result = subprocess.run(
+        ["bash", "-c", bash_script],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode != 0
+    assert "dest_root" in result.stderr
+    assert "MOCK_RM_CALLED" not in result.stderr, (
+        "the guard should abort before rm is ever reached, mocked or not: "
+        f"stderr={result.stderr!r}"
+    )

@@ -6,6 +6,17 @@
 
 Where does the repo hurt most? Churn × complexity, change-coupling, bus factor, untracked debt.
 
+## Contents
+
+- [When to use](#when-to-use)
+- [Checklist](#checklist)
+- [From category #21](#from-category-21)
+- [Examples](#examples)
+- [Bad → finding](#bad--finding)
+- [Bad → finding](#bad--finding-1)
+- [Good → no finding](#good--no-finding)
+- [Going deeper](#going-deeper)
+
 ## When to use
 
 **Shape: repo.** Run against the whole repository (scheduled or on demand), not a single diff.

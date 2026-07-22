@@ -6,8 +6,16 @@ offline/web sessions that can't reach the plugin clone. The template
 mechanically tied the embedded copy to it — so a template edit could silently
 leave the fallback stale, and offline sessions would install an outdated block
 (issue #64). This test fails the build whenever the two diverge.
+
+This repo also dogfoods the template in its own `AGENTS.md` and `CLAUDE.md`
+(the routing block a consumer repo would get from `/code-quality-atlas:atlas-init`).
+Neither was covered by the check above, which let `CLAUDE.md`'s copy drift
+from the template unnoticed (issue #167). Parametrized below alongside the
+`atlas-init.md` fallback check so any of the three copies drifting fails CI.
 """
 from pathlib import Path
+
+import pytest
 
 _BEGIN = "<!-- BEGIN code-quality-atlas routing -->"
 _END = "<!-- END code-quality-atlas routing -->"
@@ -37,4 +45,17 @@ def test_atlas_init_fallback_matches_template():
         "The embedded fallback block in commands/atlas-init.md has drifted from "
         "templates/agents-routing-snippet.md (the source of truth). Re-copy the "
         "BEGIN…END block from the template into atlas-init.md's fenced example."
+    )
+
+
+@pytest.mark.parametrize("dogfood_file", ["AGENTS.md", "CLAUDE.md"])
+def test_own_dogfood_file_matches_template(dogfood_file):
+    root = Path(__file__).resolve().parent.parent
+    template = _extract_block(
+        (root / "templates" / "agents-routing-snippet.md").read_text(encoding="utf-8"))
+    dogfood = _extract_block((root / dogfood_file).read_text(encoding="utf-8"))
+    assert dogfood == template, (
+        f"This repo's own {dogfood_file} routing block has drifted from "
+        "templates/agents-routing-snippet.md (the source of truth). Resync the "
+        "BEGIN…END block, or intentionally diverge and document why (issue #167)."
     )

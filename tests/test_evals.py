@@ -25,6 +25,19 @@ def test_validate_requires_at_least_three(tmp_path):
     with pytest.raises(EvalError, match="at least 3"):
         validate_evals(load_evals(_write(tmp_path, doc)))
 
+def test_validate_honors_a_raised_min_scenarios(tmp_path):
+    # Q21: a lens can opt into a higher bar than D8's baseline via the
+    # manifest's eval_min; validate_evals must enforce whatever the caller
+    # passes, not just the hardcoded default.
+    evals = load_evals(_write(tmp_path, _good()))  # 3 scenarios
+    with pytest.raises(EvalError, match="at least 5"):
+        validate_evals(evals, min_scenarios=5)
+
+def test_validate_min_scenarios_defaults_to_three(tmp_path):
+    doc = _good(); doc["scenarios"] = doc["scenarios"][:2]
+    with pytest.raises(EvalError, match="at least 3"):
+        validate_evals(load_evals(_write(tmp_path, doc)))  # no min_scenarios passed
+
 def test_validate_requires_expected_behavior(tmp_path):
     doc = _good(); doc["scenarios"][0].pop("expected_behavior")
     with pytest.raises(EvalError, match="expected_behavior"):

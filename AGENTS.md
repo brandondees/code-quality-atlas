@@ -1,5 +1,26 @@
 # code-quality-atlas
 
+## Orientation for new sessions
+
+Asked something like "what's next?" or otherwise asked to plan or build without
+a named task? This repo's active roadmap lives in `docs/`, not just in GitHub
+issues/PRs — check these before reporting nothing's queued:
+
+- [`docs/open-questions.md`](docs/open-questions.md) — the decisions log
+  (`D1`-`D18`+) and the live "Genuinely still open (undecided)" list. Start here.
+- [`docs/plans/`](docs/plans/) — dated, scoped design docs for approved-but-unbuilt work.
+- [`docs/map-gaps.md`](docs/map-gaps.md) — structural taxonomy gaps (`G1`-`G32`+)
+  feeding future categories/lenses.
+- [`docs/session-log.md`](docs/session-log.md) — narrative history of what
+  shipped and why, for when a doc pointer alone isn't enough context.
+
+This is separate from the code-review routing block below: that block answers
+"review this change" requests; this section answers "what should I work on"
+requests. (This orientation section is scoped to this repo's own contributor-
+facing `AGENTS.md`/`CLAUDE.md` — it does not apply to consumers of the plugin,
+who don't have this repo's planning docs, so it is not part of
+`templates/agents-routing-snippet.md`.)
+
 This file carries the code-review routing block that also appears in
 [`CLAUDE.md`](CLAUDE.md), for agents that read `AGENTS.md` instead. (`CLAUDE.md`
 additionally carries the "Plugin consumers" guidance.) The block below is the
