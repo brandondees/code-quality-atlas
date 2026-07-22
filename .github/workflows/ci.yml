@@ -40,7 +40,7 @@ jobs:
           git diff --exit-code collapsed/ || { git diff --stat collapsed/; echo "::error::collapsed/ drifted — regenerate and commit"; ok=0; }
           [ "$ok" -eq 1 ]
       - name: markdownlint
-        uses: DavidAnson/markdownlint-cli2-action@8de2aa07cae85fd17c0b35642db70cf5495f1d25 # v24.0.0
+        uses: DavidAnson/markdownlint-cli2-action@6bf21b07787794f89a243495939cd651942aeabe # v24.1.0
         with:
           globs: '**/*.md'
       - name: shellcheck
