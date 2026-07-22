@@ -17,12 +17,11 @@ does for this exact name."""
 from __future__ import annotations
 
 from tooling.generate_common import (
-    _KIND_TITLE, _TOOLING_PREAMBLE, _escape_table_cell, _scope_line,
+    _escape_table_cell,  # noqa: F401 -- call-based re-export, see tests/test_generate.py
     build_reference, modes_section, primary_owners,
 )
 from tooling.generate_skill import (
-    _CROSS_REF_QUOTA, _TOP_CHECKS_BUDGET, _cross_ref_note,
-    _team_preferences_note, build_artifact_rubric, build_skill_md,
+    build_artifact_rubric, build_skill_md,
     generate_skill, top_checks,
 )
 from tooling.generate_router import build_router_md, generate_router
@@ -30,8 +29,7 @@ from tooling.generate_synthesizer import (
     build_synthesizer_md, generate_synthesizer, mode_floor_policy,
 )
 from tooling.generate_collapsed import (
-    CollapsedOverlapError, _checklist_body, _gen_header,
-    build_collapsed_synthesis, build_entrypoint_md,
+    CollapsedOverlapError, build_collapsed_synthesis, build_entrypoint_md,
     collapsed_plugin_manifest, entrypoint_lenses, generate_collapsed,
     generate_lens_bundle, lens_bundle_body,
 )

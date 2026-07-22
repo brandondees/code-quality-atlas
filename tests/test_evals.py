@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # tests/test_evals.py
-import json, pytest
+import json
+import pytest
 from tooling.evals import load_evals, validate_evals, EvalError
 
 def _write(tmp_path, doc):
@@ -21,7 +22,8 @@ def test_load_and_validate_good_evals(tmp_path):
     assert len(evals.scenarios) == 3
 
 def test_validate_requires_at_least_three(tmp_path):
-    doc = _good(); doc["scenarios"] = doc["scenarios"][:2]
+    doc = _good()
+    doc["scenarios"] = doc["scenarios"][:2]
     with pytest.raises(EvalError, match="at least 3"):
         validate_evals(load_evals(_write(tmp_path, doc)))
 
@@ -34,12 +36,14 @@ def test_validate_honors_a_raised_min_scenarios(tmp_path):
         validate_evals(evals, min_scenarios=5)
 
 def test_validate_min_scenarios_defaults_to_three(tmp_path):
-    doc = _good(); doc["scenarios"] = doc["scenarios"][:2]
+    doc = _good()
+    doc["scenarios"] = doc["scenarios"][:2]
     with pytest.raises(EvalError, match="at least 3"):
         validate_evals(load_evals(_write(tmp_path, doc)))  # no min_scenarios passed
 
 def test_validate_requires_expected_behavior(tmp_path):
-    doc = _good(); doc["scenarios"][0].pop("expected_behavior")
+    doc = _good()
+    doc["scenarios"][0].pop("expected_behavior")
     with pytest.raises(EvalError, match="expected_behavior"):
         validate_evals(load_evals(_write(tmp_path, doc)))
 

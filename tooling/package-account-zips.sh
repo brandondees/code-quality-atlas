@@ -11,9 +11,12 @@
 # Each ZIP contains one skill as a top-level folder (<name>/SKILL.md), the layout
 # the GUI requires — it rejects a ZIP with more than one top-level folder, so it's
 # one upload per skill. Runtime resources ship (SKILL.md, reference/, examples.md);
-# dev-only material is excluded (evals/). The whole-suite --bundle mode produces a
-# single archive for convenience only; the claude.ai GUI will NOT accept it (use
-# tooling/vendor-skills.sh if you want the suite inside a repo instead).
+# dev-only material is excluded (evals/). Each skill is CC BY 4.0 licensed, so a
+# generated NOTICE.md (source repo, commit, license link) ships alongside its
+# SKILL.md in every ZIP — mirrors tooling/vendor-skills.sh's write_attribution().
+# The whole-suite --bundle mode produces a single archive for convenience only;
+# the claude.ai GUI will NOT accept it (use tooling/vendor-skills.sh if you want
+# the suite inside a repo instead).
 #
 # Usage:
 #   tooling/package-account-zips.sh                 # one ZIP per skill -> dist/account-skills/
@@ -27,9 +30,6 @@
 set -euo pipefail
 
 REQUIRED_PROGRAMS=("zip")
-
-# Dev-only directories never shipped to an end user's session.
-EXCLUDE_GLOBS=("*/evals/*")
 
 OUT_DIR="dist/account-skills"
 EMIT_PER_SKILL=1
@@ -158,12 +158,49 @@ warn_on_name_mismatch() {
   fi
 }
 
+# Stage a skill's runtime files (SKILL.md, examples.md, reference/) under
+# $stage_root/$name/ — dev-only evals/ is deliberately not copied. Mirrors
+# vendor-skills.sh's vendor_one() so both distribution channels ship the same
+# runtime surface.
+stage_skill() {
+  local name=$1 stage_root=$2
+  local src="$SKILLS_SUBDIR/$name"
+  local dest="$stage_root/$name"
+  rm -rf "${dest:?}"
+  mkdir -p "$dest"
+  cp "$src/SKILL.md" "$dest/SKILL.md"
+  [ -f "$src/examples.md" ] && cp "$src/examples.md" "$dest/examples.md"
+  [ -d "$src/reference" ] && cp -R "$src/reference" "$dest/reference"
+  return 0
+}
+
+# The skill content staged by stage_skill is CC BY 4.0 (LICENSE-CC-BY-4.0),
+# which requires attribution on redistribution. A link back to the source repo
+# satisfies it (per LICENSE). Mirrors vendor-skills.sh's write_attribution()
+# so both distribution channels for this same content carry the same notice.
+write_attribution() {
+  local dest=$1 sha=$2
+  cat >"$dest/NOTICE.md" <<EOF
+# Attribution notice
+
+This skill was packaged from
+[brandondees/code-quality-atlas](https://github.com/brandondees/code-quality-atlas)
+(commit \`$sha\`) by \`tooling/package-account-zips.sh\`.
+
+It is licensed under CC BY 4.0 (see
+[LICENSE-CC-BY-4.0](https://github.com/brandondees/code-quality-atlas/blob/$sha/LICENSE-CC-BY-4.0)
+in the source repository, pinned to the packaged commit so the license text
+matches what was actually packaged). This notice satisfies the attribution
+requirement for this copy; do not remove it while the content remains here.
+EOF
+}
+
 zip_one() {
-  local name=$1 dest=$2
+  local name=$1 dest=$2 stage_root=$3
   rm -f "$dest"
-  # Zip from within the skills source dir so the archive root is <name>/… as the
-  # GUI expects.
-  (cd "$SKILLS_SUBDIR" && zip -q -r -X "$dest" "$name" -x "${EXCLUDE_GLOBS[@]}")
+  # Zip from within the stage dir so the archive root is <name>/… as the GUI
+  # expects.
+  (cd "$stage_root" && zip -q -r -X "$dest" "$name")
 }
 
 main() {
@@ -176,20 +213,34 @@ main() {
 
   collect_skill_names || exit 1
 
-  # zip's -x patterns are matched against the paths as written; resolve OUT_DIR to
-  # an absolute path so the (cd skills && zip …) subshell writes to the right place.
   mkdir -p "$OUT_DIR"
   local abs_out
   abs_out=$(cd "$OUT_DIR" && pwd)
 
+  local stage_root
+  stage_root=$(mktemp -d) || { printf 'Error: mktemp -d failed\n' >&2; exit 1; }
+  # Double-quoted so $stage_root is substituted now, at registration time —
+  # it's a `local` inside main() and would be out of scope (unbound under
+  # set -u) by the time an EXIT trap on a single-quoted command fires later.
+  # shellcheck disable=SC2064
+  trap "rm -rf '$stage_root'" EXIT
+
+  local sha
+  sha=$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')
+
   local count="${#SKILL_NAMES[@]}"
   local name
+
+  for name in "${SKILL_NAMES[@]}"; do
+    warn_on_name_mismatch "$name"
+    stage_skill "$name" "$stage_root"
+    write_attribution "$stage_root/$name" "$sha"
+  done
 
   if [ "$EMIT_PER_SKILL" -eq 1 ]; then
     printf 'Packaging %s per-skill ZIP(s) -> %s\n' "$count" "$abs_out"
     for name in "${SKILL_NAMES[@]}"; do
-      warn_on_name_mismatch "$name"
-      zip_one "$name" "$abs_out/$name.zip"
+      zip_one "$name" "$abs_out/$name.zip" "$stage_root"
       printf '  + %s.zip\n' "$name"
     done
   fi
@@ -198,7 +249,7 @@ main() {
     local bundle="$abs_out/$BUNDLE_NAME"
     rm -f "$bundle"
     printf 'Packaging all-skills bundle -> %s\n' "$bundle"
-    (cd "$SKILLS_SUBDIR" && zip -q -r -X "$bundle" "${SKILL_NAMES[@]}" -x "${EXCLUDE_GLOBS[@]}")
+    (cd "$stage_root" && zip -q -r -X "$bundle" "${SKILL_NAMES[@]}")
     printf '  + %s\n' "$BUNDLE_NAME"
     printf 'Note: the claude.ai GUI REJECTS a multi-skill ZIP (one top-level folder only).\n'
     printf '      This bundle is a convenience archive, not for GUI upload; upload the\n'

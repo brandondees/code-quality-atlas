@@ -27,9 +27,9 @@ The counter-risk of a maximal scope — that the suite sprawls into 24 thin skil
 
 ## Phases
 
-1. **Research & taxonomy** *(complete, 2026-06-09)* — build and refine the comprehensive map; gather references and prior art per category; resolve open questions about coverage and granularity.
-2. **Skill-suite architecture** *(complete, 2026-06-09)* — decide how the 24 categories collapse into a buildable, composable set of skills; define triggering, scope, inputs/outputs, and how skills compose during a review.
-3. **Build** *(complete, 2026-06-10)* — implement, test, and dogfood the skills. All 22 behaviors built; the repo is an installable plugin; ongoing work is the docs→drift→regenerate loop.
+1. **Research & taxonomy** *(complete, 2026-06-09)* — build and refine the comprehensive map; gather references and prior art per category; resolve open questions about coverage and granularity. Current category count: see [`docs/taxonomy.md`](taxonomy.md).
+2. **Skill-suite architecture** *(complete, 2026-06-09)* — decide how the taxonomy's categories collapse into a buildable, composable set of skills; define triggering, scope, inputs/outputs, and how skills compose during a review.
+3. **Build** *(ongoing since 2026-06-10)* — implement, test, and dogfood the skills; the repo is an installable plugin. Current skill count: see [`skills/manifest.yaml`](../skills/manifest.yaml). Ongoing work is tracked in [`docs/session-log.md`](session-log.md) and [`docs/open-questions.md`](open-questions.md), not a fixed completion date — the docs→drift→regenerate loop, new lenses, and hardened evals all continue to land here.
 
 ## Working principles
 

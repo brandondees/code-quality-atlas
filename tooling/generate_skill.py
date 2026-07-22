@@ -11,7 +11,7 @@ from tooling.manifest import Artifact, Skill
 from tooling.sections import (extract_bullets, extract_section,
                               extract_subsection, is_priority, section_hash,
                               strip_priority)
-from tooling.generate_common import _escape_table_cell, _scope_line, build_reference
+from tooling.generate_common import _escape_table_cell, _gen_header, _scope_line, build_reference
 
 _TOP_CHECKS_BUDGET = 8
 _CROSS_REF_QUOTA = 2  # shared categories get token representation, not parity
@@ -297,14 +297,14 @@ def generate_skill(skill: Skill, taxonomy_version: str,
     if skill.shape == "artifact":
         for a in skill.artifacts:
             (out / "reference" / f"{a.slug}.md").write_text(
-                build_artifact_rubric(skill, a, docs_root), encoding="utf-8")
+                _gen_header(skill) + build_artifact_rubric(skill, a, docs_root), encoding="utf-8")
     else:
         (out / "reference" / "heuristics.md").write_text(
-            build_reference(skill, "heuristics", docs_root), encoding="utf-8")
+            _gen_header(skill) + build_reference(skill, "heuristics", docs_root), encoding="utf-8")
     (out / "reference" / "tool-rules.md").write_text(
-        build_reference(skill, "tooling", docs_root), encoding="utf-8")
+        _gen_header(skill) + build_reference(skill, "tooling", docs_root), encoding="utf-8")
     (out / "reference" / "sources.md").write_text(
-        build_reference(skill, "references", docs_root), encoding="utf-8")
+        _gen_header(skill) + build_reference(skill, "references", docs_root), encoding="utf-8")
     if not (out / "examples.md").exists():
         (out / "examples.md").write_text(
             f"# Examples — {skill.name}\n\n"
