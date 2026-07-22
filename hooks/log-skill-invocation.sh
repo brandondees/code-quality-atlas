@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # code-quality-atlas PostToolUse(Skill) hook — Q17/D17 stage 1 ("Process notes
 # + local log"). Registered in hooks.json with matcher "Skill", so it fires
 # once per skill invocation and receives that invocation's hook JSON on stdin.
