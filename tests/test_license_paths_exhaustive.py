@@ -23,6 +23,7 @@ _EXEMPT = {
     ".claude-plugin",
     ".serena",
     ".pytest_cache",
+    ".ruff_cache",
     "__pycache__",
     ".venv",
     "venv",
