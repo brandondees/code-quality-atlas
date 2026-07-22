@@ -3,6 +3,7 @@
 """Regression tests for tooling/package-account-zips.sh's CC BY attribution
 (issue #161's Major finding: the account-zips distribution channel had no
 equivalent of vendor-skills.sh's NOTICE.md)."""
+import os
 import subprocess
 import zipfile
 from pathlib import Path
@@ -99,6 +100,36 @@ def test_collapsed_zips_also_carry_notice(tmp_path):
     assert zip_path.exists()
     notice = _read_from_zip(zip_path, "reviewing-a-change/NOTICE.md")
     assert "brandondees/code-quality-atlas" in notice
+
+
+def test_unresolvable_sha_warns_on_stderr(tmp_path):
+    """If `git rev-parse --short HEAD` fails (e.g. run from a source export
+    with no .git), sha falls back to the literal 'unknown', which gets baked
+    into every NOTICE.md's pinned license URL as a dead link. The script
+    should warn on stderr so a packager notices before distributing —
+    silently is not good enough for a change whose whole point is license
+    compliance. repo_root() has its own git-unavailable fallback (walking up
+    from the script's location), so packaging still succeeds; only the SHA
+    resolution should degrade."""
+    out_dir = tmp_path / "zips"
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_git = fake_bin / "git"
+    fake_git.write_text("#!/bin/sh\nexit 1\n")
+    fake_git.chmod(0o755)
+
+    env = dict(os.environ)
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    result = subprocess.run(
+        [str(SCRIPT), "--out", str(out_dir), "--collapsed"],
+        cwd=str(REPO_ROOT), env=env,
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "could not resolve a git commit SHA" in result.stderr
+
+    notice = _read_from_zip(out_dir / "reviewing-a-change.zip", "reviewing-a-change/NOTICE.md")
+    assert "blob/unknown/LICENSE-CC-BY-4.0" in notice
 
 
 def test_bundle_zip_also_carries_per_skill_notices(tmp_path):

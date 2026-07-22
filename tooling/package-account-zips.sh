@@ -227,6 +227,10 @@ main() {
 
   local sha
   sha=$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')
+  if [ "$sha" = "unknown" ]; then
+    printf '  ! warning: could not resolve a git commit SHA (no .git found?) — every\n' >&2
+    printf '    NOTICE.md will pin a dead license link to .../blob/unknown/LICENSE-CC-BY-4.0\n' >&2
+  fi
 
   local count="${#SKILL_NAMES[@]}"
   local name
