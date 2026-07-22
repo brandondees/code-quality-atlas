@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # code-quality-atlas SessionEnd hook — Q17/D17 stage 1 ("Process notes + local
 # log"). Queues the just-ended session's transcript for later post-hoc
 # digestion (docs/self-improvement-loop.md §3.4's `/atlas-retro`, stage 2+,

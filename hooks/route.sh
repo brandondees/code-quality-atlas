@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
 # code-quality-atlas SessionStart hook.
 #
 # Emits a one-line steering message into the session context so the suite is
