@@ -28,7 +28,7 @@ shipped across phases 2–3 and are now marked `→ RESOLVED` in place (with a
 pointer to the decision or skill that closed them). A **decision sweep
 (2026-06-12)** closed three more: **Q16 → D14** (promote agentic safety → #32 —
 **✅ lens `reviewing-agentic-safety` built 2026-06-24**), **Q18 → D15** (the
-`artifact` shape; G11 factor → #30 — still unbuilt), and **Q13** (design
+`artifact` shape; G11 factor → #30 — **✅ built 2026-06-24**, see D15 below), and **Q13** (design
 approved, build deferred). A later sweep (2026-06-24) closed **Q14 → D16**
 (review-depth modes: separate relevance from depth; three tiers; manifest-driven —
 design [`review-depth-modes.md`](review-depth-modes.md), build deferred).
@@ -426,5 +426,5 @@ First answer shipped (D10): the `choosing-review-lenses` router (situation → l
 ### Q8 — Scope of "maintenance"  → PARTIALLY RESOLVED (detection built; fixing still open)
 
 Does maintenance include proactive hygiene (dead-code sweeps, dependency bumps, doc staleness) on a schedule, not just review-time? If so, some skills are *cron-shaped*, not *diff-shaped*.
-**Yes, and the cron shape is built for detection:** the six repo-shaped audits + `finding-maintainability-hotspots` are scheduled, whole-repo *detectors* (dead-code/debt, dep CVEs, doc staleness, …). **Still open:** the *fixing* half — skills that don't just flag but apply the change (sweep the dead code, bump the dep, refresh the stale doc). That residual is the same gap as Q3 (a maintenance/fixing mode vs. review/detection mode).
+**Yes, and the cron shape is built for detection:** the eight repo-shaped audits + `finding-maintainability-hotspots` are scheduled, whole-repo *detectors* (dead-code/debt, dep CVEs, doc staleness, …). **Still open:** the *fixing* half — skills that don't just flag but apply the change (sweep the dead code, bump the dep, refresh the stale doc). That residual is the same gap as Q3 (a maintenance/fixing mode vs. review/detection mode).
 **Narrowed by [`map-gaps.md`](map-gaps.md) G26 (2026-06-14):** the "fixing half" is *only auto-application*, and is partly served already by the broader `simplify` / `code-review --fix` skills. *Suggesting* the fix (apply/defer/ignore to the implementer) is review-time, not part of this residual — it's gated by the defect-only guard (G26), not by missing capability.
