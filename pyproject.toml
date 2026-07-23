@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: MIT
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# Default rule set (E4, E7, E9, F) — see docs/open-questions.md D-series for
+# any future decision to broaden this.
+
+[tool.ruff.lint.per-file-ignores]
+# tests/*.py deliberately interleave imports with the test sections that use
+# them (each "--- Task N ---" / "--- Feature ---" comment block imports only
+# what it needs, right above it) rather than front-loading everything at the
+# top of an already-large file. That's intentional organization, not drift.
+"tests/*.py" = ["E402"]

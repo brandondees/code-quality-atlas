@@ -156,8 +156,8 @@ class ValidationError(Exception):
     pass
 
 
-def validate(manifest: Manifest, docs_root: str = ".") -> None:
-    seen = set()
+def _validate_skills(manifest: Manifest, docs_root: str) -> set[str]:
+    seen: set[str] = set()
     primaries: dict[int, list[str]] = {}
     for s in manifest.skills:
         if not _NAME_RE.match(s.name) or len(s.name) > 64:
@@ -235,112 +235,137 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
             raise ValidationError(
                 f"category #{category} has multiple primary owners: {', '.join(owners)} "
                 f"— mark all but one with cross_ref: [{category}]")
-    if manifest.router is not None:
-        r = manifest.router
-        if not _NAME_RE.match(r.name) or len(r.name) > 64 or r.name in seen:
-            raise ValidationError(f"router: invalid or duplicate name {r.name!r}")
-        if not r.description or len(r.description) > 1024:
-            raise ValidationError("router: description must be non-empty and <=1024 chars")
-        if len(r.body) > 1024:
-            raise ValidationError("router: body must be <=1024 chars")
-        if not r.routes:
-            raise ValidationError("router: routes must be non-empty")
-        for route in r.routes:
-            if not route.when or not route.run:
-                raise ValidationError("router: every route needs `when` and `run`")
-            for lens in route.run:
-                if lens not in seen:
-                    raise ValidationError(
-                        f"router: route {route.when!r} runs unknown skill {lens!r}")
-        # The catalog lists every lens by its picker line; a missing picker
-        # would silently leave that lens undiscoverable to the router.
+    return seen
+
+
+def _validate_router(manifest: Manifest, seen: set[str]) -> None:
+    if manifest.router is None:
+        return
+    r = manifest.router
+    if not _NAME_RE.match(r.name) or len(r.name) > 64 or r.name in seen:
+        raise ValidationError(f"router: invalid or duplicate name {r.name!r}")
+    if not r.description or len(r.description) > 1024:
+        raise ValidationError("router: description must be non-empty and <=1024 chars")
+    if len(r.body) > 1024:
+        raise ValidationError("router: body must be <=1024 chars")
+    if not r.routes:
+        raise ValidationError("router: routes must be non-empty")
+    for route in r.routes:
+        if not route.when or not route.run:
+            raise ValidationError("router: every route needs `when` and `run`")
+        for lens in route.run:
+            if lens not in seen:
+                raise ValidationError(
+                    f"router: route {route.when!r} runs unknown skill {lens!r}")
+    # The catalog lists every lens by its picker line; a missing picker
+    # would silently leave that lens undiscoverable to the router.
+    for s in manifest.skills:
+        if not s.picker:
+            raise ValidationError(
+                f"{s.name}: picker is required when a router is defined")
+
+
+def _validate_synthesizer(manifest: Manifest, seen: set[str]) -> None:
+    if manifest.synthesizer is None:
+        return
+    sy = manifest.synthesizer
+    if not _NAME_RE.match(sy.name) or len(sy.name) > 64 or sy.name in seen:
+        raise ValidationError(f"synthesizer: invalid or duplicate name {sy.name!r}")
+    if not sy.description or len(sy.description) > 1024:
+        raise ValidationError("synthesizer: description must be non-empty and <=1024 chars")
+    if len(sy.severity_order) < 2:
+        raise ValidationError("synthesizer: severity_order needs at least two levels")
+    if len(sy.severity_order) != len(set(sy.severity_order)):
+        raise ValidationError("synthesizer: severity_order has duplicate levels")
+    # A tension is only meaningful between two known, distinct lenses;
+    # an unknown name would print a dangling reference in the merged report.
+    for t in sy.tensions:
+        if len(t.between) != 2 or t.between[0] == t.between[1]:
+            raise ValidationError(
+                f"synthesizer: tension `between` must name two distinct lenses, got {t.between}")
+        for lens in t.between:
+            if lens not in seen:
+                raise ValidationError(
+                    f"synthesizer: tension references unknown skill {lens!r}")
+        if not t.about or not t.resolve:
+            raise ValidationError(
+                f"synthesizer: tension {t.between} needs `about` and `resolve`")
+
+
+def _validate_modes(manifest: Manifest) -> None:
+    if not manifest.modes:
+        return
+    allowed_floors = set()
+    if manifest.synthesizer:
+        allowed_floors = set(manifest.synthesizer.severity_order)
+    allowed_floors.add("escalating")
+    seen_modes: set[str] = set()
+    for mode in manifest.modes:
+        if not mode.name or not _NAME_RE.match(mode.name):
+            raise ValidationError(f"invalid mode name: {mode.name!r}")
+        if mode.name in seen_modes:
+            raise ValidationError(f"duplicate mode name: {mode.name}")
+        seen_modes.add(mode.name)
+        if not mode.breadth.strip():
+            raise ValidationError(f"mode {mode.name}: breadth must be non-empty")
+        if not mode.triggers:
+            raise ValidationError(f"mode {mode.name}: needs at least one trigger phrase")
+        if mode.floor not in allowed_floors:
+            raise ValidationError(
+                f"mode {mode.name}: floor {mode.floor!r} is not a severity level "
+                f"in severity_order nor 'escalating' ({sorted(allowed_floors)})"
+            )
+
+
+def _validate_entrypoints(manifest: Manifest) -> None:
+    if not manifest.entrypoints:
+        return
+    if manifest.synthesizer is None:
+        raise ValidationError(
+            "entrypoints require a synthesizer (synthesis.md is bundled into every entrypoint)")
+    skill_names = {s.name for s in manifest.skills}
+    reserved = set(skill_names)
+    if manifest.router:
+        reserved.add(manifest.router.name)
+    if manifest.synthesizer:
+        reserved.add(manifest.synthesizer.name)
+    seen_eps: set[str] = set()
+    covered: set[str] = set()
+    for ep in manifest.entrypoints:
+        if ep.name in seen_eps:
+            raise ValidationError(f"duplicate entrypoint name: {ep.name}")
+        seen_eps.add(ep.name)
+        if ep.name in reserved:
+            raise ValidationError(
+                f"entrypoint {ep.name} collides with an existing skill/router/synthesizer name")
+        if not re.fullmatch(r"[a-z0-9-]{1,64}", ep.name):
+            raise ValidationError(
+                f"entrypoint {ep.name!r}: name must be 1-64 lowercase letters, digits, "
+                "or hyphens (it becomes a directory under collapsed/skills/)")
+        if not ep.description:
+            raise ValidationError(f"entrypoint {ep.name}: description must be non-empty")
+        if len(ep.description) > 1024:
+            raise ValidationError(f"entrypoint {ep.name}: description exceeds 1024 chars")
+        if not ep.shapes:
+            raise ValidationError(f"entrypoint {ep.name}: shapes must be non-empty")
+        for shape in ep.shapes:
+            if shape not in {"diff", "repo", "decision", "artifact"}:
+                raise ValidationError(f"entrypoint {ep.name}: unknown shape {shape!r}")
         for s in manifest.skills:
-            if not s.picker:
-                raise ValidationError(
-                    f"{s.name}: picker is required when a router is defined")
-    if manifest.synthesizer is not None:
-        sy = manifest.synthesizer
-        if not _NAME_RE.match(sy.name) or len(sy.name) > 64 or sy.name in seen:
-            raise ValidationError(f"synthesizer: invalid or duplicate name {sy.name!r}")
-        if not sy.description or len(sy.description) > 1024:
-            raise ValidationError("synthesizer: description must be non-empty and <=1024 chars")
-        if len(sy.severity_order) < 2:
-            raise ValidationError("synthesizer: severity_order needs at least two levels")
-        if len(sy.severity_order) != len(set(sy.severity_order)):
-            raise ValidationError("synthesizer: severity_order has duplicate levels")
-        # A tension is only meaningful between two known, distinct lenses;
-        # an unknown name would print a dangling reference in the merged report.
-        for t in sy.tensions:
-            if len(t.between) != 2 or t.between[0] == t.between[1]:
-                raise ValidationError(
-                    f"synthesizer: tension `between` must name two distinct lenses, got {t.between}")
-            for lens in t.between:
-                if lens not in seen:
-                    raise ValidationError(
-                        f"synthesizer: tension references unknown skill {lens!r}")
-            if not t.about or not t.resolve:
-                raise ValidationError(
-                    f"synthesizer: tension {t.between} needs `about` and `resolve`")
-    if manifest.modes:
-        allowed_floors = set()
-        if manifest.synthesizer:
-            allowed_floors = set(manifest.synthesizer.severity_order)
-        allowed_floors.add("escalating")
-        seen_modes: set[str] = set()
-        for mode in manifest.modes:
-            if not mode.name or not _NAME_RE.match(mode.name):
-                raise ValidationError(f"invalid mode name: {mode.name!r}")
-            if mode.name in seen_modes:
-                raise ValidationError(f"duplicate mode name: {mode.name}")
-            seen_modes.add(mode.name)
-            if not mode.breadth.strip():
-                raise ValidationError(f"mode {mode.name}: breadth must be non-empty")
-            if not mode.triggers:
-                raise ValidationError(f"mode {mode.name}: needs at least one trigger phrase")
-            if mode.floor not in allowed_floors:
-                raise ValidationError(
-                    f"mode {mode.name}: floor {mode.floor!r} is not a severity level "
-                    f"in severity_order nor 'escalating' ({sorted(allowed_floors)})"
-                )
-    if manifest.entrypoints:
-        if manifest.synthesizer is None:
-            raise ValidationError(
-                "entrypoints require a synthesizer (synthesis.md is bundled into every entrypoint)")
-        skill_names = {s.name for s in manifest.skills}
-        reserved = set(skill_names)
-        if manifest.router:
-            reserved.add(manifest.router.name)
-        if manifest.synthesizer:
-            reserved.add(manifest.synthesizer.name)
-        seen_eps: set[str] = set()
-        covered: set[str] = set()
-        for ep in manifest.entrypoints:
-            if ep.name in seen_eps:
-                raise ValidationError(f"duplicate entrypoint name: {ep.name}")
-            seen_eps.add(ep.name)
-            if ep.name in reserved:
-                raise ValidationError(
-                    f"entrypoint {ep.name} collides with an existing skill/router/synthesizer name")
-            if not re.fullmatch(r"[a-z0-9-]{1,64}", ep.name):
-                raise ValidationError(
-                    f"entrypoint {ep.name!r}: name must be 1-64 lowercase letters, digits, "
-                    "or hyphens (it becomes a directory under collapsed/skills/)")
-            if not ep.description:
-                raise ValidationError(f"entrypoint {ep.name}: description must be non-empty")
-            if len(ep.description) > 1024:
-                raise ValidationError(f"entrypoint {ep.name}: description exceeds 1024 chars")
-            if not ep.shapes:
-                raise ValidationError(f"entrypoint {ep.name}: shapes must be non-empty")
-            for shape in ep.shapes:
-                if shape not in {"diff", "repo", "decision", "artifact"}:
-                    raise ValidationError(f"entrypoint {ep.name}: unknown shape {shape!r}")
-            for s in manifest.skills:
-                if s.shape in ep.shapes or (ep.include_design and s.design):
-                    covered.add(s.name)
-        orphans = skill_names - covered
-        if orphans:
-            raise ValidationError(
-                f"lenses not covered by any entrypoint: {sorted(orphans)}")
+            if s.shape in ep.shapes or (ep.include_design and s.design):
+                covered.add(s.name)
+    orphans = skill_names - covered
+    if orphans:
+        raise ValidationError(
+            f"lenses not covered by any entrypoint: {sorted(orphans)}")
+
+
+def validate(manifest: Manifest, docs_root: str = ".") -> None:
+    seen = _validate_skills(manifest, docs_root)
+    _validate_router(manifest, seen)
+    _validate_synthesizer(manifest, seen)
+    _validate_modes(manifest)
+    _validate_entrypoints(manifest)
 
 
 # Plain-scalar prose fields. A bare " #" inside one is read by YAML as a comment

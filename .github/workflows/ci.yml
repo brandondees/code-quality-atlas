@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   gate:
     runs-on: ubuntu-latest
@@ -17,13 +20,19 @@ jobs:
       - run: pip install --require-hashes -r requirements.txt
       - name: requirements.txt is in sync with requirements.in
         run: |
-          pip install pip-tools
+          pip install pip-tools==7.6.0
           mkdir -p /tmp/reqcheck && cp requirements.in /tmp/reqcheck/
           ( cd /tmp/reqcheck && pip-compile --generate-hashes --output-file=requirements.txt requirements.in )
           diff -u requirements.txt /tmp/reqcheck/requirements.txt || {
             echo "::error::requirements.txt is not pip-compile --generate-hashes's current output for requirements.in — recompile and commit"
             exit 1
           }
+      - name: dependency vulnerability audit
+        run: |
+          pip install pip-audit
+          pip-audit --requirement requirements.txt
+      - name: lint (ruff)
+        run: ruff check .
       - name: tests
         run: python -m pytest tests/ -q
       - name: eval structure (all skills)
