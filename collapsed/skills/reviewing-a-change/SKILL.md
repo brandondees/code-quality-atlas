@@ -42,6 +42,7 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 | When reviewing… | Run |
 |---|---|
 | Bug fix | `tracing-correctness-and-invariants`, `reviewing-test-quality`, `hunting-silent-failures` |
+| Bug fix whose root cause is a missing or wrong invariant — a discriminator field (kind/status/type/mode) constraining which sibling fields are valid, or a fix that itself adds/patches a runtime validation function rather than an off-by-one, null check, or typo | `reviewing-module-design`, `tracing-correctness-and-invariants`, `reviewing-test-quality` — illegal-states-representable bugs get miscategorized as ordinary bug fixes by the base "Bug fix" route above, which never includes this lens (confirmed: two consecutive PRs fixing the same discriminator-plus-generic-field-bag bug both skipped it — brandondees/second-brain-config pull requests 776 and 778) — combine both rows so the type-design lens actually runs when the fix is a representation gap, not just a logic error |
 | New feature (general-purpose change) | `tracing-correctness-and-invariants`, `reviewing-naming-and-readability`, `reviewing-test-quality`, `checking-restraint` |
 | Refactor / restructuring | `reviewing-module-design`, `checking-restraint`, `checking-idioms-and-consistency`, `reviewing-naming-and-readability` |
 | Schema migration, backfill, or data-format change | `reviewing-migration-and-data-safety`, `tracing-correctness-and-invariants`, `hunting-silent-failures` |
