@@ -33,6 +33,7 @@ REQUIRED_PROGRAMS=("git")
 
 TARGET=""
 PRUNE=0
+FORCE=0
 SUBDIR=".claude/skills"
 MARKER_NAME=".atlas-vendored"
 # Which tree to vendor: the 37 standalone skills (default) or the 4 collapsed
@@ -41,7 +42,7 @@ SRC_SUBDIR="skills"
 
 usage() {
   cat <<'EOF'
-Usage: tooling/vendor-skills.sh <target-repo-dir> [--collapsed] [--prune]
+Usage: tooling/vendor-skills.sh <target-repo-dir> [--collapsed] [--prune] [--force]
 
 Copies skills/<name>/{SKILL.md, reference/, examples.md} (no evals/) into
 <target-repo-dir>/.claude/skills/<name>/. Run the script from inside the
@@ -55,6 +56,10 @@ Options:
                 the 37 standalone skills (skills/)
   --prune       Remove skills previously vendored by this tool that are no longer
                 in the suite (safe: only touches names recorded in the marker)
+  --force       Overwrite a target directory at a colliding skill name even if
+                it wasn't vendored by a prior run of this tool (default: skip
+                it with a warning and a non-zero exit; see the marker check
+                in vendor_one)
   -h, --help    Show this help
 
 External tools:
@@ -87,6 +92,7 @@ parse_args() {
     case "$1" in
       --collapsed) SRC_SUBDIR="collapsed/skills" ;;
       --prune) PRUNE=1 ;;
+      --force) FORCE=1 ;;
       -h | --help)
         usage
         exit 0
@@ -168,6 +174,24 @@ vendor_one() {
   # is never empty even when dest_root is (it's still "/$name"), so a dest-only
   # guard can't catch an empty dest_root widening the delete to a rooted path.
   local dest="${dest_root:?}/$name"
+
+  # Refuse to clobber a pre-existing, non-tool-managed directory at this skill
+  # name: if $dest already exists but isn't recorded in the marker from a
+  # prior run of this tool (OLD_NAMES, populated by main() before this loop),
+  # a target repo's own unrelated content there would otherwise be silently
+  # destroyed by the unconditional `rm -rf` below (#175). --force overrides.
+  if [ -e "$dest" ] && [ "$FORCE" -ne 1 ]; then
+    local already_owned=1
+    if [ "${#OLD_NAMES[@]}" -gt 0 ] && contains "$name" "${OLD_NAMES[@]}"; then
+      already_owned=0
+    fi
+    if [ "$already_owned" -ne 0 ]; then
+      printf 'Warning: %s already exists and was not vendored by a prior run of this tool; skipping (pass --force to overwrite it).\n' "$dest" >&2
+      SKIPPED_COLLISIONS+=("$name")
+      return 0
+    fi
+  fi
+
   rm -rf "${dest:?}"
   mkdir -p "$dest"
   cp "$src/SKILL.md" "$dest/SKILL.md"
@@ -228,12 +252,16 @@ main() {
   local sha
   sha=$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')
 
+  # Populated by vendor_one when it skips a name it doesn't own (#175).
+  SKIPPED_COLLISIONS=()
+
   local name
   for name in "${SKILL_NAMES[@]}"; do
     vendor_one "$name" "$dest_root"
   done
   write_attribution "$dest_root" "$sha"
-  printf 'Vendored %s skill(s) -> %s\n' "${#SKILL_NAMES[@]}" "$dest_root"
+  printf 'Vendored %s skill(s) -> %s\n' \
+    "$((${#SKILL_NAMES[@]} - ${#SKIPPED_COLLISIONS[@]}))" "$dest_root"
 
   local pruned=0
   if [ "$PRUNE" -eq 1 ] && [ "${#OLD_NAMES[@]}" -gt 0 ]; then
@@ -253,7 +281,15 @@ main() {
   # SKILL_NAMES, so switching modes (standalone <-> --collapsed) against the
   # same target silently dropped the other form's names from the marker —
   # orphaning those directories beyond --prune's reach (issue #112).
-  local marker_names=("${SKILL_NAMES[@]}")
+  # Names skipped this run due to a collision (#175) are excluded: this tool
+  # does not own that directory, so the marker must not claim it does.
+  local marker_names=()
+  for name in "${SKILL_NAMES[@]}"; do
+    if [ "${#SKIPPED_COLLISIONS[@]}" -gt 0 ] && contains "$name" "${SKIPPED_COLLISIONS[@]}"; then
+      continue
+    fi
+    marker_names+=("$name")
+  done
   if [ "${#OLD_NAMES[@]}" -gt 0 ]; then
     local old
     for old in "${OLD_NAMES[@]}"; do
@@ -278,6 +314,12 @@ main() {
   printf 'Source: code-quality-atlas@%s' "$sha"
   [ "$pruned" -gt 0 ] && printf ' (pruned %s)' "$pruned"
   printf '\nNext: review and commit %s in the target repo.\n' "$SUBDIR"
+
+  if [ "${#SKIPPED_COLLISIONS[@]}" -gt 0 ]; then
+    printf 'Skipped %s skill(s) due to a pre-existing, non-tool-managed directory: %s\n' \
+      "${#SKIPPED_COLLISIONS[@]}" "${SKIPPED_COLLISIONS[*]}" >&2
+    return 1
+  fi
 }
 
 main "$@"
