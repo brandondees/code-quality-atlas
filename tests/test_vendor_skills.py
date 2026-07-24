@@ -127,7 +127,7 @@ def test_collapsed_vendor_also_writes_attribution_notice(tmp_path):
     assert "brandondees/code-quality-atlas" in notice
 
 
-def run_vendor_expect_failure(target, *extra_args):
+def run_vendor_raw(target, *extra_args):
     return subprocess.run(
         [str(SCRIPT), str(target), *extra_args],
         cwd=str(REPO_ROOT),
@@ -150,7 +150,7 @@ def test_vendor_skips_preexisting_non_tool_managed_directory(tmp_path):
     (colliding / "SKILL.md").write_text("# hand-authored, not vendored\n")
     (colliding / "my-private-notes.txt").write_text("do not delete\n")
 
-    result = run_vendor_expect_failure(target)
+    result = run_vendor_raw(target)
     assert result.returncode != 0, (
         "a run that skips a collision must exit non-zero so it's visible, "
         f"not silently succeed: stdout={result.stdout!r} stderr={result.stderr!r}"
@@ -201,11 +201,51 @@ def test_vendor_does_not_skip_directory_it_already_owns(tmp_path):
     first_names = marker_names(target)
     assert "checking-restraint" in first_names
 
-    result = run_vendor_expect_failure(target)
+    result = run_vendor_raw(target)
     assert result.returncode == 0, (
         f"a plain refresh of tool-owned content must not fail: {result.stderr!r}"
     )
     assert "skipping" not in result.stderr.lower()
+
+
+def test_vendor_all_collisions_leaves_marker_names_empty_without_crashing(tmp_path):
+    """Regression for a follow-up gap in #175's own fix: when EVERY current-run
+    skill name collides with pre-existing, non-tool-managed content and there
+    is no prior marker (OLD_NAMES empty too — e.g. a target's first-ever
+    vendoring attempt), marker_names ends up genuinely empty. The marker-write
+    loop must handle that without unbound-variable trouble under `set -u` (the
+    script targets bash 3.2, where `"${arr[@]}"` on a zero-element array
+    raises 'unbound variable' unlike bash >=4.4) — mirror the guard already
+    used for OLD_NAMES/SKIPPED_COLLISIONS elsewhere in main(). Uses --collapsed
+    so only the 4 entrypoint names need to collide, not all 37."""
+    target = tmp_path / "target-repo"
+    skills_dir = target / ".claude" / "skills"
+    for name in (
+        "reviewing-a-change", "auditing-a-repository",
+        "reviewing-a-decision", "reviewing-an-artifact",
+    ):
+        d = skills_dir / name
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(f"mine: {name}\n")
+
+    result = run_vendor_raw(target, "--collapsed")
+    assert result.returncode == 1, (
+        f"all-collide run must still exit non-zero (visible), not crash: "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "unbound variable" not in result.stderr
+    assert "Vendored 0 skill(s)" in result.stdout
+
+    marker = skills_dir / ".atlas-vendored"
+    assert marker.exists()
+    assert marker_names(target) == set()
+
+    # Every pre-existing directory must still be completely untouched.
+    for name in (
+        "reviewing-a-change", "auditing-a-repository",
+        "reviewing-a-decision", "reviewing-an-artifact",
+    ):
+        assert (skills_dir / name / "SKILL.md").read_text() == f"mine: {name}\n"
 
 
 def _source_functions_only():

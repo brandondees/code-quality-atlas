@@ -306,9 +306,19 @@ main() {
   {
     printf '# code-quality-atlas vendored skills — do not hand-edit; regenerate with tooling/vendor-skills.sh\n'
     printf '# source=brandondees/code-quality-atlas@%s\n' "$sha"
-    for name in "${marker_names[@]}"; do
-      printf '%s\n' "$name"
-    done
+    # Guard the empty case explicitly: unlike the pre-#175 code (marker_names
+    # was always seeded from the never-empty SKILL_NAMES), a run where every
+    # skill collides with non-tool-managed content and OLD_NAMES is also
+    # empty (e.g. the target's first-ever vendoring attempt) now leaves
+    # marker_names genuinely empty. Expanding "${marker_names[@]}" directly
+    # in that state is a bash 3.2 `set -u` nounset hazard (fixed in bash 4.4+
+    # but this script targets 3.2/macOS) — mirror the same guard already used
+    # for OLD_NAMES/SKIPPED_COLLISIONS elsewhere in this function.
+    if [ "${#marker_names[@]}" -gt 0 ]; then
+      for name in "${marker_names[@]}"; do
+        printf '%s\n' "$name"
+      done
+    fi
   } >"$marker"
 
   printf 'Source: code-quality-atlas@%s' "$sha"
