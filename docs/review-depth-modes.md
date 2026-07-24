@@ -59,7 +59,7 @@ replaced by "rank by relevance, then take as many as the depth mode asks for."
 | **review** *(default)* | the relevance-ranked **top-N**, default breadth **3-8**, overridable (see the 2026-07-06 addendum above; originally 2-4, see §3 below) | today's **round-based escalation** | per-PR |
 | **comprehensive** | **every applicable lens, uncapped** | pinned at **Nit** (no per-round escalation) | on-demand / scheduled |
 
-The six repo-shaped audits are the **repo arm** of the comprehensive tier; comprehensive
+The nine repo-shaped audits are the **repo arm** of the comprehensive tier; comprehensive
 adds the missing **diff arm** (every applicable diff lens in parallel).
 
 ### 3. The default-breadth top-N survives — but only as the review-mode default depth
