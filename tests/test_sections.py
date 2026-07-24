@@ -1,13 +1,8 @@
 # SPDX-License-Identifier: MIT
 # tests/test_sections.py
 from pathlib import Path
-
-from tooling.sections import (
-    PRIORITY_MARKER,
-    extract_section,
-    is_priority,
-    strip_priority,
-)
+from tooling.sections import (extract_section, is_priority, strip_priority,
+                             PRIORITY_MARKER)
 
 SAMPLE = Path("tests/fixtures/research_sample.md").read_text()
 
@@ -36,7 +31,6 @@ def test_extract_section_missing_raises_keyerror():
 
 from tooling.sections import extract_subsection
 
-
 def test_extract_subsection_heuristics():
     section = extract_section(SAMPLE, 2)
     heur = extract_subsection(section, "heuristics")
@@ -52,7 +46,6 @@ def test_extract_subsection_absent_returns_empty():
 
 
 from tooling.sections import section_hash
-
 
 def test_section_hash_is_stable_and_specific():
     h2a = section_hash(SAMPLE, 2)
@@ -113,7 +106,6 @@ def test_section_stops_at_non_numbered_h2_inline():
 
 
 from tooling.sections import extract_bullets
-
 
 def test_extract_bullets_from_heuristics_subsection():
     heur = extract_subsection(extract_section(SAMPLE, 2), "heuristics")

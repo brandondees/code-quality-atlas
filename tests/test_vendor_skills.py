@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 # tests/test_vendor_skills.py
 """Regression tests for tooling/vendor-skills.sh's marker bookkeeping (issue #112)."""
-
 import subprocess
 from pathlib import Path
 
@@ -13,10 +12,7 @@ def run_vendor(target, *extra_args):
     result = subprocess.run(
         [str(SCRIPT), str(target), *extra_args],
         cwd=str(REPO_ROOT),
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
+        capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, result.stderr
     return result
@@ -25,8 +21,7 @@ def run_vendor(target, *extra_args):
 def marker_names(target):
     marker = target / ".claude" / "skills" / ".atlas-vendored"
     return {
-        line
-        for line in marker.read_text().splitlines()
+        line for line in marker.read_text().splitlines()
         if line and not line.startswith("#")
     }
 
@@ -48,8 +43,7 @@ def test_switching_to_collapsed_preserves_standalone_names_in_marker(tmp_path):
 
     collapsed_dir = target / ".claude" / "skills"
     collapsed_entrypoints = {
-        p.name
-        for p in collapsed_dir.iterdir()
+        p.name for p in collapsed_dir.iterdir()
         if p.is_dir() and (p / "SKILL.md").exists()
     } - standalone_names
     assert collapsed_entrypoints, "collapsed run should add new entrypoint dirs"
@@ -103,12 +97,7 @@ def test_vendor_writes_attribution_notice(tmp_path):
 
     result = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
-        cwd=str(REPO_ROOT),
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=True,
-    )
+        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10, check=True)
     sha = result.stdout.strip()
     assert sha in notice
     assert f"blob/{sha}/LICENSE-CC-BY-4.0" in notice
@@ -142,9 +131,8 @@ def _source_functions_only():
     """The script's functions/vars, without the trailing `main "$@"` call, so
     a caller can invoke individual functions (e.g. vendor_one) directly."""
     lines = SCRIPT.read_text().splitlines()
-    assert lines[-1].strip() == 'main "$@"', (
+    assert lines[-1].strip() == 'main "$@"', \
         "script's last line changed shape; update this helper"
-    )
     return "\n".join(lines[:-1])
 
 
@@ -175,11 +163,7 @@ vendor_one "etc" ""
 """
     result = subprocess.run(
         ["bash", "-c", bash_script],
-        cwd=str(REPO_ROOT),
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
+        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10,
     )
     assert result.returncode != 0, (
         f"vendor_one should have aborted on empty dest_root; "
@@ -227,10 +211,7 @@ old="etc"
 """
     result = subprocess.run(
         ["bash", "-c", bash_script],
-        capture_output=True,
-        text=True,
-        timeout=10,
-        check=False,
+        capture_output=True, text=True, timeout=10,
     )
     assert result.returncode != 0
     assert "dest_root" in result.stderr

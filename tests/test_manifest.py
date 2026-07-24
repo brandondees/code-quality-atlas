@@ -2,15 +2,8 @@
 import pytest
 
 from tooling.manifest import (
-    Entrypoint,
-    Manifest,
-    Mode,
-    Skill,
-    Source,
-    ValidationError,
+    Entrypoint, Manifest, Mode, Skill, Source, ValidationError, load_manifest, validate,
     _check_comment_truncation,
-    load_manifest,
-    validate,
 )
 
 
@@ -57,45 +50,19 @@ def test_real_manifest_has_cross_quality_tensions():
     # so cross-quality collisions get a default instead of falling back to the
     # generic "safer and simpler".
     m = load_manifest("skills/manifest.yaml")
-    cross_quality = [
-        t for t in m.synthesizer.tensions if "checking-restraint" not in t.between
-    ]
+    cross_quality = [t for t in m.synthesizer.tensions
+                     if "checking-restraint" not in t.between]
     # enforce pair-level coverage, not loose substrings: the three G31 pairs
     # whose lenses exist today must all be present.
     pairs = {tuple(sorted(t.between)) for t in cross_quality}
     assert len(cross_quality) >= 3
-    assert (
-        tuple(
-            sorted(
-                [
-                    "reviewing-performance-and-efficiency",
-                    "reviewing-accessibility-and-i18n",
-                ]
-            )
-        )
-        in pairs
-    )
-    assert (
-        tuple(
-            sorted(
-                [
-                    "reviewing-observability-and-operability",
-                    "auditing-compliance-and-provenance",
-                ]
-            )
-        )
-        in pairs
-    )
-    assert (
-        tuple(
-            sorted(
-                ["checking-idioms-and-consistency", "finding-maintainability-hotspots"]
-            )
-        )
-        in pairs
-    )
+    assert tuple(sorted(["reviewing-performance-and-efficiency",
+                         "reviewing-accessibility-and-i18n"])) in pairs
+    assert tuple(sorted(["reviewing-observability-and-operability",
+                         "auditing-compliance-and-provenance"])) in pairs
+    assert tuple(sorted(["checking-idioms-and-consistency",
+                         "finding-maintainability-hotspots"])) in pairs
     validate(m)  # the new tensions reference real, distinct lenses
-
 
 def test_load_manifest_parses_skill_and_sources():
     m = load_manifest("tests/fixtures/manifest_sample.yaml")
@@ -109,7 +76,6 @@ def test_load_manifest_parses_skill_and_sources():
     assert skill.wave == 1
     assert [s.section for s in skill.built_from] == [2, 4]
     assert skill.built_from[0].path == "tests/fixtures/research_sample.md"
-
 
 def test_source_parses_path_and_section():
     s = Source(category=2, source="docs/research/cluster-1-correctness.md#2")
@@ -157,18 +123,14 @@ def test_load_manifest_wraps_malformed_yaml_as_validation_error(tmp_path):
     # yaml.YAMLError escape to a caller that only catches ValidationError
     # (found by the atlas's own review of PR #159, reproduced against
     # `tooling.cli eval --manifest <malformed>.yaml` crashing uncaught).
-    path = _write_manifest(
-        tmp_path, 'taxonomy_version: v0.2\nskills: [ { name: "oops"\n'
-    )
+    path = _write_manifest(tmp_path, 'taxonomy_version: v0.2\nskills: [ { name: "oops"\n')
     with pytest.raises(ValidationError, match="invalid YAML"):
         load_manifest(path)
 
 
 def test_load_manifest_rejects_missing_taxonomy_version(tmp_path):
     path = _write_manifest(tmp_path, "skills: []\n")
-    with pytest.raises(
-        ValidationError, match="missing required key 'taxonomy_version'"
-    ):
+    with pytest.raises(ValidationError, match="missing required key 'taxonomy_version'"):
         load_manifest(path)
 
 
@@ -179,8 +141,7 @@ def test_load_manifest_rejects_non_list_skills(tmp_path):
 
 
 def test_load_manifest_wraps_malformed_source(tmp_path):
-    path = _write_manifest(
-        tmp_path,
+    path = _write_manifest(tmp_path,
         "taxonomy_version: v0.2\n"
         "skills:\n"
         "  - name: hunting-silent-failures\n"
@@ -189,59 +150,45 @@ def test_load_manifest_wraps_malformed_source(tmp_path):
         "    wave: 1\n"
         "    built_from:\n"
         "      - category: 2\n"
-        "        source: docs/research/cluster-1-correctness.md\n",
-    )  # no #section
+        "        source: docs/research/cluster-1-correctness.md\n")  # no #section
     with pytest.raises(ValidationError, match="skill #0"):
         load_manifest(path)
 
 
 def _skill(**kw):
-    base = {
-        "name": "hunting-silent-failures",
-        "description": "x",
-        "shape": "diff",
-        "wave": 1,
-        "built_from": [Source(2, "tests/fixtures/research_sample.md#2")],
-    }
+    base = dict(name="hunting-silent-failures",
+                description="x", shape="diff", wave=1,
+                built_from=[Source(2, "tests/fixtures/research_sample.md#2")])
     base.update(kw)
     return Skill(**base)
 
-
 def test_validate_accepts_good_manifest():
     validate(Manifest("v0.2", [_skill()]))  # no raise
-
 
 def test_validate_rejects_reserved_word_in_name():
     with pytest.raises(ValidationError, match="reserved"):
         validate(Manifest("v0.2", [_skill(name="claude-helper")]))
 
-
 def test_validate_rejects_bad_name_chars():
     with pytest.raises(ValidationError, match="name"):
         validate(Manifest("v0.2", [_skill(name="Hunting_Failures")]))
-
 
 def test_validate_rejects_duplicate_names():
     with pytest.raises(ValidationError, match="duplicate"):
         validate(Manifest("v0.2", [_skill(), _skill()]))
 
-
 def test_skill_defaults_to_preference_tier():
     assert _skill().tier == "preference"
 
-
 def test_validate_accepts_floor_tier():
     validate(Manifest("v0.2", [_skill(tier="floor")]))  # no raise
-
 
 def test_validate_rejects_bad_tier():
     with pytest.raises(ValidationError, match=r"tier must be floor\|preference"):
         validate(Manifest("v0.2", [_skill(tier="bogus")]))
 
-
 def test_load_manifest_parses_tier(tmp_path):
-    path = _write_manifest(
-        tmp_path,
+    path = _write_manifest(tmp_path,
         "taxonomy_version: v0.2\n"
         "skills:\n"
         "  - name: hunting-silent-failures\n"
@@ -250,33 +197,26 @@ def test_load_manifest_parses_tier(tmp_path):
         "    wave: 1\n"
         "    tier: floor\n"
         "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
-    )
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
     m = load_manifest(path)
     assert m.skills[0].tier == "floor"
-
 
 def test_load_manifest_defaults_tier_when_absent():
     m = load_manifest("tests/fixtures/manifest_sample.yaml")
     assert m.skills[0].tier == "preference"
 
-
 def test_skill_defaults_to_no_eval_min():
     assert _skill().eval_min is None
 
-
 def test_validate_accepts_raised_eval_min():
     validate(Manifest("v0.2", [_skill(eval_min=20)]))  # no raise
-
 
 def test_validate_rejects_eval_min_below_d8_baseline():
     with pytest.raises(ValidationError, match="eval_min must be >=3"):
         validate(Manifest("v0.2", [_skill(eval_min=2)]))
 
-
 def test_load_manifest_parses_eval_min(tmp_path):
-    path = _write_manifest(
-        tmp_path,
+    path = _write_manifest(tmp_path,
         "taxonomy_version: v0.2\n"
         "skills:\n"
         "  - name: hunting-silent-failures\n"
@@ -285,24 +225,20 @@ def test_load_manifest_parses_eval_min(tmp_path):
         "    wave: 1\n"
         "    eval_min: 27\n"
         "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
-    )
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
     m = load_manifest(path)
     assert m.skills[0].eval_min == 27
-
 
 def test_load_manifest_defaults_eval_min_to_none_when_absent():
     m = load_manifest("tests/fixtures/manifest_sample.yaml")
     assert m.skills[0].eval_min is None
-
 
 def test_load_manifest_treats_bare_cross_ref_as_empty_list(tmp_path):
     # #140: a bare "cross_ref:" (no value) parses as YAML null, not [] --
     # dict.get(key, []) only substitutes the default when the key is
     # *absent*, so a present-but-null key used to crash validate()'s
     # `for c in s.cross_ref:` with a bare TypeError.
-    path = _write_manifest(
-        tmp_path,
+    path = _write_manifest(tmp_path,
         "taxonomy_version: v0.2\n"
         "skills:\n"
         "  - name: hunting-silent-failures\n"
@@ -311,19 +247,16 @@ def test_load_manifest_treats_bare_cross_ref_as_empty_list(tmp_path):
         "    wave: 1\n"
         "    cross_ref:\n"
         "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
-    )
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
     m = load_manifest(path)
     assert m.skills[0].cross_ref == []
     validate(m)  # no raise
-
 
 def test_load_manifest_treats_bare_artifacts_as_empty_list(tmp_path):
     # #140: same YAML-null-vs-absent-key gap for "artifacts:" on a
     # diff-shaped skill, where it used to crash inside load_manifest's own
     # list comprehension before validate() was even reached.
-    path = _write_manifest(
-        tmp_path,
+    path = _write_manifest(tmp_path,
         "taxonomy_version: v0.2\n"
         "skills:\n"
         "  - name: hunting-silent-failures\n"
@@ -332,19 +265,16 @@ def test_load_manifest_treats_bare_artifacts_as_empty_list(tmp_path):
         "    wave: 1\n"
         "    artifacts:\n"
         "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
-    )
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
     m = load_manifest(path)
     assert m.skills[0].artifacts == []
     validate(m)  # no raise
-
 
 def test_load_manifest_rejects_non_list_cross_ref(tmp_path):
     # Review follow-up on #140/#142: `or []` would have silently normalized
     # any falsy value (not just null) into an empty list, hiding a malformed
     # manifest instead of raising. `cross_ref: false` must still error.
-    path = _write_manifest(
-        tmp_path,
+    path = _write_manifest(tmp_path,
         "taxonomy_version: v0.2\n"
         "skills:\n"
         "  - name: hunting-silent-failures\n"
@@ -353,28 +283,23 @@ def test_load_manifest_rejects_non_list_cross_ref(tmp_path):
         "    wave: 1\n"
         "    cross_ref: false\n"
         "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
-    )
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
     with pytest.raises(ValidationError, match="'cross_ref' must be a list"):
         load_manifest(path)
 
-
 def test_load_manifest_rejects_non_list_artifacts(tmp_path):
-    path = _write_manifest(
-        tmp_path,
+    path = _write_manifest(tmp_path,
         "taxonomy_version: v0.2\n"
         "skills:\n"
         "  - name: hunting-silent-failures\n"
         "    description: x\n"
         "    shape: diff\n"
         "    wave: 1\n"
-        '    artifacts: ""\n'
+        "    artifacts: \"\"\n"
         "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
-    )
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
     with pytest.raises(ValidationError, match="'artifacts' must be a list"):
         load_manifest(path)
-
 
 def test_load_manifest_treats_bare_picker_as_empty_string(tmp_path):
     # Review follow-up on #142: picker=s.get("picker", "").strip() has the
@@ -382,8 +307,7 @@ def test_load_manifest_treats_bare_picker_as_empty_string(tmp_path):
     # substitutes "" when the key is *absent*, not present-but-null, so a
     # bare "picker:" used to crash with AttributeError: 'NoneType' object
     # has no attribute 'strip'.
-    path = _write_manifest(
-        tmp_path,
+    path = _write_manifest(tmp_path,
         "taxonomy_version: v0.2\n"
         "skills:\n"
         "  - name: hunting-silent-failures\n"
@@ -392,18 +316,15 @@ def test_load_manifest_treats_bare_picker_as_empty_string(tmp_path):
         "    wave: 1\n"
         "    picker:\n"
         "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
-    )
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
     m = load_manifest(path)
     assert m.skills[0].picker == ""
-
 
 def test_load_manifest_treats_bare_description_as_empty_string(tmp_path):
     # Same crash class, one field over: description is required (KeyError
     # caught if the key is absent), but a *present* bare "description:"
     # null slipped past that guard the same way picker's did.
-    path = _write_manifest(
-        tmp_path,
+    path = _write_manifest(tmp_path,
         "taxonomy_version: v0.2\n"
         "skills:\n"
         "  - name: hunting-silent-failures\n"
@@ -411,17 +332,14 @@ def test_load_manifest_treats_bare_description_as_empty_string(tmp_path):
         "    shape: diff\n"
         "    wave: 1\n"
         "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
-    )
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
     m = load_manifest(path)
     assert m.skills[0].description == ""
-
 
 def test_validate_rejects_unresolvable_source():
     bad = _skill(built_from=[Source(99, "tests/fixtures/research_sample.md#99")])
     with pytest.raises(ValidationError, match="section #99"):
         validate(Manifest("v0.2", [bad]))
-
 
 def test_validate_rejects_missing_source_file():
     """A built_from pointing at a non-existent file must raise ValidationError
@@ -429,7 +347,6 @@ def test_validate_rejects_missing_source_file():
     bad = _skill(built_from=[Source(2, "tests/fixtures/does_not_exist.md#2")])
     with pytest.raises(ValidationError, match="cannot read source file"):
         validate(Manifest("v0.2", [bad]))
-
 
 def test_validate_rejects_invalid_utf8_source(tmp_path):
     """A source file with invalid UTF-8 must raise ValidationError (with context),
@@ -442,82 +359,42 @@ def test_validate_rejects_invalid_utf8_source(tmp_path):
 
 def test_g1_double_primary_rejected(tmp_path):
     doc = tmp_path / "r.md"
-    doc.write_text(
-        "## #2 Errors\n\n### Reviewable heuristics (skill-checklist seeds)\n- x\n"
-    )
+    doc.write_text("## #2 Errors\n\n### Reviewable heuristics (skill-checklist seeds)\n- x\n")
     src = f"{doc}#2"
-    a = Skill(
-        name="skill-a",
-        description="d",
-        shape="diff",
-        wave=1,
-        built_from=[Source(2, src)],
-    )
-    b = Skill(
-        name="skill-b",
-        description="d",
-        shape="diff",
-        wave=1,
-        built_from=[Source(2, src)],
-    )
+    a = Skill(name="skill-a", description="d", shape="diff", wave=1,
+              built_from=[Source(2, src)])
+    b = Skill(name="skill-b", description="d", shape="diff", wave=1,
+              built_from=[Source(2, src)])
     with pytest.raises(ValidationError, match="multiple primary owners"):
         validate(Manifest(taxonomy_version="v0", skills=[a, b]), docs_root="/")
 
 
 def test_g1_cross_ref_resolves_double_booking(tmp_path):
     doc = tmp_path / "r.md"
-    doc.write_text(
-        "## #2 Errors\n\n### Reviewable heuristics (skill-checklist seeds)\n- x\n"
-    )
+    doc.write_text("## #2 Errors\n\n### Reviewable heuristics (skill-checklist seeds)\n- x\n")
     src = f"{doc}#2"
-    a = Skill(
-        name="skill-a",
-        description="d",
-        shape="diff",
-        wave=1,
-        built_from=[Source(2, src)],
-    )
-    b = Skill(
-        name="skill-b",
-        description="d",
-        shape="diff",
-        wave=1,
-        built_from=[Source(2, src)],
-        cross_ref=[2],
-    )
+    a = Skill(name="skill-a", description="d", shape="diff", wave=1,
+              built_from=[Source(2, src)])
+    b = Skill(name="skill-b", description="d", shape="diff", wave=1,
+              built_from=[Source(2, src)], cross_ref=[2])
     validate(Manifest(taxonomy_version="v0", skills=[a, b]), docs_root="/")
 
 
 def test_g1_cross_ref_must_be_in_built_from(tmp_path):
     doc = tmp_path / "r.md"
-    doc.write_text(
-        "## #2 Errors\n\n### Reviewable heuristics (skill-checklist seeds)\n- x\n"
-    )
-    a = Skill(
-        name="skill-a",
-        description="d",
-        shape="diff",
-        wave=1,
-        built_from=[Source(2, f"{doc}#2")],
-        cross_ref=[9],
-    )
+    doc.write_text("## #2 Errors\n\n### Reviewable heuristics (skill-checklist seeds)\n- x\n")
+    a = Skill(name="skill-a", description="d", shape="diff", wave=1,
+              built_from=[Source(2, f"{doc}#2")], cross_ref=[9])
     with pytest.raises(ValidationError, match="not in built_from"):
         validate(Manifest(taxonomy_version="v0", skills=[a]), docs_root="/")
 
 
 def test_duplicate_built_from_category_rejected(tmp_path):
     doc = tmp_path / "r.md"
-    doc.write_text(
-        "## #2 Errors\n\n### Reviewable heuristics (skill-checklist seeds)\n- x\n"
-    )
+    doc.write_text("## #2 Errors\n\n### Reviewable heuristics (skill-checklist seeds)\n- x\n")
     src = f"{doc}#2"
-    a = Skill(
-        name="skill-a",
-        description="d",
-        shape="diff",
-        wave=1,
-        built_from=[Source(2, src), Source(2, src)],
-    )
+    a = Skill(name="skill-a", description="d", shape="diff", wave=1,
+              built_from=[Source(2, src), Source(2, src)])
     with pytest.raises(ValidationError, match="more than once"):
         validate(Manifest(taxonomy_version="v0", skills=[a]), docs_root="/")
 
@@ -527,24 +404,13 @@ from tooling.manifest import Artifact
 
 def _artifact_skill(tmp_path, **kw):
     doc = tmp_path / "rubrics.md"
-    doc.write_text(
-        "## #101 SKILL.md\n\n### Reviewable heuristics (skill-checklist seeds)\n- x\n"
-    )
-    base = {
-        "name": "reviewing-artifact-conventions",
-        "description": "d",
-        "shape": "artifact",
-        "wave": 5,
-        "built_from": [Source(101, f"{doc}#101")],
-        "artifacts": [
-            Artifact(
-                name="SKILL.md",
-                detect="a SKILL.md changes",
-                rubric=101,
-                slug="skill-md",
-            )
-        ],
-    }
+    doc.write_text("## #101 SKILL.md\n\n"
+                   "### Reviewable heuristics (skill-checklist seeds)\n- x\n")
+    base = dict(name="reviewing-artifact-conventions", description="d",
+                shape="artifact", wave=5,
+                built_from=[Source(101, f"{doc}#101")],
+                artifacts=[Artifact(name="SKILL.md", detect="a SKILL.md changes",
+                                    rubric=101, slug="skill-md")])
     base.update(kw)
     return Skill(**base)
 
@@ -555,15 +421,14 @@ def test_validate_accepts_artifact_shape(tmp_path):
 
 def test_artifact_shape_requires_artifacts_table(tmp_path):
     with pytest.raises(ValidationError, match="non-empty `artifacts`"):
-        validate(
-            Manifest("v0", [_artifact_skill(tmp_path, artifacts=[])]), docs_root="/"
-        )
+        validate(Manifest("v0", [_artifact_skill(tmp_path, artifacts=[])]),
+                 docs_root="/")
 
 
 def test_artifact_rubric_must_be_in_built_from(tmp_path):
-    bad = _artifact_skill(
-        tmp_path, artifacts=[Artifact(name="X", detect="y", rubric=999, slug="x")]
-    )
+    bad = _artifact_skill(tmp_path,
+                          artifacts=[Artifact(name="X", detect="y", rubric=999,
+                                              slug="x")])
     with pytest.raises(ValidationError, match="rubric #999 is not in built_from"):
         validate(Manifest("v0", [bad]), docs_root="/")
 
@@ -575,10 +440,9 @@ def test_artifacts_only_on_artifact_shape(tmp_path):
 
 
 def test_artifact_slug_must_be_lowercase_hyphen(tmp_path):
-    bad = _artifact_skill(
-        tmp_path,
-        artifacts=[Artifact(name="X", detect="y", rubric=101, slug="INVALID_slug")],
-    )
+    bad = _artifact_skill(tmp_path,
+                          artifacts=[Artifact(name="X", detect="y", rubric=101,
+                                              slug="INVALID_slug")])
     with pytest.raises(ValidationError, match="lowercase"):
         validate(Manifest("v0", [bad]), docs_root="/")
 
@@ -592,63 +456,41 @@ def test_artifact_duplicate_slug_rejected(tmp_path):
 
 from tooling.manifest import Route, Router
 
-
 def test_design_flag_only_on_diff_lenses():
     with pytest.raises(ValidationError, match="design"):
         validate(Manifest("v0.2", [_skill(shape="repo", design=True)]))
 
-
 def test_router_route_must_run_known_skills():
-    m = Manifest(
-        "v0.2",
-        [_skill(picker="p")],
-        router=Router(
-            name="choosing-review-lenses",
-            description="d",
-            routes=[Route(when="Bug fix", run=["no-such-lens"])],
-        ),
-    )
+    m = Manifest("v0.2", [_skill(picker="p")],
+                 router=Router(name="choosing-review-lenses", description="d",
+                               routes=[Route(when="Bug fix", run=["no-such-lens"])]))
     with pytest.raises(ValidationError, match="unknown skill"):
         validate(m)
 
-
 def test_router_requires_every_skill_to_have_a_picker():
-    m = Manifest(
-        "v0.2",
-        [_skill()],  # no picker
-        router=Router(
-            name="choosing-review-lenses",
-            description="d",
-            routes=[Route(when="Bug fix", run=["hunting-silent-failures"])],
-        ),
-    )
+    m = Manifest("v0.2", [_skill()],   # no picker
+                 router=Router(name="choosing-review-lenses", description="d",
+                               routes=[Route(when="Bug fix",
+                                             run=["hunting-silent-failures"])]))
     with pytest.raises(ValidationError, match="picker is required"):
         validate(m)
 
-
 def test_valid_router_accepted_and_real_manifest_loads():
-    m = Manifest(
-        "v0.2",
-        [_skill(picker="p")],
-        router=Router(
-            name="choosing-review-lenses",
-            description="d",
-            routes=[Route(when="Bug fix", run=["hunting-silent-failures"])],
-        ),
-    )
+    m = Manifest("v0.2", [_skill(picker="p")],
+                 router=Router(name="choosing-review-lenses", description="d",
+                               routes=[Route(when="Bug fix",
+                                             run=["hunting-silent-failures"])]))
     validate(m)  # no raise
     real = load_manifest("skills/manifest.yaml")
     assert real.router is not None
     assert all(s.picker for s in real.skills)
-
 
 def test_load_manifest_treats_bare_router_description_as_empty_string(tmp_path):
     # Same bare-null gap as skill.description/picker (#142 review), one
     # struct over: router.description=r["description"].strip() used to
     # crash with AttributeError: 'NoneType' object has no attribute 'strip'
     # when "description:" was present but null.
-    path = _write_manifest(
-        tmp_path,
+    path = _write_manifest(tmp_path,
         "taxonomy_version: v0.2\n"
         "skills:\n"
         "  - name: hunting-silent-failures\n"
@@ -663,8 +505,7 @@ def test_load_manifest_treats_bare_router_description_as_empty_string(tmp_path):
         "  description:\n"
         "  routes:\n"
         "    - when: Bug fix\n"
-        "      run: [hunting-silent-failures]\n",
-    )
+        "      run: [hunting-silent-failures]\n")
     m = load_manifest(path)
     assert m.router.description == ""
 
@@ -674,8 +515,7 @@ def test_load_manifest_treats_bare_router_body_as_empty_string(tmp_path):
     # only substitutes "" when the key is absent, not when it's
     # present-but-null, so `.strip()` would crash on None (CodeRabbit
     # review on #145).
-    path = _write_manifest(
-        tmp_path,
+    path = _write_manifest(tmp_path,
         "taxonomy_version: v0.2\n"
         "skills:\n"
         "  - name: hunting-silent-failures\n"
@@ -691,8 +531,7 @@ def test_load_manifest_treats_bare_router_body_as_empty_string(tmp_path):
         "  routes:\n"
         "    - when: Bug fix\n"
         "      run: [hunting-silent-failures]\n"
-        "  body:\n",
-    )
+        "  body:\n")
     m = load_manifest(path)
     assert m.router.body == ""
 
@@ -702,8 +541,7 @@ def test_load_manifest_treats_bare_route_note_as_empty_string(tmp_path):
     # only substitutes "" when the key is absent, not when it's
     # present-but-null, leaking None where a str is expected (CodeRabbit
     # review on #145).
-    path = _write_manifest(
-        tmp_path,
+    path = _write_manifest(tmp_path,
         "taxonomy_version: v0.2\n"
         "skills:\n"
         "  - name: hunting-silent-failures\n"
@@ -719,8 +557,7 @@ def test_load_manifest_treats_bare_route_note_as_empty_string(tmp_path):
         "  routes:\n"
         "    - when: Bug fix\n"
         "      run: [hunting-silent-failures]\n"
-        "      note:\n",
-    )
+        "      note:\n")
     m = load_manifest(path)
     assert m.router.routes[0].note == ""
 
@@ -729,8 +566,7 @@ def test_load_manifest_treats_bare_router_routes_as_empty_list(tmp_path):
     # A present-but-null "routes:" key used to crash `for x in
     # r["routes"]` with TypeError: 'NoneType' object is not iterable
     # (CodeRabbit review on #145).
-    path = _write_manifest(
-        tmp_path,
+    path = _write_manifest(tmp_path,
         "taxonomy_version: v0.2\n"
         "skills:\n"
         "  - name: hunting-silent-failures\n"
@@ -743,95 +579,53 @@ def test_load_manifest_treats_bare_router_routes_as_empty_list(tmp_path):
         "router:\n"
         "  name: choosing-review-lenses\n"
         "  description: d\n"
-        "  routes:\n",
-    )
+        "  routes:\n")
     m = load_manifest(path)
     assert m.router.routes == []
 
 
 from tooling.manifest import Synthesizer, Tension
 
-
 def _two_lens_skills():
-    return [
-        _skill(picker="p"),
-        _skill(
-            name="checking-restraint",
-            picker="brake",
-            design=True,
-            built_from=[Source(4, "tests/fixtures/research_sample.md#4")],
-        ),
-    ]
-
+    return [_skill(picker="p"),
+            _skill(name="checking-restraint", picker="brake", design=True,
+                   built_from=[Source(4, "tests/fixtures/research_sample.md#4")])]
 
 def _synth(**kw):
-    base = {
-        "name": "synthesizing-review-findings",
-        "description": "d",
-        "severity_order": ["Blocker", "Major", "Minor", "Nit"],
-        "tensions": [
-            Tension(
-                between=["hunting-silent-failures", "checking-restraint"],
-                about="a",
-                resolve="r",
-            )
-        ],
-    }
+    base = dict(name="synthesizing-review-findings", description="d",
+                severity_order=["Blocker", "Major", "Minor", "Nit"],
+                tensions=[Tension(between=["hunting-silent-failures", "checking-restraint"],
+                                  about="a", resolve="r")])
     base.update(kw)
     return Synthesizer(**base)
 
-
 def test_synthesizer_tension_must_name_known_skills():
-    m = Manifest(
-        "v0.2",
-        _two_lens_skills(),
-        synthesizer=_synth(
-            tensions=[
-                Tension(
-                    between=["hunting-silent-failures", "no-such-lens"],
-                    about="a",
-                    resolve="r",
-                )
-            ]
-        ),
-    )
+    m = Manifest("v0.2", _two_lens_skills(),
+                 synthesizer=_synth(tensions=[Tension(
+                     between=["hunting-silent-failures", "no-such-lens"],
+                     about="a", resolve="r")]))
     with pytest.raises(ValidationError, match="unknown skill"):
         validate(m)
 
-
 def test_synthesizer_tension_needs_two_distinct_lenses():
-    m = Manifest(
-        "v0.2",
-        _two_lens_skills(),
-        synthesizer=_synth(
-            tensions=[
-                Tension(
-                    between=["checking-restraint", "checking-restraint"],
-                    about="a",
-                    resolve="r",
-                )
-            ]
-        ),
-    )
+    m = Manifest("v0.2", _two_lens_skills(),
+                 synthesizer=_synth(tensions=[Tension(
+                     between=["checking-restraint", "checking-restraint"],
+                     about="a", resolve="r")]))
     with pytest.raises(ValidationError, match="two distinct lenses"):
         validate(m)
 
-
 def test_synthesizer_rejects_thin_severity_order():
-    m = Manifest(
-        "v0.2", _two_lens_skills(), synthesizer=_synth(severity_order=["Blocker"])
-    )
+    m = Manifest("v0.2", _two_lens_skills(),
+                 synthesizer=_synth(severity_order=["Blocker"]))
     with pytest.raises(ValidationError, match="severity_order"):
         validate(m)
 
-
 def test_synthesizer_name_must_not_collide_with_a_lens():
-    m = Manifest(
-        "v0.2", _two_lens_skills(), synthesizer=_synth(name="checking-restraint")
-    )
+    m = Manifest("v0.2", _two_lens_skills(),
+                 synthesizer=_synth(name="checking-restraint"))
     with pytest.raises(ValidationError, match="invalid or duplicate name"):
         validate(m)
-
 
 def test_valid_synthesizer_accepted_and_real_manifest_loads():
     validate(Manifest("v0.2", _two_lens_skills(), synthesizer=_synth()))  # no raise
@@ -840,14 +634,12 @@ def test_valid_synthesizer_accepted_and_real_manifest_loads():
     assert real.synthesizer.severity_order[0] == "Blocker"
     assert all(t.between[0] != t.between[1] for t in real.synthesizer.tensions)
 
-
 def test_load_manifest_treats_bare_synthesizer_description_as_empty_string(tmp_path):
     # Same bare-null gap as skill.description/picker (#142 review), one
     # struct over: synthesizer.description=sy["description"].strip() used
     # to crash with AttributeError: 'NoneType' object has no attribute
     # 'strip' when "description:" was present but null.
-    path = _write_manifest(
-        tmp_path,
+    path = _write_manifest(tmp_path,
         "taxonomy_version: v0.2\n"
         "skills:\n"
         "  - name: hunting-silent-failures\n"
@@ -859,17 +651,14 @@ def test_load_manifest_treats_bare_synthesizer_description_as_empty_string(tmp_p
         "synthesizer:\n"
         "  name: synthesizing-review-findings\n"
         "  description:\n"
-        "  severity_order: [Blocker, Major, Minor, Nit]\n",
-    )
+        "  severity_order: [Blocker, Major, Minor, Nit]\n")
     m = load_manifest(path)
     assert m.synthesizer.description == ""
-
 
 def test_load_manifest_treats_bare_tension_about_and_resolve_as_empty_string(tmp_path):
     # Same crash class, one field over: Tension.about/resolve had the
     # identical `t["about"].strip()` / `t["resolve"].strip()` gap.
-    path = _write_manifest(
-        tmp_path,
+    path = _write_manifest(tmp_path,
         "taxonomy_version: v0.2\n"
         "skills:\n"
         "  - name: hunting-silent-failures\n"
@@ -885,8 +674,7 @@ def test_load_manifest_treats_bare_tension_about_and_resolve_as_empty_string(tmp
         "  tensions:\n"
         "    - between: [hunting-silent-failures, checking-restraint]\n"
         "      about:\n"
-        "      resolve:\n",
-    )
+        "      resolve:\n")
     m = load_manifest(path)
     assert m.synthesizer.tensions[0].about == ""
     assert m.synthesizer.tensions[0].resolve == ""
@@ -898,8 +686,7 @@ def test_load_manifest_treats_bare_synthesizer_tensions_as_empty_list(tmp_path):
     # 'NoneType' object is not iterable -- .get(key, []) only substitutes
     # [] when the key is *absent*, not present-but-null (CodeRabbit
     # review on #145).
-    path = _write_manifest(
-        tmp_path,
+    path = _write_manifest(tmp_path,
         "taxonomy_version: v0.2\n"
         "skills:\n"
         "  - name: hunting-silent-failures\n"
@@ -912,14 +699,12 @@ def test_load_manifest_treats_bare_synthesizer_tensions_as_empty_list(tmp_path):
         "  name: synthesizing-review-findings\n"
         "  description: d\n"
         "  severity_order: [Blocker, Major, Minor, Nit]\n"
-        "  tensions:\n",
-    )
+        "  tensions:\n")
     m = load_manifest(path)
     assert m.synthesizer.tensions == []
 
 
 # --- Depth modes (Plan 1) ---
-
 
 def _manifest_with_body(tmp_path, body: str) -> str:
     p = tmp_path / "manifest.yaml"
@@ -931,7 +716,8 @@ def _manifest_with_body(tmp_path, body: str) -> str:
         "    shape: diff\n"
         "    wave: 1\n"
         "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n" + body
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        + body
     )
     return str(p)
 
@@ -965,43 +751,21 @@ def test_load_manifest_defaults_modes_to_empty(tmp_path):
 
 def _syn():
     from tooling.manifest import Synthesizer
-
-    return Synthesizer(
-        name="synthesizing-review-findings",
-        description="d",
-        severity_order=["Blocker", "Major", "Minor", "Nit"],
-        tensions=[],
-    )
+    return Synthesizer(name="synthesizing-review-findings", description="d",
+                       severity_order=["Blocker", "Major", "Minor", "Nit"], tensions=[])
 
 
 def test_validate_accepts_modes_with_known_floors():
     modes = [
-        Mode(
-            name="triage",
-            breadth="critical tier only",
-            floor="Major",
-            triggers=["triage"],
-        ),
+        Mode(name="triage", breadth="critical tier only", floor="Major", triggers=["triage"]),
         Mode(name="review", breadth="top 2-4", floor="escalating", triggers=["review"]),
-        Mode(
-            name="comprehensive",
-            breadth="all relevant",
-            floor="Nit",
-            triggers=["thorough"],
-        ),
+        Mode(name="comprehensive", breadth="all relevant", floor="Nit", triggers=["thorough"]),
     ]
     validate(Manifest("v0", [_skill()], synthesizer=_syn(), modes=modes))  # no raise
 
 
 def test_validate_rejects_unknown_mode_floor():
-    bad = [
-        Mode(
-            name="triage",
-            breadth="critical tier only",
-            floor="Bogus",
-            triggers=["triage"],
-        )
-    ]
+    bad = [Mode(name="triage", breadth="critical tier only", floor="Bogus", triggers=["triage"])]
     with pytest.raises(ValidationError, match="floor"):
         validate(Manifest("v0", [_skill()], synthesizer=_syn(), modes=bad))
 
@@ -1075,7 +839,6 @@ def test_load_manifest_treats_bare_mode_triggers_as_empty_list(tmp_path):
 
 # --- Collapsed entrypoints (Plan 2) ---
 
-
 def test_load_manifest_parses_entrypoints(tmp_path):
     body = (
         "entrypoints:\n"
@@ -1088,10 +851,7 @@ def test_load_manifest_parses_entrypoints(tmp_path):
         "    include_design: true\n"
     )
     m = load_manifest(_manifest_with_body(tmp_path, body))
-    assert [e.name for e in m.entrypoints] == [
-        "reviewing-a-change",
-        "reviewing-a-decision",
-    ]
+    assert [e.name for e in m.entrypoints] == ["reviewing-a-change", "reviewing-a-decision"]
     assert m.entrypoints[0].shapes == ["diff"]
     assert m.entrypoints[1].include_design is True
     assert m.entrypoints[0].include_design is False  # default
@@ -1136,12 +896,7 @@ def _eps():
     return [
         Entrypoint(name="reviewing-a-change", description="d", shapes=["diff"]),
         Entrypoint(name="auditing-a-repository", description="d", shapes=["repo"]),
-        Entrypoint(
-            name="reviewing-a-decision",
-            description="d",
-            shapes=["decision"],
-            include_design=True,
-        ),
+        Entrypoint(name="reviewing-a-decision", description="d", shapes=["decision"], include_design=True),
         Entrypoint(name="reviewing-an-artifact", description="d", shapes=["artifact"]),
     ]
 
@@ -1154,17 +909,13 @@ def test_validate_accepts_well_formed_entrypoints():
 def test_validate_rejects_entrypoint_name_colliding_with_skill():
     eps = [Entrypoint(name="hunting-silent-failures", description="d", shapes=["diff"])]
     with pytest.raises(ValidationError, match="collides"):
-        validate(
-            Manifest("v0", [_skill(picker="p")], synthesizer=_syn(), entrypoints=eps)
-        )
+        validate(Manifest("v0", [_skill(picker="p")], synthesizer=_syn(), entrypoints=eps))
 
 
 def test_validate_rejects_unknown_entrypoint_shape():
     eps = [Entrypoint(name="reviewing-a-change", description="d", shapes=["bogus"])]
     with pytest.raises(ValidationError, match="shape"):
-        validate(
-            Manifest("v0", [_skill(picker="p")], synthesizer=_syn(), entrypoints=eps)
-        )
+        validate(Manifest("v0", [_skill(picker="p")], synthesizer=_syn(), entrypoints=eps))
 
 
 def test_validate_rejects_orphaned_lens():
@@ -1178,17 +929,14 @@ def test_validate_rejects_orphaned_lens():
 def test_real_manifest_declares_four_entrypoints_covering_all_lenses():
     m = load_manifest("skills/manifest.yaml")
     assert {e.name for e in m.entrypoints} == {
-        "reviewing-a-change",
-        "auditing-a-repository",
-        "reviewing-a-decision",
-        "reviewing-an-artifact",
-    }
+        "reviewing-a-change", "auditing-a-repository",
+        "reviewing-a-decision", "reviewing-an-artifact"}
     covered = set()
     for ep in m.entrypoints:
         for s in m.skills:
             if s.shape in ep.shapes or (ep.include_design and s.design):
                 covered.add(s.name)
-    assert {s.name for s in m.skills} <= covered  # every lens covered
+    assert {s.name for s in m.skills} <= covered   # every lens covered
 
 
 def test_validate_rejects_entrypoints_without_synthesizer():
@@ -1206,8 +954,6 @@ def test_validate_rejects_empty_entrypoint_description():
 
 
 def test_validate_rejects_bad_mode_name():
-    bad = [
-        Mode(name="Quick Review", breadth="b", floor="escalating", triggers=["review"])
-    ]
+    bad = [Mode(name="Quick Review", breadth="b", floor="escalating", triggers=["review"])]
     with pytest.raises(ValidationError, match="invalid mode name"):
         validate(Manifest("v0", [_skill()], synthesizer=_syn(), modes=bad))

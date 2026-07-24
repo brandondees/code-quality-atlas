@@ -1,11 +1,9 @@
 # SPDX-License-Identifier: MIT
 # tests/test_drift.py
 from pathlib import Path
-
-from tooling.drift import DriftReport, check_drift
-from tooling.generate import generate_skill
 from tooling.manifest import Skill, Source
-
+from tooling.generate import generate_skill
+from tooling.drift import check_drift, DriftReport
 
 def _skill():
     return Skill(name="hunting-silent-failures", description="x", shape="diff", wave=1,
@@ -91,7 +89,6 @@ def test_drift_missing_source_file_raises_clear_drift_error(tmp_path):
     """A referenced source file that can't be read must raise a clear DriftError
     naming the skill and path, not a bare FileNotFoundError traceback."""
     import pytest
-
     from tooling.drift import DriftError
     generate_skill(_skill(), "v0.2", docs_root=".", skills_root=str(tmp_path))
     # Point docs-root at an empty dir so the referenced source file is missing.
@@ -107,7 +104,6 @@ def test_drift_non_utf8_source_file_raises_clear_drift_error(tmp_path):
     """A source file that exists but isn't valid UTF-8 raises UnicodeDecodeError
     (a ValueError, not an OSError); it must still surface as a clean DriftError."""
     import pytest
-
     from tooling.drift import DriftError
     generate_skill(_skill(), "v0.2", docs_root=".", skills_root=str(tmp_path))
     bad_docs = tmp_path / "bad_docs"

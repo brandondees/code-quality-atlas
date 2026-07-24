@@ -11,16 +11,13 @@ any OpenAI-compatible /v1/chat/completions server such as llama-server
 (`--api openai`). Network calls are isolated in `query_*` so tests mock
 them (no model server needed in CI).
 """
-
 from __future__ import annotations
-
 import http.client
 import json
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-
 from tooling.evals import load_evals
 
 OLLAMA_HOST = "http://localhost:11434"
@@ -80,9 +77,8 @@ def _post_json(url: str, payload: dict, timeout: int, label: str) -> object:
         raise RuntimeError(f"{label} returned a non-JSON response: {e}") from e
 
 
-def query_ollama(
-    model: str, system: str, user: str, host: str = OLLAMA_HOST, timeout: int = 600
-) -> str:
+def query_ollama(model: str, system: str, user: str,
+                 host: str = OLLAMA_HOST, timeout: int = 600) -> str:
     """Ollama /api/chat with sampling pinned and the context window widened so
     the full skill prompt isn't silently truncated (see OLLAMA_NUM_CTX)."""
     payload = {
@@ -101,13 +97,12 @@ def query_ollama(
         raise RuntimeError(f"Ollama API error: {data['error']}")
     content = data.get("message", {}).get("content") if isinstance(data, dict) else None
     if not isinstance(content, str):
-        raise TypeError(f"unexpected Ollama response shape: {data!r}")
+        raise RuntimeError(f"unexpected Ollama response shape: {data!r}")
     return content
 
 
-def query_openai(
-    model: str, system: str, user: str, host: str = OPENAI_HOST, timeout: int = 600
-) -> str:
+def query_openai(model: str, system: str, user: str,
+                 host: str = OPENAI_HOST, timeout: int = 600) -> str:
     """OpenAI-compatible /v1/chat/completions (llama-server, vLLM, ...)."""
     payload = {
         "model": model,
@@ -119,9 +114,8 @@ def query_openai(
         # evals must be reproducible — never inherit a server's sampling default
         "temperature": 0,
     }
-    data = _post_json(
-        f"{host}/v1/chat/completions", payload, timeout, "OpenAI-compatible"
-    )
+    data = _post_json(f"{host}/v1/chat/completions", payload, timeout,
+                      "OpenAI-compatible")
     if isinstance(data, dict) and data.get("error"):
         # OpenAI-compatible errors are objects ({"error": {"message": ...}});
         # surface the message text rather than the dict repr.
@@ -133,10 +127,9 @@ def query_openai(
         content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as e:
         raise RuntimeError(
-            f"unexpected OpenAI-compatible response shape: {data!r}"
-        ) from e
+            f"unexpected OpenAI-compatible response shape: {data!r}") from e
     if not isinstance(content, str):
-        raise TypeError(f"unexpected OpenAI-compatible response shape: {data!r}")
+        raise RuntimeError(f"unexpected OpenAI-compatible response shape: {data!r}")
     return content
 
 
@@ -150,9 +143,8 @@ class ScenarioRun:
 DEFAULT_HOSTS = {"ollama": OLLAMA_HOST, "openai": OPENAI_HOST}
 
 
-def run_skill_evals(
-    skill_dir: Path, model: str, host: str | None = None, api: str = "ollama"
-) -> list[ScenarioRun]:
+def run_skill_evals(skill_dir: Path, model: str,
+                    host: str | None = None, api: str = "ollama") -> list[ScenarioRun]:
     query = {"ollama": query_ollama, "openai": query_openai}[api]
     host = host or DEFAULT_HOSTS[api]
     system = assemble_context(skill_dir) + _REVIEWER_DIRECTIVE
@@ -166,15 +158,13 @@ def run_skill_evals(
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
-
     ap = argparse.ArgumentParser(prog="run-evals")
     ap.add_argument("--skill", required=True)
     ap.add_argument("--skills-root", default="skills")
     ap.add_argument("--model", default="llama3.2:3b")
     ap.add_argument("--api", choices=["ollama", "openai"], default="ollama")
-    ap.add_argument(
-        "--host", default=None, help="defaults to the chosen api's local port"
-    )
+    ap.add_argument("--host", default=None,
+                    help="defaults to the chosen api's local port")
     args = ap.parse_args(argv)
 
     skill_dir = Path(args.skills_root, args.skill)
@@ -191,5 +181,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     import sys
-
     sys.exit(main())
