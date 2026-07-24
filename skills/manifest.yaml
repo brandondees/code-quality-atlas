@@ -762,7 +762,7 @@ router:
             runtime validation function rather than an off-by-one, null
             check, or typo
       run: [reviewing-module-design, tracing-correctness-and-invariants,
-            reviewing-test-quality]
+            reviewing-test-quality, hunting-silent-failures]
       note: "illegal-states-representable bugs get miscategorized as ordinary
             bug fixes by the base \"Bug fix\" route above, which never
             includes this lens (confirmed: two consecutive PRs fixing the
