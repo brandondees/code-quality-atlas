@@ -3,15 +3,28 @@
 """Renders a standalone lens's SKILL.md and its bundled reference/ files
 (heuristics or artifact rubrics, tool-rules, sources)."""
 from __future__ import annotations
+
 import json
 import warnings
-import yaml
 from pathlib import Path
+
+import yaml
+
+from tooling.generate_common import (
+    _escape_table_cell,
+    _gen_header,
+    _scope_line,
+    build_reference,
+)
 from tooling.manifest import Artifact, Skill
-from tooling.sections import (extract_bullets, extract_section,
-                              extract_subsection, is_priority, section_hash,
-                              strip_priority)
-from tooling.generate_common import _escape_table_cell, _gen_header, _scope_line, build_reference
+from tooling.sections import (
+    extract_bullets,
+    extract_section,
+    extract_subsection,
+    is_priority,
+    section_hash,
+    strip_priority,
+)
 
 _TOP_CHECKS_BUDGET = 8
 _CROSS_REF_QUOTA = 2  # shared categories get token representation, not parity
@@ -274,9 +287,9 @@ def build_artifact_rubric(skill: Skill, artifact: Artifact, docs_root: str = "."
 
     parts = [
         f"# Rubric — {artifact.name}",
-        f"Review a **{artifact.name}** against its published standard. Activate "
+        (f"Review a **{artifact.name}** against its published standard. Activate "
         f"when {artifact.detect}. Report only real deviations from the standard; "
-        "if the artifact is well-formed, reply \"No findings\".",
+        "if the artifact is well-formed, reply \"No findings\"."),
     ]
     parts += [b for b in (block("heuristics"), block("references"),
                           block("tooling")) if b]

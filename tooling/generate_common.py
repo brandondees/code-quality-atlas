@@ -11,10 +11,11 @@ The leading underscore on names here (`_KIND_TITLE`, `_escape_table_cell`,
 not part of the manifest/skill-authoring API — not "local to this file"; they
 are imported across the sibling generate_*.py modules by design."""
 from __future__ import annotations
+
 from pathlib import Path
+
 from tooling.manifest import Manifest, Skill
-from tooling.sections import (extract_section, extract_subsection,
-                              strip_priority)
+from tooling.sections import extract_section, extract_subsection, strip_priority
 
 _KIND_TITLE = {
     "heuristics": "Reviewable heuristics",
@@ -137,11 +138,11 @@ def modes_section(manifest: Manifest) -> str:
     lines = [
         "## Depth modes",
         "",
-        "Routing first ranks **every** lens whose scope the change touches by "
+        ("Routing first ranks **every** lens whose scope the change touches by "
         "**relevance** — it is no longer a hard cap. A depth mode then sets the "
         "**breadth** (how far down the ranked list to run, plus room for judgment "
         "calls above that floor) and the severity floor. Pick the mode from the "
-        "request; default to **review**.",
+        "request; default to **review**."),
         "",
         "| Mode | Breadth | Triggers |",
         "|---|---|---|",

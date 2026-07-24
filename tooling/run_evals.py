@@ -12,12 +12,14 @@ any OpenAI-compatible /v1/chat/completions server such as llama-server
 them (no model server needed in CI).
 """
 from __future__ import annotations
+
 import http.client
 import json
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+
 from tooling.evals import load_evals
 
 OLLAMA_HOST = "http://localhost:11434"
@@ -97,7 +99,10 @@ def query_ollama(model: str, system: str, user: str,
         raise RuntimeError(f"Ollama API error: {data['error']}")
     content = data.get("message", {}).get("content") if isinstance(data, dict) else None
     if not isinstance(content, str):
-        raise RuntimeError(f"unexpected Ollama response shape: {data!r}")
+        # RuntimeError (not TypeError) is deliberate: every failure mode in this
+        # module wraps into RuntimeError so callers can use a single except clause
+        # (see _post_json's docstring); tests assert on RuntimeError specifically.
+        raise RuntimeError(f"unexpected Ollama response shape: {data!r}")  # noqa: TRY004
     return content
 
 
@@ -129,7 +134,9 @@ def query_openai(model: str, system: str, user: str,
         raise RuntimeError(
             f"unexpected OpenAI-compatible response shape: {data!r}") from e
     if not isinstance(content, str):
-        raise RuntimeError(f"unexpected OpenAI-compatible response shape: {data!r}")
+        # RuntimeError (not TypeError) is deliberate: see the matching comment in
+        # query_ollama above — a single except clause covers every failure mode.
+        raise RuntimeError(f"unexpected OpenAI-compatible response shape: {data!r}")  # noqa: TRY004
     return content
 
 

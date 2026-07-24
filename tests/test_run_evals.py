@@ -7,8 +7,8 @@ import urllib.error
 import pytest
 
 from tooling import run_evals
-from tooling.manifest import Skill, Source
 from tooling.generate import generate_skill
+from tooling.manifest import Skill, Source
 
 
 class _FakeResp:

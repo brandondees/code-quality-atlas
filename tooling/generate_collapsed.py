@@ -5,17 +5,24 @@ its lenses (loaded on demand as reference/lenses/<lens>/{body,tool-rules,
 sources}.md) plus the synthesis procedure, for cloud / account-skill /
 context-budget-constrained installs."""
 from __future__ import annotations
+
 import json
 import re
 import shutil
-import yaml
 from pathlib import Path
-from tooling.manifest import Entrypoint, Manifest, Skill
+
+import yaml
+
 from tooling.generate_common import (
-    _escape_table_cell, _gen_header, _scope_line, build_reference, modes_section,
+    _escape_table_cell,
+    _gen_header,
+    _scope_line,
+    build_reference,
+    modes_section,
 )
 from tooling.generate_skill import build_artifact_rubric
 from tooling.generate_synthesizer import build_synthesizer_md
+from tooling.manifest import Entrypoint, Manifest, Skill
 
 # Matches skill-md.md's own ~100-line ToC rubric (category #101); a lens
 # bundle this long benefits from the same navigability the rubric demands
