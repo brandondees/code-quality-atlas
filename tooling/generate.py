@@ -16,22 +16,33 @@ called from `generate_collapsed.lens_bundle_body`, so `monkeypatch.setattr`
 does for this exact name."""
 from __future__ import annotations
 
+from tooling.generate_collapsed import (
+    CollapsedOverlapError,
+    build_collapsed_synthesis,
+    build_entrypoint_md,
+    collapsed_plugin_manifest,
+    entrypoint_lenses,
+    generate_collapsed,
+    generate_lens_bundle,
+    lens_bundle_body,
+)
 from tooling.generate_common import (
     _escape_table_cell,  # noqa: F401 -- call-based re-export, see tests/test_generate.py
-    build_reference, modes_section, primary_owners,
-)
-from tooling.generate_skill import (
-    build_artifact_rubric, build_skill_md,
-    generate_skill, top_checks,
+    build_reference,
+    modes_section,
+    primary_owners,
 )
 from tooling.generate_router import build_router_md, generate_router
-from tooling.generate_synthesizer import (
-    build_synthesizer_md, generate_synthesizer, mode_floor_policy,
+from tooling.generate_skill import (
+    build_artifact_rubric,
+    build_skill_md,
+    generate_skill,
+    top_checks,
 )
-from tooling.generate_collapsed import (
-    CollapsedOverlapError, build_collapsed_synthesis, build_entrypoint_md,
-    collapsed_plugin_manifest, entrypoint_lenses, generate_collapsed,
-    generate_lens_bundle, lens_bundle_body,
+from tooling.generate_synthesizer import (
+    build_synthesizer_md,
+    generate_synthesizer,
+    mode_floor_policy,
 )
 
 __all__ = [

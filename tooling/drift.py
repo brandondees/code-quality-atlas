@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: MIT
 # tooling/drift.py
 from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
+
 import yaml
+
 from tooling.manifest import Source
 from tooling.sections import section_hash
 

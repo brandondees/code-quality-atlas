@@ -7,18 +7,22 @@ import urllib.error
 import pytest
 
 from tooling import run_evals
-from tooling.manifest import Skill, Source
 from tooling.generate import generate_skill
+from tooling.manifest import Skill, Source
 
 
 class _FakeResp:
     """Minimal stand-in for the urlopen context manager."""
+
     def __init__(self, body: bytes):
         self._body = body
+
     def read(self):
         return self._body
+
     def __enter__(self):
         return self
+
     def __exit__(self, *exc):
         return False
 
@@ -28,6 +32,7 @@ def _patch_urlopen(monkeypatch, *, body=None, exc=None):
         if exc is not None:
             raise exc
         return _FakeResp(body)
+
     monkeypatch.setattr(run_evals.urllib.request, "urlopen", fake_urlopen)
 
 
@@ -41,8 +46,13 @@ def _valid_eval_json():
 
 
 def test_run_skill_evals_assembles_context_and_collects(tmp_path, monkeypatch):
-    skill = Skill(name="hunting-silent-failures", description="x", shape="diff",
-                  wave=1, built_from=[Source(2, "tests/fixtures/research_sample.md#2")])
+    skill = Skill(
+        name="hunting-silent-failures",
+        description="x",
+        shape="diff",
+        wave=1,
+        built_from=[Source(2, "tests/fixtures/research_sample.md#2")],
+    )
     out = generate_skill(skill, "v0.2", docs_root=".", skills_root=str(tmp_path))
     (out / "evals" / "eval.json").write_text(_valid_eval_json())
 
@@ -57,7 +67,11 @@ def test_run_skill_evals_assembles_context_and_collects(tmp_path, monkeypatch):
     runs = run_evals.run_skill_evals(out, "fake-model")
 
     assert len(runs) == 3
-    assert [r.response for r in runs] == ["reviewed: q1", "reviewed: q2", "reviewed: q3"]
+    assert [r.response for r in runs] == [
+        "reviewed: q1",
+        "reviewed: q2",
+        "reviewed: q3",
+    ]
     assert runs[0].expected_behavior == ["b1"]
     # context is assembled from the skill's own files (SKILL.md mentions its name)
     assert "hunting-silent-failures" in captured["system"]
@@ -65,8 +79,13 @@ def test_run_skill_evals_assembles_context_and_collects(tmp_path, monkeypatch):
 
 
 def test_run_skill_evals_openai_backend(tmp_path, monkeypatch):
-    skill = Skill(name="hunting-silent-failures", description="x", shape="diff",
-                  wave=1, built_from=[Source(2, "tests/fixtures/research_sample.md#2")])
+    skill = Skill(
+        name="hunting-silent-failures",
+        description="x",
+        shape="diff",
+        wave=1,
+        built_from=[Source(2, "tests/fixtures/research_sample.md#2")],
+    )
     out = generate_skill(skill, "v0.2", docs_root=".", skills_root=str(tmp_path))
     (out / "evals" / "eval.json").write_text(_valid_eval_json())
 
@@ -81,11 +100,15 @@ def test_run_skill_evals_openai_backend(tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_evals, "query_openai", fake_openai)
     monkeypatch.setattr(run_evals, "query_ollama", fail_ollama)
-    runs = run_evals.run_skill_evals(out, "fake-model",
-                                     host="http://localhost:9999", api="openai")
+    runs = run_evals.run_skill_evals(
+        out, "fake-model", host="http://localhost:9999", api="openai"
+    )
 
     assert [r.response for r in runs] == [
-        "openai-reviewed: q1", "openai-reviewed: q2", "openai-reviewed: q3"]
+        "openai-reviewed: q1",
+        "openai-reviewed: q2",
+        "openai-reviewed: q3",
+    ]
     assert calls == ["http://localhost:9999"] * 3
 
     # host omitted -> defaults to the chosen api's port, not Ollama's
@@ -96,9 +119,11 @@ def test_run_skill_evals_openai_backend(tmp_path, monkeypatch):
 
 # --- query_ollama / query_openai: network + response-shape robustness (#23) ---
 
+
 def test_query_ollama_returns_content(monkeypatch):
-    _patch_urlopen(monkeypatch,
-                   body=json.dumps({"message": {"content": "a finding"}}).encode())
+    _patch_urlopen(
+        monkeypatch, body=json.dumps({"message": {"content": "a finding"}}).encode()
+    )
     assert run_evals.query_ollama("m", "sys", "usr") == "a finding"
 
 
@@ -131,15 +156,16 @@ def test_query_ollama_http_exception_raises(monkeypatch):
 
 
 def test_query_ollama_surfaces_api_error_message(monkeypatch):
-    _patch_urlopen(monkeypatch,
-                   body=json.dumps({"error": "model 'x' not found"}).encode())
+    _patch_urlopen(
+        monkeypatch, body=json.dumps({"error": "model 'x' not found"}).encode()
+    )
     with pytest.raises(RuntimeError, match="not found"):
         run_evals.query_ollama("m", "sys", "usr")
 
 
 def test_query_ollama_unexpected_shape_raises(monkeypatch):
     _patch_urlopen(monkeypatch, body=json.dumps({"message": {}}).encode())
-    with pytest.raises(RuntimeError, match="unexpected Ollama response shape"):
+    with pytest.raises(TypeError, match="unexpected Ollama response shape"):
         run_evals.query_ollama("m", "sys", "usr")
 
 
@@ -150,8 +176,10 @@ def test_query_ollama_non_json_raises(monkeypatch):
 
 
 def test_query_openai_returns_content(monkeypatch):
-    _patch_urlopen(monkeypatch, body=json.dumps(
-        {"choices": [{"message": {"content": "ok"}}]}).encode())
+    _patch_urlopen(
+        monkeypatch,
+        body=json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode(),
+    )
     assert run_evals.query_openai("m", "sys", "usr") == "ok"
 
 
@@ -162,13 +190,16 @@ def test_query_openai_network_error_raises_runtimeerror(monkeypatch):
 
 
 def test_query_openai_surfaces_api_error_message(monkeypatch):
-    _patch_urlopen(monkeypatch, body=json.dumps(
-        {"error": {"message": "rate limited"}}).encode())
+    _patch_urlopen(
+        monkeypatch, body=json.dumps({"error": {"message": "rate limited"}}).encode()
+    )
     with pytest.raises(RuntimeError, match="rate limited"):
         run_evals.query_openai("m", "sys", "usr")
 
 
 def test_query_openai_unexpected_shape_raises(monkeypatch):
     _patch_urlopen(monkeypatch, body=json.dumps({"choices": []}).encode())
-    with pytest.raises(RuntimeError, match="unexpected OpenAI-compatible response shape"):
+    with pytest.raises(
+        RuntimeError, match="unexpected OpenAI-compatible response shape"
+    ):
         run_evals.query_openai("m", "sys", "usr")
