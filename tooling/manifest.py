@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
-from dataclasses import dataclass, field
+
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
+
 import yaml
+
 from tooling.sections import extract_section
 
 

@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: MIT
 # tests/test_evals.py
 import json
+
 import pytest
-from tooling.evals import load_evals, validate_evals, EvalError
+
+from tooling.evals import EvalError, load_evals, validate_evals
+
 
 def _write(tmp_path, doc):
     p = tmp_path / "eval.json"

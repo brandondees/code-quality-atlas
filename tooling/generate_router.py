@@ -4,11 +4,14 @@
 reviewing' situation to the recommended range of lenses, plus a one-line
 catalog of every lens."""
 from __future__ import annotations
+
 import json
-import yaml
 from pathlib import Path
-from tooling.manifest import Manifest
+
+import yaml
+
 from tooling.generate_common import _escape_table_cell, modes_section
+from tooling.manifest import Manifest
 
 
 def build_router_md(manifest: Manifest) -> str:
