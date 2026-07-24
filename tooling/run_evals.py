@@ -99,9 +99,10 @@ def query_ollama(model: str, system: str, user: str,
         raise RuntimeError(f"Ollama API error: {data['error']}")
     content = data.get("message", {}).get("content") if isinstance(data, dict) else None
     if not isinstance(content, str):
-        # RuntimeError (not TypeError) is deliberate: every failure mode in this
-        # module wraps into RuntimeError so callers can use a single except clause
-        # (see _post_json's docstring); tests assert on RuntimeError specifically.
+        # RuntimeError (not TypeError) is deliberate: consistent with _post_json's
+        # failure-wrapping convention, every failure mode in this module wraps into
+        # RuntimeError so callers can use a single except clause; tests assert on
+        # RuntimeError specifically.
         raise RuntimeError(f"unexpected Ollama response shape: {data!r}")  # noqa: TRY004
     return content
 
