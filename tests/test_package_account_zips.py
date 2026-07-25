@@ -16,7 +16,7 @@ def run_package(out_dir, *extra_args):
     result = subprocess.run(
         [str(SCRIPT), "--out", str(out_dir), *extra_args],
         cwd=str(REPO_ROOT),
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, timeout=60, check=False,
     )
     assert result.returncode == 0, result.stderr
     return result
@@ -123,7 +123,7 @@ def test_unresolvable_sha_warns_on_stderr(tmp_path):
     result = subprocess.run(
         [str(SCRIPT), "--out", str(out_dir), "--collapsed"],
         cwd=str(REPO_ROOT), env=env,
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, timeout=60, check=False,
     )
     assert result.returncode == 0, result.stderr
     assert "could not resolve a git commit SHA" in result.stderr

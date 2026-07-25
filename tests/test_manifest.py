@@ -2,8 +2,15 @@
 import pytest
 
 from tooling.manifest import (
-    Entrypoint, Manifest, Mode, Skill, Source, ValidationError, load_manifest, validate,
+    Entrypoint,
+    Manifest,
+    Mode,
+    Skill,
+    Source,
+    ValidationError,
     _check_comment_truncation,
+    load_manifest,
+    validate,
 )
 
 
@@ -156,9 +163,9 @@ def test_load_manifest_wraps_malformed_source(tmp_path):
 
 
 def _skill(**kw):
-    base = dict(name="hunting-silent-failures",
-                description="x", shape="diff", wave=1,
-                built_from=[Source(2, "tests/fixtures/research_sample.md#2")])
+    base = {"name": "hunting-silent-failures",
+                "description": "x", "shape": "diff", "wave": 1,
+                "built_from": [Source(2, "tests/fixtures/research_sample.md#2")]}
     base.update(kw)
     return Skill(**base)
 
@@ -406,11 +413,11 @@ def _artifact_skill(tmp_path, **kw):
     doc = tmp_path / "rubrics.md"
     doc.write_text("## #101 SKILL.md\n\n"
                    "### Reviewable heuristics (skill-checklist seeds)\n- x\n")
-    base = dict(name="reviewing-artifact-conventions", description="d",
-                shape="artifact", wave=5,
-                built_from=[Source(101, f"{doc}#101")],
-                artifacts=[Artifact(name="SKILL.md", detect="a SKILL.md changes",
-                                    rubric=101, slug="skill-md")])
+    base = {"name": "reviewing-artifact-conventions", "description": "d",
+                "shape": "artifact", "wave": 5,
+                "built_from": [Source(101, f"{doc}#101")],
+                "artifacts": [Artifact(name="SKILL.md", detect="a SKILL.md changes",
+                                    rubric=101, slug="skill-md")]}
     base.update(kw)
     return Skill(**base)
 
@@ -455,6 +462,7 @@ def test_artifact_duplicate_slug_rejected(tmp_path):
 
 
 from tooling.manifest import Route, Router
+
 
 def test_design_flag_only_on_diff_lenses():
     with pytest.raises(ValidationError, match="design"):
@@ -586,16 +594,17 @@ def test_load_manifest_treats_bare_router_routes_as_empty_list(tmp_path):
 
 from tooling.manifest import Synthesizer, Tension
 
+
 def _two_lens_skills():
     return [_skill(picker="p"),
             _skill(name="checking-restraint", picker="brake", design=True,
                    built_from=[Source(4, "tests/fixtures/research_sample.md#4")])]
 
 def _synth(**kw):
-    base = dict(name="synthesizing-review-findings", description="d",
-                severity_order=["Blocker", "Major", "Minor", "Nit"],
-                tensions=[Tension(between=["hunting-silent-failures", "checking-restraint"],
-                                  about="a", resolve="r")])
+    base = {"name": "synthesizing-review-findings", "description": "d",
+                "severity_order": ["Blocker", "Major", "Minor", "Nit"],
+                "tensions": [Tension(between=["hunting-silent-failures", "checking-restraint"],
+                                  about="a", resolve="r")]}
     base.update(kw)
     return Synthesizer(**base)
 

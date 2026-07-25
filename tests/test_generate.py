@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: MIT
 # tests/test_generate.py
-from tooling.manifest import Manifest, Mode, Route, Router, Skill, Source, load_manifest
 from tooling.generate import build_reference, build_skill_md, primary_owners
+from tooling.manifest import Manifest, Mode, Route, Router, Skill, Source, load_manifest
 
 
 def _skill(**kw):
-    base = dict(name="hunting-silent-failures", description="x", shape="diff", wave=1,
-                built_from=[Source(2, "tests/fixtures/research_sample.md#2"),
-                            Source(4, "tests/fixtures/research_sample.md#4")])
+    base = {"name": "hunting-silent-failures", "description": "x", "shape": "diff", "wave": 1,
+                "built_from": [Source(2, "tests/fixtures/research_sample.md#2"),
+                            Source(4, "tests/fixtures/research_sample.md#4")]}
     base.update(kw)
     return Skill(**base)
 
@@ -57,8 +57,9 @@ def test_build_skill_md_has_frontmatter_and_provenance_and_links():
     assert "examples.md" in md
 
 
-from tooling.generate import generate_skill
 import json
+
+from tooling.generate import generate_skill
 
 
 def test_generate_skill_writes_full_tree(tmp_path):
@@ -757,8 +758,8 @@ def test_build_router_md_escapes_pipe_and_newline_in_route_when_and_note():
 
 
 def test_build_entrypoint_md_escapes_pipe_and_newline_in_route_fields():
-    from tooling.manifest import Entrypoint
     from tooling.generate import build_entrypoint_md
+    from tooling.manifest import Entrypoint
     skill = _skill(picker="Where do errors vanish?")
     router = Router(
         name="choosing-review-lenses", description="route",
