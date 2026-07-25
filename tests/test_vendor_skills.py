@@ -12,7 +12,7 @@ def run_vendor(target, *extra_args):
     result = subprocess.run(
         [str(SCRIPT), str(target), *extra_args],
         cwd=str(REPO_ROOT),
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, timeout=30, check=False,
     )
     assert result.returncode == 0, result.stderr
     return result
@@ -163,7 +163,7 @@ vendor_one "etc" ""
 """
     result = subprocess.run(
         ["bash", "-c", bash_script],
-        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10,
+        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10, check=False,
     )
     assert result.returncode != 0, (
         f"vendor_one should have aborted on empty dest_root; "
@@ -211,7 +211,7 @@ old="etc"
 """
     result = subprocess.run(
         ["bash", "-c", bash_script],
-        capture_output=True, text=True, timeout=10,
+        capture_output=True, text=True, timeout=10, check=False,
     )
     assert result.returncode != 0
     assert "dest_root" in result.stderr

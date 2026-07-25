@@ -4,11 +4,14 @@
 findings of the lenses the router picked into one deduplicated, ranked report
 with a single verdict."""
 from __future__ import annotations
+
 import json
-import yaml
 from pathlib import Path
-from tooling.manifest import Manifest
+
+import yaml
+
 from tooling.generate_common import _escape_table_cell
+from tooling.manifest import Manifest
 
 
 def mode_floor_policy(manifest: Manifest) -> str:
@@ -20,8 +23,8 @@ def mode_floor_policy(manifest: Manifest) -> str:
     lines = [
         "## Severity floor by mode",
         "",
-        "The merged report's severity floor depends on the active depth mode. "
-        "Below the floor, findings are omitted from the verdict.",
+        ("The merged report's severity floor depends on the active depth mode. "
+        "Below the floor, findings are omitted from the verdict."),
         "",
         "| Mode | Floor | Effect |",
         "|---|---|---|",

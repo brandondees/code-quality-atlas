@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: MIT
 # tooling/evals.py
 from __future__ import annotations
-from dataclasses import dataclass
+
 import json
+from dataclasses import dataclass
 
 
 class EvalError(Exception):
