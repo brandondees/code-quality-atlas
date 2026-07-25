@@ -128,10 +128,12 @@ def test_collapsed_vendor_also_writes_attribution_notice(tmp_path):
 
 
 def run_vendor_raw(target, *extra_args):
+    # check=False: callers inspect result.returncode themselves (both
+    # success and expected-failure cases), matching run_vendor's pattern.
     return subprocess.run(
         [str(SCRIPT), str(target), *extra_args],
         cwd=str(REPO_ROOT),
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, timeout=30, check=False,
     )
 
 
