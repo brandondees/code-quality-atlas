@@ -34,7 +34,7 @@ def _run(hook, cwd, stdin, env_extra=None):
         env.update(env_extra)
     result = subprocess.run(
         ["bash", str(hook)], cwd=str(cwd), input=stdin,
-        capture_output=True, text=True, timeout=10, env=env,
+        capture_output=True, text=True, timeout=10, env=env, check=False,
     )
     assert result.returncode == 0, f"{hook.name} must always exit 0: {result.stderr}"
     return result
@@ -155,7 +155,7 @@ def test_missing_jq_degrades_to_no_op(tmp_path):
            "PATH": str(fake_bin), "HOME": str(tmp_path)}
     result = subprocess.run(
         ["bash", str(LOG_HOOK)], cwd=str(tmp_path), input=_SKILL_INPUT,
-        capture_output=True, text=True, timeout=10, env=env,
+        capture_output=True, text=True, timeout=10, env=env, check=False,
     )
     assert result.returncode == 0
     assert not _learnings_dir(tmp_path).exists()

@@ -2,14 +2,15 @@
 # tests/test_collapsed.py
 import json
 from pathlib import Path
+
+from tooling.generate import entrypoint_lenses, generate_lens_bundle, lens_bundle_body
 from tooling.manifest import Entrypoint, Manifest, Skill, Source
-from tooling.generate import entrypoint_lenses, lens_bundle_body, generate_lens_bundle
 
 
 def _skill(**kw):
-    base = dict(name="hunting-silent-failures", description="x", shape="diff", wave=1,
-                picker="Where do errors vanish?",
-                built_from=[Source(2, "tests/fixtures/research_sample.md#2")])
+    base = {"name": "hunting-silent-failures", "description": "x", "shape": "diff", "wave": 1,
+                "picker": "Where do errors vanish?",
+                "built_from": [Source(2, "tests/fixtures/research_sample.md#2")]}
     base.update(kw)
     return Skill(**base)
 
@@ -163,8 +164,8 @@ def test_generate_lens_bundle_files_carry_generation_header(tmp_path):
 
 
 # --- Task 5: entrypoint SKILL.md + collapsed synthesis ---
-from tooling.manifest import Route, Router, Synthesizer, Mode
-from tooling.generate import build_entrypoint_md, build_collapsed_synthesis
+from tooling.generate import build_collapsed_synthesis, build_entrypoint_md
+from tooling.manifest import Mode, Route, Router, Synthesizer
 
 
 def _full_manifest():
@@ -227,8 +228,8 @@ import os
 
 
 def test_committed_collapsed_matches_regeneration(tmp_path):
-    from tooling.manifest import load_manifest, validate
     from tooling.generate import generate_collapsed
+    from tooling.manifest import load_manifest, validate
     # Regenerate ONLY the collapsed tree into tmp_path — generate_collapsed reads
     # the real committed skills/ (for each lens's examples.md) but writes nowhere
     # but tmp_path, so this never overwrites the live skills/ tree as a side effect.

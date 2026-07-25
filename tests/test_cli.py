@@ -3,7 +3,9 @@
 import subprocess
 import sys
 from pathlib import Path
+
 from tooling.cli import main
+
 
 def test_cli_generate_then_drift_reports_clean(tmp_path, capsys):
     rc = main(["generate", "--manifest", "tests/fixtures/manifest_sample.yaml",
@@ -25,7 +27,7 @@ def test_cli_runs_as_module(tmp_path):
         [sys.executable, "-m", "tooling.cli", "drift",
          "--skills-root", str(tmp_path), "--docs-root", "."],
         cwd=str(Path(__file__).resolve().parent.parent),
-        capture_output=True, text=True,
+        capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr
     assert "No drift" in result.stdout
