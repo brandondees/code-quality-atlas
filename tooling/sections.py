@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # tooling/sections.py
-import re
 import hashlib
+import re
 
 _SECTION_START = re.compile(r"^## #(\d+)\b", re.MULTILINE)
 _ANY_H2 = re.compile(r"^## ", re.MULTILINE)
