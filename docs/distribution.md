@@ -217,7 +217,10 @@ expect the plugin to appear in cloud sessions — it won't.
   copies the same runtime resources into a target repo's `.claude/skills/`,
   idempotently, ready to commit. `--prune` safely drops only previously-vendored
   skills that have left the suite (tracked via a `.atlas-vendored` marker; never
-  touches the target repo's own skills). `--collapsed` vendors the 4
+  touches the target repo's own skills). If a target repo already has its own,
+  non-tool-managed directory at a colliding skill name, that name is skipped
+  with a warning (and the run exits non-zero) rather than overwritten; pass
+  `--force` to overwrite it anyway. `--collapsed` vendors the 4
   collapsed entrypoints instead of the 37 standalone skills. The `skulto` flow
   above is an alternative. Every run also writes/refreshes a `NOTICE.md`
   alongside the vendored skills — the vendored content is CC BY 4.0 (see

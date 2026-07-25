@@ -127,6 +127,129 @@ def test_collapsed_vendor_also_writes_attribution_notice(tmp_path):
     assert "brandondees/code-quality-atlas" in notice
 
 
+def run_vendor_raw(target, *extra_args):
+    # check=False: callers inspect result.returncode themselves (both
+    # success and expected-failure cases), matching run_vendor's pattern.
+    return subprocess.run(
+        [str(SCRIPT), str(target), *extra_args],
+        cwd=str(REPO_ROOT),
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+
+
+def test_vendor_skips_preexisting_non_tool_managed_directory(tmp_path):
+    """Regression for #175: vendor_one used to `rm -rf` the destination
+    directory for every skill name unconditionally, with no check for
+    whether the target repo already had unrelated content there before this
+    tool ever ran. A target repo's own pre-existing, hand-authored skill
+    directory sharing a name with one of the suite's skills (e.g.
+    checking-restraint) must survive a first vendoring run untouched, not be
+    silently destroyed."""
+    target = tmp_path / "target-repo"
+    skills_dir = target / ".claude" / "skills"
+    colliding = skills_dir / "checking-restraint"
+    colliding.mkdir(parents=True)
+    (colliding / "SKILL.md").write_text("# hand-authored, not vendored\n")
+    (colliding / "my-private-notes.txt").write_text("do not delete\n")
+
+    result = run_vendor_raw(target)
+    assert result.returncode != 0, (
+        "a run that skips a collision must exit non-zero so it's visible, "
+        f"not silently succeed: stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "checking-restraint" in result.stderr
+    assert "skipping" in result.stderr.lower() or "skipped" in result.stderr.lower()
+
+    # The pre-existing content must be completely untouched.
+    assert (colliding / "SKILL.md").read_text() == "# hand-authored, not vendored\n"
+    assert (colliding / "my-private-notes.txt").read_text() == "do not delete\n"
+
+    # Every other (non-colliding) skill must still have been vendored normally.
+    other_skill_dirs = [
+        p for p in skills_dir.iterdir()
+        if p.is_dir() and p.name not in ("checking-restraint",) and (p / "SKILL.md").exists()
+    ]
+    assert len(other_skill_dirs) > 1
+
+    # The marker must not claim ownership of the directory this run skipped,
+    # so a later --prune can never be misled into treating it as tool-owned.
+    assert "checking-restraint" not in marker_names(target)
+
+
+def test_vendor_force_overwrites_preexisting_directory(tmp_path):
+    """--force is the explicit escape hatch for #175's collision guard: with
+    it, a colliding directory is overwritten (the pre-#175 behavior), the run
+    succeeds, and the marker does claim the name going forward."""
+    target = tmp_path / "target-repo"
+    skills_dir = target / ".claude" / "skills"
+    colliding = skills_dir / "checking-restraint"
+    colliding.mkdir(parents=True)
+    (colliding / "SKILL.md").write_text("# hand-authored, not vendored\n")
+
+    run_vendor(target, "--force")
+
+    assert (colliding / "SKILL.md").read_text() != "# hand-authored, not vendored\n"
+    assert "checking-restraint" in marker_names(target)
+
+
+def test_vendor_does_not_skip_directory_it_already_owns(tmp_path):
+    """A second, ordinary re-run (refresh) must not treat a name this tool
+    already vendored on a prior run as a collision — only genuinely
+    non-tool-managed pre-existing content should trigger the #175 guard."""
+    target = tmp_path / "target-repo"
+    target.mkdir()
+
+    run_vendor(target)
+    first_names = marker_names(target)
+    assert "checking-restraint" in first_names
+
+    result = run_vendor_raw(target)
+    assert result.returncode == 0, (
+        f"a plain refresh of tool-owned content must not fail: {result.stderr!r}"
+    )
+    assert "skipping" not in result.stderr.lower()
+
+
+def test_vendor_all_collisions_leaves_marker_names_empty_without_crashing(tmp_path):
+    """Regression for a follow-up gap in #175's own fix: when EVERY current-run
+    skill name collides with pre-existing, non-tool-managed content and there
+    is no prior marker (OLD_NAMES empty too — e.g. a target's first-ever
+    vendoring attempt), marker_names ends up genuinely empty. The marker-write
+    loop must handle that without unbound-variable trouble under `set -u` (the
+    script targets bash 3.2, where `"${arr[@]}"` on a zero-element array
+    raises 'unbound variable' unlike bash >=4.4) — mirror the guard already
+    used for OLD_NAMES/SKIPPED_COLLISIONS elsewhere in main(). Uses --collapsed
+    so only the 4 entrypoint names need to collide, not all 37."""
+    target = tmp_path / "target-repo"
+    skills_dir = target / ".claude" / "skills"
+    for name in (
+        "reviewing-a-change", "auditing-a-repository",
+        "reviewing-a-decision", "reviewing-an-artifact",
+    ):
+        d = skills_dir / name
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(f"mine: {name}\n")
+
+    result = run_vendor_raw(target, "--collapsed")
+    assert result.returncode == 1, (
+        f"all-collide run must still exit non-zero (visible), not crash: "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "unbound variable" not in result.stderr
+    assert "Vendored 0 skill(s)" in result.stdout
+
+    marker = skills_dir / ".atlas-vendored"
+    assert marker.exists()
+    assert marker_names(target) == set()
+
+    # Every pre-existing directory must still be completely untouched.
+    for name in (
+        "reviewing-a-change", "auditing-a-repository",
+        "reviewing-a-decision", "reviewing-an-artifact",
+    ):
+        assert (skills_dir / name / "SKILL.md").read_text() == f"mine: {name}\n"
+
+
 def _source_functions_only():
     """The script's functions/vars, without the trailing `main "$@"` call, so
     a caller can invoke individual functions (e.g. vendor_one) directly."""
