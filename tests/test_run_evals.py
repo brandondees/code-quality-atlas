@@ -48,7 +48,8 @@ def test_run_skill_evals_assembles_context_and_collects(tmp_path, monkeypatch):
 
     captured = {}
 
-    def fake_query(model, system, user, host=run_evals.OLLAMA_HOST, timeout=600):
+    def fake_query(model, system, user, host=run_evals.OLLAMA_HOST, timeout=600,
+                  num_ctx=run_evals.OLLAMA_NUM_CTX, think=None):
         captured["system"] = system
         captured["model"] = model
         return f"reviewed: {user}"
@@ -115,6 +116,33 @@ def test_query_ollama_sends_num_ctx(monkeypatch):
     run_evals.query_ollama("m", "sys", "usr")
     assert captured["payload"]["options"]["num_ctx"] == run_evals.OLLAMA_NUM_CTX
     assert captured["payload"]["options"]["temperature"] == 0
+    assert "think" not in captured["payload"]
+
+
+def test_query_ollama_num_ctx_override(monkeypatch):
+    # Thinking-capable models can spend the whole default window on reasoning
+    # before ever reaching the answer; num_ctx must be widenable per call.
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["payload"] = json.loads(req.data)
+        return _FakeResp(json.dumps({"message": {"content": "ok"}}).encode())
+
+    monkeypatch.setattr(run_evals.urllib.request, "urlopen", fake_urlopen)
+    run_evals.query_ollama("m", "sys", "usr", num_ctx=32768)
+    assert captured["payload"]["options"]["num_ctx"] == 32768
+
+
+def test_query_ollama_think_flag_forwarded(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["payload"] = json.loads(req.data)
+        return _FakeResp(json.dumps({"message": {"content": "ok"}}).encode())
+
+    monkeypatch.setattr(run_evals.urllib.request, "urlopen", fake_urlopen)
+    run_evals.query_ollama("m", "sys", "usr", think=False)
+    assert captured["payload"]["think"] is False
 
 
 def test_query_ollama_network_error_raises_runtimeerror(monkeypatch):

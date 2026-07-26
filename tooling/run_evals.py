@@ -80,9 +80,17 @@ def _post_json(url: str, payload: dict, timeout: int, label: str) -> object:
 
 
 def query_ollama(model: str, system: str, user: str,
-                 host: str = OLLAMA_HOST, timeout: int = 600) -> str:
+                 host: str = OLLAMA_HOST, timeout: int = 600,
+                 num_ctx: int = OLLAMA_NUM_CTX, think: bool | None = None) -> str:
     """Ollama /api/chat with sampling pinned and the context window widened so
-    the full skill prompt isn't silently truncated (see OLLAMA_NUM_CTX)."""
+    the full skill prompt isn't silently truncated (see OLLAMA_NUM_CTX).
+
+    `num_ctx` is overridable per call: thinking-capable models (e.g. qwen3.5)
+    spend a large, variable token budget on a `<think>` block before the final
+    answer, and the default 8192 can leave no room for the answer itself once
+    that overhead is added to a real skill-context-sized prompt (observed as an
+    empty `content` field, not an error). `think` maps to Ollama's per-request
+    `"think"` switch when set; left `None`, the model's own default applies."""
     payload = {
         "model": model,
         "messages": [
@@ -91,9 +99,12 @@ def query_ollama(model: str, system: str, user: str,
         ],
         "stream": False,
         # evals must be reproducible — never inherit a server's sampling default;
-        # num_ctx must fit the whole skill context or Ollama silently truncates it.
-        "options": {"temperature": 0, "num_ctx": OLLAMA_NUM_CTX},
+        # num_ctx must fit the whole skill context (+ thinking, if enabled) or
+        # Ollama silently truncates it.
+        "options": {"temperature": 0, "num_ctx": num_ctx},
     }
+    if think is not None:
+        payload["think"] = think
     data = _post_json(f"{host}/api/chat", payload, timeout, "Ollama")
     if isinstance(data, dict) and data.get("error"):
         raise RuntimeError(f"Ollama API error: {data['error']}")
@@ -152,14 +163,19 @@ DEFAULT_HOSTS = {"ollama": OLLAMA_HOST, "openai": OPENAI_HOST}
 
 
 def run_skill_evals(skill_dir: Path, model: str,
-                    host: str | None = None, api: str = "ollama") -> list[ScenarioRun]:
-    query = {"ollama": query_ollama, "openai": query_openai}[api]
+                    host: str | None = None, api: str = "ollama",
+                    num_ctx: int = OLLAMA_NUM_CTX,
+                    think: bool | None = None, timeout: int = 600) -> list[ScenarioRun]:
     host = host or DEFAULT_HOSTS[api]
     system = assemble_context(skill_dir) + _REVIEWER_DIRECTIVE
     doc = load_evals(str(skill_dir / "evals" / "eval.json"))
     runs: list[ScenarioRun] = []
     for s in doc.scenarios:
-        response = query(model, system, s["query"], host=host)
+        if api == "ollama":
+            response = query_ollama(model, system, s["query"], host=host,
+                                    num_ctx=num_ctx, think=think, timeout=timeout)
+        else:
+            response = query_openai(model, system, s["query"], host=host, timeout=timeout)
         runs.append(ScenarioRun(s["query"], s["expected_behavior"], response))
     return runs
 
@@ -173,10 +189,22 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--api", choices=["ollama", "openai"], default="ollama")
     ap.add_argument("--host", default=None,
                     help="defaults to the chosen api's local port")
+    ap.add_argument("--num-ctx", type=int, default=OLLAMA_NUM_CTX,
+                    help="Ollama context window (ollama only); widen for "
+                         "thinking-capable models, whose reasoning overhead "
+                         "can otherwise leave no room for the final answer")
+    ap.add_argument("--think", dest="think", action="store_const", const=True,
+                    default=None, help="force thinking mode on (ollama only)")
+    ap.add_argument("--no-think", dest="think", action="store_const",
+                    const=False, help="force thinking mode off (ollama only)")
+    ap.add_argument("--timeout", type=int, default=600,
+                    help="per-scenario request timeout in seconds; widen for "
+                         "thinking-mode models under a large num_ctx")
     args = ap.parse_args(argv)
 
     skill_dir = Path(args.skills_root, args.skill)
-    runs = run_skill_evals(skill_dir, args.model, host=args.host, api=args.api)
+    runs = run_skill_evals(skill_dir, args.model, host=args.host, api=args.api,
+                           num_ctx=args.num_ctx, think=args.think, timeout=args.timeout)
     for i, r in enumerate(runs, 1):
         print(f"\n{'=' * 72}\nSCENARIO {i}")
         print(f"QUERY:\n{r.query}\n")
