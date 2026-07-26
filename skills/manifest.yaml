@@ -344,6 +344,10 @@ skills:
     design: true
     wave: 3
     tier: floor
+    # Q21: second hardened, adversarial/red-team-weighted eval suite (the
+    # sweeping-for-security precedent's A-E scenario groups), raised from D8's
+    # 3-scenario baseline. See open-questions.md Q21.
+    eval_min: 26
     built_from:
       - { category: 1, source: docs/research/cluster-1-correctness.md#1 }
       - { category: 4, source: docs/research/cluster-1-correctness.md#4 }
