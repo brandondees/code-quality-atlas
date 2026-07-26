@@ -52,10 +52,16 @@ def test_run_skill_evals_assembles_context_and_collects(tmp_path, monkeypatch):
                   num_ctx=run_evals.OLLAMA_NUM_CTX, think=None):
         captured["system"] = system
         captured["model"] = model
+        captured["num_ctx"] = num_ctx
+        captured["think"] = think
+        captured["timeout"] = timeout
         return f"reviewed: {user}"
 
     monkeypatch.setattr(run_evals, "query_ollama", fake_query)
-    runs = run_evals.run_skill_evals(out, "fake-model")
+    # non-default overrides so the assertions below would catch a dropped or
+    # mis-forwarded kwarg in run_skill_evals's dispatch, not just query_ollama's.
+    runs = run_evals.run_skill_evals(out, "fake-model", num_ctx=32768, think=False,
+                                     timeout=42)
 
     assert len(runs) == 3
     assert [r.response for r in runs] == ["reviewed: q1", "reviewed: q2", "reviewed: q3"]
@@ -63,6 +69,9 @@ def test_run_skill_evals_assembles_context_and_collects(tmp_path, monkeypatch):
     # context is assembled from the skill's own files (SKILL.md mentions its name)
     assert "hunting-silent-failures" in captured["system"]
     assert captured["model"] == "fake-model"
+    assert captured["num_ctx"] == 32768
+    assert captured["think"] is False
+    assert captured["timeout"] == 42
 
 
 def test_run_skill_evals_openai_backend(tmp_path, monkeypatch):
@@ -200,3 +209,42 @@ def test_query_openai_unexpected_shape_raises(monkeypatch):
     _patch_urlopen(monkeypatch, body=json.dumps({"choices": []}).encode())
     with pytest.raises(RuntimeError, match="unexpected OpenAI-compatible response shape"):
         run_evals.query_openai("m", "sys", "usr")
+
+
+# --- run_skill_evals: unrecognized api fails fast, even with host set (#23) ---
+
+def test_run_skill_evals_rejects_unknown_api_even_with_host(tmp_path, monkeypatch):
+    # The dict-lookup dispatch this replaced (`{"ollama": ..., "openai": ...}[api]`)
+    # raised KeyError immediately; the if/ollama-else/openai branch it became must
+    # not silently misroute an unrecognized api to the openai backend just because
+    # `host` was also passed explicitly (which otherwise short-circuits `host or
+    # DEFAULT_HOSTS[api]`'s own fail-fast check).
+    skill = Skill(name="hunting-silent-failures", description="x", shape="diff",
+                  wave=1, built_from=[Source(2, "tests/fixtures/research_sample.md#2")])
+    out = generate_skill(skill, "v0.2", docs_root=".", skills_root=str(tmp_path))
+    (out / "evals" / "eval.json").write_text(_valid_eval_json())
+
+    def fail_any(*a, **kw):
+        raise AssertionError("no backend should be called for an unknown api")
+
+    monkeypatch.setattr(run_evals, "query_ollama", fail_any)
+    monkeypatch.setattr(run_evals, "query_openai", fail_any)
+    with pytest.raises(ValueError, match="unknown api"):
+        run_evals.run_skill_evals(out, "fake-model", host="http://localhost:9999",
+                                  api="bogus")
+
+
+# --- CLI argument validation (#23) ---
+
+def test_cli_think_and_no_think_are_mutually_exclusive(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        run_evals.main(["--skill", "x", "--skills-root", str(tmp_path),
+                       "--think", "--no-think"])
+    assert "not allowed with argument" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("flag", ["--num-ctx", "--timeout"])
+def test_cli_rejects_non_positive_int_options(flag, tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        run_evals.main(["--skill", "x", "--skills-root", str(tmp_path), flag, "0"])
+    assert "positive integer" in capsys.readouterr().err

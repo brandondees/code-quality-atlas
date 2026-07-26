@@ -13,6 +13,7 @@ them (no model server needed in CI).
 """
 from __future__ import annotations
 
+import argparse
 import http.client
 import json
 import urllib.error
@@ -166,6 +167,11 @@ def run_skill_evals(skill_dir: Path, model: str,
                     host: str | None = None, api: str = "ollama",
                     num_ctx: int = OLLAMA_NUM_CTX,
                     think: bool | None = None, timeout: int = 600) -> list[ScenarioRun]:
+    if api not in DEFAULT_HOSTS:
+        # Fail fast on an unrecognized api regardless of whether host is also
+        # passed explicitly — `host or DEFAULT_HOSTS[api]` alone would skip this
+        # check whenever host is truthy, silently misrouting to the else branch.
+        raise ValueError(f"unknown api: {api!r} (expected one of {sorted(DEFAULT_HOSTS)})")
     host = host or DEFAULT_HOSTS[api]
     system = assemble_context(skill_dir) + _REVIEWER_DIRECTIVE
     doc = load_evals(str(skill_dir / "evals" / "eval.json"))
@@ -180,8 +186,14 @@ def run_skill_evals(skill_dir: Path, model: str,
     return runs
 
 
+def _positive_int(value: str) -> int:
+    n = int(value)
+    if n <= 0:
+        raise argparse.ArgumentTypeError(f"must be a positive integer, got {value!r}")
+    return n
+
+
 def main(argv: list[str] | None = None) -> int:
-    import argparse
     ap = argparse.ArgumentParser(prog="run-evals")
     ap.add_argument("--skill", required=True)
     ap.add_argument("--skills-root", default="skills")
@@ -189,15 +201,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--api", choices=["ollama", "openai"], default="ollama")
     ap.add_argument("--host", default=None,
                     help="defaults to the chosen api's local port")
-    ap.add_argument("--num-ctx", type=int, default=OLLAMA_NUM_CTX,
+    ap.add_argument("--num-ctx", type=_positive_int, default=OLLAMA_NUM_CTX,
                     help="Ollama context window (ollama only); widen for "
                          "thinking-capable models, whose reasoning overhead "
                          "can otherwise leave no room for the final answer")
-    ap.add_argument("--think", dest="think", action="store_const", const=True,
-                    default=None, help="force thinking mode on (ollama only)")
-    ap.add_argument("--no-think", dest="think", action="store_const",
-                    const=False, help="force thinking mode off (ollama only)")
-    ap.add_argument("--timeout", type=int, default=600,
+    think_group = ap.add_mutually_exclusive_group()
+    think_group.add_argument("--think", dest="think", action="store_const", const=True,
+                             default=None, help="force thinking mode on (ollama only)")
+    think_group.add_argument("--no-think", dest="think", action="store_const",
+                             const=False, help="force thinking mode off (ollama only)")
+    ap.add_argument("--timeout", type=_positive_int, default=600,
                     help="per-scenario request timeout in seconds; widen for "
                          "thinking-mode models under a large num_ctx")
     args = ap.parse_args(argv)
