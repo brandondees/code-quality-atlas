@@ -39,10 +39,11 @@ which also resolved D16.
 
 **Genuinely still open (undecided):**
 Q21 (suite-wide eval comprehensiveness — risk-tiered rollout + the opt-in `eval_min`
-mechanism ✅ built 2026-07-18; three floor-tier lenses hardened so far
+mechanism ✅ built 2026-07-18; four floor-tier lenses hardened so far
 (`sweeping-for-security`, `tracing-correctness-and-invariants`,
-`reviewing-migration-and-data-safety`); generalizing to the remaining two floor-tier
-lenses (`reviewing-concurrency-and-async`, `hunting-silent-failures`), then
+`reviewing-migration-and-data-safety`, `reviewing-concurrency-and-async` — the last
+of which surfaced the campaign's worst floor-of-record gap yet, ~71% missed);
+generalizing to the last floor-tier lens (`hunting-silent-failures`), then
 preference-tier lenses, still open),
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
@@ -126,7 +127,7 @@ findings, absent on llama). Per the runbook these are model-capability limits,
 not heuristic regressions, so no tuning was applied. See the session-log entry
 of the same date.
 
-### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; three of five floor-tier lenses hardened, generalization to the rest still open) *(new, 2026-06-27)*
+### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; four of five floor-tier lenses hardened, generalization to the rest still open) *(new, 2026-06-27)*
 
 **Trigger.** Building the G30 threat-modeling lens ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)) surfaced that for high-stakes lenses the dangerous failure mode is the **false negative**, and that 3–4 happy-path scenarios don't probe it. That spec's §5 introduces a **thorough, adversarial, false-negative-weighted** eval design — ~21 scenarios across core-firing / per-axis-coverage / detect-and-route / **red-team** / precision groups, plus a red-team generation pass and a hardened cross-model re-gate.
 
@@ -179,7 +180,9 @@ of the same date.
 
 Beyond the raw miss count, three of the misses (7, 12, 16) share a distinct and more concerning pattern than a simple blind spot: the response text closely recites the lens's own `heuristics.md` checklist line — *"Is destructive DDL (DROP column/table) gated until the new path is verified live and old code drained?"* (`reference/heuristics.md:22`, quoted verbatim; the model's phrasing turns the question into a flat imperative but otherwise tracks it closely) — applied to operations that are not destructive DDL at all (a `DELETE` in scenario 12, a `CREATE TABLE ... AS SELECT` in scenario 16, and boilerplate about `NOT NULL` locking in scenario 7's dual-write case, which contains no `NOT NULL` at all). This reads as template-matching against the assembled skill context rather than tracing the actual query — a different and arguably worse failure mode than a plain miss, since the response *looks* like a considered finding rather than an obvious blank.
 
-**Disposition: not tuned away, documented as a raised floor — consistent with the other two hardened lenses.** The scenarios describe real defects (or real absences of a defect, for scenario 23); weakening them to pass a 7B model would defeat the eval's purpose. Per the same standing precedent used for the prior two lenses: this is a lens the floor-of-record model doesn't cleanly clear, an explicit documented outcome. No tuning pass or newer-model comparison was run this pass — the owner-directed (b)-then-(a) sequence from the `tracing-correctness-and-invariants` follow-up is available as a template if this lens's gap gets picked up again, but starting a fresh tuning/model-comparison cycle wasn't requested for this instance. **Two floor-tier lenses remain unhardened**: `reviewing-concurrency-and-async` and `hunting-silent-failures` (the latter already has an eval suite at 6 scenarios but no `eval_min` set — worth checking, when it's picked up, whether that count already reflects an A-E-shaped suite or still needs the full treatment).
+**Disposition: not tuned away, documented as a raised floor — consistent with the other two hardened lenses.** The scenarios describe real defects (or real absences of a defect, for scenario 23); weakening them to pass a 7B model would defeat the eval's purpose. Per the same standing precedent used for the prior two lenses: this is a lens the floor-of-record model doesn't cleanly clear, an explicit documented outcome. No tuning pass or newer-model comparison was run this pass — the owner-directed (b)-then-(a) sequence from the `tracing-correctness-and-invariants` follow-up is available as a template if this lens's gap gets picked up again, but starting a fresh tuning/model-comparison cycle wasn't requested for this instance. **One floor-tier lens remains unhardened**: `hunting-silent-failures` (already has an eval suite at 6 scenarios but no `eval_min` set — worth checking, when it's picked up, whether that count already reflects an A-E-shaped suite or still needs the full treatment).
+
+**Fourth hardened instance: `reviewing-concurrency-and-async`** (`eval_min: 24`, up from 3) — same A-E taxonomy as the prior three. See the 2026-07-26 session-log entry for the full scenario breakdown. **This lens's floor-of-record re-gate is the worst result seen in the Q21 rollout so far — 17 of 24 scenarios missed (~71%), including all three D-group adversarial-resistance scenarios and one of the two original baseline defect scenarios**, a substantially larger gap than either `tracing-correctness-and-invariants` (~8/24) or `reviewing-migration-and-data-safety` (~8/24). A harness-truncation cause was ruled out directly: the assembled context for this lens is only ~2,680 tokens, well inside the 8192-token window, so the near-blanket "No findings" pattern reflects an actual reasoning gap rather than a clipped prompt. Concurrency/race reasoning — modeling two hypothetical interleaved executions against each other — is plausibly a harder abstraction for a 7B-class model than the largely keyword/pattern-driven checks the migration and correctness-tracing lenses lean on, which would explain why this lens's gap is categorically worse rather than just a few points lower. Documented as a raised floor per the same standing disposition; no tuning pass attempted this pass.
 
 ### Q20 — Too many top-level skills: collapse to a few entrypoints + nested disclosure?  → RESOLVED (built, PR #80) *(new, 2026-06-25)*
 

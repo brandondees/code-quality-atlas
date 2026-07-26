@@ -375,6 +375,11 @@ skills:
     design: true
     wave: 3
     tier: floor
+    # Q21: fourth hardened, adversarial/red-team-weighted eval suite (the
+    # sweeping-for-security / tracing-correctness-and-invariants /
+    # reviewing-migration-and-data-safety precedent's A-E scenario groups),
+    # raised from D8's 3-scenario baseline. See open-questions.md Q21.
+    eval_min: 24
     built_from:
       - { category: 3, source: docs/research/cluster-1-correctness.md#3 }
 
