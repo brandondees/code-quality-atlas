@@ -4,6 +4,20 @@ Report each distinct issue as its own numbered finding. When the input is correc
 happens if two callers run this at once, and what may have changed across each
 `await`?
 
+**Decision rule — run this trace explicitly before answering "No findings":**
+for *every* function in the diff, list each piece of state it reads or writes
+(a row, a dict entry, a counter, a lock, a cache key) and each `await`/yield
+point. Then, for each pair of operations on the *same* piece of state, ask:
+"if a second caller entered this function right now — at any point between
+any two of these operations — would the result be wrong?" This includes
+sequences that don't look concurrency-flavored at first glance: a plain
+`if condition: do_thing()` where `condition` was computed by an earlier
+`await` is a check-then-act pair, a module-level dict or counter touched by a
+handler is shared state, and two locks taken in sequence are a lock-ordering
+question. Do this trace for every candidate before concluding there's nothing
+to flag — "no findings" is a conclusion the trace must reach, not a default
+for code that doesn't obviously mention threads, locks, or races.
+
 ## Bad → finding
 
 **Input (diff):**
@@ -48,6 +62,26 @@ def handle(request):            # served by a thread pool
 2. **Dropped task:** the `create_task` result is discarded — its exceptions vanish
    silently and the task can be garbage-collected mid-flight; keep a reference and
    handle failures (done-callback), or await it.
+
+## Bad → finding
+
+**Input (diff):**
+
+```python
+async def transfer(from_acct, to_acct, amount):
+    async with lock_for(from_acct):
+        async with lock_for(to_acct):
+            await debit(from_acct, amount)
+            await credit(to_acct, amount)
+```
+
+**Expected finding:**
+
+1. **Inconsistent lock ordering (deadlock risk):** `transfer(A, B)` locks A then
+   B; a concurrent `transfer(B, A)` locks B then A. If both run at once, each
+   can hold one lock while waiting for the other — deadlock. Acquire locks in a
+   consistent global order regardless of call direction (e.g. sort the two
+   account ids first, always lock the lower id first).
 
 ## Good → no finding
 
