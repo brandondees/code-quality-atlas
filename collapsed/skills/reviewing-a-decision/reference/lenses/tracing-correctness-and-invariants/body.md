@@ -205,21 +205,28 @@ def next_maintenance_window(today: date) -> date:
 **Input (diff):**
 
 ```python
-def assign_next(workers: dict) -> str:
-    # workers: dict[str, WorkerInfo]; used by a scheduler that replays
+def assign_next(idle_workers: set) -> str:
+    # idle_workers: set[str] of worker ids; used by a scheduler that replays
     # job history from a log and must re-derive the same assignment
-    for worker_id, info in workers.items():
-        if info.idle:
-            return worker_id
+    for worker_id in idle_workers:
+        return worker_id
+    raise NoIdleWorkers()
 ```
 
 **Expected finding:**
 
 1. **Non-deterministic replay:** the function's caller requires reproducibly
-   re-deriving the same assignment from a replayed log, but plain `dict`
-   iteration order depends on insertion order at call time, which is not
-   guaranteed to match across processes or replays. Use an explicit, stable
-   ordering (e.g. `sorted(workers.items())`) so replay is actually deterministic.
+   re-deriving the same assignment from a replayed log, but Python's `set`
+   iteration order for string elements is hash-based and varies between
+   separate process runs (hash randomization, on by default) even given the
+   exact same insertion sequence — so replay can pick a different worker
+   than the original run. (Note: this is specifically a `set`/hash-order
+   problem, not a `dict` problem — `dict` iteration order *is* guaranteed to
+   follow insertion order since Python 3.7, so the same concern about a
+   `dict` would need to trace whether *its own* insertion order is itself
+   reproducible upstream, not assume dicts are unordered.) Use an explicit,
+   stable ordering (e.g. `sorted(idle_workers)`) so replay is actually
+   deterministic.
 
 ## Bad → finding
 

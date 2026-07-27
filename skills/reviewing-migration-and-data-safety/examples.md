@@ -100,8 +100,10 @@ statement that isn't actually a `DROP`/`TRUNCATE` is a fabricated finding, not a
 cautious one — trace what the statement literally does before reaching for that
 checklist item, the same discipline as the `NOT NULL` rule above. And when a
 destructive `DROP` *does* appear, check whether the diff or its context already
-supplies concrete drain evidence (a linked ticket, a stated retirement period) —
-if it does, that satisfies the gating requirement; do not re-demand it.
+supplies concrete drain evidence — production-usage data confirming the old path
+has actually stopped being read/written (not merely a ticket link or a stated
+retirement date on their own, which document intent but not proof) — if it does,
+that satisfies the gating requirement; do not re-demand it.
 
 ## Bad → finding (a bulk `DELETE` is a data operation, not "destructive DDL")
 
@@ -119,8 +121,9 @@ DELETE FROM sessions WHERE created_at < now() - interval '1 year';
    and a large transaction/WAL — batch it (e.g. `DELETE ... WHERE id IN (SELECT id
    ... LIMIT 5000)` in a loop) rather than one giant statement.
 2. **No backup/snapshot before an irreversible bulk deletion:** once this commits
-   there is no rollback path — take a backup or snapshot (or at least a dry-run
-   count) first.
+   there is no rollback path — take a backup or snapshot first. A dry-run count is
+   a reasonable *additional* sanity check on scope, but it is not a substitute:
+   it tells you how many rows will be deleted, not how to get them back.
 
 Do NOT label this "destructive DDL" or demand the drop-column gating recipe — a
 `DELETE` doesn't drop a table or column, so that checklist item doesn't apply
@@ -137,10 +140,12 @@ ALTER TABLE orders DROP COLUMN legacy_status;
 ```
 
 **Expected finding:** None — this *is* an actual `DROP`, but the diff already
-supplies concrete drain evidence: a linked ticket and a stated retirement period
-confirming the old path is unused. Report "No findings". Do NOT re-demand proof
-that was already given, and do NOT treat every `DROP` as needing more evidence
-than a normal staged rollout would reasonably provide.
+supplies concrete drain evidence: not just a ticket link and a date, but a
+confirmed **production-usage fact** — zero reads/writes since the expand phase
+shipped. Report "No findings". Do NOT re-demand proof that was already given,
+and do NOT treat every `DROP` as needing more evidence than this. (A ticket
+link and a stated date *alone*, with no usage confirmation, would NOT be enough
+— see the decision rule above.)
 
 ## Bad → finding
 
