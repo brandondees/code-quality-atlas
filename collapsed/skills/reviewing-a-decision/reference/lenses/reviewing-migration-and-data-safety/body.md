@@ -15,6 +15,10 @@ Can this migration lock tables or lose data? Expand/contract, backfills, reversi
 - [Bad → finding](#bad--finding)
 - [Bad → finding](#bad--finding-1)
 - [Good → no finding](#good--no-finding)
+- [Bad → finding (a bulk `DELETE` is a data operation, not "destructive DDL")](#bad--finding-a-bulk-delete-is-a-data-operation-not-destructive-ddl)
+- [Good → no finding (evidenced contract-phase drop)](#good--no-finding-evidenced-contract-phase-drop)
+- [Bad → finding](#bad--finding-2)
+- [Bad → finding](#bad--finding-3)
 - [Going deeper](#going-deeper)
 
 ## When to use
@@ -132,6 +136,102 @@ step is complete in itself.
 actually appear without a safe backfill plan. Likewise `CONCURRENTLY` present =
 safe index; `NOT VALID` present = safe constraint. Quote the offending keyword in
 any finding; if you cannot quote it from the diff, the finding is invented.
+
+**"Destructive DDL" means an actual `DROP`/`TRUNCATE` of a table, column, or
+constraint — nothing else.** Before citing the destructive-DDL/gating checklist
+item, check the statement's actual keyword. A `DELETE` (even a bulk one) is a data
+operation, not schema DDL — its risk is batching/backup, not "gate until old code
+is drained." A `CREATE TABLE ... AS SELECT` or a plain `INSERT` creates or copies
+data — it destroys nothing. Reusing the destructive-DDL finding text for a
+statement that isn't actually a `DROP`/`TRUNCATE` is a fabricated finding, not a
+cautious one — trace what the statement literally does before reaching for that
+checklist item, the same discipline as the `NOT NULL` rule above. And when a
+destructive `DROP` *does* appear, check whether the diff or its context already
+supplies concrete drain evidence — production-usage data confirming the old path
+has actually stopped being read/written (not merely a ticket link or a stated
+retirement date on their own, which document intent but not proof) — if it does,
+that satisfies the gating requirement; do not re-demand it.
+
+## Bad → finding (a bulk `DELETE` is a data operation, not "destructive DDL")
+
+**Input (diff):**
+
+```sql
+DELETE FROM sessions WHERE created_at < now() - interval '1 year';
+```
+
+(`sessions` has ~50M rows; no other context given.)
+
+**Expected finding:**
+
+1. **Unbatched bulk delete:** a single `DELETE` over ~50M rows takes a long lock
+   and a large transaction/WAL — batch it (e.g. `DELETE ... WHERE id IN (SELECT id
+   ... LIMIT 5000)` in a loop) rather than one giant statement.
+2. **No backup/snapshot before an irreversible bulk deletion:** once this commits
+   there is no rollback path — take a backup or snapshot first. A dry-run count is
+   a reasonable *additional* sanity check on scope, but it is not a substitute:
+   it tells you how many rows will be deleted, not how to get them back.
+
+Do NOT label this "destructive DDL" or demand the drop-column gating recipe — a
+`DELETE` doesn't drop a table or column, so that checklist item doesn't apply
+here. Its risk is batching and backup, the same as any other large data mutation.
+
+## Good → no finding (evidenced contract-phase drop)
+
+**Input (diff):**
+
+```sql
+-- contract phase; expand shipped 3 weeks ago per #452, and #452 confirms
+-- legacy_status has had zero reads/writes in production since
+ALTER TABLE orders DROP COLUMN legacy_status;
+```
+
+**Expected finding:** None — this *is* an actual `DROP`, but the diff already
+supplies concrete drain evidence: not just a ticket link and a date, but a
+confirmed **production-usage fact** — zero reads/writes since the expand phase
+shipped. Report "No findings". Do NOT re-demand proof that was already given,
+and do NOT treat every `DROP` as needing more evidence than this. (A ticket
+link and a stated date *alone*, with no usage confirmation, would NOT be enough
+— see the decision rule above.)
+
+## Bad → finding
+
+**Input (diff):**
+
+```python
+def up(db):
+    db.execute("INSERT INTO ledger_entries (account_id, amount) VALUES (%s, %s)", (acct, amt))
+    recompute_and_write_balance(db, acct)  # separate statement/commit, not in the same transaction
+```
+
+**Expected finding:**
+
+1. **No transaction boundary across a multi-step write:** the ledger insert and
+   the balance recompute are two separate statements/commits, not wrapped in one
+   transaction — a crash or error between them leaves the ledger and the cached
+   balance inconsistent. Wrap both writes in a single transaction (or make the
+   balance update part of the same atomic unit of work) so a failure leaves either
+   both applied or neither.
+
+## Bad → finding
+
+**Input (diff):**
+
+```sql
+-- amount_cents is validated by the Money value object at the app layer,
+-- so no DB-level CHECK constraint is needed here.
+ALTER TABLE payments ADD COLUMN amount_cents bigint;
+```
+
+**Expected finding:**
+
+1. **DB-level constraint skipped in favor of an app-layer claim:** relying solely
+   on application validation means any direct DB write, migration, or future code
+   path that bypasses the app-layer type can insert an invalid value with nothing
+   at the database level to stop it. A comment asserting the app layer already
+   handles it is not itself a database constraint — add a DB-level `CHECK`
+   constraint (e.g. `amount_cents >= 0`) as defense-in-depth regardless of what
+   validates it upstream.
 
 ## Going deeper
 
