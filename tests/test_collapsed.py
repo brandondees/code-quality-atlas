@@ -208,6 +208,11 @@ def test_build_entrypoint_md_routes_table_excludes_lens_overlap_from_wrong_shape
             # entrypoint and nowhere else.
             Route(when="A decision, not a diff", run=["design-lens"],
                   shapes=["decision"]),
+            # Multi-shape (shared) -> must appear in BOTH entrypoints, the
+            # case the real manifest's "Design doc / plan / RFC" row
+            # (shapes: [diff, decision]) relies on.
+            Route(when="Design doc / plan / RFC", run=["design-lens"],
+                  shapes=["diff", "decision"]),
         ])
     syn = Synthesizer(name="synthesizing-review-findings", description="merge",
                       severity_order=["Blocker", "Major", "Minor", "Nit"], tensions=[])
@@ -225,6 +230,8 @@ def test_build_entrypoint_md_routes_table_excludes_lens_overlap_from_wrong_shape
     assert "A decision, not a diff" not in change_md
     assert "Bug fix" not in decision_md
     assert "A decision, not a diff" in decision_md
+    assert "Design doc / plan / RFC" in change_md
+    assert "Design doc / plan / RFC" in decision_md
 
 
 def test_build_collapsed_synthesis_carries_floor_policy_without_frontmatter():

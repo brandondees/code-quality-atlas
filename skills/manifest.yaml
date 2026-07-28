@@ -841,6 +841,7 @@ router:
             reviewing-llm-integration]
       note: "enumeration-led — #38 builds the model and delegates the deep verdict to
             the topical security lenses"
+      shapes: [diff, decision]
     - when: AI-generated or AI-assisted change, a large or unfamiliar diff, or any
             change that adds dependencies or confident-looking constants/APIs
       run: [reviewing-ai-authored-code, tracing-correctness-and-invariants,

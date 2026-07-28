@@ -265,6 +265,10 @@ def _validate_router(manifest: Manifest, seen: set[str]) -> None:
         if not route.when or not route.run:
             raise ValidationError("router: every route needs `when` and `run`")
         if route.shapes is not None:
+            if (not isinstance(route.shapes, list)
+                    or not all(isinstance(shape, str) for shape in route.shapes)):
+                raise ValidationError(
+                    f"router: route {route.when!r}: shapes must be a list of strings")
             if not route.shapes:
                 raise ValidationError(f"router: route {route.when!r}: shapes must be non-empty if set")
             for shape in route.shapes:

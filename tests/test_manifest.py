@@ -491,6 +491,18 @@ def test_router_route_shapes_must_be_known():
     with pytest.raises(ValidationError, match="unknown shape"):
         validate(m)
 
+def test_router_route_shapes_rejects_non_list_values():
+    # A YAML mapping (e.g. `shapes: {diff: true}`) must not slip through by
+    # iterating its keys, and a scalar must raise ValidationError rather than
+    # a bare TypeError from `for shape in route.shapes`.
+    for bad_shapes in ({"diff": True}, "diff", 5):
+        m = Manifest("v0.2", [_skill(picker="p")],
+                     router=Router(name="choosing-review-lenses", description="d",
+                                   routes=[Route(when="Bug fix", run=["hunting-silent-failures"],
+                                                 shapes=bad_shapes)]))
+        with pytest.raises(ValidationError, match="must be a list of strings"):
+            validate(m)
+
 def test_router_route_shapes_must_be_non_empty_if_set():
     m = Manifest("v0.2", [_skill(picker="p")],
                  router=Router(name="choosing-review-lenses", description="d",
