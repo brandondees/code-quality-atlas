@@ -841,6 +841,7 @@ router:
             reviewing-llm-integration]
       note: "enumeration-led — #38 builds the model and delegates the deep verdict to
             the topical security lenses"
+      shapes: [diff, decision]
     - when: AI-generated or AI-assisted change, a large or unfamiliar diff, or any
             change that adds dependencies or confident-looking constants/APIs
       run: [reviewing-ai-authored-code, tracing-correctness-and-invariants,
@@ -877,6 +878,7 @@ router:
       run: [tracing-correctness-and-invariants, reviewing-concurrency-and-async,
             reviewing-migration-and-data-safety, reviewing-api-contract-safety]
       note: pick by the design's domain, from design-capable (◆) lenses only
+      shapes: [diff, decision]
     - when: Dependency add or bump
       run: [auditing-dependencies-and-supply-chain, checking-restraint]
     - when: CI / build / config change
@@ -909,6 +911,7 @@ router:
       run: [reviewing-artifact-conventions]
       note: artifact-shaped — detect the artifact, then review it against its own
             published standard, not as application code
+      shapes: [artifact]
     - when: Any pull request (the PR artifact itself, on top of content lenses)
       run: [reviewing-pr-and-process-hygiene]
     - when: Whole-repo health audit (scheduled / cron)
@@ -921,11 +924,13 @@ router:
             (auditing-infrastructure-as-code only where IaC manifests exist;
             auditing-decision-record-currency only where a decision-record
             directory exists)
+      shapes: [repo]
     - when: Enforcement config — lint/type suppressions, alert rules or dashboards,
             or checked-in generated artifacts
       run: [auditing-enforcement-and-meta-artifacts]
       note: repo-shaped — scans suppression accretion and codegen/monitoring drift
             across the tree, not a single diff
+      shapes: [repo]
     - when: A decision, not a diff — an ADR / RFC / design doc, a dependency or
             technology adoption, a build-vs-buy or vendor choice, or a
             deprecation / sunset plan
@@ -936,6 +941,7 @@ router:
             design-capable (◆) lenses for the decision's domain.
             reviewing-decision-lifecycle auto-includes on this shape even if
             ranking would otherwise drop it"
+      shapes: [decision]
     - when: A repository's existing decision-record archive (an ADR/RFC directory
             already on disk), swept on a schedule rather than reviewed as it's
             being authored
@@ -943,6 +949,7 @@ router:
       note: "repo-shaped — status-graph consistency, revisit-triggers plausibly
             due, EOL adoptions, and orphaned records; #29 owns the authoring-time
             call, this only checks whether time has invalidated an existing one"
+      shapes: [repo]
 
 # The other half of composition (Q7): once the router's chosen lenses each emit
 # findings, this merges them into one report — deduplicated, conflicts

@@ -85,6 +85,13 @@ class Route:
     when: str                # the change shape, e.g. "Schema migration or backfill"
     run: list[str]           # skill names to run for it
     note: str = ""
+    # Which collapsed-entrypoint shape(s) this route's own *topic* belongs to
+    # (diff|repo|decision|artifact, matching Skill.shape/Entrypoint.shapes) --
+    # distinct from which lenses it runs, which can span shapes (e.g. a design
+    # doc route running design-capable diff lenses). None defaults to ["diff"],
+    # the shape nearly every route describes; only the repo-audit, decision, and
+    # artifact rows need an explicit tag. See build_entrypoint_md's routes filter.
+    shapes: list[str] | None = None
 
 
 @dataclass
@@ -153,6 +160,7 @@ class Manifest:
 
 _NAME_RE = re.compile(r"^[a-z0-9-]+$")
 _RESERVED = ("anthropic", "claude")
+_SHAPES = ("diff", "repo", "decision", "artifact")
 
 
 class ValidationError(Exception):
@@ -172,7 +180,7 @@ def _validate_skills(manifest: Manifest, docs_root: str) -> set[str]:
         seen.add(s.name)
         if not s.description or len(s.description) > 1024:
             raise ValidationError(f"{s.name}: description must be non-empty and <=1024 chars")
-        if s.shape not in ("diff", "repo", "decision", "artifact"):
+        if s.shape not in _SHAPES:
             raise ValidationError(
                 f"{s.name}: shape must be diff|repo|decision|artifact, got {s.shape!r}")
         if s.tier not in ("floor", "preference"):
@@ -256,6 +264,17 @@ def _validate_router(manifest: Manifest, seen: set[str]) -> None:
     for route in r.routes:
         if not route.when or not route.run:
             raise ValidationError("router: every route needs `when` and `run`")
+        if route.shapes is not None:
+            if (not isinstance(route.shapes, list)
+                    or not all(isinstance(shape, str) for shape in route.shapes)):
+                raise ValidationError(
+                    f"router: route {route.when!r}: shapes must be a list of strings")
+            if not route.shapes:
+                raise ValidationError(f"router: route {route.when!r}: shapes must be non-empty if set")
+            for shape in route.shapes:
+                if shape not in _SHAPES:
+                    raise ValidationError(
+                        f"router: route {route.when!r}: unknown shape {shape!r}")
         for lens in route.run:
             if lens not in seen:
                 raise ValidationError(
@@ -352,7 +371,7 @@ def _validate_entrypoints(manifest: Manifest) -> None:
         if not ep.shapes:
             raise ValidationError(f"entrypoint {ep.name}: shapes must be non-empty")
         for shape in ep.shapes:
-            if shape not in {"diff", "repo", "decision", "artifact"}:
+            if shape not in _SHAPES:
                 raise ValidationError(f"entrypoint {ep.name}: unknown shape {shape!r}")
         for s in manifest.skills:
             if s.shape in ep.shapes or (ep.include_design and s.design):
@@ -504,7 +523,8 @@ def load_manifest(path: str) -> Manifest:
                 # TypeError, and a present-but-null "note:" on a route
                 # would leak None past a caller expecting str (CodeRabbit
                 # review on #145).
-                routes=[Route(when=x["when"], run=x["run"], note=x.get("note") or "")
+                routes=[Route(when=x["when"], run=x["run"], note=x.get("note") or "",
+                              shapes=x.get("shapes"))
                         for x in (r["routes"] or [])],
                 # Same bare-null gap as description above: .get(key, "")
                 # only substitutes "" when the key is absent, not when
