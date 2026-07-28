@@ -483,6 +483,29 @@ def test_router_requires_every_skill_to_have_a_picker():
     with pytest.raises(ValidationError, match="picker is required"):
         validate(m)
 
+def test_router_route_shapes_must_be_known():
+    m = Manifest("v0.2", [_skill(picker="p")],
+                 router=Router(name="choosing-review-lenses", description="d",
+                               routes=[Route(when="Bug fix", run=["hunting-silent-failures"],
+                                             shapes=["bogus"])]))
+    with pytest.raises(ValidationError, match="unknown shape"):
+        validate(m)
+
+def test_router_route_shapes_must_be_non_empty_if_set():
+    m = Manifest("v0.2", [_skill(picker="p")],
+                 router=Router(name="choosing-review-lenses", description="d",
+                               routes=[Route(when="Bug fix", run=["hunting-silent-failures"],
+                                             shapes=[])]))
+    with pytest.raises(ValidationError, match="shapes must be non-empty"):
+        validate(m)
+
+def test_router_route_shapes_defaults_to_none_and_real_manifest_loads_them():
+    real = load_manifest("skills/manifest.yaml")
+    decision_routes = [r for r in real.router.routes if r.when.startswith("A decision, not a diff")]
+    assert decision_routes and decision_routes[0].shapes == ["decision"]
+    bug_fix_routes = [r for r in real.router.routes if r.when == "Bug fix"]
+    assert bug_fix_routes and bug_fix_routes[0].shapes is None
+
 def test_valid_router_accepted_and_real_manifest_loads():
     m = Manifest("v0.2", [_skill(picker="p")],
                  router=Router(name="choosing-review-lenses", description="d",

@@ -203,16 +203,29 @@ def build_entrypoint_md(manifest: Manifest, entrypoint: Entrypoint) -> str:
     fm = yaml.safe_dump(front, sort_keys=False, default_flow_style=False,
                         allow_unicode=True).strip()
 
-    # Routes from the router that touch this entrypoint's lenses. A route's
-    # note travels with it even when the note calls out a lens the shape
-    # filter excluded from `run` (e.g. a repo-shaped auto-include on a
-    # diff-shaped entrypoint) — otherwise that lens has no path into this
-    # entrypoint at all: not bundled (shape-filtered), not in the run list
-    # (shape-filtered), and silently missing from the note too.
+    # Routes from the router that (a) belong to this entrypoint's own shape
+    # and (b) touch this entrypoint's lenses. (a) alone isn't enough: lens
+    # overlap can happen purely because `include_design` bundles every
+    # design-capable diff lens into a non-diff entrypoint (e.g. the decision
+    # entrypoint), which would otherwise pull in every diff-shaped route
+    # (Bug fix, Refactor, Async change, ...) whose `run` happens to include
+    # one of those lenses — real, but topically irrelevant to that entrypoint
+    # (issue #188). `route.shapes` defaults to `["diff"]` when unset, since
+    # that's what nearly every route describes; only repo-audit, decision,
+    # and artifact rows (and the diff+decision-shared "Design doc" row) need
+    # an explicit tag in manifest.yaml.
+    #
+    # A route's note still travels with it even when the note calls out a
+    # lens the shape filter excluded from `run` (e.g. a repo-shaped
+    # auto-include on a diff-shaped entrypoint) — otherwise that lens has no
+    # path into this entrypoint at all: not bundled (shape-filtered), not in
+    # the run list (shape-filtered), and silently missing from the note too.
     rows = []
     if manifest.router:
         for route in manifest.router.routes:
-            if any(lens in lens_names for lens in route.run):
+            route_shapes = route.shapes or ["diff"]
+            if (any(shape in entrypoint.shapes for shape in route_shapes)
+                    and any(lens in lens_names for lens in route.run)):
                 run = ", ".join(f"`{lens}`" for lens in route.run if lens in lens_names)
                 if route.note:
                     run += f" — {_escape_table_cell(route.note)}"

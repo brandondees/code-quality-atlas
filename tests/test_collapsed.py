@@ -191,6 +191,42 @@ def test_build_entrypoint_md_has_trigger_routing_modes_and_load_instructions():
     assert "Bug fix" in md                              # the in-shape route
 
 
+def test_build_entrypoint_md_routes_table_excludes_lens_overlap_from_wrong_shape():
+    # Regression for #188: a decision-shaped entrypoint's `include_design`
+    # bundles every design-capable diff lens, which used to make ANY
+    # diff-shaped route referencing one of those lenses leak into the
+    # decision entrypoint's Routes table (e.g. "Bug fix", "Refactor") even
+    # though the route's own topic has nothing to do with decision review.
+    design_lens = _skill(name="design-lens", shape="diff", design=True)
+    router = Router(
+        name="choosing-review-lenses", description="route", body="",
+        routes=[
+            # Untagged -> defaults to shapes=["diff"]; must NOT appear in the
+            # decision entrypoint despite the lens overlap via include_design.
+            Route(when="Bug fix", run=["design-lens"]),
+            # Explicitly decision-shaped -> must appear in the decision
+            # entrypoint and nowhere else.
+            Route(when="A decision, not a diff", run=["design-lens"],
+                  shapes=["decision"]),
+        ])
+    syn = Synthesizer(name="synthesizing-review-findings", description="merge",
+                      severity_order=["Blocker", "Major", "Minor", "Nit"], tensions=[])
+    modes = [Mode(name="review", breadth="top 2-4", floor="escalating", triggers=["review"])]
+    ep_change = Entrypoint(name="reviewing-a-change", description="d", shapes=["diff"])
+    ep_decision = Entrypoint(name="reviewing-a-decision", description="d",
+                             shapes=["decision"], include_design=True)
+    m = Manifest("v0", [design_lens], router=router, synthesizer=syn, modes=modes,
+                 entrypoints=[ep_change, ep_decision])
+
+    change_md = build_entrypoint_md(m, ep_change)
+    decision_md = build_entrypoint_md(m, ep_decision)
+
+    assert "Bug fix" in change_md
+    assert "A decision, not a diff" not in change_md
+    assert "Bug fix" not in decision_md
+    assert "A decision, not a diff" in decision_md
+
+
 def test_build_collapsed_synthesis_carries_floor_policy_without_frontmatter():
     md = build_collapsed_synthesis(_full_manifest())
     assert not md.startswith("---")                     # bundled body, no frontmatter
