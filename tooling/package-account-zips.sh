@@ -41,7 +41,7 @@ SKILLS_SUBDIR="skills"
 
 usage() {
   cat <<'EOF'
-Usage: tooling/package-account-zips.sh [--bundle | --bundle-only] [--out DIR]
+Usage: tooling/package-account-zips.sh [--collapsed] [--bundle | --bundle-only] [--out DIR]
 
 Packages skills/<name>/ into upload-ready ZIPs for the claude.ai Skills GUI.
 Each per-skill ZIP holds <name>/SKILL.md plus reference/ and examples.md;
