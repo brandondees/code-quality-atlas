@@ -20,8 +20,10 @@
 # skills so that attribution travels with the copy.
 #
 # Usage:
-#   tooling/vendor-skills.sh <target-repo-dir>            # vendor/refresh
-#   tooling/vendor-skills.sh <target-repo-dir> --prune    # also drop stale vendored skills
+#   tooling/vendor-skills.sh <target-repo-dir>               # vendor/refresh
+#   tooling/vendor-skills.sh <target-repo-dir> --collapsed   # vendor the 4 collapsed entrypoints instead
+#   tooling/vendor-skills.sh <target-repo-dir> --prune       # also drop stale vendored skills
+#   tooling/vendor-skills.sh <target-repo-dir> --force       # overwrite a colliding non-vendored dir
 #
 # After running, review and commit the .claude/skills/ changes in the target repo.
 #
