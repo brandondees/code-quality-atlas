@@ -39,12 +39,12 @@ which also resolved D16.
 
 **Genuinely still open (undecided):**
 Q21 (suite-wide eval comprehensiveness — risk-tiered rollout + the opt-in `eval_min`
-mechanism ✅ built 2026-07-18; four floor-tier lenses hardened so far
+mechanism ✅ built 2026-07-18; **all five floor-tier lenses now hardened**
 (`sweeping-for-security`, `tracing-correctness-and-invariants`,
-`reviewing-migration-and-data-safety`, `reviewing-concurrency-and-async` — the last
-of which surfaced the campaign's worst floor-of-record gap yet, ~71% missed);
-generalizing to the last floor-tier lens (`hunting-silent-failures`), then
-preference-tier lenses, still open),
+`reviewing-migration-and-data-safety`, `reviewing-concurrency-and-async` — the
+last of which surfaced the campaign's worst floor-of-record gap yet, ~71%
+missed — and `hunting-silent-failures`, the fifth and final one); generalizing
+to preference-tier lenses is the next open step),
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
@@ -127,7 +127,7 @@ findings, absent on llama). Per the runbook these are model-capability limits,
 not heuristic regressions, so no tuning was applied. See the session-log entry
 of the same date.
 
-### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; four of five floor-tier lenses hardened, generalization to the rest still open) *(new, 2026-06-27)*
+### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened, generalization to preference-tier lenses still open) *(new, 2026-06-27)*
 
 **Trigger.** Building the G30 threat-modeling lens ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)) surfaced that for high-stakes lenses the dangerous failure mode is the **false negative**, and that 3–4 happy-path scenarios don't probe it. That spec's §5 introduces a **thorough, adversarial, false-negative-weighted** eval design — ~21 scenarios across core-firing / per-axis-coverage / detect-and-route / **red-team** / precision groups, plus a red-team generation pass and a hardened cross-model re-gate.
 
@@ -193,7 +193,11 @@ Beyond the raw miss count, three of the misses (7, 12, 16) share a distinct and 
 
 **Disposition: real, substantial progress — not a ceiling.** Unlike `reviewing-concurrency-and-async`, this lens responded strongly to targeted worked examples (7 of 11 resolved misses fixed in one round, ~64%). Stopping here rather than chasing the remaining 4 — two are compound/multi-defect scenarios (the lock/money/clock triple, the ADR checklist) that would need more substantial examples to address, and the mechanical-diff-distraction failure has already shown it resists simple decision-rule fixes.
 
-**One floor-tier lens remains unhardened**: `hunting-silent-failures` (already has an eval suite at 6 scenarios but no `eval_min` set — worth checking, when it's picked up, whether that count already reflects an A-E-shaped suite or still needs the full treatment).
+**Fifth and final hardened instance: `hunting-silent-failures`** (`eval_min: 27`, up from an already-above-baseline 6) — same A-E taxonomy as the prior four, mapped onto this lens's own two-category checklist (`reference/heuristics.md` categories #2 error-handling and #4 resource/steady-state, the latter scoped to the resource-cleanup-on-failure-paths factor this lens's own trigger names, since the rest of #4 is primarily owned by `tracing-correctness-and-invariants` per `cross_ref: [4]`): **A** one design-doc-shaped scenario (an RFC excerpt proposing a DEBUG-level, never-expiring cache fallback on a dependency outage — proving the lens's `design: true` capability actually fires on prose, not just diffs); **B** seven per-axis scenarios (an overly broad `except Exception` that still logs and degrades intentionally but hides unrelated bugs behind the same catch, a tight retry loop with no backoff/jitter, no circuit breaker for a dependency already known to be failing repeatedly, a caught-and-rethrown `RuntimeError` that discards the original cause via `from None`, a floating promise with no `.catch()` in a plain non-concurrent context, an assertion-worthy internal-invariant violation silently defaulted instead of surfaced, and a resource leak on the exception path with no `with`/`finally`); **C** four delegate/escalate-boundary scenarios (a swallowed validation failure letting unvalidated input reach a raw SQL string → `sweeping-for-security`, a secret leaked into an error log line → `sweeping-for-security`, a partial multi-step failure left uncompensated → `reviewing-migration-and-data-safety`, a swallowed exception masking a check-then-act race → `reviewing-concurrency-and-async`); **D** six adversarial/red-team scenarios (an in-diff "do not flag" suppression comment, a buried unsafe handler among 14 mechanically-identical safe ones, prod-is-down sycophancy/time-pressure framing, a function named/documented "safe" that isn't, an unverifiable "monitored in production, zero issues" claim, and a looks-handled-but-isn't case that logs the error yet still falls through to a false-success database write); **E** three precision scenarios (a comment-only diff, a correctly-implemented retry+backoff+circuit-breaker pair, and correct resource cleanup via `with`). 27 total, up from the original 6 (kept unchanged, still valid) — matching `sweeping-for-security`'s size, the largest suite in the campaign so far. `python -m tooling.cli generate`/`drift` clean; `python -m tooling.cli eval` confirms the new floor; `python -m pytest` (262 tests) passes.
+
+**Cross-model re-gate: deferred, same standing gap as other recent Q21 work.** No Ollama/local-model runtime available in this session (the same recurring gap noted for several prior Q21 entries and for Q15's newest additions) — the hardened suite has not yet been re-gated against the floor-of-record model. Tracked as ordinary follow-up, the same disposition as `sweeping-for-security`'s still-deferred re-gate; the other three floor-tier lenses (`tracing-correctness-and-invariants`, `reviewing-migration-and-data-safety`, `reviewing-concurrency-and-async`) did get re-gated, in separate sessions once a local-model substrate was available.
+
+**All five floor-tier lenses are now hardened**, closing the risk-tiered rollout's first wave. The next tracked Q21 step is generalizing the same A-E mechanism to preference-tier lenses — a fresh, independent scope decision (which lenses, in what order), not a continuation of this floor-tier sweep.
 
 **Suite-wide tuning-sweep summary (2026-07-27), before deciding on a baseline-model swap:**
 
