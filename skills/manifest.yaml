@@ -16,6 +16,12 @@ skills:
     wave: 1
     tier: floor
     cross_ref: [4]    # primary owner: tracing-correctness-and-invariants
+    # Q21: fifth and final hardened, adversarial/red-team-weighted eval suite
+    # (the sweeping-for-security / tracing-correctness-and-invariants /
+    # reviewing-migration-and-data-safety / reviewing-concurrency-and-async
+    # precedent's A-E scenario groups), raised from D8's 3-scenario baseline
+    # (this lens already had 6). See open-questions.md Q21.
+    eval_min: 27
     built_from:
       - { category: 2, source: docs/research/cluster-1-correctness.md#2 }
       - { category: 4, source: docs/research/cluster-1-correctness.md#4 }
