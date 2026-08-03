@@ -125,7 +125,7 @@
     {
       "query": "Review this change:\n```python\ndef support_agent(ticket):\n    return llm.chat(model=\"claude-sonnet-4-6\", prompt=build_prompt(ticket),\n                    tools=[issue_refund, close_ticket, send_email, query_customer_db],\n                    max_steps=50)\n```",
       "expected_behavior": [
-        "Flags its own narrow finding: no visible per-request budget guard on a 50-step loop over four tools — this lens's own cost/runaway-loop concern",
+        "Flags its own narrow finding: a 50-step cap across four tools (including issue_refund) is a high budget with no visible per-request $-cost cap alongside the step cap — this lens's own cost/runaway-loop concern",
         "Delegates the deeper action-surface judgment — tool least-privilege, approval gates on consequential actions like issue_refund, and step-budget design — to reviewing-agentic-safety, since this call now has a real tool/action surface beyond a plain model call",
         "Still reports its own cost/budget-guard finding in full, not just a pointer to the other lens"
       ]
