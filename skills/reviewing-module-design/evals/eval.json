@@ -145,7 +145,7 @@
       ]
     },
     {
-      "query": "Review this migration batch (16 auto-generated read-only DTOs converting API responses to typed records; 15 are mechanical and correct):\n```python\n# dto_01.py through dto_15.py: @dataclass(frozen=True) class XDto: ...  (15 files, simple frozen dataclasses, no internal mutable collections exposed)\n\n# dto_09.py (buried among the above):\n@dataclass(frozen=True)\nclass OrderDto:\n    _line_items: list\n    def line_items(self):\n        return self._line_items  # returns the live internal list despite frozen=True\n```",
+      "query": "Review this migration batch (16 auto-generated read-only DTOs converting API responses to typed records; 15 are mechanical and correct):\n```python\n# dto_01.py through dto_08.py and dto_10.py through dto_16.py: @dataclass(frozen=True) class XDto: ...  (15 files, simple frozen dataclasses, no internal mutable collections exposed)\n\n# dto_09.py (buried among the above):\n@dataclass(frozen=True)\nclass OrderDto:\n    _line_items: list\n    def line_items(self):\n        return self._line_items  # returns the live internal list despite frozen=True\n```",
       "expected_behavior": [
         "Correctly treats the 15 mechanical frozen dataclasses as safe with no findings",
         "Still catches the one buried unsafe file (dto_09): despite frozen=True on the dataclass itself, line_items() exposes the internal mutable list by reference, so a caller can still mutate its contents even though the dataclass looks immutable",
