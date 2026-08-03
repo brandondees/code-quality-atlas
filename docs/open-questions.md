@@ -45,8 +45,9 @@ mechanism ✅ built 2026-07-18; **all five floor-tier lenses now hardened**
 last of which surfaced the campaign's worst floor-of-record gap yet, ~71%
 missed — and `hunting-silent-failures`, the fifth and final one); the
 preference-tier rollout is now underway, wave-1-first: `reviewing-module-design`,
-`checking-restraint`, `reviewing-naming-and-readability`, and
-`reviewing-llm-integration` hardened; 26 preference-tier lenses remain),
+`checking-restraint`, `reviewing-naming-and-readability`,
+`reviewing-llm-integration`, and `finding-maintainability-hotspots` hardened
+(wave-1-first sub-wave now complete); 25 preference-tier lenses remain),
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
@@ -129,7 +130,7 @@ findings, absent on llama). Per the runbook these are model-capability limits,
 not heuristic regressions, so no tuning was applied. See the session-log entry
 of the same date.
 
-### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 4 of 30 done) *(new, 2026-06-27)*
+### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 5 of 30 done, wave-1-first sub-wave complete) *(new, 2026-06-27)*
 
 **Trigger.** Building the G30 threat-modeling lens ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)) surfaced that for high-stakes lenses the dangerous failure mode is the **false negative**, and that 3–4 happy-path scenarios don't probe it. That spec's §5 introduces a **thorough, adversarial, false-negative-weighted** eval design — ~21 scenarios across core-firing / per-axis-coverage / detect-and-route / **red-team** / precision groups, plus a red-team generation pass and a hardened cross-model re-gate.
 
@@ -219,7 +220,11 @@ Beyond the raw miss count, three of the misses (7, 12, 16) share a distinct and 
 
 **Cross-model re-gate: deferred**, same recurring gap.
 
-**26 preference-tier lenses remain** (one more in the wave-1-first sub-wave, then an unscoped remainder). Each is an independent, reversible follow-up — author its own A-E suite, set its own `eval_min` — not a blocking dependency on this entry.
+**Fifth preference-tier instance: `finding-maintainability-hotspots`** (`eval_min: 24`, up from 4) — same A-E taxonomy, adapted for this lens's shape: it is `shape: repo` (a repo-wide scan, not a single-diff review) and carries no `design: true`, so — like `reviewing-naming-and-readability` — the design-doc (A) group is omitted. Mapped onto this lens's own single-category checklist (`reference/heuristics.md` #21, 13 maintainability axes): the original 4 baseline scenarios already exercised 4 axes (churn×complexity hotspot detection, bus factor, debt visibility, and hidden/change-coupling) plus one precision case, so **B** covers the 8 remaining unexercised axes as new scenarios (change amplification — one field addition forcing 11 hand-edited files; shotgun surgery — a status enum duplicated across 4 files; blast radius — narrowing a 40-importer function's return contract with no compat check; the refactorability gate — restructuring a 0-test-coverage pricing function; onboarding cost — a tax surcharge whose rationale lives only in a Slack thread; connascence of position crossing a package boundary via a 5-element positional list; reversibility — a PK migration that drops the old column in the same migration it's introduced, with no rollback path; and complexity trend — deepening the nesting of an already-flagged hotspot); **C** three delegate/escalate-boundary scenarios, one anchored to this lens's one documented overlap-resolution entry (a file whose every edit reinvented its own error-handling idiom → own change-amplification finding, converge-or-diverge judgment delegated to `checking-idioms-and-consistency` per the manifest's own resolve rule) plus two more by domain judgment (a plugin-registry abstraction introduced from a single duplicated pair → own speculative-generality finding, premature-abstraction judgment delegated to `checking-restraint`; a domain-layer file importing an infra-layer client at an 82% co-change rate → own hidden-coupling finding, layering-violation judgment delegated to `auditing-architecture-conformance`, itself repo-shaped like this lens); **D** six adversarial/red-team scenarios (an unlinked "maintainability-reviewed: no action needed" annotation over a still-objectively-hot file, a buried 41-commit/1-author/complexity-89 row among 14 near-identical healthy export-script rows, SOC2-audit-deadline sycophancy framing wrapping an unsafe untested restructure of the repo's highest-complexity file, a module docstring claiming "fully covered by our regression suite" against an actual 11% coverage figure, an unverifiable "we pair-programmed extensively" bus-factor claim contradicted by unchanged single-author VCS data, and an author-count "improvement" from 1 to 5 that's actually 4 bot accounts plus the same 1 human); **E** three precision scenarios (a comment-only typo fix on an already-healthy file, a file with the repo's highest raw commit count but a healthy complexity-halving trend and closed debt markers, and a phase-1-only additive/dual-write migration step correctly not flagged for the eventual, separately-tracked column drop two migrations later). 24 total, up from the original 4 — matching two of the floor-tier lenses' and `checking-restraint`'s size. `python -m tooling.cli generate`/`drift` clean; `python -m tooling.cli eval` confirms the new floor; `python -m pytest` (262 tests) passes; markdownlint clean repo-wide.
+
+**Cross-model re-gate: deferred**, same recurring gap.
+
+**Wave-1-first sub-wave complete.** All five original wave-1 lenses (`reviewing-module-design`, `checking-restraint`, `reviewing-naming-and-readability`, `reviewing-llm-integration`, `finding-maintainability-hotspots`) are now hardened to the same A-E standard as the floor tier. **25 preference-tier lenses remain**, entirely unscoped/unordered — a later pass, not decided here. Each is an independent, reversible follow-up — author its own A-E suite, set its own `eval_min` — not a blocking dependency on this entry.
 
 **Suite-wide tuning-sweep summary (2026-07-27), before deciding on a baseline-model swap:**
 

@@ -250,6 +250,11 @@ skills:
       bus factor, untracked debt.
     shape: repo
     wave: 1
+    # Q21: fifth preference-tier lens hardened (wave-1-first rollout, last in
+    # this sub-wave). A-E taxonomy adapted for this lens's repo-scan shape
+    # (no design-doc A group: no `design: true`), raised from D8's 4-scenario
+    # baseline. See open-questions.md Q21.
+    eval_min: 24
     built_from:
       - { category: 21, source: docs/research/cluster-6-evolution.md#21 }
 
