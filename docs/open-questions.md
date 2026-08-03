@@ -43,8 +43,9 @@ mechanism ✅ built 2026-07-18; **all five floor-tier lenses now hardened**
 (`sweeping-for-security`, `tracing-correctness-and-invariants`,
 `reviewing-migration-and-data-safety`, `reviewing-concurrency-and-async` — the
 last of which surfaced the campaign's worst floor-of-record gap yet, ~71%
-missed — and `hunting-silent-failures`, the fifth and final one); generalizing
-to preference-tier lenses is the next open step),
+missed — and `hunting-silent-failures`, the fifth and final one); the
+preference-tier rollout is now underway, wave-1-first, starting with
+`reviewing-module-design`; 29 preference-tier lenses remain),
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
@@ -127,7 +128,7 @@ findings, absent on llama). Per the runbook these are model-capability limits,
 not heuristic regressions, so no tuning was applied. See the session-log entry
 of the same date.
 
-### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened, generalization to preference-tier lenses still open) *(new, 2026-06-27)*
+### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 1 of 30 done) *(new, 2026-06-27)*
 
 **Trigger.** Building the G30 threat-modeling lens ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)) surfaced that for high-stakes lenses the dangerous failure mode is the **false negative**, and that 3–4 happy-path scenarios don't probe it. That spec's §5 introduces a **thorough, adversarial, false-negative-weighted** eval design — ~21 scenarios across core-firing / per-axis-coverage / detect-and-route / **red-team** / precision groups, plus a red-team generation pass and a hardened cross-model re-gate.
 
@@ -198,6 +199,14 @@ Beyond the raw miss count, three of the misses (7, 12, 16) share a distinct and 
 **Cross-model re-gate: deferred, same standing gap as other recent Q21 work.** No Ollama/local-model runtime available in this session (the same recurring gap noted for several prior Q21 entries and for Q15's newest additions) — the hardened suite has not yet been re-gated against the floor-of-record model. Tracked as ordinary follow-up, the same disposition as `sweeping-for-security`'s still-deferred re-gate; the other three floor-tier lenses (`tracing-correctness-and-invariants`, `reviewing-migration-and-data-safety`, `reviewing-concurrency-and-async`) did get re-gated, in separate sessions once a local-model substrate was available.
 
 **All five floor-tier lenses are now hardened**, closing the risk-tiered rollout's first wave. The next tracked Q21 step is generalizing the same A-E mechanism to preference-tier lenses — a fresh, independent scope decision (which lenses, in what order), not a continuation of this floor-tier sweep.
+
+**Preference-tier rollout: scope decision, then first instance (2026-08-02).** The manifest has no explicit `tier: preference` value — Q13 Wave A only ever marked the five floor-tier lenses; every other lens (30 total, all still at D8's 3-4-scenario baseline) is preference-tier by omission. Hardening all 30 in one pass isn't a reasonable single unit of work, so this pass makes the ordering call explicit rather than picking arbitrarily: **wave-1-first** — the five original wave-1 lenses (the "★ skills" refined and cross-model gated earliest, per the 2026-06-09/10 session-log entry) are the suite's most foundational, highest-profile lenses, the same maturity signal that put `hunting-silent-failures` (also wave 1) first in the floor-tier queue. That gives an ordering, not a full plan: `reviewing-module-design`, `checking-restraint`, `reviewing-naming-and-readability`, `reviewing-llm-integration`, then `finding-maintainability-hotspots` (repo-shaped, held for last in this sub-wave since its A-E taxonomy needs repo-audit-shaped adaptation rather than the diff-shaped delegate/adversarial pattern used everywhere else). Beyond wave 1, no ordering is fixed yet — a later pass, not decided here.
+
+**First preference-tier instance: `reviewing-module-design`** (`eval_min: 26`, up from 3) — same A-E taxonomy as the floor-tier lenses, mapped onto this lens's own two-category checklist (`reference/heuristics.md` #9 cohesion/coupling/encapsulation, #10 type design/illegal states): **A** one design-doc-shaped scenario (an RFC proposing a single untyped `attributes: dict` entity bag across four domain types, proving `design: true` fires on prose); **B** nine per-axis scenarios (low-cohesion SRP violation, a shallow pass-through wrapper adding no value, Connascence of Position across a boundary, an encapsulation leak via a getter returning a live internal list, a call-sequence not enforced by types, a Data Clump of three fields traveling together, an inheritance-for-reuse LSP violation, a cyclic import between two modules, and primitive obsession on email/money/currency); **C** four delegate/escalate-boundary scenarios (mutually-exclusive nullable fields with a matching nullable schema → `reviewing-migration-and-data-safety`; a one-implementation abstract interface → `checking-restraint`; a smart constructor that doesn't actually validate, feeding a float money calculation → `tracing-correctness-and-invariants`; a removed field on a public SDK response type → `reviewing-api-contract-safety`); **D** six adversarial/red-team scenarios (an in-diff "architecture-approved, don't flag" suppression comment, a buried unsafe DTO among 15 mechanically-identical frozen ones, launch-deadline sycophancy framing, a class named/documented "Immutable" that isn't, an unverifiable "shipped in 20 other services" claim, and a smart constructor with a caller-supplied bypass flag that defeats its own validation); **E** three precision scenarios (a comment-only diff, composition-over-inheritance done correctly, and a properly exhaustive discriminated union). 26 total, up from the original 3 — matching `tracing-correctness-and-invariants`'s size. `python -m tooling.cli generate`/`drift` clean; `python -m tooling.cli eval` confirms the new floor; `python -m pytest` (262 tests) passes; markdownlint clean repo-wide.
+
+**Cross-model re-gate: deferred**, same recurring no-local-model-runtime gap as the floor-tier campaign's later sessions. Tracked as ordinary follow-up alongside the still-pending floor-tier re-gates (`sweeping-for-security`, `hunting-silent-failures`).
+
+**29 preference-tier lenses remain** (four more in the wave-1-first sub-wave, then an unscoped remainder). Each is an independent, reversible follow-up — author its own A-E suite, set its own `eval_min` — not a blocking dependency on this entry.
 
 **Suite-wide tuning-sweep summary (2026-07-27), before deciding on a baseline-model swap:**
 
