@@ -55,6 +55,10 @@ skills:
     shape: diff
     design: true
     wave: 1
+    # Q21: first preference-tier lens hardened, opening the wave-1-first
+    # rollout that follows the five floor-tier lenses. Same A-E adversarial
+    # taxonomy, raised from D8's 3-scenario baseline. See open-questions.md Q21.
+    eval_min: 26
     built_from:
       - { category: 9, source: docs/research/cluster-3-structure.md#9 }
       - { category: 10, source: docs/research/cluster-3-structure.md#10 }
