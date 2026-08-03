@@ -44,8 +44,9 @@ mechanism ✅ built 2026-07-18; **all five floor-tier lenses now hardened**
 `reviewing-migration-and-data-safety`, `reviewing-concurrency-and-async` — the
 last of which surfaced the campaign's worst floor-of-record gap yet, ~71%
 missed — and `hunting-silent-failures`, the fifth and final one); the
-preference-tier rollout is now underway, wave-1-first: `reviewing-module-design`
-and `checking-restraint` hardened; 28 preference-tier lenses remain),
+preference-tier rollout is now underway, wave-1-first: `reviewing-module-design`,
+`checking-restraint`, and `reviewing-naming-and-readability` hardened; 27
+preference-tier lenses remain),
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
@@ -128,7 +129,7 @@ findings, absent on llama). Per the runbook these are model-capability limits,
 not heuristic regressions, so no tuning was applied. See the session-log entry
 of the same date.
 
-### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 2 of 30 done) *(new, 2026-06-27)*
+### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 3 of 30 done) *(new, 2026-06-27)*
 
 **Trigger.** Building the G30 threat-modeling lens ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)) surfaced that for high-stakes lenses the dangerous failure mode is the **false negative**, and that 3–4 happy-path scenarios don't probe it. That spec's §5 introduces a **thorough, adversarial, false-negative-weighted** eval design — ~21 scenarios across core-firing / per-axis-coverage / detect-and-route / **red-team** / precision groups, plus a red-team generation pass and a hardened cross-model re-gate.
 
@@ -210,7 +211,11 @@ Beyond the raw miss count, three of the misses (7, 12, 16) share a distinct and 
 
 **Cross-model re-gate: deferred**, same recurring gap.
 
-**28 preference-tier lenses remain** (three more in the wave-1-first sub-wave, then an unscoped remainder). Each is an independent, reversible follow-up — author its own A-E suite, set its own `eval_min` — not a blocking dependency on this entry.
+**Third preference-tier instance: `reviewing-naming-and-readability`** (`eval_min: 25`, up from 3) — same A-E taxonomy, minus the design-doc (A) group: this lens's own `SKILL.md` states "Shape: diff... not meant for design docs or plans," and it carries no `design: true` in the manifest (unlike the two prior preference-tier instances), so a design-shaped scenario would be testing a capability the lens doesn't claim. Mapped onto this lens's own three-category checklist (`reference/heuristics.md` #5 naming, #6 function structure, #7 comments): **B** nine per-axis scenarios (a non-predicate boolean name, a singular name holding/iterating a collection, mixed domain synonyms for one concept, a name implying the wrong structure (`user_list` that's a dict), raw byte-packing inlined into a high-level orchestration function, a boolean flag parameter forking the whole function body, asymmetric parallel branches — two `return` directly, one falls through a shared return, a docstring with undocumented params and a stale return type, and an unattributed/unlinked TODO); **C** four delegate/escalate-boundary scenarios (a `Manager`/`process`-named God-class → `reviewing-module-design`; five near-duplicated `lines.append` calls, extraction call left to the counterweight → `checking-restraint`; an undocumented-unit `delay` param → `tracing-correctness-and-invariants`; an incomplete attribution comment → `auditing-compliance-and-provenance`); **D** six adversarial/red-team scenarios (an in-diff `# noqa: readability-checked-manually` suppression comment, a buried placeholder-named validator among 15 mechanically-identical well-named ones, outage-hotfix sycophancy framing, a function named `validateAndSanitizeInput` that only trims whitespace, an unverifiable "benchmarked and confirmed optimal" naming claim, and a looks-decomposed-but-isn't case where extracted helpers are named `step1`/`step2`/`step3`); **E** three precision scenarios (a comment-only typo fix, a well-decomposed guard-clause function with a named threshold constant, and a domain-standard one-letter file-handle abbreviation in a two-line scope). 25 total, up from the original 3. `python -m tooling.cli generate`/`drift` clean; `python -m tooling.cli eval` confirms the new floor; `python -m pytest` (262 tests) passes.
+
+**Cross-model re-gate: deferred**, same recurring gap.
+
+**27 preference-tier lenses remain** (two more in the wave-1-first sub-wave, then an unscoped remainder). Each is an independent, reversible follow-up — author its own A-E suite, set its own `eval_min` — not a blocking dependency on this entry.
 
 **Suite-wide tuning-sweep summary (2026-07-27), before deciding on a baseline-model swap:**
 
