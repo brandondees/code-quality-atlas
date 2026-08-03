@@ -343,7 +343,7 @@ def generate_collapsed(manifest: Manifest, docs_root: str = ".", skills_root: st
         (out / "evals").mkdir(parents=True, exist_ok=True)
         (out / "SKILL.md").write_text(build_entrypoint_md(manifest, ep), encoding="utf-8")
         (out / "reference" / "synthesis.md").write_text(
-            build_collapsed_synthesis(manifest), encoding="utf-8")
+            _gen_header() + build_collapsed_synthesis(manifest), encoding="utf-8")
         ep_lenses = entrypoint_lenses(manifest, ep)
         current_lens_names = {skill.name for skill in ep_lenses}
         # Prune a lens dropped from this entrypoint (deleted, reshaped, or
