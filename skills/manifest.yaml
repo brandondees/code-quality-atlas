@@ -38,6 +38,11 @@ skills:
       comment accuracy.
     shape: diff
     wave: 1
+    # Q21: third preference-tier lens hardened (wave-1-first rollout). Same
+    # A-E adversarial taxonomy as the floor-tier lenses, minus the design-doc
+    # (A) group — this lens is diff-only, not design-capable — raised from
+    # D8's 3-scenario baseline. See open-questions.md Q21.
+    eval_min: 25
     built_from:
       - { category: 5, source: docs/research/cluster-2-readability.md#5 }
       - { category: 6, source: docs/research/cluster-2-readability.md#6 }
