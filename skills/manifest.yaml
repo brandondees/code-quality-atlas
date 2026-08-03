@@ -77,6 +77,10 @@ skills:
     design: true
     wave: 1
     cross_ref: [15]   # primary owner: reviewing-performance-and-efficiency (counterweight lens here)
+    # Q21: second preference-tier lens hardened (wave-1-first rollout). Same
+    # A-E adversarial taxonomy, raised from this lens's prior 4-scenario
+    # suite (above D8's 3-scenario baseline). See open-questions.md Q21.
+    eval_min: 24
     built_from:
       - { category: 11, source: docs/research/cluster-3-structure.md#11 }
       - { category: 15, source: docs/research/cluster-4-runtime.md#15 }

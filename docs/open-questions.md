@@ -44,8 +44,8 @@ mechanism ✅ built 2026-07-18; **all five floor-tier lenses now hardened**
 `reviewing-migration-and-data-safety`, `reviewing-concurrency-and-async` — the
 last of which surfaced the campaign's worst floor-of-record gap yet, ~71%
 missed — and `hunting-silent-failures`, the fifth and final one); the
-preference-tier rollout is now underway, wave-1-first, starting with
-`reviewing-module-design`; 29 preference-tier lenses remain),
+preference-tier rollout is now underway, wave-1-first: `reviewing-module-design`
+and `checking-restraint` hardened; 28 preference-tier lenses remain),
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
@@ -128,7 +128,7 @@ findings, absent on llama). Per the runbook these are model-capability limits,
 not heuristic regressions, so no tuning was applied. See the session-log entry
 of the same date.
 
-### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 1 of 30 done) *(new, 2026-06-27)*
+### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 2 of 30 done) *(new, 2026-06-27)*
 
 **Trigger.** Building the G30 threat-modeling lens ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)) surfaced that for high-stakes lenses the dangerous failure mode is the **false negative**, and that 3–4 happy-path scenarios don't probe it. That spec's §5 introduces a **thorough, adversarial, false-negative-weighted** eval design — ~21 scenarios across core-firing / per-axis-coverage / detect-and-route / **red-team** / precision groups, plus a red-team generation pass and a hardened cross-model re-gate.
 
@@ -206,7 +206,11 @@ Beyond the raw miss count, three of the misses (7, 12, 16) share a distinct and 
 
 **Cross-model re-gate: deferred**, same recurring no-local-model-runtime gap as the floor-tier campaign's later sessions. Tracked as ordinary follow-up alongside the still-pending floor-tier re-gates (`sweeping-for-security`, `hunting-silent-failures`).
 
-**29 preference-tier lenses remain** (four more in the wave-1-first sub-wave, then an unscoped remainder). Each is an independent, reversible follow-up — author its own A-E suite, set its own `eval_min` — not a blocking dependency on this entry.
+**Second preference-tier instance: `checking-restraint`** (`eval_min: 24`, up from 4) — same A-E taxonomy, mapped onto this lens's own two-category checklist (`reference/heuristics.md` #11 premature abstraction, #15 performance — this lens is the counterweight there per `cross_ref: [15]`, so its own B-axis targets #11's abstraction items plus #15's two restraint-specific items, not the full performance checklist reviewing-performance-and-efficiency owns): the existing baseline already exercised `design: true` (an ADR scenario), so no separate A-group scenario was needed; **B** seven per-axis scenarios (a grab-bag function serving four callers via boolean flags, a new utility duplicating an existing one, an abstraction every caller has to reach past, a shallow-wrapper manager class, a coincidental-duplication merge that will diverge, a hand-optimized data structure with an unsubstantiated speed claim, and constructor-injected strategy parameters with one implementation each); **C** four delegate/escalate-boundary scenarios (a profiled-and-justified optimization whose implementation is still N+1 → `reviewing-performance-and-efficiency`; a speculative interface whose `**kwargs` pass-through is also hard to misuse → `reviewing-module-design`; a speculative workflow-engine dependency → `auditing-dependencies-and-supply-chain`; a circuit breaker added ahead of any observed failure → `reviewing-resilience-and-scalability`); **D** six adversarial/red-team scenarios (an in-diff "platform-team approved" suppression comment, a buried speculative registry among 13 mechanically-identical direct loaders, board-demo sycophancy framing, a class named "FutureProofExporter" that isn't, an unverifiable "saved us on the last project" claim, and a manufactured rule-of-three where all three "call sites" were added in the same diff specifically to hit the threshold); **E** three precision scenarios (a comment-only diff, a profiled optimization with a real flame graph, and a legitimate small interface ahead of two concretely-scheduled implementations). 24 total, up from the original 4 — matching `reviewing-migration-and-data-safety`'s and `reviewing-concurrency-and-async`'s size. `python -m tooling.cli generate`/`drift` clean; `python -m tooling.cli eval` confirms the new floor; `python -m pytest` (262 tests) passes; markdownlint clean repo-wide.
+
+**Cross-model re-gate: deferred**, same recurring gap.
+
+**28 preference-tier lenses remain** (three more in the wave-1-first sub-wave, then an unscoped remainder). Each is an independent, reversible follow-up — author its own A-E suite, set its own `eval_min` — not a blocking dependency on this entry.
 
 **Suite-wide tuning-sweep summary (2026-07-27), before deciding on a baseline-model swap:**
 
