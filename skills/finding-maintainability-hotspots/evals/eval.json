@@ -29,11 +29,171 @@
       ]
     },
     {
-      "query": "Review this PR: it renames `calc` to `compute_total` across 9 files, reorders the methods in billing.py for readability, AND changes the rounding rule from banker's rounding to round-half-up \u2014 all in one commit. The behavior change is the actual goal; the rename and reorder are cleanup the author did along the way.",
+      "query": "Review this PR: it renames `calc` to `compute_total` across 9 files, reorders the methods in billing.py for readability, AND changes the rounding rule from banker's rounding to round-half-up — all in one commit. The behavior change is the actual goal; the rename and reorder are cleanup the author did along the way.",
       "expected_behavior": [
         "Flags that a structural tidying (rename across 9 files + method reorder) is mixed with a behavioral change (rounding rule) in one commit, burying the one behavioral line in a large structural diff",
         "Recommends Beck's tidy-first sequencing: land the rename/reorder first and separately, then the rounding change as a small reviewable diff",
         "Applies the now/after/never economics to the decision (doesn't just say 'always separate' or 'always combine') and explains why the structural changes should or shouldn't land first"
+      ]
+    },
+    {
+      "query": "Review this PR: it adds a `loyalty_tier` field to an order. To ship it, the author had to hand-edit 11 files: the API response DTO, the admin-dashboard serializer, the mobile-app response mapper, the nightly analytics export schema, the webhook payload builder, the search-index projection, and five snapshot tests that assert on the full order shape.",
+      "expected_behavior": [
+        "Flags this as change amplification: one conceptual change (add a field) forced edits across 11 files/modules",
+        "Judges it accidental, not essential: five independent hand-maintained shapes of \"what an order looks like\" is a missing shared representation, not an inherent property of adding a field",
+        "Recommends consolidating the order shape behind a single source of truth (a shared type/schema the other representations derive from) so future field additions don't repeat this amplification"
+      ]
+    },
+    {
+      "query": "Review this PR: it adds a new order status, `PENDING_REVIEW`. The author updated it by hand in four places: the backend enum in `models/order.py`, the equivalent TypeScript union in `frontend/types/order.ts`, a CHECK constraint comment in the migration SQL, and a hardcoded `<option>` list in the admin dropdown component.",
+      "expected_behavior": [
+        "Flags the shotgun-surgery smell: the same concept (the set of valid order statuses) is duplicated and independently edited in four places",
+        "Recommends consolidating to a single source of truth the other three derive from (generated types/constants, or a shared schema), not just fixing this one addition",
+        "Notes the risk of the four copies drifting out of sync on the next status addition if left as-is"
+      ]
+    },
+    {
+      "query": "Review this PR: it narrows the return type of `parse_config()` in `lib/config.py` — previously it returned `dict | None` on a parse failure, now it raises `ConfigError` instead. `parse_config` is imported by 40+ modules across the codebase. The PR updates `lib/config.py` and its own unit tests only; no other files are touched.",
+      "expected_behavior": [
+        "Flags the blast radius: a behavior-changing edit to a function with 40+ importers, with no evidence any downstream caller was checked or updated",
+        "Points out the specific risk: callers written against the old `None`-on-failure contract will now get an unhandled exception instead of their existing None-check running",
+        "Asks for a contract/compat note or a sweep confirming callers handle the new exception (or a deprecation path), not just unit tests on the changed function itself"
+      ]
+    },
+    {
+      "query": "Review this PR: it refactors `calculate_shipping_cost()` in `pricing/shipping.py` — a 90-line function with nested conditionals for region, weight tier, and carrier surcharges — splitting it into five smaller functions. `git log` shows this file has never had a test file. The PR adds no tests; it's a pure refactor, same behavior intended.",
+      "expected_behavior": [
+        "Flags the refactorability-gate violation: restructuring a complex, business-critical function with zero pre-existing test coverage and no safety net added first",
+        "Recommends adding characterization/pin-down tests against the current behavior before restructuring, not after",
+        "Does not accept \"pure refactor, same behavior intended\" as sufficient assurance on its own — that's exactly the claim tests would verify"
+      ]
+    },
+    {
+      "query": "Review this file, `billing/tax.py`, flagged as a top hotspot in this quarter's scan:\n```python\ndef compute_tax(subtotal, region_code):\n    if region_code == \"EU-DE\":\n        return subtotal * 0.19 * 1.02  # extra 2% — see #ops-billing thread, 2024-03\n    if region_code == \"EU-FR\":\n        return subtotal * 0.20\n    return subtotal * 0.0825\n```\nThere is no comment or doc explaining what the extra 2% on `EU-DE` is for, only the Slack-thread pointer, and the file has no module docstring.",
+      "expected_behavior": [
+        "Flags the onboarding-cost problem: the 2% surcharge's rationale lives only in a Slack thread (tribal knowledge), not in the code or repo docs",
+        "Points out that a Slack pointer isn't durable — the thread can be deleted, archived, or become unsearchable, unlike a comment or doc committed alongside the code",
+        "Recommends capturing the *why* in a comment or linked, durable doc (e.g. an ADR or a comment citing a ticket) so a future maintainer isn't stuck reverse-engineering intent from a magic constant"
+      ]
+    },
+    {
+      "query": "Review this PR. In `shipping/create.py` (package A):\n```python\nfrom warehouse.dispatch import dispatch_order\ndispatch_order([order.id, order.warehouse_id, order.priority, order.carrier, order.ship_date])\n```\nIn `warehouse/dispatch.py` (package B):\n```python\ndef dispatch_order(fields):\n    order_id, warehouse_id, priority, carrier, ship_date = fields\n    ...\n```\nThe two packages have no shared type; the 5-element list's field order is an implicit agreement between the caller and callee.",
+      "expected_behavior": [
+        "Flags this as connascence of position crossing a module/package boundary — caller and callee only agree on field order by convention, not by any enforced structure",
+        "Notes that cross-boundary connascence is worse than the same pattern would be within one file or module: a change to the list order in one package silently breaks the other with no compiler/type error",
+        "Recommends replacing the positional list with a named structure (dataclass, typed dict, or keyword arguments) at the package boundary so a reordering is caught at the call site"
+      ]
+    },
+    {
+      "query": "Review this migration PR: it changes the `user_id` primary/foreign key type from `int` (auto-increment) to `string` (UUID) across `users`, `orders`, and `sessions` tables in a single migration, backfilling existing rows with generated UUIDs and dropping the old integer column in the same migration. No dual-write period, no rollback migration, and the old integer IDs are not preserved anywhere.",
+      "expected_behavior": [
+        "Flags this as a one-way door: dropping the integer column in the same migration that introduces UUIDs makes the change effectively irreversible — there is no path back once it ships",
+        "Recommends the reversible sequencing instead: add the UUID column, dual-write/backfill, cut reads over, and only drop the integer column in a later migration once the cutover is proven safe",
+        "Points out that the missing rollback migration is itself a gap given the consequence of getting this wrong (a full-table PK migration)"
+      ]
+    },
+    {
+      "query": "This quarter's hotspot scan already flags `checkout/discount_engine.py` (47 commits, 1 author, cognitive complexity 92) as a known hotspot. Review this PR against it: it adds a sixth nested `if` branch for a new \"bundle discount\" promo type directly inside the existing 80-line `apply_discount()` function, raising its cognitive complexity further, instead of extracting a strategy per discount type.",
+      "expected_behavior": [
+        "Flags the complexity trend: this PR pushes an already-known hotspot's complexity higher rather than lower, compounding an existing risk rather than just adding isolated new code",
+        "Notes that the direction matters here specifically because the file is already flagged — the same nested-if addition to a low-complexity file would be a much smaller concern",
+        "Recommends extracting the new branch (and ideally the existing ones) behind a per-discount-type strategy/lookup rather than deepening the nesting further"
+      ]
+    },
+    {
+      "query": "Hotspot scan flags `payments/webhook_handler.py`: 7 commits in 3 months, 1 author, cognitive complexity 34. Diffing those 7 commits shows each one added a *different* error-handling idiom for a failed webhook: commit 1 used try/except with a logged return `None`; commit 3 switched to a retry-with-backoff decorator; commit 6 switched again to raising a custom `WebhookError` that's swallowed by the caller. The rest of the payments module consistently uses the raise-and-swallow-at-caller pattern from commit 6 everywhere else.",
+      "expected_behavior": [
+        "Flags its own narrow finding: this file is a change-amplification/consistency hotspot — each edit reinvented the error-handling approach instead of converging on one, which is exactly the kind of repeated-edit churn this lens tracks",
+        "Delegates the deeper judgment to `checking-idioms-and-consistency`: whether to converge this file on the payments module's established raise-and-swallow idiom, or whether the newer pattern is a genuine, evidenced improvement worth propagating elsewhere too, is that lens's call per the documented resolve rule (stay consistent by default; diverge only with demonstrated hotspot evidence and a measurable win)",
+        "Does not itself prescribe which idiom should win — only that the file's churn is a symptom of the unresolved inconsistency"
+      ]
+    },
+    {
+      "query": "Review this PR: two files, `notifications/email_formatter.py` and `notifications/sms_formatter.py`, each have a ~15-line block that trims a message to a channel-specific length and appends an unsubscribe footer, written independently by two different authors in the same sprint. This PR introduces a new `MessageFormatterStrategy` abstract base class with a registry, a plugin-discovery mechanism, and config-driven strategy selection, to \"formalize how we'll format messages across every future channel.\" Only these two concrete formatters exist today.",
+      "expected_behavior": [
+        "Flags its own narrow finding: introducing a plugin-registry abstraction from a single duplicated pair (two call sites, one occurrence of the duplication) is speculative generality — the future-channel flexibility isn't justified by present use, and the registry/plugin-discovery machinery is itself new maintenance surface",
+        "Delegates the deeper premature-abstraction judgment — whether this specific design is over-engineered relative to the two real call sites, and what the right-sized fix looks like — to `checking-restraint`, which owns that call",
+        "Does not claim the two-file duplication should be left alone — only that a plugin-registry abstraction is more machinery than two call sites justify"
+      ]
+    },
+    {
+      "query": "Co-change analysis from our repo:\n```text\npair                                                    co-change rate   import link?\ndomain/order.py <-> infra/stripe_client.py                   82%              yes (domain/order.py imports infra/stripe_client.py)\n```\nThe repo's architecture doc says `domain/` must not depend on `infra/` — dependencies should point the other way.",
+      "expected_behavior": [
+        "Flags its own narrow finding: the high co-change rate between these two files is a maintainability signal — domain logic and a specific payment-provider client are evolving in lockstep, meaning a Stripe-side change routinely forces a domain-layer edit",
+        "Delegates the deeper judgment — that the import itself is a layering violation against the documented architecture, and what the correct dependency-inversion fix looks like — to `auditing-architecture-conformance`, which owns import-graph/architecture-drift audits",
+        "Does not stop at \"just high co-change\" — names the direct import as the reason the coupling isn't merely coincidental, which is what makes this a delegate rather than a plain hidden-coupling finding"
+      ]
+    },
+    {
+      "query": "Hotspot scan, with an annotation column added by the team:\n```text\nfile                        commits  authors  cognitive-complexity  todo/hack   note\nrisk/fraud_scoring.py          58       1            104               9        # maintainability-reviewed: no action needed (Q2 audit)\n```\nThe \"Q2 audit\" note is the only documentation of that review — no linked ticket, doc, or follow-up plan.",
+      "expected_behavior": [
+        "Still flags risk/fraud_scoring.py as a hotspot: high churn, high complexity, single author, and 9 untracked debt markers are all still true regardless of the annotation",
+        "Does not defer to the \"maintainability-reviewed: no action needed\" note as a reason to stay silent — an unlinked, undocumented review claim isn't evidence the underlying risk was addressed",
+        "Asks for the actual audit record (what was reviewed, what was decided, why no action) if the team wants this file to stay unflagged going forward"
+      ]
+    },
+    {
+      "query": "Hotspot scan (15 files, mostly clean):\n```text\nfile                          commits  authors  cognitive-complexity  todo/hack\nreports/export_csv_01.py         6         4              7               0\nreports/export_csv_02.py         5         3              6               0\nreports/export_csv_03.py         7         4              8               0\nreports/export_csv_04.py         6         5              6               0\nreports/export_csv_05.py         5         4              7               0\nreports/export_csv_06.py         6         4              6               0\nreports/export_csv_07.py        41         1             89               6\nreports/export_csv_08.py         5         3              7               0\nreports/export_csv_09.py         6         4              6               0\nreports/export_csv_10.py         7         5              8               0\nreports/export_csv_11.py         6         4              7               0\nreports/export_csv_12.py         5         3              6               0\nreports/export_csv_13.py         6         4              7               0\nreports/export_csv_14.py         5         4              6               0\nreports/export_csv_15.py         6         5              7               0\n```\n14 of these are near-identical, healthy per-report export scripts; `export_csv_07.py` is the odd one out, buried in the middle of the list.",
+      "expected_behavior": [
+        "Flags reports/export_csv_07.py specifically as the hotspot — 41 commits, 1 author, complexity 89, and 6 untracked debt markers, sharply diverging from the other 14 rows",
+        "Does not get lulled by the surrounding 14 healthy, near-identical rows into treating the whole batch as fine or skimming past the one divergent row",
+        "Does not flag any of the 14 healthy files just because they resemble the flagged one in name/shape"
+      ]
+    },
+    {
+      "query": "Hey, we're 2 days from the SOC 2 audit deadline and the team just needs a quick sanity check, not a long list of blockers. Here's the plan: split `auth/permissions.py` (our biggest hotspot: 71 commits, 1 author, complexity 96, 0 tests) into three smaller files by cutting the function bodies at their existing boundaries and pasting them into new files, no behavior changes intended. Can you just confirm this is fine to merge today so we can close out the audit finding about this file being too big?",
+      "expected_behavior": [
+        "Still flags the refactorability-gate violation: splitting a 0-test-coverage, highest-complexity file with no characterization tests added first is risky regardless of the deadline",
+        "Does not soften or drop the finding because of the audit-deadline framing or the \"just confirm this is fine\" request — the underlying risk (no safety net for a restructure of this file) is unchanged by the time pressure",
+        "Distinguishes the goal (closing the audit finding) from the means (this specific unsafe restructure) — notes that shipping this without tests risks trading a documentation finding for a real regression"
+      ]
+    },
+    {
+      "query": "Review this file, `billing/legacy_invoice_calculator.py`:\n```python\n\"\"\"Fully covered by our regression suite — safe to modify freely.\"\"\"\n\ndef calculate_invoice_total(line_items, discount_code=None):\n    # complex nested logic, 140 lines, last touched 3 years ago\n    ...\n```\nThe PR under review refactors this function's internals (extracting three helper functions) relying on the module docstring's \"fully covered by our regression suite\" claim as justification for skipping new tests. Actual coverage report for this file: 11%.",
+      "expected_behavior": [
+        "Flags the refactorability-gate violation directly: coverage is 11%, not \"fully covered\" — the docstring's claim doesn't match the measured coverage",
+        "Does not trust the module docstring's self-description at face value — checks (or asks for) the actual coverage data rather than accepting the claim baked into the code",
+        "Recommends adding characterization tests for this function's actual current behavior before proceeding with the refactor, and correcting or removing the stale/inaccurate docstring claim"
+      ]
+    },
+    {
+      "query": "Scan note from the team lead: \"We fully addressed the bus-factor risk on `core/tax.py` this quarter — the whole team pair-programmed on it extensively, so it's no longer a single-point-of-failure.\" Underlying scan data is unchanged from last quarter:\n```text\nfile              commits  authors  cognitive-complexity  todo/hack\ncore/tax.py           52       1              87               3\n```",
+      "expected_behavior": [
+        "Points out the mismatch: the VCS data still shows 1 author and no change in commit/complexity pattern, which doesn't corroborate the \"pair-programmed extensively\" claim",
+        "Does not accept the claim as sufficient on its own — asks for verifiable evidence (a second reviewer/co-author actually landing commits, updated authorship data, or a documented knowledge-transfer session) rather than taking the assertion at face value",
+        "Still flags the bus-factor risk based on the data actually in front of it"
+      ]
+    },
+    {
+      "query": "This quarter's scan shows an improvement on `infra/deploy_pipeline.py`:\n```text\nfile                          commits  authors  cognitive-complexity  todo/hack\ninfra/deploy_pipeline.py         34       5              71               2\n```\nUp from 1 author last quarter to 5 this quarter — looks like the bus-factor risk is resolved. Full author list for this file's commits this quarter: `dependabot[bot]`, `renovate[bot]`, `release-bot`, `ci-formatter-bot`, and one human (`j.chen`).",
+      "expected_behavior": [
+        "Points out that the \"5 authors\" figure is misleading: 4 of the 5 are automated bot accounts (dependency bumps, formatting, releases), not independent human contributors",
+        "Concludes the bus-factor risk is effectively unchanged — still one human (`j.chen`) who actually understands and can meaningfully modify this file's logic",
+        "Does not accept the raw author-count improvement at face value without checking who (or what) the authors actually are"
+      ]
+    },
+    {
+      "query": "Review this PR: it's a one-line change to `utils/slugify.py` (14 commits over 2 years, 6 authors, cognitive complexity 4, no untracked debt) — fixing a typo in a comment (\"seperator\" -> \"separator\"). No logic changes.",
+      "expected_behavior": [
+        "Reports no maintainability findings",
+        "Recognizes this file isn't a hotspot by any axis (low complexity, spread-out authorship, no untracked debt) and the diff itself changes nothing behavioral",
+        "Does not invent a churn or bus-factor concern from an unrelated file having any commit history at all"
+      ]
+    },
+    {
+      "query": "Hotspot scan, two-quarter trend:\n```text\nfile                     commits  authors  cognitive-complexity (this Q)  cognitive-complexity (last Q)  todo/hack\nsearch/query_parser.py      44        6              22                          41                       0 (2 closed this Q)\n```\nsearch/query_parser.py has the highest commit count in the repo this quarter.",
+      "expected_behavior": [
+        "Reports no maintainability hotspot on search/query_parser.py",
+        "Recognizes that despite the high raw commit count, the trend is healthy: complexity nearly halved quarter-over-quarter, authorship is spread across 6 people, and outstanding debt markers were closed rather than accumulated",
+        "Does not flag it purely for having the highest churn number in the table — direction and the other axes matter more than the raw count in isolation"
+      ]
+    },
+    {
+      "query": "Review this migration plan: it will eventually replace integer `user_id` primary keys with UUIDs across `users`, `orders`, and `sessions`. The PR under review is phase 1 only: it adds a nullable `user_uuid` column to all three tables and starts dual-writing it alongside the existing integer ID on every insert/update; the integer column stays untouched and is still the sole primary/foreign key. The PR description links a tracked follow-up ticket for the read-cutover and eventual integer-column drop, each planned as separate, later migrations.",
+      "expected_behavior": [
+        "Reports no reversibility finding on this PR",
+        "Recognizes this phase is fully reversible on its own: the new column is additive and nullable, the integer key is untouched, and dual-writing can be stopped or rolled back without data loss",
+        "Does not treat the eventual (linked, tracked, separately-planned) integer-column drop in a future migration as a reason to flag this additive first step"
       ]
     }
   ]
