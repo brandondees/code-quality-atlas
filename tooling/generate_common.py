@@ -51,17 +51,21 @@ _TOOLING_PREAMBLE = (
 )
 
 
-def _gen_header(skill: Skill, *, with_examples: bool = False) -> str:
+def _gen_header(skill: Skill | None = None, *, with_examples: bool = False) -> str:
     """A one-block 'generated — edit the source, not me' banner for generated
     reference files (both the standalone tree's reference/*.md and the collapsed
-    tree's reference/lenses/<lens>/*.md). These are pure generated artifacts
-    assembled from the research docs (and, for a body.md, the lens's hand-refined
-    examples.md); a contributor who edits a generated copy directly would diverge
-    it from its source (the `tooling.cli drift` / regenerate gate catches that
-    after the fact — this header prevents it up front). An HTML comment so it
-    renders invisibly and is markdownlint-clean. `with_examples` names
-    examples.md as a source only for the file that actually inlines it
-    (collapsed body.md), not tool-rules.md / sources.md / heuristics.md.
+    tree's reference/lenses/<lens>/*.md, plus the collapsed tree's per-entrypoint
+    reference/synthesis.md, which has no single owning skill). These are pure
+    generated artifacts assembled from the research docs (and, for a body.md, the
+    lens's hand-refined examples.md); a contributor who edits a generated copy
+    directly would diverge it from its source (the `tooling.cli drift` /
+    regenerate gate catches that after the fact — this header prevents it up
+    front). An HTML comment so it renders invisibly and is markdownlint-clean.
+    `with_examples` names examples.md as a source only for the file that
+    actually inlines it (collapsed body.md), not tool-rules.md / sources.md /
+    heuristics.md / synthesis.md — so `skill` is only dereferenced in that case
+    and may be omitted (e.g. for synthesis.md, which isn't skill-scoped) whenever
+    `with_examples` is left at its default of False.
 
     Not applied to SKILL.md: its YAML frontmatter must be the first bytes in
     the file for skill discovery to parse it, so an HTML comment can't be

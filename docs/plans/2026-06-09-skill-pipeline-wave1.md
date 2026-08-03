@@ -1,5 +1,7 @@
 # Skill Regeneration Pipeline (Wave 1) Implementation Plan
 
+**Status: implemented.** The unchecked task boxes below are the original execution plan, kept as the historical record; the shipped behavior (`tooling/manifest.py`, `generate*.py`, `drift.py`, `evals.py`, and the `skills/manifest.yaml`→`skills/` loop) is the source of truth.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the docs→skills regeneration pipeline (manifest → generate → drift → evals), declare the 6 wave-1 skills, generate their scaffolds, fully refine one exemplar, and prove the regenerate-after-docs-change loop.

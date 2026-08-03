@@ -8,7 +8,9 @@ issues/PRs — check these before reporting nothing's queued:
 
 - [`docs/open-questions.md`](docs/open-questions.md) — the decisions log
   (`D1`-`D18`+) and the live "Genuinely still open (undecided)" list. Start here.
-- [`docs/plans/`](docs/plans/) — dated, scoped design docs for approved-but-unbuilt work.
+- [`docs/plans/`](docs/plans/) — dated, scoped design docs, each carrying a
+  `**Status:**` header; all four in the directory as of this writing are
+  implemented (kept as historical execution records, not a work queue).
 - [`docs/map-gaps.md`](docs/map-gaps.md) — structural taxonomy gaps (`G1`-`G32`+)
   feeding future categories/lenses.
 - [`docs/session-log.md`](docs/session-log.md) — narrative history of what
