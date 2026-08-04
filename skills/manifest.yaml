@@ -858,11 +858,16 @@ router:
             ETL/ELT transformation, an event or analytics schema, a data test
             or expectation suite, or a producer of data another team consumes
       run: [reviewing-data-transformations-and-contracts,
-            tracing-correctness-and-invariants, reviewing-migration-and-data-safety]
+            tracing-correctness-and-invariants, hunting-silent-failures,
+            reviewing-migration-and-data-safety]
       note: "the analytics plane — grain and fan-out, SQL NULL semantics,
             incremental idempotency, data-test adequacy, and consumer
             compatibility; #20 owns the operational store's migration
-            mechanics, #13 the service API contract, #27 the PII verdict"
+            mechanics, #13 the service API contract, #27 the PII verdict.
+            hunting-silent-failures rides along because #40's fail-loud-not-empty
+            check delegates its verdict to #2 — a pipeline that publishes an
+            empty or stale table on a missing source is a silent-failure defect,
+            so the owning lens must actually be in the route"
     - when: Async / concurrent / distributed change (queues, workers, locks, await)
       run: [reviewing-concurrency-and-async, tracing-correctness-and-invariants,
             hunting-silent-failures]

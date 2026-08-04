@@ -190,7 +190,7 @@ tooling/vendor-skills.sh ~/code/my-service --collapsed  # OR the 4 collapsed ent
 ( cd ~/code/my-service && git add .claude/skills && git commit -m "vendor code-quality-atlas review suite" )
 ```
 
-`--collapsed` vendors the 4 collapsed entrypoints instead of the 37 standalone
+`--collapsed` vendors the 4 collapsed entrypoints instead of the 38 standalone
 skills. **Vendor one form, not both** — the two cover the same lenses.
 
 `skulto install brandondees/code-quality-atlas -y` run inside the target repo is
