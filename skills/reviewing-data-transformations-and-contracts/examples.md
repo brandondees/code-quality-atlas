@@ -89,11 +89,11 @@ pass" is not evidence — the tests do not assert the numbers.
   use a decimal type with a declared scale. *(severity: Major.)*
 
 On the reasoning: **"nothing in this repo reads the topic" is not a consumer inventory.**
-A grep finds only the consumers that live in this source tree, and an event stream's usually
-do not. Even in a monorepo where some *are* here, the ones a grep cannot reach are the ones
-that bite: BI tools, notebooks, scheduled extracts, and other teams' services subscribe to the
-topic without appearing in any repo. The grep is evidence about this repo, not about the
-consumer set. Removal needs a named consumer list, a version bump, and a deprecation window in
+A grep finds only the consumers present in this source tree, and the consumers of an event
+stream usually are not. Even in a monorepo where some of them are, the ones a grep cannot
+reach are the ones that bite: BI tools, notebooks, scheduled extracts, and other teams'
+services subscribe to the topic without appearing in any repo. The grep is evidence about
+this repo, not about the consumer set. Removal needs a named consumer list, a version bump, and a deprecation window in
 which both fields are emitted.
 
 ---
