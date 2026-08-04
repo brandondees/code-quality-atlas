@@ -66,19 +66,27 @@ pass" is not evidence — the tests do not assert the numbers.
 
 **Findings:**
 
-- `schemas/order_placed.avsc` — **two changes no compatibility mode permits.** Dropping a
-  required field with no default breaks readers still on the old schema; `long` → `double`
-  is a type change that is neither backward- nor forward-compatible. Under `BACKWARD` or
-  `FULL` this would be rejected at registration. *(severity: Blocker.)*
+- `schemas/order_placed.avsc` — **both changes break *forward* compatibility, and a
+  `BACKWARD`-only gate would wave them through.** Under Avro schema resolution, deleting
+  `promo_code` and promoting `long` → `double` are both *backward*-compatible: a reader on
+  the new schema handles old data fine (the removed field is ignored; `long` promotes to
+  `double`). Neither is *forward*-compatible: a reader still on the old schema fails on the
+  new data — `promo_code` is required there with no default, and `double` does not demote
+  to `long`. On a rolling deploy old and new readers coexist, so every consumer not yet
+  upgraded breaks on the first new message. `FULL`/`FULL_TRANSITIVE` is the mode that
+  catches this; `BACKWARD` alone is not. *(severity: Blocker.)*
 - `schemas/order_placed.avsc` — **compatibility `NONE` is the defect, not the mitigation.**
-  The registry accepts anything on this subject, so the absence of a failure is the
-  absence of a check. Set an enforced mode (`BACKWARD` at minimum, `FULL_TRANSITIVE` for a
-  contract with independent readers) and run the compatibility check in CI on the PR.
-  *(severity: Major.)*
-- `services/checkout/publisher.py` — **`total_cents` moved to a float.** A monetary field
-  in a binary floating-point type accumulates representation error across every downstream
-  sum. Keep integer minor units; if fractional amounts are genuinely required, use a
-  decimal type with a declared scale. *(severity: Major.)*
+  The registry accepts anything on this subject, so the absence of a failure is the absence
+  of a check. Set an enforced mode — `FULL_TRANSITIVE` for a contract with independently
+  deployed readers — and run the compatibility check in CI on the PR. Absent that, either
+  emit both fields through a deprecation window, or state the deploy ordering (consumers
+  first) and the named consumer list that makes the break survivable. *(severity: Major.)*
+- `services/checkout/publisher.py` — **`total_cents` moved to a float — schema-legal,
+  semantically wrong.** The promotion passes Avro's type rules, which is exactly why the
+  compatibility gate would not have caught it: a monetary field in a binary floating-point
+  type accumulates representation error across every downstream sum regardless of what the
+  registry says. Keep integer minor units; if fractional amounts are genuinely required,
+  use a decimal type with a declared scale. *(severity: Major.)*
 
 On the reasoning: **"nothing in this repo reads the topic" is not a consumer inventory.**
 The consumers of an event stream are by construction outside the producer's repo — other

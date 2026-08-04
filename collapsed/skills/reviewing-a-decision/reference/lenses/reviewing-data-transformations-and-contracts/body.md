@@ -33,7 +33,7 @@ The full review checklist, grouped by the research category each check draws fro
 ### Reviewable heuristics (skill-checklist seeds)
 
 - **Declare and defend the grain.** What does one row of this model mean? A join to a one-to-many table **before** an aggregate silently multiplies rows and inflates every `SUM`/`COUNT` downstream — the data plane's most expensive quiet defect. Require a uniqueness test on the grain key (`unique`, or a compound `dbt_utils.unique_combination_of_columns`) on any new or re-grained model, and check every added join for fan-out.
-- **A schema change crossing a consumer boundary must clear a compatibility gate.** Renaming, dropping, retyping, or narrowing an event field or a published table column breaks readers that still compile. Ask: which compatibility mode is configured (`BACKWARD`/`FORWARD`/`FULL`), does this change satisfy it, is the field additive-with-a-default, and — if it genuinely breaks — is there a version bump, a deprecation window, and a named list of consumers? "Nothing failed in CI" is not evidence when no consumer is in this repo.
+- **A schema change crossing a consumer boundary must clear a compatibility gate — in the direction that matters.** Renaming, dropping, retyping, or narrowing an event field or a published column can break readers that still compile, but *which* readers depends on direction: `BACKWARD` protects a new reader against old data, `FORWARD` protects an old reader against new data, and a rolling deploy means both coexist. Many changes satisfy one direction and not the other — under Avro schema resolution, **deleting a field** and **promoting a numeric type** (`int`→`long`/`float`/`double`, `long`→`float`/`double`, `float`→`double`) are *backward*-compatible and *forward*-incompatible, so a `BACKWARD`-only subject accepts a change that breaks every consumer not yet upgraded. So do not reason from "the schema changed"; reason from: which mode is configured on this subject, is it enforced in CI, does the change satisfy it across the whole schema history (`_TRANSITIVE`), and — where it breaks a direction that matters — is there a version bump, a deprecation window, a stated deploy ordering, and a *named* consumer list? `NONE` is not a passing grade, and "nothing failed in CI" is not evidence when no consumer lives in this repo. A change can also be schema-legal and semantically wrong (a promotion that silently changes a money field's representation) — that is a separate finding, not a compatibility one.
 - **Data tests proportional to what the model asserts.** A new or changed model should carry tests covering the dimensions it can actually be wrong on — `not_null` and `unique` on the grain, `accepted_values` on an enum/status, `relationships` for referential integrity, a freshness or volume expectation on a source. A model with zero tests is the data analog of untested code; a hundred generated per-column expectations is noise (cross #17, #11).
 - **Transformation logic needs a *unit* test, not just a data test.** Data tests assert properties of the output *after* a run against real data; they cannot tell you a `CASE` branch or a window function is wrong on an input that hasn't occurred yet. Non-trivial logic — multi-branch `CASE`, window functions, deduplication, late-arriving handling — should have a fixture-in/fixture-out unit test (dbt unit tests, or the framework's equivalent).
 - **NULL and empty-set semantics in SQL.** `NOT IN (subquery)` returns nothing when the subquery can yield `NULL` — use `NOT EXISTS` or an anti-join; `COUNT(col)` silently skips `NULL`s; a filter on the right-hand table in `WHERE` turns a `LEFT JOIN` into an inner join; `UNION` hides duplicates that `UNION ALL` would expose; a `JOIN` on a nullable key drops rows. Read every new predicate for three-valued logic (cross #1).
@@ -116,19 +116,27 @@ pass" is not evidence — the tests do not assert the numbers.
 
 **Findings:**
 
-- `schemas/order_placed.avsc` — **two changes no compatibility mode permits.** Dropping a
-  required field with no default breaks readers still on the old schema; `long` → `double`
-  is a type change that is neither backward- nor forward-compatible. Under `BACKWARD` or
-  `FULL` this would be rejected at registration. *(severity: Blocker.)*
+- `schemas/order_placed.avsc` — **both changes break *forward* compatibility, and a
+  `BACKWARD`-only gate would wave them through.** Under Avro schema resolution, deleting
+  `promo_code` and promoting `long` → `double` are both *backward*-compatible: a reader on
+  the new schema handles old data fine (the removed field is ignored; `long` promotes to
+  `double`). Neither is *forward*-compatible: a reader still on the old schema fails on the
+  new data — `promo_code` is required there with no default, and `double` does not demote
+  to `long`. On a rolling deploy old and new readers coexist, so every consumer not yet
+  upgraded breaks on the first new message. `FULL`/`FULL_TRANSITIVE` is the mode that
+  catches this; `BACKWARD` alone is not. *(severity: Blocker.)*
 - `schemas/order_placed.avsc` — **compatibility `NONE` is the defect, not the mitigation.**
-  The registry accepts anything on this subject, so the absence of a failure is the
-  absence of a check. Set an enforced mode (`BACKWARD` at minimum, `FULL_TRANSITIVE` for a
-  contract with independent readers) and run the compatibility check in CI on the PR.
-  *(severity: Major.)*
-- `services/checkout/publisher.py` — **`total_cents` moved to a float.** A monetary field
-  in a binary floating-point type accumulates representation error across every downstream
-  sum. Keep integer minor units; if fractional amounts are genuinely required, use a
-  decimal type with a declared scale. *(severity: Major.)*
+  The registry accepts anything on this subject, so the absence of a failure is the absence
+  of a check. Set an enforced mode — `FULL_TRANSITIVE` for a contract with independently
+  deployed readers — and run the compatibility check in CI on the PR. Absent that, either
+  emit both fields through a deprecation window, or state the deploy ordering (consumers
+  first) and the named consumer list that makes the break survivable. *(severity: Major.)*
+- `services/checkout/publisher.py` — **`total_cents` moved to a float — schema-legal,
+  semantically wrong.** The promotion passes Avro's type rules, which is exactly why the
+  compatibility gate would not have caught it: a monetary field in a binary floating-point
+  type accumulates representation error across every downstream sum regardless of what the
+  registry says. Keep integer minor units; if fractional amounts are genuinely required,
+  use a decimal type with a declared scale. *(severity: Major.)*
 
 On the reasoning: **"nothing in this repo reads the topic" is not a consumer inventory.**
 The consumers of an event stream are by construction outside the producer's repo — other

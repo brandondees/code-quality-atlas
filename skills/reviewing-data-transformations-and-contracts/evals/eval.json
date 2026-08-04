@@ -15,10 +15,11 @@
     {
       "query": "Review this change to our order-events producer. `schemas/order_placed.avsc` drops the `promo_code` field (it was `{\"name\": \"promo_code\", \"type\": \"string\"}`) and changes `total_cents` from `long` to `double` so it can carry fractional amounts. The producer service `services/checkout/publisher.py` is updated to match. No other file in this repo reads the topic.",
       "expected_behavior": [
-        "Flags both changes as consumer-breaking: dropping a required field with no default breaks readers on the old schema, and `long` -> `double` is a type change no compatibility mode permits — it is not an additive-with-default change",
-        "Asks which compatibility mode the schema registry enforces on this subject (BACKWARD/FORWARD/FULL and their transitive variants) and whether this change satisfies it across the schema history, rather than treating a green build as evidence",
-        "Rejects 'no other file in this repo reads the topic' as proof of safety — consumers of an event stream are by definition outside the producer's repo; requires a named consumer list, a version bump, and a deprecation window before removal",
-        "Flags the money-type change specifically: moving `total_cents` to a float introduces representation error in a monetary field; keep integer minor units"
+        "Reasons about compatibility by direction rather than asserting the changes are universally illegal: under Avro schema resolution both deleting `promo_code` and promoting `long` -> `double` are BACKWARD-compatible (a new reader tolerates old data — the removed field is ignored, and `long` promotes to `double`) but FORWARD-incompatible (an old reader fails: `promo_code` is required there with no default, and `double` does not demote to `long`)",
+        "Names the operational consequence of that asymmetry: on a rolling deploy old and new readers coexist, so a BACKWARD-only subject would accept this change and every consumer not yet upgraded breaks on the first new message; FULL/FULL_TRANSITIVE is the mode that catches it",
+        "Identifies the subject's compatibility setting as the thing to check first, and treats a green build as no evidence at all when no gate is enforced",
+        "Rejects 'no other file in this repo reads the topic' as proof of safety — consumers of an event stream are by definition outside the producer's repo; requires a named consumer list, a version bump, and either a deprecation window emitting both fields or a stated consumers-first deploy ordering",
+        "Flags the money-type change as a separate, semantic defect rather than a compatibility one: the promotion is schema-legal, which is exactly why a compatibility gate would not catch it, but a float monetary field accumulates representation error across every downstream sum; keep integer minor units"
       ]
     },
     {
