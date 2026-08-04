@@ -15,12 +15,13 @@ supports the `SKILL.md` format** (Cursor, Windsurf, Copilot, …). The plugin wr
 
 ## What you get
 
-**37 review skills**, generated from a researched taxonomy and refined against eval
+**38 review skills**, generated from a researched taxonomy and refined against eval
 scenarios:
 
-- **35 review lenses** — each a narrow, self-contained reviewer (correctness,
+- **36 review lenses** — each a narrow, self-contained reviewer (correctness,
   naming & readability, module design, concurrency, migrations & data safety,
-  security, performance, tests, API contracts, accessibility & i18n, observability,
+  security, performance, tests, API contracts, data transformations & data
+  contracts, accessibility & i18n, observability,
   LLM-integration, agentic & tool-use safety, resilience, install/upgrade
   experience, plus repo-shaped audits
   for architecture, dependencies, config/build, docs, compliance,
@@ -158,7 +159,7 @@ loop: critique the research, let drift flag affected skills, regenerate, re-gate
 
 | Path | What's in it |
 |---|---|
-| [`skills/`](skills/) | The 35 lenses + `choosing-review-lenses` (router) + `synthesizing-review-findings` (synthesizer) |
+| [`skills/`](skills/) | The 36 lenses + `choosing-review-lenses` (router) + `synthesizing-review-findings` (synthesizer) |
 | [`collapsed/`](collapsed/) | Generated 4-entrypoint form of the suite for cloud / account-skill installs; each entrypoint bundles its shape's lenses and loads them on demand |
 | [`commands/`](commands/) | Slash commands: `/atlas-review-pr`, `/atlas-code-review`, `/atlas-init`, `/atlas-rebase-stale`, `/atlas-propose-preferences` |
 | [`hooks/`](hooks/) | `SessionStart` routing hook (side-effect-free); opt-in, off-by-default `PostToolUse`/`SessionEnd` self-improvement telemetry hooks |

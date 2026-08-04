@@ -6,7 +6,7 @@ description: Run a whole-repository health audit with the code-quality-atlas rep
   for a scheduled or on-demand repo audit, not a single diff. Runs the applicable
   audits and synthesizes one report.
 provenance:
-  taxonomy_version: v0.9
+  taxonomy_version: v0.10
   built_from: []
 ---
 

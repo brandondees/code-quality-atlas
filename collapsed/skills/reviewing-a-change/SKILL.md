@@ -6,7 +6,7 @@ description: Review a diff, pull request, or code change with the code-quality-a
   = all relevant), then synthesizes one verdict. The collapsed, repo-independent entrypoint
   for change review.
 provenance:
-  taxonomy_version: v0.9
+  taxonomy_version: v0.10
   built_from: []
 ---
 
@@ -46,6 +46,7 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 | New feature (general-purpose change) | `tracing-correctness-and-invariants`, `reviewing-naming-and-readability`, `reviewing-test-quality`, `checking-restraint` |
 | Refactor / restructuring | `reviewing-module-design`, `checking-restraint`, `checking-idioms-and-consistency`, `reviewing-naming-and-readability` |
 | Schema migration, backfill, or data-format change | `reviewing-migration-and-data-safety`, `tracing-correctness-and-invariants`, `hunting-silent-failures` |
+| Data-plane change — a SQL or dbt/SQLMesh model, a warehouse or ETL/ELT transformation, an event or analytics schema, a data test or expectation suite, or a producer of data another team consumes | `reviewing-data-transformations-and-contracts`, `tracing-correctness-and-invariants`, `hunting-silent-failures`, `reviewing-migration-and-data-safety` — the analytics plane — grain and fan-out, SQL NULL semantics, incremental idempotency, data-test adequacy, and consumer compatibility; #20 owns the operational store's migration mechanics, #13 the service API contract, #27 the PII verdict. hunting-silent-failures rides along because #40's fail-loud-not-empty check delegates its verdict to #2 — a pipeline that publishes an empty or stale table on a missing source is a silent-failure defect, so the owning lens must actually be in the route |
 | Async / concurrent / distributed change (queues, workers, locks, await) | `reviewing-concurrency-and-async`, `tracing-correctness-and-invariants`, `hunting-silent-failures` |
 | Public API or contract change (endpoints, SDK surface, webhooks) | `reviewing-api-contract-safety`, `reviewing-module-design`, `sweeping-for-security` |
 | New abstraction, library, or engine shipped ahead of its consumer (generic/trait with one or no impl, a crate with no caller yet, "substrate for a later feature") | `checking-restraint`, `reviewing-module-design`, `reviewing-api-contract-safety`, `reviewing-test-quality` — restraint-led — speculative generality can be flawless and premature at once, so it hides from the correctness and test lenses |
@@ -89,6 +90,7 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 - [`reviewing-performance-and-efficiency`](reference/lenses/reviewing-performance-and-efficiency/body.md) ◆ — Will this be slow or expensive at scale? N+1, O(n²) hot paths, caching, payload buffering.
 - [`reviewing-test-quality`](reference/lenses/reviewing-test-quality/body.md) — Do the tests prove anything? Behavior coupling, over-mocking, edge coverage, determinism.
 - [`reviewing-migration-and-data-safety`](reference/lenses/reviewing-migration-and-data-safety/body.md) ◆ — Can this migration lock tables or lose data? Expand/contract, backfills, reversibility.
+- [`reviewing-data-transformations-and-contracts`](reference/lenses/reviewing-data-transformations-and-contracts/body.md) ◆ — Is the data plane correct and its contract safe? Grain and fan-out, SQL NULL traps, incremental idempotency, data tests, schema compatibility for consumers.
 - [`reviewing-accessibility-and-i18n`](reference/lenses/reviewing-accessibility-and-i18n/body.md) — Can everyone use this UI? Keyboard, screen readers, contrast, locales, RTL.
 - [`tracing-correctness-and-invariants`](reference/lenses/tracing-correctness-and-invariants/body.md) ◆ — Does the code do what it claims? Invariants, boundaries, off-by-one, resource cleanup.
 - [`reviewing-concurrency-and-async`](reference/lenses/reviewing-concurrency-and-async/body.md) ◆ — What breaks when two run at once? Races, lost updates, unawaited promises, idempotency.

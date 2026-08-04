@@ -5,7 +5,7 @@ description: Review a decision rather than code — an ADR, RFC, design doc, dep
   Reviews the choice and its record (rationale, lock-in, exit, revisit trigger) with
   the decision lens plus the design-capable lenses for the decision's domain.
 provenance:
-  taxonomy_version: v0.9
+  taxonomy_version: v0.10
   built_from: []
 ---
 
@@ -57,6 +57,7 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 - [`sweeping-for-security`](reference/lenses/sweeping-for-security/body.md) ◆ — Can an attacker abuse this? Injection, authorization, secrets, crypto, untrusted data.
 - [`reviewing-performance-and-efficiency`](reference/lenses/reviewing-performance-and-efficiency/body.md) ◆ — Will this be slow or expensive at scale? N+1, O(n²) hot paths, caching, payload buffering.
 - [`reviewing-migration-and-data-safety`](reference/lenses/reviewing-migration-and-data-safety/body.md) ◆ — Can this migration lock tables or lose data? Expand/contract, backfills, reversibility.
+- [`reviewing-data-transformations-and-contracts`](reference/lenses/reviewing-data-transformations-and-contracts/body.md) ◆ — Is the data plane correct and its contract safe? Grain and fan-out, SQL NULL traps, incremental idempotency, data tests, schema compatibility for consumers.
 - [`tracing-correctness-and-invariants`](reference/lenses/tracing-correctness-and-invariants/body.md) ◆ — Does the code do what it claims? Invariants, boundaries, off-by-one, resource cleanup.
 - [`reviewing-concurrency-and-async`](reference/lenses/reviewing-concurrency-and-async/body.md) ◆ — What breaks when two run at once? Races, lost updates, unawaited promises, idempotency.
 - [`reviewing-api-contract-safety`](reference/lenses/reviewing-api-contract-safety/body.md) ◆ — Will this break a consumer? Compatibility, error contracts, idempotency, pagination.

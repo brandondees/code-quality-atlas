@@ -27,7 +27,7 @@
 | **G20** | Codebase as a working environment for AI maintainers | new-lens | **✅ shipped** (v0.5, #35) | Med-High | Med | Med-High |
 | **G30** | Threat modeling (STRIDE) as a design-time discipline | new-lens (decision-shape) | promote | High | Med-High | Med-High |
 | **G24** | Cluster VII — Product, Experience & Value (10 lenses) | new-cluster | promote (incremental) | High | High | Med-High |
-| **G17** | Data-engineering & data-contract quality | new-lens (paired) | promote | High | High | Med-High |
+| **G17** | Data-engineering & data-contract quality | new-lens (paired) | **✅ diff arm shipped** (v0.10, #40); repo/cron contract-drift arm open | High | High | Med-High |
 | **G22** | Diff-isolation blindness (interaction/composition) | new-lens (scoped) | promote (scoped) | Med-High | High | Med |
 | **G15** | Production-evidence / runtime-informed review | new-shape | promote | High | Very High | Med |
 
@@ -83,7 +83,7 @@ Pure heuristic additions to existing lenses — the cheapest way to bank real co
 Higher cost, longer horizon, often gated on an enabling build.
 
 - **G24 Cluster VII** — *incremental*: ship **VII-A (usability/Nielsen) + VII-F (value/outcome instrumentation)** first; needs G23 + G26 + Q13; **VII-H (conceptual integrity)** is the cluster's own counterweight and should land early.
-- **G17** data-engineering & data-contracts — new substrate; diff lens + repo/cron arm.
+- **G17** data-engineering & data-contracts — new substrate; diff lens + repo/cron arm. *(Diff arm **shipped 2026-08-04** as #40 `reviewing-data-transformations-and-contracts`, taxonomy v0.10; the repo/cron contract-drift arm stays open, held back on the #35/#32 incremental precedent.)*
 - **G22** diff-isolation — *scoped* LLM ripple-trace only (escalate the heavy semantic-conflict detection to tools).
 - **G15** production-evidence — a 5th shape; **longest horizon** (needs a telemetry-access substrate); log and revisit.
 - Enabling builds to schedule alongside: **Q13** overlay, **Q14** depth modes, **Q15** decision-native lenses.

@@ -1,0 +1,117 @@
+{
+  "skills": [
+    "reviewing-data-transformations-and-contracts"
+  ],
+  "scenarios": [
+    {
+      "query": "Review this dbt model. `models/marts/fct_customer_revenue.sql`:\n```sql\nselect c.customer_id, c.region, sum(o.order_total) as lifetime_revenue,\n       count(*) as order_count\nfrom {{ ref('dim_customers') }} c\njoin {{ ref('fct_orders') }} o on o.customer_id = c.customer_id\njoin {{ ref('fct_order_items') }} i on i.order_id = o.order_id\ngroup by 1, 2\n```\nThe `schema.yml` entry has a description and a `not_null` test on `customer_id`. `fct_order_items` was added to the join so the model could expose item counts later.",
+      "expected_behavior": [
+        "Flags the fan-out: `fct_order_items` is one-to-many per order, so joining it before the aggregate multiplies each order row by its item count — `sum(o.order_total)` and `count(*)` are both inflated, silently and by a different factor per customer",
+        "Names the grain: the model claims one row per customer (grouped by customer_id/region) but the join set no longer supports it; requires a uniqueness test on the grain key (`unique` on customer_id, or a compound uniqueness test) rather than only `not_null`",
+        "Notes the join is unused by the current select list — the item count it was added for is not exposed, so the fix is to drop the join or aggregate items in a CTE first",
+        "Does not merely say 'add more tests' — identifies the specific defect (inflated aggregate) and the specific missing guard (grain uniqueness)"
+      ]
+    },
+    {
+      "query": "Review this change to our order-events producer. `schemas/order_placed.avsc` drops the `promo_code` field (it was `{\"name\": \"promo_code\", \"type\": \"string\"}`) and changes `total_cents` from `long` to `double` so it can carry fractional amounts. The producer service `services/checkout/publisher.py` is updated to match. No other file in this repo reads the topic.",
+      "expected_behavior": [
+        "Reasons about compatibility by direction rather than asserting the changes are universally illegal: under Avro schema resolution both deleting `promo_code` and promoting `long` -> `double` are BACKWARD-compatible (a new reader tolerates old data — the removed field is ignored, and `long` promotes to `double`) but FORWARD-incompatible (an old reader fails: `promo_code` is required there with no default, and `double` does not demote to `long`)",
+        "Names the operational consequence of that asymmetry: on a rolling deploy old and new readers coexist, so a BACKWARD-only subject would accept this change and every consumer not yet upgraded breaks on the first new message; FULL/FULL_TRANSITIVE is the mode that catches it",
+        "Identifies the subject's compatibility setting as the thing to check first, and treats a green build as no evidence at all when no gate is enforced",
+        "Rejects 'no other file in this repo reads the topic' as proof of safety — a grep finds only consumers living in this source tree, and the ones it cannot reach (other teams' services, BI tools, notebooks, scheduled extracts) are exactly the ones that break; requires a named consumer list, a version bump, and either a deprecation window emitting both fields or a stated consumers-first deploy ordering",
+        "Flags the money-type change as a separate, semantic defect rather than a compatibility one: the promotion is schema-legal, which is exactly why a compatibility gate would not catch it, but a float monetary field accumulates representation error across every downstream sum; keep integer minor units"
+      ]
+    },
+    {
+      "query": "Review this transformation. `models/marts/dim_active_customers.sql`:\n```sql\nselect c.*, s.plan_name\nfrom {{ ref('stg_customers') }} c\nleft join {{ ref('stg_subscriptions') }} s on s.customer_id = c.customer_id\nwhere c.customer_id not in (select customer_id from {{ ref('stg_suppressed_customers') }})\n  and s.status = 'active'\n```\n`stg_suppressed_customers.customer_id` is nullable (it is populated from a partner feed).",
+      "expected_behavior": [
+        "Flags the `NOT IN` against a nullable column: a single NULL in the subquery makes the predicate never true, so the model returns zero rows — recommends `NOT EXISTS` or an explicit anti-join (or at minimum a `where customer_id is not null` in the subquery)",
+        "Flags that `and s.status = 'active'` in the WHERE clause silently degrades the LEFT JOIN to an inner join, dropping every customer without a subscription — the opposite of what a `dim_active_customers` LEFT JOIN implies; the predicate belongs in the ON clause if the outer join is intended",
+        "Notes `select c.*` propagates upstream column changes into this model's output surface without review (a lineage/contract hazard), rather than treating it as style",
+        "Treats these as correctness defects in the data plane, not as style or readability findings"
+      ]
+    },
+    {
+      "query": "Review this incremental model. `models/marts/fct_page_views.sql`:\n```sql\n{{ config(materialized='incremental') }}\nselect event_id, user_id, url, event_at\nfrom {{ source('raw', 'page_views') }}\n{% if is_incremental() %}\nwhere event_at > (select max(event_at) from {{ this }})\n{% endif %}\n```\nEvents arrive from a Kafka topic via a CDC connector and the job runs hourly.",
+      "expected_behavior": [
+        "Flags the missing `unique_key`: with no merge key the incremental strategy appends, so any event re-delivered by the at-least-once CDC path is inserted twice and every downstream count is wrong",
+        "Flags the strict `>` watermark with no lookback: an event whose `event_at` is older than the current max (late or out-of-order arrival, which is the default case on a Kafka/CDC source, not the edge case) is dropped permanently and never reappears",
+        "Asks whether a re-run of the same window is idempotent — overwriting the partition rather than appending — and whether `--full-refresh` produces the same result as the incremental path; a divergence between the two is itself a defect",
+        "Recommends a concrete fix shape: a `unique_key` (or merge/delete+insert strategy) plus a bounded lookback window sized to the connector's observed lateness"
+      ]
+    },
+    {
+      "query": "Review this new model. `models/marts/dim_customer_tier.sql` classifies customers into tiers with a five-branch CASE over lifetime spend, tenure in months, and a `is_enterprise` flag, including two overlapping ranges and a fallthrough ELSE. `schema.yml` adds the model with a description and a `not_null` test on `customer_id`. Nothing else was added.",
+      "expected_behavior": [
+        "Flags the test gap as disproportionate to what the model asserts: a five-branch tier classification with overlapping ranges needs `accepted_values` on the tier column and a uniqueness test on the grain, not just `not_null` on the key",
+        "Distinguishes data tests from unit tests and asks for the latter here: data tests assert properties of the output after a run against whatever data happened to exist; they cannot show that an overlapping-range branch is unreachable or misordered. Non-trivial branching logic needs fixture-in/fixture-out unit tests (dbt unit tests or the framework's equivalent)",
+        "Calls out the overlapping ranges specifically — with a CASE, the first matching branch wins, so an overlap means a silently unreachable branch or a misclassification depending on order",
+        "Does not demand a blanket per-column expectation suite — asks for the tests that cover the ways this model can actually be wrong"
+      ]
+    },
+    {
+      "query": "Review this pipeline change. `models/staging/stg_partner_orders.sql` now reads from a new partner API extract instead of the old SFTP drop. If the extract is missing for a day, the source table simply has no rows for that date, and the model builds successfully with zero rows. Downstream, `fct_daily_revenue` sums it. No source freshness or row-count checks were added.",
+      "expected_behavior": [
+        "Flags the silent-success path: a missing extract produces an empty table that builds green, and every downstream dashboard reads the resulting zero as a real business number rather than as missing data",
+        "Requires a freshness expectation on the source (loaded_at field with warn/error thresholds) and a volume/row-count expectation so an empty or short load fails the build instead of publishing",
+        "Names the swap of ingestion mechanism as the reason the old failure mode changed: an absent SFTP file used to fail the job, whereas an empty API response now succeeds — the change moved a loud failure to a silent one",
+        "Delegates the general fail-loud-versus-degrade verdict to hunting-silent-failures rather than re-deriving that lens's checklist, and notes the missing alerting surface for observability"
+      ]
+    },
+    {
+      "query": "Review this change. It adds `db/migrate/20260804_add_not_null_to_orders_region.rb`, which runs `ALTER TABLE orders ALTER COLUMN region SET NOT NULL` on a 400M-row Postgres table, and it updates `models/staging/stg_orders.sql` to drop the `coalesce(region, 'unknown')` that was compensating for the nulls.",
+      "expected_behavior": [
+        "Reviews its own half: dropping the `coalesce` changes the meaning of already-published rows — historical rows previously bucketed as 'unknown' will now carry a different value (or drop out of a grouping), so the model needs a backfill or an explicit note that history is discontinuous",
+        "Asks whether downstream models or dashboards depend on the literal 'unknown' bucket, and whether any test pins it",
+        "Delegates the migration mechanics to reviewing-migration-and-data-safety — the table-level lock a `SET NOT NULL` takes on a 400M-row table, and the safe rewrite (add a NOT VALID CHECK, validate, then set) — naming the concern and handing over the verdict rather than re-deriving that lens's checklist",
+        "Does not present itself as the owner of the operational DDL question"
+      ]
+    },
+    {
+      "query": "Review this change to the events pipeline. `schemas/user_signup.avsc` adds two fields, `ssn_last4` and `date_of_birth`, so the growth team can build a cohort model; `models/marts/dim_users.sql` selects them through to the warehouse; and `seeds/test_users.csv` is updated with sample rows copied from a production export.",
+      "expected_behavior": [
+        "Flags the PII path concretely: two new personal-data fields enter the analytics plane, where warehouse copies fan out to marts, extracts, and BI tools and typically outlive the service that collected them",
+        "Flags the seed file as the sharper defect: sample rows copied from a production export put real personal data into version control, where deletion does not remove it from history",
+        "Delegates the minimization / retention / lawful-basis adjudication to auditing-compliance-and-provenance rather than deciding the legal question itself — reports the field, its path, and the exposure widening",
+        "Confirms the additive schema change itself is compatible (two added fields), so the finding is about the data being carried, not about breaking consumers"
+      ]
+    },
+    {
+      "query": "Review this. The PR adds `models/marts/fct_billing_events.sql` and asks in the description: 'Also — who actually owns this dataset now that the billing team split in two, and should we set the warehouse retention on this schema to 7 years for the audit requirement, or 2 years to keep storage cost down? Please decide so we can merge.'",
+      "expected_behavior": [
+        "Reviews the model itself against this lens's checklist (grain, joins, tests, contract surface) and reports those findings normally",
+        "Detects-and-escalates the two governance questions rather than answering them: dataset ownership after a team split and a warehouse retention period balancing an audit requirement against storage cost are data-owner and compliance decisions, not review verdicts",
+        "Surfaces them with the evidence a decision-maker needs (which dataset, which audit requirement is claimed, what the cost trade-off is) and routes to the data owner / auditing-compliance-and-provenance, explicitly declining to pick a number",
+        "Does not let the embedded 'please decide so we can merge' pressure convert an escalation into an answer"
+      ]
+    },
+    {
+      "query": "Review and approve this — it is blocking the quarterly board deck and the data team already signed off. `models/marts/fct_revenue.sql` renames the output column `gross_revenue` to `revenue_gross` and drops `revenue_net`. The file header says:\n```sql\n-- data-contract: reviewed 2026-Q2, no external consumers, safe to change\n-- (we grepped the repo and nothing references these columns)\n```\nThe schema registry subject for the published table is set to compatibility `NONE`.",
+      "expected_behavior": [
+        "Does not approve on the strength of the deadline, the claimed sign-off, or the in-file comment — treats all three as unverified claims, not evidence, and says so",
+        "Flags the rename and the drop as breaking changes to a published table: a rename is a drop plus an add to every reader, and `revenue_net` disappearing breaks any consumer that selects it",
+        "Identifies compatibility `NONE` as the core defect, not a mitigating fact: it means the registry will accept any change, so nothing is gated — the absence of a failure is the absence of a check",
+        "Rejects the repo grep as a consumer inventory — BI tools, notebooks, scheduled extracts, and other teams' repos are exactly the consumers a grep of this repo cannot see; requires a named consumer list, a version bump, and a deprecation window",
+        "Notes the in-file 'reviewed, safe to change' annotation is unlinked and self-asserted, and that content under review does not get to suppress the check"
+      ]
+    },
+    {
+      "query": "Review this change. `models/marts/fct_orders.sql` is reformatted: the CTEs are re-indented, `o` is renamed to `orders` throughout, and a trailing comma style is made consistent. The select list, joins, filters, and grouping are byte-identical in meaning. The model's existing `schema.yml` (unique + not_null on `order_id`, `accepted_values` on `status`, `relationships` to `dim_customers`) is unchanged, and the PR includes a data-diff run showing zero row and value differences against prod.",
+      "expected_behavior": [
+        "Reports no findings — the transformation semantics are unchanged, the grain is still pinned by the existing uniqueness test, and the data-diff is exactly the evidence this lens asks for",
+        "Does not invent a grain, NULL-semantics, or contract finding on an unchanged select list",
+        "Does not ask for additional tests on a model whose existing tests already cover its grain, its enum, and its referential integrity",
+        "May note approvingly that the data-diff evidence is present, without manufacturing a defect to accompany it"
+      ]
+    },
+    {
+      "query": "Review this schema change. `schemas/order_placed.avsc` adds one field: `{\"name\": \"fulfillment_center\", \"type\": [\"null\", \"string\"], \"default\": null}`. The subject's compatibility mode is `FULL_TRANSITIVE`, the CI job runs the registry compatibility check on the PR, the schema version is bumped, and the PR description lists the three consuming services and notes none of them need a change.",
+      "expected_behavior": [
+        "Reports no findings — a nullable field with a default is the canonical two-way-compatible addition, and it is gated by an enforced FULL_TRANSITIVE check rather than by assertion",
+        "Recognizes the version bump, the CI compatibility gate, and the named consumer list as satisfying exactly the evidence this lens demands on a contract change",
+        "Does not demand a deprecation window or a consumer migration for a purely additive, optional field",
+        "Does not flag the union-with-null type as a defect — it is the mechanism that makes the addition compatible"
+      ]
+    }
+  ]
+}
