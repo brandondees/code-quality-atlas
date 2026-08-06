@@ -6,7 +6,7 @@ description: Review a diff, pull request, or code change with the code-quality-a
   = all relevant), then synthesizes one verdict. The collapsed, repo-independent entrypoint
   for change review.
 provenance:
-  taxonomy_version: v0.10
+  taxonomy_version: v0.11
   built_from: []
 ---
 

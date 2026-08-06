@@ -80,7 +80,7 @@ def build_router_md(manifest: Manifest) -> str:
         "a lens outside the ranked list still clearly applies), select those "
         "additional lenses too; erring toward running one more relevant lens is "
         "cheaper than missing a finding. This is **not** a cap on the "
-        "whole-repo health-audit route, which runs **all nine repo-shaped "
+        "whole-repo health-audit route, which runs **all ten repo-shaped "
         "audits** (see Routes) — apply the 3-8 figure to per-change review, "
         "never to the audit set. And if you already know which lenses are "
         "relevant, or comprehensive coverage is the goal, call them directly — "

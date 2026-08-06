@@ -14,7 +14,7 @@ description: 'Reviews the action/tool surface of agent and tool-using systems â€
   MCP, or autonomous loop â€” an ordinary model call with no action surface is reviewing-llm-integration''s
   job.'
 provenance:
-  taxonomy_version: v0.10
+  taxonomy_version: v0.11
   built_from:
   - category: 32
     source: docs/research/cluster-4-runtime.md#32

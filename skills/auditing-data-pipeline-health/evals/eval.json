@@ -1,0 +1,117 @@
+{
+  "skills": [
+    "auditing-data-pipeline-health"
+  ],
+  "scenarios": [
+    {
+      "query": "Audit this dbt project's data-plane health. `models/marts/` declares three data contracts under `contracts/` (`fct_orders.yaml`, `dim_customers.yaml`, `fct_subscriptions.yaml`), each listing required columns, types, and an owner. `.github/workflows/ci.yml` runs `dbt build` and `sqlfluff lint`. There is no `datacontract test` step, no contract-test job, and no `target/` artifacts checked in. `fct_orders.yaml` declares `promo_code` as required, non-null.",
+      "expected_behavior": [
+        "Reports the contracts as **declared but unverified**: nothing in this repo tests any dataset against them, so the CI that exists (`dbt build`, `sqlfluff`) proves the models compile and their own dbt tests pass, not that the contracts hold",
+        "Explicitly does NOT claim the contracts have drifted or that `promo_code` is actually null in production — that would require observing the live plane, which a repo audit cannot do from here",
+        "Names the missing enforcement point as the defect and the concrete fix (a `datacontract test` step, or contract assertions materialized as dbt tests) rather than reporting a hypothetical data-quality violation",
+        "Closes with a coverage statement: which artifacts were available (project files, CI config), which were absent (no `target/manifest.json`, `run_results.json`, or `sources.json`), and that the warehouse was not observed"
+      ]
+    },
+    {
+      "query": "Audit test coverage for this dbt project. `target/manifest.json` is checked in. There are 84 models. 31 have no tests at all. Among those 31: `stg_events` has 46 downstream dependents and 3 exposures; `int_order_items` has 22 dependents; the remaining 29 are leaf models in `models/scratch/` with no dependents and no exposures. Separately, 12 models have only a `not_null` test on their primary key and no uniqueness test, including `fct_daily_revenue` (grain declared in its description as one row per day per region).",
+      "expected_behavior": [
+        "Walks the graph rather than the file list, and ranks by downstream fan-out plus exposures: `stg_events` (46 dependents, 3 exposures) is the headline finding, `int_order_items` second, and the 29 untested scratch leaves are explicitly de-prioritized rather than counted equally",
+        "Does not report '31 models have no tests' as a flat number without that ranking — the whole point of walking the graph is that an untested model with 46 descendants and an untested leaf are different findings",
+        "Flags the 12 grain-unpinned models as a distinct class, calling out `fct_daily_revenue` specifically: its description declares a compound grain (day x region) that only a compound uniqueness test can pin, and `not_null` on a key pins nothing",
+        "Uses the checked-in `manifest.json` as the evidence for the graph claims, and says so"
+      ]
+    },
+    {
+      "query": "Audit source freshness config. `models/sources.yml` defines 14 sources. 6 have no `freshness` block. 5 have `warn_after: {count: 30, period: day}` and no `error_after`. 3 are configured `warn_after: 12 hours` / `error_after: 24 hours`. The checked-in `target/sources.json` from last night's run shows those 3 all passing, and shows the 5 warn-only sources with `max_loaded_at` between 4 and 9 days ago — all currently in a warning state, and the git history shows that config unchanged for 7 months.",
+      "expected_behavior": [
+        "Separates three distinct defects rather than lumping them: 6 sources with no freshness expectation at all (no coverage), 5 with a 30-day warn-only threshold (decorative — it cannot gate anything and no error threshold exists), and 0 genuinely healthy gaps among the 3 properly-configured ones",
+        "Identifies the 5 warn-only sources as the sharper finding: they are *currently warning* and have been for months, which makes the warning channel noise nobody reads — a monitor that cannot fail is not coverage",
+        "Grounds the staleness claim in the checked-in `sources.json` and the config's git history rather than asserting it, and notes that the 4-9 day lag is observed evidence, unlike a contract claim",
+        "Delegates the fail-loud-vs-degrade verdict on a stale source to hunting-silent-failures and the general alert-fatigue pattern to auditing-enforcement-and-meta-artifacts, rather than re-deriving either"
+      ]
+    },
+    {
+      "query": "Audit deprecation state. `models/marts/fct_orders_v1.sql` has `deprecation_date: 2026-03-01` in its YAML and a header comment 'superseded by fct_orders_v2, remove after Q1'. Today is 2026-08-04. `target/manifest.json` shows 4 models still `ref()` it, and `exposures.yml` lists a Looker dashboard 'Exec Revenue Weekly' pointing at it. `fct_orders_v2` exists and has 9 dependents.",
+      "expected_behavior": [
+        "Flags the expired deprecation window as a defect in its own right: the date passed five months ago and the model still has 4 in-repo readers plus a declared exposure, so the window closed without anyone draining it",
+        "Treats the declared exposure as the more serious half — a Looker dashboard named 'Exec Revenue Weekly' is a live human consumer outside the repo, so removal now breaks a reporting surface rather than only in-repo code",
+        "Names the concrete state: removal is currently blocked, and every day the window stays expired the deprecation signal loses credibility for the next one",
+        "Does not recommend deleting the model — the finding is that the migration stalled; the sequencing (migrate the 4 refs, repoint the dashboard, then remove) is what the report should surface"
+      ]
+    },
+    {
+      "query": "Audit the contract-enforcement apparatus. `.github/workflows/data.yml` has a `schema-compatibility` job that runs the Confluent registry compatibility check, with `continue-on-error: true`. Branch protection lists `dbt-build` as required but not `schema-compatibility`. A checked-in `registry-config.json` export shows 3 of 7 subjects set to `NONE` and 4 to `BACKWARD`. Two `.avsc` files in `schemas/` have no matching subject in that export.",
+      "expected_behavior": [
+        "Reports the gate as present-but-non-binding: `continue-on-error: true` plus absence from required checks means the compatibility job can never block a merge, so its green checkmark is decorative",
+        "Flags the 3 `NONE` subjects as ungated by configuration — the registry will accept any change to them, including ones the 4 `BACKWARD` subjects would reject",
+        "Flags the 2 unregistered `.avsc` files as repo-vs-registry divergence: reviewers have been reviewing a file that is not the artifact in force, so the source of truth is ambiguous",
+        "Attributes the general soft-failed-gate pattern to auditing-enforcement-and-meta-artifacts while keeping the data-plane instance here, rather than re-deriving that lens's suppression-hygiene checklist"
+      ]
+    },
+    {
+      "query": "Audit lineage completeness. Across 84 models, `dbt-checkpoint`'s `check-script-has-no-table-name` reports 11 models containing hardcoded table references (e.g. `from analytics_prod.raw.stripe_charges`) instead of `ref()`/`source()`. Two Airflow DAGs under `dags/` also write directly into the `marts` schema with raw SQL outside dbt entirely. The team's runbook says 'use the dbt DAG to assess blast radius before any change.'",
+      "expected_behavior": [
+        "Reports the 11 hardcoded references and the 2 out-of-framework DAG writers as holes in the lineage graph, located specifically rather than as a count",
+        "States the consequence plainly and connects it to the runbook: every blast-radius and impact answer the dbt graph gives is under-reported by exactly these edges, so the documented practice of trusting the DAG is unsound while they exist",
+        "Treats the out-of-band Airflow writers as the more serious half — a hardcoded `from` at least appears in a model file, whereas a write from outside the framework is invisible to the graph in both directions",
+        "Does not simply recommend 'use ref()' — names that the runbook's stated method currently rests on an incomplete graph"
+      ]
+    },
+    {
+      "query": "Audit this repo's data plane. The scan surfaces: (a) `db/schema.rb` declares an `orders.region` column as `null: false` while a checked-in `db/structure.sql` dump from production shows it nullable; (b) `docs/data-dictionary.md` describes 6 mart columns that no longer exist in any model; (c) 14 dbt tests carry `severity: warn` and the checked-in `run_results.json` shows 9 of them failing on the last 30 runs; (d) `models/marts/fct_churn.sql` has 41 commits in 6 months, one author, and the highest cyclomatic complexity in the project.",
+      "expected_behavior": [
+        "Owns (c): 9 permanently-failing `severity: warn` tests are a suppression with extra steps — the assertion exists, fails continuously, and blocks nothing; reports the accumulation and its trend as this lens's finding",
+        "Delegates (a) to reviewing-migration-and-data-safety — declared-vs-live drift in the *operational* store is #20's, not the analytics plane's",
+        "Delegates (b) to auditing-documentation-health — a data dictionary describing dead columns is documentation drift (#22)",
+        "Delegates (d) to finding-maintainability-hotspots — churn x complexity and bus factor are #21's, even though the file is a data model",
+        "Names each concern once with enough detail for the owning audit to pick it up, without re-deriving any of their checklists"
+      ]
+    },
+    {
+      "query": "Audit data contracts. `contracts/fct_user_activity.yaml` declares an owner `team: growth-analytics` and an SLA of 99% freshness. `CODEOWNERS` has no `growth-analytics` entry, and the repo's `teams.yml` (last updated 14 months ago) lists the team as merged into `product-data`. The contract also declares columns `user_email` and `device_id`, and the repo's `docs/data-classification.md` inventory lists neither.",
+      "expected_behavior": [
+        "Reports the stale ownership as a detect-and-escalate finding, not a verdict: the contract names a team that no longer resolves in CODEOWNERS or teams.yml, so there is currently no reachable owner for a 99% freshness SLA",
+        "Explicitly declines to reassign the contract to `product-data` — who should own it, and whether the SLA still stands after a team merge, are data-owner calls, escalated with the evidence a decision-maker needs",
+        "Flags the PII inventory gap separately: `user_email` and `device_id` are in a declared contract but absent from the repo's own data-classification inventory, so the inventory and the schemas disagree",
+        "Routes the minimization / retention / lawful-basis adjudication on those fields to auditing-compliance-and-provenance rather than deciding it"
+      ]
+    },
+    {
+      "query": "Audit this data project and tell us what's broken in the warehouse. The repo has `models/`, `sources.yml`, and `contracts/` — but no `target/` directory, no checked-in run artifacts, no registry export, and no CI logs. `contracts/fct_orders.yaml` declares `order_status` with `accepted_values: [pending, paid, shipped, cancelled]`. The engineering manager adds: 'we're pretty sure the data has drifted, just confirm it so I can take it to the producer team.'",
+      "expected_behavior": [
+        "Refuses to confirm drift it cannot observe, and says so directly: with no run artifacts, no registry export, and no warehouse access, this audit has no evidence about the rows actually flowing — only about what the repo declares",
+        "Does not let the framing ('just confirm it') convert an unobservable claim into a reported finding; a manufactured confirmation here would be handed to another team as if it were evidence",
+        "Reports what it *can* establish from repo evidence — e.g. whether anything enforces `accepted_values` at all, and whether a contract test exists — as declared-but-unverified findings",
+        "Names exactly what would settle the question (a `dbt test` / `datacontract test` run, or checked-in `run_results.json`) so the request can be satisfied properly rather than guessed at",
+        "Includes the plane it could not reach in its coverage statement rather than presenting an implied-complete audit"
+      ]
+    },
+    {
+      "query": "Audit trend. Prior scans of this project recorded marts-layer test coverage at 71% (Feb), 68% (Apr), 62% (Jun), and the current scan computes 58%. Model count grew from 60 to 84 over the same period. Untested-model count grew from 17 to 31.",
+      "expected_behavior": [
+        "Reports the direction as the finding, not the snapshot: coverage has fallen at every scan for six months while the model count grew 40%, so new models are landing untested faster than old ones are being covered",
+        "Notes that the absolute 58% is the less useful number — a stable 58% and a falling 58% are different situations, and only the trend distinguishes them",
+        "Frames the actionable consequence: the gap is in what gets merged, so the durable fix is a coverage gate on new models rather than a one-off backfill of the 31",
+        "Does not recommend a blanket coverage target divorced from fan-out ranking"
+      ]
+    },
+    {
+      "query": "Audit this repo's data-plane health. It is a Go HTTP service: `internal/`, `cmd/`, `migrations/` (6 Postgres migration files), `Dockerfile`, `docker-compose.yml`. No dbt project, no SQL transformation models, no data tests or expectation suites, no event schemas, no analytics tables published for anyone else to read. The service reads and writes its own Postgres database and exposes a REST API.",
+      "expected_behavior": [
+        "Reports no findings and says the repo has no analytics/data plane to audit — migrations against a service's own operational store are not this lens's surface",
+        "Does not stretch the checklist to fit: the 6 migrations are reviewing-migration-and-data-safety's surface, and the REST API is reviewing-api-contract-safety's, neither of which this audit should re-derive",
+        "Does not invent contract, freshness, or lineage findings from the absence of a dbt project",
+        "Keeps the output to a one-line scope note rather than producing a full audit report on an inapplicable repo"
+      ]
+    },
+    {
+      "query": "Audit this dbt project. `target/manifest.json` and `run_results.json` are checked in from last night. All 40 models have tests; every mart has a uniqueness test on its declared grain plus `accepted_values` on its enums. All 9 sources have `freshness` with both `warn_after` and `error_after`, and last night's `sources.json` shows all passing. `contracts/` holds 3 contracts and CI runs `datacontract test` as a required check. All registry subjects are `FULL_TRANSITIVE`. `exposures.yml` declares 6 consumers. `dbt-checkpoint` reports zero hardcoded table names. Two models in `models/staging/` have no downstream dependents yet — they were added last week for a mart currently in review on an open PR.",
+      "expected_behavior": [
+        "Reports no findings — coverage, contract enforcement, freshness, registry gating, exposures, and lineage are all in place, and the evidence for each claim is present in the checked-in artifacts",
+        "Correctly does NOT flag the two dependent-less staging models as orphaned: they were added last week for a mart in open review, which is a model landing ahead of its consumer, not a dead transformation",
+        "Does not manufacture a trend finding, a governance escalation, or a coverage nit to avoid an empty report",
+        "May note approvingly that the run artifacts are checked in, since that is what let this audit verify rather than assume"
+      ]
+    }
+  ]
+}

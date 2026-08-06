@@ -5,7 +5,7 @@ description: Review a decision rather than code — an ADR, RFC, design doc, dep
   Reviews the choice and its record (rationale, lock-in, exit, revisit trigger) with
   the decision lens plus the design-capable lenses for the decision's domain.
 provenance:
-  taxonomy_version: v0.10
+  taxonomy_version: v0.11
   built_from: []
 ---
 
