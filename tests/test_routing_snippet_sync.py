@@ -61,54 +61,60 @@ def test_own_dogfood_file_matches_template(dogfood_file):
     )
 
 
-# Skills that exist only in the standalone form (skills/<name>/) and are never
-# copied when a repo vendors --collapsed (tooling/vendor-skills.sh's
-# collect_skill_names()/vendor_one() set SRC_SUBDIR=collapsed/skills for that
-# form, which has no choosing-review-lenses/ or synthesizing-review-findings/
-# folder — see collapsed/skills/). Naming one of these in the routing block
-# without also describing what a --collapsed-vendored repo should do instead
+# Skills that exist ONLY in the standalone form (skills/<name>/) and have no
+# collapsed-form equivalent anywhere — neither as a top-level entrypoint
+# (collapsed/skills/<name>/) nor nested as a lens bundled inside an entrypoint
+# (collapsed/skills/<entrypoint>/reference/lenses/<name>/, which is where
+# ordinary lenses like sweeping-for-security actually live in the collapsed
+# form). Only checking the top-level dir would misclassify every ordinary
+# lens as "standalone-only" — it IS present, just nested — which would demand
+# collapsed-form guidance for skills that don't need it. Naming a genuinely
+# standalone-only skill (choosing-review-lenses, synthesizing-review-findings)
+# in the routing block without also describing the collapsed-form alternative
 # 404s for that reader (issue #200). Derived from the actual directory layout
 # rather than hardcoded, so a future standalone-only skill is caught too.
 def _standalone_only_skill_names() -> set[str]:
     root = Path(__file__).resolve().parent.parent
     standalone = {p.name for p in (root / "skills").iterdir() if p.is_dir()}
-    collapsed = {p.name for p in (root / "collapsed" / "skills").iterdir() if p.is_dir()}
-    return standalone - collapsed
+    collapsed_root = root / "collapsed" / "skills"
+    collapsed_top = {p.name for p in collapsed_root.iterdir() if p.is_dir()}
+    collapsed_nested = {
+        lens.name
+        for entrypoint in collapsed_root.iterdir()
+        if (entrypoint / "reference" / "lenses").is_dir()
+        for lens in (entrypoint / "reference" / "lenses").iterdir()
+        if lens.is_dir()
+    }
+    return standalone - collapsed_top - collapsed_nested
 
 
 def test_routing_block_names_collapsed_equivalent_for_standalone_only_skills():
-    """Regression test for issue #200. Every routing-block row that names a
+    """Regression test for issue #200. Every routing-TABLE row that names a
     standalone-only skill (e.g. `choosing-review-lenses`,
     `synthesizing-review-findings`) must also tell a --collapsed-vendored
-    reader what to use instead — the word "collapsed" must appear near the
-    mention, not just the standalone skill name in isolation."""
+    reader what to use instead — the word "collapsed" must appear in that same
+    table row. Scoped to table rows (lines starting with "|") rather than any
+    line: prose mentions above the table (e.g. explaining the general review
+    methodology) are not per-tool routing instructions the way a table row
+    is, so they're not held to the same requirement."""
     root = Path(__file__).resolve().parent.parent
     block = _extract_block(
         (root / "templates" / "agents-routing-snippet.md").read_text(encoding="utf-8"))
     standalone_only = _standalone_only_skill_names()
-    named = [name for name in standalone_only if f"`{name}`" in block]
-    assert named, (
-        "expected the routing block to still name at least one standalone-only "
-        "skill (e.g. choosing-review-lenses) — if this list is now empty, either "
-        "the block or this test's assumptions have changed; update accordingly"
-    )
+    table_rows = [ln for ln in block.split("\n") if ln.lstrip().startswith("|")]
+    # Only skills the block's table actually names are checked below. If the
+    # table is ever rewritten to not name any standalone-only skill at all
+    # (e.g. made fully form-agnostic), that satisfies this test's actual
+    # requirement — "if named, must have collapsed guidance in that row" —
+    # vacuously, so this loop intentionally does not assert `named` is
+    # non-empty.
+    named = [name for name in standalone_only if any(f"`{name}`" in row for row in table_rows)]
     for name in named:
-        # A skill can be mentioned more than once (e.g. in prose ahead of the
-        # table as well as in its table row) — the requirement is that AT
-        # LEAST ONE mention has nearby --collapsed-form guidance, not that
-        # every mention does.
         needle = f"`{name}`"
-        occurrences = []
-        start = 0
-        while (idx := block.find(needle, start)) != -1:
-            occurrences.append(idx)
-            start = idx + len(needle)
-        assert any(
-            "collapsed" in block[max(0, idx - 400) : idx + 400].lower()
-            for idx in occurrences
-        ), (
-            f"the routing block mentions the standalone-only skill `{name}` "
-            "without nearby guidance for the --collapsed form (issue #200) — "
-            "every row citing a standalone-only skill must also name its "
-            "collapsed-form equivalent"
+        mentioning_rows = [row for row in table_rows if needle in row]
+        assert all("collapsed" in row.lower() for row in mentioning_rows), (
+            f"the routing table mentions the standalone-only skill `{name}` "
+            "in a row without --collapsed-form guidance in that same row "
+            "(issue #200) — every row citing a standalone-only skill must "
+            "also name its collapsed-form equivalent"
         )
