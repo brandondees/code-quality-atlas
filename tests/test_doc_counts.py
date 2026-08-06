@@ -42,7 +42,14 @@ def test_documented_counts_match_manifest():
     # invariant; bold/heading formatting is incidental and may change.
     assert _has(readme, f"{c['total']} review skills"), "README total skill count is stale"
     assert _has(readme, f"{c['lenses']} review lenses"), "README lens count is stale"
-    assert _has(plugin, f"{c['lenses']} code-review and maintenance skills"), (
+    # plugin.json quotes the *lens* count and names the router and synthesizer as
+    # additions; marketplace.json quotes the *total*. Both said "N code-review and
+    # maintenance skills", so every reviewer who compared the two files read the
+    # difference as drift (flagged 5x across PRs #199/#201 by three reviewers).
+    # The counts were always right; the shared phrasing was the defect. plugin.json
+    # now says "lenses" so the two lines can no longer be misread as the
+    # same claim.
+    assert _has(plugin, f"{c['lenses']} code-review and maintenance lenses"), (
         "plugin.json lens count is stale"
     )
     assert _has(market, f"{c['total']} code-review and maintenance skills"), (
