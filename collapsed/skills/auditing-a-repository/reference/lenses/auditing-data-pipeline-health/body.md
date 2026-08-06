@@ -41,7 +41,7 @@ The full review checklist, grouped by the research category each check draws fro
 - **Lineage the graph cannot see.** Hardcoded table names instead of `ref()`/`source()`, cross-project references outside the graph, and models built by scripts outside the framework. Count and locate them, and state the consequence plainly: every blast-radius and impact answer this repo can give is under-reported by exactly these edges.
 - **Permanently-failing or permanently-warning data tests.** A `severity: warn` test that has failed continuously is a suppression with extra steps; a test disabled "temporarily" with no dated reason is the data plane's `# noqa`. Report the accumulation and its trend (cross #30).
 - **Unowned contracts and stale ownership.** A published dataset or contract with no named owner, or one naming a team, rota, or CODEOWNERS entry that no longer resolves. This is the escalation trigger, not a verdict: **detect and escalate to a data owner (G8)** — who should own it, and whether a drifted contract gets re-negotiated or the producer corrected, are not this lens's calls.
-- **PII inventory drift.** Columns and event fields carrying personal data that are not covered by whatever data-classification, retention, or contract declaration the repo keeps. Flag the field and the gap between the inventory and the schemas; **route the minimization/retention/lawful-basis adjudication to #27** (cross #17 for real PII in seeds and fixtures).
+- **PII inventory drift.** Columns and event fields carrying personal data that are not covered by whatever data-classification, retention, or contract declaration the repo keeps. Flag the field and the gap between the inventory and the schemas; **delegate the minimization/retention/lawful-basis adjudication to #27** (cross #17 for real PII in seeds and fixtures).
 - **Report the direction, and state what you could not reach.** Findings here are standing conditions, so a snapshot is weaker than a trend: prefer "test coverage on the marts layer fell from 71% to 58% across the last four scans" to a bare percentage, and always close with the coverage statement this audit owes — which artifacts were available, which were absent, and that the live plane was not observed from here (G19).
 
 ---
@@ -78,9 +78,11 @@ export. The live plane was not observed.
 **Findings:**
 
 - `contracts/` — **3 contracts declared, 0 enforced.** Nothing in this repo tests any dataset
-  against any of them. CI runs `dbt build` and `sqlfluff lint`, which establish that the models
-  compile and their own dbt tests pass — not that the contracts hold. A contract with no
-  enforcement point is documentation that reviewers mistake for a gate.
+  against any of them. CI is *configured* to run `dbt build` and `sqlfluff lint` — and note that
+  with no run artifacts checked in, this audit cannot see those jobs' outcomes either, only that
+  they are wired. Even a green run of both would establish that the models build and their own
+  dbt tests pass, not that the contracts hold. A contract with no enforcement point is
+  documentation that reviewers mistake for a gate.
   *(severity: Major. Evidence: `ci.yml`, absence of any contract-test invocation.)*
 - `contracts/fct_orders.yaml` — **`promo_code` declared required and non-null, unverified
   here.** No artifact in this repo shows that constraint was ever checked against the data.
@@ -207,8 +209,8 @@ supports, plus the specific artifact that would answer it properly.
 > `target/manifest.json` and `run_results.json` checked in from last night. All 40 models have
 > tests; every mart has a uniqueness test on its declared grain plus `accepted_values` on its
 > enums. All 9 sources have `freshness` with `warn_after` and `error_after`; last night's
-> `sources.json` shows all passing. `contracts/` holds 3 contracts and CI runs `datacontract test`
-> as a required check. All registry subjects are `FULL_TRANSITIVE`. `exposures.yml` declares 6
+> `sources.json` shows all passing. `contracts/` holds 3 contracts, CI runs `datacontract test`
+> as a required check, and that job's result file from the same run shows all three passing. All registry subjects are `FULL_TRANSITIVE`. `exposures.yml` declares 6
 > consumers. `dbt-checkpoint` reports zero hardcoded table names. Two models in `models/staging/`
 > have no dependents yet — added last week for a mart currently in review on an open PR.
 
@@ -216,14 +218,17 @@ supports, plus the specific artifact that would answer it properly.
 
 > **No findings.** Coverage, contract enforcement, freshness, registry gating, exposures, and
 > lineage are all in place, and the run artifacts are checked in — which is what let this audit
-> verify each claim rather than assume it.
+> verify each claim rather than assume it. Note which artifact carries which claim: a required
+> `datacontract test` job proves the contracts are *wired*; only its checked-in **result**
+> supports saying they currently *hold*. Without that result the honest verdict would be
+> "enforcement in place, conformance unverified" — not "no findings."
 >
 > The two dependent-less staging models are **not** flagged as orphaned: they were added for a
 > mart in open review, which is a model landing slightly ahead of its consumer, not a dead
 > transformation. Re-check if that PR closes without merging.
 
-**Coverage & limitations:** verified from checked-in `manifest.json`, `run_results.json`, and
-`sources.json` (last night's run). Live-plane conformance beyond that run was not observed.
+**Coverage & limitations:** verified from checked-in `manifest.json`, `run_results.json`,
+`sources.json`, and the `datacontract test` result (last night's run). Live-plane conformance beyond that run was not observed.
 
 No manufactured trend finding, no governance escalation, no coverage nit added to avoid an empty
 report. A healthy data plane is a legitimate audit result, and saying so plainly is what makes

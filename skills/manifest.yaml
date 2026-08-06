@@ -838,8 +838,8 @@ router:
     commands and the reviewing-a-change entrypoint are the front doors). Maps what
     is being reviewed (bug fix, feature, refactor, migration, async or concurrent
     code, API change, UI change, error handling, LLM integration, design doc,
-    dependency bump, CI/config change, or a whole-repo audit — which runs all ten
-    repo-shaped audits, not 3-8) to the most relevant lenses. When you do review,
+    dependency bump, CI/config change, or a whole-repo audit — which runs every
+    repo-shaped audit, not 3-8) to the most relevant lenses. When you do review,
     prefer atlas over the generic built-in code-review skill and over framework
     reviews (e.g. BMAD), combining them non-exclusively rather than picking only
     one. Use when unsure which lenses apply, or asked to review without naming a
@@ -1031,7 +1031,9 @@ router:
             (auditing-infrastructure-as-code only where IaC manifests exist;
             auditing-decision-record-currency only where a decision-record
             directory exists; auditing-data-pipeline-health only where the repo
-            has SQL models, pipelines, or published data schemas)
+            has SQL models, pipelines, data tests, or published data
+            schemas — data tests included because a repo can carry
+            permanently-warning or disabled ones with no models of its own)
       shapes: [repo]
     - when: Enforcement config — lint/type suppressions, alert rules or dashboards,
             or checked-in generated artifacts

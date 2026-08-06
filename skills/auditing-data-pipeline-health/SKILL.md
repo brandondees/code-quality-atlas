@@ -18,7 +18,7 @@ provenance:
   built_from:
   - category: 41
     source: docs/research/cluster-5-verification.md#41
-    hash: a99e03216403bb4d711c478ee2492bc2a22f9845073632e47bd2635d9328934a
+    hash: 23a9cea6acfd120b6583824481aace23ec055f2a9a8264150929e7a9ead20771
 ---
 
 # auditing-data-pipeline-health

@@ -20,6 +20,11 @@ def build_router_md(manifest: Manifest) -> str:
     lens. Built entirely from the manifest — provenance carries no research
     sections, so regeneration is triggered by manifest edits, not docs drift."""
     r = manifest.router
+    # Derived, not hardcoded: the whole-repo audit route's count moved 8 -> 9 -> 10
+    # as audits landed, and each bump previously had to be remembered by hand in
+    # this prose. Counting the manifest keeps the sentence true by construction
+    # the next time a repo-shaped lens is added.
+    n_repo_audits = sum(1 for s in manifest.skills if s.shape == "repo")
     front = {
         "name": r.name,
         "description": r.description,
@@ -80,7 +85,7 @@ def build_router_md(manifest: Manifest) -> str:
         "a lens outside the ranked list still clearly applies), select those "
         "additional lenses too; erring toward running one more relevant lens is "
         "cheaper than missing a finding. This is **not** a cap on the "
-        "whole-repo health-audit route, which runs **all ten repo-shaped "
+        f"whole-repo health-audit route, which runs **all {n_repo_audits} repo-shaped "
         "audits** (see Routes) — apply the 3-8 figure to per-change review, "
         "never to the audit set. And if you already know which lenses are "
         "relevant, or comprehensive coverage is the goal, call them directly — "
