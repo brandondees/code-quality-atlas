@@ -12,7 +12,6 @@ Has the data plane drifted since anyone looked? Contract currency, test coverage
 - [Checklist](#checklist)
 - [From category #41](#from-category-41)
 - [Examples](#examples)
-- [Contents](#contents)
 - [Bad — declared contracts with no enforcement point](#bad--declared-contracts-with-no-enforcement-point)
 - [Bad — coverage as a standing condition, ranked by fan-out](#bad--coverage-as-a-standing-condition-ranked-by-fan-out)
 - [Delegating — the neighbouring audits' halves](#delegating--the-neighbouring-audits-halves)
@@ -60,14 +59,6 @@ that would need live data to confirm is reported as *declared but unverified* �
 never as confirmed drift.
 
 ---
-
-## Contents
-
-- [Bad — declared contracts with no enforcement point](#bad--declared-contracts-with-no-enforcement-point)
-- [Bad — coverage as a standing condition, ranked by fan-out](#bad--coverage-as-a-standing-condition-ranked-by-fan-out)
-- [Delegating — the neighbouring audits' halves](#delegating--the-neighbouring-audits-halves)
-- [Refusing — the finding the evidence doesn't support](#refusing--the-finding-the-evidence-doesnt-support)
-- [Clean — a healthy project (the over-flagging guard)](#clean--a-healthy-project-the-over-flagging-guard)
 
 ## Bad — declared contracts with no enforcement point
 
