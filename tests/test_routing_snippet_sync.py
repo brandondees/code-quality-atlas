@@ -59,3 +59,56 @@ def test_own_dogfood_file_matches_template(dogfood_file):
         "templates/agents-routing-snippet.md (the source of truth). Resync the "
         "BEGIN…END block, or intentionally diverge and document why (issue #167)."
     )
+
+
+# Skills that exist only in the standalone form (skills/<name>/) and are never
+# copied when a repo vendors --collapsed (tooling/vendor-skills.sh's
+# collect_skill_names()/vendor_one() set SRC_SUBDIR=collapsed/skills for that
+# form, which has no choosing-review-lenses/ or synthesizing-review-findings/
+# folder — see collapsed/skills/). Naming one of these in the routing block
+# without also describing what a --collapsed-vendored repo should do instead
+# 404s for that reader (issue #200). Derived from the actual directory layout
+# rather than hardcoded, so a future standalone-only skill is caught too.
+def _standalone_only_skill_names() -> set[str]:
+    root = Path(__file__).resolve().parent.parent
+    standalone = {p.name for p in (root / "skills").iterdir() if p.is_dir()}
+    collapsed = {p.name for p in (root / "collapsed" / "skills").iterdir() if p.is_dir()}
+    return standalone - collapsed
+
+
+def test_routing_block_names_collapsed_equivalent_for_standalone_only_skills():
+    """Regression test for issue #200. Every routing-block row that names a
+    standalone-only skill (e.g. `choosing-review-lenses`,
+    `synthesizing-review-findings`) must also tell a --collapsed-vendored
+    reader what to use instead — the word "collapsed" must appear near the
+    mention, not just the standalone skill name in isolation."""
+    root = Path(__file__).resolve().parent.parent
+    block = _extract_block(
+        (root / "templates" / "agents-routing-snippet.md").read_text(encoding="utf-8"))
+    standalone_only = _standalone_only_skill_names()
+    named = [name for name in standalone_only if f"`{name}`" in block]
+    assert named, (
+        "expected the routing block to still name at least one standalone-only "
+        "skill (e.g. choosing-review-lenses) — if this list is now empty, either "
+        "the block or this test's assumptions have changed; update accordingly"
+    )
+    for name in named:
+        # A skill can be mentioned more than once (e.g. in prose ahead of the
+        # table as well as in its table row) — the requirement is that AT
+        # LEAST ONE mention has nearby --collapsed-form guidance, not that
+        # every mention does.
+        needle = f"`{name}`"
+        occurrences = []
+        start = 0
+        while (idx := block.find(needle, start)) != -1:
+            occurrences.append(idx)
+            start = idx + len(needle)
+        assert any(
+            "collapsed" in block[max(0, idx - 400) : idx + 400].lower()
+            for idx in occurrences
+        ), (
+            f"the routing block mentions the standalone-only skill `{name}` "
+            "without nearby guidance for the --collapsed form (issue #200) — "
+            "every row citing a standalone-only skill must also name its "
+            "collapsed-form equivalent"
+        )
