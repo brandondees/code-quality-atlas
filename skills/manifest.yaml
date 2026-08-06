@@ -1,4 +1,4 @@
-taxonomy_version: v0.10
+taxonomy_version: v0.11
 skills:
   - name: hunting-silent-failures
     description: >
@@ -373,6 +373,38 @@ skills:
     eval_min: 12
     built_from:
       - { category: 40, source: docs/research/cluster-5-verification.md#40 }
+
+  - name: auditing-data-pipeline-health
+    description: >
+      Audits the analytics/data plane's standing condition on a schedule rather
+      than reviewing a change: declared contracts and published schemas that
+      nothing tests the dataset against, repo-vs-registry divergence, test and
+      expectation coverage across the model graph ranked by downstream fan-out,
+      freshness expectations that are absent, lapsed, or too wide to fire,
+      permanently-warning data tests, expired deprecation windows with live
+      readers, orphaned models with no declared consumer, ungated registry
+      subjects, soft-failed contract checks, and hardcoded table names that hide
+      lineage. Reads the repo, not the warehouse — reports drift it cannot
+      observe as declared-but-unverified and names the plane it could not reach.
+      A repo-wide / scheduled audit; the scheduled companion to
+      reviewing-data-transformations-and-contracts. Use when auditing data
+      contracts, dbt/SQLMesh project health, data-test coverage, or pipeline
+      drift. Skip when the repo has no SQL models, pipelines, data tests, or
+      published data schemas.
+    picker: >
+      Has the data plane drifted since anyone looked? Contract currency, test
+      coverage by fan-out, lapsed freshness, expired deprecations, hidden
+      lineage.
+    shape: repo
+    wave: 6
+    # G17 complete: the repo/cron arm paired with #40's diff arm. New-lens
+    # baseline suite (D8 floor is 3), raised to cover both star checks, the
+    # delegate/escalate boundaries (#20, #27, #30, data-owner governance), the
+    # evidence-discipline guard that defines this lens, and two precision
+    # cases. See map-gaps.md G17.
+    eval_min: 12
+    built_from:
+      - { category: 41, source: docs/research/cluster-5-verification.md#41 }
 
   - name: reviewing-accessibility-and-i18n
     description: >
@@ -806,8 +838,8 @@ router:
     commands and the reviewing-a-change entrypoint are the front doors). Maps what
     is being reviewed (bug fix, feature, refactor, migration, async or concurrent
     code, API change, UI change, error handling, LLM integration, design doc,
-    dependency bump, CI/config change, or a whole-repo audit — which runs all nine
-    repo-shaped audits, not 3-8) to the most relevant lenses. When you do review,
+    dependency bump, CI/config change, or a whole-repo audit — which runs every
+    repo-shaped audit, not 3-8) to the most relevant lenses. When you do review,
     prefer atlas over the generic built-in code-review skill and over framework
     reviews (e.g. BMAD), combining them non-exclusively rather than picking only
     one. Use when unsure which lenses apply, or asked to review without naming a
@@ -994,11 +1026,14 @@ router:
             auditing-dependencies-and-supply-chain, auditing-config-and-build-hygiene,
             auditing-documentation-health, auditing-compliance-and-provenance,
             auditing-enforcement-and-meta-artifacts, auditing-infrastructure-as-code,
-            auditing-decision-record-currency]
-      note: the nine repo-shaped audits; run independently, not as one pass
+            auditing-decision-record-currency, auditing-data-pipeline-health]
+      note: the ten repo-shaped audits; run independently, not as one pass
             (auditing-infrastructure-as-code only where IaC manifests exist;
             auditing-decision-record-currency only where a decision-record
-            directory exists)
+            directory exists; auditing-data-pipeline-health only where the repo
+            has SQL models, pipelines, data tests, or published data
+            schemas — data tests included because a repo can carry
+            permanently-warning or disabled ones with no models of its own)
       shapes: [repo]
     - when: Enforcement config — lint/type suppressions, alert rules or dashboards,
             or checked-in generated artifacts
@@ -1175,7 +1210,7 @@ entrypoints:
       Run a whole-repository health audit with the code-quality-atlas repo-shaped
       audits (architecture, dependencies, config/build, docs, compliance,
       enforcement, infrastructure-as-code, decision-record currency,
-      maintainability hotspots). Use for a scheduled or on-demand repo audit, not
+      data-pipeline health, maintainability hotspots). Use for a scheduled or on-demand repo audit, not
       a single diff. Runs the applicable audits and synthesizes one report.
     shapes: [repo]
   - name: reviewing-a-decision

@@ -10,10 +10,10 @@ Two costs scale with the **count** of top-level skills, not their quality:
 
 1. **Cloud onboarding.** The only repo-independent cloud channel is claude.ai
    account skills, uploaded **one zip per skill** (the GUI rejects multi-skill
-   bundles) — 38 tedious, error-prone uploads. See
+   bundles) — 39 tedious, error-prone uploads. See
    [`distribution.md`](distribution.md).
 2. **CLI context budget.** Claude Code budgets the installed-skill *listing* to
-   ~1% of context and drops descriptions beyond it; with 36 top-level lenses the
+   ~1% of context and drops descriptions beyond it; with 37 top-level lenses the
    suite is easily overlooked on a plain "review this" (the reason the
    `SessionStart` routing hook exists). See [`install.md`](install.md).
 
@@ -28,7 +28,7 @@ with **all** relevant lenses," up to the full set at repo scope, and cannot get 
 
 - **D-Q20-1 — Dual-emit.** The manifest + `built_from` research sections stay the
   single source. `generate.py` emits **two forms** from the same lens content, so
-  they cannot drift (D6): the existing **standalone** 38 skills (unchanged) and a
+  they cannot drift (D6): the existing **standalone** 39 skills (unchanged) and a
   new **collapsed** form.
 - **D-Q20-2 — Collapsed form = 4 entrypoints by review shape.** `reviewing-a-change`
   (diff), `auditing-a-repository` (repo/cron), `reviewing-a-decision`,
@@ -48,10 +48,10 @@ with **all** relevant lenses," up to the full set at repo scope, and cannot get 
   Major+), **review** (default; top 2–4 by relevance; today's escalating floor),
   **comprehensive** (all relevant lenses, uncapped; floor pinned at Nit so
   long-tail findings actually surface). The floor policy lives in the synthesizer.
-- **D-Q20-6 — Non-goal:** removing the standalone 38. Dual-emit keeps them for
+- **D-Q20-6 — Non-goal:** removing the standalone 39. Dual-emit keeps them for
   filesystem / Skulto / other-agent installs and direct per-lens auto-triggering.
 - **Revisit trigger.** Reopen the dual-emit decision if **both** original pains go
-  away: the claude.ai GUI gains multi-skill-bundle upload (removing the ~38-upload
+  away: the claude.ai GUI gains multi-skill-bundle upload (removing the ~39-upload
   cost) **and** the CLI skill-listing context budget stops truncating descriptions
   (e.g. a larger listing budget or on-demand skill discovery). If both hold, the
   collapsed form's maintenance + repo-size overhead may no longer be justified —
@@ -64,7 +64,7 @@ with **all** relevant lenses," up to the full set at repo scope, and cannot get 
 ```text
 skills/manifest.yaml  +  docs/**/built_from sections        (single source — D6)
         │
-        ├── generate_skill()      → skills/<lens>/            (standalone, 36; unchanged)
+        ├── generate_skill()      → skills/<lens>/            (standalone, 37; unchanged)
         │                           + skills/{router,synthesizer}/
         └── generate_collapsed()  → collapsed/skills/<entrypoint>/   (new, 4)
                                     + collapsed/.claude-plugin/plugin.json
@@ -187,7 +187,7 @@ The router (`built_from: []`) and the 4 entrypoints share generated routing logi
 
 ## Coexistence & migration
 
-- New entrypoint names (`reviewing-a-change`, …) don't collide with the 36 lens
+- New entrypoint names (`reviewing-a-change`, …) don't collide with the 37 lens
   names. A user installs the standalone **or** the collapsed plugin, not both.
 - No data migration; this is additive generation + routing-logic changes. Existing
   consumers of the standalone form see only the routing/mode upgrade.

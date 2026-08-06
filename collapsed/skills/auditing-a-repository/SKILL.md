@@ -2,11 +2,11 @@
 name: auditing-a-repository
 description: Run a whole-repository health audit with the code-quality-atlas repo-shaped
   audits (architecture, dependencies, config/build, docs, compliance, enforcement,
-  infrastructure-as-code, decision-record currency, maintainability hotspots). Use
-  for a scheduled or on-demand repo audit, not a single diff. Runs the applicable
-  audits and synthesizes one report.
+  infrastructure-as-code, decision-record currency, data-pipeline health, maintainability
+  hotspots). Use for a scheduled or on-demand repo audit, not a single diff. Runs
+  the applicable audits and synthesizes one report.
 provenance:
-  taxonomy_version: v0.10
+  taxonomy_version: v0.11
   built_from: []
 ---
 
@@ -14,7 +14,7 @@ provenance:
 
 ## When to use
 
-Run a whole-repository health audit with the code-quality-atlas repo-shaped audits (architecture, dependencies, config/build, docs, compliance, enforcement, infrastructure-as-code, decision-record currency, maintainability hotspots). Use for a scheduled or on-demand repo audit, not a single diff. Runs the applicable audits and synthesizes one report.
+Run a whole-repository health audit with the code-quality-atlas repo-shaped audits (architecture, dependencies, config/build, docs, compliance, enforcement, infrastructure-as-code, decision-record currency, data-pipeline health, maintainability hotspots). Use for a scheduled or on-demand repo audit, not a single diff. Runs the applicable audits and synthesizes one report.
 
 ## How this works
 
@@ -41,7 +41,7 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 
 | When reviewing… | Run |
 |---|---|
-| Whole-repo health audit (scheduled / cron) | `finding-maintainability-hotspots`, `auditing-architecture-conformance`, `auditing-dependencies-and-supply-chain`, `auditing-config-and-build-hygiene`, `auditing-documentation-health`, `auditing-compliance-and-provenance`, `auditing-enforcement-and-meta-artifacts`, `auditing-infrastructure-as-code`, `auditing-decision-record-currency` — the nine repo-shaped audits; run independently, not as one pass (auditing-infrastructure-as-code only where IaC manifests exist; auditing-decision-record-currency only where a decision-record directory exists) |
+| Whole-repo health audit (scheduled / cron) | `finding-maintainability-hotspots`, `auditing-architecture-conformance`, `auditing-dependencies-and-supply-chain`, `auditing-config-and-build-hygiene`, `auditing-documentation-health`, `auditing-compliance-and-provenance`, `auditing-enforcement-and-meta-artifacts`, `auditing-infrastructure-as-code`, `auditing-decision-record-currency`, `auditing-data-pipeline-health` — the ten repo-shaped audits; run independently, not as one pass (auditing-infrastructure-as-code only where IaC manifests exist; auditing-decision-record-currency only where a decision-record directory exists; auditing-data-pipeline-health only where the repo has SQL models, pipelines, data tests, or published data schemas — data tests included because a repo can carry permanently-warning or disabled ones with no models of its own) |
 | Enforcement config — lint/type suppressions, alert rules or dashboards, or checked-in generated artifacts | `auditing-enforcement-and-meta-artifacts` — repo-shaped — scans suppression accretion and codegen/monitoring drift across the tree, not a single diff |
 | A repository's existing decision-record archive (an ADR/RFC directory already on disk), swept on a schedule rather than reviewed as it's being authored | `auditing-decision-record-currency` — repo-shaped — status-graph consistency, revisit-triggers plausibly due, EOL adoptions, and orphaned records; #29 owns the authoring-time call, this only checks whether time has invalidated an existing one |
 
@@ -50,6 +50,7 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 ◆ = design-capable.
 
 - [`finding-maintainability-hotspots`](reference/lenses/finding-maintainability-hotspots/body.md) — Where does the repo hurt most? Churn × complexity, change-coupling, bus factor, untracked debt.
+- [`auditing-data-pipeline-health`](reference/lenses/auditing-data-pipeline-health/body.md) — Has the data plane drifted since anyone looked? Contract currency, test coverage by fan-out, lapsed freshness, expired deprecations, hidden lineage.
 - [`auditing-architecture-conformance`](reference/lenses/auditing-architecture-conformance/body.md) — Does the import graph still match the intended architecture? Layers, cycles, reach-arounds.
 - [`auditing-dependencies-and-supply-chain`](reference/lenses/auditing-dependencies-and-supply-chain/body.md) — Is the dependency tree safe? CVEs, pinning, typosquats, install scripts, licenses.
 - [`auditing-config-and-build-hygiene`](reference/lenses/auditing-config-and-build-hygiene/body.md) — Are config and CI trustworthy? Secrets, env parity, reproducible pinned builds, cache correctness.
