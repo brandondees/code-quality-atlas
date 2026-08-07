@@ -48,7 +48,7 @@ The full review checklist, grouped by the research category each check draws fro
 
 ## Examples
 
-Report each distinct issue as its own numbered finding, citing the claim it attaches to. Whether a stated outcome is *observable* — and whether the code that would observe it is in this diff — is an engineering fact and an ordinary defect; which outcome is worth pursuing is surfaced with evidence and routed to product with no engineering verdict. Refactors, fixes, bumps, and internal work owe no hypothesis. When the change makes no user or business claim, or its claim is already observable, the entire response is exactly "No findings".
+Report each distinct issue as its own numbered finding, citing the claim it attaches to. Whether a stated outcome is *observable* — and whether the code that would observe it is in this diff — is an engineering fact and an ordinary defect; which outcome is worth pursuing is surfaced with evidence and routed to product with no engineering verdict. Refactors, fixes, bumps, and internal work owe no hypothesis. Observable is not the same as complete: a claim you *can* measure may still be missing a losing condition, an experiment's guardrails, sound assignment and exposure, or an end condition on its flag — each is its own check and its own finding. "No findings" belongs to two cases only: the change makes no user or business claim at all, or it makes one and **every** applicable check above passes. Then the entire response is exactly "No findings".
 
 ## Bad → finding (an output described as an outcome)
 

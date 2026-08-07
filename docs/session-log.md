@@ -2236,3 +2236,14 @@ The map had six clusters, all of them about **the code and its lifecycle**. None
 **Process note, unrelated to the findings.** The container was reset between the first fix round and this one, leaving the working tree at the *previous* commit while the pushed head was one ahead. Caught it before editing — the giveaway was a fix from the prior round missing from a file it had definitely been applied to. `git fetch` + `git reset --hard origin/<branch>` before touching anything; had this gone unnoticed, the next push would have reverted an entire round of review fixes while reporting success.
 
 286 tests pass; the rest of the pipeline stays clean.
+
+**Review round 3 (2 findings, both accepted) — and both were introduced by round 1's fix.** Worth recording as a pattern rather than two line edits: round 1 added the missing reporting-convention intro line to both new `examples.md`, and the sentence written to close that gap opened a new one in each.
+
+- `#42`'s preamble ended *"…or the flow handles its states and its consequences, the entire response is exactly 'No findings'."* A flow can handle every state it reaches and still carry a routed design judgment — which is precisely what this lens's own fourth-date-picker example demonstrates two screens later. The preamble would have suppressed the example beneath it. Now: "No findings" requires **both** halves clear, no gap *and* no routed judgment.
+- `#43`'s ended *"…or its claim is already observable."* Observable is not complete: a measurable claim can still be missing a losing condition, an experiment's guardrails, sound assignment and exposure, or an end condition on its flag — each of which this lens checks separately. Now: "No findings" belongs to two cases only, no claim at all, or a claim where **every** applicable check passes.
+
+Both are the same shape as the round-2 tension contradictions: **the summary sentence disagreed with the detailed content underneath it.** Three of the last five findings on this PR have been that, and none of them is mechanically checkable — a generator can verify that a heading exists and that a count matches, but not that a preamble is consistent with the examples it introduces. Naming it here because it is the most likely thing to recur: when adding a summary line to satisfy a convention, read the section it summarises rather than writing the sentence the convention implies.
+
+The one remaining unresolved thread from round 2 (exhaustiveness in the decision-entrypoint bundle) was already fixed in that round's commit — the reviewer had read the pre-fix commit and has not re-run.
+
+286 tests pass; the rest of the pipeline stays clean.
