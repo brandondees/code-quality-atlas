@@ -14,7 +14,7 @@ description: Reviews whether a change that claims a user or business benefit can
   — skip them. Which outcome to chase routes to product; whether it is observable
   at all is engineering's.
 provenance:
-  taxonomy_version: v0.12
+  taxonomy_version: v0.13
   built_from:
   - category: 43
     source: docs/research/cluster-7-product.md#43

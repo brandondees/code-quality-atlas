@@ -89,6 +89,6 @@ File header template:
 | [`cluster-4-runtime.md`](cluster-4-runtime.md) | IV — Cross-cutting runtime | #14–#16, #25, #28, #32, #34, #36–#38 |
 | [`cluster-5-verification.md`](cluster-5-verification.md) | V — Verification & Supply | #17–#20, #26, #30–#31, #40–#41 |
 | [`cluster-6-evolution.md`](cluster-6-evolution.md) | VI — Evolution & humans | #21–#24, #27, #29, #33, #39 |
-| [`cluster-7-product.md`](cluster-7-product.md) | VII — Product, Experience & Value *(opened v0.12; G24)* | #42–#43 |
+| [`cluster-7-product.md`](cluster-7-product.md) | VII — Product, Experience & Value *(opened v0.12; G24)* | #42–#44 |
 
 Not a taxonomy cluster, but filed alongside them: [`competitor-landscape.md`](competitor-landscape.md) — a product-landscape pass on commercial AI-native review products (CodeRabbit, Copilot code review, Greptile), feeding [`../map-gaps.md`](../map-gaps.md) G34.

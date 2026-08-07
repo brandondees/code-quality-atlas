@@ -14,7 +14,7 @@ description: 'Reviews the analytics/data plane — SQL/dbt transformations, data
   to a data owner. Skip when the change touches no SQL, pipeline, data test, or consumed
   schema.'
 provenance:
-  taxonomy_version: v0.12
+  taxonomy_version: v0.13
   built_from:
   - category: 40
     source: docs/research/cluster-5-verification.md#40

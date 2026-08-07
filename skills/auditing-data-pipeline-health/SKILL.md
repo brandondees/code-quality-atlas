@@ -14,7 +14,7 @@ description: 'Audits the analytics/data plane''s standing condition on a schedul
   or pipeline drift. Skip when the repo has no SQL models, pipelines, data tests,
   or published data schemas.'
 provenance:
-  taxonomy_version: v0.12
+  taxonomy_version: v0.13
   built_from:
   - category: 41
     source: docs/research/cluster-5-verification.md#41

@@ -12,7 +12,7 @@ description: Selects which code-quality-atlas review lenses to run for a change 
   or asked to review without naming a lens; skip and call individual lenses directly
   when the relevant ones are already clear.
 provenance:
-  taxonomy_version: v0.12
+  taxonomy_version: v0.13
   built_from: []
 ---
 
@@ -63,7 +63,8 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 | New abstraction, library, or engine shipped ahead of its consumer (generic/trait with one or no impl, a crate with no caller yet, "substrate for a later feature") | `checking-restraint`, `reviewing-module-design`, `reviewing-api-contract-safety`, `reviewing-test-quality` — restraint-led — speculative generality can be flawless and premature at once, so it hides from the correctness and test lenses |
 | Error-handling / resilience change (retries, fallbacks, timeouts) | `hunting-silent-failures`, `reviewing-observability-and-operability`, `reviewing-concurrency-and-async` |
 | Resilience / scalability / capacity / DR design (a new queue or cache, a stateful service, failover/HA, a scaling or capacity plan, or a call to a dependency that can be slow or down) | `reviewing-resilience-and-scalability`, `reviewing-concurrency-and-async`, `reviewing-observability-and-operability` — design-time operability — blast radius, backpressure, statelessness, RTO/RPO; pairs with #16 for the runtime-instrumentation side |
-| UI / frontend change (components, templates, user-facing text) | `reviewing-usability-and-interaction`, `reviewing-accessibility-and-i18n`, `checking-idioms-and-consistency`, `reviewing-naming-and-readability` — #42 leads on a UI change because the defect it owns — a state the code reaches with nothing rendered for it — is invisible to the other three: #23 checks the markup that exists, #8 whether it matches the codebase, #5-#8 whether it reads well. None of them notices the error branch nobody designed |
+| UI / frontend change (components, templates, user-facing text) | `reviewing-usability-and-interaction`, `reviewing-accessibility-and-i18n`, `checking-idioms-and-consistency`, `reviewing-naming-and-readability`, `reviewing-conceptual-integrity` — #42 leads on a UI change because the defect it owns — a state the code reaches with nothing rendered for it — is invisible to the other three: #23 checks the markup that exists, #8 whether it matches the codebase, #5-#8 whether it reads well. None of them notices the error branch nobody designed |
+| A change introducing a user-facing concept — a new entity, mode, status, container, page, command, endpoint, or setting a user has to learn and choose between | `reviewing-conceptual-integrity`, `checking-restraint`, `reviewing-usability-and-interaction` — #44 and #11 usually agree here and answer different questions — restraint asks whether to build it, #44 whether the product still says one thing once it exists. A small, well-scoped, explicitly requested change clears restraint and can still leave the product with two nouns for one idea, which is why the counterweight has to run on ordinary feature PRs and not only at design review |
 | Auth, user input, or anything handling untrusted data | `sweeping-for-security`, `hunting-silent-failures`, `tracing-correctness-and-invariants` |
 | Performance-motivated change ("this makes it faster") | `reviewing-performance-and-efficiency`, `checking-restraint`, `tracing-correctness-and-invariants` |
 | LLM / model-API integration (a model call, prompt construction, or model-output handling — no tools or autonomous loop) | `reviewing-llm-integration`, `sweeping-for-security`, `checking-restraint` |
@@ -108,6 +109,7 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 - `reviewing-ethical-design` — Does this manipulate or disadvantage the user? Dark patterns, manipulative defaults, discriminatory conditionals — detect-and-route to product/legal.
 - `reviewing-usability-and-interaction` ◆ — Can a person use this? Undesigned loading/empty/error states, destructive actions with no way back, silent operations, errors that eat the form.
 - `reviewing-outcome-instrumentation` ◆ — After this ships, how would anyone know it worked? Stated outcome, instrumentation in the same diff, a losing condition, experiment guardrails.
+- `reviewing-conceptual-integrity` ◆ — Does the product still say one thing? A second noun for an existing idea, a second path to the same job, a rule this change quietly breaks.
 - `sweeping-for-security` ◆ — Can an attacker abuse this? Injection, authorization, secrets, crypto, untrusted data.
 - `reviewing-performance-and-efficiency` ◆ — Will this be slow or expensive at scale? N+1, O(n²) hot paths, caching, payload buffering.
 - `reviewing-test-quality` — Do the tests prove anything? Behavior coupling, over-mocking, edge coverage, determinism.

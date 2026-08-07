@@ -7,7 +7,7 @@ description: 'Audits documentation health across a repository: API-surface-to-do
   audit. Use when auditing docs, READMEs, docstrings, changelogs, ADRs, or onboarding
   material.'
 provenance:
-  taxonomy_version: v0.12
+  taxonomy_version: v0.13
   built_from:
   - category: 22
     source: docs/research/cluster-6-evolution.md#22

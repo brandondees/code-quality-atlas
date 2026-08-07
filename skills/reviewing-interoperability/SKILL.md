@@ -14,7 +14,7 @@ description: 'Reviews a change for interoperability — whether the code correct
   to #13, internal correctness to #4, idiom to #8, config to #26. Skip changes with
   no boundary-crossing standard.'
 provenance:
-  taxonomy_version: v0.12
+  taxonomy_version: v0.13
   built_from:
   - category: 37
     source: docs/research/cluster-4-runtime.md#37
