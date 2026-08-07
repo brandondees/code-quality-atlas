@@ -1,0 +1,92 @@
+{
+  "skills": [
+    "reviewing-usability-and-interaction"
+  ],
+  "scenarios": [
+    {
+      "query": "A PR adds a ProjectList component: `const { data } = useProjects(); return <ul>{data.map(...)}</ul>`. It renders fine in the mockup. Anything wrong?",
+      "expected_behavior": [
+        "Enumerates the states from the code rather than the mockup — useProjects can be pending, can reject, and can resolve to an empty array, so the component reaches four states and renders one",
+        "Names each unhandled state concretely: `data` is undefined while pending so `.map` throws; a rejection is uncaught; an empty result renders a blank region that does not distinguish 'no projects' from 'something broke'",
+        "Classifies the missing states as defects rather than design preferences, because the code produces them whether or not anyone designed them",
+        "Suggests a discriminated union over loading/empty/error/ready so the missing branch is a compiler error rather than a review finding"
+      ]
+    },
+    {
+      "query": "New 'Remove workspace' button. The dialog says 'Are you sure? This action cannot be undone.' with Cancel and Remove styled identically, side by side. Good enough?",
+      "expected_behavior": [
+        "Flags that the confirmation names nothing — error prevention requires naming what will be lost (the workspace, its projects, its files, its invitations), and 'Are you sure?' is a click users are trained to dismiss",
+        "Flags the slip case separately from the mistake case: a destructive control identical in size, colour, and position to its safe neighbour will be hit accidentally regardless of the copy",
+        "Prefers undo over confirmation where the action can be deferred, since undo costs the careful user nothing and saves the careless one",
+        "Does not treat this as a routed taste call — an unrecoverable destructive action is a defect"
+      ]
+    },
+    {
+      "query": "This submit handler clears the form immediately for responsiveness, then shows 'Something went wrong. Please try again.' if the request fails. Review it.",
+      "expected_behavior": [
+        "Identifies the lost input as a data-loss defect rather than a copy problem, and gives it ordinary engineering severity",
+        "Says the concrete fix: clear the form on success, not on submit",
+        "Separately notes the copy is weak (says what happened, not why or what to do next) and routes that half to design with no engineering verdict",
+        "Keeps the two dispositions distinct and says which is which, rather than merging one code path into a single finding"
+      ]
+    },
+    {
+      "query": "The PR adds a fourth hand-rolled date picker; the other three screens use the design system's DateField. How should this appear in the review?",
+      "expected_behavior": [
+        "Establishes the checkable facts — an equivalent exists in this codebase, and this one behaves differently (no keyboard entry, different week start)",
+        "Routes the decision to design (adopt DateField here, or change all four) rather than arguing that the design system is better",
+        "Sets no engineering verdict and does not block the merge on a pattern preference",
+        "Does not silently drop the finding merely because the call belongs to someone else"
+      ]
+    },
+    {
+      "query": "Reviewing a PR that refactors a queue consumer and its retry policy. What does this lens report?",
+      "expected_behavior": [
+        "Reports that the lens does not apply — no user-facing surface in the change — in one line",
+        "Manufactures no usability findings from a backend diff",
+        "Does not treat the absence of findings as an endorsement of anything else in the change"
+      ]
+    },
+    {
+      "query": "Our CLI got a new `db reset` subcommand. It's a terminal tool, so usability review doesn't apply, right?",
+      "expected_behavior": [
+        "Corrects the premise: a CLI is a user interface, so prompts, progress on long operations, confirmation before destruction, and --help are all in scope",
+        "Applies the destructive-action check to `db reset` specifically — does it name what will be lost, and is there a confirmation or a dry-run",
+        "Applies the system-status check to any long-running work the command does"
+      ]
+    },
+    {
+      "query": "A new checkout step opens a modal with no close button and no escape handler — it's intentional, we don't want people abandoning the flow. Fine?",
+      "expected_behavior": [
+        "Flags it as a controllability failure: the user, not the system, sets the pace and direction of the interaction (ISO 9241-110 controllability; Nielsen's user control and freedom)",
+        "Distinguishes a real constraint (a legal acknowledgement, a payment step mid-transaction) from an incidental one, and asks which this is",
+        "Notes that friction deliberately introduced to prevent abandonment is reviewing-ethical-design's territory (obstruction), and hands it there rather than adjudicating intent"
+      ]
+    },
+    {
+      "query": "Upload progress: we show a spinner while the file uploads, and nothing else. The upload takes 30-90 seconds. Any finding?",
+      "expected_behavior": [
+        "Flags that an operation long enough to exceed the user's attention span must let them leave and come back, and report completion when they return — a spinner alone does not",
+        "Notes that a spinner communicates 'working' but not progress or remaining time, which matters at this duration",
+        "Keeps the *performance* of the upload as #15's concern and this lens's as whether the wait is communicated"
+      ]
+    },
+    {
+      "query": "The team says our usability findings should block the merge, since bad UX is a real defect. How should this lens behave?",
+      "expected_behavior": [
+        "Splits the two kinds: an unhandled state, an unrecoverable destructive action, lost input, or absent feedback is a defect with ordinary severity and an engineering fix",
+        "Which pattern, which words, whether the flow should exist, and any judgment resting on knowing the users is surfaced with evidence and routed to design or product, setting no engineering verdict",
+        "States that a lens blocking a merge on a taste call has miscategorised its own finding",
+        "Does not resolve this by making everything blocking or everything advisory"
+      ]
+    },
+    {
+      "query": "A settings page requires the user to paste in the workspace ID, which is shown on the previous screen. Is that a finding?",
+      "expected_behavior": [
+        "Flags it as a recognition-over-recall failure — the product already showed the value, or already knows it, and is asking the user to carry it",
+        "Frames it as a checkable failure rather than a matter of taste",
+        "Suggests the concrete fix (prefill it, or select from a list) without prescribing visual treatment"
+      ]
+    }
+  ]
+}

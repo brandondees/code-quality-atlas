@@ -1,14 +1,16 @@
 # Examples — grounding-review-in-tool-output
 
+This pass reports no findings of its own. Every tool hit is confirmed, contextualized, or dismissed by the lens that owns it, and what leaves this pass is an evidence bundle per lens plus the three-fact coverage line. When the repo configures no deterministic tools, or none could run, say so under coverage rather than reporting nothing at all.
+
 ## Contents
 
-- [Good — the repo's own tools, triaged](#good--the-repos-own-tools-triaged)
+- [Good → the repo's own tools, triaged](#good--the-repos-own-tools-triaged)
 - [Bad → finding (a tool the repo never adopted)](#bad--finding-a-tool-the-repo-never-adopted)
 - [Bad → finding (a clean run read as an approval)](#bad--finding-a-clean-run-read-as-an-approval)
 - [Bad → finding (running the repo's tools on an untrusted branch)](#bad--finding-running-the-repos-tools-on-an-untrusted-branch)
-- [Good — the coverage line when nothing could run](#good--the-coverage-line-when-nothing-could-run)
+- [Good → the coverage line when nothing could run](#good--the-coverage-line-when-nothing-could-run)
 
-## Good — the repo's own tools, triaged
+## Good → the repo's own tools, triaged
 
 **Input:** a Python/TypeScript service. `.pre-commit-config.yaml` runs `ruff`
 and `mypy`; `.github/workflows/ci.yml` additionally gates on `semgrep --config
@@ -102,7 +104,7 @@ CI already uses for untrusted branches, or skip it and record
 `Not run: all — untrusted branch` under coverage. A grounding pre-pass must
 never be the reason untrusted code executes with credentials in scope.
 
-## Good — the coverage line when nothing could run
+## Good → the coverage line when nothing could run
 
 **Input:** a Go repo whose CI gates on `golangci-lint`, reviewed in a session
 with no Go toolchain installed.

@@ -5,7 +5,7 @@ description: Review a decision rather than code — an ADR, RFC, design doc, dep
   Reviews the choice and its record (rationale, lock-in, exit, revisit trigger) with
   the decision lens plus the design-capable lenses for the decision's domain.
 provenance:
-  taxonomy_version: v0.11
+  taxonomy_version: v0.12
   built_from: []
 ---
 
@@ -55,6 +55,8 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 - [`reviewing-llm-integration`](reference/lenses/reviewing-llm-integration/body.md) ◆ — Is the model call safe and bounded? Injection surface, output validation, evals, token cost, PII.
 - [`reviewing-agentic-safety`](reference/lenses/reviewing-agentic-safety/body.md) ◆ — Is the agent's action surface safe? Tool least-privilege, approval gates & step budgets, untrusted tool metadata, sandboxed exec, egress control.
 - [`reviewing-threat-model`](reference/lenses/reviewing-threat-model/body.md) ◆ — Enumerate what an adversary could do, boundary by boundary — STRIDE, trust boundaries, abuse cases — and whether each threat is mitigated.
+- [`reviewing-usability-and-interaction`](reference/lenses/reviewing-usability-and-interaction/body.md) ◆ — Can a person use this? Undesigned loading/empty/error states, destructive actions with no way back, silent operations, errors that eat the form.
+- [`reviewing-outcome-instrumentation`](reference/lenses/reviewing-outcome-instrumentation/body.md) ◆ — After this ships, how would anyone know it worked? Stated outcome, instrumentation in the same diff, a losing condition, experiment guardrails.
 - [`sweeping-for-security`](reference/lenses/sweeping-for-security/body.md) ◆ — Can an attacker abuse this? Injection, authorization, secrets, crypto, untrusted data.
 - [`reviewing-performance-and-efficiency`](reference/lenses/reviewing-performance-and-efficiency/body.md) ◆ — Will this be slow or expensive at scale? N+1, O(n²) hot paths, caching, payload buffering.
 - [`reviewing-migration-and-data-safety`](reference/lenses/reviewing-migration-and-data-safety/body.md) ◆ — Can this migration lock tables or lose data? Expand/contract, backfills, reversibility.

@@ -1,4 +1,4 @@
-taxonomy_version: v0.11
+taxonomy_version: v0.12
 skills:
   - name: hunting-silent-failures
     description: >
@@ -237,6 +237,57 @@ skills:
     wave: 5
     built_from:
       - { category: 36, source: docs/research/cluster-4-runtime.md#36 }
+
+  - name: reviewing-usability-and-interaction
+    description: >
+      Reviews a user-facing change for interaction quality — whether a person can
+      tell what is happening, do what they came to do, and recover when it goes
+      wrong. Grounded in Nielsen's 10 usability heuristics: state completeness
+      (an async read produces loading, empty, and error states whether or not
+      anyone designed them), reversibility of destructive actions (undo, or a
+      confirmation naming what is lost — never a bare "Are you sure?"),
+      system-status feedback, error recovery that preserves the user's input,
+      controllability (no undismissable modal, no wizard without a back), and
+      conformity with the expectations this product already set. Use when
+      reviewing a form, wizard, destructive action, async operation, or any
+      user-facing flow or screen. Detect-and-route: an unhandled state or an
+      unrecoverable action is a defect; which pattern and which words route to
+      design. Skip when the change has no user-facing surface. Accessibility
+      mechanics are #23's, measured performance #15's, manipulative design
+      #36's.
+    picker: >
+      Can a person use this? Undesigned loading/empty/error states, destructive
+      actions with no way back, silent operations, errors that eat the form.
+    shape: diff
+    design: true
+    wave: 6
+    built_from:
+      - { category: 42, source: docs/research/cluster-7-product.md#42 }
+
+  - name: reviewing-outcome-instrumentation
+    description: >
+      Reviews whether a change that claims a user or business benefit can be
+      told to have worked — the question no other lens asks. Is an outcome
+      stated rather than only an output; does the instrumentation that would
+      observe it ship in the same diff (deferred tracking leaves the feature
+      live and permanently unmeasured); does the hypothesis have a losing
+      condition; does an experiment declare guardrail metrics and not only a win
+      condition; are assignment and exposure logged where the user actually sees
+      the variant; do new analytics events match the tracking plan the rest of
+      the org reads; does a rollout flag have an owner and an end condition; and
+      has a proxy metric quietly become the target. Use when reviewing a new
+      feature, an experiment or flagged rollout, an analytics/telemetry event
+      change, or a PR claiming a user or business benefit. Refactors, fixes,
+      bumps, and internal work owe no hypothesis — skip them. Which outcome to
+      chase routes to product; whether it is observable at all is engineering's.
+    picker: >
+      After this ships, how would anyone know it worked? Stated outcome,
+      instrumentation in the same diff, a losing condition, experiment guardrails.
+    shape: diff
+    design: true
+    wave: 6
+    built_from:
+      - { category: 43, source: docs/research/cluster-7-product.md#43 }
 
   - name: finding-maintainability-hotspots
     description: >
@@ -924,8 +975,13 @@ router:
       note: "design-time operability — blast radius, backpressure, statelessness,
             RTO/RPO; pairs with #16 for the runtime-instrumentation side"
     - when: UI / frontend change (components, templates, user-facing text)
-      run: [reviewing-accessibility-and-i18n, checking-idioms-and-consistency,
-            reviewing-naming-and-readability]
+      run: [reviewing-usability-and-interaction, reviewing-accessibility-and-i18n,
+            checking-idioms-and-consistency, reviewing-naming-and-readability]
+      note: "#42 leads on a UI change because the defect it owns — a state the code
+            reaches with nothing rendered for it — is invisible to the other three:
+            #23 checks the markup that exists, #8 whether it matches the codebase,
+            #5-#8 whether it reads well. None of them notices the error branch nobody
+            designed"
     - when: Auth, user input, or anything handling untrusted data
       run: [sweeping-for-security, hunting-silent-failures,
             tracing-correctness-and-invariants]
@@ -970,6 +1026,31 @@ router:
       note: "detect-and-route — dark patterns, manipulative defaults,
             discriminatory conditionals; consent-as-law routes to #27, product
             trade-offs to product, a11y mechanics to #23"
+    - when: A user-facing flow with states or consequences — a form or wizard, a
+            destructive or irreversible action (delete, revoke, overwrite, cancel),
+            an async operation the user waits on, or a screen that can be empty or
+            error out
+      run: [reviewing-usability-and-interaction, reviewing-accessibility-and-i18n,
+            hunting-silent-failures, reviewing-ethical-design]
+      note: "the user's side of the flow — undesigned loading/empty/error states,
+            destructive actions with no way back, errors that discard the user's
+            input; hunting-silent-failures rides along because the same swallowed
+            error is both a silent failure in the code and an unhandled state on the
+            screen, and reviewing-ethical-design because friction that benefits
+            someone is #36's, friction that benefits nobody is #42's"
+    - when: A change that claims a user or business benefit — a new user-facing
+            feature, an experiment or feature-flagged rollout, a PR description
+            promising an outcome, or an analytics/telemetry change that instruments
+            one of those (not a telemetry-schema or operational-metric change on its
+            own, which claims nothing about a user)
+      run: [reviewing-outcome-instrumentation, reviewing-pr-and-process-hygiene,
+            reviewing-observability-and-operability]
+      note: "will anyone be able to tell whether it worked — a stated outcome,
+            instrumentation in this diff rather than a follow-up, a losing condition,
+            and guardrails alongside the win metric. #24 owns whether the PR's claims
+            about the *diff* hold up, #16 whether the thing can be operated; a change
+            can be fully observable and completely unmeasured. Skip on refactors,
+            fixes, and bumps, which owe no hypothesis"
     - when: Logging, metrics, alerts, feature flags, deploy/rollback paths
       run: [reviewing-observability-and-operability, sweeping-for-security]
     - when: Tests-only change
@@ -1290,6 +1371,53 @@ synthesizer:
         data in the clear — redact or tokenize at the logging boundary. Privacy
         wins on any field that could identify a person; add scrubbed, structured
         fields rather than dropping the observability.
+    - between: [sweeping-for-security, reviewing-usability-and-interaction]
+      about: protective friction (a confirmation, a re-auth, a rate limit) vs. a flow
+        the user can actually complete
+      resolve: >
+        Friction that defends a real, named threat stands — say which threat, and
+        the usability finding becomes a request to make the friction cheaper, not to
+        remove it. Friction with no threat behind it is an unconsidered flow and
+        #42 wins. Where the trade-off is genuine (how many confirmations, where the
+        step sits), surface both readings and route the call to design rather than
+        settling it in an engineering review. Distinct from the
+        security ↔ ethical-design pair: that one is about friction someone benefits
+        from, this one about friction nobody does.
+    - between: [checking-restraint, reviewing-usability-and-interaction]
+      about: designing a screen for every state vs. not building surfaces nobody hits
+      resolve: >
+        Handle the states the code can actually reach — if the fetch can fail, the
+        error state is reachable and its absence is a defect, not gold-plating.
+        Restraint wins on states the code cannot produce and on polish beyond a
+        plainly handled state. On a fourth variant of an existing pattern the two
+        lenses agree rather than compete: restraint says don't build another one,
+        #42 says users were taught the existing one — so the finding still
+        surfaces with its evidence and the decision routes to design. Restraint
+        never suppresses a consistency finding; it argues against adding surface.
+    - between: [checking-restraint, reviewing-outcome-instrumentation]
+      about: instrumenting the change vs. adding telemetry and flags nobody reads
+      resolve: >
+        Instrument the outcome the change actually claims, and nothing else.
+        Restraint wins by default on telemetry unrelated to that claim: a refactor
+        or bug fix owes no hypothesis, "track everything" is its own failure mode,
+        and each event carries cost and a PII surface (#27). Where a claimed benefit
+        has no observation at all, name the **smallest missing signal** — often one
+        event, sometimes an existing event or dashboard that already covers it, in
+        which case there is no finding. The exception is an experiment or rollout:
+        assignment and exposure records, the losing condition, the relevant
+        guardrails, and flag ownership are what make the result interpretable at
+        all, so restraint does not trade them away as surplus telemetry.
+    - between: [reviewing-ethical-design, reviewing-outcome-instrumentation]
+      about: a metric the change moves vs. whether a reasonable user would have
+        chosen the behavior that moves it
+      resolve: >
+        Goodhart's seam. A win on a proxy metric (clicks, session length, DAU) that
+        a reasonable user would not have chosen is not a win — surface both readings
+        together, name the proxy and what it stood for, and route the call to
+        product. Neither lens adjudicates it: #36 does not veto a shipped metric and
+        #43 does not certify one as success. If the mechanism moving the metric is
+        itself a dark pattern, that is #36's finding on its own terms and keeps its
+        severity.
     - between: [reviewing-performance-and-efficiency, reviewing-accessibility-and-i18n]
       about: a leaner/faster UI vs. accessible markup and assistive-tech support
       resolve: >

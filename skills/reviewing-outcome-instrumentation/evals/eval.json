@@ -1,0 +1,93 @@
+{
+  "skills": [
+    "reviewing-outcome-instrumentation"
+  ],
+  "scenarios": [
+    {
+      "query": "PR: 'Add bulk CSV export to the reports page. Users have been asking for this. Adds a Download All button, streams up to 100k rows, tested with 3 fixtures.' Anything missing?",
+      "expected_behavior": [
+        "Identifies that the description states outputs only and nothing reality could contradict — 'users have been asking' is a reason, not an outcome",
+        "Asks for a stated outcome the change is meant to move and a signal that would show it, keeping the ask small (one event, one sentence) rather than demanding a measurement programme",
+        "Routes whether that outcome is the right goal to product with no verdict, while treating whether the goal is observable at all as engineering's and a defect here"
+      ]
+    },
+    {
+      "query": "The PR says: 'We expect the new onboarding checklist to lift 7-day activation from 31% to ~40%. Analytics events will land in a follow-up PR next sprint.' Good hypothesis, so is this fine?",
+      "expected_behavior": [
+        "Flags the deferred instrumentation as the defect, and treats it as worse than no hypothesis because it looks handled",
+        "Explains the mechanism: the feature ships, works, and the follow-up is deprioritised precisely because it works — so the change is permanently unmeasured, not measured later",
+        "Requires the instrumentation in this diff, while keeping the ask proportionate (the checklist's step and completion events with cohort)",
+        "Does not accept the well-written hypothesis as satisfying the check"
+      ]
+    },
+    {
+      "query": "An experiment behind `aggressive_prefetch` rolls out to 50%. The PR names one metric: search-results page views up 5%. Review it.",
+      "expected_behavior": [
+        "Requires guardrail metrics declared before the rollout, not only a win condition — an experiment evaluable only on the metric it was designed to move cannot detect the damage it does",
+        "Names plausible guardrails for this specific change: p95 latency, error rate, and bytes transferred given prefetch",
+        "Asks to see the assignment and exposure code before drawing any conclusion about it — the scenario states only the flag and the rollout percentage, so a finding about bucketing or exposure logging would be asserted without evidence",
+        "Once that code is in hand, checks that exposure is logged where the user sees the variant rather than where the flag is read, and that assignment is stable for the declared unit across sessions",
+        "Explains that guardrails chosen after the results are known are not a check"
+      ]
+    },
+    {
+      "query": "A new 'share to team' feature ships a request counter, a latency histogram, a structured log per share, and an error-rate alert. The PR claims it will cut cross-team copy-paste. Is it instrumented?",
+      "expected_behavior": [
+        "Says no: those are operational metrics telling us the feature runs, and none of them tells us anyone shared something they wouldn't have otherwise",
+        "States that both are needed and neither substitutes, rather than accepting the ops instrumentation as coverage",
+        "Suggests a concrete outcome signal (a document_shared event with recipient count and source surface) tied to the specific claim",
+        "Attributes the operational half to reviewing-observability-and-operability rather than re-reporting it"
+      ]
+    },
+    {
+      "query": "A PR autoplays the next video and states success = +12% session length. What goes in the review?",
+      "expected_behavior": [
+        "Surfaces the Goodhart problem: session length is a proxy, and autoplay moves the proxy whether or not it moves what the proxy stood for",
+        "Names both readings — a session lengthens when someone leaves a tab open as much as when they choose to keep watching — and notes the metric cannot distinguish them",
+        "Routes the call to product and sets no engineering verdict, rather than adjudicating whether autoplay is acceptable",
+        "Hands any hard-to-stop mechanism (no way to disable autoplay, an uncancellable countdown) to reviewing-ethical-design as its own finding with its own severity"
+      ]
+    },
+    {
+      "query": "PR extracts a shared validation helper and updates 14 call sites. No behavior change. What outcome hypothesis do we need?",
+      "expected_behavior": [
+        "None — reports that the lens does not apply to an internal refactor with no user or business claim",
+        "States in one line that it was skipped rather than manufacturing a metric requirement",
+        "Recognizes that demanding a hypothesis on every change is this lens's own failure mode, more likely than the failure it guards against"
+      ]
+    },
+    {
+      "query": "Our PR template already requires 'how will we verify this?' and we answer it with the test plan. Does that satisfy this lens?",
+      "expected_behavior": [
+        "Distinguishes the two evidence surfaces: a test plan settles claims about the diff (reviewing-pr-and-process-hygiene's claims-vs-evidence factor), and cannot settle a claim about the world",
+        "Explains that 'this will reduce support tickets' cannot be verified by any test and needs production instrumentation instead",
+        "Does not accept the test plan as outcome instrumentation, and does not re-report the diff-evidence check this lens does not own"
+      ]
+    },
+    {
+      "query": "The change adds a `checkout_started` analytics event. It's well-formed JSON with the fields we need. Anything to check?",
+      "expected_behavior": [
+        "Checks it against the tracking plan or schema registry the rest of the org reads — name, casing, and required properties consistent with the existing taxonomy, and registered where a registry exists",
+        "Explains the consequence of divergence: the event is not wrong, it is invisible, because every downstream dashboard filters it out",
+        "Routes any PII in the event properties to auditing-compliance-and-provenance rather than adjudicating it",
+        "Leaves schema compatibility, versioning, and consumers to reviewing-data-transformations-and-contracts"
+      ]
+    },
+    {
+      "query": "The hypothesis says: 'We believe the new pricing page will increase trial signups.' Is that falsifiable?",
+      "expected_behavior": [
+        "No — it lacks a magnitude, a horizon, and a decision attached to the failing branch",
+        "Asks for metric, direction, rough magnitude, and a date, plus what happens if the bar is missed",
+        "Accepts 'we will keep it regardless' as a legitimate recorded answer, and identifies the defect as leaving the question unasked so the feature stays by default"
+      ]
+    },
+    {
+      "query": "The rollout flag `new_nav_v2` is added behind a config toggle. The PR says it'll be removed once we're confident. Is that enough?",
+      "expected_behavior": [
+        "Asks for an owner and a concrete end condition — the experiment concluding, the rollout completing, or a date — rather than 'once we're confident'",
+        "Explains that flags without an end condition become permanent untested branches that double the states the system can be in",
+        "Notes the moment to ask is when the flag is added, while leaving the config hygiene to #26 and the eventual dead branch to #1"
+      ]
+    }
+  ]
+}

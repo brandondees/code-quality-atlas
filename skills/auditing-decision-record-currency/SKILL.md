@@ -12,7 +12,7 @@ description: 'Audits the decision records already in a repository (ADRs/RFCs on 
   review. Use when auditing an ADR directory, a decisions/RFC archive, or a whole-repo
   health scan. Skip when the repo has no decision-record directory or archive at all.'
 provenance:
-  taxonomy_version: v0.11
+  taxonomy_version: v0.12
   built_from:
   - category: 39
     source: docs/research/cluster-6-evolution.md#39
