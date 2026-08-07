@@ -16,6 +16,8 @@ issues/PRs — check these before reporting nothing's queued:
 - [`docs/session-log.md`](docs/session-log.md) — narrative history of what
   shipped and why, for when a doc pointer alone isn't enough context.
 
+<!-- BEGIN shared orientation -->
+
 Before authoring anything here, read the **standing authoring rules** in
 [`docs/research/README.md`](docs/research/README.md) — behavioral claims,
 summaries agreeing with what they summarize, and convention sweeps. They apply to
@@ -29,6 +31,8 @@ the first edit: a blind push from a stale tree reverts your own earlier work and
 reports success. The mirror image is a tracking ref left stale when a merged branch
 is deleted server-side, which makes tooling report phantom unpushed commits —
 `git merge-base --is-ancestor HEAD origin/main` distinguishes the two.
+
+<!-- END shared orientation -->
 
 This is separate from the code-review routing block below: that block answers
 "review this change" requests; this section answers "what should I work on"

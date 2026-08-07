@@ -15,6 +15,7 @@ Can everyone use this UI? Keyboard, screen readers, contrast, locales, RTL.
 - [Bad → finding](#bad--finding)
 - [Bad → finding](#bad--finding-1)
 - [Good → no finding](#good--no-finding)
+- [Good → no finding (skipped — no rendered surface, no localized strings)](#good--no-finding-skipped--no-rendered-surface-no-localized-strings)
 - [Going deeper](#going-deeper)
 
 ## When to use
@@ -117,6 +118,25 @@ tech, and locale-aware currency formatting with locale and currency as inputs.
 Report "No findings". Do NOT demand ARIA on elements whose native semantics already
 express the role (no `role="button"` on `<button>`), and do NOT flag the icon's
 `aria-hidden` — hiding a decorative icon is correct, not an omission.
+
+## Good → no finding (skipped — no rendered surface, no localized strings)
+
+**Input (diff):** a change to a job queue's retry/backoff policy and its metrics
+labels. No components, no templates, no user-facing copy.
+
+**Expected finding:**
+
+```text
+reviewing-accessibility-and-i18n: not applicable — no rendered surface and no
+user-facing strings in this change (queue retry policy and metric labels only).
+```
+
+One line, and stop. A backend diff will yield *something* if you hunt for it —
+a log message that "should be translated", a metric label that "users might
+see" — and manufacturing those is the fastest way to get this lens muted before
+the change that needed it. Note the boundary: **operator-facing** output (logs,
+metrics, error text read by an on-call engineer) is not user-facing copy and
+does not belong to this lens.
 
 ## Going deeper
 

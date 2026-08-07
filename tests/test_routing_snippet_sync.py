@@ -19,17 +19,23 @@ import pytest
 
 _BEGIN = "<!-- BEGIN code-quality-atlas routing -->"
 _END = "<!-- END code-quality-atlas routing -->"
+# The orientation text above the routing block is repo-only (never shipped to
+# consumer repos), so it has no template to be the source of truth. Its two
+# files are peers instead, and only the *shared* part is marked: the paragraphs
+# around it legitimately differ, since each names the other file.
+_ORIENT_BEGIN = "<!-- BEGIN shared orientation -->"
+_ORIENT_END = "<!-- END shared orientation -->"
 
 
-def _extract_block(text: str) -> str:
+def _extract_block(text: str, begin: str = _BEGIN, end: str = _END) -> str:
     """Return the BEGIN…END routing block (inclusive), normalized to LF and with
     trailing whitespace stripped per line so fence indentation / CRLF can't cause
     a spurious mismatch."""
     lines = text.replace("\r\n", "\n").split("\n")
-    starts = [i for i, ln in enumerate(lines) if ln.strip() == _BEGIN]
-    ends = [i for i, ln in enumerate(lines) if ln.strip() == _END]
-    assert len(starts) == 1, f"expected exactly one {_BEGIN!r}, found {len(starts)}"
-    assert len(ends) == 1, f"expected exactly one {_END!r}, found {len(ends)}"
+    starts = [i for i, ln in enumerate(lines) if ln.strip() == begin]
+    ends = [i for i, ln in enumerate(lines) if ln.strip() == end]
+    assert len(starts) == 1, f"expected exactly one {begin!r}, found {len(starts)}"
+    assert len(ends) == 1, f"expected exactly one {end!r}, found {len(ends)}"
     assert ends[0] > starts[0], "END marker precedes BEGIN marker"
     block = lines[starts[0]:ends[0] + 1]
     return "\n".join(ln.rstrip() for ln in block)
@@ -58,6 +64,30 @@ def test_own_dogfood_file_matches_template(dogfood_file):
         f"This repo's own {dogfood_file} routing block has drifted from "
         "templates/agents-routing-snippet.md (the source of truth). Resync the "
         "BEGIN…END block, or intentionally diverge and document why (issue #167)."
+    )
+
+
+def test_shared_orientation_matches_across_agent_files():
+    """The session-start guidance is hand-duplicated into both agent files.
+
+    Agents read one file or the other, so the guidance has to exist in both —
+    and nothing tied the copies together, which is the drift class issue #167
+    was filed for one section lower. Unlike the routing block there is no
+    template to diff against: this text is repo-only and never ships to a
+    consumer repo, so the two copies are peers and the check is that they
+    agree with each other.
+    """
+    root = Path(__file__).resolve().parent.parent
+    blocks = {
+        name: _extract_block(
+            (root / name).read_text(encoding="utf-8"), _ORIENT_BEGIN, _ORIENT_END)
+        for name in ("AGENTS.md", "CLAUDE.md")
+    }
+    assert blocks["AGENTS.md"] == blocks["CLAUDE.md"], (
+        "AGENTS.md and CLAUDE.md disagree inside the shared-orientation markers. "
+        "Both are read at session start by different agents, so an edit to one "
+        "has to be mirrored into the other — or moved outside the markers if it "
+        "is genuinely file-specific."
     )
 
 

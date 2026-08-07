@@ -39,12 +39,23 @@ jobs:
           # (lockfile *consistent with* the .in, hashes genuine, no hand-edits)
           # rather than "the lockfile is the newest possible resolution".
           #
-          # Nothing is lost by scoping it that way. Freshness is already owned:
-          # Dependabot proposes upgrades weekly as their own PRs, and the
-          # `pip-audit` step below fails on a pin with a known CVE — which is the
-          # question that actually matters about a stale pin. Verified against
-          # pip-tools 7.6.0 that the narrowed check still fails on a raised .in
-          # floor, a tampered hash, and a dependency dropped from the .in.
+          # What this step does NOT check, stated because a first draft of this
+          # comment claimed otherwise: with the lockfile seeded, pip-compile
+          # reuses an already-satisfying pinned line *verbatim, hash included*,
+          # and only computes hashes for packages it newly resolves. So a
+          # hand-edited hash on an already-pinned package survives this diff.
+          # It does not survive the job: `pip install --require-hashes` above
+          # verifies every hash in the committed lockfile against the artifact
+          # it downloads, and exits 1 on any mismatch (verified, pip 26.x) —
+          # before this step even runs. Hash integrity is that step's; .in
+          # consistency is this one's.
+          #
+          # Freshness is neither step's, and is already owned twice: Dependabot
+          # proposes upgrades weekly as their own PRs, and `pip-audit` below
+          # fails on a pin with a known CVE — the question that actually matters
+          # about a stale pin. Verified against pip-tools 7.6.0 that this check
+          # still fails on a raised .in floor and on a dependency dropped from
+          # the .in.
           mkdir -p /tmp/reqcheck && cp requirements.in requirements.txt /tmp/reqcheck/
           ( cd /tmp/reqcheck && pip-compile --generate-hashes --output-file=requirements.txt requirements.in )
           diff -u requirements.txt /tmp/reqcheck/requirements.txt || {
