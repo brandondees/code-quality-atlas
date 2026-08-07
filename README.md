@@ -15,10 +15,10 @@ supports the `SKILL.md` format** (Cursor, Windsurf, Copilot, …). The plugin wr
 
 ## What you get
 
-**40 review skills**, generated from a researched taxonomy and refined against eval
+**42 review skills**, generated from a researched taxonomy and refined against eval
 scenarios:
 
-- **37 review lenses** — each a narrow, self-contained reviewer (correctness,
+- **39 review lenses** — each a narrow, self-contained reviewer (correctness,
   naming & readability, module design, concurrency, migrations & data safety,
   security, performance, tests, API contracts, data transformations & data
   contracts, accessibility & i18n, observability,
@@ -28,7 +28,8 @@ scenarios:
   infrastructure-as-code, decision-record currency, data-pipeline health, a
   decision-time lens, and an
   artifact lens that reviews authored artifacts like `SKILL.md` against their own
-  standard, and 11 more). Each
+  standard, plus the first two Cluster VII lenses — usability & interaction
+  quality and product-outcome instrumentation — and 11 more). Each
   leads with a one-line tagline, runs on its own, and carries its full checklist in
   `reference/heuristics.md` (the artifact lens uses artifact-specific rubric files
   instead); the narrowly-scoped lenses add an explicit *Skip when…* clause so the
@@ -165,7 +166,7 @@ loop: critique the research, let drift flag affected skills, regenerate, re-gate
 
 | Path | What's in it |
 |---|---|
-| [`skills/`](skills/) | The 37 lenses + the three composition skills: `choosing-review-lenses` (router), `grounding-review-in-tool-output` (tool-grounding pre-pass), `synthesizing-review-findings` (synthesizer) |
+| [`skills/`](skills/) | The 39 lenses + the three composition skills: `choosing-review-lenses` (router), `grounding-review-in-tool-output` (tool-grounding pre-pass), `synthesizing-review-findings` (synthesizer) |
 | [`collapsed/`](collapsed/) | Generated 4-entrypoint form of the suite for cloud / account-skill installs; each entrypoint bundles its shape's lenses and loads them on demand |
 | [`commands/`](commands/) | Slash commands: `/atlas-review-pr`, `/atlas-code-review`, `/atlas-init`, `/atlas-rebase-stale`, `/atlas-propose-preferences` |
 | [`hooks/`](hooks/) | `SessionStart` routing hook (side-effect-free); opt-in, off-by-default `PostToolUse`/`SessionEnd` self-improvement telemetry hooks |
