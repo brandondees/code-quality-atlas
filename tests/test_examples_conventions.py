@@ -24,14 +24,27 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-EXAMPLES = sorted((ROOT / "skills").glob("*/examples.md"))
+SKILLS = ROOT / "skills"
+EXAMPLES = sorted(SKILLS.glob("*/examples.md"))
 # a trailing parenthetical qualifier: "... (skipped - no user-facing surface)"
 _QUALIFIER_RE = re.compile(r"\s*\([^)]*\)\s*$")
 
 
-def test_there_are_examples_to_check():
-    """A glob that silently matches nothing would make every test below pass."""
-    assert len(EXAMPLES) > 30, f"expected the full skill suite, found {len(EXAMPLES)}"
+def test_every_skill_is_covered():
+    """A glob that silently matches nothing would make every test below pass.
+
+    Assert the invariant — one `examples.md` per skill — rather than a count
+    threshold that merely approximates it. A threshold passes a glob that has
+    gone half-blind, and goes stale as the suite grows.
+    """
+    skills = {p.parent.name for p in SKILLS.glob("*/SKILL.md")}
+    covered = {p.parent.name for p in EXAMPLES}
+    assert skills, "found no skills/*/SKILL.md — the glob is wrong, not the suite"
+    assert skills == covered, (
+        "every skill needs an examples.md and every examples.md needs a skill; "
+        f"missing examples: {sorted(skills - covered)}; "
+        f"orphaned examples: {sorted(covered - skills)}"
+    )
 
 
 def _section_headings(text: str) -> list[str]:
@@ -53,8 +66,7 @@ def test_example_headings_use_the_arrow_separator(path: Path):
     bad = _mis_separated(path.read_text(encoding="utf-8"))
     assert not bad, (
         f"{path.relative_to(ROOT)}: example headings separate label from subject with "
-        "an arrow, not an em-dash (39 of 42 files, at the time this guard was "
-        "written). Use `## Bad → ...` / `## Clean → ...`:\n"
+        "an arrow, not an em-dash. Use `## Bad → ...` / `## Clean → ...`:\n"
         + "\n".join(f"  ## {h}" for h in bad)
     )
 
