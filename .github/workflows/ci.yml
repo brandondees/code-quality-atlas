@@ -29,10 +29,26 @@ jobs:
           # can run. Revisit trigger: drop `"pip<26.2"` once pip-tools ships a
           # release compatible with pip 26.2+.
           pip install "pip<26.2" pip-tools==7.6.0
-          mkdir -p /tmp/reqcheck && cp requirements.in /tmp/reqcheck/
+          # The committed lockfile is seeded into the check dir, not just the .in.
+          # Without it pip-compile resolves from scratch and pins whatever is
+          # newest on PyPI *today*, so any upstream release turns every open PR
+          # red for a reason unrelated to its diff — that happened on three
+          # consecutive PRs (#204/#206/#208, all of them a fresh `ruff`). With the
+          # lockfile present, pip-compile keeps existing pins that still satisfy
+          # requirements.in, so this step asserts what it is named for
+          # (lockfile *consistent with* the .in, hashes genuine, no hand-edits)
+          # rather than "the lockfile is the newest possible resolution".
+          #
+          # Nothing is lost by scoping it that way. Freshness is already owned:
+          # Dependabot proposes upgrades weekly as their own PRs, and the
+          # `pip-audit` step below fails on a pin with a known CVE — which is the
+          # question that actually matters about a stale pin. Verified against
+          # pip-tools 7.6.0 that the narrowed check still fails on a raised .in
+          # floor, a tampered hash, and a dependency dropped from the .in.
+          mkdir -p /tmp/reqcheck && cp requirements.in requirements.txt /tmp/reqcheck/
           ( cd /tmp/reqcheck && pip-compile --generate-hashes --output-file=requirements.txt requirements.in )
           diff -u requirements.txt /tmp/reqcheck/requirements.txt || {
-            echo "::error::requirements.txt is not pip-compile --generate-hashes's current output for requirements.in — recompile and commit"
+            echo "::error::requirements.txt is not consistent with requirements.in (or was hand-edited) — recompile with pip-compile --generate-hashes and commit"
             exit 1
           }
       - name: dependency vulnerability audit

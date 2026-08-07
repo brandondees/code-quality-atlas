@@ -1,5 +1,17 @@
 # Examples — reviewing-accessibility-and-i18n
 
+Accessibility and internationalization sit in one lens because they fail the same
+way: the code works for the author's keyboard, locale, and eyesight. Name each
+barrier separately — the inputs below each carry several — saying who it excludes
+and citing the standard where one applies (a WCAG success criterion, an ICU or
+`Intl` API). Two things are deliberately **not** findings, and the examples say so
+rather than leaving it to inference: native semantics that already express a role
+need no ARIA on top, and a decorative icon hidden from assistive tech is correct.
+"No findings" means the change has a user-facing surface and every applicable
+check passes; a change that renders no UI and localizes no strings is out of scope
+entirely — say the lens did not apply, in one line, rather than reaching for
+something.
+
 ## Bad → finding
 
 **Input (diff):**

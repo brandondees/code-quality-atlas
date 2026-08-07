@@ -30,6 +30,28 @@ derived. After you critique/improve a research section, flow it into the skills:
 Adapting granularity later: edit `skills/manifest.yaml` (merge/split skills or
 re-map `built_from` categories), then run steps 2–4. No research edits needed.
 
+## Hand-authored files have house conventions
+
+`examples.md` and `evals/eval.json` are the two files `generate` never overwrites,
+so `drift` has nothing to say about their shape and the conventions live only in
+the files that already exist. Two of them are enforced by
+[`tests/test_examples_conventions.py`](../../tests/test_examples_conventions.py):
+
+- **An intro line** between the title and the first example, stating that lens's
+  reporting convention — what counts as one finding, and what "No findings"
+  requires. Write it *after* the examples and read it against them; a preamble
+  composed from the convention rather than from the file is how a summary ends up
+  narrower than the examples it introduces (standing authoring rule 2 in
+  [`docs/research/README.md`](../research/README.md)).
+- **`## Bad → …` / `## Good → …`**, an arrow and not an em-dash, separating an
+  example's label from its subject. The label vocabulary is free — `Clean`,
+  `Delegating`, and `Refusing` all read fine and say different things.
+
+Unenforced but load-bearing, from the eval tuning below: expected findings as a
+**numbered list** (weak models copy the format, and a list forces enumeration),
+paired with an explicit no-finding sentence so the template doesn't invite
+invention on correct code.
+
 ## Cross-model evals (the portability gate, D7/D8)
 
 Validate eval *structure* (≥3 scenarios) for one or all skills:

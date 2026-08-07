@@ -9,11 +9,11 @@ deliverable; the findings are what the synthesizer merges and ranks.
 
 ## Contents
 
-- [Bad — an agent design with an unwritten lethal-trifecta boundary](#bad--an-agent-design-with-an-unwritten-lethal-trifecta-boundary)
-- [Clean — adequately-mitigated design (the over-flagging guard)](#clean--adequately-mitigated-design-the-over-flagging-guard)
-- [Clean — no security-relevant surface (the proportionality guard)](#clean--no-security-relevant-surface-the-proportionality-guard)
+- [Bad → an agent design with an unwritten lethal-trifecta boundary](#bad--an-agent-design-with-an-unwritten-lethal-trifecta-boundary)
+- [Clean → adequately-mitigated design (the over-flagging guard)](#clean--adequately-mitigated-design-the-over-flagging-guard)
+- [Clean → no security-relevant surface (the proportionality guard)](#clean--no-security-relevant-surface-the-proportionality-guard)
 
-## Bad — an agent design with an unwritten lethal-trifecta boundary
+## Bad → an agent design with an unwritten lethal-trifecta boundary
 
 **Input (review request):**
 
@@ -53,7 +53,7 @@ the wire, not against injected instructions reaching an egress tool (anti-theate
 
 ---
 
-## Clean — adequately-mitigated design (the over-flagging guard)
+## Clean → adequately-mitigated design (the over-flagging guard)
 
 **Input:**
 
@@ -75,7 +75,7 @@ present and correctly placed, the lens says so and stops.
 
 ---
 
-## Clean — no security-relevant surface (the proportionality guard)
+## Clean → no security-relevant surface (the proportionality guard)
 
 **Proportionality rule (apply *before* building the model):** match the artifact to the
 surface. First triage whether the change introduces a **new trust boundary, data flow across

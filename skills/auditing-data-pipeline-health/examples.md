@@ -12,7 +12,7 @@ never as confirmed drift.
 
 ---
 
-## Bad — declared contracts with no enforcement point
+## Bad → declared contracts with no enforcement point
 
 **Input (scan):**
 
@@ -51,7 +51,7 @@ convert the second finding from unverified to confirmed-or-cleared.
 
 ---
 
-## Bad — coverage as a standing condition, ranked by fan-out
+## Bad → coverage as a standing condition, ranked by fan-out
 
 **Input (scan):**
 
@@ -90,7 +90,7 @@ a meaningful one (that is `reviewing-test-quality`'s call at diff time).
 
 ---
 
-## Delegating — the neighbouring audits' halves
+## Delegating → the neighbouring audits' halves
 
 A repo-wide scan surfaces things that are not this audit's to adjudicate. The shape to copy:
 own your half completely, hand each neighbour its half once with enough detail to act on, and
@@ -122,7 +122,7 @@ one author, highest complexity in the project.
 
 ---
 
-## Refusing — the finding the evidence doesn't support
+## Refusing → the finding the evidence doesn't support
 
 The characteristic false positive of this lens is asserting drift it cannot see. Being asked
 firmly does not change what the evidence supports.
@@ -154,7 +154,7 @@ supports, plus the specific artifact that would answer it properly.
 
 ---
 
-## Clean — a healthy project (the over-flagging guard)
+## Clean → a healthy project (the over-flagging guard)
 
 **Input (scan):**
 

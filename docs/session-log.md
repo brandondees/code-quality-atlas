@@ -2247,3 +2247,44 @@ Both are the same shape as the round-2 tension contradictions: **the summary sen
 The one remaining unresolved thread from round 2 (exhaustiveness in the decision-entrypoint bundle) was already fixed in that round's commit — the reviewer had read the pre-fix commit and has not re-run.
 
 286 tests pass; the rest of the pipeline stays clean.
+
+### 2026-08-07 (same day, third) — Reflection: three lessons made standing, one made mechanical, one recurring CI cost removed
+
+No new lens. This entry closes the day by asking what the day's two PRs (#206 the tool-grounding pre-pass, #208 Cluster VII) actually taught, and putting each answer somewhere it will be read again — because the pattern in the review record is that **every lesson left only in this log gets re-learned**.
+
+**The defect class has moved twice, and each rule caught the previous one.** The identifier rule (no invented URLs or rule IDs) works: no finding in either PR was a fabricated identifier. The behavioral-claims rule added on 2026-08-04 works too: nothing shipped this session that was flatly false about a tool. What got through was one step subtler each time.
+
+| Rule standing at the time | What still got through |
+|---|---|
+| identifiers must be real | claims about behavior, with correct citations attached (#40/#41, four of them) |
+| behavioral claims need a docs check | claims that are **true but incomplete** — right about the case that motivated them, missing the precondition (#42, two of them) |
+| — | **summaries that disagree with their own detail** — three of the last five findings on #208 |
+
+So two rules were added to `docs/research/README.md`, which is now explicitly a **standing authoring rules** section scoped to every artifact here rather than to research files alone (manifest prose and hand-written `examples.md` produced most of this session's findings, and neither is a research file):
+
+- **Check the absolute, not only the claim.** "Is this true?" returns *yes* for an incomplete claim, which is why the existing rule could not catch either one. The question that works is "is this true **unconditionally**?", and the tell is a superlative or a mechanism promise — *strictly better*, *always*, *makes it a compile error*. Both #42 claims carried one. Both were in a **recommended fix**, which is where a half-right claim costs the most: it sends the reader to a mechanism that does not mechanize.
+- **A summary must agree with what it summarizes.** Nothing mechanical checks this — `drift` compares generated files to sources, the count sweep compares numbers to the manifest, and neither has an opinion about whether a preamble is consistent with the examples printed beneath it. The habit is to re-read the thing being summarized *after* writing the summary, and the highest-risk case is a summary written to satisfy a convention, because it gets composed from the convention rather than from the file. That is exactly how round 1's fix on #208 introduced round 3's two findings.
+
+**One lesson was mechanized instead of written down.** The third finding class was convention drift in `examples.md` — a file the generator never overwrites, so `drift` says nothing and the convention lives only in the other files. It drifts a whole authoring session at a time: the two files under review had both deviations, and sweeping the rest found the same pair in a third file merged hours earlier. `tests/test_examples_conventions.py` now enforces the two checkable halves — an intro line stating the lens's reporting convention, and `→` rather than an em-dash separating an example's label from its subject. It found **four pre-existing deviations** the moment it was written (three files using `Bad — …`, and `reviewing-accessibility-and-i18n` with no intro line at all), which is the honest test of a guard: it has to fail on real drift, not merely pass on a fixed tree. Fixed all four. The label vocabulary is deliberately left free — `Clean`, `Delegating`, and `Refusing` all say different things and none of them is drift.
+
+**Removed a recurring CI cost rather than recording it a fourth time.** `requirements.txt is in sync with requirements.in` failed on three consecutive PRs, every time for a fresh upstream `ruff` and never for anything in the diff. The cause was in the check, not in luck: it copied only `requirements.in` into a scratch directory, so `pip-compile` resolved from nothing and pinned whatever PyPI served that day — making the step assert *"the lockfile is the newest possible resolution"* when its name and its purpose are *"the lockfile is consistent with the .in"*. Seeding the committed lockfile into that directory restores the intended check, because `pip-compile` keeps existing pins that still satisfy the constraints.
+
+Verified against pip-tools 7.6.0 before changing anything, in both directions — a fix that only demonstrates the false alarm is gone would be worthless if the gate went blind with it:
+
+| scenario | before | after |
+|---|---|---|
+| nothing changed | pass | pass |
+| upstream released a newer version, diff unrelated | **fail** (the false alarm) | pass |
+| `.in` floor raised above the lockfile's pin | fail | **fail** |
+| a hash hand-edited in the lockfile | fail | **fail** |
+| a dependency dropped from `.in`, left in the lockfile | fail | **fail** |
+
+The first run of that matrix reported *five* passes — a padded shell label broke the temp-path construction, so every case compared an empty result and "passed" without the tool ever running. Worth recording as its own small lesson: a verification harness that reports all-clear on its first run deserves the same suspicion as a test suite that has never failed.
+
+Nothing is lost by narrowing the check. Freshness was never this gate's job and is already owned twice over: Dependabot proposes upgrades weekly as their own PRs, and the `pip-audit` step immediately below fails on a pin with a known CVE — which is the question that actually matters about a stale pin, as opposed to whether it is the newest.
+
+**Two additions to the orientation block** in `AGENTS.md` and `CLAUDE.md`, the only text reliably read at the start of a session: a pointer to the standing authoring rules, and the resumed-session git check. That second one is here because a container reset mid-PR left the working tree a commit behind the pushed branch, and the next push would have silently reverted a full round of review fixes while reporting success. `git fetch` before the first edit costs nothing; `git merge-base --is-ancestor HEAD origin/main` separates that case from its mirror image, the stale tracking ref that reports phantom unpushed commits after a merge.
+
+**Not addressed, deliberately.** The suite still has no check for the summary-vs-detail class, and probably cannot have a cheap one — it is a semantic consistency question inside a single artifact, which is what a reviewer is for. Cluster VII remains at two of its named members, with VII-H (conceptual integrity) still the research file's own argument for what comes next.
+
+378 tests pass; `generate`/`drift`/`eval` clean on both trees; ruff clean; markdownlint clean.

@@ -12,10 +12,17 @@ For **each** taxonomy category in scope, produce three sections:
 
 **Hard rules:** No fabrication — never invent URLs, quotes, or rule IDs; mark uncertainty `(verify)` or omit. Accuracy over completeness. Ground claims in real sources via web research.
 
-**Behavioral claims need the same grounding as identifiers — and don't get it by default.** The rule above governs *identifiers* (URLs, quotes, rule IDs), and a section can satisfy it completely while still being wrong: correct tool name, correct doc link, incorrect assertion about what the tool *does*. Treat every claim of the form **"tool X does Y"**, **"format Z permits/forbids W"**, or **"operation V is safe"** as a factual claim requiring its own check against that tool's own documentation at authoring time. Two habits carry most of the weight:
+## Standing authoring rules
+
+Scoped to **every authored artifact in this repo**, not only the research files: `skills/manifest.yaml` prose, hand-written `examples.md` and `evals/eval.json`, `docs/`, and this file. They exist because each was learned the expensive way — a reviewer caught the defect after it shipped — and because none of them is mechanically checkable. `drift` verifies that generated files match their sources; nothing verifies that a sentence is true or that it agrees with the paragraph beneath it.
+
+### 1. Behavioral claims need the same grounding as identifiers — and don't get it by default
+
+The rule above governs *identifiers* (URLs, quotes, rule IDs), and a section can satisfy it completely while still being wrong: correct tool name, correct doc link, incorrect assertion about what the tool *does*. Treat every claim of the form **"tool X does Y"**, **"format Z permits/forbids W"**, or **"operation V is safe"** as a factual claim requiring its own check against that tool's own documentation at authoring time. Two habits carry most of the weight:
 
 - **State the condition when behavior is conditional.** Most third-party behavior is gated on a setting, a mode, or a field property. Write the gate ("only once column mapping is enabled", "only when the field carries no default"), not the common case as though it were universal.
 - **Don't generalize from the worked example.** A heuristic derived from one scenario tends to inherit that scenario's special case as an absolute. Check the general rule separately from the example that motivated it.
+- **Check the absolute, not only the claim.** *(added 2026-08-07)* The two habits above catch claims that are **false**. The failure mode that survives them is a claim that is **incomplete** — true in the case that motivated it, wrong as written because its precondition is missing. Asking "is this true?" returns yes and the check passes; the question that catches it is **"is this true unconditionally?"** Superlatives and mechanism claims are the tell — *strictly better*, *always*, *no X permits*, *makes it a compile error*. Each is a promise about every case, and each is cheap to falsify by finding one.
 
 Where a behavioral claim can't be confirmed, `(verify)` applies to it exactly as it does to a rule ID.
 
@@ -29,6 +36,32 @@ Where a behavioral claim can't be confirmed, `(verify)` applies to it exactly as
 | "Iceberg and Delta Lake track columns by ID, which makes a **rename** safe" | Iceberg intrinsically; Delta **only** once `delta.columnMapping.mode` is enabled |
 
 Three of the four generalized a worked example's special case into an absolute. All four were caught by external reviewers rather than by the atlas's own review pass, which reads structure and convention reliably and has no step forcing a docs check per behavioral claim. The practice itself is not new — the [G33](../map-gaps.md) pass already corrected "Farley's *seven* properties, not the eight some third-party summaries cite" — it simply was not standing.
+
+*Why the third habit exists (2026-08-07).* Category #42 shipped **two** claims that satisfied the first two habits and were wrong anyway. Both were caught by an external reviewer; the rule as written asked whether they were false, and neither was:
+
+| Claim as written | What is actually true |
+|---|---|
+| a discriminated union over the UI states "makes the missing branch a compiler error" | only **with an exhaustiveness check** — a `switch` whose `default` hands the value to `assertNever(x: never)`. An `if`/`else if` chain over the same union compiles fine with a variant unhandled |
+| "prefer undo over confirmation — strictly better than any dialog" | not when the effect leaves the system as it fires: a delete that propagates to an external index, one that starts a retention or legal-hold workflow, or anything that **revokes** authorization. A 10-second undo on "revoke API key" keeps a compromised key live for ten more seconds |
+
+Both appeared in a lens's **recommended fix**, which is where a half-right claim costs most: it sends the reader to a mechanism that doesn't mechanize.
+
+### 2. A summary must agree with what it summarizes
+
+A preamble, a boundary note, a cross-lens tension line, a heading — anything that describes content living elsewhere in the same artifact — gets written from what that content *should* say and then not read against what it does say. Nothing mechanical catches this: the generator verifies that a heading exists and that a count matches, never that a preamble is consistent with the examples underneath it. On one PR this was **three of the last five findings**.
+
+The habit: **when you write or edit a summary, re-read the thing it summarizes, then decide whether the sentence is still true.** A summary written to satisfy a convention ("every `examples.md` opens with its reporting convention") is especially exposed, because it is composed from the convention rather than from the file.
+
+Two shapes recur, and both read as perfectly reasonable in isolation:
+
+- **The summary is narrower than the content.** *"'No findings' when the flow handles its states"* — while that lens's own fourth example is a routed judgment on a flow that handles every state it reaches. The preamble would have suppressed the example printed two screens beneath it.
+- **The summary contradicts the content.** A manifest tension line asserting that `checking-restraint` wins on a case the other lens's `examples.md` surfaces as a routed finding.
+
+### 3. A convention deviation is a session's habit, not a file's slip
+
+When a review flags a convention deviation, **check the pattern across all siblings before fixing the file that was flagged.** These conventions live only in the existing files, so they drift a whole authoring session at a time: the two files under review on PR #208 had both deviations, and sweeping the other 40 found the same pair in a third file merged hours earlier. Fix the set, and prefer mechanizing the convention over rediscovering it — `tests/test_examples_conventions.py` is what that looks like, and it found four pre-existing deviations the moment it was written.
+
+## File template & verification status
 
 File header template:
 
