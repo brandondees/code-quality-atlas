@@ -2111,3 +2111,25 @@ Finished what the previous entry deliberately deferred (PR #199 merged): G17's *
 **G17 is complete** — both arms of the original disposition shipped, recorded in `map-gaps.md` and `gap-hunt-synthesis.md`.
 
 **Process note carried forward from #199's review** (not addressed here, logged for Q17/D17): every substantive finding on the #40 PR was a **domain-fact error about third-party tool behavior** — Avro promotion rules, field-deletion compatibility, `dbt build` vs `dbt test` semantics, Delta Lake column mapping — and the atlas self-review approved that content in round 1 while catching structure and convention reliably. Nothing in the review pass forces a docs check per cited tool behavior, which is exactly what a research section full of third-party claims needs. A candidate factor for `reviewing-artifact-conventions` or the research-authoring loop.
+
+### 2026-08-06 — closing the loop the last two PRs opened: behavioral-claim grounding in the research-authoring contract
+
+The previous entry logged a process note "carried forward, not addressed." This addresses it, and the finding sharpened while being written.
+
+**The gap, precisely.** `docs/research/README.md`'s **Hard rules** already forbade fabrication — *"never invent URLs, quotes, or rule IDs; mark uncertainty `(verify)` or omit."* That rule governs **identifiers**. Every one of the four claims that shipped wrong across #199/#201 satisfied it completely: correct tool name, correct citation, and a wrong assertion about what the tool *does*. The `(verify)` convention could not have caught any of them, because none was a URL, a quote, or a rule ID — they were **behavioral** claims (`long`→`double` compatibility, field-deletion direction, `dbt build` vs `dbt test`, Delta rename safety).
+
+So this was not "the reviewer should have looked harder." The authoring contract had a category of claim it did not cover, and the review pass had no step that would force a docs check on one.
+
+**Shipped.** A second hard rule in the research-authoring contract: treat every claim of the form *"tool X does Y" / "format Z permits or forbids W" / "operation V is safe"* as a factual claim needing its own check against that tool's documentation at authoring time, with `(verify)` extended to cover an unconfirmable behavioral claim exactly as it covers a rule ID. Two habits carry most of the weight — **state the condition** where behavior is gated on a setting or a field property (write "only once column mapping is enabled", not the common case as universal), and **don't generalize from the worked example**, since a heuristic derived from one scenario inherits that scenario's special case as an absolute. Three of the four defects were that second failure mode exactly.
+
+The rule ships with the evidence: a four-row table of claim-as-written vs. what is actually true, so it reads as a post-mortem rather than as a maxim. Also noted that the practice is not new — G33's pass already corrected "Farley's *seven* properties, not the eight some third-party summaries cite" — it simply was not standing.
+
+**Found while there (unrelated, real).** The README's **Index** — the table a research agent reads to find where a category lives — had not been touched across ten promotions. Four of six rows were wrong and **14 of 41 categories** were misrouted or absent (#35, #28/#32/#34/#36–#38, #30/#31/#40/#41, #29/#33/#39). Corrected, and the `Status` line, which read as though the 2026-06-09 web-verification sweep still covered every category, now says promotions since then are verified at promotion time under these rules.
+
+**Guarded, so it cannot drift again.** New `tests/test_research_index.py` derives each cluster file's categories from its `## #N` headings and compares them to the Index as **sets** — the Index compresses runs into ranges, and which runs are worth compressing is formatting, not fact, so only membership is asserted. Three tests: the file list matches, the categories match (naming exactly which are missing or phantom), and no category is defined in two research files (G1 single-owner at the file level). Verified the guard actually fails on drift by breaking the Index and watching it report `cluster-5-verification.md: defines [30, 31, 40, 41] but the Index omits them`.
+
+**Deliberately not built.** No mechanical detector for behavioral claims — recognizing "this sentence asserts third-party behavior" is the hard problem itself, and a regex for it would be noise. The contract states the rule; the Index guard is mechanical because membership genuinely is.
+
+266 tests pass; `generate`/`drift`/`eval` clean; markdownlint clean across 410 files.
+
+**Still open from the same review round:** `generate_collapsed` inlines `examples.md` verbatim, so a `## Contents` heading inside one emits a duplicate mid-document heading plus a self-referencing TOC entry in the collapsed body. 8 of 39 `examples.md` carry the heading, producing 12 affected collapsed bodies. The fix is in the generator (demote or strip on inline), which closes all of them at once instead of relying on authors to remember — its own change.

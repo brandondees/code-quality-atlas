@@ -20,7 +20,15 @@ jobs:
       - run: pip install --require-hashes -r requirements.txt
       - name: requirements.txt is in sync with requirements.in
         run: |
-          pip install pip-tools==7.6.0
+          # pip is pinned alongside pip-tools, not left floating: pip-tools imports
+          # pip as a library, and pip 26.2 changed RequirementCommand's signature
+          # (make_requirement_preparer gained a required `allow_editables` kwarg),
+          # which crashes pip-tools 7.6.0 — its latest release, so there is nothing
+          # to upgrade to. Bisected: pip <=26.1.2 works, 26.2 and 26.2.1 fail.
+          # The pin does not affect the resolved lockfile, only whether the check
+          # can run. Revisit trigger: drop `"pip<26.2"` once pip-tools ships a
+          # release compatible with pip 26.2+.
+          pip install "pip<26.2" pip-tools==7.6.0
           mkdir -p /tmp/reqcheck && cp requirements.in /tmp/reqcheck/
           ( cd /tmp/reqcheck && pip-compile --generate-hashes --output-file=requirements.txt requirements.in )
           diff -u requirements.txt /tmp/reqcheck/requirements.txt || {
