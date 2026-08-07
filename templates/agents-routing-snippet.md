@@ -23,8 +23,8 @@ shorter-named default win on keyword match alone.
 |---|---|
 | Review a pull request (number, URL, or named branch) | the `/code-quality-atlas:atlas-review-pr` command |
 | Code review of local changes with no PR (working tree, or a pushed branch without a PR) | the `/code-quality-atlas:atlas-code-review` command |
-| Unsure which lenses a change needs | the `choosing-review-lenses` skill, then the lenses it names |
-| Merge several reviewers' findings into one verdict | the `synthesizing-review-findings` skill |
+| Unsure which lenses a change needs | standalone form: the `choosing-review-lenses` skill, then the lenses it names. Collapsed form: invoke the matching entrypoint (e.g. `reviewing-a-change`) directly — it ranks and selects the relevant lenses internally |
+| Merge several reviewers' findings into one verdict | standalone form: the `synthesizing-review-findings` skill. Collapsed form: the same procedure ships bundled as each entrypoint's `reference/synthesis.md` (e.g. `reviewing-a-change/reference/synthesis.md`) and runs automatically after its lenses |
 
 `/code-quality-atlas:atlas-review-pr` and `/code-quality-atlas:atlas-code-review`
 are **Claude Code slash commands** — invoke them with the leading `/`, not as
