@@ -12,7 +12,6 @@ Can an AI agent read, navigate, and safely change this within a context budget? 
 - [Checklist](#checklist)
 - [From category #35](#from-category-35)
 - [Examples](#examples)
-- [Contents](#contents)
 - [Bad → finding (stale agent onboarding)](#bad--finding-stale-agent-onboarding)
 - [Bad → finding (context economy / AST-navigability)](#bad--finding-context-economy--ast-navigability)
 - [Bad → finding (agent-hostile megafile + duplication)](#bad--finding-agent-hostile-megafile--duplication)
@@ -46,13 +45,6 @@ The full review checklist, grouped by the research category each check draws fro
 ## Examples
 
 Report each distinct issue as its own numbered finding. When the change is already agent-legible, the entire response is exactly "No findings" — never manufacture a legibility finding for correct, self-contained code.
-
-## Contents
-
-- [Bad → finding (stale agent onboarding)](#bad--finding-stale-agent-onboarding)
-- [Bad → finding (context economy / AST-navigability)](#bad--finding-context-economy--ast-navigability)
-- [Bad → finding (agent-hostile megafile + duplication)](#bad--finding-agent-hostile-megafile--duplication)
-- [Good → no finding](#good--no-finding)
 
 ## Bad → finding (stale agent onboarding)
 
