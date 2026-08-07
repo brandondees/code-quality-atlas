@@ -1,0 +1,106 @@
+{
+  "skills": [
+    "reviewing-conceptual-integrity"
+  ],
+  "scenarios": [
+    {
+      "query": "A PR adds a Collection entity — create, rename, add/remove documents, share with a team. The product already ships Folders, which do all four. Review it.",
+      "expected_behavior": [
+        "Runs the evidence gate explicitly before reporting: names the existing concept (Folder), where it lives in the product, and what overlaps",
+        "States that the finding is the absence of a rule a user could apply to choose between Collection and Folder — not the existence of a new entity",
+        "Classifies it as a judgment routed to product (route: product), setting no engineering verdict and not blocking the merge",
+        "Does not argue that one of the two is better, or prescribe which to keep",
+        "May note the bounded-context check (two entities in the same context, reachable from the same screen) as what makes this reportable"
+      ]
+    },
+    {
+      "query": "Review this change: a new Report resource. Deleting a Report leaves its ReportSection rows in place. Project, Folder, and Dashboard all cascade to their children on delete, and the API docs say deleting a resource deletes everything inside it.",
+      "expected_behavior": [
+        "Reports this as a defect with ordinary severity rather than routing it — it contradicts a rule the product already enforces",
+        "Cites the specific evidence: three sibling resources cascade, and the documentation states the rule",
+        "Names the user-visible consequence (orphaned sections that still consume quota and appear in search) rather than describing it only as an inconsistency",
+        "Notes that only the direction of the fix is a product decision (cascade, or block the delete with an explanation); that a contradiction exists is not",
+        "Does not soften the severity because the lens is mostly detect-and-route"
+      ]
+    },
+    {
+      "query": "A PR adds --output-format=ndjson to a CLI that already has --json, --pretty, --quiet, --verbose, --table, --csv, --no-color, and --format. The PR says it is consistent with --csv, which was added last quarter. Anything to flag?",
+      "expected_behavior": [
+        "Counts the existing flags and uses the count as evidence rather than as an aesthetic complaint",
+        "Identifies that the change is justified against the most recent addition rather than against a governing idea (the second-system pattern)",
+        "Points out that --format already takes a value and could absorb the others, as a concrete alternative rather than a demand",
+        "Raises the undecided interaction between conflicting flags (e.g. --json with --format=csv) as where accretion becomes a bug",
+        "Notes that checking-restraint would reach a similar place from the other side, and that the finding should be reported once rather than twice"
+      ]
+    },
+    {
+      "query": "Review: a PR adds `myapp deploy rollback <id>`. Rollback is already reachable as `myapp deploy --revert-to <id>`; both call the same DeployService.revert().",
+      "expected_behavior": [
+        "Reports one finding: a second path to an outcome the product already reaches, with both citations (the new subcommand and the existing flag)",
+        "States the checkable facts — both exist, same underlying call, nothing deprecates the old path, no stated relationship",
+        "Routes the decision (deprecate the flag, or document them as aliases) rather than choosing",
+        "Assigns a low severity or Nit and explicitly does not block the merge",
+        "Does not argue that subcommands are inherently better than flags"
+      ]
+    },
+    {
+      "query": "A PR adds Retention policies: a rule on a workspace that deletes documents older than N days. Today documents are only deleted by hand; the product has Folders, Archive, and Trash. Does this break conceptual integrity?",
+      "expected_behavior": [
+        "Reports no findings",
+        "Shows the evidence gate being run and coming up empty: Archive is the nearest neighbour and is manual and reversible, so nothing already covers scheduled deletion",
+        "States explicitly that a new concept filling a real gap is not a defect for being new",
+        "Does not manufacture a coherence objection from the fact that the product gained a concept",
+        "Does not demand justification for the feature's existence (that is checking-restraint's question, not this lens's)"
+      ]
+    },
+    {
+      "query": "Review this change for conceptual integrity: a PR extracts PermissionChecker from three call sites into a shared service. No behavior, copy, route, or API field changes.",
+      "expected_behavior": [
+        "Says the lens does not apply, in one line, and stops",
+        "Gives the reason: no user-facing concept, vocabulary, or surface is introduced",
+        "Does not return a bare 'No findings' that would read as though a coherence check ran and passed",
+        "Points internal structure at reviewing-module-design and code-level consistency at checking-idioms-and-consistency rather than commenting on them",
+        "Does not invent a coherence argument from an internal refactor"
+      ]
+    },
+    {
+      "query": "The billing service calls its customer records 'accounts'. A new auth PR introduces an Account model meaning a login identity. Two meanings for one word — is that a finding?",
+      "expected_behavior": [
+        "Applies the bounded-context counterweight rather than reporting the collision automatically",
+        "Asks whether the boundary between billing and auth is real and whether it is visible to the user",
+        "Reports a finding only where the two meanings meet on a surface a user sees (e.g. one settings page showing both), and otherwise names the context and drops the objection",
+        "Cites Evans's ubiquitous language and bounded context as the pair, not just the first half",
+        "Does not demand global uniqueness of terms across the whole codebase"
+      ]
+    },
+    {
+      "query": "A design doc proposes adding 'Spaces' as a container above Projects, alongside the existing Teams and Organizations. It is well written, scoped, and the eng plan is sound. Review the doc.",
+      "expected_behavior": [
+        "Reviews the design doc rather than deferring on the grounds that there is no code yet (this lens is design-capable)",
+        "Names the existing containment concepts (Teams, Organizations, Projects) and asks what rule tells a user which level to use",
+        "Treats the absence of a stated distinction between three or four nested containers as the finding",
+        "Notes that catching this at the doc is cheaper than after the concept ships, since a shipped noun is close to permanent",
+        "Routes the decision to product and does not reject the proposal"
+      ]
+    },
+    {
+      "query": "Review: a PR adds sharing to Reports. Everything in the product can be shared except Reports could not, and this PR fixes that. The PR is 40 lines.",
+      "expected_behavior": [
+        "Recognizes this as a change that removes a special case rather than adding one, and reports no findings on that basis",
+        "States the direction explicitly: the product's general rule ('everything can be shared') now holds with one fewer exception",
+        "Does not flag it merely because it adds a user-facing capability",
+        "May note that the reverse change — adding an exception to a general rule — would be the finding, and would need a stated reason"
+      ]
+    },
+    {
+      "query": "A reviewer says a new Snapshots feature 'doesn't fit the product's model' but doesn't say more. The PR adds point-in-time copies of a document; the product has Versions, which are automatic per-save copies. How should this be reported?",
+      "expected_behavior": [
+        "Rejects the bare assertion as unfalsifiable and requires the evidence gate to be filled in before anything is reported",
+        "Fills it in: the existing concept is Versions, and the overlap is 'a copy of a document at a point in time'",
+        "Identifies the distinguishing rule if one exists (Versions are automatic per-save; Snapshots are user-initiated and named) and reports no finding if that rule is clear and visible to the user",
+        "Reports a routed finding only if the distinction is absent from the UI and docs, so a user could not tell which to use",
+        "Demonstrates that the gate can clear a change as well as convict one"
+      ]
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-taxonomy_version: v0.12
+taxonomy_version: v0.13
 skills:
   - name: hunting-silent-failures
     description: >
@@ -288,6 +288,31 @@ skills:
     wave: 6
     built_from:
       - { category: 43, source: docs/research/cluster-7-product.md#43 }
+
+  - name: reviewing-conceptual-integrity
+    description: >
+      Reviews whether a change fits one coherent model of what the product is —
+      Brooks's conceptual integrity, the product counterweight to sprawl. Checks
+      for a new user-facing concept duplicating one the product already has (two
+      nouns for one idea), a second path to a job it already does, a rule it
+      already enforces that this change breaks without saying so, one term with
+      two meanings across UI copy/docs/API fields, a special case carved into a
+      general rule, and the Nth option on a surface with no governing idea. Use
+      when reviewing a change that adds a user-facing concept, entity, mode,
+      page, command, endpoint, or setting — or a design doc proposing one.
+      Requires evidence: name the existing concept or report nothing. Whether the
+      concept should exist and what to call it route to product; a broken promise
+      the product already made is a defect. Skip changes introducing no
+      user-facing concept. Amount-of-surface is #11's, interaction mechanics
+      #42's, code-level consistency #8's.
+    picker: >
+      Does the product still say one thing? A second noun for an existing idea, a
+      second path to the same job, a rule this change quietly breaks.
+    shape: diff
+    design: true
+    wave: 6
+    built_from:
+      - { category: 44, source: docs/research/cluster-7-product.md#44 }
 
   - name: finding-maintainability-hotspots
     description: >
@@ -976,12 +1001,25 @@ router:
             RTO/RPO; pairs with #16 for the runtime-instrumentation side"
     - when: UI / frontend change (components, templates, user-facing text)
       run: [reviewing-usability-and-interaction, reviewing-accessibility-and-i18n,
-            checking-idioms-and-consistency, reviewing-naming-and-readability]
+            checking-idioms-and-consistency, reviewing-naming-and-readability,
+            reviewing-conceptual-integrity]
       note: "#42 leads on a UI change because the defect it owns — a state the code
             reaches with nothing rendered for it — is invisible to the other three:
             #23 checks the markup that exists, #8 whether it matches the codebase,
             #5-#8 whether it reads well. None of them notices the error branch nobody
             designed"
+    - when: A change introducing a user-facing concept — a new entity, mode,
+            status, container, page, command, endpoint, setting, term, or event
+            name a user or an API consumer has to learn, see, or use (whether or
+            not there is an existing one to choose between)
+      run: [reviewing-conceptual-integrity, checking-restraint,
+            reviewing-usability-and-interaction]
+      note: "#44 and #11 usually agree here and answer different questions —
+            restraint asks whether to build it, #44 whether the product still
+            says one thing once it exists. A small, well-scoped, explicitly
+            requested change clears restraint and can still leave the product
+            with two nouns for one idea, which is why the counterweight has to
+            run on ordinary feature PRs and not only at design review"
     - when: Auth, user input, or anything handling untrusted data
       run: [sweeping-for-security, hunting-silent-failures,
             tracing-correctness-and-invariants]
@@ -1064,7 +1102,8 @@ router:
             entrypoint"
     - when: Design doc / plan / RFC (no code yet)
       run: [tracing-correctness-and-invariants, reviewing-concurrency-and-async,
-            reviewing-migration-and-data-safety, reviewing-api-contract-safety]
+            reviewing-migration-and-data-safety, reviewing-api-contract-safety,
+            reviewing-conceptual-integrity]
       note: pick by the design's domain, from design-capable (◆) lenses only
       shapes: [diff, decision]
     - when: Dependency add or bump
@@ -1126,7 +1165,7 @@ router:
             technology adoption, a build-vs-buy or vendor choice, or a
             deprecation / sunset plan
       run: [reviewing-decision-lifecycle, checking-restraint,
-            reviewing-api-contract-safety]
+            reviewing-api-contract-safety, reviewing-conceptual-integrity]
       note: "decision-shaped — reviews the choice and its record (rationale,
             assumptions, exit), not implementation code; pair with the
             design-capable (◆) lenses for the decision's domain.
@@ -1364,6 +1403,43 @@ synthesizer:
         failures with no stated requirement. Restraint wins absent an SLO or scale
         target — but a real unbounded queue, missing timeout, or untested restore
         is a correctness/operability defect, not gold-plating, and stands.
+    - between: [checking-restraint, reviewing-conceptual-integrity]
+      about: whether a change is "too much" versus whether it fits the product's
+        existing model
+      resolve: >
+        Different questions, and they are usually on the same side. Restraint
+        asks whether to build this at all; conceptual integrity asks, given that
+        it ships, whether the product still says one thing. A small, requested,
+        well-scoped change clears restraint and can still add a second noun for
+        an existing idea — that finding stands and restraint does not suppress
+        it. Where both fire on the same addition they agree: report it once,
+        under whichever lens's evidence is concrete, and route the decision.
+        Where they genuinely diverge, restraint's "don't build it" is the
+        cheaper fix and goes first.
+    - between: [reviewing-conceptual-integrity, reviewing-usability-and-interaction]
+      about: a second way of doing something — a mechanics mismatch or a model
+        mismatch
+      resolve: >
+        Split by what the user trips on. A control that behaves differently from
+        its siblings is #42's: the user trips on it in the moment, and the fix is
+        to make it behave like the others. Two concepts covering one job is
+        #44's: the user trips on it when choosing between them, and no amount of
+        making them behave alike helps. A change can carry both, and then both
+        report — but neither restates the other's finding.
+    - between: [reviewing-conceptual-integrity, reviewing-api-contract-safety]
+      about: an endpoint that is safe and well-formed but invents its own resource
+        model
+      resolve: >
+        #13 owns whether the contract is compatible, paginated, and hard to
+        misuse; #44 owns whether it fits the model the rest of the API already
+        teaches. A new endpoint can pass every #13 check and still be the second
+        way to fetch the same resource. Conversely, matching the house model does
+        not excuse an unversioned breaking change. Both stand on their own
+        evidence, and neither lens's ownership sets the verdict: rank them by
+        the severity each reported, exactly as every other pair is ranked. #13's
+        finding is usually the blocking one because #44's is usually routed —
+        an observation about the common case, not a rule that outranks a #44
+        defect.
     - between: [reviewing-observability-and-operability, auditing-compliance-and-provenance]
       about: how much to log for operability vs. keeping PII and secrets out of logs
       resolve: >
