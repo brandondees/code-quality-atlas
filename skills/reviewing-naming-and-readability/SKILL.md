@@ -15,7 +15,7 @@ provenance:
     hash: 89afcabd80accc6737f64bc5a565165ad39c008b4a5f1408d1379c8f5303b135
   - category: 7
     source: docs/research/cluster-2-readability.md#7
-    hash: 834a07c39d7656d1186eb6d5990f09f1e3cb3689a86a2002532d7391c7015134
+    hash: 369913908d1b08ee03cb6f21ae9fadca0e9e9070ce0685a54a27c66c59790988
 ---
 
 # reviewing-naming-and-readability
