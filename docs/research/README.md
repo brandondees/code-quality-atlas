@@ -61,6 +61,8 @@ Two shapes recur, and both read as perfectly reasonable in isolation:
 
 When a review flags a convention deviation, **check the pattern across all siblings before fixing the file that was flagged.** These conventions live only in the existing files, so they drift a whole authoring session at a time: the two files under review on PR #208 had both deviations, and sweeping the other 40 found the same pair in a third file merged hours earlier. Fix the set, and prefer mechanizing the convention over rediscovering it — `tests/test_examples_conventions.py` is what that looks like, and it found four pre-existing deviations the moment it was written.
 
+**The rule applies to repairs, not only to originals** *(added 2026-08-07, after it was broken twice in one PR)*. A correction is itself a change, and it drifts the same way: fixing the file the reviewer named leaves every sibling carrying the defect, and now they disagree with the one copy that is right — which is worse than uniform wrongness, because a reader cannot tell which is current. Both cases on that PR were a fix applied at the reported site and nowhere else: an attribution corrected in one of three documents, and a route added to one of the two rows that needed it. **After making a fix, ask what class it belongs to and sweep that**, exactly as you would for the original.
+
 ## File template & verification status
 
 File header template:
