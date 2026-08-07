@@ -47,7 +47,10 @@ missed — and `hunting-silent-failures`, the fifth and final one); the
 preference-tier rollout is now underway, wave-1-first: `reviewing-module-design`,
 `checking-restraint`, `reviewing-naming-and-readability`,
 `reviewing-llm-integration`, and `finding-maintainability-hotspots` hardened
-(wave-1-first sub-wave now complete); 25 preference-tier lenses remain),
+(wave-1-first sub-wave complete), and **wave 2 opened 2026-08-07 with
+`reviewing-accessibility-and-i18n`** (3 → 25, the widest scope-to-coverage gap
+left in the wave: one baseline suite covering two whole domains); 24
+preference-tier lenses remain),
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
@@ -130,7 +133,7 @@ findings, absent on llama). Per the runbook these are model-capability limits,
 not heuristic regressions, so no tuning was applied. See the session-log entry
 of the same date.
 
-### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 5 of 30 done, wave-1-first sub-wave complete) *(new, 2026-06-27)*
+### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 6 of 30 done, wave-1-first sub-wave complete, wave 2 opened) *(new, 2026-06-27)*
 
 **Trigger.** Building the G30 threat-modeling lens ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)) surfaced that for high-stakes lenses the dangerous failure mode is the **false negative**, and that 3–4 happy-path scenarios don't probe it. That spec's §5 introduces a **thorough, adversarial, false-negative-weighted** eval design — ~21 scenarios across core-firing / per-axis-coverage / detect-and-route / **red-team** / precision groups, plus a red-team generation pass and a hardened cross-model re-gate.
 
@@ -521,3 +524,17 @@ First answer shipped (D10): the `choosing-review-lenses` router (situation → l
 Does maintenance include proactive hygiene (dead-code sweeps, dependency bumps, doc staleness) on a schedule, not just review-time? If so, some skills are *cron-shaped*, not *diff-shaped*.
 **Yes, and the cron shape is built for detection:** the nine repo-shaped audits (including `finding-maintainability-hotspots`) are scheduled, whole-repo *detectors* (dead-code/debt, dep CVEs, doc staleness, …). **Still open:** the *fixing* half — skills that don't just flag but apply the change (sweep the dead code, bump the dep, refresh the stale doc). That residual is the same gap as Q3 (a maintenance/fixing mode vs. review/detection mode).
 **Narrowed by [`map-gaps.md`](map-gaps.md) G26 (2026-06-14):** the "fixing half" is *only auto-application*, and is partly served already by the broader `simplify` / `code-review --fix` skills. *Suggesting* the fix (apply/defer/ignore to the implementer) is review-time, not part of this residual — it's gated by the defect-only guard (G26), not by missing capability.
+
+**Wave-2 hardening #1: `reviewing-accessibility-and-i18n`** (`eval_min: 25`, up from the D8 baseline of 3) — 2026-08-07. Picked by the widest scope-to-coverage gap left in wave 2 rather than by position in the list: three happy-path scenarios were carrying *two* domains (accessibility **and** internationalization), where the other wave-2 candidates sit at 4-5 over one domain each. The A-E groups transfer with one addition worth naming.
+
+**A — shape-flexible firing (2).** A Django template and a CSS-only diff, both carrying the same defect classes as the original JSX scenarios. The lens's checks are stack-independent and its examples were entirely JSX, so this group exists to prove it is not pattern-matching React: a `div` with `onclick` in a server-rendered template and a physical-direction margin in a stylesheet are the same findings.
+
+**B — per-axis coverage (12).** One scenario per owned check the original three never touched: focus management and trapping on a dialog, ARIA state that never updates (`aria-expanded` hardcoded), `alt` discipline across meaningful/decorative/missing, interpolation placeholders mismatched between catalogs, locale-aware date and currency formatting, text expansion + RTL under a fixed width, target size (2.5.8), document `lang`/`dir`, keyboard operability on a mouse-only custom widget, label/error association on a form, colour as the sole information channel (1.4.1), and localized display names + collation in a country picker.
+
+**C — delegate/escalate boundary (2).** A visually-hidden accessible name that embeds a customer email — surfaced here, adjudicated by `auditing-compliance-and-provenance`; and a too-small destructive control adjacent to a safe one, where the size is this lens's (2.5.8) and the slip consequence is `reviewing-usability-and-interaction`'s.
+
+**D — adversarial / red-team (5), the group that earns the campaign.** Design-team sign-off asserted in the PR description over a `role="button"` div with no `tabIndex` (**ARIA theater** — the attributes that make it look reviewed are exactly the ones that do not make it work); `title` as the accessible name (right defense, wrong layer); a 380-line data-grid refactor hiding a one-line `<th scope="col">`-to-`<div>` regression (distractor overload); a stated fifteen-minute deadline over a removed live region (time pressure); and — the one added for this lens specifically — **"axe-core reports 0 violations, so accessibility is covered."** That last is `grounding-review-in-tool-output`'s *a clean run clears nothing* aimed at the lens with the strongest automated tooling in the suite, which is precisely where the inference is most tempting: axe cannot judge whether `href="#"` with a click handler is really a link, whether an arrow-key handler is a coherent keyboard model, or whether an accessible name is *meaningful* rather than merely present.
+
+**E — precision (4).** Two clean-code scenarios (landmarks + skip link with `tabIndex={-1}` on `<main>`, correct and not a trap; the original labeled-input scenario), a decorative `aria-hidden` icon that must not be flagged, and a pure-Python ledger function that must produce the **one-line not-applicable** response rather than a bare "No findings" — the distinction the shared reviewer-discipline text gained earlier the same day, now pinned by an eval instead of only by prose.
+
+25 scenarios, 107 assertions. The floor was verified to gate: dropping to 24 fails `tooling.cli eval` with a non-zero exit before it was restored. **Cross-model re-gate: deferred**, the same standing gap as every other recent Q21 entry — no Ollama or local-model substrate in this remote session, so the hardened suite has not been run against the `qwen2.5-coder:7b` floor-of-record. Tracked as ordinary follow-up alongside the other deferred re-gates.

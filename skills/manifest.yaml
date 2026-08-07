@@ -497,6 +497,7 @@ skills:
       Can everyone use this UI? Keyboard, screen readers, contrast, locales,
       RTL.
     shape: diff
+    eval_min: 25
     wave: 2
     built_from:
       - { category: 23, source: docs/research/cluster-6-evolution.md#23 }

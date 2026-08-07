@@ -2354,3 +2354,23 @@ The second one is rule 3 (a convention that lives only in existing text drifts t
 Nothing here was wrong in a way a test could see. All four are the same failure at different scales: **fixing the instance that was reported instead of the class it belongs to** — which is precisely what standing rule 3 exists to prevent, written down this morning and then not applied to my own corrections. Worth recording because the rule as written points at *authoring*; the case it keeps catching is *repair*.
 
 389 tests pass; the rest of the pipeline stays clean.
+
+### 2026-08-07 (same day, fifth) — Q21 wave 2 opens: `reviewing-accessibility-and-i18n` hardened 3 → 25
+
+Three lenses shipped today, all judgment-heavy with near-zero deterministic coverage. The counterweight to that is the eval suite, which is the only backstop those lenses have — so the next move was the campaign the repo already tracks as its top open item rather than a fourth lens.
+
+**Picked by evidence, not by position in the list.** Q21's rollout is risk-tiered and wave-ordered; wave 1 is complete, so wave 2 is next, and it holds three un-hardened lenses. `reviewing-accessibility-and-i18n` was the choice because it sat at **exactly 3** — the D8 floor — while covering **two whole domains**, where `reviewing-performance-and-efficiency` (4) and `reviewing-test-quality` (5) each cover one. Widest scope-to-coverage gap in the wave.
+
+**What the A-E taxonomy surfaced that a bigger happy-path suite would not.** The B group (12 scenarios, one per owned check) is the bulk, but the two groups worth recording are A and D.
+
+**A exists because the lens's evidence was all one stack.** Every original scenario and every `examples.md` pair was JSX. The checks are stack-independent — a `div` with `onclick` in a Django template and a `margin-left` in a stylesheet are the same findings — but nothing in the suite proved the lens knew that. Two scenarios now do.
+
+**D is where the campaign earns its cost**, and one of its five is specific to this lens in a way worth naming. The generic red-team shapes transfer: **ARIA theater** (a `role="button"` div with an `aria-label` and no `tabIndex` — the attributes that make it *look* reviewed are exactly the ones that do not make it *work*, asserted over a claimed design-team sign-off), `title` as the accessible name (right defense, wrong layer), a 380-line data-grid refactor hiding a one-line `<th scope="col">`-to-`<div>` regression, and a fifteen-minute deadline over a removed live region. The lens-specific one: **"axe-core reports 0 violations, so accessibility is covered."** That is `grounding-review-in-tool-output`'s *a clean run clears nothing* pointed at the lens with the **strongest** automated tooling in the suite — which is exactly where the inference is most tempting and most wrong. Automated tooling catches a minority of barriers, and the scenario names three things axe cannot judge on its own input: whether `href="#"` with a click handler is really a link, whether an arrow-key handler is a coherent keyboard model, and whether an accessible name is *meaningful* rather than merely present.
+
+**E pins something that shipped hours earlier.** One precision scenario is a pure-Python ledger function, and its expected behavior requires the **one-line not-applicable** response rather than a bare "No findings" — the distinction the shared reviewer-discipline text gained in #210's round 3. It was prose then; it is an eval now, which is the difference between a rule and a check.
+
+**The floor was verified to gate**, not merely to pass: dropping the suite to 24 scenarios fails `tooling.cli eval` with a non-zero exit and the message naming the floor, restored immediately after. Same discipline as every other guard added this week, and the same reason — a threshold that has never failed is a threshold nobody has tested.
+
+**Cross-model re-gate: deferred**, the standing gap for every recent Q21 entry. No Ollama or local-model substrate in this remote session, so the hardened suite has not been run against the `qwen2.5-coder:7b` floor-of-record. Tracked as ordinary follow-up, not as done.
+
+25 scenarios / 107 assertions; 24 preference-tier lenses remain. 389 tests pass; `generate`/`drift`/`eval` clean on both trees; ruff clean; markdownlint clean.
