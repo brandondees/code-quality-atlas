@@ -1009,8 +1009,9 @@ router:
             #5-#8 whether it reads well. None of them notices the error branch nobody
             designed"
     - when: A change introducing a user-facing concept — a new entity, mode,
-            status, container, page, command, endpoint, or setting a user has to
-            learn and choose between
+            status, container, page, command, endpoint, setting, term, or event
+            name a user or an API consumer has to learn, see, or use (whether or
+            not there is an existing one to choose between)
       run: [reviewing-conceptual-integrity, checking-restraint,
             reviewing-usability-and-interaction]
       note: "#44 and #11 usually agree here and answer different questions —
@@ -1101,7 +1102,8 @@ router:
             entrypoint"
     - when: Design doc / plan / RFC (no code yet)
       run: [tracing-correctness-and-invariants, reviewing-concurrency-and-async,
-            reviewing-migration-and-data-safety, reviewing-api-contract-safety]
+            reviewing-migration-and-data-safety, reviewing-api-contract-safety,
+            reviewing-conceptual-integrity]
       note: pick by the design's domain, from design-capable (◆) lenses only
       shapes: [diff, decision]
     - when: Dependency add or bump
@@ -1433,7 +1435,11 @@ synthesizer:
         teaches. A new endpoint can pass every #13 check and still be the second
         way to fetch the same resource. Conversely, matching the house model does
         not excuse an unversioned breaking change. Both stand on their own
-        evidence; #13's is the blocking one when they collide.
+        evidence, and neither lens's ownership sets the verdict: rank them by
+        the severity each reported, exactly as every other pair is ranked. #13's
+        finding is usually the blocking one because #44's is usually routed —
+        an observation about the common case, not a rule that outranks a #44
+        defect.
     - between: [reviewing-observability-and-operability, auditing-compliance-and-provenance]
       about: how much to log for operability vs. keeping PII and secrets out of logs
       resolve: >
