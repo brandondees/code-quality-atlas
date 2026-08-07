@@ -12,11 +12,11 @@ Is the data plane correct and its contract safe? Grain and fan-out, SQL NULL tra
 - [Checklist](#checklist)
 - [From category #40](#from-category-40)
 - [Examples](#examples)
-- [Bad — a fan-out join inflating every aggregate downstream](#bad--a-fan-out-join-inflating-every-aggregate-downstream)
-- [Bad — a consumer-breaking schema change with no gate](#bad--a-consumer-breaking-schema-change-with-no-gate)
-- [Delegating — the half that belongs to another lens](#delegating--the-half-that-belongs-to-another-lens)
-- [Clean — a refactor with data-diff evidence (the over-flagging guard)](#clean--a-refactor-with-data-diff-evidence-the-over-flagging-guard)
-- [Clean — an additive, gated schema change (the proportionality guard)](#clean--an-additive-gated-schema-change-the-proportionality-guard)
+- [Bad → a fan-out join inflating every aggregate downstream](#bad--a-fan-out-join-inflating-every-aggregate-downstream)
+- [Bad → a consumer-breaking schema change with no gate](#bad--a-consumer-breaking-schema-change-with-no-gate)
+- [Delegating → the half that belongs to another lens](#delegating--the-half-that-belongs-to-another-lens)
+- [Clean → a refactor with data-diff evidence (the over-flagging guard)](#clean--a-refactor-with-data-diff-evidence-the-over-flagging-guard)
+- [Clean → an additive, gated schema change (the proportionality guard)](#clean--an-additive-gated-schema-change-the-proportionality-guard)
 - [Going deeper](#going-deeper)
 
 ## When to use
@@ -57,7 +57,7 @@ build stays green and the numbers just become wrong — so a finding here names 
 
 ---
 
-## Bad — a fan-out join inflating every aggregate downstream
+## Bad → a fan-out join inflating every aggregate downstream
 
 **Input:**
 
@@ -97,7 +97,7 @@ pass" is not evidence — the tests do not assert the numbers.
 
 ---
 
-## Bad — a consumer-breaking schema change with no gate
+## Bad → a consumer-breaking schema change with no gate
 
 **Input:**
 
@@ -139,7 +139,7 @@ which both fields are emitted.
 
 ---
 
-## Delegating — the half that belongs to another lens
+## Delegating → the half that belongs to another lens
 
 **Input:**
 
@@ -168,7 +168,7 @@ enough detail for the owning lens to pick it up, and stop.
 
 ---
 
-## Clean — a refactor with data-diff evidence (the over-flagging guard)
+## Clean → a refactor with data-diff evidence (the over-flagging guard)
 
 **Input:**
 
@@ -191,7 +191,7 @@ see, and those did not move.
 
 ---
 
-## Clean — an additive, gated schema change (the proportionality guard)
+## Clean → an additive, gated schema change (the proportionality guard)
 
 **Proportionality rule (apply *before* writing anything):** this lens fires on the data
 plane. If the change touches no SQL, no pipeline, no data test, and no schema another

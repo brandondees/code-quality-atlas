@@ -12,9 +12,9 @@ Enumerate what an adversary could do, boundary by boundary — STRIDE, trust bou
 - [Checklist](#checklist)
 - [From category #38](#from-category-38)
 - [Examples](#examples)
-- [Bad — an agent design with an unwritten lethal-trifecta boundary](#bad--an-agent-design-with-an-unwritten-lethal-trifecta-boundary)
-- [Clean — adequately-mitigated design (the over-flagging guard)](#clean--adequately-mitigated-design-the-over-flagging-guard)
-- [Clean — no security-relevant surface (the proportionality guard)](#clean--no-security-relevant-surface-the-proportionality-guard)
+- [Bad → an agent design with an unwritten lethal-trifecta boundary](#bad--an-agent-design-with-an-unwritten-lethal-trifecta-boundary)
+- [Clean → adequately-mitigated design (the over-flagging guard)](#clean--adequately-mitigated-design-the-over-flagging-guard)
+- [Clean → no security-relevant surface (the proportionality guard)](#clean--no-security-relevant-surface-the-proportionality-guard)
 - [Going deeper](#going-deeper)
 
 ## When to use
@@ -53,7 +53,7 @@ deliverable; the findings are what the synthesizer merges and ranks.
 
 ---
 
-## Bad — an agent design with an unwritten lethal-trifecta boundary
+## Bad → an agent design with an unwritten lethal-trifecta boundary
 
 **Input (review request):**
 
@@ -93,7 +93,7 @@ the wire, not against injected instructions reaching an egress tool (anti-theate
 
 ---
 
-## Clean — adequately-mitigated design (the over-flagging guard)
+## Clean → adequately-mitigated design (the over-flagging guard)
 
 **Input:**
 
@@ -115,7 +115,7 @@ present and correctly placed, the lens says so and stops.
 
 ---
 
-## Clean — no security-relevant surface (the proportionality guard)
+## Clean → no security-relevant surface (the proportionality guard)
 
 **Proportionality rule (apply *before* building the model):** match the artifact to the
 surface. First triage whether the change introduces a **new trust boundary, data flow across

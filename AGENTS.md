@@ -16,6 +16,24 @@ issues/PRs — check these before reporting nothing's queued:
 - [`docs/session-log.md`](docs/session-log.md) — narrative history of what
   shipped and why, for when a doc pointer alone isn't enough context.
 
+<!-- BEGIN shared orientation -->
+
+Before authoring anything here, read the **standing authoring rules** in
+[`docs/research/README.md`](docs/research/README.md) — behavioral claims,
+summaries agreeing with what they summarize, and convention sweeps. They apply to
+every artifact in this repo, not only the research files, and each one is there
+because a reviewer caught it after it shipped.
+
+**Resumed or restarted session?** This repo is worked on from cloud sessions whose
+container can be reset mid-task, leaving the working tree at an *older* commit than
+the branch already pushed. Run `git fetch origin <branch> && git status -sb` before
+the first edit: a blind push from a stale tree reverts your own earlier work and
+reports success. The mirror image is a tracking ref left stale when a merged branch
+is deleted server-side, which makes tooling report phantom unpushed commits —
+`git merge-base --is-ancestor HEAD origin/main` distinguishes the two.
+
+<!-- END shared orientation -->
+
 This is separate from the code-review routing block below: that block answers
 "review this change" requests; this section answers "what should I work on"
 requests. (This orientation section is scoped to this repo's own contributor-
