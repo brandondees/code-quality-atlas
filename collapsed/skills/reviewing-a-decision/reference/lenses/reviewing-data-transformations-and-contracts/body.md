@@ -12,7 +12,6 @@ Is the data plane correct and its contract safe? Grain and fan-out, SQL NULL tra
 - [Checklist](#checklist)
 - [From category #40](#from-category-40)
 - [Examples](#examples)
-- [Contents](#contents)
 - [Bad — a fan-out join inflating every aggregate downstream](#bad--a-fan-out-join-inflating-every-aggregate-downstream)
 - [Bad — a consumer-breaking schema change with no gate](#bad--a-consumer-breaking-schema-change-with-no-gate)
 - [Delegating — the half that belongs to another lens](#delegating--the-half-that-belongs-to-another-lens)
@@ -57,14 +56,6 @@ build stays green and the numbers just become wrong — so a finding here names 
 *silence* as much as the code.
 
 ---
-
-## Contents
-
-- [Bad — a fan-out join inflating every aggregate downstream](#bad--a-fan-out-join-inflating-every-aggregate-downstream)
-- [Bad — a consumer-breaking schema change with no gate](#bad--a-consumer-breaking-schema-change-with-no-gate)
-- [Delegating — the half that belongs to another lens](#delegating--the-half-that-belongs-to-another-lens)
-- [Clean — a refactor with data-diff evidence (the over-flagging guard)](#clean--a-refactor-with-data-diff-evidence-the-over-flagging-guard)
-- [Clean — an additive, gated schema change (the proportionality guard)](#clean--an-additive-gated-schema-change-the-proportionality-guard)
 
 ## Bad — a fan-out join inflating every aggregate downstream
 

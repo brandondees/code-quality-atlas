@@ -85,6 +85,35 @@ def _github_anchor(heading: str) -> str:
     return re.sub(r"\s", "-", slug)
 
 
+def _strip_toc_section(md: str) -> str:
+    """Drop a `## Contents` section (heading through to the next `## `) from
+    hand-authored examples before they are inlined into a bundle body.
+
+    A bundle generates its own `## Contents` for the whole body (`_toc_for_body`),
+    so an examples.md carrying one produced two defects at once: a second,
+    mid-document `## Contents` heading, and — because the generated ToC links
+    every `## ` heading it finds — a self-referencing `- [Contents](#contents)`
+    entry resolving back to the generated ToC itself (GitHub slugs the first
+    occurrence `contents` and the second `contents-1`).
+
+    Only the *inlined copy* loses its ToC; the standalone examples.md keeps
+    the one its own readers navigate by. Making this the generator's job rather
+    than an authoring convention is deliberate: 7 of 39 examples.md carried the
+    heading and nothing stopped the eighth, because "don't write a Contents
+    heading" is a rule an author has to remember and a generator can simply
+    enforce."""
+    out: list[str] = []
+    skipping = False
+    for line in md.splitlines():
+        if line.startswith("## "):
+            skipping = line[3:].strip().casefold() == "contents"
+            if skipping:
+                continue
+        if not skipping:
+            out.append(line)
+    return "\n".join(out).strip()
+
+
 def _toc_for_body(body: str) -> str:
     """A `## Contents` heading list linking every `## ` heading in `body`, in
     order, with GitHub's duplicate-heading dedup suffixing (`-1`, `-2`, ...
@@ -116,10 +145,12 @@ def lens_bundle_body(skill: Skill, docs_root: str = ".", skills_root: str = "ski
     examples_path = Path(skills_root, skill.name, "examples.md")
     examples = examples_path.read_text(encoding="utf-8") if examples_path.exists() else ""
     # The standalone examples.md carries its own `# Examples — <lens>` H1; strip a
-    # leading H1 so the bundle keeps one top-level heading.
+    # leading H1 so the bundle keeps one top-level heading. Its `## Contents` ToC,
+    # where present, goes the same way — the bundle builds its own below.
     examples = examples.strip()
     if examples.startswith("# "):
         examples = examples.split("\n", 1)[1].strip() if "\n" in examples else ""
+    examples = _strip_toc_section(examples)
     examples_block = f"## Examples\n\n{examples}\n\n" if examples else ""
     if skill.shape == "artifact":
         core_block = _artifacts_block(skill)

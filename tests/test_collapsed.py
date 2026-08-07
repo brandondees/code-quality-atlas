@@ -357,3 +357,51 @@ def test_build_entrypoint_md_uses_body_override_when_present():
     # body wins over description in the When-to-use section (description still
     # appears in the frontmatter, which is correct and separate).
     assert "## When to use\n\nA richer hand-written when-to-use body." in md
+
+
+def test_strip_toc_section_removes_only_the_contents_section():
+    """The inlined examples' own ToC is dropped; everything else survives."""
+    from tooling.generate_collapsed import _strip_toc_section
+
+    md = (
+        "Intro paragraph.\n\n"
+        "## Contents\n\n"
+        "- [Bad](#bad)\n"
+        "- [Good](#good)\n\n"
+        "## Bad\n\n"
+        "the bad case\n\n"
+        "## Good\n\n"
+        "the good case\n"
+    )
+    out = _strip_toc_section(md)
+    assert "## Contents" not in out
+    assert "- [Bad](#bad)" not in out, "the ToC's list items must go with its heading"
+    assert "Intro paragraph." in out, "content before the ToC must survive"
+    assert "## Bad\n\nthe bad case" in out
+    assert "## Good\n\nthe good case" in out
+
+
+def test_strip_toc_section_is_a_noop_without_a_contents_heading():
+    from tooling.generate_collapsed import _strip_toc_section
+
+    md = "## Bad\n\nthe bad case\n\n### Contents of the payload\n\nnot a ToC\n"
+    assert _strip_toc_section(md) == md.strip(), (
+        "only a `## Contents` heading is a ToC; a deeper heading that merely "
+        "starts with the word must be left alone"
+    )
+
+
+def test_no_committed_lens_bundle_has_a_duplicate_contents_heading():
+    """Regression: examples.md is inlined verbatim, so a `## Contents` inside one
+    used to emit a second mid-document heading plus a self-referencing ToC entry
+    (`- [Contents](#contents)` resolving back to the generated ToC). 7 of 39
+    examples.md carried the heading, affecting 12 collapsed bodies."""
+    offenders = []
+    for body in sorted(Path("collapsed").glob("skills/*/reference/lenses/*/body.md")):
+        text = body.read_text(encoding="utf-8")
+        n = sum(1 for line in text.splitlines() if line.startswith("## Contents"))
+        if n > 1:
+            offenders.append(f"{body}: {n} '## Contents' headings")
+        if "- [Contents](#contents)" in text:
+            offenders.append(f"{body}: ToC links to itself")
+    assert not offenders, "\n".join(offenders)

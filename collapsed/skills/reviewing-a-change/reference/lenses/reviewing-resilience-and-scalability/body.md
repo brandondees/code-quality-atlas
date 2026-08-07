@@ -12,7 +12,6 @@ Will it survive failure and scale? Unbounded queues, timeouts and blast radius, 
 - [Checklist](#checklist)
 - [From category #28](#from-category-28)
 - [Examples](#examples)
-- [Contents](#contents)
 - [Bad → finding (a code diff)](#bad--finding-a-code-diff)
 - [Bad → finding (a design doc / RFC)](#bad--finding-a-design-doc--rfc)
 - [Bad → finding (a cache stampede / coordinated-client failure)](#bad--finding-a-cache-stampede--coordinated-client-failure)
@@ -86,15 +85,6 @@ target — that is gold-plating (cross `checking-restraint`). If the change is
 bounded, has timeouts and a failure plan where it calls out, and keeps no
 scaling-blocking state, report exactly "No findings" — even though this lens
 *could* ask RTO/RPO questions, they do not apply when nothing durable is at stake.
-
-## Contents
-
-- [Bad → finding (a code diff)](#bad--finding-a-code-diff)
-- [Bad → finding (a design doc / RFC)](#bad--finding-a-design-doc--rfc)
-- [Bad → finding (a cache stampede / coordinated-client failure)](#bad--finding-a-cache-stampede--coordinated-client-failure)
-- [Bad → finding (degrade toward safe, not just toward available)](#bad--finding-degrade-toward-safe-not-just-toward-available)
-- [Good → no finding (degradation stays safe)](#good--no-finding-degradation-stays-safe)
-- [Good → no finding (bounded, with a defined failure path)](#good--no-finding-bounded-with-a-defined-failure-path)
 
 ## Bad → finding (a code diff)
 
