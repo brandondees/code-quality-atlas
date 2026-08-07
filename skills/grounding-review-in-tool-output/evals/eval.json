@@ -1,0 +1,89 @@
+{
+  "skills": [
+    "grounding-review-in-tool-output"
+  ],
+  "scenarios": [
+    {
+      "query": "I'm about to review a PR on a Python service. The repo has a .pre-commit-config.yaml running ruff and mypy, a .semgrep.yml, and a CI workflow that gates on all three. Six files changed. What do you do before running the review lenses?",
+      "expected_behavior": [
+        "Builds an inventory from the repo's own config first — which tool, which command, which config file, and whether CI gates on it — rather than picking tools by language guess",
+        "Runs each tool scoped to the six changed files and under the repo's own config, not under a default rule set",
+        "Treats the output as evidence routed to the owning lenses, not as findings the pre-pass reports on its own authority",
+        "Captures what did not run (exit codes, tools that failed to start) as material for the coverage line"
+      ]
+    },
+    {
+      "query": "The repo I'm reviewing has no JavaScript linter configured at all — no eslint config, nothing in package.json. Should I run eslint with the recommended config so the review has some static-analysis grounding for the frontend files?",
+      "expected_behavior": [
+        "Says no: the pre-pass runs only what the repo has already adopted, because output from a rule set the team never chose is not a set of defects in this codebase",
+        "Offers the correct alternative — at most a route: eng suggestion that the repo has no JS linter — rather than reporting the unadopted tool's hits as PR findings",
+        "Notes the absence under coverage (no deterministic coverage for those files) so the review's edge is visible"
+      ]
+    },
+    {
+      "query": "ruff, mypy, and semgrep all exited 0 on the changed files. Can I report 'static analysis clean' and skip sweeping-for-security and tracing-correctness-and-invariants for this PR?",
+      "expected_behavior": [
+        "Refuses: a clean tool run clears nothing, and absence of tool output is absence of evidence rather than evidence of absence",
+        "Explains what deterministic tools cannot speak to — whether the authorization check is on the right object, whether the assumed invariant is the one the caller guarantees, whether the change should exist",
+        "Keeps every selected lens running in full and records the clean run as a coverage line, not as a verdict"
+      ]
+    },
+    {
+      "query": "I'm reviewing a fork PR from a first-time contributor. To ground the review I want to run `make lint`, which the repo's CONTRIBUTING.md documents. The diff happens to touch the Makefile. Any concern?",
+      "expected_behavior": [
+        "Flags that running the repo's tools executes the repo's code — a Makefile target is a shell command, an eslint.config.js is JavaScript, a pre-commit hook fetches and runs a remote repository — and all of it is attacker-controlled on a fork branch",
+        "Requires either the isolation CI already uses for untrusted branches, or skipping the pre-pass entirely",
+        "If skipped, records it explicitly (Not run: all — untrusted branch) instead of silently omitting the pre-pass",
+        "Does not treat the documented-entry-point convention as overriding the untrusted-code concern"
+      ]
+    },
+    {
+      "query": "Semgrep flagged api/audit.py:19 with a raw-SQL-query rule. I looked and the SQL is a constant string with no interpolation — the rule matched the call shape. What goes in the review?",
+      "expected_behavior": [
+        "Dismisses the hit, since it does not hold in this context",
+        "Writes the dismissal down with its one-line reason rather than silently dropping it, so the call is auditable and a noisy rule stays visible",
+        "Does not report it as a finding, and does not pass it through to the author unexamined"
+      ]
+    },
+    {
+      "query": "ruff flagged B008 (function call in a default argument) at api/tokens.py:31. It's real — the default is a call — but the value is an immutable sentinel, so nothing leaks between calls. Confirm, contextualize, or dismiss?",
+      "expected_behavior": [
+        "Contextualizes rather than dismissing: the hit is genuine, so it stays in the report",
+        "Restates the severity on the atlas's scale (a Nit here) and says what about the context moved it off the tool's default",
+        "Does not silently drop a real hit merely because its consequence is small"
+      ]
+    },
+    {
+      "query": "mypy reported an arg-type error at api/tokens.py:47 and I've confirmed the None branch is reachable when the header is absent. How should this appear in the merged review?",
+      "expected_behavior": [
+        "Reports one finding attributed to the owning lens (tracing-correctness-and-invariants), with the tool and rule/error code cited as evidence — the lens owns the finding, the tool owns the proof",
+        "Keeps judgment and measurement distinguishable so a reader can tell what was measured from what was judged, and a false positive stays traceable to the rule that produced it",
+        "Does not report it as a 'mypy finding' standing on the tool's authority alone"
+      ]
+    },
+    {
+      "query": "The repo's CI gates on golangci-lint but this review session has no Go toolchain, so nothing ran. What does the review say?",
+      "expected_behavior": [
+        "Records the tool as not run, naming the reason (toolchain absent) — a missing toolchain is a stated coverage limitation, never a finding and never a silent omission",
+        "Does not infer or guess at what the linter would have reported",
+        "Runs the selected lenses exactly as it would have without a pre-pass, and states that the categories have judgment-only coverage"
+      ]
+    },
+    {
+      "query": "The repo configures ruff, and CI also runs a separate `pip-audit` step. Give me the coverage line to hand to synthesizing-review-findings for a diff review that selected reviewing-module-design, reviewing-test-quality, and sweeping-for-security.",
+      "expected_behavior": [
+        "Produces three facts: which tools ran and over what scope, which did not run and why, and which selected lenses had no deterministic coverage",
+        "Names reviewing-module-design and reviewing-test-quality as judgment-only, since neither ruff nor pip-audit grounds them",
+        "Does not present the tools that did run as covering the lenses they do not ground"
+      ]
+    },
+    {
+      "query": "This repo runs prettier, eslint, jest with a coverage threshold, and Dependabot. I've selected reviewing-accessibility-and-i18n and reviewing-api-contract-safety for the change. Which tool output goes to which lens?",
+      "expected_behavior": [
+        "Routes each family to the lens whose findings its output can evidence, rather than dumping all output at every lens",
+        "Recognizes that no configured tool grounds reviewing-api-contract-safety here, and says so under coverage instead of stretching an unrelated tool to fill the gap",
+        "Notes that a hit landing in a family no selected lens owns is passed to the nearest lens but never becomes a finding on its own authority"
+      ]
+    }
+  ]
+}

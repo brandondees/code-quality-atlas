@@ -59,8 +59,17 @@ call them directly — routing through the picker is optional.
 
 ## 3. Run the lenses, and combine non-exclusively
 
-1. Run each chosen lens against the diff.
-2. **Combine, don't exclude.** If another review method is available — the
+1. Run `code-quality-atlas:grounding-review-in-tool-output` first: run the
+   deterministic tools this repo *already* configures (`.pre-commit-config.yaml`,
+   its CI workflows, its package manifests), scoped to the changed files and
+   under the repo's own config, and route each hit to the lens that owns it.
+   Never introduce a tool the repo hasn't adopted. Skip it if the repo
+   configures none, or if running it would execute untrusted code — and say so
+   in the coverage line either way.
+2. Run each chosen lens against the diff, folding in the tool evidence routed
+   to it: confirm, contextualize, or dismiss each hit — a clean tool run clears
+   nothing, so every selected lens still runs in full.
+3. **Combine, don't exclude.** If another review method is available — the
    built-in `code-review` skill, a framework review (e.g. BMAD), or linter output
    — you may run it on the same diff and fold its findings in too. The atlas
    lenses lead; the others are additive, not a substitute and not excluded.

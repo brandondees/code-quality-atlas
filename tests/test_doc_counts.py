@@ -11,7 +11,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def _counts() -> dict[str, int]:
     m = load_manifest(str(ROOT / "skills" / "manifest.yaml"))
-    composition = (1 if m.router else 0) + (1 if m.synthesizer else 0)
+    composition = ((1 if m.router else 0) + (1 if m.prepass else 0)
+                   + (1 if m.synthesizer else 0))
     return {
         "lenses": len(m.skills),
         "diff": sum(1 for s in m.skills if s.shape == "diff"),
@@ -28,7 +29,8 @@ def test_skills_dir_matches_manifest():
     c = _counts()
     assert len(dirs) == c["total"], (
         f"skills/ has {len(dirs)} directories but the manifest implies "
-        f"{c['total']} (={c['lenses']} lenses + router + synthesizer)"
+        f"{c['total']} (={c['lenses']} lenses + the composition skills: "
+        f"router, tool-grounding pre-pass, synthesizer)"
     )
 
 
@@ -68,7 +70,7 @@ def test_documented_counts_match_manifest():
 # --- issue #131: the phrase-allowlist above only reached 4 files, so the count
 # grew again (36->37 total) and drifted unnoticed in several other files that
 # mention it. Rather than extend the allowlist with more exact phrases (the same
-# shape of bug, just a bigger list), sweep every "3x"-shaped number that sits on
+# shape of bug, just a bigger list), sweep every two-digit number that sits on
 # a line mentioning skills/lenses/zips/uploads across the suite's *living*
 # (current-state) docs and scripts, and require it to be a real current count.
 # A new sentence added to one of these files is covered automatically -- no
@@ -88,10 +90,15 @@ _LIVING_COUNT_FILES = (
     "tooling/vendor-skills.sh",
     "tooling/package-account-zips.sh",
 )
-# A "3x" token not glued to a taxonomy/issue ref ("#38"), another digit/letter,
-# or a decimal point on either side (so "2026", "v0.35", "35.2" etc. never
-# match).
-_CANDIDATE_RE = re.compile(r"(?<![#\w.])3[0-9](?![\w.])")
+# Any two-digit token not glued to a taxonomy/issue ref ("#38"), another
+# digit/letter, or a decimal point on either side (so "2026", "v0.35", "35.2"
+# etc. never match). Originally decade-scoped to "3x", which made the sweep go
+# blind the moment a count crossed 39 — it caught that crossing once (37 lenses
+# / 40 total, when the tool-grounding pre-pass landed) and would have had to
+# catch it again at 49. The keyword filter is what keeps this specific enough;
+# widening the decade costs nothing (verified: no new false positives across
+# _LIVING_COUNT_FILES) and removes a recurring maintenance step.
+_CANDIDATE_RE = re.compile(r"(?<![#\w.])[1-9][0-9](?![\w.])")
 _KEYWORD_RE = re.compile(r"\b(skills?|lens(?:es)?|zips?|uploads?)\b", re.IGNORECASE)
 # "33+" is a threshold phrase ("once past 33"), not a claimed current count.
 _THRESHOLD_SUFFIX = "+"
@@ -102,13 +109,12 @@ _ARROW_RE = re.compile(r"\d\s*(?:→|->)\s*\d")
 
 def test_living_docs_count_sweep():
     c = _counts()
-    # _CANDIDATE_RE only matches 2-digit "3x" tokens. This repo's own history
-    # (31->32->33/34->35/36->37) shows the count climbs steadily, so assert
-    # it's still inside the decade this sweep covers -- if a future skill
-    # addition pushes either count to 40+, this fails loudly instead of the
-    # sweep silently going blind to new drift.
-    assert 30 <= c["lenses"] < 40 and 30 <= c["total"] < 40, (
-        f"lenses={c['lenses']} total={c['total']} have crossed out of the 30-39 "
+    # _CANDIDATE_RE only matches *2-digit* tokens. The counts climb steadily
+    # (31->32->33/34->35/36->37 lenses), so assert they're still in that range --
+    # if a future addition pushes either to 100+, this fails loudly instead of
+    # the sweep silently going blind to new drift.
+    assert 10 <= c["lenses"] < 100 and 10 <= c["total"] < 100, (
+        f"lenses={c['lenses']} total={c['total']} have crossed out of the 2-digit "
         "range _CANDIDATE_RE covers -- widen the regex (and this range) before "
         "relying on the living-docs sweep further"
     )
@@ -144,5 +150,9 @@ def test_candidate_re_ignores_decimal_versions():
     # current count. Both sides of the decimal point must be excluded.
     assert _CANDIDATE_RE.findall("v0.35 skills released") == []
     assert _CANDIDATE_RE.findall("35.2 lenses") == []
-    # A real bare count is still matched.
+    # A real bare count is still matched -- in any decade, now that the sweep
+    # is no longer scoped to "3x".
     assert _CANDIDATE_RE.findall("37 skills") == ["37"]
+    assert _CANDIDATE_RE.findall("40 skills") == ["40"]
+    # Still not a taxonomy/issue reference.
+    assert _CANDIDATE_RE.findall("category #40 lenses") == []

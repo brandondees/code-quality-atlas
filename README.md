@@ -15,7 +15,7 @@ supports the `SKILL.md` format** (Cursor, Windsurf, Copilot, …). The plugin wr
 
 ## What you get
 
-**39 review skills**, generated from a researched taxonomy and refined against eval
+**40 review skills**, generated from a researched taxonomy and refined against eval
 scenarios:
 
 - **37 review lenses** — each a narrow, self-contained reviewer (correctness,
@@ -36,6 +36,11 @@ scenarios:
 - **`choosing-review-lenses`** — a router that ranks a change's relevant lenses and
   runs the top few by default, with **triage** and **comprehensive** depth modes for
   fewer or all of them, so you don't have to know the catalog.
+- **`grounding-review-in-tool-output`** — a pre-pass that runs the deterministic
+  linters, type checkers, and scanners the reviewed repo *already* configures,
+  scoped to what's under review, and hands each lens their hits as evidence to
+  confirm, contextualize, or dismiss. It never introduces a tool the repo hasn't
+  adopted, and a clean run clears nothing.
 - **`synthesizing-review-findings`** — merges multiple lenses (and any other
   reviewer) into one deduplicated, severity-ranked, single-verdict report.
 

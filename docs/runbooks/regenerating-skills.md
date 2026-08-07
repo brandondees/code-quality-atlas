@@ -10,13 +10,17 @@ derived. After you critique/improve a research section, flow it into the skills:
    re-stamps provenance hashes. The inlined "Top checks" are the head of each
    source category's heuristics list, so reordering bullets in a research
    section is how you curate them. `examples.md` and `evals/eval.json` are NOT
-   overwritten (hand-refined content is preserved). The two composition skills
+   overwritten (hand-refined content is preserved). The three composition skills
    are likewise manifest-derived (no research sources, so drift never flags
    them; edit the manifest and regenerate): the router
    (`choosing-review-lenses`) from `manifest.yaml`'s `router:` section +
-   per-skill `picker`/`design` fields, and the synthesizer
+   per-skill `picker`/`design` fields, the tool-grounding pre-pass
+   (`grounding-review-in-tool-output`) from the `prepass:` section
+   (`discover` + `families` + `dispositions` + `rules`), and the synthesizer
    (`synthesizing-review-findings`) from the `synthesizer:` section
-   (`severity_order` + `tensions`).
+   (`severity_order` + `tensions`). The pre-pass and the synthesizer are each
+   also bundled into every collapsed entrypoint (`reference/tool-evidence.md`
+   and `reference/synthesis.md`) by the same run.
 3. **Re-validate evals:** for each affected skill, re-run its `evals/eval.json`
    scenarios against your model tiers (see the skill's evals). Fix regressions
    by tightening `reference/heuristics.md` (via the docs) or `examples.md`.

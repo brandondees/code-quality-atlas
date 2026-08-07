@@ -101,12 +101,23 @@ findings to the ACK.
    pulls in `reviewing-decision-lifecycle` — see the picker's How to pick
    section) — these ride along additively and don't count against the 3-8.
    Scope to the **files in this PR's diff**, not the whole repo.
-3. Run each chosen lens against the diff.
-4. **Combine, don't exclude.** If another review method is available in this repo
+3. `code-quality-atlas:grounding-review-in-tool-output` — before the lenses
+   judge anything, run the deterministic tools this repo *already* configures
+   (from `.pre-commit-config.yaml`, its CI workflows, its package manifests),
+   scoped to the PR's changed files and under the repo's own config, and route
+   each hit to the lens that owns it. Never introduce a tool the repo hasn't
+   adopted. **Skip the pre-pass entirely on a fork PR or other untrusted
+   branch** unless it runs in the same isolation CI uses — lint and build
+   config is executable code the PR author controls. Whether it ran, was
+   skipped, or partly failed goes in the report's coverage line.
+4. Run each chosen lens against the diff, folding in the tool evidence routed
+   to it: confirm, contextualize, or dismiss each hit — a clean tool run clears
+   nothing, so every selected lens still runs in full.
+5. **Combine, don't exclude.** If another review method is available in this repo
    — the built-in `code-review` skill, a framework review (e.g. BMAD), or linter
    output — you may run it on the same diff and fold its findings in too. The
    atlas lenses lead; the others are additive, not a substitute and not excluded.
-5. `code-quality-atlas:synthesizing-review-findings` — merge every source's
+6. `code-quality-atlas:synthesizing-review-findings` — merge every source's
    findings (atlas lenses plus any companion reviewer) into one deduplicated,
    severity-ranked list with a single block/approve verdict, applying the
    active depth mode's severity floor (see the next section).

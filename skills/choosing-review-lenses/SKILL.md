@@ -31,6 +31,7 @@ Selects which atlas lenses to run for a change — the lens picker, not the revi
 - For a **design doc or plan** (no code yet), use only lenses marked ◆ in the catalog — the others read concrete code.
 - Lenses that share a research category name their primary owner in their SKILL.md; report each shared finding once, under the owner.
 - Nothing matches: default to `tracing-correctness-and-invariants` + `reviewing-naming-and-readability` + `checking-restraint`.
+- **Before the selected lenses judge anything, run `grounding-review-in-tool-output`** — the repo's own linters, type checkers, and scanners, scoped to what's under review, so each lens gets deterministic evidence to confirm, contextualize, or dismiss instead of re-deriving it. Skip it when the repo configures no such tools or when running them would execute untrusted code, and say so in the report's coverage line either way.
 - After the lenses run, merge their findings with `synthesizing-review-findings` — one deduplicated, ranked report with a single verdict.
 
 ## Depth modes
