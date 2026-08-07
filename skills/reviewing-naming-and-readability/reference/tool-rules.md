@@ -50,7 +50,7 @@
 
 ### Tooling rules worth lifting
 
-- **Pylint `missing-function-docstring` (C0116)`,`missing-class-docstring`(C0115)`, `missing-module-docstring` (C0114)`** — presence gates. **`fixme` (W0511)** — flags `TODO`/`FIXME`/`XXX`.
+- **Pylint `missing-function-docstring` (C0116), `missing-class-docstring` (C0115), `missing-module-docstring` (C0114)** — presence gates. **`fixme` (W0511)** — flags `TODO`/`FIXME`/`XXX`.
 - **Ruff / pydocstyle `D` rules (D1xx–D4xx, PEP 257)** — docstring style & completeness. **`undocumented-param` (D417)** — docstring doesn't document all params (only fires when an `Args` section exists; on the google convention). ([Ruff D417](https://docs.astral.sh/ruff/rules/undocumented-param/))
 - **Ruff `commented-out-code` (ERA001)** (from PyCQA `eradicate`) — detects **commented-out code** specifically. ([Ruff ERA001](https://docs.astral.sh/ruff/rules/commented-out-code/)) Direct hit on that facet.
 - **Ruff/flake8 `flake8-todos` / `flake8-fixme`** — flag `TODO`/`FIXME`/`XXX`/`HACK`, sometimes requiring author/issue link.
