@@ -74,8 +74,10 @@ clone.
 Every channel above can ship the suite in **either of two forms** — install **one
 form, not both** (they cover the same lenses):
 
-- **Standalone (40 skills)** — the default. One `SKILL.md` per lens plus the
-  `choosing-review-lenses` router and `synthesizing-review-findings` synthesizer.
+- **Standalone (40 skills)** — the default. One `SKILL.md` per lens (37) plus the
+  three composition skills: the `choosing-review-lenses` router, the
+  `grounding-review-in-tool-output` tool-grounding pre-pass, and the
+  `synthesizing-review-findings` synthesizer.
   Richest top-level discoverability; the most skills to upload/list.
 - **Collapsed (4 entrypoints)** — `reviewing-a-change`, `auditing-a-repository`,
   `reviewing-a-decision`, `reviewing-an-artifact`. Each entrypoint bundles its
@@ -125,8 +127,8 @@ specifics:
    "loaded automatically" statement covers your own uploads, not just first-party
    ones). Verify with a one-skill test before doing the whole set.
 2. **One skill per zip — confirmed.** The GUI rejects a multi-skill bundle
-   ("must contain exactly one top-level folder"), so it's one upload per lens,
-   ~40 total. Each zip is a single `<name>/` folder shipping the runtime
+   ("must contain exactly one top-level folder"), so it's one upload per
+   standalone skill — lenses *and* composition skills — ~40 total. Each zip is a single `<name>/` folder shipping the runtime
    resources — `SKILL.md`, `reference/`, **and `examples.md`** (a lens opens it
    for the output format) — and excluding the dev-only `evals/`.
 
@@ -144,7 +146,8 @@ with the lenses bundled and loaded on demand. Pick **one form**: the 40 standalo
 skills *or* the 4 collapsed entrypoints, not both (see *Two forms* below).
 
 There is **no bulk path** through the GUI: no multi-skill zip, and (per the note
-below) no usable API. The ~40 uploads are unavoidable today, which is the cost
+below) no usable API. For the **standalone** form the ~40 uploads are unavoidable
+today (the collapsed form needs 4) — which is the cost
 that motivates the structural rethink in
 [`open-questions.md`](open-questions.md) (fewer top-level skills, more nesting).
 

@@ -14,6 +14,7 @@ failure mode that reads as "fine" in the generated output:
    the difference between a pre-pass that improves a review and one that
    launders tool output into findings.
 """
+import re
 from pathlib import Path
 
 import pytest
@@ -161,3 +162,34 @@ def test_generate_prepass_seeds_an_eval_stub_without_clobbering(manifest, tmp_pa
     generate_prepass(manifest, skills_root=str(tmp_path))
     assert "kept" in stub.read_text(encoding="utf-8"), (
         "regeneration overwrote a hand-authored eval suite")
+
+
+@pytest.mark.parametrize("bad, expect", [
+    ({"source": None, "tells": "x"}, "must be a non-empty string, got null"),
+    ({"source": 12, "tells": "x"}, "must be a string, got int"),
+    ({"tells": "x"}, "missing field 'source'"),
+])
+def test_prepass_prose_fields_reject_non_strings(tmp_path, bad, expect):
+    """`str(value)` would have turned a bare `source:` into the literal "None",
+    which then satisfies every non-empty check downstream and ships a table row
+    reading "None"; a number would instead crash `.strip()` with a raw
+    AttributeError. Both are malformed manifests and must say so."""
+    doc = yaml.safe_load((ROOT / "skills" / "manifest.yaml").read_text(encoding="utf-8"))
+    doc["prepass"]["discover"] = [bad]
+    path = tmp_path / "manifest.yaml"
+    path.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True),
+                    encoding="utf-8")
+    with pytest.raises(ValidationError, match=re.escape(expect)):
+        load_manifest(str(path))
+
+
+def test_prepass_grounds_entries_must_be_strings(tmp_path):
+    """A non-string `grounds` entry can never match a lens name, so it would
+    slip past the unknown-skill check as a silently unroutable family."""
+    doc = yaml.safe_load((ROOT / "skills" / "manifest.yaml").read_text(encoding="utf-8"))
+    doc["prepass"]["families"][0]["grounds"] = ["checking-restraint", 7]
+    path = tmp_path / "manifest.yaml"
+    path.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True),
+                    encoding="utf-8")
+    with pytest.raises(ValidationError, match="every 'grounds' entry must be a string"):
+        load_manifest(str(path))

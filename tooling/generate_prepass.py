@@ -58,6 +58,8 @@ def build_prepass_md(manifest: Manifest) -> str:
 
 
 def _why_section() -> str:
+    """The G5 rationale, plus its inverse — why tool output never becomes a
+    verdict on its own. Static: no manifest input."""
     return (
         "## Why this runs first\n\n"
         "Where a mature linter or scanner already covers a category, the lens's "
@@ -75,6 +77,8 @@ def _why_section() -> str:
 
 
 def _discover_section(p: Prepass) -> str:
+    """Step 1 — the ordered inventory table, enforced before installed before
+    documented, from the manifest's `discover:` list."""
     rows = "\n".join(
         f"| {_escape_table_cell(d.source)} | {_escape_table_cell(d.tells)} |"
         for d in p.discover)
@@ -93,18 +97,32 @@ def _discover_section(p: Prepass) -> str:
 
 
 def _run_section() -> str:
+    """Step 2 — how to actually invoke the discovered tools: tool-native scope,
+    the repo's own config, and what to capture. Static: no manifest input."""
     return (
         "## 2. Run them, scoped and under their own config\n\n"
-        "- **Scope to what is under review.** A diff review runs each tool over "
-        "the changed files; a whole-repo audit runs it over the tree. Passing "
-        "the changed-file list is usually a flag the tool already has.\n"
+        "- **Scope to what is under review — through each tool's own idea of "
+        "scope.** Linters and type checkers usually take a file list, and on a "
+        "diff review that is what to pass. Plenty of tools have no meaningful "
+        "per-file mode: a dependency auditor reads the lockfile, a coverage "
+        "threshold is computed over the project, an IaC validator works per "
+        "directory or stack, a data tool works over its DAG. For those, use the "
+        "tool's own documented diff mode if it has one, otherwise its normal "
+        "project scope — then **filter the output** to what the change touches "
+        "rather than pretending the run was scoped. Record which it was: \"ran "
+        "over the tree, filtered to the diff\" is a different fact from \"ran "
+        "over the 6 changed files,\" and only one of them says anything about "
+        "the rest of the repo.\n"
         "- **Use the repo's config, never your own defaults.** Output about a "
         "rule set the team never chose is noise, and reporting it as findings "
         "is how a review loses its credibility on the first PR.\n"
         "- **Prefer the documented entry point** (`make lint`, `npm run check`, "
-        "`pre-commit run --files ...`) over invoking each tool by hand: it is "
-        "what a human would have run, and it already carries the repo's "
-        "arguments.\n"
+        "`pre-commit run --files ...`) — it is what a human would have run and "
+        "it already carries the repo's arguments — **but only while it "
+        "preserves the scope you need.** A `make lint` that always sweeps the "
+        "whole tree costs more than the review's budget and surfaces findings "
+        "the diff did not cause; when that happens, invoke the adopted tool "
+        "directly, still under the repo's config, with the changed files.\n"
         "- **Capture the raw output**, including exit codes and any tool that "
         "failed to start. What did not run is as important to the report as "
         "what did.\n\n"
@@ -112,6 +130,8 @@ def _run_section() -> str:
 
 
 def _families_section(p: Prepass) -> str:
+    """Step 3 — the tool-family → owning-lens routing table from the manifest's
+    `families:` list, whose `grounds` names validation has already checked."""
     rows = "\n".join(
         f"| {_escape_table_cell(f.kind)} | {_escape_table_cell(f.tools)} | "
         + ", ".join(f"`{lens}`" for lens in f.grounds) + " |"
@@ -131,6 +151,8 @@ def _families_section(p: Prepass) -> str:
 
 
 def _dispositions_section(p: Prepass) -> str:
+    """Step 4 — the exhaustive per-hit disposition table from the manifest's
+    `dispositions:` list; the prose names them inline so the set reads as closed."""
     rows = "\n".join(
         f"| **{_escape_table_cell(d.name)}** | {_escape_table_cell(d.when)} | "
         f"{_escape_table_cell(d.do)} |"
@@ -159,6 +181,8 @@ def _rules_section(p: Prepass) -> str:
 
 
 def _handoff_section(synth_name: str) -> str:
+    """What leaves this pass: the per-lens evidence bundle and the three-fact
+    coverage line the synthesizer's Coverage & limitations section reserves."""
     return (
         "## What to hand on\n\n"
         "Two things go forward from this pass:\n\n"

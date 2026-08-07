@@ -28,8 +28,8 @@ with **all** relevant lenses," up to the full set at repo scope, and cannot get 
 
 - **D-Q20-1 — Dual-emit.** The manifest + `built_from` research sections stay the
   single source. `generate.py` emits **two forms** from the same lens content, so
-  they cannot drift (D6): the existing **standalone** 40 skills (unchanged) and a
-  new **collapsed** form.
+  they cannot drift (D6): the existing **standalone** form (40 skills, unchanged
+  by this decision) and a new **collapsed** form.
 - **D-Q20-2 — Collapsed form = 4 entrypoints by review shape.** `reviewing-a-change`
   (diff), `auditing-a-repository` (repo/cron), `reviewing-a-decision`,
   `reviewing-an-artifact`. Each bundles its shape's lens *bodies* as on-demand

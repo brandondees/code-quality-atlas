@@ -105,6 +105,30 @@ _THRESHOLD_SUFFIX = "+"
 # "27->30" / "27→30" style historical deltas, if they ever appear in a living
 # file — skip both sides rather than assert either is "the" current count.
 _ARROW_RE = re.compile(r"\d\s*(?:→|->)\s*\d")
+# A wrapped sentence puts the count on one line and its noun on the next:
+#     "... instead of the 39 standalone
+#      skills (skills/)"
+# A strictly line-local scan is blind to those, and two such counts in
+# docs/distribution.md went stale under it (CodeRabbit review on #206). So a
+# candidate also counts when the *next* line carries the keyword -- but only
+# when the number sits in the tail of its own line, i.e. the clause plausibly
+# continues. Without that anchor the window swallows unrelated numbers from a
+# neighbouring sentence: a "2026-06-25" date and a "and 11 more" aside both
+# false-positived when the window was widened symmetrically. Looking backward
+# is what admitted the second one, so the window is forward-only.
+_WRAP_TAIL = 24
+
+
+def _wrapped_candidates(lines: list[str], i: int) -> list[re.Match]:
+    """Candidate numbers on `lines[i]` whose keyword is on this line or, for a
+    tail-anchored number, the next one."""
+    line = lines[i]
+    same = _KEYWORD_RE.search(line)
+    following = _KEYWORD_RE.search(lines[i + 1]) if i + 1 < len(lines) else None
+    if not (same or following):
+        return []
+    return [m for m in _CANDIDATE_RE.finditer(line)
+            if same or len(line) - m.end() <= _WRAP_TAIL]
 
 
 def test_living_docs_count_sweep():
@@ -121,11 +145,10 @@ def test_living_docs_count_sweep():
     valid = {c["lenses"], c["total"]}
     failures: list[str] = []
     for rel in _LIVING_COUNT_FILES:
-        path = ROOT / rel
-        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if not _KEYWORD_RE.search(line):
-                continue
-            for m in _CANDIDATE_RE.finditer(line):
+        lines = (ROOT / rel).read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(lines):
+            lineno = i + 1
+            for m in _wrapped_candidates(lines, i):
                 start, end = m.span()
                 if end < len(line) and line[end] == _THRESHOLD_SUFFIX:
                     continue
@@ -156,3 +179,29 @@ def test_candidate_re_ignores_decimal_versions():
     assert _CANDIDATE_RE.findall("40 skills") == ["40"]
     # Still not a taxonomy/issue reference.
     assert _CANDIDATE_RE.findall("category #40 lenses") == []
+
+
+def test_wrap_window_sees_a_count_whose_noun_is_on_the_next_line():
+    """The exact shape a line-local scan missed: two stale counts sat in
+    docs/distribution.md because "39 standalone" ended the line and "skills"
+    began the next. Assert the detector fires on that, not merely that today's
+    tree is clean."""
+    lines = ["`--collapsed` vendors the 4 collapsed entrypoints instead of the 39 standalone",
+             "skills (skills/)."]
+    found = [m.group() for m in _wrapped_candidates(lines, 0)]
+    assert "39" in found, "a wrapped count is still invisible to the sweep"
+
+
+def test_wrap_window_does_not_swallow_a_neighbouring_sentence():
+    """The anchor that keeps the widened window honest. A number far from the
+    end of its line belongs to its own clause, not to the next line's noun —
+    a date and a mid-sentence aside both false-positived without this."""
+    dated = ["*Status: design approved 2026-06-25, build pending. Resolves **Q20**",
+             "(top-level skill count).*"]
+    assert [m.group() for m in _wrapped_candidates(dated, 0)] == []
+    # Looking *backward* is what admitted "and 11 more" under a lens-bearing
+    # line above it; the window is forward-only, so it stays out.
+    backward = ["  artifact lens that reviews authored artifacts,",
+                "  standard, and 11 more). Each",
+                "  leads with a one-line tagline."]
+    assert [m.group() for m in _wrapped_candidates(backward, 1)] == []

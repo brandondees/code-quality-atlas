@@ -73,8 +73,9 @@
       "query": "The repo configures ruff, and CI also runs a separate `pip-audit` step. Give me the coverage line to hand to synthesizing-review-findings for a diff review that selected reviewing-module-design, reviewing-test-quality, and sweeping-for-security.",
       "expected_behavior": [
         "Produces three facts: which tools ran and over what scope, which did not run and why, and which selected lenses had no deterministic coverage",
-        "Names reviewing-module-design and reviewing-test-quality as judgment-only, since neither ruff nor pip-audit grounds them",
-        "Does not present the tools that did run as covering the lenses they do not ground"
+        "Names all three selected lenses as judgment-only — reviewing-module-design, reviewing-test-quality, and sweeping-for-security — since ruff grounds the lint/style family and pip-audit the dependency family, and neither reaches any of them",
+        "Does not present the tools that did run as covering the lenses they do not ground",
+        "Does not quietly shorten the judgment-only list to the lenses that feel obviously uncovered; every selected lens with no tool behind it is named"
       ]
     },
     {
@@ -82,6 +83,7 @@
       "expected_behavior": [
         "Routes each family to the lens whose findings its output can evidence, rather than dumping all output at every lens",
         "Recognizes that no configured tool grounds reviewing-api-contract-safety here, and says so under coverage instead of stretching an unrelated tool to fill the gap",
+        "Checks whether the eslint config actually loads an accessibility plugin (eslint-plugin-jsx-a11y) before treating eslint as grounding reviewing-accessibility-and-i18n — plain eslint is the lint-and-style family, and without an a11y plugin that lens is judgment-only too",
         "Notes that a hit landing in a family no selected lens owns is passed to the nearest lens but never becomes a finding on its own authority"
       ]
     }

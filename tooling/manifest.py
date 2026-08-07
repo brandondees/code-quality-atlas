@@ -565,6 +565,51 @@ def _list_field(s: dict, key: str, skill_index: int) -> list:
     return value
 
 
+def _prose(mapping: dict, key: str, where: str, *, required: bool = True,
+           collapse: bool = False) -> str:
+    """A required prose field, type-checked before normalization.
+
+    Coercing with `str(...)` is the trap this exists to avoid: it turns a bare
+    `key:` (YAML null) into the literal `"None"`, which then satisfies every
+    downstream non-empty check and renders as the word "None" in a generated
+    table. A number is no better — it survives `str()` and crashes `.strip()`
+    otherwise. Anything that isn't a string is a malformed manifest, and says
+    so. `collapse` folds internal whitespace (for a value written across
+    several YAML lines that must render as one table cell).
+    """
+    if key not in mapping:
+        if required:
+            raise ValidationError(f"{where}: missing field {key!r}")
+        return ""
+    value = mapping[key]
+    if value is None:
+        if required:
+            raise ValidationError(f"{where}: {key!r} must be a non-empty string, got null")
+        return ""
+    if not isinstance(value, str):
+        raise ValidationError(
+            f"{where}: {key!r} must be a string, got {type(value).__name__}")
+    return " ".join(value.split()) if collapse else value.strip()
+
+
+def _str_list(mapping: dict, key: str, where: str) -> list[str]:
+    """A list-of-strings field. A present-but-null value normalizes to [] (the
+    emptiness is caught by validation, with a message about the *table* rather
+    than about Python types); a non-list, or any non-string entry, is malformed."""
+    value = mapping.get(key)
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValidationError(
+            f"{where}: {key!r} must be a list, got {type(value).__name__}")
+    for item in value:
+        if not isinstance(item, str):
+            raise ValidationError(
+                f"{where}: every {key!r} entry must be a string, "
+                f"got {type(item).__name__} ({item!r})")
+    return list(value)
+
+
 def load_manifest(path: str) -> Manifest:
     with open(path, encoding="utf-8") as fh:
         raw = fh.read()
@@ -652,30 +697,37 @@ def load_manifest(path: str) -> Manifest:
     if "prepass" in data:
         p = data["prepass"]
         try:
-            # Same bare-null discipline as the router/synthesizer above: a
-            # present-but-null prose field must normalize to "" rather than
-            # crash `.strip()`, and a present-but-null list must normalize to []
-            # rather than crash the comprehension with TypeError. The `or []`
-            # here is deliberately *not* a default — an empty table fails
+            # Every prose field goes through _prose(), which *rejects* a
+            # non-string rather than coercing it. The sibling blocks' `or ""`
+            # idiom is not enough here: `str(value)` would turn a bare
+            # `source:` (YAML null) into the literal string "None", which then
+            # sails past _validate_prepass's non-empty check and ships a table
+            # row reading "None" (CodeRabbit review on #206). A number would
+            # instead raise a raw AttributeError from `.strip()`. Both are
+            # malformed-manifest cases and both must surface as the
+            # ValidationError naming the field. `or []` on the lists is
+            # deliberately *not* a default — an empty table fails
             # _validate_prepass loudly; it only keeps the failure a
             # ValidationError instead of a raw TypeError.
             prepass = Prepass(
-                name=p["name"],
-                description=(p["description"] or "").strip(),
-                body=(p.get("body") or "").strip(),
-                discover=[DiscoverySource(source=" ".join(str(d["source"]).split()),
-                                          tells=(d["tells"] or "").strip())
+                name=_prose(p, "name", "prepass"),
+                description=_prose(p, "description", "prepass"),
+                body=_prose(p, "body", "prepass", required=False),
+                discover=[DiscoverySource(
+                              source=_prose(d, "source", "prepass discover", collapse=True),
+                              tells=_prose(d, "tells", "prepass discover"))
                           for d in (p.get("discover") or [])],
-                families=[ToolFamily(kind=(f["kind"] or "").strip(),
-                                     tools=" ".join(str(f["tools"]).split()),
-                                     grounds=list(f.get("grounds") or []))
+                families=[ToolFamily(kind=_prose(f, "kind", "prepass family"),
+                                     tools=_prose(f, "tools", "prepass family",
+                                                  collapse=True),
+                                     grounds=_str_list(f, "grounds", "prepass family"))
                           for f in (p.get("families") or [])],
-                dispositions=[Disposition(name=(d["name"] or "").strip(),
-                                          when=(d["when"] or "").strip(),
-                                          do=(d["do"] or "").strip())
+                dispositions=[Disposition(name=_prose(d, "name", "prepass disposition"),
+                                          when=_prose(d, "when", "prepass disposition"),
+                                          do=_prose(d, "do", "prepass disposition"))
                               for d in (p.get("dispositions") or [])],
-                rules=[PrepassRule(name=(r["name"] or "").strip(),
-                                   rule=(r["rule"] or "").strip())
+                rules=[PrepassRule(name=_prose(r, "name", "prepass rule"),
+                                   rule=_prose(r, "rule", "prepass rule"))
                        for r in (p.get("rules") or [])],
             )
         except KeyError as e:

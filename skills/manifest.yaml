@@ -1101,8 +1101,8 @@ prepass:
         the richest single signal — each hook names its tool, its arguments,
         and the file filter it runs under, so it gives scope as well as
         inventory
-    - source: CI workflow definitions — `.github/workflows/*.yml`,
-        `.gitlab-ci.yml`, `Jenkinsfile`, `.circleci/config.yml`
+    - source: CI workflow definitions — `.github/workflows/*.yml` and
+        `*.yaml`, `.gitlab-ci.yml`, `Jenkinsfile`, `.circleci/config.yml`
       tells: >
         what the repo actually gates merges on, which is the set worth
         reproducing — a tool configured but not wired into CI is weaker
@@ -1212,10 +1212,12 @@ prepass:
         the reason untrusted code executes with credentials in scope.
     - name: Bound the cost, and call a timeout a coverage gap
       rule: >
-        Scope the run to the change for a diff review and to the tree only for a
-        repo audit. A tool that exceeds its budget, needs a toolchain that is
-        absent, or fails to build is a stated limitation — never a finding, and
-        never a silent omission.
+        Scope each run through the tool's own scope mechanism (see step 2) —
+        never a whole-tree sweep on a diff review when the tool has a diff mode,
+        and never a whole-tree sweep reported as though it were scoped. A tool
+        that exceeds its budget, needs a toolchain that is absent, or fails to
+        build is a stated limitation — never a finding, and never a silent
+        omission.
     - name: Keep judgment and measurement distinguishable
       rule: >
         A confirmed finding names both the lens that owns it and the rule that
