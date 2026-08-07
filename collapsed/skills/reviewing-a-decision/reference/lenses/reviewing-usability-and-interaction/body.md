@@ -15,8 +15,8 @@ Can a person use this? Undesigned loading/empty/error states, destructive action
 - [Bad → finding (three states the code reaches, one designed)](#bad--finding-three-states-the-code-reaches-one-designed)
 - [Bad → finding (a destructive action that names nothing)](#bad--finding-a-destructive-action-that-names-nothing)
 - [Bad → finding (the error path eats the form)](#bad--finding-the-error-path-eats-the-form)
-- [Good — the finding routes, the gap does not](#good--the-finding-routes-the-gap-does-not)
-- [Good — skipped, and said so](#good--skipped-and-said-so)
+- [Good → routed finding (the gap is a defect, the pattern is not)](#good--routed-finding-the-gap-is-a-defect-the-pattern-is-not)
+- [Good → no finding (skipped — no user-facing surface)](#good--no-finding-skipped--no-user-facing-surface)
 - [Going deeper](#going-deeper)
 
 ## When to use
@@ -34,7 +34,7 @@ The full review checklist, grouped by the research category each check draws fro
 - **Every state this code can reach has something designed for it.** An async read introduces at minimum **loading**, **empty / zero-data**, **error**, and **success**; a mutation adds **in-flight** and **failed**. A component that renders only the success path has shipped the others undesigned — the user sees a blank region, a spinner that never resolves, or a stray `0`. Enumerate the states from the code (the hook's flags, the union's variants, the promise's rejection path), not from the mockup, and name each one nothing handles. **This is a defect, not a preference:** the code produces the state whether or not anyone designed it.
 - **A destructive or irreversible action has a way back.** A new delete, archive, revoke, overwrite, cancel-subscription, or send flow needs **undo** (preferred, where the action can be deferred or reversed) or a confirmation that **names what will be lost** — "Delete 3 projects and 47 files?" and not "Are you sure?". A confirmation that names nothing is not error prevention; it is a click the user has been trained to dismiss. And check the *slip* case separately from the *mistake* case: a destructive control identical in size, colour, and position to its safe neighbour will be hit by accident no matter how good the confirmation copy is.
 - **The system says what it is doing.** An operation slower than about a second reports that it started; one that can run long enough to lose the user's attention survives navigation away and back, and reports completion when they return. A fire-and-forget mutation with no success or failure feedback is the reviewable form of Norman's gulf of evaluation: the user cannot tell whether it worked, so they do it again.
-- **Errors say what happened, why, and what to do next — and keep the user's work.** Three separate checks, and the third is the one reviews miss: an error path that clears a filled form, drops an upload, or resets a multi-step flow to step one is a **data-loss defect** wearing a copy problem's clothes. Wording quality routes to design (or to VII-D when it is built); losing the input does not.
+- **Errors say what happened, why, and what to do next — and keep the user's work.** Three separate checks, and the third is the one reviews miss: an error path that clears a filled form, drops an upload, or resets a multi-step flow to step one is a **data-loss defect** wearing a copy problem's clothes. Wording quality routes to design; losing the input does not.
 - **The user sets the pace.** A modal with no dismiss, a step that auto-advances before the user has read it, a wizard with no way back, an interstitial that cannot be skipped on a return visit — each takes control the standards call the user's (ISO 9241-110 controllability; Nielsen's user control and freedom). Where the constraint is real — a legal acknowledgement, a payment step — say so; where it is incidental, it is a finding.
 - **The change conforms to what this product already taught the user.** A second date picker, a dialog that confirms where the rest of the product undoes, a new empty-state that says something different from the four already shipped. Reviewable without design authority: does an equivalent already exist in this codebase, and does this one behave the same? The *decision* — adopt the existing pattern or change all of them — routes.
 - **Recognition over recall.** A step that requires the user to remember or re-enter something the product already showed them or already knows: an ID to copy from a previous screen, a value the account record holds, a selection lost on navigation. Each is a checkable failure, not a matter of taste.
@@ -44,6 +44,8 @@ The full review checklist, grouped by the research category each check draws fro
 ---
 
 ## Examples
+
+Report each distinct issue as its own numbered finding, naming the interaction principle it violates and citing the code. Say which of the two kinds each one is: a **gap** the code actually produces (an unhandled state, an unrecoverable destructive action, lost input, absent feedback) is a defect with ordinary severity, and a **judgment** (which pattern, which words, whether the flow should exist) is surfaced with its evidence and routed to design or product with no engineering verdict. When the change has no user-facing surface, or the flow handles its states and its consequences, the entire response is exactly "No findings".
 
 ## Bad → finding (three states the code reaches, one designed)
 
@@ -111,16 +113,24 @@ async function onSubmit(values) {
 ```
 
 **Finding (defect, Major — and it is not a copy problem).** On failure the user is
-told to try again, and every field they filled is gone. That is **data loss**, and
-it belongs in the same severity band as any other data-loss defect — the fact that
-it surfaces as a bad experience does not make it a preference. Clear the form on
-*success*, not on submit.
+told to try again, and every field they filled is gone. That is a **defect, not a
+preference**: the fact that it surfaces as a bad experience does not demote it.
+Clear the form on *success*, not on submit.
+
+**On the severity, deliberately.** `REVIEW.md`'s scale puts *data loss* at
+**Blocker**, and this is Major — the difference is recoverability. Blocker-tier
+data loss is durable and unrecoverable: rows deleted, a backfill that overwrites,
+a migration with no down path. Here the data is the user's *unsaved input*, and
+the user can retype it — costly and infuriating, never silent, and gone only from
+that session. Rate it Blocker when the lost input cannot be reproduced by the user
+(an uploaded file with no local copy, a long-form draft with no autosave, a
+one-time code) — then it *is* the durable kind and takes the higher band.
 
 The copy is separately weak ("Something went wrong" says what happened, not why or
 what to do next), but that half **routes to design** and sets no engineering
 verdict. Two findings, two dispositions, from one code path — say which is which.
 
-## Good — the finding routes, the gap does not
+## Good → routed finding (the gap is a defect, the pattern is not)
 
 **Input:** a PR adds a fourth date picker to the codebase, hand-rolled, in a new
 booking flow. The other three use the design system's `<DateField>`.
@@ -143,7 +153,7 @@ assign engineering severity to a pattern preference. Contrast with the three
 examples above, where the gap — an unhandled state, an unnamed consequence, lost
 input — is a defect the reviewer states plainly and does not route away.
 
-## Good — skipped, and said so
+## Good → no finding (skipped — no user-facing surface)
 
 **Input:** a PR refactors a queue consumer and its retry policy. No UI, no CLI, no
 user-facing flow.

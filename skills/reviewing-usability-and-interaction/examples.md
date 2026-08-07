@@ -1,12 +1,14 @@
 # Examples — reviewing-usability-and-interaction
 
+Report each distinct issue as its own numbered finding, naming the interaction principle it violates and citing the code. Say which of the two kinds each one is: a **gap** the code actually produces (an unhandled state, an unrecoverable destructive action, lost input, absent feedback) is a defect with ordinary severity, and a **judgment** (which pattern, which words, whether the flow should exist) is surfaced with its evidence and routed to design or product with no engineering verdict. When the change has no user-facing surface, or the flow handles its states and its consequences, the entire response is exactly "No findings".
+
 ## Contents
 
 - [Bad → finding (three states the code reaches, one designed)](#bad--finding-three-states-the-code-reaches-one-designed)
 - [Bad → finding (a destructive action that names nothing)](#bad--finding-a-destructive-action-that-names-nothing)
 - [Bad → finding (the error path eats the form)](#bad--finding-the-error-path-eats-the-form)
-- [Good — the finding routes, the gap does not](#good--the-finding-routes-the-gap-does-not)
-- [Good — skipped, and said so](#good--skipped-and-said-so)
+- [Good → routed finding (the gap is a defect, the pattern is not)](#good--routed-finding-the-gap-is-a-defect-the-pattern-is-not)
+- [Good → no finding (skipped — no user-facing surface)](#good--no-finding-skipped--no-user-facing-surface)
 
 ## Bad → finding (three states the code reaches, one designed)
 
@@ -74,16 +76,24 @@ async function onSubmit(values) {
 ```
 
 **Finding (defect, Major — and it is not a copy problem).** On failure the user is
-told to try again, and every field they filled is gone. That is **data loss**, and
-it belongs in the same severity band as any other data-loss defect — the fact that
-it surfaces as a bad experience does not make it a preference. Clear the form on
-*success*, not on submit.
+told to try again, and every field they filled is gone. That is a **defect, not a
+preference**: the fact that it surfaces as a bad experience does not demote it.
+Clear the form on *success*, not on submit.
+
+**On the severity, deliberately.** `REVIEW.md`'s scale puts *data loss* at
+**Blocker**, and this is Major — the difference is recoverability. Blocker-tier
+data loss is durable and unrecoverable: rows deleted, a backfill that overwrites,
+a migration with no down path. Here the data is the user's *unsaved input*, and
+the user can retype it — costly and infuriating, never silent, and gone only from
+that session. Rate it Blocker when the lost input cannot be reproduced by the user
+(an uploaded file with no local copy, a long-form draft with no autosave, a
+one-time code) — then it *is* the durable kind and takes the higher band.
 
 The copy is separately weak ("Something went wrong" says what happened, not why or
 what to do next), but that half **routes to design** and sets no engineering
 verdict. Two findings, two dispositions, from one code path — say which is which.
 
-## Good — the finding routes, the gap does not
+## Good → routed finding (the gap is a defect, the pattern is not)
 
 **Input:** a PR adds a fourth date picker to the codebase, hand-rolled, in a new
 booking flow. The other three use the design system's `<DateField>`.
@@ -106,7 +116,7 @@ assign engineering severity to a pattern preference. Contrast with the three
 examples above, where the gap — an unhandled state, an unnamed consequence, lost
 input — is a defect the reviewer states plainly and does not route away.
 
-## Good — skipped, and said so
+## Good → no finding (skipped — no user-facing surface)
 
 **Input:** a PR refactors a queue consumer and its retry policy. No UI, no CLI, no
 user-facing flow.

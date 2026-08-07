@@ -1,13 +1,15 @@
 # Examples — reviewing-outcome-instrumentation
 
+Report each distinct issue as its own numbered finding, citing the claim it attaches to. Whether a stated outcome is *observable* — and whether the code that would observe it is in this diff — is an engineering fact and an ordinary defect; which outcome is worth pursuing is surfaced with evidence and routed to product with no engineering verdict. Refactors, fixes, bumps, and internal work owe no hypothesis. When the change makes no user or business claim, or its claim is already observable, the entire response is exactly "No findings".
+
 ## Contents
 
 - [Bad → finding (an output described as an outcome)](#bad--finding-an-output-described-as-an-outcome)
 - [Bad → finding (instrumentation deferred to a follow-up)](#bad--finding-instrumentation-deferred-to-a-follow-up)
 - [Bad → finding (a win metric with no guardrails)](#bad--finding-a-win-metric-with-no-guardrails)
-- [Good — ops instrumentation is not outcome instrumentation](#good--ops-instrumentation-is-not-outcome-instrumentation)
-- [Good — the proxy that became the target, surfaced not adjudicated](#good--the-proxy-that-became-the-target-surfaced-not-adjudicated)
-- [Good — skipped, and said so](#good--skipped-and-said-so)
+- [Good → finding (ops instrumentation is not outcome instrumentation)](#good--finding-ops-instrumentation-is-not-outcome-instrumentation)
+- [Good → routed finding (the proxy that became the target)](#good--routed-finding-the-proxy-that-became-the-target)
+- [Good → no finding (skipped — no user or business claim)](#good--no-finding-skipped--no-user-or-business-claim)
 
 ## Bad → finding (an output described as an outcome)
 
@@ -74,7 +76,7 @@ assignment code:
 Both are code properties, checkable now, and each silently invalidates the result
 months later.
 
-## Good — ops instrumentation is not outcome instrumentation
+## Good → finding (ops instrumentation is not outcome instrumentation)
 
 **Input:** a new "share to team" feature ships with a request counter, a latency
 histogram, a structured log line per share, and an alert on the error rate.
@@ -96,7 +98,7 @@ that state is common, and it is invisible unless someone asks the question this
 lens asks. `reviewing-observability-and-operability` owns the first half and has
 nothing to say about the second.
 
-## Good — the proxy that became the target, surfaced not adjudicated
+## Good → routed finding (the proxy that became the target)
 
 **Input:** a PR autoplays the next video and states *"success = +12% session
 length."*
@@ -124,7 +126,7 @@ What makes this right: Goodhart is surfaced with both readings named, the decisi
 is routed, no engineering verdict is set, and the possible dark-pattern half is
 handed to the lens that owns it instead of being folded in or dropped.
 
-## Good — skipped, and said so
+## Good → no finding (skipped — no user or business claim)
 
 **Input:** a PR extracts a shared validation helper and updates 14 call sites. No
 behavior change, no user-facing claim.
