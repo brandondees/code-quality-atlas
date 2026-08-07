@@ -31,7 +31,7 @@ The full review checklist, grouped by the research category each check draws fro
 
 ### Reviewable heuristics (skill-checklist seeds)
 
-- **Every state this code can reach has something designed for it.** An async read introduces at minimum **loading**, **empty / zero-data**, **error**, and **success**; a mutation adds **in-flight** and **failed**. A component that renders only the success path has shipped the others undesigned — the user sees a blank region, a spinner that never resolves, or a stray `0`. Enumerate the states from the code (the hook's flags, the union's variants, the promise's rejection path), not from the mockup, and name each one nothing handles. **This is a defect, not a preference:** the code produces the state whether or not anyone designed it.
+- **Every state this code can reach has something designed for it.** An async read introduces at minimum **loading**, **empty / zero-data**, **error**, and **success**; a mutation adds **in-flight** and **failed**. A component that renders only the success path has shipped the others undesigned — the user sees a blank region, a spinner that never resolves, or a stray `0`. Enumerate the states from the code (the hook's flags, the union's variants, the promise's rejection path), not from the mockup, and name each one nothing handles. **This is a defect, not a preference:** the code produces the state whether or not anyone designed it. The durable fix is a type, not a checklist item — a discriminated union over the states **plus an exhaustiveness check** (`assertNever`, or the stack's equivalent), so a new variant that nothing renders fails the build; the union without the check still compiles with a branch missing.
 - **A destructive or irreversible action has a way back.** A new delete, archive, revoke, overwrite, cancel-subscription, or send flow needs **undo** (preferred, where the action can be deferred or reversed) or a confirmation that **names what will be lost** — "Delete 3 projects and 47 files?" and not "Are you sure?". A confirmation that names nothing is not error prevention; it is a click the user has been trained to dismiss. And check the *slip* case separately from the *mistake* case: a destructive control identical in size, colour, and position to its safe neighbour will be hit by accident no matter how good the confirmation copy is.
 - **The system says what it is doing.** An operation slower than about a second reports that it started; one that can run long enough to lose the user's attention survives navigation away and back, and reports completion when they return. A fire-and-forget mutation with no success or failure feedback is the reviewable form of Norman's gulf of evaluation: the user cannot tell whether it worked, so they do it again.
 - **Errors say what happened, why, and what to do next — and keep the user's work.** Three separate checks, and the third is the one reviews miss: an error path that clears a filled form, drops an upload, or resets a multi-step flow to step one is a **data-loss defect** wearing a copy problem's clothes. Wording quality routes to design; losing the input does not.
@@ -72,7 +72,12 @@ must exist does not.
 
 The durable fix is to make the missing branch a compiler error rather than a
 review finding — a discriminated union over `loading | empty | error | ready`
-instead of `data`-plus-two-booleans. That's `reviewing-module-design`'s
+instead of `data`-plus-two-booleans, **plus an exhaustiveness check**: a `switch`
+whose `default` hands the value to an `assertNever(x: never)`, or the stack's own
+equivalent. The union alone does not get you there — an `if`/`else if` chain over
+it compiles perfectly well with a variant unhandled, which is this same defect
+wearing a type. With the check, adding a fifth state fails the build at every
+site that renders one. That's `reviewing-module-design`'s
 illegal-states-unrepresentable move aimed at UI state, and it's the only
 mechanization this category has that scales.
 
@@ -96,9 +101,18 @@ the first:
    wrongly, and it is a design defect rather than user error. Check it separately
    from the *mistake* case the copy addresses.
 
-Prefer **undo** over confirmation wherever the action can be deferred: a
-soft-delete with a 10-second "Workspace removed — Undo" is strictly better than
-any dialog, because it costs the careful user nothing and saves the careless one.
+Prefer **undo** over confirmation **when the effect is genuinely deferrable** —
+a soft-delete with a 10-second "Workspace removed — Undo" costs the careful user
+nothing and saves the careless one, which no dialog does.
+
+Check that condition rather than assuming it. Undo is the wrong instrument when
+the effect leaves the system the moment it fires or must not be delayed: a
+deletion that propagates to an external system or a search index, one that
+starts a retention or legal-hold workflow, or anything that *revokes*
+authorization — a 10-second undo window on "revoke API key" means the
+compromised key stays live for ten more seconds, which is the opposite of what
+was asked for. There, a confirmation that names what will be lost is the
+correct control, and it is not a weaker one.
 
 ## Bad → finding (the error path eats the form)
 

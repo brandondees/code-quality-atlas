@@ -18,7 +18,7 @@ provenance:
   built_from:
   - category: 42
     source: docs/research/cluster-7-product.md#42
-    hash: b4bfdeb252ed060b06e8c68ad3a96cac88855043b9302ee250008264602d48fd
+    hash: ea85368eb7a099cacbfe933e18e9fd2498b678df6280d62cad3925afed883991
 ---
 
 # reviewing-usability-and-interaction
@@ -45,7 +45,7 @@ Report only real problems. If the code correctly handles the case, reply "No fin
 
 The head of the full checklist — enough for a first pass without opening any reference file:
 
-- **Every state this code can reach has something designed for it.** An async read introduces at minimum **loading**, **empty / zero-data**, **error**, and **success**; a mutation adds **in-flight** and **failed**. A component that renders only the success path has shipped the others undesigned — the user sees a blank region, a spinner that never resolves, or a stray `0`. Enumerate the states from the code (the hook's flags, the union's variants, the promise's rejection path), not from the mockup, and name each one nothing handles. **This is a defect, not a preference:** the code produces the state whether or not anyone designed it.
+- **Every state this code can reach has something designed for it.** An async read introduces at minimum **loading**, **empty / zero-data**, **error**, and **success**; a mutation adds **in-flight** and **failed**. A component that renders only the success path has shipped the others undesigned — the user sees a blank region, a spinner that never resolves, or a stray `0`. Enumerate the states from the code (the hook's flags, the union's variants, the promise's rejection path), not from the mockup, and name each one nothing handles. **This is a defect, not a preference:** the code produces the state whether or not anyone designed it. The durable fix is a type, not a checklist item — a discriminated union over the states **plus an exhaustiveness check** (`assertNever`, or the stack's equivalent), so a new variant that nothing renders fails the build; the union without the check still compiles with a branch missing.
 - **A destructive or irreversible action has a way back.** A new delete, archive, revoke, overwrite, cancel-subscription, or send flow needs **undo** (preferred, where the action can be deferred or reversed) or a confirmation that **names what will be lost** — "Delete 3 projects and 47 files?" and not "Are you sure?". A confirmation that names nothing is not error prevention; it is a click the user has been trained to dismiss. And check the *slip* case separately from the *mistake* case: a destructive control identical in size, colour, and position to its safe neighbour will be hit by accident no matter how good the confirmation copy is.
 - **The system says what it is doing.** An operation slower than about a second reports that it started; one that can run long enough to lose the user's attention survives navigation away and back, and reports completion when they return. A fire-and-forget mutation with no success or failure feedback is the reviewable form of Norman's gulf of evaluation: the user cannot tell whether it worked, so they do it again.
 - **Errors say what happened, why, and what to do next — and keep the user's work.** Three separate checks, and the third is the one reviews miss: an error path that clears a filled form, drops an upload, or resets a multi-step flow to step one is a **data-loss defect** wearing a copy problem's clothes. Wording quality routes to design; losing the input does not.

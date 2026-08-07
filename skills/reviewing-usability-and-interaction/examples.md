@@ -35,7 +35,12 @@ must exist does not.
 
 The durable fix is to make the missing branch a compiler error rather than a
 review finding — a discriminated union over `loading | empty | error | ready`
-instead of `data`-plus-two-booleans. That's `reviewing-module-design`'s
+instead of `data`-plus-two-booleans, **plus an exhaustiveness check**: a `switch`
+whose `default` hands the value to an `assertNever(x: never)`, or the stack's own
+equivalent. The union alone does not get you there — an `if`/`else if` chain over
+it compiles perfectly well with a variant unhandled, which is this same defect
+wearing a type. With the check, adding a fifth state fails the build at every
+site that renders one. That's `reviewing-module-design`'s
 illegal-states-unrepresentable move aimed at UI state, and it's the only
 mechanization this category has that scales.
 
@@ -59,9 +64,18 @@ the first:
    wrongly, and it is a design defect rather than user error. Check it separately
    from the *mistake* case the copy addresses.
 
-Prefer **undo** over confirmation wherever the action can be deferred: a
-soft-delete with a 10-second "Workspace removed — Undo" is strictly better than
-any dialog, because it costs the careful user nothing and saves the careless one.
+Prefer **undo** over confirmation **when the effect is genuinely deferrable** —
+a soft-delete with a 10-second "Workspace removed — Undo" costs the careful user
+nothing and saves the careless one, which no dialog does.
+
+Check that condition rather than assuming it. Undo is the wrong instrument when
+the effect leaves the system the moment it fires or must not be delayed: a
+deletion that propagates to an external system or a search index, one that
+starts a retention or legal-hold workflow, or anything that *revokes*
+authorization — a 10-second undo window on "revoke API key" means the
+compromised key stays live for ten more seconds, which is the opposite of what
+was asked for. There, a confirmation that names what will be lost is the
+correct control, and it is not a weaker one.
 
 ## Bad → finding (the error path eats the form)
 

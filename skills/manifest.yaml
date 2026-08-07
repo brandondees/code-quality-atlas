@@ -1039,8 +1039,10 @@ router:
             screen, and reviewing-ethical-design because friction that benefits
             someone is #36's, friction that benefits nobody is #42's"
     - when: A change that claims a user or business benefit — a new user-facing
-            feature, an experiment or feature-flagged rollout, a change to analytics
-            or telemetry events, or a PR description promising an outcome
+            feature, an experiment or feature-flagged rollout, a PR description
+            promising an outcome, or an analytics/telemetry change that instruments
+            one of those (not a telemetry-schema or operational-metric change on its
+            own, which claims nothing about a user)
       run: [reviewing-outcome-instrumentation, reviewing-pr-and-process-hygiene,
             reviewing-observability-and-operability]
       note: "will anyone be able to tell whether it worked — a stated outcome,
@@ -1386,16 +1388,25 @@ synthesizer:
       resolve: >
         Handle the states the code can actually reach — if the fetch can fail, the
         error state is reachable and its absence is a defect, not gold-plating.
-        Restraint wins on states the code cannot produce, on polish beyond a plain
-        handled state, and on a fourth variant of an existing pattern.
+        Restraint wins on states the code cannot produce and on polish beyond a
+        plainly handled state. On a fourth variant of an existing pattern the two
+        lenses agree rather than compete: restraint says don't build another one,
+        #42 says users were taught the existing one — so the finding still
+        surfaces with its evidence and the decision routes to design. Restraint
+        never suppresses a consistency finding; it argues against adding surface.
     - between: [checking-restraint, reviewing-outcome-instrumentation]
       about: instrumenting the change vs. adding telemetry and flags nobody reads
       resolve: >
         Instrument the outcome the change actually claims, and nothing else.
-        Restraint wins by default on every event beyond that one: a refactor or bug
-        fix owes no hypothesis, "track everything" is its own failure mode, and each
-        event carries cost and a PII surface (#27). Where a claimed benefit has no
-        observation at all, the single missing event is the finding.
+        Restraint wins by default on telemetry unrelated to that claim: a refactor
+        or bug fix owes no hypothesis, "track everything" is its own failure mode,
+        and each event carries cost and a PII surface (#27). Where a claimed benefit
+        has no observation at all, name the **smallest missing signal** — often one
+        event, sometimes an existing event or dashboard that already covers it, in
+        which case there is no finding. The exception is an experiment or rollout:
+        assignment and exposure records, the losing condition, the relevant
+        guardrails, and flag ownership are what make the result interpretable at
+        all, so restraint does not trade them away as surplus telemetry.
     - between: [reviewing-ethical-design, reviewing-outcome-instrumentation]
       about: a metric the change moves vs. whether a reasonable user would have
         chosen the behavior that moves it

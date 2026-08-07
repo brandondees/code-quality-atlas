@@ -100,7 +100,7 @@ both.
 
 ## How updates reach you
 
-All 42 skills load with provenance intact, and updates ship with every merged
+All 42 standalone skills load with provenance intact (4 in the collapsed form — see above), and updates ship with every merged
 commit (commit-SHA versioning — no version bumps). Which install path you used
 decides how those updates arrive:
 

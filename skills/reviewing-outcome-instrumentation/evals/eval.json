@@ -25,7 +25,8 @@
       "expected_behavior": [
         "Requires guardrail metrics declared before the rollout, not only a win condition — an experiment evaluable only on the metric it was designed to move cannot detect the damage it does",
         "Names plausible guardrails for this specific change: p95 latency, error rate, and bytes transferred given prefetch",
-        "Checks the assignment code in the same read: exposure logged where the user sees the variant rather than where the flag is read, and assignment stable per user across sessions rather than per session",
+        "Asks to see the assignment and exposure code before drawing any conclusion about it — the scenario states only the flag and the rollout percentage, so a finding about bucketing or exposure logging would be asserted without evidence",
+        "Once that code is in hand, checks that exposure is logged where the user sees the variant rather than where the flag is read, and that assignment is stable for the declared unit across sessions",
         "Explains that guardrails chosen after the results are known are not a check"
       ]
     },
