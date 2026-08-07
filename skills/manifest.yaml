@@ -1165,7 +1165,7 @@ router:
             technology adoption, a build-vs-buy or vendor choice, or a
             deprecation / sunset plan
       run: [reviewing-decision-lifecycle, checking-restraint,
-            reviewing-api-contract-safety]
+            reviewing-api-contract-safety, reviewing-conceptual-integrity]
       note: "decision-shaped — reviews the choice and its record (rationale,
             assumptions, exit), not implementation code; pair with the
             design-capable (◆) lenses for the decision's domain.
