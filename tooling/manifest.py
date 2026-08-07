@@ -118,6 +118,56 @@ class Synthesizer:
 
 
 @dataclass
+class DiscoverySource:
+    """One place the pre-pass looks to learn which deterministic tools the
+    reviewed repo already runs. `tells` says what that source establishes that
+    the others don't (enforced vs. merely installed vs. documented)."""
+    source: str
+    tells: str
+
+
+@dataclass
+class ToolFamily:
+    """A family of deterministic tools and the atlas lenses whose findings its
+    output can evidence. `grounds` names real lenses and is validated, so a
+    renamed lens can't leave a dangling pointer in the generated table."""
+    kind: str
+    tools: str
+    grounds: list[str]
+
+
+@dataclass
+class Disposition:
+    """What the owning lens does with one tool hit. Exactly one applies per hit
+    — passing a hit through unexamined is not a disposition."""
+    name: str
+    when: str
+    do: str
+
+
+@dataclass
+class PrepassRule:
+    """One standing discipline rule for the pre-pass (what keeps tool grounding
+    from degrading the review rather than improving it)."""
+    name: str
+    rule: str
+
+
+@dataclass
+class Prepass:
+    """The deterministic-tool evidence pre-pass (G34 Tier 1): runs between the
+    router's lens selection and the lenses themselves. Built entirely from the
+    manifest, like the router and synthesizer."""
+    name: str
+    description: str
+    discover: list[DiscoverySource]
+    families: list[ToolFamily]
+    dispositions: list[Disposition]
+    rules: list[PrepassRule]
+    body: str = ""           # richer "When to use" text; falls back to description
+
+
+@dataclass
 class Mode:
     """A review-depth mode: how *much* to run and at what severity floor.
 
@@ -153,6 +203,7 @@ class Manifest:
     taxonomy_version: str
     skills: list[Skill]
     router: Router | None = None
+    prepass: Prepass | None = None
     synthesizer: Synthesizer | None = None
     modes: list[Mode] = field(default_factory=list)
     entrypoints: list[Entrypoint] = field(default_factory=list)
@@ -314,6 +365,66 @@ def _validate_synthesizer(manifest: Manifest, seen: set[str]) -> None:
                 f"synthesizer: tension {t.between} needs `about` and `resolve`")
 
 
+def _validate_prepass(manifest: Manifest, seen: set[str]) -> None:
+    if manifest.prepass is None:
+        return
+    p = manifest.prepass
+    if not _NAME_RE.match(p.name) or len(p.name) > 64 or p.name in seen:
+        raise ValidationError(f"prepass: invalid or duplicate name {p.name!r}")
+    if not p.description or len(p.description) > 1024:
+        raise ValidationError("prepass: description must be non-empty and <=1024 chars")
+    if len(p.body) > 1024:
+        raise ValidationError("prepass: body must be <=1024 chars")
+    # Each of the four tables is load-bearing in the generated skill: without
+    # discovery there is nothing to run, without families nothing to map output
+    # onto, without dispositions a hit has no defined outcome, and without the
+    # rules the pre-pass is a tool-output dump rather than a review step.
+    for attr in ("discover", "families", "dispositions", "rules"):
+        if not getattr(p, attr):
+            raise ValidationError(f"prepass: {attr} must be non-empty")
+    for d in p.discover:
+        if not d.source or not d.tells:
+            raise ValidationError("prepass: every discover entry needs `source` and `tells`")
+    seen_kinds: set[str] = set()
+    for f in p.families:
+        if not f.kind or not f.tools:
+            raise ValidationError("prepass: every family needs `kind` and `tools`")
+        if f.kind in seen_kinds:
+            raise ValidationError(f"prepass: duplicate family kind {f.kind!r}")
+        seen_kinds.add(f.kind)
+        if not f.grounds:
+            raise ValidationError(
+                f"prepass: family {f.kind!r} must ground at least one lens — a tool "
+                "family whose output no lens owns has nowhere to send its hits")
+        for lens in f.grounds:
+            if lens not in seen:
+                raise ValidationError(
+                    f"prepass: family {f.kind!r} grounds unknown skill {lens!r}")
+    seen_dispositions: set[str] = set()
+    for disp in p.dispositions:
+        if not disp.name or not disp.when or not disp.do:
+            raise ValidationError(
+                "prepass: every disposition needs `name`, `when`, and `do`")
+        if disp.name in seen_dispositions:
+            raise ValidationError(f"prepass: duplicate disposition {disp.name!r}")
+        seen_dispositions.add(disp.name)
+    for r in p.rules:
+        if not r.name or not r.rule:
+            raise ValidationError("prepass: every rule needs `name` and `rule`")
+
+
+def _validate_composition_names(manifest: Manifest) -> None:
+    """The router / pre-pass / synthesizer each generate into skills/<name>/, so
+    two sharing a name would silently overwrite one another's SKILL.md. Each is
+    already checked against the *lens* names in its own validator; this catches
+    the collisions only visible across the three of them."""
+    names = [c.name for c in (manifest.router, manifest.prepass, manifest.synthesizer)
+             if c is not None]
+    if len(names) != len(set(names)):
+        raise ValidationError(
+            f"router/prepass/synthesizer must have distinct names, got {names}")
+
+
 def _validate_modes(manifest: Manifest) -> None:
     if not manifest.modes:
         return
@@ -349,6 +460,8 @@ def _validate_entrypoints(manifest: Manifest) -> None:
     reserved = set(skill_names)
     if manifest.router:
         reserved.add(manifest.router.name)
+    if manifest.prepass:
+        reserved.add(manifest.prepass.name)
     if manifest.synthesizer:
         reserved.add(manifest.synthesizer.name)
     seen_eps: set[str] = set()
@@ -385,7 +498,9 @@ def _validate_entrypoints(manifest: Manifest) -> None:
 def validate(manifest: Manifest, docs_root: str = ".") -> None:
     seen = _validate_skills(manifest, docs_root)
     _validate_router(manifest, seen)
+    _validate_prepass(manifest, seen)
     _validate_synthesizer(manifest, seen)
+    _validate_composition_names(manifest)
     _validate_modes(manifest)
     _validate_entrypoints(manifest)
 
@@ -394,7 +509,7 @@ def validate(manifest: Manifest, docs_root: str = ".") -> None:
 # and silently truncates the value (e.g. a route note "… pairs with #16 …" loses
 # everything from "#16", dropping the cross-reference). description/picker are
 # written as ">" block scalars, where "#" is literal, so they are exempt.
-_PLAIN_PROSE_KEYS = ("note", "when", "about", "resolve")
+_PLAIN_PROSE_KEYS = ("note", "when", "about", "resolve", "tells", "do", "rule", "tools")
 _KEY_RE = re.compile(r"^(\s*)(?:- )?([\w-]+):\s*(.*)$")
 _COMMENT_RISK = re.compile(r"\s#")
 
@@ -448,6 +563,51 @@ def _list_field(s: dict, key: str, skill_index: int) -> list:
         raise ValidationError(
             f"skill #{skill_index}: {key!r} must be a list, got {type(value).__name__}")
     return value
+
+
+def _prose(mapping: dict, key: str, where: str, *, required: bool = True,
+           collapse: bool = False) -> str:
+    """A required prose field, type-checked before normalization.
+
+    Coercing with `str(...)` is the trap this exists to avoid: it turns a bare
+    `key:` (YAML null) into the literal `"None"`, which then satisfies every
+    downstream non-empty check and renders as the word "None" in a generated
+    table. A number is no better — it survives `str()` and crashes `.strip()`
+    otherwise. Anything that isn't a string is a malformed manifest, and says
+    so. `collapse` folds internal whitespace (for a value written across
+    several YAML lines that must render as one table cell).
+    """
+    if key not in mapping:
+        if required:
+            raise ValidationError(f"{where}: missing field {key!r}")
+        return ""
+    value = mapping[key]
+    if value is None:
+        if required:
+            raise ValidationError(f"{where}: {key!r} must be a non-empty string, got null")
+        return ""
+    if not isinstance(value, str):
+        raise ValidationError(
+            f"{where}: {key!r} must be a string, got {type(value).__name__}")
+    return " ".join(value.split()) if collapse else value.strip()
+
+
+def _str_list(mapping: dict, key: str, where: str) -> list[str]:
+    """A list-of-strings field. A present-but-null value normalizes to [] (the
+    emptiness is caught by validation, with a message about the *table* rather
+    than about Python types); a non-list, or any non-string entry, is malformed."""
+    value = mapping.get(key)
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValidationError(
+            f"{where}: {key!r} must be a list, got {type(value).__name__}")
+    for item in value:
+        if not isinstance(item, str):
+            raise ValidationError(
+                f"{where}: every {key!r} entry must be a string, "
+                f"got {type(item).__name__} ({item!r})")
+    return list(value)
 
 
 def load_manifest(path: str) -> Manifest:
@@ -533,6 +693,47 @@ def load_manifest(path: str) -> Manifest:
             )
         except KeyError as e:
             raise ValidationError(f"router: missing field {e}") from e
+    prepass = None
+    if "prepass" in data:
+        p = data["prepass"]
+        try:
+            # Every prose field goes through _prose(), which *rejects* a
+            # non-string rather than coercing it. The sibling blocks' `or ""`
+            # idiom is not enough here: `str(value)` would turn a bare
+            # `source:` (YAML null) into the literal string "None", which then
+            # sails past _validate_prepass's non-empty check and ships a table
+            # row reading "None" (CodeRabbit review on #206). A number would
+            # instead raise a raw AttributeError from `.strip()`. Both are
+            # malformed-manifest cases and both must surface as the
+            # ValidationError naming the field. `or []` on the lists is
+            # deliberately *not* a default — an empty table fails
+            # _validate_prepass loudly; it only keeps the failure a
+            # ValidationError instead of a raw TypeError.
+            prepass = Prepass(
+                name=_prose(p, "name", "prepass"),
+                description=_prose(p, "description", "prepass"),
+                body=_prose(p, "body", "prepass", required=False),
+                discover=[DiscoverySource(
+                              source=_prose(d, "source", "prepass discover", collapse=True),
+                              tells=_prose(d, "tells", "prepass discover"))
+                          for d in (p.get("discover") or [])],
+                families=[ToolFamily(kind=_prose(f, "kind", "prepass family"),
+                                     tools=_prose(f, "tools", "prepass family",
+                                                  collapse=True),
+                                     grounds=_str_list(f, "grounds", "prepass family"))
+                          for f in (p.get("families") or [])],
+                dispositions=[Disposition(name=_prose(d, "name", "prepass disposition"),
+                                          when=_prose(d, "when", "prepass disposition"),
+                                          do=_prose(d, "do", "prepass disposition"))
+                              for d in (p.get("dispositions") or [])],
+                rules=[PrepassRule(name=_prose(r, "name", "prepass rule"),
+                                   rule=_prose(r, "rule", "prepass rule"))
+                       for r in (p.get("rules") or [])],
+            )
+        except KeyError as e:
+            raise ValidationError(f"prepass: missing field {e}") from e
+        except TypeError as e:
+            raise ValidationError(f"prepass: malformed entry ({e})") from e
     synthesizer = None
     if "synthesizer" in data:
         sy = data["synthesizer"]
@@ -602,5 +803,5 @@ def load_manifest(path: str) -> Manifest:
         except (KeyError, TypeError) as e:
             raise ValidationError(f"entrypoints[{i}] in {path}: malformed entrypoint ({e})")
     return Manifest(taxonomy_version=data["taxonomy_version"], skills=skills,
-                    router=router, synthesizer=synthesizer, modes=modes,
-                    entrypoints=entrypoints)
+                    router=router, prepass=prepass, synthesizer=synthesizer,
+                    modes=modes, entrypoints=entrypoints)

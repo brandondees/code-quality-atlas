@@ -32,6 +32,11 @@ from tooling.generate_common import (
     modes_section,
     primary_owners,
 )
+from tooling.generate_prepass import (
+    build_collapsed_prepass,
+    build_prepass_md,
+    generate_prepass,
+)
 from tooling.generate_router import build_router_md, generate_router
 from tooling.generate_skill import (
     build_artifact_rubric,
@@ -47,10 +52,11 @@ from tooling.generate_synthesizer import (
 
 __all__ = [
     "CollapsedOverlapError",
-    "build_artifact_rubric", "build_collapsed_synthesis", "build_entrypoint_md",
+    "build_artifact_rubric", "build_collapsed_prepass", "build_collapsed_synthesis",
+    "build_entrypoint_md", "build_prepass_md",
     "build_reference", "build_router_md", "build_skill_md", "build_synthesizer_md",
     "collapsed_plugin_manifest", "entrypoint_lenses", "generate_collapsed",
-    "generate_lens_bundle", "generate_router", "generate_skill",
+    "generate_lens_bundle", "generate_prepass", "generate_router", "generate_skill",
     "generate_synthesizer", "lens_bundle_body", "mode_floor_policy",
     "modes_section", "primary_owners", "top_checks",
 ]

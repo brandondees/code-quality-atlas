@@ -10,7 +10,7 @@ Two costs scale with the **count** of top-level skills, not their quality:
 
 1. **Cloud onboarding.** The only repo-independent cloud channel is claude.ai
    account skills, uploaded **one zip per skill** (the GUI rejects multi-skill
-   bundles) — 39 tedious, error-prone uploads. See
+   bundles) — 40 tedious, error-prone uploads. See
    [`distribution.md`](distribution.md).
 2. **CLI context budget.** Claude Code budgets the installed-skill *listing* to
    ~1% of context and drops descriptions beyond it; with 37 top-level lenses the
@@ -28,13 +28,15 @@ with **all** relevant lenses," up to the full set at repo scope, and cannot get 
 
 - **D-Q20-1 — Dual-emit.** The manifest + `built_from` research sections stay the
   single source. `generate.py` emits **two forms** from the same lens content, so
-  they cannot drift (D6): the existing **standalone** 39 skills (unchanged) and a
-  new **collapsed** form.
+  they cannot drift (D6): the existing **standalone** form (40 skills, unchanged
+  by this decision) and a new **collapsed** form.
 - **D-Q20-2 — Collapsed form = 4 entrypoints by review shape.** `reviewing-a-change`
   (diff), `auditing-a-repository` (repo/cron), `reviewing-a-decision`,
   `reviewing-an-artifact`. Each bundles its shape's lens *bodies* as on-demand
-  files and absorbs the router + synthesizer (so the collapsed form is genuinely
-  4 skills, not 6).
+  files and absorbs the composition skills — the router, the tool-grounding
+  pre-pass, and the synthesizer (so the collapsed form is genuinely 4 skills, not
+  7): routing is the entrypoint's own *How this works*, and the other two ship
+  bundled as `reference/tool-evidence.md` and `reference/synthesis.md`.
 - **D-Q20-3 — Both forms committed and marketplace-installable.** The collapsed
   form is generated-but-committed (like `skills/`) under `collapsed/`, with its own
   `.claude-plugin/plugin.json`; `marketplace.json` gains a second plugin so either
@@ -51,7 +53,7 @@ with **all** relevant lenses," up to the full set at repo scope, and cannot get 
 - **D-Q20-6 — Non-goal:** removing the standalone 39. Dual-emit keeps them for
   filesystem / Skulto / other-agent installs and direct per-lens auto-triggering.
 - **Revisit trigger.** Reopen the dual-emit decision if **both** original pains go
-  away: the claude.ai GUI gains multi-skill-bundle upload (removing the ~39-upload
+  away: the claude.ai GUI gains multi-skill-bundle upload (removing the ~40-upload
   cost) **and** the CLI skill-listing context budget stops truncating descriptions
   (e.g. a larger listing budget or on-demand skill discovery). If both hold, the
   collapsed form's maintenance + repo-size overhead may no longer be justified —

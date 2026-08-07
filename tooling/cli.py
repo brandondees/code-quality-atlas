@@ -10,6 +10,7 @@ from tooling.evals import EvalError, load_evals, validate_evals
 from tooling.generate import (
     CollapsedOverlapError,
     generate_collapsed,
+    generate_prepass,
     generate_router,
     generate_skill,
     generate_synthesizer,
@@ -54,6 +55,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"generated {out}")
         if manifest.router is not None:
             out = generate_router(manifest, skills_root=args.skills_root)
+            print(f"generated {out}")
+        if manifest.prepass is not None:
+            out = generate_prepass(manifest, skills_root=args.skills_root)
             print(f"generated {out}")
         if manifest.synthesizer is not None:
             out = generate_synthesizer(manifest, skills_root=args.skills_root)

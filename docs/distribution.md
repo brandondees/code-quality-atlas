@@ -69,20 +69,22 @@ clone.
 
 ✅ works · ⚠️ conditional · ❌ doesn't apply
 
-## Two forms: standalone (39) vs collapsed (4)
+## Two forms: standalone (40) vs collapsed (4)
 
 Every channel above can ship the suite in **either of two forms** — install **one
 form, not both** (they cover the same lenses):
 
-- **Standalone (39 skills)** — the default. One `SKILL.md` per lens plus the
-  `choosing-review-lenses` router and `synthesizing-review-findings` synthesizer.
+- **Standalone (40 skills)** — the default. One `SKILL.md` per lens (37) plus the
+  three composition skills: the `choosing-review-lenses` router, the
+  `grounding-review-in-tool-output` tool-grounding pre-pass, and the
+  `synthesizing-review-findings` synthesizer.
   Richest top-level discoverability; the most skills to upload/list.
 - **Collapsed (4 entrypoints)** — `reviewing-a-change`, `auditing-a-repository`,
   `reviewing-a-decision`, `reviewing-an-artifact`. Each entrypoint bundles its
   shape's lenses under `reference/lenses/<lens>/body.md` and loads them on demand,
   carrying the same relevance-ranked routing, depth modes, and synthesis. Best for
   **cloud / account-skill / context-budget-constrained** surfaces — 4 uploads or 4
-  vendored folders instead of 39, at the cost of one extra `Read` per lens.
+  vendored folders instead of 40, at the cost of one extra `Read` per lens.
 
 The collapsed form ships as its own marketplace plugin,
 **`code-quality-atlas-collapsed`** (see [`install.md`](install.md)), and the
@@ -125,8 +127,8 @@ specifics:
    "loaded automatically" statement covers your own uploads, not just first-party
    ones). Verify with a one-skill test before doing the whole set.
 2. **One skill per zip — confirmed.** The GUI rejects a multi-skill bundle
-   ("must contain exactly one top-level folder"), so it's one upload per lens,
-   ~39 total. Each zip is a single `<name>/` folder shipping the runtime
+   ("must contain exactly one top-level folder"), so it's one upload per
+   standalone skill — lenses *and* composition skills — ~40 total. Each zip is a single `<name>/` folder shipping the runtime
    resources — `SKILL.md`, `reference/`, **and `examples.md`** (a lens opens it
    for the output format) — and excluding the dev-only `evals/`.
 
@@ -134,17 +136,18 @@ specifics:
 upload-ready zips with exactly that inclusion rule:
 
 ```bash
-tooling/package-account-zips.sh               # 39 zips -> dist/account-skills/
+tooling/package-account-zips.sh               # 40 zips -> dist/account-skills/
 tooling/package-account-zips.sh --collapsed   # 4 zips (the collapsed entrypoints)
 ```
 
 The `--collapsed` flag packages the **4 collapsed entrypoints**
-(`collapsed/skills/`) instead of the 39 standalone skills — far fewer GUI uploads,
-with the lenses bundled and loaded on demand. Pick **one form**: the 39 standalone
+(`collapsed/skills/`) instead of the 40 standalone skills — far fewer GUI uploads,
+with the lenses bundled and loaded on demand. Pick **one form**: the 40 standalone
 skills *or* the 4 collapsed entrypoints, not both (see *Two forms* below).
 
 There is **no bulk path** through the GUI: no multi-skill zip, and (per the note
-below) no usable API. The ~39 uploads are unavoidable today, which is the cost
+below) no usable API. For the **standalone** form the ~40 uploads are unavoidable
+today (the collapsed form needs 4) — which is the cost
 that motivates the structural rethink in
 [`open-questions.md`](open-questions.md) (fewer top-level skills, more nesting).
 
@@ -185,12 +188,12 @@ code-quality-atlas clone:
 
 ```bash
 # from inside the code-quality-atlas clone; pass the OTHER repo
-tooling/vendor-skills.sh ~/code/my-service              # 39 standalone skills
+tooling/vendor-skills.sh ~/code/my-service              # 40 standalone skills
 tooling/vendor-skills.sh ~/code/my-service --collapsed  # OR the 4 collapsed entrypoints
 ( cd ~/code/my-service && git add .claude/skills && git commit -m "vendor code-quality-atlas review suite" )
 ```
 
-`--collapsed` vendors the 4 collapsed entrypoints instead of the 39 standalone
+`--collapsed` vendors the 4 collapsed entrypoints instead of the 40 standalone
 skills. **Vendor one form, not both** — the two cover the same lenses.
 
 `skulto install brandondees/code-quality-atlas -y` run inside the target repo is
@@ -221,7 +224,7 @@ expect the plugin to appear in cloud sessions — it won't.
   non-tool-managed directory at a colliding skill name, that name is skipped
   with a warning (and the run exits non-zero) rather than overwritten; pass
   `--force` to overwrite it anyway. `--collapsed` vendors the 4
-  collapsed entrypoints instead of the 39 standalone skills. The `skulto` flow
+  collapsed entrypoints instead of the 40 standalone skills. The `skulto` flow
   above is an alternative. Every run also writes/refreshes a `NOTICE.md`
   alongside the vendored skills — the vendored content is CC BY 4.0 (see
   [License](../LICENSE)), which requires attribution on redistribution; the

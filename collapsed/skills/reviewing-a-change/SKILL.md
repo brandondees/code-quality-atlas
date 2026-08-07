@@ -20,6 +20,7 @@ Review a diff, pull request, or code change with the code-quality-atlas lenses. 
 
 Rank the relevant lenses below by relevance to what is being reviewed, pick the breadth from the depth mode (default **review**), then for each selected lens **load its bundle** and apply it:
 
+- Before the lenses judge anything, gather deterministic evidence with the procedure in `reference/tool-evidence.md` — run the linters, type checkers, and scanners this repo *already* configures, scoped to what's under review, and hand each lens its hits. Skip it when the repo configures none, or when running them would execute untrusted code; say so in the coverage line either way.
 - Read `reference/lenses/<lens>/body.md` — the lens's checklist and examples. Open `reference/lenses/<lens>/tool-rules.md` or `sources.md` only if deeper tooling/provenance is called for.
 - After the lenses run, merge their findings with the procedure in `reference/synthesis.md` — one deduplicated, ranked report with a single verdict.
 

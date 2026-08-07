@@ -20,6 +20,7 @@ from tooling.generate_common import (
     build_reference,
     modes_section,
 )
+from tooling.generate_prepass import build_collapsed_prepass
 from tooling.generate_skill import build_artifact_rubric
 from tooling.generate_synthesizer import build_synthesizer_md
 from tooling.manifest import Entrypoint, Manifest, Skill
@@ -278,7 +279,14 @@ def build_entrypoint_md(manifest: Manifest, entrypoint: Entrypoint) -> str:
         "Rank the relevant lenses below by relevance to what is being reviewed, "
         "pick the breadth from the depth mode (default **review**), then for each "
         "selected lens **load its bundle** and apply it:\n\n"
-        "- Read `reference/lenses/<lens>/body.md` — the lens's checklist and examples. "
+        + ("- Before the lenses judge anything, gather deterministic evidence "
+           "with the procedure in `reference/tool-evidence.md` — run the "
+           "linters, type checkers, and scanners this repo *already* "
+           "configures, scoped to what's under review, and hand each lens its "
+           "hits. Skip it when the repo configures none, or when running them "
+           "would execute untrusted code; say so in the coverage line either "
+           "way.\n" if manifest.prepass else "")
+        + "- Read `reference/lenses/<lens>/body.md` — the lens's checklist and examples. "
         "Open `reference/lenses/<lens>/tool-rules.md` or `sources.md` only if deeper "
         "tooling/provenance is called for.\n"
         "- After the lenses run, merge their findings with the procedure in "
@@ -375,6 +383,16 @@ def generate_collapsed(manifest: Manifest, docs_root: str = ".", skills_root: st
         (out / "SKILL.md").write_text(build_entrypoint_md(manifest, ep), encoding="utf-8")
         (out / "reference" / "synthesis.md").write_text(
             _gen_header() + build_collapsed_synthesis(manifest), encoding="utf-8")
+        # The pre-pass is bundled the same way synthesis.md is — both are
+        # manifest-built procedures with no owning lens. Remove a stale copy if
+        # the manifest ever drops the block, so the committed tree can't keep
+        # advertising a step the entrypoint no longer describes.
+        tool_evidence = out / "reference" / "tool-evidence.md"
+        if manifest.prepass is not None:
+            tool_evidence.write_text(
+                _gen_header() + build_collapsed_prepass(manifest), encoding="utf-8")
+        elif tool_evidence.exists():
+            tool_evidence.unlink()
         ep_lenses = entrypoint_lenses(manifest, ep)
         current_lens_names = {skill.name for skill in ep_lenses}
         # Prune a lens dropped from this entrypoint (deleted, reshaped, or

@@ -15,7 +15,7 @@ supports the `SKILL.md` format** (Cursor, Windsurf, Copilot, …). The plugin wr
 
 ## What you get
 
-**39 review skills**, generated from a researched taxonomy and refined against eval
+**40 review skills**, generated from a researched taxonomy and refined against eval
 scenarios:
 
 - **37 review lenses** — each a narrow, self-contained reviewer (correctness,
@@ -36,6 +36,11 @@ scenarios:
 - **`choosing-review-lenses`** — a router that ranks a change's relevant lenses and
   runs the top few by default, with **triage** and **comprehensive** depth modes for
   fewer or all of them, so you don't have to know the catalog.
+- **`grounding-review-in-tool-output`** — a pre-pass that runs the deterministic
+  linters, type checkers, and scanners the reviewed repo *already* configures,
+  scoped to what's under review, and hands each lens their hits as evidence to
+  confirm, contextualize, or dismiss. It never introduces a tool the repo hasn't
+  adopted, and a clean run clears nothing.
 - **`synthesizing-review-findings`** — merges multiple lenses (and any other
   reviewer) into one deduplicated, severity-ranked, single-verdict report.
 
@@ -160,7 +165,7 @@ loop: critique the research, let drift flag affected skills, regenerate, re-gate
 
 | Path | What's in it |
 |---|---|
-| [`skills/`](skills/) | The 37 lenses + `choosing-review-lenses` (router) + `synthesizing-review-findings` (synthesizer) |
+| [`skills/`](skills/) | The 37 lenses + the three composition skills: `choosing-review-lenses` (router), `grounding-review-in-tool-output` (tool-grounding pre-pass), `synthesizing-review-findings` (synthesizer) |
 | [`collapsed/`](collapsed/) | Generated 4-entrypoint form of the suite for cloud / account-skill installs; each entrypoint bundles its shape's lenses and loads them on demand |
 | [`commands/`](commands/) | Slash commands: `/atlas-review-pr`, `/atlas-code-review`, `/atlas-init`, `/atlas-rebase-stale`, `/atlas-propose-preferences` |
 | [`hooks/`](hooks/) | `SessionStart` routing hook (side-effect-free); opt-in, off-by-default `PostToolUse`/`SessionEnd` self-improvement telemetry hooks |

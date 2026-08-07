@@ -112,6 +112,13 @@ def build_router_md(manifest: Manifest) -> str:
         "their SKILL.md; report each shared finding once, under the owner.\n"
         "- Nothing matches: default to `tracing-correctness-and-invariants` + "
         "`reviewing-naming-and-readability` + `checking-restraint`.\n"
+        + (f"- **Before the selected lenses judge anything, run "
+           f"`{manifest.prepass.name}`** — the repo's own linters, type "
+           "checkers, and scanners, scoped to what's under review, so each lens "
+           "gets deterministic evidence to confirm, contextualize, or dismiss "
+           "instead of re-deriving it. Skip it when the repo configures no such "
+           "tools or when running them would execute untrusted code, and say so "
+           "in the report's coverage line either way.\n" if manifest.prepass else "")
         + (f"- After the lenses run, merge their findings with "
            f"`{manifest.synthesizer.name}` — one deduplicated, ranked report "
            "with a single verdict.\n" if manifest.synthesizer else "")
