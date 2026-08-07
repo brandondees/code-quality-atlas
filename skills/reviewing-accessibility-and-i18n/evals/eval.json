@@ -103,7 +103,7 @@
         "Flags the fixed width plus `white-space: nowrap` against text expansion — German commonly runs 30-40% longer than English, so the labels will clip or overflow",
         "Flags that the button labels are hardcoded rather than catalog-routed",
         "Raises RTL for the Arabic build: a `.toolbar` laid out with physical direction assumptions needs logical properties or `dir`-aware layout",
-        "Recommends testing at 200% zoom / narrow viewport (WCAG 1.4.10 reflow) since a fixed pixel width is the same failure at a different trigger"
+        "Recommends checking at a 320 CSS px viewport (WCAG 1.4.10 Reflow, which is 400% zoom on a 1280px screen) since a fixed pixel width is the same failure at a different trigger"
       ]
     },
     {

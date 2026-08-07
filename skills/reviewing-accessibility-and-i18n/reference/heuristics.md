@@ -23,7 +23,7 @@
 - **Pluralization & interpolation:** are plurals/gender handled via ICU/`Intl.PluralRules` (not `count + "s"`), and do interpolation placeholders match across all locale files?
 - **Locale-aware formatting:** are numbers/dates/currency/units formatted via `Intl`/CLDR with explicit locale + currency, not hand-built strings or assumed `en-US`/`USD`? (cross-links #4 money/units correctness.)
 - **RTL & expansion:** does layout use logical properties / direction-agnostic CSS, and tolerate ~30–40% text expansion and longer words without clipping/overlap? Mirrored icons where directional.
-- **Responsive/edge layouts:** does it hold up at small/large viewports, 200% zoom, and long-content edge cases without loss of content or function (WCAG 1.4.10 Reflow, 1.4.4 Resize Text)? `(verify)`.
+- **Responsive/edge layouts:** does it hold up at small/large viewports and long-content edge cases without loss of content or function? **The two criteria have different triggers and are easy to collapse into one:** **1.4.4 Resize Text** is text scaled to **200%**; **1.4.10 Reflow** is no two-dimensional scrolling at a **320 CSS px** viewport width (or 256 px height for horizontally-scrolling content), which is **400%** zoom on a 1280px screen. Cite the figure that belongs to the criterion — a fixed pixel width fails Reflow, not Resize Text.
 - **Target size:** are interactive targets ≥24×24px (WCAG 2.2 2.5.8) with adequate spacing? `(verify)`.
 - **Document language:** is `<html lang>` set/updated, and per-element `lang` on foreign-language runs?
 - **Design fidelity vs. spec:** does the implementation match the design/spec for spacing, states (hover/focus/disabled/error), and content — flag silent deviations.

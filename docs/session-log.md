@@ -2374,3 +2374,11 @@ Three lenses shipped today, all judgment-heavy with near-zero deterministic cove
 **Cross-model re-gate: deferred**, the standing gap for every recent Q21 entry. No Ollama or local-model substrate in this remote session, so the hardened suite has not been run against the `qwen2.5-coder:7b` floor-of-record. Tracked as ordinary follow-up, not as done.
 
 25 scenarios / 107 assertions; 24 preference-tier lenses remain. 389 tests pass; `generate`/`drift`/`eval` clean on both trees; ruff clean; markdownlint clean.
+
+**Review round 1 on #211 (1 finding, accepted — and the sweep found its source).** The atlas's own pass caught a WCAG success-criterion/figure mismatch in a *new eval assertion*: "200% zoom / narrow viewport (WCAG 1.4.10 reflow)". **1.4.10 Reflow** is no two-dimensional scrolling at a **320 CSS px** viewport — 400% zoom on a 1280px screen; **200%** is **1.4.4 Resize Text**, a different criterion with no reflow requirement. Real identifier, wrong figure: standing authoring rule 1's exact shape, and rated Major because an eval assertion is not prose read once — it is ground truth the lens gets graded against on every future review that hits the pattern.
+
+**The class sweep is the part worth recording.** Rule 3 (extended to repairs the same day) says find the class before fixing the instance, so the upstream source got read rather than just the flagged line — and it was the origin: `cluster-6-evolution.md#23`'s responsive-layouts heuristic offered a single "200% zoom" figure followed by **both** criteria, `(WCAG 1.4.10 Reflow, 1.4.4 Resize Text)`, marked `(verify)`. Not false as written, but it invites exactly the collapse the eval made — one number, two criteria, reader picks. Fixing only the eval would have left the generator emitting the ambiguity into `reference/heuristics.md` forever, and the next author would rediscover it.
+
+So both moved: the eval now cites 320 CSS px / 400% against 1.4.10, and the source splits the two criteria with their own triggers, states which one a fixed pixel width actually fails, and **discharges its `(verify)` marker** — the tag was there because nobody had checked, and now someone has.
+
+389 tests pass; the rest of the pipeline stays clean.
