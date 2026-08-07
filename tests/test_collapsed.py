@@ -391,6 +391,23 @@ def test_strip_toc_section_is_a_noop_without_a_contents_heading():
     )
 
 
+def test_strip_toc_section_drops_a_trailing_contents_section_to_eof():
+    """A `## Contents` with no following `## ` runs to EOF — and is dropped.
+
+    Intentional, not incidental: "the ToC and its list" has no other sensible end
+    when the ToC is the last section. Locked in because the consequence is real —
+    any content placed after a trailing ToC without an intervening `##` heading
+    goes with it, and the tree-level test below checks for duplicate headings, not
+    content loss, so nothing else would notice.
+    """
+    from tooling.generate_collapsed import _strip_toc_section
+
+    assert _strip_toc_section("## Contents\n\n- [Bad](#bad)\n- [Good](#good)\n") == ""
+    assert _strip_toc_section(
+        "## Bad\n\nthe bad case\n\n## Contents\n\n- [Bad](#bad)\n"
+    ) == "## Bad\n\nthe bad case"
+
+
 def test_no_committed_lens_bundle_has_a_duplicate_contents_heading():
     """Regression: examples.md is inlined verbatim, so a `## Contents` inside one
     used to emit a second mid-document heading plus a self-referencing ToC entry
@@ -399,7 +416,13 @@ def test_no_committed_lens_bundle_has_a_duplicate_contents_heading():
     offenders = []
     for body in sorted(Path("collapsed").glob("skills/*/reference/lenses/*/body.md")):
         text = body.read_text(encoding="utf-8")
-        n = sum(1 for line in text.splitlines() if line.startswith("## Contents"))
+        # Mirror the generator's test exactly (`_strip_toc_section`): an exact,
+        # case-folded `## Contents`. `startswith` would count `## Contents of the
+        # payload` as a ToC and fail on a legitimate heading.
+        n = sum(
+            1 for line in text.splitlines()
+            if line.startswith("## ") and line[3:].strip().casefold() == "contents"
+        )
         if n > 1:
             offenders.append(f"{body}: {n} '## Contents' headings")
         if "- [Contents](#contents)" in text:
