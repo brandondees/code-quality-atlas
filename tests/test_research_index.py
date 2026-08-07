@@ -19,25 +19,48 @@ RESEARCH = ROOT / "docs" / "research"
 
 # "## #40 Data-engineering & data-contract quality" -> 40
 _HEADING_RE = re.compile(r"^## #(\d+)\b", re.MULTILINE)
-# an Index row: | [`cluster-5-verification.md`](...) | V - ... | #17-#20, #26, ... |
-_ROW_RE = re.compile(r"^\|\s*\[`(cluster-[^`]+\.md)`\][^|]*\|[^|]*\|([^|]*)\|", re.MULTILINE)
+# An Index row: | [`cluster-5-verification.md`](cluster-5-verification.md) | V - ... | #17-#20, ... |
+# Capture the link *destination* as well as the label. Reading only the label
+# would let `[`cluster-5-verification.md`](cluster-4-runtime.md)` satisfy every
+# assertion below while sending a reader to the wrong file — the exact failure
+# this module exists to prevent.
+_ROW_RE = re.compile(
+    r"^\|\s*\[`(?P<label>cluster-[^`]+\.md)`\]\((?P<href>[^)]+)\)[^|]*\|[^|]*\|(?P<cats>[^|]*)\|",
+    re.MULTILINE,
+)
 # a token in the Categories cell: "#17-#20" (en-dash or hyphen) or "#26"
 _SPAN_RE = re.compile(r"#(\d+)\s*[-–—]\s*#?(\d+)|#(\d+)")
 
 
+def _rows() -> list[re.Match]:
+    return list(_ROW_RE.finditer((RESEARCH / "README.md").read_text(encoding="utf-8")))
+
+
 def _declared() -> dict[str, set[int]]:
-    """Category ids the Index claims for each cluster file."""
-    text = (RESEARCH / "README.md").read_text(encoding="utf-8")
+    """Category ids the Index claims for each cluster file, keyed by link label."""
     out: dict[str, set[int]] = {}
-    for fname, cell in _ROW_RE.findall(text):
+    for m in _rows():
         ids: set[int] = set()
-        for lo, hi, single in _SPAN_RE.findall(cell):
+        for lo, hi, single in _SPAN_RE.findall(m.group("cats")):
             if single:
                 ids.add(int(single))
             else:
                 ids.update(range(int(lo), int(hi) + 1))
-        out[fname] = ids
+        out[m.group("label")] = ids
     return out
+
+
+def test_index_links_point_at_the_file_they_name():
+    """A row's link destination must be the file its label names."""
+    mismatched = [
+        f"label `{m.group('label')}` links to `{m.group('href')}`"
+        for m in _rows()
+        if Path(m.group("href")).name != m.group("label")
+    ]
+    assert not mismatched, (
+        "docs/research/README.md's Index names one file and links to another:\n"
+        + "\n".join(mismatched)
+    )
 
 
 def _actual() -> dict[str, set[int]]:
