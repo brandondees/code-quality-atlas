@@ -15,8 +15,11 @@ reviewer finding it is the slowest possible feedback. Hence these guards.
 
 Deliberately narrow. The *label* vocabulary is per-lens freedom — `Bad`, `Good`,
 `Clean`, `Delegating`, `Refusing` all read fine and say different things. What is
-checked is the separator and the presence of an intro, both of which a reader
-uses to navigate and neither of which carries meaning of its own.
+checked is the separator and the *presence* of an intro, both of which a reader
+uses to navigate and neither of which carries meaning of its own. What the intro
+says is explicitly out of scope here — that is a semantic question, and asserting
+a keyword proxy for it would be the failure mode a reviewer already caught once
+in this same file (a count threshold standing in for the invariant).
 """
 import re
 from pathlib import Path
@@ -52,13 +55,32 @@ def _section_headings(text: str) -> list[str]:
 
 
 def _mis_separated(text: str) -> list[str]:
-    """Headings using an em-dash where the house form is an arrow.
+    r"""Headings using a dash where the house form is an arrow.
 
-    Strip one trailing parenthetical first: an em-dash *inside* the qualifier
-    ("(skipped - no user-facing surface)") is ordinary prose, not the separator
-    between an example's label and its subject.
+    Two things this must get right, both found by review after a first version
+    matched the single literal `" — "`:
+
+    - **Every spelling of the mistake, not the one that happened.** A spaced
+      hyphen, en-dash, or em-dash all read as the separator, and an em/en-dash
+      needs no spaces at all to act as one (`Bad—finding`). No separate
+      normalization pass for exotic spacing: Python's `\s` already matches
+      U+00A0 and friends, which the regression cases below pin.
+    - **Not ordinary hyphenation.** `lethal-trifecta` and `user-facing` are
+      words, so a bare ASCII hyphen between word characters is left alone —
+      which is why the unspaced case is restricted to em/en dashes.
+
+    A trailing parenthetical is stripped first: a dash *inside* the qualifier
+    ("(skipped — no user-facing surface)") is prose, not the separator.
     """
-    return [h for h in _section_headings(text) if " — " in _QUALIFIER_RE.sub("", h)]
+    return [h for h in _section_headings(text) if _dash_separator(h)]
+
+
+# spaced hyphen / en-dash / em-dash, or an unspaced em/en-dash between words
+_SEPARATOR_RE = re.compile(r"\s[-–—]\s|\w[–—]\w")
+
+
+def _dash_separator(heading: str) -> bool:
+    return bool(_SEPARATOR_RE.search(_QUALIFIER_RE.sub("", heading)))
 
 
 @pytest.mark.parametrize("path", EXAMPLES, ids=lambda p: p.parent.name)
@@ -66,7 +88,7 @@ def test_example_headings_use_the_arrow_separator(path: Path):
     bad = _mis_separated(path.read_text(encoding="utf-8"))
     assert not bad, (
         f"{path.relative_to(ROOT)}: example headings separate label from subject with "
-        "an arrow, not an em-dash. Use `## Bad → ...` / `## Clean → ...`:\n"
+        "an arrow, not a dash. Use `## Bad → ...` / `## Clean → ...`:\n"
         + "\n".join(f"  ## {h}" for h in bad)
     )
 
@@ -78,13 +100,14 @@ def _intro(text: str) -> str:
 
 
 @pytest.mark.parametrize("path", EXAMPLES, ids=lambda p: p.parent.name)
-def test_examples_open_with_a_reporting_convention_line(path: Path):
+def test_examples_open_with_an_intro_line(path: Path):
     assert _intro(path.read_text(encoding="utf-8")), (
         f"{path.relative_to(ROOT)}: needs an intro line between the title and the "
-        "first example, stating this lens's reporting convention — what counts as "
-        "one finding, and what 'No findings' requires. Without it a reader has to "
-        "infer the convention from the examples, which is what the examples are "
-        "supposed to illustrate."
+        "first example. This guard checks only that one is there; what it must say "
+        "— what counts as one finding, and what 'No findings' requires — is the "
+        "author's job and standing authoring rule 2's (docs/research/README.md), "
+        "because no test can tell whether a preamble agrees with the examples "
+        "beneath it."
     )
 
 
@@ -96,8 +119,18 @@ def test_examples_open_with_a_reporting_convention_line(path: Path):
     [
         ("Bad — declared contracts with no enforcement point", True),
         ("Clean — a healthy project (the proportionality guard)", True),
+        # every other spelling of the same mistake (CodeRabbit, #209)
+        ("Bad - finding", True),
+        ("Bad – finding", True),
+        ("Bad—finding", True),
+        ("Bad–finding", True),
+        ("Bad\u00a0—\u00a0finding", True),   # no-break spaces around the dash
+        ("Bad\u202f—\u202ffinding", True),   # narrow no-break spaces
         ("Bad → finding", False),
         ("Good → no finding (skipped — no user-facing surface)", False),
+        # hyphenation is not a separator
+        ("Bad → an agent design with an unwritten lethal-trifecta boundary", False),
+        ("Good → no finding (skipped — no user-facing surface, CLI-only)", False),
         ("Output format", False),
         ("Contents", False),
     ],

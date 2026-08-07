@@ -39,13 +39,15 @@ the files that already exist. Two of them are enforced by
 
 - **An intro line** between the title and the first example, stating that lens's
   reporting convention — what counts as one finding, and what "No findings"
-  requires. Write it *after* the examples and read it against them; a preamble
-  composed from the convention rather than from the file is how a summary ends up
-  narrower than the examples it introduces (standing authoring rule 2 in
+  requires. The test checks only that an intro is **present** — whether it says
+  the right thing is yours, and no test can settle it. Write it *after* the
+  examples and read it against them: a preamble composed from the convention
+  rather than from the file is how a summary ends up narrower than the examples
+  it introduces (standing authoring rule 2 in
   [`docs/research/README.md`](../research/README.md)).
-- **`## Bad → …` / `## Good → …`**, an arrow and not an em-dash, separating an
-  example's label from its subject. The label vocabulary is free — `Clean`,
-  `Delegating`, and `Refusing` all read fine and say different things.
+- **`## Bad → …` / `## Good → …`**, an arrow and not a dash of any kind,
+  separating an example's label from its subject. The label vocabulary is free —
+  `Clean`, `Delegating`, and `Refusing` all read fine and say different things.
 
 Unenforced but load-bearing, from the eval tuning below: expected findings as a
 **numbered list** (weak models copy the format, and a list forces enumeration),

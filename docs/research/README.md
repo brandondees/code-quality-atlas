@@ -14,7 +14,7 @@ For **each** taxonomy category in scope, produce three sections:
 
 ## Standing authoring rules
 
-Scoped to **every authored artifact in this repo**, not only the research files: `skills/manifest.yaml` prose, hand-written `examples.md` and `evals/eval.json`, `docs/`, and this file. They exist because each was learned the expensive way — a reviewer caught the defect after it shipped — and because none of them is mechanically checkable. `drift` verifies that generated files match their sources; nothing verifies that a sentence is true or that it agrees with the paragraph beneath it.
+Scoped to **every authored artifact in this repo**, not only the research files: `skills/manifest.yaml` prose, hand-written `examples.md` and `evals/eval.json`, `docs/`, and this file. They exist because each was learned the expensive way — a reviewer caught the defect after it shipped — and because none of them is mechanically checkable in the part that matters. `drift` verifies that generated files match their sources, and `tests/test_examples_conventions.py` verifies that an `examples.md` has an intro and spells its headings the house way — but no test verifies that a sentence is true, or that an intro agrees with the examples beneath it. The form is checkable; the content is why these rules are written down.
 
 ### 1. Behavioral claims need the same grounding as identifiers — and don't get it by default
 
