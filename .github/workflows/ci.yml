@@ -70,7 +70,10 @@ jobs:
           # newest on PyPI on every run, so the gate itself isn't reproducible:
           # a scanner-tool release could change what CVEs are flagged (or
           # silently drop advisory coverage) with no diff in this repo to
-          # review. Pinned alongside pip-tools/pip above, same rationale.
+          # review. Pinned exact-version like pip-tools/pip above, though for
+          # a different reason: their pin is a compatibility workaround (pip
+          # 26.2 breaks pip-tools 7.6.0), this one is about the gate's own
+          # reproducibility.
           pip install pip-audit==2.10.1
           pip-audit --requirement requirements.txt
       - name: lint (ruff)
