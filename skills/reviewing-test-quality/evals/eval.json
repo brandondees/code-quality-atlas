@@ -153,7 +153,7 @@
       ]
     },
     {
-      "query": "Review this change:\n```python\ndef test_export_includes_all_customers():\n    rows = export_customers()\n    assert rows[0] == [\"Dana Whitfield\", \"dana.whitfield@example.com\", \"+1-555-0142\", \"4111111111111111\"]\n```\nThe fixture is a snapshot of the staging database.",
+      "query": "Review this change:\n```python\ndef test_export_includes_all_customers():\n    rows = export_customers()\n    assert rows[0] == [\"Dana Whitfield\", \"dana.whitfield@example.com\", \"+1-555-0142\", \"pan:4111********1111\"]\n```\nThe fixture is a snapshot of the staging database; the fourth column is the stored card number.",
       "expected_behavior": [
         "Flags the test-quality defect it owns: the assertion is coupled to one specific row of a captured database snapshot, so unrelated data changes break it and it does not state what property is being checked",
         "Surfaces that the fixture carries what appears to be real personal data and a card-shaped number, and routes the retention/consent question to `auditing-compliance-and-provenance` rather than ruling on it",

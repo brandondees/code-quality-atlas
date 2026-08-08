@@ -2405,3 +2405,15 @@ The second wave-2 lens, picked because its false negatives **compound**. Every o
 **The tally was reconciled by script this time**, not by hand: a check asserting no scenario is counted twice and none is left ungrouped, run before the docs were written. That is a direct consequence of the previous entry's accounting being wrong in exactly those two ways — CodeRabbit caught a scenario double-counted across B and C, an assertion listed as though it were a scenario, and three originals missing from the total. **5 originals + A 2 + B 7 + C 2 + D 5 + E 3 = 24.** Cheaper to assert than to re-derive under review.
 
 104 assertions; the floor gates at 23. **Cross-model re-gate: deferred**, same standing substrate gap. 23 preference-tier lenses remain. 389 tests pass; the rest of the pipeline stays clean.
+
+**Review round 1 on #213 (4 findings across two reviewers — 3 accepted, 1 rebutted with evidence).**
+
+- **A Luhn-valid test PAN in a scenario fixture** (CodeRabbit, via OpenGrep). `4111111111111111` is the well-known Visa test number, but a scanner cannot tell a test card from a real one, and this repo's own scans should be clean — a security-review suite that trips a PII rule teaches the wrong thing about its own hygiene. Masked to `pan:4111********1111`, with the query now stating outright that the fourth column is the stored card number, so the scenario's actual point (card-shaped data in a committed fixture, routed to `auditing-compliance-and-provenance`) survives intact. Zero 16-digit runs remain in the file.
+- **"a non-xUnit idiom"** (Copilot). Go's `testing.T` is arguably in the xUnit family, so classifying the A-group scenario that way is at best contestable and would mislead the next reader about what A validates. Now names the idiom directly — a Go table-driven test with subtests — and says what it guards: its loop is the language's standard form, not the Conditional Test Logic smell the JS scenario teaches.
+- **A date mismatch between the two docs** (Copilot). `open-questions.md` said 2026-08-07 and the session-log entry said 2026-08-08. The session crossed midnight UTC mid-campaign; the work is the 8th. Aligned.
+
+**Rebutted: the assertion count.** CodeRabbit reported 108 `expected_behavior` entries against my documented 104, and supplied a group breakdown — originals 16, A 12, B 33, C 9, D 26, E 12. Four of its six group totals match mine exactly; **A and D are each over by two**, and 16+10+33+9+24+12 = 104. A total summed over every scenario cannot depend on how the scenarios are grouped, so the grouping disagreement cannot explain it. Re-counted directly from the JSON, per group and overall: **104**. Left as is, with the per-group figures posted in the reply so the arithmetic is checkable rather than asserted.
+
+Worth noting which way this one went. The previous entry's tally *was* wrong and this reviewer caught it, which is exactly why the script-based reconciliation exists now — and it is also why the same reviewer's next count claim got checked rather than accepted. A reviewer that was right last time is not therefore right this time.
+
+389 tests pass; the rest of the pipeline stays clean.
