@@ -158,6 +158,14 @@ class ScenarioRun:
     query: str
     expected_behavior: list[str]
     response: str
+    # Set when this scenario's request failed. A failed scenario has an empty
+    # `response`, which is indistinguishable by content from a model that
+    # genuinely answered "nothing here" — and grading it as a miss makes a
+    # broken run look like a bad model. Observed 2026-08-08: 15 of 24 scenarios
+    # returned HTTP 500 (`llama-server ... signal: killed`, the loaded model
+    # OOM-killed while a second one loaded) and would have scored as 15 silent
+    # misses. Callers must check this field before grading.
+    error: str | None = None
 
 
 DEFAULT_HOSTS = {"ollama": OLLAMA_HOST, "openai": OPENAI_HOST}
@@ -177,12 +185,25 @@ def run_skill_evals(skill_dir: Path, model: str,
     doc = load_evals(str(skill_dir / "evals" / "eval.json"))
     runs: list[ScenarioRun] = []
     for s in doc.scenarios:
-        if api == "ollama":
-            response = query_ollama(model, system, s["query"], host=host,
-                                    num_ctx=num_ctx, think=think, timeout=timeout)
-        else:
-            response = query_openai(model, system, s["query"], host=host, timeout=timeout)
-        runs.append(ScenarioRun(s["query"], s["expected_behavior"], response))
+        # One scenario's failure must not abort the suite: a re-gate is 20+
+        # slow requests, and losing the completed ones to a single transient
+        # (or to one scenario that hangs) is what made the 2026-07-27 run fall
+        # back to a per-scenario diagnostic script. Record and continue; `main`
+        # reports the failures and exits non-zero so a degraded run is never
+        # mistaken for a complete one.
+        try:
+            if api == "ollama":
+                response = query_ollama(model, system, s["query"], host=host,
+                                        num_ctx=num_ctx, think=think, timeout=timeout)
+            else:
+                response = query_openai(model, system, s["query"], host=host,
+                                        timeout=timeout)
+            error = None
+        except RuntimeError as exc:
+            # `str(RuntimeError())` is "" — fall back to repr so the operator
+            # always gets something printable naming what failed.
+            response, error = "", str(exc) or repr(exc)
+        runs.append(ScenarioRun(s["query"], s["expected_behavior"], response, error))
     return runs
 
 
@@ -221,10 +242,24 @@ def main(argv: list[str] | None = None) -> int:
     for i, r in enumerate(runs, 1):
         print(f"\n{'=' * 72}\nSCENARIO {i}")
         print(f"QUERY:\n{r.query}\n")
-        print(f"--- {args.model} RESPONSE ---\n{r.response}\n")
+        if r.error is not None:
+            print(f"--- {args.model} REQUEST FAILED ---\n{r.error}\n")
+        else:
+            print(f"--- {args.model} RESPONSE ---\n{r.response}\n")
         print("EXPECTED BEHAVIOR:")
         for b in r.expected_behavior:
             print(f"  - {b}")
+
+    # `is not None`, not truthiness: `error` is the presence flag, and an
+    # empty-message exception would make a failed scenario read as a clean
+    # one — the exact silent-failure this guard exists to prevent.
+    failed = [i for i, r in enumerate(runs, 1) if r.error is not None]
+    if failed:
+        # Non-zero so a partial run can't be graded as if it were complete —
+        # the failed scenarios' empty responses look exactly like "no findings".
+        print(f"\n{len(failed)}/{len(runs)} scenarios FAILED to run: {failed}")
+        print("This run is incomplete — do not grade it as a model result.")
+        return 1
     return 0
 
 
