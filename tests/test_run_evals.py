@@ -248,3 +248,47 @@ def test_cli_rejects_non_positive_int_options(flag, tmp_path, capsys):
     with pytest.raises(SystemExit):
         run_evals.main(["--skill", "x", "--skills-root", str(tmp_path), flag, "0"])
     assert "positive integer" in capsys.readouterr().err
+
+
+# --- partial-run resilience (the 2026-08-08 cross-model re-gate) ---
+
+def _skill_with_evals(tmp_path):
+    skill = Skill(name="hunting-silent-failures", description="x", shape="diff",
+                  wave=1, built_from=[Source(2, "tests/fixtures/research_sample.md#2")])
+    out = generate_skill(skill, "v0.2", docs_root=".", skills_root=str(tmp_path))
+    (out / "evals" / "eval.json").write_text(_valid_eval_json())
+    return out
+
+
+def test_run_skill_evals_records_a_failed_scenario_and_keeps_going(tmp_path, monkeypatch):
+    # A re-gate is 20+ slow requests; one transient must not discard the rest.
+    # The failed scenario carries `error` and an empty `response` — the caller
+    # needs `error` to tell "the request died" from "the model found nothing".
+    out = _skill_with_evals(tmp_path)
+    calls = []
+
+    def flaky(model, system, user, **kw):
+        calls.append(user)
+        if len(calls) == 2:
+            raise RuntimeError("Ollama request failed: HTTP Error 500")
+        return "No findings"
+
+    monkeypatch.setattr(run_evals, "query_ollama", flaky)
+    runs = run_evals.run_skill_evals(out, "fake-model")
+
+    assert len(runs) == len(calls) > 2, "the suite ran past the failing scenario"
+    assert runs[1].error is not None and runs[1].response == ""
+    assert [r.error for r in runs if r is not runs[1]] == [None] * (len(runs) - 1)
+
+
+def test_cli_exits_non_zero_when_any_scenario_failed(tmp_path, monkeypatch, capsys):
+    # The load-bearing half: a partial run must not look like a complete one.
+    # An unfailed exit would let 15 dead scenarios be graded as 15 "no findings"
+    # misses — a broken run reported as a bad model.
+    out = _skill_with_evals(tmp_path)
+    monkeypatch.setattr(run_evals, "query_ollama",
+                        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")))
+    rc = run_evals.main(["--skill", out.name, "--skills-root", str(tmp_path),
+                         "--model", "fake-model"])
+    assert rc == 1
+    assert "do not grade it" in capsys.readouterr().out

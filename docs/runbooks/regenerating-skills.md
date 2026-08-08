@@ -72,6 +72,13 @@ examples.md):
 python -m tooling.run_evals --skill <name> --model llama3.2:3b
 ```
 
+For a **hardened Q21 suite** — standing up a floor-of-record model, reading the
+result as separate recall and precision figures rather than one total, and the
+`OLLAMA_MAX_LOADED_MODELS` and partial-run traps — see
+[`cross-model-re-gate.md`](cross-model-re-gate.md). Ollama does install and run
+in a remote cloud container (verified 2026-08-08), so prefer it over the
+fallback below; the fallback remains correct where it genuinely can't.
+
 **No Ollama available?** (e.g. a sandboxed cloud session): any OpenAI-compatible
 server works via `--api openai`. The lightest path is llama.cpp's `llama-server`
 with a GGUF from Hugging Face — no install, just a prebuilt binary:
