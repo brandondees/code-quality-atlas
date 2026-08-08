@@ -281,6 +281,22 @@ def test_run_skill_evals_records_a_failed_scenario_and_keeps_going(tmp_path, mon
     assert [r.error for r in runs if r is not runs[1]] == [None] * (len(runs) - 1)
 
 
+def test_cli_exits_non_zero_on_an_empty_message_failure(tmp_path, monkeypatch, capsys):
+    # `str(RuntimeError())` is "", so a truthiness check on `error` reads a failed
+    # scenario as a clean one — the guard failing silently in exactly the way it
+    # exists to prevent. `error` is a presence flag: only None means "no failure".
+    out = _skill_with_evals(tmp_path)
+    monkeypatch.setattr(run_evals, "query_ollama",
+                        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError()))
+    rc = run_evals.main(["--skill", out.name, "--skills-root", str(tmp_path),
+                         "--model", "fake-model"])
+    assert rc == 1
+    printed = capsys.readouterr().out
+    assert "do not grade it" in printed
+    # and the operator still gets something nameable, not a blank line
+    assert "RuntimeError()" in printed
+
+
 def test_cli_exits_non_zero_when_any_scenario_failed(tmp_path, monkeypatch, capsys):
     # The load-bearing half: a partial run must not look like a complete one.
     # An unfailed exit would let 15 dead scenarios be graded as 15 "no findings"

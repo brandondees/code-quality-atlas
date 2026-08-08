@@ -200,7 +200,9 @@ def run_skill_evals(skill_dir: Path, model: str,
                                         timeout=timeout)
             error = None
         except RuntimeError as exc:
-            response, error = "", str(exc)
+            # `str(RuntimeError())` is "" — fall back to repr so the operator
+            # always gets something printable naming what failed.
+            response, error = "", str(exc) or repr(exc)
         runs.append(ScenarioRun(s["query"], s["expected_behavior"], response, error))
     return runs
 
@@ -240,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
     for i, r in enumerate(runs, 1):
         print(f"\n{'=' * 72}\nSCENARIO {i}")
         print(f"QUERY:\n{r.query}\n")
-        if r.error:
+        if r.error is not None:
             print(f"--- {args.model} REQUEST FAILED ---\n{r.error}\n")
         else:
             print(f"--- {args.model} RESPONSE ---\n{r.response}\n")
@@ -248,7 +250,10 @@ def main(argv: list[str] | None = None) -> int:
         for b in r.expected_behavior:
             print(f"  - {b}")
 
-    failed = [i for i, r in enumerate(runs, 1) if r.error]
+    # `is not None`, not truthiness: `error` is the presence flag, and an
+    # empty-message exception would make a failed scenario read as a clean
+    # one — the exact silent-failure this guard exists to prevent.
+    failed = [i for i, r in enumerate(runs, 1) if r.error is not None]
     if failed:
         # Non-zero so a partial run can't be graded as if it were complete —
         # the failed scenarios' empty responses look exactly like "no findings".
