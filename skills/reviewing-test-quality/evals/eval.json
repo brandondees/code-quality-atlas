@@ -43,6 +43,190 @@
         "Recommends a readable, table-driven form (e.g. it.each / parameterized cases) with one case per row so each failure localizes the cause",
         "Notes the single test bundles several behaviors (not atomic / single reason to fail)"
       ]
+    },
+
+    {
+      "query": "Review this bug-fix PR. Title: 'Fix crash when an order has no line items.' The entire diff:\n```python\n def order_total(order):\n-    return sum(li.amount for li in order.line_items) / len(order.line_items)\n+    if not order.line_items:\n+        return Decimal(\"0\")\n+    return sum(li.amount for li in order.line_items) / len(order.line_items)\n```\nNo test files are touched.",
+      "expected_behavior": [
+        "Fires on a diff containing no test file at all — the absence of a test is this lens's finding, not a reason to skip",
+        "Flags the missing regression test for a bug fix: nothing in the repository would fail if this fix were reverted",
+        "States the specific test that is missing — order_total on an order with an empty line_items list, asserting the returned zero rather than the crash",
+        "Notes the fix also silently changes the semantic (an empty order now totals 0 rather than erroring), which is a decision the test should pin down",
+        "Does not report 'no test files in this diff, not applicable'"
+      ]
+    },
+    {
+      "query": "Review this change:\n```go\nfunc TestSplitHostPort(t *testing.T) {\n\tcases := []struct {\n\t\tname string\n\t\tin   string\n\t\thost string\n\t\tport int\n\t}{\n\t\t{\"simple\", \"example.com:8080\", \"example.com\", 8080},\n\t}\n\tfor _, tc := range cases {\n\t\tt.Run(tc.name, func(t *testing.T) {\n\t\t\th, p, err := SplitHostPort(tc.in)\n\t\t\tif err != nil {\n\t\t\t\tt.Fatalf(\"unexpected error: %v\", err)\n\t\t\t}\n\t\t\tif h != tc.host || p != tc.port {\n\t\t\t\tt.Errorf(\"got %q/%d, want %q/%d\", h, p, tc.host, tc.port)\n\t\t\t}\n\t\t})\n\t}\n}\n```",
+      "expected_behavior": [
+        "Reviews an idiomatic Go table-driven test on its own terms — the loop and subtests here are the language's standard form, not the Conditional Test Logic smell",
+        "Flags that the table has exactly one row for a function with many interesting inputs: no IPv6 bracket form, no missing port, no non-numeric port, no empty string",
+        "Notes the error path is only ever asserted as 'no error' — no case exercises SplitHostPort returning one",
+        "Recognizes the failure messages already localize the cause (t.Errorf reports got/want), so Assertion Roulette does not apply",
+        "Does not recommend rewriting it into per-case top-level test functions"
+      ]
+    },
+    {
+      "query": "Review this change:\n```js\ntest('createInvoice works', () => {\n  const repo = { save: jest.fn().mockResolvedValue({ id: 7 }) };\n  const svc = new InvoiceService(repo);\n  expect(svc).toBeDefined();\n  expect(typeof svc.create).toBe('function');\n  expect(repo.save).not.toHaveBeenCalled();\n});\n```",
+      "expected_behavior": [
+        "Flags that the test never calls the code under test — svc.create is never invoked, so no behavior is exercised",
+        "Flags the tautological assertions: that a constructed object is defined and has a method is true of any object and cannot fail for a real defect",
+        "Notes that asserting the mock was *not* called is a restatement of the test's own inaction, not a property of the system",
+        "Names the effect: this raises line coverage on InvoiceService while proving nothing about it"
+      ]
+    },
+    {
+      "query": "Review this PR. Description: 'Raises coverage from 71% to 94% — no behavior change.' The diff adds 40 tests, all in this shape:\n```python\ndef test_calculate_tax_covers_line_82():\n    try:\n        calculate_tax(order=None, region=\"XX\")\n    except Exception:\n        pass\n```",
+      "expected_behavior": [
+        "Rejects the coverage percentage as evidence of test quality — these tests execute lines and assert nothing",
+        "Flags the bare except-and-pass: any behavior, including a wrong result or an unintended exception type, passes",
+        "Names the harm rather than only the omission: 94% coverage now reports a suite that would survive almost any mutation, so the number actively misleads the next reader",
+        "Flags the test names, which describe a line number rather than a behavior — a name that cannot be read as a spec is a symptom of a test written for the metric",
+        "Recommends assertions on the actual outcome for each case, and notes the count of tests is not the thing to preserve"
+      ]
+    },
+    {
+      "query": "Review this change. A previously failing test was 'fixed':\n```diff\n test('applies bulk discount above 100 units', () => {\n   const result = price({ units: 150, tier: 'standard' });\n-  expect(result.total).toBe(1275);\n-  expect(result.discountApplied).toBe(true);\n+  expect(result.total).toBeGreaterThan(0);\n+  expect(result).toBeTruthy();\n });\n```\nThe production code is unchanged in this PR.",
+      "expected_behavior": [
+        "Identifies that the assertions were weakened rather than the failure diagnosed — the test now passes for essentially any output",
+        "Notes that the production code is untouched, so whatever made the exact-value assertion fail is still there and is now unreported",
+        "Flags that the test's name still promises 'applies bulk discount', a claim its assertions no longer check — the name and the check have come apart",
+        "Recommends restoring the specific assertions and fixing the cause, or deleting the test outright if the behavior genuinely changed — but not keeping a test that asserts nothing under a name that asserts something"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef test_subscription_renews():\n    sub = Subscription(started=datetime.now(), period_days=30)\n    assert sub.renews_on() == datetime.now() + timedelta(days=30)\n\ndef test_promo_code_sampling():\n    codes = [generate_promo_code() for _ in range(100)]\n    assert len(set(codes)) > 90\n```",
+      "expected_behavior": [
+        "Flags the real clock in the first test: two datetime.now() calls are not the same instant, so the assertion is a race that fails intermittently",
+        "Recommends injecting a fixed clock or freezing time rather than adding tolerance to the comparison",
+        "Flags the unseeded randomness in the second test: the assertion is probabilistic and will fail occasionally with no code change",
+        "Notes that both are the same defect class — the test's result depends on something other than the code under test",
+        "Does not recommend simply retrying or loosening the thresholds"
+      ]
+    },
+    {
+      "query": "Review this change. A new pure function `slugify(title)` is added, and its only test is an end-to-end browser test:\n```js\ncy.visit('/posts/new');\ncy.get('#title').type('Hello, World! 2026');\ncy.get('#save').click();\ncy.url().should('include', '/posts/hello-world-2026');\n```",
+      "expected_behavior": [
+        "Flags the level: slugify is pure and deterministic, so its cases belong in fast unit tests, with the e2e reserved for the journey",
+        "Notes the cost concretely — this test exercises routing, forms, persistence, and rendering to check a string transformation, so a slugify defect surfaces as a slow, ambiguous UI failure",
+        "Points out how little of slugify is actually covered: one input, no unicode, no punctuation-only title, no empty string, no collision case",
+        "Does not demand the e2e be deleted — it can stay as journey coverage while the unit cases move down"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef test_discount():\n    assert apply_discount(100, 0.10) == 90\n```\nThe implementation is:\n```python\ndef apply_discount(amount, rate):\n    return amount - (amount * rate)\n```",
+      "expected_behavior": [
+        "Applies mutation intuition: asks which mutations of the implementation this test would survive",
+        "Names concrete survivors — swapping `-` for a clamp, ignoring `rate` below some threshold, or truncating instead of rounding would all still yield 90 for this input",
+        "Flags the single data point: no zero rate, no 100% rate, no rate above 1, no negative amount, no rounding case such as 0.333",
+        "Recommends cases chosen so that a wrong implementation fails, not merely a right one passing",
+        "Notes this is a fast, pure, deterministic unit where actually running a mutation check is cheap, rather than only reasoning about it"
+      ]
+    },
+    {
+      "query": "Review this change. A new `encode_cursor(page_state)` / `decode_cursor(token)` pair ships with:\n```python\ndef test_encode_cursor_returns_string():\n    assert isinstance(encode_cursor({\"offset\": 20}), str)\n```",
+      "expected_behavior": [
+        "Flags the missing round-trip property: the defining behavior of an encoder/decoder pair is that decode(encode(x)) == x, and nothing checks it",
+        "Recommends a round-trip test over a range of page states, and notes this is a natural fit for a property-based test rather than a handful of examples",
+        "Flags the absent forced-error case: decode_cursor on a truncated, tampered, or foreign token has no test at all",
+        "Notes that asserting the return type is the weakest possible check on a codec",
+        "Does not accept the type assertion as coverage of the pair"
+      ]
+    },
+    {
+      "query": "Review this change. A worker gains concurrent processing:\n```python\nwith ThreadPoolExecutor(max_workers=8) as ex:\n    ex.map(process_job, jobs)\n```\nThe accompanying test:\n```python\ndef test_process_job():\n    result = process_job(make_job())\n    assert result.status == \"done\"\n```",
+      "expected_behavior": [
+        "Flags that the test exercises one job on one thread, so the concurrency this change introduces is untested",
+        "Names what a test would need to establish — that concurrent execution over shared state produces the same outcomes, and that jobs are independent or properly synchronized",
+        "Notes that a single-threaded pass proves nothing about the eight-worker path, which is the only thing this diff added",
+        "Surfaces that whether the shared state is actually safe is `reviewing-concurrency-and-async`'s judgment, and reports the test-coverage gap without adjudicating the race",
+        "May suggest a deterministic concurrency test or a property/invariant check rather than a sleep-based one"
+      ]
+    },
+    {
+      "query": "Review this change:\n```java\n@Disabled\n@Test\npublic void refundsExpireAfterNinetyDays() { ... }\n\n@Test\npublic void test2() {\n    Order o = new Order();\n    o.addItem(item(\"a\", 3));\n    assertEquals(3, o.count());\n    o.applyCoupon(\"SAVE10\");\n    assertEquals(2.70, o.total(), 0.01);\n    o.cancel();\n    assertTrue(o.isCancelled());\n    assertEquals(0, o.count());\n}\n```",
+      "expected_behavior": [
+        "Flags the @Disabled test entering the codebase with no linked issue or expiry — a disabled test is a coverage claim that no longer holds and nothing tracks it",
+        "Flags the Eager Test: test2 exercises adding, couponing, cancelling, and emptying in one test, so it has several reasons to fail",
+        "Flags the name 'test2', which describes nothing — a test name should read as the specification it enforces",
+        "Recommends splitting into named tests per behavior, and either re-enabling the disabled test or deleting it with the reason recorded",
+        "Notes that a disabled test is worse than a deleted one, because it still looks like coverage in the file"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef test_export_includes_all_customers():\n    rows = export_customers()\n    assert rows[0] == [\"Dana Whitfield\", \"dana.whitfield@example.com\", \"+1-555-0142\", \"4111111111111111\"]\n```\nThe fixture is a snapshot of the staging database.",
+      "expected_behavior": [
+        "Flags the test-quality defect it owns: the assertion is coupled to one specific row of a captured database snapshot, so unrelated data changes break it and it does not state what property is being checked",
+        "Surfaces that the fixture carries what appears to be real personal data and a card-shaped number, and routes the retention/consent question to `auditing-compliance-and-provenance` rather than ruling on it",
+        "Recommends constructing the customers the test needs in the test itself, which fixes the coupling and the data-exposure question at once",
+        "Does not adjudicate whether staging data may be committed — that is the routed half"
+      ]
+    },
+    {
+      "query": "Review this change. The PR title is 'Fix failing test in cart suite':\n```diff\n test('cart total includes shipping for orders under 50', () => {\n   const cart = makeCart([{ price: 20 }, { price: 25 }]);\n-  expect(cart.total()).toBe(50);\n+  expect(cart.total()).toBe(45);\n });\n```\nNo production code changed. The shipping rule is documented as a flat $5 under $50.",
+      "expected_behavior": [
+        "Identifies that the expected value was changed to match the observed output, which converts a failing test into a passing one without establishing which was right",
+        "Notes the documented rule (flat $5 under $50) makes 50 the correct expectation for a $45 subtotal, so the test was reporting a real production defect",
+        "Concludes the fix is in the production code, not the test, and routes the underlying defect to `tracing-correctness-and-invariants`",
+        "Names the general pattern: when a test fails, the first question is which of the test and the code is wrong, and editing the expectation answers it by assumption",
+        "Does not approve the change on the grounds that the suite is now green"
+      ]
+    },
+    {
+      "query": "Review this change. The new module ships with this comment and no unit tests:\n```python\n# Not unit tested on purpose — this path is covered end-to-end by the\n# checkout smoke suite, so unit tests here would be redundant.\ndef compute_settlement(order, fx_rate, fees): ...\n```",
+      "expected_behavior": [
+        "Treats the claim as something to verify rather than accept — does the checkout smoke suite actually exercise compute_settlement, and does it assert the settlement figure or merely complete the flow?",
+        "Notes that end-to-end coverage of a path is not coverage of a calculation: a smoke test that checks the order completes would pass with the settlement wrong by any amount",
+        "Flags that a money computation with three inputs is exactly the shape that belongs in fast, exhaustive unit tests — rounding, negative fees, zero rate, currency edges",
+        "Does not defer to the comment's assertion of redundancy simply because it is stated in the diff",
+        "If the smoke suite cannot be inspected, says so and reports the claim as unverified rather than assuming either way"
+      ]
+    },
+    {
+      "query": "Review this 420-line PR. It renames a package, updates 30 import paths, extracts two helpers, and adjusts a CI matrix. Buried in the diff:\n```diff\n-  it('rejects an expired token before hitting the database', async () => {\n-    await expect(authenticate(expiredToken)).rejects.toThrow(TokenExpired);\n-    expect(db.query).not.toHaveBeenCalled();\n-  });\n```\nThe test is deleted, not moved — no equivalent appears elsewhere in the diff.",
+      "expected_behavior": [
+        "Finds the deleted test despite the surrounding volume of mechanical change",
+        "Flags that it is a deletion rather than a move: no equivalent assertion appears anywhere else in the diff",
+        "Names what coverage is lost — expired tokens are rejected before any database call, which is both a correctness and a security-relevant property",
+        "Asks for the justification: a test may be deleted when its behavior is gone, and nothing here suggests the behavior is gone",
+        "Does not comment on the rename, import churn, or CI matrix, which belong to other lenses"
+      ]
+    },
+    {
+      "query": "These tests are flaky in CI and it's blocking a release — I've wrapped them so we can ship, please just confirm this is fine:\n```js\njest.retryTimes(3);\ntest('order status updates after payment webhook', async () => {\n  await postWebhook(paymentEvent);\n  await sleep(500);\n  expect(await getOrder(id)).toHaveProperty('status', 'paid');\n});\n```",
+      "expected_behavior": [
+        "Does not approve on the basis of the stated release pressure",
+        "Flags retryTimes(3) as suppressing the signal rather than fixing it — a test that passes on the third attempt is reporting a real race that will also happen in production",
+        "Flags the sleep(500) as the same mistake in miniature: a fixed delay makes the test slow when it works and flaky when the system is slower than the guess",
+        "Recommends waiting on the condition (poll for the state, or await the processing signal) instead of a duration, so the test is both faster and deterministic",
+        "Notes that the underlying asynchronous behavior may itself be the defect and routes that question rather than deciding it"
+      ]
+    },
+    {
+      "query": "Review this change. A pure refactor extracts three private helpers out of a 90-line function. No behavior changes, and no test files are modified.\n```python\n-def settle(order):  # 90 lines inline\n+def settle(order):\n+    lines = _normalize_lines(order)\n+    fees = _compute_fees(lines)\n+    return _finalize(lines, fees)\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes that a behavior-preserving refactor covered by existing tests needs no new tests — the existing suite passing is the point of the refactor",
+        "Does not demand unit tests for the newly extracted private helpers, which would couple the suite to the very structure the refactor may change again",
+        "Does not treat 'no test files modified' as a finding by itself"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\n-def test_legacy_csv_export_quotes_commas():\n-    assert export_csv([Row(\"a,b\")]) == '\"a,b\"\\n'\n```\nThe same PR removes `export_csv` entirely; the CSV export feature was retired and its route deleted.",
+      "expected_behavior": [
+        "Reports no findings on the deletion",
+        "Recognizes that a test whose subject no longer exists should be deleted, not kept or skipped",
+        "Distinguishes this from the coverage-losing case: the behavior is gone, so nothing is left unverified",
+        "Does not ask for the test to be ported, disabled, or replaced"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef test_invoice_pdf_renders_at_a_fixed_date(fixed_clock):\n    invoice = make_invoice(total=Decimal(\"10.00\"))\n    pdf = render_invoice(invoice, clock=fixed_clock)   # clock frozen at 2026-01-15\n    assert extract_text(pdf) == \"Invoice 2026-01-15 — Total: $10.00\"\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes the injected fixed clock as the correct fix for time dependence, not as a real-clock smell",
+        "Recognizes the assertion is on observable output (the rendered text), not on internal calls",
+        "Does not flag the use of a clock reflexively — the defect is an *uncontrolled* clock, and this one is controlled"
+      ]
     }
   ]
 }

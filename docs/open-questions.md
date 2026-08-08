@@ -49,8 +49,10 @@ preference-tier rollout is now underway, wave-1-first: `reviewing-module-design`
 `reviewing-llm-integration`, and `finding-maintainability-hotspots` hardened
 (wave-1-first sub-wave complete), and **wave 2 opened 2026-08-07 with
 `reviewing-accessibility-and-i18n`** (3 → 25, the widest scope-to-coverage gap
-left in the wave: one baseline suite covering two whole domains); 24
-preference-tier lenses remain),
+left in the wave: one baseline suite covering two whole domains) followed by
+**`reviewing-test-quality`** (5 → 24 — the lens whose false negatives compound,
+since a missed test-quality defect lets every other lens's regression net rot);
+23 preference-tier lenses remain),
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
@@ -133,7 +135,7 @@ findings, absent on llama). Per the runbook these are model-capability limits,
 not heuristic regressions, so no tuning was applied. See the session-log entry
 of the same date.
 
-### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 6 of 30 done, wave-1-first sub-wave complete, wave 2 opened) *(new, 2026-06-27)*
+### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 7 of 30 done, wave-1-first sub-wave complete, wave 2 underway) *(new, 2026-06-27)*
 
 **Trigger.** Building the G30 threat-modeling lens ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)) surfaced that for high-stakes lenses the dangerous failure mode is the **false negative**, and that 3–4 happy-path scenarios don't probe it. That spec's §5 introduces a **thorough, adversarial, false-negative-weighted** eval design — ~21 scenarios across core-firing / per-axis-coverage / detect-and-route / **red-team** / precision groups, plus a red-team generation pass and a hardened cross-model re-gate.
 
@@ -540,3 +542,17 @@ Does maintenance include proactive hygiene (dead-code sweeps, dependency bumps, 
 **The accounting, reconciled against the file** (a first draft of this entry double-counted the target-size scenario in B *and* C, listed an `aria-hidden` **assertion** as though it were an E scenario, and left the three original scenarios out of the tally — the groups are a design device, and the file is the fact): **3 originals + A 2 + B 12 + C 1 + D 5 + E 2 = 25.**
 
 25 scenarios, 107 assertions. The floor was verified to gate: dropping to 24 fails `tooling.cli eval` with a non-zero exit before it was restored. **Cross-model re-gate: deferred**, the same standing gap as every other recent Q21 entry — no Ollama or local-model substrate in this remote session, so the hardened suite has not been run against the `qwen2.5-coder:7b` floor-of-record. Tracked as ordinary follow-up alongside the other deferred re-gates.
+
+**Wave-2 hardening #2: `reviewing-test-quality`** (`eval_min: 24`, up from 5) — 2026-08-07. Picked as the lens whose false negatives **compound**: every other lens's findings are caught once, but a missed test-quality defect quietly rots the regression net that protects all of them. Its heuristics were also unusually far ahead of its suite — 15 owned checks, including four named smells (Assertion Roulette, Mystery Guest, Conditional Test Logic, Eager Test), the CORRECT boundary dimensions, mutation intuition, and Right-BICEP — against five scenarios covering five of them.
+
+**A — shape-flexible firing (2).** Unlike the accessibility lens, this suite was already multi-language (Java, JS, Python), so A had to prove something else. **The load-bearing one: a diff with no test file in it at all** — a one-line bug fix that ships no regression test. A test-quality lens that only activates on test files misses its single highest-value finding, and the scenario's last assertion says so explicitly ("does not report 'no test files in this diff, not applicable'"). The second is an idiomatic **Go table-driven test**, which doubles as a precision guard: its `for` loop and subtests are the language's standard form, *not* the Conditional Test Logic smell the original JS scenario teaches.
+
+**B — per-axis coverage (7).** One per owned check the originals never reached: a test that never calls the code under test (tautological assertions), real clock plus unseeded randomness, an e2e test standing in for a pure function's unit cases, mutation intuition on a single-data-point test, a missing encode/decode round-trip, a concurrency change tested single-threaded, and a `@Disabled` test arriving alongside an Eager Test named `test2`.
+
+**C — delegate/escalate (2).** A fixture that is a staging-database snapshot carrying apparent real customer data — the assertion's coupling is this lens's, the retention question routes to `auditing-compliance-and-provenance`; and a "fix failing test" PR that edits the expected value to match the observed output, where the documented rule shows the test was reporting a real production defect — routed to `tracing-correctness-and-invariants`.
+
+**D — adversarial / red-team (5), and this lens has the richest material in the suite so far**, because "make the suite green" is a pressure that acts on tests directly. **Coverage theater** ("71% → 94%", forty `try/except/pass` tests named after line numbers). **Weakened assertions** — a failing test "fixed" by replacing exact expectations with `toBeGreaterThan(0)` while the production code is untouched, leaving the test's *name* still promising a behavior its assertions no longer check. **An in-diff claim to verify rather than accept** — "not unit tested on purpose, covered end-to-end" over a money calculation, where a smoke test that completes the flow would pass with the settlement wrong by any amount. **Distractor overload** — a 420-line rename quietly deleting the test that proved expired tokens are rejected before any database call. And **release pressure** — `jest.retryTimes(3)` plus a `sleep(500)`, where retrying is suppressing the signal a race is producing and the fixed delay is the same mistake in miniature.
+
+**E — precision (3).** A pure refactor needing no new tests (and *not* flagging "no test files modified" by itself), a test deleted because the feature it covered was retired, and an **injected fixed clock** — recognized as the correct fix for time dependence rather than as a clock smell, which is the false positive the B-group clock scenario would otherwise train.
+
+**The accounting, reconciled against the file:** **5 originals + A 2 + B 7 + C 2 + D 5 + E 3 = 24**, verified by a script that asserts no scenario is counted twice and none is left ungrouped — written after the previous entry's tally had to be corrected in review. 104 assertions. The floor gates: at 23 scenarios `tooling.cli eval` exits non-zero naming the floor. **Cross-model re-gate: deferred**, same standing substrate gap as every other recent Q21 entry.

@@ -389,6 +389,13 @@ skills:
       coverage, determinism.
     shape: diff
     wave: 2
+    # Q21: second wave-2 preference-tier lens hardened. Same A-E adversarial
+    # taxonomy; no design-doc (A) group — this lens is diff-only, so A covers
+    # firing on a diff with *no test file in it* (the missing regression test is
+    # the finding) and on a non-xUnit idiom. Raised from this lens's prior
+    # 5-scenario suite (above D8's 3-scenario baseline). See open-questions.md
+    # Q21.
+    eval_min: 24
     built_from:
       - { category: 17, source: docs/research/cluster-5-verification.md#17 }
 
