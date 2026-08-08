@@ -18,16 +18,6 @@ question. Do this trace for every candidate before concluding there's nothing
 to flag — "no findings" is a conclusion the trace must reach, not a default
 for code that doesn't obviously mention threads, locks, or races.
 
-**The one exception the trace does not settle: a stated tolerance.** When the
-code declares a value approximate or best-effort and names what it is *not*
-used for ("occasional undercounts are acceptable; not used for billing"), that
-comment is a specification, not an excuse. The interleaving you traced is real
-and is within the documented tolerance, so it is not a defect — reporting it
-is a finding against a requirement that does not exist. This is the only guard
-that overrides the trace on the strength of what the code *says*; every other
-guard (a lock, a conditional update, a constraint) has to be verified by
-tracing what it actually covers, not by noticing that it is present.
-
 ## Bad → finding
 
 **Input (diff):**
