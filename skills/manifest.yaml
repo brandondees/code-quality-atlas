@@ -373,6 +373,11 @@ skills:
     shape: diff
     design: true
     wave: 2
+    # Q21: third wave-2 preference-tier lens hardened, and the last un-hardened
+    # lens in waves 1-2. Same A-E adversarial taxonomy, raised from this lens's
+    # prior 4-scenario suite (above D8's 3-scenario baseline). See
+    # open-questions.md Q21.
+    eval_min: 26
     built_from:
       - { category: 15, source: docs/research/cluster-4-runtime.md#15 }
 
