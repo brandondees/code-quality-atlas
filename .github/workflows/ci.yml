@@ -64,7 +64,14 @@ jobs:
           }
       - name: dependency vulnerability audit
         run: |
-          pip install pip-audit
+          # pip-audit IS the CI vulnerability gate this repo relies on — unlike
+          # requirements.txt's deps (hash-pinned, resolved once and committed),
+          # an unpinned `pip install pip-audit` re-resolves to whatever is
+          # newest on PyPI on every run, so the gate itself isn't reproducible:
+          # a scanner-tool release could change what CVEs are flagged (or
+          # silently drop advisory coverage) with no diff in this repo to
+          # review. Pinned alongside pip-tools/pip above, same rationale.
+          pip install pip-audit==2.10.1
           pip-audit --requirement requirements.txt
       - name: lint (ruff)
         run: ruff check .
