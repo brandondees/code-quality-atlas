@@ -498,6 +498,14 @@ skills:
       RTL.
     shape: diff
     wave: 2
+    # Q21: first wave-2 preference-tier lens hardened, opening that wave after
+    # the wave-1-first sub-wave completed. Same A-E adversarial taxonomy, minus
+    # the design-doc (A) group — this lens is diff-only, not design-capable, so
+    # A covers stack-flexible firing (a server-rendered template, a CSS-only
+    # diff) instead. Raised from D8's 3-scenario baseline; picked first in the
+    # wave because it carried two domains (accessibility and i18n) on one
+    # baseline suite. See open-questions.md Q21.
+    eval_min: 25
     built_from:
       - { category: 23, source: docs/research/cluster-6-evolution.md#23 }
 

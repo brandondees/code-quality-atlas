@@ -2354,3 +2354,40 @@ The second one is rule 3 (a convention that lives only in existing text drifts t
 Nothing here was wrong in a way a test could see. All four are the same failure at different scales: **fixing the instance that was reported instead of the class it belongs to** — which is precisely what standing rule 3 exists to prevent, written down this morning and then not applied to my own corrections. Worth recording because the rule as written points at *authoring*; the case it keeps catching is *repair*.
 
 389 tests pass; the rest of the pipeline stays clean.
+
+### 2026-08-07 (same day, fifth) — Q21 wave 2 opens: `reviewing-accessibility-and-i18n` hardened 3 → 25
+
+Three lenses shipped today, all judgment-heavy with near-zero deterministic coverage. The counterweight to that is the eval suite, which is the only backstop those lenses have — so the next move was the campaign the repo already tracks as its top open item rather than a fourth lens.
+
+**Picked by evidence, not by position in the list.** Q21's rollout is risk-tiered and wave-ordered; wave 1 is complete, so wave 2 is next, and it holds three un-hardened lenses. `reviewing-accessibility-and-i18n` was the choice because it sat at **exactly 3** — the D8 floor — while covering **two whole domains**, where `reviewing-performance-and-efficiency` (4) and `reviewing-test-quality` (5) each cover one. Widest scope-to-coverage gap in the wave.
+
+**What the A-E taxonomy surfaced that a bigger happy-path suite would not.** The B group (12 scenarios, one per owned check) is the bulk, but the two groups worth recording are A and D.
+
+**A exists because the lens's evidence was all one stack.** Every original scenario and every `examples.md` pair was JSX. The checks are stack-independent — a `div` with `onclick` in a Django template and a `margin-left` in a stylesheet are the same findings — but nothing in the suite proved the lens knew that. Two scenarios now do.
+
+**D is where the campaign earns its cost**, and one of its five is specific to this lens in a way worth naming. The generic red-team shapes transfer: **ARIA theater** (a `role="button"` div with an `aria-label` and no `tabIndex` — the attributes that make it *look* reviewed are exactly the ones that do not make it *work*, asserted over a claimed design-team sign-off), `title` as the accessible name (right defense, wrong layer), a 380-line data-grid refactor hiding a one-line `<th scope="col">`-to-`<div>` regression, and a fifteen-minute deadline over a removed live region. The lens-specific one: **"axe-core reports 0 violations, so accessibility is covered."** That is `grounding-review-in-tool-output`'s *a clean run clears nothing* pointed at the lens with the **strongest** automated tooling in the suite — which is exactly where the inference is most tempting and most wrong. Automated tooling catches a minority of barriers, and the scenario names three things axe cannot judge on its own input: whether `href="#"` with a click handler is really a link, whether an arrow-key handler is a coherent keyboard model, and whether an accessible name is *meaningful* rather than merely present.
+
+**E pins something that shipped hours earlier** (2 new scenarios; the three originals are counted on their own, not folded into a group). One precision scenario is a pure-Python ledger function, and its expected behavior requires the **one-line not-applicable** response rather than a bare "No findings" — the distinction the shared reviewer-discipline text gained in #210's round 3. It was prose then; it is an eval now, which is the difference between a rule and a check.
+
+**The floor was verified to gate**, not merely to pass: dropping the suite to 24 scenarios fails `tooling.cli eval` with a non-zero exit and the message naming the floor, restored immediately after. Same discipline as every other guard added this week, and the same reason — a threshold that has never failed is a threshold nobody has tested.
+
+**Cross-model re-gate: deferred**, the standing gap for every recent Q21 entry. No Ollama or local-model substrate in this remote session, so the hardened suite has not been run against the `qwen2.5-coder:7b` floor-of-record. Tracked as ordinary follow-up, not as done.
+
+**3 originals + A 2 + B 12 + C 1 + D 5 + E 2 = 25 scenarios**, 107 assertions; 24 preference-tier lenses remain. 389 tests pass; `generate`/`drift`/`eval` clean on both trees; ruff clean; markdownlint clean.
+
+**Review round 1 on #211 (1 finding, accepted — and the sweep found its source).** The atlas's own pass caught a WCAG success-criterion/figure mismatch in a *new eval assertion*: "200% zoom / narrow viewport (WCAG 1.4.10 reflow)". **1.4.10 Reflow** is no two-dimensional scrolling at a **320 CSS px** viewport — 400% zoom on a 1280px screen; **200%** is **1.4.4 Resize Text**, a different criterion with no reflow requirement. Real identifier, wrong figure: standing authoring rule 1's exact shape, and rated Major because an eval assertion is not prose read once — it is ground truth the lens gets graded against on every future review that hits the pattern.
+
+**The class sweep is the part worth recording.** Rule 3 (extended to repairs the same day) says find the class before fixing the instance, so the upstream source got read rather than just the flagged line — and it was the origin: `cluster-6-evolution.md#23`'s responsive-layouts heuristic offered a single "200% zoom" figure followed by **both** criteria, `(WCAG 1.4.10 Reflow, 1.4.4 Resize Text)`, marked `(verify)`. Not false as written, but it invites exactly the collapse the eval made — one number, two criteria, reader picks. Fixing only the eval would have left the generator emitting the ambiguity into `reference/heuristics.md` forever, and the next author would rediscover it.
+
+So both moved: the eval now cites 320 CSS px / 400% against 1.4.10, and the source splits the two criteria with their own triggers, states which one a fixed pixel width actually fails, and **discharges its `(verify)` marker** — the tag was there because nobody had checked, and now someone has.
+
+389 tests pass; the rest of the pipeline stays clean.
+
+**Review round 2 on #211 (CodeRabbit, 2 findings, both accepted) — and both are conventions, not content.**
+
+- **The A-E tally didn't reconcile with the file.** The entry claimed A2/B12/C2/D5/E4 = 25, which sums correctly and maps wrongly: the target-size scenario was counted in **both** B and C (it is one scenario that happens to carry a delegation), a decorative-`aria-hidden` *assertion* living inside D's title-as-name scenario was listed as though it were its own E scenario, and the **three original scenarios were left out of the tally entirely** — so the arithmetic worked only because three real scenarios were missing and two phantom ones were present. Re-derived against the file: **3 originals + A 2 + B 12 + C 1 + D 5 + E 2 = 25**, and the entry now says so, including what the first draft got wrong. The groups are a design device; the file is the fact. Rule 2 again, this time in a summary of a suite I had just finished counting.
+- **The manifest entry skipped the hardening convention.** Every one of the ten previously hardened lenses records *why* its floor was raised in a `# Q21:` comment immediately above `eval_min`, naming the wave, whether the A group applies (design-capable or not), and the prior count — and places `eval_min` **after** `wave:`. Mine had no comment and inverted the key order, so the manifest stopped explaining its own floors at the first new entry. Both fixed.
+
+The second is rule 3 for the **third** time today (a convention that lives only in the existing entries, extended once already to cover repairs), and it lands on the one artifact where the convention is *purely* documentary: nothing breaks if a `# Q21:` comment is missing, which is exactly why nothing catches it. Noting it rather than mechanizing it — an "entries with `eval_min` must carry a preceding comment" test is buildable, and probably worth it once the campaign has a few more instances to generalize from.
+
+389 tests pass; the rest of the pipeline stays clean.

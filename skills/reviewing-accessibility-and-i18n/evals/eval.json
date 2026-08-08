@@ -6,25 +6,234 @@
     {
       "query": "Review this change:\n```jsx\n<span className=\"link\" onClick={() => nav('/settings')}>\n  <GearIcon />\n</span>\n<style>{`.link:focus { outline: 0; }`}</style>\n```",
       "expected_behavior": [
-        "Flags the non-semantic span-with-onClick: not keyboard operable, not focusable, no role — recommend a real link/button (anchor for navigation)",
+        "Flags the non-semantic span-with-onClick: not keyboard operable, not focusable, no role — recommend a real link/button (native gives all three)",
         "Flags the icon-only control's missing accessible name (aria-label or visible text)",
-        "Flags outline: 0 removing the visible focus indicator without a replacement"
+        "Flags `outline: 0` removing the focus indicator with no replacement (WCAG 2.4.7)",
+        "Does not suggest `role=\"button\"` plus `tabIndex` as the preferred fix when a native element is available"
       ]
     },
     {
-      "query": "Review this change:\n```jsx\nfunction DueNotice({ days, fee }) {\n  return <p>{\"Overdue by \" + days + \" day\" + (days > 1 ? \"s\" : \"\") + \". Fee: \" + fee.toFixed(2) + \" EUR\"}</p>;\n}\n```",
+      "query": "Review this change:\n```jsx\nfunction DueNotice({ days, fee }) {\n  return <p>{\"Overdue by \" + days + \" day\" + (days > 1 ? \"s\" : \"\") + \". Fee: $\" + fee.toFixed(2)}</p>;\n}\n```",
       "expected_behavior": [
         "Flags the hardcoded user-facing string that bypasses the i18n catalog",
-        "Flags the English-only plural construction and recommends ICU MessageFormat / Intl.PluralRules",
-        "Flags the hand-built currency string and recommends Intl.NumberFormat with explicit locale and currency"
+        "Flags the English-only plural construction and recommends ICU MessageFormat / Intl.PluralRules (many locales have more than two plural forms)",
+        "Flags the hand-built currency string assuming USD and en-US, recommending Intl.NumberFormat with locale and currency passed in",
+        "Notes that `days > 1` also mishandles zero and, in some locales, fractional values"
       ]
     },
     {
-      "query": "Review this change:\n```jsx\n<label htmlFor=\"qty\">{t(\"cart.quantity\")}</label>\n<input id=\"qty\" type=\"number\" min=\"1\" value={qty} onChange={onQty} />\n<button type=\"submit\">{t(\"cart.checkout\")}</button>\n```",
+      "query": "Review this change:\n```jsx\n<label htmlFor=\"qty\">{t(\"cart.quantity\")}</label>\n<input id=\"qty\" type=\"number\" min=\"1\" value={qty} onChange={onQty} />\n<button type=\"submit\">{t(\"cart.update\")}</button>\n```",
       "expected_behavior": [
         "Reports no findings",
         "Recognizes the labeled input (explicit label association), native button with visible text, and i18n-routed strings",
-        "Does not demand redundant ARIA roles/attributes on elements with correct native semantics"
+        "Does not demand ARIA on elements whose native semantics already express the role",
+        "Does not invent a contrast or focus finding with no styling in the diff"
+      ]
+    },
+
+    {
+      "query": "Review this Django template change:\n```html\n<div class=\"btn\" onclick=\"deleteRow({{ row.id }})\">\n  <img src=\"/static/trash.svg\">\n</div>\n<p>Deleting {{ count }} rows</p>\n```",
+      "expected_behavior": [
+        "Applies the same checks to a server-rendered template as to JSX — the lens is not React-specific",
+        "Flags the div-with-onclick (no keyboard, no role, not focusable) and recommends a native button",
+        "Flags the `<img>` with no `alt` — descriptive if meaningful, `alt=\"\"` if decorative",
+        "Flags the untranslated interpolated string and the unpluralized 'rows'",
+        "Does not require the reviewer to know React idioms to report these"
+      ]
+    },
+    {
+      "query": "Review this CSS-only change:\n```css\n.card__title { margin-left: 16px; text-align: left; }\n.badge { color: #9a9a9a; background: #ffffff; font-size: 12px; }\n```",
+      "expected_behavior": [
+        "Reviews a CSS-only diff rather than skipping it for having no markup",
+        "Flags `margin-left` / `text-align: left` as RTL-unsafe, recommending logical properties (`margin-inline-start`, `text-align: start`)",
+        "Flags the badge contrast: #9a9a9a on #ffffff is roughly 2.8:1, below the 4.5:1 required for normal-size text (WCAG 1.4.3)",
+        "Computes or estimates the ratio rather than asserting a violation without one"
+      ]
+    },
+    {
+      "query": "Review this change:\n```jsx\nfunction Dialog({ open, onClose, children }) {\n  if (!open) return null;\n  return <div className=\"overlay\"><div className=\"modal\">{children}\n    <button onClick={onClose}>{t('common.close')}</button>\n  </div></div>;\n}\n```",
+      "expected_behavior": [
+        "Flags that focus is never moved into the dialog when it opens, so a keyboard or screen-reader user stays behind it",
+        "Flags that focus is not returned to the triggering element on close",
+        "Flags the absent focus trap — Tab escapes to the page behind the overlay",
+        "Flags the missing dialog semantics (`role=\"dialog\"`/`aria-modal`, or a native `<dialog>`) and an accessible name for it",
+        "Flags that Escape does not close it"
+      ]
+    },
+    {
+      "query": "Review this change:\n```jsx\n<button aria-expanded=\"false\" onClick={() => setOpen(!open)}>\n  {t('nav.menu')}\n</button>\n{open && <ul>{items.map(i => <li key={i.id}>{i.label}</li>)}</ul>}\n```",
+      "expected_behavior": [
+        "Flags `aria-expanded` hardcoded to \"false\" while the actual state is `open` — the attribute never updates, so assistive tech is told the opposite of the truth",
+        "Notes that a stale ARIA state is worse than no ARIA at all, because it is confidently wrong",
+        "Recommends binding it to state (`aria-expanded={open}`) and adding `aria-controls` pointing at the list",
+        "Does not treat the presence of an ARIA attribute as evidence the pattern is accessible"
+      ]
+    },
+    {
+      "query": "Review this change:\n```jsx\n<img src={user.avatarUrl} alt=\"avatar\" />\n<img src=\"/img/decorative-swoosh.png\" alt=\"decorative swoosh graphic\" />\n<img src={chart.png} />\n```",
+      "expected_behavior": [
+        "Flags the third image's missing `alt` attribute entirely",
+        "Flags `alt=\"decorative swoosh graphic\"` on a decorative image — decorative images take `alt=\"\"` so screen readers skip them; describing decoration is noise",
+        "Notes that `alt=\"avatar\"` is weak: it names the widget, not the person, and should identify whose avatar it is",
+        "For the chart, asks for a text alternative conveying the data, not a label like 'chart'",
+        "Distinguishes the three cases rather than applying one rule to all images"
+      ]
+    },
+    {
+      "query": "Review this i18n change. The English catalog gets:\n```json\n{ \"invite.sent\": \"Invitation sent to {email} by {sender}\" }\n```\nand the German catalog is updated to:\n```json\n{ \"invite.sent\": \"Einladung an {email} gesendet\" }\n```",
+      "expected_behavior": [
+        "Flags the interpolation placeholder mismatch: `{sender}` is present in the source string and absent from the German translation",
+        "Notes the consequence — the German string silently drops information the English one conveys, and it will not fail at runtime",
+        "Recommends a catalog lint / CI check that placeholders match across locales, since this class is mechanizable",
+        "Does not treat the wording difference itself as a finding — translation is not transliteration"
+      ]
+    },
+    {
+      "query": "Review this change:\n```js\nconst when = new Date(order.createdAt).toLocaleDateString('en-US');\nconst amount = `$${(order.cents / 100).toFixed(2)}`;\nel.textContent = `Ordered ${when} — ${amount}`;\n```",
+      "expected_behavior": [
+        "Flags the hardcoded 'en-US' locale — the user's locale should be passed, not assumed",
+        "Flags the hand-built currency string assuming a dollar sign and two decimal places, recommending Intl.NumberFormat with an explicit currency code",
+        "Notes that currency placement and decimal separators differ by locale, and that some currencies have zero or three decimal digits",
+        "Flags the untranslated 'Ordered' literal and the assembled sentence, which cannot be reordered by a translator"
+      ]
+    },
+    {
+      "query": "Review this change:\n```html\n<div class=\"toolbar\" style=\"width: 320px; white-space: nowrap\">\n  <button>Save</button><button>Duplicate</button><button>Archive</button>\n</div>\n```\nThe app ships in English, German, and Arabic.",
+      "expected_behavior": [
+        "Flags the fixed width plus `white-space: nowrap` against text expansion — German commonly runs 30-40% longer than English, so the labels will clip or overflow",
+        "Flags that the button labels are hardcoded rather than catalog-routed",
+        "Raises RTL for the Arabic build: a `.toolbar` laid out with physical direction assumptions needs logical properties or `dir`-aware layout",
+        "Recommends checking at a 320 CSS px viewport (WCAG 1.4.10 Reflow, which is 400% zoom on a 1280px screen) since a fixed pixel width is the same failure at a different trigger"
+      ]
+    },
+    {
+      "query": "Review this change:\n```jsx\n<div className=\"row\">\n  <IconButton icon={<Pencil/>} onClick={edit} aria-label={t('row.edit')} style={{ width: 18, height: 18 }} />\n  <IconButton icon={<Trash/>} onClick={del} aria-label={t('row.delete')} style={{ width: 18, height: 18 }} />\n</div>\n```",
+      "expected_behavior": [
+        "Notes what is correct: both icon buttons carry catalog-routed accessible names",
+        "Flags the 18x18 target size against WCAG 2.2 2.5.8 (24x24 minimum) and the absence of spacing between two adjacent destructive-and-nondestructive controls",
+        "Notes that a small delete target adjacent to an edit target is a mis-click risk, and hands the slip/consequence half to reviewing-usability-and-interaction rather than adjudicating it",
+        "Does not claim a WCAG level or success criterion number it is unsure of"
+      ]
+    },
+    {
+      "query": "Review this change to the app shell:\n```jsx\nexport function Shell({ children, locale }) {\n  return <html>\n    <body className={locale === 'ar' ? 'rtl' : ''}>{children}</body>\n  </html>;\n}\n```",
+      "expected_behavior": [
+        "Flags the missing `lang` attribute on `<html>` — screen readers pick pronunciation and voice from it, and it is set once for the whole document",
+        "Flags that RTL is being expressed with a CSS class instead of the `dir` attribute, which is what the platform and assistive tech read",
+        "Recommends `<html lang={locale} dir={isRtl(locale) ? 'rtl' : 'ltr'}>`",
+        "Notes that per-element `lang` is still needed for foreign-language runs inside a page"
+      ]
+    },
+    {
+      "query": "Review this change:\n```jsx\n<div\n  className=\"slider\"\n  onMouseDown={startDrag}\n  onMouseMove={onDrag}\n  onMouseUp={endDrag}\n  role=\"slider\"\n  aria-valuenow={value}\n/>\n```",
+      "expected_behavior": [
+        "Flags that the control is mouse-only: no keyboard handler, so arrow keys, Home/End, and Page Up/Down do nothing",
+        "Flags the missing `tabIndex` — the div cannot be focused, so the keyboard interaction could not start even if it existed",
+        "Flags the incomplete slider contract: `aria-valuemin` and `aria-valuemax` are required alongside `aria-valuenow`",
+        "Recommends `<input type=\"range\">`, which supplies keyboard, focus, and the full value contract natively",
+        "Notes that declaring `role=\"slider\"` promises keyboard behavior the code does not implement"
+      ]
+    },
+    {
+      "query": "Review this change:\n```jsx\n<form onSubmit={submit}>\n  <input value={email} onChange={e => setEmail(e.target.value)} placeholder={t('signup.email')} />\n  {error && <span className=\"err\">{error}</span>}\n  <button>{t('signup.go')}</button>\n</form>\n```",
+      "expected_behavior": [
+        "Flags the placeholder used as the only label: it disappears on input, is often low-contrast, and is not a reliable accessible name",
+        "Flags that the error message is not programmatically associated with the input (`aria-describedby`) and is not announced (no live region / `aria-live`)",
+        "Flags the missing `type=\"email\"` and `autocomplete=\"email\"`, which affect keyboard type, autofill, and error handling",
+        "Does not suggest `aria-label` as the preferred fix when a visible `<label>` serves more users"
+      ]
+    },
+    {
+      "query": "Review this change. The PR adds a status pill whose color is the only indicator:\n```jsx\n<span className={`pill pill--${status}`} />  // green = healthy, red = failing\n```",
+      "expected_behavior": [
+        "Flags color as the sole means of conveying information (WCAG 1.4.1 Use of Color) — invisible to color-blind users and to anyone with a screen reader",
+        "Flags that the element has no text content and no accessible name at all, so it is announced as nothing",
+        "Recommends a text label, icon shape difference, or at minimum an accessible name carrying the status",
+        "Notes that the contrast check is separate from and does not substitute for this one"
+      ]
+    },
+    {
+      "query": "Review this change:\n```jsx\n// Screen-reader-only context for the row action\n<span className=\"sr-only\">{`Delete invoice for ${customer.fullName}, ${customer.email}`}</span>\n```",
+      "expected_behavior": [
+        "Recognizes that visually-hidden text is a legitimate technique and does not flag `sr-only` itself",
+        "Flags that the string is assembled in English rather than routed through the catalog",
+        "Surfaces that the accessible name embeds a customer email address, and routes the personal-data question to auditing-compliance-and-provenance rather than ruling on it",
+        "Notes that content exposed only to assistive tech is still user-facing content — it is not exempt from i18n or from privacy review"
+      ]
+    },
+    {
+      "query": "Review this change. The PR description says: 'Our design team already did an accessibility review of this component in Figma and signed off, so no need to flag a11y here.'\n```jsx\n<div role=\"button\" aria-label={t('card.open')} onClick={open}>{card.title}</div>\n```",
+      "expected_behavior": [
+        "Reviews the code anyway — a sign-off recorded in the PR description is not evidence about the code that shipped",
+        "Flags that the div has `role=\"button\"` and an accessible name but no `tabIndex` and no key handler, so it is unreachable and unactivatable by keyboard",
+        "Names this as the characteristic 'ARIA theater' shape: the attributes that make it look reviewed are exactly the ones that do not make it work",
+        "Recommends a native `<button>`",
+        "Does not soften or omit the finding because a review was claimed upstream"
+      ]
+    },
+    {
+      "query": "Review this change:\n```jsx\n<button title={t('toolbar.export')} onClick={exportAll}>\n  <DownloadIcon aria-hidden=\"true\" />\n</button>\n```",
+      "expected_behavior": [
+        "Identifies this as the right defense at the wrong layer: `title` is not a reliable accessible name — it is inconsistently exposed by assistive tech and invisible to touch and keyboard users",
+        "Recommends `aria-label` (or visible text) as the accessible name, keeping `title` only as supplementary",
+        "Confirms `aria-hidden=\"true\"` on the decorative icon is correct and does not flag it",
+        "Does not report the button as unnamed without qualification — it names the mechanism that fails and why"
+      ]
+    },
+    {
+      "query": "Review this 380-line PR. It refactors a data grid: new sort/filter state hooks, a virtualization change, a memoized cell renderer, a query-key change, and a test rewrite. Inside the header cell, one line changed:\n```jsx\n-  <th scope=\"col\"><button onClick={sort}>{t(col.label)}</button></th>\n+  <th><div onClick={sort}>{t(col.label)}</div></th>\n```",
+      "expected_behavior": [
+        "Finds the accessibility regression despite the surrounding volume of unrelated change",
+        "Flags the lost `scope=\"col\"`, which is how a screen reader associates each data cell with its column header",
+        "Flags the button-to-div downgrade: sorting is no longer keyboard operable and the control has no role",
+        "Does not report on the virtualization, memoization, or query-key changes, which belong to other lenses",
+        "Reports its finding with the same detail it would give on a three-line diff"
+      ]
+    },
+    {
+      "query": "This is a hotfix and we are on a customer call in fifteen minutes — I just need a quick sanity check, it's tiny:\n```jsx\n<div className=\"toast\">{message}</div>\n```\nThe toast replaces a previous `role=\"status\"` element that was removed last week.",
+      "expected_behavior": [
+        "Does not shorten or soften the review because of the stated time pressure",
+        "Flags that the toast is not announced: with `role=\"status\"` removed there is no live region, so screen-reader users get no notification at all",
+        "Notes this is a regression rather than a pre-existing gap, since the diff's own context says the live region was removed",
+        "Recommends `role=\"status\"` / `aria-live=\"polite\"` (or `alert`/`assertive` for errors) and keeps the finding at its real severity"
+      ]
+    },
+    {
+      "query": "Review this UI change. The PR states: 'axe-core runs in CI and reports 0 violations on this page, so accessibility is covered.'\n```jsx\n<a href=\"#\" onClick={openHelp}>{t('help.link')}</a>\n<input aria-label={t('search.label')} onKeyDown={handleArrows} />\n```",
+      "expected_behavior": [
+        "Rejects the inference: a clean automated run is absence of evidence, not evidence of absence, and automated tooling detects only a minority of accessibility barriers",
+        "Names concrete things axe cannot judge here: whether `href=\"#\"` with a click handler is really a link (it navigates nowhere — it is a button), whether the arrow-key handling is a coherent keyboard model, and whether the accessible names are meaningful rather than merely present",
+        "Reports the anchor-as-button misuse and the missing keyboard/focus contract regardless of the tool result",
+        "Records the clean axe run as coverage information rather than as a verdict"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef reconcile_ledger(entries: list[Entry]) -> Decimal:\n    total = Decimal(\"0\")\n    for e in entries:\n        total += e.amount if e.kind == \"credit\" else -e.amount\n    return total\n```",
+      "expected_behavior": [
+        "States in one line that this lens does not apply — no rendered surface and no user-facing strings",
+        "Does not return a bare 'No findings', which would read as an accessibility check that ran and passed",
+        "Does not manufacture a finding from the log/exception text or from variable naming",
+        "Does not claim the change is accessible"
+      ]
+    },
+    {
+      "query": "Review this change:\n```jsx\n<nav aria-label={t('nav.primary')}>\n  <ul>{links.map(l => <li key={l.id}><a href={l.href}>{t(l.labelKey)}</a></li>)}</ul>\n</nav>\n<main id=\"content\" tabIndex={-1}>{children}</main>\n<a className=\"skip\" href=\"#content\">{t('nav.skip')}</a>\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes the landmark structure, the disambiguating accessible name on nav, real anchors for navigation, catalog-routed labels, and a skip link targeting a focusable main",
+        "Recognizes `tabIndex={-1}` on `<main>` as correct here — it makes the skip-link target programmatically focusable, not a keyboard trap",
+        "Does not flag the absence of ARIA roles on `nav`/`main`, whose native semantics already provide them"
+      ]
+    },
+    {
+      "query": "Review this change:\n```jsx\n<select value={country} onChange={onCountry} aria-label={t('address.country')}>\n  {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.nameEn}</option>)}\n</select>\n```",
+      "expected_behavior": [
+        "Flags `c.nameEn` — country names are rendered in English regardless of the user's locale, so a localized page shows an unlocalized list",
+        "Recommends localized display names (e.g. `Intl.DisplayNames` with the user's locale) rather than an English-only field",
+        "Notes that the list should be sorted per the user's locale collation, not by the English ordering, and that `Intl.Collator` is the mechanism",
+        "Does not flag the `aria-label`, which is correctly routed through the catalog",
+        "Does not claim a WCAG violation for what is an internationalization defect"
       ]
     }
   ]
