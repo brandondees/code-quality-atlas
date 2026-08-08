@@ -2466,9 +2466,9 @@ So: no swap, and a sharp follow-up instead of a vague one — **is `qwen3:8b`'s 
 
 391 tests pass; the rest of the pipeline stays clean.
 
-### 2026-08-08 (same day, follow-up) — Q21: `qwen3:8b`'s precision is not tunable, and the harness turns out to be deterministic
+### 2026-08-08 (same day, follow-up) — Q21: two tuning variants both trade recall for precision, and the harness runs deterministically
 
-The re-gate entry above ended with one sharp question rather than a vague one: over-flagging is the failure mode most likely to respond to `examples.md` work, so if discipline tuning recovered `qwen3:8b`'s 1/4 precision at unchanged recall, the baseline swap became a clear call. Answered by measurement: **it does not.**
+The re-gate entry above ended with one sharp question rather than a vague one: over-flagging is the failure mode most likely to respond to `examples.md` work, so if discipline tuning recovered `qwen3:8b`'s 1/4 precision at unchanged recall, the baseline swap became a clear call. Answered by measurement, for the two variants tried: **neither improved the trade-off.**
 
 Two variants, each run against **both** models — the file is shared, so a tuning that helps the candidate and breaks the floor is not a tuning:
 
@@ -2478,13 +2478,13 @@ Two variants, each run against **both** models — the file is shared, so a tuni
 | broad (3 guards) | +766 tok | 15/24 | 13/20 | 2/4 | 9/24 |
 | narrow (tolerance only) | +172 tok | 16/24 | 14/20 | 2/4 | 8/24 |
 
-Each variant buys one precision scenario and pays at least one recall scenario. Not a curve with a better point on it — a fixed budget being shuffled. Reverted.
+Each buys one precision scenario and pays at least one recall scenario. Two points do not prove no prompt could do better, but they were enough to stop — and the mechanism below is why a third variant seems unlikely to differ. Reverted.
 
 **The diagnostic that settled it.** On the lock-held scenario, `qwen3:8b`'s response **never mentions the lock** — not before tuning, not after either variant. It isn't failing to apply a guard rule, it's failing to read the code, and no instruction fixes a reviewer that doesn't look. Consistent with which guard transferred: *stated tolerance* worked (and the model echoed the rule back — "explicitly tolerated as part of the design"), while *store atomicity* and *lock scope* did nothing. The one that landed is satisfiable by reading a comment; the two that failed require tracing what the code guarantees. Same text-over-mechanism split the four-model comparison found one level up.
 
 **The tuning manufactured a false negative — the sharper lesson.** The broad variant's lock bullet said that if the read, decision and write sit inside one `lock_for(key)`, no caller can interleave. True about mutual exclusion, silent about deadlock. The floor model generalized it to *locks present ⇒ safe* and newly cleared the **lock-ordering deadlock** scenario it had been passing. Prose written to suppress false positives created a false negative on the very construct it names — worth remembering before the next lens gets a discipline paragraph.
 
-**The harness is deterministic, and that cuts both ways.** Two runs of the same suite, same model, same prompt: **byte-identical on all 24 scenarios**. That retroactively validates the campaign's method — single-run tuning deltas are signal, so the earlier `examples.md` results stand and don't need re-running. The cost is that every difference is *also* real: an edit aimed at one behavior flips unrelated scenarios (broad lost lock-ordering; narrow lost seat-reservation while recovering lock-ordering). So `examples.md` tuning is not safely local, and a spot check on the targeted scenario cannot see where the recall went.
+**The harness ran deterministically here, and that cuts both ways.** Two runs of the same suite, model, prompt and host: **byte-identical on all 24 scenarios** (`qwen2.5-coder:7b`, Ollama, CPU-only, `temperature: 0`, `num_ctx` 8192). Scoped to that configuration — another backend or accelerator could differ — it supports the campaign's method: single-run tuning deltas on this substrate are signal, so the earlier `examples.md` results stand. The cost is that with no observed noise, every difference is real: edits aimed at one behavior flipped unrelated scenarios twice here (broad lost lock-ordering; narrow lost seat-reservation while recovering lock-ordering). So `examples.md` tuning is not safely local, and a spot check on the targeted scenario cannot see where the recall went.
 
 **A wrong intermediate diagnosis, corrected by measurement rather than argument.** When a scenario that answered in 150s started timing out at 880s under the broad prompt, I attributed it to the prompt growth; when a *different* scenario hung under the shorter narrow prompt, I corrected that to the documented host-contention class. Both readings were guesses from the client side, where a runaway generation and a slow host are indistinguishable. The server's own counters settled it: `n_decoded = 7308` at 3.11 t/s with `truncated = 1` — a deterministic runaway that crosses the 8192 ceiling instead of finishing, reproducible at a 2,400s timeout. The general lesson is the same one this PR's exit-code guard encodes: **when a result is missing, find out whether it never happened or merely never arrived — the two look identical from outside.** `OLLAMA_NUM_CTX`'s comment now says that it budgets prompt *and* generation, which its previous sizing advice did not account for.
 

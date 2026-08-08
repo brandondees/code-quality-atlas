@@ -43,11 +43,14 @@ OPENAI_HOST = "http://localhost:8080"  # llama-server default
 # the assembled context from ~3.2k to ~4.0k, and one scenario that had answered
 # in ~800 tokens instead ran away to 7,300+ and crossed the ceiling
 # (`truncated = 1` in llama-server's slot log) rather than finishing. The
-# failure is deterministic — the same prompt reproduces it — and it surfaces to
-# the caller only as a request timeout, so a re-gate reads it as a dead
-# scenario rather than as a window that is too small. When editing a lens's
-# `examples.md`, re-check this ceiling against prompt + the longest generation
-# the suite provokes, not against the prompt.
+# failure is deterministic — the same prompt reproduces it. It surfaces to the
+# caller only as a request timeout, which `run_skill_evals` records on
+# `ScenarioRun.error` and `main` reports with a non-zero exit, so the run is not
+# graded as a miss; what the timeout hides is the *cause*, which reads as a
+# transport failure rather than as a window too small for the generation. The
+# server's own `n_decoded` counter is what distinguishes the two. When editing a
+# lens's `examples.md`, re-check this ceiling against prompt + the longest
+# generation the suite provokes, not against the prompt alone.
 OLLAMA_NUM_CTX = 8192
 
 _REVIEWER_DIRECTIVE = (

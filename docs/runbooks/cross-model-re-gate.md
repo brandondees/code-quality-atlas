@@ -90,15 +90,17 @@ Also worth recording, because they do not show up in a score:
 
 ## The harness is deterministic — deltas are signal
 
-Verified 2026-08-08: two runs of the same suite, same model, same prompt
-produced **byte-identical responses on all 24 scenarios**. Sampling is pinned
-(`temperature: 0`), and it holds end to end. So a difference between two runs is
-caused by whatever you changed, and a single run is enough to measure a tuning
-delta — you do not need repeats to average out noise, because there is none.
+Verified 2026-08-08 on one configuration — `qwen2.5-coder:7b` via Ollama,
+CPU-only, `temperature: 0`, `num_ctx` 8192 — two runs of the same suite, same
+model, same prompt produced **byte-identical responses on all 24 scenarios**.
+No run-to-run variance appeared there, so on that substrate a difference between
+two runs is caused by whatever you changed, and one run is enough to measure a
+tuning delta. Re-check this if you change backend, accelerator, batching, or
+sampling: the guarantee is a property of the configuration, not of the harness.
 
-The corollary is less comfortable: because every difference is real, an
-`examples.md` edit aimed at one behavior **will** flip unrelated scenarios, and
-you will not find out unless you look. In the 2026-08-08 tuning attempt, adding
+The corollary is less comfortable: with no observed noise to absorb it, an
+`examples.md` edit aimed at one behavior **can** flip unrelated scenarios, and
+did twice in the 2026-08-08 tuning attempt. Adding
 a guard-check step to the concurrency lens's decision rule newly cleared the
 *lock-ordering deadlock* scenario on the floor model — a false negative created
 by prose written to reduce false positives — and a narrower version of the same
