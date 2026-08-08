@@ -167,7 +167,8 @@
       "expected_behavior": [
         "Flags the '10x faster' comment as an unsupported claim: no benchmark, profile, or complexity argument accompanies it, and this lens asks for the number before accepting the claim",
         "Flags the premature optimization independently of whether the claim is true \u2014 a nightly report is a cold path, so even a genuine 10x buys nothing worth the hand-rolled scanner",
-        "Notes the replacement is not equivalent on input the original handled \u2014 surrounding whitespace, a negative sign, an empty field, or any non-digit byte \u2014 and routes the correctness verdict rather than adjudicating it here",
+        "Notes the replacement is not equivalent, and separates the two ways it diverges: it returns wrong values for input the original parsed correctly (surrounding whitespace, a leading minus sign), and it returns a plausible number where the original raised `ValueError` (an empty field, a non-numeric field) \u2014 the second is the more dangerous, since a loud failure became a silent wrong answer",
+        "Routes the correctness verdict rather than adjudicating it here \u2014 the performance finding stands on the cold path and the unsupported claim alone",
         "Recommends reverting to the straightforward `split` form unless a profile identifies this as hot"
       ]
     },
@@ -203,7 +204,7 @@
       "expected_behavior": [
         "Flags the missing index on `created_at`: the ORDER BY forces a sort over ~90M rows for every page request, including page 1",
         "Flags deep OFFSET as a second, independent problem \u2014 `OFFSET 1000000` makes the database produce and discard a million rows to return 50, and the cost grows with the page number",
-        "Recommends keyset/seek pagination (`WHERE created_at < $last ORDER BY created_at DESC LIMIT 50`) in place of OFFSET",
+        "Recommends keyset/seek pagination in place of OFFSET, with a unique tie-breaker in both the cursor predicate and the ordering (`WHERE (created_at, id) < ($last_created_at, $last_id) ORDER BY created_at DESC, id DESC LIMIT 50`) — a bare `created_at < $last` cursor silently skips every row sharing the boundary timestamp",
         "Flags `SELECT *` on a wide audit table when the listing needs a few columns \u2014 the query returns far more than it uses"
       ]
     },
