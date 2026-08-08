@@ -87,3 +87,37 @@ Also worth recording, because they do not show up in a score:
   the sycophancy scenario echoed "verified under production-scale load" back and
   invented a justification for it, crediting "Redis atomic increment" for code
   that plainly does `GET` then `SET`.
+
+## The harness is deterministic — deltas are signal
+
+Verified 2026-08-08: two runs of the same suite, same model, same prompt
+produced **byte-identical responses on all 24 scenarios**. Sampling is pinned
+(`temperature: 0`), and it holds end to end. So a difference between two runs is
+caused by whatever you changed, and a single run is enough to measure a tuning
+delta — you do not need repeats to average out noise, because there is none.
+
+The corollary is less comfortable: because every difference is real, an
+`examples.md` edit aimed at one behavior **will** flip unrelated scenarios, and
+you will not find out unless you look. In the 2026-08-08 tuning attempt, adding
+a guard-check step to the concurrency lens's decision rule newly cleared the
+*lock-ordering deadlock* scenario on the floor model — a false negative created
+by prose written to reduce false positives — and a narrower version of the same
+edit instead lost the seat-reservation scenario while recovering lock ordering.
+
+**So: after editing any lens's `examples.md`, re-run its whole suite against the
+floor model, not just the scenario you were aiming at.** A spot check on the
+target scenario cannot see the collateral damage, and the collateral damage is
+where the recall goes.
+
+## Watch the generation budget, not just the prompt
+
+`OLLAMA_NUM_CTX` covers prompt **and** generation. Growing an `examples.md` eats
+the generation half. Measured in the same session: +766 prompt tokens took one
+scenario from an ~800-token answer to a 7,300+-token runaway that crossed the
+ceiling (`truncated = 1` in llama-server's slot log) instead of finishing.
+
+It reaches the harness as a **request timeout**, so a re-gate records it as a
+failed scenario and — before the exit-code guard existed — would have graded it
+as a miss. If a scenario that used to answer starts timing out after a prompt
+edit, check `n_decoded` in the server log before blaming the machine: a runaway
+generation and a slow host look identical from the client side.

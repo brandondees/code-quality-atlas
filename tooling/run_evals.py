@@ -36,6 +36,18 @@ OPENAI_HOST = "http://localhost:8080"  # llama-server default
 # reason.) Revisit if a skill's assembled context outgrows this — `len(
 # assemble_context(skill_dir)) // 4` estimates its tokens; bump well above the
 # largest before it can clip.
+#
+# `num_ctx` is the budget for the prompt *and* the generation, so sizing it
+# against the assembled context alone understates it. Measured 2026-08-08 on
+# `reviewing-concurrency-and-async`: adding ~766 tokens to `examples.md` took
+# the assembled context from ~3.2k to ~4.0k, and one scenario that had answered
+# in ~800 tokens instead ran away to 7,300+ and crossed the ceiling
+# (`truncated = 1` in llama-server's slot log) rather than finishing. The
+# failure is deterministic — the same prompt reproduces it — and it surfaces to
+# the caller only as a request timeout, so a re-gate reads it as a dead
+# scenario rather than as a window that is too small. When editing a lens's
+# `examples.md`, re-check this ceiling against prompt + the longest generation
+# the suite provokes, not against the prompt.
 OLLAMA_NUM_CTX = 8192
 
 _REVIEWER_DIRECTIVE = (
