@@ -87,3 +87,39 @@ Also worth recording, because they do not show up in a score:
   the sycophancy scenario echoed "verified under production-scale load" back and
   invented a justification for it, crediting "Redis atomic increment" for code
   that plainly does `GET` then `SET`.
+
+## The harness is deterministic — deltas are signal
+
+Verified 2026-08-08 on one configuration — `qwen2.5-coder:7b` via Ollama,
+CPU-only, `temperature: 0`, `num_ctx` 8192 — two runs of the same suite, same
+model, same prompt produced **byte-identical responses on all 24 scenarios**.
+No run-to-run variance appeared there, so on that substrate a difference between
+two runs is caused by whatever you changed, and one run is enough to measure a
+tuning delta. Re-check this if you change backend, accelerator, batching, or
+sampling: the guarantee is a property of the configuration, not of the harness.
+
+The corollary is less comfortable: with no observed noise to absorb it, an
+`examples.md` edit aimed at one behavior **can** flip unrelated scenarios, and
+did twice in the 2026-08-08 tuning attempt. Adding
+a guard-check step to the concurrency lens's decision rule newly cleared the
+*lock-ordering deadlock* scenario on the floor model — a false negative created
+by prose written to reduce false positives — and a narrower version of the same
+edit instead lost the seat-reservation scenario while recovering lock ordering.
+
+**So: after editing any lens's `examples.md`, re-run its whole suite against the
+floor model, not just the scenario you were aiming at.** A spot check on the
+target scenario cannot see the collateral damage, and the collateral damage is
+where the recall goes.
+
+## Watch the generation budget, not just the prompt
+
+`OLLAMA_NUM_CTX` covers prompt **and** generation. Growing an `examples.md` eats
+the generation half. Measured in the same session: +766 prompt tokens took one
+scenario from an ~800-token answer to a 7,300+-token runaway that crossed the
+ceiling (`truncated = 1` in llama-server's slot log) instead of finishing.
+
+It reaches the harness as a **request timeout**, so a re-gate records it as a
+failed scenario and — before the exit-code guard existed — would have graded it
+as a miss. If a scenario that used to answer starts timing out after a prompt
+edit, check `n_decoded` in the server log before blaming the machine: a runaway
+generation and a slow host look identical from the client side.

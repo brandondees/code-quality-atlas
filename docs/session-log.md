@@ -2465,3 +2465,43 @@ So: no swap, and a sharp follow-up instead of a vague one — **is `qwen3:8b`'s 
 **Two harness fixes the run forced**, both guard-verified to fail on the reverted code. `run_skill_evals` now records a failed scenario and continues rather than aborting — the reliability gap left open on 2026-07-27, which had forced that session onto a per-scenario diagnostic script. The load-bearing half is that `main` **exits non-zero** when any scenario failed: an errored scenario's empty response is byte-identical to a model answering nothing. Not hypothetical — the first `qwen3:8b` attempt lost 15 of 24 scenarios to `llama-server ... signal: killed` (the 4.7 GB model still resident while a 9 GB one loaded on a 15.7 GiB host; `OLLAMA_MAX_LOADED_MODELS=1` fixes it) and would have been graded as 15 silent misses. The lesson generalizes past this harness: **an empty result and a result of "nothing" are the same bytes, and only the error channel tells them apart.**
 
 391 tests pass; the rest of the pipeline stays clean.
+
+### 2026-08-08 (same day, follow-up) — Q21: two tuning variants both trade recall for precision, and the harness runs deterministically
+
+The re-gate entry above ended with one sharp question rather than a vague one: over-flagging is the failure mode most likely to respond to `examples.md` work, so if discipline tuning recovered `qwen3:8b`'s 1/4 precision at unchanged recall, the baseline swap became a clear call. Answered by measurement, for the two variants tried: **neither improved the trade-off.**
+
+Two variants, each run against **both** models — the file is shared, so a tuning that helps the candidate and breaks the floor is not a tuning:
+
+| variant | prompt Δ | `qwen3:8b` | recall | precision | floor |
+|---|---|---|---|---|---|
+| baseline | — | 16/24 | 15/20 | 1/4 | 10/24 |
+| broad (3 guards) | +766 tok | 15/24 | 13/20 | 2/4 | 9/24 |
+| narrow (tolerance only) | +172 tok | 16/24 | 14/20 | 2/4 | 8/24 |
+
+Each buys one precision scenario and pays at least one recall scenario. Two points do not prove no prompt could do better, but they were enough to stop — and the mechanism below is why a third variant seems unlikely to differ. Reverted.
+
+**The diagnostic that settled it.** On the lock-held scenario, `qwen3:8b`'s response **never mentions the lock** — not before tuning, not after either variant. It isn't failing to apply a guard rule, it's failing to read the code, and no instruction fixes a reviewer that doesn't look. Consistent with which guard transferred: *stated tolerance* worked (and the model echoed the rule back — "explicitly tolerated as part of the design"), while *store atomicity* and *lock scope* did nothing. The one that landed is satisfiable by reading a comment; the two that failed require tracing what the code guarantees. Same text-over-mechanism split the four-model comparison found one level up.
+
+**The tuning manufactured a false negative — the sharper lesson.** The broad variant's lock bullet said that if the read, decision and write sit inside one `lock_for(key)`, no caller can interleave. True about mutual exclusion, silent about deadlock. The floor model generalized it to *locks present ⇒ safe* and newly cleared the **lock-ordering deadlock** scenario it had been passing. Prose written to suppress false positives created a false negative on the very construct it names — worth remembering before the next lens gets a discipline paragraph.
+
+**The harness ran deterministically here, and that cuts both ways.** Two runs of the same suite, model, prompt and host: **byte-identical on all 24 scenarios** (`qwen2.5-coder:7b`, Ollama, CPU-only, `temperature: 0`, `num_ctx` 8192). Scoped to that configuration — another backend or accelerator could differ — it supports the campaign's method: single-run tuning deltas on this substrate are signal, so the earlier `examples.md` results stand. The cost is that with no observed noise, every difference is real: edits aimed at one behavior flipped unrelated scenarios twice here (broad lost lock-ordering; narrow lost seat-reservation while recovering lock-ordering). So `examples.md` tuning is not safely local, and a spot check on the targeted scenario cannot see where the recall went.
+
+**A wrong intermediate diagnosis, corrected by measurement rather than argument.** When a scenario that answered in 150s started timing out at 880s under the broad prompt, I attributed it to the prompt growth; when a *different* scenario hung under the shorter narrow prompt, I corrected that to the documented host-contention class. Both readings were guesses from the client side, where a runaway generation and a slow host are indistinguishable. The server's own counters settled it: `n_decoded = 7308` at 3.11 t/s with `truncated = 1` — a deterministic runaway that crosses the 8192 ceiling instead of finishing, reproducible at a 2,400s timeout. The general lesson is the same one this PR's exit-code guard encodes: **when a result is missing, find out whether it never happened or merely never arrived — the two look identical from outside.** `OLLAMA_NUM_CTX`'s comment now says that it budgets prompt *and* generation, which its previous sizing advice did not account for.
+
+Net: baseline `examples.md` unchanged, floor of record unchanged, `qwen3:8b` not adopted. 392 tests pass; the rest of the pipeline stays clean.
+
+### 2026-08-09 — Q22 opened: does the atlas's own review pass execute the checks it cites?
+
+Recorded after a second consecutive PR where the atlas review approved a change, **named the exact rule that would have caught the defect, and cleared it anyway** — with an external reviewer finding it minutes later both times.
+
+On [#215](https://github.com/brandondees/code-quality-atlas/pull/215) the `tracing-correctness-and-invariants` pass listed "empty-string error message" among the edge cases it had checked on `ScenarioRun.error`, and concluded "No defect found". `str(RuntimeError())` is `""`, so the truthiness check read a failed scenario as clean and `main` exited 0 — the guard failing in precisely the way it was added to prevent. On [#216](https://github.com/brandondees/code-quality-atlas/pull/216) the pass reported checking the diff against `docs/research/README.md`'s standing authoring rules and finding "no summary/content disagreement", while the diff carried three absolutes — "Measured — no", "The harness is deterministic", "an edit *will* flip unrelated scenarios" — which rule 1's third habit exists to catch by name ("is this true **unconditionally**? Superlatives and mechanism claims are the tell").
+
+**Both times lens selection was right and the rule was named; the execution of the named check is what failed.** That is a narrower and more interesting defect than "the review missed something" — nothing in the current pass distinguishes *citing* a rule from *applying* it, and the two produce identical output. The sketch of a fix is a required falsification *attempt* on any rule the review claims to have applied (for rule 1: enumerate the diff's absolutes, try to find one counterexample each), but where it lives and whether it is worth the ceremony are left open.
+
+The entry names a confound rather than assuming past it: **both instances were the atlas reviewing a PR authored in the same session.** A reviewer carrying the author's prior is a different failure from a weak lens and would want a different fix, and two same-shaped data points cannot separate them. A third instance — ideally on a diff the atlas did not author — is what would settle it, so the recorded next step is to keep watching rather than to build.
+
+Two instances is the threshold for writing a pattern down, not for changing the suite. Deliberately no suite change here.
+
+One more thing worth saying out loud: both defects *were* caught, by external reviewers running alongside the atlas on the same PRs. The routing block has always mandated combining review sources non-exclusively rather than letting one win; that argument is now empirical.
+
+**A placement drift noticed, not fixed.** Q21's follow-up entries — including the four added this session — have been appended at the end of `open-questions.md`, which puts them physically under Q8's heading rather than Q21's (the drift predates this session; the wave-2 accessibility entry from 2026-08-07 sits there too). Q22 is placed correctly, as a `### Q22` heading at the top of the Open questions section. Relocating the Q21 tail is a ~90-line move with no content change and belongs in its own PR, where the diff is reviewable as a pure move.

@@ -38,6 +38,10 @@ design approved & **✅ built 2026-06-26, PR #80**; see the Q20 section below),
 which also resolved D16.
 
 **Genuinely still open (undecided):**
+Q22 (does the atlas's own review pass *execute* the checks it cites — two
+consecutive PRs where it named the rule that would have caught a defect and
+cleared it anyway, both then found by an external reviewer; recorded as a
+pattern, no suite change yet),
 Q21 (suite-wide eval comprehensiveness — risk-tiered rollout + the opt-in `eval_min`
 mechanism ✅ built 2026-07-18; **all five floor-tier lenses now hardened**
 (`sweeping-for-security`, `tracing-correctness-and-invariants`,
@@ -136,6 +140,28 @@ cosmetic format-leak on qwen — a trailing "No findings:" sentence after real
 findings, absent on llama). Per the runbook these are model-capability limits,
 not heuristic regressions, so no tuning was applied. See the session-log entry
 of the same date.
+
+### Q22 — Does the atlas's own review pass execute the checks it cites?  *(new, 2026-08-09)*
+
+**Trigger.** Two consecutive PRs where the atlas review approved a change, named the exact rule that would have caught the defect, and cleared it anyway — with an external reviewer finding it minutes later in both cases.
+
+| PR | What the atlas pass said | What was actually there |
+|---|---|---|
+| [#215](https://github.com/brandondees/code-quality-atlas/pull/215) | `tracing-correctness-and-invariants` listed **"empty-string error message"** among the edge cases it checked on `ScenarioRun.error` and `main`'s failed-scenario detection → "No defect found" | `str(RuntimeError())` is `""`, so `if r.error:` read a failed scenario as clean and `main` exited 0 — the guard failing silently in the way it existed to prevent |
+| [#216](https://github.com/brandondees/code-quality-atlas/pull/216) | Reviewed the diff against "this repo's standing authoring rules in `docs/research/README.md`" → "no summary/content disagreement found" | Three absolutes in the diff — "Measured — no", "The harness is deterministic", "an edit *will* flip unrelated scenarios" — which rule 1's third habit ("is this true **unconditionally**? Superlatives and mechanism claims are the tell") exists to catch |
+
+**The question.** In both cases **lens selection was correct and the rule was named**; what failed was the execution of the named check. Nothing in the current pass distinguishes *citing* a rule from *applying* it, and a review that reports "checked X, found nothing" is indistinguishable in its output from one that genuinely tried to falsify X. Does the suite need a step that forces the attempt?
+
+**Open sub-questions.**
+
+- **Is this self-review-specific?** Both instances were the atlas reviewing a PR authored in the same session. A reviewer carrying the author's prior that the work is correct is a different failure from a lens being weak, and would call for a different fix (an adversarial framing for own-PR review) than a checklist change. Two same-shaped data points cannot separate these; a third instance on someone else's diff would.
+- **What would the step look like?** The shape suggested on #216: for any rule the review claims to have applied, require a *falsification attempt* with its result recorded — for rule 1, enumerate the absolutes in the diff and try to find one counterexample each, rather than concluding the text is consistent. That is cheap for rule 1 (superlatives are greppable) and much less mechanical for "did you consider the empty-string case".
+- **Where does it live?** A checklist item in `synthesizing-review-findings`, a step in each entrypoint's bundled `reference/tool-evidence.md`, or a new shared reference — undecided, and the wrong choice adds ceremony to every review for a failure mode measured twice.
+- **How would we know it worked?** The campaign already has the instrument: eval scenarios where a named check must be *executed* rather than cited. That is an unusual scenario shape — the input is a review transcript rather than a diff — and may argue for evaluating the meta-review separately from the lenses.
+
+**Not yet a decision.** Two instances is the threshold for recording a pattern, not for changing the suite. The cheapest next step is to keep watching: if a third lands, especially on a diff the atlas did not author, that settles the self-review question above and justifies building something.
+
+**Worth stating plainly:** both defects were caught, by external reviewers, on PRs where the atlas ran alongside them. That is the routing block's non-exclusive combination working exactly as designed — the argument for it is now empirical rather than a matter of principle.
 
 ### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 8 of 35 done, wave-1-first sub-wave complete, **wave 2 complete — waves 1 and 2 are now hardened end to end**) *(new, 2026-06-27)*
 
@@ -597,3 +623,22 @@ The control reproduced (10/24 vs the recorded 9/24 — one scenario of variance 
 **Disposition: do not swap the baseline on this evidence — the trade is recall bought with precision, and for a review tool that is the wrong direction.** A missed bug costs one bug; a confident false conviction on correct code costs trust in every subsequent finding, which is exactly what the shared reviewer-discipline text exists to prevent. **The sharp, cheap follow-up is whether `qwen3:8b`'s precision is tunable**: over-flagging is the failure mode most likely to respond to `examples.md` work, the lens already ships good→no-finding examples, and both Qwen2.5/3.5 models honor them while `qwen3:8b` does not. If discipline tuning recovers its precision without costing its recall, the baseline-swap case becomes strong; if it does not, the 7B-class ceiling is confirmed a third time and the honest answer is that this lens needs a model tier no self-hosted small model reaches. Either outcome is worth more than another lens hardened against an unmeasured floor.
 
 **Harness changes this run forced** (`tooling/run_evals.py`, two new tests, both verified to fail on the reverted code): `ScenarioRun` gained an `error` field and `run_skill_evals` records a failed scenario and continues instead of aborting the suite — the reliability gap the 2026-07-27 entry left open, which had forced that session to fall back to a per-scenario diagnostic script. The load-bearing half is that `main` now **exits non-zero** when any scenario failed: a failed scenario's empty response is byte-identical to a model answering nothing, so a partial run grades as silent misses. That is not hypothetical — 15 of 24 scenarios in this session's first `qwen3:8b` attempt died with `llama-server ... signal: killed` (the 4.7 GB model still resident while a 9 GB one loaded on a 15.7 GiB host) and would have scored as 15 misses had the `error` field not distinguished them.
+
+**Follow-up (2026-08-08, same day): is `qwen3:8b`'s precision tunable? Two variants measured; neither improved the trade-off.** The re-gate above left one sharp question: over-flagging is the failure mode most likely to respond to `examples.md` work, so if discipline tuning could recover `qwen3:8b`'s 1/4 precision without costing its 15/20 recall, the baseline-swap case became strong. Two variants were authored and each measured against **both** the candidate and the floor model (the file is shared, so a tuning that helps one and breaks the other is not a tuning):
+
+| variant | prompt Δ | `qwen3:8b` | recall | precision | `qwen2.5-coder:7b` |
+|---|---|---|---|---|---|
+| baseline | — | 16/24 | 15/20 | 1/4 | 10/24 |
+| broad — three guards (store atomicity, lock scope, stated tolerance) | +766 tok | 15/24 | 13/20 | 2/4 | 9/24 |
+| narrow — stated tolerance only | +172 tok | 16/24 | 14/20 | 2/4 | 8/24 |
+
+Each of the two buys one precision scenario and pays at least one recall scenario. That is not proof that no prompt could do better — two points do not describe a curve — but it is enough to stop: **reverted; the baseline stands and `qwen3:8b` is not adopted.** The mechanism below is the reason not to expect a third variant to fare differently.
+
+**Only one of the three guards transferred, and the pattern says why.** The *stated tolerance* guard worked, and the model's own words show it landing ("the race condition is explicitly tolerated as part of the design"). The *store atomicity* and *lock scope* guards did not: `qwen3:8b` still convicts the conditional-`UPDATE`-plus-rowcount scenario and the lock-held scenario. The diagnostic is that on the lock scenario its response **never mentions the lock**, before or after either tuning. It is not failing to apply a guard rule; it is failing to read the code, and no instruction fixes a reviewer that does not look. The guard that transferred is the one satisfiable by *reading a comment*; the two that failed require tracing what the code mechanically guarantees — the same text-matching-over-mechanism split the four-model comparison showed one level up.
+
+**The tuning also manufactured a false negative, which is the sharper warning.** The broad variant's lock bullet — "if the read, the decision, and the write all sit inside one `async with lock_for(key)`, a second caller cannot interleave between them" — is true about mutual exclusion and silent about deadlock. The floor model generalized it to *locks present ⇒ safe* and newly cleared the **lock-ordering deadlock** scenario it had passed for months. Prose written to reduce false positives created a false negative on the exact construct it names.
+
+**Two harness facts established in the process, both now in [`runbooks/cross-model-re-gate.md`](runbooks/cross-model-re-gate.md).**
+
+- **The harness ran deterministically in this configuration.** Two runs of the same suite, same model, same prompt, same host produced **byte-identical responses on all 24 scenarios** — `qwen2.5-coder:7b` via Ollama, CPU-only, `temperature: 0`, `num_ctx` 8192. No run-to-run variance was observed there, which supports the campaign's method: a single-run tuning delta on this substrate is signal rather than noise, so the earlier `examples.md` tuning results need no re-running. The claim is scoped to that configuration; a different backend, batching setup, or accelerator could reintroduce variance and would need its own check. Its corollary is the cost: with no observed noise to absorb it, an edit aimed at one behavior *can* flip unrelated scenarios, and did twice here (the broad variant lost lock-ordering, the narrow one lost seat-reservation while recovering it). **After editing any lens's `examples.md`, re-run its whole suite against the floor model, not just the scenario you were aiming at.**
+- **`num_ctx` budgets prompt *and* generation.** Adding 766 prompt tokens took one scenario from an ~800-token answer to a 7,300+-token runaway that crossed the 8192 ceiling (`truncated = 1` in llama-server's slot log) instead of finishing — deterministic, reproducible at a 2,400s timeout, and visible to the harness only as a request timeout. An intermediate diagnosis in this session blamed host contention, on the strength of the hang moving to a different scenario under a different prompt; the server-side `n_decoded` counter settled it as runaway generation. Worth stating because the two are indistinguishable from the client side.
