@@ -695,6 +695,11 @@ skills:
       builds, cache correctness.
     shape: repo
     wave: 3
+    # Q21: first wave-3 lens hardened, and the first suite re-gated against the
+    # floor of record in the same session it was authored (see
+    # runbooks/cross-model-re-gate.md). Same A-E adversarial taxonomy, raised
+    # from D8's 3-scenario baseline. See open-questions.md Q21.
+    eval_min: 28
     built_from:
       - { category: 19, source: docs/research/cluster-5-verification.md#19 }
       - { category: 26, source: docs/research/cluster-5-verification.md#26 }
