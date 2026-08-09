@@ -2505,3 +2505,21 @@ Two instances is the threshold for writing a pattern down, not for changing the 
 One more thing worth saying out loud: both defects *were* caught, by external reviewers running alongside the atlas on the same PRs. The routing block has always mandated combining review sources non-exclusively rather than letting one win; that argument is now empirical.
 
 **A placement drift noticed, not fixed.** Q21's follow-up entries — including the four added this session — have been appended at the end of `open-questions.md`, which puts them physically under Q8's heading rather than Q21's (the drift predates this session; the wave-2 accessibility entry from 2026-08-07 sits there too). Q22 is placed correctly, as a `### Q22` heading at the top of the Open questions section. Relocating the Q21 tail is a ~90-line move with no content change and belongs in its own PR, where the diff is reviewable as a pure move.
+
+### 2026-08-09 (same day, follow-up) — Q21 wave 3 opens: `auditing-config-and-build-hygiene` 3 → 28, and the first re-gate that wasn't deferred
+
+Two separable changes this pass, kept to one commit each: relocating Q21's follow-up entries under their own heading (a verified pure move — sorted line multiset identical, 88/88 symmetric), then the first wave-3 hardening.
+
+**Picked by the same criterion as wave 2's picks**: 25 owned checks against 3 scenarios, 0.12 per check, the widest scope-to-coverage gap left in the wave. **3 originals + A 2 + B 13 + C 2 + D 5 + E 3 = 28**, 108 assertions, reconciled by script; floor gates in both directions.
+
+**A had to prove something different for a repo-shaped lens, and it paid off immediately.** Every original scenario is a *pre-digested scan inventory* — `"ci.yml: uses X; Dockerfile: ENV Y"`. A real audit meets files. So A supplies a raw `Dockerfile` plus `docker-compose.yml`, and a GitLab pipeline where `allow_failure: true` is `continue-on-error` under another name.
+
+**The re-gate ran in this session rather than being deferred** — the first time in the campaign, using the recipe from `runbooks/cross-model-re-gate.md`. `qwen2.5-coder:7b`: **13/28** — recall 10/24, precision 3/4, 9.2 minutes, no errors. Originals 3/3, A 1/2, B 5/13, C 1/2, **D 1/5**, E 2/3. Three originals passing 3/3 is the clearest possible statement of why three scenarios were never a bar.
+
+**The A-group miss is a finding about the lens, not the model.** Handed a raw `Dockerfile` and compose file with a committed database password, an unpinned base image, `npm install` with no lockfile, and a root user, the model answered *"No findings: config and build hygiene are sound."* The lens had only ever been evaluated on scan digests and turns out to depend on them; pointed at actual files it goes quiet. No suite built solely from digests could have surfaced that, and it is a deployment concern rather than an eval artifact. This is the strongest argument yet for A groups being about *input shape*, not just language or stack coverage.
+
+**One result worth acting on beyond this lens.** E's miss is the **third** instance of the same gap: on a scan containing only source metrics, the model returned the healthy-scan sentence — asserting config and build hygiene were checked when no such artifact was present. The accessibility and performance suites pin the same not-applicable-vs-"No findings" distinction and fail it too. Three lenses failing one shared-prose distinction points at the common reviewer-discipline text being under-specified, not at three independent lens gaps. Logged here as the candidate for the next shared-text change rather than fixed inline, since a shared-prose edit affects every lens's re-gate and — per the 2026-08-08 determinism finding — cannot be assumed local.
+
+D at 1/5 repeats the campaign's most consistent result. Its single pass is the interesting one: on the "checkov reports 0 failures" scenario it flagged both defects the scanner was configured to skip, arriving at the right answer by ignoring the claim rather than rebutting it.
+
+392 tests pass; the rest of the pipeline stays clean.

@@ -57,8 +57,10 @@ left in the wave: one baseline suite covering two whole domains) followed by
 **`reviewing-test-quality`** (5 → 24 — the lens whose false negatives compound,
 since a missed test-quality defect lets every other lens's regression net rot)
 and closed 2026-08-08 by **`reviewing-performance-and-efficiency`** (4 → 26),
-which leaves **every lens in waves 1 and 2 hardened, 11 of 11**; 27 preference-tier
-lenses remain, all in waves 3-6),
+which leaves **every lens in waves 1 and 2 hardened, 11 of 11**; wave 3 opened
+2026-08-09 with **`auditing-config-and-build-hygiene`** (3 → 28, and the first
+suite re-gated against the floor of record in the same session it was authored —
+13/28, which is what a bar looks like); 26 preference-tier lenses remain),
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
@@ -163,7 +165,7 @@ of the same date.
 
 **Worth stating plainly:** both defects were caught, by external reviewers, on PRs where the atlas ran alongside them. That is the routing block's non-exclusive combination working exactly as designed — the argument for it is now empirical rather than a matter of principle.
 
-### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 8 of 35 done, wave-1-first sub-wave complete, **wave 2 complete — waves 1 and 2 are now hardened end to end**) *(new, 2026-06-27)*
+### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 9 of 35 done, wave-1-first sub-wave complete, wave 2 complete, **wave 3 opened 2026-08-09 — and its first suite is the first re-gated against the floor of record in the session that authored it**) *(new, 2026-06-27)*
 
 **Trigger.** Building the G30 threat-modeling lens ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)) surfaced that for high-stakes lenses the dangerous failure mode is the **false negative**, and that 3–4 happy-path scenarios don't probe it. That spec's §5 introduces a **thorough, adversarial, false-negative-weighted** eval design — ~21 scenarios across core-firing / per-axis-coverage / detect-and-route / **red-team** / precision groups, plus a red-team generation pass and a hardened cross-model re-gate.
 
@@ -362,6 +364,28 @@ Each of the two buys one precision scenario and pays at least one recall scenari
 
 - **The harness ran deterministically in this configuration.** Two runs of the same suite, same model, same prompt, same host produced **byte-identical responses on all 24 scenarios** — `qwen2.5-coder:7b` via Ollama, CPU-only, `temperature: 0`, `num_ctx` 8192. No run-to-run variance was observed there, which supports the campaign's method: a single-run tuning delta on this substrate is signal rather than noise, so the earlier `examples.md` tuning results need no re-running. The claim is scoped to that configuration; a different backend, batching setup, or accelerator could reintroduce variance and would need its own check. Its corollary is the cost: with no observed noise to absorb it, an edit aimed at one behavior *can* flip unrelated scenarios, and did twice here (the broad variant lost lock-ordering, the narrow one lost seat-reservation while recovering it). **After editing any lens's `examples.md`, re-run its whole suite against the floor model, not just the scenario you were aiming at.**
 - **`num_ctx` budgets prompt *and* generation.** Adding 766 prompt tokens took one scenario from an ~800-token answer to a 7,300+-token runaway that crossed the 8192 ceiling (`truncated = 1` in llama-server's slot log) instead of finishing — deterministic, reproducible at a 2,400s timeout, and visible to the harness only as a request timeout. An intermediate diagnosis in this session blamed host contention, on the strength of the hang moving to a different scenario under a different prompt; the server-side `n_decoded` counter settled it as runaway generation. Worth stating because the two are indistinguishable from the client side.
+
+**Wave-3 hardening #1: `auditing-config-and-build-hygiene`** (`eval_min: 28`, up from the D8 baseline of 3) — 2026-08-09. Opens wave 3, picked by the same scope-to-coverage criterion as the wave-2 picks: **25 owned checks against 3 scenarios** (0.12 per check) is the widest gap left in the wave. **This is the first suite re-gated against the floor of record in the same session it was authored** — every prior entry ends with "cross-model re-gate: deferred", which [`runbooks/cross-model-re-gate.md`](runbooks/cross-model-re-gate.md) showed was a setup gap rather than an environment limit.
+
+**A — shape-flexible firing (2), and this group earned the pass by itself.** Every original scenario is a *pre-digested scan inventory* ("ci.yml: uses X; Dockerfile: ENV Y"), so A supplies what a real audit actually meets: **raw file contents** (a `Dockerfile` plus a `docker-compose.yml`) and a **GitLab pipeline**, where `allow_failure: true` is the same soft-failed gate as `continue-on-error` under another name.
+
+**B — per-axis coverage (13).** One per owned check the originals never reached: workflow injection via `${{ }}` into `run:`, `permissions: write-all` alongside one unpinned action among SHA-pinned ones, container hygiene (`:latest`, `privileged`, a mounted docker socket, no limits), cloud misconfig with no `plan` step or IaC linter, rebuild-per-environment instead of build-once-and-promote, lazily read config plus an environment-specific code branch, a non-portable build script (absolute path, BSD `sed`, pinned `TZ`), a flaky required job whose retries mask nondeterminism, the **preference-tunable advisory tier** (coverage/benchmark/complexity as `route: implementer`, not a floor-tier block), absent pre-commit hooks, secrets echoed into world-readable logs, a seven-month branch against a documented trunk-based practice, and flag hygiene across three states (healthy/ownerless/dead).
+
+**C — delegate/escalate (2).** An unfixed high CVE where the build hygiene is sound and the verdict belongs to `auditing-dependencies-and-supply-chain`; and a wildcard IAM grant surfaced here with the authorization verdict escalated to `sweeping-for-security`, on a scan whose IaC gates are otherwise healthy.
+
+**D — adversarial / red-team (5).** A `continue-on-error` justified as "temporary, tracked in OPS-441" where the line is 26 months old and the ticket is closed won't-fix; a 340-line workflow refactor that is genuinely mechanical in 334 lines and adds `if: github.actor != 'dependabot[bot]'` to the test job in one of the rest; an in-scan "reviewed and approved, do not re-flag" over a deploy key copied into an image; **"checkov reports 0 failures, so our IaC is covered"** where `.checkov.yaml` sets `--skip-check CKV_AWS_*`, so zero is the expected output whatever the Terraform contains; and a SHA-pinned action whose SHA resolves only on an individual's fork — **immutability is not provenance**.
+
+**E — precision (3).** `continue-on-error` used *correctly* on an informational benchmark that branch protection does not require — telling it from a disabled gate needs reading the protection list, not pattern-matching the string; a coverage advisory correctly suppressed by the repo's `.code-quality-atlas/preferences.md`; and a source-metrics-only scan that must produce the **one-line not-applicable** rather than the healthy-scan sentence.
+
+**The accounting, reconciled by script:** **3 originals + A 2 + B 13 + C 2 + D 5 + E 3 = 28.** 108 assertions. The floor gates in both directions — at 27 scenarios `tooling.cli eval` exits 1 naming the floor, restored at 28 it exits 0.
+
+**Floor-of-record re-gate (`qwen2.5-coder:7b`, 28 scenarios, 9.2 min, no errors): 13/28 — recall 10/24, precision 3/4.** The suite discriminates, and the three originals pass **3/3**, which is precisely why three scenarios were never a bar. By group: originals 3/3, A 1/2, B 5/13, C 1/2, **D 1/5**, E 2/3.
+
+**The single most valuable result is the A-group miss, and it is a finding about the lens rather than about the model.** Given a raw `Dockerfile` and `docker-compose.yml` containing a committed database password, an unpinned base image, `npm install` with no lockfile, and a container running as root, the model returned *"No findings: config and build hygiene are sound."* Every scenario the lens had ever been evaluated on was a summarised scan digest, and it turns out to depend on that summary — pointed at the files an audit actually encounters, it goes quiet. A suite built only from digests could not have surfaced this, and it is a deployment concern, not an artifact of the eval.
+
+**D at 1/5 repeats the campaign's most consistent finding** — adversarial resistance is where small models fail hardest. Its one pass is instructive: on the checkov scenario it flagged both defects the scanner was configured to skip, reaching the right answer by *ignoring* the claim rather than rebutting it.
+
+**E's miss is the third instance of one specific gap.** On the source-metrics-only scan the model answered with the healthy-scan sentence, asserting that config and build hygiene were checked and sound when no such artifact was present. The accessibility and performance suites pin the same distinction and it fails there too. Three lenses failing the same shared-prose distinction argues the not-applicable instruction is under-specified in the common reviewer-discipline text, not that three lenses each need their own fix — a candidate for the next shared-text change rather than a per-lens tuning.
 
 ### Q20 — Too many top-level skills: collapse to a few entrypoints + nested disclosure?  → RESOLVED (built, PR #80) *(new, 2026-06-25)*
 
