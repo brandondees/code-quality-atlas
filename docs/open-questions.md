@@ -38,6 +38,10 @@ design approved & **✅ built 2026-06-26, PR #80**; see the Q20 section below),
 which also resolved D16.
 
 **Genuinely still open (undecided):**
+Q22 (does the atlas's own review pass *execute* the checks it cites — two
+consecutive PRs where it named the rule that would have caught a defect and
+cleared it anyway, both then found by an external reviewer; recorded as a
+pattern, no suite change yet),
 Q21 (suite-wide eval comprehensiveness — risk-tiered rollout + the opt-in `eval_min`
 mechanism ✅ built 2026-07-18; **all five floor-tier lenses now hardened**
 (`sweeping-for-security`, `tracing-correctness-and-invariants`,
@@ -136,6 +140,28 @@ cosmetic format-leak on qwen — a trailing "No findings:" sentence after real
 findings, absent on llama). Per the runbook these are model-capability limits,
 not heuristic regressions, so no tuning was applied. See the session-log entry
 of the same date.
+
+### Q22 — Does the atlas's own review pass execute the checks it cites?  *(new, 2026-08-09)*
+
+**Trigger.** Two consecutive PRs where the atlas review approved a change, named the exact rule that would have caught the defect, and cleared it anyway — with an external reviewer finding it minutes later in both cases.
+
+| PR | What the atlas pass said | What was actually there |
+|---|---|---|
+| [#215](https://github.com/brandondees/code-quality-atlas/pull/215) | `tracing-correctness-and-invariants` listed **"empty-string error message"** among the edge cases it checked on `ScenarioRun.error` and `main`'s failed-scenario detection → "No defect found" | `str(RuntimeError())` is `""`, so `if r.error:` read a failed scenario as clean and `main` exited 0 — the guard failing silently in the way it existed to prevent |
+| [#216](https://github.com/brandondees/code-quality-atlas/pull/216) | Reviewed the diff against "this repo's standing authoring rules in `docs/research/README.md`" → "no summary/content disagreement found" | Three absolutes in the diff — "Measured — no", "The harness is deterministic", "an edit *will* flip unrelated scenarios" — which rule 1's third habit ("is this true **unconditionally**? Superlatives and mechanism claims are the tell") exists to catch |
+
+**The question.** In both cases **lens selection was correct and the rule was named**; what failed was the execution of the named check. Nothing in the current pass distinguishes *citing* a rule from *applying* it, and a review that reports "checked X, found nothing" is indistinguishable in its output from one that genuinely tried to falsify X. Does the suite need a step that forces the attempt?
+
+**Open sub-questions.**
+
+- **Is this self-review-specific?** Both instances were the atlas reviewing a PR authored in the same session. A reviewer carrying the author's prior that the work is correct is a different failure from a lens being weak, and would call for a different fix (an adversarial framing for own-PR review) than a checklist change. Two same-shaped data points cannot separate these; a third instance on someone else's diff would.
+- **What would the step look like?** The shape suggested on #216: for any rule the review claims to have applied, require a *falsification attempt* with its result recorded — for rule 1, enumerate the absolutes in the diff and try to find one counterexample each, rather than concluding the text is consistent. That is cheap for rule 1 (superlatives are greppable) and much less mechanical for "did you consider the empty-string case".
+- **Where does it live?** A checklist item in `synthesizing-review-findings`, a step in each entrypoint's bundled `reference/tool-evidence.md`, or a new shared reference — undecided, and the wrong choice adds ceremony to every review for a failure mode measured twice.
+- **How would we know it worked?** The campaign already has the instrument: eval scenarios where a named check must be *executed* rather than cited. That is an unusual scenario shape — the input is a review transcript rather than a diff — and may argue for evaluating the meta-review separately from the lenses.
+
+**Not yet a decision.** Two instances is the threshold for recording a pattern, not for changing the suite. The cheapest next step is to keep watching: if a third lands, especially on a diff the atlas did not author, that settles the self-review question above and justifies building something.
+
+**Worth stating plainly:** both defects were caught, by external reviewers, on PRs where the atlas ran alongside them. That is the routing block's non-exclusive combination working exactly as designed — the argument for it is now empirical rather than a matter of principle.
 
 ### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 8 of 35 done, wave-1-first sub-wave complete, **wave 2 complete — waves 1 and 2 are now hardened end to end**) *(new, 2026-06-27)*
 
