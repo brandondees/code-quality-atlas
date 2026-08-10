@@ -200,13 +200,66 @@ def _keyword_categories(line: str) -> frozenset[str]:
     return frozenset(cats)
 
 
-def _line_candidates(line: str, categories: frozenset[str]) -> list[_Candidate]:
+def _span_distance(a_start: int, a_end: int, b_start: int, b_end: int) -> int:
+    """Character gap between two non-overlapping spans (0 if they touch or
+    overlap, which shouldn't happen for a number and a keyword in practice)."""
+    if a_end <= b_start:
+        return b_start - a_end
+    if b_end <= a_start:
+        return a_start - b_end
+    return 0
+
+
+def _nearest_keyword_category(line: str, start: int, end: int) -> frozenset[str]:
+    """Category of whichever tracked keyword occurrence is positionally
+    *nearest* to a candidate's span on the same line, rather than "any
+    tracked keyword present anywhere on the line."
+
+    Round-2 self-review finding on PR #220: a line mentioning both an audit
+    and a skill/lens keyword -- exactly `docs/collapsed-entrypoints-and-
+    depth-modes.md`'s "diff lenses -> ...; the 10 audits -> ..." line, which
+    this fix itself edits -- would otherwise grant every number on that line
+    the union of both categories, letting a repo-shaped-audit number quietly
+    validate against the lens/total count too (the same false-pass shape
+    issue #219 and round 1's finding both targeted, reopened at line
+    granularity instead of file granularity)."""
+    best_dist: int | None = None
+    best_cats: set[str] = set()
+    for cat, kw_re in (("skill", _SKILL_KEYWORD_RE), ("audit", _AUDIT_KEYWORD_RE)):
+        for m in kw_re.finditer(line):
+            dist = _span_distance(start, end, m.start(), m.end())
+            if best_dist is None or dist < best_dist:
+                best_dist = dist
+                best_cats = {cat}
+            elif dist == best_dist:
+                best_cats.add(cat)
+    return frozenset(best_cats)
+
+
+def _line_candidates(
+    line: str, fallback_categories: frozenset[str] | None = None
+) -> list[_Candidate]:
     """All digit- and word-form number candidates on a single line, sorted
     by position. The two regexes match disjoint token shapes (digits vs.
-    letters) so they can't overlap."""
-    found = [_Candidate(m.start(), m.end(), m.group(), int(m.group()), categories)
+    letters) so they can't overlap.
+
+    Each candidate is tagged with the nearest tracked keyword's category on
+    this same line -- unless `fallback_categories` is given, used for the
+    tail-wrap case where the keyword lives on a *different* line entirely
+    (the "... the 39 standalone / skills (skills/)" shape), so there's no
+    same-line proximity to measure and every candidate on the anchor line
+    shares the next line's keyword category(ies) instead.
+    """
+    def categories_for(start: int, end: int) -> frozenset[str]:
+        if fallback_categories is not None:
+            return fallback_categories
+        return _nearest_keyword_category(line, start, end)
+
+    found = [_Candidate(m.start(), m.end(), m.group(), int(m.group()),
+                         categories_for(m.start(), m.end()))
              for m in _CANDIDATE_RE.finditer(line)]
-    found += [_Candidate(m.start(), m.end(), m.group(), _NUMBER_WORDS[m.group().lower()], categories)
+    found += [_Candidate(m.start(), m.end(), m.group(), _NUMBER_WORDS[m.group().lower()],
+                          categories_for(m.start(), m.end()))
               for m in _WORD_NUM_RE.finditer(line)]
     return sorted(found, key=lambda c: c.start)
 
@@ -214,18 +267,18 @@ def _line_candidates(line: str, categories: frozenset[str]) -> list[_Candidate]:
 def _wrapped_candidates(lines: list[str], i: int) -> list[_Candidate]:
     """Candidate numbers on `lines[i]` whose keyword is on this line or, for a
     tail-anchored number, the next one. Each candidate carries the keyword
-    category (skill vs. audit) of whichever line supplied its keyword, so a
-    caller can validate it against the matching count rather than any
-    tracked count."""
+    category (skill vs. audit) of whichever keyword occurrence is nearest to
+    it, so a caller can validate it against the matching count rather than
+    any tracked count."""
     line = lines[i]
     same = _KEYWORD_RE.search(line)
     following = _KEYWORD_RE.search(lines[i + 1]) if i + 1 < len(lines) else None
     if not (same or following):
         return []
     if same:
-        return _line_candidates(line, _keyword_categories(line))
+        return _line_candidates(line)
     following_cats = _keyword_categories(lines[i + 1])
-    return [c for c in _line_candidates(line, following_cats)
+    return [c for c in _line_candidates(line, fallback_categories=following_cats)
             if len(line) - c.end <= _WRAP_TAIL]
 
 
@@ -389,6 +442,27 @@ def test_wrapped_candidates_tags_audit_and_skill_claims_with_distinct_categories
     skill_line = ["This suite ships 40 lenses across the taxonomy."]
     (skill_cand,) = [c for c in _wrapped_candidates(skill_line, 0) if c.text == "40"]
     assert skill_cand.categories == frozenset({"skill"})
+
+
+def test_wrapped_candidates_uses_nearest_keyword_on_a_mixed_keyword_line():
+    """Round-2 self-review finding on PR #220: the exact line this fix
+    itself edits mentions both a skill keyword ("lenses") and an audit
+    keyword ("audits") in one sentence. Per-line (rather than per-candidate-
+    proximity) category tagging would grant every number on the line the
+    union of both categories, reopening the false-pass the fix exists to
+    close -- a mismatched audit count would validate fine as long as it
+    happened to equal the (unrelated, much farther away) lens/total count.
+    Each number must instead be tagged by whichever keyword occurrence sits
+    closest to it."""
+    line = ["fields: diff lenses -> `reviewing-a-change`; the 10 audits -> `auditing-a-repository`;"]
+    (lens_adjacent,) = [c for c in _wrapped_candidates(line, 0) if c.text == "10"]
+    assert lens_adjacent.categories == frozenset({"audit"})
+
+    # Same shape, numbers swapped, to prove it's proximity-driven and not
+    # positional (e.g. "always the second number is the audit one").
+    swapped = ["fields: diff 40 lenses -> `reviewing-a-change`; the audits -> `auditing-a-repository`;"]
+    (near_lenses,) = [c for c in _wrapped_candidates(swapped, 0) if c.text == "40"]
+    assert near_lenses.categories == frozenset({"skill"})
 
 
 def test_candidate_failure_rejects_an_audit_claim_using_the_lens_or_total_count():
