@@ -153,6 +153,16 @@ _WORD_NUM_RE = re.compile(
     r"\b(" + "|".join(re.escape(w) for w in sorted(_NUMBER_WORDS, key=len, reverse=True)) + r")\b",
     re.IGNORECASE,
 )
+# Split so a candidate's *category* -- which current count it must equal --
+# can be pinned down, not just "is some tracked keyword nearby" (issue #219
+# follow-up, CodeRabbit finding on PR #220): "skill"-category claims validate
+# against the lens/total set (the sweep's original, deliberately loose
+# either-is-fine posture for those two, unchanged); "audit"-category claims
+# must equal the repo count specifically, so a repo-shaped-audit sentence
+# that accidentally quotes the total or lens count is still caught rather
+# than passing because that number happens to be valid for something else.
+_SKILL_KEYWORD_RE = re.compile(r"\b(skills?|lens(?:es)?|zips?|uploads?)\b", re.IGNORECASE)
+_AUDIT_KEYWORD_RE = re.compile(r"\baudits?\b", re.IGNORECASE)
 _KEYWORD_RE = re.compile(r"\b(skills?|lens(?:es)?|zips?|uploads?|audits?)\b", re.IGNORECASE)
 # "33+" is a threshold phrase ("once past 33"), not a claimed current count.
 _THRESHOLD_SUFFIX = "+"
@@ -178,29 +188,45 @@ class _Candidate(NamedTuple):
     end: int
     text: str
     value: int
+    categories: frozenset[str]  # subset of {"skill", "audit"}
 
 
-def _line_candidates(line: str) -> list[_Candidate]:
+def _keyword_categories(line: str) -> frozenset[str]:
+    cats = set()
+    if _SKILL_KEYWORD_RE.search(line):
+        cats.add("skill")
+    if _AUDIT_KEYWORD_RE.search(line):
+        cats.add("audit")
+    return frozenset(cats)
+
+
+def _line_candidates(line: str, categories: frozenset[str]) -> list[_Candidate]:
     """All digit- and word-form number candidates on a single line, sorted
     by position. The two regexes match disjoint token shapes (digits vs.
     letters) so they can't overlap."""
-    found = [_Candidate(m.start(), m.end(), m.group(), int(m.group()))
+    found = [_Candidate(m.start(), m.end(), m.group(), int(m.group()), categories)
              for m in _CANDIDATE_RE.finditer(line)]
-    found += [_Candidate(m.start(), m.end(), m.group(), _NUMBER_WORDS[m.group().lower()])
+    found += [_Candidate(m.start(), m.end(), m.group(), _NUMBER_WORDS[m.group().lower()], categories)
               for m in _WORD_NUM_RE.finditer(line)]
     return sorted(found, key=lambda c: c.start)
 
 
 def _wrapped_candidates(lines: list[str], i: int) -> list[_Candidate]:
     """Candidate numbers on `lines[i]` whose keyword is on this line or, for a
-    tail-anchored number, the next one."""
+    tail-anchored number, the next one. Each candidate carries the keyword
+    category (skill vs. audit) of whichever line supplied its keyword, so a
+    caller can validate it against the matching count rather than any
+    tracked count."""
     line = lines[i]
     same = _KEYWORD_RE.search(line)
     following = _KEYWORD_RE.search(lines[i + 1]) if i + 1 < len(lines) else None
     if not (same or following):
         return []
-    return [c for c in _line_candidates(line)
-            if same or len(line) - c.end <= _WRAP_TAIL]
+    if same:
+        return _line_candidates(line, _keyword_categories(line))
+    following_cats = _keyword_categories(lines[i + 1])
+    return [c for c in _line_candidates(line, following_cats)
+            if len(line) - c.end <= _WRAP_TAIL]
 
 
 def _line_is_marked_live(lines: list[str], i: int) -> bool:
@@ -210,6 +236,44 @@ def _line_is_marked_live(lines: list[str], i: int) -> bool:
     if _LIVE_COUNT_MARKER in lines[i]:
         return True
     return i > 0 and _LIVE_COUNT_MARKER in lines[i - 1]
+
+
+def _allowed_values(categories: frozenset[str], counts: dict[str, int]) -> set[int]:
+    """The set of current counts a candidate is allowed to equal, given
+    which keyword category(ies) supplied its match. "skill"-category claims
+    (skills/lenses/zips/uploads) keep the sweep's original either-is-fine
+    posture against lens/total. "audit"-category claims must equal the repo
+    count specifically -- a candidate carrying both categories (a line
+    mentioning both, however unlikely) is valid against either set, matching
+    the union a same-line reader would allow."""
+    allowed: set[int] = set()
+    if "skill" in categories:
+        allowed |= {counts["lenses"], counts["total"]}
+    if "audit" in categories:
+        allowed |= {counts["repo"]}
+    return allowed
+
+
+def _candidate_failure(cand: _Candidate, line: str, counts: dict[str, int]) -> str | None:
+    """None if `cand` is a valid current count for its category; otherwise a
+    failure message. Shared by the full sweep and by direct unit tests, so
+    the exact logic that had a bug (CodeRabbit finding on PR #220: every
+    candidate validated against one combined {lenses, total, repo} set, so
+    an audit claim quoting the lens/total count false-passed) is what gets
+    exercised either way."""
+    if cand.end < len(line) and line[cand.end] == _THRESHOLD_SUFFIX:
+        return None
+    window = line[max(0, cand.start - 4) : min(len(line), cand.end + 4)]
+    if _ARROW_RE.search(window):
+        return None
+    allowed = _allowed_values(cand.categories, counts)
+    if cand.value in allowed:
+        return None
+    return (
+        f"{cand.value} ({cand.text!r}) is not a current count for "
+        f"{sorted(cand.categories)} {sorted(allowed)} (={counts['lenses']} lenses / "
+        f"{counts['total']} total / {counts['repo']} repo-shaped audits)"
+    )
 
 
 def test_living_docs_count_sweep():
@@ -224,7 +288,6 @@ def test_living_docs_count_sweep():
         "of the 2-digit range _CANDIDATE_RE/_WORD_NUM_RE cover -- widen them (and "
         "this range) before relying on the living-docs sweep further"
     )
-    valid = {c["lenses"], c["total"], c["repo"]}
     failures: list[str] = []
     for rel in _LIVING_COUNT_FILES:
         lines = (ROOT / rel).read_text(encoding="utf-8").splitlines()
@@ -234,17 +297,9 @@ def test_living_docs_count_sweep():
                 continue
             lineno = i + 1
             for cand in _wrapped_candidates(lines, i):
-                if cand.end < len(line) and line[cand.end] == _THRESHOLD_SUFFIX:
-                    continue
-                window = line[max(0, cand.start - 4) : min(len(line), cand.end + 4)]
-                if _ARROW_RE.search(window):
-                    continue
-                if cand.value not in valid:
-                    failures.append(
-                        f"{rel}:{lineno}: {cand.value} ({cand.text!r}) is not a current "
-                        f"count {sorted(valid)} (={c['lenses']} lenses / {c['total']} "
-                        f"total / {c['repo']} repo-shaped audits) — {line.strip()!r}"
-                    )
+                msg = _candidate_failure(cand, line, c)
+                if msg:
+                    failures.append(f"{rel}:{lineno}: {msg} — {line.strip()!r}")
     assert not failures, "stale skill/lens count(s) found by the living-docs sweep:\n" + "\n".join(
         failures
     )
@@ -318,6 +373,45 @@ def test_wrapped_candidates_ignores_single_digit_number_words():
     producing constant false positives."""
     lines = ["one lens down, two more skills to go."]
     assert _wrapped_candidates(lines, 0) == []
+
+
+def test_wrapped_candidates_tags_audit_and_skill_claims_with_distinct_categories():
+    """CodeRabbit finding on PR #220: an earlier version of the sweep
+    validated every candidate against one combined {lenses, total, repo}
+    set, so a repo-shaped-audit claim quoting the (wrong) lens/total count
+    would have false-passed just because that number happened to be valid
+    for something else. Candidates must carry which count they're actually
+    claiming, not just "some tracked count or other"."""
+    audit_line = ["The ten repo-shaped audits are the repo arm of the comprehensive tier."]
+    (audit_cand,) = [c for c in _wrapped_candidates(audit_line, 0) if c.text == "ten"]
+    assert audit_cand.categories == frozenset({"audit"})
+
+    skill_line = ["This suite ships 40 lenses across the taxonomy."]
+    (skill_cand,) = [c for c in _wrapped_candidates(skill_line, 0) if c.text == "40"]
+    assert skill_cand.categories == frozenset({"skill"})
+
+
+def test_candidate_failure_rejects_an_audit_claim_using_the_lens_or_total_count():
+    """CodeRabbit finding on PR #220, reproduced directly against
+    _candidate_failure -- the exact function the full sweep calls per
+    candidate. Before the category split, every candidate validated against
+    one combined {lenses, total, repo} set, so a repo-shaped-audit sentence
+    quoting the (wrong) lens/total count would have false-passed just
+    because that number happened to be valid for something else."""
+    counts = {"lenses": 40, "total": 43, "repo": 10}
+    line = "The 40 repo-shaped audits are the repo arm of the comprehensive tier."
+    (cand,) = [c for c in _wrapped_candidates([line], 0) if c.value == 40]
+    assert "audit" in cand.categories
+    msg = _candidate_failure(cand, line, counts)
+    assert msg is not None, "an audit claim quoting the lens count must be flagged"
+    assert "40" in msg and "[10]" in msg
+
+
+def test_candidate_failure_accepts_an_audit_claim_using_the_repo_count():
+    counts = {"lenses": 40, "total": 43, "repo": 10}
+    line = "The ten repo-shaped audits are the repo arm of the comprehensive tier."
+    (cand,) = [c for c in _wrapped_candidates([line], 0) if c.text == "ten"]
+    assert _candidate_failure(cand, line, counts) is None
 
 
 def test_line_is_marked_live_checks_this_line_and_the_previous_one():
