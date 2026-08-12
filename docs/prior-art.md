@@ -55,7 +55,7 @@ Each encodes hundreds of concrete checks — mined per-lens into each `skills/*/
 - **Accessibility:** axe-core, Pa11y, Lighthouse.
 - **Architecture:** dependency-cruiser, ArchUnit, import-linter.
 
-The rule-category mining this list originally called for has already happened inline, per lens: each `skills/*/reference/tool-rules.md` cites the tools relevant to that lens's category, down to specific rule IDs (e.g. Pylint `C0116`, Semgrep `S1135`, golangci-lint `godox`) in `reviewing-naming-and-readability/reference/tool-rules.md`. The remaining gap is a handful of tools with no citations anywhere yet — CodeClimate, Codacy, DeepSource, Qodana, Brakeman, SciTools Understand — mostly SaaS aggregators whose rule categories overlap what's already mined from the tools above.
+The rule-category mining this list originally called for has already happened inline, per lens: each `skills/*/reference/tool-rules.md` cites the tools relevant to that lens's category, down to specific rule IDs (e.g. Pylint `C0116`, SonarQube `S1135`, golangci-lint `godox`) in `reviewing-naming-and-readability/reference/tool-rules.md`. The remaining gap is a handful of tools with no citations anywhere yet — CodeClimate, Codacy, DeepSource, Qodana, Brakeman, SciTools Understand — mostly SaaS aggregators whose rule categories overlap what's already mined from the tools above.
 
 ---
 
