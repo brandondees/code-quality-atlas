@@ -43,7 +43,7 @@ Mapped to taxonomy categories. "Author's own" = present under `~/.claude/skills`
 
 ## Static analysis & review tooling (heuristic goldmine)
 
-Each encodes hundreds of concrete checks. To be expanded with *specific rules worth lifting*.
+Each encodes hundreds of concrete checks — mined per-lens into each `skills/*/reference/tool-rules.md` (see note below the list for the small remaining gap).
 
 - **General/multi-language:** SonarQube/SonarLint, Semgrep, CodeClimate, PMD, Codacy, DeepSource, Qodana.
 - **JS/TS:** ESLint (+ typescript-eslint), Biome, `eslint-plugin-security`, `eslint-plugin-jsx-a11y`.
@@ -55,7 +55,7 @@ Each encodes hundreds of concrete checks. To be expanded with *specific rules wo
 - **Accessibility:** axe-core, Pa11y, Lighthouse.
 - **Architecture:** dependency-cruiser, ArchUnit, import-linter.
 
-> **TODO:** for each tool, extract the *rule categories* that map cleanly onto a taxonomy category — those are pre-validated, real-world heuristics. The point isn't to wrap the tools, but to learn what experienced teams decided was worth flagging.
+The rule-category mining this list originally called for has already happened inline, per lens: each `skills/*/reference/tool-rules.md` cites the tools relevant to that lens's category, down to specific rule IDs (e.g. Pylint `C0116`, Semgrep `S1135`, golangci-lint `godox`) in `reviewing-naming-and-readability/reference/tool-rules.md`. The remaining gap is a handful of tools with no citations anywhere yet — CodeClimate, Codacy, DeepSource, Qodana, Brakeman, SciTools Understand — mostly SaaS aggregators whose rule categories overlap what's already mined from the tools above.
 
 ---
 
