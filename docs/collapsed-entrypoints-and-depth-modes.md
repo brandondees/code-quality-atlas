@@ -89,7 +89,7 @@ collapsed/skills/reviewing-a-change/
 ```
 
 - **Lens membership** is derived from each skill's existing `shape` and `design`
-  fields: diff lenses → `reviewing-a-change`; the 8 audits → `auditing-a-repository`;
+  fields: diff lenses → `reviewing-a-change`; the 10 audits → `auditing-a-repository`;
   `reviewing-decision-lifecycle` + design-capable (◆) lenses → `reviewing-a-decision`;
   `reviewing-artifact-conventions` + its rubrics → `reviewing-an-artifact`. A
   design-capable lens is bundled in more than one entrypoint — duplication in
