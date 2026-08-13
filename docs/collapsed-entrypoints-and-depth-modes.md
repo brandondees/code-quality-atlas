@@ -213,11 +213,12 @@ artifact detection (unchanged from D15).
   for, zero overhead until then. (Not omitted.)
 - **Collapsed `plugin.json` (resolved):** generated from a single source alongside
   `marketplace.json` (not hand-kept), to avoid drift.
-
-## Open implementation sub-questions
-
-- Command sugar naming for CLI installs (`/atlas-triage`, `/atlas-review --depth`,
-  `/atlas-audit-comprehensive`) — finalize in the implementation plan.
+- **Command sugar naming for CLI installs (resolved-by-different-means):** decided
+  against. `commands/` ships `atlas-code-review`, `atlas-init`,
+  `atlas-propose-preferences`, `atlas-rebase-stale`, and `atlas-review-pr` — no
+  `atlas-triage` or `atlas-audit-comprehensive`. Depth mode is instead selected via
+  natural-language triggers, per `choosing-review-lenses`'s Depth modes table (see
+  `commands/atlas-review-pr.md` step 4.1).
 
 ## Cross-references
 
