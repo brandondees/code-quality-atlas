@@ -1,6 +1,6 @@
 # Collapsed entrypoints + depth modes — design
 
-*Status: design approved 2026-06-25, build pending. Resolves **Q20** (top-level
+*Status: implemented (2026-06-26, PR #80). Resolves **Q20** (top-level
 skill-count vs. context budget) and **D16** (review-depth modes). Refines **D10**
 (router) and **D12** (synthesizer).*
 
