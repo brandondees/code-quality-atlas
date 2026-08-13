@@ -1,6 +1,6 @@
 # Collapsed entrypoints + depth modes — design
 
-*Status: design approved 2026-06-25, build pending. Resolves **Q20** (top-level
+*Status: implemented (2026-06-26, PR #80). Resolves **Q20** (top-level
 skill-count vs. context budget) and **D16** (review-depth modes). Refines **D10**
 (router) and **D12** (synthesizer).*
 
@@ -213,11 +213,12 @@ artifact detection (unchanged from D15).
   for, zero overhead until then. (Not omitted.)
 - **Collapsed `plugin.json` (resolved):** generated from a single source alongside
   `marketplace.json` (not hand-kept), to avoid drift.
-
-## Open implementation sub-questions
-
-- Command sugar naming for CLI installs (`/atlas-triage`, `/atlas-review --depth`,
-  `/atlas-audit-comprehensive`) — finalize in the implementation plan.
+- **Command sugar naming for CLI installs (resolved-by-different-means):** decided
+  against. `commands/` ships `atlas-code-review`, `atlas-init`,
+  `atlas-propose-preferences`, `atlas-rebase-stale`, and `atlas-review-pr` — no
+  `atlas-triage` or `atlas-audit-comprehensive`. Depth mode is instead selected via
+  natural-language triggers, per `choosing-review-lenses`'s Depth modes table (see
+  `commands/atlas-review-pr.md` step 4.1).
 
 ## Cross-references
 
