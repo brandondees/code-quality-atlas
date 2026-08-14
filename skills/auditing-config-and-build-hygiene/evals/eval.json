@@ -28,12 +28,12 @@
       ]
     },
     {
-      "query": "Audit this repository. These are the raw files, not a pre-digested scan.\n\n`Dockerfile`:\n```dockerfile\nFROM node:20\nWORKDIR /app\nCOPY . .\nRUN npm install && npm run build\nCMD [\"node\", \"dist/server.js\"]\n```\n\n`docker-compose.yml`:\n```yaml\nservices:\n  api:\n    build: .\n    ports: [\"3000:3000\"]\n    environment:\n      DATABASE_URL: postgres://app:hunter2@db:5432/app\n```\n",
+      "query": "Audit this repository. These are the raw files, not a pre-digested scan.\n\nRepository root contains: `Dockerfile`, `docker-compose.yml`, `package.json`, `package-lock.json` (committed), `src/`.\n\n`Dockerfile`:\n```dockerfile\nFROM node:20\nWORKDIR /app\nCOPY package.json package-lock.json ./\nRUN npm install\nCOPY . .\nRUN npm run build\nCMD [\"node\", \"dist/server.js\"]\n```\n\n`docker-compose.yml`:\n```yaml\nservices:\n  api:\n    build: .\n    ports: [\"3000:3000\"]\n    environment:\n      DB_USER: app\n      DB_PASSWORD: hunter2      # committed to the repo\n```\n",
       "expected_behavior": [
         "Fires on raw file contents rather than requiring a pre-summarised scan inventory \u2014 the input shape differs from the usual scan digest but the artifacts are the same",
-        "Flags the database password committed in `docker-compose.yml` \u2014 inject from a secrets manager or an untracked env file, and rotate it",
+        "Flags the database password committed in `docker-compose.yml` (`DB_PASSWORD`) \u2014 inject from a secrets manager or an untracked env file, and rotate the exposed value",
         "Flags the unpinned `node:20` base image: it is a moving tag, so the same Dockerfile builds differently over time \u2014 pin by digest",
-        "Flags `npm install` rather than `npm ci` with a committed lockfile \u2014 the build resolves fresh versions instead of the locked ones",
+        "Flags `npm install` where a `package-lock.json` is committed and copied into the image: `npm install` may resolve and write new versions when `package.json` ranges permit, so the build is not pinned to the lockfile \u2014 `npm ci` installs the locked versions exactly and fails on drift",
         "Flags the container running as root: no non-root `USER` is set in the final stage"
       ]
     },

@@ -144,6 +144,8 @@ with `re.sub(r'[*_#\s]+', ' ', t)` leaves a **leading space** that breaks
 a reported result until it was re-derived:
 
 ```python
+import re
+
 def is_no_findings(t):
     return re.sub(r'[*_#\s]+', ' ', t.strip()).strip()[:60].lower().startswith("no findings")
 ```
@@ -160,10 +162,14 @@ documented tolerance already neutralises it.
 
 Two consequences for anyone tuning a lens here:
 
-- **Prose cannot supply it.** Two separate rewrites aimed at guard recognition
-  (a three-guard check, then an operational not-applicable rule) both failed and
-  both were reverted. They were treated as wording problems; they are a missing
-  capability.
+- **Shared prose has not supplied it.** Three rewrites aimed at guard
+  recognition (a three-guard check, a narrowed version of it, then an
+  operational not-applicable rule) were each measured and each failed; two were
+  reverted. That is evidence about the rewrites tested, not proof that no
+  phrasing works — but it is enough to stop reaching for prose first. The
+  untested alternative is a lens-local worked example carrying the exact
+  response, which is what the canned healthy-scan sentence appears to be doing
+  when it survives a rule written to override it.
 - **"Floor of record" is a point on a curve, not a model.** A team wanting no
   false convictions picks the low-firing end and finds a third of the defects; a
   team wanting coverage picks the high-firing end and audits the findings. State
