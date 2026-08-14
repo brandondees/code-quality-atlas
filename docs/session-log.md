@@ -2523,3 +2523,37 @@ Two separable changes this pass, kept to one commit each: relocating Q21's follo
 D at 1/5 repeats the campaign's most consistent result. Its single pass is the interesting one: on the "checkov reports 0 failures" scenario it flagged both defects the scanner was configured to skip, arriving at the right answer by ignoring the claim rather than rebutting it.
 
 392 tests pass; the rest of the pipeline stays clean.
+
+### 2026-08-09 (same day, follow-up) — seven models, a monotonic frontier, and the deficit named
+
+Owner question, after two prose fixes failed: is the small-model setup itself inadequate — context window, response tokens, or model choice? Answered in that order.
+
+**Context and response budget: ruled out with numbers, not argument.** 363 requests at `num_ctx` 8192 — median occupancy 3,446 tokens (42%), p90 4,104, **2 truncations in 363** and both were the already-diagnosed runaway. The model stops because it decides to stop. Widening costs ~4× CPU for headroom that sits unused.
+
+**Model choice: searched, and the top web recommendation does not exist.** The listicles converge on "Llama 3.3 8B, 92.1% IFEval, highest of any sub-10B model in 2026." Ollama lists **all 14 Llama 3.3 variants at 70B** — there is no 8B. A benchmark figure attached to a nonexistent model has propagated across several sources; every candidate below was checked against the registry instead.
+
+**Seven models, one suite, one byte-identical prompt.** Owner-suggested `ornith:9b` (June 2026, MIT, post-trained for agentic coding) was the strongest addition and post-dates my knowledge cutoff.
+
+| model | fires on 20 defect scenarios | clean 3/22/23/24 |
+|---|---|---|
+| `qwen2.5-coder:7b` | 8 | **4/4** |
+| `qwen3.5:4b` | 8 | **4/4** |
+| `granite4:7b-a1b-h` | 12 | 2/4 |
+| `phi4-mini:3.8b` | 12 | 2/4 |
+| `ornith:9b` | 15 | 2/4 |
+| `qwen3:8b` | 15 | 1/4 |
+| `gemma3:4b` | 19 | 0/4 |
+
+Monotonic across four vendors and five architectures: fire more, convict more correct code. Scenario #22 — the atomic conditional update this lens *recommends as the fix* — is a false positive for every model but the two least trigger-happy.
+
+**The deficit is narrower than "can't reason about concurrency," and naming it is the session's real output.** `ornith` and `qwen3:8b` are correct on 93–100% of the defect scenarios they fire on; only `gemma3:4b` (53%) is flagging indiscriminately. They identify the *pattern* reliably and cannot evaluate whether a **guard** — a conditional update, a lock spanning the critical section, a documented tolerance — already neutralises it. `qwen3:8b` never mentioning the `lock_for(account_id)` across three prompt variants is that failure seen from inside.
+
+That retroactively explains both failed tunings. The guard-check rules and the operational not-applicable rule were both written to teach guard recognition; both were treated as wording problems, and both failed. No phrasing supplies a missing capability.
+
+**Second measured negative, reverted.** The not-applicable rewrite left the config lens's target scenario **byte-identical**, changed one word in accessibility's, and churned unrelated scenarios — one losing three of four expected findings, another upgrading a silent miss to a confidently wrong justification. Reverted in full. It also forced a correction: "three lenses fail this distinction" was too strong — measured, it is two clean failures and one near-miss.
+
+**A confound characterised, not resolved.** `_REVIEWER_DIRECTIVE` ends every prompt with "Be concise." — maximum recency, contradicting audit lenses whose `examples.md` says "enumerate **every** such defect." Removing those two words moved the config lens from 11/24 to 15/24 firing and 208 → 575 mean chars. But of five new fires only two are correct; one is self-contradictory, one names the wrong defect, one echoes the input back. The directive suppresses real findings *and* holds a 7B on-format. Every measurement the campaign has ever taken sits on top of it.
+
+**A trap I fell into and wrote into the runbook.** I reported the "Be concise" result as a strict improvement from a firing counter before reading the responses — the same error I had diagnosed in `gemma3:4b` one message earlier. Counting fires is not grading. Also documented: two successive bugs in the "no findings" detector (markdown formatting, then a leading space left by stripping it), each of which inflated a reported number until it was re-derived.
+
+392 tests pass; the rest of the pipeline stays clean.

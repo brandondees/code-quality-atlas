@@ -123,3 +123,48 @@ failed scenario and — before the exit-code guard existed — would have graded
 as a miss. If a scenario that used to answer starts timing out after a prompt
 edit, check `n_decoded` in the server log before blaming the machine: a runaway
 generation and a slow host look identical from the client side.
+
+## Two grading traps, both fallen into
+
+**Counting "did it fire" is not grading.** A firing counter is cheap and it is the
+same metric that rates a model which flags everything as perfect recall — the
+exact failure `gemma3:4b` demonstrates. On 2026-08-09 a "Be concise" experiment
+was reported as a strict improvement on the strength of a firing count (config
+11/24 → 15/24, no losses); reading the five newly-firing responses showed two
+correct findings, one self-contradictory, one naming the wrong defect, and one
+echoing the input diff back. **Read the responses before claiming a delta.** The
+counter tells you where to look, not what you found.
+
+**Detect "no findings" through markdown, and anchor it.** Models format the
+verdict as `**No findings**`, `## No findings`, or `No findings:` with the
+lens's own healthy-scan sentence appended. A naive
+`response.startswith("no findings")` misses all three, and stripping markdown
+with `re.sub(r'[*_#\s]+', ' ', t)` leaves a **leading space** that breaks
+`startswith` a second time. Both bugs occurred in one session and each inflated
+a reported result until it was re-derived:
+
+```python
+def is_no_findings(t):
+    return re.sub(r'[*_#\s]+', ' ', t.strip()).strip()[:60].lower().startswith("no findings")
+```
+
+## What the models can and cannot do (2026-08-09, seven models)
+
+Across four vendors and five architectures, firing rate and false convictions
+move together monotonically — but the two strongest models are correct on
+93-100% of the defect scenarios they fire on, so this is not mere
+trigger-happiness. The specific deficit is **guard recognition**: they identify
+the risky *pattern* (read-then-write, check-then-act) and cannot evaluate
+whether a conditional update, a lock spanning the critical section, or a
+documented tolerance already neutralises it.
+
+Two consequences for anyone tuning a lens here:
+
+- **Prose cannot supply it.** Two separate rewrites aimed at guard recognition
+  (a three-guard check, then an operational not-applicable rule) both failed and
+  both were reverted. They were treated as wording problems; they are a missing
+  capability.
+- **"Floor of record" is a point on a curve, not a model.** A team wanting no
+  false convictions picks the low-firing end and finds a third of the defects; a
+  team wanting coverage picks the high-firing end and audits the findings. State
+  which end a re-gate is measuring against.

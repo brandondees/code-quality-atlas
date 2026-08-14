@@ -387,6 +387,43 @@ Each of the two buys one precision scenario and pays at least one recall scenari
 
 **E's miss is the third instance of one specific gap.** On the source-metrics-only scan the model answered with the healthy-scan sentence, asserting that config and build hygiene were checked and sound when no such artifact was present. The accessibility and performance suites pin the same distinction and it fails there too. Three lenses failing the same shared-prose distinction argues the not-applicable instruction is under-specified in the common reviewer-discipline text, not that three lenses each need their own fix — a candidate for the next shared-text change rather than a per-lens tuning.
 
+**Seven-model comparison and two more measured negatives (2026-08-09).** Prompted by the question of whether the substrate itself was the limit — context window, response budget, or model choice. Answered in that order, and the third answer is the interesting one.
+
+**Context and response budget are ruled out, with numbers.** Across all 363 requests of that session at `num_ctx` 8192: median slot occupancy **3,446 tokens (42%)**, p90 4,104, and **2 truncations in 363**, both the single runaway already documented. The model typically uses under half the window and stops because it decides to stop. Widening costs ~4× CPU (the 32768 attempt failed to finish one scenario in 65 minutes) to buy headroom that sits unused.
+
+**Seven models, one suite (`reviewing-concurrency-and-async`, 24 scenarios), one byte-identical prompt.** Candidates were checked against the Ollama registry rather than taken from search results — worth noting because the listicles converge on "Llama 3.3 8B, 92.1% IFEval, highest of any sub-10B model," and **Ollama lists all 14 Llama 3.3 variants at 70B; there is no 8B**. A headline figure attached to a model that does not exist at that size has propagated across several sources.
+
+| model | fires on 20 defect scenarios | clean 3/22/23/24 | graded |
+|---|---|---|---|
+| `qwen2.5-coder:7b` *(floor)* | 8 | **4/4** | 10/24 (recall 6/20) |
+| `qwen3.5:4b` | 8 | **4/4** | 11/24 (recall 7/20) |
+| `granite4:7b-a1b-h` (MoE, ~1B active) | 12 | 2/4 | firing only |
+| `phi4-mini:3.8b` | 12 | 2/4 | firing only |
+| `ornith:9b` | 15 | 2/4 | 16/24 (recall 14/20) |
+| `qwen3:8b` | 15 | 1/4 | 16/24 (recall 15/20) |
+| `gemma3:4b` | 19 | 0/4 | 10/24 (recall 10/20) |
+
+(`granite4` and `phi4-mini` were measured for firing rate and clean-scenario precision only; their defect responses were not graded individually, so no total is claimed for them.)
+
+**The relationship is monotonic across four vendors, five architectures, MoE and dense, 3.8B to 9B: every model that fires more convicts more correct code.** Scenario #22 — the atomic `UPDATE ... WHERE reserved_by IS NULL` plus rowcount check, which is *the fix this lens recommends* — is a false positive for every model except the two least trigger-happy ones.
+
+**But it is not a simple sensitivity threshold, and that is the finding.** `ornith:9b` and `qwen3:8b` are correct on **93–100%** of the defect scenarios they fire on; only `gemma3:4b` (53%) is merely flagging everything. These models identify the *pattern* — read-then-write, check-then-act — reliably. What they cannot do is evaluate whether a **guard already neutralises it**: a conditional update, a lock spanning the critical section, a documented tolerance. `qwen3:8b` never mentioning the `lock_for(account_id)` across three prompt variants is that same failure seen from inside.
+
+**This retroactively explains both failed tuning attempts.** The guard-check rules (2026-08-08) and the operational not-applicable rule (below) were both written to teach guard recognition, and both failed. They were treated as wording problems; they are a capability the models do not have, and no phrasing supplies it.
+
+**Measured negative #2: the operational not-applicable rule.** The wave-3 re-gate found lenses answering with their healthy-scan sentence on inputs containing nothing they examine. The shared reviewer-discipline text was rewritten to make the decision checkable ("name what you examined; if you cannot, the lens did not run"), with an explicit carve-out so `reviewing-test-quality`'s highest-value finding — a bug fix shipping no test — stays a finding rather than a not-applicable. Result on `qwen2.5-coder:7b`: the config lens's target scenario came back **byte-identical**, accessibility's changed one word, and unrelated scenarios churned — one losing three of its four expected findings, another turning a bare "No findings" into a confidently wrong justification. **Reverted.**
+
+*A correction this measurement forced:* the claim that three lenses fail the not-applicable distinction was too strong. Measured, it is two clean failures (config #28, performance #26) and one near-miss (accessibility #23 gives the right reason and only leads wrongly).
+
+**An unresolved harness confound, now characterised.** `tooling/run_evals.py`'s `_REVIEWER_DIRECTIVE` ends every prompt with **"Be concise."** — at maximum recency, and in direct contradiction to repo-audit lenses whose `examples.md` demands "enumerate **every** such defect." Flagged as untested on 2026-07-27; tested now by removing those two words and changing nothing else:
+
+| suite | fires on defects | mean response |
+|---|---|---|
+| concurrency | 8/20 → 9/20 | 419 → 483 chars |
+| config (repo audit) | 11/24 → **15/24** | 208 → **575 chars** |
+
+The effect is real and concentrated on the audit-shaped lens. But of the five newly-firing scenarios, only **two are correct findings**; one is self-contradictory (a finding followed by "No findings: config and build hygiene are sound"), one names the wrong defect, and one echoes the input diff back instead of reviewing it. So the directive does suppress genuine findings *and* appears to hold a 7B model on-format. **Not resolved, and not shipped** — the honest state is that every measurement the campaign has taken sits on top of this confound.
+
 ### Q20 — Too many top-level skills: collapse to a few entrypoints + nested disclosure?  → RESOLVED (built, PR #80) *(new, 2026-06-25)*
 
 **Trigger.** Distribution work (see [`distribution.md`](distribution.md)) surfaced a
