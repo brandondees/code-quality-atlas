@@ -2505,3 +2505,55 @@ Two instances is the threshold for writing a pattern down, not for changing the 
 One more thing worth saying out loud: both defects *were* caught, by external reviewers running alongside the atlas on the same PRs. The routing block has always mandated combining review sources non-exclusively rather than letting one win; that argument is now empirical.
 
 **A placement drift noticed, not fixed.** Q21's follow-up entries — including the four added this session — have been appended at the end of `open-questions.md`, which puts them physically under Q8's heading rather than Q21's (the drift predates this session; the wave-2 accessibility entry from 2026-08-07 sits there too). Q22 is placed correctly, as a `### Q22` heading at the top of the Open questions section. Relocating the Q21 tail is a ~90-line move with no content change and belongs in its own PR, where the diff is reviewable as a pure move.
+
+### 2026-08-09 (same day, follow-up) — Q21 wave 3 opens: `auditing-config-and-build-hygiene` 3 → 28, and the first re-gate that wasn't deferred
+
+Two separable changes this pass, kept to one commit each: relocating Q21's follow-up entries under their own heading (a verified pure move — sorted line multiset identical, 88/88 symmetric), then the first wave-3 hardening.
+
+**Picked by the same criterion as wave 2's picks**: 25 owned checks against 3 scenarios, 0.12 per check, the widest scope-to-coverage gap left in the wave. **3 originals + A 2 + B 13 + C 2 + D 5 + E 3 = 28**, 108 assertions, reconciled by script; floor gates in both directions.
+
+**A had to prove something different for a repo-shaped lens, and it paid off immediately.** Every original scenario is a *pre-digested scan inventory* — `"ci.yml: uses X; Dockerfile: ENV Y"`. A real audit meets files. So A supplies a raw `Dockerfile` plus `docker-compose.yml`, and a GitLab pipeline where `allow_failure: true` is `continue-on-error` under another name.
+
+**The re-gate ran in this session rather than being deferred** — the first time in the campaign, using the recipe from `runbooks/cross-model-re-gate.md`. `qwen2.5-coder:7b`: **13/28** — recall 10/24, precision 3/4, 9.2 minutes, no errors. Originals 3/3, A 1/2, B 5/13, C 1/2, **D 1/5**, E 2/3. Three originals passing 3/3 is the clearest possible statement of why three scenarios were never a bar.
+
+**The A-group miss is a finding about the lens, not the model.** Handed a raw `Dockerfile` and compose file with a committed database password, an unpinned base image, `npm install` with no lockfile, and a root user, the model answered *"No findings: config and build hygiene are sound."* The lens had only ever been evaluated on scan digests and turns out to depend on them; pointed at actual files it goes quiet. No suite built solely from digests could have surfaced that, and it is a deployment concern rather than an eval artifact. This is the strongest argument yet for A groups being about *input shape*, not just language or stack coverage.
+
+**One result worth acting on beyond this lens.** E's miss is the **third** instance of the same gap: on a scan containing only source metrics, the model returned the healthy-scan sentence — asserting config and build hygiene were checked when no such artifact was present. The accessibility and performance suites pin the same not-applicable-vs-"No findings" distinction and fail it too. Three lenses failing one shared-prose distinction points at the common reviewer-discipline text being under-specified, not at three independent lens gaps. Logged here as the candidate for the next shared-text change rather than fixed inline, since a shared-prose edit affects every lens's re-gate and — per the 2026-08-08 determinism finding — cannot be assumed local.
+
+D at 1/5 repeats the campaign's most consistent result. Its single pass is the interesting one: on the "checkov reports 0 failures" scenario it flagged both defects the scanner was configured to skip, arriving at the right answer by ignoring the claim rather than rebutting it.
+
+392 tests pass; the rest of the pipeline stays clean.
+
+### 2026-08-09 (same day, follow-up) — seven models, a monotonic frontier, and the deficit named
+
+Owner question, after two prose fixes failed: is the small-model setup itself inadequate — context window, response tokens, or model choice? Answered in that order.
+
+**Context and response budget: ruled out with numbers, not argument.** 363 requests at `num_ctx` 8192 — median occupancy 3,446 tokens (42%), p90 4,104, **2 truncations in 363** and both were the already-diagnosed runaway. The model stops because it decides to stop. Widening costs ~4× CPU for headroom that sits unused.
+
+**Model choice: searched, and the top web recommendation does not exist.** The listicles converge on "Llama 3.3 8B, 92.1% IFEval, highest of any sub-10B model in 2026." Ollama lists **all 14 Llama 3.3 variants at 70B** — there is no 8B. A benchmark figure attached to a nonexistent model has propagated across several sources; every candidate below was checked against the registry instead.
+
+**Seven models, one suite, one byte-identical prompt.** Owner-suggested `ornith:9b` (June 2026, MIT, post-trained for agentic coding) was the strongest addition and post-dates my knowledge cutoff.
+
+| model | fires on 20 defect scenarios | clean 3/22/23/24 |
+|---|---|---|
+| `qwen2.5-coder:7b` | 8 | **4/4** |
+| `qwen3.5:4b` | 8 | **4/4** |
+| `granite4:7b-a1b-h` | 12 | 2/4 |
+| `phi4-mini:3.8b` | 12 | 2/4 |
+| `ornith:9b` | 15 | 2/4 |
+| `qwen3:8b` | 15 | 1/4 |
+| `gemma3:4b` | 19 | 0/4 |
+
+Monotonic across four vendors and five architectures: fire more, convict more correct code. Scenario #22 — the atomic conditional update this lens *recommends as the fix* — is a false positive for every model but the two least trigger-happy.
+
+**The deficit is narrower than "can't reason about concurrency," and naming it is the session's real output.** `ornith` and `qwen3:8b` are correct on 93–100% of the defect scenarios they fire on; only `gemma3:4b` (53%) is flagging indiscriminately. They identify the *pattern* reliably and cannot evaluate whether a **guard** — a conditional update, a lock spanning the critical section, a documented tolerance — already neutralises it. `qwen3:8b` never mentioning the `lock_for(account_id)` across three prompt variants is that failure seen from inside.
+
+That is the most economical explanation for both failed tunings. The guard-check rules and the operational not-applicable rule were both written to teach guard recognition, and both failed — three shared-prose rewrites measured, none moving it. That bounds the finding to the rewrites actually tested, not to every possible phrasing: the untested alternative is a lens-local worked example carrying the exact response, which the config lens's byte-identical canned sentence suggests would land where a distant general rule did not.
+
+**Second measured negative, reverted.** The not-applicable rewrite left the config lens's target scenario **byte-identical**, changed one word in accessibility's, and churned unrelated scenarios — one losing three of four expected findings, another upgrading a silent miss to a confidently wrong justification. Reverted in full. It also forced a correction: "three lenses fail this distinction" was too strong — measured, it is two clean failures and one near-miss.
+
+**A confound characterised, not resolved.** `_REVIEWER_DIRECTIVE` ends every prompt with "Be concise." — maximum recency, contradicting audit lenses whose `examples.md` says "enumerate **every** such defect." Removing those two words moved the config lens from 11/24 to 15/24 firing and 208 → 575 mean chars. But of five new fires only two are correct; one is self-contradictory, one names the wrong defect, one echoes the input back. The directive suppresses real findings *and* holds a 7B on-format. Every measurement the campaign has ever taken sits on top of it.
+
+**A trap I fell into and wrote into the runbook.** I reported the "Be concise" result as a strict improvement from a firing counter before reading the responses — the same error I had diagnosed in `gemma3:4b` one message earlier. Counting fires is not grading. Also documented: two successive bugs in the "no findings" detector (markdown formatting, then a leading space left by stripping it), each of which inflated a reported number until it was re-derived.
+
+392 tests pass; the rest of the pipeline stays clean.
