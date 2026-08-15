@@ -38,13 +38,14 @@ Observed 2026-08-08: 15 of 24 scenarios failed this way before the remaining 9
 ran normally.
 
 **Send a throwaway warm-up request before every run, not just after a cold
-restart.** Observed three times now (2026-08-14, twice in one session) —
-scenario 1 of an otherwise-clean run fails with `HTTP Error 500: Internal
-Server Error`, every other scenario in the same run succeeds. Timed it
-directly: a trivial one-word chat request took **17.9s** on a freshly
-`ollama serve`d host — that's the model loading into memory, not answering —
-and the harness's real first request, competing with that load time plus its
-own generation time, is what trips. A no-op request first absorbs the load
+restart.** Observed across multiple sessions (most recently 2026-08-15, see
+[`../session-log.md`](../session-log.md)) — scenario 1 of an otherwise-clean
+run fails with `HTTP Error 500: Internal Server Error`, every other scenario
+in the same run succeeds. Timed it directly on the 2026-08-15 occurrence: a
+trivial one-word chat request took **17.9s** on a freshly `ollama serve`d
+host — that's the model loading into memory, not answering — and the
+harness's real first request, competing with that load time plus its own
+generation time, is what trips. A no-op request first absorbs the load
 time on its own:
 
 ```sh

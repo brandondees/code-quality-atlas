@@ -29,7 +29,7 @@ scenarios:
   decision-time lens, and an
   artifact lens that reviews authored artifacts like `SKILL.md` against their own
   standard, plus the first two Cluster VII lenses — usability & interaction
-  quality and product-outcome instrumentation — and 11 more). Each
+  quality and product-outcome instrumentation — and 12 more). Each
   leads with a one-line tagline, runs on its own, and carries its full checklist in
   `reference/heuristics.md` (the artifact lens uses artifact-specific rubric files
   instead); the narrowly-scoped lenses add an explicit *Skip when…* clause so the
@@ -159,8 +159,9 @@ loop: critique the research, let drift flag affected skills, regenerate, re-gate
 - Project intent, scope, phases, principles → [`docs/overview.md`](docs/overview.md)
 - The master map → [`docs/taxonomy.md`](docs/taxonomy.md); per-cluster research → [`docs/research/`](docs/research/)
 - Architecture & generation → [`docs/phase-2-skill-suite-design.md`](docs/phase-2-skill-suite-design.md); [regenerating skills](docs/runbooks/regenerating-skills.md)
-- Decisions & history → [`docs/open-questions.md`](docs/open-questions.md); [`docs/session-log.md`](docs/session-log.md)
+- Decisions & history → [`docs/open-questions.md`](docs/open-questions.md); [`docs/session-log.md`](docs/session-log.md); structural gaps → [`docs/map-gaps.md`](docs/map-gaps.md)
 - Prior art surveyed → [`docs/prior-art.md`](docs/prior-art.md)
+- Contributor system map (what a change hits) → [`docs/map/CLAUDE.md`](docs/map/CLAUDE.md)
 
 ## Repo layout
 
@@ -170,7 +171,7 @@ loop: critique the research, let drift flag affected skills, regenerate, re-gate
 | [`collapsed/`](collapsed/) | Generated 4-entrypoint form of the suite for cloud / account-skill installs; each entrypoint bundles its shape's lenses and loads them on demand |
 | [`commands/`](commands/) | Slash commands: `/atlas-review-pr`, `/atlas-code-review`, `/atlas-init`, `/atlas-rebase-stale`, `/atlas-propose-preferences` |
 | [`hooks/`](hooks/) | `SessionStart` routing hook (side-effect-free); opt-in, off-by-default `PostToolUse`/`SessionEnd` self-improvement telemetry hooks |
-| [`templates/`](templates/) | `REVIEW.md` convergence policy + `agents-routing-snippet.md` routing block |
+| [`templates/`](templates/) | `REVIEW.md` convergence policy + `agents-routing-snippet.md` routing block + `preferences-template.md` team-preferences bootstrap |
 | [`tooling/`](tooling/) | The pipeline: generator, drift-checker, eval validator, cross-model runner |
 | [`docs/`](docs/) | Research, taxonomy, design, runbooks, install guide, decision log |
 
