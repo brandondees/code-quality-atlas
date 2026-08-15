@@ -40,9 +40,9 @@ State both once here rather than re-discovering the mismatch per session:
    directly, no index yet. Each card names the object types it `consumes`/
    `produces` in its own frontmatter.
 5. For a specific change, once `effects/CONTEXT.md` exists (a later slice —
-   check the root `CLAUDE.md`'s "Where things live" table first) start
-   there instead — it names which cards to open, so you don't have to
-   guess.
+   check this folder's own `CLAUDE.md` twin's "Where things live" table
+   first) start there instead — it names which cards to open, so you don't
+   have to guess.
 
 ## Entry-file twins
 
