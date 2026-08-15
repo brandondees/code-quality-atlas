@@ -6,6 +6,17 @@
 
 Any licensing, PII, or provenance exposure? Detect and escalate to humans — never decide legal questions.
 
+## Contents
+
+- [When to use](#when-to-use)
+- [Checklist](#checklist)
+- [From category #27](#from-category-27)
+- [Examples](#examples)
+- [Bad → finding](#bad--finding)
+- [Good → no finding](#good--no-finding)
+- [Not applicable → outside this lens's scope](#not-applicable--outside-this-lenss-scope)
+- [Going deeper](#going-deeper)
+
 ## When to use
 
 **Shape: repo.** Run against the whole repository (scheduled or on demand), not a single diff.
@@ -94,6 +105,25 @@ SPDX coverage, no PII surface, current SBOM. Report
 "No findings: compliance and provenance are clean". Do NOT speculate about legal
 risk the scan shows no evidence for, and do NOT rule on genuinely legal questions —
 escalating those is correct, deciding them is not.
+
+## Not applicable → outside this lens's scope
+
+**Input:**
+
+```text
+The only artifact available for this audit is a UI visual-regression
+screenshot diff (before/after images of the checkout page, 3 pixels changed
+in a footer margin). No dependency list, license scan, PII data-flow map,
+telemetry inventory, or provenance information was included in this scan.
+```
+
+**Expected finding:** This scan contains nothing about licensing, PII, or
+provenance — a screenshot diff says nothing about any of this lens's checks.
+Report "Not applicable: this scan contains no licensing, PII, or provenance
+information for this lens to audit". Do NOT report "No findings: compliance
+and provenance are clean" here — that sentence means licenses, PII flows, and
+provenance were checked and found clean, which implies there was compliance
+data to check. There wasn't any.
 
 ## Going deeper
 

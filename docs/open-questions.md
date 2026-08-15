@@ -82,7 +82,18 @@ purely by hardening (SPDX-header-only gaps, accessibility-as-legal); see
 session-log for a self-review-caught factual error in the eval's own DEP5-glob
 claim (fixed pre-merge), a full deference to a false compliance-skip
 exemption over real employee PII, and the seventh instance of the
-not-applicable gap); 22 preference-tier lenses remain),
+not-applicable gap); 22 preference-tier lenses remain. **A same-day tuning
+experiment then targeted the not-applicable gap directly** (owner request,
+after 7 straight instances of "recording the gap without attempting to close
+it") — a worked "Not applicable: ..." example added to three already-hardened
+lenses across both shapes, full re-gate on all three: all three target
+scenarios fixed, plus two unplanned bonus fixes on the exemption-claim axis,
+aggregate recall 34/52→39/52 and precision 14/19→15/19, alongside two newly
+discovered regressions (see [`runbooks/cross-model-re-gate.md`](runbooks/cross-model-re-gate.md)
+and session-log for the full reconciliation and the still-open regressions).
+Tuning still has headroom on this substrate — the owner's own stated
+criterion for pivoting to a floor-model search was "if it doesn't help,"
+and it did, so no pivot yet);
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
