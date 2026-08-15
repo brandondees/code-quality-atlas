@@ -37,7 +37,7 @@ creation time:
 | `Category` | its marker-plus-number exactly as `docs/research/cluster-*.md` writes it (`#N`) |
 | `CollapsedEntrypoint` | the literal kebab-case directory name under `collapsed/skills/` |
 | `EvalScenario` | its owning `Lens` name plus ordinal position in `evals/eval.json` (`<lens>#<n>`) |
-| `Decision` | its marker-plus-number in `docs/open-questions.md` (`QN`) |
+| `Decision` | its marker-plus-number in `docs/open-questions.md` — either a `DN` bullet under "Decisions made" or a `QN` header under "Open questions"; see the `Decision` object card for the distinction |
 | `Gap` | its marker-plus-number in `docs/map-gaps.md` (`GN`) |
 | `PlanDoc` | the literal filename (already dated and scoped) under `docs/plans/` |
 | `Command` | the literal filename under `commands/` |
