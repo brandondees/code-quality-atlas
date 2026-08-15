@@ -70,6 +70,28 @@ preferences over the project's established choices, and apply the counterweight:
 if two call sites genuinely differ, divergence is correct — do not demand
 consistency that erases a meaningful difference.
 
+## Good → no finding (no established convention to compare against)
+
+**Input (diff, with context):**
+
+```ruby
+# Project context: this Rails app predates any team style guide; RuboCop was
+# never adopted. Existing controllers mix snake_case and camelCase instance
+# variables, string and symbol hash keys, and both `unless` and `if !` with
+# no discernible pattern across the codebase.
+def show
+  @user_record = User.find(params[:id])
+  render json: { "name" => @user_record.name }
+end
+```
+
+**Expected finding:** None — there is no established formatter, linter, or
+documented convention in this codebase to compare the diff against, so this
+lens has no baseline to check consistency with. Report "No findings". Do NOT
+pick one of several already-competing styles as "the" house convention and
+flag the diff for not matching it — the team hasn't settled that question,
+and this lens shouldn't settle it for them diff-by-diff.
+
 ## Not applicable → outside this lens's scope
 
 **Input (diff, with context):**

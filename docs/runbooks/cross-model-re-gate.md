@@ -240,3 +240,51 @@ worked on the first attempt where three fuzzy-judgment rewrites had failed.
 It is not evidence that *every* prose gap is fixable this way — guard
 recognition is still unmoved — but it is worth checking whether a given gap
 has this literal-string shape before concluding a lens has hit a ceiling.
+
+## Two follow-up fix attempts on the two regressions above: one inert, one actively harmful (2026-08-15)
+
+Tried closing the two regressions from the section above, each with a new
+worked example targeting the specific restraint case that broke, following
+the same recipe that worked for the not-applicable gap.
+
+**`checking-idioms-and-consistency` scenario 12** (invents a formatting
+complaint on a codebase with no established formatter): added a "no
+established convention" worked example, different language and axis
+(Ruby, mixed naming/hash-key/conditional style) than the eval scenario
+(JS, mixed indentation/quotes/`var`/`const`). Full re-gate: **no effect** —
+scenario 12 still invents findings, now via a different hallucinated claim
+(a comparison operator that doesn't appear anywhere in the code, plus a
+false claim that "the project's linter enforces" a rule on a codebase the
+scenario explicitly states has no linter). No other scenario changed grade.
+Kept the new example anyway — it's still correct, useful content for the
+restraint case it teaches, just not one this eval scenario happens to
+exercise. This gap looks more like guard recognition (a judgment call) than
+the not-applicable gap (a literal string) — worth trying a genuinely
+different intervention shape before concluding it's a ceiling, not another
+worked example in the same style.
+
+**`reviewing-install-and-upgrade-experience` scenario 26** (fabricates an
+"unguarded" finding on a script that's visibly guarded): added a worked
+example of a different, already-idempotent script. Result: **not inert,
+actively harmful.** The new example is thematically close to scenario 10 —
+an *existing*, previously-correctly-graded scenario about an *unguarded*
+init script — and the combination sent the model into a non-terminating
+generation on scenario 10 specifically. Reproduced four times: twice as a
+mid-suite transport failure, then isolated the exact request via direct
+curl outside the harness and watched `n_decoded` climb past 2,400 tokens
+and trigger a context-shift discard before being killed — a genuine runaway,
+not a hang, exactly the "watch the generation budget" failure mode from
+earlier in this document, now caused by an *unrelated* scenario's added
+example rather than the target scenario's own growth. **Reverted the
+addition entirely** (not just trimmed) — confirmed scenario 10 returns to
+its normal 5-point response with the revert, verified via a full clean
+re-gate with zero transport failures. Scenario 26 remains broken, exactly
+as it was.
+
+**The added lesson: a new worked example's risk isn't only "does it move the
+target scenario" or "does it flip an unrelated scenario's verdict" — it can
+also destabilize an unrelated scenario's *generation* outright if the two
+are thematically close enough. A full re-gate catches this (a transport
+failure is impossible to miss), but it's worth knowing this failure mode
+exists before adding content near a lens's existing scenario themes,** not
+just far from them token-budget-wise.
