@@ -33,16 +33,17 @@ State both once here rather than re-discovering the mismatch per session:
 
 ## Reading order
 
+Making a specific change? Start at `effects/CONTEXT.md` instead of the list
+below — it names which cards to open for a recognized scenario, so you
+don't have to guess. The list below is for general orientation, not a
+specific change:
+
 1. `_meta/schema.md` for the closed node types.
 2. `objects/_index.md` for a one-line-per-type map (stub | verified | stale).
 3. Open one object card, not the whole `objects/` folder.
 4. `processes/` for a repeating movement — small enough today to browse
    directly, no index yet. Each card names the object types it `consumes`/
    `produces` in its own frontmatter.
-5. For a specific change, once `effects/CONTEXT.md` exists (a later slice —
-   check this folder's own `CLAUDE.md` twin's "Where things live" table
-   first) start there instead — it names which cards to open, so you don't
-   have to guess.
 
 ## Entry-file twins
 
