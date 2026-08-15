@@ -152,7 +152,7 @@
       "expected_behavior": [
         "Reports no substantive findings — the code is gofmt-formatted, wraps errors with the project's established `%w` convention, and matches sibling error-handling style",
         "Does not invent a stylistic nitpick on already-idiomatic, convention-following code",
-        "Confirms the naming, error-wrapping shape, and import usage all match the rest of the codebase"
+        "Confirms the naming and error-wrapping shape are idiomatic and match the stated project convention, without claiming anything about imports the snippet does not show"
       ]
     },
     {
