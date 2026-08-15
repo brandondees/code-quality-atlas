@@ -588,6 +588,13 @@ skills:
       second parallel way.
     shape: diff
     wave: 3
+    # Q21: fourth wave-3 lens hardened, tied with auditing-compliance-and-
+    # provenance at the widest remaining gap (12 owned checks against 3
+    # scenarios, 0.250 scenarios/check); picked by user request. Same A-E
+    # adversarial taxonomy minus the design-doc (A) group — this lens is
+    # diff-only, not design-capable (precedent: reviewing-naming-and-
+    # readability). See open-questions.md Q21.
+    eval_min: 21
     built_from:
       - { category: 8, source: docs/research/cluster-2-readability.md#8 }
 
