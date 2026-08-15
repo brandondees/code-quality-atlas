@@ -11,7 +11,7 @@ straight at the one card that covers it.
 
 ## If you're
 
-| Doing this | Open |
+| If you're | Open |
 |---|---|
 | Editing a `docs/research/cluster-*.md` section | `Category`, `Lens`, `generate`, `drift-check` |
 | Raising a lens's eval floor past D8's baseline (the Q21 pattern) | `EvalScenario`, `Lens`, `harden-eval-suite`, `Decision` |
