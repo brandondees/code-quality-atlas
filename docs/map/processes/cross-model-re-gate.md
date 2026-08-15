@@ -38,7 +38,9 @@ genuinely discriminating 10/24.
 1. Stand up the substrate: `ollama serve` with `OLLAMA_MAX_LOADED_MODELS=1`
    (not optional on a memory-constrained host — a second model loading
    while the first is still resident OOM-kills the new one), pull the floor
-   model, send a throwaway warm-up request first
+   model, send a throwaway warm-up request unconditionally before every run
+   (not only after a cold restart) — it absorbs the model's load time so the
+   suite's real first request doesn't compete with it and trip a timeout
    (`docs/runbooks/cross-model-re-gate.md:17-58`).
 2. Run: `python -m tooling.run_evals --skill <name> --model
    qwen2.5-coder:7b` (`docs/runbooks/cross-model-re-gate.md:62-65`); check
@@ -78,4 +80,4 @@ genuinely discriminating 10/24.
 - Objects: `EvalScenario`, `Lens`, `Decision`
 - Source: `tooling/run_evals.py`, `docs/runbooks/cross-model-re-gate.md`
 - `docs/open-questions.md` Q21
-- Verified 2026-08-15 @ `1ed3006`
+- Verified 2026-08-15 @ `914fb35`
