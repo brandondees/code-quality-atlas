@@ -13,7 +13,7 @@ wins and the map is stale — fix the card, not your mental model.
 | `_meta/schema.md` | the closed set of node types | built |
 | `_templates/` | blank object/process card starters | built |
 | `objects/` | one card per noun, clustered by how an editor asks | built — one card per noun type in `_index.md` |
-| `processes/` | one card per real, repeating movement | not yet built |
+| `processes/` | one card per real, repeating movement | built — browse the folder directly, small enough that no index exists yet |
 | `effects/CONTEXT.md` | "if you're changing X, open these cards" | not yet built |
 
 ## Route by what's actually here
@@ -23,12 +23,13 @@ wins and the map is stale — fix the card, not your mental model.
 | Learning how to walk this map | `CONTEXT.md` |
 | Looking up a node type | `_meta/schema.md` |
 | Looking up a specific noun ("what is a Lens") | `objects/_index.md`, then that noun's own card |
-| Anything else | the repo root `CLAUDE.md`'s own orientation section — this map's process cards and change-impact index don't exist yet |
+| Looking up a repeating movement ("what happens when a suite gets hardened") | `processes/` (browse — no index yet) |
+| Anything else | the repo root `CLAUDE.md`'s own orientation section — this map's change-impact index doesn't exist yet |
 
-Do not route to `processes/*.md` or `effects/CONTEXT.md` by name until the
-"Where things live" table above says they're built — those are later,
-separately-gated slices of the same audit pipeline this map follows
-(`icm-architect`'s `references/system-map.md`).
+Do not route to `effects/CONTEXT.md` by name until the "Where things live"
+table above says it's built — that's the last, separately-gated slice of
+the same audit pipeline this map follows (`icm-architect`'s
+`references/system-map.md`).
 
 ## The one rule
 
