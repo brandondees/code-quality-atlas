@@ -13,5 +13,9 @@
     "MD060": false  // table-column-style: compact table pipes are fine; spacing is cosmetic
   },
   "globs": ["**/*.md"],
-  "ignores": ["node_modules", ".git"]
+  // .claude/skills/ holds vendored third-party skills (e.g. icm-architect) for
+  // this repo's own Claude Code sessions -- see docs/distribution.md. Their
+  // prose is not this repo's to hold to this repo's authoring rules, same
+  // category as node_modules.
+  "ignores": ["node_modules", ".git", ".claude/skills"]
 }

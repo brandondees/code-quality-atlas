@@ -1,5 +1,14 @@
 # How to walk this map
 
+This map follows the Interpretable Context Methodology (ICM), vendored at
+`.claude/skills/icm-architect/` for this repo's own Claude Code sessions
+(local and cloud — see `docs/distribution.md`'s channel matrix for why
+`.claude/skills/` is the right place for a repo's own tooling, distinct from
+the `skills/`/`collapsed/` this repo distributes as its own plugin). Extend
+this map by following `.claude/skills/icm-architect/references/system-map.md`
+directly rather than re-deriving the method from this file alone — this
+`CONTEXT.md` documents this specific map's own state, not the method.
+
 ## Universes
 
 | Universe | Meaning |
@@ -35,10 +44,11 @@ State both once here rather than re-discovering the mismatch per session:
 
 `CLAUDE.md` is the hand-edited source. `AGENTS.md` and `routing.md` in this
 same folder are byte-identical copies, per `icm-architect`'s own convention
-(`references/system-map.md`: "Generate `AGENTS.md` and `routing.md` as
-byte-identical twins... Tools that ignore `CLAUDE.md` still get the
-catalog") — `AGENTS.md` for the cross-agent onboarding convention, `routing.md`
-for tooling that expects neither name. Edit `CLAUDE.md` only, then re-copy it
+(`.claude/skills/icm-architect/references/system-map.md`: "Generate
+`AGENTS.md` and `routing.md` as byte-identical twins... Tools that ignore
+`CLAUDE.md` still get the catalog") — `AGENTS.md` for the cross-agent
+onboarding convention, `routing.md` for tooling that expects neither name.
+Edit `CLAUDE.md` only, then re-copy it
 to both twins in the same change — never hand-edit a twin directly. This is
 CI-enforced the same way the root `CLAUDE.md`/`AGENTS.md` routing block is
 (`tests/test_map_twins_sync.py`, precedent: `tests/test_routing_snippet_sync.py`,
