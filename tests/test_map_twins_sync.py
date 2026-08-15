@@ -13,6 +13,9 @@ from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent / "docs" / "map"
+_VENDORED = (
+    Path(__file__).resolve().parent.parent / ".claude" / "skills" / "icm-architect"
+)
 
 
 @pytest.mark.parametrize("twin", ["AGENTS.md", "routing.md"])
@@ -23,4 +26,25 @@ def test_map_twin_matches_claude_md(twin):
         f"docs/map/{twin} has drifted from docs/map/CLAUDE.md, the hand-edited "
         f"source. Re-copy CLAUDE.md over {twin} in the same change -- never "
         f"hand-edit a twin directly."
+    )
+
+
+def test_process_template_matches_vendored_copy():
+    """Unlike object.md (a deliberate fork -- see docs/map/objects/CONTEXT.md's
+    "Templates" section), process.md's frontmatter has no brace-placeholder
+    YAML bug to fix, so it's meant to stay an exact copy of icm-architect's
+    own template rather than diverge. Flagged in atlas-review round 3: an
+    earlier fix wrongly claimed process.md was also a deliberate fork without
+    actually forking it, which would have hidden real drift instead of
+    catching it."""
+    ours = (_ROOT / "_templates" / "process.md").read_text(encoding="utf-8")
+    vendored = (_VENDORED / "assets" / "templates" / "process.md").read_text(
+        encoding="utf-8"
+    )
+    assert ours == vendored, (
+        "docs/map/_templates/process.md has diverged from the vendored "
+        ".claude/skills/icm-architect/assets/templates/process.md. If this "
+        "divergence is intentional, update docs/map/objects/CONTEXT.md's "
+        "'Templates' section to explain it (the way object.md's fork is "
+        "explained) before updating this test."
     )
