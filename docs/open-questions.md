@@ -93,7 +93,16 @@ discovered regressions (see [`runbooks/cross-model-re-gate.md`](runbooks/cross-m
 and session-log for the full reconciliation and the still-open regressions).
 Tuning still has headroom on this substrate — the owner's own stated
 criterion for pivoting to a floor-model search was "if it doesn't help,"
-and it did, so no pivot yet);
+and it did, so no pivot yet). **A same-day follow-up attempted to fix the
+tuning experiment's own two regressions and got a mixed, mostly negative
+result** — the idioms fix was inert (kept, harmless, didn't move the eval
+scenario), and the install-upgrade fix was reverted after it caused a
+*different*, previously-correctly-graded scenario to enter a non-terminating
+runaway generation (diagnosed by isolating the exact request outside the
+harness and watching `n_decoded` climb past 2,400 tokens with no stop). Both
+regressions remain open; see
+[`runbooks/cross-model-re-gate.md`](runbooks/cross-model-re-gate.md) and
+session-log for the full diagnosis;
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
