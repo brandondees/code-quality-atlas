@@ -750,6 +750,18 @@ skills:
       humans — never decide legal questions.
     shape: repo
     wave: 3
+    # Q21: fifth wave-3 lens hardened. Picked by the scope-to-coverage
+    # criterion: 12 owned checks against 3 scenarios (0.250 scenarios per
+    # check) was the widest gap left in the wave once
+    # checking-idioms-and-consistency shipped (a script-checked recount also
+    # caught a ranking bug this round — a stray "## Open threads" section was
+    # bleeding into the last category's owned-check count for several
+    # lenses; fixed before picking). Same A-E adversarial taxonomy, raised
+    # from D8's 3-scenario baseline; A gives this repo-shaped lens raw files
+    # instead of a pre-digested scan (precedent: auditing-config-and-
+    # build-hygiene, auditing-documentation-health). See open-questions.md
+    # Q21.
+    eval_min: 22
     built_from:
       - { category: 27, source: docs/research/cluster-6-evolution.md#27 }
 
