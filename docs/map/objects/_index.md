@@ -19,7 +19,10 @@ enumerating them here.
 | Runbook | — | verified | [`runbook.md`](runbook.md) |
 | Hook | — | verified | [`hook.md`](hook.md) |
 
-Full cards land in a later, separately-gated slice — see the audit pipeline
-in the `icm-architect` skill's `references/system-map.md`. This index is
-hand-maintained; keep a row's `status` accurate when a card is added or a
-type's shape changes, but never add a count column here (see `CONTEXT.md`).
+These 11 cards are Slice 2 of the audit pipeline in the `icm-architect`
+skill's `references/system-map.md`. Process cards (Slice 3) and the
+effects/change-impact index (Slice 4) remain separate, later, human-gated
+slices — not tracked by this table, which is object-type status only. This
+index is hand-maintained; keep a row's `status` accurate when a card is
+added or a type's shape changes, but never add a count column here (see
+`CONTEXT.md`).

@@ -35,13 +35,20 @@ directly-invokable action instead of relying on trigger-phrase matching.
 
 - **owns:** —
 - **owned-by:** —
-- **joins:** `CollapsedEntrypoint` (`atlas-review-pr`/`atlas-code-review`
-  invoke `reviewing-a-change` via the `Skill` tool); `Lens`/`Manifest`
-  indirectly through whichever entrypoint or lens a command's body invokes
+- **joins:** none of this map's modeled object types directly —
+  `atlas-review-pr`/`atlas-code-review` call `choosing-review-lenses`,
+  `grounding-review-in-tool-output`, and `synthesizing-review-findings`
+  directly and in sequence (`commands/atlas-review-pr.md:92,104,120`,
+  `commands/atlas-code-review.md:46,62,79`) — the same three skills the
+  `reviewing-a-change` `CollapsedEntrypoint` composes, replicated by hand
+  rather than invoked through it; see that card's own "Connected to" note.
+  `Lens`/`Manifest` indirectly through whichever lens those skills pick
 - **looks-like-but-is-not:** `Runbook` — a `Command` is a slash-invoked,
   frontmatter-declared action Claude Code itself lists and runs; a
   `Runbook` is prose a human or agent reads and follows manually, with no
-  slash-command surface at all
+  slash-command surface at all. Also not a `Hook` — a `Command` runs only
+  when named; a `Hook` runs automatically on a lifecycle event and is never
+  invoked by name
 
 ## If you change this
 

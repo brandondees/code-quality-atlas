@@ -16,7 +16,7 @@ A bundled multi-lens skill — e.g. `reviewing-a-change` — generated from an
 Q20 (`docs/open-questions.md`, resolved, built PR #80): too many top-level
 skills to select from without context bloat. Rather than picking one lens
 by hand, a `CollapsedEntrypoint` ranks and runs the relevant `Lens` set
-internally at the chosen depth `Mode` (see `Manifest`'s `modes:` section),
+internally at the chosen depth mode (see `Manifest`'s `modes:` section),
 then synthesizes one verdict — the routing block in this repo's own
 `CLAUDE.md`/`AGENTS.md` sends consumers here for "review this PR/diff"
 rather than naming a lens directly.
@@ -43,7 +43,13 @@ enumeration as it ages.
 - **owns:** —
 - **owned-by:** `Manifest` (`entrypoints:` list)
 - **joins:** every `Lens` it ranks and runs internally (not a static list —
-  computed per change from relevance + `shapes`)
+  computed per change from relevance + `shapes`). Note:
+  `commands/atlas-review-pr.md` and `commands/atlas-code-review.md` do
+  **not** invoke `reviewing-a-change` — they call the same three
+  underlying skills directly and in sequence (`choosing-review-lenses`,
+  `grounding-review-in-tool-output`, `synthesizing-review-findings`),
+  replicating this entrypoint's composition by hand rather than delegating
+  to it; see the `Command` card's own "Connected to" entry.
 - **looks-like-but-is-not:** `Lens` — see the `Lens` card's own
   looks-like-but-is-not entry for the reverse direction
 
@@ -60,7 +66,6 @@ enumeration as it ages.
 | Surface | Role |
 |---|---|
 | `tooling/generate.py` | emits `collapsed/skills/<name>/` from an `entrypoints:` entry |
-| `commands/atlas-review-pr.md`, `commands/atlas-code-review.md` | slash commands that invoke `reviewing-a-change` |
 | Root `CLAUDE.md`/`AGENTS.md` routing table | sends "review this" requests here over a bare `Lens` |
 
 ## See
