@@ -21,8 +21,8 @@ tell which is which without re-deriving it.
 
 ## Shape
 
-Two markers, not one — `_meta/schema.md`'s Naming rule ("its marker-plus-
-number, `QN`") undersells this; both forms below are `Decision` instances:
+Both marker forms below are `Decision` instances, as defined by
+`_meta/schema.md`'s Naming rule:
 
 - **`DN` — a bullet under `## Decisions made`** (`docs/open-questions.md:3`
   onward, e.g. `- **D1 — Project framing.** ... *(2026-06-08)*`). Already
