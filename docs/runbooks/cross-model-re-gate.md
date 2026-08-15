@@ -194,3 +194,49 @@ Two consequences for anyone tuning a lens here:
   false convictions picks the low-firing end and finds a third of the defects; a
   team wanting coverage picks the high-firing end and audits the findings. State
   which end a re-gate is measuring against.
+
+## The untested alternative worked, once the gap was a literal string match (2026-08-15)
+
+The "shared prose has not supplied it" finding above was about **guard
+recognition** — a fuzzy judgment call (is this check-then-act already
+neutralized?) that three rewrites of shared prose failed to move. The
+not-applicable-vs-"No findings" gap (six lenses failing it as of 2026-08-15)
+turned out to be a different kind of problem: every lens's `examples.md`
+already contains a literal, quoted canned sentence for the clean case
+("Report exactly \"No findings: ...\""), and the model reproduces it
+verbatim on out-of-scope input too — not because it can't tell the two
+cases apart, but because only one of them had a concrete string to lock
+onto. The generated `Reviewer discipline` rule already told it to say
+something else; the rule was losing to the literal example every time.
+
+Fix tested on three lenses (`reviewing-install-and-upgrade-experience`,
+`checking-idioms-and-consistency`, `auditing-compliance-and-provenance`,
+spanning both `diff` and `repo` shapes): added a **second literal quoted
+sentence** — a `"Not applicable: ..."` worked example — so the model has an
+equally concrete string for the other case. Full re-gate (not a spot check)
+against `qwen2.5-coder:7b` on all three: **all three target scenarios
+flipped from miss to hit**, reproducing the new sentence verbatim, plus two
+bonus flips on an unrelated axis (the same-day exemption-claim-vs-
+correctness-claim hypothesis — a false "skip this check" comment stopped
+working on two scenarios it previously fooled). Aggregate across the three
+suites: recall 34/52 → 39/52 (65%→75%), precision 14/19 → 15/19 (74%→79%).
+
+**It also produced real collateral damage, in both directions being
+possible at once.** Two scenarios flipped the other way: a no-established-
+formatter restraint scenario that used to correctly say "No findings" now
+invents a formatting complaint, and a correctly-guarded idempotent script
+that used to be recognized as clean now gets a fabricated "not idempotent"
+finding that directly contradicts the guard visible in the same prompt. Both
+regressions happened on scenarios untouched by the edit's target — this is
+the collateral-damage rule earlier in this document, now with a concrete
+worked example of it happening even on a fix that clearly worked in
+aggregate. **Always re-run the whole suite, and read the diff, not just the
+target scenario's before/after.**
+
+The generalizable lesson: **when the gap is "the model has one canned
+string and not the other," give it the second string** — this is a cheaper,
+more mechanical intervention than the guard-recognition rewrites, and it
+worked on the first attempt where three fuzzy-judgment rewrites had failed.
+It is not evidence that *every* prose gap is fixable this way — guard
+recognition is still unmoved — but it is worth checking whether a given gap
+has this literal-string shape before concluding a lens has hit a ceiling.
