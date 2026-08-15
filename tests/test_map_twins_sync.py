@@ -20,8 +20,8 @@ _VENDORED = (
 
 @pytest.mark.parametrize("twin", ["AGENTS.md", "routing.md"])
 def test_map_twin_matches_claude_md(twin):
-    source = (_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
-    copy = (_ROOT / twin).read_text(encoding="utf-8")
+    source = (_ROOT / "CLAUDE.md").read_bytes()
+    copy = (_ROOT / twin).read_bytes()
     assert copy == source, (
         f"docs/map/{twin} has drifted from docs/map/CLAUDE.md, the hand-edited "
         f"source. Re-copy CLAUDE.md over {twin} in the same change -- never "
@@ -37,10 +37,8 @@ def test_process_template_matches_vendored_copy():
     earlier fix wrongly claimed process.md was also a deliberate fork without
     actually forking it, which would have hidden real drift instead of
     catching it."""
-    ours = (_ROOT / "_templates" / "process.md").read_text(encoding="utf-8")
-    vendored = (_VENDORED / "assets" / "templates" / "process.md").read_text(
-        encoding="utf-8"
-    )
+    ours = (_ROOT / "_templates" / "process.md").read_bytes()
+    vendored = (_VENDORED / "assets" / "templates" / "process.md").read_bytes()
     assert ours == vendored, (
         "docs/map/_templates/process.md has diverged from the vendored "
         ".claude/skills/icm-architect/assets/templates/process.md. If this "
