@@ -7,25 +7,28 @@ wins and the map is stale — fix the card, not your mental model.
 
 ## Where things live
 
-| Folder | Holds |
-|---|---|
-| `CONTEXT.md` | how to walk this map, the universes, name collisions |
-| `_meta/schema.md` | the closed set of node types |
-| `_templates/` | blank object/process card starters |
-| `objects/` | one card per noun, clustered by how an editor asks |
-| `processes/` | one card per real, repeating movement |
-| `effects/CONTEXT.md` | "if you're changing X, open these cards" |
+| Folder | Holds | Status |
+|---|---|---|
+| `CONTEXT.md` | how to walk this map, the universes, name collisions | built |
+| `_meta/schema.md` | the closed set of node types | built |
+| `_templates/` | blank object/process card starters | built |
+| `objects/` | one card per noun, clustered by how an editor asks | index only — no clusters yet |
+| `processes/` | one card per real, repeating movement | not yet built |
+| `effects/CONTEXT.md` | "if you're changing X, open these cards" | not yet built |
 
-## Route by what you're doing
+## Route by what's actually here
 
 | If you're | Go to |
 |---|---|
-| Adding or hardening a lens | `objects/generation-pipeline/`, `objects/eval-hardening/`, `processes/harden-an-eval-suite.md` |
-| Running or debugging generation/drift/eval gates | `processes/generate.md`, `processes/drift-check.md`, `processes/eval-gate.md` |
-| Cross-model re-gating a suite | `processes/cross-model-re-gate.md` |
-| Reviewing a PR or change with the atlas itself | `processes/review-a-change.md` |
-| Not sure what a change touches | `effects/CONTEXT.md` |
-| Anything not covered above | the repo root `CLAUDE.md`'s own orientation section |
+| Learning how to walk this map | `CONTEXT.md` |
+| Looking up a node type | `_meta/schema.md` |
+| Checking whether a noun has a card yet | `objects/_index.md` |
+| Anything else | the repo root `CLAUDE.md`'s own orientation section — this map's object clusters, process cards, and change-impact index don't exist yet |
+
+Do not route to `objects/<cluster>/`, `processes/*.md`, or `effects/CONTEXT.md`
+by name until `objects/_index.md`'s status column says they exist — those are
+later, separately-gated slices of the same audit pipeline this map follows
+(`icm-architect`'s `references/system-map.md`).
 
 ## The one rule
 

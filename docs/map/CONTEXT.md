@@ -27,15 +27,22 @@ State both once here rather than re-discovering the mismatch per session:
 1. `_meta/schema.md` for the closed node types.
 2. `objects/_index.md` for a one-line-per-type map (stub | verified | stale).
 3. Open one object card, not the whole `objects/` folder.
-4. For a specific change, start at `effects/CONTEXT.md` instead — it names
+4. For a specific change, once `effects/CONTEXT.md` exists (a later slice —
+   check `objects/_index.md`'s status first) start there instead — it names
    which cards to open, so you don't have to guess.
 
 ## Entry-file twins
 
 `CLAUDE.md` is the hand-edited source. `AGENTS.md` and `routing.md` in this
-same folder are byte-identical copies for tools that don't read `CLAUDE.md`.
-Edit `CLAUDE.md` only, then re-copy it to both twins in the same change —
-never hand-edit a twin directly, and never let them drift apart.
+same folder are byte-identical copies, per `icm-architect`'s own convention
+(`references/system-map.md`: "Generate `AGENTS.md` and `routing.md` as
+byte-identical twins... Tools that ignore `CLAUDE.md` still get the
+catalog") — `AGENTS.md` for the cross-agent onboarding convention, `routing.md`
+for tooling that expects neither name. Edit `CLAUDE.md` only, then re-copy it
+to both twins in the same change — never hand-edit a twin directly. This is
+CI-enforced the same way the root `CLAUDE.md`/`AGENTS.md` routing block is
+(`tests/test_map_twins_sync.py`, precedent: `tests/test_routing_snippet_sync.py`,
+issue #167).
 
 ## What this map does not track
 
