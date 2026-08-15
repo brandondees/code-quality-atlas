@@ -27,7 +27,22 @@ types above by name.
 
 ## Naming
 
-Lens and Command cards are named by the literal kebab-case directory/file
-name. Category, Decision, and Gap cards are named by their letter+number
-(`#N`, `QN`, `GN`) exactly as the source document names them — do not invent
-a different label for the same thing.
+Every type below is named by a rule, not by convention left to guess at card
+creation time:
+
+| Type | Named by |
+|---|---|
+| `Manifest` | fixed name `Manifest` — one instance |
+| `Lens` | the literal kebab-case directory name under `skills/` |
+| `Category` | its marker-plus-number exactly as `docs/research/cluster-*.md` writes it (`#N`) |
+| `CollapsedEntrypoint` | the literal kebab-case directory name under `collapsed/skills/` |
+| `EvalScenario` | its owning `Lens` name plus ordinal position in `evals/eval.json` (`<lens>#<n>`) |
+| `Decision` | its marker-plus-number in `docs/open-questions.md` (`QN`) |
+| `Gap` | its marker-plus-number in `docs/map-gaps.md` (`GN`) |
+| `PlanDoc` | the literal filename (already dated and scoped) under `docs/plans/` |
+| `Command` | the literal filename under `commands/` |
+| `Runbook` | the literal filename under `docs/runbooks/` |
+| `Hook` | its identifier as `hooks/hooks.json` names it |
+
+Never invent a different label for the same thing than the rule above
+produces — a card's name must be re-derivable from its source alone.

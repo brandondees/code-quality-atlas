@@ -1,9 +1,9 @@
 ---
-type: object
-cluster: {cluster}
+type: "{ObjectType}"
+cluster: "{cluster}"
 universe: live
 status: stub
-entity: {path to the owning file}
+entity: "{path to the owning file}"
 ---
 
 # {Name}

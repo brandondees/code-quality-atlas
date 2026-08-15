@@ -1,5 +1,7 @@
 # code-quality-atlas
 
+<!-- BEGIN shared orientation -->
+
 ## Orientation for new sessions
 
 Asked something like "what's next?" or otherwise asked to plan or build without
@@ -19,8 +21,6 @@ issues/PRs — check these before reporting nothing's queued:
   what the nouns are (a lens, a category, an eval scenario, a decision...)
   and what a change hits, cited against source rather than re-derived from
   scratch each session.
-
-<!-- BEGIN shared orientation -->
 
 Before authoring anything here, read the **standing authoring rules** in
 [`docs/research/README.md`](docs/research/README.md) — behavioral claims,

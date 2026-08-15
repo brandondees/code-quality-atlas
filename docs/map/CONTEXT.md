@@ -56,14 +56,21 @@ issue #167).
 
 ## What this map does not track
 
-Counts — lens counts, scenario counts, assertion counts, file counts, "as of
-this writing" snapshots. Those live only in the source (`skills/manifest.yaml`,
-each lens's `evals/eval.json`, the directory tree itself) and in generated
-output, never restated as a number in this map's prose. A count written into
-a markdown file is a count that goes stale the next time someone lands a PR —
-this repo has already paid real PR-review-churn cost for exactly that pattern
-(see `docs/session-log.md`'s SKILL.md file-count reconciliation, and its
+Live counts — lens counts, scenario counts, assertion counts, file counts,
+"as of this writing" snapshots of current state. Those live only in the
+source (`skills/manifest.yaml`, each lens's `evals/eval.json`, the directory
+tree itself) and in generated output, never restated as a number describing
+*current* state in this map's prose or in any other doc's routing/orientation
+text. A current-state count written into a markdown file is a count that
+goes stale the next time someone lands a PR — this repo has already paid
+real PR-review-churn cost for exactly that pattern (see
+`docs/session-log.md`'s SKILL.md file-count reconciliation, and its
 recall/precision reconciliation, both from the same PR round). Ask the
 source, or run `python -m tooling.cli generate` / `drift` and read its own
-output, rather than trusting a written-down number here — in this map or
-anywhere else in the repo's prose docs.
+output, rather than trusting a written-down current-state number.
+
+This does not apply to a dated, point-in-time record — `docs/session-log.md`'s
+own reconciliations (cited above) are exactly that: a number that was true
+when written and is recorded as history, not asserted as the current state.
+The distinction is "as of right now" vs. "as of this dated entry" — the
+first goes stale, the second is already correctly timestamped.
