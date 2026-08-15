@@ -8,13 +8,17 @@ issues/PRs — check these before reporting nothing's queued:
 
 - [`docs/open-questions.md`](docs/open-questions.md) — the decisions log
   (`D1`-`D18`+) and the live "Genuinely still open (undecided)" list. Start here.
-- [`docs/plans/`](docs/plans/) — dated, scoped design docs, each carrying a
-  `**Status:**` header; all four in the directory as of this writing are
-  implemented (kept as historical execution records, not a work queue).
+- [`docs/plans/`](docs/plans/) — dated, scoped design docs, each carrying its
+  own `**Status:**` header; check that header per file rather than assuming
+  the whole directory is a live work queue or a historical record.
 - [`docs/map-gaps.md`](docs/map-gaps.md) — structural taxonomy gaps (`G1`-`G32`+)
   feeding future categories/lenses.
 - [`docs/session-log.md`](docs/session-log.md) — narrative history of what
   shipped and why, for when a doc pointer alone isn't enough context.
+- [`docs/map/CLAUDE.md`](docs/map/CLAUDE.md) — the repo's own ICM system map:
+  what the nouns are (a lens, a category, an eval scenario, a decision...)
+  and what a change hits, cited against source rather than re-derived from
+  scratch each session.
 
 <!-- BEGIN shared orientation -->
 
