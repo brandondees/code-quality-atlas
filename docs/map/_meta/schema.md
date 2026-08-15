@@ -12,7 +12,7 @@ this closed list. Do not invent a new type without adding it here first.
 | `Category` | one research-derived heuristic group a lens is `built_from` | a `## #N` section in `docs/research/cluster-*.md` |
 | `CollapsedEntrypoint` | a bundled multi-lens skill | `manifest.yaml`'s `entrypoints:`; materialized at `collapsed/skills/<name>/` |
 | `EvalScenario` | one query/expected_behavior pair, A-E taxonomy-tagged | an item in a lens's `evals/eval.json` |
-| `Decision` | a tracked design question and its resolution state | a `### QN` entry in `docs/open-questions.md` |
+| `Decision` | a tracked design question and its resolution state | a `DN` bullet ("Decisions made") or `QN` header ("Open questions") in `docs/open-questions.md` |
 | `Gap` | a structural taxonomy gap feeding future categories/lenses | a `GN` entry in `docs/map-gaps.md` |
 | `PlanDoc` | a dated, scoped, `**Status:**`-tagged design doc | a file in `docs/plans/` |
 | `Command` | a slash-command entry point | a file in `commands/` |
@@ -37,7 +37,7 @@ creation time:
 | `Category` | its marker-plus-number exactly as `docs/research/cluster-*.md` writes it (`#N`) |
 | `CollapsedEntrypoint` | the literal kebab-case directory name under `collapsed/skills/` |
 | `EvalScenario` | its owning `Lens` name plus ordinal position in `evals/eval.json` (`<lens>#<n>`) |
-| `Decision` | its marker-plus-number in `docs/open-questions.md` (`QN`) |
+| `Decision` | its marker-plus-number in `docs/open-questions.md` — either a `DN` bullet under "Decisions made" or a `QN` header under "Open questions"; see the `Decision` object card for the distinction |
 | `Gap` | its marker-plus-number in `docs/map-gaps.md` (`GN`) |
 | `PlanDoc` | the literal filename (already dated and scoped) under `docs/plans/` |
 | `Command` | the literal filename under `commands/` |
