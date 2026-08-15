@@ -69,3 +69,24 @@ pathlib, formatter-clean. Report "No findings". Do NOT impose personal style
 preferences over the project's established choices, and apply the counterweight:
 if two call sites genuinely differ, divergence is correct — do not demand
 consistency that erases a meaningful difference.
+
+## Not applicable → outside this lens's scope
+
+**Input (diff, with context):**
+
+```json
+// tests/fixtures/mock_api_response.json
+{
+  "status": "ok",
+- "retry_after_seconds": 42
++ "retry_after_seconds": 43
+}
+```
+
+**Expected finding:** This change has no code shape, formatting, or naming
+surface at all — it's a single numeric value edited in a test fixture, not
+source code. Report "Not applicable: this change has no code shape,
+formatting, or convention surface for this lens to check". Do NOT report "No
+findings" here — that sentence means the code was checked against project
+convention and matched it, which implies there was code to check. There
+wasn't any.

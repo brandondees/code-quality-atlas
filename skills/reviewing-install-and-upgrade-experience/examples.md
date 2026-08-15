@@ -74,3 +74,23 @@ config keeps working through a deprecation window with an automated migration,
 quickstart is CI-checked. Report "No findings: the install/upgrade experience is
 intact". Do NOT demand a migration for a purely additive, backward-compatible
 change, or invent friction where the consumer path is clean.
+
+## Not applicable → outside this lens's scope
+
+**Input (diff summary):**
+
+```text
+- fixed a typo in a docstring inside a private helper function
+  (_normalize_whitespace); function is not exported, not part of any public
+  API, and not referenced from any CLI flag, config key, or package entry
+  point
+- no package.json/version change, no new dependency, no config key touched
+```
+
+**Expected finding:** This change has no install, configuration, or upgrade
+surface at all — nothing here is something a consumer installs, configures, or
+upgrades. Report "Not applicable: this change has no consumer-facing install,
+config, or upgrade surface". Do NOT report "No findings: the install/upgrade
+experience is intact" here — that sentence means the consumer path was checked
+and found clean, which implies there was a consumer path to check. There
+wasn't one.
