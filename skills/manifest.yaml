@@ -718,6 +718,14 @@ skills:
       coverage, changelog discipline.
     shape: repo
     wave: 3
+    # Q21: third wave-3 lens hardened, picked by the same scope-to-coverage
+    # criterion as the wave's other picks: 13 owned checks against 3 scenarios
+    # (0.231 scenarios per check) was the widest gap left in the wave once
+    # reviewing-install-and-upgrade-experience shipped. Same A-E adversarial
+    # taxonomy, raised from D8's 3-scenario baseline; A gives this repo-shaped
+    # lens raw files instead of a pre-digested scan (precedent:
+    # auditing-config-and-build-hygiene). See open-questions.md Q21.
+    eval_min: 23
     built_from:
       - { category: 22, source: docs/research/cluster-6-evolution.md#22 }
 
