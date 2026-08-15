@@ -866,6 +866,12 @@ skills:
     shape: diff
     design: true
     wave: 4
+    # Q21: second wave-3 lens hardened, picked by the same scope-to-coverage
+    # criterion as the wave's other picks: 18 owned checks against 4 scenarios
+    # (0.222 scenarios per check) was the widest gap left in the wave. Same A-E
+    # adversarial taxonomy, raised from D8's 3-scenario baseline (this lens
+    # already had 4). See open-questions.md Q21.
+    eval_min: 28
     built_from:
       - { category: 33, source: docs/research/cluster-6-evolution.md#33 }
 

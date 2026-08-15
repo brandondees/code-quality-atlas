@@ -60,7 +60,11 @@ and closed 2026-08-08 by **`reviewing-performance-and-efficiency`** (4 → 26),
 which leaves **every lens in waves 1 and 2 hardened, 11 of 11**; wave 3 opened
 2026-08-09 with **`auditing-config-and-build-hygiene`** (3 → 28, and the first
 suite re-gated against the floor of record in the same session it was authored —
-13/28, which is what a bar looks like); 26 preference-tier lenses remain),
+13/28, which is what a bar looks like); **wave 3 continued 2026-08-14 with
+`reviewing-install-and-upgrade-experience`** (4 → 28, re-gated the same
+session — recall 11/21, precision 5/7; see session-log for the fabricated
+support-window figure and the fourth instance of the not-applicable-vs-"No
+findings" gap); 25 preference-tier lenses remain),
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
@@ -165,7 +169,7 @@ of the same date.
 
 **Worth stating plainly:** both defects were caught, by external reviewers, on PRs where the atlas ran alongside them. That is the routing block's non-exclusive combination working exactly as designed — the argument for it is now empirical rather than a matter of principle.
 
-### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 9 of 35 done, wave-1-first sub-wave complete, wave 2 complete, **wave 3 opened 2026-08-09 — and its first suite is the first re-gated against the floor of record in the session that authored it**) *(new, 2026-06-27)*
+### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 10 of 35 done, wave-1-first sub-wave complete, wave 2 complete, **wave 3 underway — two suites hardened and re-gated in the session that authored them** — see [`session-log.md`](session-log.md) 2026-08-09 and 2026-08-14) *(new, 2026-06-27)*
 
 **Trigger.** Building the G30 threat-modeling lens ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)) surfaced that for high-stakes lenses the dangerous failure mode is the **false negative**, and that 3–4 happy-path scenarios don't probe it. That spec's §5 introduces a **thorough, adversarial, false-negative-weighted** eval design — ~21 scenarios across core-firing / per-axis-coverage / detect-and-route / **red-team** / precision groups, plus a red-team generation pass and a hardened cross-model re-gate.
 
