@@ -28,7 +28,7 @@
       ]
     },
     {
-      "query": "Audit this repository. These are the raw files, not a pre-digested scan summary.\n\n`README.md` (excerpt):\n```markdown\n## Install\n    pip install acme-lib\n\n## Quickstart\n    from acme import Client\n    c = Client(api_key=\"...\")\n    c.widgets.list(page=1)\n```\n\n`src/acme/widgets.py` (excerpt, current on disk):\n```python\nclass Widgets:\n    def list(self, cursor: str | None = None, limit: int = 50):\n        \"\"\"List widgets.\n\n        Args:\n            page: page number to fetch, 1-indexed.\n        \"\"\"\n        ...\n```",
+      "query": "Audit this repository. These are the raw files, not a pre-digested scan.\n\n`README.md` (excerpt):\n```markdown\n## Install\n    pip install acme-lib\n\n## Quickstart\n    from acme import Client\n    c = Client(api_key=\"...\")\n    c.widgets.list(page=1)\n```\n\n`src/acme/widgets.py` (excerpt, current on disk):\n```python\nclass Widgets:\n    def list(self, cursor: str | None = None, limit: int = 50):\n        \"\"\"List widgets.\n\n        Args:\n            page: page number to fetch, 1-indexed.\n        \"\"\"\n        ...\n```",
       "expected_behavior": [
         "Reads the actual source, not just a summary, and notices `Widgets.list` was changed to cursor-based pagination (`cursor`, `limit`) while its own docstring still documents a `page` parameter that no longer exists",
         "Flags that the README's quickstart example (`c.widgets.list(page=1)`) calls the old, now-nonexistent parameter — the documented minimal example no longer runs against the current code",
@@ -36,7 +36,7 @@
       ]
     },
     {
-      "query": "Audit this repository. These are the raw files, not a pre-digested scan summary.\n\n`AGENTS.md` (repo root, unchanged by recent commits):\n```markdown\n## Build & test\n    make build\n    make test\n\n## Layout\n    scripts/deploy.sh handles releases; run it from repo root.\n```\n\n`git log --stat` (most recent commits, this repo):\n```text\na1b2c3d  rename scripts/deploy.sh -> scripts/release.sh; update CI workflow\n         to call scripts/release.sh\ne4f5a6b  Makefile: `test` target removed, replaced by `just test` (justfile added)\n```",
+      "query": "Audit this repository. These are the raw files, not a pre-digested scan.\n\n`AGENTS.md` (repo root, unchanged by recent commits):\n```markdown\n## Build & test\n    make build\n    make test\n\n## Layout\n    scripts/deploy.sh handles releases; run it from repo root.\n```\n\n`git log --stat` (most recent commits, this repo):\n```text\na1b2c3d  rename scripts/deploy.sh -> scripts/release.sh; update CI workflow\n         to call scripts/release.sh\ne4f5a6b  Makefile: `test` target removed, replaced by `just test` (justfile added)\n```",
       "expected_behavior": [
         "Notices the AGENTS.md-documented `scripts/deploy.sh` was renamed to `scripts/release.sh` in the actual commit history, and that the file itself was never updated to match",
         "Notices `make test` no longer works (the target was removed in favor of `just test`) while AGENTS.md still tells an agent to run it",
