@@ -32,8 +32,8 @@
       "expected_behavior": [
         "Fires on raw file contents rather than requiring a pre-summarised scan inventory",
         "Flags `left-pading` as a likely typosquat/misspelling of the well-known `left-pad` (or `padStart`-shaped) package name, worth verifying the intended package before trusting it",
-        "Flags `axios`'s caret range (`^1.6.0`) resolving to `1.7.9` in the lockfile as a floating install that can silently drift forward on a fresh `npm install` even though a lockfile exists",
-        "Flags the dependency itself as trivial (a fixed-width string pad is a few lines) independent of the typosquat concern"
+        "Flags the dependency itself as trivial (a fixed-width string pad is a few lines) independent of the typosquat concern",
+        "Does not flag `axios`'s lockfile entry as a drift risk on its own -- the locked 1.7.9 satisfies the declared ^1.6.0 range, so a plain `npm install` here would honor the lock, not re-resolve past it"
       ]
     },
     {
@@ -88,9 +88,9 @@
     {
       "query": "Audit this dependency scan.\n```text\npackage   version  pinned?  cves  last release  maintainers  license  notes\nfastify   5.2.1    lock     -     3 weeks ago   12           MIT      committed lockfile\n```\n`ci.yml`:\n```yaml\n- run: npm install\n- run: npm test\n```",
       "expected_behavior": [
-        "Flags that CI runs `npm install` rather than `npm ci` — `npm install` may re-resolve and rewrite the lockfile within the ranges `package.json` allows, so a committed lockfile does not actually pin what CI builds and tests",
-        "Recommends `npm ci` (or the equivalent frozen-lockfile install for the ecosystem in use) so CI builds exactly what the lockfile records",
-        "Does not treat the committed lockfile alone as sufficient evidence of a pinned, reproducible install"
+        "Flags that CI runs `npm install` rather than `npm ci` -- `npm install` only fails loudly on a manifest/lockfile mismatch when using `npm ci`; a plain `npm install` will silently re-resolve and rewrite the lockfile the next time `package.json`'s ranges and the lockfile diverge, so nothing here actually enforces that CI always builds what the lockfile records",
+        "Recommends `npm ci` (or the equivalent frozen-lockfile install for the ecosystem in use) so CI fails fast on drift instead of silently re-resolving",
+        "Does not claim this specific scan is already drifting -- no evidence of a manifest/lockfile mismatch is given here; the risk is what an unnoticed future divergence would do under `npm install`, not a current defect"
       ]
     },
     {
@@ -110,11 +110,11 @@
       ]
     },
     {
-      "query": "Audit this dependency scan.\n```text\npackage        version  pinned?  cves           license  notes\nimg-transform  2.1.0    lock     CVE-2026-500   MIT      CVE description: arbitrary code execution via a crafted image file; this package processes user-uploaded profile photos with no size/type validation before calling into it\n```",
+      "query": "Audit this dependency scan.\n```text\npackage        version  pinned?  cves           license  notes\nimg-transform  2.1.0    lock     CVE-2026-500   MIT      CVE description: arbitrary code execution via a crafted image file, no fixed version listed in this scan; this package processes user-uploaded profile photos with no size/type validation before calling into it\n```",
       "expected_behavior": [
-        "Flags the known CVE and recommends the fixed version, per this lens's own checklist",
-        "Routes the deeper exploitability judgment — whether the app's actual usage (unvalidated user-uploaded files reaching this code path) makes the CVE practically reachable and how urgently to treat it as an active incident — to `sweeping-for-security` rather than making that call here",
-        "Does not stop at 'CVE exists, bump the version' without noting that this specific usage pattern is exactly the reachable case the CVE describes — that context is why the routed severity call matters"
+        "Flags the known CVE per this lens's own checklist, without inventing a specific fixed version this scan doesn't provide -- recommends checking the advisory for a fix or an available mitigation rather than naming a version number not present in the input",
+        "Routes the deeper exploitability judgment -- whether the app's actual usage (unvalidated user-uploaded files reaching this code path) makes the CVE practically reachable and how urgently to treat it as an active incident -- to `sweeping-for-security` rather than making that call here",
+        "Does not stop at 'CVE exists' without noting that this specific usage pattern is exactly the reachable case the CVE describes -- that context is why the routed severity call matters"
       ]
     },
     {
