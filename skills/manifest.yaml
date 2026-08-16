@@ -685,6 +685,9 @@ skills:
     shape: repo
     wave: 3
     cross_ref: [27]   # primary owner: auditing-compliance-and-provenance
+    # Q21: same A-E adversarial taxonomy as the other wave-3 lenses, raised
+    # from D8's 3-scenario baseline. See open-questions.md Q21.
+    eval_min: 22
     built_from:
       - { category: 18, source: docs/research/cluster-5-verification.md#18 }
       - { category: 27, source: docs/research/cluster-6-evolution.md#27 }

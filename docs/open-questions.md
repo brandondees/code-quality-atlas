@@ -128,7 +128,13 @@ failing to move its target too. A single isolated-scenario check is not
 reliable evidence either way on this substrate (an identical request
 returned a clean pass and a fabricated finding on consecutive calls at
 `temperature: 0`), so every verdict in that session came from a full-suite
-re-gate;
+re-gate. **Wave 3 continued the same day with `auditing-dependencies-and-supply-chain`**
+(3 → 22, picked as one of five lenses tied for the widest scope-to-coverage gap
+in the wave — full re-gate the same session: recall 10/18, precision 4/4; see
+session-log for the A-E breakdown and a fabrication pattern distinct from what
+this campaign has documented elsewhere — the floor model inventing CVE IDs and
+license names that appear nowhere in the scan, not just misreading ones that
+do, on 4 of the 8 misses);
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
