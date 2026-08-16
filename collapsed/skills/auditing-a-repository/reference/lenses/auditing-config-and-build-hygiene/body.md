@@ -16,6 +16,7 @@ Are config and CI trustworthy? Secrets, env parity, reproducible pinned builds, 
 - [Bad → finding (CI + image + config)](#bad--finding-ci--image--config)
 - [Bad → finding (build reproducibility + flags)](#bad--finding-build-reproducibility--flags)
 - [Good → no finding](#good--no-finding)
+- [Not applicable → outside this lens's scope](#not-applicable--outside-this-lenss-scope)
 - [Going deeper](#going-deeper)
 
 ## When to use
@@ -160,6 +161,28 @@ validated config, owned flags with removal plans. Report
 "No findings: config and build hygiene are sound". Do NOT demand extra
 infrastructure (canaries, hermetic build systems) as a default — they're findings
 only when the project's declared risk level calls for them.
+
+## Not applicable → outside this lens's scope
+
+**Input (scan):**
+
+```text
+tests/: 812 tests, 4 flagged flaky over the last 30 CI runs (retried and
+        passed on rerun each time). Line coverage 71%, branch coverage 58%.
+```
+
+No CI, build, container, IaC, or configuration files were included in this
+scan.
+
+**Expected finding:** This scan is outside this lens's scope — it contains
+test-suite stability and coverage metrics, not a CI pipeline, build script,
+container, IaC manifest, or configuration file. Report "Not applicable: this
+scan contains no CI, build, container, IaC, or configuration artifact for
+this lens to audit" and name where the content does belong (test-quality and
+flaky-test review) instead of assessing it here. Do NOT report "No findings:
+config and build hygiene are sound" — that sentence means config and build
+artifacts were checked and found sound, which implies there were some to
+check. There weren't any.
 
 ## Going deeper
 
