@@ -103,24 +103,32 @@ harness and watching `n_decoded` climb past 2,400 tokens with no stop). Both
 regressions remain open; see
 [`runbooks/cross-model-re-gate.md`](runbooks/cross-model-re-gate.md) and
 session-log for the full diagnosis. **A follow-up session (2026-08-16)
-tried both open regressions again (four more attempts across the two,
-still open — see session-log for the full attempt-by-attempt account) and
-finished the not-applicable rollout on the remaining lenses**: fixed on
+tried both open regressions again (six more attempts across the two —
+four on `checking-idioms-and-consistency` scenario 12, two on
+`reviewing-install-and-upgrade-experience` scenario 26; still open — see
+session-log for the full attempt-by-attempt account) and finished the
+not-applicable rollout on the remaining lenses**: fixed on
 `auditing-config-and-build-hygiene` (clean, +1 hit/0 new misses) and
 `auditing-documentation-health` (fixed on a second attempt, after a first
 attempt's fix over-corrected into a new false "Not applicable" on a
 proportionate-documentation scenario — a second worked example fixed both
 together); already passing on `reviewing-accessibility-and-i18n` (no
 change needed); still open on `reviewing-performance-and-efficiency`
-(two placements tried, neither moved the target scenario at all). The
-session's headline finding, now backed by data across three sessions and
-five lenses: decision-rule prose additions reliably fail to move these
-judgment-call gaps, while a worked example matching the target's concrete
-shape (not just its underlying concept) is what moves them, when anything
-does — and a single-scenario check is not reliable evidence either way on
-this substrate (an identical request returned a clean pass and a
-fabricated finding on consecutive calls at `temperature: 0`), so every
-verdict in that session came from a full-suite re-gate;
+(two placements tried, neither moved the target scenario at all). On the
+two interventions this session that isolated decision-rule-only prose
+(no new example) — install-upgrade scenario 26's only attempt, and
+documentation-health's second attempt (aimed at fixing the first attempt's
+scenario-14 over-correction) — neither moved its target, while a worked
+example did move both documentation-health's target and (in isolation,
+before a full re-gate showed it net-negative elsewhere) idioms scenario 12's.
+This is an observation about those specific attempts, not a claim that no
+decision-rule wording could ever work or that a worked example always
+succeeds — the performance-efficiency attempts show a worked example
+failing to move its target too. A single isolated-scenario check is not
+reliable evidence either way on this substrate (an identical request
+returned a clean pass and a fabricated finding on consecutive calls at
+`temperature: 0`), so every verdict in that session came from a full-suite
+re-gate;
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
