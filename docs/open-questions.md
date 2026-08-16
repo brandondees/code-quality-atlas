@@ -103,8 +103,8 @@ harness and watching `n_decoded` climb past 2,400 tokens with no stop). Both
 regressions remain open; see
 [`runbooks/cross-model-re-gate.md`](runbooks/cross-model-re-gate.md) and
 session-log for the full diagnosis. **A follow-up session (2026-08-16)
-tried both open regressions again (six more attempts across the two —
-four on `checking-idioms-and-consistency` scenario 12, two on
+tried both open regressions again (four more attempts across the two —
+three on `checking-idioms-and-consistency` scenario 12, one on
 `reviewing-install-and-upgrade-experience` scenario 26; still open — see
 session-log for the full attempt-by-attempt account) and finished the
 not-applicable rollout on the remaining lenses**: fixed on
