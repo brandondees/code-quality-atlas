@@ -102,7 +102,25 @@ runaway generation (diagnosed by isolating the exact request outside the
 harness and watching `n_decoded` climb past 2,400 tokens with no stop). Both
 regressions remain open; see
 [`runbooks/cross-model-re-gate.md`](runbooks/cross-model-re-gate.md) and
-session-log for the full diagnosis;
+session-log for the full diagnosis. **A follow-up session (2026-08-16)
+tried both open regressions again (four more attempts across the two,
+still open — see session-log for the full attempt-by-attempt account) and
+finished the not-applicable rollout on the remaining lenses**: fixed on
+`auditing-config-and-build-hygiene` (clean, +1 hit/0 new misses) and
+`auditing-documentation-health` (fixed on a second attempt, after a first
+attempt's fix over-corrected into a new false "Not applicable" on a
+proportionate-documentation scenario — a second worked example fixed both
+together); already passing on `reviewing-accessibility-and-i18n` (no
+change needed); still open on `reviewing-performance-and-efficiency`
+(two placements tried, neither moved the target scenario at all). The
+session's headline finding, now backed by data across three sessions and
+five lenses: decision-rule prose additions reliably fail to move these
+judgment-call gaps, while a worked example matching the target's concrete
+shape (not just its underlying concept) is what moves them, when anything
+does — and a single-scenario check is not reliable evidence either way on
+this substrate (an identical request returned a clean pass and a
+fabricated finding on consecutive calls at `temperature: 0`), so every
+verdict in that session came from a full-suite re-gate;
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
