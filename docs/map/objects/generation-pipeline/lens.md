@@ -83,5 +83,5 @@ Example entry: `skills/manifest.yaml:3-28` (`hunting-silent-failures`).
 - Source: `skills/manifest.yaml` (`skills:` list, e.g. lines 3-28)
 - `docs/open-questions.md` D6, D7, D10, Q21
 - `docs/map/CONTEXT.md`'s "wave" name-collision entry
-- Verified 2026-08-16: corrected the `shape` enumeration, which had omitted
-  `decision` and `artifact` (issue #243)
+- Verified 2026-08-16 @ `603d8a6` — corrected the `shape` enumeration, which
+  had omitted `decision` and `artifact` (issue #243)
