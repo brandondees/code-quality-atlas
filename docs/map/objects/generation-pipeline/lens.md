@@ -28,7 +28,10 @@ Each `skills:` list item in `skills/manifest.yaml` carries:
   under `skills/`.
 - `description`, `picker` — the trigger text and the router's one-line
   differentiator.
-- `shape` — `diff` (most lenses) or `repo` (the whole-repo audit lenses).
+- `shape` — `diff` (most lenses), `repo` (the whole-repo audit lenses),
+  `decision` (`reviewing-decision-lifecycle`), or `artifact`
+  (`reviewing-artifact-conventions`) — the same four values the sibling
+  `CollapsedEntrypoint` card's `shapes` field documents.
 - `design` (optional) — whether the lens also fires on design-doc/RFC prose,
   not just diffs.
 - `wave` — the lens's original skill-*build* wave (when it was first
@@ -80,4 +83,5 @@ Example entry: `skills/manifest.yaml:3-28` (`hunting-silent-failures`).
 - Source: `skills/manifest.yaml` (`skills:` list, e.g. lines 3-28)
 - `docs/open-questions.md` D6, D7, D10, Q21
 - `docs/map/CONTEXT.md`'s "wave" name-collision entry
-- Verified 2026-08-15 @ `ff7c642`
+- Verified 2026-08-16 @ `603d8a6` — corrected the `shape` enumeration, which
+  had omitted `decision` and `artifact` (issue #243)
