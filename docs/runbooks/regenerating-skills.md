@@ -111,6 +111,16 @@ CPU-only inference is slow (~5 tok/s on 4 cores for a 7B Q4) but fine for
 eval-scenario volumes; `llama-server` caches the shared system prefix across a
 skill's scenarios.
 
+**Single-run speed check against Ollama, same model (2026-08-16):** a 3-scenario
+suite (`reviewing-api-contract-safety`) ran ~33% faster via `llama-server` than
+via Ollama with the identical `qwen2.5-coder-7b` weights (2m40s vs 3m58s). One
+run of one small suite — not the repeated, full-suite measurement this repo's
+own re-gate discipline would require before calling llama-server the faster
+default — but a plausible direction if a future session wants to pursue it
+further. See [`../session-log.md`](../session-log.md), 2026-08-16.
+
+**LFM2.5-2.6B tried as a lower-resource floor-model candidate, same date: not (yet) a win.** On the same 3-scenario suite it was the slowest of the three combinations tested (4m42s), despite roughly a third of `qwen2.5-coder-7b`'s parameters and a faster measured per-token throughput — it simply wrote about twice as many words per answer, in a more markdown-heavy style than this repo's established terse convention. It also missed one of three expected findings on the one lens tested. Neither result is from a suite large enough to treat as a verdict; see the session-log entry for the full breakdown and the untried next step (a brevity-focused `examples.md`/directive tweak, then a full hardened-suite re-gate) before drawing any conclusion about it as a floor-model replacement.
+
 Grade each response against `expected_behavior`. Skills must be tested on at
 least two tiers (a strong model and a small/local one). Known failure mode on
 small models: **over-flagging clean code** (inventing issues on the "good"
