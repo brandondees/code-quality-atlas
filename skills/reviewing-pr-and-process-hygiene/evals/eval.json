@@ -157,10 +157,10 @@
             ]
         },
         {
-            "query": "Review this PR. Description: \"Pure refactor \u2014 extracting a generic `Repository<T>` interface, no behavior change.\" Diff introduces a new generic repository abstraction currently used by exactly one concrete type; a comment in the diff reads `// TODO: OrderRepository and InvoiceRepository will use this too, soon`.",
+            "query": "Review this PR. Description: \"Pure refactor \u2014 extracting a generic `Repository<T>` interface around our data access, no behavior change.\" Diff introduces a new generic repository abstraction currently used by exactly one concrete type (a comment reads `// TODO: OrderRepository and InvoiceRepository will use this too, soon`); in the process, the new `Repository<T>.find()` method also turns the old direct-query code's always-applied `WHERE deleted_at IS NULL` filter into an optional parameter that defaults to including soft-deleted rows unless the caller explicitly excludes them.",
             "expected_behavior": [
-                "Flags the 'no behavior change' framing as understating the change \u2014 introducing a new generic abstraction layer is a real design decision the claims-vs-evidence check should catch, not a no-op refactor",
-                "Notes that judging whether the abstraction itself is premature/speculative (used by one caller today, 'planned soon' for others) is checking-restraint's call, not this lens's \u2014 it surfaces the mislabeled claim and routes the abstraction judgment onward"
+                "Flags the 'no behavior change' claim as false \u2014 the new `Repository<T>.find()` silently changes the soft-delete filtering default, a real behavior change smuggled inside the interface-extraction refactor, not merely a structural move",
+                "Notes that judging whether the new generic abstraction itself is premature/speculative (used by one caller today, 'planned soon' for others) is checking-restraint's call, not this lens's \u2014 it surfaces the mislabeled claim and routes the abstraction judgment onward"
             ]
         },
         {
