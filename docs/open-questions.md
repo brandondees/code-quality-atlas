@@ -140,6 +140,16 @@ yet in the wave — 29 checks across two full categories on 6 baseline
 scenarios, highest `eval_min` in the suite; cross-model re-gate deferred, no
 Ollama in this container; see session-log for the A-E breakdown and an
 initial-pass miscount of the checklist caught and corrected before shipping);
+**wave 3 continued the same day with `reviewing-ai-authored-code`** (4 → 20 —
+18 owned checks on 4 baseline scenarios, the widest remaining gap once
+`reviewing-pr-and-process-hygiene` shipped; deliberately skips a parallel
+B-axis sweep of the 9 checks it shares with the already-hardened
+`auditing-dependencies-and-supply-chain` per G1's single-owner principle,
+concentrating instead on this lens's own AI-authorship-signature territory
+and its unusually large six-target delegate surface; cross-model re-gate
+deferred, no Ollama in this container; see session-log for the A-E
+breakdown and a factual claim about a real AWS S3 canned ACL value caught
+and corrected during authoring, before shipping);
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),

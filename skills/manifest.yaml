@@ -185,6 +185,36 @@ skills:
     shape: diff
     wave: 5
     cross_ref: [18]   # primary owner: auditing-dependencies-and-supply-chain
+    # Q21: picked for the widest scope-to-coverage gap remaining among the
+    # unhardened preference-tier lenses — 18 owned checks (9 under #34, this
+    # lens's own AI-authorship-signature territory; 9 under #18, shared with
+    # auditing-dependencies-and-supply-chain) on only 4 baseline scenarios.
+    # Deliberately does NOT build a parallel B-axis sweep of #18's 9 checks —
+    # auditing-dependencies-and-supply-chain's own hardened 22-scenario suite
+    # already covers necessary/healthy/CVEs/pinning/transitive-dup/license/
+    # malicious-install/automated-updates/version-bump/vendor-lock-in from
+    # that category's primary-owner angle, and duplicating it here would
+    # violate G1's single-owner principle for no added signal. No design-doc
+    # (A) group — shape: diff, not design-capable. 4 originals + B 4 (per-axis
+    # coverage of #34's remaining untested checks: hallucinated internal
+    # references, confident-but-wrong API misuse distinct from constants, a
+    # fabricated internal-issue citation, a real-but-freshly-registered
+    # unvetted dependency) + C 4 (this lens's unusually large routing surface
+    # — the two baseline scenarios already exercise the #18 and restraint
+    # delegate boundaries, so C adds the remaining four: security-weakness
+    # signature -> sweeping-for-security, a generated test asserting the
+    # implementation's own bug -> reviewing-test-quality, duplication instead
+    # of reuse -> checking-idioms-and-consistency, plausible-but-wrong
+    # inverted-condition logic -> tracing-correctness-and-invariants) + D 5
+    # (adversarial: a confident "verified against the docs" claim over an
+    # invented parameter, a distractor-buried hallucinated env var among nine
+    # correct ones, urgency/already-reviewed framing over a real public-write
+    # S3 ACL, a "standard template, low scrutiny" framing over real
+    # duplication, a fake "security review passed" claim over a real weak
+    # session-ID generator) + E 3 (a large but genuinely correct diff, a
+    # vague-but-true comment correctly not flagged as fabricated, the
+    # not-applicable test) = 20 scenarios. See open-questions.md Q21.
+    eval_min: 20
     built_from:
       - { category: 34, source: docs/research/cluster-4-runtime.md#34 }
       - { category: 18, source: docs/research/cluster-5-verification.md#18 }
