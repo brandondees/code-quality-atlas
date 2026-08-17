@@ -500,6 +500,8 @@ The effect is real and concentrated on the audit-shaped lens. But of the five ne
 
 **First real evidence for the standing eval-model-baseline-stability question (2026-08-17): `qwen3.5:4b` beats the floor on a full 22-scenario hardened suite, 15/18 recall vs 10/18, matched 4/4 precision, zero fabrication.** Full methodology, the four-model table (`qwen2.5-coder:7b`, `qwen3.5:4b`, `qwen3.5:9b`, `ornith:9b`), and the three scenarios every model missed are in [`session-log.md`](session-log.md), 2026-08-17. Unlike the earlier `qwen3:8b` candidate (2026-08-08, above) — which traded recall for false convictions on the concurrency lens — `qwen3.5:4b` costs nothing on precision here. This is one lens, not the campaign-wide verdict a baseline swap needs; the recommended next step (a full re-gate across every hardened Q21 suite) is queued, not yet run.
 
+**Residual finding, fixed (2026-08-17, #244):** `tracing-correctness-and-invariants`'s hardened suite (scenario 10, `assign_shard`) graded on a false claim — "dict iteration order... isn't guaranteed" is wrong since Python 3.7 guarantees dict insertion order. Carried unchanged across two weekly-audit cycles (#181, 2026-08-09 and 2026-08-16) without a durable tracker; `examples.md` had already been corrected to use a `set` instead, `eval.json` had not. Fixed by swapping scenario 10 to the same `set`-based construction, matching `examples.md`.
+
 ### Q20 — Too many top-level skills: collapse to a few entrypoints + nested disclosure?  → RESOLVED (built, PR #80) *(new, 2026-06-25)*
 
 **Trigger.** Distribution work (see [`distribution.md`](distribution.md)) surfaced a

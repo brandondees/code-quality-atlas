@@ -76,9 +76,9 @@
       ]
     },
     {
-      "query": "Review this change:\n```python\ndef assign_shard(worker_ids: dict, job_id: str) -> str:\n    # worker_ids: dict[str, WorkerInfo] — pick the first idle worker\n    for worker_id, info in worker_ids.items():\n        if info.idle:\n            return worker_id\n    raise NoIdleWorkers()\n```\nUsed by a scheduler that must deterministically re-derive the same assignment when replaying job history from a log.",
+      "query": "Review this change:\n```python\ndef assign_shard(worker_ids: set, job_id: str) -> str:\n    # worker_ids: set[str] of idle worker ids\n    for worker_id in worker_ids:\n        return worker_id\n    raise NoIdleWorkers()\n```\nUsed by a scheduler that must deterministically re-derive the same assignment when replaying job history from a log.",
       "expected_behavior": [
-        "Flags the determinism gap: dict iteration order in the worker_ids passed at call time isn't guaranteed to match across processes/replays (insertion order can differ), so replay can pick a different worker than the original run",
+        "Flags the determinism gap: Python's set iteration order for string elements is hash-based and varies between separate process runs (hash randomization, on by default) even given the exact same insertion sequence, so replay can pick a different worker than the original run",
         "Recommends an explicit, stable ordering (e.g. sorted by worker_id) when the caller's contract requires reproducible replay",
         "Ties the finding to the stated replay requirement rather than flagging iteration order in general as always wrong"
       ]
