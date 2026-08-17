@@ -498,6 +498,8 @@ Each of the two buys one precision scenario and pays at least one recall scenari
 
 The effect is real and concentrated on the audit-shaped lens. But of the five newly-firing scenarios, only **two are correct findings**; one is self-contradictory (a finding followed by "No findings: config and build hygiene are sound"), one names the wrong defect, and one echoes the input diff back instead of reviewing it. So the directive does suppress genuine findings *and* appears to hold a 7B model on-format. **Not resolved, and not shipped** — the honest state is that every measurement the campaign has taken sits on top of this confound.
 
+**First real evidence for the standing eval-model-baseline-stability question (2026-08-17): `qwen3.5:4b` beats the floor on a full 22-scenario hardened suite, 15/18 recall vs 10/18, matched 4/4 precision, zero fabrication.** Full methodology, the four-model table (`qwen2.5-coder:7b`, `qwen3.5:4b`, `qwen3.5:9b`, `ornith:9b`), and the three scenarios every model missed are in [`session-log.md`](session-log.md), 2026-08-17. Unlike the earlier `qwen3:8b` candidate (2026-08-08, above) — which traded recall for false convictions on the concurrency lens — `qwen3.5:4b` costs nothing on precision here. This is one lens, not the campaign-wide verdict a baseline swap needs; the recommended next step (a full re-gate across every hardened Q21 suite) is queued, not yet run.
+
 ### Q20 — Too many top-level skills: collapse to a few entrypoints + nested disclosure?  → RESOLVED (built, PR #80) *(new, 2026-06-25)*
 
 **Trigger.** Distribution work (see [`distribution.md`](distribution.md)) surfaced a
