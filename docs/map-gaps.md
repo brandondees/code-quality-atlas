@@ -397,6 +397,8 @@ The atlas is **pure LLM judgment even in categories where mature deterministic t
 
 **Coverage caveat (own it explicitly).** This pass verified CodeRabbit and Copilot in depth and Greptile partially; it produced **no verified claims** for Qodo/CodiumAI, Sourcery, Graphite Diamond, Codacy, DeepSource, Amazon CodeGuru Reviewer, Snyk Code, or SonarQube's AI features, nor for practitioner-sentiment/complaint claims — those remain open follow-up research, not confirmed non-gaps. See the linked doc's *Open threads*.
 
+Confidence: high (the architectural pattern — deterministic-tool grounding + LLM contextualization — is confirmed from primary vendor docs across two independently-verified products). Owner-gated, like every prior G entry: no manifest/skill change ships from this finding alone.
+
 ## G35 — Error taxonomy / typed error hierarchies as a design concern, distinct from error-handling mechanics
 
 Surfaced 2026-08-17 by a direct owner question ("do we cover error handling and error taxonomy?") during a routine orientation pass — **not** a research sweep, external-standard cross-check, or failure-corpus method like G14–G34. Flagged here at **lower confidence than the rest of this file by the owner's own framing**: no independent evidence yet that this is a recurring real-world failure class worth a dedicated check, as opposed to a plausible-sounding topic that happens to be absent. Treat the confidence rating below as provisional pending exactly the kind of scrutiny G33's "named-framework provenance" method would apply — this entry hasn't had that pass yet.
@@ -415,5 +417,3 @@ Neither asks whether the **taxonomy** is coherent: does a new error type join an
 - What would factor-level opt-in actually mean mechanically — a per-check flag in the manifest schema (nothing like this exists today; `eval_min` and `tier` are both whole-lens), or just default-quiet valence/severity the way G32's pre-existing-defect surfacing is opt-in/default-quiet by convention rather than by a schema field?
 
 No build follow-up. This is a candidate for a future research pass (grounding it against real sources, per the standing authoring rule against ungrounded behavioral/topic claims) before any promotion decision, not a decision itself.
-
-Confidence: high (the architectural pattern — deterministic-tool grounding + LLM contextualization — is confirmed from primary vendor docs across two independently-verified products). Owner-gated, like every prior G entry: no manifest/skill change ships from this finding alone.
