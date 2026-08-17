@@ -651,6 +651,25 @@ skills:
     shape: diff
     wave: 3
     cross_ref: [22]   # primary owner: auditing-documentation-health
+    # Q21: picked for the widest scope-to-coverage gap remaining in the wave —
+    # 29 owned checks across two full categories (#24 process, 16 checks;
+    # #22 docs-health, 13 checks) on only 6 baseline scenarios, same "one
+    # suite, two domains" shape that opened wave 2's accessibility-and-i18n
+    # lens. No design-doc (A) group — this lens is diff-only, not
+    # design-capable. 6 originals + B 14 (per-axis: CODEOWNERS routing,
+    # reviewability aids, agent-native parity, definition of done, docstring
+    # accuracy, Diataxis coverage, README front-door, runnable example, ADR
+    # for a non-obvious decision, operability runbook, stale diagram +
+    # orphaned doc, comment rot, discoverability, agent-instructions drift)
+    # + C 3 (delegate to auditing-dependencies-and-supply-chain,
+    # sweeping-for-security, checking-restraint) + D 5 (claimed-prior-audit
+    # suppression, unsupported testing checklist, urgency/hotfix framing, an
+    # unlinked "see design doc" reference, distractor-buried
+    # acceptance-criteria gap) + E 3 (a docs-only PR correctly undemanding,
+    # a >400-LOC PR correctly not size-flagged given it's genuinely atomic
+    # and fully documented, the not-applicable test) = 31 scenarios. See
+    # open-questions.md Q21.
+    eval_min: 31
     built_from:
       - { category: 24, source: docs/research/cluster-6-evolution.md#24 }
       - { category: 22, source: docs/research/cluster-6-evolution.md#22 }

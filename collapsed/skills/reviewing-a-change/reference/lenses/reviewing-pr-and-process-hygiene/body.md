@@ -16,6 +16,8 @@ Is the PR itself reviewable? Size, atomic commits, description, scope creep, cha
 - [Bad → finding](#bad--finding)
 - [Bad → finding](#bad--finding-1)
 - [Good → no finding](#good--no-finding)
+- [Good → no finding (large but genuinely single-purpose)](#good--no-finding-large-but-genuinely-single-purpose)
+- [Not applicable → outside this lens's scope](#not-applicable--outside-this-lenss-scope)
 - [Going deeper](#going-deeper)
 
 ## When to use
@@ -140,6 +142,49 @@ test and changelog in the same diff, risk and rollback stated. Report
 "No findings". Do NOT demand ceremony proportionate to a big change (ADRs, feature
 flags, multi-reviewer sign-off) for a small well-described fix — hygiene findings
 must scale with the PR's actual risk.
+
+## Good → no finding (large but genuinely single-purpose)
+
+**Input (PR metadata):**
+
+```text
+Title: "feat!: migrate auth to OAuth2 (BREAKING CHANGE)"
+Diff: +1,800 −420, single commit
+Description: rationale, blast radius (all auth endpoints), rollback plan
+  (revert + flag), feature flag AUTH_OAUTH2_ENABLED, migration guide
+  included as a new doc, ADR-0032 attached explaining the trade-off.
+CODEOWNERS: auth/* owned by @platform-team — requested as reviewer.
+Changelog: entry present, marked BREAKING. All tests updated. CI: green.
+```
+
+**Expected finding:** None, despite exceeding the ~400 net LOC guideline. The
+size is justified by being one indivisible auth migration rather than several
+unrelated concerns bundled together, and every other hygiene signal is present
+and correct: breaking-change marker, ADR, rollback plan, correct CODEOWNERS
+routing, changelog, migration docs. Report "No findings". Do NOT apply the LOC
+threshold as a hard block — it is a heuristic for spotting *mixed*-purpose
+diffs, not a ceiling on a PR that is large because the change genuinely is.
+
+## Not applicable → outside this lens's scope
+
+**Input:**
+
+```python
+def parse_config(path):
+    with open(path) as f:
+        return json.load(f)
+```
+
+No PR title, description, commit history, diff stats, issue link, or
+changelog context accompanies this snippet.
+
+**Expected finding:** This is outside this lens's scope — there is no
+PR-level metadata (commits, description, size, changelog, ownership) here to
+review, only a bare code snippet with no process context. Report "Not
+applicable: no PR metadata (commits, description, diff stats) was provided
+for this lens to review". Do NOT report "No findings: PR process hygiene is
+healthy" — that sentence means a PR's structure was checked and found sound,
+which implies there was a PR to check. There wasn't.
 
 ## Going deeper
 

@@ -134,7 +134,12 @@ in the wave — full re-gate the same session: recall 10/18, precision 4/4; see
 session-log for the A-E breakdown and a fabrication pattern distinct from what
 this campaign has documented elsewhere — the floor model inventing CVE IDs and
 license names that appear nowhere in the scan, not just misreading ones that
-do, on 4 of the 8 misses);
+do, on 4 of the 8 misses); **wave 3 continued 2026-08-17 with
+`reviewing-pr-and-process-hygiene`** (6 → 31, the widest scope-to-coverage gap
+yet in the wave — 29 checks across two full categories on 6 baseline
+scenarios, highest `eval_min` in the suite; cross-model re-gate deferred, no
+Ollama in this container; see session-log for the A-E breakdown and an
+initial-pass miscount of the checklist caught and corrected before shipping);
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
@@ -499,8 +504,6 @@ Each of the two buys one precision scenario and pays at least one recall scenari
 The effect is real and concentrated on the audit-shaped lens. But of the five newly-firing scenarios, only **two are correct findings**; one is self-contradictory (a finding followed by "No findings: config and build hygiene are sound"), one names the wrong defect, and one echoes the input diff back instead of reviewing it. So the directive does suppress genuine findings *and* appears to hold a 7B model on-format. **Not resolved, and not shipped** — the honest state is that every measurement the campaign has taken sits on top of this confound.
 
 **First real evidence for the standing eval-model-baseline-stability question (2026-08-17): `qwen3.5:4b` beats the floor on a full 22-scenario hardened suite, 15/18 recall vs 10/18, matched 4/4 precision, zero fabrication.** Full methodology, the four-model table (`qwen2.5-coder:7b`, `qwen3.5:4b`, `qwen3.5:9b`, `ornith:9b`), and the three scenarios every model missed are in [`session-log.md`](session-log.md), 2026-08-17. Unlike the earlier `qwen3:8b` candidate (2026-08-08, above) — which traded recall for false convictions on the concurrency lens — `qwen3.5:4b` costs nothing on precision here. This is one lens, not the campaign-wide verdict a baseline swap needs; the recommended next step (a full re-gate across every hardened Q21 suite) is queued, not yet run.
-
-**Residual finding, fixed (2026-08-17, #244):** `tracing-correctness-and-invariants`'s hardened suite (scenario 10, `assign_shard`) graded on a false claim — "dict iteration order... isn't guaranteed" is wrong since Python 3.7 guarantees dict insertion order. Carried unchanged across two weekly-audit cycles (#181, 2026-08-09 and 2026-08-16) without a durable tracker; `examples.md` had already been corrected to use a `set` instead, `eval.json` had not. Fixed by swapping scenario 10 to the same `set`-based construction, matching `examples.md`.
 
 ### Q20 — Too many top-level skills: collapse to a few entrypoints + nested disclosure?  → RESOLVED (built, PR #80) *(new, 2026-06-25)*
 
