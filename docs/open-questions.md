@@ -219,7 +219,25 @@ cross-references — cross #3, #16, #26 — to reviewing-concurrency-and-async,
 reviewing-observability-and-operability, and
 auditing-config-and-build-hygiene respectively; cross-model re-gate
 deferred, no Ollama in this container; see session-log for the full A-E
-breakdown);
+breakdown); **wave 3 continued with a fresh scope-to-coverage recompute,
+picking `auditing-enforcement-and-meta-artifacts`** (4 → 20 — tied with
+`reviewing-decision-lifecycle` at the widest remaining gap, 10 owned
+checks against 4 baseline scenarios each; picked over its tie for being
+repo-shaped with strong direct wave-3 precedent rather than the
+untested decision-shaped eval-authoring pattern; repo-shaped, so its A
+group supplies raw source-file suppressions and a raw Prometheus rule
+file with no scan digest supplied, the same input-shape gap this
+wave's other repo-shaped lenses found; this lens's own
+`reference/heuristics.md` carries no literal "cross #N" markers, so its
+three delegate scenarios are grounded instead in the reciprocal
+cross-references from sibling lenses that cite #30, plus
+`map-gaps.md`'s G1 table — a hygienic suppression over a real SQL
+injection → sweeping-for-security (#14), a healthy codegen-freshness
+gate over a breaking unversioned spec change → reviewing-api-contract-
+safety (#13), a correctly-marked vendored dependency over a reported
+CVE → auditing-dependencies-and-supply-chain (#18, per G1's documented
+"#18 deps, #30 codegen" split); cross-model re-gate deferred, no Ollama
+in this container; see session-log for the full A-E breakdown);
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
@@ -327,7 +345,7 @@ of the same date.
 
 **Worth stating plainly:** all three defects were caught, by external reviewers, on PRs where the atlas ran alongside them. That is the routing block's non-exclusive combination working exactly as designed — the argument for it is now empirical rather than a matter of principle.
 
-### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 20 of 35 done, wave-1-first sub-wave complete, wave 2 complete, **wave 3's original four-way tie now closed — twelve suites hardened, one (`auditing-config-and-build-hygiene`) re-gated in the session that authored it** — see [`session-log.md`](session-log.md) 2026-08-09 through 2026-08-18) *(new, 2026-06-27)*
+### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 22 of 35 done, wave-1-first sub-wave complete, wave 2 complete, **wave 3's original four-way tie closed, plus two more since — fourteen suites hardened, one (`auditing-config-and-build-hygiene`) re-gated in the session that authored it** — see [`session-log.md`](session-log.md) 2026-08-09 through 2026-08-18) *(new, 2026-06-27)*
 
 **Trigger.** Building the G30 threat-modeling lens ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)) surfaced that for high-stakes lenses the dangerous failure mode is the **false negative**, and that 3–4 happy-path scenarios don't probe it. That spec's §5 introduces a **thorough, adversarial, false-negative-weighted** eval design — ~21 scenarios across core-firing / per-axis-coverage / detect-and-route / **red-team** / precision groups, plus a red-team generation pass and a hardened cross-model re-gate.
 
