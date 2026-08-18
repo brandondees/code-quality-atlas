@@ -211,7 +211,7 @@ full A-E breakdown and the rewrite details). **This closes wave 3's
 original four-way tie** — the next preference-tier pick needs a fresh
 scope-to-coverage recompute rather than an existing tie; **wave 3 continued
 the same day with `reviewing-resilience-and-scalability`**, picked by direct
-user request rather than a recomputed tie (3 → 23 — 13 owned checks against
+user request rather than a recomputed tie (6 → 23 — 13 owned checks against
 6 baseline scenarios, already denser than the usual 3-scenario baseline;
 `design: true`, so this pass adds an A-group design-doc scenario; its three
 delegate scenarios are grounded in the lens's own heuristics

@@ -73,7 +73,7 @@
     {
       "query": "Review this change (called once per partner on a schedule, hundreds of partners):\n```python\ndef sync_partner(partner_id):\n    conn = socket.create_connection((partner_host(partner_id), 443))\n    conn.sendall(build_request(partner_id))\n    data = read_response(conn)\n    return parse(data)\n    # conn is never closed on any path\n```",
       "expected_behavior": [
-        "Flags the leaked socket: conn is opened but never closed on success or on exception, so each scheduled run accumulates open sockets/file descriptors that are not released until the process restarts",
+        "Flags the leaked socket: conn is opened but never closed via an explicit close() or context manager on any path, success or exception — relying on the runtime's garbage collector to eventually release the fd is not a resource-safety guarantee (an exception that keeps a traceback referencing conn, or a non-refcounting runtime, holds it open far longer than the caller expects)",
         "Names it as a resource-exhaustion class distinct from an unbounded queue \u2014 a per-operation leak against a finite OS ceiling (open file descriptors/sockets) that is correct on one call and detonates only as call volume accumulates",
         "Recommends closing the connection deterministically (context manager or a finally block) so the resource is released regardless of outcome"
       ]
