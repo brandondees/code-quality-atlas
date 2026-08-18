@@ -664,6 +664,44 @@ skills:
     shape: diff
     design: true
     wave: 3
+    # Q21: one of four lenses tied for the widest scope-to-coverage gap
+    # remaining after reviewing-ai-authored-code shipped (10 checks under
+    # #16 / 3 baseline scenarios) -- picked over the other three
+    # (reviewing-api-contract-safety, auditing-architecture-conformance,
+    # auditing-infrastructure-as-code) since it directly answers a standing
+    # question about logging/telemetry coverage raised earlier in this
+    # session. Single category, no cross_ref. design: true, so this pass
+    # includes an A group (design-doc firing), unlike the diff-only lenses
+    # hardened earlier in the wave. 3 originals + A 1 (an ADR proposing a
+    # datastore migration with no rollback/exit plan and no operability plan
+    # for the cutover -- exercises both this lens's own topical checks and
+    # the shared decision-record checklist it layers on for design docs
+    # that are specifically decision records) + B 5 (per-axis: graceful
+    # shutdown/SIGTERM, SLI/SLO alerting on symptoms not causes, metric
+    # cardinality discipline, observable timeouts/retries, INFO-level log
+    # spam in a hot loop) + C 3 (delegate/escalate, each grounded in a
+    # documented ownership boundary: two from G1's cross-cutting table --
+    # PII-in-logs enforcement -> the deeper collection/retention policy
+    # call routes to auditing-compliance-and-provenance, per G1's PII
+    # split; a correct new kill-switch flag vs. a stale rolled-out one ->
+    # the lifecycle/cleanup call routes to auditing-config-and-build-hygiene,
+    # which G1 names as owning feature-flag *lifecycle* (#16 owns only the
+    # runtime kill-switch) -- the third from auditing-enforcement-and-
+    # meta-artifacts's own documented scope (G10/#30), not a G1 row: an
+    # alert that exists but lacks a for: duration or runbook -> the
+    # monitoring-config-as-artifact quality call routes there) + D 5 (adversarial:
+    # "we'll add proper logging later" deferred-ceremony framing over a
+    # currently-shipping payment gap, an in-diff "already reviewed by
+    # platform team" suppression comment over a silently swallowed
+    # exception, a distractor-buried missing correlation id among six
+    # otherwise-correct log lines, compliance-deadline urgency framing over
+    # a missing kill switch on an irreversible bulk-delete, a fake "SLOs
+    # fully defined" claim over an actually cause-only alert) + E 3 (a
+    # trivial reversible helper correctly not demanding observability
+    # ceremony, a correct graceful-shutdown implementation as B1's
+    # counterweight, the not-applicable test) = 20 scenarios. See
+    # open-questions.md Q21.
+    eval_min: 20
     built_from:
       - { category: 16, source: docs/research/cluster-4-runtime.md#16 }
 

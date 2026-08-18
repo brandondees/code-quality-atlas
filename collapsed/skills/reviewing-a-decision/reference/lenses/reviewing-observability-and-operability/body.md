@@ -15,6 +15,8 @@ Can you debug this in production at 3am? Logs, traces, health checks, kill switc
 - [Bad → finding](#bad--finding)
 - [Bad → finding](#bad--finding-1)
 - [Good → no finding](#good--no-finding)
+- [Good → no finding (trivial, reversible helper)](#good--no-finding-trivial-reversible-helper)
+- [Not applicable → outside this lens's scope](#not-applicable--outside-this-lenss-scope)
 - [Going deeper](#going-deeper)
 
 ## When to use
@@ -120,6 +122,41 @@ wrapped with context and logged once at the boundary. Report "No findings". Do N
 demand metrics, tracing, or feature flags for every trivial internal helper — the
 golden-signal bar applies to meaningful operations, and a reversible copy change
 needs no kill switch.
+
+## Good → no finding (trivial, reversible helper)
+
+**Input (diff):**
+
+```python
+def format_display_name(user):
+    return f"{user.first_name} {user.last_name}".strip()
+```
+
+A pure internal string-formatting helper called from a template renderer — no I/O,
+no external calls, trivially reversible (a follow-up deploy fixes any formatting
+mistake).
+
+**Expected finding:** No findings
+
+Note: the observability bar scales with the operation's stakes, not applied
+uniformly to every function touched. Do NOT demand logging, metrics, a kill
+switch, or an SLO for a trivial, reversible, no-I/O internal helper.
+
+## Not applicable → outside this lens's scope
+
+**Input:**
+
+```text
+Memo: "Q3 marketing campaign timeline and budget allocation" — a business
+planning document with no system design, code, or operational behavior
+discussed anywhere in it.
+```
+
+**Expected finding:** This is outside this lens's scope — it covers diffs and
+system/software design docs, and a marketing-planning memo has neither. Report
+"Not applicable: no code, system design, or operational surface was provided
+for this lens to review". Do NOT report "No findings" — that would imply an
+operational surface was checked and found sound. There wasn't one.
 
 ## Going deeper
 
