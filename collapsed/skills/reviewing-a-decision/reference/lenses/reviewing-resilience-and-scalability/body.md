@@ -18,6 +18,8 @@ Will it survive failure and scale? Unbounded queues, timeouts and blast radius, 
 - [Bad → finding (degrade toward safe, not just toward available)](#bad--finding-degrade-toward-safe-not-just-toward-available)
 - [Good → no finding (degradation stays safe)](#good--no-finding-degradation-stays-safe)
 - [Good → no finding (bounded, with a defined failure path)](#good--no-finding-bounded-with-a-defined-failure-path)
+- [Good → no finding (isolated bulkheads)](#good--no-finding-isolated-bulkheads)
+- [Not applicable → no resilience/scale surface](#not-applicable--no-resiliencescale-surface)
 - [Going deeper](#going-deeper)
 
 ## When to use
@@ -234,6 +236,49 @@ holds no instance-local state that blocks scaling. Report exactly "No findings".
 This is **stateless** code with no datastore or DR design, so RTO/RPO,
 recoverability, and HA simply do not apply — do not raise them here, and do not
 demand multi-region or extra redundancy absent a stated requirement.
+
+## Good → no finding (isolated bulkheads)
+
+**Input (review this change):**
+
+```python
+# checkout uses its own dedicated pool; analytics exports use a separate one
+checkout_pool = create_pool(max_size=10)
+analytics_pool = create_pool(max_size=5)
+
+def checkout(order):
+    with checkout_pool.acquire() as conn:
+        return conn.execute(CHECKOUT_SQL, order)
+
+def export_analytics():
+    with analytics_pool.acquire() as conn:
+        return conn.execute(HEAVY_ROLLUP_SQL)
+```
+
+**Expected finding:** None — the critical checkout path and the non-critical
+analytics export draw from separate, bounded pools, so a slow or exhausted
+analytics pool cannot starve checkout of connections. Report exactly "No
+findings". Do not demand further isolation (separate processes or hosts)
+beyond this bulkhead absent a stated requirement.
+
+## Not applicable → no resilience/scale surface
+
+**Input (review this change):**
+
+```diff
+- <h1>Welcome to Acme</h1>
++ <h1>Acme: Smarter Shopping, Faster Checkout</h1>
+
+- <p>Read our latest post about the fall product line.</p>
++ <p>Read our latest post about the new fall product line and how it saves you time.</p>
+```
+
+**Expected finding:** Not applicable — a homepage hero-text and blog-post copy
+change has no queue, dependency call, shared state, or recovery surface for
+this lens to review. Say so with a line starting "Not applicable:", naming
+what's missing. Do not report "No findings" (which implies the checks ran and
+found nothing) and do not invent a resilience or scale concern in a
+text-only content change.
 
 ## Going deeper
 

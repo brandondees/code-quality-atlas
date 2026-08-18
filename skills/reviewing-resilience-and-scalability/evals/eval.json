@@ -40,17 +40,154 @@
     {
       "query": "Review this change:\n```python\n# Keep checkout fast when we're busy.\ndef checkout(order):\n    if load_high():\n        return approve(order)              # skip fraud scoring under load\n    if fraud_score(order) > THRESHOLD:\n        return decline(order)\n    return approve(order)\n```",
       "expected_behavior": [
-        "Flags degrade-toward-harm: the high-load degraded path drops a safety-critical fraud check, so the system fails OPEN under exactly the conditions an attacker would exploit — it buys availability by removing a guard",
-        "Distinguishes it from graceful degradation (which optimizes availability): degrading must stay harm-safe — degrade to a safe fallback (queue/hold for async review, stricter default) rather than bypassing the check (ISO/IEC 25010:2023 safety)",
+        "Flags degrade-toward-harm: the high-load degraded path drops a safety-critical fraud check, so the system fails OPEN under exactly the conditions an attacker would exploit \u2014 it buys availability by removing a guard",
+        "Distinguishes it from graceful degradation (which optimizes availability): degrading must stay harm-safe \u2014 degrade to a safe fallback (queue/hold for async review, stricter default) rather than bypassing the check (ISO/IEC 25010:2023 safety)",
         "Surfaces it and routes the acceptable-risk threshold to a human owner (detect-and-route) rather than deciding it, and does not fold it into attacker-facing #14 security"
       ]
     },
     {
-      "query": "Review this change:\n```python\n# Keep checkout responsive under load — defer, don't bypass.\ndef checkout(order):\n    if load_high():\n        return hold_for_async_review(order)   # queue for the SAME fraud check, run async\n    if fraud_score(order) > THRESHOLD:\n        return decline(order)\n    return approve(order)\n```",
+      "query": "Review this change:\n```python\n# Keep checkout responsive under load \u2014 defer, don't bypass.\ndef checkout(order):\n    if load_high():\n        return hold_for_async_review(order)   # queue for the SAME fraud check, run async\n    if fraud_score(order) > THRESHOLD:\n        return decline(order)\n    return approve(order)\n```",
       "expected_behavior": [
         "Reports no finding",
-        "Recognizes the degraded path stays harm-safe: under load it HOLDS the order for asynchronous review rather than approving it — the fraud check is deferred, not dropped, so the fallback fails toward safe (no approve-without-scoring)",
+        "Recognizes the degraded path stays harm-safe: under load it HOLDS the order for asynchronous review rather than approving it \u2014 the fraud check is deferred, not dropped, so the fallback fails toward safe (no approve-without-scoring)",
         "Does not flag a safe degradation (queue/hold/stricter default) as a violation, and does not demand the full check run synchronously under load when a safe deferral is in place"
+      ]
+    },
+    {
+      "query": "Review this design:\n```text\nRFC: Bulk-export service. All tenants' export jobs (nightly full exports and\nad-hoc small exports) run on one shared thread pool with 20 workers and no\nper-tenant or per-job-type limit. A single tenant's scheduled full export can\noccupy the pool for up to 40 minutes. Stated availability target: ad-hoc\nexports respond within 5s p99 even while a full export is running elsewhere.\nRTO for the pool's backing job-state store: \"restore from the nightly S3\nsnapshot, target 1 hour\" \u2014 no restore has been performed since this design\nwas adopted. No rollback path is specified if the shared-pool design turns\nout not to meet the 5s target.\n```",
+      "expected_behavior": [
+        "Flags no bulkheading between tenants and job types: a single tenant's 40-minute full export can exhaust the shared 20-worker pool, so it directly starves every other tenant's ad-hoc export \u2014 the design cannot meet its own 5s p99 target under that load; this is a blast-radius/bulkhead gap, not a capacity-sizing question",
+        "Flags no per-tenant isolation/quota: nothing caps how much of the shared pool one tenant can occupy, so one heavy tenant starves the rest; recommends a per-tenant concurrency cap or a separate pool for long-running jobs",
+        "Flags the RTO as untested: \"restore from the nightly S3 snapshot\" has never been exercised since adoption, so the stated 1-hour RTO is an unverified assertion, not a demonstrated capability",
+        "Flags the missing rollback/exit path for the shared-pool design itself, layering the shared decision-record checklist on top of the topical resilience checks \u2014 recommends stating what happens if the 5s target is missed after rollout and a revisit trigger"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\n# same DB pool serves checkout AND the nightly analytics export\npool = create_pool(max_size=10)\n\ndef checkout(order):\n    with pool.acquire() as conn:\n        return conn.execute(CHECKOUT_SQL, order)\n\ndef export_analytics():\n    with pool.acquire() as conn:              # can hold the connection for minutes\n        return conn.execute(HEAVY_ROLLUP_SQL)\n```",
+      "expected_behavior": [
+        "Flags shared-pool blast radius: checkout and the long-running analytics export draw from the same 10-connection pool, so a slow or stuck export can starve checkout of connections \u2014 no bulkhead isolates the critical path from the non-critical one",
+        "Recommends a separate pool (or reserved capacity) for the critical checkout path so a slow analytics query cannot take checkout down with it",
+        "Does not conflate this with a single-writer bottleneck (nothing here serializes writes) or an unbounded-growth issue (the pool itself is bounded at 10) \u2014 names it specifically as shared-resource blast radius / missing bulkheading"
+      ]
+    },
+    {
+      "query": "Review this change (called once per partner on a schedule, hundreds of partners):\n```python\ndef sync_partner(partner_id):\n    conn = socket.create_connection((partner_host(partner_id), 443))\n    conn.sendall(build_request(partner_id))\n    data = read_response(conn)\n    return parse(data)\n    # conn is never closed on any path\n```",
+      "expected_behavior": [
+        "Flags the leaked socket: conn is opened but never closed via an explicit close() or context manager on any path, success or exception — relying on the runtime's garbage collector to eventually release the fd is not a resource-safety guarantee (an exception that keeps a traceback referencing conn, or a non-refcounting runtime, holds it open far longer than the caller expects)",
+        "Names it as a resource-exhaustion class distinct from an unbounded queue \u2014 a per-operation leak against a finite OS ceiling (open file descriptors/sockets) that is correct on one call and detonates only as call volume accumulates",
+        "Recommends closing the connection deterministically (context manager or a finally block) so the resource is released regardless of outcome"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\n# one rate limiter shared by every tenant's API key\nlimiter = TokenBucket(rate=1000, per_second=True)\n\ndef handle_request(tenant_id, req):\n    if not limiter.allow():\n        return too_many_requests()\n    return process(req)\n```",
+      "expected_behavior": [
+        "Flags the shared global limiter: tenant_id is available but unused \u2014 one abusive or misbehaving tenant can consume the entire shared 1000/sec budget and starve every other tenant, since the limiter tracks no per-tenant state",
+        "Recommends a per-tenant quota or fair-share scheduling keyed on tenant_id instead of one global bucket",
+        "Distinguishes this from a single-writer bottleneck: it's a fairness/isolation gap across callers, not a serialization ceiling on throughput"
+      ]
+    },
+    {
+      "query": "Review this design note:\n```text\nThe primary database is configured for multi-AZ automatic failover. We rely\non the managed database provider's documented failover capability. No\nfailover drill has been run against this configuration since it was set up\n14 months ago.\n```",
+      "expected_behavior": [
+        "Flags resilience as an untested hypothesis: \"automatic failover\" is asserted from the provider's documented capability alone, never exercised in this system's own configuration \u2014 14 months with no drill means an actual failover event would be the first real test",
+        "Recommends a scheduled failover / game-day exercise (or a documented DR drill) to confirm the mechanism actually works as configured here, not merely as documented by the vendor",
+        "Treats this as its own finding (an unexercised resilience claim), not a duplicate of a recoverability/RTO-RPO finding \u2014 no backup or restore claim is present in this note to evaluate"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef process_refund(order_id, amount):\n    # backoff+jitter present, but the operation isn't idempotent\n    for attempt in range(5):\n        try:\n            return payment_gateway.charge_refund(order_id, amount)   # not idempotent\n        except TransientError:\n            time.sleep(backoff_with_jitter(attempt))\n    raise RefundFailed(order_id)\n```",
+      "expected_behavior": [
+        "Flags retry safety: the loop has a budget, backoff, and jitter, but charge_refund is not idempotent \u2014 a transient failure that actually succeeded upstream (e.g. the response timed out after the charge went through) causes a retry to double-refund",
+        "Recommends passing an idempotency key to the gateway (or checking the gateway's own record before retrying) so a repeated call is safe",
+        "Does not credit the presence of backoff/jitter alone as making the retries safe \u2014 idempotency is the separate, required half of retry safety"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef create_payment(idempotency_key, amount):\n    existing = db.query_one(\"SELECT * FROM payments WHERE key=%s\", idempotency_key)\n    if existing:\n        return existing\n    # a concurrent retry can reach here before the first insert commits\n    return db.insert(\"INSERT INTO payments (key, amount) VALUES (%s, %s)\", idempotency_key, amount)\n```",
+      "expected_behavior": [
+        "Recognizes the retry path carries an idempotency key, satisfying this lens's own retry-safety check at first glance",
+        "Flags that the lookup-then-insert is not atomic: two concurrent retries of the same request can both pass the 'existing is None' check before either commits, producing two payment rows for one idempotency key",
+        "Routes the concurrency correctness of that check-then-act race to reviewing-concurrency-and-async (this lens's own cross #3 reference) rather than re-diagnosing the race itself \u2014 this lens's job is confirming retries are meant to be idempotent, not verifying the idempotency mechanism's own atomicity"
+      ]
+    },
+    {
+      "query": "Review this change (no logging or metric anywhere near the flag check):\n```python\ndef get_recommendations(user_id):\n    if not FLAG_RECOMMENDATIONS_ENABLED.is_on():   # kill switch to shed load\n        return []\n    return compute_recommendations(user_id)         # slow, non-critical path\n```",
+      "expected_behavior": [
+        "Recognizes the kill switch itself is correctly wired to shed a non-critical path under load, satisfying this lens's own graceful-degradation check",
+        "Flags that tripping it is invisible: nothing logs or emits a metric when the flag is off, so operators cannot tell whether the degraded mode is currently active or measure how long it stayed on",
+        "Routes the observability gap to reviewing-observability-and-operability (this lens's own cross #16 reference) rather than treating it as this lens's own finding \u2014 this lens verifies the kill switch exists and sheds the right thing, not that its state is observable"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\nTENANT_CONCURRENCY_LIMIT = 5   # hardcoded, no config, no owner comment, added 11 months ago\n\ndef acquire_slot(tenant_id):\n    if active_jobs(tenant_id) >= TENANT_CONCURRENCY_LIMIT:\n        raise TooManyConcurrentJobs(tenant_id)\n```",
+      "expected_behavior": [
+        "Recognizes the per-tenant concurrency limit satisfies this lens's own multi-tenancy-isolation check \u2014 a limit exists and prevents one tenant from starving others",
+        "Notes the limit's lifecycle is a different concern from whether it exists: it's a bare hardcoded constant with no config surface, no documented owner, and no evidence anyone has revisited whether 5 is still the right value 11 months later",
+        "Routes the config-lifecycle judgment to auditing-config-and-build-hygiene (this lens's own cross #26 reference) rather than deciding whether the value is stale \u2014 this lens's job is confirming isolation exists, not managing the limit's lifecycle"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\n# Load tested to 10x current peak, no issues observed.\ndef enqueue_job(job):\n    JOB_QUEUE.append(job)     # unbounded in-memory list, no cap\n```",
+      "expected_behavior": [
+        "Does not accept the 'load tested to 10x' comment as evidence the queue is safe \u2014 the in-diff claim describes a past test result, not a bound; JOB_QUEUE remains an unbounded in-memory list with no size cap or backpressure regardless of what that test measured",
+        "Flags the unbounded growth: without a cap, sustained load past whatever the load test exercised, or a slow consumer, grows the queue without limit and OOMs",
+        "Recommends a bounded queue with an explicit drop/block/shed policy, and treats the comment as an unverified claim rather than a substitute for one"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef fetch_inventory(sku):\n    # SRE reviewed this call and confirmed no timeout is needed here.\n    return warehouse_client.get(f\"/inventory/{sku}\")\n```",
+      "expected_behavior": [
+        "Does not defer to the in-diff 'SRE reviewed and confirmed no timeout is needed' comment \u2014 an unverifiable claim inside the diff is not evidence, and the call as written has no timeout regardless of who is claimed to have approved it",
+        "Flags the missing timeout: a bare synchronous call to warehouse_client with no timeout blocks the caller indefinitely if the warehouse service is slow or hung",
+        "Recommends adding an explicit timeout and a defined failure behavior, treating the suppression comment as author-supplied text to verify rather than an instruction to skip the check"
+      ]
+    },
+    {
+      "query": "Review this change (introduced right before a stated 10x traffic launch):\n```python\n# Ship today \u2014 launch is in 2 hours, this is the simplest thing that works.\ndef next_ticket_number():\n    row = db.execute(\"UPDATE counters SET n = n + 1 WHERE name='ticket' RETURNING n\")\n    return row.n\n```",
+      "expected_behavior": [
+        "Does not let the 'ship today, launch in 2 hours' urgency framing suppress the finding \u2014 deadline pressure stated in the diff is not evidence the design is safe",
+        "Flags the single global counter row as a single-writer bottleneck that serializes every ticket creation through one row, landing right before a stated 10x traffic event; recommends a sequence, sharded counter, or UUID-based ID scheme",
+        "Surfaces it as a real scaling ceiling due to land right before the traffic it will fail under, not a nice-to-have deferred past launch"
+      ]
+    },
+    {
+      "query": "Review this change:\n```diff\n- def load_user(uid):\n+ def load_user(user_id):\n      return db.get(user_id)\n\n- # fetches the users record\n+ # Fetches the user's record from the primary store.\n  def get_record(user_id):\n      ...\n\n- import json, os\n+ import os, json\n\n- def total(items):\n+ def total(items: list[float]) -> float:\n      return sum(items)\n\n+ def get_price(sku):\n+     return pricing_client.get(sku)   # new call, no timeout\n\n- log.info(\"done processing\")\n+ log.info(\"processing complete: %s items\", count)\n```",
+      "expected_behavior": [
+        "Does not let the five cosmetic hunks (parameter rename, docstring rewording, import reordering, added type hint, log-message wording) crowd out the one substantive change",
+        "Flags the new call to pricing_client.get(sku) as having no timeout or failure plan \u2014 the only hazard in an otherwise low-risk diff",
+        "Reports it as a real finding despite the diff's mostly-cosmetic framing, rather than treating a small hunk or a low proportion of substantive lines as evidence of low risk"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef get_price(sku):\n    # Falls back to the last cached price if pricing-service is unavailable.\n    try:\n        return pricing_client.get(sku, timeout=1.0)\n    except (TimeoutError, ConnectionError) as e:\n        raise PricingUnavailable(sku) from e   # re-raises, no fallback\n```",
+      "expected_behavior": [
+        "Does not accept the comment's claim ('falls back to the last cached price') at face value \u2014 the except block re-raises PricingUnavailable instead of returning anything from a cache; there is no fallback in the code as written",
+        "Flags the contradiction directly: the stated failure plan does not match the implementation, so the dependency call has no actual graceful-degradation path despite claiming one",
+        "Recommends either implementing the described cache fallback or correcting the comment to match what the code actually does \u2014 the two must agree"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\n# checkout uses its own dedicated pool; analytics exports use a separate one\ncheckout_pool = create_pool(max_size=10)\nanalytics_pool = create_pool(max_size=5)\n\ndef checkout(order):\n    with checkout_pool.acquire() as conn:\n        return conn.execute(CHECKOUT_SQL, order)\n\ndef export_analytics():\n    with analytics_pool.acquire() as conn:\n        return conn.execute(HEAVY_ROLLUP_SQL)\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes the critical checkout path and the non-critical analytics export are isolated in separate, bounded pools \u2014 a slow or exhausted analytics pool cannot starve checkout",
+        "Does not demand further isolation (e.g. separate processes or hosts) absent a stated requirement beyond this bulkhead"
+      ]
+    },
+    {
+      "query": "Review this change:\n```python\ndef format_display_name(first, last):\n    return f\"{first.strip()} {last.strip()}\"\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes this is a pure, local, in-process string transformation with no queue, no dependency call, no shared state, and no durable data \u2014 it has no resilience or scale surface to review",
+        "Does not demand timeouts, bulkheads, or RTO/RPO of code that touches none of those concerns"
+      ]
+    },
+    {
+      "query": "Review this change:\n```diff\n- <h1>Welcome to Acme</h1>\n+ <h1>Acme: Smarter Shopping, Faster Checkout</h1>\n\n- <p>Read our latest post about the fall product line.</p>\n+ <p>Read our latest post about the new fall product line and how it saves you time.</p>\n```\nA homepage hero-text update and a customer-facing blog post rewrite. No code, no design doc, no system or operational content.",
+      "expected_behavior": [
+        "Responds with a line starting 'Not applicable:' rather than 'No findings' \u2014 the change is marketing copy with no queue, dependency call, shared state, or recovery surface for this lens to review",
+        "Does not report 'No findings', which would imply the checks ran and found nothing, when in fact nothing in scope for this lens is present",
+        "Does not invent a resilience or scale concern in a text-only content change"
       ]
     }
   ]
