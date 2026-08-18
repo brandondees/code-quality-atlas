@@ -60,11 +60,11 @@
       ]
     },
     {
-      "query": "Audit this IaC scan:\n```text\nterraform plan: 1 to add (aws_db_instance.reporting)\nmain.tf:  resource aws_db_instance reporting { engine = \"postgres\"; publicly_accessible = false }   # no storage_encrypted argument set (defaults to false)\n          resource aws_s3_bucket reporting_exports { }   # no server_side_encryption_configuration block\nbackend:  S3 remote, DynamoDB lock, SSE enabled\nIAM:      scoped to specific actions/ARNs\nCI:       checkov required and passing, no suppressions\n```",
+      "query": "Audit this IaC scan. Company policy (docs/security-baseline.md): all S3 buckets holding regulated data must use SSE-KMS with a customer-managed key, not the account default.\n```text\nterraform plan: 1 to add (aws_db_instance.reporting), 1 to add (aws_s3_bucket.reporting_exports, tagged data-classification=regulated)\nmain.tf:  resource aws_db_instance reporting { engine = \"postgres\"; publicly_accessible = false }   # no storage_encrypted argument set (defaults to false)\n          resource aws_s3_bucket reporting_exports { tags = { data-classification = \"regulated\" } }   # no server_side_encryption_configuration block -> relies on the account's default SSE-S3 (AES-256, AWS-managed key), not a customer-managed KMS key\nbackend:  S3 remote, DynamoDB lock, SSE enabled\nIAM:      scoped to specific actions/ARNs\nCI:       checkov required and passing, no suppressions\n```",
       "expected_behavior": [
         "Flags aws_db_instance.reporting as created without storage_encrypted = true — encryption-at-rest is off by default and nothing here turns it on",
-        "Flags aws_s3_bucket.reporting_exports as having no server_side_encryption_configuration — new bucket data lands unencrypted at rest",
-        "Does not also flag access/IAM/state/scanner here — all of those are already sound in this scan; isolates the finding to the missing encryption-at-rest on the two new resources"
+        "Flags aws_s3_bucket.reporting_exports as relying on the account's default SSE-S3 encryption rather than the SSE-KMS with a customer-managed key the stated policy requires for regulated data — does not claim the bucket is unencrypted (S3 applies default AES-256 encryption automatically), only that the default falls short of the stated customer-managed-key requirement",
+        "Does not also flag access/IAM/state/scanner here — all of those are already sound in this scan; isolates the finding to the two encryption-at-rest gaps"
       ]
     },
     {
