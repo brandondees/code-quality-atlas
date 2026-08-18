@@ -195,13 +195,18 @@ cross #20, #18, #30 — to reviewing-migration-and-data-safety (a
 destructive RDS replace's own migration mechanics), auditing-dependencies-
 and-supply-chain (a pinned module's own CVE status), and
 auditing-enforcement-and-meta-artifacts (an unscoped wildcard scanner
-suppression); two adversarial scenarios were rewritten mid-authoring
-after a self-caught accuracy concern — a `storage_type` change that
-wouldn't actually force a Terraform replace, and CVE/default-value claims
-against real, specific public Terraform Registry modules — both replaced
-with technically-sound or fictional-internal-module equivalents before
-this ever reached review, the same failure class Q22 tracks; cross-model
-re-gate deferred, no Ollama in this container; see session-log for the
+suppression); two scenarios (one C-group, one D-group) were rewritten
+mid-authoring after a self-caught accuracy concern — a `storage_type`
+change that wouldn't actually force a Terraform replace, and CVE/default-
+value claims against real, specific public Terraform Registry modules —
+both replaced with technically-sound or fictional-internal-module
+equivalents before this ever reached review, the same failure class Q22
+tracks; CodeRabbit's independent review then caught a real Terraform
+syntax error in the rewritten module (a `ref` argument instead of the
+`?ref=` query-string form git-sourced modules actually use to pin,
+leaving it effectively unpinned) plus the "D-group" mislabeling above,
+both fixed same-PR; cross-model re-gate deferred, no Ollama in this
+container; see session-log for the
 full A-E breakdown and the rewrite details). **This closes wave 3's
 original four-way tie** — the next preference-tier pick needs a fresh
 scope-to-coverage recompute rather than an existing tie;

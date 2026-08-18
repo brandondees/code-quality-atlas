@@ -83,7 +83,7 @@
       ]
     },
     {
-      "query": "Audit this IaC scan:\n```text\nmain.tf:  module \"vpc\" {\n            source  = \"git::https://git.internal.acme.com/platform/terraform-modules.git//vpc\"\n            ref     = \"v3.14.0\"   # pinned\n          }\nnote:     module last published 2021 (no releases since); the module's own issue tracker shows an open, unpatched CVE against this pinned version, reported 2024\n```",
+      "query": "Audit this IaC scan:\n```text\nmain.tf:  module \"vpc\" {\n            source = \"git::https://git.internal.acme.com/platform/terraform-modules.git//vpc?ref=v3.14.0\"   # pinned\n          }\nnote:     module last published 2021 (no releases since); the module's own issue tracker shows an open, unpatched CVE against this pinned version, reported 2024\n```",
       "expected_behavior": [
         "Recognizes the module version is pinned (satisfies this lens's own pinning check — a floating version isn't the defect here)",
         "Does not treat the pin alone as sufficient and stop — flags that the pinned version is old and has a reported unpatched CVE against it",
