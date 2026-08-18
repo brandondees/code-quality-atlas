@@ -15,6 +15,8 @@ Does this infra change expose or destroy something? Blast radius, public access,
 - [Bad → finding (Terraform scan)](#bad--finding-terraform-scan)
 - [Bad → finding (Kubernetes scan)](#bad--finding-kubernetes-scan)
 - [Good → no finding](#good--no-finding)
+- [Good → no finding (deliberately public, scoped and documented)](#good--no-finding-deliberately-public-scoped-and-documented)
+- [Not applicable](#not-applicable)
 - [Going deeper](#going-deeper)
 
 ## When to use
@@ -153,6 +155,40 @@ defaults safe, scanner maintained and required, and no drift. Report exactly
 "No findings: infrastructure-as-code is sound". Do NOT manufacture a finding from a
 healthy plan (adds/changes to stateless resources are not destructive) or invent a
 CVE the scan does not show.
+
+## Good → no finding (deliberately public, scoped and documented)
+
+**Input (IaC scan):**
+
+```text
+terraform plan: 1 to add (aws_s3_bucket.public_assets, a static-site bucket)
+main.tf: aws_s3_bucket_policy.public_assets grants s3:GetObject only, to
+         Principal "*", restricted to the /assets/* prefix; block_public_acls = true;
+         no write or delete actions granted to the public principal; bucket documented
+         in README as the intentionally-public CDN origin for static assets
+```
+
+**Expected finding:** None — the bucket is deliberately public, but scoped
+read-only to a specific prefix with no write/delete surface, ACLs still
+blocked, and documented as the intended CDN origin. Report exactly "No
+findings: infrastructure-as-code is sound". Do NOT flag every public bucket
+the way an undocumented, unscoped one would be flagged — public alone is not
+a defect when this narrowly scoped and justified.
+
+## Not applicable
+
+**Input:**
+
+```python
+# checkout_service.py
+def calculate_total(cart):
+    return sum(item.price * item.qty for item in cart.items)
+```
+
+**Expected finding:** "Not applicable: no Terraform/CloudFormation/Kubernetes/Helm
+manifests or plan output present to audit." Do NOT report "No findings" here —
+that sentence means a check ran and found nothing, not that nothing in this
+input was checkable.
 
 ## Going deeper
 
