@@ -149,7 +149,17 @@ concentrating instead on this lens's own AI-authorship-signature territory
 and its unusually large six-target delegate surface; cross-model re-gate
 deferred, no Ollama in this container; see session-log for the A-E
 breakdown and a factual claim about a real AWS S3 canned ACL value caught
-and corrected during authoring, before shipping);
+and corrected during authoring, before shipping); **wave 3 continued
+2026-08-18 with `reviewing-observability-and-operability`** (3 → 20 —
+one of four lenses tied for the widest remaining gap, 10 checks on 3
+baseline scenarios, picked over the other three since it directly
+answers a logging/telemetry coverage question raised earlier the same
+session; `design: true`, so this pass adds an A-group design-doc
+scenario unlike the diff-only lenses hardened earlier in the wave;
+cross-model re-gate deferred, no Ollama in this container; see
+session-log for the A-E breakdown and its three delegate scenarios,
+each grounded in a documented ownership boundary — two in
+`map-gaps.md`'s G1 table, one in a target lens's own documented scope);
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
