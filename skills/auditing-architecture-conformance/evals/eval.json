@@ -29,10 +29,10 @@
       ]
     },
     {
-      "query": "Audit this repository. Declared rule (docs/architecture.md): ui -> app -> domain -> infra; domain must not import infra or ui.\n\nRelevant files:\n```python\n# domain/pricing.py\nfrom infra.stripe_client import StripeClient\n\ndef calculate_total(order):\n    client = StripeClient()\n    return client.apply_fees(order.subtotal)\n```\n```python\n# app/order_service.py\nfrom domain.pricing import calculate_total\nfrom domain.orders import Order\n\ndef place_order(cart):\n    order = Order.from_cart(cart)\n    return calculate_total(order)\n```\n```python\n# infra/stripe_client.py\nclass StripeClient:\n    def apply_fees(self, amount):\n        ...\n```",
+      "query": "Audit this repository. Declared rule (docs/architecture.md): domain must never import infra, app, or ui; app may import domain; ui may import app; infra may implement interfaces owned by domain, but domain must never depend on infra directly.\n\nRelevant files:\n```python\n# domain/pricing.py\nfrom infra.stripe_client import StripeClient\n\ndef calculate_total(order):\n    client = StripeClient()\n    return client.apply_fees(order.subtotal)\n```\n```python\n# app/order_service.py\nfrom domain.pricing import calculate_total\nfrom domain.orders import Order\n\ndef place_order(cart):\n    order = Order.from_cart(cart)\n    return calculate_total(order)\n```\n```python\n# infra/stripe_client.py\nclass StripeClient:\n    def apply_fees(self, amount):\n        ...\n```",
       "expected_behavior": [
         "Derives the violation from the raw import statements rather than requiring a pre-digested scan/violations block — none is given here",
-        "Flags domain/pricing.py importing infra/stripe_client.py as an upward violation of the declared ui -> app -> domain -> infra direction",
+        "Flags domain/pricing.py importing infra/stripe_client.py as a violation of the declared rule that domain must never depend on infra directly",
         "Recommends inverting the dependency (a payment-gateway interface owned by domain, implemented in infra) rather than merely relocating the import",
         "Does not flag app/order_service.py importing domain/pricing.py and domain/orders.py, which follows the declared direction"
       ]
@@ -141,14 +141,14 @@
     {
       "query": "Audit this scan. Declared rule: domain owns its own ports; infra implements them.\n```python\n# domain/ports.py\nclass PaymentGateway(Protocol):\n    def charge(self, amount: int) -> None: ...\n```\n```python\n# domain/orders.py\nfrom domain.ports import PaymentGateway\n\nclass OrderService:\n    def __init__(self, gateway: PaymentGateway):\n        self.gateway = gateway\n```\n```python\n# infra/stripe_gateway.py\nfrom domain.ports import PaymentGateway\n\nclass StripeGateway(PaymentGateway):\n    def charge(self, amount: int) -> None: ...\n```\n```python\n# app/composition_root.py\nfrom domain.orders import OrderService\nfrom infra.stripe_gateway import StripeGateway\n\norder_service = OrderService(StripeGateway())\n```",
       "expected_behavior": [
-        "Reports no findings: domain defines the PaymentGateway port, infra implements it, and only the composition root wires the concrete class in — the correctly-inverted pattern",
+        "Reports exactly \"No findings: the codebase conforms to its declared architecture\" — domain defines the PaymentGateway port, infra implements it, and only the composition root wires the concrete class in, the correctly-inverted pattern",
         "Does not flag infra/stripe_gateway.py importing domain.ports — a port interface flowing from domain to infra is the intended direction, not a violation"
       ]
     },
     {
       "query": "Audit this scan.\n```text\nnew code: app/formatters.py adds format_order_number(order_id: str) -> str, a pure string-formatting function with no imports beyond the standard library. Used only within app/, which already sits between ui/ and domain/ per the declared layering.\n```",
       "expected_behavior": [
-        "Reports no findings: a pure, dependency-free helper added within its existing correct layer needs no architecture ceremony",
+        "Reports exactly \"No findings: the codebase conforms to its declared architecture\" — a pure, dependency-free helper added within its existing correct layer needs no architecture ceremony",
         "Does not demand a fitness function, interface, or layering justification for a trivial same-layer addition"
       ]
     },
