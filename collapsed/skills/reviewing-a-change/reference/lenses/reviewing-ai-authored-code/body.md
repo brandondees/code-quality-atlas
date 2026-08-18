@@ -17,6 +17,8 @@ Does this carry the AI-authored failure signature? Hallucinated/typosquatted pac
 - [Bad → finding](#bad--finding-1)
 - [Bad → finding (over-helpful scope creep)](#bad--finding-over-helpful-scope-creep)
 - [Good → no finding](#good--no-finding)
+- [Good → no finding (vague but true comment)](#good--no-finding-vague-but-true-comment)
+- [Not applicable → outside this lens's scope](#not-applicable--outside-this-lenss-scope)
 - [Going deeper](#going-deeper)
 
 ## When to use
@@ -140,6 +142,38 @@ Note: a real, already-present pinned dependency used with a correct, current API
 (timeout set, `raise_for_status` before parsing), no hallucinated symbols, no scope
 creep, no confident-but-wrong constants. Do NOT invent AI-defect findings on correct
 code, and do NOT flag the f-string path or the URL parameter as inherently unsafe.
+
+## Good → no finding (vague but true comment)
+
+**Input (diff):**
+
+```python
+# Handle the edge case where the list is empty
+if not items:
+    return []
+```
+
+**Expected finding:** No findings
+
+Note: the comment is generic but accurately describes what the code does. A vague
+comment is not the same defect as a fabricated one — do NOT flag comment genericness
+as a fabricated-comment/citation finding when the described behavior is genuinely
+correct.
+
+## Not applicable → outside this lens's scope
+
+**Input:**
+
+```text
+PR description: "Updated the wording in three tooltip strings for clarity."
+No diff, code, or file contents were provided — only that sentence.
+```
+
+**Expected finding:** This is outside this lens's scope — it is written for
+concrete code (shape: diff), and a bare description with no code attached gives
+it nothing to check. Report "Not applicable: no code diff was provided for this
+lens to review". Do NOT report "No findings" — that would imply code was
+examined and found clean. There wasn't any to examine.
 
 ## Going deeper
 
