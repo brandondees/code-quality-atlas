@@ -53,3 +53,51 @@ high fan-in with tiny fan-out is a healthy shared kernel, not a hub. Report
 "No findings: the codebase conforms to its declared architecture". Do NOT flag
 high fan-in alone as a problem, and do NOT invent architectural rules the project
 never declared.
+
+## Good → no finding (correct dependency inversion)
+
+**Input (declared rule: domain owns its own ports; infra implements them):**
+
+```python
+# domain/ports.py
+class PaymentGateway(Protocol):
+    def charge(self, amount: int) -> None: ...
+
+# domain/orders.py
+from domain.ports import PaymentGateway
+
+class OrderService:
+    def __init__(self, gateway: PaymentGateway):
+        self.gateway = gateway
+
+# infra/stripe_gateway.py
+from domain.ports import PaymentGateway
+
+class StripeGateway(PaymentGateway):
+    def charge(self, amount: int) -> None: ...
+
+# app/composition_root.py
+order_service = OrderService(StripeGateway())
+```
+
+**Expected finding:** None — domain defines the `PaymentGateway` port,
+`infra/stripe_gateway.py` implements it, and only the composition root wires
+the concrete class into `OrderService`. `infra` importing `domain.ports` is
+the port flowing in the intended direction, not a violation; `domain` never
+imports or instantiates the concrete `StripeGateway`.
+
+## Not applicable
+
+**Input:**
+
+```text
+Q3 Product Newsletter
+
+We shipped three new customer-facing features this quarter and grew active
+users by 12%. Thanks to everyone on the team for a great quarter!
+```
+
+**Expected finding:** "Not applicable: no import graph, layering, or
+module-boundary information is present to audit." Do NOT report "No
+findings" here — that sentence means a check ran and found nothing, not that
+nothing in this input was checkable.

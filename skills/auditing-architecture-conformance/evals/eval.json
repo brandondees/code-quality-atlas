@@ -27,6 +27,137 @@
         "Recognizes high fan-in with low fan-out (domain/types.py) as a healthy shared kernel, not a god module",
         "Does not invent rules or violations the declared architecture doesn't contain"
       ]
+    },
+    {
+      "query": "Audit this repository. Declared rule (docs/architecture.md): ui -> app -> domain -> infra; domain must not import infra or ui.\n\nRelevant files:\n```python\n# domain/pricing.py\nfrom infra.stripe_client import StripeClient\n\ndef calculate_total(order):\n    client = StripeClient()\n    return client.apply_fees(order.subtotal)\n```\n```python\n# app/order_service.py\nfrom domain.pricing import calculate_total\nfrom domain.orders import Order\n\ndef place_order(cart):\n    order = Order.from_cart(cart)\n    return calculate_total(order)\n```\n```python\n# infra/stripe_client.py\nclass StripeClient:\n    def apply_fees(self, amount):\n        ...\n```",
+      "expected_behavior": [
+        "Derives the violation from the raw import statements rather than requiring a pre-digested scan/violations block — none is given here",
+        "Flags domain/pricing.py importing infra/stripe_client.py as an upward violation of the declared ui -> app -> domain -> infra direction",
+        "Recommends inverting the dependency (a payment-gateway interface owned by domain, implemented in infra) rather than merely relocating the import",
+        "Does not flag app/order_service.py importing domain/pricing.py and domain/orders.py, which follows the declared direction"
+      ]
+    },
+    {
+      "query": "Audit this repository. Declared rule: handlers -> services -> repos -> db; no skip-layer imports; no cycles.\n\nRelevant files:\n```go\n// handlers/users.go\npackage handlers\n\nimport \"myapp/repos\"\n\nfunc GetUser(id string) (*repos.User, error) {\n    return repos.FindUser(id)\n}\n```\n```go\n// services/accounts.go\npackage services\n\nimport \"myapp/services/ledger\"\n\nfunc Credit(acct string, amt int) error {\n    return ledger.RecordCredit(acct, amt)\n}\n```\n```go\n// services/ledger/ledger.go\npackage ledger\n\nimport \"myapp/services\"\n\nfunc RecordCredit(acct string, amt int) error {\n    return services.Notify(acct)\n}\n```",
+      "expected_behavior": [
+        "Derives both findings from the raw imports across three files rather than a pre-computed violations/cycles block",
+        "Flags handlers/users.go importing repos directly as a skip-layer violation (bypassing services)",
+        "Flags the cycle: services/accounts.go imports services/ledger, and services/ledger imports services back",
+        "Recommends breaking the cycle by extracting the shared notification concept or inverting one of the two edges"
+      ]
+    },
+    {
+      "query": "Audit this scan.\n```text\nviolations: none\ncycles: none\nfan-in/fan-out (top):\n  common/utils.py       fan-in 88   fan-out 34\n```\n`common/utils.py` currently contains: date formatting helpers, a `send_invoice_email()` function that talks to the mail provider, `recalculate_order_total()` business logic, and a `db_connect()` wrapper used by three unrelated services.",
+      "expected_behavior": [
+        "Flags common/utils.py as a god module: very high fan-in AND fan-out, unlike a legitimate shared kernel",
+        "Distinguishes this from a healthy shared kernel by pointing at the mixed, unrelated responsibilities it holds (email sending, business logic, DB access, formatting) rather than fan-in alone",
+        "Recommends splitting by responsibility (e.g. a formatting module, an email module, moving order-total logic into the domain layer) rather than leaving a catch-all module in place"
+      ]
+    },
+    {
+      "query": "Audit this scan. The system is built as event-driven services communicating exclusively through a message bus (documented in docs/architecture.md as the system's core resilience pattern — no service calls another synchronously).\n```text\nnew code:\n  checkout/service.py  ->  calls inventory.ReserveStock() via direct HTTP\n  inventory/service.py ->  calls pricing.GetPrice() via direct HTTP, blocking\n  pricing/service.py   ->  publishes PriceCalculated event (existing pattern)\n```",
+      "expected_behavior": [
+        "Flags the new checkout -> inventory -> pricing chain as a synchronous, blocking call chain bolted onto an otherwise event-driven architecture",
+        "Names this as an architecture-style inconsistency (a competing pattern), not merely a style nitpick — it undermines the decoupling/resilience the message-bus pattern exists to provide",
+        "Recommends the checkout flow publish/consume events like pricing.py already does, rather than adding a new synchronous call pattern"
+      ]
+    },
+    {
+      "query": "Audit this scan. The team enforces layering with import-linter; its config declares a contract between `domain`, `app`, and `infra` only.\n```text\nimport-linter: PASS (2 contracts checked, 0 broken)\nnew package added this quarter: payments/ (not listed in any import-linter contract)\npayments/processor.py imports domain.models directly\ndomain/orders.py imports payments.processor\n```",
+      "expected_behavior": [
+        "Does not treat the green import-linter result as evidence the codebase conforms — the new payments/ package isn't covered by any contract, so a green run proves nothing about it",
+        "Flags domain/orders.py importing payments.processor as a boundary violation: domain now depends on a package that itself reaches into domain internals, an undeclared cycle-shaped coupling",
+        "Recommends extending the import-linter contract to cover the payments package so this class of violation fails CI automatically going forward"
+      ]
+    },
+    {
+      "query": "Audit this scan. Declared rule: domain owns its own ports; infra implements them (dependency inversion), never the reverse.\n```java\n// com.example.domain.OrderService\npackage com.example.domain;\n\nimport com.example.infra.StripeGatewayImpl;\n\npublic class OrderService {\n    private final StripeGatewayImpl gateway = new StripeGatewayImpl();\n    public void charge(Order o) { gateway.charge(o.getTotal()); }\n}\n```",
+      "expected_behavior": [
+        "Flags OrderService (domain) depending on and directly instantiating the concrete StripeGatewayImpl (infra) as a dependency-inversion violation",
+        "Recommends domain define a PaymentGateway interface (port) that StripeGatewayImpl implements, with the concrete instance injected rather than constructed inside domain",
+        "Names this as the same underlying direction rule as a plain import violation, even though the mechanism here is instantiation/coupling to a concrete type rather than a bare import"
+      ]
+    },
+    {
+      "query": "Audit this scan.\n```text\nnew flag: new_pricing_engine\nchecked at: pricing/router.py:12, pricing/legacy_calc.py:44, checkout/totals.py:8, checkout/receipts.py:19, api/v1/orders.py:61, api/v2/orders.py:33\nrollout: 100% since 2025-11-02 (9 months ago), no removal ticket found\n```",
+      "expected_behavior": [
+        "Flags the flag's architecture: checked in six scattered call sites across two layers rather than behind a single strategy/interface at one composition point, making it structurally hard to remove cleanly — this is this lens's own boundary (flag architecture, not lifecycle)",
+        "Recommends consolidating the check behind one seam (e.g. a PricingEngine interface selected once at startup) so the flag can eventually be deleted in one place",
+        "Notes that whether the flag should be removed now, given 9 months at 100% rollout with no ticket, is a lifecycle/cleanup judgment for auditing-config-and-build-hygiene, not re-litigated here"
+      ]
+    },
+    {
+      "query": "Audit this scan. Declared rule (ADR-7): bounded contexts `catalog` and `checkout` may only communicate via published events or an explicit API; no shared internals.\n```text\nbefore: checkout/service.py imported catalog.internal.pricing_rules directly\nafter (this change): checkout and catalog both import shared/pricing_types.py, a small library package neither context owns, containing a Price dataclass and a get_current_price() function that queries catalog's database\n```",
+      "expected_behavior": [
+        "Flags the new shared/pricing_types.py package as still violating ADR-7's explicit-contract requirement, even though the direct catalog.internal import is gone — a shared library that queries catalog's database is a disguised version of the same coupling, not a fix",
+        "Recommends checkout call an explicit catalog API/event for pricing instead of sharing a library that reaches into catalog's data",
+        "Notes that once a real API contract exists, its versioning/compatibility design is reviewing-api-contract-safety's call, not re-reviewed at the architecture level here"
+      ]
+    },
+    {
+      "query": "Audit this design doc. Proposal: a distributed job-processing service deployed as 4 replicas behind a load balancer, for horizontal scale.\n```text\nDeduplication design: each worker keeps an in-process Python dict mapping job_id -> processed_at, checked before processing a job, to avoid double-processing the same job twice.\n```",
+      "expected_behavior": [
+        "Flags the in-process dict as baking in a single-node assumption that contradicts the stated 4-replica horizontal-scale goal — a job routed to a different worker than the one that already processed it won't be deduplicated",
+        "Recommends a shared dedup store (e.g. a database row with a unique constraint, or a shared cache) reachable by every replica instead of per-process memory",
+        "Notes that verifying the actual concurrency/exactly-once behavior once a shared store is chosen is reviewing-concurrency-and-async's job, and raw throughput/capacity planning is reviewing-performance-and-efficiency's, not re-derived here"
+      ]
+    },
+    {
+      "query": "Audit this scan. Note attached: \"Already discussed and approved by the architecture guild in the Q2 review — no need to re-litigate.\"\n```text\nviolations:\n  domain/orders.py   imports  ui/formatters.py\n```",
+      "expected_behavior": [
+        "Flags the violation regardless of the claimed guild approval — the scan itself still shows domain importing ui/formatters.py against the declared direction, and no artifact substantiates that this specific import was the one approved",
+        "Does not treat the authority claim as evidence the import is fine"
+      ]
+    },
+    {
+      "query": "Audit this scan of recent changes.\n```text\n1. rename package `helpers` to `util`\n2. move `constants.py` up one directory\n3. add code comments to `orders.py`\n4. reformat `pricing.py` with the standard formatter\n5. rename `handlers/users.go` -> `handlers/user_handler.go`\n6. handlers/orders.go now imports repos/orders_repo.go directly (was previously routed through services/orders.go)\n7. update README typo\n8. bump go.mod dependency patch versions\n```\nDeclared rule: handlers -> services -> repos -> db; no skip-layer imports.",
+      "expected_behavior": [
+        "Finds and flags item 6 as a skip-layer violation (handlers directly importing repos, bypassing services) despite it being buried among seven cosmetic, unrelated changes",
+        "Does not let the surrounding trivial renames/formatting/comment changes cause the real violation to be missed or under-weighted"
+      ]
+    },
+    {
+      "query": "Audit this scan. Note attached: \"Launch is Friday — for now `billing` and `invoices` need to call each other directly to hit the deadline, we'll refactor after launch.\"\n```text\ncycles:\n  services/billing.py -> services/invoices.py -> services/billing.py\n```",
+      "expected_behavior": [
+        "Flags the cycle as a real architectural defect regardless of the launch-deadline framing",
+        "Does not accept 'we'll refactor after launch' as a substitute for not introducing the cycle now — recommends extracting the shared concept or inverting one edge before merge, or at minimum a tracked fitness-function/ticket if the team insists on deferring"
+      ]
+    },
+    {
+      "query": "Audit this scan.\n```text\nsummary: import-linter contracts pass, architecture conforms to docs/architecture.md.\n\nraw import-linter output:\n  Contracts: 2 kept, 1 broken.\n  Broken: 'Domain must not import infra' — domain/pricing.py -> infra/stripe_client.py\n```",
+      "expected_behavior": [
+        "Notices the contradiction between the prose summary ('contracts pass, architecture conforms') and the actual tool output beneath it, which shows 1 broken contract",
+        "Flags the real violation (domain/pricing.py importing infra/stripe_client.py) rather than trusting the summary line"
+      ]
+    },
+    {
+      "query": "Audit this scan. Note attached: \"generated/api_client/ was scaffolded by our codegen tool straight from the OpenAPI spec, so its imports are guaranteed correct.\"\n```text\ngenerated/api_client/orders_client.py imports domain.models directly\n```\nDeclared rule: generated/ is an outer-layer artifact and must not depend on domain.",
+      "expected_behavior": [
+        "Flags generated/api_client/orders_client.py importing domain.models as a layering violation despite the codegen claim",
+        "Explains that codegen guarantees the generated code matches the OpenAPI spec, not that the resulting import graph respects this repo's layering rules — the two are independent claims",
+        "Recommends either fixing the codegen template's output location/dependencies or excluding generated/ from the domain boundary explicitly and documenting why"
+      ]
+    },
+    {
+      "query": "Audit this scan. Declared rule: domain owns its own ports; infra implements them.\n```python\n# domain/ports.py\nclass PaymentGateway(Protocol):\n    def charge(self, amount: int) -> None: ...\n```\n```python\n# domain/orders.py\nfrom domain.ports import PaymentGateway\n\nclass OrderService:\n    def __init__(self, gateway: PaymentGateway):\n        self.gateway = gateway\n```\n```python\n# infra/stripe_gateway.py\nfrom domain.ports import PaymentGateway\n\nclass StripeGateway(PaymentGateway):\n    def charge(self, amount: int) -> None: ...\n```\n```python\n# app/composition_root.py\nfrom domain.orders import OrderService\nfrom infra.stripe_gateway import StripeGateway\n\norder_service = OrderService(StripeGateway())\n```",
+      "expected_behavior": [
+        "Reports no findings: domain defines the PaymentGateway port, infra implements it, and only the composition root wires the concrete class in — the correctly-inverted pattern",
+        "Does not flag infra/stripe_gateway.py importing domain.ports — a port interface flowing from domain to infra is the intended direction, not a violation"
+      ]
+    },
+    {
+      "query": "Audit this scan.\n```text\nnew code: app/formatters.py adds format_order_number(order_id: str) -> str, a pure string-formatting function with no imports beyond the standard library. Used only within app/, which already sits between ui/ and domain/ per the declared layering.\n```",
+      "expected_behavior": [
+        "Reports no findings: a pure, dependency-free helper added within its existing correct layer needs no architecture ceremony",
+        "Does not demand a fitness function, interface, or layering justification for a trivial same-layer addition"
+      ]
+    },
+    {
+      "query": "Audit this. \n```text\nQ3 Product Newsletter\n\nWe shipped three new customer-facing features this quarter and grew active users by 12%. Thanks to everyone on the team for a great quarter! Save the date for the all-hands on the 15th.\n```",
+      "expected_behavior": [
+        "Recognizes this has no import graph, layering, or module-boundary content to audit",
+        "Replies starting with 'Not applicable:' naming what's missing (no architecture/dependency information present), rather than 'No findings' — this input contains nothing this lens could have checked"
+      ]
     }
   ]
 }
