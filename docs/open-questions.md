@@ -246,8 +246,11 @@ scenario is already a decision-record text block; its three delegate
 scenarios are grounded in the lens's own heuristics.md cross-references
 — cross #11/#18, #1/#13, #27 — to checking-restraint, reviewing-api-
 contract-safety, and auditing-compliance-and-provenance respectively;
-cross-model re-gate deferred, no Ollama in this container; see
-session-log for the full breakdown);
+**this repo's own automated atlas-review routine, watching its own PR,
+caught a real not-applicable-vs-no-findings inconsistency between two
+E-group scenarios testing the same "no decision content" case on
+different input shapes — fixed same-PR**; cross-model re-gate deferred,
+no Ollama in this container; see session-log for the full breakdown);
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),

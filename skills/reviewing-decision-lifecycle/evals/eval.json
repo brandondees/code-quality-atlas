@@ -130,9 +130,9 @@
     {
       "query": "Review this change.\n```text\nPR: \"Increase the default page size for the internal admin search UI from 20 to 25 results.\" No new dependency, no architecture change, no vendor, no deprecation. Purely a constant tweak in an internal tool.\n```",
       "expected_behavior": [
-        "Reports no findings",
-        "Recognizes there is no adoption, deprecation, or architectural decision here at all — a constant tweak in an internal tool has no lock-in, no reversibility question, and no decision-record need",
-        "Does not manufacture a decision-lifecycle concern where there's no decision to review"
+        "Responds with a line starting 'Not applicable:' naming that the change carries no adoption, deprecation, architecture, or vendor decision for this lens to review",
+        "Does not report 'No findings', which would imply the checks ran against a decision and found it sound — there is no decision-lifecycle content here at all to check, only a constant tweak",
+        "Applies the same not-applicable judgment to a trivial code diff that the next scenario applies to a narrative document — this lens reviews decisions, not diffs or documents as such, so either input shape is out of scope when it carries no decision content"
       ]
     },
     {

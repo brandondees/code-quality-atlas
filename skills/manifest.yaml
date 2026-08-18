@@ -971,10 +971,14 @@ skills:
     # buried as item 4 of a 6-item low-stakes batch RFC; a "fully
     # reversible, no lock-in" ADR summary contradicted by its own
     # implementation notes further down the same document) + E 4 (a
-    # proportionate-scrutiny counterweight to B1, a trivial non-decision
-    # needing no ceremony, the not-applicable test, a vendor
-    # adopt/exit-symmetry counterweight to B2) = 18 scenarios. See
-    # open-questions.md Q21.
+    # proportionate-scrutiny counterweight to B1; two not-applicable
+    # instances on the same "no decision content at all" test applied to
+    # two input shapes -- a trivial code diff and a narrative status-
+    # update document -- kept as one convention after an atlas
+    # self-review caught the diff-shaped instance originally expecting
+    # "No findings", inconsistent with the document-shaped instance's
+    # "Not applicable"; a vendor adopt/exit-symmetry counterweight to
+    # B2) = 18 scenarios. See open-questions.md Q21.
     eval_min: 18
     built_from:
       - { category: 29, source: docs/research/cluster-6-evolution.md#29 }
