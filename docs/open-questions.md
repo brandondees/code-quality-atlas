@@ -169,21 +169,47 @@ cross-references — cross #3, #8, #2 — to reviewing-concurrency-and-async,
 checking-idioms-and-consistency, and hunting-silent-failures
 respectively; cross-model re-gate deferred, no Ollama in this container;
 see session-log for the full A-E breakdown) **and again the same day
-with `auditing-architecture-conformance`** (3 → 20 — the last of the
-four-way tie this wave opened with, alongside `auditing-infrastructure-as-code`
-which remains next; both repo-shaped and equally thin, so the tie-break
-favored the lens whose defects don't require fabricating cloud-provider
-specifics, lower risk on this campaign's recurring factual-accuracy
-concern; repo-shaped, so its A group supplies raw import statements
-across real files rather than a pre-digested scan, the same input-shape
-gap `auditing-config-and-build-hygiene`'s A group found; its three
-delegate scenarios are grounded in the lens's own heuristics
-cross-references — cross #26, #13, #3/#15 — to
+with `auditing-architecture-conformance`** (3 → 20 — one of the
+four-way tie this wave opened with; picked over its tied peer
+`auditing-infrastructure-as-code` since its defects don't require
+fabricating cloud-provider specifics, lower risk on this campaign's
+recurring factual-accuracy concern; repo-shaped, so its A group supplies
+raw import statements across real files rather than a pre-digested scan,
+the same input-shape gap `auditing-config-and-build-hygiene`'s A group
+found; its three delegate scenarios are grounded in the lens's own
+heuristics cross-references — cross #26, #13, #3/#15 — to
 auditing-config-and-build-hygiene (feature-flag architecture vs.
 lifecycle, per `map-gaps.md`'s G1 split), reviewing-api-contract-safety,
 and reviewing-concurrency-and-async / reviewing-performance-and-efficiency
-respectively; cross-model re-gate deferred, no Ollama in this container;
-see session-log for the full A-E breakdown);
+respectively; **CodeRabbit caught two real issues pre-merge** — an
+arrow-chain rule notation that literally implied the flagged edge was
+allowed, and two precision scenarios not requiring this lens's own exact
+documented no-finding sentence — both fixed same-PR (#256); cross-model
+re-gate deferred, no Ollama in this container; see session-log for the
+full A-E breakdown) **and again the same day with
+`auditing-infrastructure-as-code`** (3 → 20 — the last of the four-way
+tie, closing it; repo-shaped, its A group supplies a raw `.tf` file and
+raw Kubernetes YAML rather than a pre-digested scan; its three delegate
+scenarios are grounded in the lens's own heuristics cross-references —
+cross #20, #18, #30 — to reviewing-migration-and-data-safety (a
+destructive RDS replace's own migration mechanics), auditing-dependencies-
+and-supply-chain (a pinned module's own CVE status), and
+auditing-enforcement-and-meta-artifacts (an unscoped wildcard scanner
+suppression); two scenarios (one C-group, one D-group) were rewritten
+mid-authoring after a self-caught accuracy concern — a `storage_type`
+change that wouldn't actually force a Terraform replace, and CVE/default-
+value claims against real, specific public Terraform Registry modules —
+both replaced with technically-sound or fictional-internal-module
+equivalents before this ever reached review, the same failure class Q22
+tracks; CodeRabbit's independent review then caught a real Terraform
+syntax error in the rewritten module (a `ref` argument instead of the
+`?ref=` query-string form git-sourced modules actually use to pin,
+leaving it effectively unpinned) plus the "D-group" mislabeling above,
+both fixed same-PR; cross-model re-gate deferred, no Ollama in this
+container; see session-log for the
+full A-E breakdown and the rewrite details). **This closes wave 3's
+original four-way tie** — the next preference-tier pick needs a fresh
+scope-to-coverage recompute rather than an existing tie;
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
@@ -291,7 +317,7 @@ of the same date.
 
 **Worth stating plainly:** all three defects were caught, by external reviewers, on PRs where the atlas ran alongside them. That is the routing block's non-exclusive combination working exactly as designed — the argument for it is now empirical rather than a matter of principle.
 
-### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 19 of 35 done, wave-1-first sub-wave complete, wave 2 complete, **wave 3 underway — eleven suites hardened, one (`auditing-config-and-build-hygiene`) re-gated in the session that authored it** — see [`session-log.md`](session-log.md) 2026-08-09 through 2026-08-18) *(new, 2026-06-27)*
+### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 20 of 35 done, wave-1-first sub-wave complete, wave 2 complete, **wave 3's original four-way tie now closed — twelve suites hardened, one (`auditing-config-and-build-hygiene`) re-gated in the session that authored it** — see [`session-log.md`](session-log.md) 2026-08-09 through 2026-08-18) *(new, 2026-06-27)*
 
 **Trigger.** Building the G30 threat-modeling lens ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)) surfaced that for high-stakes lenses the dangerous failure mode is the **false negative**, and that 3–4 happy-path scenarios don't probe it. That spec's §5 introduces a **thorough, adversarial, false-negative-weighted** eval design — ~21 scenarios across core-firing / per-axis-coverage / detect-and-route / **red-team** / precision groups, plus a red-team generation pass and a hardened cross-model re-gate.
 

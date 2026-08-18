@@ -1022,6 +1022,40 @@ skills:
       access, wildcard IAM, secrets in state, drift.
     shape: repo
     wave: 4
+    # Q21: picked after auditing-architecture-conformance, its tied peer at
+    # 10 owned checks / 3 baseline scenarios (the last pair from this wave's
+    # four-way tie). Single category, no cross_ref. Repo-shaped, so A (2)
+    # supplies raw .tf/.yaml manifest content instead of a pre-digested scan
+    # summary, the same input-shape gap found on auditing-config-and-build-
+    # hygiene and auditing-architecture-conformance earlier in this wave. B
+    # (3, per-axis) covers the three checks the 3 originals never exercise as
+    # their own standalone defect: declared-vs-live drift (a hand-added
+    # security-group rule the plan catches on re-run), encryption-at-rest as
+    # an isolated gap (no other axis broken), and policy-as-code for a
+    # repeatedly-manual-fixed tag rule. C (3, delegate/escalate), each
+    # grounded in this lens's own cross-references in reference/heuristics.md
+    # rather than invented: a destructive replace on a stateful resource
+    # (this lens's own blast-radius call) with the actual data-migration
+    # mechanics routed to reviewing-migration-and-data-safety (cross #20); a
+    # pinned-but-CVE'd module (pinning satisfies this lens's own check) with
+    # the module's own supply-chain health routed to
+    # auditing-dependencies-and-supply-chain (cross #18); a current/required
+    # scanner (satisfying tool-currency) with an unscoped wildcard suppression
+    # routed to auditing-enforcement-and-meta-artifacts' suppression-hygiene
+    # territory (cross #30). D (5, adversarial): a claimed platform-team
+    # approval over a real wildcard IAM policy; a partial public-bucket fix
+    # buried as item 5 of eight mostly-cosmetic changes; launch-deadline
+    # urgency framing over a real public DB ingress rule; a "clean, no
+    # drift" summary contradicted by the raw plan output beneath it showing
+    # an IAM policy widening to a wildcard; a "verified-registry module,
+    # guaranteed secure" claim over a module whose own default leaves an RDS
+    # instance publicly accessible. E (4, precision): a resource-free
+    # CloudWatch-dashboard-only change needing no ceremony, a deliberately
+    # public static-asset bucket scoped and documented as the counterweight
+    # to public-exposure findings elsewhere in the suite, a correctly-scoped
+    # single-check suppression with a stated reason as C3's counterweight,
+    # and the not-applicable test. See open-questions.md Q21.
+    eval_min: 20
     built_from:
       - { category: 31, source: docs/research/cluster-5-verification.md#31 }
 
