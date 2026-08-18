@@ -160,6 +160,15 @@ cross-model re-gate deferred, no Ollama in this container; see
 session-log for the A-E breakdown and its three delegate scenarios,
 each grounded in a documented ownership boundary — two in
 `map-gaps.md`'s G1 table, one in a target lens's own documented scope);
+**wave 3 continued the same day with `reviewing-api-contract-safety`**
+(3 → 20 — tied for the widest remaining gap, picked over its ties as
+this campaign's own most frequently cited foundational lens rather than
+by a topical tie-breaker; `design: true`, A-group included; its three
+delegate scenarios are grounded in the lens's own heuristics
+cross-references — cross #3, #8, #2 — to reviewing-concurrency-and-async,
+checking-idioms-and-consistency, and hunting-silent-failures
+respectively; cross-model re-gate deferred, no Ollama in this container;
+see session-log for the full A-E breakdown);
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
