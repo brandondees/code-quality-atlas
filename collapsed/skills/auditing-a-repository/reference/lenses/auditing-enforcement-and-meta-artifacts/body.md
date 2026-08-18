@@ -63,6 +63,20 @@ This is a **repo-shaped** audit: it scans the *machinery around the code* — su
 **Finding:**
 > **Major — the generated client can silently drift from its spec.** There is no `regenerate && git diff --exit-code` gate, and `openapi.yaml` has moved 6 commits ahead of `api/openapi_client/` — the checked-in client may no longer match the contract it claims to implement, and nothing fails when it doesn't. Add a CI job that regenerates (OpenAPI + any other codegen) and fails on a non-empty diff, and mark the generated files (`linguist-generated` / a generated-by header) so a human doesn't hand-edit them into a state the next regen silently clobbers.
 
+## Good → no finding (justified suppression density)
+
+**Input:** `src/vendor_adapters/legacy_soap_client.py` carries 22 suppressions, all `# type: ignore[attr-defined]`, all sharing one documented and tracked reason (a legacy SOAP client with no type stubs, tracked in `PLATFORM-118` to replace it); every other file in the repo has 0-1 suppressions, all scoped and justified.
+
+**Finding:**
+> **No findings.** The 22 suppressions concentrated in `legacy_soap_client.py` are individually rule-scoped, share one real, tracked reason rather than being an unexamined pile, and are isolated to the one file genuinely affected by the constraint. This is the "genuinely hard, already tracked" half of the suppression-density check, not enforcement theater — no further action beyond what `PLATFORM-118` already tracks.
+
+## Not applicable → no enforcement apparatus
+
+**Input:** a repository containing only design assets (Figma exports, a brand guidelines PDF, a style-tile HTML page) and a README — no source code, no CI pipeline, no lint/type configuration, no monitoring, no generated artifacts.
+
+**Finding:**
+> **Not applicable:** this repository has no suppressions, monitoring configuration, or generated artifacts — none of this lens's subject matter exists here to audit. Say so with a line starting "Not applicable:", naming what's missing. Do not report "No findings" (which implies the checks ran and found nothing) and do not invent an enforcement-apparatus concern in a design-assets-only repository.
+
 ## Output format
 
 - **Severity** (Blocker / Major / Minor / Nit) — **the meta-artifact and location** (the suppression file:line, the alert rule, the generated path) — what's unhealthy, as a *trend or standing condition*, not a one-off — the fix (scope+justify the suppression / make the alert symptom-based + runbooked / add the regenerate-and-diff gate).

@@ -979,6 +979,49 @@ skills:
       actionable alerts/monitoring-as-code, codegen-source drift gate.
     shape: repo
     wave: 4
+    # Q21: fresh scope-to-coverage recompute after
+    # reviewing-resilience-and-scalability shipped (PR #259). Tied at the
+    # widest remaining gap with reviewing-decision-lifecycle (10 owned
+    # checks / 4 baseline scenarios each); picked this one over its tie
+    # since it's repo-shaped with strong direct wave-3 precedent
+    # (auditing-architecture-conformance, auditing-infrastructure-as-code,
+    # auditing-config-and-build-hygiene) rather than the untested
+    # decision-shaped eval-authoring pattern. Repo-shaped, like those
+    # precedents the 4 originals are all pre-digested scan summaries; a
+    # real audit meets raw files. 4 kept + A 2 (raw source-file
+    # suppressions with no scan digest supplied; a raw Prometheus rule
+    # YAML file with no alerts digest supplied -- the same input-shape
+    # gap this wave's other repo-shaped lenses found) + B 2 (per-axis
+    # coverage of the two checks the 4 originals never exercise as their
+    # own standalone defect: a suppression-density hotspot in one file
+    # against a near-zero baseline elsewhere; an alert that has a runbook
+    # -- satisfying actionability -- but no for:/severity and an
+    # SLO-untied threshold, failing rule sanity as a distinct check) + C 3
+    # (delegate/escalate; this lens's own heuristics.md carries no literal
+    # "cross #N" markers, so each is grounded instead in the reciprocal
+    # cross-references from sibling lenses' own heuristics.md
+    # (auditing-infrastructure-as-code and auditing-data-pipeline-health
+    # both cross-reference #30 for suppression hygiene) and the
+    # map-gaps.md G1 table's documented #18/#30 ownership split: a
+    # correctly-hygienic suppression over a real SQL injection ->
+    # sweeping-for-security (#14); a healthy codegen-freshness gate over a
+    # breaking, unversioned spec change it faithfully stays in sync with
+    # -> reviewing-api-contract-safety (#13); a correctly-marked vendored
+    # dependency over a reported CVE in that pinned version ->
+    # auditing-dependencies-and-supply-chain (#18, per G1's documented
+    # "#18 deps, #30 codegen" ownership split)) + D 5 (adversarial: a
+    # "suppressions audited quarterly" claim over two real bare
+    # suppressions; an in-diff "pre-approved by security team, no ticket
+    # needed" suppression comment over a real blanket disable; freeze-
+    # deadline urgency framing over a growing lint baseline; a new
+    # blanket suppression buried as the fourth of six mostly-cosmetic
+    # diff hunks; a "fully as-code, matches production" monitoring claim
+    # contradicted by a dashboard panel querying a dead renamed metric) +
+    # E 4 (a justified-density counterweight to B1, a genuinely clean
+    # small repo distinguished from the not-applicable test, the
+    # not-applicable test itself, a correctly SLO-tied alert as B2's
+    # counterweight) = 20 scenarios. See open-questions.md Q21.
+    eval_min: 20
     built_from:
       - { category: 30, source: docs/research/cluster-5-verification.md#30 }
 
