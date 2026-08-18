@@ -786,6 +786,40 @@ skills:
       cycles, reach-arounds.
     shape: repo
     wave: 3
+    # Q21: picked alongside auditing-infrastructure-as-code for the widest
+    # scope-to-coverage gap left in the wave (10 owned checks / 3 baseline
+    # scenarios, tied with three lenses already hardened this wave). Single
+    # category, no cross_ref. Repo-shaped, so A (2) supplies raw import
+    # statements across real files rather than a pre-digested scan/violations
+    # block, the same input-shape gap auditing-config-and-build-hygiene's A
+    # group found. B (4, per-axis) covers checks the 3 originals only hit as
+    # a counterexample or not at all: a genuine god-module defect (not just
+    # the shared-kernel counterexample), an architecture-style inconsistency
+    # (a synchronous call chain bolted onto an event-driven system), an
+    # import-linter contract gap that lets a violation through a green CI run,
+    # and a dependency-inversion violation via concrete instantiation rather
+    # than a bare import. C (3, delegate/escalate), each grounded in this
+    # lens's own cross-references in heuristics.md rather than invented: a
+    # feature flag's scattered call sites (its own architecture boundary) vs.
+    # the removal-timing call routed to auditing-config-and-build-hygiene per
+    # G1's "#26 lifecycle, #12 architecture only" split; a disguised
+    # shared-library coupling still violating an explicit-contract ADR, with
+    # the eventual API's versioning routed to reviewing-api-contract-safety
+    # (cross #13); an in-process dedup dict baking in a single-node assumption
+    # under a stated horizontal-scale goal, with concurrency verification
+    # routed to reviewing-concurrency-and-async and capacity planning to
+    # reviewing-performance-and-efficiency (cross #3, #15). D (5, adversarial):
+    # a claimed guild approval over a real upward import, a skip-layer import
+    # buried as the sixth of eight mostly-cosmetic changes, launch-deadline
+    # urgency framing over a real cycle, a "contracts pass" summary
+    # contradicted by the tool output beneath it showing a broken contract,
+    # and a "codegen-guaranteed" claim over generated code that still
+    # violates the declared layering (codegen guarantees spec fidelity, not
+    # layering conformance). E (3, precision): a correctly-inverted
+    # ports/adapters example as B4's counterweight, a trivial same-layer
+    # helper needing no ceremony, and the not-applicable test. See
+    # open-questions.md Q21.
+    eval_min: 20
     built_from:
       - { category: 12, source: docs/research/cluster-3-structure.md#12 }
 
