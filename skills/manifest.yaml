@@ -646,6 +646,36 @@ skills:
     shape: diff
     design: true
     wave: 3
+    # Q21: one of several lenses tied for the widest scope-to-coverage gap
+    # after reviewing-observability-and-operability shipped (10 checks under
+    # #13 / 3 baseline scenarios) -- picked as the most frequently cited
+    # foundational lens in this campaign's own history (repeatedly used as
+    # the standard example lens across earlier Q21 model-comparison
+    # sessions). design: true, so this pass includes an A group. 3
+    # originals + A 1 (an RFC proposing a public webhooks API with no
+    # versioning strategy, no delivery-guarantee statement, and no
+    # deprecation plan for the polling integration it replaces) + B 4
+    # (per-axis: hard-to-misuse type modeling, "when in doubt leave it out"
+    # on an unrequested internal field exposed publicly, typed/stable error
+    # contracts vs. ad-hoc strings, a missing contract test as its own
+    # defect) + C 3 (delegate/escalate, each grounded in this lens's own
+    # heuristics cross-references: an idempotency key present but with a
+    # non-atomic check-then-act race -> reviewing-concurrency-and-async
+    # per the "cross #3" reference; a naming inconsistency with the rest of
+    # the API surface -> checking-idioms-and-consistency per "cross #8";
+    # silent type coercion on malformed input -> hunting-silent-failures
+    # per "cross #2") + D 5 (adversarial: a claimed prior design-guild
+    # approval suppressing scrutiny of a real breaking change, a breaking
+    # rename buried as one of nine mostly-cosmetic changes, demo-deadline
+    # urgency framing over a missing idempotency key on a payment endpoint,
+    # a fake "fully backward compatible, verified" claim over a real
+    # enum-casing break, an "auto-generated SDK guaranteed correct" claim
+    # over a real breaking spec type change) + E 4 (a comprehensively
+    # correct new endpoint pair, a breaking change shipped the right way
+    # via versioning + deprecation window, a correctly deprecated-but-still-
+    # returned field, the not-applicable test) = 20 scenarios. See
+    # open-questions.md Q21.
+    eval_min: 20
     built_from:
       - { category: 13, source: docs/research/cluster-3-structure.md#13 }
 

@@ -15,6 +15,8 @@ Will this break a consumer? Compatibility, error contracts, idempotency, paginat
 - [Bad → finding](#bad--finding)
 - [Bad → finding](#bad--finding-1)
 - [Good → no finding](#good--no-finding)
+- [Good → no finding (breaking change shipped correctly)](#good--no-finding-breaking-change-shipped-correctly)
+- [Not applicable → outside this lens's scope](#not-applicable--outside-this-lenss-scope)
 - [Going deeper](#going-deeper)
 
 ## When to use
@@ -115,6 +117,37 @@ def list_transactions(req):
 the backward-compatible way to evolve a contract. Report "No findings". Do NOT flag
 additive optional fields as breaking, and do NOT demand a version bump for a change
 no existing consumer can observe failing.
+
+## Good → no finding (breaking change shipped correctly)
+
+**Input:** a breaking field removal on a public v1 endpoint, shipped as a new
+`/v2/orders/{id}` endpoint alongside the still-functioning `/v1/orders/{id}`.
+The PR includes a migration guide doc, a `Sunset` header added to v1 responses,
+and a changelog entry stating v1 will be removed in 6 months.
+
+**Expected finding:** No findings
+
+Note: this is the correct way to ship a breaking change — versioned via a new
+endpoint, the old one still functioning with a documented deprecation window,
+migration guide provided. Do NOT flag this merely for containing a breaking
+field removal; the removal is handled exactly as this lens's own checklist
+asks for.
+
+## Not applicable → outside this lens's scope
+
+**Input:**
+
+```python
+def _compute_shipping_estimate(order):
+    # private helper, not exposed on any route or exported from this module
+    return order.weight_kg * SHIPPING_RATE_PER_KG
+```
+
+**Expected finding:** This is outside this lens's scope — it skips changes
+with no public API/SDK/webhook surface no external caller depends on. Report
+"Not applicable: this is an internal-only helper with no consumer-facing
+contract surface". Do NOT report "No findings" — that would imply a public
+contract was checked and found sound. There wasn't one to check.
 
 ## Going deeper
 
