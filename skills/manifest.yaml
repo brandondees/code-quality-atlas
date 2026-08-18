@@ -1001,6 +1001,42 @@ skills:
     shape: diff
     design: true
     wave: 4
+    # Q21: continuing the preference-tier rollout after the wave-3 four-way
+    # tie closed (auditing-infrastructure-as-code, PR #257). Picked by
+    # direct request rather than the tie/gap criterion used for prior
+    # picks. 13 owned checks against 6 baseline scenarios (already denser
+    # than the usual 3-scenario baseline). design: true, so this pass
+    # includes an A group. 6 kept + A 1 (an RFC for a shared multi-tenant
+    # job pool with no bulkhead between tenants or job types, an untested
+    # RTO, and no rollback path for the shared-pool design itself --
+    # exercises the shared decision-record checklist too) + B 5 (per-axis
+    # coverage of checks the 6 originals never exercise as their own
+    # standalone defect: blast radius via a DB pool shared between
+    # checkout and a long-running analytics export, a leaked never-closed
+    # socket as a resource-exhaustion class distinct from unbounded
+    # growth, a global rate limiter with no per-tenant quota, an
+    # unexercised multi-AZ failover claim as its own untested-hypothesis
+    # finding, a retry loop with backoff+jitter but a non-idempotent
+    # refund call) + C 3 (delegate/escalate, each grounded in this lens's
+    # own heuristics cross-references: an idempotency key present but
+    # with a non-atomic lookup-then-insert race ->
+    # reviewing-concurrency-and-async per "cross #3"; a correctly-wired
+    # kill switch whose trip emits no log or metric ->
+    # reviewing-observability-and-operability per "cross #16"; a
+    # per-tenant concurrency limit that satisfies isolation but is a
+    # stale hardcoded constant with no config surface or owner ->
+    # auditing-config-and-build-hygiene per "cross #26") + D 5
+    # (adversarial: a "load tested to 10x" claim over a real unbounded
+    # in-memory queue; an in-diff "SRE reviewed, no timeout needed"
+    # suppression comment over a real missing timeout; launch-deadline
+    # urgency framing over a single-writer counter landing right before a
+    # stated 10x traffic event; a missing-timeout call buried as the
+    # fifth of six mostly-cosmetic hunks; a "falls back to cache" comment
+    # directly contradicted by an except block that re-raises instead) +
+    # E 3 (a correctly bulkheaded checkout/analytics pool split as B1's
+    # counterweight, a trivial pure-function needing no ceremony, the
+    # not-applicable test) = 23 scenarios. See open-questions.md Q21.
+    eval_min: 23
     built_from:
       - { category: 28, source: docs/research/cluster-4-runtime.md#28 }
 

@@ -209,7 +209,17 @@ both fixed same-PR; cross-model re-gate deferred, no Ollama in this
 container; see session-log for the
 full A-E breakdown and the rewrite details). **This closes wave 3's
 original four-way tie** — the next preference-tier pick needs a fresh
-scope-to-coverage recompute rather than an existing tie;
+scope-to-coverage recompute rather than an existing tie; **wave 3 continued
+the same day with `reviewing-resilience-and-scalability`**, picked by direct
+user request rather than a recomputed tie (3 → 23 — 13 owned checks against
+6 baseline scenarios, already denser than the usual 3-scenario baseline;
+`design: true`, so this pass adds an A-group design-doc scenario; its three
+delegate scenarios are grounded in the lens's own heuristics
+cross-references — cross #3, #16, #26 — to reviewing-concurrency-and-async,
+reviewing-observability-and-operability, and
+auditing-config-and-build-hygiene respectively; cross-model re-gate
+deferred, no Ollama in this container; see session-log for the full A-E
+breakdown);
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
