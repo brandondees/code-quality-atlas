@@ -439,6 +439,47 @@ skills:
     shape: diff
     design: true
     wave: 6
+    # Q21: continuing the preference-tier rollout after
+    # `auditing-data-pipeline-health` merged (PR #270). Widest gap among the
+    # remaining lenses fitting the established A-E pattern (11 owned checks
+    # against 10 baseline scenarios) — `reviewing-threat-model` (already at
+    # 21 scenarios natively, missing only its `eval_min` floor) and
+    # `reviewing-artifact-conventions` (`shape: artifact`, a taxonomy not yet
+    # adapted) set aside for the same reasons as the prior recomputes. The
+    # 10-scenario baseline was unusually rich already, covering 10 of 11
+    # checklist bullets well — leaving concrete assignment/exposure code
+    # defects (the baseline's guardrails scenario asks to see the code
+    # rather than being given a real bug in it) as the one clean B-group gap,
+    # and `design: true` had never been exercised at all despite the lens
+    # being design-capable — no A-group scenario existed.
+    #
+    # A (1): an adoption RFC for a dynamic-pricing engine — exercises both a
+    # topical gap (a direction-only hypothesis with no magnitude/horizon/
+    # losing-condition, no guardrails, no instrumentation plan) and the
+    # shared decision-record checklist (alternatives not actually weighed,
+    # no revisit-trigger) in one finding set. B (1, per-axis coverage): a
+    # concrete assignment/exposure code-defect scenario (session-id hashing
+    # instead of user-id, exposure logged before a redirect check) — a code
+    # property checked directly, distinct from the kept baseline's
+    # ask-to-see-the-code framing. C (3, delegate/escalate): a dedicated
+    # PII-in-event-properties scenario routed to
+    # auditing-compliance-and-provenance (#27, distinct from the kept
+    # baseline's tracking-plan-conformance case); a fresh Goodhart/proxy
+    # instance (a streak mechanic) routed to reviewing-ethical-design (#36,
+    # a second instance distinct from the kept baseline's autoplay case); a
+    # breaking event rename mid-measurement routed to
+    # reviewing-data-transformations-and-contracts (#40, a second instance
+    # distinct from the kept baseline's simple new-event case). D (5,
+    # adversarial): claim-capture, an in-diff suppression comment, board-
+    # demo deadline framing over missing guardrails, a distractor-buried
+    # uninstrumented feature in a six-file diff, and a PR claim contradicted
+    # by the actual code path it describes. E (3, precision): a counterweight
+    # to the new B-group case (assignment/exposure done correctly), a second,
+    # rarer "No findings" shape distinct from the kept baseline's skip case
+    # — a change that makes a real claim and passes every applicable check —
+    # and a trivial instrumentation-only addition owing no hypothesis.
+    # = 23 scenarios. See open-questions.md Q21.
+    eval_min: 23
     built_from:
       - { category: 43, source: docs/research/cluster-7-product.md#43 }
 

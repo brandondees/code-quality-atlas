@@ -15,9 +15,11 @@ After this ships, how would anyone know it worked? Stated outcome, instrumentati
 - [Bad → finding (an output described as an outcome)](#bad--finding-an-output-described-as-an-outcome)
 - [Bad → finding (instrumentation deferred to a follow-up)](#bad--finding-instrumentation-deferred-to-a-follow-up)
 - [Bad → finding (a win metric with no guardrails)](#bad--finding-a-win-metric-with-no-guardrails)
+- [Bad → finding (assignment and exposure code defects)](#bad--finding-assignment-and-exposure-code-defects)
 - [Good → finding (ops instrumentation is not outcome instrumentation)](#good--finding-ops-instrumentation-is-not-outcome-instrumentation)
 - [Good → routed finding (the proxy that became the target)](#good--routed-finding-the-proxy-that-became-the-target)
 - [Good → no finding (skipped — no user or business claim)](#good--no-finding-skipped--no-user-or-business-claim)
+- [Good → no finding (everything done right)](#good--no-finding-everything-done-right)
 - [Going deeper](#going-deeper)
 
 ## When to use
@@ -115,6 +117,41 @@ assignment code:
 Both are code properties, checkable now, and each silently invalidates the result
 months later.
 
+## Bad → finding (assignment and exposure code defects)
+
+**Bad:** an experiment behind `flag: new_checkout_flow` rolls out to 50%, with
+guardrails and a win condition correctly declared. The assignment code:
+
+```python
+def get_variant(session):
+    bucket = hash(session.id) % 100
+    variant = 'new' if bucket < 50 else 'old'
+    return variant
+
+@app.get('/checkout')
+def checkout(session):
+    variant = get_variant(session)
+    log_exposure(session, variant)   # logged before we know if the user will even see checkout
+    if some_middleware_redirects_before_render(session):
+        return redirect('/cart')
+    return render_checkout(variant)
+```
+
+**Finding (defect, Major).** Two separate code properties, both wrong:
+
+- **Assignment unit.** `hash(session.id)` re-buckets a user on every new
+  session rather than hashing a stable user identifier — the same person can
+  land in both arms across visits, and the guardrails and win condition can't
+  be trusted to represent one consistent population per user.
+- **Exposure-logging point.** `log_exposure` fires right after the variant is
+  read, before the code checks whether the user gets redirected away without
+  ever seeing checkout. Some "exposed" users never saw either variant, which
+  dilutes the measured effect toward zero.
+
+Both are checkable now, from the code alone, and each silently invalidates the
+result months later — the same category of finding as guardrails, just
+discovered by reading the assignment logic instead of the metric declaration.
+
 ## Good → finding (ops instrumentation is not outcome instrumentation)
 
 **Input:** a new "share to team" feature ships with a request counter, a latency
@@ -181,6 +218,35 @@ Refactors, bug fixes, dependency bumps, build work, and internal tooling owe no
 outcome hypothesis. Demanding one is this lens's own failure mode and is more
 likely than the failure it guards against — a lens that asks every commit for a
 metric gets muted, and then it is not there for the change that needed it.
+
+## Good → no finding (everything done right)
+
+**Input:** a PR adds a one-click reorder button to past orders. Description states
+the hypothesis: *"We expect this to lift repeat-purchase rate among users with 2+
+past orders from 22% to ~27% within 30 days; if it doesn't move by at least 2pts,
+we'll remove the button rather than keep it by default."* The diff adds a
+`reorder_clicked` event (`user_id`, `source_order_id`, `item_count`) matching the
+existing tracking-plan naming convention and registered in the schema registry,
+plus a `reorder_completed` event on successful checkout. This ships to 100% as a
+permanent feature — no experiment flag, no randomization. No PII in either event's
+properties.
+
+**Good:**
+
+```text
+No findings.
+```
+
+This is the second, less-common shape "No findings" is allowed to take: not a
+skip (this change does make a user/business claim), but every applicable check
+actually passing. The hypothesis is falsifiable — metric, direction, magnitude,
+horizon, and a decision recorded for the losing branch. Instrumentation ships in
+this diff. Both events match the tracking-plan convention and are registered. No
+PII in the payload. And because this ships as a permanent feature with no flag or
+randomization, the experiment-only checks — guardrails, assignment stability,
+exposure-logging point, flag end-condition — correctly do not apply; asking for
+them anyway would be this lens's own over-flagging failure. A well-instrumented
+change is a legitimate, and worth-stating-plainly, clean result.
 
 ## Going deeper
 
