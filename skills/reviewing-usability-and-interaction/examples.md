@@ -7,6 +7,7 @@ Report each distinct issue as its own numbered finding, naming the interaction p
 - [Bad → finding (three states the code reaches, one designed)](#bad--finding-three-states-the-code-reaches-one-designed)
 - [Bad → finding (a destructive action that names nothing)](#bad--finding-a-destructive-action-that-names-nothing)
 - [Bad → finding (the error path eats the form)](#bad--finding-the-error-path-eats-the-form)
+- [Delegating → the accessibility-mechanics half that belongs to another lens](#delegating--the-accessibility-mechanics-half-that-belongs-to-another-lens)
 - [Good → routed finding (the gap is a defect, the pattern is not)](#good--routed-finding-the-gap-is-a-defect-the-pattern-is-not)
 - [Good → no finding (skipped — no user-facing surface)](#good--no-finding-skipped--no-user-facing-surface)
 
@@ -106,6 +107,29 @@ one-time code) — then it *is* the durable kind and takes the higher band.
 The copy is separately weak ("Something went wrong" says what happened, not why or
 what to do next), but that half **routes to design** and sets no engineering
 verdict. Two findings, two dispositions, from one code path — say which is which.
+
+## Delegating → the accessibility-mechanics half that belongs to another lens
+
+**Input:** a "Delete workspace" confirmation dialog correctly names what will
+be lost ("Delete *Acme Production* and its 12 projects, 340 files?") with
+visually distinct Cancel/Delete buttons. It's implemented as a `<div>` with
+`onClick` handlers — no `role="dialog"`, no `aria-modal`, no focus trap, and
+Escape does not close it.
+
+**Output:**
+
+> **No usability finding.** Both of this lens's own checks pass: the
+> confirmation names the consequence, and the destructive control is visually
+> distinct from its safe neighbour.
+>
+> **Delegated (named once, not re-derived):** the dialog has no `role="dialog"`,
+> no `aria-modal`, no focus trap, and Escape doesn't close it — accessibility
+> mechanics, `reviewing-accessibility-and-i18n`'s (#23), not this lens's.
+
+The shape to copy: a dialog can say the right thing and distinguish its
+buttons correctly while still being mechanically inaccessible underneath — say
+the first plainly, name the second once, and do not let either stand in for
+the other.
 
 ## Good → routed finding (the gap is a defect, the pattern is not)
 
