@@ -36,11 +36,14 @@ Detect which artifact the change adds or touches, then open its rubric and revie
 This lens is **presence-activated**: first detect a supported artifact (the Artifacts
 table in `SKILL.md`), then open that artifact's rubric (`reference/<slug>.md`) and
 review the artifact against it. Report each deviation as its own numbered finding,
-naming the specific rule of the standard it breaks. When the artifact is well-formed,
-the whole response is exactly "No findings"; when no supported artifact is present in
-the change at all, say so with "Not applicable:" instead — that sentence means no check
-ran, which is a different fact from a check running and passing. This is **authoring
-quality**, distinct from doc-drift (#22) and runtime agent-safety (#32).
+naming the specific rule of the standard it breaks. When the artifact is well-formed on
+this lens's own rubric **and** raises no concern belonging to another lens, the whole
+response is exactly "No findings"; when it's well-formed on this rubric but does carry
+a concern outside it, report that as a delegated finding instead (see the "Delegating"
+example below) rather than defaulting to "No findings"; when no supported artifact is
+present in the change at all, say so with "Not applicable:" instead — that sentence
+means no check ran, which is a different fact from a check running and passing. This is
+**authoring quality**, distinct from doc-drift (#22) and runtime agent-safety (#32).
 
 ## Bad → finding (SKILL.md — weak frontmatter description)
 
@@ -109,18 +112,20 @@ because the lens's domain (a supported artifact) is entirely absent from the inp
 
 **Input:** a SKILL.md that is well-formed on every authoring-rubric line (frontmatter,
 progressive disclosure, examples, eval count) but whose body instructs: *"Run
-`python -m tooling.cli lint` to check formatting before committing."* The repo's actual
-CLI has no `lint` subcommand — it was renamed to `check` two releases ago.
+`python -m tooling.cli eval` after editing this SKILL.md to regenerate the collapsed
+skill files."* `tooling.cli eval` only runs eval scenarios against the manifest's
+`eval_min` floor — it does not regenerate anything; `tooling.cli generate` is the
+command that does.
 
 **Output:**
 
 > **No finding on this lens's own rubric.** Frontmatter, progressive disclosure,
 > examples, and eval count all pass — the artifact is well-formed as a SKILL.md.
 >
-> **Delegated (named once, not adjudicated here):** the body's `cli lint` reference is
-> stale — the actual command is `cli check`. Docs-vs-code drift is
-> `auditing-documentation-health`'s (#22) job, not this lens's authoring-standard
-> review.
+> **Delegated (named once, not adjudicated here):** the body's description of `cli
+> eval` is wrong — it doesn't regenerate anything; `cli generate` does. Docs-vs-code
+> drift is `auditing-documentation-health`'s (#22) job, not this lens's
+> authoring-standard review.
 
 The shape to copy: an artifact can be correctly *formed* per its own standard while
 still making a factual claim about the codebase that's gone stale — say the first
