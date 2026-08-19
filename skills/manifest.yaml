@@ -505,6 +505,50 @@ skills:
     shape: diff
     design: true
     wave: 6
+    # Q21: continuing the preference-tier rollout after
+    # `reviewing-outcome-instrumentation` merged (PR #271). Tied with
+    # `reviewing-usability-and-interaction` on raw scope (9 owned checks / 10
+    # baseline scenarios each). Broke the tie by checking what was actually
+    # still uncovered rather than the raw count: usability's baseline already
+    # covered all 9 of its checklist bullets but had never exercised
+    # `design: true` (no A-group scenario existed at all); this lens's
+    # baseline already had its A-group covered (the Spaces design-doc
+    # scenario) but left one checklist bullet — the release-note-duplication-
+    # cost proxy — with no standalone scenario, and offered richer,
+    # mostly-unused delegate grounding for C-group (`reviewing-module-design`,
+    # `checking-idioms-and-consistency`, a second `checking-restraint`
+    # instance) versus usability's only two named cross-refs (both already
+    # exercised in its baseline). Picked this lens; usability is now the
+    # clean next pick with a well-defined single gap (an A-group scenario).
+    #
+    # Not needing an A group (already covered). B (1, per-axis coverage): the
+    # release-note-proxy check as its own scenario — a case where the
+    # evidence gate already finds an overlap, so the "write the one-sentence
+    # release note" proxy correctly fires and makes the duplication's ongoing
+    # cost explicit, distinct from every kept baseline scenario where this
+    # check either doesn't apply or isn't exercised on its own. C (3,
+    # delegate/escalate), each grounded in this lens's own description
+    # ("code-level consistency #8's") or its own examples.md ("internal
+    # structure is reviewing-module-design's question"): a clean user-facing
+    # rename with a copy-pasted internal implementation, routed to
+    # reviewing-module-design; a correctly-reused status vocabulary with a
+    # code-idiom mismatch (raw string vs. the sibling concept's enum), routed
+    # to checking-idioms-and-consistency (#8); a fresh second-system-watch
+    # instance (a fifth dashboard view mode justified only against the most
+    # recent one) routed to checking-restraint (#11, a second instance
+    # distinct from the kept baseline's CLI-flag case). D (5, adversarial):
+    # a "no new vocabulary" claim contradicted by a genuinely new entity's
+    # actual behavior; an in-diff suppression comment over a real broken
+    # cascade-rule case; demo-deadline framing over a real unreconciled
+    # duplicate concept; a distractor-buried second-path finding in a
+    # six-file diff; a design doc's own framing contradicted by the
+    # containment structure its proposed API actually describes. E (3,
+    # precision): a release-note-proxy counterweight to B1 (a genuinely
+    # distinct concept where the proxy correctly doesn't fire), a
+    # second-system-watch counterweight to C3 (a governed Nth addition,
+    # correctly no finding), and a trivial pattern-extension needing no
+    # ceremony. = 22 scenarios. See open-questions.md Q21.
+    eval_min: 22
     built_from:
       - { category: 44, source: docs/research/cluster-7-product.md#44 }
 

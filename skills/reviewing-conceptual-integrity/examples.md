@@ -7,6 +7,8 @@ Report each distinct issue as its own numbered finding, and open every one with 
 - [Bad → finding (a second noun for an idea the product already has)](#bad--finding-a-second-noun-for-an-idea-the-product-already-has)
 - [Bad → finding (a rule the product enforces everywhere else)](#bad--finding-a-rule-the-product-enforces-everywhere-else)
 - [Bad → finding (the ninth option, justified against the eighth)](#bad--finding-the-ninth-option-justified-against-the-eighth)
+- [Bad → finding (the release-note proxy makes the cost explicit)](#bad--finding-the-release-note-proxy-makes-the-cost-explicit)
+- [Delegating → the internal-structure half that belongs to another lens](#delegating--the-internal-structure-half-that-belongs-to-another-lens)
 - [Good → routed finding (a second path, surfaced and handed over)](#good--routed-finding-a-second-path-surfaced-and-handed-over)
 - [Good → no finding (a genuinely new concept)](#good--no-finding-a-genuinely-new-concept)
 - [Good → no finding (skipped — no user-facing concept)](#good--no-finding-skipped--no-user-facing-concept)
@@ -94,6 +96,57 @@ Two facts worth stating plainly, since either could be the resolution:
 we need this flag"). **Same finding, report it once** — under whichever lens has
 the concrete evidence, which here is this one, because the count and the
 `--format` overlap are the argument.
+
+## Bad → finding (the release-note proxy makes the cost explicit)
+
+**Bad:** a PR adds **Snoozed** as a task state — hidden from the default view,
+reappearing automatically on a chosen date. The product already has
+**Deferred** — a manual flag that also hides a task from the default view, with
+no reappearance logic.
+
+**Finding (judgment, `route: product`).** The evidence gate first: the
+existing concept is Deferred, the overlap is "hides a task from the default
+view." That alone earns a look, not yet a verdict — the release-note proxy is
+what turns it into one:
+
+> Write the one-sentence release note. *"Snoozed tasks reappear automatically
+> on a date you choose."* On its own that sentence reads fine — until a user
+> who already knows Deferred asks the obvious question, and the note can only
+> answer it by teaching the difference: *"...unlike Deferred, which just hides
+> a task until you manually bring it back."* That second clause is the cost.
+> It has to be taught, forever, to every user who already learned Deferred.
+
+**This check never fires on its own.** It only applies because the gate above
+already found the overlap — a genuinely new concept needs a new word in its
+release note by definition, and that would not be a finding. Here it is one,
+because the "instead of X" clause is a permanent tax the product now carries.
+Report the cost; route whether to unify or keep both distinguishing to
+product.
+
+## Delegating → the internal-structure half that belongs to another lens
+
+**Input:** a PR adds a **Bookmarks** feature that correctly reuses the
+existing **Favorites** concept at the user level — same page, the changelog
+says "Bookmarks are now called Favorites," the old term fully retired. One
+concept, one name. Internally, the PR implements `BookmarkStore` as a
+near-duplicate of the existing `FavoriteStore` class — same CRUD shape, same
+caching logic, copy-pasted rather than extended.
+
+**Output:**
+
+> **No conceptual-integrity finding.** The evidence gate, the second-path
+> check, and the rule-still-holds check all pass — the product presents one
+> concept, correctly named, with the old term fully retired.
+>
+> **Delegated (named once, not re-derived):** `BookmarkStore` duplicates
+> `FavoriteStore`'s CRUD shape and caching logic rather than extending it — an
+> internal-structure question for `reviewing-module-design`, not this lens's.
+
+The shape to copy: the product can present one coherent concept to the user
+while the code underneath still has two implementations of it. Say the first
+plainly, name the second once, and do not let either finding stand in for the
+other — a clean user-facing rename is not evidence the code is clean, and a
+messy internal duplicate is not evidence the concept is incoherent.
 
 ## Good → routed finding (a second path, surfaced and handed over)
 
