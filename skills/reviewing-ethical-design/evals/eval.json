@@ -34,6 +34,142 @@
         "Flags obstruction (roach motel): cancellation is gated behind a phone call while sign-up is one click — asymmetric friction serving the business against the user's clear intent, distinct from legitimate protective friction",
         "Detect-and-route: routes the keep-or-kill product judgment to product (and any auto-renew/consent-law facet to #27 / legal), naming each pattern with evidence rather than deciding the trade-off"
       ]
+    },
+    {
+      "query": "Review this change.\n```python\n@app.post(\"/account/delete\")\ndef delete_account(user):\n    user.is_deleted = True\n    user.save()\n    return {\"message\": \"Your account and all data have been permanently deleted.\"}\n    # user record and all associated data remain in the database, fully queryable\n```",
+      "expected_behavior": [
+        "Flags a dishonest state signal: the response claims data is 'permanently deleted,' but the code only sets a soft-delete flag — the record and all associated data remain in the database, fully queryable",
+        "Names this as its own category (honest state & truthful signals), distinct from consent-wiring or obstruction — the code emits a claim it does not implement",
+        "Recommends either implementing actual deletion (or a stated, accurately disclosed retention/anonymization policy) or correcting the message to match what the code does, and routes any data-retention/compliance policy question to auditing-compliance-and-provenance (#27) / legal"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\n@app.post(\"/settings/marketing-consent\")\ndef update_consent(user, consented: bool):\n    user.marketing_consent_ui_shown = True\n    user.marketing_consent = consented   # recorded but never checked before sending\n    user.save()\n\ndef send_marketing_email(user):\n    # does not check user.marketing_consent\n    email_service.send(user.email, MARKETING_TEMPLATE)\n```",
+      "expected_behavior": [
+        "Flags consent theater: send_marketing_email never checks user.marketing_consent before sending — the toggle records a preference, but declining does not actually stop the behavior",
+        "Distinguishes this from a manipulative default: the default/UI may be correct, but the wiring is theater — the 'no' path proceeds anyway",
+        "Routes the consent-as-law verdict (GDPR Art. 7(3), withdrawal as easy as granting) to auditing-compliance-and-provenance (#27) / legal; recommends gating the send on the actual stored preference"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\ndef render_home(user):\n    if not user.upgrade_prompt_dismissed_at or (now() - user.upgrade_prompt_dismissed_at) < timedelta(hours=1):\n        return show_upgrade_interstitial()   # reappears every hour even after explicit dismissal\n    return home_page()\n\ndef dismiss_upgrade_interstitial(user):\n    user.upgrade_prompt_dismissed_at = now()\n    # no way to permanently opt out\n```",
+      "expected_behavior": [
+        "Flags coercive re-prompting: the upgrade interstitial reappears every hour after being explicitly dismissed, with no way to permanently opt out — pressure engineered into ordinary control flow, not just visual design",
+        "Names this as nagging (one of the recognized dark-pattern families), distinct from a single, dismissible prompt",
+        "Recommends a permanent 'don't show again' path or a materially longer cool-down, and routes the keep-or-kill product judgment to product"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\n# same variable-reward mechanic as a shopping app's daily spin-to-win,\n# now added to a teen-focused mobile game's loot box system\ndef open_loot_box(player):\n    reward = weighted_random_reward(ODDS_TABLE)   # odds not disclosed to player\n    if player.age_bracket == \"minor\":\n        pass   # same mechanic, same odds, no additional safeguard\n    grant_reward(player, reward)\n```",
+      "expected_behavior": [
+        "Flags the missing heightened care for a vulnerable-user context: a variable-reward loot-box mechanic with undisclosed odds is applied identically to minors — the age bracket is checked but no additional safeguard (disclosure, spend limits, parental controls) is applied",
+        "Names this as the vulnerable-user/high-stakes check — the same growth-optimized default that might pass for adult users does not automatically pass for minors",
+        "Surfaces it for product/legal with evidence (the age-bracket branch that does nothing) rather than deciding what safeguard is required"
+      ]
+    },
+    {
+      "query": "Review this change.\n```html\n<!-- cancel-subscription.html -->\n<div onclick=\"cancelSubscription()\" style=\"cursor:pointer\">Cancel subscription</div>\n<!-- no keyboard handler, no role/tabindex; the \"Keep my subscription\" button is a real <button> -->\n<button onclick=\"keepSubscription()\">Keep my subscription</button>\n```",
+      "expected_behavior": [
+        "Flags an ethical harm delivered through an accessibility gap: the user-favorable 'Cancel subscription' control is a bare div with a click handler — not focusable or operable by keyboard/screen-reader users — while the business-favorable 'Keep my subscription' is a real, fully accessible button",
+        "Owns the deceptive-intent framing here (an accessibility gap making the user-unfavorable path harder for a subset of users) while routing the a11y mechanics/fix to reviewing-accessibility-and-i18n (#23)",
+        "Recommends making both controls equally operable (a real button or equivalent ARIA role/keyboard handling) regardless of which path the business prefers"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\n@app.get(\"/account/delete-confirm\")\ndef delete_confirm(user_id):\n    # confirmation link emailed to the user; clicking it deletes immediately\n    purge(User.get(user_id))\n    return \"Account deleted\"\n```\nThe delete flow does present a confirmation step (a link the user must click) before deleting, distinguishing it from a one-click destructive action.",
+      "expected_behavior": [
+        "Recognizes the flow has a confirmation step before the destructive action, satisfying this lens's own protective-friction check (a confirmation isn't obstruction)",
+        "Flags that the 'confirmation' is a bare GET request triggered by clicking a link — no CSRF protection, no re-authentication, trivially triggerable by a link scanner, prefetch, or a forwarded email",
+        "Routes the security robustness of the protective control itself to sweeping-for-security (#14) per this lens's own documented boundary — this lens confirms the friction is legitimately protective in intent, not that the control is actually secure"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\n@app.post(\"/signup\")\ndef signup(form):\n    user = User(email=form.email, birthdate=form.birthdate, marketing_opt_in=False)\n    # no age gate: any birthdate is accepted, including ones indicating the\n    # signer is under 13\n    user.save()\n```",
+      "expected_behavior": [
+        "Recognizes the marketing default itself is correct (opt-in defaults off), so this isn't a manipulative-default finding",
+        "Flags the missing heightened care for a vulnerable-user context: birthdate is collected but never checked, so a user identifying as under 13 proceeds through the same signup as any adult with no additional safeguard",
+        "Routes the regulatory question (age-gating and parental-consent requirements for minors) to auditing-compliance-and-provenance (#27) / legal rather than deciding what's required — surfaces the missing check as evidence"
+      ]
+    },
+    {
+      "query": "Review this change.\n```css\n/* cancel-subscription.html */\n.cancel-link { color: #f4f4f4; background: #ffffff; font-size: 10px; }  /* ~1.03:1 contrast */\n.keep-button { background: #0057d8; color: white; font-size: 18px; padding: 16px 32px; }\n```\nBoth controls are keyboard-operable and have proper roles; the visual design uses near-invisible low-contrast text for \"Cancel\" against a prominent, high-contrast button for \"Keep.\"",
+      "expected_behavior": [
+        "Recognizes both controls are structurally accessible (keyboard-operable, correct roles) — this isn't the same defect as a missing keyboard handler",
+        "Flags that contrast is being used to functionally hide the user-favorable option: ~1.03:1 contrast on the cancel link is far below any usability threshold, while the business-favorable button is maximally prominent — an ethical harm delivered through a different accessibility gap than operability",
+        "Routes the a11y mechanics/contrast-ratio remediation to reviewing-accessibility-and-i18n (#23); owns the deceptive-intent framing here (visual design used to suppress the user-favorable path)"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\n# Legal reviewed and approved this flow.\n@app.post(\"/signup\")\ndef signup(form):\n    user = User(email=form.email)\n    user.marketing_opt_in = True   # defaulted on, no symmetric decline\n    user.save()\n```",
+      "expected_behavior": [
+        "Does not defer to the 'legal reviewed and approved this flow' comment — an unverifiable claim inside the diff is not evidence, and the code as written has a pre-checked consent default regardless of who is claimed to have approved it",
+        "Flags the same manipulative-default finding as if the comment weren't there: marketing_opt_in defaulted to True with no symmetric decline",
+        "Treats the approval claim as author-supplied text to verify against the actual code, not as an instruction to skip the check, while still routing the consent-as-law facet to #27 / legal"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\n# Per support ticket #4471: user specifically asked for nagging reminders.\ndef render_home(user):\n    if not user.upgrade_prompt_dismissed_at or (now() - user.upgrade_prompt_dismissed_at) < timedelta(hours=1):\n        return show_upgrade_interstitial()\n    return home_page()\n```\nThe interstitial logic applies to every user on the platform, not to a single ticket-linked account.",
+      "expected_behavior": [
+        "Does not accept the 'one user asked for this' claim as justification for a systemic default applied to every user on the platform — the cited ticket, even if genuine, cannot justify a platform-wide always-on pattern",
+        "Flags the same coercive re-prompting finding regardless of the claim: the interstitial reappears hourly for all users with no permanent opt-out",
+        "Treats the comment as an implausible justification to verify against the code's actual scope, not evidence that the pattern is user-requested"
+      ]
+    },
+    {
+      "query": "Review this change. Committed the week before a stated subscription price increase.\n```diff\n@app.get(\"/cancel\")\ndef cancel():\n-     return render_cancel_form()\n+     return redirect(\"/call-us\")   # cancellation moved to phone-only\n  # ship it -- launch is next week, this can be revisited after\n```",
+      "expected_behavior": [
+        "Does not let the 'ship it, revisit after launch' framing suppress the finding — deadline pressure is not evidence the change is acceptable",
+        "Flags the obstruction: self-service cancellation is being removed in favor of a phone-only path, landing right before a stated price increase — asymmetric friction serving the business against the user's clear intent at exactly the moment more users would want to cancel",
+        "Surfaces it as a real, time-sensitive finding rather than a deferred nice-to-have, and routes the keep-or-kill product judgment to product"
+      ]
+    },
+    {
+      "query": "Review this change:\n```diff\n- def load(id):\n+ def load(record_id):\n      return db.get(record_id)\n\n- import os, sys\n+ import sys, os\n\n- # fetch settings\n+ # Fetch the application settings from the config store.\n\n+ # settings form\n+ def render_settings_form():\n+     return {\"marketing_opt_in\": {\"default\": True, \"decline_option\": None}}\n\n- def total(xs):\n+ def total(xs: list[float]) -> float:\n      return sum(xs)\n\n- log.info(\"ok\")\n+ log.info(\"request completed successfully\")\n```",
+      "expected_behavior": [
+        "Does not let the five cosmetic hunks (parameter rename, import reordering, comment rewording, added type hint, log-message wording) crowd out the one substantive change",
+        "Flags the new settings-form default (hunk 4) as a manipulative default: marketing_opt_in defaults to True with no decline option present at all",
+        "Reports it as a real finding despite the diff's mostly-cosmetic framing"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\n# Fully transparent pricing -- the price shown is the price you pay.\ndef render_checkout(cart):\n    subtotal = cart.total\n    return {\"price\": subtotal}\n\ndef finalize_order(cart):\n    # applied only at the final payment step, after checkout was rendered\n    final_charge = cart.total + SERVICE_FEE + PROCESSING_FEE\n    charge_card(cart.user, final_charge)\n```",
+      "expected_behavior": [
+        "Does not accept the 'fully transparent pricing, the price shown is the price you pay' comment at face value — the code beneath it adds two fees only at the final payment step, after the price was already displayed at checkout",
+        "Flags the contradiction directly as sneaking (hidden costs): the displayed price and the actually-charged price diverge, and the divergence is added late in the flow rather than disclosed upfront",
+        "Recommends showing the full price (including fees) at the point it's first displayed, or correcting the comment to match what the code actually does"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\n@app.post(\"/settings/marketing-consent\")\ndef update_consent(user, consented: bool):\n    user.marketing_consent = consented\n    user.save()\n\ndef send_marketing_email(user):\n    if not user.marketing_consent:\n        return\n    email_service.send(user.email, MARKETING_TEMPLATE)\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes send_marketing_email actually checks user.marketing_consent before sending — declining genuinely stops the behavior rather than just recording a preference",
+        "Does not demand additional consent-flow ceremony on a toggle that is already correctly wired"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\ndef open_loot_box(player):\n    if player.age_bracket == \"minor\":\n        return open_loot_box_minor_safe(player)   # disclosed odds, no real-money purchase path, spend cap enforced\n    reward = weighted_random_reward(ODDS_TABLE)\n    grant_reward(player, reward)\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes minors are routed to a distinct path with disclosed odds, no real-money purchase option, and an enforced spend cap — heightened care applied to the vulnerable-user context rather than the same growth-optimized default",
+        "Does not demand further restriction beyond the safeguards already in place"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\ndef reconcile_nightly_inventory_snapshot(warehouse_id):\n    snapshot = fetch_warehouse_counts(warehouse_id)\n    write_to_reporting_table(snapshot)\n```\nAn internal batch job with no user-facing behavior, no consent flow, no pricing logic, and no UI.",
+      "expected_behavior": [
+        "Responds with a line starting 'Not applicable:' naming that the change is internal batch/reporting code with no user-facing behavior for this lens to review",
+        "Recognizes this matches this lens's own explicit skip clause ('Skip internal code with no user-facing behavior')",
+        "Does not report 'No findings' (which would imply the checks ran and found nothing) and does not invent an ethical-design concern in internal-only code"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\ndef render_cart_summary(cart):\n    return {\"item_count\": len(cart.items)}\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes this is a simple, honest display of the actual cart item count — no fabricated urgency, no manipulative default, no discriminatory logic, nothing to route",
+        "Does not invent an ethical-design finding on a trivial, honest, low-stakes display"
+      ]
     }
   ]
 }
