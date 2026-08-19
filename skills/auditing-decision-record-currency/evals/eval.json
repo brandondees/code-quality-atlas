@@ -84,10 +84,11 @@
       ]
     },
     {
-      "query": "Audit this decision-record scan (archive index lists ADR-1 through ADR-9; the directory on disk also contains `ADR-9-b-cache-invalidation.md`, not listed in the index):\n```text\nid      status    supersedes  technology  revisit_trigger  last_touched  notes\nADR-9   accepted  -           Varnish     -                1 year ago    \"edge cache\"\n```",
+      "query": "Audit this decision-record scan (archive index lists ADR-1 through ADR-9; the directory on disk also contains `ADR-9-b-cache-invalidation.md`, not listed in the index; two separate files on disk are both titled `ADR-9` — `ADR-9-varnish-edge-cache.md` and `ADR-9-log-retention.md`):\n```text\nid      status    supersedes  technology  revisit_trigger  last_touched  notes\nADR-9   accepted  -           Varnish     -                1 year ago    \"edge cache (ADR-9-varnish-edge-cache.md)\"\nADR-9   accepted  -           -           -                6 months ago  \"log retention policy (ADR-9-log-retention.md)\"\n```",
       "expected_behavior": [
-        "Flags the archive's own index as out of date: a file on disk (`ADR-9-b-cache-invalidation.md`) is not listed in the index, so the sweep's own view of the archive may be incomplete",
-        "Surfaces this as a scan-reliability signal, not a decision-content finding about ADR-9 itself",
+        "Flags the duplicate record ID: two distinct files on disk both use the identifier ADR-9 (edge-cache and log-retention) — a scan-reliability defect in its own right, separate from any content judgment about either record",
+        "Separately flags the archive's own index as out of date: a file on disk (`ADR-9-b-cache-invalidation.md`) is not listed in the index, so the sweep's own view of the archive may be incomplete",
+        "Surfaces both as scan-reliability signals, not decision-content findings about the records themselves",
         "Routes the general index/discoverability upkeep to auditing-documentation-health (#22) rather than treating it as this lens's own content judgment"
       ]
     },

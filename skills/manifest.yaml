@@ -326,7 +326,7 @@ skills:
     # generated-directory counterweight to B4, the not-applicable test,
     # a trivial one-line function needing no ceremony) = 21 scenarios.
     # See open-questions.md Q21.
-    eval_min: 20
+    eval_min: 21
     built_from:
       - { category: 35, source: docs/research/cluster-2-readability.md#35 }
 
@@ -387,7 +387,7 @@ skills:
     # matching this lens's own explicit skip clause verbatim, a
     # trivial honest low-stakes display needing no ceremony) = 21
     # scenarios. See open-questions.md Q21.
-    eval_min: 20
+    eval_min: 21
     built_from:
       - { category: 36, source: docs/research/cluster-4-runtime.md#36 }
 
@@ -747,7 +747,7 @@ skills:
     # adversarial taxonomy minus the design-doc (A) group — this lens is
     # diff-only, not design-capable (precedent: reviewing-naming-and-
     # readability). See open-questions.md Q21.
-    eval_min: 20
+    eval_min: 21
     built_from:
       - { category: 8, source: docs/research/cluster-2-readability.md#8 }
 
