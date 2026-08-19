@@ -15,8 +15,10 @@ Is the data plane correct and its contract safe? Grain and fan-out, SQL NULL tra
 - [Bad → a fan-out join inflating every aggregate downstream](#bad--a-fan-out-join-inflating-every-aggregate-downstream)
 - [Bad → a consumer-breaking schema change with no gate](#bad--a-consumer-breaking-schema-change-with-no-gate)
 - [Delegating → the half that belongs to another lens](#delegating--the-half-that-belongs-to-another-lens)
+- [Bad → a timezone-naive type coercion](#bad--a-timezone-naive-type-coercion)
 - [Clean → a refactor with data-diff evidence (the over-flagging guard)](#clean--a-refactor-with-data-diff-evidence-the-over-flagging-guard)
 - [Clean → an additive, gated schema change (the proportionality guard)](#clean--an-additive-gated-schema-change-the-proportionality-guard)
+- [Not applicable → no data-plane surface touched](#not-applicable--no-data-plane-surface-touched)
 - [Going deeper](#going-deeper)
 
 ## When to use
@@ -168,6 +170,37 @@ enough detail for the owning lens to pick it up, and stop.
 
 ---
 
+## Bad → a timezone-naive type coercion
+
+**Input:**
+
+> `models/marts/fct_shipments.sql`
+>
+> ```sql
+> select shipment_id, warehouse_id,
+>        cast(shipped_at as date) as shipped_date,   -- warehouse session tz is US/Pacific; source is UTC
+>        cast(tracking_number as varchar) as tracking_number
+> from {{ ref('stg_shipments') }}
+> ```
+>
+> The warehouse session default timezone is `America/Los_Angeles`. No explicit
+> timezone conversion is applied before the truncation.
+
+**Findings:**
+
+- `models/marts/fct_shipments.sql:3` — **timezone-naive truncation.**
+  `cast(shipped_at as date)` truncates using the warehouse session's default
+  timezone rather than an explicit one, so a shipment near midnight UTC can land
+  on the wrong calendar date relative to any UTC-based reporting. The cast
+  always succeeds — the discrepancy is silent. *(severity: Major.)*
+
+Convert to an explicit, declared timezone before truncating rather than relying
+on session default. This is a transformation-logic type-fidelity defect, not a
+missing-test gap — no test would have caught it either, since the cast never
+fails.
+
+---
+
 ## Clean → a refactor with data-diff evidence (the over-flagging guard)
 
 **Input:**
@@ -214,6 +247,21 @@ contract finding to look useful.
 
 No deprecation window is demanded for a purely additive optional field, and the
 union-with-`null` type is the mechanism that makes the addition safe — not a smell.
+
+---
+
+## Not applicable → no data-plane surface touched
+
+**Input:** a change to the marketing site's CSS (`site/styles/hero.css`) — a
+button's color and padding. No SQL, pipeline, data test, ETL/ELT code, or
+event/analytics schema is touched anywhere in the diff.
+
+**Output:** Not applicable — this change touches no SQL, pipeline, data test, or
+consumed schema, matching this lens's own explicit skip clause.
+
+Say so with a line starting "Not applicable:", not "No findings" — the latter
+implies the data-plane checks ran and found nothing, when there is no
+data-plane surface here at all to check.
 
 ## Going deeper
 
