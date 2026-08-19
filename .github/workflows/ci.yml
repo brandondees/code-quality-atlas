@@ -105,8 +105,23 @@ jobs:
         with:
           globs: '**/*.md'
       - name: shellcheck
+        # timeout-minutes is a backstop, not the primary fix: normal runtime here
+        # is a few seconds, so 3 minutes only bounds a hang, never a real run.
+        timeout-minutes: 3
         run: |
-          sudo apt-get update
+          # ubuntu-latest (Azure-hosted) runners pre-seed azure.archive.ubuntu.com
+          # as a same-region apt mirror. When it's unreachable from a given runner
+          # (a blackholed connection, not a clean refusal), apt-get update doesn't
+          # fail — it hangs on the connection attempt until apt's own timeout,
+          # then falls back to archive.ubuntu.com correctly. Observed 2026-08-19
+          # (PR #274's own CI): that cost 2m15s before the fallback even started,
+          # then another unexplained 5m35s of silence before the job was
+          # cancelled — see docs/session-log.md. Tight Acquire options make a bad
+          # mirror fail in ~10s per source instead of minutes, so the common case
+          # self-heals within the run instead of needing a manual cancel+rerun;
+          # the timeout-minutes above is the backstop for whatever that second,
+          # less-understood stall was.
+          sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 update
           sudo apt-get install -y --no-install-recommends shellcheck=0.9.0-1
           shopt -s nullglob
           shellcheck --source-path=SCRIPTDIR -x tooling/*.sh hooks/*.sh hooks/lib/*.sh
