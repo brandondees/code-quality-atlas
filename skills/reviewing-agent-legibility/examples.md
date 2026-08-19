@@ -8,6 +8,8 @@ Report each distinct issue as its own numbered finding. When the change is alrea
 - [Bad → finding (context economy / AST-navigability)](#bad--finding-context-economy--ast-navigability)
 - [Bad → finding (agent-hostile megafile + duplication)](#bad--finding-agent-hostile-megafile--duplication)
 - [Good → no finding](#good--no-finding)
+- [Good → no finding (guarded generated directory)](#good--no-finding-guarded-generated-directory)
+- [Not applicable → no code or structure to review](#not-applicable--no-code-or-structure-to-review)
 
 ## Bad → finding (stale agent onboarding)
 
@@ -112,3 +114,39 @@ docstring, no distant context needed), a retrieval-friendly name, and the onboar
 file kept accurate and scoped. Do NOT invent agent-legibility findings on correct
 code, and do NOT demand an `llms.txt` index or extra structure this small change
 doesn't need.
+
+## Good → no finding (guarded generated directory)
+
+**Input (diff):**
+
+```diff
++ generated_sdk/                    # new directory, 40 files, generated from an OpenAPI spec
+```
+
+```diff
+# AGENTS.md
+  ## Working here
+  Run `make check` before pushing. Uses Python 3.12 and pytest.
++ ## Do not hand-edit
++ - `generated_sdk/` is regenerated from `openapi.yaml` via `make generate`. Never
++   edit files under it directly -- your changes will be silently overwritten.
+```
+
+**Expected finding:** No findings
+
+AGENTS.md names the new generated directory as an explicit do-not-touch zone with
+the reason and the correct regeneration command — an autonomous edit has a clear
+guardrail to fail safe against. Do NOT demand additional ceremony beyond a
+guardrail that's already in place.
+
+## Not applicable → no code or structure to review
+
+**Input (diff):** a marketing copy update — the homepage hero text and a
+customer-facing blog post about a new pricing tier. No source code, no
+repository structure, no agent-onboarding files touched.
+
+**Expected finding:** Not applicable — the change touches no code, structure,
+or agent-onboarding content for this lens to review. Say so with a line
+starting "Not applicable:", naming what's missing. Do NOT report "No
+findings" (which implies the checks ran and found nothing) and do NOT invent
+an agent-legibility concern in a marketing-copy-only change.
