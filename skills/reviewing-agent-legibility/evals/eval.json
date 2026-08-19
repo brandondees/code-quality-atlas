@@ -34,6 +34,142 @@
         "Flags the duplicated `_retry` sitting parallel to the existing `utils.retry`: a divergent copy invites an agent editing the wrong one — a legibility regression (xref #21 change-amplification, #34 duplication) — and recommends importing the existing helper",
         "Keeps the verdict to the legibility regressions, routing the duplication-vs-reuse detail to checking-idioms-and-consistency / restraint and any deep dependency verdict to its owner"
       ]
+    },
+    {
+      "query": "Review this change.\n```python\n# utils/helpers.py  (existing grab-bag file, ~40 unrelated functions)\ndef process_refund(order_id, amount, reason):\n    order = orders.get(order_id)\n    order.refund(amount, reason)\n    audit_log.record(\"refund\", order_id, amount)\n    return order\n```\nNo payments/refunds module exists in the repo; this is the first refund-handling logic added, placed in the general utils file alongside string-formatting and date-parsing helpers.",
+      "expected_behavior": [
+        "Flags the retrieval-friendly / discoverable-structure problem: refund logic lives in a general-purpose grab-bag utils file alongside ~40 unrelated helpers — an agent (or human) searching for 'refund' or expecting payments logic under a payments/ module would not land here",
+        "Notes the code itself is otherwise fine — this is a placement/discoverability defect, not a correctness or style issue",
+        "Recommends moving the function to a dedicated, intention-revealing location (e.g. payments/refunds.py) so retrieval and future edits land in the right place"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\ndef schedule_batch_job(job):\n    # constant chosen for a reason not stated here\n    if job.priority < 3:\n        job.delay_seconds = 45\n    return queue.enqueue(job)\n```\nThe real reason (from the PR author's commit message, not in the diff): the downstream worker pool takes ~40s to autoscale from zero, so low-priority jobs are delayed to avoid hitting a cold pool -- 45 was chosen with a 5s safety margin.",
+      "expected_behavior": [
+        "Flags the missing local self-explanation: the 45-second delay and the priority-3 threshold are non-obvious magic values with a real operational reason (worker-pool autoscale lag), but that reason lives only in the commit message, not at the edit site",
+        "Notes this is distinct from the code simply lacking a comment in general — an agent editing this function later has no local signal of the constraint it must preserve if it changes the delay or threshold",
+        "Recommends putting the rationale in a comment or a named constant (e.g. WORKER_POOL_COLD_START_MARGIN_S) at the edit site rather than leaving it in commit history an agent won't read"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\ndef apply_discount(cart):\n    rate = resolve_rate(cart)\n    return cart.total * (1 - rate)\n\ndef resolve_rate(cart):\n    return lookup_tier_rate(cart.customer_tier, cart.region)\n\ndef lookup_tier_rate(tier, region):\n    base = TIER_TABLE[tier]\n    return apply_region_modifier(base, region)\n\ndef apply_region_modifier(base, region):\n    return base * REGION_MODIFIERS.get(region, 1.0)\n```\nEach function is short and reads cleanly on its own; understanding what discount a given cart actually gets requires tracing through all four functions and two lookup tables across the module.",
+      "expected_behavior": [
+        "Flags the LLM-centric-readability problem: each function is individually simple and reads fine line-by-line, but understanding the actual discount for a cart requires resolving a chain of four functions and two tables spread across the module — hidden reasoning cost despite superficially clean code",
+        "Names this as the reader-side instance of the 'superficially clean but intrinsically complex' pattern — deep parameter coupling and long-range dependencies that only resolve after tracing several calls",
+        "Suggests a shape that lowers the reasoning cost within a budget (e.g. a single resolve_discount(cart) entry point that documents the full rule, or inlining the trivial hops) — routes decomposition detail to reviewing-naming-and-readability (#6) and any restraint counterweight to checking-restraint (#11)"
+      ]
+    },
+    {
+      "query": "Review this change.\n```diff\n+ generated_sdk/                    # new directory, 40 files, generated from an OpenAPI spec\n+   client.py\n+   models.py\n+   ... (38 more files)\n```\n```\n# AGENTS.md (unchanged)\n## Working here\nRun `make check` before pushing. Uses Python 3.12 and pytest.\n```",
+      "expected_behavior": [
+        "Recognizes AGENTS.md is accurate about build/test commands, satisfying the already-covered onboarding-accuracy check",
+        "Flags the missing do-not-touch guardrail: the new generated_sdk/ directory is exactly the kind of zone an autonomous agent could hand-edit, silently losing the change on the next regeneration, but AGENTS.md says nothing about it",
+        "Recommends naming the new generated directory as off-limits for manual edits in AGENTS.md/CLAUDE.md so an autonomous edit fails safe rather than confidently editing generated output"
+      ]
+    },
+    {
+      "query": "Review this change.\n```text\nREADME.md: \"Acme SDK -- built for AI coding assistants to integrate payments in\nminutes. See our docs for the full API surface.\"\n```\nThe repo has 60+ endpoint modules and no llms.txt or any machine-readable index; docs exist only as a 200-page hand-navigated website with no sitemap or canonical-entry-point file.",
+      "expected_behavior": [
+        "Flags the missing llms.txt-style index: the README explicitly markets this SDK for AI-assistant consumption, but there is no machine-readable map pointing an agent at canonical entry points across 60+ endpoint modules",
+        "Frames this as an improvement rather than a blocker per this lens's own standard (emerging standard, surfaced as a nit/improvement absent it being demanded) while still naming the concrete gap given the repo's own stated agent-consumption intent",
+        "Does not demand llms.txt on a repo with no stated agent-consumption need — cites the README's own claim as what makes this one apply"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\ndef expire_stale_sessions(sessions):\n    # runs before the nightly cleanup job\n    return [s for s in sessions if s.age_hours() > 12]\n```",
+      "expected_behavior": [
+        "Recognizes local self-explanation is satisfied at first glance by this lens's own locality standard: a comment sits right at the edit site, not scattered elsewhere",
+        "Flags that the comment states only WHAT the code does relative to its caller (runs before cleanup) rather than WHY 12 hours is the right threshold or what breaks if it changes — a 'what' comment, not a 'why' one",
+        "Routes the comment-quality judgment (what vs. why content) to reviewing-naming-and-readability (#7) rather than deciding it here — this lens confirms an explanation exists locally, not that its content clears the why-not-what bar"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\n# invoices/exporters/pdf.py  (new file, this PR)\ndef format_line_item(item):\n    return f\"{item.name}: {item.amount_cents / 100:.2f}\"\n```\nThe same formatting logic (name + cents-to-dollars string) already exists, nearly identically, in receipts/exporters/pdf.py, statements/exporters/pdf.py, and estimates/exporters/pdf.py -- four independent copies now, each requiring its own fix if the currency formatting rule ever changes.",
+      "expected_behavior": [
+        "Flags the new copy as a legibility regression this lens owns: a fourth near-identical parallel implementation invites an agent to find and edit the wrong one, or to miss updating the other three when this logic needs to change",
+        "Notes this specific diff's duplication is this lens's finding (an agent-hostile parallel-copy pattern), distinct from whether the four-copies-and-growing pattern constitutes a repo-wide change-amplification hotspot",
+        "Routes the repo-wide hotspot judgment (whether this recurring duplication pattern across the whole codebase warrants a tracked cleanup) to finding-maintainability-hotspots (#21) rather than deciding it here — this lens flags the single-diff regression, the repo-shaped audit tracks the accumulating pattern"
+      ]
+    },
+    {
+      "query": "Review this change.\n```\n# AGENTS.md (this PR)\n## Working here\nRun `make check` before pushing. Uses Python 3.12 and pytest. Requires\nPostgreSQL 15+ locally; see docker-compose.yml.\n```\n```\n# README.md (unchanged in this PR)\n## Getting started\nRun `make test` to run the test suite. Requires PostgreSQL 14.\n```",
+      "expected_behavior": [
+        "Recognizes AGENTS.md itself is accurate, specific, and scoped — it names the current command (make check), the right runtime version, and the local dependency — satisfying this lens's own onboarding-content check",
+        "Flags that AGENTS.md now directly disagrees with README.md on both the command (make check vs. make test) and the required PostgreSQL version (15+ vs. 14) — a human and an agent onboarding from the two files would get contradictory instructions",
+        "Routes the cross-document consistency judgment to reviewing-pr-and-process-hygiene (#22) rather than deciding it here — this lens confirms AGENTS.md's own content is good, not that it agrees with every other doc in the repo"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\n# No context needed here -- fully self-explanatory.\ndef process(x):\n    y = transform_a(x)          # defined in pipeline/stage_a.py\n    z = transform_b(y, cfg)     # defined in pipeline/stage_b.py; cfg from config/loader.py\n    return finalize(z, ctx)     # ctx built in pipeline/context.py from three other modules\n```",
+      "expected_behavior": [
+        "Does not accept the 'no context needed, fully self-explanatory' comment at face value — understanding process() requires loading four separate modules (stage_a, stage_b, config/loader, pipeline/context), the opposite of self-contained",
+        "Flags the same context-economy defect the comment claims doesn't exist: this is a fragmented, whole-repo-dependent read, not a depth-first slice",
+        "Treats the comment as an unverified claim to check against the actual dependency graph, not a substitute for it"
+      ]
+    },
+    {
+      "query": "Review this change.\n```diff\n# Makefile\n- test:\n-     pytest tests/\n+ check:\n+     python -m tooling.cli eval && pytest tests/\n```\n```\n# PR description: \"AGENTS.md was already updated for this in a separate infra PR last week.\"\n```\n```\n# AGENTS.md (as it exists on this PR's branch, unchanged by this PR)\n## Working here\nRun the tests with `make test` before pushing.\n```",
+      "expected_behavior": [
+        "Does not accept the 'AGENTS.md was already updated in a separate PR' claim without checking — the AGENTS.md content actually present on this branch still documents the dead `make test` target",
+        "Flags the same stale-onboarding defect as if the claim weren't made: an agent following AGENTS.md on this branch runs a target that no longer exists",
+        "Verifies against the actual file content in the diff/branch rather than an unverifiable claim about a separate PR"
+      ]
+    },
+    {
+      "query": "Review this change. Committed the week before a stated public launch.\n```diff\n+ vendor_bundle.js         # 8,400 lines, single minified-adjacent file, checked into src/\n  # ship it -- launch is next week, cleanup can happen after\n```",
+      "expected_behavior": [
+        "Does not let the 'launch is next week, cleanup after' framing suppress the finding — deadline pressure is not evidence the megafile is acceptable to check in as-is",
+        "Flags the 8,400-line single file as a context-budget hazard for any agent working nearby, landing right before the period of highest change velocity (post-launch fixes)",
+        "Recommends keeping the generated/vendored bundle out of the navigable source tree (build-time fetch or a separate package) rather than deferring past the exact window it will be needed"
+      ]
+    },
+    {
+      "query": "Review this change:\n```diff\n- def load(id):\n+ def load(record_id):\n      return db.get(record_id)\n\n- import os, sys\n+ import sys, os\n\n- # fetch settings\n+ # Fetch the application settings from the config store.\n\n+ REGISTRY = {}\n+ def register(name):\n+     def deco(fn): REGISTRY[name] = fn; return fn\n+     return deco\n+ @register(\"legacy_v3\")\n+ def _handler(payload): ...\n\n- def total(xs):\n+ def total(xs: list[float]) -> float:\n      return sum(xs)\n\n- log.info(\"ok\")\n+ log.info(\"request completed successfully\")\n```",
+      "expected_behavior": [
+        "Does not let the five cosmetic hunks (parameter rename, import reordering, comment rewording, added type hint, log-message wording) crowd out the one substantive change",
+        "Flags the new stringly-keyed registry-and-decorator pattern (hunk 4) as defeating static/AST navigation — the binding to legacy_v3 can only be found by grepping the literal string",
+        "Reports it as a real finding despite the diff's mostly-cosmetic framing"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\ndef acquire_lock_before_flush(cache):\n    # Fully documented inline: this must run before any writer touches the cache.\n    cache.flush()\n```\nNo lock is actually acquired anywhere in the function or nearby code; the name and comment both claim a locking behavior the implementation does not have.",
+      "expected_behavior": [
+        "Does not accept the 'fully documented inline' comment at face value — the function name and comment both claim locking behavior, but no lock is acquired anywhere in the function",
+        "Flags the contradiction: local self-explanation requires that what's stated at the edit site be true; a comment and function name that assert a safeguard the code doesn't implement misleads any agent (or human) relying on it more than no comment at all",
+        "Recommends either implementing the claimed lock or correcting the name/comment to match what the code actually does"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\n# payments/refunds.py  (new file)\ndef process_refund(order_id, amount, reason):\n    order = orders.get(order_id)\n    order.refund(amount, reason)\n    audit_log.record(\"refund\", order_id, amount)\n    return order\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes the refund logic is placed in a dedicated, intention-revealing location (payments/refunds.py) — a grep or retrieval query for 'refund' or 'payments' lands exactly here",
+        "Does not demand further reorganization of code that is already discoverable and correctly scoped"
+      ]
+    },
+    {
+      "query": "Review this change.\n```diff\n+ generated_sdk/                    # new directory, 40 files, generated from an OpenAPI spec\n```\n```diff\n# AGENTS.md\n  ## Working here\n  Run `make check` before pushing. Uses Python 3.12 and pytest.\n+ ## Do not hand-edit\n+ - `generated_sdk/` is regenerated from `openapi.yaml` via `make generate`. Never edit files under it directly -- your changes will be silently overwritten.\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes AGENTS.md names the new generated directory as an explicit do-not-touch zone with the reason and the correct regeneration command — an autonomous edit has a clear guardrail to fail safe against",
+        "Does not demand additional ceremony beyond the guardrail already added"
+      ]
+    },
+    {
+      "query": "Review this change.\n```text\nMarketing copy update: the homepage hero text and a customer-facing blog post about the new pricing tier. No source code, no repository structure, no agent-onboarding files touched.\n```",
+      "expected_behavior": [
+        "Responds with a line starting 'Not applicable:' naming that the change touches no code, structure, or agent-onboarding content for this lens to review",
+        "Does not report 'No findings' (which would imply the checks ran and found nothing) — there is nothing in this lens's domain present at all",
+        "Does not invent an agent-legibility concern in a marketing-copy-only change"
+      ]
+    },
+    {
+      "query": "Review this change.\n```python\ndef is_even(n: int) -> bool:\n    return n % 2 == 0\n```",
+      "expected_behavior": [
+        "Reports no findings",
+        "Recognizes this is a trivial, fully self-contained, retrieval-friendly one-line function needing no ceremony — a typed signature, no external dependencies, nothing to trace",
+        "Does not demand documentation, an llms.txt entry, or restructuring of code this small and self-evident"
+      ]
     }
   ]
 }

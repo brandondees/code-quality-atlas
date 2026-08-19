@@ -287,6 +287,45 @@ skills:
       AGENTS.md/CLAUDE.md.
     shape: diff
     wave: 5
+    # Q21: fresh scope-to-coverage recompute after reviewing-agentic-safety
+    # shipped (PR #262). Two-way tie at the widest remaining gap with
+    # reviewing-ethical-design (both 9 owned checks / 4 baseline
+    # scenarios); picked this one as the technically lower-risk of the
+    # two and a natural continuation of the prior pick's agent-tooling
+    # theme. shape: diff, not design-capable, so no A group (precedent:
+    # checking-idioms-and-consistency). 4 kept + B 5 (per-axis coverage
+    # of the five completely-uncovered checks: retrieval-friendly
+    # placement -- refund logic buried in a grab-bag utils file; local
+    # self-explanation -- a non-obvious operational constant whose
+    # rationale lives only in a commit message, not at the edit site;
+    # LLM-centric readability -- four individually-simple functions
+    # whose actual behavior only resolves after tracing all of them;
+    # scoped guardrails -- an accurate AGENTS.md that never names a new
+    # generated directory as off-limits; llms.txt-style index -- an SDK
+    # marketed for AI-assistant consumption with no machine-readable
+    # entry-point map) + C 3 (delegate/escalate, each grounded in this
+    # lens's own heuristics.md cross-references: a locally-present
+    # comment that states what rather than why -> reviewing-naming-
+    # and-readability per "distinct from #7's human 'why-not-what'"; a
+    # fourth near-identical parallel implementation, this diff's own
+    # legibility regression, with the repo-wide accumulating-pattern
+    # judgment routed to finding-maintainability-hotspots per "xref #21
+    # change-amplification"; an accurate, well-scoped AGENTS.md that
+    # directly contradicts README.md on the test command and a version
+    # requirement -> reviewing-pr-and-process-hygiene, which also owns
+    # #22 per the manifest's own category mapping) + D 5 (adversarial:
+    # a "no context needed, fully self-explanatory" comment over a
+    # genuinely four-module-deep read; an "AGENTS.md was already
+    # updated in a separate PR" claim contradicted by the actual branch
+    # content; launch-deadline framing over a new 8,400-line vendored
+    # megafile; a stringly-keyed registry buried as one hunk of a
+    # six-hunk mostly-cosmetic diff; a "fully documented inline" /
+    # locking claim contradicted by code that acquires no lock at all)
+    # + E 4 (a retrieval-friendly counterweight to B1, a guarded-
+    # generated-directory counterweight to B4, the not-applicable test,
+    # a trivial one-line function needing no ceremony) = 21 scenarios.
+    # See open-questions.md Q21.
+    eval_min: 21
     built_from:
       - { category: 35, source: docs/research/cluster-2-readability.md#35 }
 
