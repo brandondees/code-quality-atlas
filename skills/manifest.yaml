@@ -1399,6 +1399,41 @@ skills:
       SemVer, RFC date/URI/email formats, Unicode, cron dialects, OTel semconv.
     shape: diff
     wave: 5
+    # Q21: continuing the preference-tier rollout after
+    # `auditing-decision-record-currency` merged (PR #266). Widest gap among
+    # the remaining shape:diff lenses (8 owned checks against 4 baseline
+    # scenarios). Not `design: true` — no A group. The 4 original scenarios
+    # covered a date-format defect, missing OAuth `state`, a clean
+    # idempotent-POST/RFC-3339 case, and a cron-dialect mismatch — leaving
+    # 5 of the lens's 8 checks with no standalone coverage. B (5, per-axis
+    # coverage): SemVer/back-compat (a breaking rename shipped under a
+    # patch bump), encoding/charset/content-negotiation (a declared
+    # Content-Type with no charset over a non-ASCII body), time/calendar/
+    # locale tags on the wire (a non-IANA tz abbreviation and a
+    # non-BCP-47 locale tag, distinct from the date-format axis the
+    # originals already cover), OTel semconv (bespoke span-attribute keys
+    # instead of the standard names), co-existence (a hardcoded shared
+    # lock path). C (3, delegate/escalate), grounded in this lens's own
+    # documented defer list ("defers the contract we author to #13,
+    # internal correctness to #4, ... config to #26"): a correctly
+    # major-bumped breaking change whose field-shape ambiguity routes to
+    # reviewing-api-contract-safety (#13); a correctly RFC-3339-formatted
+    # timestamp whose wall-clock (non-monotonic) duration measurement
+    # routes to tracing-correctness-and-invariants (#4, "monotonic clocks
+    # for durations"); a hardcoded-port co-existence finding whose
+    # configuration-practice verdict routes to
+    # auditing-config-and-build-hygiene (#26). D (5, adversarial):
+    # claim-capture, an in-diff suppression note on the OAuth check,
+    # demo-deadline framing over a real cron-dialect mismatch, a
+    # distractor-buried PUT-idempotency violation in a six-hunk mostly-
+    # cosmetic diff, a docstring claim contradicted by the actual
+    # single-dialect implementation. E (4, precision): a SemVer
+    # counterweight to B1 (correctly major-bumped), a co-existence
+    # counterweight to B5 (an env-configurable port), a trivial one-line
+    # RFC-3339 helper, and the not-applicable test matching this lens's
+    # own explicit skip clause verbatim (a purely internal refactor
+    # crossing no boundary). = 21 scenarios. See open-questions.md Q21.
+    eval_min: 21
     built_from:
       - { category: 37, source: docs/research/cluster-4-runtime.md#37 }
 
