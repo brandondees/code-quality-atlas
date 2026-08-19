@@ -16,6 +16,9 @@ Does this manipulate or disadvantage the user? Dark patterns, manipulative defau
 - [Bad → finding (discriminatory business logic)](#bad--finding-discriminatory-business-logic)
 - [Bad → finding (fabricated urgency + obstruction)](#bad--finding-fabricated-urgency--obstruction)
 - [Good → no finding](#good--no-finding)
+- [Bad → finding (dishonest state signal)](#bad--finding-dishonest-state-signal)
+- [Good → no finding (consent actually wired)](#good--no-finding-consent-actually-wired)
+- [Not applicable → no user-facing behavior](#not-applicable--no-user-facing-behavior)
 - [Going deeper](#going-deeper)
 
 ## When to use
@@ -128,6 +131,71 @@ protective friction, not obstruction), consent defaults to off, and declining
 actually stops the behavior. Do NOT flag the destructive-action confirmation as a
 dark pattern, and do NOT invent ethical findings on a flow that treats the user
 honestly.
+
+## Bad → finding (dishonest state signal)
+
+**Input (diff):**
+
+```python
+@app.post("/account/delete")
+def delete_account(user):
+    user.is_deleted = True
+    user.save()
+    return {"message": "Your account and all data have been permanently deleted."}
+    # user record and all associated data remain in the database, fully queryable
+```
+
+**Expected finding:**
+
+1. **Dishonest state signal:** the response claims data is "permanently deleted,"
+   but the code only sets a soft-delete flag — the record and all associated data
+   remain fully queryable in the database. A signal the code knows to be false is
+   a defect regardless of product intent. Either implement actual deletion (or a
+   stated, accurately disclosed retention/anonymization policy) or correct the
+   message to match what the code does. **Route:** any data-retention/compliance
+   policy question to `auditing-compliance-and-provenance` (#27) / `legal`.
+
+## Good → no finding (consent actually wired)
+
+**Input (diff):**
+
+```python
+@app.post("/settings/marketing-consent")
+def update_consent(user, consented: bool):
+    user.marketing_consent = consented
+    user.save()
+
+def send_marketing_email(user):
+    if not user.marketing_consent:
+        return
+    email_service.send(user.email, MARKETING_TEMPLATE)
+```
+
+**Expected finding:** No findings
+
+Note: `send_marketing_email` actually checks `user.marketing_consent` before
+sending — declining genuinely stops the behavior rather than just recording a
+preference nobody reads (consent theater). Do NOT demand additional ceremony on
+a toggle that is already correctly wired.
+
+## Not applicable → no user-facing behavior
+
+**Input (diff):**
+
+```python
+def reconcile_nightly_inventory_snapshot(warehouse_id):
+    snapshot = fetch_warehouse_counts(warehouse_id)
+    write_to_reporting_table(snapshot)
+```
+
+An internal batch job with no user-facing behavior, no consent flow, no pricing
+logic, and no UI.
+
+**Expected finding:** Not applicable — this is internal batch/reporting code
+with no user-facing behavior, matching this lens's own explicit skip clause. Say
+so with a line starting "Not applicable:". Do NOT report "No findings" (which
+implies the checks ran and found nothing) and do NOT invent an ethical-design
+concern in internal-only code.
 
 ## Going deeper
 

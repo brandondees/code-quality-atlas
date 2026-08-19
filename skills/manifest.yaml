@@ -351,6 +351,43 @@ skills:
       defaults, discriminatory conditionals — detect-and-route to product/legal.
     shape: diff
     wave: 5
+    # Q21: fresh scope-to-coverage recompute after reviewing-agent-
+    # legibility shipped (PR #264). Its earlier tie partner is now
+    # hardened, leaving this lens alone at the widest remaining gap (9
+    # owned checks / 4 baseline scenarios). shape: diff, not
+    # design-capable, so no A group. 4 kept + B 5 (per-axis coverage of
+    # the five completely-uncovered checks: honest state/truthful
+    # signals -- a "permanently deleted" claim over a soft-delete-only
+    # implementation; consent theater -- a stored consent flag never
+    # checked before sending; coercion/pressure -- an hourly-recurring
+    # upgrade interstitial with no permanent dismiss; vulnerable-user
+    # context -- an undisclosed-odds loot-box mechanic applied
+    # identically to minors; accessibility-as-exclusion -- a
+    # keyboard-inoperable cancel control next to a fully accessible
+    # keep-subscription button) + C 3 (delegate/escalate, each grounded
+    # in this lens's own documented routing boundaries: a legitimately
+    # protective delete-confirmation that's a bare unauthenticated GET
+    # -> sweeping-for-security per "route the protective-control side
+    # to #14"; a correct opt-out default undermined by a missing
+    # under-13 age gate -> auditing-compliance-and-provenance (#27), a
+    # distinct regulatory facet from the consent-as-law delegate the 4
+    # originals already exercise; a contrast-hidden (not
+    # keyboard-inoperable) cancel control -> reviewing-accessibility-
+    # and-i18n (#23), a second, distinct instance of the a11y-mechanics
+    # boundary from B5's own operability instance) + D 5 (adversarial:
+    # a "legal reviewed and approved" claim over a real manipulative
+    # default; an implausible single-ticket justification over a
+    # platform-wide nagging pattern; price-increase-week urgency
+    # framing over a real obstruction (cancellation moved phone-only);
+    # a pre-checked consent default with no decline option buried as
+    # one hunk of a six-hunk mostly-cosmetic diff; a "fully transparent
+    # pricing" claim contradicted by fees applied only after checkout
+    # is rendered) + E 4 (a consent-theater counterweight to B2, a
+    # vulnerable-user counterweight to B4, the not-applicable test
+    # matching this lens's own explicit skip clause verbatim, a
+    # trivial honest low-stakes display needing no ceremony) = 21
+    # scenarios. See open-questions.md Q21.
+    eval_min: 21
     built_from:
       - { category: 36, source: docs/research/cluster-4-runtime.md#36 }
 
