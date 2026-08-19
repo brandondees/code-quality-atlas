@@ -131,9 +131,9 @@ def get_variant(session):
 @app.get('/checkout')
 def checkout(session):
     variant = get_variant(session)
+    log_exposure(session, variant)   # logged before we know if the user will even see checkout
     if some_middleware_redirects_before_render(session):
         return redirect('/cart')
-    log_exposure(session, variant)   # logged before the redirect check
     return render_checkout(variant)
 ```
 
