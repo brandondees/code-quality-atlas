@@ -16,6 +16,8 @@ Is the agent's action surface safe? Tool least-privilege, approval gates & step 
 - [Bad → finding (unbounded loop + ungated action — ASI01/ASI08)](#bad--finding-unbounded-loop--ungated-action--asi01asi08)
 - [Bad → finding (token passthrough / confused deputy — ASI03, detect-and-route)](#bad--finding-token-passthrough--confused-deputy--asi03-detect-and-route)
 - [Good → no finding](#good--no-finding)
+- [Good → no finding (sandboxed execution — ASI05)](#good--no-finding-sandboxed-execution--asi05)
+- [Not applicable → no action/tool surface](#not-applicable--no-actiontool-surface)
 - [Going deeper](#going-deeper)
 
 ## When to use
@@ -132,6 +134,46 @@ result = agent.run(task, max_steps=8, on_action=require_approval)  # bounded + g
 Note: the tool is least-privilege (read-only, single-purpose), the loop is bounded
 (`max_steps`), and actions are gated (`require_approval`). Do NOT invent an agentic
 defect on a tool surface that is already narrow, bounded, and gated.
+
+## Good → no finding (sandboxed execution — ASI05)
+
+**Input (diff):**
+
+```python
+def run_agent_code(code: str):
+    return sandbox.run(
+        code,
+        env={},                     # no ambient credentials
+        cpu_limit="1", memory_limit="256Mi", timeout=5,
+        network=NetworkPolicy.DENY_ALL,
+    )
+```
+
+**Expected finding:** No findings
+
+Note: the execution is sandboxed with no ambient credentials (`env={}`), bounded
+resources, and no network egress — the ASI05 mitigations this check exists to
+require. Do NOT invent a finding merely because the change executes
+agent-generated code.
+
+## Not applicable → no action/tool surface
+
+**Input (diff):**
+
+```python
+def summarize_ticket(ticket_text: str) -> str:
+    response = client.chat.completions.create(
+        model="gpt-...",
+        messages=[{"role": "user", "content": f"Summarize this support ticket:\n{ticket_text}"}],
+    )
+    return response.choices[0].message.content
+```
+
+**Expected finding:** Not applicable — a single-turn chat completion with no tools,
+no agent loop, no MCP server, and no autonomous action has no action/tool surface
+for this lens to review. Don't force an ASI-framed finding onto an ordinary model
+call; it's `reviewing-llm-integration`'s (#25) territory instead, per this lens's
+own skip clause.
 
 ## Going deeper
 

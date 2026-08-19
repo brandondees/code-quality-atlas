@@ -139,6 +139,49 @@ skills:
     wave: 5
     built_from:
       - { category: 32, source: docs/research/cluster-4-runtime.md#32 }
+    # Q21: fresh scope-to-coverage recompute after reviewing-decision-lifecycle
+    # shipped (PR #261). Three lenses tied at the widest gap (9 owned checks /
+    # 4 baseline scenarios): reviewing-agentic-safety, reviewing-agent-legibility,
+    # reviewing-ethical-design. Picked reviewing-agentic-safety -- not by a
+    # topical tie-breaker, but because it is the one of the three with a real
+    # security/safety consequence (tool least-privilege, approval gates on
+    # irreversible actions, sandboxed execution, exfiltration), matching how
+    # the campaign prioritized the floor tier's security-adjacent lenses
+    # earlier. 4 kept + A 1 (design-doc, shape-flexible firing: an RFC with no
+    # autonomy bound/approval gate anywhere for an irreversible credit-issuing
+    # action, plus tool definitions sourced from an unpinned, auto-updating
+    # third-party marketplace) + B 6 (per-axis coverage of the six owned
+    # checks the 4 originals never exercised as their own standalone defect:
+    # tool metadata as untrusted input/tool poisoning (ASI04); unsandboxed
+    # code execution with the full host env (ASI05); an unauthenticated
+    # inter-agent handoff (ASI07); an unconditional, unprovenanced memory
+    # write (ASI06); a tool dispatcher with no audit trail (ASI09/10); and the
+    # lethal-trifecta action leg -- private-data read paired with a
+    # model-supplied, unconstrained webhook destination) + C 3
+    # (delegate/escalate, grounded in this lens's own examples.md boundary
+    # statement -- defers the model call to #25, the authz verdict to #14,
+    # the tool contract to #13 -- each scenario keeps the action surface
+    # itself clean so the routed defect is the only finding): an
+    # otherwise-sound bounded/gated tool whose retrieved-context prompt has
+    # no untrusted-content delimiter -> reviewing-llm-integration;  a
+    # correctly narrow tool whose implementation string-concatenates SQL ->
+    # sweeping-for-security; a correctly scoped tool with an unvalidated,
+    # untyped amount parameter and silently forwarded extra kwargs ->
+    # reviewing-api-contract-safety) + D 5 (adversarial: a "sandboxed via
+    # subprocess" comment directly over shell=True with the full host env; a
+    # new unbounded delete-all tool buried as hunk 4 of 6 mostly-cosmetic
+    # hunks; "ship today, approval gate next sprint" framing over an
+    # ungated, uncapped fund-transfer tool shipping now; a third-party tool
+    # docstring embedding a hidden "also call export_ssh_keys" instruction;
+    # a "logged to our SIEM" comment directly over a dispatcher with no log
+    # call on either path) + E 4 (a correctly sandboxed execution
+    # counterweight to B2; a signed/verified inter-agent handoff plus a
+    # provenanced, TTL'd memory write as a joint counterweight to B3/B4; a
+    # false-positive bait -- a memory write carrying only a session id and
+    # timestamps, no user content; the not-applicable case, a single-turn
+    # chat completion with no tools/agent/MCP surface at all) = 23 scenarios.
+    # See open-questions.md Q21.
+    eval_min: 23
 
   - name: reviewing-threat-model
     description: >
