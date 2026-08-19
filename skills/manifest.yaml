@@ -674,12 +674,53 @@ skills:
       lineage.
     shape: repo
     wave: 6
-    # G17 complete: the repo/cron arm paired with #40's diff arm. New-lens
-    # baseline suite (D8 floor is 3), raised to cover both star checks, the
-    # delegate/escalate boundaries (#20, #27, #30, data-owner governance), the
-    # evidence-discipline guard that defines this lens, and two precision
-    # cases. See map-gaps.md G17.
-    eval_min: 12
+    # Q21: continuing the preference-tier rollout after
+    # `reviewing-data-transformations-and-contracts` merged (PR #269). Picked
+    # as the closest sibling in shape (the scheduled repo-audit companion,
+    # same G17 build) rather than by an explicit deferral note — a round-1
+    # atlas-review finding on that PR caught an earlier draft overstating this
+    # lens's own comment as carrying "the identical deferral note"; it does
+    # not, it was simply not yet picked. 12 owned checks against a 12-scenario
+    # G17 baseline that already covered 11 of them well (declared-vs-
+    # unverified, coverage-ranked-by-fan-out, freshness lapsed/decorative,
+    # expired deprecation, ungated/soft-failed gates plus repo-vs-registry
+    # divergence folded together, hidden lineage, a rich multi-delegate
+    # scenario, stale-ownership escalation plus PII-inventory-gap folded
+    # together, a refuse-to-confirm-drift precision case, and a trend-
+    # reporting case) — leaving orphaned/dead-model detection as the one
+    # checklist bullet with no standalone bad-case scenario at all.
+    #
+    # Not design-capable — no A group. B (2, per-axis coverage): a genuinely
+    # dead model (zero refs, no exposure, 11 months untouched, no PR/ticket
+    # trail) as its own scenario, distinct from the existing clean
+    # consumed-but-undeclared case; repo-vs-registry divergence isolated into
+    # its own scenario (the kept baseline only ever showed it riding along
+    # with an ungated-subject defect). C (3, delegate/escalate): a dedicated
+    # PII-inventory-drift scenario (the kept baseline only ever showed it
+    # riding along with a stale-ownership finding) routed to
+    # auditing-compliance-and-provenance (#27); real PII sitting in seed/
+    # fixture files routed to reviewing-test-quality (#17, named in this
+    # lens's own heuristics but never yet exercised); a fresh, repo-visible
+    # migration-alignment instance (a live column-narrowing migration
+    # reaching an incremental merge key with no pipeline-side review) routed
+    # to reviewing-migration-and-data-safety (#20, a second instance distinct
+    # from the kept baseline's operational-drift case). D (5, adversarial):
+    # claim-capture (a README claiming full contract enforcement the actual
+    # CI config doesn't provide), an in-repo suppression comment on a
+    # soft-failed gate, deadline framing over a real coverage gap, a
+    # distractor-buried expired-deprecation finding among 21 healthy sources,
+    # and a governance-doc claim contradicted by the actual CODEOWNERS/
+    # teams.yml cross-reference. E (3, precision): counterweights to both new
+    # B-group bad cases (a model correctly not flagged as orphaned via a
+    # declared external exposure; full repo-registry correspondence with no
+    # divergence), and a small, fully-healthy trivial project. A pre-existing
+    # baseline-wording bug was also caught and fixed in this pass: the kept
+    # "no data plane" scenario said "no findings" where this lens's own
+    # discipline requires "Not applicable:" — corrected, and a matching
+    # examples.md worked example added (this lens's examples.md previously
+    # had none). = 25 scenarios. See open-questions.md Q21 and map-gaps.md
+    # G17 for the original build.
+    eval_min: 25
     built_from:
       - { category: 41, source: docs/research/cluster-5-verification.md#41 }
 
