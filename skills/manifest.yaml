@@ -137,6 +137,51 @@ skills:
     shape: diff
     design: true
     wave: 5
+    # Q21: fresh scope-to-coverage recompute after
+    # reviewing-decision-lifecycle shipped (PR #261). Three-way tie at
+    # the widest remaining gap (reviewing-agentic-safety,
+    # reviewing-agent-legibility, reviewing-ethical-design, all 9 owned
+    # checks / 4 baseline scenarios); picked this one for direct
+    # thematic relevance to this session (this repo runs its own
+    # agentic PR-review routines) and for design:true precedent already
+    # proven out three times this wave. design: true, so this pass
+    # includes an A group. 4 kept + A 1 (an RFC for an autonomous ops
+    # agent with unscoped shell access, no autonomy bounds or approval
+    # gates, no audit trail, and no rollback plan for the agent design
+    # itself -- exercises the shared decision-record checklist too) + B
+    # 5 (per-axis coverage of the five completely-uncovered checks:
+    # unpinned MCP servers with tool descriptions trusted verbatim
+    # (tool poisoning); model-generated code run via bare exec() in the
+    # host process (unsandboxed); an inter-agent message acted on with
+    # no origin authentication; a raw, unvalidated, unprovenanced
+    # memory write; a handler reaching sensitive data and then posting
+    # to a model-supplied URL (lethal-trifecta action leg)) + C 3
+    # (delegate/escalate, each grounded in this lens's own documented
+    # cross-references: an egress-gated action leg that still combines
+    # the other two trifecta legs -> reviewing-llm-integration per "#25
+    # owns the trifecta framing, #32 owns the mitigation"; a
+    # well-logged, well-scoped tool call nobody actually monitors ->
+    # reviewing-observability-and-operability per "cross #16"; a
+    # least-privilege, approval-gated tool with an untyped free-form
+    # JSON parameter contract -> reviewing-api-contract-safety per "the
+    # tool contract to #13") + D 5 (adversarial: a "sandboxed, fully
+    # isolated" comment over a real bare exec() in the host process; an
+    # in-diff "reviewed and approved by security team" claim over a
+    # real unpinned, verbatim-trusted MCP connection; demo-deadline
+    # framing ("approval gate can come in a follow-up PR") over a real
+    # ungated irreversible delete_account call; an unbounded,
+    # ungated transfer_funds agent loop buried as one hunk of six
+    # mostly-cosmetic changes; an "all writes are validated and
+    # provenance-checked" comment directly contradicted by an
+    # unvalidated raw memory-store append beneath it) + E 4 (a
+    # sandboxing counterweight to B2, a memory-hygiene counterweight to
+    # B4, the not-applicable test matching this lens's own explicit
+    # skip clause -- an ordinary model call with no action surface, per
+    # "an ordinary model call ... is reviewing-llm-integration's job" --
+    # and a tool-metadata counterweight to B1 (a pinned, hash-verified,
+    # description-validated MCP server)) = 22 scenarios. See
+    # open-questions.md Q21.
+    eval_min: 22
     built_from:
       - { category: 32, source: docs/research/cluster-4-runtime.md#32 }
 
