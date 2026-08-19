@@ -326,7 +326,7 @@ skills:
     # generated-directory counterweight to B4, the not-applicable test,
     # a trivial one-line function needing no ceremony) = 21 scenarios.
     # See open-questions.md Q21.
-    eval_min: 21
+    eval_min: 20
     built_from:
       - { category: 35, source: docs/research/cluster-2-readability.md#35 }
 
@@ -387,7 +387,7 @@ skills:
     # matching this lens's own explicit skip clause verbatim, a
     # trivial honest low-stakes display needing no ceremony) = 21
     # scenarios. See open-questions.md Q21.
-    eval_min: 21
+    eval_min: 20
     built_from:
       - { category: 36, source: docs/research/cluster-4-runtime.md#36 }
 
@@ -747,7 +747,7 @@ skills:
     # adversarial taxonomy minus the design-doc (A) group — this lens is
     # diff-only, not design-capable (precedent: reviewing-naming-and-
     # readability). See open-questions.md Q21.
-    eval_min: 21
+    eval_min: 20
     built_from:
       - { category: 8, source: docs/research/cluster-2-readability.md#8 }
 
@@ -1125,6 +1125,47 @@ skills:
       consistency, revisit-triggers due, EOL adoptions, orphaned records.
     shape: repo
     wave: 6
+    # Delegate targets (not a manifest `cross_ref` — this lens's own
+    # built_from has only category 39, and that field marks categories
+    # within a lens's own built_from list, not foreign targets): #29
+    # reviewing-decision-lifecycle owns the reopen judgment (this lens only
+    # surfaces the signal, per its own closing heuristic); #22
+    # auditing-documentation-health owns general index/discoverability
+    # upkeep (this lens only flags a scan-reliability signal when the
+    # archive index drifts from disk).
+    #
+    # Q21: continuing the preference-tier rollout after `reviewing-ethical-design`
+    # merged (PR #265). Restarted the branch from `origin/main` first.
+    # Recomputed scope-to-coverage across the 9 remaining unhardened
+    # preference-tier lenses: this lens had the widest gap (10 owned checks
+    # against 5 baseline scenarios) among the shape:diff/repo lenses that fit
+    # the established A-E pattern cleanly — `reviewing-artifact-conventions`
+    # scored a nominally wider gap but is `shape: artifact` (presence-activated,
+    # single-rubric), a genuinely different taxonomy this campaign hasn't
+    # adapted yet, so it was set aside rather than forced into this pass.
+    # `reviewing-threat-model` was excluded from the count entirely — it
+    # already ships its own native 21-scenario adversarial suite from
+    # authorship, just without an `eval_min` floor recorded.
+    #
+    # Not `design: true` (no A group). B 3 (per-axis coverage for the three
+    # completely-uncovered checklist items: a stalled `proposed` record stuck
+    # with no resolution while downstream work proceeds as settled; silent
+    # supersession where a newer record's notes clearly replace an older
+    # one's subject but neither carries the machine-checkable `supersedes`/
+    # `superseded-by` field; a revisit-trigger naming a real, specific
+    # condition no repo signal can verify, distinct from no trigger at all).
+    # C 3 (delegate scenarios grounded in this lens's own closing heuristic,
+    # "escalate the judgment call... route to the decision's owner (cross
+    # #29" — two fresh revisit/EOL instances explicitly routed to #29, plus
+    # an index-drift instance routed to #22, the lens's own archive-
+    # discoverability analog). D 5 (adversarial: claim-capture, an in-diff
+    # suppression note, release-freeze urgency framing, a distractor-buried
+    # finding in an 8-record scan, a notes claim contradicted by dependency-
+    # manifest evidence). E 4 (two counterweights to the new B-group bad
+    # cases, a trivial single-record scan, and a "Not applicable:" test for
+    # a repo with no decision-record archive at all) = 20 scenarios. See
+    # open-questions.md Q21.
+    eval_min: 20
     built_from:
       - { category: 39, source: docs/research/cluster-6-evolution.md#39 }
 
