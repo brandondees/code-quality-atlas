@@ -62,7 +62,7 @@
     {
       "query": "Review this change.\n```python\nspan.set_attribute(\"http.status\", resp.status_code)   # bespoke key\nspan.set_attribute(\"user_id\", user.id)                 # bespoke key, no otel namespace\n```",
       "expected_behavior": [
-        "Flags non-conformant span attribute names: OpenTelemetry semantic conventions specify `http.response.status_code` (not `http.status`) and a namespaced key such as `enduser.id` (not a bespoke `user_id`) for stable, tool-consumable telemetry",
+        "Flags non-conformant span attribute names: current stable OpenTelemetry HTTP semantic conventions (semconv v1.23+) specify `http.response.status_code` (not `http.status`) and a namespaced key such as `enduser.id` (not a bespoke `user_id`) for stable, tool-consumable telemetry",
         "Recommends adopting the OTel semconv attribute names so external tracing/observability tooling — which expects the standard keys — can actually consume the data",
         "Does not claim the telemetry is functionally broken — it emits and is queryable internally; the defect is non-conformance to the convention external tooling expects"
       ]
