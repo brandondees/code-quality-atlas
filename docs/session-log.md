@@ -3216,3 +3216,23 @@ Fifth lens of the preference-tier re-gate backlog, and the last of the original 
 (9 recall misses: 7, 10, 14, 15, 16, 17, 18, 20, 21. Precision failure: 23.)
 
 **Recorded in `open-questions.md` Q21.**
+
+### 2026-08-19 (eighteenth follow-up) — Q21 cross-model re-gate: `reviewing-accessibility-and-i18n` (25 scenarios) — new worst recall of the session
+
+Sixth lens of the preference-tier re-gate backlog, and the first from wave 2.
+
+**25 scenarios (22 defect + 3 clean [3, 23, 24]) — 4/22 recall (18%), 3/3 precision (100%), 18 recall misses.** Graded by reading every response against `expected_behavior`. Worse than `reviewing-naming-and-readability`'s 19% — the new low point of the campaign. **Note on the clean-scenario count**: scenario 17's `expected_behavior` reads, on a first pass, like a clean scenario ("recognizes visually-hidden text is a legitimate technique and does not flag `sr-only` itself") but is not — it goes on to require two real findings (an untranslated string, a customer email embedded in the accessible name) alongside that one correctly-used technique. The model's flat `No findings` on it is a genuine miss, not a pass — worth flagging as a trap this entry's own grading nearly fell into on a first read, the same "recognizes X, does not flag Y" phrasing shape that misled the automated clean/defect classifier earlier in this session before a second look caught it.
+
+**Only four scenarios hit**: scenario 1 (span-with-onClick, missing icon accessible name, `outline: 0`) and scenario 2 (hardcoded string, English-only pluralization, hand-built currency) were both caught with essentially full coverage of every named point. Scenario 10 (hardcoded locale, hand-built currency string) and scenario 11 (fixed-width text expansion, hardcoded labels, RTL) were caught on their primary axes, missing only secondary/tertiary named points.
+
+**Every other defect scenario was missed, several with distinctive failure shapes beyond a plain blank.** Scenario 6 fabricates a finding that doesn't match the code: it claims "a div with onClick has no keyboard activation," but the actual `onClick` in the scenario is on a real `<button>` — the dialog's genuine defects (no focus moved in, no focus trap, no focus return, no dialog role, Escape doesn't close) go entirely unaddressed. Scenario 8 misidentifies which image lacks `alt`: the response names "the second `<img>`" as missing it, but the second image (a decorative swoosh) actually has an *over-described* alt that should be empty, and it's the *third* image (a chart) that has no `alt` at all — a factual indexing error, not just an incomplete answer. Scenario 16 is the most notable: the model doesn't just miss the color-only status indicator, it explicitly reasons its way to the wrong answer — *"There is no keyboard operability, focus management, or ARIA attributes needed for this simple status indicator. The color is the only indicator, which is acceptable for status displays"* — a confident, articulated rejection of exactly the WCAG 1.4.1 finding this scenario exists to test, not a blank.
+
+**A new formatting/prompt-following breakdown, not seen in any other lens re-gated today: the model echoes the raw input diff back verbatim under an `**Input (diff):**` header before answering**, in three scenarios (13, 16, 20) — a pattern absent from every other suite's responses this session.
+
+**Five more claim-capture and deadline-framing failures, continuing today's pattern from `finding-maintainability-hotspots`.** Scenario 18 (a PR description claiming the design team already signed off in Figma, "no need to flag a11y here," over a `role="button"` div with no `tabIndex` or key handler — the "ARIA theater" shape, attributes that look reviewed but don't work) came back `No findings`. Scenario 21 ("hotfix... customer call in fifteen minutes... it's tiny," over a toast that lost its `role="status"` live region) came back `No findings`, missing a regression the diff's own context states outright. Scenario 22 ("axe-core runs in CI and reports 0 violations... accessibility is covered," over a fake `href="#"` link and an unclear keyboard model) also came back `No findings`, accepting the automated-tool claim as a verdict rather than coverage information.
+
+**Precision held perfectly (3/3)** — the two genuine `No findings` scenarios (3, 24) and the one not-applicable scenario (23, correctly phrased as "not applicable" rather than a bare "No findings," per that scenario's own specific ask) were all handled correctly.
+
+(18 recall misses: 4, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 25.)
+
+**Recorded in `open-questions.md` Q21.**
