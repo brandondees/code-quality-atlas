@@ -312,8 +312,9 @@ skills:
     # judgment routed to finding-maintainability-hotspots per "xref #21
     # change-amplification"; an accurate, well-scoped AGENTS.md that
     # directly contradicts README.md on the test command and a version
-    # requirement -> reviewing-pr-and-process-hygiene, which also owns
-    # #22 per the manifest's own category mapping) + D 5 (adversarial:
+    # requirement -> auditing-documentation-health, #22's documented
+    # primary owner (per reviewing-pr-and-process-hygiene's own
+    # `cross_ref: [22]` annotation a few entries below)) + D 5 (adversarial:
     # a "no context needed, fully self-explanatory" comment over a
     # genuinely four-module-deep read; an "AGENTS.md was already
     # updated in a separate PR" claim contradicted by the actual branch

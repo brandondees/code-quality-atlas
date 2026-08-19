@@ -272,9 +272,9 @@ not design-capable, so no A group; its three delegate scenarios are
 grounded in the lens's own heuristics.md cross-references — the
 "why-not-what" #7 boundary, "xref #21" change-amplification, and #22
 doc-drift — to reviewing-naming-and-readability, finding-
-maintainability-hotspots, and reviewing-pr-and-process-hygiene
-respectively; cross-model re-gate deferred, no Ollama in this
-container; see session-log for the full breakdown);
+maintainability-hotspots, and auditing-documentation-health (#22's
+documented primary owner) respectively; cross-model re-gate deferred,
+no Ollama in this container; see session-log for the full breakdown);
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),

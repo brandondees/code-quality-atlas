@@ -96,7 +96,7 @@
       "expected_behavior": [
         "Recognizes AGENTS.md itself is accurate, specific, and scoped — it names the current command (make check), the right runtime version, and the local dependency — satisfying this lens's own onboarding-content check",
         "Flags that AGENTS.md now directly disagrees with README.md on both the command (make check vs. make test) and the required PostgreSQL version (15+ vs. 14) — a human and an agent onboarding from the two files would get contradictory instructions",
-        "Routes the cross-document consistency judgment to reviewing-pr-and-process-hygiene (#22) rather than deciding it here — this lens confirms AGENTS.md's own content is good, not that it agrees with every other doc in the repo"
+        "Routes the cross-document consistency judgment to auditing-documentation-health (#22, this category's documented primary owner) rather than deciding it here — this lens confirms AGENTS.md's own content is good, not that it agrees with every other doc in the repo"
       ]
     },
     {
