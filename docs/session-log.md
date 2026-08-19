@@ -3122,3 +3122,15 @@ Continuing the preference-tier rollout after `reviewing-conceptual-integrity` me
 **Cross-model re-gate: deferred, same standing reason as every other recent entry.** No Ollama in this container.
 
 2 preference-tier lenses remain unhardened: `reviewing-threat-model` (already ships its own native 21-scenario adversarial suite from authorship, just missing an `eval_min` floor annotation — a lightweight follow-up, not a fresh authoring pass) and `reviewing-artifact-conventions` (`shape: artifact`, presence-activated, a taxonomy this campaign has not yet adapted an A-E pattern for). Both were set aside at every recompute this session for these same reasons.
+
+### 2026-08-19 (twelfth follow-up) — Q21: `reviewing-threat-model` gated as-is, no new scenarios needed
+
+Continuing under the owner's standing self-merge authorization, after PR #273 merged. Restarted the branch from `origin/main` first. This lens was set aside at every recompute this session, not because it was unhardened but because it never needed the same treatment: it already ships its own native 21-scenario adversarial suite from original authorship (`docs/threat-modeling-design-time-security.md` §5's core-firing / per-axis-coverage / detect-and-route / red-team / precision groups — this lens's own A-E-equivalent taxonomy, which predates and independently converges on the shape this campaign's A-E pattern uses elsewhere). The only gap was that it had never had an `eval_min` floor recorded in the manifest, leaving it ungated. This follow-up authored no new scenarios — the eval.json content is untouched.
+
+**Independently recounted from the shipped `eval.json` before writing anything:** 21 scenarios, 84 assertions. Set `eval_min: 21`, with a manifest comment explaining why this lens was excluded from the campaign's usual scope-to-coverage recomputes. Bump-and-restore verified the floor gates at the exact count — scoped the `sed` to the confirmed line number (218) this time, per the standing lesson from PR #266's stray clobber — bumping to 22 correctly fails (`INVALID: reviewing-threat-model — a skill must ship at least 22 eval scenarios`), and `git diff origin/main -- skills/manifest.yaml | grep eval_min` confirmed only that one line changed after restoring to 21.
+
+`python -m tooling.cli generate`/`drift` clean; `python -m tooling.cli eval` confirms the floor; full `pytest` and `markdownlint-cli2` pending in this same pass before push.
+
+**Cross-model re-gate: deferred, same standing reason as every other recent entry.** No Ollama in this container.
+
+1 preference-tier lens remains unhardened: `reviewing-artifact-conventions` (`shape: artifact`, presence-activated, single rubric with ~17 items, only 4 baseline scenarios — a taxonomy this campaign has not yet adapted an A-E pattern for, and will need original design work rather than a mechanical application of the existing pattern).
