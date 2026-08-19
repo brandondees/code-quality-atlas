@@ -206,6 +206,16 @@ skills:
     wave: 4
     # cross_ref intentionally absent: reviewing-threat-model is the sole primary owner of #38.
     # sweeping-for-security (#14) owns diff-time vuln detection; these are complementary, not overlapping.
+    # Q21: excluded from every preference-tier scope-to-coverage recompute
+    # this campaign has run — this lens already ships its own native
+    # 21-scenario adversarial suite from original authorship (core-firing /
+    # per-axis-coverage / detect-and-route / red-team / precision groups,
+    # this lens's own A-E-equivalent taxonomy predating the campaign's, per
+    # docs/threat-modeling-design-time-security.md §5), just missing this
+    # eval_min floor annotation. No new scenarios authored here — floor
+    # verified to gate at the exact existing count (21 scenarios, 84
+    # assertions, both independently recounted from the shipped eval.json).
+    eval_min: 21
     built_from:
       - { category: 38, source: docs/research/cluster-4-runtime.md#38 }
 
