@@ -16,6 +16,8 @@ Is the agent's action surface safe? Tool least-privilege, approval gates & step 
 - [Bad → finding (unbounded loop + ungated action — ASI01/ASI08)](#bad--finding-unbounded-loop--ungated-action--asi01asi08)
 - [Bad → finding (token passthrough / confused deputy — ASI03, detect-and-route)](#bad--finding-token-passthrough--confused-deputy--asi03-detect-and-route)
 - [Good → no finding](#good--no-finding)
+- [Good → no finding (sandboxed execution)](#good--no-finding-sandboxed-execution)
+- [Not applicable → no action surface](#not-applicable--no-action-surface)
 - [Going deeper](#going-deeper)
 
 ## When to use
@@ -132,6 +134,44 @@ result = agent.run(task, max_steps=8, on_action=require_approval)  # bounded + g
 Note: the tool is least-privilege (read-only, single-purpose), the loop is bounded
 (`max_steps`), and actions are gated (`require_approval`). Do NOT invent an agentic
 defect on a tool surface that is already narrow, bounded, and gated.
+
+## Good → no finding (sandboxed execution)
+
+**Input (diff):**
+
+```python
+def run_agent_code(code: str):
+    return sandbox.run(
+        code,
+        network="none",
+        filesystem="ephemeral-tmpdir",
+        credentials=None,
+        cpu_limit="1",
+        timeout="10s",
+    )
+```
+
+**Expected finding:** No findings
+
+Model-generated code runs in an isolated sandbox with no network egress, no
+ambient credentials, an ephemeral filesystem, and bounded CPU/time (ASI05).
+Do NOT demand additional isolation beyond what's already in place.
+
+## Not applicable → no action surface
+
+**Input (diff):**
+
+```python
+def summarize_ticket(ticket_text):
+    return llm.generate(f"Summarize this support ticket: {ticket_text}")
+```
+
+**Expected finding:** Not applicable — an ordinary model call with no tools,
+agents, MCP, or autonomous loop has no action surface for this lens to review.
+Say so with a line starting "Not applicable:", naming what's missing; that
+review belongs to `reviewing-llm-integration` (#25). Do not report "No
+findings" (which implies the checks ran and found nothing) and do not invent
+an agentic-safety concern where there's no action surface at all.
 
 ## Going deeper
 
