@@ -13,10 +13,10 @@ quality**, distinct from doc-drift (#22) and runtime agent-safety (#32).
 
 - [Bad → finding (SKILL.md — weak frontmatter description)](#bad--finding-skillmd--weak-frontmatter-description)
 - [Bad → finding (SKILL.md — no progressive disclosure)](#bad--finding-skillmd--no-progressive-disclosure)
-- [Bad → finding, adversarial (a suppression comment over a real defect)](#bad--finding-adversarial-a-suppression-comment-over-a-real-defect)
-- [Delegating → an authoring-correct skill with a stale command reference](#delegating--an-authoring-correct-skill-with-a-stale-command-reference)
 - [Good → no finding (well-formed SKILL.md)](#good--no-finding-well-formed-skillmd)
 - [Not applicable → no supported artifact present](#not-applicable--no-supported-artifact-present)
+- [Delegating → an authoring-correct skill with a stale command reference](#delegating--an-authoring-correct-skill-with-a-stale-command-reference)
+- [Bad → finding, adversarial (a suppression comment over a real defect)](#bad--finding-adversarial-a-suppression-comment-over-a-real-defect)
 
 ## Bad → finding (SKILL.md — weak frontmatter description)
 
