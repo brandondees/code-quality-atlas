@@ -301,6 +301,20 @@ reviewing-decision-lifecycle (#29, its documented pairing partner) and
 one archive-index-drift instance to auditing-documentation-health
 (#22, the discoverability analog); cross-model re-gate deferred, no
 Ollama in this container; see session-log for the full breakdown);
+**wave 3 continued with `reviewing-interoperability`** (4 → 21 — the
+widest gap among the 8 lenses remaining after the recompute corrected
+an off-by-one in the running tally (8 owned checks against 4 baseline
+scenarios); `shape: diff`, not design-capable, so no A group; its
+three delegate scenarios are grounded in this lens's own documented
+defer list ("defers the contract we author to #13, internal
+correctness to #4, ... config to #26") — a correctly major-bumped
+breaking change whose field-shape ambiguity routes to
+reviewing-api-contract-safety (#13), a correctly RFC-3339-formatted
+timestamp whose wall-clock duration measurement routes to
+tracing-correctness-and-invariants (#4), a hardcoded-port co-existence
+finding whose configuration-practice verdict routes to
+auditing-config-and-build-hygiene (#26); cross-model re-gate deferred,
+no Ollama in this container; see session-log for the full breakdown);
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
@@ -408,7 +422,7 @@ of the same date.
 
 **Worth stating plainly:** all three defects were caught, by external reviewers, on PRs where the atlas ran alongside them. That is the routing block's non-exclusive combination working exactly as designed — the argument for it is now empirical rather than a matter of principle.
 
-### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 27 of 35 done, wave-1-first sub-wave complete, wave 2 complete, **wave 3's original four-way tie closed, plus seven more since — nineteen suites hardened, one (`auditing-config-and-build-hygiene`) re-gated in the session that authored it** — see [`session-log.md`](session-log.md) 2026-08-09 through 2026-08-19) *(new, 2026-06-27)*
+### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 28 of 35 done, wave-1-first sub-wave complete, wave 2 complete, **wave 3's original four-way tie closed, plus eight more since — twenty suites hardened, one (`auditing-config-and-build-hygiene`) re-gated in the session that authored it** — see [`session-log.md`](session-log.md) 2026-08-09 through 2026-08-19) *(new, 2026-06-27)*
 
 **Trigger.** Building the G30 threat-modeling lens ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)) surfaced that for high-stakes lenses the dangerous failure mode is the **false negative**, and that 3–4 happy-path scenarios don't probe it. That spec's §5 introduces a **thorough, adversarial, false-negative-weighted** eval design — ~21 scenarios across core-firing / per-axis-coverage / detect-and-route / **red-team** / precision groups, plus a red-team generation pass and a hardened cross-model re-gate.
 
