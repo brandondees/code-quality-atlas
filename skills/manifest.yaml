@@ -608,12 +608,46 @@ skills:
     shape: diff
     design: true
     wave: 6
-    # G17 build: new-lens baseline suite (D8 floor is 3), raised to cover both
-    # star checks, the delegate/escalate boundaries (#20, #27, governance), one
-    # adversarial scenario, and two precision guards. The full Q21 A-E
-    # adversarial hardening pass rides with that campaign rather than shipping
-    # here. See map-gaps.md G17 and open-questions.md Q21.
-    eval_min: 12
+    # Q21: continuing the preference-tier rollout after `reviewing-interoperability`
+    # merged (PR #267). Picked over the other 6 remaining lenses because this
+    # one was explicitly deferred to this exact campaign at G17 build time (see
+    # the prior comment this replaces): "the full Q21 A-E adversarial hardening
+    # pass rides with that campaign rather than shipping here." 13 owned checks
+    # against a 12-scenario G17 baseline that already exercised most axes
+    # richly — a genuinely different starting shape than the usual 4-scenario
+    # baseline, so this pass is smaller than most but still real: 3 checklist
+    # bullets had no standalone scenario, and the C/D/E groups needed the same
+    # adversarial-taxonomy pass as every other lens.
+    #
+    # `design: true` — A (1): an RFC for a new customer-LTV pipeline, exercising
+    # both a topical gap (no idempotency/fail-loud/compat-mode strategy stated)
+    # and the shared decision-record checklist (alternatives not actually
+    # weighed, no revisit-trigger) in one finding set. B (3, per-axis coverage
+    # for the completely-uncovered bullets): type fidelity/silent coercion as
+    # its own dedicated scenario (a timezone-naive truncation, distinct from
+    # the money-as-float example folded into the kept schema-compat scenario);
+    # duplicates & event-time-vs-processing-time (distinct from the kept
+    # idempotency scenario); lineage & downstream blast radius (a hardcoded
+    # table name breaking ref()-based lineage, with no exposure declared). C
+    # (3, delegate/escalate): a correctly-gated additive schema change whose
+    # wrapping REST contract has its own shape problem, routed to
+    # reviewing-api-contract-safety (#13, named in this lens's own description
+    # but never yet exercised); a fresh backfill-mechanics instance routed to
+    # reviewing-migration-and-data-safety (#20, a second instance distinct from
+    # the kept baseline's NOT-NULL-migration case); a fresh
+    # right-to-be-forgotten/retention instance routed to
+    # auditing-compliance-and-provenance (#27, a second instance distinct from
+    # the kept baseline's new-PII-field case). D (5, adversarial): claim-capture
+    # (an "idempotent" comment over a model with no unique_key), an in-diff
+    # suppression note over a real NULL-trap, launch-blocker urgency framing
+    # over a real test gap, a fan-out join buried in a six-file mostly-cosmetic
+    # diff, and a PR-description claim contradicted by the actual schema diff
+    # and compatibility mode. E (4, precision): two counterweights to the new
+    # B-group bad cases (correct type fidelity, correct event-time handling), a
+    # trivial passthrough view, and a "Not applicable:" test for a change with
+    # no data-plane surface at all. = 28 scenarios. See open-questions.md Q21
+    # and map-gaps.md G17 for the original build.
+    eval_min: 28
     built_from:
       - { category: 40, source: docs/research/cluster-5-verification.md#40 }
 
