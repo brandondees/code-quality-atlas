@@ -23,6 +23,20 @@ This lens reviews a **decision** (ADR / RFC / adoption PR / deprecation plan), n
 **Finding:**
 > **No findings.** Retirement is planned and clocked — sunset date, migration path, tracked removal, and a changelog entry are all present. Nothing to add.
 
+## Good → "No findings" (scrutiny matched to a two-way door)
+
+**Input (PR):** "Switch the internal logging library from LibA to LibB. Both wrap the same structured-logging interface used throughout the codebase; the switch is a one-line config change, fully internal, no external consumers, reversible by reverting the config line. Merged without a formal ADR; a one-paragraph PR description states the reason and that it's trivially revertible."
+
+**Finding:**
+> **No findings.** This is a genuinely two-way-door decision — cheap, internal, instantly revertible — handled with proportionate lightweight process. A full decision record, alternatives comparison, or exit-cost assessment would be process for its own sake here, not a missing safeguard.
+
+## Not applicable → no decision to review
+
+**Input:** "Weekly team status update: shipped 3 bug fixes, onboarded a new team member, sprint velocity was 32 points, next week's focus is the reporting dashboard."
+
+**Finding:**
+> **Not applicable:** this document contains no adoption, deprecation, architecture, or vendor decision — it's a status update, not a decision record. Say so with a line starting "Not applicable:", naming what's missing. Do not report "No findings" (which implies the checks ran and found nothing) and do not invent a decision-lifecycle concern in routine status reporting.
+
 ## Output format
 
 - **Severity** (Blocker / Major / Minor / Nit) — **the decision/record location** (ADR-N, the RFC section, the proposal) — what's missing or unsound in the *reasoning*, concretely — the fix (record the rationale / weigh option Y / add a revisit-trigger / state the exit), **or** the evidence needed to decide.

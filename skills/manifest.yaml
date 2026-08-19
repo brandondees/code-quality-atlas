@@ -935,6 +935,51 @@ skills:
       ADR assumptions, revisit-triggers, planned retirement.
     shape: decision
     wave: 4
+    # Q21: fresh scope-to-coverage recompute after
+    # auditing-enforcement-and-meta-artifacts shipped (PR #260). This
+    # lens's earlier tie partner (auditing-enforcement-and-meta-artifacts)
+    # is now hardened, leaving this one alone at the widest remaining gap
+    # (10 owned checks / 4 baseline scenarios). Picked up despite last
+    # pick's stated caution about its novel shape -- shape: decision turns
+    # out to need no separate eval-authoring pattern: every scenario here
+    # already *is* a decision-record text block (ADR/RFC/adoption PR),
+    # the same shape the design:true diff lenses' single "A" scenario
+    # already used twice this wave, so there is no distinct A-group
+    # input-shape gap the way there was for the repo-shaped lenses. 4
+    # kept + B 2 (per-axis coverage of the two checks the 4 originals
+    # never exercise as their own standalone defect: reversibility
+    # matched to scrutiny -- an irreversible datastore migration treated
+    # with two-way-door casualness; vendor adopt/exit symmetry, kept
+    # distinct from the already-covered lock-in-cost check by having the
+    # cost genuinely estimated but no actual abstraction seam designed)
+    # + C 3 (delegate/escalate, each grounded in this lens's own
+    # heuristics.md cross-references: a right-sized, well-justified ADR
+    # that omits an existing in-house equivalent -> checking-restraint
+    # per "cross #11 restraint, #18 deps"; a correctly scheduled
+    # deprecation whose replacement contract silently changes a
+    # financial field's unit/type -> reviewing-api-contract-safety per
+    # "cross #1, #13"; a PII-handling vendor ADR with lock-in properly
+    # assessed but no compliance/data-residency mention ->
+    # auditing-compliance-and-provenance per this lens's own "escalate
+    # the governance slice... cross #27" boundary) + D 5 (adversarial: a
+    # "battle-tested elsewhere, no ADR needed" claim over a real
+    # unjustified infrastructure switch; an in-doc "pre-approved by the
+    # architecture review board" claim over a real one-way-door adoption
+    # with no exit plan; unrelated-sprint-deadline framing over an
+    # accepted decision whose assumptions have expired against a live
+    # customer commitment; a platform-wide auth-provider replacement
+    # buried as item 4 of a 6-item low-stakes batch RFC; a "fully
+    # reversible, no lock-in" ADR summary contradicted by its own
+    # implementation notes further down the same document) + E 4 (a
+    # proportionate-scrutiny counterweight to B1; two not-applicable
+    # instances on the same "no decision content at all" test applied to
+    # two input shapes -- a trivial code diff and a narrative status-
+    # update document -- kept as one convention after an atlas
+    # self-review caught the diff-shaped instance originally expecting
+    # "No findings", inconsistent with the document-shaped instance's
+    # "Not applicable"; a vendor adopt/exit-symmetry counterweight to
+    # B2) = 18 scenarios. See open-questions.md Q21.
+    eval_min: 18
     built_from:
       - { category: 29, source: docs/research/cluster-6-evolution.md#29 }
 
