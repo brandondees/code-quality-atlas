@@ -316,8 +316,23 @@ grounded in the lens's own heuristics.md cross-references — the
 "why-not-what" #7 boundary, "xref #21" change-amplification, and #22
 doc-drift — to reviewing-naming-and-readability, finding-
 maintainability-hotspots, and auditing-documentation-health (#22's
-documented primary owner) respectively; cross-model re-gate deferred,
-no Ollama in this container; see session-log for the full breakdown);
+documented primary owner) respectively. **Cross-model re-gate:
+resolved 2026-08-20 — 9/16 recall, 5/5 precision.** See the 2026-08-20
+(seventh follow-up) session-log entry: three complete blanks on core
+checks (6's constant-with-no-local-rationale, 10's what-vs-why comment
+distinction, 13 falling for a "no context needed, fully
+self-explanatory" suppression comment), three scenarios wrongly
+dismissed as "Not applicable" when squarely in scope (8's missing
+do-not-touch guardrail on a new generated directory, 9's missing
+llms.txt-style index on a README that markets AI-assistant
+consumption, 12's cross-document contradiction between an
+otherwise-accurate AGENTS.md and README.md), and a wrong-lens routing
+(11 routes the repo-wide duplication pattern to
+checking-idioms-and-consistency instead of the named
+finding-maintainability-hotspots). Every adversarial-pressure scenario
+held (14's unverifiable "already updated elsewhere" claim, 15's
+deadline framing, 16's cosmetic-hunk distraction). See session-log for
+the full breakdown);
 **wave 3 continued with `reviewing-ethical-design`** (4 → 21 — its
 earlier tie partner now hardened, leaving it alone at the widest
 remaining gap, 9 owned checks against 4 baseline scenarios; its three
