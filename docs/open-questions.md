@@ -279,8 +279,23 @@ includes an A group; its three delegate scenarios are grounded in the
 lens's own documented cross-references — the trifecta-framing/
 mitigation split, "cross #16", and "the tool contract to #13" — to
 reviewing-llm-integration, reviewing-observability-and-operability,
-and reviewing-api-contract-safety respectively; cross-model re-gate
-deferred, no Ollama in this container; see session-log for the full
+and reviewing-api-contract-safety respectively. **Cross-model re-gate:
+resolved 2026-08-20 — 12/17 recall, 3/5 precision.** See the 2026-08-20
+(fourth follow-up) session-log entry: all three C-group delegate
+scenarios missed, each a different shape (dropped second finding and
+inverted routing direction on scenario 11; ownership claimed instead of
+routed on scenario 12; a fabricated least-privilege violation replacing
+the real finding entirely on scenario 13), plus a fourth mis-routing
+failure on scenario 8 (a defect this lens owns outright, deflected to
+`sweeping-for-security` with no delegate framing in the query), a
+fifth recall miss on scenario 17 (the real hazard is caught, but a
+fabricated finding on an unrelated cosmetic hunk also gets reported,
+missing the requirement not to be distracted), and two precision
+failures — scenario 20 fabricates a finding on a memory write the
+query shows is already validated, provenance-tagged, and expiring,
+and scenario 22 opens with a finding-shaped header before its own
+body concedes the pinned, validated MCP server needs no scrutiny;
+see session-log for the full
 breakdown); **wave 3 continued with `reviewing-agent-legibility`**
 (4 → 21 — a two-way tie at the widest remaining gap with
 `reviewing-ethical-design`, both 9 owned checks against 4 baseline
