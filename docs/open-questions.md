@@ -451,8 +451,22 @@ unexercised, and offered richer unused delegate grounding
 (reviewing-module-design, checking-idioms-and-consistency, a second
 checking-restraint instance) than usability's two already-exercised
 cross-refs; usability is now the clean next pick with a single,
-well-defined gap (no A-group scenario despite being design-capable);
-cross-model re-gate deferred, no Ollama in this container; see
+well-defined gap (no A-group scenario despite being design-capable).
+**Cross-model re-gate: resolved 2026-08-20 — 7/16 recall, 4/6
+precision.** See the 2026-08-20 (eleventh follow-up) session-log
+entry: the sharpest single failure is a content-bleed, not a wrong
+judgment — scenario 9 (adding sharing to Reports, expected "No
+findings") gets a Major-defect response about deleting a different
+resource and orphaned rows, verbatim scenario 2's subject matter.
+A CLI-flag-accretion template correctly fires once (3) then bleeds
+leftover CLI-specific phrasing (`` `--help` will list both ``) into
+two non-CLI scenarios (10, 17). Scenario 7 skips the bounded-context
+counterweight entirely, reporting a same-word collision as a finding
+without checking whether the two meanings ever meet on a surface a
+user sees. Two adversarial design-doc scenarios (8, 19) and two more
+standard-pattern scenarios (13, 18) are complete blanks. One
+precision failure (21) contradicts its own stated reasoning in the
+same sentence. See
 session-log for the full breakdown); **wave 3 continued with
 `reviewing-usability-and-interaction`** (10 → 22 — the clean pick left
 from that tie; the baseline already covered all 9 checklist bullets,
