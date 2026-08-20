@@ -376,7 +376,30 @@ efficiency (#15, a second instance distinct from the kept baseline's
 upload-progress case), and reviewing-ethical-design (#36, a second
 instance distinct from the kept baseline's undismissable-modal case);
 cross-model re-gate deferred, no Ollama in this container; see
-session-log for the full breakdown);
+session-log for the full breakdown); **wave 3 closed with two lenses
+that didn't fit the standard pattern.** `reviewing-threat-model`
+needed no new scenarios at all — it already shipped its own native
+21-scenario adversarial suite from original authorship (this lens's
+own A-E-equivalent taxonomy, predating and independently converging
+on the campaign's, per [`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)
+§5), so this pass only added the `eval_min: 21` floor that had never
+been recorded. `reviewing-artifact-conventions` (4 → 19) was the
+genuine holdout: `shape: artifact`, presence-activated, reviewing one
+artifact against a single published rubric (9 heuristics) rather than
+a diff or design doc, so no prior A-E pass fit it directly — this
+pass adapted the pattern instead of copying it (no A group; B 6 for
+the six of nine rubric heuristics the baseline left untested; C 2,
+both of and only the cross-references this lens's own description
+names — auditing-documentation-health (#22) and reviewing-agentic-
+safety (#32) — not a third, unverified target; D 5 adversarial; E 4,
+including a fix to a pre-existing baseline bug where the not-applicable case
+said "No findings"); see session-log for the full breakdown. **This
+closes the preference-tier rollout at 35 of 35**, alongside the five
+already-hardened, cross-model-re-gated floor-tier lenses. **Still
+open, not closed by this pass:** cross-model re-gating the preference
+tier (deferred throughout — no Ollama available in-container for most
+of this campaign) and adapting the A-E pattern to any *new* lens or
+artifact shape added after this one;
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
@@ -484,7 +507,7 @@ of the same date.
 
 **Worth stating plainly:** all three defects were caught, by external reviewers, on PRs where the atlas ran alongside them. That is the routing block's non-exclusive combination working exactly as designed — the argument for it is now empirical rather than a matter of principle.
 
-### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened **and cross-model re-gated** (the last two, `sweeping-for-security`/`hunting-silent-failures`, re-gated 2026-08-19); preference-tier rollout underway, 34 of 35 done, wave-1-first sub-wave complete, wave 2 complete, **wave 3's original four-way tie closed, plus fourteen more since — twenty-five suites freshly hardened, one (`auditing-config-and-build-hygiene`) re-gated in the session that authored it, one (`reviewing-threat-model`) already comprehensive at authorship and only needed its `eval_min` floor recorded** — see [`session-log.md`](session-log.md) 2026-08-09 through 2026-08-19) *(new, 2026-06-27)*
+### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → RESOLVED for the current lens catalog (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened **and cross-model re-gated** (the last two, `sweeping-for-security`/`hunting-silent-failures`, re-gated 2026-08-19); **all 35 of 35 preference-tier lenses now hardened** — wave-1-first sub-wave complete, wave 2 complete, wave 3's original four-way tie closed, plus fifteen more since — twenty-six suites freshly hardened, one (`auditing-config-and-build-hygiene`) re-gated in the session that authored it, one (`reviewing-threat-model`) already comprehensive at authorship and only needed its `eval_min` floor recorded, one (`reviewing-artifact-conventions`) required adapting an original A-E-equivalent taxonomy for its `shape: artifact` presence-activated single-rubric review shape — see [`session-log.md`](session-log.md) 2026-08-09 through 2026-08-19). Still open: cross-model re-gating the preference tier (deferred throughout the hardening pass itself — no Ollama available in-container for most of this campaign — but now underway in parallel: see the 2026-08-19 thirteenth-through-eighteenth session-log entries for six suites re-gated once the substrate and CI flake were resolved, PRs #274/#275) and extending the A-E pattern to any *new* lens or shape added after this pass. *(new, 2026-06-27)*
 
 **Trigger.** Building the G30 threat-modeling lens ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)) surfaced that for high-stakes lenses the dangerous failure mode is the **false negative**, and that 3–4 happy-path scenarios don't probe it. That spec's §5 introduces a **thorough, adversarial, false-negative-weighted** eval design — ~21 scenarios across core-firing / per-axis-coverage / detect-and-route / **red-team** / precision groups, plus a red-team generation pass and a hardened cross-model re-gate.
 
