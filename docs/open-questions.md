@@ -311,9 +311,22 @@ injection → sweeping-for-security (#14), a healthy codegen-freshness
 gate over a breaking unversioned spec change → reviewing-api-contract-
 safety (#13), a correctly-marked vendored dependency over a reported
 CVE → auditing-dependencies-and-supply-chain (#18, per G1's documented
-"#18 deps, #30 codegen" split); cross-model re-gate deferred, no Ollama
-in this container; see session-log for the full A-E breakdown); **wave 3
-continued with `reviewing-decision-lifecycle`** (4 → 18 — its earlier
+"#18 deps, #30 codegen" split); see session-log for the full A-E
+breakdown. **Cross-model re-gate: resolved 2026-08-20 — 9/15 recall,
+5/5 precision.** See the 2026-08-20 (twentieth follow-up) session-log
+entry: a severe template-reuse that contradicts the given facts
+(scenario 8's runbook-linked, well-formed-except-for-`for:` alert gets
+the "no runbook" boilerplate verbatim from two genuinely runbookless
+scenarios), a response dropping two of three named suppression
+instances while also garbling the given baseline numbers (1), a
+correctly-caught surface defect missing both of its required judgment
+calls (7), and all three of this lens's own delegate scenarios missing
+their required routing — the SQL-injection-under-a-justified-
+suppression case graded "valid" outright (9), the breaking-spec-change
+case verdicted clean via a self-contradicting "Finding:.../No
+findings" header (10), and the CVE'd vendored dependency adjudicated
+directly instead of routed (11). Precision held perfectly (5/5).);
+**wave 3 continued with `reviewing-decision-lifecycle`** (4 → 18 — its earlier
 tie partner now hardened, leaving it alone at the widest remaining gap,
 10 owned checks against 4 baseline scenarios; `shape: decision`, which
 turned out to need no separate A-group input-shape gap since every
