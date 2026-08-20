@@ -447,8 +447,21 @@ reviewing-accessibility-and-i18n (#23, named in the lens's own
 description but never yet exercised), reviewing-performance-and-
 efficiency (#15, a second instance distinct from the kept baseline's
 upload-progress case), and reviewing-ethical-design (#36, a second
-instance distinct from the kept baseline's undismissable-modal case);
-cross-model re-gate deferred, no Ollama in this container; see
+instance distinct from the kept baseline's undismissable-modal case).
+**Cross-model re-gate: resolved 2026-08-20 — 8/18 recall, 3/4
+precision.** See the 2026-08-20 (ninth follow-up) session-log entry:
+two scenarios agree with the exact false premise they're built to
+correct (6 accepts "a CLI doesn't need usability review" outright; 7
+accepts "intentional, don't want abandonment" as a reason to withhold
+a controllability finding), four complete blanks on core checks (1's
+unhandled states, 10's recognition-over-recall, 16's suppression
+comment, 18's bulk-delete buried among cosmetic files), two dropped
+routing halves in opposite directions (13 self-adjudicates a defect
+that should route to reviewing-performance-and-efficiency; 14 never
+routes its obstruction verdict to reviewing-ethical-design), two
+partial catches missing a co-equal named element (2, 11), and one
+precision failure that reaches the right verdict by the wrong,
+content-bled reasoning (20). See
 session-log for the full breakdown); **wave 3 closed with two lenses
 that didn't fit the standard pattern.** `reviewing-threat-model`
 needed no new scenarios at all — it already shipped its own native
