@@ -416,7 +416,26 @@ needed no new scenarios at all — it already shipped its own native
 own A-E-equivalent taxonomy, predating and independently converging
 on the campaign's, per [`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)
 §5), so this pass only added the `eval_min: 21` floor that had never
-been recorded. `reviewing-artifact-conventions` (4 → 19) was the
+been recorded. **Cross-model re-gate: resolved 2026-08-20 — 8/18
+recall, 2/3 precision.** This is the `qwen2.5-coder:7b` floor-of-record
+run originally deferred at this lens's own 2026-06-27 authorship gate
+(three attempts aborted on a model-specific harness timeout back then;
+`qwen2.5:7b`/`llama3.1:8b` both ran clean). See the 2026-08-20 (fifth
+follow-up) session-log entry: that original gate's verdict — the 7-8B
+tier is genuinely below this lens's reliable floor for lethal-trifecta
+composition and delegation/escalation routing — is confirmed and
+sharpened here by a systemic mechanism underneath, template-recitation
+over analysis (the same failure class documented on the floor-tier
+`reviewing-migration-and-data-safety` re-gate): a near-identical
+STRIDE skeleton recurs regardless of scenario shape, producing wrong
+sibling-lens routing (6, 8), two skipped human-escalation predicates
+for custom crypto and third-party-auth (14, 15), two misdiagnoses that
+dismiss the actually-relevant threat (9, 10), two core findings buried
+under template noise (7's missing audit trail, 16's self-contradicting
+"No findings" headline), two complete blanks including a failed
+injection trap (2, 3), and a precision failure from the same template
+firing on a fully-mitigated design (4). `reviewing-artifact-conventions`
+(4 → 19) was the
 genuine holdout: `shape: artifact`, presence-activated, reviewing one
 artifact against a single published rubric (9 heuristics) rather than
 a diff or design doc, so no prior A-E pass fit it directly — this
@@ -561,7 +580,7 @@ of the same date.
 
 **First hardened instance: `sweeping-for-security`** (`eval_min: 27`, up from 6) — chosen because the threat-modeling lens's own A-E adversarial scenario-group taxonomy ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)§5.1) transfers most directly onto a general vuln-sweep lens: **A** core shape-flexible firing (a design-doc IDOR-gap scenario added, proving the lens's `design: true` capability is actually exercised, not just declared); **B** per-axis coverage (one scenario per major check the lens owns that wasn't already hit — XSS, IDOR, weak/homegrown crypto, unsafe deserialization, SSRF, CSRF, permissive CORS, sensitive data in logs/URLs); **C** delegate/escalate boundary (four scenarios proving the lens surfaces a security-relevant finding but hands the deeper judgment to the lens that owns it — `reviewing-llm-integration` for prompt-injection-shaped input, `reviewing-agentic-safety` for an over-broad tool definition, `auditing-compliance-and-provenance` for PII-retention policy, `reviewing-migration-and-data-safety` for backfill mechanics); **D** adversarial/red-team (six: security theater, an in-diff comment instructing the reviewer not to flag anything, distractor overload, an implicit trust boundary at a reused helper's new call site, sycophancy/time-pressure framing, and a client-side-only "right defense, wrong layer" check); **E** precision (two: a pure styling change and a benign local script, both "No findings"). 27 total, up from the original 6 (kept unchanged, still valid). `python -m tooling.cli eval` now enforces this floor for the lens; `python -m pytest` (229 tests, 9 new) confirms the mechanism itself (manifest parsing/validation, `validate_evals`'s parameter, and the CLI's name-keyed lookup + graceful fallback) via unit and CLI-integration tests.
 
-**(3) Cross-model re-gate cost — resolved for `sweeping-for-security`, 2026-08-19: 14/23 recall, 4/4 precision.** See the 2026-08-19 (ninth follow-up) session-log entry for the full scenario-by-scenario grading and failure-mode analysis (two complete misses, one distractor-buried miss, and three vulnerability-class *mis*labelings distinct from plain omission). The threat-modeling lens's own floor-of-record re-run remains separately tracked.
+**(3) Cross-model re-gate cost — resolved for `sweeping-for-security`, 2026-08-19: 14/23 recall, 4/4 precision.** See the 2026-08-19 (ninth follow-up) session-log entry for the full scenario-by-scenario grading and failure-mode analysis (two complete misses, one distractor-buried miss, and three vulnerability-class *mis*labelings distinct from plain omission). The threat-modeling lens's own floor-of-record re-run, tracked separately here since its 2026-06-27 authorship gate, is now resolved too — see the `reviewing-threat-model` paragraph below (2026-08-20 fifth follow-up).
 
 **Second hardened instance: `tracing-correctness-and-invariants`** (`eval_min: 26`, up from 5) — see the 2026-07-26 session-log entry for the full A-E scenario breakdown and the cross-model re-gate result. **This is the first lens where the documented `qwen2.5-coder:7b` floor does *not* cleanly pass the hardened suite** — a genuine, documented outcome (per the threat-modeling lens's own precedent: "this lens may carry a higher supported-model floor than the rest of the suite," not a silent gap). Tracked as its own residual below.
 
