@@ -301,8 +301,23 @@ contract-safety, and auditing-compliance-and-provenance respectively;
 **this repo's own automated atlas-review routine, watching its own PR,
 caught a real not-applicable-vs-no-findings inconsistency between two
 E-group scenarios testing the same "no decision content" case on
-different input shapes — fixed same-PR**; cross-model re-gate deferred,
-no Ollama in this container; see session-log for the full breakdown);
+different input shapes — fixed same-PR**. **Cross-model re-gate:
+resolved 2026-08-20 — 6/13 recall, 3/5 precision.** See the 2026-08-20
+(sixteenth follow-up) session-log entry: a single "unjustified
+adoption, no exit" template recurs verbatim across seven of thirteen
+defect scenarios, correct on three but wrong or incomplete on four —
+twice ignoring a switching-cost estimate the query explicitly states
+(6, 9), once contradicting a well-formed ADR's own described content
+(7), once missing a required right-sizing cross-link to
+checking-restraint (1). A different confirmed-correct template
+(scenario 3's clean deprecation-plan write-up) gets reused verbatim on
+scenario 8, missing that scenario's silently-changed financial field
+and its required routing to reviewing-api-contract-safety. One
+scenario misses the specific claim-verification test underneath an
+otherwise-correct finding (5). Two precision failures: a format
+substitution ("No findings" for the required "Not applicable:") and
+an unwarranted demand for more evidence on a decision that already
+clears both of this lens's checks. See session-log for the full breakdown);
 **wave 3 continued with `reviewing-agentic-safety`** (4 → 22 — a
 three-way tie at the widest remaining gap with
 `reviewing-agent-legibility` and `reviewing-ethical-design`, all 9
