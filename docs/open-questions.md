@@ -280,9 +280,21 @@ user request rather than a recomputed tie (6 → 23 — 13 owned checks against
 delegate scenarios are grounded in the lens's own heuristics
 cross-references — cross #3, #16, #26 — to reviewing-concurrency-and-async,
 reviewing-observability-and-operability, and
-auditing-config-and-build-hygiene respectively; cross-model re-gate
-deferred, no Ollama in this container; see session-log for the full A-E
-breakdown); **wave 3 continued with a fresh scope-to-coverage recompute,
+auditing-config-and-build-hygiene respectively; see session-log for
+the full A-E breakdown. **Cross-model re-gate: resolved 2026-08-20 —
+12/18 recall, 5/5 precision.** See the 2026-08-20 (nineteenth
+follow-up) session-log entry: a severe content-bleed (scenario 14's
+response is scenario 5's verbatim, discussing an attacker and a
+fraud-scoring check that don't exist in scenario 14's actual query),
+two scenarios mislabeled "single-writer bottleneck" — the category
+`expected_behavior` explicitly rules out — applied to a fairness/
+isolation gap (10) and a correctly-functioning per-tenant limit whose
+real issue is config lifecycle (15), and three scenarios reciting the
+lens's full nine-item checklist mechanically, burying a correct catch
+under a fabricated finding (9), a mislabeled and unrouted catch closing
+with "Expected finding: None" (13), and a real catch immediately
+contradicted by a flat "No findings" closer (19). Precision held
+perfectly (5/5).); **wave 3 continued with a fresh scope-to-coverage recompute,
 picking `auditing-enforcement-and-meta-artifacts`** (4 → 20 — tied with
 `reviewing-decision-lifecycle` at the widest remaining gap, 10 owned
 checks against 4 baseline scenarios each; picked over its tie for being
