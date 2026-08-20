@@ -665,10 +665,12 @@ safety (#32) — not a third, unverified target; D 5 adversarial; E 4,
 including a fix to a pre-existing baseline bug where the not-applicable case
 said "No findings"); see session-log for the full breakdown. **This
 closes the preference-tier rollout at 35 of 35**, alongside the five
-already-hardened, cross-model-re-gated floor-tier lenses. **Still
-open, not closed by this pass:** cross-model re-gating the preference
-tier (deferred throughout — no Ollama available in-container for most
-of this campaign) and adapting the A-E pattern to any *new* lens or
+already-hardened, cross-model-re-gated floor-tier lenses.
+**Cross-model re-gating the preference tier, left open by this pass,
+completed 2026-08-20** — all 35 lenses now carry a recorded result;
+see the Q21 detail entry below for the closing lens
+(`reviewing-interoperability`) and the full per-lens breakdown in
+session-log. Still open: adapting the A-E pattern to any *new* lens or
 artifact shape added after this one;
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
