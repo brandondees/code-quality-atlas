@@ -146,8 +146,18 @@ initial-pass miscount of the checklist caught and corrected before shipping);
 B-axis sweep of the 9 checks it shares with the already-hardened
 `auditing-dependencies-and-supply-chain` per G1's single-owner principle,
 concentrating instead on this lens's own AI-authorship-signature territory
-and its unusually large six-target delegate surface; cross-model re-gate
-deferred, no Ollama in this container; see session-log for the A-E
+and its unusually large six-target delegate surface. **Cross-model
+re-gate: resolved 2026-08-20 — 12/16 recall, 4/4 precision.** See the
+2026-08-20 (sixth follow-up) session-log entry: two complete blanks on
+the suite's own adversarial traps (scenario 12's inverted permission
+check flagged by no framing pressure at all; scenario 15's "ship
+today... rubber-stamp" framing suppressing the public-read-write S3
+ACL finding), a dropped `reviewing-test-quality` handoff on an
+otherwise-correct catch (scenario 10), and a template misapplied
+wholesale — a fabricated issue-tracker citation (scenario 7) diagnosed
+as a package/slopsquat risk and routed to
+`auditing-dependencies-and-supply-chain`, a lens with nothing to do
+with the actual defect. See session-log for the A-E
 breakdown and a factual claim about a real AWS S3 canned ACL value caught
 and corrected during authoring, before shipping); **wave 3 continued
 2026-08-18 with `reviewing-observability-and-operability`** (3 → 20 —
