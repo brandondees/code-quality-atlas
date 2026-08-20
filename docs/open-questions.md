@@ -471,8 +471,27 @@ reviewing-api-contract-safety (#13), a correctly RFC-3339-formatted
 timestamp whose wall-clock duration measurement routes to
 tracing-correctness-and-invariants (#4), a hardcoded-port co-existence
 finding whose configuration-practice verdict routes to
-auditing-config-and-build-hygiene (#26); cross-model re-gate deferred,
-no Ollama in this container; see session-log for the full breakdown);
+auditing-config-and-build-hygiene (#26); see session-log for the full
+breakdown. **Cross-model re-gate: resolved 2026-08-20 — 8/16 recall,
+4/5 precision.** See the 2026-08-20 (twenty-first follow-up)
+session-log entry: three scenarios get an identical, nonsensical
+"route to sweeping-for-security (#14)" clause tacked onto findings
+that have nothing to do with security — a habit picked up from the two
+scenarios where that routing genuinely fits — including one (scenario
+10) that invents a SemVer violation on a change that was *already*
+correctly major-bumped, missing the actual required field-ambiguity
+finding entirely; two scenarios reuse the RFC 3339 "space separator,
+no offset" template on code whose timestamp formatting is already
+correct, missing the real defects underneath (a non-IANA timezone
+label, a non-BCP-47 locale tag, and a wall-clock duration measurement
+that should route to #4); one correct catch is undercut by a
+fabricated RFC 4180 quoting claim that contradicts its own required
+distinguishing point; a real PUT-idempotency violation buried among
+five cosmetic hunks got a complete blank; and the sole precision
+failure reuses a hardcoded-port template on a port that's actually
+externally configurable via an environment variable. **This closes the
+Q21 preference-tier cross-model re-gate backlog** — every lens left
+deferred from the wave-3 hardening pass now has a recorded result.);
 **wave 3 continued with `reviewing-data-transformations-and-contracts`**
 (12 → 28 — explicitly deferred to this exact campaign at its G17 build
 time rather than picked purely by widest-gap; `design: true`, so this
@@ -758,7 +777,7 @@ of the same date.
 
 **Worth stating plainly:** all three defects were caught, by external reviewers, on PRs where the atlas ran alongside them. That is the routing block's non-exclusive combination working exactly as designed — the argument for it is now empirical rather than a matter of principle.
 
-### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → RESOLVED for the current lens catalog (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened **and cross-model re-gated** (the last two, `sweeping-for-security`/`hunting-silent-failures`, re-gated 2026-08-19); **all 35 of 35 preference-tier lenses now hardened** — wave-1-first sub-wave complete, wave 2 complete, wave 3's original four-way tie closed, plus fifteen more since — twenty-six suites freshly hardened, one (`auditing-config-and-build-hygiene`) re-gated in the session that authored it, one (`reviewing-threat-model`) already comprehensive at authorship and only needed its `eval_min` floor recorded, one (`reviewing-artifact-conventions`) required adapting an original A-E-equivalent taxonomy for its `shape: artifact` presence-activated single-rubric review shape — see [`session-log.md`](session-log.md) 2026-08-09 through 2026-08-19). Still open: cross-model re-gating the preference tier (deferred throughout the hardening pass itself — no Ollama available in-container for most of this campaign — but now underway in parallel: see the 2026-08-19 thirteenth-through-eighteenth session-log entries for six suites re-gated once the substrate and CI flake were resolved, PRs #274/#275) and extending the A-E pattern to any *new* lens or shape added after this pass. *(new, 2026-06-27)*
+### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → RESOLVED for the current lens catalog (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened **and cross-model re-gated** (the last two, `sweeping-for-security`/`hunting-silent-failures`, re-gated 2026-08-19); **all 35 of 35 preference-tier lenses now hardened** — wave-1-first sub-wave complete, wave 2 complete, wave 3's original four-way tie closed, plus fifteen more since — twenty-six suites freshly hardened, one (`auditing-config-and-build-hygiene`) re-gated in the session that authored it, one (`reviewing-threat-model`) already comprehensive at authorship and only needed its `eval_min` floor recorded, one (`reviewing-artifact-conventions`) required adapting an original A-E-equivalent taxonomy for its `shape: artifact` presence-activated single-rubric review shape — see [`session-log.md`](session-log.md) 2026-08-09 through 2026-08-19). **Cross-model re-gating the preference tier is now complete (2026-08-20):** all 35 preference-tier lenses hardened by this pass have a recorded cross-model re-gate result, closing out with `reviewing-interoperability` (see the 2026-08-19 thirteenth-through-twenty-first session-log entries and the PRs they link for the full per-lens breakdown, once the substrate and CI flake were resolved). Still open: extending the A-E pattern to any *new* lens or shape added after this pass. *(new, 2026-06-27)*
 
 **Trigger.** Building the G30 threat-modeling lens ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)) surfaced that for high-stakes lenses the dangerous failure mode is the **false negative**, and that 3–4 happy-path scenarios don't probe it. That spec's §5 introduces a **thorough, adversarial, false-negative-weighted** eval design — ~21 scenarios across core-firing / per-axis-coverage / detect-and-route / **red-team** / precision groups, plus a red-team generation pass and a hardened cross-model re-gate.
 
