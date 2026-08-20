@@ -425,8 +425,23 @@ properties instance), reviewing-ethical-design (#36, a second Goodhart/
 proxy instance distinct from the kept baseline's autoplay case), and
 reviewing-data-transformations-and-contracts (#40, a breaking event
 rename mid-measurement, distinct from the kept baseline's simple new-
-event case); cross-model re-gate deferred, no Ollama in this container;
-see session-log for the full breakdown); **wave 3 continued with
+event case). **Cross-model re-gate: resolved 2026-08-20 — 12/19
+recall, 3/4 precision.** See the 2026-08-20 (tenth follow-up)
+session-log entry: a Goodhart-problem template fires correctly twice
+(5, 14) then misapplies twice more — once to an actual PII-in-event
+scenario (13, missing the #27 routing entirely) and once to a
+guardrails-deferred-under-pressure scenario (18, missing the
+guardrails finding entirely); the same pattern recurs with a
+"not applicable" template, correct on a genuine internal refactor (6)
+but misapplied to a scenario built to test exactly that mistake (19,
+five cosmetic files hiding one real instrumentation gap). Two complete
+blanks (8's tracking-plan conformance check, a confidently wrong "yes"
+on a falsifiability question that should be no, scenario 9). One false
+positive reusing a neighboring scenario's diagnosis without checking
+it applies (21). Two scenarios drop the outcome-instrumentation-
+specific angle for a generic finding (11's decision-record
+alternatives-weighing gap; 15's event-rename recommendation pointing
+the wrong direction). See session-log for the full breakdown); **wave 3 continued with
 `reviewing-conceptual-integrity`** (10 → 22 — tied with
 `reviewing-usability-and-interaction` on raw scope (9 owned checks / 10
 baseline scenarios each); broke the tie on what was actually still
