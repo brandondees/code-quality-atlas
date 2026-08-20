@@ -257,9 +257,20 @@ tracks; CodeRabbit's independent review then caught a real Terraform
 syntax error in the rewritten module (a `ref` argument instead of the
 `?ref=` query-string form git-sourced modules actually use to pin,
 leaving it effectively unpinned) plus the "D-group" mislabeling above,
-both fixed same-PR; cross-model re-gate deferred, no Ollama in this
-container; see session-log for the
-full A-E breakdown and the rewrite details). **This closes wave 3's
+both fixed same-PR; see session-log for the
+full A-E breakdown and the rewrite details. **Cross-model re-gate:
+resolved 2026-08-20 — 8/15 recall, 4/5 precision.** See the 2026-08-20
+(eighteenth follow-up) session-log entry: an outright fabrication that
+inverts a stated fact (scenario 10 calls a version-pinned module "not
+pinned by version"), two scenarios dropping half or more of a
+multi-part finding (5, 7), two dropped required routings to a sibling
+lens on otherwise-caught findings (9, 11), one verbatim-reused remedy
+that's technically wrong for the actual defect (16, an RDS
+`publicly_accessible` flag "fixed" by a security-group ingress change
+copied from a different scenario), a genuinely correct catch buried
+under a flat self-contradicting "No findings" closer (13), and a
+finding-shaped-header precision failure on a well-formed suppression
+(19).) **This closes wave 3's
 original four-way tie** — the next preference-tier pick needs a fresh
 scope-to-coverage recompute rather than an existing tie; **wave 3 continued
 the same day with `reviewing-resilience-and-scalability`**, picked by direct
