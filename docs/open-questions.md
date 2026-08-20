@@ -185,11 +185,9 @@ respectively; **CodeRabbit caught two real issues pre-merge** — an
 arrow-chain rule notation that literally implied the flagged edge was
 allowed, and two precision scenarios not requiring this lens's own exact
 documented no-finding sentence — both fixed same-PR (#256). **Cross-model
-re-gate: resolved 2026-08-20 — 9/16 recall, 4/4 precision**, fourth-best
-recall among the preference-tier lenses re-gated so far (behind
-`checking-restraint`'s 75%, `reviewing-llm-integration`'s 73%, and
-`reviewing-module-design`'s 68%). See the 2026-08-20 (second follow-up)
-session-log entry: a cycle mischaracterized as two different, both-incorrect
+re-gate: resolved 2026-08-20 — 9/16 recall, 4/4 precision.** See the
+2026-08-20 (second follow-up) session-log entry: a cycle mischaracterized as
+two different, both-incorrect
 non-cycle violations (scenario 5), a response that correctly identifies
 three real violations then contradicts itself with a closing "No findings:
 conforms" line (scenario 7), two failures of the lens's own "don't trust a
