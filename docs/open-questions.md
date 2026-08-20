@@ -167,9 +167,18 @@ by a topical tie-breaker; `design: true`, A-group included; its three
 delegate scenarios are grounded in the lens's own heuristics
 cross-references — cross #3, #8, #2 — to reviewing-concurrency-and-async,
 checking-idioms-and-consistency, and hunting-silent-failures
-respectively; cross-model re-gate deferred, no Ollama in this container;
-see session-log for the full A-E breakdown) **and again the same day
-with `auditing-architecture-conformance`** (3 → 20 — one of the
+respectively. **Cross-model re-gate: resolved 2026-08-20 — 10/15 recall,
+4/5 precision.** See the 2026-08-20 (third follow-up) session-log entry:
+two of the three C-group delegate scenarios drop the routing half even
+with the owned finding caught (scenario 9 adjudicates a race it should
+route to `reviewing-concurrency-and-async`; scenario 10 recommends its own
+fix instead of routing to `checking-idioms-and-consistency`), two partial
+catches each missing one of two co-equal named findings (scenarios 1, 5),
+and a false-positive precision failure fabricating a breaking change on a
+textbook-correct field deprecation (scenario 17). Three adversarial-claim
+defenses held (scenarios 12, 15, 16) and a distractor-buried breaking
+rename was found among eight non-breaking changes (scenario 13).) **and
+again the same day with `auditing-architecture-conformance`** (3 → 20 — one of the
 four-way tie this wave opened with; picked over its tied peer
 `auditing-infrastructure-as-code` since its defects don't require
 fabricating cloud-provider specifics, lower risk on this campaign's
