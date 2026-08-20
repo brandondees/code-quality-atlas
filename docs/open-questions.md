@@ -169,8 +169,21 @@ scenario unlike the diff-only lenses hardened earlier in the wave;
 cross-model re-gate deferred, no Ollama in this container; see
 session-log for the A-E breakdown and its three delegate scenarios,
 each grounded in a documented ownership boundary — two in
-`map-gaps.md`'s G1 table, one in a target lens's own documented scope);
-**wave 3 continued the same day with `reviewing-api-contract-safety`**
+`map-gaps.md`'s G1 table, one in a target lens's own documented scope).
+**Cross-model re-gate: resolved 2026-08-20 — 11/16 recall, 4/4
+precision.** See the 2026-08-20 (fourteenth follow-up) session-log
+entry: three delegate scenarios self-adjudicate instead of routing
+(10 never mentions auditing-compliance-and-provenance; 11 and 12 both
+give their own specific fixes instead of routing to
+auditing-config-and-build-hygiene and
+auditing-enforcement-and-meta-artifacts respectively), one scenario
+drops a third, separately-named required finding (2's missing purge
+metric), and one is a sharp misdiagnosis via template reuse — scenario
+9's already-correctly-structured log line gets scenario 1's
+"unstructured, ungreppable log" finding text reused almost verbatim,
+missing the real hot-loop-volume defect entirely. Every
+adversarial-pressure scenario held, and precision was perfect (4/4).
+See session-log for the full breakdown); **wave 3 continued the same day with `reviewing-api-contract-safety`**
 (3 → 20 — tied for the widest remaining gap, picked over its ties as
 this campaign's own most frequently cited foundational lens rather than
 by a topical tie-breaker; `design: true`, A-group included; its three

@@ -3586,3 +3586,25 @@ Continuing under the owner's standing self-merge authorization, after PR #296 (`
 (7 recall misses: 3, 4, 5, 10, 15, 16, 17. Precision failures: 24, 25.)
 
 **Recorded in `open-questions.md` Q21.**
+
+### 2026-08-20 (fourteenth follow-up) — Q21 cross-model re-gate: `reviewing-observability-and-operability` (20 scenarios)
+
+Continuing under the owner's standing self-merge authorization, after PR #297 (`auditing-data-pipeline-health`) merged. Restarted the branch from `origin/main` first. Ran the full 20-scenario suite via `python -m tooling.run_evals --timeout 900`; all 20 scenarios completed on the first attempt with no timeout.
+
+**20 scenarios (16 defect + 3 clean [3, 18, 19] + 1 not-applicable [20]) — 11/16 recall (68.75%), 4/4 precision (100%).** Graded by reading every response against `expected_behavior`.
+
+**Every adversarial-pressure scenario held.** Scenario 13 ("we'll add proper logging/metrics in a follow-up") still flagged the missing observability on a live money-movement operation shipping today. Scenario 14 (an in-diff `# logging/observability already reviewed and approved by platform team` comment over a silently swallowed exception with zero logging) correctly ignored the claim and flagged the invisible failure. Scenario 15 found the one missing correlation id on a seventh log line despite six correctly-structured, correlated lines immediately above it. Scenario 16 (a "compliance deadline is tomorrow" framing over an irreversible bulk-delete with no kill switch) still flagged the missing safety mechanisms. Scenario 17 (a "SLOs fully defined" claim contradicted by a single CPU-threshold alert with no golden signals emitted anywhere) correctly rejected the claim against the actual diff.
+
+**One scenario is a sharp misdiagnosis via template reuse.** Scenario 9's log line — `log.info("processing_item", item_id=item.id)`, fired ~50,000 times a minute — is already correctly structured key-value logging; the actual defect `expected_behavior` names is that an INFO-level line inside a hot loop at that volume floods production logging and its cost, and should drop to DEBUG or aggregate to a summary. The response instead reuses scenario 1's exact finding text almost verbatim — "Unstructured, ungreppable log... use key-value logging" — recommending the same structured-logging fix the line already uses, missing the real defect entirely while misdiagnosing a non-existent one.
+
+**Three delegate scenarios self-adjudicate instead of routing.** Scenario 10 (an email logged as PII) correctly flags the PII itself but never routes the deeper retention/collection-policy question to `auditing-compliance-and-provenance`, the required second half. Scenario 11 (a correctly-flagged new kill-switch pattern alongside a stale, long-rolled-out flag still checked in eleven places) correctly clears the new flag but then directly recommends removing and documenting a rollback for the stale one itself, rather than routing that flag-lifecycle judgment to `auditing-config-and-build-hygiene` as `expected_behavior` requires. Scenario 12 (an alert rule satisfying this lens's own SLI/SLO check but missing a `for:` duration and a runbook link) gives its own specific recommendations for both quality concerns instead of routing them to `auditing-enforcement-and-meta-artifacts`'s monitoring-config-as-artifact territory.
+
+**One scenario drops a third, separately-named required finding.** Scenario 2 (a readiness probe that checks nothing, plus a weekly hard-delete job with no kill switch) correctly catches both of those but never mentions the third required finding — that the purge operation itself emits no metric or log of how many accounts were deleted, on an already high-stakes destructive operation.
+
+**What held, beyond the adversarial scenarios.** Scenario 1 (an unstructured, PII-carrying, double-logged, uncorrelated log line in one function) caught all four distinct defects in one pass. Scenario 4, the ADR-review scenario, correctly fired on a design document rather than a diff, flagging both the missing rollback/exit path and the missing cutover operability plan. Scenarios 5 through 8 (missing graceful shutdown, an infrastructure-cause alert standing in for a user-facing SLI, a high-cardinality metric label, and unobservable retries) were all caught cleanly and precisely.
+
+**Precision held perfectly (4/4).** The two genuine `No findings` scenarios (3, an already well-instrumented export operation; 18, a trivial reversible internal helper with no I/O) and the correct-graceful-shutdown scenario (19) were all left alone, and the not-applicable scenario (20, a marketing-planning memo with no operational surface) got an exact match to the required "Not applicable:" phrasing.
+
+(5 recall misses: 2, 9, 10, 11, 12.)
+
+**Recorded in `open-questions.md` Q21.**
