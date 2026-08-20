@@ -3756,3 +3756,31 @@ Continuing under the owner's standing self-merge authorization, after PR #303 (`
 (6 recall misses: 1, 7, 8, 9, 10, 11.)
 
 **Recorded in `open-questions.md` Q21.**
+
+### 2026-08-20 (twenty-first follow-up) — Q21 cross-model re-gate: `reviewing-interoperability` (21 scenarios)
+
+Continuing under the owner's standing self-merge authorization, after PR #306 (`auditing-enforcement-and-meta-artifacts`) merged. Fresh worktree from `origin/main`. Ran the full 21-scenario suite via `python -m tooling.run_evals --timeout 900`; all 21 scenarios completed on the first attempt with no timeout. This closes the Q21 preference-tier cross-model re-gate backlog — the last of the lenses left deferred from the wave-3 hardening pass.
+
+**21 scenarios (16 defect + 4 clean [3, 18, 19, 20] + 1 not-applicable [21]) — 8/16 recall (50%), 4/5 precision (80%).** Graded by reading every response against `expected_behavior`.
+
+**Three scenarios get an identical, nonsensical routing tacked onto findings that have nothing to do with security — a habit picked up from the two scenarios where it genuinely fits.** Scenarios 2 and 14 correctly route their OAuth/CSRF findings to `sweeping-for-security` (#14), which is exactly right for a login-forgery hole. That same "**Route:** ... to `sweeping-for-security` (#14)" clause then gets mechanically reapplied to scenario 8 (an OpenTelemetry semantic-convention naming mismatch — nothing security-related), scenario 10 (a SemVer versioning question), and scenario 17 (a cron-dialect docstring contradiction) — three findings with no security content at all, none of which this lens's own heuristics route anywhere.
+
+**One scenario invents a violation on a scenario that has none, missing the actual required finding entirely.** Scenario 10 (a breaking field removal *correctly* major-bumped, 2.9.0 → 3.0.0, per SemVer) gets "A major bump is required for breaking changes" as if flagging a violation — but the major bump was already done correctly; there is no versioning defect here. The actual required finding, the ambiguous null-vs-omitted semantics of the new `order_status` field (which should route to `reviewing-api-contract-safety`, #13), is never reached.
+
+**Two scenarios reuse the RFC 3339 "space separator, no timezone offset" template on code that doesn't have that defect.** Scenario 11's `datetime.now(timezone.utc).isoformat()` correctly emits a timezone-aware, RFC-3339-compliant string — the exact opposite of what the reused template claims — and the actual required finding (a wall-clock `time.time()` duration measurement that should route to `tracing-correctness-and-invariants`, #4) is never reached. Scenario 7 gets the same misapplied template; the two real, distinctly-named defects here — a non-IANA `"EST"` timezone identifier and a non-BCP-47 `"en_US"` locale tag (should be `en-US`) — are both missed.
+
+**One scenario's otherwise-correct catch is undercut by a fabricated finding that contradicts a required distinguishing point.** Scenario 6 correctly identifies the missing `charset=utf-8` declaration as its second finding, but its first finding claims the CSV body itself needs "proper quoting and escaping" under RFC 4180 for its non-ASCII vendor names — a fabricated defect (RFC 4180 quoting governs delimiter/quote characters, not text encoding) that directly contradicts `expected_behavior`'s own distinguishing point: the body bytes are correct, only the declared metadata is wrong.
+
+**One scenario drops the required routing on an otherwise-correct catch.** Scenario 12 correctly flags the hardcoded shared port as a co-existence defect, but never routes the deeper "should this be externalized as configured" judgment to `auditing-config-and-build-hygiene` (#26) as required.
+
+**One scenario is a complete blank.** Scenario 16 (a PUT handler that appends to a list instead of replacing state — a real HTTP-idempotency violation buried among five cosmetic hunks: a rename, a comment reword, a formatting fix, a docstring reword, and an import reorder) returns "No findings," losing the one real defect among the distractors.
+
+**One precision failure reuses the co-existence template on code that isn't hardcoded.** Scenario 19's port is `int(os.environ.get("SERVICE_PORT", 8080))` — externally configurable via an environment variable, with `8080` only as a fallback default — but gets flagged as a "hardcoded shared port" collision anyway, the identical language reused from scenarios 9 and 12's genuinely hardcoded cases without checking whether this one actually is.
+
+**What held.** Scenario 1 (a bare `str(datetime)` emitting a space-separated, offset-free timestamp to a partner webhook) was caught precisely, correctly distinguished from internal clock correctness. Scenario 4 (a cron-dialect mismatch, a 6-field Quartz expression on a 5-field POSIX runner) and scenario 5 (a breaking field removal shipped under a patch bump) were both caught cleanly. Scenario 9 (a hardcoded shared lock-file path) was caught precisely, correctly framed as the ISO co-existence facet. Scenario 13 correctly rejected a "Fully RFC 3339 compliant" comment sitting directly above a malformed, unpadded date string. Three adversarial-pressure scenarios held: scenario 14 ("do not flag, already reviewed"), scenario 15 ("shipping as-is for tomorrow's demo"), both refusing to defer or soften a real defect regardless of the framing.
+
+**Precision held on four of five (4/5, 80%).** Scenario 3 (a retry-safe idempotent POST plus a correctly-formatted RFC 3339 timestamp) and scenario 18 (a breaking change correctly reflected in a major version bump) were both correctly left alone. Scenario 20 (a trivial, already-correct RFC 3339 helper) was not padded with invented ceremony. Scenario 21 (a pure internal refactor touching no protocol, wire format, versioned surface, or shared resource) got the required "Not applicable" reply.
+
+(8 recall misses: 6, 7, 8, 10, 11, 12, 16, 17. Precision failure: 19.)
+
+**Recorded in `open-questions.md` Q21.**
