@@ -425,9 +425,23 @@ delegate scenarios route to auditing-compliance-and-provenance (#27,
 a dedicated PII-inventory scenario distinct from the kept baseline's
 combined stale-ownership case), reviewing-test-quality (#17, named in
 this lens's own heuristics but never yet exercised), and a fresh
-instance of reviewing-migration-and-data-safety (#20); cross-model
-re-gate deferred, no Ollama in this container; see session-log for the
-full breakdown); **wave 3 continued with
+instance of reviewing-migration-and-data-safety (#20). **Cross-model
+re-gate: resolved 2026-08-20 — 13/20 recall, 3/5 precision.** See the
+2026-08-20 (thirteenth follow-up) session-log entry: two scenarios
+drop a distinct, separately-named finding while catching another in
+the same audit (3 misses the sharper of two freshness-config defects
+plus its required delegations; 5 misses that 3 of 7 registry subjects
+are set to `NONE`). Two delegate scenarios drop the required routing
+and one fabricates a lens name that doesn't exist — `reviewing-data-
+classification-and-retention (#17)` in place of the actual
+`reviewing-test-quality` (16). One scenario softens a required "do not
+recommend X" instruction into an either/or (4). One trend scenario
+gets the headline direction right but drops both of its sharper,
+specifically-required points (10). Two precision failures reuse a
+canned positive-verdict template from a genuinely clean sibling
+scenario, in one case asserting a `datacontract test` job and
+contracts the query explicitly says don't exist (25). See
+session-log for the full breakdown); **wave 3 continued with
 `reviewing-outcome-instrumentation`** (10 → 23 — widest gap among the
 lenses fitting the established pattern (11 owned checks against 10
 baseline scenarios), though the baseline was unusually rich already;
