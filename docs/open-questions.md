@@ -396,9 +396,23 @@ shared decision-record checklist); its three delegate scenarios route
 to reviewing-api-contract-safety (#13, named in the lens's own
 description but not yet exercised), and fresh second instances of
 reviewing-migration-and-data-safety (#20) and
-auditing-compliance-and-provenance (#27); cross-model re-gate deferred,
-no Ollama in this container; see session-log for the full breakdown);
-**wave 3 continued with `auditing-data-pipeline-health`** (12 → 25 —
+auditing-compliance-and-provenance (#27). **Cross-model re-gate:
+resolved 2026-08-20 — 9/22 recall, 4/6 precision.** See the 2026-08-20
+(twelfth follow-up) session-log entry: the dominant failure is a
+"not applicable" template misapplied to five separate pipeline/
+data-plane scenarios squarely in scope (6, 9, 13, 18, 19 — including
+one that self-contradicts within its own sentence, "adds a new SQL
+model but does not touch any SQL"), plus a second, separate canned
+"data-diff is exactly the evidence" positive-verdict template that
+bleeds from its one genuine origin (11) into four scenarios where no
+data-diff was ever mentioned (15, 23, 25, 27 — two of them real misses,
+two clean scenarios reaching the right verdict for a fabricated
+reason). Two more complete blanks on textbook incremental-model
+patterns (4, and 20's adversarial version, which explicitly notes "No
+unique_key is configured" before wrongly excusing it). Two delegate
+scenarios drop the required routing (17 never names #13; 5 fabricates
+a uniqueness test the query never states exists). See session-log for
+the full breakdown); **wave 3 continued with `auditing-data-pipeline-health`** (12 → 25 —
 the scheduled repo-audit companion to the lens just hardened, same G17
 build; picked as the closest sibling in shape rather than by an
 explicit deferral note (a round-1 atlas-review finding on the prior PR
