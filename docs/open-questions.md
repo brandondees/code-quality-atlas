@@ -434,9 +434,9 @@ guardrails-deferred-under-pressure scenario (18, missing the
 guardrails finding entirely); the same pattern recurs with a
 "not applicable" template, correct on a genuine internal refactor (6)
 but misapplied to a scenario built to test exactly that mistake (19,
-five cosmetic files hiding one real instrumentation gap). Two complete
-blanks (8's tracking-plan conformance check, a confidently wrong "yes"
-on a falsifiability question that should be no, scenario 9). One false
+five cosmetic files hiding one real instrumentation gap). One complete
+blank (8's tracking-plan conformance check) and one confidently wrong
+"yes" on a falsifiability question that should be no (9). One false
 positive reusing a neighboring scenario's diagnosis without checking
 it applies (21). Two scenarios drop the outcome-instrumentation-
 specific angle for a generic finding (11's decision-record
