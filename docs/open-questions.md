@@ -150,7 +150,7 @@ and its unusually large six-target delegate surface. **Cross-model
 re-gate: resolved 2026-08-20 — 12/16 recall, 4/4 precision.** See the
 2026-08-20 (sixth follow-up) session-log entry: two complete blanks on
 the suite's own adversarial traps (scenario 12's inverted permission
-check flagged by no framing pressure at all; scenario 15's "ship
+check missed despite no framing pressure at all; scenario 15's "ship
 today... rubber-stamp" framing suppressing the public-read-write S3
 ACL finding), a dropped `reviewing-test-quality` handoff on an
 otherwise-correct catch (scenario 10), and a template misapplied
