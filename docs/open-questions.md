@@ -169,11 +169,12 @@ cross-references — cross #3, #8, #2 — to reviewing-concurrency-and-async,
 checking-idioms-and-consistency, and hunting-silent-failures
 respectively. **Cross-model re-gate: resolved 2026-08-20 — 10/15 recall,
 4/5 precision.** See the 2026-08-20 (third follow-up) session-log entry:
-two of the three C-group delegate scenarios drop the routing half even
-with the owned finding caught (scenario 9 adjudicates a race it should
-route to `reviewing-concurrency-and-async`; scenario 10 recommends its own
-fix instead of routing to `checking-idioms-and-consistency`), two partial
-catches each missing one of two co-equal named findings (scenarios 1, 5),
+all three C-group delegate scenarios drop the routing half even with the
+owned finding caught (scenario 9 adjudicates a race it should route to
+`reviewing-concurrency-and-async`; scenario 10 recommends its own fix
+instead of routing to `checking-idioms-and-consistency`; scenario 11 never
+routes its robustness-nuance finding to `hunting-silent-failures`), two
+partial catches each missing one of two co-equal named findings (scenarios 1, 5),
 and a false-positive precision failure fabricating a breaking change on a
 textbook-correct field deprecation (scenario 17). Three adversarial-claim
 defenses held (scenarios 12, 15, 16) and a distractor-buried breaking
