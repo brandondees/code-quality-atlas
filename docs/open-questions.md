@@ -287,9 +287,14 @@ inverted routing direction on scenario 11; ownership claimed instead of
 routed on scenario 12; a fabricated least-privilege violation replacing
 the real finding entirely on scenario 13), plus a fourth mis-routing
 failure on scenario 8 (a defect this lens owns outright, deflected to
-`sweeping-for-security` with no delegate framing in the query) and two
-fabricated findings on scenarios the query explicitly shows are clean
-(17's cosmetic-hunk distraction, 20's already-validated memory write);
+`sweeping-for-security` with no delegate framing in the query), a
+fifth recall miss on scenario 17 (the real hazard is caught, but a
+fabricated finding on an unrelated cosmetic hunk also gets reported,
+missing the requirement not to be distracted), and two precision
+failures — scenario 20 fabricates a finding on a memory write the
+query shows is already validated, provenance-tagged, and expiring,
+and scenario 22 opens with a finding-shaped header before its own
+body concedes the pinned, validated MCP server needs no scrutiny;
 see session-log for the full
 breakdown); **wave 3 continued with `reviewing-agent-legibility`**
 (4 → 21 — a two-way tie at the widest remaining gap with
