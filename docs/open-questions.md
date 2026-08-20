@@ -137,8 +137,19 @@ license names that appear nowhere in the scan, not just misreading ones that
 do, on 4 of the 8 misses); **wave 3 continued 2026-08-17 with
 `reviewing-pr-and-process-hygiene`** (6 → 31, the widest scope-to-coverage gap
 yet in the wave — 29 checks across two full categories on 6 baseline
-scenarios, highest `eval_min` in the suite; cross-model re-gate deferred, no
-Ollama in this container; see session-log for the A-E breakdown and an
+scenarios, highest `eval_min` in the suite. **Cross-model re-gate: resolved
+2026-08-20 — 18/27 recall, 4/4 precision.** See the 2026-08-20 (fifteenth
+follow-up) session-log entry: two claims-vs-evidence scenarios testing a
+"pure refactor / no behavior change" claim against a smuggled real change
+(a new dependency; a silently-flipped soft-delete filter default) both
+return flat "No findings," accepting the false claim outright. One scenario
+directly violates an explicit "do not fault the size here" instruction
+rather than merely missing a finding. Two scenarios drop one half of a
+two-part finding (an unrequested-scope "no more" half; a second,
+equally-required stale-doc gap). One scenario drops the single most
+specific, most important part of a multi-part claim (a conditional
+operator smuggled inside a "pure refactor"). Every other adversarial-
+pressure scenario held. See session-log for the A-E breakdown and an
 initial-pass miscount of the checklist caught and corrected before shipping);
 **wave 3 continued the same day with `reviewing-ai-authored-code`** (4 → 20 —
 18 owned checks on 4 baseline scenarios, the widest remaining gap once
