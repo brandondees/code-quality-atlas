@@ -411,9 +411,19 @@ closing heuristic ("escalate the judgment call... route to the
 decision's owner") — two fresh revisit-trigger/EOL instances to
 reviewing-decision-lifecycle (#29, its documented pairing partner) and
 one archive-index-drift instance to auditing-documentation-health
-(#22, the discoverability analog); cross-model re-gate deferred, no
-Ollama in this container; see session-log for the full breakdown);
-**wave 3 continued with `reviewing-interoperability`** (4 → 21 — the
+(#22, the discoverability analog). **Cross-model re-gate: resolved
+2026-08-20 — 7/15 recall, 4/5 precision.** See the 2026-08-20
+(seventeenth follow-up) session-log entry: three complete blanks (a
+status-graph contradiction, a silent supersession, and a real finding
+lost among eight records), a dropped second finding riding alongside a
+correctly-caught orphaned record, a real-but-unverifiable revisit
+trigger wrongly called clean, a certainty-overstating "EOL or on Hold"
+conflation, an incomplete duplicate-ID finding missing its required
+routing, a missed adversarial claim-verification check (accepting a
+record's own "reviewed and reconfirmed" note at face value), and a
+precision failure reusing a genuinely-correct "stalled proposed
+record" template on a two-week-old proposal still in active
+discussion; **wave 3 continued with `reviewing-interoperability`** (4 → 21 — the
 widest gap among the 8 lenses remaining after the recompute corrected
 an off-by-one in the running tally (8 owned checks against 4 baseline
 scenarios); `shape: diff`, not design-capable, so no A group; its
