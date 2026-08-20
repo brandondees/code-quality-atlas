@@ -464,9 +464,10 @@ two non-CLI scenarios (10, 17). Scenario 7 skips the bounded-context
 counterweight entirely, reporting a same-word collision as a finding
 without checking whether the two meanings ever meet on a surface a
 user sees. Two adversarial design-doc scenarios (8, 19) and two more
-standard-pattern scenarios (13, 18) are complete blanks. One
-precision failure (21) contradicts its own stated reasoning in the
-same sentence. See
+standard-pattern scenarios (13, 18) are complete blanks. Two precision
+failures: scenario 9's content-bleed (above) counts as one; scenario
+21 additionally contradicts its own stated reasoning in the same
+sentence. See
 session-log for the full breakdown); **wave 3 continued with
 `reviewing-usability-and-interaction`** (10 → 22 — the clean pick left
 from that tie; the baseline already covered all 9 checklist bullets,
