@@ -342,8 +342,23 @@ consent-as-law/#27 boundary applied to a distinct regulatory facet
 (under-13 age-gating) than the 4 originals already exercise, and a
 second, distinct a11y-mechanics instance (contrast vs. keyboard
 operability) — to sweeping-for-security, auditing-compliance-and-
-provenance, and reviewing-accessibility-and-i18n respectively;
-cross-model re-gate deferred, no Ollama in this container; see
+provenance, and reviewing-accessibility-and-i18n respectively.
+**Cross-model re-gate: resolved 2026-08-20 — 9/16 recall, 4/5
+precision.** See the 2026-08-20 (eighth follow-up) session-log entry:
+a "manipulative default" finding gets recited verbatim on three
+scenarios (1, 6, 13) regardless of fit — correct on 1 and 13, but
+misapplied on 6, where the actual defect is the distinctly-named
+**consent theater** category (a correctly-recorded preference the send
+path never checks), and the same template also misfires on 7 (mislabeled,
+a nonsensical GDPR routing) — then goes missing entirely on 16, the
+suite's own cosmetic-hunk trap hiding the identical default pattern
+the model recites unprompted elsewhere in the same run. Two complete
+blanks on this lens's own vulnerable-user and security-boundary checks
+(10's CSRF-vulnerable confirmation link, 11's missing age-gate on a
+collected birthdate). Two accessibility-as-exclusion scenarios split on
+one distinguishing requirement — 9 caught, 12 missing the "both
+controls are structurally accessible" distinction from 9's different
+defect type. Every adversarial-pressure scenario held. See
 session-log for the full breakdown); **wave 3 continued with
 `auditing-decision-record-currency`** (5 → 20 — the widest gap among
 the 9 remaining lenses that fit the established shape:diff/repo A-E
