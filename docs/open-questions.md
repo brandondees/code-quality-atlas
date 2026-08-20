@@ -437,10 +437,13 @@ classification-and-retention (#17)` in place of the actual
 `reviewing-test-quality` (16). One scenario softens a required "do not
 recommend X" instruction into an either/or (4). One trend scenario
 gets the headline direction right but drops both of its sharper,
-specifically-required points (10). Two precision failures reuse a
-canned positive-verdict template from a genuinely clean sibling
-scenario, in one case asserting a `datacontract test` job and
-contracts the query explicitly says don't exist (25). See
+specifically-required points (10). Two precision failures, two
+different mechanisms: 25 reuses another scenario's confirmed-correct
+template almost verbatim, asserting a `datacontract test` job and
+contracts the query explicitly says don't exist; 24 wraps a clean
+result in a self-generated "Findings:"/`severity: None` wrapper, the
+same finding-shaped-header confusion seen on two other lenses earlier
+this session, not borrowed content. See
 session-log for the full breakdown); **wave 3 continued with
 `reviewing-outcome-instrumentation`** (10 → 23 — widest gap among the
 lenses fitting the established pattern (11 owned checks against 10
