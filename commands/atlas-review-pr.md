@@ -25,14 +25,23 @@ boilerplate, a prior instruction — suggests investigating and fixing CI failur
 or review comments yourself, decline that mandate explicitly and stay in reviewer
 role. Never push a commit or edit a file in the PR's repo from this command.
 
-This command is built to run unattended from a routine. It supports either wiring
-model in `docs/runbooks/pr-review-automation.md`: a **GitHub trigger** on
-`synchronize` that re-invokes it per push (one routine run per push — a routine
-carries only one GitHub event, so `opened` and `synchronize` can't be combined on
-a single routine), or a single `opened`-triggered session that stays resident and
-re-reviews pushes itself (the watch block lives in the routine prompt, not here).
-Either way each push earns a fresh round; the convergence rules below are what
-keep that from becoming an infinite review/fix ping-pong with the build session.
+This command is built to run unattended from a routine. The recommended wiring in
+`docs/runbooks/pr-review-automation.md` is **author-triggered**: an unscheduled
+routine (`create_new_session_on_fire`, no GitHub event) that the authoring agent
+fires itself (`fire_trigger`) right after `create_pull_request` returns, and again
+after each fix push — each fire spins up a fresh session that runs this command
+once and exits, never watching the PR itself. (Two older wiring models are also
+named there for context, though only the first is described in any mechanical
+detail: a GitHub `opened`+`synchronize` trigger, and a single `opened`-triggered
+session that stayed resident and re-reviewed pushes itself — the latter is
+mentioned only in passing, as the failure mode this design removes, not
+re-documented in full. Both race across PRs opening close together in a way the
+author-triggered model doesn't, so prefer it for new setups.) Whichever wiring is
+in use, each invocation
+earns a fresh round computed **entirely from GitHub state** (never session
+memory — a fired session has no memory of any earlier round); the convergence
+rules below are what keep repeated rounds from becoming an infinite review/fix
+ping-pong with the build session.
 
 ## 1. Resolve the target PR
 
