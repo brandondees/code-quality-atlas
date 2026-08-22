@@ -105,10 +105,31 @@ def _strip_toc_section(md: str) -> str:
     than an authoring convention is deliberate: 7 of 39 examples.md carried the
     heading and nothing stopped the eighth, because "don't write a Contents
     heading" is a rule an author has to remember and a generator can simply
-    enforce."""
+    enforce.
+
+    Fence-aware like `_toc_for_body` (#317, the same gap #313 fixed there): a
+    `## `-prefixed line inside a fenced code block (``` or ~~~, indent < 4 so
+    an indented, non-fenced block can't be mistaken for one) is example
+    content, not a real heading, and can't start or end the skipped section."""
     out: list[str] = []
     skipping = False
+    fence: str | None = None
     for line in md.splitlines():
+        indent = len(line) - len(line.lstrip(" "))
+        stripped = line.strip()
+        if fence is not None:
+            if indent < 4 and stripped and len(stripped) >= len(fence) and set(stripped) == {fence[0]}:
+                fence = None
+            if not skipping:
+                out.append(line)
+            continue
+        if indent < 4:
+            match = _FENCE_OPEN_RE.match(stripped)
+            if match:
+                fence = match.group(1)
+                if not skipping:
+                    out.append(line)
+                continue
         if line.startswith("## "):
             skipping = line[3:].strip().casefold() == "contents"
             if skipping:
