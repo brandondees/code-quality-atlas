@@ -89,6 +89,40 @@ def _github_anchor(heading: str) -> str:
     return re.sub(r"\s", "-", slug)
 
 
+class _FenceTracker:
+    """Tracks fenced-code-block state across a Markdown document, line by
+    line, so a heading-like line inside a fence (``` or ~~~, any length,
+    closing fence must match the opener's character and be at least as
+    long) is treated as content, not a real heading. Fence detection is
+    gated on indentation `< 4`, matching CommonMark's rule that a 4+-space
+    *indented* code block is never a fence, even if a line in it starts
+    with backticks/tildes after stripping.
+
+    `_strip_toc_section` and `_toc_for_body` each independently grew this
+    exact logic (#313, then #317 for the second, unnoticed copy) — extracted
+    here so a third recurrence isn't possible."""
+
+    def __init__(self) -> None:
+        self._fence: str | None = None
+
+    def consume(self, line: str) -> bool:
+        """Update state for `line`; return True if `line` is inside a fence
+        (an opening or closing fence-marker line itself counts as inside)."""
+        indent = len(line) - len(line.lstrip(" "))
+        stripped = line.strip()
+        if self._fence is not None:
+            if (indent < 4 and stripped and len(stripped) >= len(self._fence)
+                    and set(stripped) == {self._fence[0]}):
+                self._fence = None
+            return True
+        if indent < 4:
+            match = _FENCE_OPEN_RE.match(stripped)
+            if match:
+                self._fence = match.group(1)
+                return True
+        return False
+
+
 def _strip_toc_section(md: str) -> str:
     """Drop a `## Contents` section (heading through to the next `## `) from
     hand-authored examples before they are inlined into a bundle body.
@@ -107,29 +141,18 @@ def _strip_toc_section(md: str) -> str:
     heading" is a rule an author has to remember and a generator can simply
     enforce.
 
-    Fence-aware like `_toc_for_body` (#317, the same gap #313 fixed there): a
-    `## `-prefixed line inside a fenced code block (``` or ~~~, indent < 4 so
-    an indented, non-fenced block can't be mistaken for one) is example
-    content, not a real heading, and can't start or end the skipped section."""
+    Fence-aware via `_FenceTracker` (#317, the same gap #313 fixed in
+    `_toc_for_body`): a `## `-prefixed line inside a fenced code block is
+    example content, not a real heading, and can't start or end the skipped
+    section."""
     out: list[str] = []
     skipping = False
-    fence: str | None = None
+    fence = _FenceTracker()
     for line in md.splitlines():
-        indent = len(line) - len(line.lstrip(" "))
-        stripped = line.strip()
-        if fence is not None:
-            if indent < 4 and stripped and len(stripped) >= len(fence) and set(stripped) == {fence[0]}:
-                fence = None
+        if fence.consume(line):
             if not skipping:
                 out.append(line)
             continue
-        if indent < 4:
-            match = _FENCE_OPEN_RE.match(stripped)
-            if match:
-                fence = match.group(1)
-                if not skipping:
-                    out.append(line)
-                continue
         if line.startswith("## "):
             skipping = line[3:].strip().casefold() == "contents"
             if skipping:
@@ -143,29 +166,16 @@ def _toc_for_body(body: str) -> str:
     """A `## Contents` heading list linking every `## ` heading in `body`, in
     order, with GitHub's duplicate-heading dedup suffixing (`-1`, `-2`, ...
     appended to the *n*th repeat of an identical slug). Returns "" if `body`
-    has no `## ` headings to link. Fence-aware: a `## `-prefixed line inside a
-    fenced code block (``` or ~~~) is example content, not a real heading, and
-    is skipped (#313 — a worked example's fenced Markdown excerpt was
-    otherwise picked up as a heading, producing a broken anchor). A 4+-space
-    *indented* code block never opens or closes a fence, even if a line in it
-    happens to start with backticks/tildes after stripping — indentation, not
-    the stripped text, is what CommonMark uses to tell the two apart, and
-    without that check an indented block merely documenting fence syntax
-    would falsely open a fence and swallow every real heading after it."""
+    has no `## ` headings to link. Fence-aware via `_FenceTracker` (#313 — a
+    worked example's fenced Markdown excerpt was otherwise picked up as a
+    heading, producing a broken anchor): a `## `-prefixed line inside a
+    fenced code block is example content, not a real heading, and is
+    skipped."""
     headings = []
-    fence: str | None = None
+    fence = _FenceTracker()
     for line in body.splitlines():
-        indent = len(line) - len(line.lstrip(" "))
-        stripped = line.strip()
-        if fence is not None:
-            if indent < 4 and stripped and len(stripped) >= len(fence) and set(stripped) == {fence[0]}:
-                fence = None
+        if fence.consume(line):
             continue
-        if indent < 4:
-            match = _FENCE_OPEN_RE.match(stripped)
-            if match:
-                fence = match.group(1)
-                continue
         if line.startswith("## "):
             headings.append(line[3:].strip())
     if not headings:
