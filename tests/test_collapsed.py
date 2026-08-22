@@ -195,6 +195,44 @@ def test_toc_for_body_ignores_backtick_runs_inside_indented_code_blocks():
     assert "[Another real heading](#another-real-heading)" in toc
 
 
+def test_toc_for_body_skips_headings_inside_a_tilde_fenced_code_block():
+    # dees-bot review nit on PR #315: the docstring and _FENCE_OPEN_RE both
+    # claim ~~~-tilde fence support alongside backticks, but no test
+    # exercised it.
+    import tooling.generate_collapsed as g
+    body = (
+        "## Real heading\n\n"
+        "~~~markdown\n"
+        "## Quickstart\n"
+        "~~~\n\n"
+        "## Another real heading\n\nx\n"
+    )
+    toc = g._toc_for_body(body)
+    assert "[Real heading](#real-heading)" in toc
+    assert "[Another real heading](#another-real-heading)" in toc
+    assert "Quickstart" not in toc
+
+
+def test_toc_for_body_does_not_close_a_fence_on_a_mismatched_fence_character():
+    # dees-bot review nit on PR #315: closing a fence requires the *same*
+    # character as the opener (set(stripped) == {fence[0]}) — a run of the
+    # other fence character must not close it early.
+    import tooling.generate_collapsed as g
+    body = (
+        "## Real heading\n\n"
+        "```\n"
+        "## Quickstart\n"
+        "~~~~\n"
+        "still inside the fence\n"
+        "```\n\n"
+        "## Another real heading\n\nx\n"
+    )
+    toc = g._toc_for_body(body)
+    assert "[Real heading](#real-heading)" in toc
+    assert "[Another real heading](#another-real-heading)" in toc
+    assert "Quickstart" not in toc
+
+
 def test_generate_lens_bundle_writes_three_files(tmp_path):
     dest = generate_lens_bundle(_skill(), tmp_path, docs_root=".", skills_root="skills")
     assert (dest / "body.md").exists()
