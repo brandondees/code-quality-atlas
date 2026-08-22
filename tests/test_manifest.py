@@ -343,6 +343,25 @@ def test_load_manifest_treats_bare_description_as_empty_string(tmp_path):
     m = load_manifest(path)
     assert m.skills[0].description == ""
 
+def test_load_manifest_treats_bare_skill_name_as_empty_string(tmp_path):
+    # #268: a present-but-null "name:" on a skill slips past the KeyError
+    # guard and used to crash _NAME_RE.match(None) in _validate_skills with
+    # a raw TypeError instead of the intended ValidationError.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name:\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
+    m = load_manifest(path)
+    assert m.skills[0].name == ""
+    with pytest.raises(ValidationError, match="invalid name"):
+        validate(m)
+
+
 def test_validate_rejects_unresolvable_source():
     bad = _skill(built_from=[Source(99, "tests/fixtures/research_sample.md#99")])
     with pytest.raises(ValidationError, match="section #99"):
@@ -454,6 +473,31 @@ def test_artifact_slug_must_be_lowercase_hyphen(tmp_path):
         validate(Manifest("v0", [bad]), docs_root="/")
 
 
+def test_load_manifest_treats_bare_artifact_slug_as_empty_string(tmp_path):
+    # #304: same bug class as #268, on Artifact.slug instead of Skill.name.
+    # a["slug"] was read straight off the dict with no null guard, so a
+    # present-but-null "slug:" loaded as Artifact.slug = None and crashed
+    # _NAME_RE.match(None) in _validate_skills with a raw TypeError.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: artifact\n"
+        "    wave: 1\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        "    artifacts:\n"
+        "      - name: SKILL.md\n"
+        "        detect: presence of SKILL.md\n"
+        "        rubric: 2\n"
+        "        slug:\n")
+    m = load_manifest(path)
+    assert m.skills[0].artifacts[0].slug == ""
+    with pytest.raises(ValidationError, match="artifact slug must be lowercase"):
+        validate(m)
+
+
 def test_artifact_duplicate_slug_rejected(tmp_path):
     a = Artifact(name="X", detect="y", rubric=101, slug="skill-md")
     bad = _artifact_skill(tmp_path, artifacts=[a, a])
@@ -527,6 +571,32 @@ def test_valid_router_accepted_and_real_manifest_loads():
     real = load_manifest("skills/manifest.yaml")
     assert real.router is not None
     assert all(s.picker for s in real.skills)
+
+def test_load_manifest_treats_bare_router_name_as_empty_string(tmp_path):
+    # #268: same bug class as the skill-name gap, on Router.name. A
+    # present-but-null "name:" slips past the KeyError guard and used to
+    # crash _NAME_RE.match(None) in _validate_router.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    picker: p\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        "router:\n"
+        "  name:\n"
+        "  description: d\n"
+        "  routes:\n"
+        "    - when: Bug fix\n"
+        "      run: [hunting-silent-failures]\n")
+    m = load_manifest(path)
+    assert m.router.name == ""
+    with pytest.raises(ValidationError, match="invalid or duplicate name"):
+        validate(m)
+
 
 def test_load_manifest_treats_bare_router_description_as_empty_string(tmp_path):
     # Same bare-null gap as skill.description/picker (#142 review), one
@@ -677,6 +747,29 @@ def test_valid_synthesizer_accepted_and_real_manifest_loads():
     assert real.synthesizer is not None
     assert real.synthesizer.severity_order[0] == "Blocker"
     assert all(t.between[0] != t.between[1] for t in real.synthesizer.tensions)
+
+def test_load_manifest_treats_bare_synthesizer_name_as_empty_string(tmp_path):
+    # #268: same bug class as the skill-name gap, on Synthesizer.name. A
+    # present-but-null "name:" slips past the KeyError guard and used to
+    # crash _NAME_RE.match(None) in _validate_synthesizer.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        "synthesizer:\n"
+        "  name:\n"
+        "  description: d\n"
+        "  severity_order: [Blocker, Major, Minor, Nit]\n")
+    m = load_manifest(path)
+    assert m.synthesizer.name == ""
+    with pytest.raises(ValidationError, match="invalid or duplicate name"):
+        validate(m)
+
 
 def test_load_manifest_treats_bare_synthesizer_description_as_empty_string(tmp_path):
     # Same bare-null gap as skill.description/picker (#142 review), one
@@ -842,6 +935,26 @@ def test_real_manifest_declares_three_modes():
     assert review.floor == "escalating"
 
 
+def test_load_manifest_treats_bare_mode_breadth_as_empty_string(tmp_path):
+    # #309: a present-but-null "breadth:" on a mode slips past the
+    # (KeyError, TypeError) guard around Mode(...) construction -- that
+    # guard only catches errors from the dataclass assignment itself, which
+    # never raises on None -- and used to crash `mode.breadth.strip()` in
+    # _validate_modes with a raw AttributeError instead of a
+    # ValidationError.
+    body = (
+        "modes:\n"
+        "  - name: triage\n"
+        "    breadth:\n"
+        "    floor: Major\n"
+        "    triggers: [triage]\n"
+    )
+    m = load_manifest(_manifest_with_body(tmp_path, body))
+    assert m.modes[0].breadth == ""
+    with pytest.raises(ValidationError, match="breadth must be non-empty"):
+        validate(Manifest("v0", [_skill()], synthesizer=_syn(), modes=m.modes))
+
+
 def test_load_manifest_treats_bare_mode_note_as_empty_string(tmp_path):
     # Same bare-null gap as skill.picker (#142 review): note=raw_mode.get(
     # "note", "") only substitutes "" when the key is absent, not when it's
@@ -903,6 +1016,29 @@ def test_load_manifest_parses_entrypoints(tmp_path):
 
 def test_load_manifest_defaults_entrypoints_to_empty(tmp_path):
     assert load_manifest(_manifest_with_body(tmp_path, "")).entrypoints == []
+
+
+def test_load_manifest_treats_bare_entrypoint_name_as_empty_string(tmp_path):
+    # #268: same bug class as the skill-name gap, on Entrypoint.name. A
+    # present-but-null "name:" slips past the (KeyError, TypeError) guard
+    # around Entrypoint(...) construction -- that guard only catches errors
+    # from the dataclass assignment itself, which never raises on None --
+    # and used to crash re.fullmatch(..., None) in _validate_entrypoints
+    # with a raw TypeError instead of a ValidationError.
+    body = (
+        "synthesizer:\n"
+        "  name: synthesizing-review-findings\n"
+        "  description: d\n"
+        "  severity_order: [Blocker, Major, Minor, Nit]\n"
+        "entrypoints:\n"
+        "  - name:\n"
+        "    description: d\n"
+        "    shapes: [diff]\n"
+    )
+    m = load_manifest(_manifest_with_body(tmp_path, body))
+    assert m.entrypoints[0].name == ""
+    with pytest.raises(ValidationError, match="name must be 1-64"):
+        validate(m)
 
 
 def test_load_manifest_treats_bare_entrypoint_description_as_empty_string(tmp_path):
