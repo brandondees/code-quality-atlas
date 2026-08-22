@@ -183,6 +183,129 @@ finding and the routing together, not one or the other — do not self-adjudicat
 the authorization question, and do not drop the finding because its full verdict
 belongs to another lens.
 
+The routing convention above is not specific to Terraform/IAM — it applies to
+*every* build/deploy-manifest defect whose deeper verdict belongs to another
+lens's checklist, whatever shape the manifest is (Kubernetes, a CI pipeline
+scan, a dependency-audit gate). The next two examples show the same habit on
+different subject matter.
+
+## Bad → finding, security verdict routed elsewhere (Kubernetes)
+
+**Input (scan):**
+
+```text
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+        - name: api
+          image: registry.example.com/api:latest
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+      volumes:
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+```
+
+**Expected finding:**
+
+1. **Unpinned image:** `:latest` is not reproducible — pin the digest.
+2. **Privileged container with a mounted Docker socket:** `privileged: true` plus
+   the host's `docker.sock` hands this container control of the host's container
+   runtime — a hygiene-visible container-default defect. How much privilege this
+   workload actually needs, and whether the socket mount is ever justified, is
+   `sweeping-for-security`'s (#14) verdict — flagged here, not adjudicated here.
+3. **Missing resource limits and non-root defaults:** no CPU/memory
+   requests/limits, no `runAsNonRoot`, no read-only root filesystem.
+
+Three separate findings, not one merged paragraph — pinning, the
+privileged/socket combination (routed), and the missing resource/user defaults
+are three distinct container-hygiene checks, the same way action-SHA,
+base-image-digest, and dependency-lock pinning are three separate checks
+elsewhere in this lens.
+
+## Bad → finding, routed to a different lens (dependency CVE, not IAM)
+
+**Input (scan):**
+
+```text
+requirements.txt: pinned with hashes; pip-audit runs in CI and is required.
+  pip-audit currently reports: cryptography 41.0.1 -> GHSA-xxxx (high), no fix
+  version yet.
+ci.yml: actions SHA-pinned; gates required; build reproducible.
+```
+
+**Expected finding:** None from this lens on the CVE itself — the build/config
+hygiene here is sound: the audit gate exists, runs, and is required, and the
+lockfile is hash-pinned. Report "No findings: config and build hygiene are
+sound." The CVE's severity and whether an unfixed high-severity finding must
+block a merge is `auditing-dependencies-and-supply-chain`'s (#18) verdict, not
+this lens's — do not manufacture a build-hygiene finding out of a dependency
+problem just because a scan happens to mention one. (Contrast the IAM and
+Kubernetes examples above: there, the *hygiene* fact itself — an over-broad
+grant, a privileged container — is this lens's own finding, with the deeper
+verdict routed. Here, there is no hygiene-layer fact for this lens to find at
+all; the entire scan's substance belongs to the other lens.)
+
+## Bad → finding (adversarial — a real defect buried in an accurately-described mechanical diff)
+
+**Input (scan). The PR description says: "Routine workflow refactor — 340 lines, all mechanical: split one job into six, no behaviour change."**
+
+```text
+ci.yml diff: 340 lines changed.
+  334 lines: one `build` job split into six named jobs, steps moved verbatim,
+             every action still SHA-pinned, same commands, same order.
+  line 118:  - name: unit tests
+  line 119:      if: github.actor != 'dependabot[bot]'
+  line 287:  branch protection: required checks updated to the six new job names
+```
+
+**Expected finding:**
+
+1. **Unit tests silently skipped for Dependabot PRs:** line 119 makes the
+   `unit tests` job skip entirely when the actor is `dependabot[bot]` —
+   dependency-bump PRs, exactly the class most likely to break a build, now
+   merge without tests having run.
+
+The PR description's "all mechanical, no behaviour change" framing is
+accurate for 334 of the 340 changed lines — that's what makes the one real
+change easy to miss, not a reason it isn't there. A large diff described (even
+correctly) as mechanical still needs every changed line checked; do not let
+the volume of harmless, verbatim-moved lines stand in for having read the one
+that isn't. Confirm what's genuinely fine (steps moved verbatim, still
+SHA-pinned) rather than flagging the refactor itself — but confirm it, don't
+assume it.
+
+## Good → no finding (a non-gating job is not a soft-failed gate)
+
+**Input (scan):**
+
+```text
+ci.yml:
+  benchmark:
+    continue-on-error: true
+    # informational only: posts a comment with timings, never gates merge
+  lint / types / tests / pip-audit: all required to merge, none soft-failed.
+branch protection: the four gates above are required; `benchmark` is not.
+```
+
+**Expected finding:** None — report "No findings: config and build hygiene are
+sound". `continue-on-error: true` is a soft-failed-gate finding only when the
+job it's on is one of the checks branch protection actually requires; here
+`benchmark` is explicitly not in that list, so a failing benchmark was never
+going to block a merge in the first place, and `continue-on-error` doesn't
+weaken anything. Check the branch-protection list before flagging any
+`continue-on-error`/`allow_failure`/`|| true`, not just its presence — the
+same discipline as reading `ADD COLUMN` keywords literally elsewhere in this
+lens's checklist. Do NOT recommend making the benchmark required; nothing in
+the scan says it should be.
+
 ## Good → no finding
 
 **Input (build/config scan):**
