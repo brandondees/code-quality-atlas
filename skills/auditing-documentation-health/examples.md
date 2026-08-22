@@ -21,7 +21,21 @@ documentation artifact (a README, a docstring set, a changelog) is squarely in
 scope for that artifact; evaluate what's actually there on its own merits
 (including "proportionate for this project's size and audience" as a valid
 verdict) rather than treating a scan as not-applicable just because it isn't
-exhaustive across every category this lens could check.
+exhaustive across every category this lens could check. This holds even when
+the scan itself is framed as a narrative — a team debate about tooling, a
+retrospective, a status update — rather than a plain audit list: read past the
+framing for any concrete defect the text states as a fact (drifted docstrings
+the scan says it already caught, a stale example, an undocumented endpoint) and
+flag it. A scan being *about* a decision (which tool to adopt, whether to
+invest in generation) does not make the defect that decision is discussing any
+less real or less in scope; the decision itself is a judgment call to route,
+not a reason to skip the finding sitting inside it.
+
+When raw source is given alongside a docstring or example, ground every claim
+in what the source actually shows — the specific parameter names, the actual
+call signature — rather than a plausible-sounding guess (an assumed missing
+import, an assumed missing class) about what might be wrong. A confidently
+wrong mechanism is worse than a correctly identified one.
 
 ## Bad → finding
 
@@ -50,6 +64,93 @@ diagrams/arch.png:   binary image, references services deleted in Q1
    can't track changes.
 5. **Stale binary diagram:** references deleted services and can't be diffed —
    redraw as text (Mermaid) so drift shows up in review.
+
+## Bad → finding (ground the mismatch in the actual source, not a guess)
+
+**Input (raw files, not a pre-digested scan):**
+
+```markdown
+## Quickstart
+    from acme import Client
+    c = Client(api_key="...")
+    c.widgets.list(page=1)
+```
+
+```python
+class Widgets:
+    def list(self, cursor: str | None = None, limit: int = 50):
+        """List widgets.
+
+        Args:
+            page: page number to fetch, 1-indexed.
+        """
+        ...
+```
+
+**Expected finding:**
+
+1. **Docstring documents a parameter that no longer exists:** `Widgets.list`'s
+   real signature is `(cursor, limit)`, but its own docstring still documents
+   `page` — the class was moved to cursor-based pagination and the docstring
+   was never updated.
+2. **README quickstart calls the removed parameter:** `c.widgets.list(page=1)`
+   passes `page`, which the current signature doesn't accept — the documented
+   example no longer runs against the code as written.
+
+Both findings trace to the same root cause (the docstring's stale `page`
+reference), stated as what the source in front of you actually shows — not as
+a guess about an unrelated missing import or a class that "might not exist."
+
+## Bad → finding (stale example — flag the CI gap too, not just the drift)
+
+**Input (scan):**
+
+```text
+docs/guides/rate-limiting.md — doctest block:
+  >>> client.set_rate_limit(rps=10)
+  RateLimitConfig(requests_per_second=10)
+
+src/client.py (current): `set_rate_limit` renamed to `configure_rate_limit`
+in the last release; the doctest was not updated and is not run in CI.
+```
+
+**Expected finding:**
+
+1. **Stale example calls a renamed method:** the doctest calls
+   `client.set_rate_limit`, which no longer exists — it was renamed to
+   `configure_rate_limit`. The example would fail if it were ever run.
+2. **The example isn't wired into CI:** nothing runs this doctest, which is
+   how the rename went unnoticed — flag the missing CI wiring as its own
+   finding alongside the drift itself, and recommend running it in CI so it
+   can't rot silently again.
+
+Report both parts every time: the content drift alone under-states the defect,
+since an unrun example will drift again the moment it's merely corrected by
+hand.
+
+## Bad → finding (a concrete stated defect, inside a framed narrative)
+
+**Input (scan):**
+
+```text
+Docstrings are hand-maintained across 40 modules; coverage is good but three
+have drifted this quarter (caught by this audit). Team is debating whether
+to adopt an API-doc generator (auto-sync from signatures, ~3 engineer-days to
+wire up) versus continuing hand maintenance with tighter review discipline.
+```
+
+**Expected finding:**
+
+1. **Three docstrings have drifted this quarter:** the scan states this as an
+   already-caught fact — report it with whatever specifics the scan gives,
+   the same as any other drifted-docstring finding.
+
+The tooling debate (generator vs. hand-maintenance) is a real trade-off, but
+it's a build-vs-buy call for engineering leadership, not this lens's verdict —
+surface it as a trade-off rather than prescribing the generator, and don't let
+narrating the debate be a reason to skip the concrete defect the scan already
+names. This is not "Not applicable": a real, audited drift was reported inside
+the narrative.
 
 ## Good → no finding
 

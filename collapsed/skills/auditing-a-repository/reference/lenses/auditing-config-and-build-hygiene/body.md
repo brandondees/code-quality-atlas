@@ -15,6 +15,9 @@ Are config and CI trustworthy? Secrets, env parity, reproducible pinned builds, 
 - [Examples](#examples)
 - [Bad → finding (CI + image + config)](#bad--finding-ci--image--config)
 - [Bad → finding (build reproducibility + flags)](#bad--finding-build-reproducibility--flags)
+- [Bad → finding (job-behavior metrics and branching practice, no raw config shown)](#bad--finding-job-behavior-metrics-and-branching-practice-no-raw-config-shown)
+- [Bad → finding (build-once-promote violated)](#bad--finding-build-once-promote-violated)
+- [Bad → finding, security verdict routed elsewhere](#bad--finding-security-verdict-routed-elsewhere)
 - [Good → no finding](#good--no-finding)
 - [Not applicable → outside this lens's scope](#not-applicable--outside-this-lenss-scope)
 - [Going deeper](#going-deeper)
@@ -76,14 +79,35 @@ given in the decision rule below — never a numbered list of findings for a hea
 defect — a secret in the repo/image, an unpinned action/toolchain, a base image on
 `:latest`, a build that depends on machine-local state, a missing or soft-failed
 merge gate (`continue-on-error`, `|| true`, `allow_failure`), env-specific code
-branches, config read lazily without validation, or a flag with no owner (dead and
-unreferenced → delete; live-but-ownerless → assign an owner + removal plan).
-Enumerate **every** such defect present in the scan, each as its own finding — pinning
-is per-artifact (action SHA, base-image digest, dependency lock are three separate
-checks, not one). Do not demand tooling the project's size doesn't warrant. If the
-gates run and are required, builds are pinned and reproducible, and config is
-injected/validated, report exactly
+branches, config read lazily without validation, a flag with no owner (dead and
+unreferenced → delete; live-but-ownerless → assign an owner + removal plan), a
+pipeline that rebuilds per environment instead of building once and promoting the
+same artifact, or a long-lived branch carrying incomplete work with no feature
+flag. Enumerate **every** such defect present in the scan, each as its own
+finding — pinning is per-artifact (action SHA, base-image digest, dependency lock
+are three separate checks, not one). Do not demand tooling the project's size
+doesn't warrant. If the gates run and are required, builds are pinned and
+reproducible, and config is injected/validated, report exactly
 "No findings: config and build hygiene are sound".
+
+A scan describing a CI job's **own observed behavior** — its runtime, retry/flake
+rate, or pass/fail history — is in scope even with no raw config snippet shown:
+you are still auditing that job, just from its metrics instead of its YAML.
+Likewise, **branching/merge practice** (a long-lived branch, incomplete work with
+no flag) is this lens's own checklist item, not out of scope merely because the
+input reads as team metadata rather than a config file. Reserve "Not applicable"
+for scans with no CI/build/config/IaC/flag *subject matter* at all — test-suite
+results, source-complexity metrics, docs — not for this lens's own subject matter
+arriving as prose or numbers instead of a raw snippet.
+
+The security *verdict* on a privileged container, exposed port, or over-broad IAM
+grant surfaced in a build/deploy manifest is owned by `sweeping-for-security`
+(#14); a known CVE's severity and whether it must block a merge is owned by
+`auditing-dependencies-and-supply-chain` (#18). Flag the hygiene-relevant fact
+here — the pipeline still applies without a plan, the manifest still grants the
+excess — and attribute the deeper verdict there; do not manufacture your own
+security or CVE judgment in its place, and do not let "that's someone else's
+verdict" become a reason to drop the finding.
 
 ## Bad → finding (CI + image + config)
 
@@ -143,6 +167,90 @@ flags.yml:    legacy_export: false  (owner none; referenced in 0 code paths; 18 
 4. **Live but ownerless flag:** `dark_mode_v2` has no owner and both branches are
    still maintained — assign an owner and a removal plan so it doesn't rot like the
    dead one.
+
+## Bad → finding (job-behavior metrics and branching practice, no raw config shown)
+
+**Input (scan):**
+
+```text
+ci.yml:      job `e2e-nightly`, required to merge, 42 min runtime, no caching,
+             retries: 3. Failure rate over its first 30 runs: 11 failures,
+             9 of which passed on retry.
+Branching:   feature/payments-rewrite open 7 months, 1,400 commits behind main,
+             merged from main 11 times, no feature flag in the codebase.
+             CONTRIBUTING.md documents trunk-based development as team practice.
+```
+
+**Expected finding:**
+
+1. **Flaky required gate masked by retries:** nine of eleven failures passed on a
+   later attempt — the retries are absorbing nondeterminism, not infrastructure
+   noise, on a check that's required to merge. Find the source of the flake rather
+   than raising the retry count further.
+2. **Slow, uncached, serial required gate:** 42 minutes with no caching sets the
+   floor on every merge; parallelize and cache it.
+3. **Long-lived branch contradicts the team's own documented practice:** seven
+   months and 1,400 commits behind, integrated via eleven merges from main instead
+   of a feature flag, while `CONTRIBUTING.md` states trunk-based development —
+   integrate the incomplete work behind a flag so it merges continuously instead
+   of accumulating one large, increasingly risky final merge.
+
+Neither input here is a raw config/YAML snippet — one is a job's own metrics, the
+other is branching metadata plus a doc — but both describe this lens's own subject
+matter (a required CI gate's health; integration practice), so both are in scope.
+Do not answer "Not applicable" just because the input isn't shaped like a file.
+
+## Bad → finding (build-once-promote violated)
+
+**Input (scan):**
+
+```text
+ci.yml:
+  build-staging: docker build -t app:staging --build-arg ENV=staging .
+                 docker push app:staging && deploy staging
+  build-prod:    needs: build-staging
+                 docker build -t app:prod --build-arg ENV=prod .
+                 docker push app:prod && deploy prod
+```
+
+**Expected finding:**
+
+1. **Rebuilds per environment instead of promoting one artifact:** `build-prod`
+   runs its own `docker build` with `--build-arg ENV=prod` rather than promoting
+   the exact image `build-staging` already built, tested, and pushed. The artifact
+   that reaches production is not the artifact staging validated — baking
+   environment identity into the image via `--build-arg ENV=` is what forces the
+   rebuild. Build once, tag that image, and promote the same digest through
+   environments; supply environment differences as runtime config, not a build arg.
+
+Do not speculate about missing base-image pins or lockfiles the scan doesn't show
+— the concrete, scan-visible defect is the per-environment rebuild itself.
+
+## Bad → finding, security verdict routed elsewhere
+
+**Input (scan):**
+
+```text
+terraform/: providers pinned; `terraform plan` runs in CI and is reviewed;
+            tflint and checkov both run and are required to merge.
+            One resource: an IAM policy grants Action: "*" on Resource: "*"
+            to the CI role.
+```
+
+**Expected finding:**
+
+1. **Wildcard IAM grant on the CI role:** the policy's `Action: "*"` /
+   `Resource: "*"` is diff-visible over-privilege on a role that runs unattended.
+   The authorization *verdict* — how much privilege this role legitimately needs —
+   belongs to `sweeping-for-security` (#14); flagged here, not adjudicated here.
+
+Credit what's healthy — pinned providers, a reviewed plan, required linters —
+rather than letting the one finding read as a wholesale failure; note that
+`tflint`/`checkov` running and passing is not evidence the grant is fine, since a
+linter's clean run only means nothing it was configured to check fired. Report the
+finding and the routing together, not one or the other — do not self-adjudicate
+the authorization question, and do not drop the finding because its full verdict
+belongs to another lens.
 
 ## Good → no finding
 
