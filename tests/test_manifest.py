@@ -343,6 +343,7 @@ def test_load_manifest_treats_bare_description_as_empty_string(tmp_path):
     m = load_manifest(path)
     assert m.skills[0].description == ""
 
+
 def test_load_manifest_treats_bare_skill_name_as_empty_string(tmp_path):
     # #268: a present-but-null "name:" on a skill slips past the KeyError
     # guard and used to crash _NAME_RE.match(None) in _validate_skills with
@@ -572,6 +573,7 @@ def test_valid_router_accepted_and_real_manifest_loads():
     assert real.router is not None
     assert all(s.picker for s in real.skills)
 
+
 def test_load_manifest_treats_bare_router_name_as_empty_string(tmp_path):
     # #268: same bug class as the skill-name gap, on Router.name. A
     # present-but-null "name:" slips past the KeyError guard and used to
@@ -747,6 +749,7 @@ def test_valid_synthesizer_accepted_and_real_manifest_loads():
     assert real.synthesizer is not None
     assert real.synthesizer.severity_order[0] == "Blocker"
     assert all(t.between[0] != t.between[1] for t in real.synthesizer.tensions)
+
 
 def test_load_manifest_treats_bare_synthesizer_name_as_empty_string(tmp_path):
     # #268: same bug class as the skill-name gap, on Synthesizer.name. A
