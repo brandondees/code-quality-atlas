@@ -176,6 +176,25 @@ def test_toc_for_body_handles_a_longer_fence_wrapping_a_shorter_nested_one():
     assert "Quickstart" not in toc
 
 
+def test_toc_for_body_ignores_backtick_runs_inside_indented_code_blocks():
+    # CodeRabbit review on PR #315: a 4+-space *indented* code block (not a
+    # fenced one) can contain a line that, after stripping leading
+    # whitespace, looks like a fence opener (e.g. an indented example
+    # documenting fence syntax itself). That must not be mistaken for an
+    # active fence and swallow every real heading after it.
+    import tooling.generate_collapsed as g
+    body = (
+        "## Real heading\n\n"
+        "    some indented code\n"
+        "    ```not a fence, just indented text\n"
+        "    more indented code\n\n"
+        "## Another real heading\n\nx\n"
+    )
+    toc = g._toc_for_body(body)
+    assert "[Real heading](#real-heading)" in toc
+    assert "[Another real heading](#another-real-heading)" in toc
+
+
 def test_generate_lens_bundle_writes_three_files(tmp_path):
     dest = generate_lens_bundle(_skill(), tmp_path, docs_root=".", skills_root="skills")
     assert (dest / "body.md").exists()
