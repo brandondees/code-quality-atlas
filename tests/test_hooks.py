@@ -129,6 +129,29 @@ def test_ratified_preferences_line_activates_logging(tmp_path):
     assert (_learnings_dir(tmp_path) / "invocations.jsonl").exists()
 
 
+def test_template_shaped_trailing_comment_still_activates_logging(tmp_path):
+    # #251: templates/preferences-template.md:164 ships the ratified example
+    # with a trailing inline comment on the same line as the value —
+    # `feedback: local      # off (default, hooks no-op) | local (...` — which
+    # is exactly what a team gets by editing the template's own shown `off`
+    # to `local` in place. The old strict end-anchored match required the
+    # value to be the last thing on the line and silently fell through to
+    # "off" on this literal, template-shaped input.
+    prefs_dir = tmp_path / ".code-quality-atlas"
+    prefs_dir.mkdir()
+    (prefs_dir / "preferences.md").write_text(
+        "## Feedback & learnings\n\n"
+        "feedback: local      # off (default, hooks no-op) | local (invocation log +\n"
+        "#                     a session-end retro queue land in\n"
+        "#                     .code-quality-atlas/learnings/, read by this team's own\n"
+        "#                     retro tooling — never transmitted anywhere by this\n"
+        "#                     setting alone) | draft | auto (stages 2+, unbuilt)\n"
+        "decided: 2026-01-01, @alice\n"
+        "reason: local-only telemetry is safe by construction\n")
+    _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra={"CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)})
+    assert (_learnings_dir(tmp_path) / "invocations.jsonl").exists()
+
+
 def test_malformed_stdin_json_is_a_clean_no_op(tmp_path):
     env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
            "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
