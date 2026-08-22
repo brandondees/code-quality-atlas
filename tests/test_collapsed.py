@@ -137,6 +137,45 @@ def test_toc_for_body_dedups_repeated_headings_with_github_style_suffixes():
     assert "[Bad → finding](#bad--finding-2)" in toc
 
 
+def test_toc_for_body_skips_headings_inside_fenced_code_blocks():
+    # #313: a literal "## "-prefixed line inside a worked example's fenced
+    # snippet (e.g. a README excerpt) is example content, not a real heading,
+    # and must not get its own (broken) ToC entry.
+    import tooling.generate_collapsed as g
+    body = (
+        "## Real heading\n\n"
+        "```markdown\n"
+        "## Quickstart\n"
+        "    from acme import Client\n"
+        "```\n\n"
+        "## Another real heading\n\nx\n"
+    )
+    toc = g._toc_for_body(body)
+    assert "[Real heading](#real-heading)" in toc
+    assert "[Another real heading](#another-real-heading)" in toc
+    assert "Quickstart" not in toc
+
+
+def test_toc_for_body_handles_a_longer_fence_wrapping_a_shorter_nested_one():
+    # A worked example that itself demonstrates fenced Markdown (outer fence
+    # longer than the inner one it wraps) must not close early on the inner
+    # fence's shorter backtick run.
+    import tooling.generate_collapsed as g
+    body = (
+        "## Real heading\n\n"
+        "````\n"
+        "```markdown\n"
+        "## Quickstart\n"
+        "```\n"
+        "````\n\n"
+        "## Another real heading\n\nx\n"
+    )
+    toc = g._toc_for_body(body)
+    assert "[Real heading](#real-heading)" in toc
+    assert "[Another real heading](#another-real-heading)" in toc
+    assert "Quickstart" not in toc
+
+
 def test_generate_lens_bundle_writes_three_files(tmp_path):
     dest = generate_lens_bundle(_skill(), tmp_path, docs_root=".", skills_root="skills")
     assert (dest / "body.md").exists()
