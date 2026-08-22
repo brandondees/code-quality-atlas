@@ -45,14 +45,20 @@ feedback_tier() {
     # a line matches both) so a one-line comment earlier in the file can never
     # leave `incomment` stuck on for everything after it — that previously let
     # a single-line comment silently swallow a real, ratified `feedback:`
-    # line further down, resolving to "off" with no error. Then take the
-    # first `feedback: <value>` line restricted to the four known tiers.
+    # line further down, resolving to "off" with no error. Strip a trailing
+    # `# ...` inline comment next (#251 — the template's own shown format,
+    # `feedback: local      # off (default...) | local (...`, carries one;
+    # the strict end-anchored grep below would otherwise silently miss a
+    # team's correctly-ratified line — copied verbatim from the template —
+    # and fall through to "off" with no error). Then take the first
+    # `feedback: <value>` line restricted to the four known tiers.
     file_tier="$(awk '
       /<!--.*-->/ { next }
       /<!--/      { incomment=1; next }
       /-->/       { incomment=0; next }
       !incomment  { print }
     ' "$prefs" 2>/dev/null \
+      | sed -E 's/[[:space:]]*#.*$//' \
       | grep -m1 -E '^[[:space:]]*feedback:[[:space:]]*(off|local|draft|auto)[[:space:]]*$' \
       | sed -E 's/^[[:space:]]*feedback:[[:space:]]*//; s/[[:space:]]*$//')"
     if [ -n "$file_tier" ] && _code_quality_atlas_valid_tier "$file_tier"; then
