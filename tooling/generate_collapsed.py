@@ -30,6 +30,9 @@ from tooling.manifest import Entrypoint, Manifest, Skill
 # of a third party's SKILL.md.
 _TOC_LINE_THRESHOLD = 100
 
+# Opening fence marker for a fenced code block: 3+ backticks or tildes.
+_FENCE_OPEN_RE = re.compile(r"^(`{3,}|~{3,})")
+
 
 class CollapsedOverlapError(ValueError):
     """Raised when generate_collapsed's prune target would overlap the standalone
@@ -119,8 +122,31 @@ def _toc_for_body(body: str) -> str:
     """A `## Contents` heading list linking every `## ` heading in `body`, in
     order, with GitHub's duplicate-heading dedup suffixing (`-1`, `-2`, ...
     appended to the *n*th repeat of an identical slug). Returns "" if `body`
-    has no `## ` headings to link."""
-    headings = [line[3:].strip() for line in body.splitlines() if line.startswith("## ")]
+    has no `## ` headings to link. Fence-aware: a `## `-prefixed line inside a
+    fenced code block (``` or ~~~) is example content, not a real heading, and
+    is skipped (#313 — a worked example's fenced Markdown excerpt was
+    otherwise picked up as a heading, producing a broken anchor). A 4+-space
+    *indented* code block never opens or closes a fence, even if a line in it
+    happens to start with backticks/tildes after stripping — indentation, not
+    the stripped text, is what CommonMark uses to tell the two apart, and
+    without that check an indented block merely documenting fence syntax
+    would falsely open a fence and swallow every real heading after it."""
+    headings = []
+    fence: str | None = None
+    for line in body.splitlines():
+        indent = len(line) - len(line.lstrip(" "))
+        stripped = line.strip()
+        if fence is not None:
+            if indent < 4 and stripped and len(stripped) >= len(fence) and set(stripped) == {fence[0]}:
+                fence = None
+            continue
+        if indent < 4:
+            match = _FENCE_OPEN_RE.match(stripped)
+            if match:
+                fence = match.group(1)
+                continue
+        if line.startswith("## "):
+            headings.append(line[3:].strip())
     if not headings:
         return ""
     seen: dict[str, int] = {}

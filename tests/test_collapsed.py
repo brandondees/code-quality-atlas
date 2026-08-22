@@ -137,6 +137,102 @@ def test_toc_for_body_dedups_repeated_headings_with_github_style_suffixes():
     assert "[Bad → finding](#bad--finding-2)" in toc
 
 
+def test_toc_for_body_skips_headings_inside_fenced_code_blocks():
+    # #313: a literal "## "-prefixed line inside a worked example's fenced
+    # snippet (e.g. a README excerpt) is example content, not a real heading,
+    # and must not get its own (broken) ToC entry.
+    import tooling.generate_collapsed as g
+    body = (
+        "## Real heading\n\n"
+        "```markdown\n"
+        "## Quickstart\n"
+        "    from acme import Client\n"
+        "```\n\n"
+        "## Another real heading\n\nx\n"
+    )
+    toc = g._toc_for_body(body)
+    assert "[Real heading](#real-heading)" in toc
+    assert "[Another real heading](#another-real-heading)" in toc
+    assert "Quickstart" not in toc
+
+
+def test_toc_for_body_handles_a_longer_fence_wrapping_a_shorter_nested_one():
+    # A worked example that itself demonstrates fenced Markdown (outer fence
+    # longer than the inner one it wraps) must not close early on the inner
+    # fence's shorter backtick run.
+    import tooling.generate_collapsed as g
+    body = (
+        "## Real heading\n\n"
+        "````\n"
+        "```markdown\n"
+        "## Quickstart\n"
+        "```\n"
+        "````\n\n"
+        "## Another real heading\n\nx\n"
+    )
+    toc = g._toc_for_body(body)
+    assert "[Real heading](#real-heading)" in toc
+    assert "[Another real heading](#another-real-heading)" in toc
+    assert "Quickstart" not in toc
+
+
+def test_toc_for_body_ignores_backtick_runs_inside_indented_code_blocks():
+    # CodeRabbit review on PR #315: a 4+-space *indented* code block (not a
+    # fenced one) can contain a line that, after stripping leading
+    # whitespace, looks like a fence opener (e.g. an indented example
+    # documenting fence syntax itself). That must not be mistaken for an
+    # active fence and swallow every real heading after it.
+    import tooling.generate_collapsed as g
+    body = (
+        "## Real heading\n\n"
+        "    some indented code\n"
+        "    ```not a fence, just indented text\n"
+        "    more indented code\n\n"
+        "## Another real heading\n\nx\n"
+    )
+    toc = g._toc_for_body(body)
+    assert "[Real heading](#real-heading)" in toc
+    assert "[Another real heading](#another-real-heading)" in toc
+
+
+def test_toc_for_body_skips_headings_inside_a_tilde_fenced_code_block():
+    # dees-bot review nit on PR #315: the docstring and _FENCE_OPEN_RE both
+    # claim ~~~-tilde fence support alongside backticks, but no test
+    # exercised it.
+    import tooling.generate_collapsed as g
+    body = (
+        "## Real heading\n\n"
+        "~~~markdown\n"
+        "## Quickstart\n"
+        "~~~\n\n"
+        "## Another real heading\n\nx\n"
+    )
+    toc = g._toc_for_body(body)
+    assert "[Real heading](#real-heading)" in toc
+    assert "[Another real heading](#another-real-heading)" in toc
+    assert "Quickstart" not in toc
+
+
+def test_toc_for_body_does_not_close_a_fence_on_a_mismatched_fence_character():
+    # dees-bot review nit on PR #315: closing a fence requires the *same*
+    # character as the opener (set(stripped) == {fence[0]}) — a run of the
+    # other fence character must not close it early.
+    import tooling.generate_collapsed as g
+    body = (
+        "## Real heading\n\n"
+        "```\n"
+        "## Quickstart\n"
+        "~~~~\n"
+        "still inside the fence\n"
+        "```\n\n"
+        "## Another real heading\n\nx\n"
+    )
+    toc = g._toc_for_body(body)
+    assert "[Real heading](#real-heading)" in toc
+    assert "[Another real heading](#another-real-heading)" in toc
+    assert "Quickstart" not in toc
+
+
 def test_generate_lens_bundle_writes_three_files(tmp_path):
     dest = generate_lens_bundle(_skill(), tmp_path, docs_root=".", skills_root="skills")
     assert (dest / "body.md").exists()
