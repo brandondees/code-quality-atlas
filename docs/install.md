@@ -182,6 +182,14 @@ For Claude Code, the plugin ships a `SessionStart` hook
 so the suite is used as designed without you having to name a skill first. On each
 session it injects one line of routing guidance into context.
 
+**Both plugin forms carry this hook (and the two below).** The collapsed plugin
+has its own copy at [`../collapsed/hooks/`](../collapsed/hooks/), auto-discovered
+the same way under its own plugin root — the only difference is `route.sh`'s
+message text, which names this form's 4 entrypoint skills (`reviewing-a-change`,
+`auditing-a-repository`, `reviewing-a-decision`, `reviewing-an-artifact`) instead
+of the standalone plugin's 43 skills, router, and `commands/`, none of which ship
+under `collapsed/`'s own source tree.
+
 This exists because, with 33+ skills, individual skill **descriptions** can be
 dropped from the model's skill listing (budgeted to ~1% of context, not re-injected
 after `/compact`), which makes the lenses easy to overlook on a plain "review this"
