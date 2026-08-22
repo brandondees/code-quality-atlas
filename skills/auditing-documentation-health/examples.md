@@ -69,8 +69,8 @@ diagrams/arch.png:   binary image, references services deleted in Q1
 
 **Input (raw files, not a pre-digested scan):**
 
-```markdown
-## Quickstart
+```text
+README, "Quickstart" section:
     from acme import Client
     c = Client(api_key="...")
     c.widgets.list(page=1)
