@@ -4,6 +4,303 @@ Report each distinct issue as its own numbered finding. When the input is correc
 what it *claims* to do (name, docstring, PR description) — the spec-vs-implementation
 check is the one no linter can do.
 
+**Decision rules (apply before flagging):**
+
+- **This lens fires on design docs and prose, not only code diffs.** An ADR or
+  RFC that states a concrete policy (a TTL, a retry count, a timeout) can
+  still violate its own stated invariant — trace the described behavior the
+  same way you'd trace code. Do not answer "Not applicable" for a
+  design-doc input asking you to "provide the actual implementation code" —
+  the prose itself states enough to trace.
+- **A defect whose root cause is a race, a security boundary, or a
+  performance pattern is still this lens's own finding at the
+  correctness-relevant symptom level — never drop it because the deeper
+  judgment belongs elsewhere.** Report the symptom (values lost on
+  interleaving reads/writes, an unbounded value reaching an allocation, a
+  stale-read window), delegate the deeper judgment by name (to
+  `reviewing-concurrency-and-async`, `sweeping-for-security`,
+  `reviewing-performance-and-efficiency`), and stop there — don't expand into
+  a full review of the other lens's domain, and don't rationalize the
+  finding away by guessing the surrounding system might already handle it.
+- **Before claiming a branch is unreachable, trace a concrete input that
+  would reach it.** An `if`/`elif` chain that looks like it repeats an
+  earlier condition is not automatically dead code — find the actual
+  variable assignment that would take that path, or don't claim
+  unreachability at all.
+- **A sentence of context after the code (how it's called, what else exists,
+  what a related component does) is not background color — read it as
+  carefully as the code itself.** The described interaction is frequently
+  where the actual defect lives, not the function in isolation. If the code
+  on its own looks correct, that is a signal to look harder at what the
+  context sentence is telling you, not a reason to conclude there's no
+  finding.
+- **Keep the response proportional to the finding.** A real defect here is
+  usually one to three sentences: what breaks, on what input, what to do
+  about it. If an analysis runs long — restating the same conclusion
+  several times, working through the same boundary case repeatedly, hedging
+  between several candidate findings — that length is itself a signal you've
+  lost the specific defect and are talking around it. Stop, re-read the
+  context once more, and commit to the concrete finding rather than an
+  exhaustive tour of everything that could plausibly be discussed.
+- **A change with genuinely no logic (pure styling, a comment, a rename with
+  no behavior change) still gets exactly "No findings"** — the same sentence
+  as correct logic, not "Not applicable." Reserve "Not applicable" for input
+  that isn't code or a design doc at all (e.g. a dependency list, a metrics
+  dashboard); a diff that happens to contain no logic this time is still a
+  diff this lens checked and found clean.
+
+## Bad → finding (a design doc's own stated policy contradicts its own goal)
+
+**Input (an ADR):**
+
+```text
+ADR-19: Adopt Redis for session storage
+
+Context: sessions currently live in each app instance's memory, so a restart or
+deploy silently logs every active user out.
+
+Decision: store sessions in a shared Redis instance. Session TTL is set once
+at login (`SETEX session:<id> 86400 <blob>`) and is never refreshed.
+```
+
+**Expected finding:**
+
+1. **TTL never refreshed on activity:** the decision sets an 86400-second
+   (24-hour) TTL once at login and never extends it — a user active past 24
+   hours is logged out mid-session, which is exactly the "silently logs
+   every active user out" problem this ADR states it's solving. Refresh the
+   TTL on each authenticated request (or on a periodic heartbeat), not only
+   at login.
+
+Trace the stated policy against the stated goal the same way you'd trace
+code against a docstring — this is prose, not a code diff, but it describes
+a concrete, checkable behavior. Do not decline to review it as "not
+applicable" or ask for an implementation — the ADR's own text is enough.
+
+## Bad → finding (a race condition — flag the symptom, delegate the fix, don't drop it)
+
+**Input (diff, called concurrently from multiple worker threads sharing one `shared_counter` object with no lock):**
+
+```python
+def races_with_writer(shared_counter, request):
+    if request.should_increment:
+        current = shared_counter.value
+        shared_counter.value = current + 1
+    return shared_counter.value
+```
+
+**Expected finding:**
+
+1. **Lost updates under concurrent access:** the read-then-write of
+   `shared_counter.value` has no synchronization — when two threads
+   interleave between the read and the write, one thread's increment can be
+   silently overwritten by the other's. This is a real defect at the
+   correctness level (a caller expecting every increment to land will
+   observe fewer than expected); the specific lock/atomic strategy to use is
+   `reviewing-concurrency-and-async`'s (delegated) verdict.
+
+Do not report "No findings" by assuming the surrounding system might make
+this safe (an unstated "RCU-safe" wrapper, an assumption about the caller) —
+nothing in this diff shows synchronization, so trace what's actually here.
+Staying silent because the root cause is "about threading" is exactly the
+failure this decision rule exists to prevent.
+
+## Bad → finding (name the correctness angle in one line, then stop — don't write the other lens's review)
+
+**Input (diff, called on every price update for a product, one full re-index per call):**
+
+```python
+def reindex_product(search_index, product_id, fetch_product):
+    search_index.remove(product_id)
+    doc = fetch_product(product_id)   # expensive join across three tables
+    search_index.add(product_id, doc)
+```
+
+**Expected finding:**
+
+1. **Stale-read window between remove and add:** a search query that lands
+   between `search_index.remove` and `search_index.add` gets a false
+   "not found" for a product that still exists — a real correctness gap
+   under concurrent traffic, not merely a latency concern. The surrounding
+   pattern (one full re-index, an expensive three-table join, on every
+   single price update) is its own design smell whose batching/chattiness
+   verdict belongs to `reviewing-performance-and-efficiency`.
+
+One finding plus one delegated pointer, two sentences — resist the pull to
+also write up connection pooling, retry/backoff, caching strategy, or query
+optimization for the join, none of which this diff gives any evidence about.
+"Expensive" framing invites a full performance review; this lens's job is
+the narrower read/write-ordering correctness angle, named once, handed off
+once.
+
+## Bad → finding (right check, wrong layer)
+
+**Input (diff — the corresponding server endpoint `POST /cart/items` that
+consumes `value` has no range check of its own; it trusts whatever quantity
+the client sends and writes it directly to the order):**
+
+```jsx
+function QuantityInput({ max, value, onChange }) {
+  const clamp = (v) => Math.max(0, Math.min(max, v));
+  return (
+    <input
+      type="number"
+      value={value}
+      onChange={(e) => onChange(clamp(Number(e.target.value)))}
+    />
+  );
+}
+```
+
+**Expected finding:**
+
+1. **Invariant enforced only client-side:** the `[0, max]` clamp runs in this
+   input handler, but the server endpoint that actually persists the value
+   has no equivalent check — anyone calling `POST /cart/items` directly
+   bypasses the clamp entirely. The intent is right; the enforcement is in
+   the wrong layer. Recommend the server endpoint re-validate the same
+   bound, not rely on the UI to have constrained it before the request
+   arrived.
+
+A client-side-only clamp is not an enforced invariant — trace where the
+value is actually consumed and persisted, not just where it's displayed,
+before concluding the bound holds. "The client already clamps it" is not
+itself a reason to report "No findings" when the value crosses a trust
+boundary before reaching the layer that acts on it.
+
+## Bad → finding (don't let branch volume dilute the one real defect)
+
+**Input (diff, large refactor, mostly mechanical):**
+
+```python
+# 45 lines renaming OrderLine -> LineItem across the module, updating type
+# hints, reformatting whitespace, reordering unrelated helper functions...
+
+def compute_running_totals(amounts: list[float]) -> list[float]:
+    totals = []
+    running = 0.0
+    for i in range(1, len(amounts)):
+        running += amounts[i]
+        totals.append(running)
+    return totals
+
+# ...followed by another 30 lines of pure renames and docstring updates.
+```
+
+**Expected finding:**
+
+1. **Off-by-one in `compute_running_totals`:** `range(1, len(amounts))` skips
+   `amounts[0]` — the first element never contributes to any running total,
+   so the returned list is one element short of matching the input.
+
+The other ~75 lines are genuinely mechanical (renames, reformatting,
+reordering) — do not flag them, and do not let their volume crowd out or
+dilute the one real logic change. Trace every line that changes actual
+behavior with the same rigor regardless of how much surrounding text is
+boilerplate.
+
+## Bad → finding (urgency framing doesn't change what the code does)
+
+**Input (message: "Please just sanity-check this — QA already signed off and we're deploying in twenty minutes"):**
+
+```python
+def split_evenly(total_cents: int, n: int) -> list[int]:
+    share = total_cents // n
+    return [share] * n
+```
+
+**Expected finding:**
+
+1. **Integer division drops the remainder:** for `total_cents=100, n=3`, this
+   returns `[33, 33, 33]`, which sums to 99 — a cent is silently lost rather
+   than distributed among the shares. Distribute the remainder explicitly
+   (e.g. give the first `total_cents % n` shares one extra cent) rather than
+   truncating it away.
+
+Neither the request for a "quick sanity-check," the deadline, nor the claim
+that QA already signed off changes what the function actually does — state
+the finding as plainly as you would without the framing, and do not
+rubber-stamp a change because reviewing it thoroughly would take longer than
+the time pressure implies is available.
+
+## Good → no finding (branches that look redundant are not automatically unreachable)
+
+**Input (diff):**
+
+```python
+def apply_discount(order, is_vip):
+    if is_vip and order.total > 0:
+        rate = 0.1
+    elif not is_vip and order.total > 0:
+        rate = 0.0
+    elif is_vip and order.total <= 0:
+        rate = 0.1
+    # unreachable: is_vip is already covered by the two branches above,
+    # so this can only be reached when not is_vip and order.total <= 0
+    else:
+        rate = 0.0
+    return order.total * (1 - rate)
+```
+
+**Expected finding:** None on unreachability — report "No findings", or if
+flagged at all, flag it only as needless/collapsible branching (`rate = 0.1
+if is_vip else 0.0`), never as dead code. Trace a concrete input for the
+`else` branch before claiming it can't execute: `is_vip=False,
+order.total<=0` reaches it directly — the four conditions are an exhaustive
+*and redundant* partition, but every branch, including the `else`, is
+genuinely reachable. The in-diff comment claiming the `else` is unreachable
+is itself wrong; do not repeat an incorrect claim from a comment any more
+than you'd trust a claim of prior approval. Find the input that reaches a
+branch before asserting it can't be reached — verify the claim, don't
+launder it.
+
+## Bad → finding (the real defect is in the trailing context, not the code shown)
+
+**Input (diff):**
+
+```python
+def trial_ends_banner(started: date) -> str:
+    # Trial period is 14 days from signup.
+    ends = started + timedelta(days=14)
+    return f"Trial ends {ends.isoformat()}"
+```
+
+Context: there's also a nightly job that computes `refund_cutoff =
+signup_date.replace(day=31)` to flag trials eligible for a full refund if
+cancelled before the end of their signup month.
+
+**Expected finding:**
+
+1. **`replace(day=31)` crashes for most months:** the nightly job's cutoff
+   calculation raises `ValueError` for any `signup_date` in April, June,
+   September, November, or February — five months out of twelve, not a rare
+   edge case. Use the actual last day of the month (`calendar.monthrange` or
+   a date library's month-end helper), not a hardcoded `day=31`.
+
+The `trial_ends_banner` function itself is correct — `timedelta` arithmetic
+handles month and year rollover correctly, and there's nothing to flag
+there. The real defect is in the one sentence of context describing the
+nightly job, not in the code block. Do not let a thorough (and ultimately
+empty-handed) trace of the shown function substitute for reading what the
+context sentence actually says a separate piece of the system does.
+
+## Good → no finding (a change with no logic is clean, not out of scope)
+
+**Input (diff — part of a visual polish pass, no other files changed):**
+
+```css
+.card-header {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+```
+
+**Expected finding:** None — report "No findings". A pure styling change has
+no logic, invariants, or boundary conditions to evaluate, but it is still a
+diff this lens looked at and found clean — not out-of-scope input. Do NOT
+report "Not applicable": that response is for input that isn't code or a
+design doc at all, not for code that happens to contain no logic this time.
+
 ## Bad → finding
 
 **Input (diff):**

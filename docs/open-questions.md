@@ -137,8 +137,19 @@ license names that appear nowhere in the scan, not just misreading ones that
 do, on 4 of the 8 misses); **wave 3 continued 2026-08-17 with
 `reviewing-pr-and-process-hygiene`** (6 → 31, the widest scope-to-coverage gap
 yet in the wave — 29 checks across two full categories on 6 baseline
-scenarios, highest `eval_min` in the suite; cross-model re-gate deferred, no
-Ollama in this container; see session-log for the A-E breakdown and an
+scenarios, highest `eval_min` in the suite. **Cross-model re-gate: resolved
+2026-08-20 — 18/27 recall, 4/4 precision.** See the 2026-08-20 (fifteenth
+follow-up) session-log entry: two claims-vs-evidence scenarios testing a
+"pure refactor / no behavior change" claim against a smuggled real change
+(a new dependency; a silently-flipped soft-delete filter default) both
+return flat "No findings," accepting the false claim outright. One scenario
+directly violates an explicit "do not fault the size here" instruction
+rather than merely missing a finding. Two scenarios drop one half of a
+two-part finding (an unrequested-scope "no more" half; a second,
+equally-required stale-doc gap). One scenario drops the single most
+specific, most important part of a multi-part claim (a conditional
+operator smuggled inside a "pure refactor"). Every other adversarial-
+pressure scenario held. See session-log for the A-E breakdown and an
 initial-pass miscount of the checklist caught and corrected before shipping);
 **wave 3 continued the same day with `reviewing-ai-authored-code`** (4 → 20 —
 18 owned checks on 4 baseline scenarios, the widest remaining gap once
@@ -146,8 +157,18 @@ initial-pass miscount of the checklist caught and corrected before shipping);
 B-axis sweep of the 9 checks it shares with the already-hardened
 `auditing-dependencies-and-supply-chain` per G1's single-owner principle,
 concentrating instead on this lens's own AI-authorship-signature territory
-and its unusually large six-target delegate surface; cross-model re-gate
-deferred, no Ollama in this container; see session-log for the A-E
+and its unusually large six-target delegate surface. **Cross-model
+re-gate: resolved 2026-08-20 — 12/16 recall, 4/4 precision.** See the
+2026-08-20 (sixth follow-up) session-log entry: two complete blanks on
+the suite's own adversarial traps (scenario 12's inverted permission
+check missed despite no framing pressure at all; scenario 15's "ship
+today... rubber-stamp" framing suppressing the public-read-write S3
+ACL finding), a dropped `reviewing-test-quality` handoff on an
+otherwise-correct catch (scenario 10), and a template misapplied
+wholesale — a fabricated issue-tracker citation (scenario 7) diagnosed
+as a package/slopsquat risk and routed to
+`auditing-dependencies-and-supply-chain`, a lens with nothing to do
+with the actual defect. See session-log for the A-E
 breakdown and a factual claim about a real AWS S3 canned ACL value caught
 and corrected during authoring, before shipping); **wave 3 continued
 2026-08-18 with `reviewing-observability-and-operability`** (3 → 20 —
@@ -159,17 +180,40 @@ scenario unlike the diff-only lenses hardened earlier in the wave;
 cross-model re-gate deferred, no Ollama in this container; see
 session-log for the A-E breakdown and its three delegate scenarios,
 each grounded in a documented ownership boundary — two in
-`map-gaps.md`'s G1 table, one in a target lens's own documented scope);
-**wave 3 continued the same day with `reviewing-api-contract-safety`**
+`map-gaps.md`'s G1 table, one in a target lens's own documented scope).
+**Cross-model re-gate: resolved 2026-08-20 — 11/16 recall, 4/4
+precision.** See the 2026-08-20 (fourteenth follow-up) session-log
+entry: three delegate scenarios self-adjudicate instead of routing
+(10 never mentions auditing-compliance-and-provenance; 11 and 12 both
+give their own specific fixes instead of routing to
+auditing-config-and-build-hygiene and
+auditing-enforcement-and-meta-artifacts respectively), one scenario
+drops a third, separately-named required finding (2's missing purge
+metric), and one is a sharp misdiagnosis via template reuse — scenario
+9's already-correctly-structured log line gets scenario 1's
+"unstructured, ungreppable log" finding text reused almost verbatim,
+missing the real hot-loop-volume defect entirely. Every
+adversarial-pressure scenario held, and precision was perfect (4/4).
+See session-log for the full breakdown); **wave 3 continued the same day with `reviewing-api-contract-safety`**
 (3 → 20 — tied for the widest remaining gap, picked over its ties as
 this campaign's own most frequently cited foundational lens rather than
 by a topical tie-breaker; `design: true`, A-group included; its three
 delegate scenarios are grounded in the lens's own heuristics
 cross-references — cross #3, #8, #2 — to reviewing-concurrency-and-async,
 checking-idioms-and-consistency, and hunting-silent-failures
-respectively; cross-model re-gate deferred, no Ollama in this container;
-see session-log for the full A-E breakdown) **and again the same day
-with `auditing-architecture-conformance`** (3 → 20 — one of the
+respectively. **Cross-model re-gate: resolved 2026-08-20 — 10/15 recall,
+4/5 precision.** See the 2026-08-20 (third follow-up) session-log entry:
+all three C-group delegate scenarios drop the routing half even with the
+owned finding caught (scenario 9 adjudicates a race it should route to
+`reviewing-concurrency-and-async`; scenario 10 recommends its own fix
+instead of routing to `checking-idioms-and-consistency`; scenario 11 never
+routes its robustness-nuance finding to `hunting-silent-failures`), two
+partial catches each missing one of two co-equal named findings (scenarios 1, 5),
+and a false-positive precision failure fabricating a breaking change on a
+textbook-correct field deprecation (scenario 17). Three adversarial-claim
+defenses held (scenarios 12, 15, 16) and a distractor-buried breaking
+rename was found among eight non-breaking changes (scenario 13).) **and
+again the same day with `auditing-architecture-conformance`** (3 → 20 — one of the
 four-way tie this wave opened with; picked over its tied peer
 `auditing-infrastructure-as-code` since its defects don't require
 fabricating cloud-provider specifics, lower risk on this campaign's
@@ -184,10 +228,18 @@ and reviewing-concurrency-and-async / reviewing-performance-and-efficiency
 respectively; **CodeRabbit caught two real issues pre-merge** — an
 arrow-chain rule notation that literally implied the flagged edge was
 allowed, and two precision scenarios not requiring this lens's own exact
-documented no-finding sentence — both fixed same-PR (#256); cross-model
-re-gate deferred, no Ollama in this container; see session-log for the
-full A-E breakdown) **and again the same day with
-`auditing-infrastructure-as-code`** (3 → 20 — the last of the four-way
+documented no-finding sentence — both fixed same-PR (#256). **Cross-model
+re-gate: resolved 2026-08-20 — 9/16 recall, 4/4 precision.** See the
+2026-08-20 (second follow-up) session-log entry: a cycle mischaracterized as
+two different, both-incorrect
+non-cycle violations (scenario 5), a response that correctly identifies
+three real violations then contradicts itself with a closing "No findings:
+conforms" line (scenario 7), two failures of the lens's own "don't trust a
+green tool result" check (scenarios 8, 17), and a not-applicable
+misclassification on a scenario that actually required deriving a finding
+from non-import data (scenario 10). Precision held perfectly (4/4),
+including an exact-match not-applicable response.) **and again the same
+day with `auditing-infrastructure-as-code`** (3 → 20 — the last of the four-way
 tie, closing it; repo-shaped, its A group supplies a raw `.tf` file and
 raw Kubernetes YAML rather than a pre-digested scan; its three delegate
 scenarios are grounded in the lens's own heuristics cross-references —
@@ -205,9 +257,20 @@ tracks; CodeRabbit's independent review then caught a real Terraform
 syntax error in the rewritten module (a `ref` argument instead of the
 `?ref=` query-string form git-sourced modules actually use to pin,
 leaving it effectively unpinned) plus the "D-group" mislabeling above,
-both fixed same-PR; cross-model re-gate deferred, no Ollama in this
-container; see session-log for the
-full A-E breakdown and the rewrite details). **This closes wave 3's
+both fixed same-PR; see session-log for the
+full A-E breakdown and the rewrite details. **Cross-model re-gate:
+resolved 2026-08-20 — 8/15 recall, 4/5 precision.** See the 2026-08-20
+(eighteenth follow-up) session-log entry: an outright fabrication that
+inverts a stated fact (scenario 10 calls a version-pinned module "not
+pinned by version"), two scenarios dropping half or more of a
+multi-part finding (5, 7), two dropped required routings to a sibling
+lens on otherwise-caught findings (9, 11), one verbatim-reused remedy
+that's technically wrong for the actual defect (16, an RDS
+`publicly_accessible` flag "fixed" by a security-group ingress change
+copied from a different scenario), a genuinely correct catch buried
+under a flat self-contradicting "No findings" closer (13), and a
+finding-shaped-header precision failure on a well-formed suppression
+(19).) **This closes wave 3's
 original four-way tie** — the next preference-tier pick needs a fresh
 scope-to-coverage recompute rather than an existing tie; **wave 3 continued
 the same day with `reviewing-resilience-and-scalability`**, picked by direct
@@ -217,9 +280,21 @@ user request rather than a recomputed tie (6 → 23 — 13 owned checks against
 delegate scenarios are grounded in the lens's own heuristics
 cross-references — cross #3, #16, #26 — to reviewing-concurrency-and-async,
 reviewing-observability-and-operability, and
-auditing-config-and-build-hygiene respectively; cross-model re-gate
-deferred, no Ollama in this container; see session-log for the full A-E
-breakdown); **wave 3 continued with a fresh scope-to-coverage recompute,
+auditing-config-and-build-hygiene respectively; see session-log for
+the full A-E breakdown. **Cross-model re-gate: resolved 2026-08-20 —
+12/18 recall, 5/5 precision.** See the 2026-08-20 (nineteenth
+follow-up) session-log entry: a severe content-bleed (scenario 14's
+response is scenario 5's verbatim, discussing an attacker and a
+fraud-scoring check that don't exist in scenario 14's actual query),
+two scenarios mislabeled "single-writer bottleneck" — the category
+`expected_behavior` explicitly rules out — applied to a fairness/
+isolation gap (10) and a correctly-functioning per-tenant limit whose
+real issue is config lifecycle (15), and three scenarios reciting the
+lens's full nine-item checklist mechanically, burying a correct catch
+under a fabricated finding (9), a mislabeled and unrouted catch closing
+with "Expected finding: None" (13), and a real catch immediately
+contradicted by a flat "No findings" closer (19). Precision held
+perfectly (5/5).); **wave 3 continued with a fresh scope-to-coverage recompute,
 picking `auditing-enforcement-and-meta-artifacts`** (4 → 20 — tied with
 `reviewing-decision-lifecycle` at the widest remaining gap, 10 owned
 checks against 4 baseline scenarios each; picked over its tie for being
@@ -236,9 +311,22 @@ injection → sweeping-for-security (#14), a healthy codegen-freshness
 gate over a breaking unversioned spec change → reviewing-api-contract-
 safety (#13), a correctly-marked vendored dependency over a reported
 CVE → auditing-dependencies-and-supply-chain (#18, per G1's documented
-"#18 deps, #30 codegen" split); cross-model re-gate deferred, no Ollama
-in this container; see session-log for the full A-E breakdown); **wave 3
-continued with `reviewing-decision-lifecycle`** (4 → 18 — its earlier
+"#18 deps, #30 codegen" split); see session-log for the full A-E
+breakdown. **Cross-model re-gate: resolved 2026-08-20 — 9/15 recall,
+5/5 precision.** See the 2026-08-20 (twentieth follow-up) session-log
+entry: a severe template-reuse that contradicts the given facts
+(scenario 8's runbook-linked, well-formed-except-for-`for:` alert gets
+the "no runbook" boilerplate verbatim from two genuinely runbookless
+scenarios), a response dropping two of three named suppression
+instances while also garbling the given baseline numbers (1), a
+correctly-caught surface defect missing both of its required judgment
+calls (7), and all three of this lens's own delegate scenarios missing
+their required routing — the SQL-injection-under-a-justified-
+suppression case graded "valid" outright (9), the breaking-spec-change
+case verdicted clean via a self-contradicting "Finding:.../No
+findings" header (10), and the CVE'd vendored dependency adjudicated
+directly instead of routed (11). Precision held perfectly (5/5).);
+**wave 3 continued with `reviewing-decision-lifecycle`** (4 → 18 — its earlier
 tie partner now hardened, leaving it alone at the widest remaining gap,
 10 owned checks against 4 baseline scenarios; `shape: decision`, which
 turned out to need no separate A-group input-shape gap since every
@@ -249,8 +337,23 @@ contract-safety, and auditing-compliance-and-provenance respectively;
 **this repo's own automated atlas-review routine, watching its own PR,
 caught a real not-applicable-vs-no-findings inconsistency between two
 E-group scenarios testing the same "no decision content" case on
-different input shapes — fixed same-PR**; cross-model re-gate deferred,
-no Ollama in this container; see session-log for the full breakdown);
+different input shapes — fixed same-PR**. **Cross-model re-gate:
+resolved 2026-08-20 — 6/13 recall, 3/5 precision.** See the 2026-08-20
+(sixteenth follow-up) session-log entry: a single "unjustified
+adoption, no exit" template recurs verbatim across seven of thirteen
+defect scenarios, correct on three but wrong or incomplete on four —
+twice ignoring a switching-cost estimate the query explicitly states
+(6, 9), once contradicting a well-formed ADR's own described content
+(7), once missing a required right-sizing cross-link to
+checking-restraint (1). A different confirmed-correct template
+(scenario 3's clean deprecation-plan write-up) gets reused verbatim on
+scenario 8, missing that scenario's silently-changed financial field
+and its required routing to reviewing-api-contract-safety. One
+scenario misses the specific claim-verification test underneath an
+otherwise-correct finding (5). Two precision failures: a format
+substitution ("No findings" for the required "Not applicable:") and
+an unwarranted demand for more evidence on a decision that already
+clears both of this lens's checks. See session-log for the full breakdown);
 **wave 3 continued with `reviewing-agentic-safety`** (4 → 22 — a
 three-way tie at the widest remaining gap with
 `reviewing-agent-legibility` and `reviewing-ethical-design`, all 9
@@ -261,8 +364,23 @@ includes an A group; its three delegate scenarios are grounded in the
 lens's own documented cross-references — the trifecta-framing/
 mitigation split, "cross #16", and "the tool contract to #13" — to
 reviewing-llm-integration, reviewing-observability-and-operability,
-and reviewing-api-contract-safety respectively; cross-model re-gate
-deferred, no Ollama in this container; see session-log for the full
+and reviewing-api-contract-safety respectively. **Cross-model re-gate:
+resolved 2026-08-20 — 12/17 recall, 3/5 precision.** See the 2026-08-20
+(fourth follow-up) session-log entry: all three C-group delegate
+scenarios missed, each a different shape (dropped second finding and
+inverted routing direction on scenario 11; ownership claimed instead of
+routed on scenario 12; a fabricated least-privilege violation replacing
+the real finding entirely on scenario 13), plus a fourth mis-routing
+failure on scenario 8 (a defect this lens owns outright, deflected to
+`sweeping-for-security` with no delegate framing in the query), a
+fifth recall miss on scenario 17 (the real hazard is caught, but a
+fabricated finding on an unrelated cosmetic hunk also gets reported,
+missing the requirement not to be distracted), and two precision
+failures — scenario 20 fabricates a finding on a memory write the
+query shows is already validated, provenance-tagged, and expiring,
+and scenario 22 opens with a finding-shaped header before its own
+body concedes the pinned, validated MCP server needs no scrutiny;
+see session-log for the full
 breakdown); **wave 3 continued with `reviewing-agent-legibility`**
 (4 → 21 — a two-way tie at the widest remaining gap with
 `reviewing-ethical-design`, both 9 owned checks against 4 baseline
@@ -273,8 +391,23 @@ grounded in the lens's own heuristics.md cross-references — the
 "why-not-what" #7 boundary, "xref #21" change-amplification, and #22
 doc-drift — to reviewing-naming-and-readability, finding-
 maintainability-hotspots, and auditing-documentation-health (#22's
-documented primary owner) respectively; cross-model re-gate deferred,
-no Ollama in this container; see session-log for the full breakdown);
+documented primary owner) respectively. **Cross-model re-gate:
+resolved 2026-08-20 — 9/16 recall, 5/5 precision.** See the 2026-08-20
+(seventh follow-up) session-log entry: three complete blanks on core
+checks (6's constant-with-no-local-rationale, 10's what-vs-why comment
+distinction, 13 falling for a "no context needed, fully
+self-explanatory" suppression comment), three scenarios wrongly
+dismissed as "Not applicable" when squarely in scope (8's missing
+do-not-touch guardrail on a new generated directory, 9's missing
+llms.txt-style index on a README that markets AI-assistant
+consumption, 12's cross-document contradiction between an
+otherwise-accurate AGENTS.md and README.md), and a wrong-lens routing
+(11 routes the repo-wide duplication pattern to
+checking-idioms-and-consistency instead of the named
+finding-maintainability-hotspots). Every adversarial-pressure scenario
+held (14's unverifiable "already updated elsewhere" claim, 15's
+deadline framing, 16's cosmetic-hunk distraction). See session-log for
+the full breakdown);
 **wave 3 continued with `reviewing-ethical-design`** (4 → 21 — its
 earlier tie partner now hardened, leaving it alone at the widest
 remaining gap, 9 owned checks against 4 baseline scenarios; its three
@@ -284,8 +417,23 @@ consent-as-law/#27 boundary applied to a distinct regulatory facet
 (under-13 age-gating) than the 4 originals already exercise, and a
 second, distinct a11y-mechanics instance (contrast vs. keyboard
 operability) — to sweeping-for-security, auditing-compliance-and-
-provenance, and reviewing-accessibility-and-i18n respectively;
-cross-model re-gate deferred, no Ollama in this container; see
+provenance, and reviewing-accessibility-and-i18n respectively.
+**Cross-model re-gate: resolved 2026-08-20 — 9/16 recall, 4/5
+precision.** See the 2026-08-20 (eighth follow-up) session-log entry:
+a "manipulative default" finding gets recited verbatim on three
+scenarios (1, 6, 13) regardless of fit — correct on 1 and 13, but
+misapplied on 6, where the actual defect is the distinctly-named
+**consent theater** category (a correctly-recorded preference the send
+path never checks), and the same template also misfires on 7 (mislabeled,
+a nonsensical GDPR routing) — then goes missing entirely on 16, the
+suite's own cosmetic-hunk trap hiding the identical default pattern
+the model recites unprompted elsewhere in the same run. Two complete
+blanks on this lens's own vulnerable-user and security-boundary checks
+(10's CSRF-vulnerable confirmation link, 11's missing age-gate on a
+collected birthdate). Two accessibility-as-exclusion scenarios split on
+one distinguishing requirement — 9 caught, 12 missing the "both
+controls are structurally accessible" distinction from 9's different
+defect type. Every adversarial-pressure scenario held. See
 session-log for the full breakdown); **wave 3 continued with
 `auditing-decision-record-currency`** (5 → 20 — the widest gap among
 the 9 remaining lenses that fit the established shape:diff/repo A-E
@@ -299,9 +447,19 @@ closing heuristic ("escalate the judgment call... route to the
 decision's owner") — two fresh revisit-trigger/EOL instances to
 reviewing-decision-lifecycle (#29, its documented pairing partner) and
 one archive-index-drift instance to auditing-documentation-health
-(#22, the discoverability analog); cross-model re-gate deferred, no
-Ollama in this container; see session-log for the full breakdown);
-**wave 3 continued with `reviewing-interoperability`** (4 → 21 — the
+(#22, the discoverability analog). **Cross-model re-gate: resolved
+2026-08-20 — 7/15 recall, 4/5 precision.** See the 2026-08-20
+(seventeenth follow-up) session-log entry: three complete blanks (a
+status-graph contradiction, a silent supersession, and a real finding
+lost among eight records), a dropped second finding riding alongside a
+correctly-caught orphaned record, a real-but-unverifiable revisit
+trigger wrongly called clean, a certainty-overstating "EOL or on Hold"
+conflation, an incomplete duplicate-ID finding missing its required
+routing, a missed adversarial claim-verification check (accepting a
+record's own "reviewed and reconfirmed" note at face value), and a
+precision failure reusing a genuinely-correct "stalled proposed
+record" template on a two-week-old proposal still in active
+discussion; **wave 3 continued with `reviewing-interoperability`** (4 → 21 — the
 widest gap among the 8 lenses remaining after the recompute corrected
 an off-by-one in the running tally (8 owned checks against 4 baseline
 scenarios); `shape: diff`, not design-capable, so no A group; its
@@ -313,8 +471,27 @@ reviewing-api-contract-safety (#13), a correctly RFC-3339-formatted
 timestamp whose wall-clock duration measurement routes to
 tracing-correctness-and-invariants (#4), a hardcoded-port co-existence
 finding whose configuration-practice verdict routes to
-auditing-config-and-build-hygiene (#26); cross-model re-gate deferred,
-no Ollama in this container; see session-log for the full breakdown);
+auditing-config-and-build-hygiene (#26); see session-log for the full
+breakdown. **Cross-model re-gate: resolved 2026-08-20 — 8/16 recall,
+4/5 precision.** See the 2026-08-20 (twenty-first follow-up)
+session-log entry: three scenarios get an identical, nonsensical
+"route to sweeping-for-security (#14)" clause tacked onto findings
+that have nothing to do with security — a habit picked up from the two
+scenarios where that routing genuinely fits — including one (scenario
+10) that invents a SemVer violation on a change that was *already*
+correctly major-bumped, missing the actual required field-ambiguity
+finding entirely; two scenarios reuse the RFC 3339 "space separator,
+no offset" template on code whose timestamp formatting is already
+correct, missing the real defects underneath (a non-IANA timezone
+label, a non-BCP-47 locale tag, and a wall-clock duration measurement
+that should route to #4); one correct catch is undercut by a
+fabricated RFC 4180 quoting claim that contradicts its own required
+distinguishing point; a real PUT-idempotency violation buried among
+five cosmetic hunks got a complete blank; and the sole precision
+failure reuses a hardcoded-port template on a port that's actually
+externally configurable via an environment variable. **This closes the
+Q21 preference-tier cross-model re-gate backlog** — every lens left
+deferred from the wave-3 hardening pass now has a recorded result.);
 **wave 3 continued with `reviewing-data-transformations-and-contracts`**
 (12 → 28 — explicitly deferred to this exact campaign at its G17 build
 time rather than picked purely by widest-gap; `design: true`, so this
@@ -323,9 +500,23 @@ shared decision-record checklist); its three delegate scenarios route
 to reviewing-api-contract-safety (#13, named in the lens's own
 description but not yet exercised), and fresh second instances of
 reviewing-migration-and-data-safety (#20) and
-auditing-compliance-and-provenance (#27); cross-model re-gate deferred,
-no Ollama in this container; see session-log for the full breakdown);
-**wave 3 continued with `auditing-data-pipeline-health`** (12 → 25 —
+auditing-compliance-and-provenance (#27). **Cross-model re-gate:
+resolved 2026-08-20 — 9/22 recall, 4/6 precision.** See the 2026-08-20
+(twelfth follow-up) session-log entry: the dominant failure is a
+"not applicable" template misapplied to five separate pipeline/
+data-plane scenarios squarely in scope (6, 9, 13, 18, 19 — including
+one that self-contradicts within its own sentence, "adds a new SQL
+model but does not touch any SQL"), plus a second, separate canned
+"data-diff is exactly the evidence" positive-verdict template that
+bleeds from its one genuine origin (11) into four scenarios where no
+data-diff was ever mentioned (15, 23, 25, 27 — two of them real misses,
+two clean scenarios reaching the right verdict for a fabricated
+reason). Two more complete blanks on textbook incremental-model
+patterns (4, and 20's adversarial version, which explicitly notes "No
+unique_key is configured" before wrongly excusing it). Two delegate
+scenarios drop the required routing (17 never names #13; 5 fabricates
+a uniqueness test the query never states exists). See session-log for
+the full breakdown); **wave 3 continued with `auditing-data-pipeline-health`** (12 → 25 —
 the scheduled repo-audit companion to the lens just hardened, same G17
 build; picked as the closest sibling in shape rather than by an
 explicit deferral note (a round-1 atlas-review finding on the prior PR
@@ -338,9 +529,26 @@ delegate scenarios route to auditing-compliance-and-provenance (#27,
 a dedicated PII-inventory scenario distinct from the kept baseline's
 combined stale-ownership case), reviewing-test-quality (#17, named in
 this lens's own heuristics but never yet exercised), and a fresh
-instance of reviewing-migration-and-data-safety (#20); cross-model
-re-gate deferred, no Ollama in this container; see session-log for the
-full breakdown); **wave 3 continued with
+instance of reviewing-migration-and-data-safety (#20). **Cross-model
+re-gate: resolved 2026-08-20 — 13/20 recall, 3/5 precision.** See the
+2026-08-20 (thirteenth follow-up) session-log entry: two scenarios
+drop a distinct, separately-named finding while catching another in
+the same audit (3 misses the sharper of two freshness-config defects
+plus its required delegations; 5 misses that 3 of 7 registry subjects
+are set to `NONE`). Two delegate scenarios drop the required routing
+and one fabricates a lens name that doesn't exist — `reviewing-data-
+classification-and-retention (#17)` in place of the actual
+`reviewing-test-quality` (16). One scenario softens a required "do not
+recommend X" instruction into an either/or (4). One trend scenario
+gets the headline direction right but drops both of its sharper,
+specifically-required points (10). Two precision failures, two
+different mechanisms: 25 reuses another scenario's confirmed-correct
+template almost verbatim, asserting a `datacontract test` job and
+contracts the query explicitly says don't exist; 24 wraps a clean
+result in a self-generated "Findings:"/`severity: None` wrapper, the
+same finding-shaped-header confusion seen on two other lenses earlier
+this session, not borrowed content. See
+session-log for the full breakdown); **wave 3 continued with
 `reviewing-outcome-instrumentation`** (10 → 23 — widest gap among the
 lenses fitting the established pattern (11 owned checks against 10
 baseline scenarios), though the baseline was unusually rich already;
@@ -352,8 +560,23 @@ properties instance), reviewing-ethical-design (#36, a second Goodhart/
 proxy instance distinct from the kept baseline's autoplay case), and
 reviewing-data-transformations-and-contracts (#40, a breaking event
 rename mid-measurement, distinct from the kept baseline's simple new-
-event case); cross-model re-gate deferred, no Ollama in this container;
-see session-log for the full breakdown); **wave 3 continued with
+event case). **Cross-model re-gate: resolved 2026-08-20 — 12/19
+recall, 3/4 precision.** See the 2026-08-20 (tenth follow-up)
+session-log entry: a Goodhart-problem template fires correctly twice
+(5, 14) then misapplies twice more — once to an actual PII-in-event
+scenario (13, missing the #27 routing entirely) and once to a
+guardrails-deferred-under-pressure scenario (18, missing the
+guardrails finding entirely); the same pattern recurs with a
+"not applicable" template, correct on a genuine internal refactor (6)
+but misapplied to a scenario built to test exactly that mistake (19,
+five cosmetic files hiding one real instrumentation gap). One complete
+blank (8's tracking-plan conformance check) and one confidently wrong
+"yes" on a falsifiability question that should be no (9). One false
+positive reusing a neighboring scenario's diagnosis without checking
+it applies (21). Two scenarios drop the outcome-instrumentation-
+specific angle for a generic finding (11's decision-record
+alternatives-weighing gap; 15's event-rename recommendation pointing
+the wrong direction). See session-log for the full breakdown); **wave 3 continued with
 `reviewing-conceptual-integrity`** (10 → 22 — tied with
 `reviewing-usability-and-interaction` on raw scope (9 owned checks / 10
 baseline scenarios each); broke the tie on what was actually still
@@ -363,9 +586,92 @@ unexercised, and offered richer unused delegate grounding
 (reviewing-module-design, checking-idioms-and-consistency, a second
 checking-restraint instance) than usability's two already-exercised
 cross-refs; usability is now the clean next pick with a single,
-well-defined gap (no A-group scenario despite being design-capable);
-cross-model re-gate deferred, no Ollama in this container; see
-session-log for the full breakdown);
+well-defined gap (no A-group scenario despite being design-capable).
+**Cross-model re-gate: resolved 2026-08-20 — 7/16 recall, 4/6
+precision.** See the 2026-08-20 (eleventh follow-up) session-log
+entry: the sharpest single failure is a content-bleed, not a wrong
+judgment — scenario 9 (adding sharing to Reports, expected "No
+findings") gets a Major-defect response about deleting a different
+resource and orphaned rows, verbatim scenario 2's subject matter.
+A CLI-flag-accretion template correctly fires once (3) then bleeds
+leftover CLI-specific phrasing (`` `--help` will list both ``) into
+two non-CLI scenarios (10, 17). Scenario 7 skips the bounded-context
+counterweight entirely, reporting a same-word collision as a finding
+without checking whether the two meanings ever meet on a surface a
+user sees. Two adversarial design-doc scenarios (8, 19) and two more
+standard-pattern scenarios (13, 18) are complete blanks. Two precision
+failures: scenario 9's content-bleed (above) counts as one; scenario
+21 additionally contradicts its own stated reasoning in the same
+sentence. See
+session-log for the full breakdown); **wave 3 continued with
+`reviewing-usability-and-interaction`** (10 → 22 — the clean pick left
+from that tie; the baseline already covered all 9 checklist bullets,
+so this pass added only the missing A-group scenario plus the
+standard C/D/E groups; its three delegate scenarios route to
+reviewing-accessibility-and-i18n (#23, named in the lens's own
+description but never yet exercised), reviewing-performance-and-
+efficiency (#15, a second instance distinct from the kept baseline's
+upload-progress case), and reviewing-ethical-design (#36, a second
+instance distinct from the kept baseline's undismissable-modal case).
+**Cross-model re-gate: resolved 2026-08-20 — 8/18 recall, 3/4
+precision.** See the 2026-08-20 (ninth follow-up) session-log entry:
+two scenarios agree with the exact false premise they're built to
+correct (6 accepts "a CLI doesn't need usability review" outright; 7
+accepts "intentional, don't want abandonment" as a reason to withhold
+a controllability finding), four complete blanks on core checks (1's
+unhandled states, 10's recognition-over-recall, 16's suppression
+comment, 18's bulk-delete buried among cosmetic files), two dropped
+routing halves in opposite directions (13 self-adjudicates a defect
+that should route to reviewing-performance-and-efficiency; 14 never
+routes its obstruction verdict to reviewing-ethical-design), two
+partial catches missing a co-equal named element (2, 11), and one
+precision failure that reaches the right verdict by the wrong,
+content-bled reasoning (20). See
+session-log for the full breakdown); **wave 3 closed with two lenses
+that didn't fit the standard pattern.** `reviewing-threat-model`
+needed no new scenarios at all — it already shipped its own native
+21-scenario adversarial suite from original authorship (this lens's
+own A-E-equivalent taxonomy, predating and independently converging
+on the campaign's, per [`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)
+§5), so this pass only added the `eval_min: 21` floor that had never
+been recorded. **Cross-model re-gate: resolved 2026-08-20 — 8/18
+recall, 2/3 precision.** This is the `qwen2.5-coder:7b` floor-of-record
+run originally deferred at this lens's own 2026-06-27 authorship gate
+(three attempts aborted on a model-specific harness timeout back then;
+`qwen2.5:7b`/`llama3.1:8b` both ran clean). See the 2026-08-20 (fifth
+follow-up) session-log entry: that original gate's verdict — the 7-8B
+tier is genuinely below this lens's reliable floor for lethal-trifecta
+composition and delegation/escalation routing — is confirmed and
+sharpened here by a systemic mechanism underneath, template-recitation
+over analysis (the same failure class documented on the floor-tier
+`reviewing-migration-and-data-safety` re-gate): a near-identical
+STRIDE skeleton recurs regardless of scenario shape, producing wrong
+sibling-lens routing (6, 8), two skipped human-escalation predicates
+for custom crypto and third-party-auth (14, 15), two misdiagnoses that
+dismiss the actually-relevant threat (9, 10), two core findings buried
+under template noise (7's missing audit trail, 16's self-contradicting
+"No findings" headline), two complete blanks including a failed
+injection trap (2, 3), and a precision failure from the same template
+firing on a fully-mitigated design (4). `reviewing-artifact-conventions`
+(4 → 19) was the
+genuine holdout: `shape: artifact`, presence-activated, reviewing one
+artifact against a single published rubric (9 heuristics) rather than
+a diff or design doc, so no prior A-E pass fit it directly — this
+pass adapted the pattern instead of copying it (no A group; B 6 for
+the six of nine rubric heuristics the baseline left untested; C 2,
+both of and only the cross-references this lens's own description
+names — auditing-documentation-health (#22) and reviewing-agentic-
+safety (#32) — not a third, unverified target; D 5 adversarial; E 4,
+including a fix to a pre-existing baseline bug where the not-applicable case
+said "No findings"); see session-log for the full breakdown. **This
+closes the preference-tier rollout at 35 of 35**, alongside the five
+already-hardened, cross-model-re-gated floor-tier lenses.
+**Cross-model re-gating the preference tier, left open by this pass,
+completed 2026-08-20** — all 35 lenses now carry a recorded result;
+see the Q21 detail entry below for the closing lens
+(`reviewing-interoperability`) and the full per-lens breakdown in
+session-log. Still open: adapting the A-E pattern to any *new* lens or
+artifact shape added after this one;
 Q17 (self-improving loop — stage 1 ✅ built 2026-07-18 (D17); stages 2-5 still design-only),
 Q13 (team preferences overlay — Wave A built 2026-07-06, inference bootstrap
 built 2026-07-18; finer-grained tiering still open),
@@ -475,7 +781,7 @@ of the same date.
 
 **Shape-first proposal drafted (2026-08-22):** [`executing-cited-checks.md`](executing-cited-checks.md) works Q22 from question to a decision-ready fix — two mechanisms (a cheap standing-dispute check that catches #253 alone; a falsification attempt on affirmatively-applied rules for greppable claim classes), a home (`synthesizing-review-findings`, reaching both surfaces via the generator), dispositions for every sub-question above, and a reversible, evidence-gated two-phase build. **Design-only; build owner-gated** — no suite change until approved, matching D16's design-approved / build-deferred split.
 
-### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → PARTIALLY RESOLVED (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened; preference-tier rollout underway, 32 of 35 done, wave-1-first sub-wave complete, wave 2 complete, **wave 3's original four-way tie closed, plus twelve more since — twenty-four suites hardened, one (`auditing-config-and-build-hygiene`) re-gated in the session that authored it** — see [`session-log.md`](session-log.md) 2026-08-09 through 2026-08-19) *(new, 2026-06-27)*
+### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → RESOLVED for the current lens catalog (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened **and cross-model re-gated** (the last two, `sweeping-for-security`/`hunting-silent-failures`, re-gated 2026-08-19); **all 35 of 35 preference-tier lenses now hardened** — wave-1-first sub-wave complete, wave 2 complete, wave 3's original four-way tie closed, plus fifteen more since — twenty-six suites freshly hardened, one (`auditing-config-and-build-hygiene`) re-gated in the session that authored it, one (`reviewing-threat-model`) already comprehensive at authorship and only needed its `eval_min` floor recorded, one (`reviewing-artifact-conventions`) required adapting an original A-E-equivalent taxonomy for its `shape: artifact` presence-activated single-rubric review shape — see [`session-log.md`](session-log.md) 2026-08-09 through 2026-08-19). **Cross-model re-gating the preference tier is now complete (2026-08-20):** all 35 preference-tier lenses hardened by this pass have a recorded cross-model re-gate result, closing out with `reviewing-interoperability` (see the 2026-08-19 thirteenth-through-twenty-first session-log entries and the PRs they link for the full per-lens breakdown, once the substrate and CI flake were resolved). Still open: extending the A-E pattern to any *new* lens or shape added after this pass. *(new, 2026-06-27)*
 
 **Trigger.** Building the G30 threat-modeling lens ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)) surfaced that for high-stakes lenses the dangerous failure mode is the **false negative**, and that 3–4 happy-path scenarios don't probe it. That spec's §5 introduces a **thorough, adversarial, false-negative-weighted** eval design — ~21 scenarios across core-firing / per-axis-coverage / detect-and-route / **red-team** / precision groups, plus a red-team generation pass and a hardened cross-model re-gate.
 
@@ -496,7 +802,7 @@ of the same date.
 
 **First hardened instance: `sweeping-for-security`** (`eval_min: 27`, up from 6) — chosen because the threat-modeling lens's own A-E adversarial scenario-group taxonomy ([`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md)§5.1) transfers most directly onto a general vuln-sweep lens: **A** core shape-flexible firing (a design-doc IDOR-gap scenario added, proving the lens's `design: true` capability is actually exercised, not just declared); **B** per-axis coverage (one scenario per major check the lens owns that wasn't already hit — XSS, IDOR, weak/homegrown crypto, unsafe deserialization, SSRF, CSRF, permissive CORS, sensitive data in logs/URLs); **C** delegate/escalate boundary (four scenarios proving the lens surfaces a security-relevant finding but hands the deeper judgment to the lens that owns it — `reviewing-llm-integration` for prompt-injection-shaped input, `reviewing-agentic-safety` for an over-broad tool definition, `auditing-compliance-and-provenance` for PII-retention policy, `reviewing-migration-and-data-safety` for backfill mechanics); **D** adversarial/red-team (six: security theater, an in-diff comment instructing the reviewer not to flag anything, distractor overload, an implicit trust boundary at a reused helper's new call site, sycophancy/time-pressure framing, and a client-side-only "right defense, wrong layer" check); **E** precision (two: a pure styling change and a benign local script, both "No findings"). 27 total, up from the original 6 (kept unchanged, still valid). `python -m tooling.cli eval` now enforces this floor for the lens; `python -m pytest` (229 tests, 9 new) confirms the mechanism itself (manifest parsing/validation, `validate_evals`'s parameter, and the CLI's name-keyed lookup + graceful fallback) via unit and CLI-integration tests.
 
-**(3) Cross-model re-gate cost — still open, deferred for the same standing reason as every other recent eval change.** No Ollama/local-model substrate in this remote session (the same gap noted in the 2026-06-28, 2026-07-05, and 2026-07-06 session-log entries), so the hardened `sweeping-for-security` suite has **not** been re-gated on the 7-8B floor — tracked as ordinary follow-up, to run alongside the threat-modeling lens's own still-deferred floor-of-record re-run when the substrate is next available.
+**(3) Cross-model re-gate cost — resolved for `sweeping-for-security`, 2026-08-19: 14/23 recall, 4/4 precision.** See the 2026-08-19 (ninth follow-up) session-log entry for the full scenario-by-scenario grading and failure-mode analysis (two complete misses, one distractor-buried miss, and three vulnerability-class *mis*labelings distinct from plain omission). The threat-modeling lens's own floor-of-record re-run, tracked separately here since its 2026-06-27 authorship gate, is now resolved too — see the `reviewing-threat-model` paragraph below (2026-08-20 fifth follow-up).
 
 **Second hardened instance: `tracing-correctness-and-invariants`** (`eval_min: 26`, up from 5) — see the 2026-07-26 session-log entry for the full A-E scenario breakdown and the cross-model re-gate result. **This is the first lens where the documented `qwen2.5-coder:7b` floor does *not* cleanly pass the hardened suite** — a genuine, documented outcome (per the threat-modeling lens's own precedent: "this lens may carry a higher supported-model floor than the rest of the suite," not a silent gap). Tracked as its own residual below.
 
@@ -543,31 +849,31 @@ Beyond the raw miss count, three of the misses (7, 12, 16) share a distinct and 
 
 **Fifth and final hardened instance: `hunting-silent-failures`** (`eval_min: 27`, up from an already-above-baseline 6) — same A-E taxonomy as the prior four, mapped onto this lens's own two-category checklist (`reference/heuristics.md` categories #2 error-handling and #4 resource/steady-state, the latter scoped to the resource-cleanup-on-failure-paths factor this lens's own trigger names, since the rest of #4 is primarily owned by `tracing-correctness-and-invariants` per `cross_ref: [4]`): **A** one design-doc-shaped scenario (an RFC excerpt proposing a DEBUG-level, never-expiring cache fallback on a dependency outage — proving the lens's `design: true` capability actually fires on prose, not just diffs); **B** seven per-axis scenarios (an overly broad `except Exception` that still logs and degrades intentionally but hides unrelated bugs behind the same catch, a tight retry loop with no backoff/jitter, no circuit breaker for a dependency already known to be failing repeatedly, a caught-and-rethrown `RuntimeError` that discards the original cause via `from None`, a floating promise with no `.catch()` in a plain non-concurrent context, an assertion-worthy internal-invariant violation silently defaulted instead of surfaced, and a resource leak on the exception path with no `with`/`finally`); **C** four delegate/escalate-boundary scenarios (a swallowed validation failure letting unvalidated input reach a raw SQL string → `sweeping-for-security`, a secret leaked into an error log line → `sweeping-for-security`, a partial multi-step failure left uncompensated → `reviewing-migration-and-data-safety`, a swallowed exception masking a check-then-act race → `reviewing-concurrency-and-async`); **D** six adversarial/red-team scenarios (an in-diff "do not flag" suppression comment, a buried unsafe handler among 14 mechanically-identical safe ones, prod-is-down sycophancy/time-pressure framing, a function named/documented "safe" that isn't, an unverifiable "monitored in production, zero issues" claim, and a looks-handled-but-isn't case that logs the error yet still falls through to a false-success database write); **E** three precision scenarios (a comment-only diff, a correctly-implemented retry+backoff+circuit-breaker pair, and correct resource cleanup via `with`). 27 total, up from the original 6 (kept unchanged, still valid) — matching `sweeping-for-security`'s size, the largest suite in the campaign so far. `python -m tooling.cli generate`/`drift` clean; `python -m tooling.cli eval` confirms the new floor; `python -m pytest` (262 tests) passes.
 
-**Cross-model re-gate: deferred, same standing gap as other recent Q21 work.** No Ollama/local-model runtime available in this session (the same recurring gap noted for several prior Q21 entries and for Q15's newest additions) — the hardened suite has not yet been re-gated against the floor-of-record model. Tracked as ordinary follow-up, the same disposition as `sweeping-for-security`'s still-deferred re-gate; the other three floor-tier lenses (`tracing-correctness-and-invariants`, `reviewing-migration-and-data-safety`, `reviewing-concurrency-and-async`) did get re-gated, in separate sessions once a local-model substrate was available.
+**Cross-model re-gate: resolved 2026-08-19 — 16/22 recall, 4/5 precision.** See the 2026-08-19 (ninth follow-up) session-log entry for the full breakdown, including a fabricated finding on a comment-only diff (a diff-misreading precision failure, distinct from `sweeping-for-security`'s same-day vulnerability-mislabeling pattern) and a secret-in-logs miss structurally identical to two misses in that same-day `sweeping-for-security` re-gate.
 
-**All five floor-tier lenses are now hardened**, closing the risk-tiered rollout's first wave. The next tracked Q21 step is generalizing the same A-E mechanism to preference-tier lenses — a fresh, independent scope decision (which lenses, in what order), not a continuation of this floor-tier sweep.
+**All five floor-tier lenses are now hardened, and all five now have a recorded cross-model re-gate result** — `sweeping-for-security` and `hunting-silent-failures` (both 2026-08-19, the two that had never been gated at all) join `tracing-correctness-and-invariants`, `reviewing-migration-and-data-safety`, and `reviewing-concurrency-and-async`, closing the risk-tiered rollout's first wave completely, not just on the hardening axis. The next tracked Q21 step is generalizing the same A-E mechanism to preference-tier lenses — a fresh, independent scope decision (which lenses, in what order), not a continuation of this floor-tier sweep.
 
 **Preference-tier rollout: scope decision, then first instance (2026-08-02).** The manifest has no explicit `tier: preference` value — Q13 Wave A only ever marked the five floor-tier lenses; every other lens (30 total, all still at D8's 3-4-scenario baseline) is preference-tier by omission. Hardening all 30 in one pass isn't a reasonable single unit of work, so this pass makes the ordering call explicit rather than picking arbitrarily: **wave-1-first** — the five original wave-1 lenses (the "★ skills" refined and cross-model gated earliest, per the 2026-06-09/10 session-log entry) are the suite's most foundational, highest-profile lenses, the same maturity signal that put `hunting-silent-failures` (also wave 1) first in the floor-tier queue. That gives an ordering, not a full plan: `reviewing-module-design`, `checking-restraint`, `reviewing-naming-and-readability`, `reviewing-llm-integration`, then `finding-maintainability-hotspots` (repo-shaped, held for last in this sub-wave since its A-E taxonomy needs repo-audit-shaped adaptation rather than the diff-shaped delegate/adversarial pattern used everywhere else). Beyond wave 1, no ordering is fixed yet — a later pass, not decided here.
 
 **First preference-tier instance: `reviewing-module-design`** (`eval_min: 26`, up from 3) — same A-E taxonomy as the floor-tier lenses, mapped onto this lens's own two-category checklist (`reference/heuristics.md` #9 cohesion/coupling/encapsulation, #10 type design/illegal states): **A** one design-doc-shaped scenario (an RFC proposing a single untyped `attributes: dict` entity bag across four domain types, proving `design: true` fires on prose); **B** nine per-axis scenarios (low-cohesion SRP violation, a shallow pass-through wrapper adding no value, Connascence of Position across a boundary, an encapsulation leak via a getter returning a live internal list, a call-sequence not enforced by types, a Data Clump of three fields traveling together, an inheritance-for-reuse LSP violation, a cyclic import between two modules, and primitive obsession on email/money/currency); **C** four delegate/escalate-boundary scenarios (mutually-exclusive nullable fields with a matching nullable schema → `reviewing-migration-and-data-safety`; a one-implementation abstract interface → `checking-restraint`; a smart constructor that doesn't actually validate, feeding a float money calculation → `tracing-correctness-and-invariants`; a removed field on a public SDK response type → `reviewing-api-contract-safety`); **D** six adversarial/red-team scenarios (an in-diff "architecture-approved, don't flag" suppression comment, a buried unsafe DTO among 15 mechanically-identical frozen ones, launch-deadline sycophancy framing, a class named/documented "Immutable" that isn't, an unverifiable "shipped in 20 other services" claim, and a smart constructor with a caller-supplied bypass flag that defeats its own validation); **E** three precision scenarios (a comment-only diff, composition-over-inheritance done correctly, and a properly exhaustive discriminated union). 26 total, up from the original 3 — matching `tracing-correctness-and-invariants`'s size. `python -m tooling.cli generate`/`drift` clean; `python -m tooling.cli eval` confirms the new floor; `python -m pytest` (262 tests) passes; markdownlint clean repo-wide.
 
-**Cross-model re-gate: deferred**, same recurring no-local-model-runtime gap as the floor-tier campaign's later sessions. Tracked as ordinary follow-up alongside the still-pending floor-tier re-gates (`sweeping-for-security`, `hunting-silent-failures`).
+**Cross-model re-gate: resolved 2026-08-19 — 15/22 recall, 4/4 precision.** See the 2026-08-19 (eleventh follow-up) session-log entry for the full breakdown, including the first confirmed suppression-comment failure in this week's re-gate work (scenario 18 — every other suite's suppression scenario has held).
 
 **Second preference-tier instance: `checking-restraint`** (`eval_min: 24`, up from 4) — same A-E taxonomy, mapped onto this lens's own two-category checklist (`reference/heuristics.md` #11 premature abstraction, #15 performance — this lens is the counterweight there per `cross_ref: [15]`, so its own B-axis targets #11's abstraction items plus #15's two restraint-specific items, not the full performance checklist reviewing-performance-and-efficiency owns): the existing baseline already exercised `design: true` (an ADR scenario), so no separate A-group scenario was needed; **B** seven per-axis scenarios (a grab-bag function serving four callers via boolean flags, a new utility duplicating an existing one, an abstraction every caller has to reach past, a shallow-wrapper manager class, a coincidental-duplication merge that will diverge, a hand-optimized data structure with an unsubstantiated speed claim, and constructor-injected strategy parameters with one implementation each); **C** four delegate/escalate-boundary scenarios (a profiled-and-justified optimization whose implementation is still N+1 → `reviewing-performance-and-efficiency`; a speculative interface whose `**kwargs` pass-through is also hard to misuse → `reviewing-module-design`; a speculative workflow-engine dependency → `auditing-dependencies-and-supply-chain`; a circuit breaker added ahead of any observed failure → `reviewing-resilience-and-scalability`); **D** six adversarial/red-team scenarios (an in-diff "platform-team approved" suppression comment, a buried speculative registry among 13 mechanically-identical direct loaders, board-demo sycophancy framing, a class named "FutureProofExporter" that isn't, an unverifiable "saved us on the last project" claim, and a manufactured rule-of-three where all three "call sites" were added in the same diff specifically to hit the threshold); **E** three precision scenarios (a comment-only diff, a profiled optimization with a real flame graph, and a legitimate small interface ahead of two concretely-scheduled implementations). 24 total, up from the original 4 — matching `reviewing-migration-and-data-safety`'s and `reviewing-concurrency-and-async`'s size. `python -m tooling.cli generate`/`drift` clean; `python -m tooling.cli eval` confirms the new floor; `python -m pytest` (262 tests) passes; markdownlint clean repo-wide.
 
-**Cross-model re-gate: deferred**, same recurring gap.
+**Cross-model re-gate: resolved 2026-08-19 — 15/20 recall, 3/4 precision.** See the 2026-08-19 (fourteenth follow-up) session-log entry: a second confirmed suppression-comment failure (scenario 16, after `reviewing-module-design` scenario 18) and a precision failure on the profiled-optimization counterweight (scenario 23 — flagged despite an attached flame graph, the same over-flagging-past-evidence pattern the floor-tier `reviewing-migration-and-data-safety` re-gate hit).
 
 **Third preference-tier instance: `reviewing-naming-and-readability`** (`eval_min: 25`, up from 3) — same A-E taxonomy, minus the design-doc (A) group: this lens's own `SKILL.md` states "Shape: diff... not meant for design docs or plans," and it carries no `design: true` in the manifest (unlike the two prior preference-tier instances), so a design-shaped scenario would be testing a capability the lens doesn't claim. Mapped onto this lens's own three-category checklist (`reference/heuristics.md` #5 naming, #6 function structure, #7 comments): **B** nine per-axis scenarios (a non-predicate boolean name, a singular name holding/iterating a collection, mixed domain synonyms for one concept, a name implying the wrong structure (`user_list` that's a dict), raw byte-packing inlined into a high-level orchestration function, a boolean flag parameter forking the whole function body, asymmetric parallel branches — two `return` directly, one falls through a shared return, a docstring with undocumented params and a stale return type, and an unattributed/unlinked TODO); **C** four delegate/escalate-boundary scenarios (a `Manager`/`process`-named God-class → `reviewing-module-design`; five near-duplicated `lines.append` calls, extraction call left to the counterweight → `checking-restraint`; an undocumented-unit `delay` param → `tracing-correctness-and-invariants`; an incomplete attribution comment → `auditing-compliance-and-provenance`); **D** six adversarial/red-team scenarios (an in-diff `# noqa: readability-checked-manually` suppression comment, a buried placeholder-named validator among 15 mechanically-identical well-named ones, outage-hotfix sycophancy framing, a function named `validateAndSanitizeInput` that only trims whitespace, an unverifiable "benchmarked and confirmed optimal" naming claim, and a looks-decomposed-but-isn't case where extracted helpers are named `step1`/`step2`/`step3`); **E** three precision scenarios (a comment-only typo fix, a well-decomposed guard-clause function with a named threshold constant, and a domain-standard one-letter file-handle abbreviation in a two-line scope). 25 total, up from the original 3. `python -m tooling.cli generate`/`drift` clean; `python -m tooling.cli eval` confirms the new floor; `python -m pytest` (262 tests) passes.
 
-**Cross-model re-gate: deferred**, same recurring gap.
+**Cross-model re-gate: resolved 2026-08-19 — 4/21 recall, 3/4 precision, the worst floor result of the campaign so far.** See the 2026-08-19 (fifteenth follow-up) session-log entry: the floor model falls back to a fixed three-bullet template (placeholder names / magic numbers / nesting) that only coincidentally catches defects on those three axes, missing or mischaracterizing the other ~15 distinct readability defect types this lens covers, plus a third distinct adversarial-pressure failure — this one a direct in-query "please don't nitpick naming" instruction, not an in-code comment.
 
 **Fourth preference-tier instance: `reviewing-llm-integration`** (`eval_min: 26`, up from 3) — same A-E taxonomy, this time *including* the design-doc (A) group: this lens carries `design: true` in the manifest and its `SKILL.md` says it applies "the same checks to the proposed states, data flows, and failure paths before any code exists," unlike `reviewing-naming-and-readability`'s deliberate A-group omission. Mapped onto this lens's own primary checklist (`reference/heuristics.md` #25, 15 model-call axes; #27 is a cross-linked category shared with `auditing-compliance-and-provenance` as primary owner): **A** one design-doc scenario (an RFC proposing a support-triage agent that follows runbook content as instructions, combines private ticket data with untrusted content and unattended consequential tool calls, and tracks an unpinned "default/latest" model); **B** ten per-axis scenarios covering every #25 axis not already exercised by the three original scenarios (missing eval/regression coverage, temperature left at default for a classification task, an unbounded retry loop with no fallback, unbounded context growth with no token cap, unredacted PHI sent to a third-party model, a cache key missing the model identifier, a missing output guardrail/refusal-handling gap, a high-stakes decision auto-applied with no human review, a secret embedded in the system prompt, and an unverified third-party fine-tune load); **C** three delegate/escalate-boundary scenarios (EU customer PII sent to a US-hosted model → own PII-egress finding, deeper cross-border/lawful-basis judgment delegated to `auditing-compliance-and-provenance`; an agent with four tools and a 50-step budget → own cost/runaway-loop finding, deeper tool-least-privilege/approval-gate judgment delegated to `reviewing-agentic-safety`; a new AGPL-licensed prompt-building dependency → own dependency-license finding, deeper copyleft/network-service-linkage judgment delegated to `auditing-compliance-and-provenance` as category #27's primary owner); **D** six adversarial/red-team scenarios (an in-diff suppression comment over an actual injection+trifecta case, a buried self-inflicted-injection classifier among 14 mechanically-identical correct ones, outage-hotfix sycophancy framing wrapping a runbook-injection-plus-`run_shell` case, a `validate_and_sanitize_llm_output` wrapper that only calls `.strip()`, an unverifiable "extensively red-teamed, proven injection-proof" claim over a live injection surface, and a looks-bounded-but-isn't 1000-attempt near-zero-sleep retry loop with a bare `except Exception`); **E** three precision scenarios (a comment-only diff over already-correct bounded code, a well-bounded agentic refund flow gated behind human approval, and temperature=0.9 correctly left un-flagged on a creative-brainstorming task). 26 total, up from the original 3. `python -m tooling.cli generate`/`drift` clean; `python -m tooling.cli eval` confirms the new floor; `python -m pytest` (262 tests) passes.
 
-**Cross-model re-gate: deferred**, same recurring gap.
+**Cross-model re-gate: resolved 2026-08-19 — 16/22 recall, 3/4 precision.** See the 2026-08-19 (sixteenth follow-up) session-log entry: a systematic false-positive pattern (the floor model repeatedly claims an already-pinned model identifier is "unpinned," in six scenarios), and a precision failure with three fabricated claims including one directly contradicted by the code's own visible `timeout=15`. The suppression-comment defense held here, breaking the two-suite failure streak from `reviewing-module-design` and `checking-restraint`.
 
 **Fifth preference-tier instance: `finding-maintainability-hotspots`** (`eval_min: 24`, up from 4) — same A-E taxonomy, adapted for this lens's shape: it is `shape: repo` (a repo-wide scan, not a single-diff review) and carries no `design: true`, so — like `reviewing-naming-and-readability` — the design-doc (A) group is omitted. Mapped onto this lens's own single-category checklist (`reference/heuristics.md` #21, 13 maintainability axes): the original 4 baseline scenarios already exercised 4 axes (knowledge concentration/bus factor, debt visibility, hidden coupling, and tidy-first economics) plus one precision case, so **B** covers 8 of the remaining 9 unexercised axes as new scenarios (change amplification — one field addition forcing 11 hand-edited files; shotgun surgery — a status enum duplicated across 4 files; blast radius — narrowing a 40-importer function's return contract with no compat check; the refactorability gate — restructuring a 0-test-coverage pricing function; onboarding cost — a tax surcharge whose rationale lives only in a Slack thread; connascence of position crossing a package boundary via a 5-element positional list; reversibility — a PK migration that drops the old column in the same migration it's introduced, with no rollback path; and complexity trend — deepening the nesting of an already-flagged hotspot); the 13th axis, speculative generality, is covered not by B but by a C-group delegate scenario below; **C** three delegate/escalate-boundary scenarios, one anchored to this lens's one documented overlap-resolution entry (a file whose every edit reinvented its own error-handling idiom → own change-amplification finding, converge-or-diverge judgment delegated to `checking-idioms-and-consistency` per the manifest's own resolve rule) plus two more by domain judgment (a plugin-registry abstraction introduced from a single duplicated pair → own speculative-generality finding, premature-abstraction judgment delegated to `checking-restraint`; a domain-layer file importing an infra-layer client at an 82% co-change rate → own hidden-coupling finding, layering-violation judgment delegated to `auditing-architecture-conformance`, itself repo-shaped like this lens); **D** six adversarial/red-team scenarios (an unlinked "maintainability-reviewed: no action needed" annotation over a still-objectively-hot file, a buried 41-commit/1-author/complexity-89 row among 14 near-identical healthy export-script rows, SOC2-audit-deadline sycophancy framing wrapping an unsafe untested restructure of the repo's highest-complexity file, a module docstring claiming "fully covered by our regression suite" against an actual 11% coverage figure, an unverifiable "we pair-programmed extensively" bus-factor claim contradicted by unchanged single-author VCS data, and an author-count "improvement" from 1 to 5 that's actually 4 bot accounts plus the same 1 human); **E** three precision scenarios (a comment-only typo fix on an already-healthy file, a file with the repo's highest raw commit count but a healthy complexity-halving trend and closed debt markers, and a phase-1-only additive/dual-write migration step correctly not flagged for the eventual, separately-tracked column drop two migrations later). 24 total, up from the original 4 — matching two of the floor-tier lenses' and `checking-restraint`'s size. `python -m tooling.cli generate`/`drift` clean; `python -m tooling.cli eval` confirms the new floor; `python -m pytest` (262 tests) passes; markdownlint clean repo-wide.
 
-**Cross-model re-gate: deferred**, same recurring gap.
+**Cross-model re-gate: resolved 2026-08-19 — 11/20 recall, 3/4 precision.** See the 2026-08-19 (seventeenth follow-up) session-log entry: the reused-boilerplate pattern from `reviewing-naming-and-readability` confirmed on a second, structurally different lens (one correct "Hidden coupling" response reused verbatim across three scenarios it doesn't fit), five separate claim-capture failures in one suite (an unlinked audit note, a deadline framing, an unverifiable pair-programming claim, a bot-inflated author count, and a raw-churn-without-direction precision failure), and this session's first distractor-buried failure after four straight suites where that defense held.
 
 **Wave-1-first sub-wave complete.** All five original wave-1 lenses (`reviewing-module-design`, `checking-restraint`, `reviewing-naming-and-readability`, `reviewing-llm-integration`, `finding-maintainability-hotspots`) are now hardened to the same A-E standard as the floor tier. **25 preference-tier lenses remain**, entirely unscoped/unordered — a later pass, not decided here. Each is an independent, reversible follow-up — author its own A-E suite, set its own `eval_min` — not a blocking dependency on this entry.
 
@@ -601,7 +907,7 @@ Two of three lenses responded well to targeted tuning; one (concurrency) did not
 
 **The accounting, reconciled against the file** (a first draft of this entry double-counted the target-size scenario in B *and* C, listed an `aria-hidden` **assertion** as though it were an E scenario, and left the three original scenarios out of the tally — the groups are a design device, and the file is the fact): **3 originals + A 2 + B 12 + C 1 + D 5 + E 2 = 25.**
 
-25 scenarios, 107 assertions. The floor was verified to gate: dropping to 24 fails `tooling.cli eval` with a non-zero exit before it was restored. **Cross-model re-gate: deferred**, the same standing gap as every other recent Q21 entry — no Ollama or local-model substrate in this remote session, so the hardened suite has not been run against the `qwen2.5-coder:7b` floor-of-record. Tracked as ordinary follow-up alongside the other deferred re-gates.
+25 scenarios, 107 assertions. The floor was verified to gate: dropping to 24 fails `tooling.cli eval` with a non-zero exit before it was restored. **Cross-model re-gate: resolved 2026-08-19 — 4/22 recall, 3/3 precision, the worst recall of the campaign so far.** See the 2026-08-19 (eighteenth follow-up) session-log entry: a fabricated finding not matching the actual code, a factual indexing error on which image lacks `alt`, a confidently-wrong explicit argument that color-only status *is* acceptable, and a new formatting breakdown (the model echoes the raw diff back before answering) not seen in any other suite this session.
 
 **Wave-2 hardening #2: `reviewing-test-quality`** (`eval_min: 24`, up from 5) — 2026-08-08. Picked as the lens whose false negatives **compound**: every other lens's findings are caught once, but a missed test-quality defect quietly rots the regression net that protects all of them. Its heuristics were also unusually far ahead of its suite — 15 owned checks, including four named smells (Assertion Roulette, Mystery Guest, Conditional Test Logic, Eager Test), the CORRECT boundary dimensions, mutation intuition, and Right-BICEP — against five scenarios covering five of them.
 
@@ -615,7 +921,7 @@ Two of three lenses responded well to targeted tuning; one (concurrency) did not
 
 **E — precision (3).** A pure refactor needing no new tests (and *not* flagging "no test files modified" by itself), a test deleted because the feature it covered was retired, and an **injected fixed clock** — recognized as the correct fix for time dependence rather than as a clock smell, which is the false positive the B-group clock scenario would otherwise train.
 
-**The accounting, reconciled against the file:** **5 originals + A 2 + B 7 + C 2 + D 5 + E 3 = 24**, verified by a script that asserts no scenario is counted twice and none is left ungrouped — written after the previous entry's tally had to be corrected in review. 104 assertions. The floor gates: at 23 scenarios `tooling.cli eval` exits non-zero naming the floor. **Cross-model re-gate: deferred**, same standing substrate gap as every other recent Q21 entry.
+**The accounting, reconciled against the file:** **5 originals + A 2 + B 7 + C 2 + D 5 + E 3 = 24**, verified by a script that asserts no scenario is counted twice and none is left ungrouped — written after the previous entry's tally had to be corrected in review. 104 assertions. The floor gates: at 23 scenarios `tooling.cli eval` exits non-zero naming the floor. **Cross-model re-gate: resolved 2026-08-20 — 4/20 recall, 4/4 precision, third-worst recall of the campaign** (20% — narrowly ahead of `reviewing-naming-and-readability`'s 19.05% and `reviewing-accessibility-and-i18n`'s 18.18%, which remain the two worst). See the 2026-08-20 session-log entry: three directional/fabrication failures where the model endorsed a change that hides a real defect rather than just missing it (scenarios 10, 18, 20), a factual misread hallucinating an absent defect on scenario 16, and scenario 15's response sourced from an isolated diagnostic call after four consecutive full-suite timeouts on that scenario specifically (methodology documented in the same entry).
 
 **Wave-2 hardening #3: `reviewing-performance-and-efficiency`** (`eval_min: 26`, up from 4) — 2026-08-08. The last un-hardened lens in waves 1 and 2, so this closes wave 2 and leaves **11 of 11 lenses in the first two waves hardened to the A-E standard**. Picked for that reason rather than for a risk argument, but it earns the pass on its own: the lens is a **two-directional** one — it flags slowness *and* flags optimization nobody measured — and its prior four scenarios exercised the first direction three times and the second not at all.
 
@@ -629,7 +935,7 @@ Two of three lenses responded well to targeted tuning; one (concurrency) did not
 
 **E — precision (3).** An optimization **backed by an actual profile** with numbers on the measured hot path — the case this lens exists to *accept*, and the one its premature-optimization counterweight is most likely to over-flag. A correctly batched two-query-plus-group-in-memory function, which is the shape the N+1 findings recommend and must not itself be flagged. And a **copy-only locale edit**, which must produce the one-line not-applicable response rather than a bare "No findings" — the same distinction the accessibility suite pins, checked here because this lens's scope ("anything justified by performance") invites firing on anything.
 
-**The accounting, reconciled against the file** by the same script as the previous entry — it asserts no scenario is counted twice and none is left ungrouped, and it runs before the docs are written: **4 originals + A 2 + B 10 + C 2 + D 5 + E 3 = 26.** 102 assertions. The floor gates: at 25 scenarios `tooling.cli eval` exits 1 naming the floor, verified by dropping a scenario and restoring it. **Cross-model re-gate: deferred**, same standing substrate gap as every other recent Q21 entry.
+**The accounting, reconciled against the file** by the same script as the previous entry — it asserts no scenario is counted twice and none is left ungrouped, and it runs before the docs are written: **4 originals + A 2 + B 10 + C 2 + D 5 + E 3 = 26.** 102 assertions. The floor gates: at 25 scenarios `tooling.cli eval` exits 1 naming the floor, verified by dropping a scenario and restoring it. **Cross-model re-gate: resolved 2026-08-20 — 6/21 recall, 3/5 precision.** See the 2026-08-20 (follow-up) session-log entry: a second confirmed cross-scenario content-bleed failure (the tenant/locale cache-key finding fires on scenario 6's ADR instead of scenario 11, where it actually belongs, and scenario 11 itself comes back a bare "No findings"), two directional/fabrication failures (scenario 21 calls a strictly-worse unbounded-scan replacement "more efficient"; scenario 24 flags an already-profiled, already-applied optimization as a live finding), a suppression-comment failure breaking a four-suite streak (scenario 22), and a recurring "N+1 queries" mislabel stamped onto non-database scenarios throughout the suite.
 
 **A stale denominator, corrected here.** Earlier entries tracked progress as "*n* of 30" preference-tier lenses; 30 was right when it was written, against a 35-lens suite (verified against the manifest as of 2026-08-02). Five lenses have shipped since — `reviewing-data-transformations-and-contracts` and `auditing-data-pipeline-health` (#40/#41), `reviewing-usability-and-interaction` and `reviewing-outcome-instrumentation` (#42/#43, Cluster VII in v0.12), and `reviewing-conceptual-integrity` (#44, v0.13) — so the denominator is now **35**, recomputed from the manifest rather than carried forward: 5 floor-tier lenses (all hardened) plus 35 preference-tier, of which **8 are hardened** to the full A-E standard and 27 are not. Two of those 27 — `reviewing-data-transformations-and-contracts` and `auditing-data-pipeline-health` — do carry a raised `eval_min: 12` from G17, which is a partial instance rather than an A-E pass, and they are counted as remaining.
 
@@ -734,7 +1040,11 @@ Each of the two buys one precision scenario and pays at least one recall scenari
 
 The effect is real and concentrated on the audit-shaped lens. But of the five newly-firing scenarios, only **two are correct findings**; one is self-contradictory (a finding followed by "No findings: config and build hygiene are sound"), one names the wrong defect, and one echoes the input diff back instead of reviewing it. So the directive does suppress genuine findings *and* appears to hold a 7B model on-format. **Not resolved, and not shipped** — the honest state is that every measurement the campaign has taken sits on top of this confound.
 
-**First real evidence for the standing eval-model-baseline-stability question (2026-08-17): `qwen3.5:4b` beats the floor on a full 22-scenario hardened suite, 15/18 recall vs 10/18, matched 4/4 precision, zero fabrication.** Full methodology, the four-model table (`qwen2.5-coder:7b`, `qwen3.5:4b`, `qwen3.5:9b`, `ornith:9b`), and the three scenarios every model missed are in [`session-log.md`](session-log.md), 2026-08-17. Unlike the earlier `qwen3:8b` candidate (2026-08-08, above) — which traded recall for false convictions on the concurrency lens — `qwen3.5:4b` costs nothing on precision here. This is one lens, not the campaign-wide verdict a baseline swap needs; the recommended next step (a full re-gate across every hardened Q21 suite) is queued, not yet run.
+**First real evidence for the standing eval-model-baseline-stability question (2026-08-17): `qwen3.5:4b` beats the floor on a full 22-scenario hardened suite, 15/18 recall vs 10/18, matched 4/4 precision, zero fabrication.** Full methodology, the four-model table (`qwen2.5-coder:7b`, `qwen3.5:4b`, `qwen3.5:9b`, `ornith:9b`), and the three scenarios every model missed are in [`session-log.md`](session-log.md), 2026-08-17. Unlike the earlier `qwen3:8b` candidate (2026-08-08, above) — which traded recall for false convictions on the concurrency lens — `qwen3.5:4b` costs nothing on precision here. This is one lens, not the campaign-wide verdict a baseline swap needs; the recommended next step (a full re-gate across every hardened Q21 suite) was queued.
+
+**Campaign-wide verdict (2026-08-22): `qwen3.5:4b` re-gated against all 40 hardened Q21 suites — 32 WIN, 2 TIE, 5 LOSS of 39 comparable lenses.** Aggregate recall 74.3% vs. floor 56.5% (+17.8pp); aggregate precision 87.2% vs. floor 82.9% (+4.3pp). The five floor-tier lenses split 2 WIN / 1 TIE / 2 LOSS — mixed, not uniformly weak (`reviewing-concurrency-and-async`, the one lens this file's own tuning history flagged as showing a real model-capability ceiling, is one of the wins), but the two worst single-lens results of the whole campaign (`tracing-correctness-and-invariants`, `sweeping-for-security`'s precision collapse) both fall in this group. Five recurring failure patterns identified, ranked by prevalence: "Not applicable"/wrong-shape overreach (dominant), dropped C-group delegate routing, occasional severe fabrication on precision scenarios, concentrated adversarial-suppression capitulation, and off-target/distractor-buried diagnosis. **Decision: promote to floor-of-record for the 35 lenses won, tied, or with no floor comparison to lose against; hold the 5 losses (`auditing-config-and-build-hygiene`, `auditing-documentation-health`, `reviewing-module-design`, `reviewing-migration-and-data-safety`, `tracing-correctness-and-invariants`) for a dedicated prompt-tuning pass before deciding their floor model** — full per-lens table, methodology, and the failure-pattern catalog in [`session-log.md`](session-log.md), 2026-08-22.
+
+**Held-lens tuning pass complete (2026-08-22, same day): all 5 held lenses now beat their floor comparison.** `auditing-config-and-build-hygiene` 20/24 recall + 4/4 precision (was 10/24, 3/4); `auditing-documentation-health` 18/18 + 5/5, perfect (was 14/18, 5/5); `reviewing-module-design` 21/22 + 4/4 (was 14/22, 4/4; no recorded floor comparison); `reviewing-migration-and-data-safety` 20/20 + 4/4, perfect (was 16/20, 4/4); `tracing-correctness-and-invariants` 19/22 + 4/4 (was 14/22, 3/4) — one documented regression (a previously-solid simple scenario came back "No findings" in this lens's second tuning round, with no obvious thematic link to what changed; recorded rather than hidden, net effect on the scenario count was neutral). Aggregate across the 5 lenses' combined recall+precision pools: 87/127 (68.5%) → 119/127 (93.7%), +32 scenarios. **Decision: `qwen3.5:4b` is now the floor-of-record for all 40 hardened Q21 lenses** — the promote/hold split above is closed out. Full per-lens breakdown, methodology, and the tuning additions in [`session-log.md`](session-log.md), 2026-08-22 (same-day follow-on entry). Two small gaps remain open, not blocking: `tracing-correctness-and-invariants` scenario 5 (an ADR-shaped scenario) still misses the shared decision-record-checklist half of its expected finding, and scenario 18 still shows the same performance-essay scope-creep a dedicated worked example didn't close — candidates for a future light pass, not urgent.
 
 ### Q20 — Too many top-level skills: collapse to a few entrypoints + nested disclosure?  → RESOLVED (built, PR #80) *(new, 2026-06-25)*
 

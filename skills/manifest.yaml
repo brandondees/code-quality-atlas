@@ -206,6 +206,16 @@ skills:
     wave: 4
     # cross_ref intentionally absent: reviewing-threat-model is the sole primary owner of #38.
     # sweeping-for-security (#14) owns diff-time vuln detection; these are complementary, not overlapping.
+    # Q21: excluded from every preference-tier scope-to-coverage recompute
+    # this campaign has run — this lens already ships its own native
+    # 21-scenario adversarial suite from original authorship (core-firing /
+    # per-axis-coverage / detect-and-route / red-team / precision groups,
+    # this lens's own A-E-equivalent taxonomy predating the campaign's, per
+    # docs/threat-modeling-design-time-security.md §5), just missing this
+    # eval_min floor annotation. No new scenarios authored here — floor
+    # verified to gate at the exact existing count (21 scenarios, 84
+    # assertions, both independently recounted from the shipped eval.json).
+    eval_min: 21
     built_from:
       - { category: 38, source: docs/research/cluster-4-runtime.md#38 }
 
@@ -414,6 +424,48 @@ skills:
     shape: diff
     design: true
     wave: 6
+    # Q21: continuing the preference-tier rollout after
+    # `reviewing-conceptual-integrity` merged (PR #272). The clean pick left
+    # from the prior recompute's tie: this lens's baseline already covered
+    # all 9 of its checklist bullets, but `design: true` had never actually
+    # been exercised — no A-group scenario existed. No B group needed; the
+    # only real gap was the missing A-group scenario, plus the standard C/D/E
+    # groups this campaign's pattern always adds.
+    #
+    # A (1): an RFC for a Bulk Import wizard — exercises both a topical gap
+    # (no stated system-status feedback for a long-running import, no stated
+    # partial-failure behavior, no stated warning for a destructive overwrite
+    # option) and the shared decision-record checklist (alternatives not
+    # actually weighed, no revisit-trigger) in one finding set. C (3,
+    # delegate/escalate), each grounded in this lens's own description
+    # ("Accessibility mechanics are #23's, measured performance #15's,
+    # manipulative design #36's"): a destructive-confirmation dialog that
+    # gets this lens's own checks right (names the loss, distinguishes the
+    # controls) but is mechanically inaccessible underneath, routed to
+    # reviewing-accessibility-and-i18n (#23, named but never yet exercised);
+    # a search-as-you-type feature with no debounce/cancellation, where
+    # status IS communicated but the underlying responsiveness isn't, routed
+    # to reviewing-performance-and-efficiency (#15, a second instance
+    # distinct from the kept baseline's upload-progress case); a
+    # four-screen cancel-subscription flow with a de-emphasized cancel
+    # control on each screen, routed to reviewing-ethical-design (#36, a
+    # second instance distinct from the kept baseline's undismissable-modal
+    # case). D (5, adversarial): a "all states handled, see Storybook" claim
+    # contradicted by a component with no state handling at all
+    # (claim-capture); an in-diff "approved by growth, do not flag" comment
+    # over a real undismissable-modal case with no legitimate constraint
+    # (suppression); conference-demo deadline framing over a real unhandled
+    # empty state (deadline framing); a real unconfirmed bulk-delete action
+    # buried as the fourth of six files in an otherwise cosmetic diff
+    # (distractor-buried); a "we continuously save a draft" claim
+    # contradicted by an error handler that never calls the save function
+    # (contradicted claims). E (3, precision): explicit counterweights to
+    # C3 and C1 (a single, equally-weighted retention screen — not
+    # obstruction; the same dialog with accessibility mechanics correctly
+    # wired this time — no finding on either axis), and a trivial static
+    # page with no interaction surface at all. = 22 scenarios. See
+    # open-questions.md Q21.
+    eval_min: 22
     built_from:
       - { category: 42, source: docs/research/cluster-7-product.md#42 }
 
@@ -1622,6 +1674,56 @@ skills:
         detect: a SKILL.md or agent-skill definition file is added or changed
         slug: skill-md
         rubric: 101
+    # Q21: the last preference-tier lens hardened. Set aside at every prior
+    # recompute this session not for being unhardened but because it's a
+    # genuinely different taxonomy — `shape: artifact`, presence-activated,
+    # reviewing one artifact against its own single published rubric
+    # (reference/skill-md.md, 9 reviewable heuristics) rather than a diff or
+    # a design doc. No prior A-E pass in this campaign fit it directly, so
+    # this pass adapts the pattern rather than copying it mechanically.
+    #
+    # No A group: this lens isn't `design: true` and doesn't review decision
+    # records — its own artifact-detection gate is the only "does this apply
+    # at all" axis, covered by the kept not-applicable case below. B 6 (per-
+    # axis coverage for the six of nine rubric heuristics the 4-scenario
+    # baseline left untested — frontmatter/name, progressive disclosure, and
+    # trigger-richness were already covered): an option-menu body ("you
+    # could... or alternatively...") violating the single-default-approach
+    # heuristic; a compliant skill missing examples.md entirely; time-
+    # sensitive wording ("as of the latest release") plus a hardcoded
+    # Windows-path assumption in one excerpt; a two-levels-deep bundled
+    # reference file plus a >100-line reference file with no ToC; an
+    # eval.json shipping only 2 scenarios against the >=3 floor; a body
+    # naming Claude Code-specific tools (Read, Task) despite the skill's own
+    # portability claim. C 2 (delegate/escalate, both of and only the cross-
+    # references this lens's own description actually names — "distinct
+    # from doc-drift (#22) and runtime agent-safety (#32)" — not a third,
+    # unverified target): an authoring-correct skill whose body cites a CLI
+    # subcommand that no longer exists, routed to auditing-documentation-
+    # health (#22); an authoring-correct skill whose body defaults to an
+    # unconfirmed `rm -rf`, routed to reviewing-agentic-safety (#32). D 5
+    # (adversarial: a PR-description claim of "5 scenarios with a baseline"
+    # contradicted by an actual 2-scenario eval.json; an in-file "reviewed
+    # and approved, do not re-flag" comment over a real vague description;
+    # "shipping today for the demo, examples/evals next sprint" framing over
+    # a skill with neither; a real progressive-disclosure violation buried
+    # as the third of five files in an otherwise-cosmetic multi-skill diff;
+    # a body naming Claude-specific tools that directly contradicts its own
+    # description's portability claim). E 4 (2 kept: the well-formed-skill
+    # no-finding case, and the not-applicable case — its `expected_behavior`
+    # fixed in this pass from "No findings" to "Not applicable:", a
+    # pre-existing bug predating this pass, since this lens's own SKILL.md
+    # explicitly reserves "No findings" for a check that ran and passed; 2
+    # new: an explicit counterweight to the new B-group option-menu case — a
+    # skill naming one clear default and demoting an alternative to a named
+    # secondary cross-check, not a menu; a trivial 12-line skill with no
+    # bundled files at all, correctly clearing progressive disclosure by
+    # having nothing large enough to need splitting out, not by being too
+    # small to check) = 19 scenarios (4 kept + 15 new), 71 assertions.
+    # `examples.md` gets a matching fix (the same "No findings" ->
+    # "Not applicable:" bug) plus two new worked examples (a delegate, an
+    # adversarial suppression case). See open-questions.md Q21.
+    eval_min: 19
     built_from:
       - { category: 101, source: docs/research/artifact-rubrics.md#101 }
 
