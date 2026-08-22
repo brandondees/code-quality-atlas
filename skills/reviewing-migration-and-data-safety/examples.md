@@ -17,6 +17,21 @@ distinct unsafe operation as its own numbered finding. When the input is correct
   `CREATE INDEX CONCURRENTLY`, `NOT VALID` constraint, batched backfill), do NOT
   flag the deferred later steps as missing — deferring them IS the pattern. Report
   exactly "No findings".
+- **This lens's scope is data-safety, not just DDL syntax.** A diff with zero
+  migration statements is still in scope when application code assumes a data
+  guarantee the database doesn't actually enforce — a uniqueness check-then-act
+  with no `UNIQUE` constraint, an ordering or cardinality assumption nothing in
+  the schema backs. Do not answer "Not applicable" for app-level code just
+  because there's no `ALTER`/`CREATE`/migration file in front of you; ask
+  whether the code's correctness depends on the database catching something it
+  isn't set up to catch.
+- **`ADD COLUMN col type NOT NULL DEFAULT <constant>` is one safe pattern, not
+  two conflicting signals.** Read past `NOT NULL` to check for `DEFAULT
+  <constant>` on the same line before flagging — `NOT NULL` alone (no default)
+  fails/locks on existing rows, but paired with a constant default it is the
+  fast, safe, no-rewrite form the decision rule above already covers. Flagging
+  it as if the default weren't there is a fabricated finding on a line whose
+  actual keywords already show it's safe.
 
 ## Bad → finding
 
@@ -62,6 +77,88 @@ class Migration(migrations.Migration):
    confirm the migration is reversible (or the irreversibility is deliberate and
    documented).
 
+## Bad → finding (in-place type change — same breakage as a rename)
+
+**Input (diff, Postgres, `orders.customer_id` currently `int`, customer volume
+has outgrown int range):**
+
+```sql
+ALTER TABLE orders ALTER COLUMN customer_id TYPE bigint;
+```
+
+**Expected finding:**
+
+1. **In-place type change breaks the running app:** during a rolling deploy, old
+   app-code instances still marshal `customer_id` as a 32-bit int while the new
+   type is live underneath them — the same backward-compatibility break as an
+   in-place rename, not merely a locking/performance concern. Use the
+   expand/contract recipe: add a new `bigint` column, dual-write both, backfill,
+   cut reads over to the new column, then drop the old one.
+
+A type change is covered by the same "any one-step rename or type-change of a
+live column is breaking" decision rule as a rename — do not report only the
+table-rewrite/locking cost (real, but secondary) while missing the
+backward-compatibility break that the decision rule already calls out by name.
+
+## Bad → finding (missing dual-write during a column cutover)
+
+**Input (diff and the app change deployed in the same release):**
+
+```sql
+ALTER TABLE users ADD COLUMN display_name text;
+```
+
+```python
+# app code, deployed in the same release as the migration
+def get_name(user):
+    return user.display_name  # old `full_name` column is no longer read anywhere
+```
+
+**Expected finding:**
+
+1. **Missing dual-write during the cutover:** the schema change itself is
+   safe — a nullable add locks nothing and breaks nothing. The unsafe part is
+   the app code: during a rolling deploy, instances still running the *old*
+   version never write `display_name`, so a request served by a *new*-version
+   instance reads null/empty for any row the old code touched in between.
+   Recommend a transition phase where the app writes both columns (or the
+   column is backfilled first) before cutting reads over exclusively to the
+   new one.
+
+The defect here is entirely in the app-side read/write sequencing, not the
+migration's SQL — do not clear this as safe just because the DDL by itself is
+the nullable-add pattern this lens already treats as sound. A safe schema
+change and an unsafe deployment sequence are two different questions; check
+both.
+
+## Bad → finding (no migration statement at all — the guarantee the app assumes doesn't exist in the schema)
+
+**Input (diff — no `UNIQUE` constraint exists on `users.email` in the schema):**
+
+```python
+class SignupForm:
+    def save(self):
+        if User.objects.filter(email=self.email).exists():
+            raise ValidationError("Email already registered")
+        return User.objects.create(email=self.email, ...)
+```
+
+**Expected finding:**
+
+1. **App-level uniqueness check with no database-level enforcement:** two
+   concurrent signup requests can both pass the `.exists()` check before either
+   commits, creating duplicate accounts with the same email — the check and the
+   create are not atomic, and nothing at the database layer would reject the
+   race even if the app-level check is perfectly written. Add a database-level
+   `UNIQUE` constraint on `users.email` so the database itself rejects the
+   duplicate, rather than relying solely on an app-level pre-check.
+
+This diff contains no `ALTER`/`CREATE`/migration file — do not report "Not
+applicable" on that basis. The question this lens asks is whether a data
+guarantee the code depends on is actually backed by the schema; here it
+isn't, and that gap is squarely this lens's own finding regardless of what
+shape the diff arrives in.
+
 ## Good → no finding
 
 **Input (diff):**
@@ -104,6 +201,24 @@ supplies concrete drain evidence — production-usage data confirming the old pa
 has actually stopped being read/written (not merely a ticket link or a stated
 retirement date on their own, which document intent but not proof) — if it does,
 that satisfies the gating requirement; do not re-demand it.
+
+## Good → no finding (`NOT NULL` *with* a constant default is the safe form, not the unsafe one)
+
+**Input (diff, Postgres 11+):**
+
+```sql
+ALTER TABLE payments ADD COLUMN retry_count int NOT NULL DEFAULT 0;
+```
+
+**Expected finding:** None — `NOT NULL` is present, but so is `DEFAULT 0`, and
+the decision rule above is explicit that `ADD COLUMN ... DEFAULT <constant>` is
+fast and safe (no table rewrite, no per-row backfill) regardless of table size.
+Report "No findings". Do NOT flag this as "`NOT NULL` with no backfill logic
+will fail on existing rows" — that failure mode is real only for `NOT NULL`
+*without* a default; this line has one. The same discipline as the nullable-add
+keyword rule above: read every keyword on the line — `NOT NULL` and `DEFAULT`
+both — before deciding which pattern is in front of you, not just the first
+keyword that looks alarming.
 
 ## Bad → finding (a bulk `DELETE` is a data operation, not "destructive DDL")
 
