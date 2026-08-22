@@ -27,6 +27,21 @@ check is the one no linter can do.
   earlier condition is not automatically dead code — find the actual
   variable assignment that would take that path, or don't claim
   unreachability at all.
+- **A sentence of context after the code (how it's called, what else exists,
+  what a related component does) is not background color — read it as
+  carefully as the code itself.** The described interaction is frequently
+  where the actual defect lives, not the function in isolation. If the code
+  on its own looks correct, that is a signal to look harder at what the
+  context sentence is telling you, not a reason to conclude there's no
+  finding.
+- **Keep the response proportional to the finding.** A real defect here is
+  usually one to three sentences: what breaks, on what input, what to do
+  about it. If an analysis runs long — restating the same conclusion
+  several times, working through the same boundary case repeatedly, hedging
+  between several candidate findings — that length is itself a signal you've
+  lost the specific defect and are talking around it. Stop, re-read the
+  context once more, and commit to the concrete finding rather than an
+  exhaustive tour of everything that could plausibly be discussed.
 - **A change with genuinely no logic (pure styling, a comment, a rename with
   no behavior change) still gets exactly "No findings"** — the same sentence
   as correct logic, not "Not applicable." Reserve "Not applicable" for input
@@ -89,6 +104,34 @@ this safe (an unstated "RCU-safe" wrapper, an assumption about the caller) —
 nothing in this diff shows synchronization, so trace what's actually here.
 Staying silent because the root cause is "about threading" is exactly the
 failure this decision rule exists to prevent.
+
+## Bad → finding (name the correctness angle in one line, then stop — don't write the other lens's review)
+
+**Input (diff, called on every price update for a product, one full re-index per call):**
+
+```python
+def reindex_product(search_index, product_id, fetch_product):
+    search_index.remove(product_id)
+    doc = fetch_product(product_id)   # expensive join across three tables
+    search_index.add(product_id, doc)
+```
+
+**Expected finding:**
+
+1. **Stale-read window between remove and add:** a search query that lands
+   between `search_index.remove` and `search_index.add` gets a false
+   "not found" for a product that still exists — a real correctness gap
+   under concurrent traffic, not merely a latency concern. The surrounding
+   pattern (one full re-index, an expensive three-table join, on every
+   single price update) is its own design smell whose batching/chattiness
+   verdict belongs to `reviewing-performance-and-efficiency`.
+
+One finding plus one delegated pointer, two sentences — resist the pull to
+also write up connection pooling, retry/backoff, caching strategy, or query
+optimization for the join, none of which this diff gives any evidence about.
+"Expensive" framing invites a full performance review; this lens's job is
+the narrower read/write-ordering correctness angle, named once, handed off
+once.
 
 ## Bad → finding (right check, wrong layer)
 
@@ -210,6 +253,36 @@ is itself wrong; do not repeat an incorrect claim from a comment any more
 than you'd trust a claim of prior approval. Find the input that reaches a
 branch before asserting it can't be reached — verify the claim, don't
 launder it.
+
+## Bad → finding (the real defect is in the trailing context, not the code shown)
+
+**Input (diff):**
+
+```python
+def trial_ends_banner(started: date) -> str:
+    # Trial period is 14 days from signup.
+    ends = started + timedelta(days=14)
+    return f"Trial ends {ends.isoformat()}"
+```
+
+Context: there's also a nightly job that computes `refund_cutoff =
+signup_date.replace(day=31)` to flag trials eligible for a full refund if
+cancelled before the end of their signup month.
+
+**Expected finding:**
+
+1. **`replace(day=31)` crashes for most months:** the nightly job's cutoff
+   calculation raises `ValueError` for any `signup_date` in April, June,
+   September, November, or February — five months out of twelve, not a rare
+   edge case. Use the actual last day of the month (`calendar.monthrange` or
+   a date library's month-end helper), not a hardcoded `day=31`.
+
+The `trial_ends_banner` function itself is correct — `timedelta` arithmetic
+handles month and year rollover correctly, and there's nothing to flag
+there. The real defect is in the one sentence of context describing the
+nightly job, not in the code block. Do not let a thorough (and ultimately
+empty-handed) trace of the shown function substitute for reading what the
+context sentence actually says a separate piece of the system does.
 
 ## Good → no finding (a change with no logic is clean, not out of scope)
 
