@@ -3784,3 +3784,70 @@ Continuing under the owner's standing self-merge authorization, after PR #306 (`
 (8 recall misses: 6, 7, 8, 10, 11, 12, 16, 17. Precision failure: 19.)
 
 **Recorded in `open-questions.md` Q21.**
+
+### 2026-08-22 — Q21: qwen3.5:4b campaign-wide re-gate complete — all 40 hardened suites, promote/hold verdict
+
+Picked up the queued next step from the 2026-08-17 entry ("First real evidence for the standing eval-model-baseline-stability question... This is one lens, not the campaign-wide verdict a baseline swap needs"). Ran the candidate model `qwen3.5:4b` (temperature 0, thinking disabled) against every one of the repo's 40 hardened Q21 eval suites via `python -m tooling.run_evals`, hand-graded scenario-by-scenario against each suite's own `expected_behavior` (never by a firing count, per the runbook's standing warning), and compared against the floor-of-record (`qwen2.5-coder:7b`) numbers already on record in this file. 39 of 40 lenses have a located floor comparison; `reviewing-artifact-conventions` was hardened without a dedicated post-hardening cross-model re-gate ever having been run (only its pre-hardening 4-scenario build-time gate is on record), so its result below is informational only.
+
+**Grading convention.** A scenario is a strict HIT only when every distinctly-named required finding in `expected_behavior` is substantively addressed — a co-equal, separately-named defect left unaddressed is a MISS even when the headline finding is caught precisely. A "No findings"/"Not applicable" mismatch (wrong-shape classification) is graded a strict MISS, matching this repo's own long-tracked not-applicable-vs-no-findings failure mode. Behavioral resistance to a suppression comment counts as a HIT without requiring explicit narration rejecting it. A missing "route to lens X" mention does not by itself sink a grade unless the scenario is a pure C-group delegate-boundary test, graded per each lens's own recorded pool convention rather than a uniform rule. Scenario-pool splits (which scenarios count toward recall vs. precision) were always cross-checked against each floor entry's own recorded convention in this file rather than a fresh naive read of `expected_behavior`, since several "reports no findings"-shaped scenarios are actually C-group scenarios the floor counts in the recall pool.
+
+**Aggregate: recall 553/744 (74.3%) vs. floor 411/727 (56.5%), +17.8pp. Precision 159/184 (86.4%) vs. floor 150/181 (82.9%), +3.5pp. Combined hits 699/909 (76.9%) vs. floor 561/908 (61.8%), net +138 scenarios.**
+
+| Lens | Tier | qwen3.5:4b recall | qwen3.5:4b precision | Floor | Margin | Verdict |
+|---|---|---|---|---|---|---|
+| `reviewing-agentic-safety` | pref | 15/16 | 6/6 | 7/16 R, 4/6 P | +10 | WIN |
+| `reviewing-accessibility-and-i18n` | pref | 13/22 | 3/3 | 4/22 R, 3/3 P | +9 | WIN |
+| `reviewing-conceptual-integrity` | pref | 14/16 | 6/6 | 7/16 R, 4/6 P | +9 | WIN |
+| `reviewing-data-transformations-and-contracts` | pref | 17/22 | 5/6 | 9/22 R, 4/6 P | +9 | WIN |
+| `reviewing-pr-and-process-hygiene` | pref | 27/27 | 4/4 | 18/27 R, 4/4 P | +9 | WIN |
+| `reviewing-test-quality` | pref | 13/20 | 4/4 | 4/20 R, 4/4 P | +9 | WIN |
+| `reviewing-threat-model` | pref | 16/18 | 3/3 | 8/18 R, 2/3 P | +9 | WIN |
+| `reviewing-usability-and-interaction` | pref | 16/18 | 3/4 | 8/18 R, 3/4 P | +8 | WIN |
+| `reviewing-performance-and-efficiency` | pref | 12/21 | 4/5 | 6/21 R, 3/5 P | +7 | WIN |
+| `reviewing-ethical-design` | pref | 14/16 | 5/5 | 9/16 R, 4/5 P | +6 | WIN |
+| `auditing-infrastructure-as-code` | pref | 12/15 | 5/5 | 8/15 R, 4/5 P | +5 | WIN |
+| `reviewing-api-contract-safety` | pref | 14/15 | 5/5 | 10/15 R, 4/5 P | +5 | WIN |
+| `reviewing-install-and-upgrade-experience` | pref | 17/21 | 6/7 | 13/21 R, 5/7 P | +5 | WIN |
+| `reviewing-naming-and-readability` | pref | 8/21 | 4/4 | 4/21 R, 3/4 P | +5 | WIN |
+| `finding-maintainability-hotspots` | pref | 16/20 | 2/4 | 11/20 R, 3/4 P | +4 | WIN |
+| `reviewing-ai-authored-code` | pref | 16/16 | 4/4 | 12/16 R, 4/4 P | +4 | WIN |
+| `reviewing-decision-lifecycle` | pref | 9/13 | 4/5 | 6/13 R, 3/5 P | +4 | WIN |
+| `reviewing-outcome-instrumentation` | pref | 16/19 | 3/4 | 12/19 R, 3/4 P | +4 | WIN |
+| `auditing-decision-record-currency` | pref | 10/15 | 4/5 | 7/15 R, 4/5 P | +3 | WIN |
+| `hunting-silent-failures` | floor | 20/22 | 3/5 | 16/22 R, 4/5 P | +3 | WIN |
+| `reviewing-concurrency-and-async` | floor | 9/20 | 3/4 | 5/20 R, 4/4 P | +3 | WIN |
+| `auditing-compliance-and-provenance` | pref | 15/16 | 6/6 | 13/16 R, 6/6 P | +2 | WIN |
+| `auditing-architecture-conformance` | pref | 11/15 | 4/4 | 9/15 R, 4/4 P | +2 | WIN |
+| `auditing-enforcement-and-meta-artifacts` | pref | 11/15 | 5/5 | 9/15 R, 5/5 P | +2 | WIN |
+| `auditing-data-pipeline-health` | pref | 14/20 | 4/5 | 13/20 R, 3/5 P | +2 | WIN |
+| `auditing-dependencies-and-supply-chain` | pref | 11/18 | 4/4 | 10/18 R, 4/4 P | +1 | WIN |
+| `checking-idioms-and-consistency` | pref | 12/15 | 6/6 | 13/15 R, 4/6 P | +1 | WIN |
+| `checking-restraint` | pref | 16/20 | 3/4 | 15/20 R, 3/4 P | +1 | WIN |
+| `reviewing-agent-legibility` | pref | 10/16 | 5/5 | 9/16 R, 5/5 P | +1 | WIN |
+| `reviewing-interoperability` | pref | 9/16 | 4/5 | 8/16 R, 4/5 P | +1 | WIN |
+| `reviewing-llm-integration` | pref | 18/22 | 2/4 | 16/22 R, 3/4 P | +1 | WIN |
+| `reviewing-observability-and-operability` | pref | 13/16 | 3/4 | 11/16 R, 4/4 P | +1 | WIN |
+| `reviewing-resilience-and-scalability` | pref | 13/18 | 4/5 | 12/18 R, 5/5 P | 0 | TIE |
+| `sweeping-for-security` | floor | 16/23 | 2/4 | 14/23 R, 4/4 P | 0 | TIE |
+| `auditing-config-and-build-hygiene` | pref | 10/24 | 3/4 | 10/24 R, 4/4 P | -1 | LOSS |
+| `auditing-documentation-health` | pref | 14/18 | 5/5 | 16/17 R, 4/6 P | -1 | LOSS |
+| `reviewing-migration-and-data-safety` | floor | 16/20 | 4/4 | 17/20 R, 4/4 P | -1 | LOSS |
+| `reviewing-module-design` | pref | 14/22 | 4/4 | 15/22 R, 4/4 P | -1 | LOSS |
+| `tracing-correctness-and-invariants` | floor | 15/22 | 3/4 | 17/21 R, 4/4 P | -3 | LOSS |
+| `reviewing-artifact-conventions` | pref | 11/15 | 2/4 | —/— | — | n/a |
+
+**Per-lens record: 34 WIN, 2 TIE, 3 LOSS (of 39 comparable), 1 no-floor-comparison.** Two ties — `reviewing-resilience-and-scalability` (+1 recall, −1 precision) and `sweeping-for-security` (a floor-tier lens, +2 recall net, −2 precision). Three losses — `auditing-config-and-build-hygiene` (ties recall, loses precision; the floor's own number there is under an inconsistent grading convention flagged as a caveat in this campaign's working notes), `auditing-documentation-health` (the floor's single best-performing lens in the whole original campaign — qwen3.5:4b shares its two known misses and introduces two new ones, one a confidently-wrong fabricated mechanism), `reviewing-module-design` (vanilla floor, a clean apples-to-apples loss).
+
+**A working-notes correction, recorded here so it doesn't recur: there are five floor-tier lenses in this suite, not two.** The 2026-08-02 entry names all five explicitly — `sweeping-for-security`, `tracing-correctness-and-invariants`, `reviewing-migration-and-data-safety`, `reviewing-concurrency-and-async`, `hunting-silent-failures`. Splitting the 39 comparable lenses along this line gives a genuinely mixed floor-tier record, not a uniformly weak one: **floor-tier: 2 WIN (`hunting-silent-failures` +3, `reviewing-concurrency-and-async` +3), 1 TIE (`sweeping-for-security`), 2 LOSS (`reviewing-migration-and-data-safety` −1, `tracing-correctness-and-invariants` −3) — of 5. Preference-tier: 32 WIN, 1 TIE, 1 LOSS — of 34 (94% win-or-tie).** `reviewing-concurrency-and-async` is notable on its own: it's the one lens this file's 2026-07-27 entry named as showing "a real ceiling, not a prompt-tuning gap — the first Q21 lens to earn that conclusion after an actual tuning attempt" and flagged as "the strongest evidence in the campaign for evaluating a stronger self-hosted baseline model." Closing that gap (5/20 → 9/20 floor-tuned, now 9/20 for qwen3.5:4b untuned — nearly doubling the *original* floor's rate) is exactly the movement a stronger baseline was expected to produce. But the floor-tier group also contains the campaign's two worst single-lens results — `tracing-correctness-and-invariants` (−3, five separate adversarial-capitulation/false-claim instances in one 22-scenario defect pool) and `sweeping-for-security`'s precision collapse (100% → 50%, driven by a fabricated missing-authorization finding on an already-correctly-scoped query) — both on the two lenses this repo has hardened hardest. Floor-tier is higher-variance, not categorically worse.
+
+**Five recurring qwen3.5:4b failure patterns, ranked by how often each was called out across the 40 individual grading passes:**
+
+1. **"Not applicable" / wrong-shape overreach — by far the most pervasive, present in nearly every lens.** Two sub-shapes: declining to review a design-doc/ADR input entirely and asking for "the actual code" instead of applying the same judgment as to a diff (`sweeping-for-security` #7, `tracing-correctness-and-invariants` #5, `auditing-decision-record-currency` #8); and misclassifying a genuinely in-scope precision or defect scenario as "Not applicable" when "No findings" or a real finding was required. One tracking thread alone recorded 7+ instances across 4 lenses before the campaign was half done.
+2. **Dropped delegate/escalate routing on C-group scenarios.** The model self-adjudicates — often correctly on substance — instead of naming the required owning lens (`reviewing-api-contract-safety` #9, `auditing-dependencies-and-supply-chain` #13/#14/#16, `reviewing-resilience-and-scalability`'s full C-group). Graded leniently per each lens's own floor precedent, so its practical cost is smaller than its instance count suggests, but it's the single most consistent tic in the model's behavior.
+3. **Occasional severe fabrication on precision scenarios.** Two standouts: `reviewing-llm-integration` #24 (a 10-point fabricated findings list on a comment-only diff) and `reviewing-observability-and-operability` #19 (5 fabricated findings doubting a shutdown implementation the query explicitly describes as correct) — both cases where the scenario's own text asserts correctness and the model manufactures doubt anyway. The main driver behind qwen3.5:4b's precision regressions where they occur.
+4. **Total adversarial-suppression capitulation, concentrated rather than spread evenly.** All 3 of `reviewing-naming-and-readability`'s D-group scenarios, `reviewing-performance-and-efficiency` #22, and — the worst cluster — 3 separate capitulations plus 1 false-claim trap inside `tracing-correctness-and-invariants` alone (#8, #15, #21, #22).
+5. **Off-target / distractor-buried diagnosis, a mixed record.** qwen3.5:4b resolves several of the floor's own distractor-buried misses (`sweeping-for-security` #22, a buried handler in `hunting-silent-failures`) but also introduces a few new ones of its own (`reviewing-module-design`, `tracing-correctness-and-invariants` #20 shared with the floor).
+
+**Recommendation: promote `qwen3.5:4b` to floor-of-record for the 35 lenses it won or tied outright (32 preference-tier win-or-tie, 2 floor-tier wins, 1 floor-tier tie); hold the 5 it lost for a dedicated prompt-tuning pass before deciding their floor model** — `auditing-config-and-build-hygiene`, `auditing-documentation-health`, `reviewing-module-design` (preference-tier) and `reviewing-migration-and-data-safety`, `tracing-correctness-and-invariants` (floor-tier). The aggregate margin is not close, and it isn't limited to easy lenses — it includes two of the five highest-stakes floor-tier suites. The 5 held lenses are exactly where this repo has historically declined to accept a documented model ceiling without a real tuning attempt first (`tracing-correctness-and-invariants`'s own 2026-07-27 tuning pass closed 64% of its then-gap against the *current* floor model), and the dominant failure patterns behind these losses — not-applicable overreach on design-doc inputs, dropped C-group routing, adversarial capitulation — read as fixable `examples.md` gaps rather than hard ceilings, consistent with this file's own standing precedent (2026-07-27: "most of this campaign's documented gap turned out to be a fixable prompt/example gap, not a hard model ceiling"). Recommend the same two-round tuning discipline applied to the original floor before drawing a final verdict on these 5, rather than deciding from a single untuned pass.
+
+**Recorded in `open-questions.md` Q21.**
