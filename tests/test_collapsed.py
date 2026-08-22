@@ -504,6 +504,46 @@ def test_strip_toc_section_drops_a_trailing_contents_section_to_eof():
     ) == "## Bad\n\nthe bad case"
 
 
+def test_strip_toc_section_ignores_a_contents_like_line_inside_a_fenced_block():
+    # #317 (the same gap #313 fixed in _toc_for_body): a literal "## Contents"
+    # line inside a worked example's fenced snippet is example content, not
+    # a real ToC heading, and must not be stripped.
+    from tooling.generate_collapsed import _strip_toc_section
+
+    md = (
+        "## Bad\n\n"
+        "```markdown\n"
+        "## Contents\n"
+        "- [Quickstart](#quickstart)\n"
+        "```\n\n"
+        "the bad case\n"
+    )
+    out = _strip_toc_section(md)
+    assert "## Contents" in out
+    assert "- [Quickstart](#quickstart)" in out
+    assert "the bad case" in out
+
+
+def test_strip_toc_section_ignores_a_fenced_heading_while_skipping_a_real_toc():
+    # A fenced "## "-prefixed line inside a real Contents section must not be
+    # mistaken for the next real heading and end the skip early.
+    from tooling.generate_collapsed import _strip_toc_section
+
+    md = (
+        "## Contents\n\n"
+        "- [Bad](#bad)\n\n"
+        "```markdown\n"
+        "## Not a real heading\n"
+        "```\n\n"
+        "## Bad\n\nthe bad case\n"
+    )
+    out = _strip_toc_section(md)
+    assert "## Contents" not in out
+    assert "- [Bad](#bad)" not in out
+    assert "Not a real heading" not in out
+    assert "## Bad\n\nthe bad case" in out
+
+
 def test_no_committed_lens_bundle_has_a_duplicate_contents_heading():
     """Regression: examples.md is inlined verbatim, so a `## Contents` inside one
     used to emit a second mid-document heading plus a self-referencing ToC entry
