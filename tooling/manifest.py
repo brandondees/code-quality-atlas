@@ -641,10 +641,18 @@ def load_manifest(path: str) -> Manifest:
         try:
             built = [Source(category=b["category"], source=b["source"]) for b in s["built_from"]]
             artifacts = [Artifact(name=a["name"], detect=a["detect"],
-                                  rubric=a["rubric"], slug=a["slug"])
+                                  rubric=a["rubric"],
+                                  # Same bare-null gap as description/picker
+                                  # below: a present-but-null "slug:" slips
+                                  # past the KeyError guard and would crash
+                                  # _NAME_RE.match(None) in _validate_skills.
+                                  slug=a["slug"] or "")
                          for a in _list_field(s, "artifacts", i)]
             skills.append(Skill(
-                name=s["name"],
+                # Same bare-null gap as description/picker below: a
+                # present-but-null "name:" slips past the KeyError guard
+                # and would crash _NAME_RE.match(None) in _validate_skills.
+                name=s["name"] or "",
                 # description is a required key (KeyError -> ValidationError
                 # below if absent), but a *present* bare `description:` null
                 # slips past that guard -- `None.strip()` would crash the
@@ -673,7 +681,10 @@ def load_manifest(path: str) -> Manifest:
         r = data["router"]
         try:
             router = Router(
-                name=r["name"],
+                # Same bare-null gap as description below: a present-but-null
+                # "name:" slips past the KeyError guard and would crash
+                # _NAME_RE.match(None) in _validate_router.
+                name=r["name"] or "",
                 # Same bare-null gap as skill.description/picker (#142 review):
                 # a present-but-null "description:" slips past the KeyError
                 # guard and would crash `.strip()` on None.
@@ -739,7 +750,10 @@ def load_manifest(path: str) -> Manifest:
         sy = data["synthesizer"]
         try:
             synthesizer = Synthesizer(
-                name=sy["name"],
+                # Same bare-null gap as description below: a present-but-null
+                # "name:" slips past the KeyError guard and would crash
+                # _NAME_RE.match(None) in _validate_synthesizer.
+                name=sy["name"] or "",
                 # Same bare-null gap as skill.description/picker (#142 review):
                 # a present-but-null "description:" slips past the KeyError
                 # guard and would crash `.strip()` on None.
@@ -763,7 +777,10 @@ def load_manifest(path: str) -> Manifest:
         try:
             modes.append(Mode(
                 name=raw_mode["name"],
-                breadth=raw_mode["breadth"],
+                # Same bare-null gap as note below: a present-but-null
+                # "breadth:" slips past the KeyError guard and would crash
+                # `.strip()` on None in _validate_modes.
+                breadth=raw_mode["breadth"] or "",
                 floor=raw_mode["floor"],
                 # Same bare-null gap as tensions above: a present-but-null
                 # "triggers:" would crash `list(...)` with TypeError
@@ -788,7 +805,10 @@ def load_manifest(path: str) -> Manifest:
                     f"entrypoints[{i}] in {path}: 'shapes' must be a list of strings "
                     f"(got {shapes!r}) — use 'shapes: [diff]', not 'shapes: diff'")
             entrypoints.append(Entrypoint(
-                name=raw_ep["name"],
+                # Same bare-null gap as description below: a present-but-null
+                # "name:" slips past the KeyError guard and would crash
+                # re.fullmatch(..., None) in _validate_entrypoints.
+                name=raw_ep["name"] or "",
                 # Same bare-null gap as skill.description/picker (#142
                 # review): a present-but-null "description:" slips past the
                 # KeyError guard and would crash `.strip()` on None.
