@@ -168,7 +168,7 @@ def test_malformed_stdin_json_is_a_clean_no_op(tmp_path):
 # routing nudge nor the opt-in telemetry hooks. collapsed/hooks/ mirrors
 # hooks/, except route.sh's steering message, which is intentionally NOT
 # shared: the collapsed plugin's source ("./collapsed") ships none of the
-# standalone plugin's 43 skills, router, or commands/ — only the 4 collapsed
+# standalone plugin's 44 skills, router, or commands/ — only the 4 collapsed
 # entrypoints — so the nudge must name what's actually installed.
 
 COLLAPSED_HOOKS_DIR = REPO_ROOT / "collapsed" / "hooks"
@@ -273,7 +273,7 @@ def test_route_hook_emits_valid_session_start_json_and_names_standalone_entrypoi
     assert payload["hookSpecificOutput"]["hookEventName"] == "SessionStart"
     context = payload["hookSpecificOutput"]["additionalContext"]
     assert isinstance(context, str) and context
-    # The standalone plugin's full surface (43 skills + router + commands/),
+    # The standalone plugin's full surface (44 skills + router + commands/),
     # distinct from the collapsed plugin's 4 entrypoints covered by
     # test_collapsed_route_hook_names_collapsed_entrypoints_not_standalone_surface.
     for surface in ("atlas-review-pr", "atlas-code-review", "choosing-review-lenses",
