@@ -14,7 +14,7 @@ description: 'Reviews whether a change fits one coherent model of what the produ
   Amount-of-surface is #11''s, interaction mechanics #42''s, code-level consistency
   #8''s.'
 provenance:
-  taxonomy_version: v0.13
+  taxonomy_version: v0.14
   built_from:
   - category: 44
     source: docs/research/cluster-7-product.md#44

@@ -1,0 +1,62 @@
+{
+  "skills": [
+    "auditing-deployment-and-trust-boundaries"
+  ],
+  "scenarios": [
+    {
+      "query": "Audit this deployment wiring:\n```text\nlaunchd: com.acme.git-sync.plist\n  ProgramArguments: [\"/usr/bin/git\", \"-C\", \"/srv/app\", \"pull\", \"origin\", \"main\"]\n  StartInterval: 300          # every 5 minutes, unattended\nlaunchd: com.acme.deploy.plist\n  ProgramArguments: [\"/srv/app/deploy-binaries.sh\"]\n  # deploy-binaries.sh (from the just-pulled tree):\n  #   ./install-launchd.sh && ./windmill.sh sync && systemctl restart app-services\n  RunAtLoad: true\nbranch protection on main: required PR review, 1 approval; admin/bypass not restricted (\"include administrators\" unchecked — the platform default)\n```",
+      "expected_behavior": [
+        "Flags Poisoned Pipeline Execution: git-sync fast-forwards main unattended every 5 minutes and deploy.plist then executes deploy-binaries.sh from that same freshly-pulled tree",
+        "Grounds the PPE verdict in a concrete gap in the review gate itself, not merely the absence of a second post-merge gate — the branch protection's admin/bypass allowance means a commit can land on main without going through the required review",
+        "Separately notes deploy-binaries.sh always runs whatever is at the tip of main rather than a specific reviewed commit-SHA or tag, so merge and deploy collapse into one unattended event with no distinct deploy-time check",
+        "Names the consequence concretely: an admin, a misconfigured automation account, or a compromised bot with write access gets host code execution with persistence",
+        "Recommends closing the bypass allowance in branch protection and pinning deploy-binaries.sh to a specific reviewed commit-SHA or signed release tag, verified at deploy time",
+        "Flags the absence of any provenance/attestation check on what deploy-binaries.sh is about to run, framing it as identifying build origin and supporting a pre-execution policy check (paired with verifying an approved signed release/tag/allowlisted commit) rather than as a standalone guarantee the tree is safe"
+      ]
+    },
+    {
+      "query": "Audit this deployment wiring:\n```text\nsystemd unit: /etc/systemd/system/billing-sync.service\n  [Service]\n  User=root\n  EnvironmentFile=/srv/billing/prod.env    # committed to the repo, tracked in git\n  ExecStart=/srv/billing/sync.py\n  # no PrivateTmp=, no NoNewPrivileges=, no ProtectSystem=\nprod.env (in repo): STRIPE_SECRET_KEY=sk_live_51H..., DB_ADMIN_PASSWORD=Correct-Horse-1\n```",
+      "expected_behavior": [
+        "Flags the committed prod.env as a credential-in-tree finding: a live Stripe secret key and an admin DB password reachable by anyone who can read the repository, not just anyone with server access",
+        "Recommends moving both to a secrets manager and rotating both values as already exposed",
+        "Flags the unsandboxed root service separately: User=root with none of PrivateTmp=/NoNewPrivileges=/ProtectSystem= set, so a bug or compromise in sync.py runs with full host privilege",
+        "Reports these as two distinct findings, not folded into one line"
+      ]
+    },
+    {
+      "query": "Audit this deployment wiring:\n```text\nGitHub Actions: .github/workflows/deploy.yml\n  on: release: { types: [published] }\n  permissions: { contents: read, id-token: write }\n  jobs:\n    deploy:\n      runs-on: ubuntu-latest                 # ephemeral, provider-managed\n      environment: production                # requires approval from one of the listed required reviewers before this run starts\n      steps:\n        - uses: actions/checkout@<pinned-sha>\n          with: { ref: \"${{ github.event.release.tag_name }}\" }\n        - uses: aws-actions/configure-aws-credentials@<pinned-sha>\n          with: { role-to-assume: arn:aws:iam::123:role/deploy-billing-service,\n                  aws-region: us-east-1 }     # role scoped to one service, OIDC short-lived\n        - run: ./deploy.sh                    # deploys only the checked-out artifact\nrequired reviewers on \"production\" environment: 1 (of a listed team), from the platform team\nimmutable releases: enabled — once a release publishes, its tag is locked to that commit and cannot be moved or force-pushed, including by admins\nbranch protection on main: required PR review, required status checks, no direct pushes, admin bypass disabled\nno cron/systemd/launchd unit executes repo content unattended\n```",
+      "expected_behavior": [
+        "Reports no findings: the workflow declares environment: production, which GitHub enforces as a required-reviewer gate independent of branch protection, immutable releases are enabled so the release's tag can't be moved to different content after approval, branch protection has no admin-bypass allowance, the runner is ephemeral, and the deploy credential is OIDC short-lived and scoped to one service",
+        "Does not treat the release tag as safe to check out merely because it is a tag — recognizes that an ordinary mutable tag could be force-moved after environment approval, and that immutable releases specifically is what makes checking it out here safe",
+        "Does not infer a signed/reviewed release from the release: published trigger or a comment alone — treats the environment reviewer gate and immutable-releases protection as the actual controls, not the trigger type by itself",
+        "Does not overstate the required-reviewer rule as needing multiple approvals — GitHub's required-reviewer gate needs only one of the listed reviewers to approve",
+        "Does not flag the mere existence of a deploy pipeline as a problem",
+        "Does not demand additional controls (e.g. a separate provenance check) beyond what this wiring's actual risk warrants"
+      ]
+    },
+    {
+      "query": "Audit this deployment wiring:\n```text\nmain.tf: resource \"aws_s3_bucket_public_access_block\" \"assets\" { block_public_acls = false }\ndeploy.yml: on: push: { branches: [main] }, then: terraform apply -auto-approve\nbranch protection on main: required PR review, required status checks, no direct pushes, admin bypass disabled\n```",
+      "expected_behavior": [
+        "Does not adjudicate the public S3 bucket itself as this lens's own finding",
+        "Routes the public S3 bucket / declared-IaC exposure to auditing-infrastructure-as-code (#31) by name",
+        "Does not flag Poisoned Pipeline Execution — the terraform apply on push runs against the exact commit CI's trigger ties it to, and that commit only reaches main through a review gate with no bypass allowance",
+        "Does not treat the mere absence of a second post-execution gate beyond that review gate as PPE by itself"
+      ]
+    },
+    {
+      "query": "Audit this deployment wiring:\n```python\n# math_utils.py — a pure library with no packaging, CI deploy step, or service\ndef clamp(value, low, high):\n    return max(low, min(value, high))\n```",
+      "expected_behavior": [
+        "Recognizes this is application source code with no CI/CD deploy step, cron/systemd/launchd unit, deploy script, or service-trust config to audit",
+        "Replies starting with 'Not applicable:' naming what's missing, rather than the healthy-scan sentence — this input contains nothing this lens could have checked"
+      ]
+    },
+    {
+      "query": "Audit this deployment wiring:\n```text\nservice-a config: calls http://service-b.internal:8080/admin/reindex on a timer\n  # no mTLS, no signed token, no auth header — service-b trusts any caller that can reach the port\nservice-b: internal-only DNS name, same VPC as service-a, no network policy restricting who can reach it\n```",
+      "expected_behavior": [
+        "Flags the unverified service-to-service trust: service-b's /admin/reindex endpoint is reachable and trusted purely because the caller is on the internal network, with no mTLS or signed token authenticating the caller",
+        "Names this as an un-mitigated Spoofing threat at that boundary (or equivalent identity/authentication framing) rather than dismissing it because the network is 'internal-only'",
+        "Recommends authenticating the caller (mTLS, a signed service token, or equivalent) rather than relying on network reachability alone"
+      ]
+    }
+  ]
+}

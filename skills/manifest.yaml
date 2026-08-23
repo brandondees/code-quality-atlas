@@ -1,4 +1,4 @@
-taxonomy_version: v0.13
+taxonomy_version: v0.14
 skills:
   - name: hunting-silent-failures
     description: >
@@ -1558,6 +1558,44 @@ skills:
     built_from:
       - { category: 31, source: docs/research/cluster-5-verification.md#31 }
 
+  - name: auditing-deployment-and-trust-boundaries
+    description: >
+      Audits the deployment/execution wiring already committed in a repo,
+      retrospectively and on a schedule: CI/CD jobs, cron/systemd/launchd
+      units, git-sync-then-execute patterns, deploy scripts, and
+      service-to-service trust in config — read for Poisoned Pipeline
+      Execution (an unattended job executing attacker-influenced content
+      from the branch it just fetched, with no trust gate), a deploy
+      identity's blast radius versus what it deploys, credential-in-tree at
+      rest, self-hosted-runner persistence risk, and the agent-action
+      surface already wired into the repo. The repo-shaped, retrospective
+      counterpart to reviewing-threat-model's design-time enumeration;
+      delegates a code vuln to sweeping-for-security, an IaC resource's
+      blast radius to auditing-infrastructure-as-code, pipeline hygiene to
+      auditing-config-and-build-hygiene. A repo-wide / scheduled audit. Use
+      on deploy scripts, CI/CD workflows, cron/systemd/launchd units,
+      service-trust config, or agent-triggerable hooks/scripts. Skip only
+      with none of those present.
+    picker: >
+      Could an adversary reach code execution or persistence through the
+      deployment wiring itself, not a vulnerable line of code?
+    shape: repo
+    wave: 7
+    # Built from a field report (#191): a whole-repo audit against a real
+    # system found none of the (then) nine repo-shaped audits could reach
+    # its single highest-severity issue — an unattended git-sync job that
+    # fast-forwards main and executes a deploy script from the freshly-
+    # pulled tree. Disposition chosen over the field report's cheaper
+    # alternative (conditionally routing sweeping-for-security /
+    # reviewing-threat-model into repo-audit mode) because those lenses'
+    # checklists are tuned for a diff or a design doc, not a static
+    # arrangement already at rest — a dedicated lens avoids reconciling
+    # borrowed framing. Single category, no cross_ref. eval_min left unset
+    # (D8's 3-scenario baseline) — this is a first build, not yet through
+    # the Q21 hardening/cross-model-re-gate pass other repo audits carry.
+    built_from:
+      - { category: 45, source: docs/research/cluster-4-runtime.md#45 }
+
   - name: reviewing-install-and-upgrade-experience
     description: >
       Reviews a change for the experience of the people who consume this software
@@ -1979,14 +2017,19 @@ router:
             auditing-dependencies-and-supply-chain, auditing-config-and-build-hygiene,
             auditing-documentation-health, auditing-compliance-and-provenance,
             auditing-enforcement-and-meta-artifacts, auditing-infrastructure-as-code,
-            auditing-decision-record-currency, auditing-data-pipeline-health]
-      note: the ten repo-shaped audits; run independently, not as one pass
+            auditing-decision-record-currency, auditing-data-pipeline-health,
+            auditing-deployment-and-trust-boundaries]
+      note: the eleven repo-shaped audits; run independently, not as one pass
             (auditing-infrastructure-as-code only where IaC manifests exist;
             auditing-decision-record-currency only where a decision-record
             directory exists; auditing-data-pipeline-health only where the repo
             has SQL models, pipelines, data tests, or published data
             schemas — data tests included because a repo can carry
-            permanently-warning or disabled ones with no models of its own)
+            permanently-warning or disabled ones with no models of its own;
+            auditing-deployment-and-trust-boundaries only where the repo has
+            deployment automation, a scheduled job, an unattended
+            sync/execute pattern, service-to-service trust config, or an
+            agent-triggerable hook/helper script to examine)
       shapes: [repo]
     - when: Enforcement config — lint/type suppressions, alert rules or dashboards,
             or checked-in generated artifacts
@@ -2411,7 +2454,8 @@ entrypoints:
       Run a whole-repository health audit with the code-quality-atlas repo-shaped
       audits (architecture, dependencies, config/build, docs, compliance,
       enforcement, infrastructure-as-code, decision-record currency,
-      data-pipeline health, maintainability hotspots). Use for a scheduled or on-demand repo audit, not
+      data-pipeline health, deployment/execution and trust-boundary security,
+      maintainability hotspots). Use for a scheduled or on-demand repo audit, not
       a single diff. Runs the applicable audits and synthesizes one report.
     shapes: [repo]
   - name: reviewing-a-decision

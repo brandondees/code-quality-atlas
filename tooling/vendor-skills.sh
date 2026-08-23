@@ -38,7 +38,7 @@ PRUNE=0
 FORCE=0
 SUBDIR=".claude/skills"
 MARKER_NAME=".atlas-vendored"
-# Which tree to vendor: the 43 standalone skills (default) or the 4 collapsed
+# Which tree to vendor: the 44 standalone skills (default) or the 4 collapsed
 # entrypoints (--collapsed).
 SRC_SUBDIR="skills"
 
@@ -55,7 +55,7 @@ Arguments:
 
 Options:
   --collapsed   Vendor the 4 collapsed entrypoints (collapsed/skills/) instead of
-                the 43 standalone skills (skills/)
+                the 44 standalone skills (skills/)
   --prune       Remove skills previously vendored by this tool that are no longer
                 in the suite (safe: only touches names recorded in the marker)
   --force       Overwrite a target directory at a colliding skill name even if
