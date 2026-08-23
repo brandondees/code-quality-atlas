@@ -25,7 +25,8 @@ scenarios:
   LLM-integration, agentic & tool-use safety, resilience, install/upgrade
   experience, plus repo-shaped audits
   for architecture, dependencies, config/build, docs, compliance,
-  infrastructure-as-code, decision-record currency, data-pipeline health, a
+  infrastructure-as-code, decision-record currency, data-pipeline health,
+  deployment/trust-boundary security, a
   decision-time lens, and an
   artifact lens that reviews authored artifacts like `SKILL.md` against their own
   standard, plus the first two Cluster VII lenses — usability & interaction
