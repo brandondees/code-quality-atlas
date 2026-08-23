@@ -8,7 +8,7 @@
 # for the full rationale — this file only restates what differs): the
 # steering message names this form's 4 entrypoint skills
 # (reviewing-a-change, auditing-a-repository, reviewing-a-decision,
-# reviewing-an-artifact) instead of the standalone plugin's 43 skills, router,
+# reviewing-an-artifact) instead of the standalone plugin's 44 skills, router,
 # and commands/, none of which ship under this plugin's own root
 # (`source: "./collapsed"` in .claude-plugin/marketplace.json) — the
 # collapsed entrypoints absorb the router, tool-grounding pre-pass, and
