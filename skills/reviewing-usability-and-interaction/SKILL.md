@@ -14,7 +14,7 @@ description: 'Reviews a user-facing change for interaction quality — whether a
   surface. Accessibility mechanics are #23''s, measured performance #15''s, manipulative
   design #36''s.'
 provenance:
-  taxonomy_version: v0.13
+  taxonomy_version: v0.14
   built_from:
   - category: 42
     source: docs/research/cluster-7-product.md#42

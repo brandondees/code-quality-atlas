@@ -6,7 +6,7 @@ description: Run a whole-repository health audit with the code-quality-atlas rep
   hotspots). Use for a scheduled or on-demand repo audit, not a single diff. Runs
   the applicable audits and synthesizes one report.
 provenance:
-  taxonomy_version: v0.13
+  taxonomy_version: v0.14
   built_from: []
 ---
 
@@ -42,7 +42,7 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 
 | When reviewing… | Run |
 |---|---|
-| Whole-repo health audit (scheduled / cron) | `finding-maintainability-hotspots`, `auditing-architecture-conformance`, `auditing-dependencies-and-supply-chain`, `auditing-config-and-build-hygiene`, `auditing-documentation-health`, `auditing-compliance-and-provenance`, `auditing-enforcement-and-meta-artifacts`, `auditing-infrastructure-as-code`, `auditing-decision-record-currency`, `auditing-data-pipeline-health` — the ten repo-shaped audits; run independently, not as one pass (auditing-infrastructure-as-code only where IaC manifests exist; auditing-decision-record-currency only where a decision-record directory exists; auditing-data-pipeline-health only where the repo has SQL models, pipelines, data tests, or published data schemas — data tests included because a repo can carry permanently-warning or disabled ones with no models of its own) |
+| Whole-repo health audit (scheduled / cron) | `finding-maintainability-hotspots`, `auditing-architecture-conformance`, `auditing-dependencies-and-supply-chain`, `auditing-config-and-build-hygiene`, `auditing-documentation-health`, `auditing-compliance-and-provenance`, `auditing-enforcement-and-meta-artifacts`, `auditing-infrastructure-as-code`, `auditing-decision-record-currency`, `auditing-data-pipeline-health`, `auditing-deployment-and-trust-boundaries` — the eleven repo-shaped audits; run independently, not as one pass (auditing-infrastructure-as-code only where IaC manifests exist; auditing-decision-record-currency only where a decision-record directory exists; auditing-data-pipeline-health only where the repo has SQL models, pipelines, data tests, or published data schemas — data tests included because a repo can carry permanently-warning or disabled ones with no models of its own; auditing-deployment-and-trust-boundaries only where the repo has deployment automation, a scheduled job, or an unattended sync/execute pattern to examine) |
 | Enforcement config — lint/type suppressions, alert rules or dashboards, or checked-in generated artifacts | `auditing-enforcement-and-meta-artifacts` — repo-shaped — scans suppression accretion and codegen/monitoring drift across the tree, not a single diff |
 | A repository's existing decision-record archive (an ADR/RFC directory already on disk), swept on a schedule rather than reviewed as it's being authored | `auditing-decision-record-currency` — repo-shaped — status-graph consistency, revisit-triggers plausibly due, EOL adoptions, and orphaned records; #29 owns the authoring-time call, this only checks whether time has invalidated an existing one |
 
@@ -60,3 +60,4 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 - [`auditing-decision-record-currency`](reference/lenses/auditing-decision-record-currency/body.md) — Do the repo's existing decision records still hold? Status-graph consistency, revisit-triggers due, EOL adoptions, orphaned records.
 - [`auditing-enforcement-and-meta-artifacts`](reference/lenses/auditing-enforcement-and-meta-artifacts/body.md) — Is the enforcement apparatus healthy? Suppression hygiene & baseline trend, actionable alerts/monitoring-as-code, codegen-source drift gate.
 - [`auditing-infrastructure-as-code`](reference/lenses/auditing-infrastructure-as-code/body.md) — Does this infra change expose or destroy something? Blast radius, public access, wildcard IAM, secrets in state, drift.
+- [`auditing-deployment-and-trust-boundaries`](reference/lenses/auditing-deployment-and-trust-boundaries/body.md) — Could an adversary reach code execution or persistence through the deployment wiring itself, not a vulnerable line of code?

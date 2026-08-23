@@ -88,7 +88,7 @@ File header template:
 | [`cluster-1-correctness.md`](cluster-1-correctness.md) | I — Correctness & Robustness *(exemplar/template, extra-deep)* | #1–#4 |
 | [`cluster-2-readability.md`](cluster-2-readability.md) | II — Readability & Clarity | #5–#8, #35 |
 | [`cluster-3-structure.md`](cluster-3-structure.md) | III — Structure & Architecture | #9–#13 |
-| [`cluster-4-runtime.md`](cluster-4-runtime.md) | IV — Cross-cutting runtime | #14–#16, #25, #28, #32, #34, #36–#38 |
+| [`cluster-4-runtime.md`](cluster-4-runtime.md) | IV — Cross-cutting runtime | #14–#16, #25, #28, #32, #34, #36–#38, #45 |
 | [`cluster-5-verification.md`](cluster-5-verification.md) | V — Verification & Supply | #17–#20, #26, #30–#31, #40–#41 |
 | [`cluster-6-evolution.md`](cluster-6-evolution.md) | VI — Evolution & humans | #21–#24, #27, #29, #33, #39 |
 | [`cluster-7-product.md`](cluster-7-product.md) | VII — Product, Experience & Value *(opened v0.12; G24)* | #42–#44 |

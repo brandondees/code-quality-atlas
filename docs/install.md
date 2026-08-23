@@ -48,7 +48,7 @@ claude plugin install code-quality-atlas@code-quality-atlas
 The same marketplace also offers a **collapsed** plugin —
 `code-quality-atlas-collapsed` — that installs the suite as **4 entrypoint
 skills** (`reviewing-a-change`, `auditing-a-repository`, `reviewing-a-decision`,
-`reviewing-an-artifact`) instead of 43, bundling each shape's lenses and loading
+`reviewing-an-artifact`) instead of 44, bundling each shape's lenses and loading
 them on demand. The collapsed **form** is the one to reach for on
 **cloud / account-skill / context-budget-constrained** surfaces; the standalone
 form keeps the richest top-level discoverability. Install **one form, not both**.
@@ -100,7 +100,7 @@ both.
 
 ## How updates reach you
 
-All 43 standalone skills load with provenance intact (4 in the collapsed form — see above), and updates ship with every merged
+All 44 standalone skills load with provenance intact (4 in the collapsed form — see above), and updates ship with every merged
 commit (commit-SHA versioning — no version bumps). Which install path you used
 decides how those updates arrive:
 
@@ -187,7 +187,7 @@ has its own copy at [`../collapsed/hooks/`](../collapsed/hooks/), auto-discovere
 the same way under its own plugin root — the only difference is `route.sh`'s
 message text, which names this form's 4 entrypoint skills (`reviewing-a-change`,
 `auditing-a-repository`, `reviewing-a-decision`, `reviewing-an-artifact`) instead
-of the standalone plugin's 43 skills, router, and `commands/`, none of which ship
+of the standalone plugin's 44 skills, router, and `commands/`, none of which ship
 under `collapsed/`'s own source tree.
 
 The two forms need the hook for different reasons. For the **standalone**
