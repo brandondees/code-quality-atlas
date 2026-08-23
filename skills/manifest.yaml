@@ -1819,11 +1819,11 @@ router:
             reviewing-test-quality, hunting-silent-failures]
       note: "illegal-states-representable bugs get miscategorized as ordinary
             bug fixes by the base \"Bug fix\" route above, which never
-            includes this lens (confirmed: two consecutive PRs fixing the
-            same discriminator-plus-generic-field-bag bug both skipped it —
-            brandondees/second-brain-config pull requests 776 and 778) —
-            combine both rows so the type-design lens actually runs when the
-            fix is a representation gap, not just a logic error"
+            includes this lens (confirmed via two consecutive real-world
+            fixes to the same discriminator-plus-generic-field-bag defect,
+            both skipped by the base route) — combine both rows so the
+            type-design lens actually runs when the fix is a representation
+            gap, not just a logic error"
     - when: New feature (general-purpose change)
       run: [tracing-correctness-and-invariants, reviewing-naming-and-readability,
             reviewing-test-quality, checking-restraint]
