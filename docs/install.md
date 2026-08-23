@@ -190,11 +190,18 @@ message text, which names this form's 4 entrypoint skills (`reviewing-a-change`,
 of the standalone plugin's 43 skills, router, and `commands/`, none of which ship
 under `collapsed/`'s own source tree.
 
-This exists because, with 33+ skills, individual skill **descriptions** can be
-dropped from the model's skill listing (budgeted to ~1% of context, not re-injected
-after `/compact`), which makes the lenses easy to overlook on a plain "review this"
-request; the hook's `additionalContext` is injected verbatim before the first
-prompt, so it's reliable where the listing isn't. The hook is **side-effect-free** —
+The two forms need the hook for different reasons. For the **standalone**
+plugin: with 33+ skills, individual skill **descriptions** can be dropped from
+the model's skill listing (budgeted to ~1% of context, not re-injected after
+`/compact`), which makes the lenses easy to overlook on a plain "review this"
+request. The **collapsed** form only ships 4 skills, so that mechanism doesn't
+apply to it — its own motivation is the context-budget-constrained surfaces it
+targets (cloud / account-skill installs, per *Two forms* in
+[`distribution.md`](distribution.md)), where a nudge that doesn't depend on the
+model choosing to read a description at all is worth more, not less. Either
+way, the hook's `additionalContext` is injected verbatim before the first
+prompt, so it's reliable where the listing
+isn't. The hook is **side-effect-free** —
 it only prints to stdout and writes nothing to your repo.
 
 **How the wiring loads.** The hook needs no `hooks` key in

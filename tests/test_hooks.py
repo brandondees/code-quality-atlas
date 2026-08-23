@@ -221,6 +221,18 @@ def test_collapsed_log_hook_activates_under_its_own_plugin_root(tmp_path):
     assert (_learnings_dir(tmp_path) / "invocations.jsonl").exists()
 
 
+def test_collapsed_retro_hook_activates_under_its_own_plugin_root(tmp_path):
+    # dees-bot round-1 nit on PR #320: queue-session-retro.sh resolves its lib
+    # via the identical CLAUDE_PLUGIN_ROOT pattern as log-skill-invocation.sh
+    # above but only had a byte-identity check, not an equivalent end-to-end
+    # activation test — a future edit that broke path resolution specifically
+    # in this script would slip through undetected.
+    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT / "collapsed")}
+    _run(COLLAPSED_HOOKS_DIR / "queue-session-retro.sh", tmp_path, _SESSION_END_INPUT, env_extra=env)
+    assert (_learnings_dir(tmp_path) / "pending-retro.jsonl").exists()
+
+
 def test_missing_jq_degrades_to_no_op(tmp_path):
     # A minimal PATH with every common coreutil except jq, so `command -v jq`
     # genuinely fails rather than skipping a real system jq via a fragile
