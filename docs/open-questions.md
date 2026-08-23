@@ -1237,7 +1237,7 @@ The 2-4 cap is really a *depth* choice wearing a *relevance* mask. Separating th
 - Cost/latency: comprehensive-in-parallel is the expensive path — on-demand only, or scheduled like the repo audits?
 - Does the team-preferences overlay (Q13) set the default mode and the critical-tier floor per repo?
 
-**Relation to prior decisions.** Refines D10 (router) and D12 (synthesizer / advisory fan-out); "all lenses in parallel" is consistent with D12's finding contract a harness can mechanize. Evidence: G9. **Status: open — framing captured, no decisions yet.**
+**Relation to prior decisions.** Refines D10 (router) and D12 (synthesizer / advisory fan-out); "all lenses in parallel" is consistent with D12's finding contract a harness can mechanize. Evidence: G9. **Status: resolved — see D16 above (built via Q20, PR #80); this framing is kept for provenance, not a live open question.**
 
 ### Q15 — A decision-time review shape  → RESOLVED (built; see D-notes below) *(new, 2026-06-12; the round-2 gap-hunt headline)*
 

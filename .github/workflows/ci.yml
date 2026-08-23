@@ -21,19 +21,17 @@ jobs:
       - run: pip install --require-hashes -r requirements.txt
       - name: requirements.txt is in sync with requirements.in
         run: |
-          # pip is pinned alongside pip-tools: pip-tools imports pip as a library,
-          # and pip 26.2 changed RequirementCommand's signature
-          # (make_requirement_preparer gained a required `allow_editables` kwarg),
-          # which crashes pip-tools 7.6.0 — its latest release, so there is nothing
-          # to upgrade to. Bisected: pip 26.1.2 works, 26.2 and 26.2.1 fail; pinned
-          # exact (not a "<26.2" range) so this step's own gate stays reproducible.
-          # Neither this pin nor pip-audit's below is hash-verified like
-          # requirements.txt's deps — considered and deliberately skipped: both are
-          # CI-only tooling, not shipped or imported by this repo's own code, and a
-          # hash-pinned requirements-dev.txt for two tools was judged not worth the
-          # added Dependabot/maintenance surface. Revisit trigger: drop the exact
-          # pip pin once pip-tools ships a release compatible with pip 26.2+.
-          pip install pip==26.1.2 pip-tools==7.6.0
+          # pip-tools 7.6.0 crashed under pip 26.2 (RequirementCommand's
+          # make_requirement_preparer gained a required `allow_editables`
+          # kwarg pip-tools 7.6.0 didn't pass) — pip-tools 7.6.1 (2026-08-11)
+          # fixed that compatibility, so no pip-version workaround is needed
+          # any more; pip-tools alone is pinned exact so this step's own gate
+          # stays reproducible. Not hash-verified like requirements.txt's
+          # deps — considered and deliberately skipped: it's CI-only tooling,
+          # not shipped or imported by this repo's own code, and a
+          # hash-pinned requirements-dev.txt for one tool was judged not
+          # worth the added Dependabot/maintenance surface.
+          pip install pip-tools==7.6.1
           # The committed lockfile is seeded into the check dir, not just the .in.
           # Without it pip-compile resolves from scratch and pins whatever is
           # newest on PyPI *today*, so any upstream release turns every open PR
@@ -75,10 +73,11 @@ jobs:
           # newest on PyPI on every run, so the gate itself isn't reproducible:
           # a scanner-tool release could change what CVEs are flagged (or
           # silently drop advisory coverage) with no diff in this repo to
-          # review. Pinned exact-version like pip-tools/pip above, though for
-          # a different reason: their pin is a compatibility workaround (pip
-          # 26.2 breaks pip-tools 7.6.0), this one is about the gate's own
-          # reproducibility. Unlike that pin, Dependabot has no manifest that
+          # review. Pinned exact-version like pip-tools above, though for a
+          # different reason: that pin is about the requirements-check step's
+          # own reproducibility (a pip-tools release could change what it
+          # resolves), this one is about the vulnerability-audit gate's.
+          # Like that pin, Dependabot has no manifest that
           # covers a version pinned inline in a `run:` script (its `pip`
           # ecosystem entry tracks requirements.txt/.in; `github-actions`
           # tracks `uses:` refs) — this pin has no automated freshness path.
