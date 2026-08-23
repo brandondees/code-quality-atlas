@@ -13,6 +13,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LOG_HOOK = REPO_ROOT / "hooks" / "log-skill-invocation.sh"
 RETRO_HOOK = REPO_ROOT / "hooks" / "queue-session-retro.sh"
+ROUTE_HOOK = REPO_ROOT / "hooks" / "route.sh"
 
 _SKILL_INPUT = json.dumps({
     "session_id": "s1",
@@ -253,6 +254,31 @@ def test_missing_jq_degrades_to_no_op(tmp_path):
     )
     assert result.returncode == 0
     assert not _learnings_dir(tmp_path).exists()
+
+
+# --- #310: route.sh was the one hook with real content (the SessionStart
+# steering message) that no test ever executed — only that hooks.json
+# *declares* the SessionStart key (test_hooks_registered_in_hooks_json
+# below). A future edit to the heredoc (a stray quote, a missing key) would
+# ship with CI green, since shellcheck only checks shell syntax, not the
+# emitted JSON.
+
+def test_route_hook_emits_valid_session_start_json_and_names_standalone_entrypoints():
+    result = subprocess.run(
+        ["bash", str(ROUTE_HOOK)],
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert payload["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+    context = payload["hookSpecificOutput"]["additionalContext"]
+    assert isinstance(context, str) and context
+    # The standalone plugin's full surface (43 skills + router + commands/),
+    # distinct from the collapsed plugin's 4 entrypoints covered by
+    # test_collapsed_route_hook_names_collapsed_entrypoints_not_standalone_surface.
+    for surface in ("atlas-review-pr", "atlas-code-review", "choosing-review-lenses",
+                    "grounding-review-in-tool-output", "synthesizing-review-findings"):
+        assert surface in context
 
 
 def test_hooks_registered_in_hooks_json():
