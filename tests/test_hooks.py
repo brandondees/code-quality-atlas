@@ -162,6 +162,77 @@ def test_malformed_stdin_json_is_a_clean_no_op(tmp_path):
     assert not log.exists() or log.read_text() == ""
 
 
+# --- #305: the collapsed plugin (code-quality-atlas-collapsed) shipped with no
+# hooks/ directory at all, so a collapsed install got neither the SessionStart
+# routing nudge nor the opt-in telemetry hooks. collapsed/hooks/ mirrors
+# hooks/, except route.sh's steering message, which is intentionally NOT
+# shared: the collapsed plugin's source ("./collapsed") ships none of the
+# standalone plugin's 43 skills, router, or commands/ — only the 4 collapsed
+# entrypoints — so the nudge must name what's actually installed.
+
+COLLAPSED_HOOKS_DIR = REPO_ROOT / "collapsed" / "hooks"
+
+
+def test_collapsed_hooks_json_matches_standalone():
+    # hooks.json's structure (which hooks fire on which events) has no
+    # collapsed-specific content, so it must stay byte-identical to the
+    # standalone copy rather than silently drifting apart.
+    standalone = (REPO_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8")
+    collapsed = (COLLAPSED_HOOKS_DIR / "hooks.json").read_text(encoding="utf-8")
+    assert collapsed == standalone
+
+
+def test_collapsed_generic_hook_scripts_match_standalone():
+    # log-skill-invocation.sh, queue-session-retro.sh, and lib/feedback-tier.sh
+    # carry no skill-name-specific content (unlike route.sh), so they must
+    # stay byte-identical between the two plugin forms.
+    for rel in ("log-skill-invocation.sh", "queue-session-retro.sh", "lib/feedback-tier.sh"):
+        standalone = (REPO_ROOT / "hooks" / rel).read_text(encoding="utf-8")
+        collapsed = (COLLAPSED_HOOKS_DIR / rel).read_text(encoding="utf-8")
+        assert collapsed == standalone, f"collapsed/hooks/{rel} has drifted from hooks/{rel}"
+
+
+def test_collapsed_route_hook_names_collapsed_entrypoints_not_standalone_surface():
+    result = subprocess.run(
+        ["bash", str(COLLAPSED_HOOKS_DIR / "route.sh")],
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    context = payload["hookSpecificOutput"]["additionalContext"]
+    for entrypoint in ("reviewing-a-change", "auditing-a-repository",
+                       "reviewing-a-decision", "reviewing-an-artifact"):
+        assert entrypoint in context
+    # Standalone-only surface (not shipped under collapsed/'s own plugin root)
+    # must not be named — it doesn't exist in this install.
+    for standalone_only in ("choosing-review-lenses", "grounding-review-in-tool-output",
+                             "synthesizing-review-findings", "atlas-review-pr",
+                             "atlas-code-review"):
+        assert standalone_only not in context
+
+
+def test_collapsed_log_hook_activates_under_its_own_plugin_root(tmp_path):
+    # End-to-end: CLAUDE_PLUGIN_ROOT pointed at collapsed/ (as the real plugin
+    # runtime sets it for a code-quality-atlas-collapsed install) must resolve
+    # collapsed/hooks/lib/feedback-tier.sh, not the standalone copy.
+    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT / "collapsed")}
+    _run(COLLAPSED_HOOKS_DIR / "log-skill-invocation.sh", tmp_path, _SKILL_INPUT, env_extra=env)
+    assert (_learnings_dir(tmp_path) / "invocations.jsonl").exists()
+
+
+def test_collapsed_retro_hook_activates_under_its_own_plugin_root(tmp_path):
+    # dees-bot round-1 nit on PR #320: queue-session-retro.sh resolves its lib
+    # via the identical CLAUDE_PLUGIN_ROOT pattern as log-skill-invocation.sh
+    # above but only had a byte-identity check, not an equivalent end-to-end
+    # activation test — a future edit that broke path resolution specifically
+    # in this script would slip through undetected.
+    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT / "collapsed")}
+    _run(COLLAPSED_HOOKS_DIR / "queue-session-retro.sh", tmp_path, _SESSION_END_INPUT, env_extra=env)
+    assert (_learnings_dir(tmp_path) / "pending-retro.jsonl").exists()
+
+
 def test_missing_jq_degrades_to_no_op(tmp_path):
     # A minimal PATH with every common coreutil except jq, so `command -v jq`
     # genuinely fails rather than skipping a real system jq via a fragile
