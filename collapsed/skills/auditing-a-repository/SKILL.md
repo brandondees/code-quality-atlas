@@ -2,9 +2,9 @@
 name: auditing-a-repository
 description: Run a whole-repository health audit with the code-quality-atlas repo-shaped
   audits (architecture, dependencies, config/build, docs, compliance, enforcement,
-  infrastructure-as-code, decision-record currency, data-pipeline health, maintainability
-  hotspots). Use for a scheduled or on-demand repo audit, not a single diff. Runs
-  the applicable audits and synthesizes one report.
+  infrastructure-as-code, decision-record currency, data-pipeline health, deployment/execution
+  and trust-boundary security, maintainability hotspots). Use for a scheduled or on-demand
+  repo audit, not a single diff. Runs the applicable audits and synthesizes one report.
 provenance:
   taxonomy_version: v0.14
   built_from: []
@@ -14,7 +14,7 @@ provenance:
 
 ## When to use
 
-Run a whole-repository health audit with the code-quality-atlas repo-shaped audits (architecture, dependencies, config/build, docs, compliance, enforcement, infrastructure-as-code, decision-record currency, data-pipeline health, maintainability hotspots). Use for a scheduled or on-demand repo audit, not a single diff. Runs the applicable audits and synthesizes one report.
+Run a whole-repository health audit with the code-quality-atlas repo-shaped audits (architecture, dependencies, config/build, docs, compliance, enforcement, infrastructure-as-code, decision-record currency, data-pipeline health, deployment/execution and trust-boundary security, maintainability hotspots). Use for a scheduled or on-demand repo audit, not a single diff. Runs the applicable audits and synthesizes one report.
 
 ## How this works
 

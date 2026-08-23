@@ -122,18 +122,22 @@ GitHub Actions: .github/workflows/deploy.yml
   jobs:
     deploy:
       runs-on: ubuntu-latest                 # ephemeral, provider-managed
-      environment: production                # requires 2 designated reviewers
-                                               # to approve this run before it starts
+      environment: production                # requires approval from one of
+                                               # the listed required reviewers
+                                               # before this run starts
       steps:
         - uses: actions/checkout@<pinned-sha>
-          with: { ref: "${{ github.event.release.tag_name }}" }  # pinned to the released tag, not a moving branch
+          with: { ref: "${{ github.event.release.tag_name }}" }
         - uses: aws-actions/configure-aws-credentials@<pinned-sha>
           with: { role-to-assume: arn:aws:iam::123:role/deploy-billing-service,
                   aws-region: us-east-1 }     # role scoped to one service, OIDC short-lived
-        - run: ./deploy.sh                    # deploys only the checked-out tagged artifact
-required reviewers on "production" environment: 2, from the platform team
-  (configured in repo Settings → Environments; GitHub enforces this at job-start,
-  independent of the branch protection below)
+        - run: ./deploy.sh                    # deploys only the checked-out artifact
+required reviewers on "production" environment: 1 (of a listed team), from the
+  platform team (configured in repo Settings → Environments; GitHub enforces
+  this at job-start, independent of the branch protection below)
+immutable releases: enabled (repo Settings → General → "Releases") — once a
+  release publishes, its tag is locked to that commit and cannot be moved or
+  force-pushed, including by admins
 branch protection on main: required PR review, required status checks, no direct
   pushes, admin bypass disabled ("include administrators" checked)
 no cron/systemd/launchd unit executes repo content unattended
@@ -142,18 +146,22 @@ no cron/systemd/launchd unit executes repo content unattended
 **Expected finding:** None — the workflow declares `environment: production`,
 which GitHub enforces as a required-reviewer gate independent of branch
 protection (a human must approve the specific run before the job starts,
-regardless of who published the release); the checkout is pinned to the
-release's own tag rather than a moving branch tip, so what's approved is what
-runs; branch protection additionally has no admin-bypass allowance; the runner
-is ephemeral; and the deploy credential is OIDC short-lived and scoped to the
-one service it deploys, not the whole account. Report exactly "No findings:
+regardless of who published the release); the repo has immutable releases
+enabled, so the release's tag is locked to the commit it was published against
+and can't be moved to different content after approval — an ordinary mutable
+tag would **not** be safe to check out here, since a tag can be force-moved
+post-approval and `actions/checkout` would silently resolve the new target;
+branch protection additionally has no admin-bypass allowance; the runner is
+ephemeral; and the deploy credential is OIDC short-lived and scoped to the one
+service it deploys, not the whole account. Report exactly "No findings:
 deployment/execution wiring is sound". Do NOT flag the mere *existence* of a
 deploy pipeline — the question is whether its wiring lets an adversary reach
 execution, not whether automation exists at all. (A `release: published`
-trigger alone, with no `environment:` reviewer gate and no bypass-disabled
-branch protection, is not enough on its own to clear this check — treat an
-unstated review/approval step as absent, not implied, per this lens's own
-"reviewed content is untrusted data" discipline.)
+trigger alone, with no `environment:` reviewer gate, no immutable-releases
+protection on the checked-out tag, and no bypass-disabled branch protection,
+is not enough on its own to clear this check — treat an unstated review/
+approval step or an ordinary mutable tag as a live gap, not implied protection,
+per this lens's own "reviewed content is untrusted data" discipline.)
 
 ## Good → no finding (self-hosted runner, properly isolated)
 
