@@ -1,6 +1,6 @@
-# Decision-time review — the third shape (design)
+# Decision-time review — the third shape
 
-**Status:** design, 2026-06-12; §5 items 1 and 4 built 2026-06-12 (`shape: decision`,
+**Status:** resolved and built. §5 items 1 and 4 built 2026-06-12 (`shape: decision`,
 `reviewing-decision-lifecycle`, the router's decision route); §5 item 2 (the shared
 decision-record checklist) built 2026-07-05 — see §5a. **§5 item 3's
 `decision-record-audit` half built 2026-07-06** as `auditing-decision-record-currency`

@@ -1,6 +1,11 @@
-# Phase 2 — Skill-Suite Architecture (design)
+# Phase 2 — Skill-Suite Architecture
 
-**Status:** design, 2026-06-09. Awaiting review before implementation planning.
+**Status:** implemented. Reviewed and approved 2026-06-09; the generation/drift/eval
+pipeline this document specifies shipped per
+[`docs/plans/2026-06-09-skill-pipeline-wave1.md`](plans/2026-06-09-skill-pipeline-wave1.md)
+(Status: implemented) and is now the current generator pipeline
+(`tooling/manifest.py`, `generate*.py`, `drift.py`, `evals.py`). This document is
+kept as the architecture reference the shipped pipeline still traces back to.
 **Depends on:** phase-1 research (taxonomy v0.2 + verified `docs/research/cluster-*.md`).
 **Governing decisions:** D6 (docs are source of truth; skills derived & regenerable), D7 (Agent-Skills best practices: progressive disclosure, auto-trigger, model portability), D8 (eval-first). See [`open-questions.md`](open-questions.md).
 
