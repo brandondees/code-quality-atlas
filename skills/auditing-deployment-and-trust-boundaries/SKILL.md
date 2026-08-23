@@ -10,14 +10,15 @@ description: 'Audits the deployment/execution wiring already committed in a repo
   retrospective counterpart to reviewing-threat-model''s design-time enumeration;
   delegates a code vuln to sweeping-for-security, an IaC resource''s blast radius
   to auditing-infrastructure-as-code, pipeline hygiene to auditing-config-and-build-hygiene.
-  A repo-wide / scheduled audit. Use on deploy scripts, CI/CD workflows, or cron/systemd/launchd
-  units. Skip with no deployment automation or unattended execute pattern.'
+  A repo-wide / scheduled audit. Use on deploy scripts, CI/CD workflows, cron/systemd/launchd
+  units, service-trust config, or agent-triggerable hooks/scripts. Skip only with
+  none of those present.'
 provenance:
   taxonomy_version: v0.14
   built_from:
   - category: 45
     source: docs/research/cluster-4-runtime.md#45
-    hash: b2258b45827ea82b1410ac9e3fa4f3bc786bae8ff7132e0242f21a05c7640510
+    hash: 4988d5d9b7cf97960dee81c956b6e9458fde5513a58380b8a2e876ca1ebc4209
 ---
 
 # auditing-deployment-and-trust-boundaries
@@ -26,7 +27,7 @@ provenance:
 
 ## When to use
 
-Audits the deployment/execution wiring already committed in a repo, retrospectively and on a schedule: CI/CD jobs, cron/systemd/launchd units, git-sync-then-execute patterns, deploy scripts, and service-to-service trust in config — read for Poisoned Pipeline Execution (an unattended job executing attacker-influenced content from the branch it just fetched, with no trust gate), a deploy identity's blast radius versus what it deploys, credential-in-tree at rest, self-hosted-runner persistence risk, and the agent-action surface already wired into the repo. The repo-shaped, retrospective counterpart to reviewing-threat-model's design-time enumeration; delegates a code vuln to sweeping-for-security, an IaC resource's blast radius to auditing-infrastructure-as-code, pipeline hygiene to auditing-config-and-build-hygiene. A repo-wide / scheduled audit. Use on deploy scripts, CI/CD workflows, or cron/systemd/launchd units. Skip with no deployment automation or unattended execute pattern.
+Audits the deployment/execution wiring already committed in a repo, retrospectively and on a schedule: CI/CD jobs, cron/systemd/launchd units, git-sync-then-execute patterns, deploy scripts, and service-to-service trust in config — read for Poisoned Pipeline Execution (an unattended job executing attacker-influenced content from the branch it just fetched, with no trust gate), a deploy identity's blast radius versus what it deploys, credential-in-tree at rest, self-hosted-runner persistence risk, and the agent-action surface already wired into the repo. The repo-shaped, retrospective counterpart to reviewing-threat-model's design-time enumeration; delegates a code vuln to sweeping-for-security, an IaC resource's blast radius to auditing-infrastructure-as-code, pipeline hygiene to auditing-config-and-build-hygiene. A repo-wide / scheduled audit. Use on deploy scripts, CI/CD workflows, cron/systemd/launchd units, service-trust config, or agent-triggerable hooks/scripts. Skip only with none of those present.
 
 **Shape: repo.** Run against the whole repository (scheduled or on demand), not a single diff.
 
@@ -42,7 +43,7 @@ Report only real problems. If this lens applies and what you reviewed holds up �
 
 The head of the full checklist — enough for a first pass without opening any reference file:
 
-- **Trace what auto-executes off an unattended pull, merge, or webhook.** Find every cron/systemd/launchd unit, `post-merge`/`post-receive` git hook, container entrypoint, or webhook-triggered job that runs unattended against a branch this repo controls. For each: what does it execute (a script, a binary, a container image), and is that thing read from the **same tree** the trigger just fetched? If yes, ask who can cause that tree to change — direct push, a merged PR, a bot with write access, a compromised dependency's install/build step — and whether anything gates *execution* beyond whatever already gated the *merge*. No additional gate between "content lands in the tree" and "content executes with real privilege" is Poisoned Pipeline Execution, present tense, not hypothetical.
+- **Trace what auto-executes off an unattended pull, merge, or webhook — scoped to attacker-controlled or unreviewed content.** Find every cron/systemd/launchd unit, `post-merge`/`post-receive` git hook, container entrypoint, or webhook-triggered job that runs unattended against a branch this repo controls. For each: what does it execute (a script, a binary, a container image), and is that thing read from the **same tree** the trigger just fetched? A branch protected by required PR review and required status checks is an intended trust gate, not an omission — treat what merges there as *reviewed*, not attacker-controlled. Emit **Poisoned Pipeline Execution** only when the revision that ends up executing, or an input the pipeline consumes, can change *without* that same review (a direct push the protection doesn't actually cover, a webhook/PR trigger that runs before any human looks at the content, a secondary file the CI config trusts but the branch rule doesn't cover, a bot/app with a bypass allowance) — or when the review gate itself can be bypassed. The mere absence of a *second*, post-merge execution gate on top of an already-required-review branch is not PPE by itself; note it instead as a deployment trust-boundary observation (defense-in-depth worth naming, not an active exploit path) unless the input above shows the review gate is bypassable.
 - **Check the deploy identity's blast radius against what it deploys.** The credential, token, or service account a deploy/sync job uses — does its scope match the single service/environment it's meant to touch, or does it carry broader reach (the whole cloud account, every secret, admin on the orchestrator)? A narrow trigger (one service's redeploy) behind a broad credential is a mismatch worth flagging even with no other finding attached.
 - **Credential-in-tree at rest.** A deploy script, `EnvironmentFile=`, CI config, or committed `.env` that reads a live token/key from a file in the repo rather than a secrets manager, reachable by anyone who can read the repository — the repo-audit counterpart to #14's diff-time secret-scanning, applied to what's already sitting there.
 - **Self-hosted/persistent runner exposure.** A CI job pinned to a long-lived self-hosted runner (not an ephemeral, provider-managed one) carries host-persistence risk from anything that runs on it — a fork PR's workflow, a compromised build step, a poisoned dependency — because the *next* job on that same host inherits whatever the previous one left behind.

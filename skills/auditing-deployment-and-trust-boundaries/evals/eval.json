@@ -4,13 +4,14 @@
   ],
   "scenarios": [
     {
-      "query": "Audit this deployment wiring:\n```text\nlaunchd: com.acme.git-sync.plist\n  ProgramArguments: [\"/usr/bin/git\", \"-C\", \"/srv/app\", \"pull\", \"origin\", \"main\"]\n  StartInterval: 300          # every 5 minutes, unattended\nlaunchd: com.acme.deploy.plist\n  ProgramArguments: [\"/srv/app/deploy-binaries.sh\"]\n  # deploy-binaries.sh (from the just-pulled tree):\n  #   ./install-launchd.sh && ./windmill.sh sync && systemctl restart app-services\n  RunAtLoad: true\nbranch protection on main: required PR review, 1 approval\n```",
+      "query": "Audit this deployment wiring:\n```text\nlaunchd: com.acme.git-sync.plist\n  ProgramArguments: [\"/usr/bin/git\", \"-C\", \"/srv/app\", \"pull\", \"origin\", \"main\"]\n  StartInterval: 300          # every 5 minutes, unattended\nlaunchd: com.acme.deploy.plist\n  ProgramArguments: [\"/srv/app/deploy-binaries.sh\"]\n  # deploy-binaries.sh (from the just-pulled tree):\n  #   ./install-launchd.sh && ./windmill.sh sync && systemctl restart app-services\n  RunAtLoad: true\nbranch protection on main: required PR review, 1 approval; admin/bypass not restricted (\"include administrators\" unchecked — the platform default)\n```",
       "expected_behavior": [
-        "Flags Poisoned Pipeline Execution: git-sync fast-forwards main unattended every 5 minutes and deploy.plist then executes deploy-binaries.sh from that same freshly-pulled tree, with no gate between pull and execute beyond whatever already gated the merge",
-        "Names the consequence concretely: anyone who can land a commit on main (a merged PR, a compromised dependency's build step, a bot with write access) gets host code execution with persistence",
-        "Does not treat branch-protection's required PR review as sufficient — it gates the merge, not the execution that follows",
-        "Recommends inserting an execution-time gate (pin deploy to a specific reviewed/tagged commit, or verify a signed release artifact before running anything from it) rather than only strengthening the merge gate",
-        "Flags the absence of any provenance/attestation check on what deploy-binaries.sh is about to run"
+        "Flags Poisoned Pipeline Execution: git-sync fast-forwards main unattended every 5 minutes and deploy.plist then executes deploy-binaries.sh from that same freshly-pulled tree",
+        "Grounds the PPE verdict in a concrete gap in the review gate itself, not merely the absence of a second post-merge gate — the branch protection's admin/bypass allowance means a commit can land on main without going through the required review",
+        "Separately notes deploy-binaries.sh always runs whatever is at the tip of main rather than a specific reviewed commit-SHA or tag, so merge and deploy collapse into one unattended event with no distinct deploy-time check",
+        "Names the consequence concretely: an admin, a misconfigured automation account, or a compromised bot with write access gets host code execution with persistence",
+        "Recommends closing the bypass allowance in branch protection and pinning deploy-binaries.sh to a specific reviewed commit-SHA or signed release tag, verified at deploy time",
+        "Flags the absence of any provenance/attestation check on what deploy-binaries.sh is about to run, framing it as identifying build origin and supporting a pre-execution policy check (paired with verifying an approved signed release/tag/allowlisted commit) rather than as a standalone guarantee the tree is safe"
       ]
     },
     {
@@ -23,19 +24,21 @@
       ]
     },
     {
-      "query": "Audit this deployment wiring:\n```text\nGitHub Actions: .github/workflows/deploy.yml\n  on: release: { types: [published] }        # triggered only by a signed, reviewed release\n  permissions: { contents: read, id-token: write }\n  jobs:\n    deploy:\n      runs-on: ubuntu-latest                 # ephemeral, provider-managed\n      steps:\n        - uses: aws-actions/configure-aws-credentials@<pinned-sha>\n          with: { role-to-assume: arn:aws:iam::123:role/deploy-billing-service,\n                  aws-region: us-east-1 }     # role scoped to one service, OIDC short-lived\n        - run: ./deploy.sh                    # deploys only the tagged release artifact\nbranch protection on main: required PR review, required status checks, no direct pushes\nno cron/systemd/launchd unit executes repo content unattended\n```",
+      "query": "Audit this deployment wiring:\n```text\nGitHub Actions: .github/workflows/deploy.yml\n  on: release: { types: [published] }\n  permissions: { contents: read, id-token: write }\n  jobs:\n    deploy:\n      runs-on: ubuntu-latest                 # ephemeral, provider-managed\n      environment: production                # requires 2 designated reviewers to approve this run before it starts\n      steps:\n        - uses: actions/checkout@<pinned-sha>\n          with: { ref: \"${{ github.event.release.tag_name }}\" }  # pinned to the released tag, not a moving branch\n        - uses: aws-actions/configure-aws-credentials@<pinned-sha>\n          with: { role-to-assume: arn:aws:iam::123:role/deploy-billing-service,\n                  aws-region: us-east-1 }     # role scoped to one service, OIDC short-lived\n        - run: ./deploy.sh                    # deploys only the checked-out tagged artifact\nrequired reviewers on \"production\" environment: 2, from the platform team\nbranch protection on main: required PR review, required status checks, no direct pushes, admin bypass disabled\nno cron/systemd/launchd unit executes repo content unattended\n```",
       "expected_behavior": [
-        "Reports no findings: the deploy trigger is a reviewed, signed release rather than an unattended pull, the runner is ephemeral, the deploy credential is OIDC short-lived and scoped to one service, and nothing else auto-executes fetched content",
+        "Reports no findings: the workflow declares environment: production, which GitHub enforces as a required-reviewer gate independent of branch protection, the checkout is pinned to the release's own tag rather than a moving branch, branch protection has no admin-bypass allowance, the runner is ephemeral, and the deploy credential is OIDC short-lived and scoped to one service",
+        "Does not infer a signed/reviewed release from the release: published trigger or a comment alone — treats the environment reviewer gate and the pinned tag as the actual controls, not the trigger type by itself",
         "Does not flag the mere existence of a deploy pipeline as a problem",
         "Does not demand additional controls (e.g. a separate provenance check) beyond what this wiring's actual risk warrants"
       ]
     },
     {
-      "query": "Audit this deployment wiring:\n```text\nmain.tf: resource \"aws_s3_bucket_public_access_block\" \"assets\" { block_public_acls = false }\ndeploy.yml: on: push: { branches: [main] }, then: terraform apply -auto-approve\n```",
+      "query": "Audit this deployment wiring:\n```text\nmain.tf: resource \"aws_s3_bucket_public_access_block\" \"assets\" { block_public_acls = false }\ndeploy.yml: on: push: { branches: [main] }, then: terraform apply -auto-approve\nbranch protection on main: required PR review, required status checks, no direct pushes, admin bypass disabled\n```",
       "expected_behavior": [
         "Does not adjudicate the public S3 bucket itself as this lens's own finding",
         "Routes the public S3 bucket / declared-IaC exposure to auditing-infrastructure-as-code (#31) by name",
-        "Notes the CI trigger (terraform apply on push to a reviewed branch) has no unattended-execute-on-pull pattern outside CI's own sandboxing, so it is not flagged as Poisoned Pipeline Execution"
+        "Does not flag Poisoned Pipeline Execution — the terraform apply on push runs against the exact commit CI's trigger ties it to, and that commit only reaches main through a review gate with no bypass allowance",
+        "Does not treat the mere absence of a second post-execution gate beyond that review gate as PPE by itself"
       ]
     },
     {

@@ -1573,8 +1573,9 @@ skills:
       delegates a code vuln to sweeping-for-security, an IaC resource's
       blast radius to auditing-infrastructure-as-code, pipeline hygiene to
       auditing-config-and-build-hygiene. A repo-wide / scheduled audit. Use
-      on deploy scripts, CI/CD workflows, or cron/systemd/launchd units.
-      Skip with no deployment automation or unattended execute pattern.
+      on deploy scripts, CI/CD workflows, cron/systemd/launchd units,
+      service-trust config, or agent-triggerable hooks/scripts. Skip only
+      with none of those present.
     picker: >
       Could an adversary reach code execution or persistence through the
       deployment wiring itself, not a vulnerable line of code?
@@ -2026,8 +2027,9 @@ router:
             schemas — data tests included because a repo can carry
             permanently-warning or disabled ones with no models of its own;
             auditing-deployment-and-trust-boundaries only where the repo has
-            deployment automation, a scheduled job, or an unattended
-            sync/execute pattern to examine)
+            deployment automation, a scheduled job, an unattended
+            sync/execute pattern, service-to-service trust config, or an
+            agent-triggerable hook/helper script to examine)
       shapes: [repo]
     - when: Enforcement config — lint/type suppressions, alert rules or dashboards,
             or checked-in generated artifacts

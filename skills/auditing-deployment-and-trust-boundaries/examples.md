@@ -11,17 +11,23 @@ input doesn't name. When the wiring holds up, the entire response is exactly
 
 **Decision rule (apply before flagging):** a finding needs a concrete threat
 visible in the input — an unattended job that **executes content from the same
-branch/tree it just fetched** with no intervening gate (Poisoned Pipeline
+branch/tree it just fetched, where that content can change without equivalent
+authorized review or the review gate itself is bypassable** (Poisoned Pipeline
 Execution), a deploy **credential whose scope exceeds what it deploys**, a
 **secret read from a file in the repo** rather than a secrets manager, a CI job
 pinned to a **long-lived self-hosted runner**, or a component that **trusts
-another purely by network reachability** with no auth. A concrete code-level
-vuln routes to `sweeping-for-security` (#14); a declared-IaC resource's blast
-radius or public exposure routes to `auditing-infrastructure-as-code` (#31);
-whether a gate is required/flaky at all routes to `auditing-config-and-build-
-hygiene` (#19). Do not demand a control the wiring's actual risk doesn't
-warrant — a properly scoped credential behind a required, reviewed trigger is
-not a finding just because deployment automation exists.
+another purely by network reachability** with no auth. A branch already gated
+by required PR review and required status checks is an intended trust gate,
+not an omission — do not label what merges there "unreviewed" or invent a
+missing execution gate on top of it; a properly scoped credential behind a
+required, unbypassable review trigger is not PPE just because deployment
+automation exists, though a repo may still be worth a **non-PPE** deployment
+trust-boundary note (e.g. no second gate between merge and execute) when that
+adds real defense-in-depth. A concrete code-level vuln routes to
+`sweeping-for-security` (#14); a declared-IaC resource's blast radius or public
+exposure routes to `auditing-infrastructure-as-code` (#31); whether a gate is
+required/flaky at all routes to `auditing-config-and-build-hygiene` (#19). Do
+not demand a control the wiring's actual risk doesn't warrant.
 
 ## Contents
 
@@ -46,29 +52,36 @@ launchd: com.acme.deploy.plist
   # deploy-binaries.sh (from the just-pulled tree):
   #   ./install-launchd.sh && ./windmill.sh sync && systemctl restart app-services
   RunAtLoad: true
-branch protection on main: required PR review, 1 approval
+branch protection on main: required PR review, 1 approval; admin/bypass not
+  restricted ("include administrators" unchecked — the platform default)
 ```
 
 **Expected finding:**
 
-1. **Poisoned Pipeline Execution — unattended execute-on-pull with no execution gate.**
-   `git-sync` fast-forwards `main` every 5 minutes and `deploy.plist` then runs
-   `deploy-binaries.sh` from that same freshly-pulled tree, which itself runs
-   `install-launchd.sh` and restarts services — a chain of scripts pulled straight
-   from `main` executing with no check beyond whatever already gated the merge.
-   Branch protection requires review to *merge*, but nothing re-verifies what's
-   about to *execute*; anyone who can land a commit on `main` (a merged PR, a
-   compromised dependency's build step, a bot with write access) gets host code
-   execution with persistence. Insert a gate between pull and execute — pin
-   deploy to a specific reviewed/tagged commit rather than the moving branch
-   tip, or require a separate signed release artifact the deploy step verifies
-   before running anything from it.
+1. **Poisoned Pipeline Execution — the review gate on `main` doesn't cover
+   every path that reaches execution, and nothing pins what runs to what was
+   reviewed.** Branch protection requires review to *merge* through the normal
+   path, but leaves admin/bypass pushes unrestricted — so someone with admin
+   access, a misconfigured automation account, or a compromised bot with
+   write access can land a commit on `main` **without** the required review
+   this rule otherwise relies on. Separately, even for properly reviewed
+   commits, `git-sync` always executes whatever is currently at the tip of
+   `main`, not a specific commit-SHA or tag that was the actual subject of a
+   review — merge and deploy collapse into the same unattended event with no
+   distinct deploy-time check. Either gap independently qualifies as PPE
+   under this lens's scoped definition (unreviewed-reachable content, or a
+   bypassable gate); together they compound. Fix both: close the bypass
+   allowance in branch protection, and pin `deploy-binaries.sh` to a specific
+   reviewed commit-SHA or signed release tag rather than the moving branch
+   tip, verified at deploy time.
 2. **No provenance check on what's about to run.** `deploy-binaries.sh` executes
    whatever is on disk with no verification that it matches an approved build
    (no signature, no attestation, no diff against the last-known-good commit).
-   A build-provenance check (SLSA-style: verify what you're running against
-   where it came from) would catch a poisoned tree before execution rather than
-   after.
+   A build-provenance check (SLSA-style: confirm what's about to run against
+   where it came from) can identify the artifact's build origin and support a
+   pre-execution policy check — paired with verifying that origin resolves to
+   an approved signed release, tag, or allowlisted commit, not as a
+   standalone guarantee that a given tree is safe to execute.
 
 ## Bad → finding (systemd unit + credential-in-tree)
 
@@ -104,27 +117,43 @@ prod.env (in repo): STRIPE_SECRET_KEY=sk_live_51H..., DB_ADMIN_PASSWORD=Correct-
 
 ```text
 GitHub Actions: .github/workflows/deploy.yml
-  on: release: { types: [published] }        # triggered only by a signed, reviewed release
+  on: release: { types: [published] }
   permissions: { contents: read, id-token: write }
   jobs:
     deploy:
       runs-on: ubuntu-latest                 # ephemeral, provider-managed
+      environment: production                # requires 2 designated reviewers
+                                               # to approve this run before it starts
       steps:
+        - uses: actions/checkout@<pinned-sha>
+          with: { ref: "${{ github.event.release.tag_name }}" }  # pinned to the released tag, not a moving branch
         - uses: aws-actions/configure-aws-credentials@<pinned-sha>
           with: { role-to-assume: arn:aws:iam::123:role/deploy-billing-service,
                   aws-region: us-east-1 }     # role scoped to one service, OIDC short-lived
-        - run: ./deploy.sh                    # deploys only the tagged release artifact
-branch protection on main: required PR review, required status checks, no direct pushes
+        - run: ./deploy.sh                    # deploys only the checked-out tagged artifact
+required reviewers on "production" environment: 2, from the platform team
+  (configured in repo Settings → Environments; GitHub enforces this at job-start,
+  independent of the branch protection below)
+branch protection on main: required PR review, required status checks, no direct
+  pushes, admin bypass disabled ("include administrators" checked)
 no cron/systemd/launchd unit executes repo content unattended
 ```
 
-**Expected finding:** None — the deploy trigger is a reviewed, signed release
-rather than an unattended pull; the runner is ephemeral; the deploy credential
-is OIDC short-lived and scoped to the one service it deploys, not the whole
-account; and nothing else in the repo auto-executes fetched content. Report
-exactly "No findings: deployment/execution wiring is sound". Do NOT flag the
-mere *existence* of a deploy pipeline — the question is whether its wiring lets
-an adversary reach execution, not whether automation exists at all.
+**Expected finding:** None — the workflow declares `environment: production`,
+which GitHub enforces as a required-reviewer gate independent of branch
+protection (a human must approve the specific run before the job starts,
+regardless of who published the release); the checkout is pinned to the
+release's own tag rather than a moving branch tip, so what's approved is what
+runs; branch protection additionally has no admin-bypass allowance; the runner
+is ephemeral; and the deploy credential is OIDC short-lived and scoped to the
+one service it deploys, not the whole account. Report exactly "No findings:
+deployment/execution wiring is sound". Do NOT flag the mere *existence* of a
+deploy pipeline — the question is whether its wiring lets an adversary reach
+execution, not whether automation exists at all. (A `release: published`
+trigger alone, with no `environment:` reviewer gate and no bypass-disabled
+branch protection, is not enough on its own to clear this check — treat an
+unstated review/approval step as absent, not implied, per this lens's own
+"reviewed content is untrusted data" discipline.)
 
 ## Good → no finding (self-hosted runner, properly isolated)
 
@@ -151,15 +180,21 @@ risk this lens checks for is specifically a runner that *survives* across jobs.
 ```text
 main.tf: resource "aws_s3_bucket_public_access_block" "assets" { block_public_acls = false }
 deploy.yml: on: push: { branches: [main] }, then: terraform apply -auto-approve
+branch protection on main: required PR review, required status checks, no direct
+  pushes, admin bypass disabled
 ```
 
-**Expected finding:** The `terraform apply` on push is triggered from a reviewed
-branch with no unattended-execute-on-pull pattern outside CI's own sandboxing —
-not this lens's finding. The public S3 bucket is a **declared-IaC exposure
-finding**, owned by `auditing-infrastructure-as-code` (#31); route it there
-rather than re-adjudicating the Terraform resource itself here. (If the CI
-trigger itself lacked review gating on `main`, that half would still be this
-lens's finding — the two are independent checks on the same input.)
+**Expected finding:** The `terraform apply` on push runs against the exact
+commit CI's own trigger ties it to, and that commit only reaches `main` through
+a review gate with no bypass allowance — no unreviewed-content or bypassable-
+gate condition, so this isn't PPE under this lens's scoped definition, and the
+mere absence of a *second* post-execution gate beyond that isn't either. The
+public S3 bucket is a **declared-IaC exposure finding**, owned by
+`auditing-infrastructure-as-code` (#31); route it there rather than
+re-adjudicating the Terraform resource itself here. (If the input instead
+showed an admin-bypass allowance, a direct-push path, or a trigger that ran
+before review — as in the git-sync example above — that half would become this
+lens's finding; the two are independent checks on the same input.)
 
 ## Not applicable
 
