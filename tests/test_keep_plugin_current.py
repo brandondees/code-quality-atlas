@@ -20,7 +20,7 @@ DEFAULT_PLUGIN = "code-quality-atlas@code-quality-atlas"
 
 def _run(args, env, timeout=10):
     return subprocess.run(
-        ["bash", str(SCRIPT), *args],
+        [str(SCRIPT), *args],
         capture_output=True, text=True, timeout=timeout, env=env, check=False,
     )
 
