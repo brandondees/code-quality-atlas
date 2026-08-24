@@ -54,6 +54,8 @@ for input that contains no deployment/execution wiring at all to examine.
 - [Good → no finding](#good--no-finding)
 - [Good → no finding (self-hosted runner, properly isolated)](#good--no-finding-self-hosted-runner-properly-isolated)
 - [Delegating → routed to a sibling lens](#delegating--routed-to-a-sibling-lens)
+- [Delegating → hollow gate routed to #19, not PPE](#delegating--hollow-gate-routed-to-19-not-ppe)
+- [Escalate (G8) → compromised credential needs org authority to rotate](#escalate-g8--compromised-credential-needs-org-authority-to-rotate)
 - [Not applicable](#not-applicable)
 
 ## Bad → finding (unattended git-sync + deploy)
