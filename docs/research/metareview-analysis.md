@@ -10,8 +10,8 @@
 > reading primary source directly — README, rubrics, `internal/` package layout, and the
 > project's own dogfooded review/learning artifacts under `docs/metareview/` — rather than
 > summarizing rendered GitHub pages. All claims below are traceable to a specific file in that
-> checkout. Time-sensitive: this is a fast-moving pre-1.0 project; re-verify before citing
-> externally.
+> checkout. Feeds [`../map-gaps.md`](../map-gaps.md) G36. Time-sensitive: this is a fast-moving
+> pre-1.0 project; re-verify before citing externally.
 
 ## Why this exists
 
@@ -26,7 +26,7 @@ accept/discard learning loop. It is the closest thing found so far to a second i
 it worth reading for mechanism even where the suite's own architecture (stateless Claude Code
 skills invoked per PR, no CLI, no persistent state) differs on purpose.
 
-## Coverage note
+## Coverage note (be honest about what this pass did and didn't confirm)
 
 This pass read the actual repository content: `README.md`, `CLAUDE.md`/`AGENTS.md`, all six files
 under `rubrics/`, the `skills/` and `commands/` directory listings, and — most valuable —
