@@ -229,10 +229,10 @@ split so noise doesn't silently accumulate, (b) a *typed* discard reason instead
 (c) traceability from the accepted lesson back to the specific finding and the specific run that
 resolved it. The closest the atlas has is ad hoc: a reviewer catches something, the fix ships, and
 the lesson becomes a paragraph in `session-log.md` or a new line in `open-questions.md`'s standing
-authoring rules (see the `README.md`'s own "Why this rule exists" provenance notes for #40/#41 and
-#42, which are structurally the same thing — a post-hoc "what should change reviewer behavior next
-time" capture — done by hand, per incident, rather than as a standing gate with a forced
-accept/discard/provenance shape). Whether a mechanized version of this is worth building for a
+authoring rules (see the `README.md`'s own "Why this rule exists" provenance notes for categories
+\#40/\#41 and \#42, which are structurally the same thing — a post-hoc "what should change
+reviewer behavior next time" capture — done by hand, per incident, rather than as a standing gate
+with a forced accept/discard/provenance shape). Whether a mechanized version of this is worth building for a
 *review suite that has no runtime state between invocations* is a real open question (see Gap
 analysis) — but the **shape** of the mechanism (forced dispositioning, typed discards, provenance
 links) is worth reading even if this suite's own version stays a lighter-weight manual convention.
