@@ -417,3 +417,81 @@ Neither asks whether the **taxonomy** is coherent: does a new error type join an
 - What would factor-level opt-in actually mean mechanically — a per-check flag in the manifest schema (nothing like this exists today; `eval_min` and `tier` are both whole-lens), or just default-quiet valence/severity the way G32's pre-existing-defect surfacing is opt-in/default-quiet by convention rather than by a schema field?
 
 No build follow-up. This is a candidate for a future research pass (grounding it against real sources, per the standing authoring rule against ungrounded behavioral/topic claims) before any promotion decision, not a decision itself.
+
+## G36 — Harness/orchestration gap vs. metareview: no terminal-escalation signal, no evidence-receipt input contract, no mechanized post-merge calibration loop
+
+Surfaced 2026-08-24 (owner question: *what can we learn from dsifry/metareview?*). Distinct in
+kind from G34: G34 compared this suite's runtime architecture against **commercial SaaS**
+reviewers and found a content/grounding gap (mostly closed by `grounding-review-in-tool-output`).
+This gap comes from comparing against an **open-source, unhosted, agent-native review harness**
+with a persistent CLI, a five-gate lifecycle state machine, and its own local learning store — the
+closest thing found so far to a second implementation of "agent review harness" with real,
+inspectable dogfooded output. Full verified findings, per-mechanism detail, and primary-source
+citations in [`research/metareview-analysis.md`](research/metareview-analysis.md) (a new doc,
+sibling to `prior-art.md`/`competitor-landscape.md` but scoped to an agent-native review harness
+rather than skills/linters or a SaaS product).
+
+**The finding.** metareview's runtime is built as a chain of five typed gates (`artifact` →
+`task-done` → `epic-ready` → `pr-ready` → `learn --post-merge`), each returning one of four
+verdicts — `PASS` / `PASS_ADVISORY` / `NEEDS_REVISION` / **`ESCALATED`** (stop autonomous retries,
+a human must redesign the target) — with findings carrying stable IDs a later run can reconcile
+against rather than re-litigate. Validation claims are backed by hash-verified JSON evidence
+receipts (`command`, `cwd`, `exitCode`, timestamps, `stdoutSha256`/`stderrSha256`) rather than
+prose, importable from local test runs or GitHub check results into one uniform format. After a PR
+merges, `learn --post-merge` forces every candidate lesson into an **accepted** or **discarded**
+bucket — accepted entries carry a stated confidence and provenance links back to the exact finding
+ID and the exact run that fixed it; discarded entries carry a typed rejection reason rather than a
+silent drop — and the accepted store feeds directly into the next automated run of the same CLI.
+
+This suite has no equivalent of any of the three: findings ship with severity/tier but no terminal
+"stop iterating, escalate to a human" signal; there is no format for a caller to hand in
+externally-validated evidence in a way a later step could verify without re-running or
+re-embedding it; and the "what should change reviewer behavior next time" capture this repo already
+does (session-log entries, the standing authoring rules' own incident write-ups in
+`research/README.md`) is manual, per-incident, and has no forced accept/discard split, no typed
+discard reason, and no automatic feed-forward into a later review — because, unlike metareview,
+this suite runs as **stateless per-invocation Claude Code skills with no persistent state between
+invocations to feed a calibration loop back into**.
+
+**Disposition (lean), ranked value ÷ cost (full reasoning in the linked doc):**
+
+- **Tier 1 (high value, low cost, fits a stateless skill):** (1) a named terminal-escalation
+  signal in the synthesizer's verdict contract — evaluable from the current round's findings
+  (e.g., a `CRITICAL` architecture-level finding, or the same root cause recurring across rounds
+  the caller already tracked) without needing new persistent state; check whether this belongs in
+  [`synthesizing-review-findings`](../skills/synthesizing-review-findings) or one layer up in
+  [`runbooks/pr-review-automation.md`](runbooks/pr-review-automation.md). (2) Naming the specific
+  deterministic sub-case a `prepass:` tool hit already owns **inside the lens prompt itself**
+  (metareview's rubric text tells the LLM lens "the `eval(` gate covers bare `eval(` — don't
+  re-flag it, flag SQL string interpolation instead"), not only at the synthesizer's dedup step —
+  check whether `reference/tool-evidence.md` already does this per-lens or only at synthesis time.
+- **Tier 2 (real value, needs state this suite doesn't keep today):** an evidence-receipt input
+  format for a caller handing in external validation (a CI pipeline's test run) as first-class
+  review input — an input-contract question for `runbooks/pr-review-automation.md`, not a
+  lens-content change; and a mechanized post-merge calibration gate, whose value is contingent on
+  a concrete answer to "where does an accepted learning get read on the next review" — plausibly a
+  "reviewer calibration" tier on the still-unbuilt Q13 team-preferences overlay
+  ([`team-preferences-overlay.md`](team-preferences-overlay.md)) rather than a new mechanism,
+  since a calibration store with no read path is dead weight.
+- **Tier 3 (architecturally out of scope as designed):** the gate lifecycle's *mechanism* itself
+  (a persistent CLI, `.metareview/` state, `--previous-run` chaining) — adopting the earlier-stage
+  *coverage* (reviewing a spec/plan before code exists) is already a scope question this repo's
+  shape/artifact routing and `reviewing-decision-lifecycle` partially own; adopting metareview's
+  state-machine *mechanism* would mean building genuinely new infrastructure, not a skill change.
+
+**Not a gap.** metareview's adversarial multi-lens panel and its unusually deep
+architecture/data-modeling rubric (schema invariants, TOCTOU, money-as-float, "be most suspicious
+where the code looks most idiomatic") read as convergent validation of this suite's own
+`cluster-3-structure.md` / `reviewing-ai-authored-code` coverage, not new coverage to add.
+
+**Coverage caveat.** This pass read metareview's own repository directly (primary source, not
+rendered-page summaries) but did **not** clone or verify metaswarm, the sibling orchestrator
+metareview's docs describe as its intended lifecycle-owning companion and the stated source of its
+security rubric and golden-eval process — claims about metaswarm in the linked doc are metareview's
+own stated description, not independently confirmed. See the linked doc's *Open threads*.
+
+Confidence: medium-high on the mechanism descriptions (primary-source read of metareview's own
+checkout, including real dogfooded review/learning output, not documentation claims alone);
+medium on the disposition tiers, which are this pass's own value/cost judgment rather than an
+external benchmark. Owner-gated, like every prior G entry: no manifest/skill change ships from
+this finding alone.

@@ -77,3 +77,12 @@ review, Greptile, and peers) — not a checklist to mine, but a **competing arch
 worth benchmarking the suite's own design against. See
 [`research/competitor-landscape.md`](research/competitor-landscape.md) for verified findings and
 [`map-gaps.md`](map-gaps.md) **G34** for the resulting gap analysis and disposition.
+
+## Open-source agent-native review harnesses (a fourth kind of prior art)
+
+A fourth kind, distinct from both: open-source, unhosted review **harnesses** built specifically
+for agent workflows — a gate state machine with typed verdicts, JSON evidence receipts, and
+persistent local learning, rather than a SaaS product or a lightweight skill/plugin. See
+[`research/metareview-analysis.md`](research/metareview-analysis.md) (subject:
+[dsifry/metareview](https://github.com/dsifry/metareview)) and [`map-gaps.md`](map-gaps.md)
+**G36** for the resulting gap analysis.

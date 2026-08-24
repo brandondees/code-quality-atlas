@@ -94,3 +94,8 @@ File header template:
 | [`cluster-7-product.md`](cluster-7-product.md) | VII — Product, Experience & Value *(opened v0.12; G24)* | #42–#44 |
 
 Not a taxonomy cluster, but filed alongside them: [`competitor-landscape.md`](competitor-landscape.md) — a product-landscape pass on commercial AI-native review products (CodeRabbit, Copilot code review, Greptile), feeding [`../map-gaps.md`](../map-gaps.md) G34.
+
+Also not a taxonomy cluster: [`metareview-analysis.md`](metareview-analysis.md) — a primary-source
+read of [dsifry/metareview](https://github.com/dsifry/metareview), an open-source agent-native
+review *harness* (gate state machine, JSON evidence receipts, post-merge learning), feeding
+[`../map-gaps.md`](../map-gaps.md) G36.
