@@ -46,8 +46,8 @@ independently verified against metaswarm's source.
 ### A five-state gate lifecycle, not a single review pass
 
 metareview treats "review" as a chain of five distinct decision points, each with its own rubric
-file and each returning one of four verdicts (`README.md`, "Lifecycle gate results have a small
-operating contract"):
+file. Each **lifecycle gate** returns one of four normalized verdicts (`README.md`, "Lifecycle gate
+results have a small operating contract"):
 
 | Gate | Command | Rubric | Decision it gates |
 |---|---|---|---|
@@ -63,6 +63,12 @@ Verdicts are fixed and machine-actionable, not prose (`README.md`):
 - `PASS_ADVISORY` — proceed **only** if the review reports zero blocking findings.
 - `NEEDS_REVISION` — fix blockers, re-run the *same* gate with `--previous-run <run-id>`.
 - `ESCALATED` — stop autonomous retries; a human must narrow, split, or redesign the target.
+
+These four are the **lifecycle-gate** contract. The per-lens **rubrics** use a related but distinct
+verdict vocabulary — `PASS` / `NEEDS_REVISION` / `ESCALATE` (a human decision is required) /
+`NOT_APPLICABLE` (the lens doesn't apply), with **no** `PASS_ADVISORY` and `ESCALATE` rather than
+`ESCALATED` — which the gate normalizes into the four above. Don't read the two sets as identical:
+a per-lens `NOT_APPLICABLE` or `ESCALATE` is a rubric-level outcome, not a gate verdict.
 
 A real dogfooded example (`docs/metareview/reviews/mrv-20260705-223417096019000-pr-ready-branch-10d735e5.md`)
 shows the shape this actually produces: a `pr-ready` run with six named reviewer roles
@@ -121,7 +127,11 @@ Each gate's rubric names required lenses run as (per `README.md`) independent pa
 by default, with an explicit degraded mode: "`in-session-emulated` fallback is weaker evidence and
 must say the review is not independently adversarial." `artifact-review-rubric.md` names six
 required lenses — **Feasibility**, **Completeness**, **Scope And Alignment**, **Architecture**,
-**Intent Preservation**, **Security** — each with its own block conditions. The Architecture lens
+**Intent Preservation**, **Security** — each with its own block conditions. (This six-lens count is
+specific to the *artifact* rubric; the other gates' rubrics name their own, smaller lens sets.
+metareview's own `README.md` still says the artifact review runs "the five required lenses" — the
+original set before Security was added as the sixth per the security-rubric provenance note quoted
+below; the README line wasn't updated to match, an internal inconsistency in metareview's docs.) The Architecture lens
 is unusually deep for what is nominally one rubric section: it enumerates data-modeling smells
 (N+1, unbounded materialization, "Jaywalking" columns, missing FK/UNIQUE/CHECK constraints),
 concurrency/consistency smells (lost updates, TOCTOU check-then-insert, money-as-float), coupling
@@ -217,8 +227,11 @@ that point back to the exact finding ID that surfaced the problem and the exact 
 fixed** (`finding mrvf-...-001; fixed-run mrv-...`). The paired discarded-candidates file for the
 same run keeps a one-line, *typed* rejection reason rather than silently dropping the candidate:
 `follow-up-not-knowledge: Capture review-driven fix: Complete the work or convert the remaining
-work into an explicit follow-up.` The acceptance bar is stated directly in `docs/quickstart.md`:
-"Keep accepted knowledge only when it would change a future reviewer's behavior on a similar task."
+work into an explicit follow-up.` The acceptance bar is stated directly in
+`skills/learn-post-merge/SKILL.md`: "Keep accepted knowledge only when it would change a future
+reviewer's behavior on a similar task." (`rubrics/learning-review-rubric.md` states the same rule
+in its own words — "Post-merge learning keeps only knowledge that changes future reviewer
+behavior" — and enumerates the fixed discard reasons, `follow-up-not-knowledge` among them.)
 
 **→ mine:** this is the single most distinctive mechanism in the whole project relative to this
 suite's own design, and the most directly comparable to something the atlas already has in nascent
