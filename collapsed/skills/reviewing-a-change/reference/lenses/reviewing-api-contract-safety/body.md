@@ -33,6 +33,7 @@ The full review checklist, grouped by the research category each check draws fro
 
 - Is the change to a public contract **backward-compatible**? If breaking, is it versioned and communicated (semver, deprecation window)?
 - Is the API **easy to use, hard to misuse**? Required things required by the type; invalid combinations impossible; sensible defaults.
+- **Parse inbound payloads into a validated shape once at the edge** (parse-don't-validate at the wire boundary): the request/event body is decoded into a typed, validated object at the entry point, not passed inward as a raw map / `any` / untyped JSON to be re-checked (or silently trusted) at each use. And make an **impossible response shape unrepresentable** — a result modeled as `oneOf {ok, error}` rather than an object where `error` and `data` can both be populated or both be null. This is #10's make-illegal-states-unrepresentable move applied to the contract's own wire types (cross #10).
 - **"When in doubt, leave it out":** any field/endpoint/param being added that isn't clearly needed? (You can add later; you can't remove.)
 - **Consistent** with the rest of the surface (naming, pluralization, error shape, pagination, status codes, casing — cross #8)?
 - Are **errors part of the contract** — typed, documented, stable codes — not ad-hoc strings?

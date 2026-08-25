@@ -61,7 +61,7 @@ The full review checklist, grouped by the research category each check draws fro
 ### Reviewable heuristics (skill-checklist seeds)
 
 - Is config **separated from code** and injected via env — no secrets or env-specific values hardcoded/committed?
-- Is config **validated at startup** (fail fast, clear message), not lazily at first use?
+- Is config **parsed into a typed, validated object once at startup** (fail fast, clear message) — not read key-by-key and re-validated (or trusted unchecked) at each use site? A boot-time parse into a typed settings object is #10's parse-don't-validate / illegal-states-unrepresentable move applied to configuration: downstream code receives a value already known-good, and a missing or malformed key fails loudly at boot rather than at 3am on first use (cross #10).
 - Are **safe, secure defaults** used (deny-by-default, TLS on, debug off in prod — cross #14)?
 - **Dev/prod parity**: does the change keep environments close (same backing services, same config shape), avoiding env-specific code branches?
 - New **feature flag**: does it have an owner and a **removal plan**? Are stale/dead flags being cleaned up (debt — cross #21)?

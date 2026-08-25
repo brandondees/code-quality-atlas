@@ -13,7 +13,7 @@ provenance:
   built_from:
   - category: 13
     source: docs/research/cluster-3-structure.md#13
-    hash: 7f725163d5f31734656d5099caa13bf51bc3ab1c71fb65f48ee6e1d0c6543d5a
+    hash: fc4cd102b7dd8ecc85e0a3f665199ce5af7d301c9e1277c17d9c7aeac410b039
 ---
 
 # reviewing-api-contract-safety
@@ -42,12 +42,12 @@ The head of the full checklist — enough for a first pass without opening any r
 
 - Is the change to a public contract **backward-compatible**? If breaking, is it versioned and communicated (semver, deprecation window)?
 - Is the API **easy to use, hard to misuse**? Required things required by the type; invalid combinations impossible; sensible defaults.
+- **Parse inbound payloads into a validated shape once at the edge** (parse-don't-validate at the wire boundary): the request/event body is decoded into a typed, validated object at the entry point, not passed inward as a raw map / `any` / untyped JSON to be re-checked (or silently trusted) at each use. And make an **impossible response shape unrepresentable** — a result modeled as `oneOf {ok, error}` rather than an object where `error` and `data` can both be populated or both be null. This is #10's make-illegal-states-unrepresentable move applied to the contract's own wire types (cross #10).
 - **"When in doubt, leave it out":** any field/endpoint/param being added that isn't clearly needed? (You can add later; you can't remove.)
 - **Consistent** with the rest of the surface (naming, pluralization, error shape, pagination, status codes, casing — cross #8)?
 - Are **errors part of the contract** — typed, documented, stable codes — not ad-hoc strings?
 - **Idempotency**: are unsafe operations idempotent or protected by idempotency keys (cross #3)?
 - Pagination, rate limits, filtering defined for collection endpoints?
-- Is there a **contract test** (Pact/schema) guarding the consumer-provider boundary?
 
 ## Mechanizing these checks
 

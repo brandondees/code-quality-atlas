@@ -495,3 +495,52 @@ checkout, including real dogfooded review/learning output, not documentation cla
 medium on the disposition tiers, which are this pass's own value/cost judgment rather than an
 external benchmark. Owner-gated, like every prior G entry: no manifest/skill change ships from
 this finding alone.
+
+## G37 — "Make illegal states unrepresentable" / "parse, don't validate" was siloed to the type substrate, not applied as the cross-substrate principle it is
+
+Surfaced 2026-08-25, following on from the metareview read (G36) and a direct owner question about
+lens-level improvements derivable from it. Same **shape as G33** (named-framework provenance /
+under-application): the suite had the canonical principle correctly *sourced* in exactly one place
+and applied *unnamed* — or not at all — everywhere else the same move belongs. Not a new principle;
+a distribution failure of one the map already held.
+
+**The finding.** `reviewing-module-design` (#10) owns "make illegal states unrepresentable"
+(Minsky) and "parse, don't validate" (King), correctly cited in its `reference/sources.md`. But the
+whole category was phrased in **type-system vocabulary** — tagged unions, smart constructors,
+exhaustive enums — and its Minsky note actively asserted "the type system is the enforcement
+mechanism, not runtime checks," which *contradicts* the principle's substrate-independence (a DB
+`CHECK` is a runtime check that still makes the state unconstructible). The same move appeared, but
+unnamed and uncited, at other boundaries: config validation-at-startup (#26), UI state via a
+discriminated union (#42, its one fully-worked instance, cross-referencing #10 already), and was
+**absent** at the wire boundary (#13 — no parse-inbound-once / discriminated-response-shape check)
+and the IaC input boundary (#31 — no `variable validation` block / CRD admission-schema check). The
+persistence substrate was gestured at by a single weak #10 line ("do the types and the persistence
+schema agree?") with none of the DB-native mechanisms spelled out — the same DB-schema semantic gap
+noticed in metareview's own deep Architecture rubric (G36's linked doc).
+
+**Disposition: ✅ shipped 2026-08-25.** #10 reframed as the **canonical cross-substrate home**: a
+priority-marked (★, Top-checks) general-principle heuristic stating the move and mapping each
+substrate to its enforcement mechanism with cross-refs (#26/#13/#42/#31/#20/#40), the Minsky note
+corrected to state substrate-independence, and two **persistence-substrate** bullets folding in the
+DB mechanisms (a `CHECK` forbidding a contradictory combination; a real FK vs. a polymorphic
+`(entity_type, entity_id)` pair; a status column split into orthogonal fields; scoped `UNIQUE`
+matching the real invariant; a partial unique index surviving soft-delete; an exclusion constraint
+for effective-dated overlap) — which also closes the DB-schema semantic gap from G36. Substrate
+instances added at the two boundaries that lacked them: #13 (parse inbound payloads into a validated
+shape once at the edge; make an impossible response shape — `error` and `data` both populated —
+unrepresentable) and #31 (constrain a module/CRD's own inputs via a Terraform `validation` block or
+a CRD `openAPIV3Schema`/CEL admission check, distinct from plan-time policy-as-code). #26's
+startup-validation bullet reframed from "validated" to "parsed into a typed object once at boot"
+with a #10 cross-ref. #42 was **already substantively covered** (its ★ state-completeness heuristic
+and tooling note already carry the move and cite #10) and received only an explicit in-heuristic
+`cross #10` pointer — not a new check. Generator prose only (`built_from` unchanged, so docs drift
+stays clean); regenerated drift-clean; 435 tests pass. G1 respected: #10 owns the *modeling*
+decision, #20 the *migration mechanics* of adding a constraint, #40 the analytics-plane version —
+each cross-referenced, none duplicated.
+
+**The class (why this recurs).** G33 and G37 are the same method: sweep a canonical principle across
+*every* lens whose substrate it touches, not just the one where it was first cited, and check
+name-level + mechanism-level coverage per substrate rather than assuming the idea propagated. The
+dual of the conflation audit — that one hunts *un-framed* surfaces; this hunts a *correctly-framed
+principle that never travelled*. Owner-gated: the edits are generator-source prose, reviewable in
+the PR.
