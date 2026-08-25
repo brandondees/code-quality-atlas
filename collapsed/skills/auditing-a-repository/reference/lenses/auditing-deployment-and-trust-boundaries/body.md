@@ -17,6 +17,8 @@ Could an adversary reach code execution or persistence through the deployment wi
 - [Good → no finding](#good--no-finding)
 - [Good → no finding (self-hosted runner, properly isolated)](#good--no-finding-self-hosted-runner-properly-isolated)
 - [Delegating → routed to a sibling lens](#delegating--routed-to-a-sibling-lens)
+- [Delegating → hollow gate routed to #19, not PPE](#delegating--hollow-gate-routed-to-19-not-ppe)
+- [Escalate (G8) → compromised credential needs org authority to rotate](#escalate-g8--compromised-credential-needs-org-authority-to-rotate)
 - [Not applicable](#not-applicable)
 - [Going deeper](#going-deeper)
 
@@ -78,6 +80,24 @@ adds real defense-in-depth. A concrete code-level vuln routes to
 exposure routes to `auditing-infrastructure-as-code` (#31); whether a gate is
 required/flaky at all routes to `auditing-config-and-build-hygiene` (#19). Do
 not demand a control the wiring's actual risk doesn't warrant.
+
+**"Reviewed and gated" is not the same question as "is something else wrong
+here" — do not relabel a different defect as PPE just because it sits inside
+unattended or CI-triggered wiring.** A deploy identity with a broader IAM scope
+than what it deploys, a required status check made hollow by
+`continue-on-error`/`allow_failure`, a command built by interpolating input
+into a shell call, and a container `CMD`/entrypoint that re-fetches and
+executes a remote script **at runtime, on every start** (as opposed to at
+build time, from the reviewed tree) are each their own named finding — not a
+second flavor of Poisoned Pipeline Execution. PPE is specifically "unreviewed
+or bypassable-gate content reaches unattended execution"; these four are a
+credential-scope mismatch, a hollow gate, a code vulnerability, and an
+unpinned-runtime-fetch, respectively, each independent of whether the branch
+that shipped them was itself properly reviewed. When a scan shows deployment
+config (a CI workflow, a deploy script, a cron/systemd unit) but nothing that
+fits this lens's own checks, the right answer is "No findings" or a routed
+finding to a sibling lens — never "Not applicable." Reserve "Not applicable"
+for input that contains no deployment/execution wiring at all to examine.
 
 ## Bad → finding (unattended git-sync + deploy)
 
@@ -245,6 +265,59 @@ showed an admin-bypass allowance, a direct-push path, or a trigger that ran
 before review — as in the git-sync example above — that half would become this
 lens's finding; the two are independent checks on the same input.)
 
+## Delegating → hollow gate routed to #19, not PPE
+
+**Input (deployment wiring):**
+
+```text
+GitHub Actions: .github/workflows/deploy.yml
+  on: push: { branches: [main] }
+  jobs:
+    deploy:
+      continue-on-error: true       # applies to the whole job, including the deploy step itself
+      steps:
+        - run: ./run-migrations.sh && ./deploy.sh
+"deploy" is listed as a required status check on main's branch protection.
+```
+
+**Expected finding:** **Hollow required gate, routed to
+`auditing-config-and-build-hygiene` (#19).** `continue-on-error: true` on the
+whole `deploy` job means the "deploy" required status check reports success
+even when `run-migrations.sh`/`deploy.sh` actually fail — the required-check
+gate this repo relies on is not actually enforcing anything. Name the specific
+instance found here and hand off the verdict to #19, which owns whether CI
+gating itself is sound; do not re-derive #19's full soft-fail checklist. This
+is **not** a Poisoned Pipeline Execution finding — nothing here shows the
+trigger reaching execution without review — the problem is that a failed
+deploy still shows green, a distinct failure class from unreviewed content
+reaching execution. Do not respond with a mechanical recitation of every
+other check this lens owns "in case" one applies — report only what the input
+actually shows.
+
+## Escalate (G8) → compromised credential needs org authority to rotate
+
+**Input (deployment wiring):**
+
+```text
+An incident three weeks ago confirmed the CI deploy credential (AWS access
+key AKIA...) for the payments service was exposed in a public gist by a
+departed contractor. The key has not been rotated; deploy.yml still uses it
+directly via a checked-out secret, not OIDC.
+```
+
+**Expected finding:** **Credential-in-tree at rest, already known-compromised
+— escalate the rotation to a human/security team rather than resolving it as
+an ordinary finding.** The key is confirmed exposed, not merely at risk, and
+rotating an already-abused production credential without breaking live
+deploys needs org/infra authority (coordinating the cutover, confirming no
+other system still depends on the old key) that a repo checkout doesn't
+carry — this is exactly the G8 case this lens's own discipline names.
+Escalating does not mean reporting less: still name the finding at full
+severity and still give the durable fix — move from a long-lived static key
+to short-lived OIDC-based credentials so this class of exposure can't recur
+the same way — the escalation is about *who* authorizes the rotation, not
+about withholding the finding.
+
 ## Not applicable
 
 **Input:**
@@ -259,6 +332,15 @@ def clamp(value, low, high):
 unit, deploy script, or service-trust config present to audit." Do NOT report
 "No findings" here — that sentence means a check ran and found nothing, not
 that nothing in this input was checkable.
+
+**Contrast — this is not the same case.** An input can contain deployment
+wiring (a `deploy.yml`, a Makefile `setup` target, a cron unit) alongside
+content this lens doesn't own (a suppression comment, a disabled alert, a
+documentation page) without becoming "Not applicable." If any deployment or
+execution wiring is present anywhere in the input, examine it against this
+lens's own checks and report "No findings" (if it holds up) or a real finding
+— reserve "Not applicable" strictly for input with **no** deployment/execution
+wiring surface anywhere in it, like the pure-library example above.
 
 ## Going deeper
 
