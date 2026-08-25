@@ -87,11 +87,11 @@ built on top of the atlas's own review output (see Gap analysis, Tier 1).
 metareview does not trust an agent's prose claim that "tests pass." `metareview evidence run --
 <command>` wraps a validation command and records a JSON receipt; the real receipts embedded in
 the dogfooded `pr-ready` review above have this shape (fields observed directly, not from
-documentation):
+documentation; the absolute `cwd` path is anonymized here):
 
 ```json
 {"schemaVersion":1,"kind":"validation","command":["bash","tests/run-all.sh"],
- "cwd":"/Users/dsifry/Developer/metareview/.worktrees/docs-0-6-release-notes",
+ "cwd":"<repo>/.worktrees/docs-0-6-release-notes",
  "exitCode":0,"startedAt":"2026-07-05T21:54:06.03Z","finishedAt":"2026-07-05T21:54:28.47Z",
  "stdoutSha256":"d936305a...","stderrSha256":"2bdaf97d...",
  "summary":"bash tests/run-all.sh exited 0"}
@@ -105,9 +105,11 @@ locally-run validation are evidence in one uniform, hash-verifiable format. `tas
 **→ mine:** the receipt shape — command, cwd, exit code, start/end timestamps, **hashes of stdout
 and stderr** rather than the raw output — is a specific, well-thought-through answer to "how do
 you let a reviewer (LLM or human) trust that a claimed validation actually happened, without
-storing potentially-huge or sensitive raw output." The hash lets a later run cheaply verify "this
-is the same output as before" (e.g., to confirm a fix didn't change unrelated test output) without
-re-embedding it. [`grounding-review-in-tool-output`](../../skills/grounding-review-in-tool-output)
+storing potentially-huge or sensitive raw output." The hash lets a later run cheaply verify that an
+output stream is **byte-identical** to a previous run's — or detect that it differs — without
+re-embedding it. That is exact-equality verification, not a diff: a matching hash confirms nothing
+changed, but a differing one cannot attribute *what* changed (for that you'd retain diffable
+output). [`grounding-review-in-tool-output`](../../skills/grounding-review-in-tool-output)
 already runs the repo's own tools and hands raw output to the lens as evidence for *this* PR, but
 the atlas has no receipt/log format at all — nothing analogous exists for a *caller* (a CI wrapper,
 an agent) to hand the atlas "here is proof I ran the tests" in a way a later invocation could

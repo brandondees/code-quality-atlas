@@ -12,7 +12,7 @@ provenance:
     hash: 38ffd004ead3132595eb8c0abef6604be65c2ff741e304912c5fe25a0356ef3e
   - category: 10
     source: docs/research/cluster-3-structure.md#10
-    hash: f48f1dbea9ad7454101ec63321271e9647b64ba67495fe939cc1932ef204665a
+    hash: a0d6f60a2202e76d2ada9c19476a5b3e8c06ad0e4f4f7ab09df8aa6c461000b4
 ---
 
 # reviewing-module-design

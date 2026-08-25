@@ -13,7 +13,7 @@ provenance:
   built_from:
   - category: 13
     source: docs/research/cluster-3-structure.md#13
-    hash: fc4cd102b7dd8ecc85e0a3f665199ce5af7d301c9e1277c17d9c7aeac410b039
+    hash: 5ceaedad11911f6198cc16dfae9849a607eb14ac958325a8590754e1948a0e76
 ---
 
 # reviewing-api-contract-safety
@@ -40,9 +40,10 @@ Report only real problems. If this lens applies and what you reviewed holds up �
 
 The head of the full checklist — enough for a first pass without opening any reference file:
 
+- Is there a **contract test** (Pact/schema) guarding the consumer-provider boundary?
 - Is the change to a public contract **backward-compatible**? If breaking, is it versioned and communicated (semver, deprecation window)?
 - Is the API **easy to use, hard to misuse**? Required things required by the type; invalid combinations impossible; sensible defaults.
-- **Parse inbound payloads into a validated shape once at the edge** (parse-don't-validate at the wire boundary): the request/event body is decoded into a typed, validated object at the entry point, not passed inward as a raw map / `any` / untyped JSON to be re-checked (or silently trusted) at each use. And make an **impossible response shape unrepresentable** — a result modeled as `oneOf {ok, error}` rather than an object where `error` and `data` can both be populated or both be null. This is #10's make-illegal-states-unrepresentable move applied to the contract's own wire types (cross #10).
+- **Parse inbound payloads into a validated shape once at the edge** (parse-don't-validate at the wire boundary): the request/event body is decoded into a typed, validated object at the entry point, not passed inward as a raw map / `any` / untyped JSON to be re-checked (or silently trusted) at each use. And make an **impossible response shape unrepresentable** — model the result as a discriminated union (a `oneOf`/`anyOf` carrying a discriminator field, or branches whose `required` fields are mutually exclusive) so that both an empty object **and** one populating `data` and `error` together are invalid. A bare `oneOf` over properties-only branches is *not* enough: because `oneOf` demands exactly one match and properties-only branches match `{}`, it still admits the empty and both-populated cases. This is #10's make-illegal-states-unrepresentable move applied to the contract's own wire types (cross #10).
 - **"When in doubt, leave it out":** any field/endpoint/param being added that isn't clearly needed? (You can add later; you can't remove.)
 - **Consistent** with the rest of the surface (naming, pluralization, error shape, pagination, status codes, casing — cross #8)?
 - Are **errors part of the contract** — typed, documented, stable codes — not ad-hoc strings?

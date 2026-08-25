@@ -36,7 +36,7 @@
 ### Reviewable heuristics (skill-checklist seeds)
 
 - Is config **separated from code** and injected via env — no secrets or env-specific values hardcoded/committed?
-- Is config **parsed into a typed, validated object once at startup** (fail fast, clear message) — not read key-by-key and re-validated (or trusted unchecked) at each use site? A boot-time parse into a typed settings object is #10's parse-don't-validate / illegal-states-unrepresentable move applied to configuration: downstream code receives a value already known-good, and a missing or malformed key fails loudly at boot rather than at 3am on first use (cross #10).
+- Is config **parsed into a typed, validated object** — at startup for static config (fail fast, clear message), and for **reloadable** config or feature flags re-parsed and re-validated into a *new* typed object swapped in atomically on each update — rather than read key-by-key and re-validated (or trusted unchecked) at each use site? Parsing config into a typed settings object is #10's parse-don't-validate / illegal-states-unrepresentable move applied to configuration: downstream receives a value already known-good, and a missing or malformed key fails loudly (at boot for static config; before the new values are published for reloadable config) rather than at 3am on first use (cross #10).
 - Are **safe, secure defaults** used (deny-by-default, TLS on, debug off in prod — cross #14)?
 - **Dev/prod parity**: does the change keep environments close (same backing services, same config shape), avoiding env-specific code branches?
 - New **feature flag**: does it have an owner and a **removal plan**? Are stale/dead flags being cleaned up (debt — cross #21)?

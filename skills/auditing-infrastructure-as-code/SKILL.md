@@ -15,7 +15,7 @@ provenance:
   built_from:
   - category: 31
     source: docs/research/cluster-5-verification.md#31
-    hash: b32ce91f64dd191f3df8067698752fb333668178b3ff680f6112d137d5dc87d9
+    hash: ca71fb83f48adc983f58ffa7199e50b497f5c15b9f4928b72600dfb19f186ca1
 ---
 
 # auditing-infrastructure-as-code

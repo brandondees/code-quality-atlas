@@ -14,7 +14,7 @@ provenance:
     hash: 6beb4e0197f9d737af372f8b572900ed9c6ca3fdb9a5534d77704009afd0bed5
   - category: 26
     source: docs/research/cluster-5-verification.md#26
-    hash: 58e94774bd879fee936722051d03f05bc125723a9b6aec719819cc6e5e9fcf01
+    hash: a68808540e90547323e56035d450d31bd83fcc58fc2e9fd9226b025502ab6c06
 ---
 
 # auditing-config-and-build-hygiene
@@ -45,7 +45,7 @@ The head of the full checklist — enough for a first pass without opening any r
 - Is the build **reproducible/hermetic** enough to not depend on machine-local state (pinned toolchain, lockfiles, no network in build)?
 - Is CI **fast and reliable**? A new slow/flaky job is a defect — parallelized, cached, deterministic?
 - Is config **separated from code** and injected via env — no secrets or env-specific values hardcoded/committed?
-- Is config **parsed into a typed, validated object once at startup** (fail fast, clear message) — not read key-by-key and re-validated (or trusted unchecked) at each use site? A boot-time parse into a typed settings object is #10's parse-don't-validate / illegal-states-unrepresentable move applied to configuration: downstream code receives a value already known-good, and a missing or malformed key fails loudly at boot rather than at 3am on first use (cross #10).
+- Is config **parsed into a typed, validated object** — at startup for static config (fail fast, clear message), and for **reloadable** config or feature flags re-parsed and re-validated into a *new* typed object swapped in atomically on each update — rather than read key-by-key and re-validated (or trusted unchecked) at each use site? Parsing config into a typed settings object is #10's parse-don't-validate / illegal-states-unrepresentable move applied to configuration: downstream receives a value already known-good, and a missing or malformed key fails loudly (at boot for static config; before the new values are published for reloadable config) rather than at 3am on first use (cross #10).
 - Are **safe, secure defaults** used (deny-by-default, TLS on, debug off in prod — cross #14)?
 - **Dev/prod parity**: does the change keep environments close (same backing services, same config shape), avoiding env-specific code branches?
 
