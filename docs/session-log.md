@@ -3913,3 +3913,21 @@ Picked up the loose end the 2026-08-23 build entry named explicitly: `auditing-d
 **Verification:** 435/435 tests pass, `python -m tooling.cli drift` clean, `python -m tooling.cli eval --skill auditing-deployment-and-trust-boundaries` gates at 20/20. No stale entries remain anywhere in the manifest.
 
 **Recorded in `open-questions.md` Q21.**
+
+### 2026-08-25 — cross-substrate "make illegal states unrepresentable" (map-gaps G37)
+
+Follow-on from the metareview read (G36) and an owner question about lens-level improvements derivable from it. The "make illegal states unrepresentable" (Minsky) / "parse, don't validate" (King) principle was correctly *sourced* in `reviewing-module-design` (#10) but siloed to the **type substrate** — phrased entirely in tagged-union / smart-constructor vocabulary, with a Minsky note that even asserted "the type system is the enforcement mechanism, not runtime checks" (which contradicts the principle's substrate-independence — a DB `CHECK` is a runtime check that still makes the state unconstructible). The same move showed up unnamed at other boundaries and was absent at two.
+
+**Shipped (generator-source prose only, all five in the research cluster files):**
+
+- **#10 (`reviewing-module-design`, canonical home)** — added a ★ (Top-checks) general-principle heuristic mapping each substrate to its enforcement mechanism (type / DB constraint / parsed config / discriminated wire payload / discriminated-union+exhaustiveness UI state / IaC `validation` block), corrected the Minsky note to state substrate-independence, and folded in two **persistence-substrate** bullets carrying the DB-native mechanisms (`CHECK` for contradictory combinations, real FK vs. polymorphic `(entity_type, entity_id)`, orthogonal status fields, scoped `UNIQUE`, partial unique index surviving soft-delete, exclusion constraint for effective-dated overlap) — the latter also closing the DB-schema semantic gap noticed in metareview's Architecture rubric. Replaced the old weak "do the types and the persistence schema agree?" line.
+- **#13 (`reviewing-api-contract-safety`, wire boundary — was absent)** — parse inbound payloads into a validated shape once at the edge; make an impossible response shape (`error` and `data` both populated, or neither) unrepresentable via a discriminated union (discriminator field or mutually-exclusive `required` branches — not a bare `oneOf`). Cross-refs #10. *(Round-2 CodeRabbit review sharpened the `oneOf` wording, corrected the `optional()` Terraform claim, DB-engine-qualified the persistence bullets, and scoped the config-parse rule to static-vs-reloadable; ★-promoted the #13 contract-test check so the new bullet didn't displace it from Top checks.)*
+- **#26 (`auditing-config-and-build-hygiene`, config)** — reframed the startup-validation bullet from "validated" to "parsed into a typed object once at boot," so downstream never sees an invalid config. Cross-refs #10.
+- **#31 (`auditing-infrastructure-as-code`, IaC input boundary — was absent)** — constrain a module/CRD's own inputs (Terraform `variable` `validation` block; K8s CRD `openAPIV3Schema` / `x-kubernetes-validations` CEL at admission), explicitly distinguished from plan-time policy-as-code. Cross-refs #10, #13.
+- **#42 (`reviewing-usability-and-interaction`, UI state)** — **already substantively covered** (its ★ state-completeness heuristic and tooling note already carry the discriminated-union+exhaustiveness move and cite #10); received only an explicit in-heuristic `cross #10` pointer, not a new check. Called out honestly rather than manufactured into a fifth new edit.
+
+**G1 respected:** #10 owns the modeling decision, #20 the migration mechanics of adding a constraint, #40 the analytics-plane version — each cross-referenced, none duplicated.
+
+**Verification:** `python -m tooling.cli generate` + `drift` — "No drift"; full suite **435 passed**; `markdownlint-cli2` clean on the edited files. `built_from` unchanged so provenance hashes updated cleanly via regeneration. **Not shipped here (separate follow-up):** the "quote-the-line" evidence-discipline finding for the synthesizer finding schema (the other lens-level item identified from metareview) — deliberately left for its own change.
+
+**Recorded in `map-gaps.md` G37.**

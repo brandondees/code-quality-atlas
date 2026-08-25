@@ -417,3 +417,130 @@ Neither asks whether the **taxonomy** is coherent: does a new error type join an
 - What would factor-level opt-in actually mean mechanically — a per-check flag in the manifest schema (nothing like this exists today; `eval_min` and `tier` are both whole-lens), or just default-quiet valence/severity the way G32's pre-existing-defect surfacing is opt-in/default-quiet by convention rather than by a schema field?
 
 No build follow-up. This is a candidate for a future research pass (grounding it against real sources, per the standing authoring rule against ungrounded behavioral/topic claims) before any promotion decision, not a decision itself.
+
+## G36 — Harness/orchestration gap vs. metareview: no terminal-escalation signal, no evidence-receipt input contract, no mechanized post-merge calibration loop
+
+Surfaced 2026-08-24 (owner question: *what can we learn from dsifry/metareview?*). Distinct in
+kind from G34: G34 compared this suite's runtime architecture against **commercial SaaS**
+reviewers and found a content/grounding gap (mostly closed by `grounding-review-in-tool-output`).
+This gap comes from comparing against an **open-source, unhosted, agent-native review harness**
+with a persistent CLI, a five-gate lifecycle state machine, and its own local learning store — the
+closest thing found so far to a second implementation of "agent review harness" with real,
+inspectable dogfooded output. Full verified findings, per-mechanism detail, and primary-source
+citations in [`research/metareview-analysis.md`](research/metareview-analysis.md) (a new doc,
+sibling to `prior-art.md`/`competitor-landscape.md` but scoped to an agent-native review harness
+rather than skills/linters or a SaaS product).
+
+**The finding.** metareview's runtime is built as a chain of five typed gates (`artifact` →
+`task-done` → `epic-ready` → `pr-ready` → `learn --post-merge`), each returning one of four
+verdicts — `PASS` / `PASS_ADVISORY` / `NEEDS_REVISION` / **`ESCALATED`** (stop autonomous retries,
+a human must redesign the target) — with findings carrying stable IDs a later run can reconcile
+against rather than re-litigate. Validation claims are backed by hash-verified JSON evidence
+receipts (`command`, `cwd`, `exitCode`, timestamps, `stdoutSha256`/`stderrSha256`) rather than
+prose, importable from local test runs or GitHub check results into one uniform format. After a PR
+merges, `learn --post-merge` forces every candidate lesson into an **accepted** or **discarded**
+bucket — accepted entries carry a stated confidence and provenance links back to the exact finding
+ID and the exact run that fixed it; discarded entries carry a typed rejection reason rather than a
+silent drop — and the accepted store feeds directly into the next automated run of the same CLI.
+
+This suite has no equivalent of any of the three: findings ship with severity/tier but no terminal
+"stop iterating, escalate to a human" signal; there is no format for a caller to hand in
+externally-validated evidence in a way a later step could verify without re-running or
+re-embedding it; and the "what should change reviewer behavior next time" capture this repo already
+does (session-log entries, the standing authoring rules' own incident write-ups in
+`research/README.md`) is manual, per-incident, and has no forced accept/discard split, no typed
+discard reason, and no automatic feed-forward into a later review — because, unlike metareview,
+this suite runs as **stateless per-invocation Claude Code skills with no persistent state between
+invocations to feed a calibration loop back into**.
+
+**Disposition (lean), ranked value ÷ cost (full reasoning in the linked doc):**
+
+- **Tier 1 (high value, low cost, fits a stateless skill):** (1) a named terminal-escalation
+  signal in the synthesizer's verdict contract — evaluable from the current round's findings
+  (e.g., a `CRITICAL` architecture-level finding, or the same root cause recurring across rounds
+  the caller already tracked) without needing new persistent state; check whether this belongs in
+  [`synthesizing-review-findings`](../skills/synthesizing-review-findings) or one layer up in
+  [`runbooks/pr-review-automation.md`](runbooks/pr-review-automation.md). (2) Naming the specific
+  deterministic sub-case a `prepass:` tool hit already owns **inside the lens prompt itself**
+  (metareview's rubric text tells the LLM lens "the `eval(` gate covers bare `eval(` — don't
+  re-flag it, flag SQL string interpolation instead"), not only at the synthesizer's dedup step —
+  check whether `reference/tool-evidence.md` already does this per-lens or only at synthesis time.
+- **Tier 2 (real value, needs state this suite doesn't keep today):** an evidence-receipt input
+  format for a caller handing in external validation (a CI pipeline's test run) as first-class
+  review input — an input-contract question for `runbooks/pr-review-automation.md`, not a
+  lens-content change; and a mechanized post-merge calibration gate, whose value is contingent on
+  a concrete answer to "where does an accepted learning get read on the next review" — plausibly a
+  "reviewer calibration" tier on the still-unbuilt Q13 team-preferences overlay
+  ([`team-preferences-overlay.md`](team-preferences-overlay.md)) rather than a new mechanism,
+  since a calibration store with no read path is dead weight.
+- **Tier 3 (architecturally out of scope as designed):** the gate lifecycle's *mechanism* itself
+  (a persistent CLI, `.metareview/` state, `--previous-run` chaining) — adopting the earlier-stage
+  *coverage* (reviewing a spec/plan before code exists) is already a scope question this repo's
+  shape/artifact routing and `reviewing-decision-lifecycle` partially own; adopting metareview's
+  state-machine *mechanism* would mean building genuinely new infrastructure, not a skill change.
+
+**Not a gap.** metareview's adversarial multi-lens panel and its unusually deep
+architecture/data-modeling rubric (schema invariants, TOCTOU, money-as-float, "be most suspicious
+where the code looks most idiomatic") read as convergent validation of this suite's own
+`cluster-3-structure.md` / `reviewing-ai-authored-code` coverage, not new coverage to add.
+
+**Coverage caveat.** This pass read metareview's own repository directly (primary source, not
+rendered-page summaries) but did **not** clone or verify metaswarm, the sibling orchestrator
+metareview's docs describe as its intended lifecycle-owning companion and the stated source of its
+security rubric and golden-eval process — claims about metaswarm in the linked doc are metareview's
+own stated description, not independently confirmed. See the linked doc's *Open threads*.
+
+Confidence: medium-high on the mechanism descriptions (primary-source read of metareview's own
+checkout, including real dogfooded review/learning output, not documentation claims alone);
+medium on the disposition tiers, which are this pass's own value/cost judgment rather than an
+external benchmark. Owner-gated, like every prior G entry: no manifest/skill change ships from
+this finding alone.
+
+## G37 — "Make illegal states unrepresentable" / "parse, don't validate" was siloed to the type substrate, not applied as the cross-substrate principle it is
+
+Surfaced 2026-08-25, following on from the metareview read (G36) and a direct owner question about
+lens-level improvements derivable from it. Same **shape as G33** (named-framework provenance /
+under-application): the suite had the canonical principle correctly *sourced* in exactly one place
+and applied *unnamed* — or not at all — everywhere else the same move belongs. Not a new principle;
+a distribution failure of one the map already held.
+
+**The finding.** `reviewing-module-design` (#10) owns "make illegal states unrepresentable"
+(Minsky) and "parse, don't validate" (King), correctly cited in its `reference/sources.md`. But the
+whole category was phrased in **type-system vocabulary** — tagged unions, smart constructors,
+exhaustive enums — and its Minsky note actively asserted "the type system is the enforcement
+mechanism, not runtime checks," which *contradicts* the principle's substrate-independence (a DB
+`CHECK` is a runtime check that still makes the state unconstructible). The same move appeared, but
+unnamed and uncited, at other boundaries: config validation-at-startup (#26), UI state via a
+discriminated union (#42, its one fully-worked instance, cross-referencing #10 already), and was
+**absent** at the wire boundary (#13 — no parse-inbound-once / discriminated-response-shape check)
+and the IaC input boundary (#31 — no `variable validation` block / CRD admission-schema check). The
+persistence substrate was gestured at by a single weak #10 line ("do the types and the persistence
+schema agree?") with none of the DB-native mechanisms spelled out — the same DB-schema semantic gap
+noticed in metareview's own deep Architecture rubric (G36's linked doc).
+
+**Disposition: ✅ shipped 2026-08-25.** #10 reframed as the **canonical cross-substrate home**: a
+priority-marked (★, Top-checks) general-principle heuristic stating the move and mapping each
+substrate to its enforcement mechanism with cross-refs (#26/#13/#42/#31/#20/#40), the Minsky note
+corrected to state substrate-independence, and two **persistence-substrate** bullets folding in the
+DB mechanisms (a `CHECK` forbidding a contradictory combination; a real FK vs. a polymorphic
+`(entity_type, entity_id)` pair; a status column split into orthogonal fields; scoped `UNIQUE`
+matching the real invariant; a partial unique index surviving soft-delete; an exclusion constraint
+for effective-dated overlap) — which also closes the DB-schema semantic gap from G36. Substrate
+instances added at the two boundaries that lacked them: #13 (parse inbound payloads into a validated
+shape once at the edge; make an impossible response shape — `error` and `data` both populated —
+unrepresentable) and #31 (constrain a module/CRD's own inputs via a Terraform `validation` block or
+a CRD `openAPIV3Schema`/CEL admission check, distinct from plan-time policy-as-code). #26's
+startup-validation bullet reframed from "validated" to "parsed into a typed object once at boot"
+with a #10 cross-ref. #42 was **already substantively covered** (its ★ state-completeness heuristic
+and tooling note already carry the move and cite #10) and received only an explicit in-heuristic
+`cross #10` pointer — not a new check. Generator prose only (`built_from` unchanged, so docs drift
+stays clean); regenerated drift-clean; 435 tests pass. G1 respected: #10 owns the *modeling*
+decision, #20 the *migration mechanics* of adding a constraint, #40 the analytics-plane version —
+each cross-referenced, none duplicated.
+
+**The class (why this recurs).** G33 and G37 are the same method: sweep a canonical principle across
+*every* lens whose substrate it touches, not just the one where it was first cited, and check
+name-level + mechanism-level coverage per substrate rather than assuming the idea propagated. The
+dual of the conflation audit — that one hunts *un-framed* surfaces; this hunts a *correctly-framed
+principle that never travelled*. Owner-gated: the edits are generator-source prose, reviewable in
+the PR.

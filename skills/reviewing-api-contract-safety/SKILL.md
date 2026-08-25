@@ -13,7 +13,7 @@ provenance:
   built_from:
   - category: 13
     source: docs/research/cluster-3-structure.md#13
-    hash: 7f725163d5f31734656d5099caa13bf51bc3ab1c71fb65f48ee6e1d0c6543d5a
+    hash: 79bd1525c2d4a7f152b0f60650405bd6b0f4a4dacc4964e4fa6b646a8abc7a52
 ---
 
 # reviewing-api-contract-safety
@@ -40,14 +40,15 @@ Report only real problems. If this lens applies and what you reviewed holds up �
 
 The head of the full checklist — enough for a first pass without opening any reference file:
 
+- Is there a **contract test** (Pact/schema) guarding the consumer-provider boundary?
 - Is the change to a public contract **backward-compatible**? If breaking, is it versioned and communicated (semver, deprecation window)?
 - Is the API **easy to use, hard to misuse**? Required things required by the type; invalid combinations impossible; sensible defaults.
+- **Parse inbound payloads into a validated shape once at the edge** (parse-don't-validate at the wire boundary): the request/event body is decoded into a typed, validated object at the entry point, not passed inward as a raw map / `any` / untyped JSON to be re-checked (or silently trusted) at each use. And make an **impossible response shape unrepresentable** — model the result as a `oneOf` whose branches each **`require`** their own discriminating field (`required: [data]` vs `required: [error]`), so an empty object and one populating `data` and `error` together are both rejected while each single-populated response stays valid. Two traps worth naming in review: (1) a bare `oneOf` over *properties-only* branches (no `required`) fails in the *opposite* direction — `properties` imposes no presence requirement, so *every* object satisfies **both** branches at once and `oneOf`'s exactly-one rule rejects them all, including a well-formed single-populated response; (2) `anyOf` in place of `oneOf` permits more than one branch to match, so it never rejects the both-populated case at all. An OpenAPI `discriminator` keyword documents the union for codegen/serialization but is **not** itself a validation constraint — the per-branch `required` is what does the enforcing. This is #10's make-illegal-states-unrepresentable move applied to the contract's own wire types (cross #10).
 - **"When in doubt, leave it out":** any field/endpoint/param being added that isn't clearly needed? (You can add later; you can't remove.)
 - **Consistent** with the rest of the surface (naming, pluralization, error shape, pagination, status codes, casing — cross #8)?
 - Are **errors part of the contract** — typed, documented, stable codes — not ad-hoc strings?
 - **Idempotency**: are unsafe operations idempotent or protected by idempotency keys (cross #3)?
 - Pagination, rate limits, filtering defined for collection endpoints?
-- Is there a **contract test** (Pact/schema) guarding the consumer-provider boundary?
 
 ## Mechanizing these checks
 
