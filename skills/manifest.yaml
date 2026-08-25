@@ -1590,9 +1590,14 @@ skills:
     # reviewing-threat-model into repo-audit mode) because those lenses'
     # checklists are tuned for a diff or a design doc, not a static
     # arrangement already at rest — a dedicated lens avoids reconciling
-    # borrowed framing. Single category, no cross_ref. eval_min left unset
-    # (D8's 3-scenario baseline) — this is a first build, not yet through
-    # the Q21 hardening/cross-model-re-gate pass other repo audits carry.
+    # borrowed framing. Single category, no cross_ref.
+    # Q21-hardened 2026-08-24: 6 D8-baseline scenarios -> 20 (B per-axis
+    # coverage: deploy-identity blast radius, self-hosted/persistent
+    # runner, agent-action surface at rest; C delegate/escalate to
+    # #14/#19/#30 and G8; D adversarial framing/injection/claim-capture;
+    # E precision on the new B-axis checks; A a raw-file input). See
+    # open-questions.md Q21 and session-log.md, 2026-08-24.
+    eval_min: 20
     built_from:
       - { category: 45, source: docs/research/cluster-4-runtime.md#45 }
 
