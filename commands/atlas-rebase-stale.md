@@ -1,7 +1,7 @@
 ---
 description: Sweep open PRs for ones that have fallen behind, hit a merge conflict, or slipped past a resident reviewer's watch, and poke or re-trigger as needed — the polling complement that webhooks can't cover. Cheap-model friendly.
 argument-hint: "[label or author to filter by — omit to sweep all open PRs]"
-allowed-tools: mcp__github__list_pull_requests, mcp__github__pull_request_read, mcp__github__get_commit, mcp__github__update_pull_request_branch, mcp__github__add_comment_to_pending_review, mcp__github__pull_request_review_write, mcp__github__add_issue_comment
+allowed-tools: mcp__github__list_pull_requests, mcp__github__pull_request_read, mcp__github__get_commit, mcp__github__update_pull_request_branch, mcp__github__update_pull_request, mcp__github__add_comment_to_pending_review, mcp__github__pull_request_review_write, mcp__github__add_issue_comment
 ---
 
 You are the **stale-PR poker**. GitHub emits no webhook when a base branch
@@ -14,6 +14,9 @@ told coverage lapsed. This command is the polling backstop for both gaps — run
 it on a **frequent schedule** with a cheap, fast model (see
 `docs/runbooks/pr-review-automation.md`). Keep it mechanical; it makes no code
 judgments, and re-triggering a review is a delegation, not a review itself.
+**Don't just flag a lapse — retrigger it** (§3): re-requesting review is a real
+GitHub event a companion routine can wake on, not only a comment a human has to
+notice.
 
 ## 1. List candidates
 
@@ -57,13 +60,26 @@ commit SHA (`mcp__github__pull_request_read`) against the commit the
 (`mcp__github__get_commit` / the review's `commit_id`). If HEAD has moved past
 that round with no unaddressed `<!-- atlas-coverage-poke -->` from you already on
 the PR, the reviewer's watch has lapsed on this push (missed subscription
-wakeup, or the resident session was reclaimed) — post a single issue comment
-marked `<!-- atlas-coverage-poke -->` that says review coverage may have lapsed
-for this push and a fresh review is needed; do **not** attempt the review
-yourself. A PR with no ack comment yet has simply not been picked up (e.g. the
-reviewer routine hasn't fired) — leave it to its own trigger, this step only
-covers a **lapsed** watch with an established baseline, not a missing or
-still-in-flight one.
+wakeup, or the resident session was reclaimed) — escalate in two ways, not one:
+
+1. Post a single issue comment marked `<!-- atlas-coverage-poke -->` that says
+   review coverage may have lapsed for this push and a fresh review is needed —
+   a human-visible record, kept even when nothing automated is wired to act on it.
+2. **Re-request review from the same login that posted the most recent round
+   review** (read it off that review's author, no hardcoded identity —
+   `mcp__github__update_pull_request` with `reviewers: [<that login>]`). This
+   fires a real GitHub `review_requested` event. If the reviewer has a companion
+   routine on that trigger (see `docs/runbooks/pr-review-automation.md` §1a),
+   this is what actually retriggers a fresh review session, independent of
+   whether the original resident session or its subscription survived — GitHub
+   delivers this event regardless. Without that companion routine wired up it's
+   still a correct, harmless signal (a human sees a pending review request
+   either way), just not a self-healing one.
+
+Do **not** attempt the review yourself in either case. A PR with no ack comment
+yet has simply not been picked up (e.g. the reviewer routine hasn't fired) —
+leave it to its own trigger, this step only covers a **lapsed** watch with an
+established baseline, not a missing or still-in-flight one.
 
 ## 4. Stay idempotent
 
