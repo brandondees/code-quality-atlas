@@ -4047,3 +4047,32 @@ Both findings are a useful, unplanned confirmation that the underlying atlas
 reviewer mechanism (subscribe failures notwithstanding) still catches real
 defects when it does fire. `markdownlint-cli2`, `tooling.cli drift`, and
 `pytest` (435/435) all re-verified clean after the fix.
+
+**#329 merged; separate follow-on: repo-wide CI break in the requirements.txt
+sync gate.** #329's own CI went red on a step untouched by its diff
+("requirements.txt is in sync with requirements.in"). Reproduced on a clean
+checkout of `main` with zero changes applied: `pip-compile` (pinned
+`pip-tools==7.6.1`, Python 3.12, matching CI exactly) now emits `--no-index`
+in its own regenerated header comment, where the committed file doesn't have
+it. Root-caused with `--verbose` against an empty pip cache: `requirements.in`
+is fully version-pinned and every package resolves from local cache, so
+pip-compile can complete without ever consulting an index and now says so
+truthfully — confirmed deterministic (reproduced identically across two
+independent fresh installs, on Python 3.11 and 3.12), not a one-off runner
+blip. Zero package/hash changes accompanied it — verified with a full diff and
+a `pip install --require-hashes` sanity check against the regenerated file.
+This affects every open PR and `main` itself, not #329's diff, so the fix
+ships separately rather than folded into that PR (which had already merged by
+the time this was root-caused).
+
+**Shipped:** regenerated `requirements.txt` (header-only change — the
+`--no-index` flag now matches what pip-compile actually produces; no
+package/hash line changed) and a dated comment in `.github/workflows/ci.yml`
+next to the existing requirements-check rationale block, explaining the
+mechanism so a future recurrence reads as "regenerate again," not "real
+drift" or "investigate from scratch."
+
+**Verification:** the exact CI recompile-and-diff step reproduced locally now
+matches (`MATCH — CI step would now pass`); `pip install --require-hashes`,
+`pip-audit`, `ruff check`, `pytest` (435/435), `tooling.cli drift`, and
+`markdownlint-cli2` all clean against the fix.
