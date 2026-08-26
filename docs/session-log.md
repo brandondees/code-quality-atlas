@@ -3931,3 +3931,119 @@ Follow-on from the metareview read (G36) and an owner question about lens-level 
 **Verification:** `python -m tooling.cli generate` + `drift` — "No drift"; full suite **435 passed**; `markdownlint-cli2` clean on the edited files. `built_from` unchanged so provenance hashes updated cleanly via regeneration. **Not shipped here (separate follow-up):** the "quote-the-line" evidence-discipline finding for the synthesizer finding schema (the other lens-level item identified from metareview) — deliberately left for its own change.
 
 **Recorded in `map-gaps.md` G37.**
+
+### 2026-08-26 — PR-review automation: subscribe failures, a self-nudge fallback, and a review-request retrigger
+
+Surfaced while the atlas reviewer was live on PR #327: `subscribe_pr_activity`
+failed outright (three separate calls, all erroring, not just missing an
+occasional event), and the documented backstop for exactly this case — the
+`pr-review-automation.md` §2 poller routine — turned out to be designed but
+**never actually provisioned** for any of the ~9 repos this account runs the
+atlas reviewer against (confirmed via `list_triggers`: every `Atlas PR Reviewer
+-- <repo>` trigger is webhook-only, `cron_expression: None`). Provisioned one
+for this repo live (account-side Routine, not a repo file, so nothing to commit
+for that step) and then worked through the owner's follow-up questions about
+making it actually retrigger a lapsed reviewer rather than only flag one.
+
+**What shipped (docs + the command's own spec, both generator content — no
+skill/manifest change, nothing to regenerate):**
+
+- **`commands/atlas-rebase-stale.md` §3** — the coverage-lapse check now
+  escalates two ways instead of one: the existing `<!-- atlas-coverage-poke -->`
+  issue comment (human-visible, unchanged) *plus* re-requesting review from the
+  same login that posted the most-recent-round review (`update_pull_request`,
+  `reviewers: [...]`, self-discovering — no hardcoded identity), which fires a
+  real `review_requested` GitHub event. Gated on the same idempotency check as
+  the existing poke, so it escalates once per lapse, not every sweep.
+- **`docs/runbooks/pr-review-automation.md`** — three additions: (1) §1's
+  resident-reviewer prompt template now arms a `send_later` self-nudge
+  check-in (~20-30 min) as its *primary* re-review loop rather than treating
+  `subscribe_pr_activity` as sufficient on its own; (2) a new **§1a
+  review-requested companion routine** — the same prompt as §1, triggered by
+  `Pull request review requested` instead of `opened`, existing purely as the
+  wake target for the poller's escalation (a routine trigger carries one event,
+  so this can't fold into §1); (3) *Known boundaries* corrected and extended —
+  the previous flat claim that self-scheduling "dies with its container the
+  same way the watch does" is only partly right: this account's own trigger
+  history (`list_triggers`) shows self-bind `send_later` reminders that *did*
+  end with `ended_reason: auto_disabled_session_gone`, so the self-nudge loop
+  is documented as a mitigation for the more common failure (the subscription
+  itself erroring while the session is fine), not a fix for a genuinely
+  reclaimed container — the poller + §1a stay the structural backstop either
+  way. Also recorded, since it took a live check to answer: `Pull request
+  review requested` **is** an available GitHub routine-trigger event;
+  comment-based triggers (`Issue comment created` or equivalent) are **not** —
+  which is why the escalation re-requests review rather than posting a
+  comment a routine could wake on.
+
+**Verified live, this session:** `subscribe_pr_activity` failed 3/3 (both the
+`github` and `Claude_Code_Remote` variants); direct `pull_request_read`
+calls (get/get_diff/get_files/get_reviews/get_comments/get_commits) all
+succeeded throughout, confirming polling-by-read is a working, independent
+code path from the broken subscription; a poller routine was created and
+confirmed live (`trig_01KHwMncYp856tXsjRZbT71n`, hourly); the Routines UI
+trigger picker was checked directly for `Pull request review requested`
+(present) and any comment-based event (absent).
+
+**Not verified — flagged rather than assumed:** whether the `send_later`
+self-nudge chain actually survives a real container reclaim in production,
+long-run, for this specific use (the account history shows mixed outcomes,
+not a clean pass); this PR documents the design and the honest uncertainty,
+it doesn't close the question. `markdownlint-cli2` clean on the edited files;
+no generator/skill files touched, so no `drift`/`pytest` regeneration applies
+to this change.
+
+**Recorded in `docs/runbooks/pr-review-automation.md` itself** (this is
+operational-tooling documentation, not taxonomy/lens content, so it isn't a
+`map-gaps.md`/`open-questions.md` entry — see that file's own scope).
+
+**Same-day follow-on: scope `REQUEST_CHANGES` to Blocker only.** A separate,
+related problem surfaced once the above was in flight: the reviewer's
+`REQUEST_CHANGES` state (used for *any* new at/above-floor finding — a Major
+qualifies once the round-2+ floor rises to Major) hard-blocks merge in GitHub
+until a human explicitly dismisses it, and since the reviewer's own watch isn't
+reliably catching up on pushes (the whole subject of this entry), a fixed Major
+can leave a stale, un-self-clearing block that the PR author can't bypass —
+only dismiss by hand, with a cited reason, in the GitHub UI. Fixed by decoupling
+the **posting** floor (unchanged — Major/Minor/Nit still post as inline
+comments exactly as before) from the **GitHub review state**: `REQUEST_CHANGES`
+now fires only on a new Blocker; a Major/Minor/Nit-only round posts `COMMENT`
+instead, leaving merge to human/author discretion. Shipped in
+`commands/atlas-review-pr.md` step 5 (the three-way state selection replacing
+the old own-PR-fallback-only branching), `REVIEW.md` (new *GitHub review state
+vs. severity* section explaining the split and why the earlier any-floor-finding
+behavior was reverted), and a note in the runbook's §3 merge-gate section (a
+merge gate keyed on `reviewDecision == CHANGES_REQUESTED` is now a clean signal
+for "Blocker present," not "any Major" — new since this change).
+
+**Same-day follow-on: the atlas reviewer caught two real bugs in its own PR
+(#329).** The still-live `opened`-triggered reviewer routine fired on #329
+itself (using its pre-this-PR prompt, since the self-nudge rewrite hadn't been
+pushed to the live trigger yet) and found two Major findings in
+`commands/atlas-rebase-stale.md`'s new escalation logic — both confirmed and
+fixed before push:
+
+- **Tool over-grant.** `mcp__github__update_pull_request` was added to
+  `allowed-tools` for the `reviewers`-only re-request, but the tool also
+  accepts `state`/`base`/`title`/`body`/`draft` with no prompt-level guardrail
+  restricting which fields this unattended, multi-repo sweep may actually pass.
+  Fixed by adding an explicit "only owner/repo/pullNumber/reviewers, never
+  state/base/title/body/draft" constraint at both call sites (the command and
+  the runbook's duplicated inline prompt).
+  ("`reviewing-agentic-safety`")
+- **Self-disabling escalation.** §4's "skip if an unaddressed poke is already
+  there" idempotency check was presence-only — correct for the conflict-poke
+  (a review thread with a real GitHub `isResolved` state) but wrong for the
+  coverage-poke (a plain issue comment, which never resolves itself on
+  GitHub). A presence-only reading meant the PR's first-ever coverage-poke
+  would permanently disable the re-request escalation this PR's whole point
+  was to add. Fixed by defining "outstanding" precisely for the coverage-poke:
+  addressed once a `<!-- atlas-review round:N -->` review posts after it
+  (compare timestamps), not by bare presence — so a poke that already earned a
+  fresh round doesn't block a genuinely new lapse from escalating again.
+  ("`hunting-silent-failures`", "`tracing-correctness-and-invariants`")
+
+Both findings are a useful, unplanned confirmation that the underlying atlas
+reviewer mechanism (subscribe failures notwithstanding) still catches real
+defects when it does fire. `markdownlint-cli2`, `tooling.cli drift`, and
+`pytest` (435/435) all re-verified clean after the fix.

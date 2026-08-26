@@ -2,9 +2,12 @@
 
 This wires the atlas suite into a self-driving pull-request loop on **Claude Code
 on the web** (cloud sandbox sessions): a build session opens a PR and auto-fixes
-feedback, an event-triggered reviewer posts findings and re-reviews each push, and a
-scheduled poller covers the merge-conflict gap that webhooks don't. It replaces a
-manually spun-up second review session, and it isn't budget/rate-limited the way the
+feedback, an event-triggered reviewer posts findings and re-reviews each push (on
+its own self-nudge timer, not only a PR-activity subscription — see §1), and a
+scheduled poller covers both the merge-conflict gap webhooks don't deliver and a
+reviewer watch that's gone quiet, escalating the latter by re-requesting review
+rather than only leaving a comment (§1a, §2). It replaces a manually spun-up
+second review session, and it isn't budget/rate-limited the way the
 CodeRabbit/Copilot PR integrations are.
 
 ## What's in the plugin vs. what you wire up
@@ -20,20 +23,24 @@ So:
 | `/atlas-review-pr` command | this plugin (`commands/`) | plugin install |
 | `/atlas-rebase-stale` command | this plugin (`commands/`) | plugin install |
 | `REVIEW.md` convergence policy | the **reviewed repo's** root | you copy `templates/REVIEW.md` |
-| Reviewer routine (GitHub trigger + watch instructions) | Claude Code web app | you, once (below) |
+| Reviewer routine (GitHub trigger + self-nudge watch instructions) | Claude Code web app | you, once (below) |
+| Review-requested companion routine (same prompt, different trigger) | Claude Code web app | you, once (below, §1a) — recommended, not required |
 | Poller routine (schedule trigger) | Claude Code web app | you, once (below) |
 | Build + auto-fix session | a live web session | you start it / your existing flow |
 
-## The three moving parts
+## The three (or four) moving parts
 
 ```text
                  PR opened (GitHub trigger)
 build+autofix ──────────────────────────►  reviewer routine
   session     ◄──── inline findings ───────  one session: first review, then
-     ▲                                        subscribes & re-reviews each push
-     │  reacts to review comments / CI
-     │
-     └──── poller routine (hourly/daily) ── rebases "behind" PRs, pokes conflicts
+     ▲                                        self-nudges & re-reviews each push
+     │  reacts to review comments / CI            ▲
+     │                                             │ review_requested (GitHub trigger)
+     │                                             │
+     └──── poller routine (hourly/daily) ──────────┘
+              rebases "behind" PRs, pokes conflicts,
+              re-requests review on a lapsed watch
 ```
 
 1. **Build + auto-fix session** — your existing flow. One web session opens the PR
@@ -45,13 +52,22 @@ build+autofix ──────────────────────
    don't resolve in routine sessions, see [Setup](#setup)), then **stays resident and
    watches the PR**, re-reviewing each push in the same session. A routine can carry only **one GitHub event** (see
    [Setup §1](#1-reviewer-routine-event-driven-no-cron-lag)), so `synchronize` can't
-   be a second trigger here — the in-session subscription covers re-review instead.
+   be a second trigger here — a self-nudge timer plus a best-effort PR-activity
+   subscription cover re-review instead (§1's watch block treats the timer as
+   primary; see *Known boundaries* for why).
    The watch behavior lives in the routine's prompt, not the command, so it's set up
    per-routine.
-3. **Poller routine** — a **scheduled** routine on a cheap fast model running the
+3. **Review-requested companion routine** (§1a) — same prompt as (2), triggered by
+   **`Pull request review requested`** instead of `opened`. Exists purely as the
+   wake target for (4)'s escalation: a GitHub routine trigger carries one event, so
+   this can't just be folded into (2). Optional — without it, (4)'s re-request is
+   still a visible signal, just not a self-healing one.
+4. **Poller routine** — a **scheduled** routine on a cheap fast model running the
    `atlas-rebase-stale` sweep (also inlined in the prompt). Catches PRs that fell
    **behind or into conflict**, which GitHub never delivers as a webhook, so neither
-   (1) nor (2) can see them.
+   (1) nor (2) can see them — and catches a reviewer watch that's gone quiet,
+   escalating it by re-requesting review (waking (3)) rather than only leaving a
+   comment nothing is watching for.
 
 ## Setup
 
@@ -187,12 +203,56 @@ In the Claude Code web app → **Routines** → **New routine**:
   This session's own subscription is best-effort, not a durable guarantee — a bare
   push with no CI/comment activity may not wake it, and the resident session
   itself can be reclaimed after a period of inactivity, silently ending the watch
-  with no one told coverage lapsed. Don't try to patch this by self-scheduling
-  reminders inside this same session (a rearmed timer dies with its container the
-  same way the watch does) — instead rely on a separate scheduled poller routine
-  (below) that starts a fresh session per fire and doesn't depend on this one
-  staying alive.
+  with no one told coverage lapsed. Try `subscribe_pr_activity`, but don't depend
+  on it alone — observed directly (2026-08-26): it can fail outright (every call
+  erroring, not merely missing an occasional event), for reasons unrelated to
+  whether the watch itself is still wanted.
+
+  So treat a timer, not the subscription, as the primary loop. Immediately after
+  posting each round's review — and after a quiet round with nothing new to say —
+  arm a self-nudge check-in: call `send_later` with a delay of roughly 20-30
+  minutes (tune to your push cadence) and a message telling yourself to re-check
+  this PR's *current* state directly, no subscription involved. On that wake,
+  don't trust memory for what's new — call `pull_request_read` (`get_commits` for
+  the current HEAD SHA, `get_comments`/`get_reviews` for new activity) and compare
+  against what you saw last round. Nothing new → re-arm the next `send_later` and
+  stay silent, no GitHub write. Something new → re-derive the round from the
+  `<!-- atlas-review round:N -->` markers (GitHub is the source of truth, not
+  memory — see the note above about `/compact`), run the review logic, then
+  re-arm.
+
+  **Don't oversell this to yourself.** `send_later` is a self-bind scheduled
+  Routine, not an in-process timer, and its documented contract is that delivery
+  survives a container restart — which is *why* this is worth doing at all rather
+  than a no-op restatement of the broken subscription. But this account's own
+  trigger history has multiple self-bind reminders (including plain `send_later`
+  check-ins, not just this pattern) that ended with `ended_reason:
+  auto_disabled_session_gone` rather than firing — so "survives a restart" is not
+  "always survives," at least not as observed here. Treat the self-nudge chain as
+  a cheap layer that catches the common case (the subscription itself being flaky
+  while the session is still alive), not a guarantee — it can fail the exact same
+  way the subscription can. The poller + review-request companion (§1a, §2) are
+  the real backstop for when it does; keep both wired even if the self-nudge loop
+  seems to be working.
+
+  You are not the only safety net regardless: a separate scheduled poller routine
+  (§2 below) sweeps this repo for coverage gaps independently of whether this
+  session or its self-nudge chain is still alive, and escalates a lapse by
+  **re-requesting your review** — which fires a `Pull request review requested`
+  event. If a companion routine is wired to that trigger (§1a below), it wakes a
+  fresh session that picks the review straight back up: re-derive the round from
+  GitHub, review what changed, and resume your own self-nudge loop from there,
+  exactly as if you were the original resident session.
+
+  Stop the self-nudge chain (don't re-arm) only when the PR is merged or closed,
+  or the hard round cap is reached.
   ```
+
+  **Prerequisite for the reviewer identity check above:** the reviewer must be
+  able to tell its own GitHub login apart from other actors on the PR (so it
+  knows which `<!-- atlas-review round:N -->` reviews are its own to re-derive
+  state from) — `mcp__github__get_me`, same as step 5 of `atlas-review-pr.md`
+  already requires for the own-PR fallback.
 
   **Generic instructions are a floor, not a ceiling — never let them silently
   overrule a repo's own review policy.** The prompt above only names atlas
@@ -218,6 +278,27 @@ In the Claude Code web app → **Routines** → **New routine**:
 - **Permissions:** leave **Allow unrestricted branch pushes** *off*. The reviewer
   only posts reviews/comments via the GitHub API; it never pushes commits.
 
+### 1a. Review-requested companion routine (what the poller's escalation wakes)
+
+A third routine, sibling to §1, needed only because a GitHub routine trigger
+carries **one** event — so the retrigger path the poller's escalation relies on
+(a `Pull request review requested` event) can't just be added as a second event
+on the `opened` routine.
+
+- **Name:** e.g. `Atlas PR reviewer (review-requested)`.
+- **Repository:** the same reviewed repo as §1.
+- **Trigger:** **GitHub event** → **`Pull request review requested`**.
+- **Prompt:** identical to §1's — word for word, self-nudge block included. It's
+  the same reviewer role; GitHub is the source of truth for round state
+  regardless of which event woke the session, so there's no separate logic to
+  maintain. Treat the two routines as one prompt with two triggers, not two
+  prompts to keep in sync.
+- **Model / Connectors / Permissions:** same guidance as §1.
+
+Without this routine, the poller's re-request (§2 below) is still a correct,
+harmless signal — a human sees a pending review request on the PR either way —
+it just isn't self-healing on its own.
+
 ### 2. Poller routine (the conflict/stale/coverage backstop)
 
 A second routine. Unlike the reviewer's per-repo GitHub trigger, **one poller can
@@ -242,7 +323,8 @@ run checks them all:
   Sweep the open pull requests across EVERY repository attached to this routine —
   the polling backstop for PRs that fell behind, hit a conflict (no webhook for
   either), or slipped past a resident reviewer's watch (missed subscription
-  wakeup, or its session got reclaimed). All attached repos are cloned into the
+  wakeup, its self-nudge chain broke, or its session got reclaimed). All attached
+  repos are cloned into the
   workspace, so first enumerate them (e.g. from the workspace root,
   `for d in */; do git -C "$d" remote get-url origin 2>/dev/null; done`), then run the
   sweep below for EACH repo. The full spec is commands/atlas-rebase-stale.md; the
@@ -263,12 +345,27 @@ run checks them all:
      (not just an ack — an ack with zero rounds behind it has no baseline commit
      to compare against and would false-positive on a PR still mid-flight on
      round 1), compare HEAD against the commit the MOST RECENT round review was
-     posted against — if HEAD has moved past it with no unaddressed
-     <!-- atlas-coverage-poke --> already there, post one issue comment marked
-     <!-- atlas-coverage-poke --> flagging that review coverage may have lapsed;
-     do NOT review it yourself. Skip PRs with no ack, or an ack but no round
+     posted against. A <!-- atlas-coverage-poke --> comment is OUTSTANDING only
+     until a <!-- atlas-review round:N --> review is posted AFTER it (compare
+     created_at/submitted_at) — a bare presence check is wrong here, since a
+     plain issue comment has no GitHub-native resolved state, and would leave
+     the PR's first-ever poke marked "already there" forever, permanently
+     disabling this escalation. If HEAD has moved past the most recent round
+     with no OUTSTANDING coverage-poke (by that definition), escalate two ways:
+     (a) post one issue comment marked <!-- atlas-coverage-poke --> flagging
+     that review coverage may have lapsed, and (b) re-request review from the
+     same login that posted the most recent round review
+     (mcp__github__update_pull_request, passing ONLY owner, repo, pullNumber,
+     and reviewers: [<that login>] — read the login off the review, never
+     hardcode it, and never pass state/base/title/body/draft even though the
+     tool schema allows them — this sweep is unattended and multi-repo, keep
+     its tool use load-bearing only) so a review-requested companion routine
+     (§1a), if wired up, wakes a fresh session and actually closes the loop. Do
+     NOT review it yourself. Skip PRs with no ack, or an ack but no round
      review yet (not picked up / still in flight, not lapsed).
-  4. Mark every poke with its marker and never double-poke either kind.
+  4. Mark every poke with its marker; never double-poke while one is
+     OUTSTANDING (conflict-poke: GitHub's own thread-resolved state;
+     coverage-poke: step 3's later-round-review definition, not bare presence).
   5. End with a one-line summary across all repos: counts of updated,
      conflict-poked, coverage-poked, and skipped.
   ```
@@ -293,6 +390,19 @@ review state. It falls back to a `COMMENT` whose body says it approves (observed
 `<!-- atlas-review round:N -->` marker plus an `APPROVE` token in the review body
 instead. (On PRs opened by a *different* identity, the reviewer posts a real
 `APPROVE` state and either signal works.)
+
+**`REQUEST_CHANGES` from this reviewer now means one specific thing: a Blocker.**
+`REVIEW.md`'s *GitHub review state vs. severity* section scopes the hard-blocking
+`REQUEST_CHANGES` state to genuine Blockers only — a Major/Minor/Nit finding still
+posts inline but the review state is `COMMENT`, leaving merge to human/author
+discretion rather than a GitHub block someone has to go dismiss by hand. If you
+want an *automated* hold on Blockers specifically (on top of, or instead of, a
+merge gate watching for the body's `APPROVE` token), `reviewDecision ==
+CHANGES_REQUESTED` is now a clean, minimal signal for that on cross-identity PRs
+— it no longer fires on ordinary Majors. It still doesn't fire on your own PRs
+(the own-PR `COMMENT` substitute states the intended verdict in the body's first
+line instead, same pattern as the approval case above), so a gate that cares
+about Blockers on your own PRs still needs to read the body.
 
 ## Why it converges instead of looping forever
 
@@ -330,9 +440,12 @@ you own, and resets daily.
 
 - Each GitHub event that matches a trigger starts its **own session** — there's no
   session reuse across events. With an `opened`-only reviewer that's **one run per
-  PR opened**; the in-session watch re-reviews subsequent pushes inside that
-  already-counted session, so pushes don't each cost a run. (A `synchronize` trigger
-  would cost one run *per push* — the reason we don't use it.)
+  PR opened**; the in-session self-nudge/subscription watch re-reviews subsequent
+  pushes inside that already-counted session, so pushes don't each cost a run. (A
+  `synchronize` trigger would cost one run *per push* — the reason we don't use
+  it.) The §1a companion routine adds one more run **only when the poller
+  actually escalates a lapse** — rare by design (it's gated on an unaddressed
+  coverage-poke, §2 §4), so it doesn't turn into a second per-push cost center.
 - Exactly what increments the included-run counter is **not documented and observed
   to be fuzzy**: in testing, ~10 scheduled fires in a day did not increment it 1:1
   (the counter read 0/15 just after a reset, and ~7/15 by end of a prior day). Treat
@@ -367,17 +480,35 @@ you own, and resets daily.
   indefinitely-lived process either — cloud sessions get reclaimed after a
   platform-defined inactivity limit, silently ending the watch (the ack comment
   and prior reviews stay on the PR; nothing marks the watch as dead). Observed
-  directly: several resident-session watches in the wild ended with
-  `auto_disabled_session_gone` before their next scheduled check-in fired.
-  **Don't try to fix this from inside the resident session** — a self-rearmed
-  reminder is exactly as vulnerable to the container being reclaimed as the watch
-  it's meant to protect. The poller routine's coverage-check step (§2, backed by
-  `atlas-rebase-stale.md` §3) is the actual fix: it runs in a **fresh session per
+  directly, twice over: several resident-session watches in the wild ended with
+  `auto_disabled_session_gone` before their next scheduled check-in fired, **and**
+  this account's own trigger history shows plain self-bind `send_later` check-ins
+  ending the same way — a self-rearmed reminder is not immune to the container
+  being reclaimed, whatever its own documentation promises about surviving a
+  restart. §1's self-nudge loop is still worth running (it's a real, verified-live
+  mechanism for the more common case — the subscription itself failing outright,
+  observed 2026-08-26 — while the session is otherwise fine) but it is a
+  mitigation, not a fix, for this specific failure mode. **The actual fix is
+  structural, not a smarter timer:** the poller routine's coverage-check step
+  (§2, backed by `atlas-rebase-stale.md` §3) runs in a **fresh session per
   scheduled fire**, so it isn't vulnerable to any prior session's container being
-  gone, and it flags (doesn't silently lose) a PR whose HEAD has moved past every
-  reviewed round. If closing the gap faster than the poller's cadence matters more
-  than the per-push run cost, swap the reviewer's trigger to **`Pull request
-  synchronize`** (one fresh run per push) instead of relying on a long-lived
-  `opened` watch at all.
+  gone, and — as of this runbook's revision — it no longer just flags a lapse for
+  a human to notice; it **re-requests review**, firing a `Pull request review
+  requested` event a companion routine (§1a) can wake a fresh session on. That
+  fresh session inherits nothing from whatever died — it re-derives round state
+  from GitHub the same way any reviewer session does. If closing the gap faster
+  than the poller's cadence matters more than the per-push run cost, swap the
+  reviewer's trigger to **`Pull request synchronize`** (one fresh run per push)
+  instead of relying on a long-lived `opened` watch at all — still the simplest
+  fix if you'd rather not run §1a/§2 together.
+- **Confirmed available GitHub trigger events (as of this revision):** `Pull
+  request opened`, `Pull request synchronize`, and **`Pull request review
+  requested`** all appear in the Routines UI's trigger picker — `Pull request
+  review requested` is what makes §1a possible. **Not available:** any
+  comment-based event (`Issue comment created` or equivalent) — checked and
+  absent from the same picker, which is why the poller's coverage escalation
+  re-requests review rather than relying on a comment to wake anything. Re-check
+  the picker before assuming either has changed; this list isn't guaranteed to be
+  exhaustive or stable.
 - A subscription/routine can't share context with the build session — they're
   separate sessions communicating only through the PR (comments, reviews, commits).
