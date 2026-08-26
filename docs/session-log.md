@@ -4015,3 +4015,35 @@ vs. severity* section explaining the split and why the earlier any-floor-finding
 behavior was reverted), and a note in the runbook's §3 merge-gate section (a
 merge gate keyed on `reviewDecision == CHANGES_REQUESTED` is now a clean signal
 for "Blocker present," not "any Major" — new since this change).
+
+**Same-day follow-on: the atlas reviewer caught two real bugs in its own PR
+(#329).** The still-live `opened`-triggered reviewer routine fired on #329
+itself (using its pre-this-PR prompt, since the self-nudge rewrite hadn't been
+pushed to the live trigger yet) and found two Major findings in
+`commands/atlas-rebase-stale.md`'s new escalation logic — both confirmed and
+fixed before push:
+
+- **Tool over-grant.** `mcp__github__update_pull_request` was added to
+  `allowed-tools` for the `reviewers`-only re-request, but the tool also
+  accepts `state`/`base`/`title`/`body`/`draft` with no prompt-level guardrail
+  restricting which fields this unattended, multi-repo sweep may actually pass.
+  Fixed by adding an explicit "only owner/repo/pullNumber/reviewers, never
+  state/base/title/body/draft" constraint at both call sites (the command and
+  the runbook's duplicated inline prompt).
+  ("`reviewing-agentic-safety`")
+- **Self-disabling escalation.** §4's "skip if an unaddressed poke is already
+  there" idempotency check was presence-only — correct for the conflict-poke
+  (a review thread with a real GitHub `isResolved` state) but wrong for the
+  coverage-poke (a plain issue comment, which never resolves itself on
+  GitHub). A presence-only reading meant the PR's first-ever coverage-poke
+  would permanently disable the re-request escalation this PR's whole point
+  was to add. Fixed by defining "outstanding" precisely for the coverage-poke:
+  addressed once a `<!-- atlas-review round:N -->` review posts after it
+  (compare timestamps), not by bare presence — so a poke that already earned a
+  fresh round doesn't block a genuinely new lapse from escalating again.
+  ("`hunting-silent-failures`", "`tracing-correctness-and-invariants`")
+
+Both findings are a useful, unplanned confirmation that the underlying atlas
+reviewer mechanism (subscribe failures notwithstanding) still catches real
+defects when it does fire. `markdownlint-cli2`, `tooling.cli drift`, and
+`pytest` (435/435) all re-verified clean after the fix.

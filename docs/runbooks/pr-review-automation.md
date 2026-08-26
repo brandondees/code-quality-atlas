@@ -345,20 +345,27 @@ run checks them all:
      (not just an ack — an ack with zero rounds behind it has no baseline commit
      to compare against and would false-positive on a PR still mid-flight on
      round 1), compare HEAD against the commit the MOST RECENT round review was
-     posted against — if HEAD has moved past it with no unaddressed
-     <!-- atlas-coverage-poke --> already there, escalate two ways: (a) post one
-     issue comment marked <!-- atlas-coverage-poke --> flagging that review
-     coverage may have lapsed, and (b) re-request review from the same login that
-     posted the most recent round review (mcp__github__update_pull_request,
-     reviewers: [<that login>] — read the login off the review, never hardcode
-     it) so a review-requested companion routine (runbook §1a), if wired up,
-     wakes a fresh session and actually closes the loop. Do NOT review it
-     yourself. Skip PRs with no ack, or an ack but no round review yet (not
-     picked up / still in flight, not lapsed).
-  4. Mark every poke with its marker and never double-poke either kind — this
-     also rate-limits the re-request: an unaddressed coverage-poke already on the
-     PR means step 3 already fired last sweep, so skip both (a) and (b) rather
-     than re-requesting review every hour until a human or a new round clears it.
+     posted against. A <!-- atlas-coverage-poke --> comment is OUTSTANDING only
+     until a <!-- atlas-review round:N --> review is posted AFTER it (compare
+     created_at/submitted_at) — a bare presence check is wrong here, since a
+     plain issue comment has no GitHub-native resolved state, and would leave
+     the PR's first-ever poke marked "already there" forever, permanently
+     disabling this escalation. If HEAD has moved past the most recent round
+     with no OUTSTANDING coverage-poke (by that definition), escalate two ways:
+     (a) post one issue comment marked <!-- atlas-coverage-poke --> flagging
+     that review coverage may have lapsed, and (b) re-request review from the
+     same login that posted the most recent round review
+     (mcp__github__update_pull_request, passing ONLY owner, repo, pullNumber,
+     and reviewers: [<that login>] — read the login off the review, never
+     hardcode it, and never pass state/base/title/body/draft even though the
+     tool schema allows them — this sweep is unattended and multi-repo, keep
+     its tool use load-bearing only) so a review-requested companion routine
+     (§1a), if wired up, wakes a fresh session and actually closes the loop. Do
+     NOT review it yourself. Skip PRs with no ack, or an ack but no round
+     review yet (not picked up / still in flight, not lapsed).
+  4. Mark every poke with its marker; never double-poke while one is
+     OUTSTANDING (conflict-poke: GitHub's own thread-resolved state;
+     coverage-poke: step 3's later-round-review definition, not bare presence).
   5. End with a one-line summary across all repos: counts of updated,
      conflict-poked, coverage-poked, and skipped.
   ```

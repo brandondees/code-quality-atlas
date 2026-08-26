@@ -57,24 +57,46 @@ Skip those PRs in this step entirely; don't poke them.
 For each open PR that has **at least one** posted round review, compare the HEAD
 commit SHA (`mcp__github__pull_request_read`) against the commit the
 **most recent** `<!-- atlas-review round:N -->` review was posted against
-(`mcp__github__get_commit` / the review's `commit_id`). If HEAD has moved past
-that round with no unaddressed `<!-- atlas-coverage-poke -->` from you already on
-the PR, the reviewer's watch has lapsed on this push (missed subscription
-wakeup, or the resident session was reclaimed) — escalate in two ways, not one:
+(`mcp__github__get_commit` / the review's `commit_id`).
+
+**What counts as "already addressed" — defined precisely, because a plain issue
+comment carries no GitHub-native resolved state** (unlike the conflict-poke
+review thread, which has a real `isResolved`/`isOutdated` signal): a
+`<!-- atlas-coverage-poke -->` comment is addressed once a
+`<!-- atlas-review round:N -->` review has been **posted after it** — compare
+the poke comment's `created_at` against the most recent round review's
+`submitted_at`. A poke with **no** later round review is still outstanding;
+skip escalating again while one is outstanding. A poke that **does** have a
+later round review behind it already did its job (it got a fresh round), so it
+no longer counts as outstanding — if HEAD has since moved past *that* round too,
+this is a **new** lapse, not a repeat of the old one, and escalates again. Don't
+use bare presence as the check: since an issue comment never resolves itself, a
+presence-only reading would treat the PR's first-ever poke as "already there"
+forever and permanently disable this escalation for the rest of the PR's life.
+
+If HEAD has moved past the most recent round with no outstanding coverage-poke
+(by the definition above), the reviewer's watch has lapsed on this push (missed
+subscription wakeup, or the resident session was reclaimed) — escalate in two
+ways, not one:
 
 1. Post a single issue comment marked `<!-- atlas-coverage-poke -->` that says
    review coverage may have lapsed for this push and a fresh review is needed —
    a human-visible record, kept even when nothing automated is wired to act on it.
 2. **Re-request review from the same login that posted the most recent round
    review** (read it off that review's author, no hardcoded identity —
-   `mcp__github__update_pull_request` with `reviewers: [<that login>]`). This
-   fires a real GitHub `review_requested` event. If the reviewer has a companion
-   routine on that trigger (see `docs/runbooks/pr-review-automation.md` §1a),
-   this is what actually retriggers a fresh review session, independent of
-   whether the original resident session or its subscription survived — GitHub
-   delivers this event regardless. Without that companion routine wired up it's
-   still a correct, harmless signal (a human sees a pending review request
-   either way), just not a self-healing one.
+   `mcp__github__update_pull_request`, passing **only** `owner`, `repo`,
+   `pullNumber`, and `reviewers: [<that login>]` — never `state`, `base`,
+   `title`, `body`, or `draft`, even though the tool schema permits them; this
+   command is unattended, scheduled, and swept across every attached repo, so
+   its tool grant stays load-bearing only for what this step actually needs).
+   This fires a real GitHub `review_requested` event. If the reviewer has a
+   companion routine on that trigger (see
+   `docs/runbooks/pr-review-automation.md` §1a), this is what actually
+   retriggers a fresh review session, independent of whether the original
+   resident session or its subscription survived — GitHub delivers this event
+   regardless. Without that companion routine wired up it's still a correct,
+   harmless signal (a human sees a pending review request either way), just not
+   a self-healing one.
 
 Do **not** attempt the review yourself in either case. A PR with no ack comment
 yet has simply not been picked up (e.g. the reviewer routine hasn't fired) —
@@ -86,9 +108,14 @@ established baseline, not a missing or still-in-flight one.
 Mark every conflict poke with `<!-- atlas-rebase-poke -->` (review-comment body)
 and every coverage poke with `<!-- atlas-coverage-poke -->` (issue-comment body).
 Before posting either, list the PR's existing review threads / issue comments and
-skip if an unaddressed poke of that kind from you is already there — this command
-runs often and must never spam. Branch updates are naturally idempotent (an
-up-to-date branch reports as up to date and is skipped).
+skip if an **outstanding** poke of that kind from you is already there — this
+command runs often and must never spam. For the conflict-poke, "outstanding"
+means the review thread isn't resolved (GitHub's own `isResolved`). For the
+coverage-poke, use §3's precise definition (a later round review clears it) —
+never a bare presence check, which would silently and permanently disable the
+coverage escalation after the PR's first-ever lapse. Branch updates are
+naturally idempotent (an up-to-date branch reports as up to date and is
+skipped).
 
 ## 5. Report
 
