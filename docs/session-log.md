@@ -3996,3 +3996,22 @@ to this change.
 **Recorded in `docs/runbooks/pr-review-automation.md` itself** (this is
 operational-tooling documentation, not taxonomy/lens content, so it isn't a
 `map-gaps.md`/`open-questions.md` entry — see that file's own scope).
+
+**Same-day follow-on: scope `REQUEST_CHANGES` to Blocker only.** A separate,
+related problem surfaced once the above was in flight: the reviewer's
+`REQUEST_CHANGES` state (used for *any* new at/above-floor finding — a Major
+qualifies once the round-2+ floor rises to Major) hard-blocks merge in GitHub
+until a human explicitly dismisses it, and since the reviewer's own watch isn't
+reliably catching up on pushes (the whole subject of this entry), a fixed Major
+can leave a stale, un-self-clearing block that the PR author can't bypass —
+only dismiss by hand, with a cited reason, in the GitHub UI. Fixed by decoupling
+the **posting** floor (unchanged — Major/Minor/Nit still post as inline
+comments exactly as before) from the **GitHub review state**: `REQUEST_CHANGES`
+now fires only on a new Blocker; a Major/Minor/Nit-only round posts `COMMENT`
+instead, leaving merge to human/author discretion. Shipped in
+`commands/atlas-review-pr.md` step 5 (the three-way state selection replacing
+the old own-PR-fallback-only branching), `REVIEW.md` (new *GitHub review state
+vs. severity* section explaining the split and why the earlier any-floor-finding
+behavior was reverted), and a note in the runbook's §3 merge-gate section (a
+merge gate keyed on `reviewDecision == CHANGES_REQUESTED` is now a clean signal
+for "Blocker present," not "any Major" — new since this change).

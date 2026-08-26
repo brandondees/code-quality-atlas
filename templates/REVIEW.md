@@ -146,11 +146,40 @@ tidied").
   [Only new findings earn a comment](#only-new-findings-earn-a-comment-quiet-on-no-news).
   Don't re-emit `APPROVE` on every subsequent quiet push.
 
+## GitHub review state vs. severity
+
+The severity floor (above) decides what gets **posted**; it is not what decides
+GitHub's blocking `REQUEST_CHANGES` review state. Those are different levers:
+
+- **Only a new Blocker** uses `REQUEST_CHANGES` — the GitHub state that hard-blocks
+  merge until a human explicitly dismisses it. Reserve that friction for what
+  actually needs it.
+- **A new Major, Minor, or Nit finding still posts as an inline comment** exactly
+  per the floor rules above — nothing here changes what gets raised — but the
+  review's top-level state is `COMMENT`, not `REQUEST_CHANGES`. Merge discretion
+  on anything short of a Blocker stays with the human or the PR's author, not a
+  GitHub merge gate someone then has to go find and dismiss by hand.
+- **No new findings at or above the floor** → `APPROVE`, unchanged (see above).
+
+This is a deliberate choice, not an oversight: an earlier version of this policy
+let any at-or-above-floor finding — any Major, once the floor rose past round
+one — trigger `REQUEST_CHANGES`. In practice that GitHub state doesn't self-clear —
+if the reviewer's own watch lapses (see the `pr-review-automation.md` runbook's
+self-nudge/poller discussion) after the finding is fixed, the block just sits
+there until someone opens the GitHub UI and dismisses it with a reason, even
+though the PR itself is fine. Scoping the hard block to genuine Blockers keeps
+the signal meaningful (a `REQUEST_CHANGES` from this reviewer now *always* means
+"do not merge, correctness/security/data-loss risk") without holding an
+otherwise-mergeable PR hostage over a Major that's someone's call to fix now or
+later.
+
 ## Scope discipline
 
 - Review only the files in the PR's diff, never the whole repo (that's what the
   `auditing-*` skills and scheduled audits are for).
 - Severity vocabulary is the atlas synthesizer's own (`synthesizing-review-findings`),
   ranked **Blocker > Major > Minor > Nit**: **Blocker** (block: correctness,
-  security, data loss), **Major** (should fix before merge), **Minor** / **Nit**
-  (polish). A single Blocker blocks; once only below-floor findings remain, approve.
+  security, data loss — the only tier that hard-blocks merge, see *GitHub review
+  state vs. severity* above), **Major** (should fix before merge, but a `COMMENT`
+  not a block), **Minor** / **Nit** (polish). Once no new finding at or above the
+  floor remains, approve.

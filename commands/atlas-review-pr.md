@@ -159,18 +159,38 @@ findings to the ACK.
   a reason to break silence on a quiet push.
 - Open your review summary with the marker `<!-- atlas-review round:N -->` so the
   next run can read the round count and carry the advisory list forward.
-- **Own-PR fallback applies to every review state, not just APPROVE.** GitHub
-  forbids reviewing your own PR with either `APPROVE` or `REQUEST_CHANGES` — the
-  clean case below isn't the only one affected. Before submitting **any** review
-  in this step, check identity once (`mcp__github__get_me`, compared to the PR
-  author's login from step 1): if they match, submit every review as `COMMENT`
-  regardless of verdict, with the intended state spelled out in the body's first
-  line — `## Round N — APPROVE (own-PR, posted as comment)` for a clean round, or
-  `## Round N — REQUEST_CHANGES (own-PR, posted as comment)` when new findings at
-  or above the floor exist. The inline findings themselves still post normally
-  (as comments on a `COMMENT`-state review); only the top-level review state
-  substitutes. If the identities don't match, submit the real `APPROVE` or
-  `REQUEST_CHANGES` state as normal.
+- **The top-level review state is keyed on severity, not merely "something is at
+  or above the floor."** GitHub's `REQUEST_CHANGES` state hard-blocks merge until
+  a human explicitly dismisses it — reserve it for what actually needs that: a
+  genuine **Blocker** (correctness, security, data loss). A Major/Minor/Nit
+  finding still posts as an inline comment per the floor rules above exactly as
+  before, but it does **not** escalate the review state — merge discretion on
+  anything short of a Blocker stays with the human or the author, not a GitHub
+  merge gate they then have to go dismiss by hand. Concretely, this round's
+  verdict is one of three, decided by the new (this-round, at-or-above-floor)
+  findings alone:
+  - **A new Blocker** → `REQUEST_CHANGES` (or its own-PR `COMMENT` substitute,
+    below).
+  - **New findings at/above the floor, none of them a Blocker** → `COMMENT`,
+    always — this branch never needs the own-PR substitution below, since
+    `COMMENT` was never forbidden on your own PR to begin with. Post the inline
+    findings normally; make the summary's first line state the assessment
+    plainly (e.g. `## Round N — Major findings, not blocking merge`) so a human
+    (or a merge gate reading the body) can tell this apart from a clean round
+    without relying on the review state, which reads the same as approve-on-clean
+    in this branch.
+  - **No new findings at or above the floor** → `APPROVE` (or its own-PR
+    `COMMENT` substitute, below) — the approve-on-clean terminal state, unchanged
+    and described next.
+- **Own-PR fallback applies to `APPROVE` and `REQUEST_CHANGES` only** — the two
+  states GitHub forbids on your own PR; `COMMENT` never needed this fallback.
+  Before submitting a review that would use one of those two, check identity once
+  (`mcp__github__get_me`, compared to the PR author's login from step 1): if they
+  match, submit `COMMENT` instead, with the intended state spelled out in the
+  body's first line — `## Round N — APPROVE (own-PR, posted as comment)` or
+  `## Round N — REQUEST_CHANGES (own-PR, posted as comment)`. The inline findings
+  themselves still post normally either way; only the top-level state
+  substitutes. If the identities don't match, submit the real state.
 - **If no new finding survives the floor**, behave by whether the PR has already
   come clean:
   - *First time clean* — submit a single `APPROVE` review (or its own-PR `COMMENT`

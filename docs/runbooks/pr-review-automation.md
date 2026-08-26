@@ -384,6 +384,19 @@ review state. It falls back to a `COMMENT` whose body says it approves (observed
 instead. (On PRs opened by a *different* identity, the reviewer posts a real
 `APPROVE` state and either signal works.)
 
+**`REQUEST_CHANGES` from this reviewer now means one specific thing: a Blocker.**
+`REVIEW.md`'s *GitHub review state vs. severity* section scopes the hard-blocking
+`REQUEST_CHANGES` state to genuine Blockers only — a Major/Minor/Nit finding still
+posts inline but the review state is `COMMENT`, leaving merge to human/author
+discretion rather than a GitHub block someone has to go dismiss by hand. If you
+want an *automated* hold on Blockers specifically (on top of, or instead of, a
+merge gate watching for the body's `APPROVE` token), `reviewDecision ==
+CHANGES_REQUESTED` is now a clean, minimal signal for that on cross-identity PRs
+— it no longer fires on ordinary Majors. It still doesn't fire on your own PRs
+(the own-PR `COMMENT` substitute states the intended verdict in the body's first
+line instead, same pattern as the approval case above), so a gate that cares
+about Blockers on your own PRs still needs to read the body.
+
 ## Why it converges instead of looping forever
 
 Two autonomous sessions reacting to each other will ping-pong without a brake.
