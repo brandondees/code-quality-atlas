@@ -59,6 +59,28 @@ jobs:
           # about a stale pin. Verified against pip-tools 7.6.0 that this check
           # still fails on a raised .in floor and on a dependency dropped from
           # the .in.
+          #
+          # 2026-08-26: this step went red on every open PR with zero .in/.txt
+          # diff in any of them — pip-compile started emitting `--no-index` in
+          # its own regenerated header comment (Python 3.12, pip-tools 7.6.1)
+          # where it previously didn't. requirements.in itself is NOT fully
+          # pinned (>= floors, e.g. `ruff>=0.16.4`) — the reason pip-compile
+          # can skip the index is the mechanism the comment block above this
+          # one already names: the seeded requirements.txt already carries
+          # exact, satisfying pins pip-compile reuses verbatim, and with a
+          # warm local wheel cache behind those pins it never needs to query
+          # an index to complete the resolution. Confirmed via a from-scratch
+          # pip-tools install (its own transitive deps —
+          # build/click/pyproject_hooks/setuptools/wheel — are deliberately
+          # unpinned per the comment above) that this is deterministic given
+          # that seeded lockfile and a satisfiable local cache, not a one-off:
+          # it now says so truthfully in the command line it re-emits. Zero
+          # package/hash changes accompanied it.
+          # Regenerated once to match (no `pip install pip-tools==7.6.1` pin
+          # bump involved); if this recurs, regenerate again rather than
+          # treating it as a real drift — the diff to actually worry about is
+          # in the pinned packages/hashes below this header, not the comment
+          # documenting how the file was produced.
           mkdir -p /tmp/reqcheck && cp requirements.in requirements.txt /tmp/reqcheck/
           ( cd /tmp/reqcheck && pip-compile --generate-hashes --output-file=requirements.txt requirements.in )
           diff -u requirements.txt /tmp/reqcheck/requirements.txt || {
