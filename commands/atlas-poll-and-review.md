@@ -10,8 +10,16 @@ description: >-
   webhook trigger surviving. See `docs/runbooks/pr-review-automation.md`
   ("Model B") for when to pick this over the event-triggered design.
 argument-hint: "[repo, or label/author filter — omit to sweep every attached repo's open PRs]"
-allowed-tools: Task, mcp__github__list_pull_requests, mcp__github__pull_request_read, mcp__github__get_commit, mcp__github__update_pull_request_branch, mcp__github__update_pull_request, mcp__github__add_comment_to_pending_review, mcp__github__pull_request_review_write, mcp__github__add_issue_comment
+allowed-tools: Task, Skill, Read, Grep, Bash, mcp__github__list_pull_requests, mcp__github__pull_request_read, mcp__github__get_file_contents, mcp__github__get_commit, mcp__github__list_commits, mcp__github__get_me, mcp__github__update_pull_request_branch, mcp__github__add_comment_to_pending_review, mcp__github__pull_request_review_write, mcp__github__add_issue_comment, mcp__github__add_reply_to_pull_request_comment, mcp__github__resolve_review_thread
 ---
+
+**`allowed-tools` above covers both the top-level sweep and every subagent it
+spawns** — a `Task`-spawned subagent inherits this session's tool grants
+rather than needing a separate list, which is why it's wider than what steps
+1-2 call directly: the review subagent in step 3 needs everything
+`atlas-review-pr.md` itself requires (`Skill`, `get_file_contents`, `get_me`,
+`resolve_review_thread`, and the rest), inherited from here rather than
+granted again per spawn. Nothing here is unused — it's used one level down.
 
 You are the **poller-reviewer**: a single scheduled sweep that replaces both
 the event-triggered reviewer routine and the escalation-only poller
@@ -90,13 +98,23 @@ error.
 - **HEAD matches the most recent round's commit**: nothing to do.
 
 **Review subagent** (`Task` tool, the strongest model your platform offers,
-one per PR, run concurrently across PRs): tell it to read and follow
+one per PR): tell it to read and follow
 `commands/atlas-review-pr.md` exactly for that specific PR, and — critically —
 to **re-derive the round and ack status itself from GitHub**, not trust
 anything the calling session reports, since the triage pass may be stale by
 the time it runs. It runs the lenses, posts that round's review, and stops —
 no resident watch, no subscription, no self-nudge chain to arm. The next
 scheduled sweep is what picks up the next push, by design.
+
+**Concurrency cap: at most 5 review subagents in flight at once, across every
+repo in this sweep combined.** A sweep over many attached repos could
+plausibly have review work due on several PRs at the same tick — batch
+review-subagent spawns in groups of 5 (wait for each batch before starting
+the next) rather than firing all of them at once, so a busy sweep can't
+silently fan out into an unbounded number of concurrent strong-model
+subagents each posting to GitHub simultaneously. This is a starting number,
+not a hard platform limit — raise or lower it per the account's actual
+concurrency/rate-limit headroom.
 
 ## 4. Idempotency
 
