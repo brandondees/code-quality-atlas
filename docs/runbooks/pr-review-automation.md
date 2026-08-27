@@ -90,8 +90,10 @@ build+autofix ──────────────────────
   provision routines against the plugin path; use one of:
   - **Vendor `.claude/skills/`** into the reviewed repo (`tooling/vendor-skills.sh`,
     tracked via a `.atlas-vendored` marker) — committed, works offline, immune to
-    every cloud failure mode. The reviewer routine should check for this first and
-    use it when present, since it's zero-latency and needs no extra repo access.
+    every cloud failure mode. Vendoring it is what makes `commands/
+    atlas-review-pr.md`'s own step 4 resolve lens content zero-latency, with no
+    extra repo access, when it gets there — the *routine prompt* itself does not
+    check for this (see the bullet below).
   - **Enable the suite as account skills** on claude.ai (repo-independent, loads
     into every cloud session automatically) — covers repos you haven't vendored
     into yet.
