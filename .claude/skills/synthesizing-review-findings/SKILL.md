@@ -137,3 +137,7 @@ Synthesis must not inflate. Do not raise a finding no lens reported, do not upgr
 - [choosing-review-lenses](../choosing-review-lenses/SKILL.md) — the front half: picks which lenses to run before you synthesize their output.
 - [multi-repo audit runbook](../../docs/runbooks/multi-repo-audit.md) — fan the suite out across many repositories with background agents and aggregate their findings through this contract.
 - [self-improvement loop](../../docs/self-improvement-loop.md) — why Process notes exist, the opt-in feedback tiers a repo can turn on to keep them (`.code-quality-atlas/preferences.md`), and where the signal goes from there.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/synthesizing-review-findings/SKILL.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

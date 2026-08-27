@@ -62,3 +62,7 @@ Where a finding here is one a tool can catch deterministically, surface that as 
 - [examples.md](examples.md) — concrete good/bad findings, and the output format to match.
 - [reference/tool-rules.md](reference/tool-rules.md) — static-analysis rules covering the mechanical subset; for wiring up linters, not needed for the judgment review itself.
 - [reference/sources.md](reference/sources.md) — the research behind each check; for provenance, not needed during a review.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-module-design/SKILL.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

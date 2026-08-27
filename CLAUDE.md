@@ -87,3 +87,15 @@ instructions, then follow them exactly.
 <!-- END code-quality-atlas routing -->
 
 **Plugin consumers:** don't hand-copy this section — run the `/code-quality-atlas:atlas-init` command, which writes the routing block into your repo's `CLAUDE.md` **and** `AGENTS.md` (agents read different files) and keeps it current. The canonical block lives in [`templates/agents-routing-snippet.md`](templates/agents-routing-snippet.md). This repo's own [`AGENTS.md`](AGENTS.md) mirrors the block as a dogfood.
+
+**`.claude/skills/` in this repo is generated, not authored.** It's a
+self-vendored mirror of `skills/<name>/` (via `tooling/vendor-skills.sh .`,
+see [`docs/distribution.md`](docs/distribution.md) Channel B) so that
+reviewing this repo itself resolves lens content through the same `Skill`
+tool path any repo that vendored the suite gets. If you're asked to fix a
+lens, edit `skills/<name>/` — never `.claude/skills/<name>/` directly, even
+though that's what the `Skill` tool actually resolves and loads. Each
+vendored `SKILL.md` carries a trailing generated-marker saying the same
+thing; re-run `tooling/vendor-skills.sh .` and commit the refresh after any
+`skills/` change (see
+[`docs/runbooks/regenerating-skills.md`](docs/runbooks/regenerating-skills.md)).

@@ -147,3 +147,7 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 **Artifact-shaped — run when a standardized non-source artifact is present; detect the artifact, then load and apply its rubric:**
 
 - `reviewing-artifact-conventions` — Is this authored artifact well-formed per its own standard? Detect the artifact (e.g. SKILL.md), load its rubric, review against it.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/choosing-review-lenses/SKILL.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

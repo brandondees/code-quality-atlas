@@ -106,3 +106,7 @@ That last line is the one a reader cannot reconstruct for themselves, and the on
 - [choosing-review-lenses](../choosing-review-lenses/SKILL.md) — picks the lenses this pre-pass gathers evidence for.
 - [synthesizing-review-findings](../synthesizing-review-findings/SKILL.md) — merges the lenses' findings, including the ones this pre-pass evidenced, into one verdict.
 - Each lens's own `reference/tool-rules.md` — the specific rule ids in that lens's domain, for wiring a tool up in a repo that has none.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/grounding-review-in-tool-output/SKILL.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->
