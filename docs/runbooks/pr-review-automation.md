@@ -1,14 +1,46 @@
 # Runbook — Hands-off PR review automation
 
 This wires the atlas suite into a self-driving pull-request loop on **Claude Code
-on the web** (cloud sandbox sessions): a build session opens a PR and auto-fixes
-feedback, an event-triggered reviewer posts findings and re-reviews each push (on
-its own self-nudge timer, not only a PR-activity subscription — see §1), and a
-scheduled poller covers both the merge-conflict gap webhooks don't deliver and a
-reviewer watch that's gone quiet, escalating the latter by re-requesting review
-rather than only leaving a comment (§1a, §2). It replaces a manually spun-up
-second review session, and it isn't budget/rate-limited the way the
-CodeRabbit/Copilot PR integrations are.
+on the web** (cloud sandbox sessions). It replaces a manually spun-up second
+review session, and it isn't budget/rate-limited the way the CodeRabbit/Copilot
+PR integrations are. Two supported architectures, not one — pick per repo:
+
+- **Model A — event-driven** (§1/§1a/§2): a `Pull request opened`-triggered
+  reviewer posts findings and re-reviews each push (on its own self-nudge
+  timer, not only a PR-activity subscription — see §1), and a scheduled poller
+  covers both the merge-conflict gap webhooks don't deliver and a reviewer
+  watch that's gone quiet, escalating the latter by re-requesting review. Near-
+  instant on a push; needs two GitHub-event routines set up by hand in the
+  Routines UI (no API path exists to create one — see §1's note), and carries
+  real dependency on PR-activity subscriptions and self-bind reminders that
+  have both been observed failing in production (see *Known boundaries*).
+- **Model B — poll-driven** (§4): one scheduled sweep does the rebase/conflict
+  polling **and** the review itself — round 1 and re-review both — delegating
+  the cheap PR-listing pass to a fast/cheap-model subagent and the review pass
+  to a stronger one. No GitHub-event trigger at all, so nothing to set up
+  beyond a schedule, and no dependency on subscriptions or self-bind survival.
+  Trade-off: latency bounded by the cron interval, and that interval has a
+  **confirmed 1-hour floor enforced by the platform's own API**, not just the
+  Routines UI's preset picker (verified directly, 2026-08-26 — a `*/5 * * * *`
+  cron was rejected with "the minimum interval is 1 hour").
+
+Both models share `REVIEW.md`'s convergence policy and `/atlas-review-pr`'s
+lens/synthesis logic — they differ only in *what triggers a review and how re-
+review coverage is guaranteed*, not in what a review actually checks. Nothing
+stops running both on the same repo (Model A for instant coverage, Model B as
+an independent backstop that also happens to not need any UI setup) — see
+*Which model to pick*.
+
+## Which model to pick
+
+| | Model A (event-driven) | Model B (poll-driven) |
+|---|---|---|
+| Setup | 2 GitHub-event routines, UI-only (no API path) | 1 scheduled routine, fully API-creatable |
+| Latency on a fresh push | Seconds (webhook) to ~30 min (self-nudge fallback) | Up to the cron interval (1 hour floor via API; a human can retune tighter via the Routines UI or `/schedule update` in the interactive CLI if their account allows it) |
+| Depends on PR-activity subscription | Yes, as a best-effort layer (§1) | No |
+| Depends on a self-bind reminder surviving | Yes, as the primary loop (§1) — observed failing in this account's own trigger history | No |
+| Cost shape | One run per PR lifetime (event-triggered), cheap on quiet pushes | One run per cron tick regardless of PR activity, but the "nothing to do" case is cheap (Haiku triage subagent, no stronger-model spend) |
+| Best for | Repos where instant review feedback matters and you're fine doing the one-time UI setup | Repos you want reviewed with zero GitHub-event-trigger setup, or where the subscription/self-nudge failure modes below are a real recurring problem |
 
 ## What's in the plugin vs. what you wire up
 
@@ -18,17 +50,19 @@ hooks into a Claude Code installation — it cannot provision routines or trigge
 in your Anthropic account, and there is no `routines` key in the manifest schema.
 So:
 
-| Piece | Where it lives | Provisioned by |
-|---|---|---|
-| `/atlas-review-pr` command | this plugin (`commands/`) | plugin install |
-| `/atlas-rebase-stale` command | this plugin (`commands/`) | plugin install |
-| `REVIEW.md` convergence policy | the **reviewed repo's** root | you copy `templates/REVIEW.md` |
-| Reviewer routine (GitHub trigger + self-nudge watch instructions) | Claude Code web app | you, once (below) |
-| Review-requested companion routine (same prompt, different trigger) | Claude Code web app | you, once (below, §1a) — recommended, not required |
-| Poller routine (schedule trigger) | Claude Code web app | you, once (below) |
-| Build + auto-fix session | a live web session | you start it / your existing flow |
+| Piece | Model | Where it lives | Provisioned by |
+|---|---|---|---|
+| `/atlas-review-pr` command | both | this plugin (`commands/`) | plugin install |
+| `/atlas-rebase-stale` command | A | this plugin (`commands/`) | plugin install |
+| `/atlas-poll-and-review` command | B | this plugin (`commands/`) | plugin install |
+| `REVIEW.md` convergence policy | both | the **reviewed repo's** root | you copy `templates/REVIEW.md` |
+| Reviewer routine (GitHub trigger + self-nudge watch instructions) | A | Claude Code web app | you, once (below) — **UI-only, no API path** |
+| Review-requested companion routine (same prompt, different trigger) | A | Claude Code web app | you, once (below, §1a) — recommended, not required; **UI-only** |
+| Poller routine (schedule trigger, conflict/stale only) | A | Claude Code web app or API | you, once (below, §2) |
+| Poller-reviewer routine (schedule trigger, does everything) | B | Claude Code web app **or API** — the one piece an agent can provision end-to-end with no UI step | you, once (below, §4) |
+| Build + auto-fix session | both | a live web session | you start it / your existing flow |
 
-## The three (or four) moving parts
+## Model A: the three (or four) moving parts
 
 ```text
                  PR opened (GitHub trigger)
@@ -51,7 +85,7 @@ build+autofix ──────────────────────
    the `atlas-review-pr` command (inlined in the routine prompt — slash commands
    don't resolve in routine sessions, see [Setup](#setup)), then **stays resident and
    watches the PR**, re-reviewing each push in the same session. A routine can carry only **one GitHub event** (see
-   [Setup §1](#1-reviewer-routine-event-driven-no-cron-lag)), so `synchronize` can't
+   [Setup §1](#1-reviewer-routine-model-a--event-driven-no-cron-lag)), so `synchronize` can't
    be a second trigger here — a self-nudge timer plus a best-effort PR-activity
    subscription cover re-review instead (§1's watch block treats the timer as
    primary; see *Known boundaries* for why).
@@ -109,12 +143,12 @@ build+autofix ──────────────────────
     lens content in that order — the `Skill` tool first (which resolves a
     vendored copy or an account-enabled skill identically, so there's only one
     tier to check, not two), then API-fetch. The routine prompt in [Setup
-    §1](#1-reviewer-routine-event-driven-no-cron-lag) below deliberately does
-    **not** duplicate that check up front — it fetches only the command file
-    itself first (never vendored, so always one API call) and lets the
-    command's own step 4 locate lens content when it actually needs it, later.
-    Front-loading the lens-location check delayed the ACK in a live test (see
-    §1's prompt for the fix).
+    §1](#1-reviewer-routine-model-a--event-driven-no-cron-lag) below
+    deliberately does **not** duplicate that check up front — it fetches only
+    the command file itself first (never vendored, so always one API call)
+    and confirms reachability, then lets the command's own step 4 locate lens
+    content when it actually needs it, later. Front-loading the lens-location
+    check delayed the ACK in a live test (see §1's prompt for the fix).
 - The **Claude GitHub App** installed on the repo (required for GitHub triggers).
   The trigger setup prompts you to install it if it isn't already; if configuring
   the trigger never prompts, it's already installed. Note that `/web-setup` grants
@@ -122,7 +156,7 @@ build+autofix ──────────────────────
 - `cp templates/REVIEW.md REVIEW.md` in the reviewed repo, tune the floors/cap,
   commit it.
 
-### 1. Reviewer routine (event-driven, no cron lag)
+### 1. Reviewer routine (Model A — event-driven, no cron lag)
 
 In the Claude Code web app → **Routines** → **New routine**:
 
@@ -317,7 +351,7 @@ Without this routine, the poller's re-request (§2 below) is still a correct,
 harmless signal — a human sees a pending review request on the PR either way —
 it just isn't self-healing on its own.
 
-### 2. Poller routine (the conflict/stale/coverage backstop)
+### 2. Poller routine (Model A — the conflict/stale/coverage backstop)
 
 A second routine. Unlike the reviewer's per-repo GitHub trigger, **one poller can
 sweep many repos at once** — attach every repo you want swept and a single scheduled
@@ -326,8 +360,10 @@ run checks them all:
 - **Trigger:** **Schedule**. The web presets are **hourly / daily / weekdays /
   weekly**, and the minimum interval is **one hour** — sub-hour schedules are
   rejected, and a custom interval (e.g. every 4 hours) needs `/schedule update` in
-  the CLI. (An earlier draft of this runbook said "~15 min"; that isn't achievable,
-  and would be cap-expensive anyway since every fire is a run.)
+  the CLI. This isn't just a UI restriction: confirmed via direct API test
+  (2026-08-26, see §4) that the trigger-management API itself enforces the same
+  1-hour floor. (An earlier draft of this runbook said "~15 min"; that isn't
+  achievable, and would be cap-expensive anyway since every fire is a run.)
 - **Cadence:** pick the loosest cadence that still catches stale PRs in time —
   **hourly** for an active repo (≈24 runs/day, so mind the shared daily cap), or
   **daily** for a low-traffic one.
@@ -392,7 +428,7 @@ run checks them all:
   in acme/my-app …`. Verified live: a Haiku run enumerated 12 attached repos, rebased
   the `behind` PRs, and posted review-comment pokes on the conflicted ones.)
 
-### 3. (Optional) merge gate
+### 3. (Optional) merge gate (either model)
 
 If you already run a scheduled "merge PRs meeting criteria" routine, point its
 criteria at the reviewer's terminal state: an approval from the atlas reviewer
@@ -421,6 +457,70 @@ CHANGES_REQUESTED` is now a clean, minimal signal for that on cross-identity PRs
 (the own-PR `COMMENT` substitute states the intended verdict in the body's first
 line instead, same pattern as the approval case above), so a gate that cares
 about Blockers on your own PRs still needs to read the body.
+
+### 4. Poller-reviewer routine (Model B — poll-driven, no GitHub-event trigger)
+
+The alternative to §1/§1a/§2: one routine, fully creatable via the account's
+routine-management API (no Routines UI required) since it has no GitHub-event
+trigger at all — only a schedule. It absorbs §2's conflict/rebase polling and
+§1's round-1 and re-review duty into a single sweep, spending a fast/cheap
+model on the listing pass and a stronger model only on PRs that actually need
+a review.
+
+- **Trigger:** **Schedule**, cron. **Confirmed via direct API test
+  (2026-08-26): the 1-hour minimum interval is enforced by the platform
+  itself**, not just the Routines UI's hourly/daily/weekly presets — a
+  `*/5 * * * *` cron was rejected outright ("the minimum interval is 1 hour").
+  If your account has a path to a shorter interval the API doesn't expose
+  (the Routines UI, or `/schedule update` in the interactive CLI), retune
+  after creating it; start from hourly.
+- **Model:** whatever the account's routine default is — the trigger-creation
+  API has no model parameter, so this can't be forced to a specific tier at
+  creation time. This doesn't matter much: the routine's own top-level session
+  is a thin dispatcher (see below), not where the token cost lives.
+- **Prompt:** read and follow `commands/atlas-poll-and-review.md` for the repo
+  (or repos) being swept — the full spec lives there; inline a copy in the
+  routine prompt itself, same reasoning as §1/§2 (`/`-commands don't resolve
+  in routine sessions). The command's own two-tier subagent design is the
+  point of this model, so don't flatten it into the top-level session's own
+  work:
+  1. **Cheap triage.** The top-level session spawns one subagent via the
+     `Task` tool requesting the fastest/cheapest model available (e.g. Haiku)
+     to list every open PR and report back a compact per-PR state summary
+     (draft status, `mergeable_state`, ack/round/HEAD state, existing pokes).
+     This keeps the token-heavy, judgment-light listing pass off the stronger
+     tier on every single cron tick, including the common case where nothing
+     needs action.
+  2. **Mechanical actions** (rebase behind PRs, poke conflicts) happen
+     directly in the top-level session — no subagent needed, these are pure
+     API calls with no judgment involved.
+  3. **The review itself.** For each PR needing round 1 or a re-review, the
+     top-level session first posts the `<!-- atlas-review-ack -->` lock
+     itself (synchronously, before spawning anything, so the race window
+     stays as short as one API call — see the command's own step 3 for why
+     this matters when Model A might also be watching the same repo), then
+     spawns a **separate** subagent via the `Task` tool requesting the
+     strongest model available (e.g. Opus) to read and follow
+     `atlas-review-pr.md` for that specific PR and post the review. One
+     subagent per PR needing one; run them concurrently.
+- **Connectors:** none needed (same as §2 — strip the defaults).
+- **Permissions:** leave **Allow unrestricted branch pushes** *off* — this
+  routine only rebases via the GitHub API and posts reviews/comments, never
+  pushes a commit.
+
+**This absorbs §1a and most of §2's coverage-escalation step.** With this
+routine running, there's no separate "re-request review" escalation to wire
+up — the next scheduled sweep *is* the re-review, not a signal asking
+something else to do it. If a repo runs both models side by side (Model A for
+instant coverage, this as an independent backstop), §2's escalation step
+becomes redundant rather than harmful — the poller doing full reviews will
+just occasionally review a PR Model A's `opened`/`review_requested` routines
+already got to, and `atlas-review-pr.md`'s own "only new findings" convergence
+rule makes that a no-op, not a duplicate comment.
+
+**Verified live** (this repo, 2026-08-26): provisioned entirely via the
+trigger-management API, no Routines UI step — confirming the "no GitHub-event
+trigger" claim above isn't theoretical.
 
 ## Why it converges instead of looping forever
 
@@ -530,3 +630,9 @@ you own, and resets daily.
   exhaustive or stable.
 - A subscription/routine can't share context with the build session — they're
   separate sessions communicating only through the PR (comments, reviews, commits).
+- **Most of the boundaries above are specific to Model A.** Model B (§4) has no
+  PR-activity subscription to fail, no self-bind reminder to lose, and no
+  GitHub-event trigger to be missing from the picker — its only real boundary
+  is the 1-hour cron floor, which is latency, not a failure mode. It trades
+  those away for slower coverage on a fresh push, not a strictly better or
+  worse design — see *Which model to pick* at the top of this doc.
