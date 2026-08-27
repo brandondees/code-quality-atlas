@@ -57,7 +57,12 @@ bootstrapping and even a full test-suite run *before* ever posting the ACK —
 from the PR author's side that reads as "nothing is happening," not "a
 thorough reviewer is warming up." None of that work is a prerequisite for
 this step: deciding whether to post an ACK needs only the PR's own comment/review
-history, already pulled in step 1.
+history, already pulled in step 1. The one real prerequisite — confirming you
+can actually reach the atlas suite at all, so the ACK isn't a promise you
+can't keep — is already satisfied by the fact that you're reading and
+following this file: whatever fetched it (a routine's bootstrap, the `Skill`
+tool, a slash command) already proved that access works. Don't re-verify it
+here; if it had failed, you would not have reached this step to begin with.
 
 Count this reviewer's prior reviews on the PR — your past review summaries carry
 the marker line `<!-- atlas-review round:N -->`. The current round is the highest
