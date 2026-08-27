@@ -4123,3 +4123,37 @@ one file), and gives that requirement a working path in the self-review case.
 **Verification:** `markdownlint-cli2` (0 issues) and `pytest` (435/435) clean;
 `tooling.cli drift` reports no drift (this command is hand-authored, not
 generated, so nothing to regenerate).
+
+**Same-day follow-on: drop the self-review special case, self-vendor instead.**
+The owner pushed back on the direct-read tier above before merge: reading
+`skills/<lens-name>/` straight from the working tree only when the reviewed
+repo happens to *be* `code-quality-atlas` means self-review never exercises
+the same `Skill`-tool → vendored-`.claude/skills/` path every consuming repo
+actually depends on — a bug in that path (or in the API-fetch fallback) could
+sit uncaught indefinitely, since self-review would always take the
+convenient local shortcut instead. The fix: stop special-casing the reviewed
+repo and make it true instead — `code-quality-atlas` now vendors its own 44
+lenses into its own `.claude/skills/` (`tooling/vendor-skills.sh .`,
+target = the repo's own root), the exact mechanism [Channel B in
+`docs/distribution.md`](../distribution.md) documents for any consuming repo.
+Step 4's resolution order dropped back to the same two tiers step 2 already
+uses for `REVIEW.md` (`Skill` tool, then API-fetch) — no third,
+repo-specific tier. Verified live in-session: after vendoring, the `Skill`
+tool's own skill listing surfaced all 44 lenses by name, confirming the
+vendored copy resolves through the same tool call a consuming repo's session
+would make, not a special path.
+
+Kept in sync by `tests/test_self_vendored_skills_sync.py` — a new test in the
+same family as `test_review_template_sync.py`, byte-comparing each vendored
+skill's `SKILL.md`/`examples.md`/`reference/*` against its `skills/` source
+(deliberately excluding `.atlas-vendored`/`NOTICE.md`, which embed the
+vendoring commit's own SHA — unavoidably one commit behind for a repo
+vendoring itself, since a commit's hash isn't known until after it's made;
+that's expected metadata staleness, not drift in the content the test
+actually guards). `docs/runbooks/regenerating-skills.md` gained a step
+(re-vendor after any skill content change) and `docs/distribution.md`'s
+Channel B section now names this repo's own use of it.
+
+**Verification:** `markdownlint-cli2` (0 issues), `pytest` (437/437, the two
+new sync tests included), `tooling.cli drift` (no drift — self-vendoring
+copies generated content, it doesn't change what `drift` itself checks).

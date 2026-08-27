@@ -25,10 +25,19 @@ derived. After you critique/improve a research section, flow it into the skills:
    scenarios against your model tiers (see the skill's evals). Fix regressions
    by tightening `reference/heuristics.md` (via the docs) or `examples.md`.
 4. **Confirm sync:** `python -m tooling.cli drift` → "No drift".
-5. **Commit** the regenerated skills with the docs change.
+5. **Re-vendor this repo's own copy:** `tooling/vendor-skills.sh .` — this repo
+   vendors its own lenses into its own `.claude/skills/` (see
+   [`distribution.md`](../distribution.md), Channel B) so that reviewing
+   code-quality-atlas itself resolves lens content through the same `Skill`
+   tool path any repo that vendored the suite gets, rather than a
+   repo-special-cased fallback. `tests/test_self_vendored_skills_sync.py`
+   fails the build if a skill content change lands without a matching
+   re-vendor.
+6. **Commit** the regenerated skills, the refreshed `.claude/skills/`, and the
+   docs change together.
 
 Adapting granularity later: edit `skills/manifest.yaml` (merge/split skills or
-re-map `built_from` categories), then run steps 2–4. No research edits needed.
+re-map `built_from` categories), then run steps 2–5. No research edits needed.
 
 ## Hand-authored files have house conventions
 

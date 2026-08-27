@@ -121,27 +121,20 @@ findings to the ACK.
    the checks relevant to this diff (most lenses keep their full checklist in
    `reference/heuristics.md`; the artifact lens uses artifact-specific rubric
    files instead — read what its own `SKILL.md` names). Resolve each lens the
-   way this session actually has it available, in order:
+   same two-tier way step 2 resolves `REVIEW.md`/`templates/REVIEW.md`:
    - **The `Skill` tool**, if `code-quality-atlas:<lens-name>` resolves —
      covers a vendored `.claude/skills/` install or an account-enabled skill.
-   - **Otherwise, read the file directly** — `Read`/`Glob`/`Grep` against
-     `skills/<lens-name>/SKILL.md` and `skills/<lens-name>/reference/`. This is
-     the path when **the reviewed repo is `code-quality-atlas` itself**: the
-     suite's real lens content lives in the working tree at `skills/`, not
-     `.claude/skills/` (that directory holds only this repo's own
-     contributor-facing skills, e.g. `icm-architect`), so the `Skill` tool
-     resolving nothing here is expected, not a bootstrap failure — the clone
-     already open in this session *is* the source, no plugin install or API
-     fetch needed. The same direct-read fallback also covers any other repo
-     where neither a vendored copy nor an account skill is present but the
-     atlas suite's clone is reachable another way (e.g. fetched per step 2's
-     `templates/REVIEW.md` fallback) — read `skills/<lens-name>/` from
-     wherever that clone landed.
+     This repo vendors its own lenses into its own `.claude/skills/`
+     (`tooling/vendor-skills.sh .`, kept in sync by CI) precisely so that
+     reviewing `code-quality-atlas` itself resolves through this same tier
+     like any other repo that has vendored the suite — never assume this
+     tier is unavailable just because the reviewed repo *is* the suite.
    - **Otherwise, fetch it** — `mcp__github__get_file_contents` (`owner:
      brandondees`, `repo: code-quality-atlas`, `path:
      skills/<lens-name>/SKILL.md`, and its `reference/` files as needed) —
      the same fixed, locatable path used for the `templates/REVIEW.md`
-     fallback in step 2.
+     fallback in step 2, for a repo with neither a vendored copy nor an
+     account-enabled skill.
    Do this for every selected lens before step 5 runs any of them — a lens
    whose content wasn't actually read hasn't run, whatever the synthesis
    report claims.
