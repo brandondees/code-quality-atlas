@@ -110,14 +110,51 @@ findings to the ACK.
    branch** unless it runs in the same isolation CI uses — lint and build
    config is executable code the PR author controls. Whether it ran, was
    skipped, or partly failed goes in the report's coverage line.
-4. Run each chosen lens against the diff, folding in the tool evidence routed
-   to it: confirm, contextualize, or dismiss each hit — a clean tool run clears
-   nothing, so every selected lens still runs in full.
-5. **Combine, don't exclude.** If another review method is available in this repo
+4. **Load each selected lens's own content before judging anything with it —
+   never run a lens from its name alone.** Picking a lens in step 2 only tells
+   you *that* it applies; `choosing-review-lenses` does not carry the lens's
+   own checklist, and inferring one from what a lens with that name *probably*
+   checks is not running the lens — it's guessing at it. For every lens the
+   set from step 2 names (the content lenses, the auto-included ones, and
+   `reviewing-pr-and-process-hygiene`), read that lens's actual `SKILL.md` in
+   full before applying it, plus any `reference/*.md` file it points to for
+   the checks relevant to this diff (most lenses keep their full checklist in
+   `reference/heuristics.md`; the artifact lens uses artifact-specific rubric
+   files instead — read what its own `SKILL.md` names). Resolve each lens the
+   way this session actually has it available, in order:
+   - **The `Skill` tool**, if `code-quality-atlas:<lens-name>` resolves —
+     covers a vendored `.claude/skills/` install or an account-enabled skill.
+   - **Otherwise, read the file directly** — `Read`/`Glob`/`Grep` against
+     `skills/<lens-name>/SKILL.md` and `skills/<lens-name>/reference/`. This is
+     the path when **the reviewed repo is `code-quality-atlas` itself**: the
+     suite's real lens content lives in the working tree at `skills/`, not
+     `.claude/skills/` (that directory holds only this repo's own
+     contributor-facing skills, e.g. `icm-architect`), so the `Skill` tool
+     resolving nothing here is expected, not a bootstrap failure — the clone
+     already open in this session *is* the source, no plugin install or API
+     fetch needed. The same direct-read fallback also covers any other repo
+     where neither a vendored copy nor an account skill is present but the
+     atlas suite's clone is reachable another way (e.g. fetched per step 2's
+     `templates/REVIEW.md` fallback) — read `skills/<lens-name>/` from
+     wherever that clone landed.
+   - **Otherwise, fetch it** — `mcp__github__get_file_contents` (`owner:
+     brandondees`, `repo: code-quality-atlas`, `path:
+     skills/<lens-name>/SKILL.md`, and its `reference/` files as needed) —
+     the same fixed, locatable path used for the `templates/REVIEW.md`
+     fallback in step 2.
+   Do this for every selected lens before step 5 runs any of them — a lens
+   whose content wasn't actually read hasn't run, whatever the synthesis
+   report claims.
+5. Run each chosen lens against the diff, folding in the tool evidence routed
+   to it: confirm, contextualize, or dismiss each hit against the checklist
+   just loaded, not against a guess at what a lens with that name would
+   check — a clean tool run clears nothing, so every selected lens still runs
+   in full.
+6. **Combine, don't exclude.** If another review method is available in this repo
    — the built-in `code-review` skill, a framework review (e.g. BMAD), or linter
    output — you may run it on the same diff and fold its findings in too. The
    atlas lenses lead; the others are additive, not a substitute and not excluded.
-6. `code-quality-atlas:synthesizing-review-findings` — merge every source's
+7. `code-quality-atlas:synthesizing-review-findings` — merge every source's
    findings (atlas lenses plus any companion reviewer) into one deduplicated,
    severity-ranked list with a single block/approve verdict, applying the
    active depth mode's severity floor (see the next section).
