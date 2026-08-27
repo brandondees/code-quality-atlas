@@ -1,0 +1,68 @@
+---
+name: reviewing-api-contract-safety
+description: 'Reviews public API and contract changes for safety: backward compatibility
+  (versioned/deprecated if breaking), hard-to-misuse shapes, "when in doubt leave
+  it out" on new surface, typed and stable error contracts, idempotency for unsafe
+  operations, pagination and rate limits on collections, contract tests, and no internal-representation
+  leakage. Use when reviewing REST/GraphQL/RPC endpoints, request or response shapes,
+  SDK surface, webhooks, or any consumer-facing contract. Skip when the change is
+  internal-only with no consumer-facing surface — private helpers or implementation
+  details no external caller depends on.'
+provenance:
+  taxonomy_version: v0.14
+  built_from:
+  - category: 13
+    source: docs/research/cluster-3-structure.md#13
+    hash: 79bd1525c2d4a7f152b0f60650405bd6b0f4a4dacc4964e4fa6b646a8abc7a52
+---
+
+# reviewing-api-contract-safety
+
+*Will this break a consumer? Compatibility, error contracts, idempotency, pagination.*
+
+## When to use
+
+Reviews public API and contract changes for safety: backward compatibility (versioned/deprecated if breaking), hard-to-misuse shapes, "when in doubt leave it out" on new surface, typed and stable error contracts, idempotency for unsafe operations, pagination and rate limits on collections, contract tests, and no internal-representation leakage. Use when reviewing REST/GraphQL/RPC endpoints, request or response shapes, SDK surface, webhooks, or any consumer-facing contract. Skip when the change is internal-only with no consumer-facing surface — private helpers or implementation details no external caller depends on.
+
+**Shape: diff — design-capable.** Also works on design docs and plans: apply the same checks to the proposed states, data flows, and failure paths before any code exists. When the design doc is specifically a decision record (an ADR, RFC, or adoption/deprecation plan), also run the shared **decision-record checklist** on top of this lens's own topical checks: is the rationale actually recorded (not just the outcome); are the stated assumptions still current; is there a revisit-trigger; is an exit, rollback, or sunset path defined; were real alternatives weighed, not just the chosen option justified after the fact? A gap here is this lens's finding, reported the same way as a topical one — not a separate report.
+
+## Reviewer discipline
+
+Report only real problems. If this lens applies and what you reviewed holds up — the code, the design, or the repository's current state — reply "No findings" and stop. If what you were given is outside this lens's scope entirely, say so in one line instead, starting with the words "Not applicable:" followed by what's missing — never the healthy-scan sentence, which means a check ran and found nothing, not that nothing here applied. Either way, do not invent issues. This guards against false positives on correct code; still report every genuine issue you do find, with its full detail.
+
+**Defects are the default; improvements are opt-in.** By default this lens is defect-only: do not suggest changes to code that is already correct. When the team has opted up into improvement suggestions, a finding on already-correct code is admissible only as `nit`-severity, `route: implementer` (the author applies, defers, or ignores), and must clear the non-configurable anti-churn floor: it must genuinely *improve* — never offer a merely equivalent alternative — and must converge (once a dimension is as good as you can confidently make it, stop; never oscillate A→B then B→A, never re-order to an equivalent state). Defects keep the strict bar above regardless of this setting.
+
+**Team preferences.** If the reviewed repo has `.code-quality-atlas/preferences.md`, apply it before reporting: a repo's `.code-quality-atlas/preferences.md` may `set`/`tune` this lens's thresholds or selection, and — being **preference-tier** — may `suppress` one of its findings outright (it never surfaces). Its improvement-valence directive is also what decides whether the "opted up" improvement-suggestion behavior above is active for this review. Absent the file, apply this lens's defaults exactly as written above.
+
+**Pre-existing defects in touched code are surfaceable, not yours to fix.** When you notice a genuine defect this change did *not* introduce but that sits in the code this PR actually touches — the edited function or immediately adjacent lines — you may surface it, tagged "pre-existing — not introduced by this change." Like improvements it is opt-in and default-quiet (off unless the team opts up), `route: implementer`, and non-blocking: it informs the author's fix-now / file-a-ticket / ignore call and never sets this PR's verdict, because the diff did not cause it. Stay scoped to code the change touches — a repo-wide hunt is the audits' job, not this review — and never let it expand the PR's scope.
+
+## Top checks
+
+The head of the full checklist — enough for a first pass without opening any reference file:
+
+- Is there a **contract test** (Pact/schema) guarding the consumer-provider boundary?
+- Is the change to a public contract **backward-compatible**? If breaking, is it versioned and communicated (semver, deprecation window)?
+- Is the API **easy to use, hard to misuse**? Required things required by the type; invalid combinations impossible; sensible defaults.
+- **Parse inbound payloads into a validated shape once at the edge** (parse-don't-validate at the wire boundary): the request/event body is decoded into a typed, validated object at the entry point, not passed inward as a raw map / `any` / untyped JSON to be re-checked (or silently trusted) at each use. And make an **impossible response shape unrepresentable** — model the result as a `oneOf` whose branches each **`require`** their own discriminating field (`required: [data]` vs `required: [error]`), so an empty object and one populating `data` and `error` together are both rejected while each single-populated response stays valid. Two traps worth naming in review: (1) a bare `oneOf` over *properties-only* branches (no `required`) fails in the *opposite* direction — `properties` imposes no presence requirement, so *every* object satisfies **both** branches at once and `oneOf`'s exactly-one rule rejects them all, including a well-formed single-populated response; (2) `anyOf` in place of `oneOf` permits more than one branch to match, so it never rejects the both-populated case at all. An OpenAPI `discriminator` keyword documents the union for codegen/serialization but is **not** itself a validation constraint — the per-branch `required` is what does the enforcing. This is #10's make-illegal-states-unrepresentable move applied to the contract's own wire types (cross #10).
+- **"When in doubt, leave it out":** any field/endpoint/param being added that isn't clearly needed? (You can add later; you can't remove.)
+- **Consistent** with the rest of the surface (naming, pluralization, error shape, pagination, status codes, casing — cross #8)?
+- Are **errors part of the contract** — typed, documented, stable codes — not ad-hoc strings?
+- **Idempotency**: are unsafe operations idempotent or protected by idempotency keys (cross #3)?
+- Pagination, rate limits, filtering defined for collection endpoints?
+
+## Mechanizing these checks
+
+Where a finding here is one a tool can catch deterministically, surface that as an advisory `route: implementer` note next to the finding: the hand review caught it this time, and wiring the matching tool from [reference/tool-rules.md](reference/tool-rules.md) into CI catches it automatically from then on. This is a suggestion to mechanize, not a defect — it never blocks a verdict, and it falls away on a repo that already runs the tool.
+
+**Process notes.** If this lens misfired on this change — flagged correct code, missed an obvious issue squarely in its own scope, or its checklist didn't fit the change shape — say so in one line under `synthesizing-review-findings`'s **Process notes** appendix; that is not a defect finding. Say nothing if the lens worked as intended — never invent a process note to fill the section.
+
+## Going deeper
+
+- [reference/heuristics.md](reference/heuristics.md) — the full checklist; open it when the change sits squarely in this lens's domain.
+- [examples.md](examples.md) — concrete good/bad findings, and the output format to match.
+- [reference/tool-rules.md](reference/tool-rules.md) — static-analysis rules covering the mechanical subset; for wiring up linters, not needed for the judgment review itself.
+- [reference/sources.md](reference/sources.md) — the research behind each check; for provenance, not needed during a review.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-api-contract-safety/SKILL.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

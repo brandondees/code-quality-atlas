@@ -203,6 +203,16 @@ an equivalent alternative.
 refresh by re-running the sync and committing the diff. `skulto save` writes a
 `skulto.json` that `skulto sync` reproduces for teammates.
 
+**This repo dogfoods Channel B on itself.** `code-quality-atlas`'s own
+`.claude/skills/` carries a self-vendored copy of its 44 lenses (`tooling/
+vendor-skills.sh .`, target = the repo's own root), so that a cloud session
+reviewing `code-quality-atlas` itself resolves lens content through the same
+`Skill`-tool path a consuming repo gets from vendoring — not a bootstrap case
+special-cased in `commands/atlas-review-pr.md`. `tests/
+test_self_vendored_skills_sync.py` fails the build if a lens changes without a
+matching re-vendor; see [`regenerating-skills.md`](runbooks/regenerating-skills.md)
+step 5.
+
 ### C. Plugin / Skulto — local source of truth (CLI only)
 
 Install the plugin (or Skulto-sync) for **local** CLI / desktop / IDE work, per

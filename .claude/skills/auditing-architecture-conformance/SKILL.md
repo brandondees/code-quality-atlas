@@ -1,0 +1,63 @@
+---
+name: auditing-architecture-conformance
+description: 'Audits a repository for architecture conformance: dependency direction
+  violations between layers/modules, cyclic dependencies, reach-arounds past a boundary,
+  accidental coupling to internals, and drift between the documented architecture
+  and the import graph. A repo-wide / scheduled audit rather than a single-diff review.
+  Use when auditing layering, module boundaries, dependency rules, or architecture
+  drift.'
+provenance:
+  taxonomy_version: v0.14
+  built_from:
+  - category: 12
+    source: docs/research/cluster-3-structure.md#12
+    hash: 49051cc3b2f556cac15149bd8a1834bb93672eb5eb558dc04a4f80caed8e8235
+---
+
+# auditing-architecture-conformance
+
+*Does the import graph still match the intended architecture? Layers, cycles, reach-arounds.*
+
+## When to use
+
+Audits a repository for architecture conformance: dependency direction violations between layers/modules, cyclic dependencies, reach-arounds past a boundary, accidental coupling to internals, and drift between the documented architecture and the import graph. A repo-wide / scheduled audit rather than a single-diff review. Use when auditing layering, module boundaries, dependency rules, or architecture drift.
+
+**Shape: repo.** Run against the whole repository (scheduled or on demand), not a single diff.
+
+## Reviewer discipline
+
+Report only real problems. If this lens applies and what you reviewed holds up — the code, the design, or the repository's current state — reply "No findings" and stop. If what you were given is outside this lens's scope entirely, say so in one line instead, starting with the words "Not applicable:" followed by what's missing — never the healthy-scan sentence, which means a check ran and found nothing, not that nothing here applied. Either way, do not invent issues. This guards against false positives on correct code; still report every genuine issue you do find, with its full detail.
+
+**Defects are the default; improvements are opt-in.** By default this lens is defect-only: do not suggest changes to code that is already correct. When the team has opted up into improvement suggestions, a finding on already-correct code is admissible only as `nit`-severity, `route: implementer` (the author applies, defers, or ignores), and must clear the non-configurable anti-churn floor: it must genuinely *improve* — never offer a merely equivalent alternative — and must converge (once a dimension is as good as you can confidently make it, stop; never oscillate A→B then B→A, never re-order to an equivalent state). Defects keep the strict bar above regardless of this setting.
+
+**Team preferences.** If the reviewed repo has `.code-quality-atlas/preferences.md`, apply it before reporting: a repo's `.code-quality-atlas/preferences.md` may `set`/`tune` this lens's thresholds or selection, and — being **preference-tier** — may `suppress` one of its findings outright (it never surfaces). Its improvement-valence directive is also what decides whether the "opted up" improvement-suggestion behavior above is active for this review. Absent the file, apply this lens's defaults exactly as written above.
+
+## Top checks
+
+The head of the full checklist — enough for a first pass without opening any reference file:
+
+- Do source dependencies respect the **intended direction** (domain doesn't import infrastructure; UI→app→domain, not back)?
+- Any **dependency cycles** between modules/packages/services (ADP)?
+- Is there a **god module / hub** with huge fan-in *and* fan-out that everything routes through?
+- Does the change honor existing layer/boundary contracts, or smuggle a cross-layer import?
+- Could the intended rule be expressed as a **fitness function** (an ArchUnit/import-linter check)? If a rule is repeatedly violated, the boundary is wrong or unclear.
+- New cross-service/cross-context coupling via an **explicit contract** (API/event), not a shared DB or internal reach-in?
+- Is the architecture style **consistent** with the rest of the system (not a competing pattern bolted on)?
+- Does it scale along the expected axis (data volume, traffic, team size), or bake in a single-node assumption (cross #3, #15)?
+
+## Mechanizing these checks
+
+Where a finding here is one a tool can catch deterministically, surface that as an advisory `route: implementer` note next to the finding: the hand review caught it this time, and wiring the matching tool from [reference/tool-rules.md](reference/tool-rules.md) into CI catches it automatically from then on. This is a suggestion to mechanize, not a defect — it never blocks a verdict, and it falls away on a repo that already runs the tool.
+
+**Process notes.** If this lens misfired on this change — flagged correct code, missed an obvious issue squarely in its own scope, or its checklist didn't fit the change shape — say so in one line under `synthesizing-review-findings`'s **Process notes** appendix; that is not a defect finding. Say nothing if the lens worked as intended — never invent a process note to fill the section.
+
+## Going deeper
+
+- [reference/heuristics.md](reference/heuristics.md) — the full checklist; open it when the change sits squarely in this lens's domain.
+- [examples.md](examples.md) — concrete good/bad findings, and the output format to match.
+- [reference/tool-rules.md](reference/tool-rules.md) — static-analysis rules covering the mechanical subset; for wiring up linters, not needed for the judgment review itself.
+- [reference/sources.md](reference/sources.md) — the research behind each check; for provenance, not needed during a review.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/auditing-architecture-conformance/SKILL.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->
