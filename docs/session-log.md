@@ -4135,3 +4135,138 @@ both side by side — this doesn't deprecate that path, it adds a second one.
 `tooling.cli drift` — clean (no generator-source content touched). No
 `map-gaps.md`/`open-questions.md` entry — operational-tooling documentation,
 same scope note as the two 2026-08-26 entries above.
+
+### 2026-08-27 — `atlas-review-pr.md` never actually loaded a selected lens's own content
+
+Surfaced by live testing of the routines above: the owner watched a routine
+transcript where the reviewer read `choosing-review-lenses` to pick lenses,
+then judged the diff against each picked lens **without ever reading that
+lens's own `SKILL.md` or `reference/*.md`** — it inferred a checklist from the
+lens's name instead of loading the real one. Step 4 named the lenses to run
+but never instructed reading their content, so nothing in the command actually
+required it, and the gap was invisible from the file alone until a transcript
+showed the omission directly.
+
+**Fixed in `commands/atlas-review-pr.md` step 4** with a new sub-step, inserted
+between the tool-grounding pre-pass and the "run each lens" step it used to
+lead straight into: for every selected lens, read its `SKILL.md` in full plus
+whichever `reference/*.md` it points to for this diff, before judging anything
+with it. Resolution order is explicit rather than assumed: the `Skill` tool
+first (vendored `.claude/skills/` or an account-enabled skill), then a direct
+`Read`/`Glob`/`Grep` of `skills/<lens-name>/` in the working tree, then an API
+fetch (`mcp__github__get_file_contents`) as the last resort.
+
+The direct-read tier also closes a **self-review bootstrap gap** the existing
+three-tier fallback (vendored → account-skill → API-fetch) didn't cover: when
+the reviewed repo *is* `code-quality-atlas`, there's nothing to vendor or
+fetch — the suite's real lens content is already sitting in the working tree
+at `skills/<lens-name>/`, not `.claude/skills/` (which here holds only this
+repo's own contributor-facing skills, e.g. `icm-architect`). Previously the
+command gave no path for that case at all, which is exactly the condition the
+owner's transcript caught live: the `Skill` tool resolved nothing, and the
+command had nothing else to fall back to, so the reviewer filled the gap by
+guessing.
+
+**Scoped deliberately narrow.** The owner separately confirmed the plugin
+(marketplace) install path itself loads lazily or not at all in cloud/routine
+sessions, independent of this gap — that investigation, and any other issue
+this same testing round surfaced, is explicit follow-up, not part of this fix.
+This change only makes the command's own instructions require reading lens
+content before judging with it, for both Model A and Model B (both read this
+one file), and gives that requirement a working path in the self-review case.
+
+**Verification:** `markdownlint-cli2` (0 issues) and `pytest` (435/435) clean;
+`tooling.cli drift` reports no drift (this command is hand-authored, not
+generated, so nothing to regenerate).
+
+**Same-day follow-on: drop the self-review special case, self-vendor instead.**
+The owner pushed back on the direct-read tier above before merge: reading
+`skills/<lens-name>/` straight from the working tree only when the reviewed
+repo happens to *be* `code-quality-atlas` means self-review never exercises
+the same `Skill`-tool → vendored-`.claude/skills/` path every consuming repo
+actually depends on — a bug in that path (or in the API-fetch fallback) could
+sit uncaught indefinitely, since self-review would always take the
+convenient local shortcut instead. The fix: stop special-casing the reviewed
+repo and make it true instead — `code-quality-atlas` now vendors its own 44
+lenses into its own `.claude/skills/` (`tooling/vendor-skills.sh .`,
+target = the repo's own root), the exact mechanism [Channel B in
+`docs/distribution.md`](../distribution.md) documents for any consuming repo.
+Step 4's resolution order dropped back to the same two tiers step 2 already
+uses for `REVIEW.md` (`Skill` tool, then API-fetch) — no third,
+repo-specific tier. Verified live in-session: after vendoring, the `Skill`
+tool's own skill listing surfaced all 44 lenses by name, confirming the
+vendored copy resolves through the same tool call a consuming repo's session
+would make, not a special path.
+
+Kept in sync by `tests/test_self_vendored_skills_sync.py` — a new test in the
+same family as `test_review_template_sync.py`, byte-comparing each vendored
+skill's `SKILL.md`/`examples.md`/`reference/*` against its `skills/` source
+(deliberately excluding `.atlas-vendored`/`NOTICE.md`, which embed the
+vendoring commit's own SHA — unavoidably one commit behind for a repo
+vendoring itself, since a commit's hash isn't known until after it's made;
+that's expected metadata staleness, not drift in the content the test
+actually guards). `docs/runbooks/regenerating-skills.md` gained a step
+(re-vendor after any skill content change) and `docs/distribution.md`'s
+Channel B section now names this repo's own use of it.
+
+**Verification:** `markdownlint-cli2` (0 issues), `pytest` (437/437, the two
+new sync tests included), `tooling.cli drift` (no drift — self-vendoring
+copies generated content, it doesn't change what `drift` itself checks).
+
+### 2026-08-27 (same day, follow-on) — the ACK was arriving late, not first
+
+The owner's original transcript observation actually named two problems, and
+only one (lens content never loaded) had been fixed so far. The other: "it
+seems to be doing a lot before initiating the actual review" — the routine
+spent visible time investigating triggers, installed and ran the reviewed
+repo's full `pytest` suite, and searched around before finally posting the
+`<!-- atlas-review-ack -->`. From the PR author's side that reads as "nothing
+is happening," not "a thorough reviewer is warming up" — the entire point of
+the ACK is to signal engagement *before* the slow part starts.
+
+**Root cause:** two places told the session to do slow bootstrapping ahead of
+the ACK.
+
+- `commands/atlas-review-pr.md` itself loaded `REVIEW.md` (step 2, now step 3)
+  *before* determining the round and posting the ACK (old step 3, now step 2)
+  — not itself slow, but the wrong order: nothing about the ACK decision
+  needs the convergence policy.
+- The bigger culprit was one level up, in the routine prompt (`docs/runbooks/
+  pr-review-automation.md` §1): it told the session to **"Locate the atlas
+  suite before reviewing"** — check vendored `.claude/skills/`, then account
+  skills, then API-fetch — *before* it even opened `commands/atlas-review-pr.md`
+  to learn that file's own ACK-first instruction. A session dutifully
+  following that literal order does a full suite bootstrap (and whatever
+  exploration that invites) before it has even read the file that would tell
+  it to hurry to the ACK.
+
+**Fixed both ends:**
+
+- `commands/atlas-review-pr.md` — swapped step order: resolving the PR (step
+  1) now pulls only identifying metadata plus existing reviews/comments
+  (deferring the diff/files pull to step 4, where lenses actually consume it),
+  then step 2 determines the round and posts the ACK immediately, called out
+  as "the highest-priority action in the whole command." Loading `REVIEW.md`
+  moved to step 3, after the ACK — it's only needed for the floor/cap logic in
+  step 5, never for the ACK decision.
+- `docs/runbooks/pr-review-automation.md` §1's routine prompt — replaced the
+  "locate the atlas suite" preamble with "fetch just `commands/
+  atlas-review-pr.md` (one file, one call — commands are never vendored
+  regardless of what's set up) and follow it exactly, starting from its own
+  step 1," with an explicit instruction *not* to check vendored skills,
+  account skills, or run any tool before the ACK decision — that's the
+  command's own step 4, several steps later. §0 Prerequisites corrected to
+  match: it previously claimed the routine prompt itself checked
+  vendored → account-skill → API-fetch order; that check now lives only in
+  `atlas-review-pr.md` step 4 (two tiers, since the `Skill` tool already
+  covers both vendored and account-enabled cases), not duplicated in the
+  routine prompt.
+- §1a (the review-requested companion routine) reuses §1's prompt verbatim, so
+  one edit covers both routines. Model B (`atlas-poll-and-review.md`) was
+  never affected — its review-subagent prompt already just says "read and
+  follow `atlas-review-pr.md` exactly," with no separate suite-location
+  preamble to reorder.
+
+**Verification:** `markdownlint-cli2` (0 issues), `pytest` (437/437 — no test
+exercises the command's own step ordering directly, so this is prose-level
+verification), `tooling.cli drift` (no drift).

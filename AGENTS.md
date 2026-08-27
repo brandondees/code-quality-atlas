@@ -85,3 +85,15 @@ code-quality-atlas`, and `path: commands/atlas-review-pr.md` (or `path:
 commands/atlas-code-review.md` for local changes) to retrieve the current
 instructions, then follow them exactly.
 <!-- END code-quality-atlas routing -->
+
+**`.claude/skills/` in this repo is generated, not authored.** It's a
+self-vendored mirror of `skills/<name>/` (via `tooling/vendor-skills.sh .`,
+see [`docs/distribution.md`](docs/distribution.md) Channel B) so that
+reviewing this repo itself resolves lens content through the same `Skill`
+tool path any repo that vendored the suite gets. If you're asked to fix a
+lens, edit `skills/<name>/` — never `.claude/skills/<name>/` directly, even
+though that's what the `Skill` tool actually resolves and loads. Each
+vendored `SKILL.md` carries a trailing generated-marker saying the same
+thing; re-run `tooling/vendor-skills.sh .` and commit the refresh after any
+`skills/` change (see
+[`docs/runbooks/regenerating-skills.md`](docs/runbooks/regenerating-skills.md)).

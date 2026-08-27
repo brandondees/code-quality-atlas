@@ -169,6 +169,24 @@ contains() {
   return 1
 }
 
+# Appends a trailing, do-not-edit marker to a vendored SKILL.md — the file an
+# agent asked to "fix lens X" is actually likely to open and edit directly
+# (it's literally what the Skill tool resolves and loads), unlike the
+# directory-level .atlas-vendored marker / NOTICE.md that don't sit next to
+# it. Appended at the very END of the file, never before the frontmatter
+# fence, so it can never interfere with frontmatter parsing.
+# reference/*.md and examples.md deliberately do NOT get this — SKILL.md is
+# the concrete edit target the finding named, and marking every runtime file
+# would multiply the sync-test's stripping logic for little added benefit.
+append_generated_marker() {
+  local file=$1 name=$2
+  {
+    printf '\n<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh\n'
+    printf '     from %s/%s/SKILL.md in code-quality-atlas.\n' "$SRC_SUBDIR" "$name"
+    printf '     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->\n'
+  } >>"$file"
+}
+
 vendor_one() {
   local name=$1 dest_root=$2
   local src="$SRC_SUBDIR/$name"
@@ -197,6 +215,7 @@ vendor_one() {
   rm -rf "${dest:?}"
   mkdir -p "$dest"
   cp "$src/SKILL.md" "$dest/SKILL.md"
+  append_generated_marker "$dest/SKILL.md" "$name"
   [ -f "$src/examples.md" ] && cp "$src/examples.md" "$dest/examples.md"
   [ -d "$src/reference" ] && cp -R "$src/reference" "$dest/reference"
   return 0
