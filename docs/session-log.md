@@ -4080,3 +4080,58 @@ drift" or "investigate from scratch."
 matches (`MATCH — CI step would now pass`); `pip install --require-hashes`,
 `pip-audit`, `ruff check`, `pytest` (435/435), `tooling.cli drift`, and
 `markdownlint-cli2` all clean against the fix.
+
+### 2026-08-26 (cont.) — Model B: a poll-driven alternative to the event-triggered reviewer
+
+Same evening, same repo. The owner asked whether the trigger-management API
+could create the review-requested/opened GitHub-event routines directly
+instead of the manual UI steps §1/§1a needed — it can't (confirmed: the
+`create_trigger`-equivalent tool has no GitHub-event parameter at all, only
+schedule and self-bind/session-targeting modes) — which led to designing and
+shipping an alternative architecture that needs no GitHub-event trigger at
+all: one scheduled sweep does rebase/conflict polling **and** the review
+itself, splitting the work across two subagent tiers (a fast/cheap model for
+the listing pass, a stronger one only for PRs that actually need a review).
+
+**Shipped:**
+
+- **`commands/atlas-poll-and-review.md`** (new command) — the generalized,
+  repo-agnostic spec: Haiku-tier triage subagent lists every open PR and
+  reports structured state; mechanical rebase/conflict actions happen inline,
+  no subagent; for each PR needing round 1 or a re-review, the calling session
+  posts the `<!-- atlas-review-ack -->` lock **itself, synchronously, before**
+  spawning anything (closing the race window to one API call, since this
+  poller may not be the only thing capable of reviewing a given PR — a repo
+  could run both models at once), then spawns a stronger-tier subagent to
+  read and follow `atlas-review-pr.md` and post the review. A stale-ack
+  (90+ minutes, zero rounds) retry rule prevents a crashed round-1 attempt
+  from being skipped forever — the failure mode a naive "ack exists → skip"
+  rule would hit under this design, unlike under Model A where a live
+  resident session made "in progress" and "abandoned" distinguishable another
+  way. Draft PRs are excluded from both polling and review.
+- **`docs/runbooks/pr-review-automation.md`** restructured around two named
+  models (§ "Which model to pick" table up top) instead of presenting the
+  event-triggered design as the only option: Model A (§1/§1a/§2, UI-only
+  setup, near-instant, depends on subscription/self-nudge survival) and the
+  new Model B (§4, fully API-provisionable, up to the cron floor's latency,
+  depends on neither). Known boundaries section notes Model B sidesteps
+  nearly all of Model A's listed failure modes, trading them for latency
+  bounded by an **API-confirmed 1-hour cron floor** — tested directly
+  (`*/5 * * * *` rejected outright: "the minimum interval is 1 hour"),
+  correcting what had only been observed through the Routines UI's preset
+  picker until now.
+- **`README.md`** — added `/atlas-poll-and-review` to the commands inventory.
+
+**Verified live** (this repo): the account's own hourly "Atlas PR Poller"
+routine (created earlier the same evening for the narrower escalation-only
+job) was upgraded in place via the trigger-management API to the full Model B
+design — no Routines UI step at any point, confirming the "no GitHub-event
+trigger, fully API-provisionable" claim empirically rather than just in
+theory. `commands/atlas-rebase-stale.md` and its escalation-only poller (§2)
+stay documented and valid for repos that want Model A without Model B, or
+both side by side — this doesn't deprecate that path, it adds a second one.
+
+**Verification (this PR):** `markdownlint-cli2` — 0 issues; `pytest` — 435/435;
+`tooling.cli drift` — clean (no generator-source content touched). No
+`map-gaps.md`/`open-questions.md` entry — operational-tooling documentation,
+same scope note as the two 2026-08-26 entries above.
