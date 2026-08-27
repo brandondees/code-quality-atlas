@@ -135,5 +135,5 @@ Synthesis must not inflate. Do not raise a finding no lens reported, do not upgr
 ## Going deeper
 
 - [choosing-review-lenses](../choosing-review-lenses/SKILL.md) — the front half: picks which lenses to run before you synthesize their output.
-- [multi-repo audit runbook](../../docs/runbooks/multi-repo-audit.md) — fan the suite out across many repositories with background agents and aggregate their findings through this contract.
-- [self-improvement loop](../../docs/self-improvement-loop.md) — why Process notes exist, the opt-in feedback tiers a repo can turn on to keep them (`.code-quality-atlas/preferences.md`), and where the signal goes from there.
+- [multi-repo audit runbook](https://github.com/brandondees/code-quality-atlas/blob/main/docs/runbooks/multi-repo-audit.md) — fan the suite out across many repositories with background agents and aggregate their findings through this contract.
+- [self-improvement loop](https://github.com/brandondees/code-quality-atlas/blob/main/docs/self-improvement-loop.md) — why Process notes exist, the opt-in feedback tiers a repo can turn on to keep them (`.code-quality-atlas/preferences.md`), and where the signal goes from there.
