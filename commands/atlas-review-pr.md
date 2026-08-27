@@ -40,12 +40,53 @@ keep that from becoming an infinite review/fix ping-pong with the build session.
 - Otherwise, take the PR from the triggering `<github-webhook-activity>` event.
 - If neither is present, stop and say so — do not guess a PR number.
 
-Pull the PR metadata, the diff, and the existing review threads with
-`mcp__github__pull_request_read` (use the `diff`, `files`, and `reviews`/`comments`
-methods as needed). Note the PR author's login from this metadata — step 5's
-own-PR fallback needs it.
+Pull only what step 2 needs right now: the PR's identifying metadata and its
+author's login (`mcp__github__pull_request_read`, `get` method — step 5's
+own-PR fallback needs that login) plus its existing reviews/comments (the
+`reviews`/`comments` methods) so step 2 can count rounds. **Defer the `diff`
+and `files` methods to step 4**, where the lenses actually consume them —
+pulling the full diff now buys nothing before the ack and only delays it.
 
-## 2. Load the convergence policy
+## 2. Determine the review round, then post the ACK before anything else
+
+**This is the highest-priority action in the whole command — get here with the
+least possible work first, and treat posting the ACK as more urgent than
+loading `REVIEW.md`, locating the atlas suite's lens content, or running any
+tool.** A live routine run was observed spending real, visible time on suite
+bootstrapping and even a full test-suite run *before* ever posting the ACK —
+from the PR author's side that reads as "nothing is happening," not "a
+thorough reviewer is warming up." None of that work is a prerequisite for
+this step: deciding whether to post an ACK needs only the PR's own comment/review
+history, already pulled in step 1.
+
+Count this reviewer's prior reviews on the PR — your past review summaries carry
+the marker line `<!-- atlas-review round:N -->`. The current round is the highest
+N seen, plus one (first review is **round 1**). **Paginate through all pages** of
+reviews and review threads before counting — `mcp__github__pull_request_read`
+caps results per call, and on a PR with many rounds the `<!-- atlas-review
+round:N -->` marker (and the round-1 `<!-- atlas-review-ack -->`) can sit on a
+later page; reading only the first page undercounts the round and re-raises
+findings already recorded in standing threads.
+
+**If this is round 1, post the ACK now, before step 3.** Check the PR's issue
+comments for an existing `<!-- atlas-review-ack -->` first (a compacted or
+restarted session must not re-post it), and if none exists, drop one short
+issue comment marked `<!-- atlas-review-ack -->` (e.g. "👀 atlas reviewer
+engaged — running lenses, hold for findings") so the author knows immediately
+that a reviewer is attached and worth waiting for, since the lens run takes a
+while. Post it **once per PR** — round 1 only; later rounds skip it. Never
+attach findings to the ACK.
+
+Only after that ack decision is settled: if the round would exceed the cap in
+the convergence policy (loaded next, in step 3), **run no new lenses and post
+no new inline comments**; instead post a single summary that notes the cap is
+reached **and re-surfaces the outstanding non-blocking findings** — read your
+most recent round's summary (`<!-- atlas-review round:N -->`) and carry its
+*Non-blocking (advisory)* list forward **verbatim** (no lenses run this round,
+so you cannot recompute the below-floor set), so the human taking over sees
+what is left below the floor — then stop.
+
+## 3. Load the convergence policy
 
 Read `REVIEW.md` from the **PR's repo root** if it exists (via
 `mcp__github__get_file_contents`). If it does not, fall back to the canonical
@@ -55,31 +96,6 @@ it, otherwise fetch it from the source repo with `mcp__github__get_file_contents
 which is a fixed, locatable path that works in web/routine sessions where the plugin
 clone location is unknown. It defines the severity floor per round, the round cap,
 and the approve-on-clean behavior. The repo's own `REVIEW.md` always wins.
-
-## 3. Determine the review round
-
-Count this reviewer's prior reviews on the PR — your past review summaries carry
-the marker line `<!-- atlas-review round:N -->`. The current round is the highest
-N seen, plus one (first review is **round 1**). **Paginate through all pages** of
-reviews and review threads before counting — `mcp__github__pull_request_read`
-caps results per call, and on a PR with many rounds the `<!-- atlas-review
-round:N -->` marker (and the round-1 `<!-- atlas-review-ack -->`) can sit on a
-later page; reading only the first page undercounts the round and re-raises
-findings already recorded in standing threads. If the round would exceed the cap
-in the convergence policy, **run no new lenses and post no new inline comments**;
-instead post a single summary that notes the cap is reached **and re-surfaces the
-outstanding non-blocking findings** — read your most recent round's summary
-(`<!-- atlas-review round:N -->`) and carry its *Non-blocking (advisory)* list
-forward **verbatim** (no lenses run this round, so you cannot recompute the
-below-floor set), so the human taking over sees what is left below the floor —
-then stop.
-
-**If this is round 1, post the ACK first.** Before running any lenses, drop one
-short issue comment marked `<!-- atlas-review-ack -->` (e.g. "👀 atlas reviewer
-engaged — running lenses, hold for findings") so the author knows immediately that
-a reviewer is attached and worth waiting for, since the lens run takes a while.
-Post it **once per PR** — round 1 only; later rounds skip it. Never attach
-findings to the ACK.
 
 ## 4. Run the lenses
 
@@ -121,7 +137,7 @@ findings to the ACK.
    the checks relevant to this diff (most lenses keep their full checklist in
    `reference/heuristics.md`; the artifact lens uses artifact-specific rubric
    files instead — read what its own `SKILL.md` names). Resolve each lens the
-   same two-tier way step 2 resolves `REVIEW.md`/`templates/REVIEW.md`:
+   same two-tier way step 3 resolves `REVIEW.md`/`templates/REVIEW.md`:
    - **The `Skill` tool**, if `code-quality-atlas:<lens-name>` resolves —
      covers a vendored `.claude/skills/` install or an account-enabled skill.
      This repo vendors its own lenses into its own `.claude/skills/`
@@ -133,7 +149,7 @@ findings to the ACK.
      brandondees`, `repo: code-quality-atlas`, `path:
      skills/<lens-name>/SKILL.md`, and its `reference/` files as needed) —
      the same fixed, locatable path used for the `templates/REVIEW.md`
-     fallback in step 2, for a repo with neither a vendored copy nor an
+     fallback in step 3, for a repo with neither a vendored copy nor an
      account-enabled skill.
    Do this for every selected lens before step 5 runs any of them — a lens
    whose content wasn't actually read hasn't run, whatever the synthesis

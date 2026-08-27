@@ -4157,3 +4157,61 @@ Channel B section now names this repo's own use of it.
 **Verification:** `markdownlint-cli2` (0 issues), `pytest` (437/437, the two
 new sync tests included), `tooling.cli drift` (no drift — self-vendoring
 copies generated content, it doesn't change what `drift` itself checks).
+
+### 2026-08-27 (same day, follow-on) — the ACK was arriving late, not first
+
+The owner's original transcript observation actually named two problems, and
+only one (lens content never loaded) had been fixed so far. The other: "it
+seems to be doing a lot before initiating the actual review" — the routine
+spent visible time investigating triggers, installed and ran the reviewed
+repo's full `pytest` suite, and searched around before finally posting the
+`<!-- atlas-review-ack -->`. From the PR author's side that reads as "nothing
+is happening," not "a thorough reviewer is warming up" — the entire point of
+the ACK is to signal engagement *before* the slow part starts.
+
+**Root cause:** two places told the session to do slow bootstrapping ahead of
+the ACK.
+
+- `commands/atlas-review-pr.md` itself loaded `REVIEW.md` (step 2, now step 3)
+  *before* determining the round and posting the ACK (old step 3, now step 2)
+  — not itself slow, but the wrong order: nothing about the ACK decision
+  needs the convergence policy.
+- The bigger culprit was one level up, in the routine prompt (`docs/runbooks/
+  pr-review-automation.md` §1): it told the session to **"Locate the atlas
+  suite before reviewing"** — check vendored `.claude/skills/`, then account
+  skills, then API-fetch — *before* it even opened `commands/atlas-review-pr.md`
+  to learn that file's own ACK-first instruction. A session dutifully
+  following that literal order does a full suite bootstrap (and whatever
+  exploration that invites) before it has even read the file that would tell
+  it to hurry to the ACK.
+
+**Fixed both ends:**
+
+- `commands/atlas-review-pr.md` — swapped step order: resolving the PR (step
+  1) now pulls only identifying metadata plus existing reviews/comments
+  (deferring the diff/files pull to step 4, where lenses actually consume it),
+  then step 2 determines the round and posts the ACK immediately, called out
+  as "the highest-priority action in the whole command." Loading `REVIEW.md`
+  moved to step 3, after the ACK — it's only needed for the floor/cap logic in
+  step 5, never for the ACK decision.
+- `docs/runbooks/pr-review-automation.md` §1's routine prompt — replaced the
+  "locate the atlas suite" preamble with "fetch just `commands/
+  atlas-review-pr.md` (one file, one call — commands are never vendored
+  regardless of what's set up) and follow it exactly, starting from its own
+  step 1," with an explicit instruction *not* to check vendored skills,
+  account skills, or run any tool before the ACK decision — that's the
+  command's own step 4, several steps later. §0 Prerequisites corrected to
+  match: it previously claimed the routine prompt itself checked
+  vendored → account-skill → API-fetch order; that check now lives only in
+  `atlas-review-pr.md` step 4 (two tiers, since the `Skill` tool already
+  covers both vendored and account-enabled cases), not duplicated in the
+  routine prompt.
+- §1a (the review-requested companion routine) reuses §1's prompt verbatim, so
+  one edit covers both routines. Model B (`atlas-poll-and-review.md`) was
+  never affected — its review-subagent prompt already just says "read and
+  follow `atlas-review-pr.md` exactly," with no separate suite-location
+  preamble to reorder.
+
+**Verification:** `markdownlint-cli2` (0 issues), `pytest` (437/437 — no test
+exercises the command's own step ordering directly, so this is prose-level
+verification), `tooling.cli drift` (no drift).
