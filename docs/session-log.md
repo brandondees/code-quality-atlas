@@ -4080,3 +4080,46 @@ drift" or "investigate from scratch."
 matches (`MATCH — CI step would now pass`); `pip install --require-hashes`,
 `pip-audit`, `ruff check`, `pytest` (435/435), `tooling.cli drift`, and
 `markdownlint-cli2` all clean against the fix.
+
+### 2026-08-27 — `atlas-review-pr.md` never actually loaded a selected lens's own content
+
+Surfaced by live testing of the routines above: the owner watched a routine
+transcript where the reviewer read `choosing-review-lenses` to pick lenses,
+then judged the diff against each picked lens **without ever reading that
+lens's own `SKILL.md` or `reference/*.md`** — it inferred a checklist from the
+lens's name instead of loading the real one. Step 4 named the lenses to run
+but never instructed reading their content, so nothing in the command actually
+required it, and the gap was invisible from the file alone until a transcript
+showed the omission directly.
+
+**Fixed in `commands/atlas-review-pr.md` step 4** with a new sub-step, inserted
+between the tool-grounding pre-pass and the "run each lens" step it used to
+lead straight into: for every selected lens, read its `SKILL.md` in full plus
+whichever `reference/*.md` it points to for this diff, before judging anything
+with it. Resolution order is explicit rather than assumed: the `Skill` tool
+first (vendored `.claude/skills/` or an account-enabled skill), then a direct
+`Read`/`Glob`/`Grep` of `skills/<lens-name>/` in the working tree, then an API
+fetch (`mcp__github__get_file_contents`) as the last resort.
+
+The direct-read tier also closes a **self-review bootstrap gap** the existing
+three-tier fallback (vendored → account-skill → API-fetch) didn't cover: when
+the reviewed repo *is* `code-quality-atlas`, there's nothing to vendor or
+fetch — the suite's real lens content is already sitting in the working tree
+at `skills/<lens-name>/`, not `.claude/skills/` (which here holds only this
+repo's own contributor-facing skills, e.g. `icm-architect`). Previously the
+command gave no path for that case at all, which is exactly the condition the
+owner's transcript caught live: the `Skill` tool resolved nothing, and the
+command had nothing else to fall back to, so the reviewer filled the gap by
+guessing.
+
+**Scoped deliberately narrow.** The owner separately confirmed the plugin
+(marketplace) install path itself loads lazily or not at all in cloud/routine
+sessions, independent of this gap — that investigation, and any other issue
+this same testing round surfaced, is explicit follow-up, not part of this fix.
+This change only makes the command's own instructions require reading lens
+content before judging with it, for both Model A and Model B (both read this
+one file), and gives that requirement a working path in the self-review case.
+
+**Verification:** `markdownlint-cli2` (0 issues) and `pytest` (435/435) clean;
+`tooling.cli drift` reports no drift (this command is hand-authored, not
+generated, so nothing to regenerate).
