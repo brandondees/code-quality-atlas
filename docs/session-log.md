@@ -4190,7 +4190,7 @@ convenient local shortcut instead. The fix: stop special-casing the reviewed
 repo and make it true instead — `code-quality-atlas` now vendors its own 44
 lenses into its own `.claude/skills/` (`tooling/vendor-skills.sh .`,
 target = the repo's own root), the exact mechanism [Channel B in
-`docs/distribution.md`](../distribution.md) documents for any consuming repo.
+`docs/distribution.md`](distribution.md) documents for any consuming repo.
 Step 4's resolution order dropped back to the same two tiers step 2 already
 uses for `REVIEW.md` (`Skill` tool, then API-fetch) — no third,
 repo-specific tier. Verified live in-session: after vendoring, the `Skill`
