@@ -33,10 +33,13 @@ broken:
 
 1. **Which runners exist, where do they live, and what do they do?** —
    [Fleet registry](#fleet-registry)
-2. **Why is my job stalled?** —
-   [Diagnosing a job that never ran](#diagnosing-a-job-that-never-ran)
-3. **How do I bring a dead runner back online?** —
+2. **How do I bring a dead runner back online?** —
    [Operating the runners](#operating-the-runners)
+3. **Why is my job stalled?** —
+   [Diagnosing a job that never ran](#diagnosing-a-job-that-never-ran)
+
+(Listed in the order the sections appear below, not in order of how often you
+will want them — in practice question 3 is the common entry point.)
 
 ## Fleet registry
 
@@ -195,9 +198,39 @@ Two lessons from operating it:
   step 2 fails every time with a bare log line. A watchdog whose repair action
   cannot actually run is only a monitor.
 
-A native Linux host does not need any of this: `svc.sh install` sets
-`Restart=always`, so systemd restarts the runner itself. The watchdog exists
-specifically because a VM can be _stopped from outside_.
+A native Linux host needs _less_ of this, not none: there is no VM to be
+stopped from outside, which is the specific gap the watchdog's step 1 exists
+for. It still gets no crash recovery.
+
+**The runner unit does not restart itself.** `svc.sh install` renders
+upstream's `actions.runner.service.template`, which contains no `Restart=`
+directive at all — so systemd's default `Restart=no` applies and a crashed or
+OOM-killed runner simply stays dead. Verified on this fleet:
+
+```sh
+$ systemctl show 'actions.runner.<owner>-<repo>.<name>.service' -p Restart --value
+no
+$ grep -l 'Restart=' /etc/systemd/system/actions.runner.*.service | wc -l
+0
+```
+
+This is not hypothetical. When the OOM cascade described under
+[Sizing the host](#sizing-the-host) killed four of five runner services, none
+of them came back on their own — they stayed `failed` until the VM was
+rebooted, and they returned then only because the units are `enabled` (start
+at boot), which is a different mechanism from a restart policy. A dead runner
+service means that repo's jobs queue forever with no error, which is row 2 of
+the triage table above.
+
+If you want crash recovery, add it explicitly — a drop-in is the least
+invasive way, since `svc.sh` will overwrite the unit itself on reinstall:
+
+```sh
+sudo systemctl edit 'actions.runner.<owner>-<repo>.<name>.service'
+# [Service]
+# Restart=always
+# RestartSec=10
+```
 
 #### Manual checks
 
@@ -264,8 +297,11 @@ the work it gates.
    `orb start runner-2604`. This is the on-demand weak link described above.
 3. Is the runner service active inside the VM?
    `orb -m runner-2604 systemctl status 'actions.runner.*'`
-4. Is the runner simply busy with another repo's job? One registration runs
-   one job at a time, and six repos share this host.
+4. Is this repo's runner simply busy with one of **its own** jobs? One
+   registration runs one job at a time. Note the runner API's `busy` flag is
+   per-repo — another repo's job does **not** show up there and does not
+   queue behind yours (see the capacity note below), so if `busy=false` and
+   the job still isn't starting, look at host load rather than for a queue.
 
 **`docker: command not found` or a missing `/var/run/docker.sock`** — the job
 landed on a Linux runner whose VM has no Docker. Nothing installs it
@@ -275,11 +311,23 @@ automatically:
 orb -m runner-2604 bash -c '
   sudo apt-get update -qq &&
   sudo apt-get install -y docker.io docker-compose-v2 &&
-  sudo usermod -aG docker dees &&
+  sudo usermod -aG docker dees &&   # see the caveat below
   sudo systemctl enable --now docker &&
   sudo systemctl restart "actions.runner.*"
 '
 ```
+
+> **`usermod -aG docker` grants root-equivalent access to the host.** Anyone
+> who can talk to the Docker socket can start a privileged container that
+> mounts `/`, so docker-group membership is effectively unrestricted root
+> ([Docker's own post-install
+> docs](https://docs.docker.com/engine/install/linux-postinstall/) say so
+> explicitly). That is a deliberate trade here — the runner has to build
+> images — but it is worth making consciously rather than copy-pasting it
+> mid-incident, and it compounds the cross-repo blast radius described under
+> [Accepted Risks](#accepted-risks): every repo's CI on this host inherits
+> that access. Rootless Docker is the mitigation if that ever stops being an
+> acceptable trade.
 
 **GitHub says the runner is online but jobs still do not start** — the agent
 hits a TLS hiccup on its broker connection and normally reconnects itself, but
@@ -406,7 +454,8 @@ and will very likely resurface on the next repo/machine:
   that to `$GITHUB_PATH`, not `mv` into a system path — a plain
   `mv ... /usr/local/bin/foo` fails with `Permission denied`.
 - **Architecture-specific binary pins need re-checking.** Any workflow step
-  that downloads a pinned tool release (this repo's `mise`, `hadolint`) by a
+  that downloads a pinned tool release (calendar-proxy's `mise`, `hadolint`)
+  by a
   hardcoded asset name (`*-linux-x64`, `*-Linux-x86_64`) will silently fail
   to execute on an ARM64 runner — re-pin to the matching arch's asset name
   and re-verify its checksum from the tool's actual release page; don't
@@ -585,13 +634,28 @@ self-hosted runner"; exit 1; }`) to any job depending on a tool that isn't
   `grep -rhoE "command -v +[a-z0-9_-]+" **/*.sh`.
 
 - **Self-hosted capacity is fixed and shared, unlike GitHub-hosted's
-  effectively unlimited parallel pool.** Every job routed to one runner
-  queues behind every other job on that same runner — a scheduled/nightly
-  workflow's jobs that used to fan out in parallel now run serially, one at
-  a time, and can queue behind concurrent per-PR CI too. This mostly matters
-  for timing-sensitive gates (a P99 latency test sharing a host with other
-  load reads noisier than one on a dedicated GitHub-hosted VM) — see
-  `nightly.yml`'s `aggregate-nfr1` job.
+  effectively unlimited parallel pool — but be precise about _how_ it is
+  shared, because the two mechanisms need different diagnoses.**
+
+  **Within one repo**, a registration runs one job at a time, so that repo's
+  jobs genuinely queue behind each other. A workflow that used to fan out
+  across independent hosted VMs now serializes.
+
+  **Across repos, there is no queue.** Each repo has its own runner install
+  and its own systemd unit (`~/actions-runner-<repo>/`,
+  `actions.runner.<owner>-<repo>.<name>.service`), so six repos are six
+  independent `Runner.Listener` processes, each polling only for its own
+  repo. They can and do run jobs simultaneously — four were observed `busy`
+  at once on this host. What they share is finite CPU and RAM, so
+  cross-repo interference shows up as **resource contention**, not as a
+  queue.
+
+  The practical consequence: when a job is slow or stuck, `busy` on the
+  runner API only tells you about that repo. If it reads `false` and the job
+  still isn't moving, the answer is host load or memory
+  ([Sizing the host](#sizing-the-host)), not another repo's job "ahead in
+  line". Contention also makes timing-sensitive gates noisier than on a
+  dedicated hosted VM — see `nightly.yml`'s `aggregate-nfr1` job.
 
 - **Every workflow needs a `concurrency` group once it's self-hosted, and a
   `push` trigger scoped to the default branch.** Both are near-free on hosted
@@ -678,12 +742,15 @@ incident. Raised in review across
   per-job ephemeral runners (container/VM-per-job), or splitting repos across
   separate hosts by trust level.
 - **Reduced parallelism.** One runner registration processes one job at a
-  time. Workflows that previously fanned out across independent hosted VMs
-  (e.g. a 4-way test matrix plus lint plus a separate test job — 6 concurrent
-  VMs) now serialize on a single machine, and additionally queue behind other
-  repos' jobs sharing that host. Expect materially longer wall-clock CI per
-  push. Registering additional runner instances on the host is the
-  straightforward fix if turnaround starts to matter.
+  time, so a workflow that previously fanned out across independent hosted
+  VMs (a 4-way test matrix plus lint plus a separate test job — 6 concurrent
+  VMs) now serializes within this repo. It does **not** additionally queue
+  behind other repos' jobs — those run on their own registrations
+  concurrently — but it does compete with them for CPU and RAM, so expect
+  materially longer wall-clock CI per push either way. Registering additional
+  runner instances for this repo on the host is the straightforward fix if
+  turnaround starts to matter, bounded by what the host can actually feed
+  (see [Sizing the host](#sizing-the-host)).
 - **Runner OS support lifecycle is now yours to track.** GitHub retires and
   refreshes its hosted images; a self-hosted host does not update itself. This
   bit us concretely: the first Linux runner was built on Ubuntu 25.10, a
