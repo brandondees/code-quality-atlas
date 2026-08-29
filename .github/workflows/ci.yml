@@ -50,9 +50,16 @@ jobs:
       contents: read
       pull-requests: read
     steps:
+      # persist-credentials: false -- this job never pushes anything (read-
+      # only lint/test/audit), so there's no reason for the checked-out
+      # working tree to retain the job's GITHUB_TOKEN in its git config for
+      # the rest of the job. Narrows what a compromised dependency pulled in
+      # by the steps below (pip installs, markdownlint-cli2-action) could
+      # exfiltrate.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
+          persist-credentials: false
       # Four independent outputs, matched to this job's genuinely disjoint
       # step input sets (see the `on:` comment above for why this is
       # per-step rather than one job-level gate). `python`/`requirements`
@@ -72,6 +79,15 @@ jobs:
       # the rest of `docs/` (session-log.md, runbooks/, plans/, map/, etc.)
       # are verified to have zero references from tooling/*.py and are
       # genuinely markdown-only.
+      #
+      # `.pre-commit-config.yaml` is in `python`: tests/test_precommit_ci_
+      # version_sync.py reads it and cross-checks its markdownlint-cli2 rev
+      # against this workflow, so a change to that file alone must still
+      # reach `tests`. `.markdownlint-cli2.jsonc` is in `markdown`: it's the
+      # actual rule config markdownlint-cli2 loads (per .pre-commit-
+      # config.yaml's own comment), so a rules-only change with no `.md`
+      # diff must still reach the `markdownlint` step -- both gaps caught by
+      # round-1 review (dees-bot / coderabbitai).
       - name: Detect relevant changes
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -85,6 +101,7 @@ jobs:
               - "docs/research/**"
               - "*.py"
               - "pyproject.toml"
+              - ".pre-commit-config.yaml"
               - ".github/workflows/ci.yml"
             requirements:
               - "requirements.in"
@@ -95,6 +112,7 @@ jobs:
               - "collapsed/hooks/**"
             markdown:
               - "**/*.md"
+              - ".markdownlint-cli2.jsonc"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         with:
