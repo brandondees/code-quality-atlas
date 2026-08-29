@@ -72,12 +72,37 @@ def _matches_any_glob(rel_path: str, globs: list) -> bool:
             prefix = pattern[:-3]
             if rel_path == prefix or rel_path.startswith(prefix + "/"):
                 return True
-        elif "*" in pattern:
-            if fnmatch.fnmatch(rel_path, pattern):
-                return True
-        elif rel_path == pattern:
+            continue
+        # dorny/paths-filter (minimatch-backed) matches segment-by-segment:
+        # a pattern with no "**" must have the same number of "/"-separated
+        # segments as the path, and each segment matches independently -- a
+        # bare "*" never crosses a "/". Plain fnmatch.fnmatch on the whole
+        # string would get this wrong: Python's fnmatch has no notion of "/"
+        # as a separator, so "*.py" would (incorrectly) report a match
+        # against "src/foo.py" too, when the real filter -- and this repo's
+        # actual `*.py` entry, which is deliberately root-level-only per its
+        # neighboring skills/**/tooling/**/tests/**/etc. globs -- would not.
+        # (CodeRabbit finding, PR #340 round 4.)
+        pattern_segs = pattern.split("/")
+        path_segs = rel_path.split("/")
+        if len(pattern_segs) != len(path_segs):
+            continue
+        if all(fnmatch.fnmatch(p, seg) for p, seg in zip(path_segs, pattern_segs)):
             return True
     return False
+
+
+def test_matches_any_glob_does_not_let_a_bare_wildcard_cross_a_directory_boundary():
+    """Regression for a CodeRabbit finding (round 4): a bare `*` in a
+    filter pattern never crosses a `/`, matching dorny/paths-filter's real
+    (minimatch-backed) semantics -- unlike Python's fnmatch, whose `*` has
+    no notion of `/` as a separator and would incorrectly treat `*.py` as
+    matching a nested path like `src/foo.py` too."""
+    assert _matches_any_glob("conftest.py", ["*.py"]) is True
+    assert _matches_any_glob("src/foo.py", ["*.py"]) is False
+    # A directory glob ("dir/**") is unaffected -- it's still meant to match
+    # at any depth beneath it.
+    assert _matches_any_glob("skills/foo/SKILL.md", ["skills/**"]) is True
 
 
 def test_python_filter_covers_every_known_external_read():
