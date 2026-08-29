@@ -222,10 +222,14 @@ vendor_one() {
 }
 
 # The skill content copied by vendor_one is CC BY 4.0 (LICENSE-CC-BY-4.0), which
-# requires attribution on redistribution. A link back to the source repo satisfies
-# it (per LICENSE); write that notice alongside the vendored skills.
+# requires attribution on redistribution. Vendor the actual license text
+# alongside the notice — not just a link to it — so a target repo's copy is
+# self-contained and doesn't depend on a live fetch from GitHub to see the
+# terms it's actually operating under (issue #1157, filed against a consumer
+# repo whose copy had only the link).
 write_attribution() {
   local dest_root=$1 sha=$2
+  cp "LICENSE-CC-BY-4.0" "$dest_root/LICENSE-CC-BY-4.0"
   cat >"$dest_root/NOTICE.md" <<EOF
 # Attribution notice
 
@@ -233,12 +237,14 @@ The skill content in this directory was vendored from
 [brandondees/code-quality-atlas](https://github.com/brandondees/code-quality-atlas)
 (commit \`$sha\`) by \`tooling/vendor-skills.sh\`.
 
-It is licensed under CC BY 4.0 (see
+It is licensed under CC BY 4.0. The full license text is vendored alongside
+this notice as \`LICENSE-CC-BY-4.0\`, copied verbatim from the source
+repository at the commit above (see also
 [LICENSE-CC-BY-4.0](https://github.com/brandondees/code-quality-atlas/blob/$sha/LICENSE-CC-BY-4.0)
-in the source repository, pinned to the vendored commit so the license text
+in the source repository, pinned to the same commit so the linked text
 matches what was actually vendored). This notice satisfies the attribution
-requirement for this vendored copy; do not remove it while the content remains
-here.
+requirement for this vendored copy; do not remove either file while the
+content remains here.
 EOF
 }
 

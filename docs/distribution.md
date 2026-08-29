@@ -235,11 +235,13 @@ expect the plugin to appear in cloud sessions — it won't.
   with a warning (and the run exits non-zero) rather than overwritten; pass
   `--force` to overwrite it anyway. `--collapsed` vendors the 4
   collapsed entrypoints instead of the 44 standalone skills. The `skulto` flow
-  above is an alternative. Every run also writes/refreshes a `NOTICE.md`
-  alongside the vendored skills — the vendored content is CC BY 4.0 (see
-  [License](../LICENSE)), which requires attribution on redistribution; the
-  notice's link back to this repository satisfies that. Commit it along with
-  the vendored skills and don't remove it while they stay in the target repo.
+  above is an alternative. Every run also writes/refreshes a `NOTICE.md` and a
+  `LICENSE-CC-BY-4.0` alongside the vendored skills — the vendored content is
+  CC BY 4.0 (see [License](../LICENSE)), which requires attribution on
+  redistribution; the notice names the source and vendored commit, and the
+  license text is copied verbatim (not just linked) so the target repo's copy
+  is self-contained. Commit both files along with the vendored skills and
+  don't remove them while the skills stay in the target repo.
 
 ```bash
 tooling/vendor-skills.sh ~/code/my-service          # vendor/refresh into that repo
