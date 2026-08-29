@@ -127,6 +127,54 @@ def test_collapsed_vendor_also_writes_attribution_notice(tmp_path):
     assert "brandondees/code-quality-atlas" in notice
 
 
+def license_file(target):
+    return target / ".claude" / "skills" / "LICENSE-CC-BY-4.0"
+
+
+def test_vendor_writes_license_file_matching_source(tmp_path):
+    """Issue #1157 (second-brain-config): a target repo's vendored skills
+    carried an attribution notice that only *linked* to the license at the
+    pinned commit, with no local copy — so the notice's own promise ("the
+    license text matches what was actually vendored") depended on a live
+    fetch from GitHub rather than anything actually shipped alongside the
+    skills. Vendor the real license text so a target repo's copy is
+    self-contained."""
+    target = tmp_path / "target-repo"
+    target.mkdir()
+
+    run_vendor(target)
+
+    vendored = license_file(target)
+    assert vendored.is_file()
+    assert vendored.read_bytes() == (REPO_ROOT / "LICENSE-CC-BY-4.0").read_bytes()
+
+
+def test_collapsed_vendor_also_writes_license_file(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+
+    run_vendor(target, "--collapsed")
+
+    vendored = license_file(target)
+    assert vendored.is_file()
+    assert vendored.read_bytes() == (REPO_ROOT / "LICENSE-CC-BY-4.0").read_bytes()
+
+
+def test_attribution_notice_references_the_vendored_license_file(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+
+    run_vendor(target)
+    notice = notice_text(target)
+    assert "LICENSE-CC-BY-4.0" in notice
+    # The link to the pinned-commit source stays too, as a cross-check.
+    result = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10, check=True)
+    sha = result.stdout.strip()
+    assert f"blob/{sha}/LICENSE-CC-BY-4.0" in notice
+
+
 def run_vendor_raw(target, *extra_args):
     # check=False: callers inspect result.returncode themselves (both
     # success and expected-failure cases), matching run_vendor's pattern.
