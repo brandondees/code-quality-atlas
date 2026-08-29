@@ -323,5 +323,13 @@ jobs:
           mv "/tmp/shellcheck-${version}/shellcheck" "$HOME/.local/bin/shellcheck"
           chmod +x "$HOME/.local/bin/shellcheck"
           "$HOME/.local/bin/shellcheck" --version
-          shopt -s nullglob
-          "$HOME/.local/bin/shellcheck" --source-path=SCRIPTDIR -x tooling/*.sh hooks/*.sh hooks/lib/*.sh collapsed/hooks/*.sh collapsed/hooks/lib/*.sh
+          # globstar makes `**` recurse into subdirectories, matching what
+          # the `shell:` paths-filter above actually promises to cover
+          # (`tooling/**/*.sh`, `hooks/**`, `collapsed/hooks/**`) -- the
+          # previous one-level-deep globs (tooling/*.sh, hooks/lib/*.sh, ...)
+          # silently stopped scanning a script the filter still correctly
+          # detected as changed. tests/test_ci_shellcheck_glob_covers_tree.py
+          # guards this by asserting these globs match every *.sh file
+          # actually present under the three trees.
+          shopt -s nullglob globstar
+          "$HOME/.local/bin/shellcheck" --source-path=SCRIPTDIR -x tooling/**/*.sh hooks/**/*.sh collapsed/hooks/**/*.sh
