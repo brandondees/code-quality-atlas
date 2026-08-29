@@ -10,7 +10,21 @@ permissions:
 
 jobs:
   gate:
-    runs-on: ubuntu-24.04
+    # Fork-PR gate. This is the load-bearing one in this repo: unlike the
+    # other repos on this runner, code-quality-atlas is PUBLIC, so `on:
+    # pull_request` genuinely can carry code from an arbitrary contributor.
+    # A self-hosted runner executes the checked-out tree directly on
+    # personally-owned hardware rather than an ephemeral VM, so a fork PR
+    # must report "skipped" (which branch protection treats as passing)
+    # instead of running here. Same-repo branch PRs are unaffected.
+    #
+    # NOTE: this means fork PRs get no CI signal at all rather than a
+    # GitHub-hosted one -- an accepted trade, since the alternative is
+    # executing untrusted code on a personal machine. If external
+    # contributions become common, split this into a hosted job for
+    # `pull_request` and a self-hosted job for `push`.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, ARM64]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -135,19 +149,26 @@ jobs:
         # is a few seconds, so 3 minutes only bounds a hang, never a real run.
         timeout-minutes: 3
         run: |
-          # ubuntu-24.04 (Azure-hosted) runners pre-seed azure.archive.ubuntu.com
-          # as a same-region apt mirror. When it's unreachable from a given runner
-          # (a blackholed connection, not a clean refusal), apt-get update doesn't
-          # fail — it hangs on the connection attempt until apt's own timeout,
-          # then falls back to archive.ubuntu.com correctly. Observed 2026-08-19
-          # (PR #274's own CI): that cost 2m15s before the fallback even started,
-          # then another unexplained 5m35s of silence before the job was
-          # cancelled — see docs/session-log.md. Tight Acquire options make a bad
-          # mirror fail in ~10s per source instead of minutes, so the common case
-          # self-heals within the run instead of needing a manual cancel+rerun;
-          # the timeout-minutes above is the backstop for whatever that second,
-          # less-understood stall was.
+          # The tight Acquire options below were added for Azure-hosted
+          # ubuntu-24.04 runners, which pre-seed azure.archive.ubuntu.com as a
+          # same-region apt mirror; when that mirror blackholes a connection,
+          # apt-get update hangs until its own timeout rather than failing
+          # (observed 2026-08-19, PR #274 — see docs/session-log.md). They are
+          # inert on the self-hosted runner (no Azure mirror in play) but are
+          # kept because they're harmless and this step should stay correct if
+          # it ever moves back to a hosted runner. The timeout-minutes above
+          # remains the backstop for the second, less-understood stall.
           sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 update
-          sudo apt-get install -y --no-install-recommends shellcheck=0.9.0-1
+          # 0.10.0-1, not 0.9.0-1: the version pin tracks whatever the runner
+          # OS actually ships, and this job now runs on Ubuntu 25.10 (the
+          # self-hosted runner) whose archive carries 0.10.0-1 only — the old
+          # exact pin fails outright there with "Version '0.9.0-1' not found".
+          # Verified before bumping that 0.10.0 reports NO new findings across
+          # this repo's scripts (the exact command below, exit 0), so this is
+          # a version bump without a gate-behavior change. Note the coupling
+          # this pin carries: it is only installable on a runner whose archive
+          # has that exact version, so it must be revisited alongside any
+          # future change of runner OS.
+          sudo apt-get install -y --no-install-recommends shellcheck=0.10.0-1
           shopt -s nullglob
           shellcheck --source-path=SCRIPTDIR -x tooling/*.sh hooks/*.sh hooks/lib/*.sh collapsed/hooks/*.sh collapsed/hooks/lib/*.sh
