@@ -149,26 +149,48 @@ jobs:
         # is a few seconds, so 3 minutes only bounds a hang, never a real run.
         timeout-minutes: 3
         run: |
-          # The tight Acquire options below were added for Azure-hosted
-          # ubuntu-24.04 runners, which pre-seed azure.archive.ubuntu.com as a
-          # same-region apt mirror; when that mirror blackholes a connection,
-          # apt-get update hangs until its own timeout rather than failing
-          # (observed 2026-08-19, PR #274 — see docs/session-log.md). They are
-          # inert on the self-hosted runner (no Azure mirror in play) but are
-          # kept because they're harmless and this step should stay correct if
-          # it ever moves back to a hosted runner. The timeout-minutes above
-          # remains the backstop for the second, less-understood stall.
-          sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 update
-          # 0.10.0-1, not 0.9.0-1: the version pin tracks whatever the runner
-          # OS actually ships, and this job now runs on Ubuntu 25.10 (the
-          # self-hosted runner) whose archive carries 0.10.0-1 only — the old
-          # exact pin fails outright there with "Version '0.9.0-1' not found".
-          # Verified before bumping that 0.10.0 reports NO new findings across
-          # this repo's scripts (the exact command below, exit 0), so this is
-          # a version bump without a gate-behavior change. Note the coupling
-          # this pin carries: it is only installable on a runner whose archive
-          # has that exact version, so it must be revisited alongside any
-          # future change of runner OS.
-          sudo apt-get install -y --no-install-recommends shellcheck=0.10.0-1
+          set -euo pipefail
+          # Installed from the upstream release rather than apt, deliberately.
+          #
+          # The previous `apt-get install shellcheck=<exact>` pin coupled this
+          # gate to whichever shellcheck version the *runner OS archive*
+          # happened to carry, and that broke twice in quick succession as the
+          # runner moved: 0.9.0-1 exists on ubuntu-24.04 but not on 25.10, and
+          # 0.10.0-1 exists on 25.10 but not on 26.04 (which ships 0.11.0-2).
+          # Each move failed the job outright with "Version '<x>' was not
+          # found" — a CI break caused purely by infrastructure, with no diff
+          # in this repo. Re-pinning to each new OS's version would also
+          # silently change *which* shellcheck gates this repo every time the
+          # host is rebuilt, which is exactly what an exact pin exists to
+          # prevent.
+          #
+          # The upstream tarball decouples the two: the version is pinned by
+          # this file (reproducible, and only ever changed deliberately), and
+          # it installs identically on any Linux host regardless of distro or
+          # release. Checksums are per-arch and verified, matching the
+          # pinned-release-plus-checksum pattern used elsewhere in this org's
+          # CI. Both arches are listed so this step stays correct if the job
+          # ever moves back to a hosted x86_64 runner.
+          #
+          # Version is unchanged from the previous pin (0.10.0) — verified
+          # again on the current runner that it reports no findings across
+          # this repo's scripts, so this is a change of *install mechanism*,
+          # not of what the gate enforces.
+          version=v0.10.0
+          case "$(uname -m)" in
+            aarch64|arm64) arch=aarch64; sha=324a7e89de8fa2aed0d0c28f3dab59cf84c6d74264022c00c22af665ed1a09bb ;;
+            x86_64|amd64)  arch=x86_64;  sha=6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87 ;;
+            *) echo "::error::unsupported architecture $(uname -m) for the pinned shellcheck release"; exit 1 ;;
+          esac
+          curl --connect-timeout 10 --max-time 120 -fsSL -o /tmp/shellcheck.tar.xz \
+            "https://github.com/koalaman/shellcheck/releases/download/${version}/shellcheck-${version}.linux.${arch}.tar.xz"
+          echo "${sha}  /tmp/shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf /tmp/shellcheck.tar.xz -C /tmp
+          # $HOME/.local/bin, not /usr/local/bin: a self-hosted runner's user
+          # is not guaranteed write access to system directories.
+          mkdir -p "$HOME/.local/bin"
+          mv "/tmp/shellcheck-${version}/shellcheck" "$HOME/.local/bin/shellcheck"
+          chmod +x "$HOME/.local/bin/shellcheck"
+          "$HOME/.local/bin/shellcheck" --version
           shopt -s nullglob
-          shellcheck --source-path=SCRIPTDIR -x tooling/*.sh hooks/*.sh hooks/lib/*.sh collapsed/hooks/*.sh collapsed/hooks/lib/*.sh
+          "$HOME/.local/bin/shellcheck" --source-path=SCRIPTDIR -x tooling/*.sh hooks/*.sh hooks/lib/*.sh collapsed/hooks/*.sh collapsed/hooks/lib/*.sh
