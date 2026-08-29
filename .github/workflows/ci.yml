@@ -331,5 +331,13 @@ jobs:
           # detected as changed. tests/test_ci_shellcheck_glob_covers_tree.py
           # guards this by asserting these globs match every *.sh file
           # actually present under the three trees.
-          shopt -s nullglob globstar
+          #
+          # dotglob too: dorny/paths-filter@v4.0.3 sets picomatch's `dot:
+          # true` internally (verified against its source), so the `shell:`
+          # filter above already matches a dot-prefixed path -- without
+          # dotglob, a hidden .sh file would correctly trigger this step via
+          # the filter and then be silently skipped by these globs anyway,
+          # the exact bug this PR exists to close, just for hidden paths
+          # instead of nested ones (round-1 review finding).
+          shopt -s nullglob globstar dotglob
           "$HOME/.local/bin/shellcheck" --source-path=SCRIPTDIR -x tooling/**/*.sh hooks/**/*.sh collapsed/hooks/**/*.sh
