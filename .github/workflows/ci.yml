@@ -1,5 +1,20 @@
 name: ci
 
+# No `paths:` filter here (#339): a path-filtered `on:` trigger means the
+# workflow never RUNS at all for a push/PR that touches none of the listed
+# paths, which leaves any branch-protection-required check on this workflow
+# stuck permanently pending instead of reporting a conclusion. Gate individual
+# steps below instead (via one dorny/paths-filter step + per-step `if:`), so
+# the workflow always reports a real conclusion -- success or a fast
+# `skipped` step (which branch protection treats as passing) -- never
+# silence. This job's steps have genuinely disjoint input sets (Python code
+# vs. requirements.in/.txt vs. shell scripts vs. Markdown), so per-step
+# gating is used rather than an all-or-nothing job-level gate (the
+# calendar-proxy `changes`-job pattern used elsewhere in this org): a single
+# job-level gate can't let e.g. markdownlint run on a docs-only change while
+# skipping the Python pipeline, without also either pulling every Markdown
+# change into the expensive path or dropping Markdown lint coverage
+# entirely -- see #339 for the fuller reasoning.
 on:
   pull_request:
   push:
@@ -26,14 +41,69 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, Linux, ARM64]
     timeout-minutes: 15
+    # pull-requests:read is required by dorny/paths-filter (below) to list a
+    # PR's changed files via the GitHub API; push events don't hit that path,
+    # but the permission must be granted unconditionally at the job level
+    # since job-level `permissions:` replaces rather than merges with the
+    # workflow-level default above.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      # Four independent outputs, matched to this job's genuinely disjoint
+      # step input sets (see the `on:` comment above for why this is
+      # per-step rather than one job-level gate). `python`/`requirements`
+      # jointly gate the whole pip-install-through-generated-tree-check
+      # sequence below (cheap enough, and interdependent enough via the
+      # shared Python env, that splitting them further isn't worth the
+      # complexity); `shell` and `markdown` each gate their own single step
+      # independently, since shellcheck and markdownlint need no Python
+      # setup at all.
+      #
+      # `docs/research/**` is in `python`, not treated as docs-only: every
+      # entry in skills/manifest.yaml's `source:` field is a
+      # `docs/research/*.md` path that `tooling.cli generate`/`drift`
+      # actually reads at generation time (tooling/generate_common.py,
+      # tooling/drift.py) -- a change there can change generated output and
+      # must reach the generated-tree-check. `commands/`, `templates/`, and
+      # the rest of `docs/` (session-log.md, runbooks/, plans/, map/, etc.)
+      # are verified to have zero references from tooling/*.py and are
+      # genuinely markdown-only.
+      - name: Detect relevant changes
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          filters: |
+            python:
+              - "skills/**"
+              - "collapsed/**"
+              - "tooling/**"
+              - "tests/**"
+              - "docs/research/**"
+              - "*.py"
+              - "pyproject.toml"
+              - ".github/workflows/ci.yml"
+            requirements:
+              - "requirements.in"
+              - "requirements.txt"
+            shell:
+              - "tooling/**/*.sh"
+              - "hooks/**"
+              - "collapsed/hooks/**"
+            markdown:
+              - "**/*.md"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         with:
           python-version: "3.12"
           cache: 'pip'
-      - run: pip install --require-hashes -r requirements.txt
+      - if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        run: pip install --require-hashes -r requirements.txt
       - name: requirements.txt is in sync with requirements.in
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: |
           # pip-tools 7.6.0 crashed under pip 26.2 (RequirementCommand's
           # make_requirement_preparer gained a required `allow_editables`
@@ -102,6 +172,7 @@ jobs:
             exit 1
           }
       - name: dependency vulnerability audit
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: |
           # pip-audit IS the CI vulnerability gate this repo relies on — unlike
           # requirements.txt's deps (hash-pinned, resolved once and committed),
@@ -124,16 +195,22 @@ jobs:
           pip install pip-audit==2.10.1
           pip-audit --requirement requirements.txt
       - name: lint (ruff)
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: ruff check .
       - name: tests
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: python -m pytest tests/ -q
       - name: eval structure (all skills)
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: python -m tooling.cli eval
       - name: eval structure (collapsed entrypoints)
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: python -m tooling.cli eval --skills-root collapsed/skills
       - name: provenance drift
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: python -m tooling.cli drift
       - name: Generated trees are in sync
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: |
           python -m tooling.cli generate --manifest skills/manifest.yaml --docs-root . --skills-root skills --collapsed-root collapsed
           ok=1
@@ -141,10 +218,12 @@ jobs:
           git diff --exit-code collapsed/ || { git diff --stat collapsed/; echo "::error::collapsed/ drifted — regenerate and commit"; ok=0; }
           [ "$ok" -eq 1 ]
       - name: markdownlint
+        if: steps.filter.outputs.markdown == 'true'
         uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
         with:
           globs: '**/*.md'
       - name: shellcheck
+        if: steps.filter.outputs.shell == 'true'
         # timeout-minutes is a backstop, not the primary fix: normal runtime here
         # is a few seconds, so 3 minutes only bounds a hang, never a real run.
         timeout-minutes: 3
