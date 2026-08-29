@@ -16,6 +16,12 @@ for what actually runs where and the operational trade-offs; this page is the
 > accepted cost is drift: a copy may lag the canonical, so check the canonical
 > before trusting anything here that looks surprising.
 >
+> **Links to `calendar-proxy` in this file require access to that repo**,
+> which is private. They resolve for the fleet's operators and `404` for
+> anyone else — relevant because some repos carrying this copy are public.
+> Nothing here depends on following them; they are provenance, not
+> instructions.
+>
 > Concrete file references in the gotchas below (`fly-deploy.yml`,
 > `nightly.yml`, `markdown.yml`, …) are **examples from calendar-proxy**,
 > where each gotcha was first hit. They illustrate the shape of the problem;
@@ -97,7 +103,7 @@ across every repo rather than re-downloading per repo, and loop:
 That only **registers** the runner. Continue with steps 3-4 below to install
 it as a persistent service — a registered-but-not-installed runner works
 until the terminal closes or the host reboots, and then silently stops
-picking up jobs (which presents as checks queued forever, not as an error).
+picking up jobs (which presents as checks stuck `queued`, not as an error).
 
 The web-UI flow, for reference:
 
@@ -173,7 +179,7 @@ macOS login  →  OrbStack launches (start_at_login=true)
 The **on-demand** step is the weak link: OrbStack does not boot every VM when
 the app launches — a VM starts only when something touches it (`orb -m <name>
 ...`). Until something does, the VM stays cold and every runner on it appears
-offline, which presents as jobs queued forever.
+offline, which presents as jobs stuck `queued`.
 
 Runner services are installed `enabled`, so once the VM is up they start on
 their own. The gap is purely "who starts the VM".
@@ -219,7 +225,7 @@ This is not hypothetical. When the OOM cascade described under
 of them came back on their own — they stayed `failed` until the VM was
 rebooted, and they returned then only because the units are `enabled` (start
 at boot), which is a different mechanism from a restart policy. A dead runner
-service means that repo's jobs queue forever with no error, which is row 2 of
+service means that repo's jobs sit `queued` with no error, which is row 2 of
 the triage table above.
 
 If you want crash recovery, add it explicitly — a drop-in is the least
@@ -256,7 +262,7 @@ Actions UI.
 | Symptom                                                | Cause                                         | Confirm with                                        |
 | ------------------------------------------------------ | --------------------------------------------- | --------------------------------------------------- |
 | Fails in ~2s, `runner=` empty, `steps=0`, log 404s     | **Account billing / spending limit**          | check-run annotation (see command below)            |
-| Queued forever, never starts, no error                 | **No runner online with the required labels** | `gh api repos/O/R/actions/runners`                  |
+| Sits `queued`, never starts, no error                  | **No runner online with the required labels** | `gh api repos/O/R/actions/runners`                  |
 | Started, then `cancelled` mid-run with steps part-done | **Runner process OOM-killed**                 | `journalctl -u 'actions.runner.*' \| grep -i oom`   |
 | Queued behind a long job on a single-runner repo       | **Ordinary serialization**                    | `gh api .../actions/runners --jq '.runners[].busy'` |
 
@@ -283,9 +289,17 @@ Two traps when reading this:
 The structural fix is not to restore billing — it is to stop depending on
 hosted runners for anything gating self-hosted work. A cheap `changes` /
 path-filter job on `ubuntu-latest` in front of self-hosted jobs means every
-other job `needs:` it, so one hosted failure takes the whole workflow red
-while every self-hosted job passes. Put the gate on the same runner class as
-the work it gates.
+other job `needs:` it, so one hosted failure takes the whole workflow red.
+Put the gate on the same runner class as the work it gates.
+
+Be precise about what happens to the gated jobs, because it depends on how
+they are written. By default a job whose `needs:` dependency failed is
+**skipped**, not run. The workflows on this fleet deliberately gate on
+`if: ${{ !cancelled() && needs.changes.outputs.<x> != 'false' && ... }}`,
+and `!cancelled()` overrides the implicit `success()` GitHub adds — so they
+_do_ still run, and were observed passing on `orbstack-linux-mbp` while the
+hosted gate failed. Either way the run is red; the difference is whether you
+also lose the test signal.
 
 ### Other symptoms worth recognizing
 
@@ -348,12 +362,21 @@ by six repos, reach for the bounded `docker-gc.sh` rather than
 layers and _still_ misses the per-job buildx builders where the space actually
 accumulates.
 
+> **"Stuck queued" has an upper bound, and it is not forever.** GitHub
+> terminates a job that has not started within **24 hours**
+> ([queue limits](https://docs.github.com/en/actions/reference/limits)), so a
+> job blocked on a dead or missing runner eventually surfaces as _cancelled_
+> rather than staying pending indefinitely. That matters twice: a cancelled
+> job with no logs is easy to misread as a flake rather than a runner
+> outage, and `timeout-minutes` still does not help, because it only starts
+> counting once a job has begun.
+
 ## Sizing the host
 
 An undersized host does not fail cleanly; it thrashes, and the symptoms point
 away from memory. On 2026-08-29 a 4 CPU / 8 GB VM serving six repos produced
 **45 OOM kills in 30 minutes**, which killed four of five runner _services_
-outright — and a dead runner service means its repo's jobs queue forever
+outright — and a dead runner service means its repo's jobs sit `queued`
 (row 2 of the table above), so the presenting symptom was "CI is stuck", not
 "we are out of memory".
 
@@ -428,9 +451,14 @@ Notes that cost time doing this:
   are added automatically; anything else (e.g. `orbstack`) is lost unless
   passed to `--labels`, and losing it silently strands every job whose
   `runs-on:` names it.
-- **Pipe the registration token via stdin**, as above, rather than
-  interpolating it into a command line where it lands in shell history and
-  logs.
+- **The registration token still reaches `config.sh` as an argv element.**
+  Reading it from stdin, as above, keeps it out of _shell history_ — which is
+  worth doing — but `--token "$TOK"` is a process argument, so it is visible
+  in `ps` to any local user for the lifetime of the call, and to anything
+  scraping `/proc`. There is no argv-free flag; the mitigations are to treat
+  the host as trusted, and to rely on the token being single-use and
+  short-lived (well under an hour). Do not describe this as "not on the
+  command line".
 
 Before deleting the old host, verify what actually depends on it rather than
 assuming. Check for runner services (`systemctl list-units 'actions.runner.*'`),
@@ -584,6 +612,17 @@ audit`), `PUPPETEER_SKIP_DOWNLOAD=true` alone is enough — no need to fetch
   `.env` and restart it. One shared cache serves every repo's runner on that
   host. The same class of problem applies to other `setup-*` actions.
 
+  **A shared tool cache is a cross-repo integrity boundary.** Every repo's
+  jobs can write to it, and a later job in a _different_ repo executes what
+  it finds there — so a compromised or malicious workflow can plant or
+  replace an interpreter another repo then runs. That is the same
+  non-ephemeral-host exposure described under
+  [Accepted Risks](#accepted-risks), but sharper, because the artifact is an
+  executable on a path other jobs deliberately trust. Accepted here for a
+  single-owner fleet; if that stops holding, the mitigations are a per-repo
+  cache directory, or a root-owned cache the runner user can read but not
+  write (seeded once by an operator).
+
 - **A workflow can silently depend on a toolchain component the runner image
   happened to preinstall.** `dtolnay/rust-toolchain` installs with
   `--profile minimal`, which excludes `clippy` and `rustfmt` — but a
@@ -631,7 +670,9 @@ self-hosted runner"; exit 1; }`) to any job depending on a tool that isn't
   Rather than discovering these one red CI run at a time, grep the repo for
   what its own scripts declare before migrating — many document it:
   `grep -rn -A4 "External tools:" tooling/ hooks/` and
-  `grep -rhoE "command -v +[a-z0-9_-]+" **/*.sh`.
+  `find . -name '*.sh' -exec grep -rhoE "command -v +[a-z0-9_-]+" {} +`
+  (`**/*.sh` does **not** recurse in bash unless `shopt -s globstar` is set,
+  so the glob form silently checks only the current directory).
 
 - **Self-hosted capacity is fixed and shared, unlike GitHub-hosted's
   effectively unlimited parallel pool — but be precise about _how_ it is
@@ -685,7 +726,7 @@ self-hosted runner"; exit 1; }`) to any job depending on a tool that isn't
     cancel-in-progress: ${{ github.event_name == 'pull_request' }}
   ```
 
-- **A job requiring a label no runner carries queues forever, silently.**
+- **A job requiring a label no runner carries sits `queued`, silently.**
   GitHub does not error on an unsatisfiable `runs-on:` — it waits. A
   Dependabot-generated dependency-graph job requesting a `dependabot` label
   sat queued for over nine hours this way, indistinguishable in the UI from a
@@ -696,12 +737,17 @@ self-hosted runner"; exit 1; }`) to any job depending on a tool that isn't
     --jq '.runners[] | "\(.name): \([.labels[].name] | join(","))"'
   ```
 
-- **`docker/setup-buildx-action` creates a new named builder every time it
-  runs, and never tears it down.** Each is a persistent `docker-container`
-  instance with its own build-cache silo — on a self-hosted runner these
-  accumulate forever, one per job that's ever used buildx. `docker builder
-prune` / `docker buildx prune` with no `--builder` flag only targets the
-  unused `default` context, silently missing all the real cache; you have to
+- **`docker/setup-buildx-action` builders accumulate on a persistent host.**
+  Each is a `docker-container` instance with its own build-cache silo.
+  Recent versions of the action do clean up the builder they create, so in
+  principle this should not pile up — but verified on this fleet that it does
+  anyway: `docker buildx ls` showed five builders, three of them orphaned
+  `calproxy-verify-builder-*` instances from jobs long finished. Treat the
+  cleanup as best-effort, because a cancelled or OOM-killed job never reaches
+  its cleanup step — precisely the failure mode a contended self-hosted host
+  produces most often. `docker builder prune` / `docker buildx prune` with no
+  `--builder` flag acts only on the currently-selected builder, silently
+  missing every other one; you have to
   enumerate every builder (`docker buildx ls`) and prune each one
   explicitly. See [Automated Disk Cleanup](#automated-disk-cleanup) below —
   this is exactly what took the Linux runner's disk from fine to 100% full
@@ -722,7 +768,7 @@ incident. Raised in review across
   registered. There is no automatic failover to a hosted runner and no
   alerting on runner availability. The sharp edge is that this does **not**
   fail fast: `timeout-minutes` only bounds a job once it has _started_, so a
-  job with no available runner sits **queued indefinitely** rather than
+  job with no available runner sits **`queued`** rather than
   erroring. Symptom to recognize: checks that never start, on every branch at
   once. First things to check are `systemctl status
 'actions.runner.*'` on the host and the repo's **Settings → Actions →
@@ -795,7 +841,9 @@ never pruned below, not a ceiling).
 
 ## Uninstalling a runner
 
-From the runner's directory: `./svc.sh stop && ./svc.sh uninstall`, then
+From the runner's directory — `sudo` on Linux, none needed on macOS,
+matching the install step above: `sudo ./svc.sh stop && sudo ./svc.sh
+uninstall`, then
 `./config.sh remove --token <a-removal-token-from-the-repo's-Runners-page>`.
 Removing the directory without running `config.sh remove` first leaves a
 stale, offline entry on the repo's Runners page.
@@ -808,8 +856,11 @@ _outside_ the host can reference it, and that is not visible from inside.
 
 ## Why self-hosted at all?
 
-GitHub-hosted runners bill roughly \$0.008/min for Linux and \$0.08/min for
-macOS, which adds up on repos that run CI on every push. Self-hosting also
+GitHub-hosted runners bill per minute, with macOS roughly an order of
+magnitude more than Linux, which adds up on repos that run CI on every push.
+(Deliberately not quoting rates here — they change, and a stale number in a
+copied file is worse than a link: see
+[Actions runner pricing](https://docs.github.com/en/billing/reference/actions-runner-pricing).) Self-hosting also
 keeps caches warm across runs — a persistent `~/.cargo`, a stable per-runner
 cache root, a populated Docker layer cache — making incremental rebuilds far
 faster than the cold cache a fresh hosted VM gets.
@@ -827,7 +878,7 @@ under [Accepted Risks](#accepted-risks) are the ones deliberately _not_ solved.
 
 **Workflow → runner mapping.** Which of this repo's workflows target which
 labels — worth listing when the repo has more than one target class, since a
-job whose labels no runner carries queues forever with no error:
+job whose labels no runner carries sits `queued` with no error:
 
 ```sh
 grep -rn 'runs-on:' .github/workflows/ | sed 's/:  */: /'
