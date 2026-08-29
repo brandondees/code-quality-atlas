@@ -77,31 +77,34 @@ jobs:
       # tooling/drift.py) -- a change there can change generated output and
       # must reach the generated-tree-check.
       #
-      # `commands/**`, `templates/**`, `docs/map/**`, root `AGENTS.md`/
-      # `CLAUDE.md`, and `LICENSE` are in `python` too, added in round 2 of
-      # review: round 1's audit (and the fix it produced) only checked
-      # `tooling/*.py` for real references and missed that several
-      # regression tests under `tests/*.py` read these exact paths --
-      # tests/test_routing_snippet_sync.py (templates/agents-routing-
-      # snippet.md, commands/atlas-init.md, AGENTS.md, CLAUDE.md --
-      # issues #64/#167's drift guard), tests/test_review_template_sync.py
-      # (REVIEW.md vs. templates/REVIEW.md), tests/test_map_twins_sync.py
-      # (docs/map/CLAUDE.md/AGENTS.md/routing.md/_templates/process.md), and
-      # tests/test_license_paths_exhaustive.py (LICENSE, walking top-level
-      # dirs). Without these, an edit to e.g. commands/atlas-init.md alone
-      # would skip `tests` -- and with it the exact drift-guard test
-      # written to catch that file diverging. The rest of `docs/`
-      # (session-log.md, runbooks/, plans/) remains genuinely markdown-only
-      # -- no test or tooling module reads those paths.
-      #
-      # `.pre-commit-config.yaml` is in `python`: tests/test_precommit_ci_
-      # version_sync.py reads it and cross-checks its markdownlint-cli2 rev
-      # against this workflow, so a change to that file alone must still
-      # reach `tests`. `.markdownlint-cli2.jsonc` is in `markdown`: it's the
-      # actual rule config markdownlint-cli2 loads (per .pre-commit-
-      # config.yaml's own comment), so a rules-only change with no `.md`
-      # diff must still reach the `markdownlint` step -- both gaps caught by
-      # round-1 review (dees-bot / coderabbitai).
+      # Round 3 review found this list was STILL incomplete after two prior
+      # fix rounds each patched a narrower subset (round 1: only checked
+      # `tooling/*.py`; round 2: checked `tests/*.py` but only for the paths
+      # that round's reviewer happened to name). Rather than a fourth manual
+      # patch of the same shape, this round did an exhaustive audit of every
+      # path any `tests/*.py` file reads and added
+      # `tests/test_ci_python_filter_covers_known_reads.py`, which asserts
+      # this filter covers every path in that audit's inventory -- so the
+      # NEXT gap (a new test reading a new path) is a failing test here
+      # instead of a fifth review round. The full audit, for reference:
+      # `commands/atlas-init.md`/`templates/agents-routing-snippet.md`/
+      # `AGENTS.md`/`CLAUDE.md` (test_routing_snippet_sync.py, issues
+      # #64/#167's drift guard); `templates/REVIEW.md`/`REVIEW.md`
+      # (test_review_template_sync.py); `docs/map/**`
+      # (test_map_twins_sync.py); `LICENSE` (test_license_paths_exhaustive.py,
+      # walking top-level dirs); `.pre-commit-config.yaml`
+      # (test_precommit_ci_version_sync.py); `hooks/**`
+      # (test_hooks.py -- NOT covered by being in the `shell` filter below,
+      # since `shell` doesn't gate the `tests` step); `.claude-plugin/
+      # plugin.json`/`marketplace.json`/`README.md`/`docs/distribution.md`/
+      # `docs/install.md`/`docs/collapsed-entrypoints-and-depth-modes.md`/
+      # `docs/review-depth-modes.md`/`docs/open-questions.md`
+      # (test_doc_counts.py); `.claude/skills/**`
+      # (test_self_vendored_skills_sync.py, test_map_twins_sync.py). The
+      # rest of `docs/` (session-log.md, runbooks/, plans/) remains
+      # genuinely markdown-only -- no test or tooling module reads those
+      # paths, and the drift-guard test above would catch it if that ever
+      # changed.
       - name: Detect relevant changes
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -116,9 +119,20 @@ jobs:
               - "commands/**"
               - "templates/**"
               - "docs/map/**"
+              - "hooks/**"
+              - ".claude/skills/**"
               - "AGENTS.md"
               - "CLAUDE.md"
+              - "README.md"
+              - "REVIEW.md"
               - "LICENSE"
+              - ".claude-plugin/plugin.json"
+              - ".claude-plugin/marketplace.json"
+              - "docs/distribution.md"
+              - "docs/install.md"
+              - "docs/collapsed-entrypoints-and-depth-modes.md"
+              - "docs/review-depth-modes.md"
+              - "docs/open-questions.md"
               - "*.py"
               - "pyproject.toml"
               - ".pre-commit-config.yaml"
