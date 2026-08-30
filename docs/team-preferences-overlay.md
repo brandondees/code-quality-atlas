@@ -1,6 +1,6 @@
 # Team Preferences Overlay — design
 
-**Status:** design approved 2026-06-12; **Wave A built 2026-07-06** (see below). Waves B+ (inference bootstrap, per-check tier granularity, monorepo discovery, acknowledge-expiry) remain design-only.
+**Status:** design approved 2026-06-12; **Wave A built 2026-07-06**; **Wave B (partial) built 2026-07-18** — the inference/interview path from §6 (see below). Per-check tier granularity, monorepo discovery, and acknowledge-expiry remain design-only.
 **Depends on:** phase-3 skill suite (23 lenses + `choosing-review-lenses` router + `synthesizing-review-findings`), D6 (docs are source of truth; skills derived & regenerable), D7 (model portability), D9 (plugin packaging), D12 (the synthesizer — where `acknowledge`d deviations land in the verdict).
 **Decisions captured (user, 2026-06-12):** tiered precedence; both bootstrap paths (template + inference) but inference is **proposal-only, never auto-applied**. See open-questions Q13.
 **Added (user, 2026-06-14, [`map-gaps.md`](map-gaps.md) G26):** an **improvement-valence verbosity** dial (§4.6) — the defect-only guard is a team *preference*, default strict — plus a built-in **anti-churn / convergence** discipline (§4a) the overlay cannot relax.

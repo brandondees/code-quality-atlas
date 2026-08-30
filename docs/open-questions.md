@@ -1097,7 +1097,7 @@ folds in **D16** — routing emits a relevance-**ranked** list (not a 2-4 cap) w
 breadth × severity-floor axis (triage / review / comprehensive), applied to both forms — so
 **building Q20 resolved D16**. Both the depth-modes/relevance-ranking and the collapsed 4-entrypoint emission shipped in PR #80.
 
-### Q18 — Artifact-scoped lens hosting: many per-artifact lenses without context bloat *(new, 2026-06-12)*
+### Q18 — Artifact-scoped lens hosting: many per-artifact lenses without context bloat  → RESOLVED (see D15) *(new, 2026-06-12)*
 
 **Trigger.** Owner asked whether we review artifacts against published authoring standards — starting
 from Anthropic's Agent Skill best-practices guide ([`map-gaps.md`](map-gaps.md) **G11**). We hold
