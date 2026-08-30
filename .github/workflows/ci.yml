@@ -39,7 +39,22 @@ jobs:
     # contributions become common, split this into a hosted job for
     # `pull_request` and a self-hosted job for `push`.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, Linux, ARM64]
+    # Arch-agnostic on purpose: the fleet now has an x86_64 Linux host
+    # (bazzite-runner-*) registered alongside the Mac's arm64 OrbStack VM, and
+    # this job can run on either. Pinning ARM64 would strand it on one machine
+    # and leave it queued whenever that machine is down or busy.
+    #
+    # Nothing in this job is arch-specific: the only step that fetches a
+    # prebuilt binary is `shellcheck` below, which already selects its asset
+    # and checksum from `uname -m` and errors loudly on an unrecognized arch
+    # rather than downloading the wrong one. Everything else is Python,
+    # actions/setup-python (which publishes both arches), or pure-Node actions.
+    #
+    # Keep the fork gate above in front of this. It matters more, not less,
+    # with a second host: this repo is public, so `on: pull_request` can carry
+    # arbitrary contributors' code, and a self-hosted runner executes the
+    # checked-out tree directly on personally-owned hardware.
+    runs-on: [self-hosted, Linux]
     timeout-minutes: 15
     # pull-requests:read is required by dorny/paths-filter (below) to list a
     # PR's changed files via the GitHub API; push events don't hit that path,
