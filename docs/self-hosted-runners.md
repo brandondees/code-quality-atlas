@@ -1025,3 +1025,17 @@ job whose labels no runner carries sits `queued` with no error:
 ```sh
 grep -rn 'runs-on:' .github/workflows/ | sed 's/:  */: /'
 ```
+
+**Dependabot PRs share this repo's self-hosted exposure.** `ci.yml`'s fork-PR
+gate keeps fork-originated content off the persistent runner, but it can't
+distinguish a same-repo human PR from a same-repo Dependabot dependency-bump
+PR — both satisfy the same "same repo" check. That means `pip install
+pip-tools==7.6.1` and `pip install pip-audit==2.10.1` (both outside the
+hash-pinned `pip install --require-hashes -r requirements.txt` gate) run
+unattended on the shared runner before human review of a proposed version
+bump, same as for any other PR. Consequence is bounded here — this workflow
+holds no secrets and no deploy credentials — so the exposure is
+runner-persistence (state left for the _next_ job), covered by the fleet-wide
+"Cross-repo blast radius" risk above, not credential theft. Tighter isolation
+(a GitHub-hosted runner for Dependabot-authored PRs, or a maintainer-applied
+label gating the pip-install/pip-audit steps) is not currently in place.

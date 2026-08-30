@@ -1,7 +1,7 @@
 # The Code Quality Map
 
 **Status:** v0.14 (2026-08-23 — the repo-shaped, retrospective security audit field feedback surfaced was missing). Maximal scope.
-**Shape:** 7 clusters → 45 categories → ~140 factors. Four **review shapes**: diff, repo/cron, **decision-time** ([`decision-time-review-shape.md`](decision-time-review-shape.md)), and **artifact** (D15 — designed; [`research/artifact-scoped-lenses.md`](research/artifact-scoped-lenses.md)).
+**Shape:** 7 clusters → 45 categories → ~140 factors. Four **review shapes**: diff, repo/cron, **decision-time** ([`decision-time-review-shape.md`](decision-time-review-shape.md)), and **artifact** (D15 — shipped 2026-06-24; [`research/artifact-scoped-lenses.md`](research/artifact-scoped-lenses.md)).
 
 Cross-links between factors are deliberate; quality dimensions genuinely overlap. Where a category is partly covered by existing prior art, see [`prior-art.md`](prior-art.md) for the mapping (kept out of this file so the map stays tool-agnostic).
 
