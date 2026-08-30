@@ -27,21 +27,24 @@ for what actually runs where and the operational trade-offs; this page is the
 > where each gotcha was first hit. They illustrate the shape of the problem;
 > they are not claims about the repo you are reading this in.
 >
-> Fleet as of 2026-08-29: **two** Linux hosts. `runner-2604` (an OrbStack
-> Ubuntu 26.04 LTS VM on the Mac, 6 CPU / 12 GB, arm64) serves six repos as
-> `orbstack-linux-mbp`; the Bazzite host (x86_64, 32 cores) serves seven repos
-> as `bazzite-runner-<id>-<n>`, one registration per repo. Plus `macos-local`
-> (the Mac itself) and `orbstack-linux` on another laptop.
+> Fleet as of 2026-08-29: **three Linux hosts across two architectures.**
+> `runner-2604` (an OrbStack Ubuntu 26.04 LTS VM on the Mac, 6 CPU / 12 GB,
+> arm64) serves six repos as `orbstack-linux-mbp`; the Bazzite host (x86_64,
+> 32 cores) serves seven repos as `bazzite-runner-<id>-<n>`; and
+> `orbstack-linux` (x86_64) runs on another laptop. Plus `macos-local`, the Mac
+> itself.
 >
-> Runner names are per-repo, so the same name across six repos is six
-> registrations of one host, not a conflict.
+> The Bazzite host uses one registration per repo, except `second-brain-config`,
+> which has two (instances 2 and 3) so its jobs can run two at a time. Runner
+> names are per-repo, so the same name across six repos is six registrations of
+> one host, not a conflict.
 >
-> **The two Linux hosts are different architectures**, which is the single
-> most important thing to know before editing a `runs-on:` or a tool-download
-> step. A job pinned `[self-hosted, Linux, ARM64]` can only ever land on the
-> Mac; one that says `[self-hosted, Linux]` can land on either, and any step
-> that downloads a prebuilt binary must therefore select it from `uname -m`
-> rather than hardcoding an asset name. See
+> **The two architectures are what matters most** before editing a `runs-on:`
+> or a tool-download step — the host count is bookkeeping, the arch split
+> changes what a job can do. A job pinned `[self-hosted, Linux, ARM64]` can
+> only ever land on the Mac; one that says `[self-hosted, Linux]` can land on
+> any of the three, and any step that downloads a prebuilt binary must
+> therefore select it from `uname -m` rather than hardcoding an asset name. See
 > [Architecture portability](#architecture-portability).
 
 This guide answers the three questions that come up every time CI looks
@@ -589,11 +592,11 @@ authoritative; this is what leaks into workflow authoring.
   Plain command-line tools are the same hazard without the cache subtlety, and
   they rarely fail legibly:
 
-  | Tool    | How its absence actually presented                                                        |
-  | ------- | ----------------------------------------------------------------------------------------- |
-  | `unzip` | "the browser folder exists but the executable is missing" — Playwright's extractor no-ops |
-  | `zip`   | 7 unrelated-looking test failures, from one packaging script exiting non-zero             |
-  | `rsync` | assumed present by copy/deploy steps                                                      |
+  | Tool    | How its absence actually presented                                                                                                 |
+  | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+  | `unzip` | "the browser folder exists but the executable is missing" — **Puppeteer's** extractor no-ops (see [Known gotchas](#known-gotchas)) |
+  | `zip`   | 7 unrelated-looking test failures, from one packaging script exiting non-zero                                                      |
+  | `rsync` | assumed present by copy/deploy steps                                                                                               |
 
   All three are in the image now, but the list is not closed. Before assuming a
   job can shell out to something, check:
