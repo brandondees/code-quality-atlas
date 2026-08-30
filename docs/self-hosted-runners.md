@@ -27,12 +27,22 @@ for what actually runs where and the operational trade-offs; this page is the
 > where each gotcha was first hit. They illustrate the shape of the problem;
 > they are not claims about the repo you are reading this in.
 >
-> Fleet as of 2026-08-29: one Linux host (`runner-2604`, an OrbStack Ubuntu
-> 26.04 LTS VM, 6 CPU / 12 GB) serving six repos, plus `macos-local` (the Mac
-> itself) and an X64 fleet on other machines (`orbstack-linux`,
-> `bazzite-runner-*`). Every repo's Linux runner is named `orbstack-linux-mbp`
-> — the name is per-repo, so the same name on six repos is six registrations
-> of one host, not a conflict.
+> Fleet as of 2026-08-29: **two** Linux hosts. `runner-2604` (an OrbStack
+> Ubuntu 26.04 LTS VM on the Mac, 6 CPU / 12 GB, arm64) serves six repos as
+> `orbstack-linux-mbp`; the Bazzite host (x86_64, 32 cores) serves seven repos
+> as `bazzite-runner-<id>-<n>`, one registration per repo. Plus `macos-local`
+> (the Mac itself) and `orbstack-linux` on another laptop.
+>
+> Runner names are per-repo, so the same name across six repos is six
+> registrations of one host, not a conflict.
+>
+> **The two Linux hosts are different architectures**, which is the single
+> most important thing to know before editing a `runs-on:` or a tool-download
+> step. A job pinned `[self-hosted, Linux, ARM64]` can only ever land on the
+> Mac; one that says `[self-hosted, Linux]` can land on either, and any step
+> that downloads a prebuilt binary must therefore select it from `uname -m`
+> rather than hardcoding an asset name. See
+> [Architecture portability](#architecture-portability).
 
 This guide answers the three questions that come up every time CI looks
 broken:
@@ -54,13 +64,40 @@ several registrations of one machine, not one shared runner. Labels are what
 `runs-on:` actually matches, and they are matched **case-insensitively**
 (`linux` matches the `Linux` label).
 
-| Name                            | OS    | Arch   | Host                                   | Labels                                      |
-| ------------------------------- | ----- | ------ | -------------------------------------- | ------------------------------------------- |
-| `macos-local`                   | macOS | ARM64  | The Mac itself (native, launchd)       | `self-hosted`, `macOS`, `ARM64`             |
-| `orbstack-linux-mbp`            | Linux | ARM64  | The Mac, OrbStack VM **`runner-2604`** | `self-hosted`, `Linux`, `ARM64`, `orbstack` |
-| `orbstack-linux`                | Linux | x86_64 | Other laptop (OrbStack VM)             | `self-hosted`, `Linux`, `X64`, `orbstack`   |
-| `bazzite-runner-9cbf0d01cf92-2` | Linux | x86_64 | Bazzite host (other machine)           | `self-hosted`, `Linux`, `X64`, `bazzite`    |
-| `bazzite-runner-9cbf0d01cf92-3` | Linux | x86_64 | Bazzite host (other machine)           | `self-hosted`, `Linux`, `X64`, `bazzite`    |
+| Name                              | OS    | Arch   | Host                                   | Labels                                      |
+| --------------------------------- | ----- | ------ | -------------------------------------- | ------------------------------------------- |
+| `macos-local`                     | macOS | ARM64  | The Mac itself (native, launchd)       | `self-hosted`, `macOS`, `ARM64`             |
+| `orbstack-linux-mbp`              | Linux | ARM64  | The Mac, OrbStack VM **`runner-2604`** | `self-hosted`, `Linux`, `ARM64`, `orbstack` |
+| `orbstack-linux`                  | Linux | x86_64 | Other laptop (OrbStack VM)             | `self-hosted`, `Linux`, `X64`, `orbstack`   |
+| `bazzite-runner-9cbf0d01cf92-<n>` | Linux | x86_64 | Bazzite host (other machine)           | `self-hosted`, `Linux`, `X64`, `bazzite`    |
+
+The Bazzite host runs one container per repo, numbered rather than named after
+the repo. **Instance numbers are the `<n>` suffix** in
+`bazzite-runner-9cbf0d01cf92-<n>` from the row above — so instance 5 is the
+runner named `bazzite-runner-9cbf0d01cf92-5`, which is what
+`gh api .../actions/runners` will show. Verified live on 2026-08-29:
+
+| Instance | Repository            |
+| -------- | --------------------- |
+| 1        | `bazzite-config`      |
+| 2, 3     | `second-brain-config` |
+| 4        | `calendar-proxy`      |
+| 5        | `git_archive_sync`    |
+| 6        | `code-quality-atlas`  |
+| 7        | `cuddly-palm-tree`    |
+| 8        | `software-factory`    |
+
+> **The `orbstack` label is not on every registration of `orbstack-linux-mbp`.**
+> Checked live on 2026-08-29: it is present on `second-brain-config`, and
+> **absent** on `calendar-proxy`, `git_archive_sync`, and `code-quality-atlas`,
+> where the labels are just `self-hosted`, `Linux`, `ARM64`. This is the
+> "custom labels must be re-supplied" gotcha from
+> [Migrating a runner](#migrating-a-runner-to-another-host) having already
+> happened, and it is why the table above lists labels per _runner_ while the
+> real answer is per _registration_. Nothing is broken today — only
+> `second-brain-config` has jobs naming `orbstack`, and its copy has the label
+> — but a job routed to `[self-hosted, orbstack]` in any of the other three
+> would queue forever with no error.
 
 Not every repo has every runner registered. **Check the live list rather than
 trusting this table** — it has gone stale before, and a table that names a
@@ -468,6 +505,108 @@ directories (`~/.fly`, `~/.gnupg`, `~/.docker`), and whether `~/.ssh` holds
 real keys or symlinks to the host Mac. Reclaimed disk is also **asynchronous**
 — free space can briefly go _down_ right after a delete, so re-measure a few
 minutes later before concluding nothing was freed.
+
+## Architecture portability
+
+The fleet has **two Linux architectures**: arm64 (`orbstack-linux-mbp`, on the
+Mac) and x86_64 (`bazzite-runner-*`, `orbstack-linux`). A job pinned
+`[self-hosted, Linux, ARM64]` can only ever land on the Mac, so it queues
+whenever that machine is down or busy even though another Linux runner is idle.
+
+Relaxing the pin to `[self-hosted, Linux]` is the goal, but **the label is the
+last thing to change, not the first.** This section is the policy; the
+mechanics of each hazard already live in
+[Known gotchas](#known-gotchas) and are not repeated here.
+
+Work through the job's steps before touching `runs-on:`, checking each against
+its gotcha:
+
+| Check the job for                       | Mechanics                                                                           |
+| --------------------------------------- | ----------------------------------------------------------------------------------- |
+| A prebuilt binary fetched by asset name | [Architecture-specific binary pins need re-checking](#known-gotchas)                |
+| An `actions/cache` key                  | [Cache keys that hold compiled binaries must include `runner.arch`](#known-gotchas) |
+| A dependency with no arm64 wheel        | [Check the dependency tree ships arm64 artifacts](#known-gotchas)                   |
+
+Two things that section does not give you:
+
+**The shape to write.** Select the asset _and_ its checksum from `uname -m`,
+and make an unrecognized arch a hard error rather than a fall-through to a
+guess:
+
+```sh
+case "$(uname -m)" in
+  aarch64|arm64) arch=arm64;  sha256=... ;;
+  x86_64|amd64)  arch=x64;    sha256=... ;;
+  *) echo "::error::unsupported architecture $(uname -m)"; exit 1 ;;
+esac
+```
+
+Fetch the second checksum; never derive it. A cheap way to prove you fetched
+correctly is to recompute the checksum you already have and confirm it matches
+what is committed. Asset naming is per-project and genuinely inconsistent —
+mise `linux-x64`, hadolint `Linux-x86_64`, shellcheck `linux.x86_64` — so write
+each case arm against that project's real release assets rather than a
+convention.
+
+**Staying put is a valid outcome.** A job that must run on one architecture
+should say so in its labels, not rely on
+being the only runner that exists. `[self-hosted, Linux, X64]` is a valid,
+honest pin.
+
+## Containerized runners (the Bazzite host)
+
+The Bazzite host runs each runner in a Podman container rather than as a
+systemd unit on the host, which changes three things worth knowing before
+routing a job there. Its own runbook (`bazzite-config/runbooks/09-*.md`) is
+authoritative; this is what leaks into workflow authoring.
+
+- **`docker` inside the job is the _host's_ podman**, reached through a mounted
+  socket. Anything that bind-mounts a path into a container —
+  `docker run --mount type=bind,source=${{ github.workspace }} …` — has its
+  source resolved by the **host**, in the host's namespace. The runner's
+  default work folder (`/home/runner/_work/…`) does not exist there, so the
+  mount fails:
+
+  ```text
+  making volume mountpoint for volume /home/runner/_work/x:
+  mkdir /home/runner: permission denied
+  ```
+
+  The fix is host-side (bind the work folder at an identical absolute path on
+  both sides), not a workflow change — but if you see that error, this is why.
+  `git_archive_sync`'s bats job is the one that needs it. Note the failure is
+  loud, but its message points at the container path rather than at the
+  namespace mismatch.
+
+- **The runner image is not `ubuntu-latest`.** It is `ghcr.io/actions/actions-runner`
+  plus a few additions, and it carries far less than a GitHub-hosted image. The
+  trap is a step gated `if: cache-hit != 'true'` that installs system libraries:
+  on a cache hit it is skipped, and whatever it would have installed had better
+  already be on the machine. Chromium is the live example — all 15 of its shared
+  libraries were missing, so a cache hit restored the browser and it failed to
+  launch, while a cache miss passed. They are baked into the image now.
+
+  Plain command-line tools are the same hazard without the cache subtlety, and
+  they rarely fail legibly:
+
+  | Tool    | How its absence actually presented                                                        |
+  | ------- | ----------------------------------------------------------------------------------------- |
+  | `unzip` | "the browser folder exists but the executable is missing" — Playwright's extractor no-ops |
+  | `zip`   | 7 unrelated-looking test failures, from one packaging script exiting non-zero             |
+  | `rsync` | assumed present by copy/deploy steps                                                      |
+
+  All three are in the image now, but the list is not closed. Before assuming a
+  job can shell out to something, check:
+
+  ```sh
+  podman run --rm --entrypoint bash localhost/github-runner:latest \
+    -c 'command -v <tool> || echo MISSING'
+  ```
+
+- **The runner user is unprivileged but _has_ passwordless sudo** in the
+  container, so `playwright install --with-deps` and similar work — unlike on
+  the OrbStack VM, where `$HOME/.local/bin` is the only safe install target.
+  Prefer `$HOME/.local/bin` anyway so the step stays portable across both hosts.
 
 ## Known gotchas
 
