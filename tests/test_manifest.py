@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: MIT
+import re
+
 import pytest
 
 from tooling.manifest import (
@@ -327,6 +329,27 @@ def test_load_manifest_treats_bare_picker_as_empty_string(tmp_path):
     m = load_manifest(path)
     assert m.skills[0].picker == ""
 
+def test_load_manifest_rejects_a_non_string_picker(tmp_path):
+    # #347 weekly-audit follow-up: picker used to be `(s.get("picker") or
+    # "").strip()`, which only guarded against null -- a non-string,
+    # non-null value (e.g. a bare YAML number) is truthy, survives the
+    # `or ""`, and crashes with AttributeError: 'int' object has no
+    # attribute 'strip' instead of a ValidationError naming the field. Now
+    # routed through the same _prose() type check every other prose field
+    # gets, so this is a malformed-manifest error, not a crash.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    picker: 42\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
+    with pytest.raises(ValidationError, match="'picker' must be a string, got int"):
+        load_manifest(path)
+
 def test_load_manifest_treats_bare_description_as_empty_string(tmp_path):
     # Same crash class, one field over: description is required (KeyError
     # caught if the key is absent), but a *present* bare "description:"
@@ -359,6 +382,26 @@ def test_load_manifest_treats_bare_skill_name_as_empty_string(tmp_path):
         "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
     m = load_manifest(path)
     assert m.skills[0].name == ""
+    with pytest.raises(ValidationError, match="invalid name"):
+        validate(m)
+
+def test_load_manifest_does_not_strip_a_padded_skill_name_before_validation(tmp_path):
+    # Round-2 review on #349: _prose()'s default strip=True would trim
+    # ' valid-name ' to 'valid-name', silently passing it past _NAME_RE
+    # where the original `s["name"] or ""` (no .strip()) preserved the
+    # padding and correctly failed validation. name/slug are opted out via
+    # strip=False specifically so this stays caught.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: \" valid-name \"\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
+    m = load_manifest(path)
+    assert m.skills[0].name == " valid-name "
     with pytest.raises(ValidationError, match="invalid name"):
         validate(m)
 
@@ -677,6 +720,75 @@ def test_load_manifest_treats_bare_route_note_as_empty_string(tmp_path):
     assert m.router.routes[0].note == ""
 
 
+def test_load_manifest_rejects_a_non_string_route_note(tmp_path):
+    # Same #347 follow-up as picker above: note=x.get("note") or "" also
+    # only guarded against null, not against a non-string truthy value
+    # (e.g. a bare YAML number), which would previously survive to a
+    # caller expecting str with no error at all.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    picker: p\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        "router:\n"
+        "  name: choosing-review-lenses\n"
+        "  description: d\n"
+        "  routes:\n"
+        "    - when: Bug fix\n"
+        "      run: [hunting-silent-failures]\n"
+        "      note: 7\n")
+    with pytest.raises(ValidationError, match="'note' must be a string, got int"):
+        load_manifest(path)
+
+def test_load_manifest_rejects_a_non_string_route_when(tmp_path):
+    # Round-2 review on #349: `when=x["when"]` bypassed _prose() entirely
+    # (a pre-existing gap, not introduced by this PR's refactor). A numeric
+    # `when` is truthy, so _validate_router's `if not route.when` check
+    # accepted it silently -- it would only crash later, downstream, on a
+    # caller like `route.when.startswith(...)`.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    picker: p\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        "router:\n"
+        "  name: choosing-review-lenses\n"
+        "  description: d\n"
+        "  routes:\n"
+        "    - when: 7\n"
+        "      run: [hunting-silent-failures]\n")
+    with pytest.raises(ValidationError, match="'when' must be a string, got int"):
+        load_manifest(path)
+
+def test_load_manifest_rejects_a_non_string_artifact_name_or_detect(tmp_path):
+    # Round-2 review on #349: Artifact.name/.detect bypassed _prose() (a
+    # pre-existing gap): `if not a.name or not a.detect` in _validate_skills
+    # is a truthy check, so a numeric value slipped past it silently.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: reviewing-artifact-conventions\n"
+        "    description: x\n"
+        "    shape: artifact\n"
+        "    wave: 1\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        "    artifacts:\n"
+        "      - { name: 7, detect: y, rubric: 2, slug: x }\n")
+    with pytest.raises(ValidationError, match="'name' must be a string, got int"):
+        load_manifest(path)
+
+
 def test_load_manifest_treats_bare_router_routes_as_empty_list(tmp_path):
     # A present-but-null "routes:" key used to crash `for x in
     # r["routes"]` with TypeError: 'NoneType' object is not iterable
@@ -887,6 +999,22 @@ def test_load_manifest_parses_modes(tmp_path):
 def test_load_manifest_defaults_modes_to_empty(tmp_path):
     m = load_manifest(_manifest_with_body(tmp_path, ""))
     assert m.modes == []
+
+
+def test_load_manifest_missing_mode_breadth_error_names_the_file(tmp_path):
+    # dees-bot round-1 atlas review on #349: routing `breadth` through
+    # _prose() means a missing key now raises _prose()'s own
+    # ValidationError directly, bypassing the wrapping `except (KeyError,
+    # TypeError)` that used to add `in {path}` to the message. Locks in
+    # that the file path is still present, just via _prose()'s own `where`
+    # argument instead of the wrapping except clause.
+    path = _manifest_with_body(tmp_path,
+        "modes:\n"
+        "  - name: triage\n"
+        "    floor: Major\n"
+        "    triggers: [triage]\n")
+    with pytest.raises(ValidationError, match=re.escape(path) + r".*missing field 'breadth'"):
+        load_manifest(path)
 
 
 def _syn():
