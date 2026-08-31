@@ -566,16 +566,29 @@ def _list_field(s: dict, key: str, skill_index: int) -> list:
 
 
 def _prose(mapping: dict, key: str, where: str, *, required: bool = True,
-           collapse: bool = False) -> str:
-    """A required prose field, type-checked before normalization.
+           collapse: bool = False, null_ok: bool = False) -> str:
+    """A prose field, type-checked before normalization.
 
     Coercing with `str(...)` is the trap this exists to avoid: it turns a bare
     `key:` (YAML null) into the literal `"None"`, which then satisfies every
     downstream non-empty check and renders as the word "None" in a generated
     table. A number is no better — it survives `str()` and crashes `.strip()`
     otherwise. Anything that isn't a string is a malformed manifest, and says
-    so. `collapse` folds internal whitespace (for a value written across
-    several YAML lines that must render as one table cell).
+    so (regardless of `required`/`null_ok` — those two only decide what
+    counts as *absent*, never what counts as a valid *type*). `collapse` folds
+    internal whitespace (for a value written across several YAML lines that
+    must render as one table cell).
+
+    `required` and `null_ok` are independent: `required` governs a *missing*
+    key (KeyError-shaped); `null_ok` governs a *present-but-null* one
+    (`key:` with nothing after the colon). Most callers (prepass) want a
+    present-but-null value to be exactly as invalid as a missing one — the
+    default. A handful of longer-standing fields (skill/router/synthesizer/
+    mode/entrypoint name-and-description-shaped fields) were historically
+    written as `mapping["key"] or ""` — key must be present, but a bare null
+    quietly normalizes to "" rather than erroring — and that tolerance is
+    locked in by existing manifests and tests; `null_ok=True` preserves it
+    for exactly those callers without loosening the still-strict prepass ones.
     """
     if key not in mapping:
         if required:
@@ -583,7 +596,7 @@ def _prose(mapping: dict, key: str, where: str, *, required: bool = True,
         return ""
     value = mapping[key]
     if value is None:
-        if required:
+        if required and not null_ok:
             raise ValidationError(f"{where}: {key!r} must be a non-empty string, got null")
         return ""
     if not isinstance(value, str):
@@ -642,32 +655,18 @@ def load_manifest(path: str) -> Manifest:
             built = [Source(category=b["category"], source=b["source"]) for b in s["built_from"]]
             artifacts = [Artifact(name=a["name"], detect=a["detect"],
                                   rubric=a["rubric"],
-                                  # Same bare-null gap as description/picker
-                                  # below: a present-but-null "slug:" slips
-                                  # past the KeyError guard and would crash
-                                  # _NAME_RE.match(None) in _validate_skills.
-                                  slug=a["slug"] or "")
+                                  slug=_prose(a, "slug", f"skill #{i} artifact", null_ok=True))
                          for a in _list_field(s, "artifacts", i)]
             skills.append(Skill(
-                # Same bare-null gap as description/picker below: a
-                # present-but-null "name:" slips past the KeyError guard
-                # and would crash _NAME_RE.match(None) in _validate_skills.
-                name=s["name"] or "",
-                # description is a required key (KeyError -> ValidationError
-                # below if absent), but a *present* bare `description:` null
-                # slips past that guard -- `None.strip()` would crash the
-                # same way picker's did (review follow-up on #142).
-                description=(s["description"] or "").strip(),
+                name=_prose(s, "name", f"skill #{i}", null_ok=True),
+                description=_prose(s, "description", f"skill #{i}", null_ok=True),
                 shape=s["shape"],
                 wave=s["wave"],
                 built_from=built,
                 primary_owner=s.get("primary_owner"),
                 cross_ref=_list_field(s, "cross_ref", i),
                 design=s.get("design", False),
-                # Same bare-null gap as cross_ref/artifacts: .get(key, "")
-                # only substitutes "" when the key is absent, not when it's
-                # present-but-null (#142 review).
-                picker=(s.get("picker") or "").strip(),
+                picker=_prose(s, "picker", f"skill #{i}", required=False),
                 artifacts=artifacts,
                 tier=s.get("tier", "preference"),
                 eval_min=s.get("eval_min"),
@@ -681,26 +680,13 @@ def load_manifest(path: str) -> Manifest:
         r = data["router"]
         try:
             router = Router(
-                # Same bare-null gap as description below: a present-but-null
-                # "name:" slips past the KeyError guard and would crash
-                # _NAME_RE.match(None) in _validate_router.
-                name=r["name"] or "",
-                # Same bare-null gap as skill.description/picker (#142 review):
-                # a present-but-null "description:" slips past the KeyError
-                # guard and would crash `.strip()` on None.
-                description=(r["description"] or "").strip(),
-                # Same bare-null gap, two fields over: a present-but-null
-                # "routes:" would crash `for x in r["routes"]` with
-                # TypeError, and a present-but-null "note:" on a route
-                # would leak None past a caller expecting str (CodeRabbit
-                # review on #145).
-                routes=[Route(when=x["when"], run=x["run"], note=x.get("note") or "",
+                name=_prose(r, "name", "router", null_ok=True),
+                description=_prose(r, "description", "router", null_ok=True),
+                routes=[Route(when=x["when"], run=x["run"],
+                              note=_prose(x, "note", "router route", required=False),
                               shapes=x.get("shapes"))
                         for x in (r["routes"] or [])],
-                # Same bare-null gap as description above: .get(key, "")
-                # only substitutes "" when the key is absent, not when
-                # it's present-but-null (CodeRabbit review on #145).
-                body=(r.get("body") or "").strip(),
+                body=_prose(r, "body", "router", required=False),
             )
         except KeyError as e:
             raise ValidationError(f"router: missing field {e}") from e
@@ -750,24 +736,12 @@ def load_manifest(path: str) -> Manifest:
         sy = data["synthesizer"]
         try:
             synthesizer = Synthesizer(
-                # Same bare-null gap as description below: a present-but-null
-                # "name:" slips past the KeyError guard and would crash
-                # _NAME_RE.match(None) in _validate_synthesizer.
-                name=sy["name"] or "",
-                # Same bare-null gap as skill.description/picker (#142 review):
-                # a present-but-null "description:" slips past the KeyError
-                # guard and would crash `.strip()` on None.
-                description=(sy["description"] or "").strip(),
+                name=_prose(sy, "name", "synthesizer", null_ok=True),
+                description=_prose(sy, "description", "synthesizer", null_ok=True),
                 severity_order=sy["severity_order"],
                 tensions=[Tension(between=t["between"],
-                                  # Same gap, one field over, for a tension's
-                                  # required prose fields (#142 review).
-                                  about=(t["about"] or "").strip(),
-                                  resolve=(t["resolve"] or "").strip())
-                          # .get(key, []) only substitutes [] when the key
-                          # is absent, not when it's present-but-null; a
-                          # bare "tensions:" would crash the iteration with
-                          # TypeError (CodeRabbit review on #145).
+                                  about=_prose(t, "about", "synthesizer tension", null_ok=True),
+                                  resolve=_prose(t, "resolve", "synthesizer tension", null_ok=True))
                           for t in (sy.get("tensions") or [])],
             )
         except KeyError as e:
@@ -777,22 +751,10 @@ def load_manifest(path: str) -> Manifest:
         try:
             modes.append(Mode(
                 name=raw_mode["name"],
-                # Same bare-null gap as note below: a present-but-null
-                # "breadth:" slips past the KeyError guard and would crash
-                # `.strip()` on None in _validate_modes.
-                breadth=raw_mode["breadth"] or "",
+                breadth=_prose(raw_mode, "breadth", f"modes[{i}]", null_ok=True),
                 floor=raw_mode["floor"],
-                # Same bare-null gap as tensions above: a present-but-null
-                # "triggers:" would crash `list(...)` with TypeError
-                # (CodeRabbit review on #145).
                 triggers=list(raw_mode.get("triggers") or []),
-                # Same bare-null gap as skill.picker (#142 review): .get(key,
-                # "") only substitutes "" when the key is absent, not when
-                # it's present-but-null. A bare "note:" doesn't crash here
-                # (nothing calls .strip() on it in this function), but it
-                # would crash downstream in generate.py's modes_section,
-                # which does `m.note.strip()`.
-                note=raw_mode.get("note") or "",
+                note=_prose(raw_mode, "note", f"modes[{i}]", required=False),
             ))
         except (KeyError, TypeError) as e:
             raise ValidationError(f"modes[{i}] in {path}: malformed mode ({e})")
@@ -805,20 +767,11 @@ def load_manifest(path: str) -> Manifest:
                     f"entrypoints[{i}] in {path}: 'shapes' must be a list of strings "
                     f"(got {shapes!r}) — use 'shapes: [diff]', not 'shapes: diff'")
             entrypoints.append(Entrypoint(
-                # Same bare-null gap as description below: a present-but-null
-                # "name:" slips past the KeyError guard and would crash
-                # re.fullmatch(..., None) in _validate_entrypoints.
-                name=raw_ep["name"] or "",
-                # Same bare-null gap as skill.description/picker (#142
-                # review): a present-but-null "description:" slips past the
-                # KeyError guard and would crash `.strip()` on None.
-                description=(raw_ep["description"] or "").strip(),
+                name=_prose(raw_ep, "name", f"entrypoints[{i}]", null_ok=True),
+                description=_prose(raw_ep, "description", f"entrypoints[{i}]", null_ok=True),
                 shapes=list(shapes),
                 include_design=bool(raw_ep.get("include_design", False)),
-                # Same bare-null gap as description above: .get(key, "")
-                # only substitutes "" when the key is absent, not when
-                # it's present-but-null (CodeRabbit review on #145).
-                body=(raw_ep.get("body") or "").strip(),
+                body=_prose(raw_ep, "body", f"entrypoints[{i}]", required=False),
             ))
         except (KeyError, TypeError) as e:
             raise ValidationError(f"entrypoints[{i}] in {path}: malformed entrypoint ({e})")

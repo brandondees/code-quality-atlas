@@ -327,6 +327,27 @@ def test_load_manifest_treats_bare_picker_as_empty_string(tmp_path):
     m = load_manifest(path)
     assert m.skills[0].picker == ""
 
+def test_load_manifest_rejects_a_non_string_picker(tmp_path):
+    # #347 weekly-audit follow-up: picker used to be `(s.get("picker") or
+    # "").strip()`, which only guarded against null -- a non-string,
+    # non-null value (e.g. a bare YAML number) is truthy, survives the
+    # `or ""`, and crashes with AttributeError: 'int' object has no
+    # attribute 'strip' instead of a ValidationError naming the field. Now
+    # routed through the same _prose() type check every other prose field
+    # gets, so this is a malformed-manifest error, not a crash.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    picker: 42\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
+    with pytest.raises(ValidationError, match="'picker' must be a string, got int"):
+        load_manifest(path)
+
 def test_load_manifest_treats_bare_description_as_empty_string(tmp_path):
     # Same crash class, one field over: description is required (KeyError
     # caught if the key is absent), but a *present* bare "description:"
@@ -675,6 +696,32 @@ def test_load_manifest_treats_bare_route_note_as_empty_string(tmp_path):
         "      note:\n")
     m = load_manifest(path)
     assert m.router.routes[0].note == ""
+
+
+def test_load_manifest_rejects_a_non_string_route_note(tmp_path):
+    # Same #347 follow-up as picker above: note=x.get("note") or "" also
+    # only guarded against null, not against a non-string truthy value
+    # (e.g. a bare YAML number), which would previously survive to a
+    # caller expecting str with no error at all.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    picker: p\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        "router:\n"
+        "  name: choosing-review-lenses\n"
+        "  description: d\n"
+        "  routes:\n"
+        "    - when: Bug fix\n"
+        "      run: [hunting-silent-failures]\n"
+        "      note: 7\n")
+    with pytest.raises(ValidationError, match="'note' must be a string, got int"):
+        load_manifest(path)
 
 
 def test_load_manifest_treats_bare_router_routes_as_empty_list(tmp_path):
