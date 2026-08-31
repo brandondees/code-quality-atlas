@@ -766,7 +766,7 @@ def load_manifest(path: str) -> Manifest:
                 breadth=_prose(raw_mode, "breadth", f"modes[{i}] in {path}", null_ok=True),
                 floor=raw_mode["floor"],
                 triggers=list(raw_mode.get("triggers") or []),
-                note=_prose(raw_mode, "note", f"modes[{i}]", required=False),
+                note=_prose(raw_mode, "note", f"modes[{i}] in {path}", required=False),
             ))
         except (KeyError, TypeError) as e:
             raise ValidationError(f"modes[{i}] in {path}: malformed mode ({e})")
@@ -783,7 +783,7 @@ def load_manifest(path: str) -> Manifest:
                 description=_prose(raw_ep, "description", f"entrypoints[{i}] in {path}", null_ok=True),
                 shapes=list(shapes),
                 include_design=bool(raw_ep.get("include_design", False)),
-                body=_prose(raw_ep, "body", f"entrypoints[{i}]", required=False),
+                body=_prose(raw_ep, "body", f"entrypoints[{i}] in {path}", required=False),
             ))
         except (KeyError, TypeError) as e:
             raise ValidationError(f"entrypoints[{i}] in {path}: malformed entrypoint ({e})")
