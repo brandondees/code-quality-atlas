@@ -566,7 +566,7 @@ def _list_field(s: dict, key: str, skill_index: int) -> list:
 
 
 def _prose(mapping: dict, key: str, where: str, *, required: bool = True,
-           collapse: bool = False, null_ok: bool = False) -> str:
+           collapse: bool = False, null_ok: bool = False, strip: bool = True) -> str:
     """A prose field, type-checked before normalization.
 
     Coercing with `str(...)` is the trap this exists to avoid: it turns a bare
@@ -574,10 +574,11 @@ def _prose(mapping: dict, key: str, where: str, *, required: bool = True,
     downstream non-empty check and renders as the word "None" in a generated
     table. A number is no better — it survives `str()` and crashes `.strip()`
     otherwise. Anything that isn't a string is a malformed manifest, and says
-    so (regardless of `required`/`null_ok` — those two only decide what
-    counts as *absent*, never what counts as a valid *type*). `collapse` folds
-    internal whitespace (for a value written across several YAML lines that
-    must render as one table cell).
+    so (regardless of `required`/`null_ok`/`strip` — those only decide what
+    counts as *absent* or how a valid string gets normalized, never what
+    counts as a valid *type*). `collapse` folds internal whitespace (for a
+    value written across several YAML lines that must render as one table
+    cell); ignored when `strip=False`.
 
     `required` and `null_ok` are independent: `required` governs a *missing*
     key (KeyError-shaped); `null_ok` governs a *present-but-null* one
@@ -589,6 +590,14 @@ def _prose(mapping: dict, key: str, where: str, *, required: bool = True,
     quietly normalizes to "" rather than erroring — and that tolerance is
     locked in by existing manifests and tests; `null_ok=True` preserves it
     for exactly those callers without loosening the still-strict prepass ones.
+
+    `strip=False` opts an identifier-shaped field (name, slug) out of
+    whitespace normalization entirely: those are validated downstream by
+    `_NAME_RE`/`re.fullmatch`, which a stray leading/trailing space should
+    fail rather than have silently trimmed away before the check ever sees
+    it (round-2 review on #349) — unlike free-text prose fields (description,
+    body, note), where trimming incidental whitespace is the desired
+    normalization.
     """
     if key not in mapping:
         if required:
@@ -602,6 +611,8 @@ def _prose(mapping: dict, key: str, where: str, *, required: bool = True,
     if not isinstance(value, str):
         raise ValidationError(
             f"{where}: {key!r} must be a string, got {type(value).__name__}")
+    if not strip:
+        return value
     return " ".join(value.split()) if collapse else value.strip()
 
 
@@ -653,12 +664,13 @@ def load_manifest(path: str) -> Manifest:
     for i, s in enumerate(data["skills"]):
         try:
             built = [Source(category=b["category"], source=b["source"]) for b in s["built_from"]]
-            artifacts = [Artifact(name=a["name"], detect=a["detect"],
+            artifacts = [Artifact(name=_prose(a, "name", f"skill #{i} artifact"),
+                                  detect=_prose(a, "detect", f"skill #{i} artifact"),
                                   rubric=a["rubric"],
-                                  slug=_prose(a, "slug", f"skill #{i} artifact", null_ok=True))
+                                  slug=_prose(a, "slug", f"skill #{i} artifact", null_ok=True, strip=False))
                          for a in _list_field(s, "artifacts", i)]
             skills.append(Skill(
-                name=_prose(s, "name", f"skill #{i}", null_ok=True),
+                name=_prose(s, "name", f"skill #{i}", null_ok=True, strip=False),
                 description=_prose(s, "description", f"skill #{i}", null_ok=True),
                 shape=s["shape"],
                 wave=s["wave"],
@@ -680,9 +692,9 @@ def load_manifest(path: str) -> Manifest:
         r = data["router"]
         try:
             router = Router(
-                name=_prose(r, "name", "router", null_ok=True),
+                name=_prose(r, "name", "router", null_ok=True, strip=False),
                 description=_prose(r, "description", "router", null_ok=True),
-                routes=[Route(when=x["when"], run=x["run"],
+                routes=[Route(when=_prose(x, "when", "router route"), run=x["run"],
                               note=_prose(x, "note", "router route", required=False),
                               shapes=x.get("shapes"))
                         for x in (r["routes"] or [])],
@@ -736,7 +748,7 @@ def load_manifest(path: str) -> Manifest:
         sy = data["synthesizer"]
         try:
             synthesizer = Synthesizer(
-                name=_prose(sy, "name", "synthesizer", null_ok=True),
+                name=_prose(sy, "name", "synthesizer", null_ok=True, strip=False),
                 description=_prose(sy, "description", "synthesizer", null_ok=True),
                 severity_order=sy["severity_order"],
                 tensions=[Tension(between=t["between"],
@@ -767,7 +779,7 @@ def load_manifest(path: str) -> Manifest:
                     f"entrypoints[{i}] in {path}: 'shapes' must be a list of strings "
                     f"(got {shapes!r}) — use 'shapes: [diff]', not 'shapes: diff'")
             entrypoints.append(Entrypoint(
-                name=_prose(raw_ep, "name", f"entrypoints[{i}]", null_ok=True),
+                name=_prose(raw_ep, "name", f"entrypoints[{i}]", null_ok=True, strip=False),
                 description=_prose(raw_ep, "description", f"entrypoints[{i}]", null_ok=True),
                 shapes=list(shapes),
                 include_design=bool(raw_ep.get("include_design", False)),

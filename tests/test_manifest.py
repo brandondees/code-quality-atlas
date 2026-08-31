@@ -383,6 +383,26 @@ def test_load_manifest_treats_bare_skill_name_as_empty_string(tmp_path):
     with pytest.raises(ValidationError, match="invalid name"):
         validate(m)
 
+def test_load_manifest_does_not_strip_a_padded_skill_name_before_validation(tmp_path):
+    # Round-2 review on #349: _prose()'s default strip=True would trim
+    # ' valid-name ' to 'valid-name', silently passing it past _NAME_RE
+    # where the original `s["name"] or ""` (no .strip()) preserved the
+    # padding and correctly failed validation. name/slug are opted out via
+    # strip=False specifically so this stays caught.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: \" valid-name \"\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n")
+    m = load_manifest(path)
+    assert m.skills[0].name == " valid-name "
+    with pytest.raises(ValidationError, match="invalid name"):
+        validate(m)
+
 
 def test_validate_rejects_unresolvable_source():
     bad = _skill(built_from=[Source(99, "tests/fixtures/research_sample.md#99")])
@@ -721,6 +741,49 @@ def test_load_manifest_rejects_a_non_string_route_note(tmp_path):
         "      run: [hunting-silent-failures]\n"
         "      note: 7\n")
     with pytest.raises(ValidationError, match="'note' must be a string, got int"):
+        load_manifest(path)
+
+def test_load_manifest_rejects_a_non_string_route_when(tmp_path):
+    # Round-2 review on #349: `when=x["when"]` bypassed _prose() entirely
+    # (a pre-existing gap, not introduced by this PR's refactor). A numeric
+    # `when` is truthy, so _validate_router's `if not route.when` check
+    # accepted it silently -- it would only crash later, downstream, on a
+    # caller like `route.when.startswith(...)`.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    picker: p\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        "router:\n"
+        "  name: choosing-review-lenses\n"
+        "  description: d\n"
+        "  routes:\n"
+        "    - when: 7\n"
+        "      run: [hunting-silent-failures]\n")
+    with pytest.raises(ValidationError, match="'when' must be a string, got int"):
+        load_manifest(path)
+
+def test_load_manifest_rejects_a_non_string_artifact_name_or_detect(tmp_path):
+    # Round-2 review on #349: Artifact.name/.detect bypassed _prose() (a
+    # pre-existing gap): `if not a.name or not a.detect` in _validate_skills
+    # is a truthy check, so a numeric value slipped past it silently.
+    path = _write_manifest(tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: reviewing-artifact-conventions\n"
+        "    description: x\n"
+        "    shape: artifact\n"
+        "    wave: 1\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        "    artifacts:\n"
+        "      - { name: 7, detect: y, rubric: 2, slug: x }\n")
+    with pytest.raises(ValidationError, match="'name' must be a string, got int"):
         load_manifest(path)
 
 
