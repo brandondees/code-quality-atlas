@@ -763,7 +763,7 @@ def load_manifest(path: str) -> Manifest:
         try:
             modes.append(Mode(
                 name=raw_mode["name"],
-                breadth=_prose(raw_mode, "breadth", f"modes[{i}]", null_ok=True),
+                breadth=_prose(raw_mode, "breadth", f"modes[{i}] in {path}", null_ok=True),
                 floor=raw_mode["floor"],
                 triggers=list(raw_mode.get("triggers") or []),
                 note=_prose(raw_mode, "note", f"modes[{i}]", required=False),
@@ -779,8 +779,8 @@ def load_manifest(path: str) -> Manifest:
                     f"entrypoints[{i}] in {path}: 'shapes' must be a list of strings "
                     f"(got {shapes!r}) — use 'shapes: [diff]', not 'shapes: diff'")
             entrypoints.append(Entrypoint(
-                name=_prose(raw_ep, "name", f"entrypoints[{i}]", null_ok=True, strip=False),
-                description=_prose(raw_ep, "description", f"entrypoints[{i}]", null_ok=True),
+                name=_prose(raw_ep, "name", f"entrypoints[{i}] in {path}", null_ok=True, strip=False),
+                description=_prose(raw_ep, "description", f"entrypoints[{i}] in {path}", null_ok=True),
                 shapes=list(shapes),
                 include_design=bool(raw_ep.get("include_design", False)),
                 body=_prose(raw_ep, "body", f"entrypoints[{i}]", required=False),

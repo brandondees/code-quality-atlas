@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: MIT
+import re
+
 import pytest
 
 from tooling.manifest import (
@@ -997,6 +999,22 @@ def test_load_manifest_parses_modes(tmp_path):
 def test_load_manifest_defaults_modes_to_empty(tmp_path):
     m = load_manifest(_manifest_with_body(tmp_path, ""))
     assert m.modes == []
+
+
+def test_load_manifest_missing_mode_breadth_error_names_the_file(tmp_path):
+    # dees-bot round-1 atlas review on #349: routing `breadth` through
+    # _prose() means a missing key now raises _prose()'s own
+    # ValidationError directly, bypassing the wrapping `except (KeyError,
+    # TypeError)` that used to add `in {path}` to the message. Locks in
+    # that the file path is still present, just via _prose()'s own `where`
+    # argument instead of the wrapping except clause.
+    path = _manifest_with_body(tmp_path,
+        "modes:\n"
+        "  - name: triage\n"
+        "    floor: Major\n"
+        "    triggers: [triage]\n")
+    with pytest.raises(ValidationError, match=re.escape(path) + r".*missing field 'breadth'"):
+        load_manifest(path)
 
 
 def _syn():
