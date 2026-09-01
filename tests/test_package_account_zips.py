@@ -63,6 +63,51 @@ def test_notice_names_source_repo_commit_and_pinned_license_link(tmp_path):
     assert f"blob/{sha}/LICENSE-CC-BY-4.0" in notice
 
 
+def test_every_per_skill_zip_vendors_the_license_text(tmp_path):
+    """Issue #351: unlike vendor-skills.sh (fixed for #1157), this channel's
+    write_attribution() used to ship only a NOTICE.md linking back to
+    LICENSE-CC-BY-4.0 on GitHub, never the license text itself. That's worse
+    here than it was for #1157: an uploaded zip is extracted into a claude.ai
+    account skill with no ongoing relationship to this git repo at all, so a
+    dead or unreachable link would be the *only* copy of the license terms
+    that skill will ever have. Every zip must carry its own verbatim copy."""
+    out_dir = tmp_path / "zips"
+    run_package(out_dir)
+
+    source_license = (REPO_ROOT / "LICENSE-CC-BY-4.0").read_bytes()
+
+    zips = sorted(out_dir.glob("*.zip"))
+    assert len(zips) > 30  # sanity: the standalone suite is large
+
+    for zip_path in zips:
+        name = zip_path.stem
+        with zipfile.ZipFile(zip_path) as zf:
+            vendored = zf.read(f"{name}/LICENSE-CC-BY-4.0")
+        assert vendored == source_license
+
+
+def test_notice_references_the_vendored_license_file(tmp_path):
+    out_dir = tmp_path / "zips"
+    run_package(out_dir)
+
+    zip_path = out_dir / "checking-restraint.zip"
+    notice = _read_from_zip(zip_path, "checking-restraint/NOTICE.md")
+    # The vendored file is named explicitly, not just linked.
+    assert "vendored alongside" in notice
+    assert "`LICENSE-CC-BY-4.0`" in notice
+
+
+def test_collapsed_zips_also_vendor_the_license_text(tmp_path):
+    out_dir = tmp_path / "zips"
+    run_package(out_dir, "--collapsed")
+
+    source_license = (REPO_ROOT / "LICENSE-CC-BY-4.0").read_bytes()
+    zip_path = out_dir / "reviewing-a-change.zip"
+    with zipfile.ZipFile(zip_path) as zf:
+        vendored = zf.read("reviewing-a-change/LICENSE-CC-BY-4.0")
+    assert vendored == source_license
+
+
 def test_evals_are_excluded_but_skill_content_is_intact(tmp_path):
     """The staging rewrite (needed to add NOTICE.md) must not regress the
     existing evals/ exclusion or drop SKILL.md / reference/ content."""
