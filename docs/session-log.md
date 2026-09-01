@@ -4276,9 +4276,11 @@ verification), `tooling.cli drift` (no drift).
 A fresh session opened with "what's next?" and worked the repo's own
 orientation docs rather than starting from a named task. `docs/open-questions.md`'s
 "Genuinely still open" list had shrunk to two items: **Q21** (the eval-hardening
-campaign), confirmed fully closed per its own resolution note and the
-2026-08-24 session-log entry hardening the last lens
-(`auditing-deployment-and-trust-boundaries`); and **Q22** (does the atlas's own
+campaign), confirmed resolved for the current lens catalog per its own
+resolution note and the 2026-08-24 session-log entry hardening the last lens
+(`auditing-deployment-and-trust-boundaries`) — still open only for extending
+the A-E pattern to any new lens or shape added after this pass; and **Q22**
+(does the atlas's own
 review pass execute the checks it cites), which already carried a
 decision-ready, owner-gated design doc — [`executing-cited-checks.md`](executing-cited-checks.md),
 drafted 2026-08-22 — proposing a small, reversible Phase 1. Asked the owner
