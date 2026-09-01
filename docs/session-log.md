@@ -4270,3 +4270,60 @@ the ACK.
 **Verification:** `markdownlint-cli2` (0 issues), `pytest` (437/437 — no test
 exercises the command's own step ordering directly, so this is prose-level
 verification), `tooling.cli drift` (no drift).
+
+### 2026-09-01 — Q22 Phase 1 shipped: the standing-dispute check
+
+A fresh session opened with "what's next?" and worked the repo's own
+orientation docs rather than starting from a named task. `docs/open-questions.md`'s
+"Genuinely still open" list had shrunk to two items: **Q21** (the eval-hardening
+campaign), confirmed fully closed per its own resolution note and the
+2026-08-24 session-log entry hardening the last lens
+(`auditing-deployment-and-trust-boundaries`); and **Q22** (does the atlas's own
+review pass execute the checks it cites), which already carried a
+decision-ready, owner-gated design doc — [`executing-cited-checks.md`](executing-cited-checks.md),
+drafted 2026-08-22 — proposing a small, reversible Phase 1. Asked the owner
+whether to build it; approved.
+
+**Shipped Phase 1 (M1 — the standing-dispute check).** Added one paragraph to
+`synthesizing-review-findings`'s `## Reviewer discipline` section, generated
+from `tooling/generate_synthesizer.py`'s `build_synthesizer_md` (the same
+function `generate_collapsed.py` reuses for every collapsed entrypoint's
+bundled `reference/synthesis.md`, so one edit reached both surfaces with no
+manifest schema change — exactly the doc's own recommended home and
+mechanism): before affirming any claim not independently re-derived, scan the
+PR's existing comment threads and prior review rounds for a standing dispute
+of that exact claim; treat a disputed claim as unresolved rather than
+settled, without flipping to "the disputing comment is automatically right"
+either. Added 3 meta-review eval scenarios to
+`skills/synthesizing-review-findings/evals/eval.json` (already above D8's
+3-scenario baseline at 9, now 12) in the transcript-input shape the design
+doc's own "how would we know it worked" sub-question anticipated: a direct
+reconstruction of PR #253 (the sharpest recorded instance — a confident
+positive affirmation of an S3 canned-ACL claim already disputed by a standing
+comment ~90 seconds earlier), a precision check that the discipline doesn't
+invent phantom disputes on a finding nobody ever contested, and a boundary
+check distinguishing a *resolved* historical objection (superseded by a
+later fix and a confirming comment) from a *standing* one.
+
+Wrote the dated implementation-plan record the design doc's closing section
+asked for — [`plans/2026-09-01-executing-cited-checks-phase1.md`](plans/2026-09-01-executing-cited-checks-phase1.md)
+— deliberately without the full TDD/checkbox scaffolding the repo's other
+plan docs use, since inventing task-by-task ceremony for a one-paragraph,
+already-completed change would be exactly the ceremony cost Q22 itself warns
+against. Updated `executing-cited-checks.md`'s status line and Phase 1
+section, and `open-questions.md`'s Q22 entry and "Genuinely still open"
+summary, to record the shipped state; Phase 2 (M2, falsification attempts on
+affirmatively-applied greppable rule classes) stays owner-gated pending
+Phase 1 producing signal and a non-self-authored instance, unchanged from
+the design doc's own phasing.
+
+**Verification:** `python -m tooling.cli generate` (regenerated the
+standalone skill and all four collapsed `reference/synthesis.md` bundles),
+`tooling/vendor-skills.sh .` (re-vendored this repo's own 44 lenses),
+`tooling.cli drift` (no drift — this skill is `built_from: []`, so drift
+tracks manifest/generator changes, not research-section hashes),
+`tooling.cli eval --skill synthesizing-review-findings` (12/12 scenarios
+valid), `pytest` (451/451), `markdownlint-cli2` (0 issues) on the touched
+files. No cross-model re-gate this session (design doc frames Phase 1's
+evidence bar as "produces signal," not a pre-ship hardened-floor gate — see
+the plan doc's own note on this).

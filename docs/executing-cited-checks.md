@@ -1,13 +1,15 @@
 # Executing cited checks: forcing the atlas to *apply* the rule it names
 
-**Status: design-only, build owner-gated (2026-08-22).** Resolves the *shape* of a
-fix for [`open-questions.md`](open-questions.md) **Q22** — it does not authorize a
-build. Q22 is the last item on the decisions log's "genuinely still open
-(undecided)" list; this doc works it from question to a decision-ready proposal so
-the owner can approve, amend, or defer a scoped build. Nothing in the suite changes
-until then. Phasing below is deliberately reversible and gated on evidence, mirroring
-how D16/D17 approved a shape first and built each piece against evidence rather than
-up front.
+**Status: Phase 1 shipped (2026-09-01, owner-approved); Phase 2 still owner-gated.**
+Resolved the *shape* of a fix for [`open-questions.md`](open-questions.md) **Q22**
+on 2026-08-22; the owner then approved Phase 1 for build. See
+[`plans/2026-09-01-executing-cited-checks-phase1.md`](plans/2026-09-01-executing-cited-checks-phase1.md)
+for what shipped (M1, the standing-dispute check, in `synthesizing-review-findings`,
+plus 3 meta-review eval scenarios). Phase 2 (M2, falsification attempts on
+affirmatively-applied rule classes) remains gated on Phase 1 producing signal and a
+non-self-authored instance, exactly as phased below. Phasing below is deliberately
+reversible and gated on evidence, mirroring how D16/D17 approved a shape first and
+built each piece against evidence rather than up front.
 
 ## The gap, stated precisely
 
@@ -123,12 +125,12 @@ adding a new artifact.
 
 ## Proposed build (all phases owner-gated; approve per phase)
 
-**Phase 1 — M1 + a meta-review eval seed.** Add the standing-dispute check as a
-`Reviewer discipline` bullet in `synthesizing-review-findings` (reaching both
-surfaces via the generator), plus 2–3 meta-review eval scenarios in the new
-transcript-input shape, including a direct reconstruction of #253. Cheapest,
-reversible, and it targets the most mechanically-preventable shape. This is the phase
-this doc recommends approving first.
+**Phase 1 — M1 + a meta-review eval seed. ✅ Shipped 2026-09-01.** Added the
+standing-dispute check as a `Reviewer discipline` bullet in
+`synthesizing-review-findings` (reaching both surfaces via the generator), plus 3
+meta-review eval scenarios in the new transcript-input shape, including a direct
+reconstruction of #253. See
+[`plans/2026-09-01-executing-cited-checks-phase1.md`](plans/2026-09-01-executing-cited-checks-phase1.md).
 
 **Phase 2 — M2 for greppable claim classes (deferred).** Gate on Phase 1 producing
 signal *and* on a non-self-authored instance (or an eval that stands in for one).

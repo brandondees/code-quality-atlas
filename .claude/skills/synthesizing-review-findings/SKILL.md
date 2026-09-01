@@ -132,6 +132,8 @@ The merged report's severity floor depends on the active depth mode. Below the f
 
 Synthesis must not inflate. Do not raise a finding no lens reported, do not upgrade a severity to seem thorough, and do not turn "No findings" into a verdict with changes. The merged report is exactly the union of real lens findings, deduplicated and ordered — nothing added.
 
+**Check standing disputes before affirming a claim.** Before **affirming** any claim you did not independently re-derive — your own earlier reasoning, a lens's conclusion, or a statement under review — scan the PR's existing comment threads and prior review rounds for a standing dispute of that exact claim. If one exists, treat the claim as **unresolved**, not settled: say so and re-derive it, rather than repeating it as correct. A standing dispute does not make the disputing comment automatically right either — you still adjudicate, you just may not skip the adjudication. This targets a sharper failure than a lens silently missing a check: a *confident, positive affirmation* of something already on the record as disputed, which reads as more authoritative than a miss and is easy to mistake for verification.
+
 ## Going deeper
 
 - [choosing-review-lenses](../choosing-review-lenses/SKILL.md) — the front half: picks which lenses to run before you synthesize their output.

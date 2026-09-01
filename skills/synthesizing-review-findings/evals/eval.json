@@ -74,6 +74,30 @@
         "Surfaces the rounding bug under a Pre-existing section tagged 'pre-existing — not introduced by this change', route: implementer (fix now / file a ticket / ignore), and does NOT let it set or harden this PR's verdict because the diff did not introduce it",
         "Keeps the pre-existing finding scoped to the touched function rather than expanding into a repo-wide hunt, and does not restate it as if this change caused it"
       ]
+    },
+    {
+      "query": "You are about to finalize the merged review for a PR. sweeping-for-security's finding says a new S3 upload endpoint sets the object ACL to `public-read-write`, and its writeup states: 'WRITE lets anyone overwrite or delete the uploaded document, so this is a Blocker.' Before you write the final report, you notice the PR's comment thread already has a comment posted about 90 seconds ago by another automated reviewer: 'WRITE has no effect on an S3 object-level ACL — only READ affects object access; this specific claim about overwrite/delete is incorrect.' Synthesize the review and say what you do with the ACL finding.",
+      "expected_behavior": [
+        "Recognizes the WRITE/overwrite-or-delete claim is under a standing dispute already on the record in this same PR's comment thread, rather than repeating sweeping-for-security's writeup verbatim and affirming it as correct",
+        "Treats the claim as unresolved and re-derives or independently checks it rather than positively affirming it ('this is also correct') against the standing objection",
+        "Does not simply flip to trusting the disputing comment as automatically right either — it still has to adjudicate the underlying claim, and does not silently drop the public-ACL exposure from the report while sorting this out"
+      ]
+    },
+    {
+      "query": "Synthesizing a review: reviewing-api-contract-safety reports that a new `DELETE /users/{id}` endpoint returns 200 with no idempotency key, so calling it twice double-logs an audit event. No other lens found anything, and the PR's comment thread is empty — no other comments at all. Merge this into a single review.",
+      "expected_behavior": [
+        "Does not invent or claim to have found a dispute that doesn't exist, and does not add standing-dispute hedging or ceremony to a finding that was never previously affirmed or disputed by anyone",
+        "Reports the idempotency finding as a normal, direct finding with a verdict, the same as it would without any standing-dispute discipline in play",
+        "Stays proportionate: the standing-dispute check applies when a claim is about to be affirmed as settled, not to every finding a lens raises for the first time"
+      ]
+    },
+    {
+      "query": "Synthesizing a review: hunting-silent-failures flags a bare `except:` in `payment/retry.py:40`. In round 1 of this same PR, a human commenter argued it was intentional and 'not a bug.' In round 2, the author pushed a fix that now logs and re-raises the exception, and a second, later human comment says 'looks good, that addresses my concern.' You are about to affirm that the bare-except issue is now resolved. What do you do?",
+      "expected_behavior": [
+        "Recognizes the round-1 objection was superseded by the round-2 fix and the later confirming comment, so there is no standing (current) dispute left to re-derive — it is resolved history, not an open disagreement",
+        "Distinguishes a resolved historical disagreement from a standing dispute rather than treating every past objection as permanently blocking affirmation",
+        "Affirms the fix as adequate on the basis of the round-2 commit and comment, rather than either ignoring that history entirely or refusing to ever affirm because round 1 once disputed it"
+      ]
     }
   ]
 }
