@@ -38,10 +38,11 @@ design approved & **✅ built 2026-06-26, PR #80**; see the Q20 section below),
 which also resolved D16.
 
 **Genuinely still open (undecided):**
-Q22 (does the atlas's own review pass *execute* the checks it cites — two
-consecutive PRs where it named the rule that would have caught a defect and
-cleared it anyway, both then found by an external reviewer; recorded as a
-pattern, no suite change yet),
+Q22 (does the atlas's own review pass *execute* the checks it cites — three
+instances where it named the rule that would have caught a defect and
+cleared it anyway, all three then caught by an external reviewer; Phase 1
+(the standing-dispute check) ✅ shipped 2026-09-01, Phase 2 (falsification
+attempts) stays owner-gated pending signal),
 Q21 (suite-wide eval comprehensiveness — risk-tiered rollout + the opt-in `eval_min`
 mechanism ✅ built 2026-07-18; **all five floor-tier lenses now hardened**
 (`sweeping-for-security`, `tracing-correctness-and-invariants`,
@@ -754,7 +755,7 @@ findings, absent on llama). Per the runbook these are model-capability limits,
 not heuristic regressions, so no tuning was applied. See the session-log entry
 of the same date.
 
-### Q22 — Does the atlas's own review pass execute the checks it cites?  *(new, 2026-08-09)*
+### Q22 — Does the atlas's own review pass execute the checks it cites?  → PARTIALLY RESOLVED (Phase 1 ✅ shipped 2026-09-01; Phase 2 still owner-gated) *(new, 2026-08-09)*
 
 **Trigger.** Two consecutive PRs where the atlas review approved a change, named the exact rule that would have caught the defect, and cleared it anyway — with an external reviewer finding it minutes later in both cases.
 
@@ -779,7 +780,9 @@ of the same date.
 
 **Worth stating plainly:** all three defects were caught, by external reviewers, on PRs where the atlas ran alongside them. That is the routing block's non-exclusive combination working exactly as designed — the argument for it is now empirical rather than a matter of principle.
 
-**Shape-first proposal drafted (2026-08-22):** [`executing-cited-checks.md`](executing-cited-checks.md) works Q22 from question to a decision-ready fix — two mechanisms (a cheap standing-dispute check that catches #253 alone; a falsification attempt on affirmatively-applied rules for greppable claim classes), a home (`synthesizing-review-findings`, reaching both surfaces via the generator), dispositions for every sub-question above, and a reversible, evidence-gated two-phase build. **Design-only; build owner-gated** — no suite change until approved, matching D16's design-approved / build-deferred split.
+**Shape-first proposal drafted (2026-08-22):** [`executing-cited-checks.md`](executing-cited-checks.md) works Q22 from question to a decision-ready fix — two mechanisms (a cheap standing-dispute check that catches #253 alone; a falsification attempt on affirmatively-applied rules for greppable claim classes), a home (`synthesizing-review-findings`, reaching both surfaces via the generator), dispositions for every sub-question above, and a reversible, evidence-gated two-phase build.
+
+**Phase 1 ✅ shipped (2026-09-01, owner-approved).** M1 (the standing-dispute check) landed as a `Reviewer discipline` paragraph generated into `synthesizing-review-findings` — and, via the shared `build_synthesizer_md`, into every collapsed entrypoint's bundled `reference/synthesis.md` — plus 3 meta-review eval scenarios (a direct #253 reconstruction, a no-phantom-dispute precision check, and a resolved-vs-standing-dispute boundary check). See [`plans/2026-09-01-executing-cited-checks-phase1.md`](plans/2026-09-01-executing-cited-checks-phase1.md) for the full record; `tooling.cli drift` clean, `tooling.cli eval` passes at 12 scenarios, `pytest` (451/451) and `markdownlint-cli2` clean. **Phase 2 (M2) stays owner-gated**, per the design doc's own phasing — it waits on Phase 1 producing signal and a non-self-authored instance (or an eval standing in for one) before scoping M2 to greppable claim classes.
 
 ### Q21 — Suite-wide eval comprehensiveness: raise the bar beyond "≥3 scenarios"  → RESOLVED for the current lens catalog (risk-tiered, opt-in mechanism ✅ built 2026-07-18; all five floor-tier lenses hardened **and cross-model re-gated** (the last two, `sweeping-for-security`/`hunting-silent-failures`, re-gated 2026-08-19); **all 35 of 35 preference-tier lenses now hardened** — wave-1-first sub-wave complete, wave 2 complete, wave 3's original four-way tie closed, plus fifteen more since — twenty-six suites freshly hardened, one (`auditing-config-and-build-hygiene`) re-gated in the session that authored it, one (`reviewing-threat-model`) already comprehensive at authorship and only needed its `eval_min` floor recorded, one (`reviewing-artifact-conventions`) required adapting an original A-E-equivalent taxonomy for its `shape: artifact` presence-activated single-rubric review shape — see [`session-log.md`](session-log.md) 2026-08-09 through 2026-08-19). **Cross-model re-gating the preference tier is now complete (2026-08-20):** all 35 preference-tier lenses hardened by this pass have a recorded cross-model re-gate result, closing out with `reviewing-interoperability` (see the 2026-08-19 thirteenth-through-twenty-first session-log entries and the PRs they link for the full per-lens breakdown, once the substrate and CI flake were resolved). Still open: extending the A-E pattern to any *new* lens or shape added after this pass. *(new, 2026-06-27)*
 

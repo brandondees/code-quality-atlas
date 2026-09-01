@@ -20,7 +20,7 @@ provenance:
 
 Merges the findings of several code-quality-atlas lenses — and of any other review method run alongside them (the built-in code-review skill, a framework review like BMAD, linter output, or human notes) — into one review: deduplicates issues raised by more than one source, reconciles lenses that pull opposite ways (e.g. restraint vs. coverage, cache vs. profile), ranks by severity, and ends on a single block/approve verdict. Use after running any set of atlas review lenses (and any companion reviewers) on a change — typically 3-8 in standard review mode, uncapped in comprehensive mode — when assembling multi-source review output into one report, or when overlapping findings need deduplicating and prioritizing.
 
-**Shape: composition.** Runs after `choosing-review-lenses` has picked the lenses and you have each lens's findings in hand; it produces the single review a human or agent actually reads. It adds no new checks of its own — it only merges.
+**Shape: composition.** Runs after `choosing-review-lenses` has picked the lenses and you have each lens's findings in hand; it produces the single review a human or agent actually reads. It adds no new findings of its own about the reviewed change — it only merges lens findings — though it does apply its own reviewer-discipline guards (below) to how that merge and the surrounding claims are made.
 
 ## Fan-out model
 
@@ -131,6 +131,8 @@ The merged report's severity floor depends on the active depth mode. Below the f
 ## Reviewer discipline
 
 Synthesis must not inflate. Do not raise a finding no lens reported, do not upgrade a severity to seem thorough, and do not turn "No findings" into a verdict with changes. The merged report is exactly the union of real lens findings, deduplicated and ordered — nothing added.
+
+**Check standing disputes before affirming a claim.** Before **affirming** any claim you did not independently re-derive — your own earlier reasoning, a lens's conclusion, or a statement under review — scan the PR's existing comment threads and prior review rounds for a standing dispute of that exact claim. If one exists, treat the claim as **unresolved**, not settled: say so and re-derive it, rather than repeating it as correct. A standing dispute does not make the disputing comment automatically right either — you still adjudicate, you just may not skip the adjudication. This targets a sharper failure than a lens silently missing a check: a *confident, positive affirmation* of something already on the record as disputed, which reads as more authoritative than a miss and is easy to mistake for verification.
 
 ## Going deeper
 
