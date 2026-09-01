@@ -38,6 +38,12 @@ design approved & **✅ built 2026-06-26, PR #80**; see the Q20 section below),
 which also resolved D16.
 
 **Genuinely still open (undecided):**
+Q24 (should we restructure routines/triggers, or move to a different
+agent-orchestration tool, for more control over the review-enforcement
+environment than Claude Code cloud currently allows — open, no disposition yet,
+waiting on Q23's result before it's even decidable),
+Q23 (does a repo-committed, non-plugin hook fire in a Claude Code cloud/routine
+session — open, empirical test in progress),
 Q22 (does the atlas's own review pass *execute* the checks it cites — three
 instances where it named the rule that would have caught a defect and
 cleared it anyway, all three then caught by an external reviewer; Phase 1
@@ -754,6 +760,31 @@ cosmetic format-leak on qwen — a trailing "No findings:" sentence after real
 findings, absent on llama). Per the runbook these are model-capability limits,
 not heuristic regressions, so no tuning was applied. See the session-log entry
 of the same date.
+
+### Q24 — Should we restructure routines/triggers, or move to a different agent-orchestration tool, for more control over the review-enforcement environment?  → OPEN — no disposition *(new, 2026-09-01)*
+
+**Trigger.** The same investigation behind #353, #355, #356, and #357 surfaced a cluster of Claude-Code-cloud-specific constraints that keep showing up as root causes rather than one-off bugs: plugins never load in cloud (`distribution.md`); GitHub repo read/write access is gated by a per-session credential-proxy scope, completely independent of network policy (#356); the command file carrying the actual review orchestration is never vendored and always needs a live cross-repo read (#356); and it's now an open question (Q23) whether even a committed, non-plugin hook fires at all. Each has been individually documented and worked around, but the accumulating list raises a broader question about the platform itself.
+
+**The question.** Is continuing to program around Claude Code cloud's specific constraints (vendoring, account skills, self-audit prose, hook workarounds) the right ongoing investment, or would restructuring how the review pipeline's routines/triggers are wired — or moving the reviewer's execution to a different agent-orchestration substrate entirely (e.g. a self-hosted runner or a different framework with direct control over the container, its filesystem, and its process lifecycle) — remove more of these failure classes at once than continuing to patch around them individually?
+
+**Open sub-questions.**
+
+- **Separate platform limits from model behavior.** Some of what's been found is Claude-Code-cloud-specific (repo-scope gating, plugin non-loading) and would genuinely improve on different infrastructure. Some (#357's fabrication, Q22's cited-but-unexecuted checks) is a property of an LLM-driven reviewer regardless of orchestration substrate, and would very likely recur unchanged on any other tool using the same or a comparable model the same way. Migrating doesn't fix the second category — only the enforcement mechanisms wrapped around it might.
+- **What would "more control" actually buy?** Candidate list to validate before committing to a migration: guaranteed hook/gate execution (vs. Q23's open question), direct read access to the running session's own transcript/tool-call history (for the verification approaches sketched in #357), deterministic pre/post-flight steps that don't depend on the model choosing to comply, and freedom from the credential-proxy's per-repo authorization model.
+- **Cost side.** A different orchestration tool means losing whatever Claude Code cloud already provides for free (hosted compute, the GitHub App integration, the routines/triggers scheduling primitives, this suite's existing distribution channels) and re-building or re-integrating them elsewhere. Worth scoping concretely before deciding this is worth it, not after.
+- **A cheaper middle path exists and should be ruled out first.** Restructuring *within* Claude Code — e.g. routines/triggers pointed at a self-hosted runner, if that's a supported pattern, or the "eager-load the floor-tier lenses" structural fix suggested in #357 that needs no new infrastructure at all — may close most of the same gaps without a platform migration. Q23's result is a direct input here: if committed hooks work, a large share of the motivation for leaving the platform evaporates.
+
+**Status.** Genuinely undecided; no owner disposition yet. Needs Q23's result plus a scoped list of what a different orchestration tool would concretely buy before this is even decidable.
+
+### Q23 — Does a repo-committed, non-plugin hook fire in a Claude Code cloud/routine session?  → OPEN — empirical test in progress *(new, 2026-09-01)*
+
+**Trigger.** Investigating why a cloud review session skipped the atlas's own enforcement surface (#357: fabricated findings for lenses whose `body.md` was never loaded), a Claude Code plugin hook was proposed as an enforcement gate — until it became clear the suite's own shipped hooks (`hooks/hooks.json`, wired through `${CLAUDE_PLUGIN_ROOT}`) are plugin-scoped, and `distribution.md`'s hard-won finding that plugins never load in a Claude Code cloud/routine session (verified via an empty `installed_plugins.json`, no plugin directory on disk) applies to them too.
+
+**The question.** `distribution.md`'s cloud investigation only tested the plugin-install path (the `enabledPlugins`/`extraKnownMarketplaces` marketplace snippet in `.claude/settings.json`). It never tested a **bare `hooks` key committed directly to a target repo's `.claude/settings.json`**, with no plugin involved at all — pointing at a script path inside the repo instead of relying on `${CLAUDE_PLUGIN_ROOT}` (which only exists for a plugin install). The routines docs' own "what a cloud session can use" list (*"shell commands, skills committed to the cloned repository, and connectors"*) doesn't explicitly confirm or rule out hooks either way.
+
+**Why it matters.** If a repo-committed, non-plugin hook does fire in cloud, it's a real enforcement lever — a `PostToolUse` hook on `Read`/`Skill` could observe (and potentially block on) which lens bundles actually got loaded before a review posts, addressing #357 mechanically instead of relying on the reviewer's own self-report (#357's suggested fix #1, which a careless or corner-cutting run can simply lie about, the same way Q22's cited-but-unexecuted checks were). If it doesn't fire, that closes off an entire mitigation family, and the fallback of restructuring the entrypoint to eager-load the floor-tier lenses (#357's suggested fix #4) becomes the load-bearing option.
+
+**Status.** Untested as of this writing. Test in progress: a throwaway `SessionStart` hook (non-plugin, committed directly to a branch's `.claude/settings.json`, emitting a distinctive marker via `additionalContext`) spun up in a sibling cloud session to check whether the marker appears in that session's injected context. Result to be recorded here once observed.
 
 ### Q22 — Does the atlas's own review pass execute the checks it cites?  → PARTIALLY RESOLVED (Phase 1 ✅ shipped 2026-09-01; Phase 2 still owner-gated) *(new, 2026-08-09)*
 
