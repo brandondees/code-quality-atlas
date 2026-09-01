@@ -12,8 +12,8 @@
 # the GUI requires — it rejects a ZIP with more than one top-level folder, so it's
 # one upload per skill. Runtime resources ship (SKILL.md, reference/, examples.md);
 # dev-only material is excluded (evals/). Each skill is CC BY 4.0 licensed, so a
-# generated NOTICE.md (source repo, commit, license link) ships alongside its
-# SKILL.md in every ZIP — mirrors tooling/vendor-skills.sh's write_attribution().
+# generated NOTICE.md plus a vendored copy of LICENSE-CC-BY-4.0 ship alongside
+# its SKILL.md in every ZIP — mirrors tooling/vendor-skills.sh's write_attribution().
 # The whole-suite --bundle mode produces a single archive for convenience only;
 # the claude.ai GUI will NOT accept it (use tooling/vendor-skills.sh if you want
 # the suite inside a repo instead).
@@ -175,11 +175,16 @@ stage_skill() {
 }
 
 # The skill content staged by stage_skill is CC BY 4.0 (LICENSE-CC-BY-4.0),
-# which requires attribution on redistribution. A link back to the source repo
-# satisfies it (per LICENSE). Mirrors vendor-skills.sh's write_attribution()
-# so both distribution channels for this same content carry the same notice.
+# which requires attribution on redistribution. Vendor the actual license
+# text alongside the notice -- not just a link to it -- so an uploaded ZIP is
+# self-contained: extracted into a claude.ai account skill, it has no ongoing
+# relationship to this git repo at all, so a dead or unreachable link would
+# be the *only* copy of the license terms that skill will ever have (issue
+# #351). Mirrors vendor-skills.sh's write_attribution() so both distribution
+# channels for this same content carry the same notice.
 write_attribution() {
   local dest=$1 sha=$2
+  cp "LICENSE-CC-BY-4.0" "$dest/LICENSE-CC-BY-4.0"
   cat >"$dest/NOTICE.md" <<EOF
 # Attribution notice
 
@@ -187,11 +192,14 @@ This skill was packaged from
 [brandondees/code-quality-atlas](https://github.com/brandondees/code-quality-atlas)
 (commit \`$sha\`) by \`tooling/package-account-zips.sh\`.
 
-It is licensed under CC BY 4.0 (see
+It is licensed under CC BY 4.0. The full license text is vendored alongside
+this notice as \`LICENSE-CC-BY-4.0\`, copied verbatim from the source
+repository at the commit above (see also
 [LICENSE-CC-BY-4.0](https://github.com/brandondees/code-quality-atlas/blob/$sha/LICENSE-CC-BY-4.0)
-in the source repository, pinned to the packaged commit so the license text
+in the source repository, pinned to the same commit so the linked text
 matches what was actually packaged). This notice satisfies the attribution
-requirement for this copy; do not remove it while the content remains here.
+requirement for this copy; do not remove either file while the content
+remains here.
 EOF
 }
 

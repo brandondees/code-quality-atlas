@@ -225,7 +225,11 @@ expect the plugin to appear in cloud sessions — it won't.
 - **Channel A — [`tooling/package-account-zips.sh`](../tooling/package-account-zips.sh):**
   emits one upload-ready zip per lens (`<name>/SKILL.md` + `reference/` +
   `examples.md`, no `evals/`) for the claude.ai GUI. `--collapsed` emits the 4
-  collapsed-entrypoint zips instead.
+  collapsed-entrypoint zips instead. Each zip also carries its own `NOTICE.md`
+  and a vendored copy of `LICENSE-CC-BY-4.0` — an uploaded zip is extracted
+  into a claude.ai account skill with no ongoing relationship to this git
+  repo, so the license text ships inside every zip rather than only being
+  linked, mirroring Channel B's self-contained notice below.
 - **Channel B — [`tooling/vendor-skills.sh`](../tooling/vendor-skills.sh):**
   copies the same runtime resources into a target repo's `.claude/skills/`,
   idempotently, ready to commit. `--prune` safely drops only previously-vendored
