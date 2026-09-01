@@ -9,17 +9,5 @@
   },
   "enabledPlugins": {
     "code-quality-atlas@code-quality-atlas": true
-  },
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "echo 'ATLAS-HOOK-TEST-Q23-9a5478ca (non-plugin, repo-committed .claude/settings.json SessionStart hook)'"
-          }
-        ]
-      }
-    ]
   }
 }

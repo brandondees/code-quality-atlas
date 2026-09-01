@@ -35,15 +35,19 @@ design [`review-depth-modes.md`](review-depth-modes.md), build deferred).
 **Recently resolved by build (kept here for context, no longer open):** Q20
 (top-level skill-count → collapse to a few entrypoints + nested disclosure —
 design approved & **✅ built 2026-06-26, PR #80**; see the Q20 section below),
-which also resolved D16.
+which also resolved D16. **Recently resolved empirically (2026-09-01):** Q23
+(does a repo-committed, non-plugin hook fire in a Claude Code cloud/routine
+session — **yes**, confirmed via a sibling cloud session's own post-turn
+summary, with the one caveat that a verbatim transcript quote couldn't be
+pulled back through the API; see the Q23 section below), which unblocks the
+strongest version of #357's fix and narrows Q24.
 
 **Genuinely still open (undecided):**
 Q24 (should we restructure routines/triggers, or move to a different
 agent-orchestration tool, for more control over the review-enforcement
-environment than Claude Code cloud currently allows — open, no disposition yet,
-waiting on Q23's result before it's even decidable),
-Q23 (does a repo-committed, non-plugin hook fire in a Claude Code cloud/routine
-session — open, empirical test in progress),
+environment than Claude Code cloud currently allows — open, no disposition yet;
+Q23 resolved **yes** in the meantime, which narrows but does not close this
+question — see Q24's own entry),
 Q22 (does the atlas's own review pass *execute* the checks it cites — three
 instances where it named the rule that would have caught a defect and
 cleared it anyway, all three then caught by an external reviewer; Phase 1
@@ -776,7 +780,7 @@ of the same date.
 
 **Status.** Genuinely undecided; no owner disposition yet. Needs Q23's result plus a scoped list of what a different orchestration tool would concretely buy before this is even decidable.
 
-### Q23 — Does a repo-committed, non-plugin hook fire in a Claude Code cloud/routine session?  → OPEN — empirical test in progress *(new, 2026-09-01)*
+### Q23 — Does a repo-committed, non-plugin hook fire in a Claude Code cloud/routine session?  → RESOLVED — yes, it fires *(new, 2026-09-01)*
 
 **Trigger.** Investigating why a cloud review session skipped the atlas's own enforcement surface (#357: fabricated findings for lenses whose `body.md` was never loaded), a Claude Code plugin hook was proposed as an enforcement gate — until it became clear the suite's own shipped hooks (`hooks/hooks.json`, wired through `${CLAUDE_PLUGIN_ROOT}`) are plugin-scoped, and `distribution.md`'s hard-won finding that plugins never load in a Claude Code cloud/routine session (verified via an empty `installed_plugins.json`, no plugin directory on disk) applies to them too.
 
@@ -784,7 +788,13 @@ of the same date.
 
 **Why it matters.** If a repo-committed, non-plugin hook does fire in cloud, it's a real enforcement lever — a `PostToolUse` hook on `Read`/`Skill` could observe (and potentially block on) which lens bundles actually got loaded before a review posts, addressing #357 mechanically instead of relying on the reviewer's own self-report (#357's suggested fix #1, which a careless or corner-cutting run can simply lie about, the same way Q22's cited-but-unexecuted checks were). If it doesn't fire, that closes off an entire mitigation family, and the fallback of restructuring the entrypoint to eager-load the floor-tier lenses (#357's suggested fix #4) becomes the load-bearing option.
 
-**Status.** Untested as of this writing. Test in progress: a throwaway `SessionStart` hook (non-plugin, committed directly to a branch's `.claude/settings.json`, emitting a distinctive marker via `additionalContext`) spun up in a sibling cloud session to check whether the marker appears in that session's injected context. Result to be recorded here once observed.
+**Status.** RESOLVED — confirmed, 2026-09-01. A throwaway `SessionStart` hook (non-plugin, committed directly to this branch's `.claude/settings.json`, echoing a distinctive marker) was pushed, then a sibling session was spun up on that branch via the Claude Code Remote API (`environment_kind: anthropic_cloud`, a genuine cloud container, not a local CLI session). That session's own post-turn summary reported it *"verified SessionStart hook fired and output surfaced in system context"* — i.e. the marker from the repo-committed, non-plugin hook did appear in its injected context.
+
+**Caveat, stated plainly.** The verbatim marker text couldn't be pulled back through the API — cross-session messaging to that sibling session returned "not reachable," so this rests on the harness-generated structured summary field, not a quoted transcript. That's meaningfully weaker than the direct-quote confirmation this entry originally asked for, though it's a specific, structured claim from the session itself rather than vague chatter. A second, independent confirmation (e.g. a human starting a cloud session directly on a branch carrying this hook and reporting exactly what they see before their first message) would close the remaining gap. The throwaway hook itself has been removed from `.claude/settings.json` now that the result is recorded.
+
+**Why this matters, now that it's answered.** Committed, non-plugin hooks are a viable, cloud-compatible enforcement mechanism — the `${CLAUDE_PLUGIN_ROOT}`/plugin-loading dead end documented in `distribution.md` does not extend to a bare `hooks` key in a repo's own `.claude/settings.json`. This unblocks the strongest version of #357's fix: a `PostToolUse` hook (matching `Read` on `reference/lenses/**/body.md`, or matching `Skill`) can independently observe — and potentially record or block on — which lenses actually got loaded before a review posts, rather than relying solely on the reviewer's own self-report. **Follow-up:** design that hook and have `tooling/vendor-skills.sh` vendor it alongside the collapsed skills, so any consumer repo that vendors the suite gets the enforcement gate for free.
+
+**Effect on Q24.** With committed hooks confirmed working, a real chunk of the motivation for a platform migration is weaker than when Q24 was opened — Q24 stays genuinely open, but its scope now narrows toward whatever gap a hook-based gate still can't close on this platform (e.g. detecting a *silent* self-report lie the hook itself didn't happen to observe), rather than the full "cloud gives us no enforcement levers at all" framing.
 
 ### Q22 — Does the atlas's own review pass execute the checks it cites?  → PARTIALLY RESOLVED (Phase 1 ✅ shipped 2026-09-01; Phase 2 still owner-gated) *(new, 2026-08-09)*
 
