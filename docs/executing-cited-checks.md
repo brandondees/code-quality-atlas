@@ -145,8 +145,15 @@ Q22 confirms was never the failure.
 
 ## What this doc does not do
 
-It does not change any shipped behavior, add a manifest section, or run the
-generator. It is the shape-first artifact the owner asked for before the suite is
-touched — the analog of D16's design-approved-build-deferred split. On approval, a
-Phase 1 implementation plan lands under [`plans/`](plans/) in the dated,
-`built_from`-clean style the other pipeline plans use.
+**As originally drafted (design-only), this doc itself did not** change any
+shipped behavior, add a manifest section, or run the generator — it was the
+shape-first artifact the owner asked for before the suite was touched, the
+analog of D16's design-approved-build-deferred split. **That has since
+changed for Phase 1**: it shipped 2026-09-01 (generator prose + evals, no
+manifest schema change — see
+[`plans/2026-09-01-executing-cited-checks-phase1.md`](plans/2026-09-01-executing-cited-checks-phase1.md)).
+What still holds is the phasing discipline itself: Phase 2 remains unbuilt
+and owner-gated exactly as scoped above, and any future phase's
+implementation plan lands under [`plans/`](plans/) in the dated,
+`built_from`-clean style the other pipeline plans use, the same way Phase
+1's did.
