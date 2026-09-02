@@ -503,9 +503,13 @@ a review.
      directly in the top-level session — no subagent needed, these are pure
      API calls with no judgment involved.
   3. **The review itself.** For each PR needing round 1 or a re-review, the
-     top-level session first posts the `<!-- atlas-review-ack -->` lock
-     itself (synchronously, before spawning anything, so the race window
-     stays as short as one API call — see the command's own step 3 for why
+     top-level session first posts the ack lock itself — carrying both the
+     `<!-- atlas-review-ack -->` marker and the visible "👀 atlas reviewer
+     engaged" text, same dual-encoding as `atlas-poll-and-review.md`'s own
+     ack post (§2), since a marker-only ack is as vulnerable to
+     `pull_request_read`'s comment-stripping as anywhere else this protocol
+     posts one — synchronously, before spawning anything, so the race window
+     stays as short as one API call (see the command's own step 3 for why
      this matters when Model A might also be watching the same repo), then
      spawns a **separate** subagent via the `Task` tool requesting the
      strongest model available (e.g. Opus) to read and follow
