@@ -46,24 +46,32 @@ label/author filter if given). For each, read its mergeable state via
 
 ## 3. Check reviewer coverage of the current HEAD
 
-**Precondition: only run this check when the PR has at least one posted
-`<!-- atlas-review round:N -->` review.** An `<!-- atlas-review-ack -->` comment
-with **zero** round reviews behind it (e.g. the reviewer crashed right after
-posting the ack, or is still mid-flight on round 1) has no baseline commit to
+A round review is identified by a `## Round N — ...` heading as the body's
+first line, falling back to the redundant `<!-- atlas-review round:N -->`
+marker only where the heading is absent — `pull_request_read` has been
+observed stripping HTML comments from returned review bodies entirely
+(#354/#355), so the marker alone is not a reliable presence/absence signal.
+Likewise, an ack is either the `<!-- atlas-review-ack -->` marker or the
+visible "👀 atlas reviewer engaged" text.
+
+**Precondition: only run this check when the PR has at least one posted round
+review** (per the definition above). An ack comment with **zero** round
+reviews behind it (e.g. the reviewer crashed right after posting the ack, or
+is still mid-flight on round 1) has no baseline commit to
 compare HEAD against — "moved past every posted round" is vacuously true over an
 empty set and would false-positive on a PR that's simply still being reviewed.
 Skip those PRs in this step entirely; don't poke them.
 
 For each open PR that has **at least one** posted round review, compare the HEAD
 commit SHA (`mcp__github__pull_request_read`) against the commit the
-**most recent** `<!-- atlas-review round:N -->` review was posted against
+**most recent** round review was posted against
 (`mcp__github__get_commit` / the review's `commit_id`).
 
 **What counts as "already addressed" — defined precisely, because a plain issue
 comment carries no GitHub-native resolved state** (unlike the conflict-poke
 review thread, which has a real `isResolved`/`isOutdated` signal): a
-`<!-- atlas-coverage-poke -->` comment is addressed once a
-`<!-- atlas-review round:N -->` review has been **posted after it** — compare
+`<!-- atlas-coverage-poke -->` comment is addressed once a round review has
+been **posted after it** — compare
 the poke comment's `created_at` against the most recent round review's
 `submitted_at`. A poke with **no** later round review is still outstanding;
 skip escalating again while one is outstanding. A poke that **does** have a
