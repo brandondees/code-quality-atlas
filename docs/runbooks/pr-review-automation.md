@@ -177,9 +177,10 @@ In the Claude Code web app → **Routines** → **New routine**:
   so the prompt **reads and follows the command file** from the clone, then adds an
   in-session **watch block** so a single `opened`-triggered session re-reviews
   subsequent pushes instead of exiting after the first pass. The command file is
-  written for the per-push-trigger model (it counts prior reviews via
-  `<!-- atlas-review round:N -->` markers); the watch block adapts it to one resident
-  session:
+  written for the per-push-trigger model (it counts prior reviews via each
+  review's `## Round N — ...` heading, falling back to the redundant
+  `<!-- atlas-review round:N -->` marker — see #354/#355); the watch block adapts
+  it to one resident session:
 
   ```text
   You are the atlas reviewer for a pull request in this repo, running as an
@@ -233,9 +234,11 @@ In the Claude Code web app → **Routines** → **New routine**:
   is merged or closed, so pushes get an instant re-review without waiting on a
   poll cycle. Subscribe to its activity and re-run the review on each new push, in
   this same session. GitHub is the source of truth for round state, not memory: on
-  each push, re-derive the current round from the `<!-- atlas-review round:N -->`
-  markers on your prior reviews (paginate through all reviews and use the highest N
-  seen + 1). Keep the round count and the findings you have already raised in
+  each push, re-derive the current round from your prior reviews' `## Round N — ...`
+  headings (primary — `pull_request_read` has been observed stripping the
+  redundant `<!-- atlas-review round:N -->` HTML-comment marker entirely, see
+  #354/#355) or that marker where the heading isn't found (paginate through all
+  reviews and use the highest N seen from either signal + 1). Keep the round count and the findings you have already raised in
   memory only as a performance cache, and always defer to GitHub when they differ —
   especially after a `/compact`, which drops in-memory state and would otherwise
   restart the loop from round 1, re-post the ACK, and re-raise settled findings.
@@ -269,7 +272,8 @@ In the Claude Code web app → **Routines** → **New routine**:
   the current HEAD SHA, `get_comments`/`get_reviews` for new activity) and compare
   against what you saw last round. Nothing new → re-arm the next `send_later` and
   stay silent, no GitHub write. Something new → re-derive the round from the
-  `<!-- atlas-review round:N -->` markers (GitHub is the source of truth, not
+  `## Round N — ...` headings, falling back to the `<!-- atlas-review round:N -->`
+  markers only where a heading is absent (GitHub is the source of truth, not
   memory — see the note above about `/compact`), run the review logic, then
   re-arm.
 
@@ -302,9 +306,9 @@ In the Claude Code web app → **Routines** → **New routine**:
 
   **Prerequisite for the reviewer identity check above:** the reviewer must be
   able to tell its own GitHub login apart from other actors on the PR (so it
-  knows which `<!-- atlas-review round:N -->` reviews are its own to re-derive
-  state from) — `mcp__github__get_me`, same as step 5 of `atlas-review-pr.md`
-  already requires for the own-PR fallback.
+  knows which round reviews are its own to re-derive state from) —
+  `mcp__github__get_me`, same as step 5 of `atlas-review-pr.md` already requires
+  for the own-PR fallback.
 
   **Generic instructions are a floor, not a ceiling — never let them silently
   overrule a repo's own review policy.** The prompt above only names atlas
@@ -395,12 +399,14 @@ run checks them all:
      comments — sees it; body = a whole-PR conflict notice asking them to rebase onto
      base and resolve, only if no unaddressed <!-- atlas-rebase-poke --> review thread
      from you exists. Clean/up-to-date/draft → skip silently.
-  3. For any PR with at least one posted <!-- atlas-review round:N --> review
-     (not just an ack — an ack with zero rounds behind it has no baseline commit
+  3. For any PR with at least one posted round review (identified by a
+     `## Round N — ...` heading, falling back to the redundant
+     <!-- atlas-review round:N --> marker only where the heading is absent — see
+     #354/#355; not just an ack — an ack with zero rounds behind it has no baseline commit
      to compare against and would false-positive on a PR still mid-flight on
      round 1), compare HEAD against the commit the MOST RECENT round review was
      posted against. A <!-- atlas-coverage-poke --> comment is OUTSTANDING only
-     until a <!-- atlas-review round:N --> review is posted AFTER it (compare
+     until a round review (same heading/marker rule) is posted AFTER it (compare
      created_at/submitted_at) — a bare presence check is wrong here, since a
      plain issue comment has no GitHub-native resolved state, and would leave
      the PR's first-ever poke marked "already there" forever, permanently
@@ -432,7 +438,8 @@ run checks them all:
 
 If you already run a scheduled "merge PRs meeting criteria" routine, point its
 criteria at the reviewer's terminal state: an approval from the atlas reviewer
-carrying `<!-- atlas-review round:N -->` plus green CI is a clean "ready" signal.
+carrying a `## Round N — ...` heading (or, redundantly, the
+`<!-- atlas-review round:N -->` marker) plus green CI is a clean "ready" signal.
 
 **Match the approval in the review *body*, not the GitHub review *state*.** GitHub
 forbids approving your own PR, so when the reviewer runs as the **same identity
@@ -441,9 +448,10 @@ you and the reviewer routine also runs as you — it **cannot** emit an `APPROVE
 review state. It falls back to a `COMMENT` whose body says it approves (observed:
 `## Round N — APPROVE (own-PR, posted as comment)`). A gate keyed on
 `reviewDecision == APPROVED` therefore never fires on your own PRs; key it on the
-`<!-- atlas-review round:N -->` marker plus an `APPROVE` token in the review body
-instead. (On PRs opened by a *different* identity, the reviewer posts a real
-`APPROVE` state and either signal works.)
+`## Round N` heading (primary — see #354/#355; the `<!-- atlas-review round:N -->`
+marker is a redundant fallback, not reliably present on read-back) plus an
+`APPROVE` token in the review body instead. (On PRs opened by a *different*
+identity, the reviewer posts a real `APPROVE` state and either signal works.)
 
 **`REQUEST_CHANGES` from this reviewer now means one specific thing: a Blocker.**
 `REVIEW.md`'s *GitHub review state vs. severity* section scopes the hard-blocking
@@ -495,9 +503,13 @@ a review.
      directly in the top-level session — no subagent needed, these are pure
      API calls with no judgment involved.
   3. **The review itself.** For each PR needing round 1 or a re-review, the
-     top-level session first posts the `<!-- atlas-review-ack -->` lock
-     itself (synchronously, before spawning anything, so the race window
-     stays as short as one API call — see the command's own step 3 for why
+     top-level session first posts the ack lock itself — carrying both the
+     `<!-- atlas-review-ack -->` marker and the visible "👀 atlas reviewer
+     engaged" text, same dual-encoding as `atlas-poll-and-review.md`'s own
+     ack post (§2), since a marker-only ack is as vulnerable to
+     `pull_request_read`'s comment-stripping as anywhere else this protocol
+     posts one — synchronously, before spawning anything, so the race window
+     stays as short as one API call (see the command's own step 3 for why
      this matters when Model A might also be watching the same repo), then
      spawns a **separate** subagent via the `Task` tool requesting the
      strongest model available (e.g. Opus) to read and follow

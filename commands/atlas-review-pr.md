@@ -64,30 +64,45 @@ following this file: whatever fetched it (a routine's bootstrap, the `Skill`
 tool, a slash command) already proved that access works. Don't re-verify it
 here; if it had failed, you would not have reached this step to begin with.
 
-Count this reviewer's prior reviews on the PR — your past review summaries carry
-the marker line `<!-- atlas-review round:N -->`. The current round is the highest
-N seen, plus one (first review is **round 1**). **Paginate through all pages** of
-reviews and review threads before counting — `mcp__github__pull_request_read`
-caps results per call, and on a PR with many rounds the `<!-- atlas-review
-round:N -->` marker (and the round-1 `<!-- atlas-review-ack -->`) can sit on a
-later page; reading only the first page undercounts the round and re-raises
-findings already recorded in standing threads.
+Count this reviewer's prior reviews on the PR. Going forward, every round-posting
+review summary this command posts carries **both** a visible `## Round N — ...`
+heading as its first line **and** the invisible marker
+`<!-- atlas-review round:N -->` (dual-encoded — see step 5) — but a review posted
+before this dual-encoding was adopted, or one where `mcp__github__pull_request_read`
+has stripped the HTML comment on read-back entirely (observed happening, #354/#355),
+may carry only one of the two signals. The current round is the highest N seen
+from **either** signal on **any** prior review, plus one (first review is
+**round 1**). **Treat the visible heading as primary** — a round count derived
+from the comment alone can silently undercount when the comment is missing —
+but parse whichever signal is actually present on each review, and never
+conclude "round 1" just because the comment is missing when a `## Round N`
+heading is not found.
+
+**Paginate through all pages** of reviews and review threads before counting —
+`mcp__github__pull_request_read` caps results per call, and on a PR with many
+rounds the marker/heading (and the round-1 ACK) can sit on a later page;
+reading only the first page undercounts the round and re-raises findings
+already recorded in standing threads.
 
 **If this is round 1, post the ACK now, before step 3.** Check the PR's issue
-comments for an existing `<!-- atlas-review-ack -->` first (a compacted or
-restarted session must not re-post it), and if none exists, drop one short
-issue comment marked `<!-- atlas-review-ack -->` (e.g. "👀 atlas reviewer
-engaged — running lenses, hold for findings") so the author knows immediately
-that a reviewer is attached and worth waiting for, since the lens run takes a
-while. Post it **once per PR** — round 1 only; later rounds skip it. Never
-attach findings to the ACK.
+comments for an existing ACK first (a compacted or restarted session must not
+re-post it) — look for **either** the invisible `<!-- atlas-review-ack -->`
+marker **or** the visible text "👀 atlas reviewer engaged" (same
+comment-stripping risk as the round marker above means the invisible marker
+alone is not a reliable absence signal). If neither is found, drop one short
+issue comment carrying **both**: marked `<!-- atlas-review-ack -->` and
+opening with the literal visible phrase "👀 atlas reviewer engaged — running
+lenses, hold for findings" so the author knows immediately that a reviewer is
+attached and worth waiting for, since the lens run takes a while. Post it
+**once per PR** — round 1 only; later rounds skip it. Never attach findings to
+the ACK.
 
 Only after that ack decision is settled: if the round would exceed the cap in
 the convergence policy (loaded next, in step 3), **run no new lenses and post
 no new inline comments**; instead post a single summary that notes the cap is
 reached **and re-surfaces the outstanding non-blocking findings** — read your
-most recent round's summary (`<!-- atlas-review round:N -->`) and carry its
-*Non-blocking (advisory)* list forward **verbatim** (no lenses run this round,
+most recent round's summary (identified per step 2's heading/marker rule) and
+carry its *Non-blocking (advisory)* list forward **verbatim** (no lenses run this round,
 so you cannot recompute the below-floor set), so the human taking over sees
 what is left below the floor — then stop.
 
@@ -208,8 +223,15 @@ and the approve-on-clean behavior. The repo's own `REVIEW.md` always wins.
   refreshed below-floor set; on the cap notice (no lenses run) carry the last
   lens-running round's list verbatim. A changed advisory list is never on its own
   a reason to break silence on a quiet push.
-- Open your review summary with the marker `<!-- atlas-review round:N -->` so the
-  next run can read the round count and carry the advisory list forward.
+- **Dual-encode the round on every review summary you post, in every branch below
+  (clean approve, cap notice, and findings alike):** open the body's first line
+  with the visible heading `## Round N — <label>` (e.g. `## Round N — Major
+  findings, not blocking merge`, `## Round N — no new findings at or above this
+  round's floor`) **and** include the invisible marker `<!-- atlas-review
+  round:N -->` somewhere in the body. The heading is the primary,
+  robust-to-comment-stripping signal a later run reads back (see step 2); the
+  marker is a redundant secondary encoding for exact machine parsing when it
+  does survive. Never post one without the other.
 - **The top-level review state is keyed on severity, not merely "something is at
   or above the floor."** GitHub's `REQUEST_CHANGES` state hard-blocks merge until
   a human explicitly dismisses it — reserve it for what actually needs that: a
@@ -245,9 +267,10 @@ and the approve-on-clean behavior. The repo's own `REVIEW.md` always wins.
 - **If no new finding survives the floor**, behave by whether the PR has already
   come clean:
   - *First time clean* — submit a single `APPROVE` review (or its own-PR `COMMENT`
-    substitute, per the rule above) whose body notes "no new findings at or above
-    this round's floor" (carrying the round marker), including the `Non-blocking
-    (advisory)` list when below-floor findings exist, then stop. This is the
+    substitute, per the rule above) whose body opens with `## Round N — no new
+    findings at or above this round's floor` (dual-encoded per the rule above),
+    including the `Non-blocking (advisory)` list when below-floor findings exist,
+    then stop. This is the
     loop's terminal state: the build session sees no actionable inline comments
     and quiesces. A merge gate keyed on the review *body* (see the
     pr-review-automation runbook) detects the approval by that text either way; a
