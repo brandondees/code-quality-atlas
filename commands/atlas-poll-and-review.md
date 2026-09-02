@@ -85,13 +85,19 @@ could also run an event-triggered reviewer routine alongside this one) —
 treat a state that already changed as "someone else got there first," not an
 error.
 
-- **No ack yet** — round 1. Post the ack issue comment **yourself, in this
-  session, immediately** — carrying both the `<!-- atlas-review-ack -->`
-  marker and the visible "👀 atlas reviewer engaged" text (see step 1) — this
-  is the lock, and it has to happen before anything else for this PR so the
-  race window stays as short as one API call. Do this for every PR needing
-  round 1 *before* spawning any review subagent, then spawn one review
-  subagent per PR (below).
+- **No ack yet, and zero round reviews detected** — round 1. Post the ack
+  issue comment **yourself, in this session, immediately** — carrying both
+  the `<!-- atlas-review-ack -->` marker and the visible "👀 atlas reviewer
+  engaged" text (see step 1) — this is the lock, and it has to happen before
+  anything else for this PR so the race window stays as short as one API
+  call. Do this for every PR needing round 1 *before* spawning any review
+  subagent, then spawn one review subagent per PR (below). **Don't take this
+  branch on ack absence alone** — an unreadable/missing ack with round
+  reviews already posted (e.g. an ack comment deleted after the fact, or a
+  PR reviewed before this protocol required one) is round 2+, not round 1;
+  fall through to the "has ack + at least one round review" branch below
+  instead, treating the missing ack as already-satisfied rather than posting
+  a late, incorrect round-1 ack on an established PR.
 - **Has ack, zero round reviews, ack younger than ~90 minutes**: skip —
   plausibly a review subagent (this cycle's or an earlier one) still running.
   Never spawn a second attempt while one might be in flight.
