@@ -64,18 +64,21 @@ following this file: whatever fetched it (a routine's bootstrap, the `Skill`
 tool, a slash command) already proved that access works. Don't re-verify it
 here; if it had failed, you would not have reached this step to begin with.
 
-Count this reviewer's prior reviews on the PR — your past review summaries carry
-**both** a visible `## Round N — ...` heading as their first line **and** the
-invisible marker `<!-- atlas-review round:N -->` (dual-encoded — see step 5).
-The current round is the highest N seen from either signal, plus one (first
-review is **round 1**). **Treat the visible heading as primary**:
-`mcp__github__pull_request_read` has been observed stripping HTML comments
-from returned review bodies entirely (#354/#355) — a review posted with the
-marker present can come back with no `<!-- ... -->` at all — so a round count
-derived from the comment alone can silently undercount. Parse whichever
-signal is present in what was actually returned, and never conclude "round 1"
-just because the comment is missing when a `## Round N` heading is not. **Paginate
-through all pages** of reviews and review threads before counting —
+Count this reviewer's prior reviews on the PR. Going forward, every round-posting
+review summary this command posts carries **both** a visible `## Round N — ...`
+heading as its first line **and** the invisible marker
+`<!-- atlas-review round:N -->` (dual-encoded — see step 5) — but a review posted
+before this dual-encoding was adopted, or one where `mcp__github__pull_request_read`
+has stripped the HTML comment on read-back entirely (observed happening, #354/#355),
+may carry only one of the two signals. The current round is the highest N seen
+from **either** signal on **any** prior review, plus one (first review is
+**round 1**). **Treat the visible heading as primary** — a round count derived
+from the comment alone can silently undercount when the comment is missing —
+but parse whichever signal is actually present on each review, and never
+conclude "round 1" just because the comment is missing when a `## Round N`
+heading is not found.
+
+**Paginate through all pages** of reviews and review threads before counting —
 `mcp__github__pull_request_read` caps results per call, and on a PR with many
 rounds the marker/heading (and the round-1 ACK) can sit on a later page;
 reading only the first page undercounts the round and re-raises findings
