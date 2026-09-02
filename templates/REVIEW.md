@@ -16,8 +16,13 @@ round cap as a backstop.
 ## Reviewer ACK (start-of-review notice)
 
 On the **first round** for a PR, before running any lenses, post one short issue
-comment marked `<!-- atlas-review-ack -->` — e.g. "👀 atlas reviewer engaged —
-running lenses, hold for findings." This is an acknowledgment, not a finding: it
+comment carrying **both** the invisible marker `<!-- atlas-review-ack -->` **and**
+the literal visible phrase "👀 atlas reviewer engaged — running lenses, hold for
+findings" — the visible phrase is the primary, required detection signal (not
+just illustrative wording), since `pull_request_read` has been observed
+stripping HTML comments from returned bodies entirely (#354/#355), and ACK
+detection must be able to find an existing ACK from the visible text alone.
+This is an acknowledgment, not a finding: it
 lets the author (or their auto-fix session) know immediately that a reviewer is
 attached and worth waiting for, since the lens run itself takes a while. Post it
 **once per PR** (round 1 only); later rounds don't repeat it — the author already
@@ -85,7 +90,10 @@ review summary on every push:
 - **First time the PR comes clean** (nothing new at/above the floor): post one
   concise terminal note — an `APPROVE` (see
   [Approve-on-clean](#approve-on-clean-the-terminal-state)) carrying the round
-  marker and, if any exist, the advisory list.
+  state (a visible `## Round N — ...` heading is the primary signal, dual-encoded
+  with the redundant `<!-- atlas-review round:N -->` marker — see
+  `commands/atlas-review-pr.md` step 5 for the full heading-first/marker-fallback
+  derivation rule, #354/#355) and, if any exist, the advisory list.
 - **Subsequent quiet pushes** (still nothing new at/above the floor): stay
   silent. Resolve any threads the new push addressed, but post **no** new
   summary — there is no news. Don't re-emit `APPROVE`, and don't re-dump the
