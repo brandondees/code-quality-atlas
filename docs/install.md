@@ -246,9 +246,11 @@ malformed value, resolves to `off`.
 
 **What `local` writes, and where.** Under `.code-quality-atlas/learnings/` in your
 project: `invocations.jsonl` (one line per skill invocation — timestamp, plugin commit
-SHA, session id, tool name, and the raw tool-input payload) and
-`pending-retro.jsonl` (one line per ended session — timestamp, plugin SHA, session id,
-transcript path, end reason). Nothing here is transmitted anywhere by itself; at tier
-`local` it stays a file in your own repo for your own team's use (design doc §5's "D17
-note"). Both hooks degrade to a clean no-op (never blocking or crashing the session) if
-`jq` is missing or a hook receives malformed input.
+SHA, session id, tool name, and the tool-input payload's byte length, plus a SHA-256
+digest when `sha256sum` or `shasum` is on `PATH` (`null` otherwise) — never the payload
+itself) and `pending-retro.jsonl` (one line per ended session — timestamp, plugin SHA,
+session id, the transcript's basename, end reason — never the full transcript path, which
+is an absolute local path). Nothing here is transmitted anywhere
+by itself; at tier `local` it stays a file in your own repo for your own team's use
+(design doc §5's "D17 note"). Both hooks degrade to a clean no-op (never blocking or
+crashing the session) if `jq` is missing or a hook receives malformed input.

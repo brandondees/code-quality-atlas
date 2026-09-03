@@ -5,6 +5,7 @@ queue must default to off, gate correctly on the feedback tier (env override,
 then a ratified `.code-quality-atlas/preferences.md` line, ignoring commented-
 out template examples), and degrade to a clean no-op on malformed input or a
 missing `jq` — never block or crash the calling session."""
+import hashlib
 import json
 import shutil
 import subprocess
@@ -60,9 +61,116 @@ def test_env_override_enables_logging(tmp_path):
     record = json.loads(log.read_text().strip().splitlines()[-1])
     assert record["session_id"] == "s1"
     assert record["tool_name"] == "Skill"
-    assert record["tool_input"] == {"skill": "checking-restraint"}
     assert record["plugin_sha"]   # this repo is a git checkout; resolvable
     assert "ts" in record
+    # #364: the raw tool_input payload is never written — only its shape-
+    # independent abstraction (byte length + digest of the compact JSON).
+    assert "tool_input" not in record
+    compact = json.dumps({"skill": "checking-restraint"}, separators=(",", ":"))
+    # tool_input_len is a byte count (the hook computes it with `wc -c`), so
+    # compare against the UTF-8 encoded length, not Python's codepoint count
+    # (len(compact)) — they coincide for this ASCII fixture but would diverge
+    # for a multi-byte payload, per test_env_override_byte_length_is_utf8_bytes.
+    assert record["tool_input_len"] == len(compact.encode("utf-8"))
+    assert record["tool_input_sha256"] == hashlib.sha256(compact.encode()).hexdigest()
+
+
+def test_env_override_byte_length_is_utf8_bytes_not_codepoints(tmp_path):
+    # Regression for Copilot's PR #397 finding: a codepoint-count assertion
+    # would pass by coincidence on ASCII input and mask the hook computing
+    # something other than a true byte count for multi-byte characters.
+    skill_input = json.dumps({
+        "session_id": "s1",
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Skill",
+        "tool_input": {"skill": "café ☂"},
+    })
+    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    _run(LOG_HOOK, tmp_path, skill_input, env_extra=env)
+    log = _learnings_dir(tmp_path) / "invocations.jsonl"
+    record = json.loads(log.read_text().strip().splitlines()[-1])
+    # jq's compact output keeps raw UTF-8 (no \uXXXX escaping), so the
+    # expected serialization must be built the same way to match what the
+    # hook actually hashes/measures.
+    compact = json.dumps({"skill": "café ☂"}, separators=(",", ":"), ensure_ascii=False)
+    assert len(compact.encode("utf-8")) != len(compact)   # the fixture must actually be multi-byte
+    assert record["tool_input_len"] == len(compact.encode("utf-8"))
+    assert record["tool_input_sha256"] == hashlib.sha256(compact.encode("utf-8")).hexdigest()
+
+
+def test_env_override_hashes_with_sorted_keys_so_key_order_does_not_matter(tmp_path):
+    # Regression for CodeRabbit's PR #397 finding: `jq -c` preserves the
+    # original key order, so two logically-equivalent tool_input payloads
+    # with differently ordered keys would hash differently — undermining
+    # tool_input_sha256's use for future repeat-input analysis (§3.4). The
+    # hook must serialize with sorted keys (jq -cS) before hashing.
+    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    ordered_a = json.dumps({
+        "session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Skill",
+        "tool_input": {"a": 1, "b": 2},
+    })
+    ordered_b = json.dumps({
+        "session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Skill",
+        "tool_input": {"b": 2, "a": 1},
+    })
+    _run(LOG_HOOK, tmp_path, ordered_a, env_extra=env)
+    _run(LOG_HOOK, tmp_path, ordered_b, env_extra=env)
+    lines = (_learnings_dir(tmp_path) / "invocations.jsonl").read_text().strip().splitlines()
+    record_a, record_b = (json.loads(line) for line in lines[-2:])
+    assert record_a["tool_input_sha256"] == record_b["tool_input_sha256"]
+    assert record_a["tool_input_len"] == record_b["tool_input_len"]
+
+
+def test_env_override_preserves_explicit_false_tool_input(tmp_path):
+    # Regression for CodeRabbit's PR #397 finding: `.tool_input // null`
+    # folds an explicitly-provided `false` (or any falsy-but-present JSON
+    # value) into the same "no input" bucket as an absent/null tool_input,
+    # via jq's `//` operator treating false as falsy too. The hook must
+    # distinguish "tool_input is present and false" from "tool_input is
+    # absent or null" so the recorded length/hash reflect what was sent.
+    skill_input = json.dumps({
+        "session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Skill",
+        "tool_input": False,
+    })
+    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    _run(LOG_HOOK, tmp_path, skill_input, env_extra=env)
+    record = json.loads((_learnings_dir(tmp_path) / "invocations.jsonl").read_text().strip().splitlines()[-1])
+    assert record["tool_input_len"] == len("false")
+    assert record["tool_input_sha256"] == hashlib.sha256(b"false").hexdigest()
+
+
+def test_env_override_degrades_to_null_digest_without_a_hashing_tool(tmp_path):
+    # Regression for the atlas reviewer's PR #397 finding: a PATH with `jq`
+    # but neither `sha256sum` nor `shasum` must still log the invocation —
+    # with a real tool_input_len and a null (not missing, not a crash)
+    # tool_input_sha256 — rather than silently dropping the record or
+    # producing an undocumented shape.
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    for tool in ("bash", "cat", "mkdir", "printf", "date", "git", "grep",
+                 "sed", "awk", "dirname", "cd", "sh", "jq", "wc", "tr", "cut"):
+        found = shutil.which(tool)
+        if found:
+            (fake_bin / tool).symlink_to(found)
+    assert not (fake_bin / "sha256sum").exists()
+    assert not (fake_bin / "shasum").exists()
+    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+           "PATH": str(fake_bin), "HOME": str(tmp_path)}
+    result = subprocess.run(
+        ["bash", str(LOG_HOOK)], cwd=str(tmp_path), input=_SKILL_INPUT,
+        capture_output=True, text=True, timeout=10, env=env, check=False,
+    )
+    assert result.returncode == 0
+    log = _learnings_dir(tmp_path) / "invocations.jsonl"
+    assert log.exists()
+    record = json.loads(log.read_text().strip().splitlines()[-1])
+    compact = json.dumps({"skill": "checking-restraint"}, separators=(",", ":"))
+    assert record["tool_input_len"] == len(compact.encode("utf-8"))
+    assert record["tool_input_sha256"] is None
 
 
 def test_session_end_queues_retro_under_env_override(tmp_path):
@@ -72,8 +180,51 @@ def test_session_end_queues_retro_under_env_override(tmp_path):
     queue = _learnings_dir(tmp_path) / "pending-retro.jsonl"
     assert queue.exists()
     record = json.loads(queue.read_text().strip().splitlines()[-1])
-    assert record["transcript_path"] == "/tmp/some-transcript.jsonl"
+    # #364: never the full absolute transcript_path (leaks OS username,
+    # $HOME, and project layout) — only its basename.
+    assert "transcript_path" not in record
+    assert record["transcript_basename"] == "some-transcript.jsonl"
     assert record["reason"] == "clear"
+
+
+def test_session_end_basename_strips_windows_backslash_paths_too(tmp_path):
+    # Regression for Copilot's PR #397 finding: splitting only on "/" left a
+    # Windows-style transcript_path (backslash separators) un-reduced, so the
+    # full absolute path — OS username, home directory, project layout —
+    # would still leak into the committed pending-retro.jsonl.
+    session_end_input = json.dumps({
+        "session_id": "s1",
+        "hook_event_name": "SessionEnd",
+        "transcript_path": r"C:\Users\alice\.claude\projects\foo\abc-123.jsonl",
+        "reason": "clear",
+    })
+    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    _run(RETRO_HOOK, tmp_path, session_end_input, env_extra=env)
+    queue = _learnings_dir(tmp_path) / "pending-retro.jsonl"
+    record = json.loads(queue.read_text().strip().splitlines()[-1])
+    assert "transcript_path" not in record
+    assert record["transcript_basename"] == "abc-123.jsonl"
+
+
+def test_session_end_empty_transcript_path_yields_null_basename_not_empty_string(tmp_path):
+    # Regression for the atlas reviewer's PR #397 finding: jq's `if` only
+    # treats null/false as falsy, so `if .transcript_path then ...` alone
+    # would turn an (unlikely but possible) empty-string transcript_path
+    # into transcript_basename: "" instead of null, diverging from the
+    # documented "basename or null" contract.
+    session_end_input = json.dumps({
+        "session_id": "s1",
+        "hook_event_name": "SessionEnd",
+        "transcript_path": "",
+        "reason": "clear",
+    })
+    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    _run(RETRO_HOOK, tmp_path, session_end_input, env_extra=env)
+    queue = _learnings_dir(tmp_path) / "pending-retro.jsonl"
+    record = json.loads(queue.read_text().strip().splitlines()[-1])
+    assert record["transcript_basename"] is None
 
 
 def test_invalid_env_tier_falls_back_to_off(tmp_path):

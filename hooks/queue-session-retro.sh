@@ -10,9 +10,13 @@
 # feedback loop on (see hooks/lib/feedback-tier.sh and
 # docs/self-improvement-loop.md §5). When on, appends one compact JSON line
 # per session to `.code-quality-atlas/learnings/pending-retro.jsonl` in the
-# project's working directory: the transcript path, the plugin commit SHA
-# (D9 — so a later regeneration's champion/challenger comparison knows which
-# suite version reviewed), and why the session ended.
+# project's working directory: the transcript's basename (#364 — never the
+# full `transcript_path`, which is an absolute local path carrying the OS
+# username, `$HOME`, and project layout; the basename alone is enough to
+# identify the session file to a stage-2+ digestion pass running on the same
+# machine, which still has the standard transcript directory available), the
+# plugin commit SHA (D9 — so a later regeneration's champion/challenger
+# comparison knows which suite version reviewed), and why the session ended.
 #
 # Always exits 0 — a broken or absent dependency (jq), an unwritable
 # directory, or malformed input degrades to "don't queue this one", never to
@@ -58,7 +62,7 @@ record="$(printf '%s' "$input" | jq -c \
     ts: $ts,
     plugin_sha: (if $plugin_sha == "" then null else $plugin_sha end),
     session_id: (.session_id // null),
-    transcript_path: (.transcript_path // null),
+    transcript_basename: ((.transcript_path // "") | if . == "" then null else (gsub("\\\\"; "/") | split("/") | last) end),
     reason: (.reason // null)
   }' 2>/dev/null)"
 
