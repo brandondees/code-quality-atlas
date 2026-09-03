@@ -4524,3 +4524,79 @@ above) with real files in a scratch directory, `pytest` (487/487, up from
 pinned v0.10.0 CI uses), `tooling.cli drift` (clean; no skill content
 changed). `docs/distribution.md`'s Channel B section updated to describe
 the marker's trust boundary and `--dry-run`.
+
+### 2026-09-03 (same day, follow-up) — #377 PR review round: forged-marker ownership gap, plus a merge conflict from #398
+
+Two things landed on the #377 PR (#400) after it opened. First, a genuine
+merge conflict: #398 (an unrelated `--with-lens-coverage-hook` feature)
+merged to `main` in between and touched the same two files
+(`tooling/vendor-skills.sh`, `tests/test_vendor_skills.py`). Resolved by
+merging `main` in and combining both feature sets by hand — kept #377's
+marker validation/`--dry-run`/warnings and #398's hook-vendoring call,
+gated the latter behind `DRY_RUN` too (a gap neither PR's own diff had
+covered, since `--dry-run` didn't exist when #398 was written) so
+`--dry-run --with-lens-coverage-hook` together also touch nothing.
+Re-verified everything end to end after the merge, including that specific
+combination, before pushing.
+
+Second, and more important: Copilot and CodeRabbit both independently
+caught a real gap in the #377 fix itself — one the original issue text had
+actually already named ("The #175 collision check also trusts the marker,
+so a planted real skill name re-grants `rm -rf` over a non-tool-managed
+directory without `--force`") but the first round of work only partly
+closed. `is_bare_skill_name` stops a malformed *shape* (a traversal
+segment) from reaching `OLD_NAMES`, but a well-formed, falsely-claimed
+marker line — a real skill name the marker lists as previously vendored,
+for a directory this tool never actually touched — still satisfied both
+`vendor_one`'s collision check and the new `--prune` loop on name-match
+alone. Reproduced against the pre-this-round script: a hand-authored
+`checking-restraint/` directory (no generated-marker comment, i.e. never
+really vendored) plus a marker forging that claim let a plain refresh
+silently `rm -rf` and overwrite it with real content — no `--force`
+needed, no warning, exactly the #175 protection the marker-trust bug was
+supposed to still have.
+
+**Fix:** `is_tool_vendored_skill_dir` checks for independent evidence a
+directory really is this tool's own output — its `SKILL.md` carries the
+exact generated-marker comment `append_generated_marker` writes, which
+nothing else has reason to write. Both `vendor_one`'s collision check and
+the `--prune` loop now require the marker *and* this real-content check
+before treating a directory as tool-owned; `--force` still overrides
+either path, unchanged. The `--prune` loop's marker-rewrite bookkeeping
+was adjusted to match: a stale name skipped (not actually deleted) because
+it failed the ownership check now stays recorded in the marker rather than
+being silently dropped as if it had been pruned.
+
+Also fixed, from the same review round: Copilot's wording finding that the
+git-state warnings undersold the risk to only `--prune`/`--force`, when an
+ordinary refresh already `rm -rf`s and recreates every tool-owned skill
+directory — reworded both warnings to name the real, broader risk. The
+atlas reviewer's own round added two Nits: a vacuous `assert
+"MOCK_RM_CALLED" not in result.stderr` in a unit test that never exercises
+a code path calling `rm` at all (removed, since the real proof is already
+the returncode/message assertions beside it); and a correctness note about
+`confirm_child_of_dest_root` aborting mid-`--prune`-loop potentially
+leaving the marker unrewritten after some stale dirs are already deleted
+— accepted as-is per the reviewer's own "very hard to trigger, not
+blocking" assessment (the guard is unreachable in practice once
+`is_bare_skill_name` already rules out anything that could mismatch).
+
+Added `test_forged_marker_name_does_not_bypass_the_collision_check_on_refresh`
+and `test_forged_stale_marker_name_does_not_authorize_prune_deletion` —
+both reproduced against the pre-fix script first (confirmed the forged
+name really did bypass protection) before confirming the fix closes them.
+One existing test
+(`test_warns_when_target_has_uncommitted_skills_changes`) needed adjusting:
+its dirty-file simulation replaced a `SKILL.md`'s entire content, which
+incidentally erased the generated-marker comment and started tripping the
+new ownership check too — switched to appending instead of replacing, so
+it exercises only the git-dirty warning it's named for.
+
+**Verification:** reproduced both forged-marker attacks against the
+pre-fix script (confirmed real, not theoretical) before fixing, then
+confirmed the fix closes both; `pytest` (511/511, up from 487 — includes
+PR #398's own 12 tests merged in plus 2 new forged-marker regressions and
+one adjusted test); `ruff check .` (clean); `shellcheck --source-path=SCRIPTDIR
+-x` across the full `tooling/`, `hooks/`, `collapsed/hooks/` trees with the
+same globstar/dotglob flags CI uses (15 files, clean); `tooling.cli drift`
+(clean); `markdownlint-cli2` (clean).

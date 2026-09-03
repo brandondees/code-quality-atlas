@@ -251,19 +251,40 @@ is_bare_skill_name() {
   esac
 }
 
+# #377 review (CodeRabbit, Copilot): the marker is target-repo content this
+# tool does not fully trust (is_bare_skill_name above only rules out a
+# malformed *shape* like a traversal segment) -- a well-formed but falsely
+# claimed name (e.g. "checking-restraint" listed in the marker for a
+# directory this tool never actually vendored) still passed the collision
+# check in vendor_one and the --prune loop unmodified. Independent evidence
+# that a directory really is this tool's own output: its SKILL.md carries
+# the exact generated-marker comment append_generated_marker writes, which
+# nothing but this script has reason to write. A directory recorded in the
+# marker but missing that comment is treated as NOT owned by this tool,
+# regardless of what the marker claims.
+is_tool_vendored_skill_dir() {
+  local dest=$1
+  [ -f "$dest/SKILL.md" ] || return 1
+  grep -qF '<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh' "$dest/SKILL.md" 2>/dev/null
+}
+
 # #377: the target repo a maintainer runs this against, and the state of
-# .claude/skills/ inside it, are exactly what --prune/--force delete or
-# overwrite -- warn (never abort; some legitimate targets, e.g. a scratch
-# directory in a test) so the run isn't silent about the two things that
-# would otherwise make a bad delete unrecoverable.
+# .claude/skills/ inside it, are exactly what this tool deletes or overwrites
+# -- not only under --prune/--force. An ordinary refresh already does
+# `rm -rf` + recreate for every tool-owned skill directory in vendor_one, so
+# the risk described below isn't confined to those two flags (Copilot review
+# on PR #400: the original wording undersold this). Warn, never abort --
+# some legitimate targets (e.g. a scratch directory in a test) aren't git
+# working trees at all -- so the run isn't silent about the two things that
+# would otherwise make a bad delete or overwrite unrecoverable.
 check_target_git_state() {
   local abs_target=$1 subdir=$2
   if ! git -C "$abs_target" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    printf 'Warning: %s does not look like a git working tree -- there is no version-control safety net if --prune or --force deletes/overwrites something unexpected.\n' "$abs_target" >&2
+    printf 'Warning: %s does not look like a git working tree -- there is no version-control safety net if this run deletes or overwrites something unexpected (every tool-owned skill directory is recreated on refresh; --prune and --force widen what counts as tool-owned further).\n' "$abs_target" >&2
     return 0
   fi
   if [ -n "$(git -C "$abs_target" status --porcelain -- "$subdir" 2>/dev/null)" ]; then
-    printf 'Warning: %s has uncommitted changes under %s -- review them before running with --prune or --force, since this tool cannot tell your own edits there from ones it is about to overwrite or delete.\n' \
+    printf 'Warning: %s has uncommitted changes under %s -- review them before continuing, since this tool cannot tell your own edits there from ones it is about to overwrite or delete on refresh (more so with --prune or --force).\n' \
       "$abs_target" "$subdir" >&2
   fi
 }
@@ -317,9 +338,14 @@ vendor_one() {
   # prior run of this tool (OLD_NAMES, populated by main() before this loop),
   # a target repo's own unrelated content there would otherwise be silently
   # destroyed by the unconditional `rm -rf` below (#175). --force overrides.
+  # #377 review: the marker claiming a name is not enough by itself -- it's
+  # target-repo content this tool doesn't fully trust, so a forged-but-valid
+  # marker line also requires the directory's own SKILL.md to actually carry
+  # this tool's generated-marker comment (is_tool_vendored_skill_dir) before
+  # it's treated as already owned.
   if [ -e "$dest" ] && [ "$FORCE" -ne 1 ]; then
     local already_owned=1
-    if [ "${#OLD_NAMES[@]}" -gt 0 ] && contains "$name" "${OLD_NAMES[@]}"; then
+    if [ "${#OLD_NAMES[@]}" -gt 0 ] && contains "$name" "${OLD_NAMES[@]}" && is_tool_vendored_skill_dir "$dest"; then
       already_owned=0
     fi
     if [ "$already_owned" -ne 0 ]; then
@@ -638,10 +664,23 @@ main() {
   fi
 
   local pruned=0
+  # #377 review: names --prune skipped because the target directory doesn't
+  # carry this tool's own generated-marker comment -- a forged-but-valid
+  # stale marker line must not authorize deleting a target-owned directory
+  # that merely happens to share its name. Populated only on a real (non
+  # --dry-run) run; excluded from the marker rewrite below so a name this
+  # run declined to touch is never silently dropped from the record.
+  SKIPPED_STALE_NAMES=()
   if [ "$PRUNE" -eq 1 ] && [ "${#stale_names[@]}" -gt 0 ]; then
     local old target
     for old in "${stale_names[@]}"; do
       target="${dest_root:?}/$old"
+      if [ -e "$target" ] && [ "$FORCE" -ne 1 ] && ! is_tool_vendored_skill_dir "$target"; then
+        printf 'Warning: %s is listed as stale in the marker but does not look like something this tool vendored (no generated-marker comment in its SKILL.md)%s; pass --force to remove it anyway, or delete it by hand if you are sure.\n' \
+          "$target" "$([ "$DRY_RUN" -eq 1 ] && printf ' -- would skip in a real run' || printf ' -- skipping deletion')" >&2
+        [ "$DRY_RUN" -eq 1 ] || SKIPPED_STALE_NAMES+=("$old")
+        continue
+      fi
       if [ "$DRY_RUN" -eq 1 ]; then
         printf '  - (dry-run) would prune stale: %s\n' "$old"
       else
@@ -679,11 +718,17 @@ main() {
       fi
       marker_names+=("$name")
     done
-    if [ "${#stale_names[@]}" -gt 0 ] && [ "$PRUNE" -ne 1 ]; then
-      # Still stale, not pruned this run: keep them recorded so a later
-      # --prune (or the notice above) can still find them.
+    if [ "${#stale_names[@]}" -gt 0 ]; then
+      # Keep a stale name recorded when it wasn't actually removed this run
+      # -- either because this wasn't a --prune run at all, or (#377 review)
+      # because --prune declined to delete it (SKIPPED_STALE_NAMES: no
+      # generated-marker evidence of real ownership). Only a name genuinely
+      # deleted above is dropped from the marker.
       local old
       for old in "${stale_names[@]}"; do
+        if [ "$PRUNE" -eq 1 ] && ! { [ "${#SKIPPED_STALE_NAMES[@]}" -gt 0 ] && contains "$old" "${SKIPPED_STALE_NAMES[@]}"; }; then
+          continue  # actually pruned this run
+        fi
         marker_names+=("$old")
       done
     fi

@@ -456,6 +456,77 @@ def test_refresh_without_prune_also_rejects_a_traversal_marker_line(tmp_path):
     assert "/etc/passwd" not in marker.read_text()
 
 
+def test_forged_marker_name_does_not_bypass_the_collision_check_on_refresh(tmp_path):
+    """Regression for a Major finding from Copilot and CodeRabbit on this
+    PR: is_bare_skill_name only rules out a malformed *shape* (a traversal
+    segment, an absolute path). A well-formed but falsely claimed marker
+    line -- a real skill name the marker lists as previously vendored, for
+    a directory this tool never actually touched -- previously still
+    satisfied vendor_one's #175 collision check (`contains "$name"
+    "${OLD_NAMES[@]}"` alone) and got silently `rm -rf`'d and overwritten
+    without --force. Plants exactly that: a hand-authored
+    "checking-restraint" directory (no generated-marker comment in its
+    SKILL.md, i.e. never actually vendored) alongside a marker that falsely
+    claims it was."""
+    target = tmp_path / "target-repo"
+    skills_dir = target / ".claude" / "skills"
+    colliding = skills_dir / "checking-restraint"
+    colliding.mkdir(parents=True)
+    (colliding / "SKILL.md").write_text("# hand-authored, never vendored by this tool\n")
+    (colliding / "my-private-notes.txt").write_text("do not delete\n")
+    marker = skills_dir / ".atlas-vendored"
+    marker.write_text(
+        "# code-quality-atlas vendored skills — do not hand-edit; regenerate with tooling/vendor-skills.sh\n"
+        "# format=1\n"
+        "checking-restraint\n"
+    )
+
+    result = run_vendor_raw(target)
+    assert result.returncode != 0, (
+        "a forged marker claim must not let this run silently succeed while "
+        f"overwriting non-owned content: stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "checking-restraint" in result.stderr
+    assert "skipping" in result.stderr.lower() or "skipped" in result.stderr.lower()
+
+    # The critical assertion: the hand-authored content must be completely
+    # untouched, exactly like the #175 regression this mirrors.
+    assert (colliding / "SKILL.md").read_text() == "# hand-authored, never vendored by this tool\n"
+    assert (colliding / "my-private-notes.txt").read_text() == "do not delete\n"
+
+
+def test_forged_stale_marker_name_does_not_authorize_prune_deletion(tmp_path):
+    """Same forgery, on the --prune path instead of the collision path: a
+    marker line naming a real skill the current run doesn't vendor (so it's
+    "stale") for a directory this tool never actually touched must not let
+    --prune delete it. confirm_child_of_dest_root alone doesn't catch this
+    -- the forged name's path is a perfectly legitimate child of dest_root;
+    it's real ownership evidence (is_tool_vendored_skill_dir) that's needed
+    here, the same fix as the collision-check regression above."""
+    target = tmp_path / "target-repo"
+    skills_dir = target / ".claude" / "skills"
+    victim = skills_dir / "not-actually-vendored"
+    victim.mkdir(parents=True)
+    (victim / "SKILL.md").write_text("# hand-authored, never vendored by this tool\n")
+    marker = skills_dir / ".atlas-vendored"
+    marker.write_text(
+        "# code-quality-atlas vendored skills — do not hand-edit; regenerate with tooling/vendor-skills.sh\n"
+        "# format=1\n"
+        "not-actually-vendored\n"
+    )
+
+    result = run_vendor_raw(target, "--prune")
+    assert result.returncode == 0, result.stderr
+    assert "not-actually-vendored" in result.stderr
+    assert "does not look like something this tool vendored" in result.stderr
+
+    # The critical assertion: survives untouched, and stays recorded in the
+    # marker rather than being silently dropped now that it wasn't deleted.
+    assert victim.is_dir()
+    assert (victim / "SKILL.md").read_text() == "# hand-authored, never vendored by this tool\n"
+    assert "not-actually-vendored" in marker_names(target)
+
+
 def test_dry_run_creates_nothing(tmp_path):
     target = tmp_path / "target-repo"
     target.mkdir()
@@ -559,7 +630,12 @@ def test_warns_when_target_has_uncommitted_skills_changes(tmp_path):
     subprocess.run(["git", "add", "-A"], cwd=str(target), check=True)
     subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=str(target), check=True)
 
-    (target / ".claude" / "skills" / "checking-restraint" / "SKILL.md").write_text("dirty\n")
+    # Append rather than replace: keeps the trailing generated-marker
+    # comment intact, so this exercises only the git-dirty warning, not the
+    # #377-review ownership check (is_tool_vendored_skill_dir) that a
+    # wholesale rewrite would also -- correctly -- trip as a collision.
+    skill_md = target / ".claude" / "skills" / "checking-restraint" / "SKILL.md"
+    skill_md.write_text(skill_md.read_text() + "\n<!-- dirty edit for this test -->\n")
 
     result = run_vendor_raw(target)
     assert result.returncode == 0, result.stderr
@@ -626,7 +702,13 @@ def test_confirm_child_of_dest_root_rejects_a_mismatched_parent(tmp_path):
     """Direct unit test of the defense-in-depth check (#377): unreachable
     through main()'s own flow today (is_bare_skill_name already rules out
     anything that could mismatch), which is exactly why it needs its own
-    test rather than only integration coverage through main()."""
+    test rather than only integration coverage through main(). Tests the
+    function in isolation -- it never calls rm itself (main()'s prune loop
+    does, only after this check passes), so there's no rm call to mock or
+    assert against here; the real proof is the returncode and message below,
+    plus the integration-level test_prune_rejects_path_traversal_marker_line,
+    which does exercise a real rm call (atlas review round-1 finding on this
+    PR, dropping a vacuous MOCK_RM assertion this test previously carried)."""
     dest_root = tmp_path / "dest_root"
     dest_root.mkdir()
     outside = tmp_path / "outside"
@@ -634,7 +716,6 @@ def test_confirm_child_of_dest_root_rejects_a_mismatched_parent(tmp_path):
 
     bash_script = f"""
 set -euo pipefail
-{_MOCK_RM}
 {_source_functions_only()}
 confirm_child_of_dest_root "{outside}/victim" "{dest_root}"
 """
@@ -644,7 +725,6 @@ confirm_child_of_dest_root "{outside}/victim" "{dest_root}"
     )
     assert result.returncode != 0
     assert "refusing to delete" in result.stderr
-    assert "MOCK_RM_CALLED" not in result.stderr
 
 
 def test_confirm_child_of_dest_root_accepts_a_true_child(tmp_path):
