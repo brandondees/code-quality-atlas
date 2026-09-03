@@ -78,6 +78,15 @@ fi
 
 session_id="$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null)"
 [ -n "$session_id" ] || exit 0
+# Defense in depth (Copilot review, PR #398): session_id is interpolated
+# straight into a filesystem path below. It's harness-supplied, not
+# attacker-controlled in the threat models this hook actually runs under --
+# but reject anything outside a safe charset before it ever reaches a path,
+# rather than trust that shape by assumption. A rejected session_id is the
+# same as an empty one: fail open, this hook only records/gates evidence.
+case "$session_id" in
+  *[!A-Za-z0-9_-]*) exit 0 ;;
+esac
 
 state_file=".claude/.atlas-lens-coverage/$session_id.txt"
 # No reads recorded yet this session: nothing to check against, and the

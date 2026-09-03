@@ -49,6 +49,14 @@ command -v jq >/dev/null 2>&1 || exit 0
 
 session_id="$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null)"
 [ -n "$session_id" ] || exit 0
+# Defense in depth (Copilot review, PR #398, originally against the sibling
+# gate-lens-coverage.sh -- same interpolation-into-a-path pattern here).
+# session_id is harness-supplied, not attacker-controlled in this hook's
+# actual threat model, but reject anything outside a safe charset before it
+# reaches a path rather than trust that shape by assumption.
+case "$session_id" in
+  *[!A-Za-z0-9_-]*) exit 0 ;;
+esac
 
 tool_name="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null)"
 

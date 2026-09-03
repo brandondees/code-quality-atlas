@@ -377,6 +377,18 @@ def test_track_dedupes_repeat_reads_of_the_same_lens(tmp_path):
     assert _lens_coverage_state(tmp_path).read_text().splitlines() == ["hunting-silent-failures"]
 
 
+def test_track_rejects_a_path_traversal_shaped_session_id(tmp_path):
+    # Copilot review, PR #398: session_id is interpolated straight into a
+    # filesystem path -- confirm a hostile-shaped value is rejected rather
+    # than escaping the intended state directory.
+    stdin = json.dumps({
+        "session_id": "../../../../tmp/evil", "tool_name": "Skill",
+        "tool_input": {"skill": "hunting-silent-failures"},
+    })
+    _run(TRACK_HOOK, tmp_path, stdin)
+    assert not (tmp_path / ".claude" / ".atlas-lens-coverage").exists()
+
+
 def _run_gate(cwd, stdin, env_extra=None):
     env = {"PATH": "/usr/bin:/bin:/usr/local/bin", "HOME": str(cwd)}
     if env_extra:
@@ -493,4 +505,17 @@ def test_gate_fails_open_when_no_state_file_exists_yet_for_this_session(tmp_path
     _make_known_lens(tmp_path, "tracing-correctness-and-invariants")
     assert not _lens_coverage_state(tmp_path).exists()
     result = _run_gate(tmp_path, _gate_body("tracing-correctness-and-invariants"))
+    assert result.returncode == 0
+
+
+def test_gate_rejects_a_path_traversal_shaped_session_id(tmp_path):
+    # Copilot review, PR #398: same interpolation-into-a-path pattern as the
+    # tracker's own regression test above. A hostile-shaped session_id must
+    # fail open (harmlessly), never touch a path outside the state directory.
+    _enable_gate(tmp_path)
+    _make_known_lens(tmp_path, "tracing-correctness-and-invariants")
+    result = _run_gate(tmp_path, json.dumps({
+        "session_id": "../../../../tmp/evil",
+        "tool_input": {"body": "Major\n- x.py:1 (tracing-correctness-and-invariants)"},
+    }))
     assert result.returncode == 0
