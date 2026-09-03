@@ -119,13 +119,18 @@ posted_text="$(printf '%s' "$input" | jq -r '[.tool_input | .. | strings] | join
 
 # Lenses that exist for real on this filesystem, in either shape a bundle can
 # ship in -- the allowlist that keeps an ordinary parenthetical from being
-# misread as a lens citation.
+# misread as a lens citation. Matched on the marker FILE each shape actually
+# carries (body.md / SKILL.md), not just the containing directory (Copilot
+# review, PR #398): a bare directory match would misclassify any unrelated
+# */skills/* directory a consumer repo happens to have (e.g. a non-atlas
+# skills/todo/ with no SKILL.md) as a "known lens," letting an innocuous
+# "(todo)" parenthetical in review prose block a post.
 known_lenses="$(
   {
-    find "$project_dir" -maxdepth 6 -type d -path '*/reference/lenses/*' -not -path '*/.git/*' 2>/dev/null \
-      | sed -E 's#.*/reference/lenses/##; s#/.*##'
-    find "$project_dir" -maxdepth 3 -type d -path '*/skills/*' -not -path '*/.git/*' 2>/dev/null \
-      | sed -E 's#.*/skills/##; s#/.*##'
+    find "$project_dir" -maxdepth 7 -type f -path '*/reference/lenses/*/body.md' -not -path '*/.git/*' 2>/dev/null \
+      | sed -E 's#/body\.md$##; s#.*/reference/lenses/##; s#/.*##'
+    find "$project_dir" -maxdepth 4 -type f -path '*/skills/*/SKILL.md' -not -path '*/.git/*' 2>/dev/null \
+      | sed -E 's#/SKILL\.md$##; s#.*/skills/##; s#/.*##'
   } | sort -u
 )"
 [ -n "$known_lenses" ] || exit 0   # can't tell what a real lens is here -- nothing safe to enforce

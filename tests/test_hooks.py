@@ -493,6 +493,24 @@ def test_gate_ignores_a_benign_parenthetical_that_is_not_a_known_lens(tmp_path):
     assert result.returncode == 0
 
 
+def test_gate_ignores_a_skills_directory_with_no_skill_md_marker(tmp_path):
+    # Copilot review, PR #398: known_lenses must be built from the marker
+    # FILE each lens shape actually carries (SKILL.md/body.md), not just the
+    # containing directory -- otherwise an unrelated skills/<name>/ a
+    # consumer repo happens to have (no SKILL.md at all, e.g. a non-atlas
+    # skills/todo/) is misread as a "known lens," and a benign "(todo)"
+    # parenthetical in review prose falsely trips the gate.
+    _enable_gate(tmp_path)
+    _make_known_lens(tmp_path, "tracing-correctness-and-invariants")
+    (tmp_path / "skills" / "todo").mkdir(parents=True)
+    _record_prior_read(tmp_path, "some-other-lens")
+    result = _run_gate(tmp_path, json.dumps({
+        "session_id": "s1",
+        "tool_input": {"body": "See the todo list (todo) for details."},
+    }))
+    assert result.returncode == 0
+
+
 def test_gate_fails_open_when_no_state_file_exists_yet_for_this_session(tmp_path):
     # Distinct code path from test_gate_ratified_line_blocks_a_missing_lens_citation:
     # there, a state file exists (created by _make_known_lens's session having
