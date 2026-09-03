@@ -15,6 +15,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 LOG_HOOK = REPO_ROOT / "hooks" / "log-skill-invocation.sh"
 RETRO_HOOK = REPO_ROOT / "hooks" / "queue-session-retro.sh"
 ROUTE_HOOK = REPO_ROOT / "hooks" / "route.sh"
+TRACK_HOOK = REPO_ROOT / "hooks" / "lens-coverage" / "track-lens-reads.sh"
+GATE_HOOK = REPO_ROOT / "hooks" / "lens-coverage" / "gate-lens-coverage.sh"
 
 _SKILL_INPUT = json.dumps({
     "session_id": "s1",
@@ -335,10 +337,16 @@ def test_collapsed_hooks_json_matches_standalone():
 
 
 def test_collapsed_generic_hook_scripts_match_standalone():
-    # log-skill-invocation.sh, queue-session-retro.sh, and lib/feedback-tier.sh
-    # carry no skill-name-specific content (unlike route.sh), so they must
-    # stay byte-identical between the two plugin forms.
-    for rel in ("log-skill-invocation.sh", "queue-session-retro.sh", "lib/feedback-tier.sh"):
+    # log-skill-invocation.sh, queue-session-retro.sh, lib/feedback-tier.sh,
+    # and the lens-coverage/ pair carry no skill-name-specific content (unlike
+    # route.sh), so they must stay byte-identical between the two plugin forms.
+    for rel in (
+        "log-skill-invocation.sh",
+        "queue-session-retro.sh",
+        "lib/feedback-tier.sh",
+        "lens-coverage/track-lens-reads.sh",
+        "lens-coverage/gate-lens-coverage.sh",
+    ):
         standalone = (REPO_ROOT / "hooks" / rel).read_text(encoding="utf-8")
         collapsed = (COLLAPSED_HOOKS_DIR / rel).read_text(encoding="utf-8")
         assert collapsed == standalone, f"collapsed/hooks/{rel} has drifted from hooks/{rel}"
@@ -438,3 +446,309 @@ def test_hooks_registered_in_hooks_json():
     assert any(h["matcher"] == "Skill" for h in post_tool_use)
     assert "SessionEnd" in hooks["hooks"]
     assert "SessionStart" in hooks["hooks"]   # the pre-existing router hook survives
+
+
+# --- #357/Q23 lens-coverage hooks: track-lens-reads.sh (PostToolUse Read|Skill)
+# records which lens bundles were actually loaded; gate-lens-coverage.sh
+# (PreToolUse) blocks a review post that attributes a finding to one that
+# wasn't. Round-1 review on PR #398 found two Major bugs neither had a
+# regression test for — the tracker never matched the Skill tool at all (this
+# repo's own primary resolution path), and (claimed, not reproduced against
+# the pushed fix — kept here as a regression lock either way) the gate's
+# opt-in check could mis-parse a template-shaped preferences.md line. These
+# tests cover both, plus the core pass/block behavior.
+
+def _lens_coverage_hooks_registered_for(matcher, hooks_json_path):
+    hooks = json.loads(hooks_json_path.read_text())
+    return [h for h in hooks["hooks"].get("PostToolUse", []) if h["matcher"] == matcher]
+
+
+def test_track_lens_reads_registered_under_both_read_and_skill_matchers():
+    # Regression for the Major finding: a script wired under only "Read"
+    # never fires for a lens loaded via the Skill tool at all — this asserts
+    # the wiring itself, independent of the script's own tool_name branching
+    # tested below.
+    for matcher in ("Read", "Skill"):
+        entries = _lens_coverage_hooks_registered_for(matcher, REPO_ROOT / "hooks" / "hooks.json")
+        assert any(
+            "lens-coverage/track-lens-reads.sh" in h["command"]
+            for entry in entries for h in entry["hooks"]
+        ), f"track-lens-reads.sh not registered under PostToolUse matcher {matcher!r}"
+
+
+def _lens_coverage_state(cwd, session_id="s1"):
+    return cwd / ".claude" / ".atlas-lens-coverage" / f"{session_id}.txt"
+
+
+def test_track_records_a_skill_tool_invocation_of_a_lens(tmp_path):
+    # The Major finding itself: a lens invoked via Skill (tool_input.skill),
+    # not Read, must still be recorded.
+    stdin = json.dumps({
+        "session_id": "s1", "tool_name": "Skill",
+        "tool_input": {"skill": "hunting-silent-failures", "args": ""},
+    })
+    _run(TRACK_HOOK, tmp_path, stdin)
+    assert _lens_coverage_state(tmp_path).read_text().splitlines() == ["hunting-silent-failures"]
+
+
+def test_track_records_a_standalone_skill_md_read(tmp_path):
+    stdin = json.dumps({
+        "session_id": "s1", "tool_name": "Read",
+        "tool_input": {"file_path": "skills/checking-restraint/SKILL.md"},
+    })
+    _run(TRACK_HOOK, tmp_path, stdin)
+    assert _lens_coverage_state(tmp_path).read_text().splitlines() == ["checking-restraint"]
+
+
+def test_track_records_a_collapsed_entrypoint_lens_body_read(tmp_path):
+    stdin = json.dumps({
+        "session_id": "s1", "tool_name": "Read",
+        "tool_input": {"file_path": "collapsed/skills/reviewing-a-change/reference/lenses/checking-restraint/body.md"},
+    })
+    _run(TRACK_HOOK, tmp_path, stdin)
+    assert _lens_coverage_state(tmp_path).read_text().splitlines() == ["checking-restraint"]
+
+
+def test_track_ignores_an_unrelated_read(tmp_path):
+    stdin = json.dumps({
+        "session_id": "s1", "tool_name": "Read",
+        "tool_input": {"file_path": "README.md"},
+    })
+    _run(TRACK_HOOK, tmp_path, stdin)
+    assert not _lens_coverage_state(tmp_path).exists()
+
+
+def test_track_dedupes_repeat_reads_of_the_same_lens(tmp_path):
+    stdin = json.dumps({
+        "session_id": "s1", "tool_name": "Skill",
+        "tool_input": {"skill": "hunting-silent-failures"},
+    })
+    _run(TRACK_HOOK, tmp_path, stdin)
+    _run(TRACK_HOOK, tmp_path, stdin)
+    assert _lens_coverage_state(tmp_path).read_text().splitlines() == ["hunting-silent-failures"]
+
+
+def test_track_rejects_a_path_traversal_shaped_session_id(tmp_path):
+    # Copilot review, PR #398: session_id is interpolated straight into a
+    # filesystem path -- confirm a hostile-shaped value is rejected rather
+    # than escaping the intended state directory.
+    stdin = json.dumps({
+        "session_id": "../../../../tmp/evil", "tool_name": "Skill",
+        "tool_input": {"skill": "hunting-silent-failures"},
+    })
+    _run(TRACK_HOOK, tmp_path, stdin)
+    assert not (tmp_path / ".claude" / ".atlas-lens-coverage").exists()
+
+
+def _run_gate(cwd, stdin, env_extra=None):
+    env = {"PATH": "/usr/bin:/bin:/usr/local/bin", "HOME": str(cwd)}
+    if env_extra:
+        env.update(env_extra)
+    return subprocess.run(
+        ["bash", str(GATE_HOOK)], cwd=str(cwd), input=stdin,
+        capture_output=True, text=True, timeout=10, env=env, check=False,
+    )
+
+
+def _gate_body(finding_lens):
+    return json.dumps({"session_id": "s1", "tool_input": {"body": f"Major\n- x.py:1 ({finding_lens})"}})
+
+
+def _enable_gate(cwd, prefs_text="lens-coverage-gate: on\n"):
+    prefs_dir = cwd / ".code-quality-atlas"
+    prefs_dir.mkdir(exist_ok=True)
+    (prefs_dir / "preferences.md").write_text(prefs_text)
+
+
+def _make_known_lens(cwd, name):
+    lens_dir = cwd / "skills" / name
+    lens_dir.mkdir(parents=True, exist_ok=True)
+    (lens_dir / "SKILL.md").write_text(f"---\nname: {name}\n---\n")
+
+
+def _record_prior_read(cwd, lens, session_id="s1"):
+    # Writes the state file directly rather than via track-lens-reads.sh --
+    # these gate tests exercise gate-lens-coverage.sh in isolation (the
+    # tracker/gate integration itself is covered separately by
+    # test_gate_passes_when_the_cited_lens_was_actually_read). A state file
+    # must exist with *some* content, or the gate's own state_file-missing
+    # check (tested by test_gate_fails_open_when_no_state_file_exists_yet_
+    # for_this_session) would fail these tests open for the wrong reason
+    # before ever reaching the logic each of these actually means to test.
+    state = _lens_coverage_state(cwd, session_id)
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(lens + "\n")
+
+
+def test_gate_off_by_default_even_with_a_missing_lens_citation(tmp_path):
+    _make_known_lens(tmp_path, "tracing-correctness-and-invariants")
+    _record_prior_read(tmp_path, "some-other-lens")
+    result = _run_gate(tmp_path, _gate_body("tracing-correctness-and-invariants"))
+    assert result.returncode == 0
+
+
+def test_gate_commented_out_template_example_stays_inert(tmp_path):
+    # Same shape as the shipped preferences template: the whole example lives
+    # inside an HTML comment block. A gate line in there must never activate.
+    _enable_gate(tmp_path, "<!--\nlens-coverage-gate: on\n-->\n")
+    _make_known_lens(tmp_path, "tracing-correctness-and-invariants")
+    _record_prior_read(tmp_path, "some-other-lens")
+    result = _run_gate(tmp_path, _gate_body("tracing-correctness-and-invariants"))
+    assert result.returncode == 0
+
+
+def test_gate_ratified_line_blocks_a_missing_lens_citation(tmp_path):
+    _enable_gate(tmp_path)
+    _make_known_lens(tmp_path, "tracing-correctness-and-invariants")
+    _record_prior_read(tmp_path, "some-other-lens")
+    result = _run_gate(tmp_path, _gate_body("tracing-correctness-and-invariants"))
+    assert result.returncode == 2
+    assert "tracing-correctness-and-invariants" in result.stderr
+
+
+def test_gate_template_shaped_trailing_comment_still_activates(tmp_path):
+    # Regression lock for the round-1 review's claimed (not reproduced
+    # against the pushed fix, but worth locking in either way) false
+    # negative: the exact multi-line trailing-comment shape
+    # templates/preferences-template.md ships for every ratified key.
+    _enable_gate(tmp_path,
+        "lens-coverage-gate: on      # off (default) | on (blocks a review\n"
+        "#                     post that attributes a finding to an unread\n"
+        "#                     lens)\n"
+        "decided: 2026-01-01, @alice\n")
+    _make_known_lens(tmp_path, "tracing-correctness-and-invariants")
+    _record_prior_read(tmp_path, "some-other-lens")
+    result = _run_gate(tmp_path, _gate_body("tracing-correctness-and-invariants"))
+    assert result.returncode == 2
+
+
+def test_gate_passes_when_the_cited_lens_was_actually_read(tmp_path):
+    _enable_gate(tmp_path)
+    _make_known_lens(tmp_path, "hunting-silent-failures")
+    _run(TRACK_HOOK, tmp_path, json.dumps({
+        "session_id": "s1", "tool_name": "Skill",
+        "tool_input": {"skill": "hunting-silent-failures"},
+    }))
+    result = _run_gate(tmp_path, _gate_body("hunting-silent-failures"))
+    assert result.returncode == 0
+
+
+def test_gate_ignores_a_benign_parenthetical_that_is_not_a_known_lens(tmp_path):
+    _enable_gate(tmp_path)
+    _make_known_lens(tmp_path, "tracing-correctness-and-invariants")
+    _record_prior_read(tmp_path, "some-other-lens")
+    result = _run_gate(tmp_path, json.dumps({
+        "session_id": "s1",
+        "tool_input": {"body": "See the summary above (see below) for details."},
+    }))
+    assert result.returncode == 0
+
+
+def test_gate_ignores_a_skills_directory_with_no_skill_md_marker(tmp_path):
+    # Copilot review, PR #398: known_lenses must be built from the marker
+    # FILE each lens shape actually carries (SKILL.md/body.md), not just the
+    # containing directory -- otherwise an unrelated skills/<name>/ a
+    # consumer repo happens to have (no SKILL.md at all, e.g. a non-atlas
+    # skills/todo/) is misread as a "known lens," and a benign "(todo)"
+    # parenthetical in review prose falsely trips the gate.
+    _enable_gate(tmp_path)
+    _make_known_lens(tmp_path, "tracing-correctness-and-invariants")
+    (tmp_path / "skills" / "todo").mkdir(parents=True)
+    _record_prior_read(tmp_path, "some-other-lens")
+    result = _run_gate(tmp_path, json.dumps({
+        "session_id": "s1",
+        "tool_input": {"body": "See the todo list (todo) for details."},
+    }))
+    assert result.returncode == 0
+
+
+def test_gate_fails_open_when_no_state_file_exists_yet_for_this_session(tmp_path):
+    # Distinct code path from test_gate_ratified_line_blocks_a_missing_lens_citation:
+    # there, a state file exists (created by _make_known_lens's session having
+    # tracked something) but doesn't list the cited lens, and the gate
+    # correctly blocks. Here, track-lens-reads.sh has never run at all for
+    # this session_id -- no state file on disk -- and the gate must fail
+    # open rather than block, per its own stated design (the common case for
+    # a repo where the suite isn't vendored/available locally at all).
+    _enable_gate(tmp_path)
+    _make_known_lens(tmp_path, "tracing-correctness-and-invariants")
+    assert not _lens_coverage_state(tmp_path).exists()
+    result = _run_gate(tmp_path, _gate_body("tracing-correctness-and-invariants"))
+    assert result.returncode == 0
+
+
+def test_gate_rejects_a_path_traversal_shaped_session_id(tmp_path):
+    # Copilot review, PR #398: same interpolation-into-a-path pattern as the
+    # tracker's own regression test above. A hostile-shaped session_id must
+    # fail open (harmlessly), never touch a path outside the state directory.
+    _enable_gate(tmp_path)
+    _make_known_lens(tmp_path, "tracing-correctness-and-invariants")
+    result = _run_gate(tmp_path, json.dumps({
+        "session_id": "../../../../tmp/evil",
+        "tool_input": {"body": "Major\n- x.py:1 (tracing-correctness-and-invariants)"},
+    }))
+    assert result.returncode == 0
+
+
+# --- Round-4 CodeRabbit review, PR #398: a plugin-installed lens's Skill
+# invocation carries a `<plugin>:` prefix, a Read path can carry a stray
+# "./" segment, and neither the tracker nor the gate anchored their state
+# path to the project root -- a hook invoked with a working directory other
+# than the project root would silently disagree with itself about where the
+# state file lives.
+
+def test_track_strips_plugin_prefix_from_a_skill_invocation(tmp_path):
+    stdin = json.dumps({
+        "session_id": "s1", "tool_name": "Skill",
+        "tool_input": {"skill": "code-quality-atlas:hunting-silent-failures"},
+    })
+    _run(TRACK_HOOK, tmp_path, stdin)
+    assert _lens_coverage_state(tmp_path).read_text().splitlines() == ["hunting-silent-failures"]
+
+
+def test_track_collapses_a_stray_dot_slash_path_segment(tmp_path):
+    stdin = json.dumps({
+        "session_id": "s1", "tool_name": "Read",
+        "tool_input": {"file_path": "skills/./checking-restraint/SKILL.md"},
+    })
+    _run(TRACK_HOOK, tmp_path, stdin)
+    assert _lens_coverage_state(tmp_path).read_text().splitlines() == ["checking-restraint"]
+
+
+def test_track_rejects_a_lens_value_shaped_like_an_injection_attempt(tmp_path):
+    # An embedded newline in tool_input.skill could otherwise let a crafted
+    # value inject an extra, fabricated "line" into the state file gate-
+    # lens-coverage.sh trusts as a record of what was actually read.
+    stdin = json.dumps({
+        "session_id": "s1", "tool_name": "Skill",
+        "tool_input": {"skill": "evil\nfake-lens"},
+    })
+    _run(TRACK_HOOK, tmp_path, stdin)
+    assert not _lens_coverage_state(tmp_path).exists()
+
+
+def test_track_and_gate_agree_on_claude_project_dir_over_cwd(tmp_path):
+    # The tracker and gate must resolve the SAME state path even when
+    # invoked with a working directory other than the project root -- CWD
+    # is where the hook happens to run, CLAUDE_PROJECT_DIR (when set) is
+    # where the project actually is.
+    project_dir = tmp_path / "project"
+    other_cwd = tmp_path / "elsewhere"
+    project_dir.mkdir()
+    other_cwd.mkdir()
+    (project_dir / "skills" / "hunting-silent-failures").mkdir(parents=True)
+    env = {"CLAUDE_PROJECT_DIR": str(project_dir)}
+
+    _run(TRACK_HOOK, other_cwd, json.dumps({
+        "session_id": "s1", "tool_name": "Skill",
+        "tool_input": {"skill": "hunting-silent-failures"},
+    }), env_extra=env)
+
+    # Landed under the project dir, not a cwd-relative .claude/ in other_cwd.
+    assert (project_dir / ".claude" / ".atlas-lens-coverage" / "s1.txt").read_text().strip() \
+        == "hunting-silent-failures"
+    assert not (other_cwd / ".claude").exists()
+
+    _enable_gate(project_dir)
+    result = _run_gate(other_cwd, _gate_body("hunting-silent-failures"), env_extra=env)
+    assert result.returncode == 0
