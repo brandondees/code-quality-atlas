@@ -52,16 +52,21 @@ input="$(cat)"
 
 command -v jq >/dev/null 2>&1 || exit 0
 
-# TODO before this ships for real: this duplicates ../lib/feedback-tier.sh's
-# HTML-comment-stripping + `key: value` extraction instead of sharing it --
-# acceptable for a first draft, not for a merged feature (checking-idioms-
-# and-consistency would flag the duplication). Factor a generic
-# "read one key from preferences.md" helper into lib/ and have both this and
-# feedback-tier.sh call it. The comment-stripping below is otherwise the
-# exact copy of feedback-tier.sh's own logic and must stay that way -- an
-# un-stripped raw grep here previously matched a `lens-coverage-gate: on`
-# line sitting inside the preferences template's commented-out example
-# block, silently turning the gate on (round-1 review finding).
+# Known follow-up, not a blocker: this duplicates ../lib/feedback-tier.sh's
+# HTML-comment-stripping + `key: value` extraction instead of sharing it
+# (checking-idioms-and-consistency would flag the duplication). Correctness
+# is not at stake -- the pipeline below is kept an EXACT copy of
+# feedback-tier.sh's own logic on purpose (an un-stripped raw grep here
+# previously matched a `lens-coverage-gate: on` line sitting inside the
+# preferences template's commented-out example block, silently turning the
+# gate on -- round-1 review finding, now covered by both scripts' own
+# regression tests) -- only maintainability is at stake. Factoring a generic
+# "read one key from preferences.md" helper into lib/ is real work on its
+# own, though: gate-lens-coverage.sh is vendored standalone into consumer
+# repos (tooling/vendor-skills.sh --with-lens-coverage-hook), so a shared
+# lib/ helper would need vendoring too, plus CLAUDE_PLUGIN_ROOT-aware
+# sourcing this script doesn't currently have at all -- scoped out of this
+# change rather than bolted on as a side effect of a comment-wording fix.
 gate_prefs=".code-quality-atlas/preferences.md"
 gate_on=""
 if [ -f "$gate_prefs" ]; then
