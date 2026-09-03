@@ -136,7 +136,7 @@ PR-triggered routine session can be the PR head. If the base ref has no `REVIEW.
 to the canonical template at `templates/REVIEW.md` — read it from the plugin
 clone if you can locate it, otherwise fetch it from the source repo with
 `mcp__github__get_file_contents` (`owner: brandondees`, `repo:
-code-quality-atlas`, `path: templates/REVIEW.md`), which is a fixed, locatable
+code-quality-atlas`, `path: templates/REVIEW.md`, `ref: refs/heads/main`), which is a fixed, locatable
 path that works in web/routine sessions where the plugin clone location is
 unknown. It defines the severity floor per round, the round cap, and the
 approve-on-clean behavior. The repo's own `REVIEW.md` always wins over the
@@ -171,8 +171,11 @@ The `Skill` tool loads from the session's checkout, and in a PR-triggered
 routine session that checkout can be the PR head; a PR that edits anything
 under `.claude/skills/` would then be supplying the picker that chooses the
 lenses, the checklist each lens applies, and the synthesizer that sets the
-verdict. So read the PR's `files` list now (`mcp__github__pull_request_read`,
-`get_files`, paginated): if any changed path is under `.claude/skills/`,
+verdict. So read the PR's **complete** `files` list now
+(`mcp__github__pull_request_read`, `get_files`, walking `page` upward until a
+page comes back with fewer than `perPage` entries — the `.claude/skills/` path
+that matters can sit on a later page): if any changed path is under
+`.claude/skills/`,
 **use the fetch tier for every `code-quality-atlas:*` skill this round and
 do not call the `Skill` tool for any of them** — the edited skill content is
 the review's *subject*, and the lenses that review it
@@ -246,18 +249,21 @@ line.
      **Not available this round if the gate at the top of this step
      fired** (the diff touches `.claude/skills/`): then every atlas skill,
      this lens included, comes from the fetch tier.
-   - **Otherwise, fetch it** — `mcp__github__get_file_contents` (`owner:
-     brandondees`, `repo: code-quality-atlas`, `path:
-     skills/<lens-name>/SKILL.md`, and its `reference/` files as needed) —
-     the same fixed, locatable path used for the `templates/REVIEW.md`
-     fallback in step 3, for a repo with neither a vendored copy nor an
-     account-enabled skill, and for every skill whenever the gate at the
-     top of this step fired. A vendored copy at
-     the reviewed repo's **base ref** (`get_file_contents` on the reviewed
-     repo, `path: .claude/skills/<lens-name>/SKILL.md`, `ref:
-     refs/heads/<base.ref>`) is an equally trusted source when the reviewed
-     repo pins a particular suite version and the session can't reach the
-     source repo.
+   - **Otherwise, fetch it** — `mcp__github__get_file_contents`, always with
+     an explicit `ref`, in this order:
+     1. the reviewed repo's own vendored copy at its base ref (`path:
+        .claude/skills/<lens-name>/SKILL.md`, `ref: refs/heads/<base.ref>`,
+        plus its `reference/` files as needed), when the base ref carries
+        one — this is what the `Skill` tool would have loaded from a clean
+        checkout of the base, so the review runs at the suite version the
+        reviewed repo pinned, not whatever the source repo holds today;
+     2. else the source repo (`owner: brandondees`, `repo:
+        code-quality-atlas`, `path: skills/<lens-name>/SKILL.md`, `ref:
+        refs/heads/main`, and its `reference/` files as needed) — the same
+        fixed, locatable path used for the `templates/REVIEW.md` fallback in
+        step 3, for a repo with neither a vendored copy nor an
+        account-enabled skill, and for every skill whenever the gate at the
+        top of this step fired and the base ref has no vendored copy.
    Do this for every selected lens before step 5 runs any of them — a lens
    whose content wasn't actually read hasn't run, whatever the synthesis
    report claims. Whichever tier served each lens, and whether the gate at
