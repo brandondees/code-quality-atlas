@@ -83,19 +83,44 @@ following this file: whatever fetched it (a routine's bootstrap, the `Skill`
 tool, a slash command) already proved that access works. Don't re-verify it
 here; if it had failed, you would not have reached this step to begin with.
 
-Count this reviewer's prior reviews on the PR. Going forward, every round-posting
-review summary this command posts carries **both** a visible `## Round N — ...`
-heading as its first line **and** the invisible marker
-`<!-- atlas-review round:N -->` (dual-encoded — see step 5) — but a review posted
-before this dual-encoding was adopted, or one where `mcp__github__pull_request_read`
-has stripped the HTML comment on read-back entirely (observed happening, #354/#355),
-may carry only one of the two signals. The current round is the highest N seen
+**Establish your own identity once, up front — `mcp__github__get_me`, cached
+for the rest of this session.** Every "your own"/"this reviewer's" judgment in
+this step, and step 5's own-PR fallback, and step 6's resolve scoping (#362),
+reuse this same login rather than re-deriving or assuming it. This closes
+issue #360's first gap: round/ACK detection used to treat *any* comment or review
+carrying the right marker as authoritative regardless of who posted it — a PR
+author or any other collaborator with comment access could post a fabricated
+ACK or a fake high `## Round N` review to suppress the real ACK or inflate the
+round count past what actually happened.
+
+Count this reviewer's prior reviews on the PR — **"this reviewer's" means
+`author.login == your own login` from the identity check above; a review from
+anyone else, however it's formatted, is not a candidate for round derivation at
+all.** Going forward, every round-posting review summary this command posts
+carries **both** a visible `## Round N — ...` heading as its first line **and**
+the invisible marker `<!-- atlas-review round:N -->` (dual-encoded — see step
+5) — but a review posted before this dual-encoding was adopted, or one where
+`mcp__github__pull_request_read` has stripped the HTML comment on read-back
+entirely (observed happening, #354/#355), may carry only one of the two
+signals. Among **your own** reviews, the current round is the highest N seen
 from **either** signal on **any** prior review, plus one (first review is
 **round 1**). **Treat the visible heading as primary** — a round count derived
 from the comment alone can silently undercount when the comment is missing —
-but parse whichever signal is actually present on each review, and never
-conclude "round 1" just because the comment is missing when a `## Round N`
-heading is not found.
+but parse whichever signal is actually present on each of your own reviews,
+and never conclude "round 1" just because the comment is missing when a
+`## Round N` heading is not found.
+
+**Round state has a third value: `unknown`, distinct from both "round 1" and
+any specific N (issue #360, gap 3).** Zero prior reviews of your own on this
+PR legitimately means round 1 — proceed normally. But one or more prior
+reviews of your own where **none** yields a parseable heading or marker (both
+signals missing or corrupted on every one) is `unknown`, not round 1:
+something you posted exists but its round can't be read back. **On `unknown`,
+stop before posting anything new** — don't guess round 1 (which would restart
+the loop and re-raise settled findings) and don't guess the highest plausible
+N either. Post a single comment naming the ambiguity (which of your reviews
+couldn't be parsed and why) and stop; this needs a human looking at the PR's
+review history directly.
 
 **Paginate through all pages** of reviews and review threads before counting —
 `mcp__github__pull_request_read` caps results per call, and on a PR with many
@@ -103,18 +128,41 @@ rounds the marker/heading (and the round-1 ACK) can sit on a later page;
 reading only the first page undercounts the round and re-raises findings
 already recorded in standing threads.
 
-**If this is round 1, post the ACK now, before step 3.** Check the PR's issue
-comments for an existing ACK first (a compacted or restarted session must not
-re-post it) — look for **either** the invisible `<!-- atlas-review-ack -->`
-marker **or** the visible text "👀 atlas reviewer engaged" (same
-comment-stripping risk as the round marker above means the invisible marker
-alone is not a reliable absence signal). If neither is found, drop one short
-issue comment carrying **both**: marked `<!-- atlas-review-ack -->` and
-opening with the literal visible phrase "👀 atlas reviewer engaged — running
-lenses, hold for findings" so the author knows immediately that a reviewer is
-attached and worth waiting for, since the lens run takes a while. Post it
-**once per PR** — round 1 only; later rounds skip it. Never attach findings to
-the ACK.
+**If this is round 1, post the ACK now, before step 3 — but acquire a lock
+first.** The naive "check for an ACK, then post one if absent" sequence is a
+read-then-write race (issue #360, gap 2): two sessions acting as this same
+identity — the event-triggered reviewer and a poller sweep both watching the
+same PR, a supported combination per `docs/runbooks/pr-review-automation.md`
+— can each read "no ack" before either write lands, and both post. Close that
+race with a primitive GitHub actually enforces atomically:
+`mcp__github__pull_request_review_write`, method `create`, with **no**
+`event` parameter — this opens a *pending* review, and GitHub allows **at
+most one pending review per identity per PR at a time**, so a concurrent
+`create` under your own identity fails outright instead of silently racing.
+
+- **If `create` fails** because a pending review already exists for your
+  identity: another session (this one's own earlier attempt, or a concurrent
+  one) is already mid-ACK. Stand down — post nothing, don't retry, let it
+  finish.
+- **If `create` succeeds**, you hold the lock. Check the PR's issue comments
+  for an existing ACK **from your own identity** (a compacted or restarted
+  session must not re-post it) — look for **either** the invisible
+  `<!-- atlas-review-ack -->` marker **or** the visible text "👀 atlas
+  reviewer engaged" (same comment-stripping risk as the round marker above
+  means the invisible marker alone is not a reliable absence signal). If
+  neither is found, drop one short issue comment carrying **both**: marked
+  `<!-- atlas-review-ack -->` and opening with the literal visible phrase "👀
+  atlas reviewer engaged — running lenses, hold for findings" so the author
+  knows immediately that a reviewer is attached and worth waiting for, since
+  the lens run takes a while. Post it **once per PR** — round 1 only; later
+  rounds skip it. Never attach findings to the ACK. **Always release the
+  lock before moving on** — `mcp__github__pull_request_review_write` method
+  `delete_pending` — whether or not you actually posted (an ACK found
+  already present still needs the lock released), and even if the post
+  itself fails: a stuck pending review would permanently block every future
+  ACK attempt on this PR until someone manually clears it. Never leave a
+  pending review open past this step — it would also block your own round-1
+  review from opening its own pending review later in step 5.
 
 Only after that ack decision is settled: if the round would exceed the cap in
 the convergence policy (loaded next, in step 3), **run no new lenses and post
@@ -351,8 +399,9 @@ line.
     and described next.
 - **Own-PR fallback applies to `APPROVE` and `REQUEST_CHANGES` only** — the two
   states GitHub forbids on your own PR; `COMMENT` never needed this fallback.
-  Before submitting a review that would use one of those two, check identity once
-  (`mcp__github__get_me`, compared to the PR author's login from step 1): if they
+  Before submitting a review that would use one of those two, compare your own
+  identity (step 2's `mcp__github__get_me` call, cached — no need to call it
+  again) against the PR author's login from step 1: if they
   match, submit `COMMENT` instead, with the intended state spelled out in the
   body's first line — `## Round N — APPROVE (own-PR, posted as comment)` or
   `## Round N — REQUEST_CHANGES (own-PR, posted as comment)`. The inline findings
@@ -383,8 +432,7 @@ own: calling it on a thread you didn't start closes someone else's open
 conversation on your own judgment that a later push addressed it, and on a repo
 that gates merge on resolved conversations that silently clears the gate out from
 under them (issue #362). Before resolving anything, know your own identity —
-`mcp__github__get_me`, the same call step 5 already makes for the own-PR
-fallback; reuse that result here rather than calling it twice. For each
+step 2's `mcp__github__get_me` call, cached; no need to call it again. For each
 candidate thread, check the **first comment's author login**
 (`mcp__github__pull_request_read`, `get_review_comments` — each thread's
 comments carry a `user.login`) against your own login: only resolve a thread

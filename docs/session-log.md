@@ -4654,3 +4654,115 @@ actually reachable, not just visually present) before fixing; new
 regression test confirmed to fail on the pre-fix text and pass on the
 fix; `pytest` (515/515, up from 511 — 4 new); `markdownlint-cli2` (clean,
 490 files); `ruff check .` (clean); `tooling.cli drift` (clean).
+
+### 2026-09-03 — #360: ACK/round detection had no identity binding, no atomic lock, and collapsed "unreadable" into "absent"
+
+CodeRabbit's review on PR #359 (the #354/#355 comment-stripping fix)
+surfaced three related, pre-existing gaps in the round/ACK detection
+protocol shared by `commands/atlas-review-pr.md`,
+`commands/atlas-poll-and-review.md`, `commands/atlas-rebase-stale.md`, and
+their restatements in `docs/runbooks/pr-review-automation.md`. Filed as #360
+rather than folded into #359 (a narrow, low-risk doc fix) since these
+three span up to five locations across four files, each with more than
+one viable design, and getting the trust model wrong under a rushed
+documentation-only PR would have been hard to catch pre-merge.
+
+1. **No reviewer-identity binding (Major, spoofing/DoS).** Every detection
+   site treated *any* issue comment carrying the ack marker/phrase, or
+   *any* review opening with a `## Round N` heading, as authoritative
+   regardless of who posted it — a PR author or other collaborator with
+   comment access could post a fabricated ACK to suppress the real one, or
+   a fake high-round review to inflate the round count past what actually
+   happened.
+2. **The ACK "post it as a lock" pattern wasn't atomic (Major, race
+   condition).** "Check for no ack, then post one" is a read-then-write
+   race over a non-transactional API; two sessions acting as the same
+   reviewer identity (the event-triggered reviewer and a poller sweep both
+   watching the same PR — an explicitly supported combination per the
+   runbook) could each read "no ack" before either write lands, and both
+   post.
+3. **A review with neither readable signal collapsed into "no round," not
+   "unreadable" (Major).** Indistinguishable from a review that genuinely
+   predates any round, so a corrupted/stripped signal would silently
+   restart the loop at round 1 (re-raising settled findings) or silently
+   drop out of coverage checks.
+
+**Fix, all three, applied consistently across the four files:**
+
+- **Identity binding:** each detection site now calls
+  `mcp__github__get_me` once (cached per session/sweep) and filters every
+  ack/round candidate to `author.login == that login` — a signal from
+  anyone else, however formatted, is never authoritative.
+  `atlas-review-pr.md` establishes this in step 2 (moved earlier so
+  round-counting, the ACK check, step 5's own-PR fallback, and step 6's
+  #362 resolve-scoping all reuse one call instead of re-deriving it);
+  `atlas-poll-and-review.md`'s top-level session calls it once per sweep
+  and threads the login into each triage subagent's prompt (subagents
+  can't share session state, so re-deriving per subagent would be
+  wasteful and, worse, is exactly the kind of duplicated logic that
+  drifts); `atlas-rebase-stale.md` needed `mcp__github__get_me` added to
+  its `allowed-tools` grant, since it never needed identity before.
+- **Atomic lock:** replaced the naive check-then-post ACK with a
+  primitive GitHub actually enforces atomically —
+  `mcp__github__pull_request_review_write` method `create` with no
+  `event` opens a *pending* review, and GitHub allows only one pending
+  review per identity per PR at a time, so a concurrent `create` under
+  the same identity fails outright instead of racing. A failed `create`
+  means stand down (someone else is mid-ACK); a successful one means the
+  session holds the lock, re-checks for an existing ACK (now
+  authoritative), posts if still absent, then **always** releases via
+  `delete_pending` — including on a failed post, since a stuck pending
+  review would permanently block every future ACK attempt on that PR.
+  Applied to `atlas-review-pr.md` step 2, `atlas-poll-and-review.md` step
+  3, and both of the runbook's inlined restatements (Model A's watch loop
+  never posts an ACK past round 1, so only Model B's embedded sweep
+  needed this — the resident reviewer's first-round ACK is entirely
+  delegated to `atlas-review-pr.md` itself, not duplicated in the
+  runbook's prose).
+- **Tri-state round detection:** a third state, `unknown`, distinct from
+  both "round 1" (zero prior reviews from the expected identity — still
+  legitimate) and any specific N: one or more prior reviews from the
+  expected identity exist but none parses a heading or marker. On
+  `unknown`, `atlas-review-pr.md` stops and posts a comment naming the
+  ambiguity rather than guessing; the two pollers (`atlas-poll-and-review.md`,
+  `atlas-rebase-stale.md`, and the runbook's Model B sweep) skip
+  escalating/reviewing that PR for the current cycle and flag it in their
+  summary report for human attention, rather than silently treating it as
+  covered or uncovered.
+
+Added `tests/test_ack_round_identity_binding.py`, mirroring
+`test_review_thread_resolution_scoping.py`'s (#362) prose-guard shape
+since these are agent-instruction files with no interpreter to run them
+against: asserts every file still cites issue #360 and calls `get_me`,
+still names an `unknown` round state, that the three ACK-posting surfaces
+(the two commands plus the runbook — `atlas-rebase-stale.md` never posts
+an ACK, so it's excluded) still carry the `delete_pending` release half of
+the lock, that `atlas-rebase-stale.md`'s `allowed-tools` line grants
+`get_me`, and that the identity check is actually tied to round/ack
+detection specifically (not just present somewhere else in the file, e.g.
+the pre-existing own-PR-fallback or #362's resolve-scoping use). Verified
+against the pre-fix content (checked out all four files at their pre-#360
+state) that every one of the six checks fails as expected.
+
+**A process note for future sessions:** verifying the regression test against
+pre-fix content the first time around overwrote the working files with
+`git show`'s output for the pre-fix commit, then ran `git checkout` on those
+same paths to "restore" them. Since the fix was still uncommitted, that
+checkout restored from HEAD (the pre-fix commit), not from the uncommitted
+fix — silently discarding it.
+
+Caught immediately by re-running `pytest` (which started failing against
+files that should have passed) and `git status` (a clean working tree when
+uncommitted edits should have shown as modified — the tell). Recovered by
+re-applying every edit from this same conversation's own record of them.
+The safe pattern (used successfully in the #362 and #377 verification
+passes) is stashing the paths first and popping them back after the check,
+never a raw overwrite followed by a plain checkout, whenever the content
+being restored is still uncommitted.
+
+**Verification:** reproduced the conceptual gap by reading each detection
+site's unfiltered logic as the unattended agent would actually follow it
+before fixing; new regression test confirmed to fail against the pre-fix
+content on all six checks and pass on the fix (after the recovery above);
+`pytest` (521/521, up from 515 — 6 new); `markdownlint-cli2` (clean, 490
+files); `ruff check .` (clean); `tooling.cli drift` (clean).

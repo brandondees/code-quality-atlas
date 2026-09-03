@@ -36,23 +36,34 @@ sweep every repo this session has access to.
 
 ## 1. Cheap triage — spawn a fast/cheap-model subagent
 
+**First, establish the expected reviewer identity once**, in this top-level
+session, before spawning anything: `mcp__github__get_me`. Pass its login into
+every triage subagent's prompt below — every ack/round signal a subagent
+reports must be filtered to comments/reviews authored by this login, never
+taken from any commenter (issue #360, gap 1). Calling it once here, not once
+per subagent, keeps the cheap pass cheap.
+
 Spawn one subagent (the `Task` tool, requesting the fastest/cheapest model
-your platform offers — e.g. Haiku) per repo being swept. Its job is purely
-mechanical listing, not judgment, so keep it off the stronger tier entirely:
-list every open PR (`mcp__github__list_pull_requests`, paginate fully,
-applying `$ARGUMENTS`'s filter if a label/author was given — not a repo name),
-and for each PR report back: PR number, `draft` (true/false),
-`mergeable_state`, HEAD commit SHA, whether an ack exists — either an
-`<!-- atlas-review-ack -->` issue comment or the visible text "👀 atlas
-reviewer engaged" (`pull_request_read` has been observed stripping HTML
-comments from returned bodies, #354/#355, so check both) — and its
-`created_at` if so, whether any round review exists (identified by a
-`## Round N — ...` heading, falling back to the redundant
-`<!-- atlas-review round:N -->` marker only where the heading is absent) and
-if so the **highest** round number, that review's `commit_id`, and its
-author's login, and whether an unresolved `<!-- atlas-rebase-poke -->` review
-thread exists. One line per PR, nothing else — this report is the only thing
-the calling session reads before acting, so keep it structured and compact.
+your platform offers — e.g. Haiku) per repo being swept, telling it the login
+from above. Its job is purely mechanical listing, not judgment, so keep it off
+the stronger tier entirely: list every open PR (`mcp__github__list_pull_requests`,
+paginate fully, applying `$ARGUMENTS`'s filter if a label/author was given —
+not a repo name), and for each PR report back: PR number, `draft` (true/false),
+`mergeable_state`, HEAD commit SHA, whether an ack **authored by the given
+login** exists — either an `<!-- atlas-review-ack -->` issue comment or the
+visible text "👀 atlas reviewer engaged" (`pull_request_read` has been observed
+stripping HTML comments from returned bodies, #354/#355, so check both) — and
+its `created_at` if so, whether any round review **authored by the given
+login** exists (identified by a `## Round N — ...` heading, falling back to the
+redundant `<!-- atlas-review round:N -->` marker only where the heading is
+absent) and if so the **highest** round number and that review's `commit_id`,
+and whether an unresolved `<!-- atlas-rebase-poke -->` review thread exists.
+**Also report `round_state: unknown`** for any PR where a review authored by
+the given login exists but none of them parses a heading or marker (issue #360,
+gap 3) — distinct from simply having no round review at all; don't let
+the subagent silently collapse that into "no round review." One line per PR,
+nothing else — this report is the only thing the calling session reads before
+acting, so keep it structured and compact.
 
 ## 2. Mechanical actions — no subagent, no judgment
 
@@ -79,25 +90,43 @@ until marked ready for review.
 
 For each non-draft PR needing a review, first **re-verify immediately before
 acting** — re-run `mcp__github__pull_request_read` (`get_comments`,
-`get_reviews`) for that one PR, not trusting the triage report as current.
-This sweep may not be the only thing capable of reviewing this PR (a repo
-could also run an event-triggered reviewer routine alongside this one) —
-treat a state that already changed as "someone else got there first," not an
-error.
+`get_reviews`) for that one PR, not trusting the triage report as current, and
+**filter every candidate to `author.login == your own login`** (step 1's
+`get_me` call) — a comment or review from anyone else, however formatted, is
+never authoritative for ack/round state (issue #360, gap 1). This sweep may not
+be the only thing capable of reviewing this PR (a repo could also run an
+event-triggered reviewer routine alongside this one) — treat a state that
+already changed as "someone else got there first," not an error.
 
-- **No ack yet, and zero round reviews detected** — round 1. Post the ack
-  issue comment **yourself, in this session, immediately** — carrying both
-  the `<!-- atlas-review-ack -->` marker and the visible "👀 atlas reviewer
-  engaged" text (see step 1) — this is the lock, and it has to happen before
-  anything else for this PR so the race window stays as short as one API
-  call. Do this for every PR needing round 1 *before* spawning any review
-  subagent, then spawn one review subagent per PR (below). **Don't take this
-  branch on ack absence alone** — an unreadable/missing ack with round
-  reviews already posted (e.g. an ack comment deleted after the fact, or a
-  PR reviewed before this protocol required one) is round 2+, not round 1;
-  fall through to the "has ack + at least one round review" branch below
-  instead, treating the missing ack as already-satisfied rather than posting
-  a late, incorrect round-1 ack on an established PR.
+- **Round state is `unknown`** (one or more of your own reviews exist but
+  none parses a heading or marker — issue #360, gap 3): don't guess. Skip
+  this PR for this sweep entirely — no ack post, no review subagent — and
+  note it in the final report as needing human attention rather than silently
+  treating it as "no round review."
+- **No ack yet, and zero round reviews detected** — round 1. **Acquire a lock
+  before posting anything**: `mcp__github__pull_request_review_write`, method
+  `create`, no `event` — GitHub allows only one pending review per identity
+  per PR at a time, so this fails outright if another session (this cycle's
+  or a concurrent one, including an event-triggered reviewer routine watching
+  the same repo) is already mid-ACK, instead of racing silently on a plain
+  "check then post" issue comment (issue #360, gap 2). **If `create` fails**,
+  stand down on this PR for this sweep — someone else has it, skip it
+  entirely this cycle. **If it succeeds**, re-check for an ack from your own
+  identity one more time (the lock makes this check authoritative), then post
+  the ack issue comment — carrying both the `<!-- atlas-review-ack -->`
+  marker and the visible "👀 atlas reviewer engaged" text (see step 1) — only
+  if still absent, then **always** release the lock
+  (`mcp__github__pull_request_review_write` method `delete_pending`) before
+  moving on, whether or not you posted, and even if posting itself fails — a
+  stuck pending review would block every future ACK attempt on this PR. Do
+  this for every PR needing round 1 *before* spawning any review subagent,
+  then spawn one review subagent per PR (below). **Don't take this branch on
+  ack absence alone** — an unreadable/missing ack with round reviews already
+  posted (e.g. an ack comment deleted after the fact, or a PR reviewed before
+  this protocol required one) is round 2+, not round 1; fall through to the
+  "has ack + at least one round review" branch below instead, treating the
+  missing ack as already-satisfied rather than posting a late, incorrect
+  round-1 ack on an established PR.
 - **Has ack, zero round reviews, ack younger than ~90 minutes**: skip —
   plausibly a review subagent (this cycle's or an earlier one) still running.
   Never spawn a second attempt while one might be in flight.
