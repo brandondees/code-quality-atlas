@@ -48,11 +48,17 @@ label/author filter if given). For each, read its mergeable state via
 
 **Establish the expected reviewer identity once per sweep**:
 `mcp__github__get_me`. A round review or ack counts toward anything in this
-step only when `author.login` matches this identity — a review or comment
+step only when `author.login` matches this identity **and its state is not
+`PENDING`** — a review or comment
 from anyone else, however it's formatted, is never authoritative for coverage
 state (issue #360, gap 1): a PR author or other collaborator could otherwise
 post a fabricated high-round review to make a genuinely lapsed watch look
-covered, silently defeating this step's entire purpose.
+covered, silently defeating this step's entire purpose. The `PENDING`
+exclusion matters because `get_reviews` returns your own not-yet-submitted
+review too — `atlas-review-pr.md`'s ACK lock, or its step 5's own pending
+review while still being built — and counting either would wrongly read as
+"a review with no parseable heading," miscounting coverage (PR #402's own
+round-3 review).
 
 **Recover a stuck ACK lock — safely, not blindly** (issue #360 follow-up;
 refined after PR #402's round-2 review found the first version of this
@@ -68,24 +74,34 @@ PR" — so treating *every* old pending review as a stuck ACK lock risks
 deleting a perfectly healthy, actively in-progress round review's collected
 findings, which is worse than the orphaned-lock gap this recovery closes.
 
-The one case that's unambiguous: **step 5's pending review can only ever
-open after the ACK issue comment already exists** (step 2 posts the ACK and
-releases its lock before step 3, 4, or 5 ever runs) — so a `PENDING` review
-under your own identity on a PR whose ACK (`<!-- atlas-review-ack -->`
-marker or the visible "👀 atlas reviewer engaged" text) is **absent**, with
-a `created_at` more than 30 minutes old, can only be a stuck pre-ACK step-2
-lock (a real ACK post completes in well under a minute). Clear that one —
+**Require two independent signals before ever clearing anything, not just
+ACK-absence and age (PR #402's own review — ACK-absence alone wasn't judged
+safe enough)**: `atlas-review-pr.md`'s ACK lock is always created with
+`body` set to the literal marker `(atlas-ack-lock)`; step 5's own pending
+review is never created with that body. So the one case that's safe to
+auto-clear is a `PENDING` review under your own identity whose `body` is
+**exactly** `(atlas-ack-lock)` (the direct, load-bearing signal) **and**
+whose PR's ACK (`<!-- atlas-review-ack -->` marker or the visible "👀 atlas
+reviewer engaged" text) is **absent** (the corroborating signal — step 5
+can only ever open its own pending review after the ACK already exists,
+since step 2 posts the ACK and releases its lock before step 3, 4, or 5
+ever run) **and** `created_at` is more than 30 minutes old (a real ACK post
+completes in well under a minute). All three together can only be a stuck
+pre-ACK step-2 lock. Clear it —
 `mcp__github__pull_request_review_write` method `delete_pending` — and note
-it in the report, naming the PR and that a stuck lock was cleared. If the
-ACK **is** present, a lingering old `PENDING` review is ambiguous — it could
-be step 5 legitimately still building a large round, a lock stuck in the
-narrow window after the ACK posted but before `delete_pending` ran, or an
-orphaned step-5 lock from an earlier crashed round — **never auto-clear
+it in the report, naming the PR and that a stuck lock was cleared. Any
+`PENDING` review that fails even one of those three checks (body isn't the
+marker, or the ACK is present, or it's not yet stale) is ambiguous — it
+could be step 5 legitimately still building a large round, a lock stuck in
+the narrow window after the ACK posted but before `delete_pending` ran, or
+an orphaned step-5 lock from an earlier crashed round — **never auto-clear
 it**; just note it in the report, naming the PR and that it may be a stuck
 lock or an in-progress review, not auto-cleared, so a human can check
-before running `delete_pending`
-by hand. Check once per sweep, not per PR (a stuck lock, if any, is
-per-identity, not per-PR).
+before running `delete_pending` by hand. Check **every open PR in this
+sweep, once each** — a pending review is scoped to one PR at a time per
+identity (not one global lock across every PR this identity might be
+reviewing), so a stuck lock on one PR would otherwise leave every other PR
+unchecked and potentially blocked indefinitely.
 
 A round review (authored by that identity) is identified by a
 `## Round N — ...` heading as the body's first line, falling back to the
@@ -181,5 +197,5 @@ skipped).
 
 End with a one-line summary: how many PRs were updated, conflict-poked,
 coverage-poked, and skipped, plus any stuck ACK locks cleared or flagged
-(step 3). Post
-nothing to GitHub beyond the pokes above and any `delete_pending` calls.
+(step 3). Post nothing to GitHub beyond the pokes above, the coverage
+escalation's review re-requests (§3), and any `delete_pending` calls.

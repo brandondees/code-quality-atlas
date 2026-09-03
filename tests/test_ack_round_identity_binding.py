@@ -250,3 +250,74 @@ def test_create_failure_distinguishes_contention_from_a_real_error():
             "exists\") -- re-add the distinction so a genuine failure gets "
             "surfaced instead of silently read as \"someone else has it.\""
         )
+
+
+def test_ack_lock_is_created_with_a_body_marker():
+    # CodeRabbit's PR #402 round-3 finding: ack-absence and age alone were
+    # judged not a safe enough signal (both are indirect and have edge
+    # cases -- a manually deleted ack comment, HTML-comment stripping
+    # affecting both ack signals, read-after-write lag). Every site that
+    # acquires the ACK lock now creates it with body "(atlas-ack-lock)" --
+    # a direct, load-bearing marker the recovery pass matches against
+    # before ever clearing anything.
+    for label, path in ACK_POSTING_FILES.items():
+        text = _read(path)
+        assert "(atlas-ack-lock)" in text, (
+            f"{label} ({path}) no longer creates its ACK lock with the "
+            "(atlas-ack-lock) body marker -- without it, the recovery pass "
+            "in the poller files has no independent way to tell an ACK "
+            "lock apart from a findings-building pending review before "
+            "clearing anything (PR #402 round-3 review)."
+        )
+
+
+def test_recovery_matches_the_body_marker_before_clearing():
+    for label, path in RECOVERY_FILES.items():
+        text = _read(path)
+        assert "(atlas-ack-lock)" in text, (
+            f"{label} ({path}) no longer checks the (atlas-ack-lock) body "
+            "marker before clearing a pending review -- ack-absence and "
+            "age alone are not a safe enough signal on their own (PR #402 "
+            "round-3 review); re-add the marker check as a required, "
+            "independent third condition."
+        )
+
+
+def test_round_derivation_excludes_pending_reviews():
+    # CodeRabbit's PR #402 round-3 finding: get_reviews returns the caller's
+    # own not-yet-submitted PENDING review (confirmed GitHub API behavior).
+    # Without excluding it, a concurrent session's round-count during the
+    # ACK lock's brief hold window -- or a review subagent's own step-5
+    # pending review while still being built -- gets miscounted as "a
+    # review with no parseable heading," wrongly tripping the `unknown`
+    # state instead of proceeding normally or detecting real contention.
+    for label, path in FILES.items():
+        text = _read(path)
+        assert re.search(r"not\s+.{0,20}PENDING|PENDING.{0,40}exclu", text, re.IGNORECASE), (
+            f"{label} ({path}) no longer excludes PENDING-state reviews "
+            "from round derivation -- re-add the exclusion (PR #402 "
+            "round-3 review) so your own ACK lock or in-progress findings "
+            "review doesn't get miscounted as an unparseable round signal."
+        )
+
+
+def test_rebase_stale_lock_recovery_checks_every_pr_not_once_globally():
+    # CodeRabbit's PR #402 round-3 finding: a pending review is scoped to
+    # one PR at a time per identity, not one lock across an entire sweep --
+    # "check once per sweep, not per PR" was actually backwards and would
+    # leave every PR but the first unchecked.
+    for label, path in RECOVERY_FILES.items():
+        text = _read(path)
+        assert "once per sweep, not per pr" not in text.lower(), (
+            f"{label} ({path}) still says to check for a stuck lock \"once "
+            "per sweep, not per PR\" -- this is backwards: a pending "
+            "review is scoped per-PR per identity, so this must check "
+            "every open PR in the sweep, not a single global check (PR "
+            "#402 round-3 review)."
+        )
+        assert re.search(r"each open pr|every open pr", text, re.IGNORECASE), (
+            f"{label} ({path}) doesn't say the stuck-lock recovery check "
+            "runs for each/every open PR in the sweep -- without this, a "
+            "stuck lock on one PR leaves every other PR's own lock "
+            "unchecked."
+        )

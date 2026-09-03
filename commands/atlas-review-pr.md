@@ -94,9 +94,17 @@ ACK or a fake high `## Round N` review to suppress the real ACK or inflate the
 round count past what actually happened.
 
 Count this reviewer's prior reviews on the PR — **"this reviewer's" means
-`author.login == your own login` from the identity check above; a review from
-anyone else, however it's formatted, is not a candidate for round derivation at
-all.** Going forward, every round-posting review summary this command posts
+`author.login == your own login` from the identity check above **and** the
+review's state is not `PENDING`; a review from anyone else, however it's
+formatted, or your own not-yet-submitted review (the ACK lock this same step
+acquires below, or a review still being built), is not a candidate for round
+derivation at all.** `get_reviews` returns your own `PENDING` review (GitHub
+API behavior, confirmed via docs.github.com/en/rest/pulls/reviews) — without
+this exclusion, a concurrent session's round-count during your ACK lock's
+brief hold window, or your own step 5 pending review while it's still being
+built, would be miscounted as "a review with no parseable heading" and
+wrongly trip the `unknown` state below (found in PR #402's own review).
+Going forward, every round-posting review summary this command posts
 carries **both** a visible `## Round N — ...` heading as its first line **and**
 the invisible marker `<!-- atlas-review round:N -->` (dual-encoded — see step
 5) — but a review posted before this dual-encoding was adopted, or one where
@@ -136,9 +144,16 @@ same PR, a supported combination per `docs/runbooks/pr-review-automation.md`
 — can each read "no ack" before either write lands, and both post. Close that
 race with a primitive GitHub actually enforces atomically:
 `mcp__github__pull_request_review_write`, method `create`, with **no**
-`event` parameter — this opens a *pending* review, and GitHub allows **at
-most one pending review per identity per PR at a time**, so a concurrent
-`create` under your own identity fails outright instead of silently racing.
+`event` parameter and `body` set to the literal marker `(atlas-ack-lock)` —
+this opens a *pending* review, and GitHub allows **at most one pending
+review per identity per PR at a time**, so a concurrent `create` under your
+own identity fails outright instead of silently racing. **The `(atlas-ack-lock)`
+body is load-bearing, not decorative:** it is the independent signal
+`atlas-rebase-stale.md`/`atlas-poll-and-review.md`'s stuck-lock recovery
+uses to tell this lock apart from step 5's own pending review (which is
+never created with this body) before ever calling `delete_pending` —
+PR #402's own review found that ACK-absence and age alone weren't a safe
+enough signal on their own.
 
 - **If `create` fails, check *why* before deciding what to do — not every
   failure means contention.** If the error says a pending review already

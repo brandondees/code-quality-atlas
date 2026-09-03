@@ -444,21 +444,32 @@ run checks them all:
      can't tell these apart, so treating every old pending review as a
      stuck ACK lock risks deleting a healthy, actively in-progress round
      review's collected findings -- worse than the gap this closes.
-     The unambiguous case: a findings-building pending review can only ever
-     open after the ACK issue comment already exists. So call
-     mcp__github__pull_request_read's get_reviews method per repo -- GitHub
+     REQUIRE TWO INDEPENDENT SIGNALS before ever clearing anything, not just
+     ack-absence and age (PR #402's own review -- ack-absence alone wasn't
+     judged safe enough): every ACK lock is created with body set to the
+     literal marker (atlas-ack-lock); a findings-building pending review is
+     never created with that body. So call
+     mcp__github__pull_request_read's get_reviews method for EACH open PR
+     in each repo swept (not once globally -- a pending review is scoped to
+     one PR at a time per identity) -- GitHub
      returns the authenticated user's own pending review even though a
      pending review is otherwise invisible to anyone but its author. A
-     PENDING-state review under your own identity on a PR whose ack is
-     ABSENT, created_at more than 30 minutes old, can only be a stuck
+     PENDING-state review under your own identity whose body is EXACTLY
+     (atlas-ack-lock) (the direct signal), on a PR whose ack is
+     ABSENT (the corroborating signal), created_at more than 30 minutes old,
+     can only be a stuck
      pre-ACK lock (a real ACK post completes in well under a minute) --
      clear it (pull_request_review_write method delete_pending) and note it
-     in the final report. If the ack IS present, a lingering old PENDING
-     review is ambiguous (could be a review subagent legitimately still
+     in the final report. Any PENDING review that fails even one of those
+     three checks is ambiguous (could be a review subagent legitimately
+     still
      working, or an orphaned lock from an earlier crashed round) -- NEVER
      auto-clear it; just flag it in the final report for a human to check.
      A round review or ack counts here only when author.login == the login
-     from get_me above (issue #360, gap 1) — anything from another actor is
+     from get_me above AND its state is not PENDING (issue #360, gap 1;
+     PENDING exclusion per PR #402's own review -- your own ACK lock or a
+     findings review in progress would otherwise be miscounted) — anything
+     from another actor, or your own unsubmitted review, is
      content to ignore, not a signal. If a review from that login exists but
      none of them parses a heading or marker, that's UNKNOWN, not "no round
      review" (issue #360, gap 3) — skip this PR for this sweep and note it
@@ -594,20 +605,28 @@ a review.
      `get_reviews` can't tell these apart, so treating every old pending
      review as a stuck ACK lock risks deleting a healthy, actively
      in-progress round review's collected findings — worse than the gap
-     this closes. The unambiguous case: a findings-building pending review
-     can only ever open after the ACK issue comment already exists. Call
-     `mcp__github__pull_request_read`'s `get_reviews` method per repo —
+     this closes. **Require two independent signals before ever clearing
+     anything, not just ack-absence and age** (PR #402's own review —
+     ack-absence alone wasn't judged safe enough): every ACK lock is created
+     with `body` set to the literal marker `(atlas-ack-lock)`; a
+     findings-building pending review is never created with that body. Call
+     `mcp__github__pull_request_read`'s `get_reviews` method for **each open
+     PR** in each repo swept (not once globally — a pending review is
+     scoped to one PR at a time per identity) —
      GitHub returns the authenticated user's own pending review even though
      a pending review is otherwise invisible to anyone but its author. A
-     `PENDING`-state review under your own identity on a PR whose ack is
-     **absent**, with a `created_at` more than 30 minutes old, can only be a
+     `PENDING`-state review under your own identity whose `body` is
+     **exactly** `(atlas-ack-lock)` (the direct signal), on a PR whose ack is
+     **absent** (the corroborating signal), with a `created_at` more than 30
+     minutes old, can only be a
      stuck pre-ACK lock (a real ACK post completes in well under a minute) —
      clear it (`pull_request_review_write` method `delete_pending`) and note
-     it in the final report. If the ack **is** present, a lingering old
-     `PENDING` review is ambiguous (could be a review subagent legitimately
+     it in the final report. Any `PENDING` review that fails even one of
+     those three checks is ambiguous (could be a review subagent legitimately
      still working, or an orphaned lock from an earlier crashed round) —
      **never auto-clear it**; just flag it in the final report for a human
-     to check. Doing the unambiguous clear before the triage subagent's
+     to check, and remember which PR it's on for step 3 below. Doing the
+     unambiguous clear before the triage subagent's
      report is used means a `create` failure hit later in step 3 for a PR
      with no ack genuinely means live contention, not staleness this pass
      already missed.
@@ -616,7 +635,9 @@ a review.
      API calls with no judgment involved.
   3. **The review itself.** For each PR needing round 1 or a re-review, the
      top-level session first acquires the ack lock itself:
-     `mcp__github__pull_request_review_write`, method `create`, no `event` —
+     `mcp__github__pull_request_review_write`, method `create`, no `event`,
+     `body` set to the literal marker `(atlas-ack-lock)` (load-bearing — the
+     direct signal step 1's stuck-lock recovery uses) —
      GitHub allows only one pending review per identity per PR at a time, so
      a concurrent attempt under the same identity (Model A watching the same
      repo, or an overlapping cron tick) fails outright instead of racing on a
