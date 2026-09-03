@@ -355,13 +355,43 @@ vendor_lens_coverage_hook() {
     fi
   fi
 
+  # Every failure path below is an EXPLICIT check, not a reliance on `set -e`
+  # catching a failing pipeline: this function is called as
+  # `vendor_lens_coverage_hook "$abs_target" || exit 1` in main(), and bash
+  # suspends errexit for the full duration of a function invoked as the
+  # non-final part of an `||` (or `&&`) list -- an internal jq failure here
+  # previously did NOT stop execution, silently continuing to the final
+  # `> "$settings_file"` and printing a false success message (Copilot
+  # review, PR #398, confirmed by reproduction: a settings.json with a
+  # non-array `.hooks.PostToolUse` shape made the merge jq error, and the
+  # unguarded `... | jq . > "$settings_file"` truncated the target to an
+  # EMPTY file before jq could report that error -- real data loss, not a
+  # theoretical one).
   local updated
-  updated="$(printf '%s' "$current" \
-    | merge_settings_hook "PostToolUse" "Read" "$HOOK_SUBDIR/track-lens-reads.sh" \
-    | merge_settings_hook "PostToolUse" "Skill" "$HOOK_SUBDIR/track-lens-reads.sh" \
-    | merge_settings_hook "PreToolUse" "mcp__github__pull_request_review_write|mcp__github__add_comment_to_pending_review" "$HOOK_SUBDIR/gate-lens-coverage.sh")"
+  if ! updated="$(printf '%s' "$current" \
+      | merge_settings_hook "PostToolUse" "Read" "$HOOK_SUBDIR/track-lens-reads.sh" \
+      | merge_settings_hook "PostToolUse" "Skill" "$HOOK_SUBDIR/track-lens-reads.sh" \
+      | merge_settings_hook "PreToolUse" "mcp__github__pull_request_review_write|mcp__github__add_comment_to_pending_review" "$HOOK_SUBDIR/gate-lens-coverage.sh")" \
+     || ! printf '%s' "$updated" | jq -e . >/dev/null 2>&1; then
+    printf 'Error: failed to merge the lens-coverage hook wiring into %s -- an existing .hooks entry may have an unexpected shape (expected an array under .hooks.<Event>). Left untouched; merge it in by hand -- see hooks/lens-coverage/ in code-quality-atlas.\n' "$settings_file" >&2
+    return 1
+  fi
 
-  printf '%s\n' "$updated" | jq . > "$settings_file"
+  # Atomic write: stage in a temp file in the same directory (so the final
+  # `mv` is a same-filesystem rename, not a copy), then move it into place.
+  # A failure between here and the mv leaves the existing settings_file
+  # (if any) completely untouched, instead of truncated.
+  local tmp_settings
+  tmp_settings="$(mktemp "${settings_file}.XXXXXX")" || {
+    printf 'Error: could not create a temp file to stage %s\n' "$settings_file" >&2
+    return 1
+  }
+  if ! printf '%s\n' "$updated" | jq . > "$tmp_settings"; then
+    rm -f "$tmp_settings"
+    printf 'Error: failed writing the merged settings JSON; %s left untouched.\n' "$settings_file" >&2
+    return 1
+  fi
+  mv "$tmp_settings" "$settings_file"
 
   # The tracker writes one state file per session under this directory
   # (never meant to be committed); append the ignore entry to the target's

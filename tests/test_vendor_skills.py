@@ -390,3 +390,38 @@ old="etc"
         "the guard should abort before rm is ever reached, mocked or not: "
         f"stderr={result.stderr!r}"
     )
+
+
+def test_with_lens_coverage_hook_never_corrupts_a_settings_json_it_cannot_merge_into(tmp_path):
+    """Regression for a Copilot-review finding on PR #398: a target's
+    .claude/settings.json with a valid-but-unexpected .hooks shape (an
+    object instead of an array under an event name -- itself a malformed
+    Claude Code settings.json, but a plausible hand-authored mistake) made
+    merge_settings_hook's jq error. vendor_lens_coverage_hook is called as
+    `... || exit 1` in main(), and bash suspends errexit for the whole
+    duration of a function invoked as the non-final part of an `||` list --
+    so the jq failure did not stop execution, and the unguarded
+    `... | jq . > "$settings_file"` truncated the target to an EMPTY file
+    before ever reporting the error. Confirmed real data loss, not
+    theoretical, before the fix (explicit checks + an atomic temp-file-then-
+    mv write) landed."""
+    target = tmp_path / "target-repo"
+    settings_dir = target / ".claude"
+    settings_dir.mkdir(parents=True)
+    original = '{\n  "hooks": {\n    "PostToolUse": {"matcher": "Read", "hooks": []}\n  }\n}\n'
+    (settings_dir / "settings.json").write_text(original)
+
+    result = run_vendor_raw(target, "--with-lens-coverage-hook")
+    assert result.returncode != 0, (
+        "a merge that can't proceed must fail visibly, not silently succeed: "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "settings.json" in result.stderr
+
+    # The critical assertion: the pre-existing file must be byte-for-byte
+    # untouched, not truncated/emptied/partially written.
+    assert (settings_dir / "settings.json").read_text() == original
+
+    # No stray temp file left behind from the aborted atomic write.
+    leftovers = list(settings_dir.glob("settings.json.*"))
+    assert leftovers == [], f"temp file(s) not cleaned up: {leftovers}"
