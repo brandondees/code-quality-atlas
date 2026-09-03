@@ -99,6 +99,37 @@ def test_env_override_byte_length_is_utf8_bytes_not_codepoints(tmp_path):
     assert record["tool_input_sha256"] == hashlib.sha256(compact.encode("utf-8")).hexdigest()
 
 
+def test_env_override_degrades_to_null_digest_without_a_hashing_tool(tmp_path):
+    # Regression for the atlas reviewer's PR #397 finding: a PATH with `jq`
+    # but neither `sha256sum` nor `shasum` must still log the invocation —
+    # with a real tool_input_len and a null (not missing, not a crash)
+    # tool_input_sha256 — rather than silently dropping the record or
+    # producing an undocumented shape.
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    for tool in ("bash", "cat", "mkdir", "printf", "date", "git", "grep",
+                 "sed", "awk", "dirname", "cd", "sh", "jq", "wc", "tr", "cut"):
+        found = shutil.which(tool)
+        if found:
+            (fake_bin / tool).symlink_to(found)
+    assert not (fake_bin / "sha256sum").exists()
+    assert not (fake_bin / "shasum").exists()
+    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+           "PATH": str(fake_bin), "HOME": str(tmp_path)}
+    result = subprocess.run(
+        ["bash", str(LOG_HOOK)], cwd=str(tmp_path), input=_SKILL_INPUT,
+        capture_output=True, text=True, timeout=10, env=env, check=False,
+    )
+    assert result.returncode == 0
+    log = _learnings_dir(tmp_path) / "invocations.jsonl"
+    assert log.exists()
+    record = json.loads(log.read_text().strip().splitlines()[-1])
+    compact = json.dumps({"skill": "checking-restraint"}, separators=(",", ":"))
+    assert record["tool_input_len"] == len(compact.encode("utf-8"))
+    assert record["tool_input_sha256"] is None
+
+
 def test_session_end_queues_retro_under_env_override(tmp_path):
     env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
            "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
@@ -131,6 +162,26 @@ def test_session_end_basename_strips_windows_backslash_paths_too(tmp_path):
     record = json.loads(queue.read_text().strip().splitlines()[-1])
     assert "transcript_path" not in record
     assert record["transcript_basename"] == "abc-123.jsonl"
+
+
+def test_session_end_empty_transcript_path_yields_null_basename_not_empty_string(tmp_path):
+    # Regression for the atlas reviewer's PR #397 finding: jq's `if` only
+    # treats null/false as falsy, so `if .transcript_path then ...` alone
+    # would turn an (unlikely but possible) empty-string transcript_path
+    # into transcript_basename: "" instead of null, diverging from the
+    # documented "basename or null" contract.
+    session_end_input = json.dumps({
+        "session_id": "s1",
+        "hook_event_name": "SessionEnd",
+        "transcript_path": "",
+        "reason": "clear",
+    })
+    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    _run(RETRO_HOOK, tmp_path, session_end_input, env_extra=env)
+    queue = _learnings_dir(tmp_path) / "pending-retro.jsonl"
+    record = json.loads(queue.read_text().strip().splitlines()[-1])
+    assert record["transcript_basename"] is None
 
 
 def test_invalid_env_tier_falls_back_to_off(tmp_path):

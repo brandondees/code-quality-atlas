@@ -18,10 +18,12 @@
 # tool as of this writing, and guessing a field name wrong would silently
 # drop data. Rather than store the payload itself (which can carry file
 # contents, paths, or other reviewed-repo material the design promises stays
-# abstracted), it records only the payload's byte length and SHA-256 digest —
-# enough for a later analysis pass (§3.4) to see that invocations happened and
-# whether their inputs repeat or change shape, without capturing what they
-# contained.
+# abstracted), it records only the payload's byte length and, when a hashing
+# tool is on PATH (sha256sum or shasum — best-effort, not guaranteed: the
+# digest is `null` on a system with neither, while the length is still
+# recorded), a SHA-256 digest — enough for a later analysis pass (§3.4) to
+# see that invocations happened and whether their inputs repeat or change
+# shape, without capturing what they contained.
 #
 # Always exits 0 — a broken or absent dependency (jq), an unwritable
 # directory, or malformed input degrades to "don't log this one", never to
