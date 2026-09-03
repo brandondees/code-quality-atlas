@@ -158,6 +158,31 @@ floor or hidden one of its findings, name that in the summary.
 
 ## 4. Run the lenses
 
+**Before invoking any `code-quality-atlas:*` skill in this step, decide which
+tier serves them all this round.** Every atlas skill this step names — the
+picker (`choosing-review-lenses`), the tool pre-pass
+(`grounding-review-in-tool-output`), each lens, and the synthesizer
+(`synthesizing-review-findings`) — resolves the same two-tier way: the
+`Skill` tool first (a vendored `.claude/skills/` install or an account-enabled
+skill), else a fetch from the source repo (sub-step 4 below spells out both).
+The `Skill` tool loads from the session's checkout, and in a PR-triggered
+routine session that checkout can be the PR head; a PR that edits anything
+under `.claude/skills/` would then be supplying the picker that chooses the
+lenses, the checklist each lens applies, and the synthesizer that sets the
+verdict. So read the PR's `files` list now (`mcp__github__pull_request_read`,
+`get_files`, paginated): if any changed path is under `.claude/skills/`,
+**use the fetch tier for every `code-quality-atlas:*` skill this round and
+do not call the `Skill` tool for any of them** — the edited skill content is
+the review's *subject*, and the lenses that review it
+(`reviewing-artifact-conventions`, `auditing-enforcement-and-meta-artifacts`)
+read it from the diff like any other change. (When the reviewed repo is the
+suite itself, a `skills/` edit arrives with a matching `.claude/skills/`
+re-vendor — `tests/test_self_vendored_skills_sync.py` fails CI otherwise — so
+the same path test catches it.) A vendored install the diff doesn't touch is
+identical on head and base, so the `Skill` tool is safe to use there. Record
+which tier served this round, and whether this gate fired, for the coverage
+line.
+
 1. Determine the **depth mode**, matching the triggers table in
    `code-quality-atlas:choosing-review-lenses`'s Depth modes section:
    **triage** ("triage", "quick review", "fast check", "pre-merge gate"),
