@@ -38,8 +38,8 @@ directly-invokable action instead of relying on trigger-phrase matching.
 - **joins:** none of this map's modeled object types directly —
   `atlas-review-pr`/`atlas-code-review` call `choosing-review-lenses`,
   `grounding-review-in-tool-output`, and `synthesizing-review-findings`
-  directly and in sequence (`commands/atlas-review-pr.md:200,212,268`,
-  `commands/atlas-code-review.md:46,62,79`) — the same three skills the
+  directly and in sequence (`commands/atlas-review-pr.md:206,218,274`,
+  `commands/atlas-code-review.md:57,73,90`) — the same three skills the
   `reviewing-a-change` `CollapsedEntrypoint` composes, replicated by hand
   rather than invoked through it; see that card's own "Connected to" note.
   `Lens`/`Manifest` indirectly through whichever lens those skills pick

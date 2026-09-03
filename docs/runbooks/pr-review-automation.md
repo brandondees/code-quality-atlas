@@ -466,7 +466,7 @@ identity, the reviewer posts a real `APPROVE` state and either signal works.)
 `atlas-review-pr.md` (steps 3 and 4) reads `REVIEW.md`,
 `.code-quality-atlas/preferences.md`, and — when the diff touches them — the
 vendored lenses from the PR's **base** ref, and takes the depth mode only from
-`$ARGUMENTS` or an `OWNER`/`MEMBER`/`COLLABORATOR`. A PR that edits its own
+`$ARGUMENTS` or an `OWNER`/`MEMBER`/`COLLABORATOR` comment. A PR that edits its own
 review policy, suppresses its own findings, rewrites a lens, or asks for
 "triage" in its description is therefore reviewed under the rules already on
 the base, and its `APPROVE` means what it would have meant for any other PR.
