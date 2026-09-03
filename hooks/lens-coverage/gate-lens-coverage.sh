@@ -53,6 +53,15 @@ input="$(cat)"
 
 command -v jq >/dev/null 2>&1 || exit 0
 
+# Anchor every project-relative path below to $CLAUDE_PROJECT_DIR when the
+# harness sets it (round-4 CodeRabbit review, PR #398) -- a hook can run
+# with a working directory other than the project root, and this and
+# track-lens-reads.sh must agree on the same state path regardless. Falls
+# back to the existing cwd-relative behavior when unset, so every
+# already-verified path (this repo's own tests included, which never set
+# it) is unaffected.
+project_dir="${CLAUDE_PROJECT_DIR:-.}"
+
 # Known follow-up, not a blocker: this duplicates ../lib/feedback-tier.sh's
 # HTML-comment-stripping + `key: value` extraction instead of sharing it
 # (checking-idioms-and-consistency would flag the duplication). Correctness
@@ -68,7 +77,7 @@ command -v jq >/dev/null 2>&1 || exit 0
 # lib/ helper would need vendoring too, plus CLAUDE_PLUGIN_ROOT-aware
 # sourcing this script doesn't currently have at all -- scoped out of this
 # change rather than bolted on as a side effect of a comment-wording fix.
-gate_prefs=".code-quality-atlas/preferences.md"
+gate_prefs="$project_dir/.code-quality-atlas/preferences.md"
 gate_on=""
 if [ -f "$gate_prefs" ]; then
   gate_on="$(awk '
@@ -94,7 +103,7 @@ case "$session_id" in
   *[!A-Za-z0-9_-]*) exit 0 ;;
 esac
 
-state_file=".claude/.atlas-lens-coverage/$session_id.txt"
+state_file="$project_dir/.claude/.atlas-lens-coverage/$session_id.txt"
 # No reads recorded yet this session: nothing to check against, and the
 # common case on a repo where the suite isn't vendored/enabled locally at
 # all. Fail open rather than block every review on an environment gap this
@@ -113,9 +122,9 @@ posted_text="$(printf '%s' "$input" | jq -r '[.tool_input | .. | strings] | join
 # misread as a lens citation.
 known_lenses="$(
   {
-    find . -maxdepth 6 -type d -path '*/reference/lenses/*' -not -path '*/.git/*' 2>/dev/null \
+    find "$project_dir" -maxdepth 6 -type d -path '*/reference/lenses/*' -not -path '*/.git/*' 2>/dev/null \
       | sed -E 's#.*/reference/lenses/##; s#/.*##'
-    find . -maxdepth 3 -type d -path '*/skills/*' -not -path '*/.git/*' 2>/dev/null \
+    find "$project_dir" -maxdepth 3 -type d -path '*/skills/*' -not -path '*/.git/*' 2>/dev/null \
       | sed -E 's#.*/skills/##; s#/.*##'
   } | sort -u
 )"

@@ -104,7 +104,34 @@ case "$tool_name" in
 esac
 [ -n "$lens" ] || exit 0
 
-state_dir=".claude/.atlas-lens-coverage"
+# Normalize and validate before this ever reaches the state file (round-4
+# CodeRabbit review, PR #398):
+#   - A plugin-installed lens's Skill invocation carries a `<plugin>:`
+#     prefix (e.g. this repo's own plugin, installed rather than vendored,
+#     is invoked as `code-quality-atlas:hunting-silent-failures`) -- strip
+#     up to the last colon so only the bare slug is ever recorded, matching
+#     what gate-lens-coverage.sh's citation parser looks for.
+#   - Collapse a leading "./" path segment the case patterns above don't
+#     strip on their own (e.g. skills/./checking-restraint/SKILL.md).
+#   - Reject anything left that isn't lowercase-letters/digits/hyphens --
+#     every real lens name in this suite, and the exact shape
+#     gate-lens-coverage.sh's own known-lens pattern expects -- rather than
+#     write untrusted-shaped content (an embedded newline, say) into a file
+#     that hook treats as a trusted audit record.
+lens="${lens##*:}"
+lens="${lens#./}"
+case "$lens" in
+  *[!a-z0-9-]*) exit 0 ;;
+esac
+[ -n "$lens" ] || exit 0
+
+# Anchor to the project root via $CLAUDE_PROJECT_DIR when the harness sets
+# it (round-4 CodeRabbit review) -- a hook can run with a working directory
+# other than the project root, and this and gate-lens-coverage.sh must
+# agree on the same state path regardless. Falls back to the existing
+# cwd-relative behavior when unset, so every already-verified path (this
+# repo's own tests included, which never set it) is unaffected.
+state_dir="${CLAUDE_PROJECT_DIR:-.}/.claude/.atlas-lens-coverage"
 mkdir -p "$state_dir" 2>/dev/null || exit 0
 state_file="$state_dir/$session_id.txt"
 

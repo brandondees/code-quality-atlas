@@ -519,3 +519,67 @@ def test_gate_rejects_a_path_traversal_shaped_session_id(tmp_path):
         "tool_input": {"body": "Major\n- x.py:1 (tracing-correctness-and-invariants)"},
     }))
     assert result.returncode == 0
+
+
+# --- Round-4 CodeRabbit review, PR #398: a plugin-installed lens's Skill
+# invocation carries a `<plugin>:` prefix, a Read path can carry a stray
+# "./" segment, and neither the tracker nor the gate anchored their state
+# path to the project root -- a hook invoked with a working directory other
+# than the project root would silently disagree with itself about where the
+# state file lives.
+
+def test_track_strips_plugin_prefix_from_a_skill_invocation(tmp_path):
+    stdin = json.dumps({
+        "session_id": "s1", "tool_name": "Skill",
+        "tool_input": {"skill": "code-quality-atlas:hunting-silent-failures"},
+    })
+    _run(TRACK_HOOK, tmp_path, stdin)
+    assert _lens_coverage_state(tmp_path).read_text().splitlines() == ["hunting-silent-failures"]
+
+
+def test_track_collapses_a_stray_dot_slash_path_segment(tmp_path):
+    stdin = json.dumps({
+        "session_id": "s1", "tool_name": "Read",
+        "tool_input": {"file_path": "skills/./checking-restraint/SKILL.md"},
+    })
+    _run(TRACK_HOOK, tmp_path, stdin)
+    assert _lens_coverage_state(tmp_path).read_text().splitlines() == ["checking-restraint"]
+
+
+def test_track_rejects_a_lens_value_shaped_like_an_injection_attempt(tmp_path):
+    # An embedded newline in tool_input.skill could otherwise let a crafted
+    # value inject an extra, fabricated "line" into the state file gate-
+    # lens-coverage.sh trusts as a record of what was actually read.
+    stdin = json.dumps({
+        "session_id": "s1", "tool_name": "Skill",
+        "tool_input": {"skill": "evil\nfake-lens"},
+    })
+    _run(TRACK_HOOK, tmp_path, stdin)
+    assert not _lens_coverage_state(tmp_path).exists()
+
+
+def test_track_and_gate_agree_on_claude_project_dir_over_cwd(tmp_path):
+    # The tracker and gate must resolve the SAME state path even when
+    # invoked with a working directory other than the project root -- CWD
+    # is where the hook happens to run, CLAUDE_PROJECT_DIR (when set) is
+    # where the project actually is.
+    project_dir = tmp_path / "project"
+    other_cwd = tmp_path / "elsewhere"
+    project_dir.mkdir()
+    other_cwd.mkdir()
+    (project_dir / "skills" / "hunting-silent-failures").mkdir(parents=True)
+    env = {"CLAUDE_PROJECT_DIR": str(project_dir)}
+
+    _run(TRACK_HOOK, other_cwd, json.dumps({
+        "session_id": "s1", "tool_name": "Skill",
+        "tool_input": {"skill": "hunting-silent-failures"},
+    }), env_extra=env)
+
+    # Landed under the project dir, not a cwd-relative .claude/ in other_cwd.
+    assert (project_dir / ".claude" / ".atlas-lens-coverage" / "s1.txt").read_text().strip() \
+        == "hunting-silent-failures"
+    assert not (other_cwd / ".claude").exists()
+
+    _enable_gate(project_dir)
+    result = _run_gate(other_cwd, _gate_body("hunting-silent-failures"), env_extra=env)
+    assert result.returncode == 0
