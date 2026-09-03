@@ -5,6 +5,13 @@ Copy this file to the **root of the repo you want reviewed**. The
 should be, and when to stop. Without it, the command falls back to these same
 defaults. The repo's own copy always wins, so tune the numbers per project.
 
+**Which copy governs a review: the one on the PR's base ref.** The reviewer
+reads this file (and `.code-quality-atlas/preferences.md`) from the base branch,
+never from the PR head — a PR that edits this policy is reviewed under the
+policy already merged, and the edit takes effect for the next PR. Otherwise a
+PR could raise its own floor, lower its own cap, or suppress its own findings
+before anyone had reviewed the change that did so.
+
 The point of this policy is convergence: the reviewer and the build (auto-fix)
 session react to each other, and a `synchronize`-triggered reviewer re-runs on
 every push. The brakes that keep that mutual reaction from ping-ponging forever
