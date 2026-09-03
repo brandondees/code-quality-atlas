@@ -346,10 +346,13 @@ vendor_lens_coverage_hook() {
   local hook_dest="$abs_target/$HOOK_SUBDIR"
   local settings_file="$abs_target/.claude/settings.json"
 
-  mkdir -p "$hook_dest"
-  cp "$hook_src/track-lens-reads.sh" "$hook_dest/track-lens-reads.sh"
-  cp "$hook_src/gate-lens-coverage.sh" "$hook_dest/gate-lens-coverage.sh"
-  chmod +x "$hook_dest/track-lens-reads.sh" "$hook_dest/gate-lens-coverage.sh"
+  if ! mkdir -p "$hook_dest" \
+    || ! cp "$hook_src/track-lens-reads.sh" "$hook_dest/track-lens-reads.sh" \
+    || ! cp "$hook_src/gate-lens-coverage.sh" "$hook_dest/gate-lens-coverage.sh" \
+    || ! chmod +x "$hook_dest/track-lens-reads.sh" "$hook_dest/gate-lens-coverage.sh"; then
+    printf 'Error: failed to install the lens-coverage hook scripts into %s; %s left untouched.\n' "$hook_dest" "$settings_file" >&2
+    return 1
+  fi
 
   local current='{}'
   if [ -f "$settings_file" ]; then
@@ -359,18 +362,26 @@ vendor_lens_coverage_hook() {
     fi
   fi
 
-  # Every failure path below is an EXPLICIT check, not a reliance on `set -e`
-  # catching a failing pipeline: this function is called as
-  # `vendor_lens_coverage_hook "$abs_target" || exit 1` in main(), and bash
-  # suspends errexit for the full duration of a function invoked as the
-  # non-final part of an `||` (or `&&`) list -- an internal jq failure here
-  # previously did NOT stop execution, silently continuing to the final
-  # `> "$settings_file"` and printing a false success message (Copilot
-  # review, PR #398, confirmed by reproduction: a settings.json with a
-  # non-array `.hooks.PostToolUse` shape made the merge jq error, and the
-  # unguarded `... | jq . > "$settings_file"` truncated the target to an
-  # EMPTY file before jq could report that error -- real data loss, not a
-  # theoretical one).
+  # This whole function is called as a BARE statement in main() (no `if`,
+  # no `|| exit 1`) specifically so `set -e` applies normally to every
+  # command in it, including the plain mkdir/cp/chmod above and the mv
+  # below -- calling it any other way suspends errexit for the function's
+  # entire body, which is exactly what let an internal jq failure here
+  # previously go uncaught, silently continue to `> "$settings_file"`, and
+  # print a false success message (Copilot review, PR #398, confirmed by
+  # reproduction: a settings.json with a non-array `.hooks.PostToolUse`
+  # shape made the merge jq error, and the unguarded write truncated the
+  # target to an EMPTY file before jq could report that error -- real data
+  # loss). A round-3 follow-up review found that first fix incomplete: it
+  # added explicit checks around the merge/write below, but the mkdir/cp/
+  # chmod block above and the mv below were still unguarded and still hit
+  # the identical silent-false-success failure mode on their own (confirmed
+  # by reproduction: an obstructed hook_dest made five commands fail while
+  # the run still reported success and wrote full hook wiring into
+  # settings.json for scripts that were never copied) -- calling the
+  # function bare, as it is now, closes every such gap at once rather than
+  # requiring a guard at each site; the explicit checks below stay because
+  # they give a clear, specific error message instead of a bare abort.
   local updated
   if ! updated="$(printf '%s' "$current" \
       | merge_settings_hook "PostToolUse" "Read" "$HOOK_SUBDIR/track-lens-reads.sh" \
@@ -395,13 +406,20 @@ vendor_lens_coverage_hook() {
     printf 'Error: failed writing the merged settings JSON; %s left untouched.\n' "$settings_file" >&2
     return 1
   fi
-  mv "$tmp_settings" "$settings_file"
+  if ! mv "$tmp_settings" "$settings_file"; then
+    rm -f "$tmp_settings"
+    printf 'Error: failed to move the merged settings JSON into place at %s.\n' "$settings_file" >&2
+    return 1
+  fi
 
   # The tracker writes one state file per session under this directory
   # (never meant to be committed); append the ignore entry to the target's
   # own .gitignore, idempotently, same as this repo's own (round-1 review on
   # PR #398 -- nothing previously ignored this path here or in a vendored
-  # target).
+  # target). Non-fatal on failure, deliberately: settings_file (the part
+  # that actually makes the gate enforce anything) is already written and
+  # correct by this point, so a .gitignore hiccup is a hygiene nit, not a
+  # reason to report the whole run as failed.
   local gitignore_file="$abs_target/.gitignore" ignore_line=".claude/.atlas-lens-coverage/"
   if [ ! -f "$gitignore_file" ] || ! grep -Fxq "$ignore_line" "$gitignore_file"; then
     # Decide the leading newline BEFORE opening the redirect below -- doing
@@ -410,10 +428,12 @@ vendor_lens_coverage_hook() {
     # computing it into a plain variable first sidesteps that entirely.
     local leading_newline=""
     [ -s "$gitignore_file" ] && leading_newline=1
-    {
+    if ! {
       [ -n "$leading_newline" ] && printf '\n'
       printf '# Per-session lens-coverage state (code-quality-atlas hooks/lens-coverage/) -- ephemeral, never committed\n%s\n' "$ignore_line"
-    } >> "$gitignore_file"
+    } >> "$gitignore_file"; then
+      printf 'Warning: could not update %s to ignore .claude/.atlas-lens-coverage/ -- add it by hand.\n' "$gitignore_file" >&2
+    fi
   fi
 
   printf 'Vendored lens-coverage hook -> %s (wiring merged into %s, %s updated)\n' "$hook_dest" "$settings_file" "$gitignore_file"
@@ -462,7 +482,15 @@ main() {
     "$((${#SKILL_NAMES[@]} - ${#SKIPPED_COLLISIONS[@]}))" "$dest_root"
 
   if [ "$WITH_LENS_COVERAGE_HOOK" -eq 1 ]; then
-    vendor_lens_coverage_hook "$abs_target" || exit 1
+    # Called as a bare statement, deliberately -- see the function's own
+    # header for why testing its exit status here (an `if`, or `|| exit 1`
+    # as this line previously read) would suspend `set -e` for the ENTIRE
+    # function body, not just this call. Left untested, a failure inside
+    # the function (an explicit `return 1`, or any unguarded command) exits
+    # this whole script immediately with that same status, exactly like an
+    # ordinary top-level command failing under `set -e` -- no explicit
+    # check needed here at all.
+    vendor_lens_coverage_hook "$abs_target"
   fi
 
   local pruned=0

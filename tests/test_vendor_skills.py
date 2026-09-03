@@ -425,3 +425,43 @@ def test_with_lens_coverage_hook_never_corrupts_a_settings_json_it_cannot_merge_
     # No stray temp file left behind from the aborted atomic write.
     leftovers = list(settings_dir.glob("settings.json.*"))
     assert leftovers == [], f"temp file(s) not cleaned up: {leftovers}"
+
+
+def test_with_lens_coverage_hook_leaves_no_settings_json_when_script_install_fails(tmp_path):
+    """Round-3 atlas review on PR #398: the fix above guarded the merge/
+    write path but not vendor_lens_coverage_hook's mkdir/cp/chmod block
+    above it, which sits in the same function called as `... || exit 1` in
+    main() -- bash suspends errexit for a function's ENTIRE body when it's
+    invoked as the non-final part of an `||` list, so a failed copy there
+    hit the identical silent-false-success failure mode independently:
+    confirmed by reproduction (an obstructed hook_dest made mkdir/cp/chmod
+    fail loudly on stderr while the run still printed "Vendored
+    lens-coverage hook -> ..." and exited 0, having written full
+    PostToolUse/PreToolUse wiring into settings.json for two scripts that
+    were never actually copied -- an installed-and-working claim for a
+    gate that silently was not there at all).
+
+    Fixed by calling vendor_lens_coverage_hook as a bare, untested statement
+    (closing the whole errexit-suspension class at once, per the review's
+    preferred fix over patching each site) plus an explicit guard around
+    the copy block for a clear error message. This reproduces the exact
+    obstruction shape from that review: hook_dest already exists as a
+    plain file, so mkdir/cp/chmod all fail."""
+    target = tmp_path / "target-repo"
+    hook_dest = target / ".claude" / "hooks" / "lens-coverage"
+    hook_dest.parent.mkdir(parents=True)
+    hook_dest.write_text("not a directory\n")
+
+    result = run_vendor_raw(target, "--collapsed", "--with-lens-coverage-hook")
+    assert result.returncode != 0, (
+        "a failed hook-script install must fail visibly, not report success "
+        f"while leaving settings.json wired to scripts that don't exist: "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "Vendored lens-coverage hook ->" not in result.stdout, (
+        "must not claim success once the copy step failed"
+    )
+
+    # The critical assertion: no settings.json was ever written -- the
+    # operator must never be told the gate is installed when it is absent.
+    assert not (target / ".claude" / "settings.json").exists()
