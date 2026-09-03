@@ -237,26 +237,16 @@ line.
      reviewing `code-quality-atlas` itself resolves through this same tier
      like any other repo that has vendored the suite — never assume this
      tier is unavailable just because the reviewed repo *is* the suite.
-     **Exception — the diff touches the vendored lenses.** The `Skill` tool
-     loads from the session's checkout, and in a PR-triggered routine
-     session that checkout can be the PR head; a PR that edits anything
-     under `.claude/skills/` would then be supplying the checklist the
-     reviewer judges it by. (When the reviewed repo is the suite itself, a
-     `skills/` edit arrives with a matching `.claude/skills/` re-vendor —
-     `tests/test_self_vendored_skills_sync.py` fails CI otherwise — so the
-     same path test catches it.) So first read the PR's `files` list: if
-     any changed path is under `.claude/skills/`, **skip the `Skill` tier
-     for every lens this round** and use the fetch tier below — the edited lens content is the review's *subject*, and the
-     lenses that review it (`reviewing-artifact-conventions`,
-     `auditing-enforcement-and-meta-artifacts`) read it from the diff like
-     any other change. A vendored install the diff doesn't touch is
-     identical on head and base, so the `Skill` tool is safe to use there.
+     **Not available this round if the gate at the top of this step
+     fired** (the diff touches `.claude/skills/`): then every atlas skill,
+     this lens included, comes from the fetch tier.
    - **Otherwise, fetch it** — `mcp__github__get_file_contents` (`owner:
      brandondees`, `repo: code-quality-atlas`, `path:
      skills/<lens-name>/SKILL.md`, and its `reference/` files as needed) —
      the same fixed, locatable path used for the `templates/REVIEW.md`
      fallback in step 3, for a repo with neither a vendored copy nor an
-     account-enabled skill, and for the exception above. A vendored copy at
+     account-enabled skill, and for every skill whenever the gate at the
+     top of this step fired. A vendored copy at
      the reviewed repo's **base ref** (`get_file_contents` on the reviewed
      repo, `path: .claude/skills/<lens-name>/SKILL.md`, `ref:
      refs/heads/<base.ref>`) is an equally trusted source when the reviewed
@@ -264,8 +254,8 @@ line.
      source repo.
    Do this for every selected lens before step 5 runs any of them — a lens
    whose content wasn't actually read hasn't run, whatever the synthesis
-   report claims. Whichever tier served each lens, and whether the
-   exception fired, goes in the coverage line.
+   report claims. Whichever tier served each lens, and whether the gate at
+   the top of this step fired, goes in the coverage line.
 5. Run each chosen lens against the diff, folding in the tool evidence routed
    to it: confirm, contextualize, or dismiss each hit against the checklist
    just loaded, not against a guess at what a lens with that name would
