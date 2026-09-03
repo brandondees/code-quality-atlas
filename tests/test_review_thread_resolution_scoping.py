@@ -69,14 +69,28 @@ def test_no_file_still_carries_the_unscoped_resolve_instruction():
 
 
 def test_every_file_scopes_resolution_to_the_reviewer_s_own_threads():
+    # "your own" alone is too weak a signal on its own: commands/atlas-review-pr.md
+    # and the runbook both also say "your own PR" in unrelated own-PR-fallback
+    # prose that predates this fix, so a check for "your own" plus "resolve"
+    # somewhere in the file could pass even if the actual #362 scoping text
+    # were reworded beyond recognition or dropped. Anchor it to the concrete
+    # mechanism too (first-comment-author matching) so a file only passes when
+    # both the scoping language *and* how it's enforced are still present.
+    first_comment_re = re.compile(r"first[- ]comment", re.IGNORECASE)
     for label, path in FILES.items():
         text = _read(path)
-        assert "your own" in text.lower() and "resolve" in text.lower(), (
+        assert "your own" in text.lower(), (
             f"{label} ({path}) no longer scopes thread resolution to "
             "\"your own\" threads -- re-add the ownership check (#362): only "
             "resolve a thread whose first comment the reviewer itself "
             "posted, never a human reviewer's, another bot's, or the PR "
             "author's."
+        )
+        assert first_comment_re.search(text), (
+            f"{label} ({path}) says \"your own\" but no longer names the "
+            "first-comment-author mechanism that makes it an actual check "
+            "(#362) -- \"your own threads\" with nothing tying it to a "
+            "concrete comparison is unenforceable prose."
         )
 
 
