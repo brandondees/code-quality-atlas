@@ -62,7 +62,7 @@ record="$(printf '%s' "$input" | jq -c \
     ts: $ts,
     plugin_sha: (if $plugin_sha == "" then null else $plugin_sha end),
     session_id: (.session_id // null),
-    transcript_basename: (if .transcript_path then (.transcript_path | split("/") | last) else null end),
+    transcript_basename: (if .transcript_path then (.transcript_path | gsub("\\\\"; "/") | split("/") | last) else null end),
     reason: (.reason // null)
   }' 2>/dev/null)"
 

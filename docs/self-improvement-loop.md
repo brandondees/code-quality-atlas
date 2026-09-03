@@ -269,14 +269,18 @@ a leaked learnings file is not a leaked codebase.
 
 **What "abstracted" means for the two shipped stage-1 hooks (#364).**
 `hooks/log-skill-invocation.sh` never writes the Skill tool's raw `tool_input` — only its
-byte length and a SHA-256 digest of its compact JSON serialization (`tool_input_len`,
-`tool_input_sha256`). `hooks/queue-session-retro.sh` never writes the full
-`transcript_path` — only its basename (`transcript_basename`), since the full path is an
-absolute local path (OS username, `$HOME`, project layout) that the privacy boundary
-above is meant to keep out of a file the design commits to the repo. Neither hook needs
-the undocumented inner shape of `tool_input` (§3.1's assumption (a)) to do this: a length
-and a digest abstract *any* payload shape without parsing it, which is also why this
-approach — rather than guessing a field to keep — was picked as the fix for #364.
+byte length (`tool_input_len`, always populated) and, when a hashing tool is available on
+`PATH` (`sha256sum` or `shasum`, both standard on Linux and macOS respectively), a SHA-256
+digest of its compact JSON serialization (`tool_input_sha256`; `null` on a system with
+neither — the hook degrades the digest, not the whole record, since `tool_input_len`
+alone is still useful signal). `hooks/queue-session-retro.sh` never writes the full
+`transcript_path` — only its basename (`transcript_basename`, splitting on both `/` and
+`\`, so a Windows-style path is reduced the same way), since the full path is an absolute
+local path (OS username, `$HOME`, project layout) that the privacy boundary above is
+meant to keep out of a file the design commits to the repo. Neither hook needs the
+undocumented inner shape of `tool_input` (§3.1's assumption (a)) to do this: a length and
+a digest abstract *any* payload shape without parsing it, which is also why this approach
+— rather than guessing a field to keep — was picked as the fix for #364.
 
 **Retention.** `.code-quality-atlas/learnings/*.jsonl` grows without bound by default;
 stage 1 ships no rotation or expiry. A team that enables tier `local` should periodically

@@ -67,8 +67,36 @@ def test_env_override_enables_logging(tmp_path):
     # independent abstraction (byte length + digest of the compact JSON).
     assert "tool_input" not in record
     compact = json.dumps({"skill": "checking-restraint"}, separators=(",", ":"))
-    assert record["tool_input_len"] == len(compact)
+    # tool_input_len is a byte count (the hook computes it with `wc -c`), so
+    # compare against the UTF-8 encoded length, not Python's codepoint count
+    # (len(compact)) — they coincide for this ASCII fixture but would diverge
+    # for a multi-byte payload, per test_env_override_byte_length_is_utf8_bytes.
+    assert record["tool_input_len"] == len(compact.encode("utf-8"))
     assert record["tool_input_sha256"] == hashlib.sha256(compact.encode()).hexdigest()
+
+
+def test_env_override_byte_length_is_utf8_bytes_not_codepoints(tmp_path):
+    # Regression for Copilot's PR #397 finding: a codepoint-count assertion
+    # would pass by coincidence on ASCII input and mask the hook computing
+    # something other than a true byte count for multi-byte characters.
+    skill_input = json.dumps({
+        "session_id": "s1",
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Skill",
+        "tool_input": {"skill": "café ☂"},
+    })
+    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    _run(LOG_HOOK, tmp_path, skill_input, env_extra=env)
+    log = _learnings_dir(tmp_path) / "invocations.jsonl"
+    record = json.loads(log.read_text().strip().splitlines()[-1])
+    # jq's compact output keeps raw UTF-8 (no \uXXXX escaping), so the
+    # expected serialization must be built the same way to match what the
+    # hook actually hashes/measures.
+    compact = json.dumps({"skill": "café ☂"}, separators=(",", ":"), ensure_ascii=False)
+    assert len(compact.encode("utf-8")) != len(compact)   # the fixture must actually be multi-byte
+    assert record["tool_input_len"] == len(compact.encode("utf-8"))
+    assert record["tool_input_sha256"] == hashlib.sha256(compact.encode("utf-8")).hexdigest()
 
 
 def test_session_end_queues_retro_under_env_override(tmp_path):
@@ -83,6 +111,26 @@ def test_session_end_queues_retro_under_env_override(tmp_path):
     assert "transcript_path" not in record
     assert record["transcript_basename"] == "some-transcript.jsonl"
     assert record["reason"] == "clear"
+
+
+def test_session_end_basename_strips_windows_backslash_paths_too(tmp_path):
+    # Regression for Copilot's PR #397 finding: splitting only on "/" left a
+    # Windows-style transcript_path (backslash separators) un-reduced, so the
+    # full absolute path — OS username, home directory, project layout —
+    # would still leak into the committed pending-retro.jsonl.
+    session_end_input = json.dumps({
+        "session_id": "s1",
+        "hook_event_name": "SessionEnd",
+        "transcript_path": r"C:\Users\alice\.claude\projects\foo\abc-123.jsonl",
+        "reason": "clear",
+    })
+    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    _run(RETRO_HOOK, tmp_path, session_end_input, env_extra=env)
+    queue = _learnings_dir(tmp_path) / "pending-retro.jsonl"
+    record = json.loads(queue.read_text().strip().splitlines()[-1])
+    assert "transcript_path" not in record
+    assert record["transcript_basename"] == "abc-123.jsonl"
 
 
 def test_invalid_env_tier_falls_back_to_off(tmp_path):

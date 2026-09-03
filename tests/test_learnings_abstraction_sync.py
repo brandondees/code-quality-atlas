@@ -31,6 +31,16 @@ def test_retro_hook_never_emits_raw_transcript_path():
     assert "transcript_basename" in RETRO_HOOK
 
 
+def test_retro_hook_basename_split_handles_backslash_paths():
+    # #397 review (Copilot): splitting only on "/" left a Windows-style
+    # transcript_path un-reduced. The jq filter must normalize backslashes
+    # before splitting on "/".
+    assert "gsub(" in RETRO_HOOK, (
+        "queue-session-retro.sh must normalize backslash separators before "
+        "splitting transcript_path into a basename (#397 review)."
+    )
+
+
 def test_design_doc_names_the_abstracted_fields():
     for needle in ("tool_input_len", "tool_input_sha256", "transcript_basename"):
         assert needle in SELF_IMPROVEMENT_LOOP, (
@@ -46,8 +56,11 @@ def test_design_doc_states_a_retention_rule():
 
 def test_install_doc_does_not_claim_raw_capture():
     assert "raw tool-input payload" not in INSTALL
-    assert "tool-input payload's byte length and SHA-256 digest" in INSTALL
+    assert "tool-input payload's byte length" in INSTALL
     assert "transcript's basename" in INSTALL
+    # #397 review: the digest isn't guaranteed (no hashing tool on PATH -> null)
+    # — the doc must say so rather than implying it's always present.
+    assert "null otherwise" in INSTALL or "null" in INSTALL
 
 
 def test_preferences_template_states_a_retention_rule():
