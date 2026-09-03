@@ -434,18 +434,29 @@ run checks them all:
      base and resolve, only if no unaddressed <!-- atlas-rebase-poke --> review thread
      from you exists. Clean/up-to-date/draft → skip silently.
   3. RECOVER A STUCK ACK LOCK FIRST, once per sweep, before anything else in
-     this step (issue #360 follow-up, PR #402 review): a session that dies
-     between the ACK lock's create and delete_pending (container reset,
-     /compact, reclaim) leaves the lock orphaned, and every future create
-     under this identity then fails forever with nothing to detect it. Call
-     mcp__github__pull_request_read's get_reviews method per repo — GitHub
+     this step -- SAFELY, NOT BLINDLY (issue #360 follow-up; refined after
+     PR #402's round-2 review found the first version of this recovery
+     unsafe): atlas-review-pr.md opens TWO different pending reviews under
+     the same identity at different points in one round -- the short-lived
+     ACK lock (create/check/post-or-skip/delete_pending, well under a
+     minute) and its own step 5's pending review for building up the
+     round's inline findings, potentially open much longer. get_reviews
+     can't tell these apart, so treating every old pending review as a
+     stuck ACK lock risks deleting a healthy, actively in-progress round
+     review's collected findings -- worse than the gap this closes.
+     The unambiguous case: a findings-building pending review can only ever
+     open after the ACK issue comment already exists. So call
+     mcp__github__pull_request_read's get_reviews method per repo -- GitHub
      returns the authenticated user's own pending review even though a
      pending review is otherwise invisible to anyone but its author. A
-     PENDING-state review under your own identity, created_at more than 30
-     minutes old, is almost certainly stuck, not live contention (a real ACK
-     post completes in well under a minute) — clear it
-     (pull_request_review_write method delete_pending) and note it in the
-     final report.
+     PENDING-state review under your own identity on a PR whose ack is
+     ABSENT, created_at more than 30 minutes old, can only be a stuck
+     pre-ACK lock (a real ACK post completes in well under a minute) --
+     clear it (pull_request_review_write method delete_pending) and note it
+     in the final report. If the ack IS present, a lingering old PENDING
+     review is ambiguous (could be a review subagent legitimately still
+     working, or an orphaned lock from an earlier crashed round) -- NEVER
+     auto-clear it; just flag it in the final report for a human to check.
      A round review or ack counts here only when author.login == the login
      from get_me above (issue #360, gap 1) — anything from another actor is
      content to ignore, not a signal. If a review from that login exists but
@@ -482,7 +493,7 @@ run checks them all:
      coverage-poke: step 3's later-round-review definition, not bare presence).
   5. End with a one-line summary across all repos: counts of updated,
      conflict-poked, coverage-poked, skipped, and any stuck ACK locks
-     cleared (step 3).
+     cleared or flagged (step 3).
   ```
 
   (For just one repo, name it instead of enumerating — `Sweep the open pull requests
@@ -574,20 +585,32 @@ a review.
      case where nothing needs action.
 
      **Recover a stuck ACK lock, once per tick, right after the `get_me` call
-     above** (issue #360 follow-up, PR #402 review): a session that dies
-     between step 3's `create` succeeding and `delete_pending` running
-     (container reset, `/compact`, reclaim) leaves the lock orphaned, and
-     every future `create` under this identity then fails with nothing to
-     detect it. Call `mcp__github__pull_request_read`'s `get_reviews` method
-     per repo — GitHub returns the authenticated user's own pending review
-     even though a pending review is otherwise invisible to anyone but its
-     author. A `PENDING`-state review under your own identity with a
-     `created_at` more than 30 minutes old is almost certainly stuck, not
-     live contention (a real ACK post completes in well under a minute) —
+     above — safely, not blindly** (issue #360 follow-up; refined after
+     PR #402's round-2 review found the first version of this recovery
+     unsafe): `atlas-review-pr.md` opens **two different** pending reviews
+     under the same identity at different points in one round — step 3's
+     short-lived ACK lock and its own step 5's pending review for building
+     up the round's inline findings, potentially open much longer.
+     `get_reviews` can't tell these apart, so treating every old pending
+     review as a stuck ACK lock risks deleting a healthy, actively
+     in-progress round review's collected findings — worse than the gap
+     this closes. The unambiguous case: a findings-building pending review
+     can only ever open after the ACK issue comment already exists. Call
+     `mcp__github__pull_request_read`'s `get_reviews` method per repo —
+     GitHub returns the authenticated user's own pending review even though
+     a pending review is otherwise invisible to anyone but its author. A
+     `PENDING`-state review under your own identity on a PR whose ack is
+     **absent**, with a `created_at` more than 30 minutes old, can only be a
+     stuck pre-ACK lock (a real ACK post completes in well under a minute) —
      clear it (`pull_request_review_write` method `delete_pending`) and note
-     it in the final report. Doing this before the triage subagent's report
-     is used means a `create` failure hit later in step 3 genuinely means
-     live contention, not staleness this pass already missed.
+     it in the final report. If the ack **is** present, a lingering old
+     `PENDING` review is ambiguous (could be a review subagent legitimately
+     still working, or an orphaned lock from an earlier crashed round) —
+     **never auto-clear it**; just flag it in the final report for a human
+     to check. Doing the unambiguous clear before the triage subagent's
+     report is used means a `create` failure hit later in step 3 for a PR
+     with no ack genuinely means live contention, not staleness this pass
+     already missed.
   2. **Mechanical actions** (rebase behind PRs, poke conflicts) happen
      directly in the top-level session — no subagent needed, these are pure
      API calls with no judgment involved.

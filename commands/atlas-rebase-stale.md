@@ -54,32 +54,38 @@ state (issue #360, gap 1): a PR author or other collaborator could otherwise
 post a fabricated high-round review to make a genuinely lapsed watch look
 covered, silently defeating this step's entire purpose.
 
-**Recover a stuck ACK lock (issue #360 follow-up, flagged in PR #402's own
-review).** `atlas-review-pr.md`/`atlas-poll-and-review.md` acquire a lock
-before posting a round-1 ACK — a GitHub pending review
-(`mcp__github__pull_request_review_write` method `create`, no `event`) —
-and release it with `delete_pending` afterward. A session that dies between
-those two calls (container reset, `/compact`, reclaim — all real, observed
-failure modes this runbook documents elsewhere) leaves the lock orphaned,
-and nothing in the ACK protocol itself can route around that: every future
-`create` attempt under the same identity fails, and the protocol's own
-instruction on that failure is to stand down — so a stuck lock would
-otherwise silently and permanently stop a PR from ever being ack'd or
-reviewed again, with nothing to detect it. This poller is the fix, since it
-runs independently of whatever session might be stuck: once per sweep (not
-per PR — a stuck lock, if any, is per-identity, not per-PR), call
-`mcp__github__pull_request_read`'s `get_reviews` method — GitHub returns the
-authenticated user's own pending review even though a pending review is
-otherwise invisible to anyone but its author. If a `PENDING`-state review
-under your own identity exists on any open PR with a `created_at` more than
-30 minutes old, that's almost certainly a stuck lock, not live contention (a
-real ACK post completes in well under a minute) — clear it
-(`mcp__github__pull_request_review_write` method `delete_pending`) and note
-it in this sweep's final report ("cleared N stuck ACK lock(s), PR #___") so
-a human sees the anomaly even though this step self-heals it. Proceed with
-the rest of this sweep normally afterward — the affected PR gets a fresh
-chance at being ack'd/reviewed on this or a later tick now that the lock is
-clear.
+**Recover a stuck ACK lock — safely, not blindly** (issue #360 follow-up;
+refined after PR #402's round-2 review found the first version of this
+recovery unsafe). `atlas-review-pr.md` opens **two different** pending
+reviews under the same identity at different points in one round: step 2's
+short-lived ACK lock (`create` → check → post-or-skip → `delete_pending`,
+done in well under a minute) and step 5's **own** pending review for
+building up the round's inline findings (potentially open much longer — many
+lenses, many `add_comment_to_pending_review` calls, before `submit_pending`).
+`mcp__github__pull_request_read`'s `get_reviews` method can't tell these
+apart — both are just "a `PENDING` review under your own identity on this
+PR" — so treating *every* old pending review as a stuck ACK lock risks
+deleting a perfectly healthy, actively in-progress round review's collected
+findings, which is worse than the orphaned-lock gap this recovery closes.
+
+The one case that's unambiguous: **step 5's pending review can only ever
+open after the ACK issue comment already exists** (step 2 posts the ACK and
+releases its lock before step 3, 4, or 5 ever runs) — so a `PENDING` review
+under your own identity on a PR whose ACK (`<!-- atlas-review-ack -->`
+marker or the visible "👀 atlas reviewer engaged" text) is **absent**, with
+a `created_at` more than 30 minutes old, can only be a stuck pre-ACK step-2
+lock (a real ACK post completes in well under a minute). Clear that one —
+`mcp__github__pull_request_review_write` method `delete_pending` — and note
+it in the report, naming the PR and that a stuck lock was cleared. If the
+ACK **is** present, a lingering old `PENDING` review is ambiguous — it could
+be step 5 legitimately still building a large round, a lock stuck in the
+narrow window after the ACK posted but before `delete_pending` ran, or an
+orphaned step-5 lock from an earlier crashed round — **never auto-clear
+it**; just note it in the report, naming the PR and that it may be a stuck
+lock or an in-progress review, not auto-cleared, so a human can check
+before running `delete_pending`
+by hand. Check once per sweep, not per PR (a stuck lock, if any, is
+per-identity, not per-PR).
 
 A round review (authored by that identity) is identified by a
 `## Round N — ...` heading as the body's first line, falling back to the
@@ -174,5 +180,6 @@ skipped).
 ## 5. Report
 
 End with a one-line summary: how many PRs were updated, conflict-poked,
-coverage-poked, and skipped, plus any stuck ACK locks cleared (step 3). Post
+coverage-poked, and skipped, plus any stuck ACK locks cleared or flagged
+(step 3). Post
 nothing to GitHub beyond the pokes above and any `delete_pending` calls.

@@ -99,23 +99,36 @@ event-triggered reviewer routine alongside this one) — treat a state that
 already changed as "someone else got there first," not an error.
 
 **Recover a stuck ACK lock first, once per sweep, before touching any
-individual PR (issue #360 follow-up, flagged in PR #402's own review).** A
-session that dies between `create` succeeding and `delete_pending` running
-below (container reset, `/compact`, reclaim) leaves the lock orphaned —
-every future `create` under this identity then fails, and the instinct is to
-read that as "someone else has it" forever, silently and permanently
-stopping that PR from ever being ack'd again. Since this routine already
-runs on a schedule independent of whatever session got stuck, it's the
-natural place to self-heal: call `mcp__github__pull_request_read`'s
-`get_reviews` method for each repo being swept — GitHub returns the
-authenticated user's own pending review even though a pending review is
-otherwise invisible to anyone but its author. A `PENDING`-state review under
-your own identity with a `created_at` more than 30 minutes old is almost
-certainly a stuck lock, not live contention (a real ACK post completes in
-well under a minute) — clear it (`mcp__github__pull_request_review_write`
-method `delete_pending`) and note it in step 5's report. Doing this once up
-front means a `create` failure encountered later in this same sweep (below)
-genuinely does mean live contention, not staleness this pass already missed.
+individual PR — safely, not blindly** (issue #360 follow-up; refined after
+PR #402's round-2 review found the first version of this recovery unsafe).
+`atlas-review-pr.md` opens **two different** pending reviews under the same
+identity at different points in one round: the short-lived ACK lock
+acquired below (`create` → check → post-or-skip → `delete_pending`, done in
+well under a minute) and its own step 5's pending review for building up
+the round's inline findings (potentially open much longer). `get_reviews`
+can't tell these apart — both are just "a `PENDING` review under your own
+identity on this PR" — so treating *every* old pending review as a stuck ACK
+lock risks deleting a perfectly healthy, actively in-progress round review's
+collected findings, worse than the orphaned-lock gap this recovery closes.
+
+The one case that's unambiguous: a findings-building pending review can only
+ever open after the ACK issue comment already exists (the ACK is posted and
+its own lock released before any review subagent runs) — so call
+`mcp__github__pull_request_read`'s `get_reviews` method for each repo being
+swept (GitHub returns the authenticated user's own pending review even
+though a pending review is otherwise invisible to anyone but its author):
+a `PENDING`-state review under your own identity on a PR whose ack (see
+step 1) is **absent**, with a `created_at` more than 30 minutes old, can
+only be a stuck pre-ACK lock (a real ACK post completes in well under a
+minute) — clear it (`mcp__github__pull_request_review_write` method
+`delete_pending`) and note it in step 5's report. If the ack **is**
+present, a lingering old `PENDING` review is ambiguous (could be a review
+subagent legitimately still working, or an orphaned lock from an earlier
+crashed round) — **never auto-clear it**; just flag it in step 5's report
+for a human to check. Doing the unambiguous clear once up front means a
+`create` failure hit later in this same sweep for a PR with no ack
+genuinely does mean live contention, not staleness this pass already
+missed.
 
 - **Round state is `unknown`** (one or more of your own reviews exist but
   none parses a heading or marker — issue #360, gap 3): don't guess. Skip
@@ -192,6 +205,6 @@ naturally idempotent.
 ## 5. Report
 
 End with one line per repo swept: counts of updated (rebased), conflict-poked,
-round-1-reviewed, re-reviewed, skipped, and any stuck ACK locks cleared
-(step 3). Nothing else goes to GitHub beyond the actions above and any
-`delete_pending` calls.
+round-1-reviewed, re-reviewed, skipped, and any stuck ACK locks cleared or
+flagged (step 3). Nothing else goes to GitHub beyond the actions above and
+any `delete_pending` calls.

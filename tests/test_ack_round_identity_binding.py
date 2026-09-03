@@ -201,6 +201,41 @@ def test_pollers_recover_a_stuck_ack_lock():
         )
 
 
+def test_stuck_lock_recovery_never_blindly_clears_an_in_progress_review():
+    # PR #402's round-2 review: atlas-review-pr.md opens TWO different
+    # pending reviews per round -- the short-lived ACK lock, and step 5's
+    # own, potentially much longer-lived pending review for building up a
+    # round's inline findings. get_reviews can't tell them apart, so the
+    # first version of this recovery (bare "PENDING + 30min old -> clear")
+    # could delete an actively in-progress round review's collected
+    # findings. Fixed by only auto-clearing when the PR's ack is absent
+    # (the one case a findings-review can't be, since it only ever opens
+    # after the ack already exists) and merely flagging -- never
+    # auto-clearing -- when the ack is present and a pending review lingers.
+    for label, path in RECOVERY_FILES.items():
+        text = _read(path)
+        assert re.search(r"ambiguous", text, re.IGNORECASE), (
+            f"{label} ({path}) no longer calls the ack-present case "
+            "ambiguous -- without naming that a lingering pending review "
+            "could be a legitimate in-progress round review (not just a "
+            "stuck lock), the safety distinction PR #402's round-2 review "
+            "asked for is gone."
+        )
+        assert re.search(r"never\s+auto-clear", text, re.IGNORECASE), (
+            f"{label} ({path}) no longer says to never auto-clear the "
+            "ambiguous (ack-present) case -- without this, a future edit "
+            "could quietly revert to blindly clearing every old pending "
+            "review regardless of whether a round review might legitimately "
+            "still be in progress, reopening the destructive race PR #402's "
+            "round-2 review found."
+        )
+        assert re.search(r"\babsent\b", text, re.IGNORECASE), (
+            f"{label} ({path}) no longer names ack absence as the "
+            "distinguishing signal for the one case that's safe to "
+            "auto-clear."
+        )
+
+
 def test_create_failure_distinguishes_contention_from_a_real_error():
     # A second, smaller PR #402 finding: every create failure was folded
     # into "someone else has the lock," silently swallowing permission
