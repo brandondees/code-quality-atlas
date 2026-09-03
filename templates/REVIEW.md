@@ -5,6 +5,13 @@ Copy this file to the **root of the repo you want reviewed**. The
 should be, and when to stop. Without it, the command falls back to these same
 defaults. The repo's own copy always wins, so tune the numbers per project.
 
+**Which copy governs a review: the one on the PR's base ref.** The reviewer
+reads this file (and `.code-quality-atlas/preferences.md`) from the base branch,
+never from the PR head — a PR that edits this policy is reviewed under the
+policy already merged, and the edit takes effect for the next PR. Otherwise a
+PR could raise its own floor, lower its own cap, or suppress its own findings
+before anyone had reviewed the change that did so.
+
 The point of this policy is convergence: the reviewer and the build (auto-fix)
 session react to each other, and a `synchronize`-triggered reviewer re-runs on
 every push. The brakes that keep that mutual reaction from ping-ponging forever
@@ -16,8 +23,13 @@ round cap as a backstop.
 ## Reviewer ACK (start-of-review notice)
 
 On the **first round** for a PR, before running any lenses, post one short issue
-comment marked `<!-- atlas-review-ack -->` — e.g. "👀 atlas reviewer engaged —
-running lenses, hold for findings." This is an acknowledgment, not a finding: it
+comment carrying **both** the invisible marker `<!-- atlas-review-ack -->` **and**
+the literal visible phrase "👀 atlas reviewer engaged — running lenses, hold for
+findings" — the visible phrase is the primary, required detection signal (not
+just illustrative wording), since `pull_request_read` has been observed
+stripping HTML comments from returned bodies entirely (#354/#355), and ACK
+detection must be able to find an existing ACK from the visible text alone.
+This is an acknowledgment, not a finding: it
 lets the author (or their auto-fix session) know immediately that a reviewer is
 attached and worth waiting for, since the lens run itself takes a while. Post it
 **once per PR** (round 1 only); later rounds don't repeat it — the author already
@@ -85,7 +97,10 @@ review summary on every push:
 - **First time the PR comes clean** (nothing new at/above the floor): post one
   concise terminal note — an `APPROVE` (see
   [Approve-on-clean](#approve-on-clean-the-terminal-state)) carrying the round
-  marker and, if any exist, the advisory list.
+  state (a visible `## Round N — ...` heading is the primary signal, dual-encoded
+  with the redundant `<!-- atlas-review round:N -->` marker — see
+  `commands/atlas-review-pr.md` step 5 for the full heading-first/marker-fallback
+  derivation rule, #354/#355) and, if any exist, the advisory list.
 - **Subsequent quiet pushes** (still nothing new at/above the floor): stay
   silent. Resolve any threads the new push addressed, but post **no** new
   summary — there is no news. Don't re-emit `APPROVE`, and don't re-dump the

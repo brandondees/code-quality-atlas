@@ -43,6 +43,17 @@ Determine the **depth mode** from the request, matching the triggers table in
 ("thorough", "comprehensive", "deep review", "use all relevant lenses", "review
 everything"), otherwise **review** (the default).
 
+Before ranking, resolve the team-preferences overlay from the **base side of
+the diff** — the ref step 1 measured the change against (`@{upstream}`, the
+default branch, the left side of the `$ARGUMENTS` range, or `HEAD` for
+uncommitted work): `git show <base>:.code-quality-atlas/preferences.md` via
+`Bash`. Absent there → every lens applies its defaults. Never read the
+working-tree copy: a change that edits `preferences.md` to `suppress` its own
+findings would otherwise govern its own review — the same self-tampering
+`/atlas-review-pr` step 3 closes by reading from the PR's base ref. Hand the
+base-side content to the picker and each lens as *the* overlay for this
+review, and name the ref it came from in the coverage line.
+
 Run `code-quality-atlas:choosing-review-lenses` to rank every lens the change
 touches by relevance, then take as many as the mode's breadth allows: triage
 runs the critical tier only (correctness, security, data-safety, concurrency);
