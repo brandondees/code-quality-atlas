@@ -4435,3 +4435,92 @@ install step specifically), `tooling.cli drift` (clean), `markdownlint-cli2`
 No generated-tree or Python-source changes, so `tooling.cli generate` and
 `ruff check` are unaffected by construction — this is a single-file CI
 workflow edit.
+
+### 2026-09-03 — #377: `vendor-skills.sh --prune` path traversal via the target's `.atlas-vendored` marker
+
+The same audit (#347) raised #377 (Major + Minor): `main()` in
+`tooling/vendor-skills.sh` read every non-comment line of the *target*
+repo's committed `.claude/skills/.atlas-vendored` marker into `OLD_NAMES`
+with no validation, and `--prune` ran `rm -rf "${dest_root:?}/$old"` for any
+entry not in the current skill set. Reproduced before touching anything: a
+marker line of `../../src` printed "pruned stale: ../../src" and deleted
+`<target>/../src` — a real directory one level above the target repo, from
+a file the tool's own header calls "generated, do-not-hand-edit" and a
+maintainer reviewing a PR is likely to skim rather than read closely. The
+same untrusted `OLD_NAMES` also fed `vendor_one`'s #175 collision check, so
+a planted *real* skill name could re-grant `rm -rf` over a non-tool-managed
+directory without `--force`.
+
+**Fix.** `is_bare_skill_name` accepts a marker line only if it matches the
+manifest's own name shape (`a-z0-9-` only, non-empty); anything else —
+`../../victim`, an absolute path, a future field an older copy of this
+script doesn't understand — is dropped with a warning before it ever
+reaches `OLD_NAMES`, rather than after. `confirm_child_of_dest_root` adds a
+second, independent check right before the `--prune` delete: the target's
+resolved parent directory must actually be `dest_root`, so a future edit
+that weakens or removes the marker-line validation still can't delete
+outside the tree this tool owns. Verified the fix against the exact
+reproduction, real filesystem, no mocks: planted `../../src` (a real
+victim directory containing a file) into a target's marker, ran `--prune`,
+confirmed the victim survived untouched and the malformed line was warned
+about and dropped from the rewritten marker — then confirmed the same
+setup against the pre-fix script actually deletes the victim, so the test
+proves the fix closes the reproduced bug rather than merely not opening a
+new one.
+
+Also closed the Minor UX/provenance gaps the same finding named: a refresh
+with no `--prune` now prints a one-line notice naming any stale
+(withdrawn-from-the-suite) names still on disk and pointing at `--prune`,
+rather than silently re-listing them in the marker forever with no
+indication anything was stale; added `--dry-run`, which reports what would
+be vendored/pruned/skipped without writing, deleting, or overwriting
+anything (verified: running it against both a fresh and an
+already-vendored target leaves the filesystem byte-identical, mtimes
+included); `check_target_git_state` warns (never aborts — a legitimate
+target, e.g. a test scratch dir, may not be git-tracked) when the target
+isn't a git working tree or has uncommitted changes under `.claude/skills/`
+before a `--prune`/`--force` run, so there's a version-control safety net
+to notice is missing; copied `package-account-zips.sh`'s existing
+unresolvable-SHA warning (this script had the same silent `@unknown`
+NOTICE.md gap that sibling script already guards against) and added two
+more in the same spirit — the *source* repo's own tree must be clean for
+the stamped SHA's provenance claim to hold, and the SHA should be reachable
+from a remote-tracking branch or the NOTICE.md's GitHub blob link 404s;
+and a `# format=N` marker header the reader checks, warning (not failing)
+on a mismatch — a secondary, explicit signal alongside `is_bare_skill_name`,
+which is the actual safety net against a newer marker field confusing an
+older copy of this script.
+
+Declined scope creep on two adjacent asks the issue's fix list didn't
+actually make: rewriting `--dry-run` to also simulate `write_attribution`'s
+output content (the "would vendor" report already names every affected
+skill; a byte-for-byte NOTICE.md preview added complexity for a case
+`--dry-run`'s own stated purpose — "touch nothing, report what would
+happen" — doesn't need), and adding a `--yes`/confirmation prompt on
+`--prune` (not requested, and this is a scriptable CLI tool meant to run
+non-interactively in the same breath as `--dry-run`'s whole point of
+letting a maintainer preview first).
+
+Added `tests/test_vendor_skills.py` coverage for every piece: the
+traversal reproduction itself (both with and without `--prune`, since
+`OLD_NAMES` feeds the collision check too, not just the prune loop),
+`--dry-run` writing nothing (fresh target) and changing nothing (already-
+vendored target, `--prune` case included), the stale-names notice, the
+format-header write and mismatch warning, the git-state warnings (dirty,
+non-git, and the clean/no-warning case), and direct unit tests of
+`is_bare_skill_name` and `confirm_child_of_dest_root` themselves (the
+latter unreachable through `main()`'s own flow today, which is exactly why
+it needs standalone coverage rather than only integration coverage).
+Updated the existing prune-guard test pair
+(`test_prune_guard_expression_matches_script`,
+`test_prune_rm_guard_aborts_on_empty_dest_root`) to match the guard's new
+shape — moved from inline in the `rm -rf` call to a separate `target=`
+assignment shared with the new parent-resolution check.
+
+**Verification:** manual end-to-end reproduction of the bug and the fix (see
+above) with real files in a scratch directory, `pytest` (487/487, up from
+472 — 30 tests in `test_vendor_skills.py`, up from 12), `ruff check` (clean),
+`shellcheck --source-path=SCRIPTDIR -x` on the edited script (clean, same
+pinned v0.10.0 CI uses), `tooling.cli drift` (clean; no skill content
+changed). `docs/distribution.md`'s Channel B section updated to describe
+the marker's trust boundary and `--dry-run`.
