@@ -4386,3 +4386,52 @@ match an independent `sha256sum` of the same compact JSON, and
 `tooling.cli drift` (clean), `tooling.cli generate` (no output diff —
 these two hooks aren't manifest-generated, so this confirms nothing else
 drifted), `markdownlint-cli2` (0 issues on the touched docs).
+
+### 2026-09-03 — #366: `pip install --require-hashes` verified nothing already-installed on the persistent runner
+
+The same audit (#347) raised #366 (Major, security): `ci.yml`'s
+`pip install --require-hashes -r requirements.txt` ran with no venv and no
+`--force-reinstall` on `runs-on: [self-hosted, Linux]` — a *persistent*
+runner (`docs/self-hosted-runners.md`), so any pin already sitting in
+site-packages from a prior job was "Requirement already satisfied" and its
+hash never checked at all. Reproduced locally before touching anything: with
+`ruff==0.16.5` already installed in a venv, a requirements file pinning it
+with a hash of 64 zeros still made `pip install --require-hashes` exit 0.
+The workflow's own comment at the time claimed the opposite twice — that the
+step "verifies every hash in the committed lockfile against the artifact it
+downloads" — which is also wrong on its own terms even ignoring the
+persistent-runner gap: pip only ever downloads and checks the one artifact it
+resolves for the running job's platform, never the hashes listed for other
+platforms' wheels on the same requirement line (reproduced with a forged
+`pyyaml` hash: the forged hash for a non-selected wheel survives both the
+install and the pip-compile consistency diff below it).
+
+**Fix.** Create a fresh `python -m venv --clear "$RUNNER_TEMP/venv"` per job
+and install into that with `--require-hashes`, then append its `bin/` to
+`$GITHUB_PATH` so every later step in the job (the `requirements.txt` sync
+check's `pip install pip-tools`, the `pip-audit` step, `ruff`, `pytest`,
+`tooling.cli`) transparently resolves `pip`/`python`/`ruff`/`pytest` to the
+same fresh environment without editing each step individually. `--clear` is
+defense in depth beyond what the issue's suggested fix used, in case a
+self-hosted runner's `$RUNNER_TEMP` is ever not wiped between jobs the way a
+hosted runner's is guaranteed to be — cheap, and removes any doubt about the
+one property (nothing pre-installed) this fix depends on. Rewrote the
+requirements-sync step's comment to state the actually-true, narrower
+guarantee: hash integrity for the platform this job runs on is the
+`--require-hashes` step's; `.in`/`.txt` consistency is the sync step's;
+cross-platform hash coverage is neither's — matching the two corrections
+the issue asked for exactly.
+
+**Verification:** reproduced the original bug in a scratch venv (already-
+installed `ruff` + a 64-zeros forged hash → `pip install --require-hashes`
+exits 0), then reproduced the fix closing it (same forged hash against a
+`python -m venv --clear` target → pip correctly reports a hash mismatch and
+exits 1) — both before editing `ci.yml`, so the fix is verified against the
+actual failure mode rather than assumed from reading pip's docs.
+`python -c "import yaml; yaml.safe_load(...)"` on the edited workflow file
+(valid YAML), `pytest` (468/468, unaffected — no test reads `ci.yml`'s pip-
+install step specifically), `tooling.cli drift` (clean), `markdownlint-cli2`
+(0 issues; `ci.yml` itself isn't Markdown but nothing else changed).
+No generated-tree or Python-source changes, so `tooling.cli generate` and
+`ruff check` are unaffected by construction — this is a single-file CI
+workflow edit.
