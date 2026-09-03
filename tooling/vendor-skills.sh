@@ -283,11 +283,15 @@ EOF
 
 # Ensure one PostToolUse/PreToolUse hook entry exists in a settings.json
 # object, without disturbing anything else already there. Idempotent: checks
-# for an existing hooks-array entry whose command already matches (by exact
-# command string, regardless of which matcher group it's nested under) before
-# appending a new one — re-running this is a no-op once vendored. Reads the
+# for an existing hooks-array entry whose (matcher, command) PAIR already
+# matches before appending a new one -- re-running this is a no-op once
+# vendored, and dedupe is keyed on the pair (not command alone) precisely so
+# the same script can still be wired under two different matchers, as
+# track-lens-reads.sh is (see the jq filter's own comment below for the
+# concrete bug that shipped from deduping on command alone). Reads the
 # current settings JSON on stdin, writes the updated JSON to stdout; the
-# caller is responsible for atomically replacing the file.
+# caller is responsible for atomically replacing the file
+# (vendor_lens_coverage_hook does, via a temp-file-then-mv write).
 merge_settings_hook() {
   local event=$1 matcher=$2 command=$3
   jq --arg event "$event" --arg matcher "$matcher" --arg command "$command" '
