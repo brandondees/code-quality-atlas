@@ -293,7 +293,14 @@ merge_settings_hook() {
   jq --arg event "$event" --arg matcher "$matcher" --arg command "$command" '
     .hooks = (.hooks // {}) |
     .hooks[$event] = (.hooks[$event] // []) |
-    ( .hooks[$event] | any(.hooks[]?.command == $command) ) as $exists |
+    # Dedupe on the (matcher, command) PAIR, not command alone -- the same
+    # script legitimately gets wired under two different matchers (e.g.
+    # track-lens-reads.sh under both "Read" and "Skill"), and deduping by
+    # command alone would make the second call a no-op, silently dropping
+    # that matcher entry (round-1 review on PR #398, caught by re-running
+    # this vendoring against a scratch target and finding only one
+    # PostToolUse entry where two were expected).
+    ( .hooks[$event] | any(.matcher == $matcher and (.hooks[]?.command == $command)) ) as $exists |
     if $exists then .
     else .hooks[$event] += [{matcher: $matcher, hooks: [{type: "command", command: $command}]}]
     end
@@ -351,10 +358,31 @@ vendor_lens_coverage_hook() {
   local updated
   updated="$(printf '%s' "$current" \
     | merge_settings_hook "PostToolUse" "Read" "$HOOK_SUBDIR/track-lens-reads.sh" \
+    | merge_settings_hook "PostToolUse" "Skill" "$HOOK_SUBDIR/track-lens-reads.sh" \
     | merge_settings_hook "PreToolUse" "mcp__github__pull_request_review_write|mcp__github__add_comment_to_pending_review" "$HOOK_SUBDIR/gate-lens-coverage.sh")"
 
   printf '%s\n' "$updated" | jq . > "$settings_file"
-  printf 'Vendored lens-coverage hook -> %s (wiring merged into %s)\n' "$hook_dest" "$settings_file"
+
+  # The tracker writes one state file per session under this directory
+  # (never meant to be committed); append the ignore entry to the target's
+  # own .gitignore, idempotently, same as this repo's own (round-1 review on
+  # PR #398 -- nothing previously ignored this path here or in a vendored
+  # target).
+  local gitignore_file="$abs_target/.gitignore" ignore_line=".claude/.atlas-lens-coverage/"
+  if [ ! -f "$gitignore_file" ] || ! grep -Fxq "$ignore_line" "$gitignore_file"; then
+    # Decide the leading newline BEFORE opening the redirect below -- doing
+    # the `-s` check inside the same `{ ... } >> "$gitignore_file"` block
+    # reads and writes the same file in one pipeline (shellcheck SC2094);
+    # computing it into a plain variable first sidesteps that entirely.
+    local leading_newline=""
+    [ -s "$gitignore_file" ] && leading_newline=1
+    {
+      [ -n "$leading_newline" ] && printf '\n'
+      printf '# Per-session lens-coverage state (code-quality-atlas hooks/lens-coverage/) -- ephemeral, never committed\n%s\n' "$ignore_line"
+    } >> "$gitignore_file"
+  fi
+
+  printf 'Vendored lens-coverage hook -> %s (wiring merged into %s, %s updated)\n' "$hook_dest" "$settings_file" "$gitignore_file"
 }
 
 main() {
