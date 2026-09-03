@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 # tests/test_vendor_skills.py
-"""Regression tests for tooling/vendor-skills.sh's marker bookkeeping (issue #112)."""
+"""Regression tests for tooling/vendor-skills.sh's marker bookkeeping (issue
+#112), --with-lens-coverage-hook (issue #357/Q23, #398), and marker-line
+trust boundary, --dry-run, and provenance/UX gaps (issue #377)."""
 import subprocess
 from pathlib import Path
 
@@ -347,11 +349,14 @@ vendor_one "etc" ""
 
 
 # The literal guarded expression from the prune loop in tooling/vendor-skills.sh
-# (main()'s --prune branch). Kept as a module-level constant, cross-checked
-# against the live script by test_prune_guard_expression_matches_script below,
-# so a future edit to the real guard's syntax fails loudly here instead of
-# leaving this test silently exercising a expression the script no longer has.
-_PRUNE_RM_GUARD_LINE = '        rm -rf "${dest_root:?}/$old"'
+# (main()'s --prune branch). #377 moved the `${dest_root:?}` guard out of the
+# `rm -rf` call itself and into this separate `target=` assignment (so the
+# same resolved target can also be checked by confirm_child_of_dest_root
+# before deletion) — kept as a module-level constant, cross-checked against
+# the live script by test_prune_guard_expression_matches_script below, so a
+# future edit to the real guard's syntax fails loudly here instead of leaving
+# this test silently exercising an expression the script no longer has.
+_PRUNE_TARGET_GUARD_LINE = '      target="${dest_root:?}/$old"'
 
 
 def test_prune_guard_expression_matches_script():
@@ -359,9 +364,9 @@ def test_prune_guard_expression_matches_script():
     someone edits the guard in tooling/vendor-skills.sh without updating the
     hand-typed expression below, this fails and says so explicitly."""
     script_text = SCRIPT.read_text()
-    assert _PRUNE_RM_GUARD_LINE in script_text, (
-        "tooling/vendor-skills.sh's prune-loop rm guard no longer matches "
-        f"the expression this test exercises ({_PRUNE_RM_GUARD_LINE!r}); "
+    assert _PRUNE_TARGET_GUARD_LINE in script_text, (
+        "tooling/vendor-skills.sh's prune-loop target guard no longer matches "
+        f"the expression this test exercises ({_PRUNE_TARGET_GUARD_LINE!r}); "
         "update both together"
     )
 
@@ -378,7 +383,8 @@ set -euo pipefail
 {_MOCK_RM}
 dest_root=""
 old="etc"
-{_PRUNE_RM_GUARD_LINE.strip()}
+{_PRUNE_TARGET_GUARD_LINE.strip()}
+rm -rf "$target"
 """
     result = subprocess.run(
         ["bash", "-c", bash_script],
@@ -391,6 +397,353 @@ old="etc"
         f"stderr={result.stderr!r}"
     )
 
+
+# --- #377: the marker's trust boundary, --dry-run, and provenance/UX gaps ---
+
+def test_prune_rejects_path_traversal_marker_line(tmp_path):
+    """Regression for #377's reproduction: the marker is a generated,
+    do-not-hand-edit file a reviewer skims rather than reads closely. A
+    planted (or malformed) line like "../../src" must never reach OLD_NAMES
+    -- and therefore never reach the --prune `rm -rf` -- even though nothing
+    about the marker's own format previously stopped it. Plants a real
+    victim directory one level above the target repo, exactly mirroring the
+    issue's own reproduction (a marker line of "../../src" deleting
+    <target>/../src)."""
+    target = tmp_path / "target-repo"
+    target.mkdir()
+
+    run_vendor(target)
+
+    marker = target / ".claude" / "skills" / ".atlas-vendored"
+    victim = tmp_path / "src"
+    victim.mkdir()
+    (victim / "important.txt").write_text("must survive\n")
+
+    with marker.open("a") as f:
+        f.write("../../src\n")
+
+    result = run_vendor_raw(target, "--prune")
+    assert result.returncode == 0, result.stderr
+    assert "ignoring malformed marker line" in result.stderr
+    assert "../../src" in result.stderr
+
+    # The victim, one level above the target repo, must be completely
+    # untouched.
+    assert victim.is_dir()
+    assert (victim / "important.txt").read_text() == "must survive\n"
+
+    # The malformed line must not survive the marker rewrite either.
+    assert "../../src" not in marker.read_text()
+
+
+def test_refresh_without_prune_also_rejects_a_traversal_marker_line(tmp_path):
+    """Same as above but without --prune: the malformed line must be dropped
+    (and warned about) on an ordinary refresh too, not only when --prune is
+    passed -- OLD_NAMES feeds vendor_one's collision check as well as the
+    prune loop, so an unvalidated entry there could also mislead that check."""
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    run_vendor(target)
+
+    marker = target / ".claude" / "skills" / ".atlas-vendored"
+    with marker.open("a") as f:
+        f.write("/etc/passwd\n")
+
+    result = run_vendor_raw(target)
+    assert result.returncode == 0, result.stderr
+    assert "ignoring malformed marker line" in result.stderr
+    assert "/etc/passwd" in result.stderr
+    assert "/etc/passwd" not in marker.read_text()
+
+
+def test_forged_marker_name_does_not_bypass_the_collision_check_on_refresh(tmp_path):
+    """Regression for a Major finding from Copilot and CodeRabbit on this
+    PR: is_bare_skill_name only rules out a malformed *shape* (a traversal
+    segment, an absolute path). A well-formed but falsely claimed marker
+    line -- a real skill name the marker lists as previously vendored, for
+    a directory this tool never actually touched -- previously still
+    satisfied vendor_one's #175 collision check (`contains "$name"
+    "${OLD_NAMES[@]}"` alone) and got silently `rm -rf`'d and overwritten
+    without --force. Plants exactly that: a hand-authored
+    "checking-restraint" directory (no generated-marker comment in its
+    SKILL.md, i.e. never actually vendored) alongside a marker that falsely
+    claims it was."""
+    target = tmp_path / "target-repo"
+    skills_dir = target / ".claude" / "skills"
+    colliding = skills_dir / "checking-restraint"
+    colliding.mkdir(parents=True)
+    (colliding / "SKILL.md").write_text("# hand-authored, never vendored by this tool\n")
+    (colliding / "my-private-notes.txt").write_text("do not delete\n")
+    marker = skills_dir / ".atlas-vendored"
+    marker.write_text(
+        "# code-quality-atlas vendored skills — do not hand-edit; regenerate with tooling/vendor-skills.sh\n"
+        "# format=1\n"
+        "checking-restraint\n"
+    )
+
+    result = run_vendor_raw(target)
+    assert result.returncode != 0, (
+        "a forged marker claim must not let this run silently succeed while "
+        f"overwriting non-owned content: stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+    assert "checking-restraint" in result.stderr
+    assert "skipping" in result.stderr.lower() or "skipped" in result.stderr.lower()
+
+    # The critical assertion: the hand-authored content must be completely
+    # untouched, exactly like the #175 regression this mirrors.
+    assert (colliding / "SKILL.md").read_text() == "# hand-authored, never vendored by this tool\n"
+    assert (colliding / "my-private-notes.txt").read_text() == "do not delete\n"
+
+
+def test_forged_stale_marker_name_does_not_authorize_prune_deletion(tmp_path):
+    """Same forgery, on the --prune path instead of the collision path: a
+    marker line naming a real skill the current run doesn't vendor (so it's
+    "stale") for a directory this tool never actually touched must not let
+    --prune delete it. confirm_child_of_dest_root alone doesn't catch this
+    -- the forged name's path is a perfectly legitimate child of dest_root;
+    it's real ownership evidence (is_tool_vendored_skill_dir) that's needed
+    here, the same fix as the collision-check regression above."""
+    target = tmp_path / "target-repo"
+    skills_dir = target / ".claude" / "skills"
+    victim = skills_dir / "not-actually-vendored"
+    victim.mkdir(parents=True)
+    (victim / "SKILL.md").write_text("# hand-authored, never vendored by this tool\n")
+    marker = skills_dir / ".atlas-vendored"
+    marker.write_text(
+        "# code-quality-atlas vendored skills — do not hand-edit; regenerate with tooling/vendor-skills.sh\n"
+        "# format=1\n"
+        "not-actually-vendored\n"
+    )
+
+    result = run_vendor_raw(target, "--prune")
+    assert result.returncode == 0, result.stderr
+    assert "not-actually-vendored" in result.stderr
+    assert "does not look like something this tool vendored" in result.stderr
+
+    # The critical assertion: survives untouched, and stays recorded in the
+    # marker rather than being silently dropped now that it wasn't deleted.
+    assert victim.is_dir()
+    assert (victim / "SKILL.md").read_text() == "# hand-authored, never vendored by this tool\n"
+    assert "not-actually-vendored" in marker_names(target)
+
+
+def test_dry_run_creates_nothing(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+
+    result = run_vendor_raw(target, "--dry-run")
+    assert result.returncode == 0, result.stderr
+    assert not (target / ".claude").exists()
+    assert "(dry-run) would vendor" in result.stdout
+
+
+def test_dry_run_does_not_modify_an_existing_vendored_target(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    run_vendor(target)
+
+    marker = target / ".claude" / "skills" / ".atlas-vendored"
+    before_marker = marker.read_text()
+    before_mtime = marker.stat().st_mtime_ns
+    skill_md = target / ".claude" / "skills" / "checking-restraint" / "SKILL.md"
+    before_skill = skill_md.read_text()
+
+    result = run_vendor_raw(target, "--dry-run")
+    assert result.returncode == 0, result.stderr
+
+    assert marker.read_text() == before_marker
+    assert marker.stat().st_mtime_ns == before_mtime
+    assert skill_md.read_text() == before_skill
+
+
+def test_dry_run_prune_reports_without_deleting(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    run_vendor(target)
+    run_vendor(target, "--collapsed")  # leaves standalone names orphaned in the marker
+
+    collapsed_dir = target / ".claude" / "skills"
+    assert (collapsed_dir / "checking-restraint").is_dir()
+
+    result = run_vendor_raw(target, "--collapsed", "--dry-run", "--prune")
+    assert result.returncode == 0, result.stderr
+    assert "(dry-run) would prune stale: checking-restraint" in result.stdout
+    assert (collapsed_dir / "checking-restraint").is_dir()  # untouched
+
+
+def test_refresh_without_prune_notes_stale_names(tmp_path):
+    """#377 UX gap: a refresh with no --prune previously re-listed withdrawn
+    lenses in the marker forever with no indication anything was stale or
+    that --prune would remove them."""
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    run_vendor(target)
+    run_vendor(target, "--collapsed")
+
+    result = run_vendor_raw(target, "--collapsed")
+    assert result.returncode == 0, result.stderr
+    assert "checking-restraint" in result.stdout
+    assert "re-run with --prune to remove them" in result.stdout
+
+
+def test_marker_has_format_header(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    run_vendor(target)
+    marker = target / ".claude" / "skills" / ".atlas-vendored"
+    assert "# format=1" in marker.read_text().splitlines()
+
+
+def test_marker_format_mismatch_warns(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    run_vendor(target)
+    marker = target / ".claude" / "skills" / ".atlas-vendored"
+    marker.write_text(marker.read_text().replace("# format=1", "# format=99"))
+
+    result = run_vendor_raw(target)
+    assert result.returncode == 0, result.stderr
+    assert "format=99" in result.stderr
+    assert "format=1" in result.stderr
+
+
+def test_warns_when_target_is_not_a_git_worktree(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    result = run_vendor_raw(target)
+    assert result.returncode == 0, result.stderr
+    assert "does not look like a git working tree" in result.stderr
+
+
+def _init_git_repo(path):
+    subprocess.run(["git", "init", "-q"], cwd=str(path), check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=str(path), check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=str(path), check=True)
+
+
+def test_warns_when_target_has_uncommitted_skills_changes(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    _init_git_repo(target)
+
+    run_vendor(target)
+    subprocess.run(["git", "add", "-A"], cwd=str(target), check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=str(target), check=True)
+
+    # Append rather than replace: keeps the trailing generated-marker
+    # comment intact, so this exercises only the git-dirty warning, not the
+    # #377-review ownership check (is_tool_vendored_skill_dir) that a
+    # wholesale rewrite would also -- correctly -- trip as a collision.
+    skill_md = target / ".claude" / "skills" / "checking-restraint" / "SKILL.md"
+    skill_md.write_text(skill_md.read_text() + "\n<!-- dirty edit for this test -->\n")
+
+    result = run_vendor_raw(target)
+    assert result.returncode == 0, result.stderr
+    assert "uncommitted changes" in result.stderr
+
+
+def test_no_warning_for_a_clean_git_target(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    _init_git_repo(target)
+
+    run_vendor(target)
+    subprocess.run(["git", "add", "-A"], cwd=str(target), check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=str(target), check=True)
+
+    result = run_vendor_raw(target)
+    assert result.returncode == 0, result.stderr
+    assert "does not look like a git working tree" not in result.stderr
+    assert "uncommitted changes" not in result.stderr
+
+
+def test_is_bare_skill_name_accepts_only_the_manifest_name_shape():
+    """Direct unit test of the trust-boundary predicate itself (#377):
+    exactly what feeds OLD_NAMES, which in turn feeds the --prune `rm -rf`
+    and vendor_one's collision check."""
+    bash_script = f"""
+set -euo pipefail
+{_source_functions_only()}
+for name in "checking-restraint" "auditing-config-and-build-hygiene" "a" "a1-2" "a-b-c-9"; do
+  is_bare_skill_name "$name" || {{ printf 'REJECTED:%s\\n' "$name"; exit 1; }}
+done
+for bad in "../../victim" "/etc/passwd" "UPPER" "with space" "trailing/slash" "dot.name" ".."; do
+  if is_bare_skill_name "$bad"; then
+    printf 'ACCEPTED:%s\\n' "$bad"
+    exit 1
+  fi
+done
+printf 'OK\\n'
+"""
+    result = subprocess.run(
+        ["bash", "-c", bash_script],
+        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    assert result.stdout.strip() == "OK"
+
+
+def test_is_bare_skill_name_rejects_empty_string():
+    # A bare empty argument, exercised separately from the loop above since
+    # an empty string in a bash for-loop word list is easy to get wrong.
+    bash_script = f"""
+set -euo pipefail
+{_source_functions_only()}
+is_bare_skill_name ""
+"""
+    result = subprocess.run(
+        ["bash", "-c", bash_script],
+        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert result.returncode != 0
+
+
+def test_confirm_child_of_dest_root_rejects_a_mismatched_parent(tmp_path):
+    """Direct unit test of the defense-in-depth check (#377): unreachable
+    through main()'s own flow today (is_bare_skill_name already rules out
+    anything that could mismatch), which is exactly why it needs its own
+    test rather than only integration coverage through main(). Tests the
+    function in isolation -- it never calls rm itself (main()'s prune loop
+    does, only after this check passes), so there's no rm call to mock or
+    assert against here; the real proof is the returncode and message below,
+    plus the integration-level test_prune_rejects_path_traversal_marker_line,
+    which does exercise a real rm call (atlas review round-1 finding on this
+    PR, dropping a vacuous MOCK_RM assertion this test previously carried)."""
+    dest_root = tmp_path / "dest_root"
+    dest_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    bash_script = f"""
+set -euo pipefail
+{_source_functions_only()}
+confirm_child_of_dest_root "{outside}/victim" "{dest_root}"
+"""
+    result = subprocess.run(
+        ["bash", "-c", bash_script],
+        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert result.returncode != 0
+    assert "refusing to delete" in result.stderr
+
+
+def test_confirm_child_of_dest_root_accepts_a_true_child(tmp_path):
+    dest_root = tmp_path / "dest_root"
+    dest_root.mkdir()
+
+    bash_script = f"""
+set -euo pipefail
+{_source_functions_only()}
+confirm_child_of_dest_root "{dest_root}/some-skill" "{dest_root}"
+"""
+    result = subprocess.run(
+        ["bash", "-c", bash_script],
+        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+
+
+# --- #398: the --with-lens-coverage-hook errexit-suspension / atomic-write regressions ---
 
 def test_with_lens_coverage_hook_never_corrupts_a_settings_json_it_cannot_merge_into(tmp_path):
     """Regression for a Copilot-review finding on PR #398: a target's
