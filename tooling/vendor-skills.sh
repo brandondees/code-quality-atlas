@@ -24,6 +24,9 @@
 #   tooling/vendor-skills.sh <target-repo-dir> --collapsed   # vendor the 4 collapsed entrypoints instead
 #   tooling/vendor-skills.sh <target-repo-dir> --prune       # also drop stale vendored skills
 #   tooling/vendor-skills.sh <target-repo-dir> --force       # overwrite a colliding non-vendored dir
+#   tooling/vendor-skills.sh <target-repo-dir> --with-lens-coverage-hook
+#                                                             # also vendor the #357/Q23
+#                                                             # lens-coverage enforcement hook
 #
 # After running, review and commit the .claude/skills/ changes in the target repo.
 #
@@ -36,11 +39,19 @@ REQUIRED_PROGRAMS=("git")
 TARGET=""
 PRUNE=0
 FORCE=0
+WITH_LENS_COVERAGE_HOOK=0
 SUBDIR=".claude/skills"
 MARKER_NAME=".atlas-vendored"
 # Which tree to vendor: the 44 standalone skills (default) or the 4 collapsed
 # entrypoints (--collapsed).
 SRC_SUBDIR="skills"
+# Destination for --with-lens-coverage-hook's two scripts, relative to the
+# target repo root. Deliberately NOT under .claude/skills/ (SUBDIR) — that
+# tree's contents are Skill-tool-loaded bundles governed by the
+# .atlas-vendored marker/--prune machinery above; the hook scripts are
+# neither, so they get their own destination and their own (much simpler)
+# no-prune vendoring below.
+HOOK_SUBDIR=".claude/hooks/lens-coverage"
 
 usage() {
   cat <<'EOF'
@@ -62,21 +73,42 @@ Options:
                 it wasn't vendored by a prior run of this tool (default: skip
                 it with a warning and a non-zero exit; see the marker check
                 in vendor_one)
+  --with-lens-coverage-hook
+                Also vendor the #357/Q23 lens-coverage enforcement hook: two
+                scripts copied to .claude/hooks/lens-coverage/, plus a
+                PostToolUse(Read)/PreToolUse hook wiring merged (not
+                clobbered) into the target repo's .claude/settings.json.
+                Explicit opt-in, separate from the hook's OWN opt-in
+                enforcement gate (a `lens-coverage-gate: on` line in the
+                target repo's .code-quality-atlas/preferences.md) --
+                writing hook execution into a consumer's settings.json is a
+                more sensitive action than copying skill markdown, so this
+                is never vendored implicitly. Requires jq. No --prune
+                equivalent yet: turning this flag off on a later run does
+                NOT retract already-vendored hook wiring (see
+                vendor_lens_coverage_hook's own header).
   -h, --help    Show this help
 
 External tools:
   git
+  jq   (only required when --with-lens-coverage-hook is passed)
 
 Examples:
   tooling/vendor-skills.sh ~/code/my-service
   tooling/vendor-skills.sh ~/code/my-service --prune
+  tooling/vendor-skills.sh ~/code/my-service --with-lens-coverage-hook
 EOF
 }
 
 check_requirements() {
   local missing=0
   local program
-  for program in "${REQUIRED_PROGRAMS[@]}"; do
+  local required=("${REQUIRED_PROGRAMS[@]}")
+  # jq is only needed to merge (not clobber) the target's .claude/settings.json
+  # for --with-lens-coverage-hook -- every other path in this script has never
+  # needed it, so it stays out of the always-required list.
+  [ "$WITH_LENS_COVERAGE_HOOK" -eq 1 ] && required+=("jq")
+  for program in "${required[@]}"; do
     if ! command -v "$program" >/dev/null 2>&1; then
       printf 'Error: Required program %s is not installed or not on PATH. Please install it first.\n' "$program" >&2
       missing=1
@@ -95,6 +127,7 @@ parse_args() {
       --collapsed) SRC_SUBDIR="collapsed/skills" ;;
       --prune) PRUNE=1 ;;
       --force) FORCE=1 ;;
+      --with-lens-coverage-hook) WITH_LENS_COVERAGE_HOOK=1 ;;
       -h | --help)
         usage
         exit 0
@@ -248,6 +281,82 @@ content remains here.
 EOF
 }
 
+# Ensure one PostToolUse/PreToolUse hook entry exists in a settings.json
+# object, without disturbing anything else already there. Idempotent: checks
+# for an existing hooks-array entry whose command already matches (by exact
+# command string, regardless of which matcher group it's nested under) before
+# appending a new one — re-running this is a no-op once vendored. Reads the
+# current settings JSON on stdin, writes the updated JSON to stdout; the
+# caller is responsible for atomically replacing the file.
+merge_settings_hook() {
+  local event=$1 matcher=$2 command=$3
+  jq --arg event "$event" --arg matcher "$matcher" --arg command "$command" '
+    .hooks = (.hooks // {}) |
+    .hooks[$event] = (.hooks[$event] // []) |
+    ( .hooks[$event] | any(.hooks[]?.command == $command) ) as $exists |
+    if $exists then .
+    else .hooks[$event] += [{matcher: $matcher, hooks: [{type: "command", command: $command}]}]
+    end
+  '
+}
+
+# Vendors the #357/Q23 lens-coverage enforcement hook into a target repo:
+# the two scripts under hooks/lens-coverage/, plus the settings.json wiring
+# that makes them fire. This is deliberately NOT part of the main skill-
+# vendoring loop above (vendor_one/the .atlas-vendored marker/--prune) --
+# those exist to manage Skill-tool-loaded content; this writes hook
+# EXECUTION wiring into the target's own settings.json, a different and more
+# sensitive kind of change, gated behind its own explicit
+# --with-lens-coverage-hook flag rather than happening implicitly.
+#
+# Committed, non-plugin settings.json hooks were confirmed to actually fire
+# in a Claude Code cloud/routine session on 2026-09-01 (docs/open-questions.md
+# Q23) -- that result is what makes vendoring this into a target's own
+# settings.json (rather than only the plugin's hooks.json, which never loads
+# in cloud at all per distribution.md) worth doing.
+#
+# The command paths written into settings.json are relative to the target
+# repo root (".claude/hooks/lens-coverage/<script>.sh"), matching how
+# gate-lens-coverage.sh and track-lens-reads.sh already reference their own
+# state file (.claude/.atlas-lens-coverage/) the same way -- this assumes
+# Claude Code invokes hook commands with the project root as the working
+# directory, not that any particular env var is set (unlike the plugin path,
+# which uses ${CLAUDE_PLUGIN_ROOT} -- not applicable here since there's no
+# plugin runtime involved).
+#
+# No --prune equivalent: unlike the skill marker above, there's no record of
+# "hook entries this tool previously added" to safely reverse. Turning
+# --with-lens-coverage-hook off on a later run leaves prior runs' vendored
+# scripts and settings.json entries in place; removing them is a manual step
+# for now. Stated here as a known gap, not silently accepted.
+vendor_lens_coverage_hook() {
+  local abs_target=$1
+  local hook_src="hooks/lens-coverage"
+  local hook_dest="$abs_target/$HOOK_SUBDIR"
+  local settings_file="$abs_target/.claude/settings.json"
+
+  mkdir -p "$hook_dest"
+  cp "$hook_src/track-lens-reads.sh" "$hook_dest/track-lens-reads.sh"
+  cp "$hook_src/gate-lens-coverage.sh" "$hook_dest/gate-lens-coverage.sh"
+  chmod +x "$hook_dest/track-lens-reads.sh" "$hook_dest/gate-lens-coverage.sh"
+
+  local current='{}'
+  if [ -f "$settings_file" ]; then
+    if ! current="$(cat "$settings_file")" || ! printf '%s' "$current" | jq -e . >/dev/null 2>&1; then
+      printf 'Error: %s exists but is not valid JSON; refusing to touch it. Merge the lens-coverage hook in by hand -- see hooks/lens-coverage/ in code-quality-atlas.\n' "$settings_file" >&2
+      return 1
+    fi
+  fi
+
+  local updated
+  updated="$(printf '%s' "$current" \
+    | merge_settings_hook "PostToolUse" "Read" "$HOOK_SUBDIR/track-lens-reads.sh" \
+    | merge_settings_hook "PreToolUse" "mcp__github__pull_request_review_write|mcp__github__add_comment_to_pending_review" "$HOOK_SUBDIR/gate-lens-coverage.sh")"
+
+  printf '%s\n' "$updated" | jq . > "$settings_file"
+  printf 'Vendored lens-coverage hook -> %s (wiring merged into %s)\n' "$hook_dest" "$settings_file"
+}
+
 main() {
   parse_args "$@"
   check_requirements || exit 1
@@ -289,6 +398,10 @@ main() {
   write_attribution "$dest_root" "$sha"
   printf 'Vendored %s skill(s) -> %s\n' \
     "$((${#SKILL_NAMES[@]} - ${#SKIPPED_COLLISIONS[@]}))" "$dest_root"
+
+  if [ "$WITH_LENS_COVERAGE_HOOK" -eq 1 ]; then
+    vendor_lens_coverage_hook "$abs_target" || exit 1
+  fi
 
   local pruned=0
   if [ "$PRUNE" -eq 1 ] && [ "${#OLD_NAMES[@]}" -gt 0 ]; then

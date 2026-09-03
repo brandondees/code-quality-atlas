@@ -184,10 +184,16 @@ def test_collapsed_hooks_json_matches_standalone():
 
 
 def test_collapsed_generic_hook_scripts_match_standalone():
-    # log-skill-invocation.sh, queue-session-retro.sh, and lib/feedback-tier.sh
-    # carry no skill-name-specific content (unlike route.sh), so they must
-    # stay byte-identical between the two plugin forms.
-    for rel in ("log-skill-invocation.sh", "queue-session-retro.sh", "lib/feedback-tier.sh"):
+    # log-skill-invocation.sh, queue-session-retro.sh, lib/feedback-tier.sh,
+    # and the lens-coverage/ pair carry no skill-name-specific content (unlike
+    # route.sh), so they must stay byte-identical between the two plugin forms.
+    for rel in (
+        "log-skill-invocation.sh",
+        "queue-session-retro.sh",
+        "lib/feedback-tier.sh",
+        "lens-coverage/track-lens-reads.sh",
+        "lens-coverage/gate-lens-coverage.sh",
+    ):
         standalone = (REPO_ROOT / "hooks" / rel).read_text(encoding="utf-8")
         collapsed = (COLLAPSED_HOOKS_DIR / rel).read_text(encoding="utf-8")
         assert collapsed == standalone, f"collapsed/hooks/{rel} has drifted from hooks/{rel}"
