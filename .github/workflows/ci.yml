@@ -167,8 +167,25 @@ jobs:
         with:
           python-version: "3.12"
           cache: 'pip'
+      # #366: this runner is self-hosted and persistent (see the job's own
+      # comment above) -- installing straight into its interpreter meant any
+      # pin already present in site-packages from a prior job was reported
+      # "Requirement already satisfied" and its hash was never checked at
+      # all, silently defeating --require-hashes below. Reproduced during the
+      # audit: with ruff already installed, a requirements.txt pinning it
+      # with a hash of 64 zeros still exited 0. A fresh venv per job (--clear
+      # as defense in depth, in case a self-hosted runner's $RUNNER_TEMP ever
+      # isn't wiped between jobs the way a hosted runner's is) guarantees
+      # nothing is ever already-satisfied, so every pin's hash is verified on
+      # every run. Exporting its bin/ onto $GITHUB_PATH -- rather than only
+      # this step -- carries the same guarantee through every later step that
+      # invokes pip/python/ruff/pytest (pip-tools and pip-audit below
+      # included), without touching each of them individually.
       - if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
-        run: pip install --require-hashes -r requirements.txt
+        run: |
+          python -m venv --clear "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --require-hashes -r requirements.txt
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
       - name: requirements.txt is in sync with requirements.in
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: |
@@ -198,11 +215,21 @@ jobs:
           # reuses an already-satisfying pinned line *verbatim, hash included*,
           # and only computes hashes for packages it newly resolves. So a
           # hand-edited hash on an already-pinned package survives this diff.
-          # It does not survive the job: `pip install --require-hashes` above
-          # verifies every hash in the committed lockfile against the artifact
-          # it downloads, and exits 1 on any mismatch (verified, pip 26.x) —
-          # before this step even runs. Hash integrity is that step's; .in
-          # consistency is this one's.
+          # `pip install --require-hashes` above (into a fresh per-job venv,
+          # #366) catches most of that: it verifies the one artifact pip
+          # actually resolves and downloads for this job's platform/Python
+          # against the hash(es) listed for it, and exits 1 on any mismatch.
+          #
+          # #366: what it does NOT do, despite a second draft of this comment
+          # claiming otherwise -- is verify every hash in the committed
+          # lockfile. A requirement line can list hashes for several
+          # platforms' wheels (sdist, manylinux, macOS, Windows, ...), and pip
+          # only ever downloads and checks the one it selects for the running
+          # job. A forged hash on a wheel this platform never selects passes
+          # both this step's diff and that install silently (reproduced with
+          # a forged pyyaml hash during the audit). Hash integrity for the
+          # platform this job actually runs on is that step's; .in consistency
+          # is this one's; cross-platform hash coverage is neither's.
           #
           # Freshness is neither step's, and is already owned twice: Dependabot
           # proposes upgrades weekly as their own PRs, and `pip-audit` below
