@@ -20,7 +20,7 @@ which test_review_template_sync.py keeps byte-identical) -- so this test
 guards the prose shape directly: the vulnerable unscoped phrasing must not
 reappear, and the ownership-check language must stay present in all four.
 """
-from pathlib import re
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -39,8 +39,10 @@ FILES = {
 VULNERABLE_PHRASES = (
     "resolve any threads the new push addressed",
     "resolve threads that later pushes addressed",
-    "if a prior thread was already addressed by a later push, resolve it "
-    "with `resolve_review_thread` rather than re-raising it",
+    (
+        "if a prior thread was already addressed by a later push, resolve it "
+        "with `resolve_review_thread` rather than re-raising it"
+    ),
 )
 
 
