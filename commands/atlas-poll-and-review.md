@@ -98,6 +98,25 @@ be the only thing capable of reviewing this PR (a repo could also run an
 event-triggered reviewer routine alongside this one) — treat a state that
 already changed as "someone else got there first," not an error.
 
+**Recover a stuck ACK lock first, once per sweep, before touching any
+individual PR (issue #360 follow-up, flagged in PR #402's own review).** A
+session that dies between `create` succeeding and `delete_pending` running
+below (container reset, `/compact`, reclaim) leaves the lock orphaned —
+every future `create` under this identity then fails, and the instinct is to
+read that as "someone else has it" forever, silently and permanently
+stopping that PR from ever being ack'd again. Since this routine already
+runs on a schedule independent of whatever session got stuck, it's the
+natural place to self-heal: call `mcp__github__pull_request_read`'s
+`get_reviews` method for each repo being swept — GitHub returns the
+authenticated user's own pending review even though a pending review is
+otherwise invisible to anyone but its author. A `PENDING`-state review under
+your own identity with a `created_at` more than 30 minutes old is almost
+certainly a stuck lock, not live contention (a real ACK post completes in
+well under a minute) — clear it (`mcp__github__pull_request_review_write`
+method `delete_pending`) and note it in step 5's report. Doing this once up
+front means a `create` failure encountered later in this same sweep (below)
+genuinely does mean live contention, not staleness this pass already missed.
+
 - **Round state is `unknown`** (one or more of your own reviews exist but
   none parses a heading or marker — issue #360, gap 3): don't guess. Skip
   this PR for this sweep entirely — no ack post, no review subagent — and
@@ -109,9 +128,14 @@ already changed as "someone else got there first," not an error.
   per PR at a time, so this fails outright if another session (this cycle's
   or a concurrent one, including an event-triggered reviewer routine watching
   the same repo) is already mid-ACK, instead of racing silently on a plain
-  "check then post" issue comment (issue #360, gap 2). **If `create` fails**,
-  stand down on this PR for this sweep — someone else has it, skip it
-  entirely this cycle. **If it succeeds**, re-check for an ack from your own
+  "check then post" issue comment (issue #360, gap 2). **If `create` fails
+  because a pending review already exists** for your identity, stand down on
+  this PR for this sweep — someone else has it, skip it entirely this cycle
+  (the stuck-lock recovery pass above already cleared anything stale, so
+  this genuinely means live contention). **Any other error** is a real
+  failure, not contention — note it in step 5's report rather than silently
+  treating it as "someone else has it." **If `create` succeeds**, re-check
+  for an ack from your own
   identity one more time (the lock makes this check authoritative), then post
   the ack issue comment — carrying both the `<!-- atlas-review-ack -->`
   marker and the visible "👀 atlas reviewer engaged" text (see step 1) — only
@@ -168,5 +192,6 @@ naturally idempotent.
 ## 5. Report
 
 End with one line per repo swept: counts of updated (rebased), conflict-poked,
-round-1-reviewed, re-reviewed, and skipped. Nothing else goes to GitHub beyond
-the actions above.
+round-1-reviewed, re-reviewed, skipped, and any stuck ACK locks cleared
+(step 3). Nothing else goes to GitHub beyond the actions above and any
+`delete_pending` calls.

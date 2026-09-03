@@ -140,10 +140,22 @@ race with a primitive GitHub actually enforces atomically:
 most one pending review per identity per PR at a time**, so a concurrent
 `create` under your own identity fails outright instead of silently racing.
 
-- **If `create` fails** because a pending review already exists for your
-  identity: another session (this one's own earlier attempt, or a concurrent
-  one) is already mid-ACK. Stand down — post nothing, don't retry, let it
-  finish.
+- **If `create` fails, check *why* before deciding what to do — not every
+  failure means contention.** If the error says a pending review already
+  exists for your identity: another session (this one's own earlier
+  attempt, or a concurrent one) is already mid-ACK. Stand down — post
+  nothing, don't retry, let it finish. **Any other error** (permissions,
+  rate limit, a transient API failure) is a real failure, not contention —
+  don't silently fold it into "someone else has it"; note it and stop
+  rather than guessing.
+  - **If the lock stays stuck** (a session dies between `create` succeeding
+    and `delete_pending` running — container reset, `/compact`, reclaim),
+    this command has no way to detect or clear its own orphaned lock after
+    the fact; recovery is deliberately not this command's job, since a dead
+    session obviously can't clean up after itself. `atlas-rebase-stale.md`
+    (step 3) and `atlas-poll-and-review.md` (step 3) are the independently
+    scheduled backstops that detect and clear a stale pending review under
+    this same identity — see either for the recovery mechanism.
 - **If `create` succeeds**, you hold the lock. Check the PR's issue comments
   for an existing ACK **from your own identity** (a compacted or restarted
   session must not re-post it) — look for **either** the invisible

@@ -61,6 +61,16 @@ ACK_POSTING_FILES = {
     "pr-review-automation runbook": ROOT / "docs" / "runbooks" / "pr-review-automation.md",
 }
 
+# The three independently-scheduled surfaces that actually run the
+# stuck-lock recovery pass (PR #402's own review round) --
+# atlas-review-pr.md never runs it itself (a dead session can't clean up
+# after itself); it only references where recovery lives.
+RECOVERY_FILES = {
+    "atlas-poll-and-review command": ROOT / "commands" / "atlas-poll-and-review.md",
+    "atlas-rebase-stale command": ROOT / "commands" / "atlas-rebase-stale.md",
+    "pr-review-automation runbook": ROOT / "docs" / "runbooks" / "pr-review-automation.md",
+}
+
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
@@ -148,4 +158,60 @@ def test_identity_filtering_is_tied_to_round_or_ack_not_just_present():
             "specifically -- the identity check must scope round/ack "
             "candidates, not just exist somewhere else in the file (#360, "
             "gap 1)."
+        )
+
+
+def test_pollers_recover_a_stuck_ack_lock():
+    # PR #402's own review round: a session that dies between the lock's
+    # create and delete_pending orphans it forever, since every future
+    # create under the same identity then fails and the protocol's own
+    # instruction was "stand down" -- with none of the system's backstops
+    # (they share the reviewer's identity) able to route around it. Fixed
+    # by having the independently-scheduled pollers detect and clear a
+    # stale (30+ minute old) pending review under their own identity.
+    for label, path in RECOVERY_FILES.items():
+        text = _read(path)
+        # "stuck", "get_reviews", and "delete_pending" alone are too weak an
+        # anchor for atlas-poll-and-review.md specifically: all three already
+        # existed there before this recovery pass, for unrelated reasons (the
+        # ACK lock's own create/delete_pending, and get_reviews used
+        # elsewhere for identity filtering). Anchor to the staleness
+        # threshold instead, which is new and specific to this mechanism.
+        assert "30 minutes" in text, (
+            f"{label} ({path}) no longer names the stuck-lock staleness "
+            "threshold (30 minutes) -- without a concrete recovery pass "
+            "(detect a PENDING review under your own identity older than "
+            "the threshold, clear it with delete_pending), a session dying "
+            "between the ACK lock's create and delete_pending permanently "
+            "and silently stops the affected PR from ever being ack'd or "
+            "reviewed again (PR #402 review)."
+        )
+        assert "get_reviews" in text, (
+            f"{label} ({path}) mentions the staleness threshold but not "
+            "get_reviews -- the recovery pass needs a concrete way to find "
+            "its own orphaned pending review (pull_request_read's "
+            "get_reviews method, which returns the authenticated user's own "
+            "PENDING review even though it's otherwise invisible to anyone "
+            "else)."
+        )
+        assert "delete_pending" in text, (
+            f"{label} ({path}) mentions stuck-lock detection but not the "
+            "delete_pending call that actually clears it -- detection "
+            "without release doesn't fix anything."
+        )
+
+
+def test_create_failure_distinguishes_contention_from_a_real_error():
+    # A second, smaller PR #402 finding: every create failure was folded
+    # into "someone else has the lock," silently swallowing permission
+    # errors, rate limits, and other real failures under the same "stand
+    # down" branch as ordinary lock contention.
+    for label, path in ACK_POSTING_FILES.items():
+        text = _read(path)
+        assert re.search(r"real\s+(failure|error)", text, re.IGNORECASE), (
+            f"{label} ({path}) no longer distinguishes a real create "
+            "failure (permissions, rate limit, a transient API error) from "
+            "ordinary lock contention (\"a pending review already "
+            "exists\") -- re-add the distinction so a genuine failure gets "
+            "surfaced instead of silently read as \"someone else has it.\""
         )

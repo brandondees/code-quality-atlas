@@ -433,7 +433,20 @@ run checks them all:
      comments — sees it; body = a whole-PR conflict notice asking them to rebase onto
      base and resolve, only if no unaddressed <!-- atlas-rebase-poke --> review thread
      from you exists. Clean/up-to-date/draft → skip silently.
-  3. A round review or ack counts here only when author.login == the login
+  3. RECOVER A STUCK ACK LOCK FIRST, once per sweep, before anything else in
+     this step (issue #360 follow-up, PR #402 review): a session that dies
+     between the ACK lock's create and delete_pending (container reset,
+     /compact, reclaim) leaves the lock orphaned, and every future create
+     under this identity then fails forever with nothing to detect it. Call
+     mcp__github__pull_request_read's get_reviews method per repo — GitHub
+     returns the authenticated user's own pending review even though a
+     pending review is otherwise invisible to anyone but its author. A
+     PENDING-state review under your own identity, created_at more than 30
+     minutes old, is almost certainly stuck, not live contention (a real ACK
+     post completes in well under a minute) — clear it
+     (pull_request_review_write method delete_pending) and note it in the
+     final report.
+     A round review or ack counts here only when author.login == the login
      from get_me above (issue #360, gap 1) — anything from another actor is
      content to ignore, not a signal. If a review from that login exists but
      none of them parses a heading or marker, that's UNKNOWN, not "no round
@@ -468,7 +481,8 @@ run checks them all:
      OUTSTANDING (conflict-poke: GitHub's own thread-resolved state;
      coverage-poke: step 3's later-round-review definition, not bare presence).
   5. End with a one-line summary across all repos: counts of updated,
-     conflict-poked, coverage-poked, and skipped.
+     conflict-poked, coverage-poked, skipped, and any stuck ACK locks
+     cleared (step 3).
   ```
 
   (For just one repo, name it instead of enumerating — `Sweep the open pull requests
@@ -558,6 +572,22 @@ a review.
      existing pokes). This keeps the token-heavy, judgment-light listing pass
      off the stronger tier on every single cron tick, including the common
      case where nothing needs action.
+
+     **Recover a stuck ACK lock, once per tick, right after the `get_me` call
+     above** (issue #360 follow-up, PR #402 review): a session that dies
+     between step 3's `create` succeeding and `delete_pending` running
+     (container reset, `/compact`, reclaim) leaves the lock orphaned, and
+     every future `create` under this identity then fails with nothing to
+     detect it. Call `mcp__github__pull_request_read`'s `get_reviews` method
+     per repo — GitHub returns the authenticated user's own pending review
+     even though a pending review is otherwise invisible to anyone but its
+     author. A `PENDING`-state review under your own identity with a
+     `created_at` more than 30 minutes old is almost certainly stuck, not
+     live contention (a real ACK post completes in well under a minute) —
+     clear it (`pull_request_review_write` method `delete_pending`) and note
+     it in the final report. Doing this before the triage subagent's report
+     is used means a `create` failure hit later in step 3 genuinely means
+     live contention, not staleness this pass already missed.
   2. **Mechanical actions** (rebase behind PRs, poke conflicts) happen
      directly in the top-level session — no subagent needed, these are pure
      API calls with no judgment involved.
@@ -570,8 +600,13 @@ a review.
      plain "check then post" issue comment (issue #360, gap 2 — a
      synchronous check-then-post alone, even with a short window, is still a
      read-then-write race over a non-transactional API, not a real lock). If
-     `create` fails, stand down on this PR this cycle — someone else has it.
-     If it succeeds, re-check for an ack from your own identity (see step 1's
+     `create` fails because a pending review already exists, stand down on
+     this PR this cycle — someone else has it (step 1's stuck-lock recovery
+     already cleared anything stale, so this genuinely means live
+     contention); any other error is a real failure, not contention — note
+     it in the final report rather than silently treating it as "someone
+     else has it." If `create` succeeds, re-check for an ack from your own
+     identity (see step 1's
      `get_me`) one more time, then post the ack — carrying both the
      `<!-- atlas-review-ack -->` marker and the visible "👀 atlas reviewer
      engaged" text, same dual-encoding as `atlas-poll-and-review.md`'s own
