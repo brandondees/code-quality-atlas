@@ -51,7 +51,14 @@ def test_design_doc_names_the_abstracted_fields():
 
 
 def test_design_doc_states_a_retention_rule():
-    assert "Retention." in SELF_IMPROVEMENT_LOOP
+    # CodeRabbit's PR #397 finding: match on the concrete guidance, not just
+    # the "Retention." heading, so deleting the actual rule can't slip past
+    # this check while the heading survives.
+    assert "grows without bound" in SELF_IMPROVEMENT_LOOP
+    assert "prune or archive old lines" in SELF_IMPROVEMENT_LOOP
+    # Pruning the working file doesn't purge Git history/clones/backups —
+    # a real gap CodeRabbit caught in the first version of this note.
+    assert "doesn't purge" in SELF_IMPROVEMENT_LOOP or "stay reachable through Git history" in SELF_IMPROVEMENT_LOOP
 
 
 def test_install_doc_does_not_claim_raw_capture():
@@ -65,3 +72,13 @@ def test_install_doc_does_not_claim_raw_capture():
 
 def test_preferences_template_states_a_retention_rule():
     assert "Retention:" in PREFS_TEMPLATE
+    assert "grows without bound" in PREFS_TEMPLATE
+    assert "doesn't purge" in PREFS_TEMPLATE
+
+
+def test_design_doc_and_template_note_digest_is_not_a_hard_privacy_guarantee():
+    # CodeRabbit's PR #397 finding: tool_input_sha256 is unkeyed, so a
+    # low-entropy tool_input could be recovered offline by hashing
+    # candidates and comparing. "Abstracted" must not read as "unrecoverable."
+    assert "unkeyed" in SELF_IMPROVEMENT_LOOP
+    assert "unkeyed" in PREFS_TEMPLATE

@@ -99,6 +99,49 @@ def test_env_override_byte_length_is_utf8_bytes_not_codepoints(tmp_path):
     assert record["tool_input_sha256"] == hashlib.sha256(compact.encode("utf-8")).hexdigest()
 
 
+def test_env_override_hashes_with_sorted_keys_so_key_order_does_not_matter(tmp_path):
+    # Regression for CodeRabbit's PR #397 finding: `jq -c` preserves the
+    # original key order, so two logically-equivalent tool_input payloads
+    # with differently ordered keys would hash differently — undermining
+    # tool_input_sha256's use for future repeat-input analysis (§3.4). The
+    # hook must serialize with sorted keys (jq -cS) before hashing.
+    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    ordered_a = json.dumps({
+        "session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Skill",
+        "tool_input": {"a": 1, "b": 2},
+    })
+    ordered_b = json.dumps({
+        "session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Skill",
+        "tool_input": {"b": 2, "a": 1},
+    })
+    _run(LOG_HOOK, tmp_path, ordered_a, env_extra=env)
+    _run(LOG_HOOK, tmp_path, ordered_b, env_extra=env)
+    lines = (_learnings_dir(tmp_path) / "invocations.jsonl").read_text().strip().splitlines()
+    record_a, record_b = (json.loads(line) for line in lines[-2:])
+    assert record_a["tool_input_sha256"] == record_b["tool_input_sha256"]
+    assert record_a["tool_input_len"] == record_b["tool_input_len"]
+
+
+def test_env_override_preserves_explicit_false_tool_input(tmp_path):
+    # Regression for CodeRabbit's PR #397 finding: `.tool_input // null`
+    # folds an explicitly-provided `false` (or any falsy-but-present JSON
+    # value) into the same "no input" bucket as an absent/null tool_input,
+    # via jq's `//` operator treating false as falsy too. The hook must
+    # distinguish "tool_input is present and false" from "tool_input is
+    # absent or null" so the recorded length/hash reflect what was sent.
+    skill_input = json.dumps({
+        "session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Skill",
+        "tool_input": False,
+    })
+    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    _run(LOG_HOOK, tmp_path, skill_input, env_extra=env)
+    record = json.loads((_learnings_dir(tmp_path) / "invocations.jsonl").read_text().strip().splitlines()[-1])
+    assert record["tool_input_len"] == len("false")
+    assert record["tool_input_sha256"] == hashlib.sha256(b"false").hexdigest()
+
+
 def test_env_override_degrades_to_null_digest_without_a_hashing_tool(tmp_path):
     # Regression for the atlas reviewer's PR #397 finding: a PATH with `jq`
     # but neither `sha256sum` nor `shasum` must still log the invocation —

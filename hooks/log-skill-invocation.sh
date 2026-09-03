@@ -65,7 +65,11 @@ fi
 
 # Compact tool_input first so length/hash are computed over one canonical
 # serialization rather than whatever whitespace the caller happened to send.
-tool_input_json="$(printf '%s' "$input" | jq -c '.tool_input // null' 2>/dev/null)"
+# -cS (sorted keys) so two equivalent payloads with reordered keys hash the
+# same; an explicit `if == null` (not `// null`) so a genuinely falsy but
+# present value (e.g. tool_input: false) is preserved rather than folded
+# into the same "no input" bucket as an absent/null tool_input.
+tool_input_json="$(printf '%s' "$input" | jq -cS 'if .tool_input == null then null else .tool_input end' 2>/dev/null)"
 [ -n "$tool_input_json" ] || exit 0   # malformed stdin JSON: nothing sane to append, skip silently
 
 tool_input_len=0

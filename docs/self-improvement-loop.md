@@ -280,13 +280,24 @@ local path (OS username, `$HOME`, project layout) that the privacy boundary abov
 meant to keep out of a file the design commits to the repo. Neither hook needs the
 undocumented inner shape of `tool_input` (§3.1's assumption (a)) to do this: a length and
 a digest abstract *any* payload shape without parsing it, which is also why this approach
-— rather than guessing a field to keep — was picked as the fix for #364.
+— rather than guessing a field to keep — was picked as the fix for #364. The digest is
+sorted-key JSON (`jq -cS`) so two equivalent payloads hash the same regardless of key
+order, and it's unkeyed: it stops raw content from being *stored*, but for a low-entropy
+or otherwise guessable `tool_input` (a small, enumerable set of skill names and short
+arguments), an attacker with log access could in principle recover the original by
+hashing candidates offline and comparing — "no raw content stored," not "unrecoverable."
 
 **Retention.** `.code-quality-atlas/learnings/*.jsonl` grows without bound by default;
 stage 1 ships no rotation or expiry. A team that enables tier `local` should periodically
 prune or archive old lines (e.g. drop records past some age, or move a full file into a
 dated archive) as ordinary repo hygiene — the design doesn't mandate a specific window,
-but an ever-growing committed file with no prune policy is itself worth flagging.
+but an ever-growing committed file with no prune policy is itself worth flagging. Pruning
+lines from the working file is repo hygiene, not data destruction: because the file is
+committed (D17), earlier lines stay reachable through Git history, and through any clone,
+fork, or backup taken before the prune. A team that needs a record actually gone — not
+merely absent from the current tip — has to rewrite history (e.g. `git filter-repo`) and
+treat every existing clone as still holding it, or keep the log out of version control
+(gitignored) from the start instead of relying on D17's default.
 
 **D17 note (2026-07-06):** the "reaches upstream?" column above is about the atlas
 project, not the consumer's own infrastructure. D17 commits the tier-1 log to the
