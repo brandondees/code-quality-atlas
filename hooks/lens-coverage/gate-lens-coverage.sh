@@ -57,11 +57,22 @@ command -v jq >/dev/null 2>&1 || exit 0
 # acceptable for a first draft, not for a merged feature (checking-idioms-
 # and-consistency would flag the duplication). Factor a generic
 # "read one key from preferences.md" helper into lib/ and have both this and
-# feedback-tier.sh call it.
+# feedback-tier.sh call it. The comment-stripping below is otherwise the
+# exact copy of feedback-tier.sh's own logic and must stay that way -- an
+# un-stripped raw grep here previously matched a `lens-coverage-gate: on`
+# line sitting inside the preferences template's commented-out example
+# block, silently turning the gate on (round-1 review finding).
 gate_prefs=".code-quality-atlas/preferences.md"
 gate_on=""
 if [ -f "$gate_prefs" ]; then
-  gate_on="$(grep -m1 -E '^[[:space:]]*lens-coverage-gate:[[:space:]]*on[[:space:]]*$' "$gate_prefs" 2>/dev/null)"
+  gate_on="$(awk '
+    /<!--.*-->/ { next }
+    /<!--/      { incomment=1; next }
+    /-->/       { incomment=0; next }
+    !incomment  { print }
+  ' "$gate_prefs" 2>/dev/null \
+    | sed -E 's/[[:space:]]*#.*$//' \
+    | grep -m1 -E '^[[:space:]]*lens-coverage-gate:[[:space:]]*on[[:space:]]*$')"
 fi
 [ -n "$gate_on" ] || exit 0   # opt-in, default off -- see this header
 
