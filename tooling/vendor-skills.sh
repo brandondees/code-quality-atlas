@@ -55,7 +55,7 @@ HOOK_SUBDIR=".claude/hooks/lens-coverage"
 
 usage() {
   cat <<'EOF'
-Usage: tooling/vendor-skills.sh <target-repo-dir> [--collapsed] [--prune] [--force]
+Usage: tooling/vendor-skills.sh <target-repo-dir> [--collapsed] [--prune] [--force] [--with-lens-coverage-hook]
 
 Copies skills/<name>/{SKILL.md, reference/, examples.md} (no evals/) into
 <target-repo-dir>/.claude/skills/<name>/. Run the script from inside the
@@ -75,9 +75,10 @@ Options:
                 in vendor_one)
   --with-lens-coverage-hook
                 Also vendor the #357/Q23 lens-coverage enforcement hook: two
-                scripts copied to .claude/hooks/lens-coverage/, plus a
-                PostToolUse(Read)/PreToolUse hook wiring merged (not
-                clobbered) into the target repo's .claude/settings.json.
+                scripts copied to .claude/hooks/lens-coverage/, plus
+                PostToolUse(Read)/PostToolUse(Skill)/PreToolUse hook wiring
+                merged (not clobbered) into the target repo's
+                .claude/settings.json.
                 Explicit opt-in, separate from the hook's OWN opt-in
                 enforcement gate (a `lens-coverage-gate: on` line in the
                 target repo's .code-quality-atlas/preferences.md) --

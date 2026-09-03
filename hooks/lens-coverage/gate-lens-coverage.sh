@@ -3,9 +3,10 @@
 # code-quality-atlas PreToolUse hook -- lens-coverage gate (#357, Q23).
 #
 # Blocks a review post that attributes a finding to a lens whose body.md/
-# SKILL.md was never Read this session -- see track-lens-reads.sh, the
-# PostToolUse(Read) companion that builds the evidence this hook checks
-# against. This exists because #357 found a live session that loaded one
+# SKILL.md was never loaded (via Skill or Read) this session -- see
+# track-lens-reads.sh, the PostToolUse(Read|Skill) companion that builds
+# the evidence this hook checks against. This exists because #357 found a
+# live session that loaded one
 # lens's bundle and fabricated findings for several more, styled from their
 # one-line routing-table descriptions rather than their actual checklists --
 # and nothing caught it, because the only "coverage" claim in play was the
@@ -145,7 +146,7 @@ $cited_lenses
 EOF
 
 if [ -n "$missing" ]; then
-  printf 'atlas-lens-coverage: this post attributes finding(s) to%s, but that lens'"'"'s body.md/SKILL.md was never Read this session. Load reference/lenses/<lens>/body.md (or skills/<lens>/SKILL.md) for each lens before attributing a finding to it, or drop the attribution if the finding did not actually come from that lens'"'"'s checklist.\n' "$missing" >&2
+  printf 'atlas-lens-coverage: this post attributes finding(s) to%s, but that lens'"'"'s body.md/SKILL.md was never loaded this session. Load reference/lenses/<lens>/body.md, invoke skills/<lens>/SKILL.md as a Skill, or Read it directly, for each lens before attributing a finding to it, or drop the attribution if the finding did not actually come from that lens'"'"'s checklist.\n' "$missing" >&2
   exit 2
 fi
 
