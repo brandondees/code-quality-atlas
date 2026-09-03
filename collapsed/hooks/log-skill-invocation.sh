@@ -13,12 +13,15 @@
 # measured) and S1 (routing miss)/S5 (contract violation) capture material for
 # a future retro pass (docs/self-improvement-loop.md §3.4, stage 2+, unbuilt).
 #
-# Deliberately raw: this hook does not try to parse which skill/lens was
-# invoked out of `tool_input` — that shape isn't documented for the Skill
+# Abstracted, not raw (#364): this hook does not try to parse which skill/lens
+# was invoked out of `tool_input` — that shape isn't documented for the Skill
 # tool as of this writing, and guessing a field name wrong would silently
-# drop data. It stores `tool_input` verbatim; a later analysis pass (§3.4)
-# parses whatever shape it turns out to be, once, instead of every one of
-# these hook invocations guessing.
+# drop data. Rather than store the payload itself (which can carry file
+# contents, paths, or other reviewed-repo material the design promises stays
+# abstracted), it records only the payload's byte length and SHA-256 digest —
+# enough for a later analysis pass (§3.4) to see that invocations happened and
+# whether their inputs repeat or change shape, without capturing what they
+# contained.
 #
 # Always exits 0 — a broken or absent dependency (jq), an unwritable
 # directory, or malformed input degrades to "don't log this one", never to
@@ -58,18 +61,37 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   plugin_sha="$(git -C "$CLAUDE_PLUGIN_ROOT" rev-parse HEAD 2>/dev/null || true)"
 fi
 
+# Compact tool_input first so length/hash are computed over one canonical
+# serialization rather than whatever whitespace the caller happened to send.
+tool_input_json="$(printf '%s' "$input" | jq -c '.tool_input // null' 2>/dev/null)"
+[ -n "$tool_input_json" ] || exit 0   # malformed stdin JSON: nothing sane to append, skip silently
+
+tool_input_len=0
+tool_input_sha256=""
+if [ "$tool_input_json" != "null" ]; then
+  tool_input_len="$(printf '%s' "$tool_input_json" | wc -c | tr -d ' [:space:]')"
+  if command -v sha256sum >/dev/null 2>&1; then
+    tool_input_sha256="$(printf '%s' "$tool_input_json" | sha256sum | cut -d' ' -f1)"
+  elif command -v shasum >/dev/null 2>&1; then
+    tool_input_sha256="$(printf '%s' "$tool_input_json" | shasum -a 256 | cut -d' ' -f1)"
+  fi
+fi
+
 record="$(printf '%s' "$input" | jq -c \
   --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --arg plugin_sha "$plugin_sha" \
+  --argjson tool_input_len "${tool_input_len:-0}" \
+  --arg tool_input_sha256 "$tool_input_sha256" \
   '{
     ts: $ts,
     plugin_sha: (if $plugin_sha == "" then null else $plugin_sha end),
     session_id: (.session_id // null),
     tool_name: (.tool_name // null),
-    tool_input: (.tool_input // null)
+    tool_input_len: $tool_input_len,
+    tool_input_sha256: (if $tool_input_sha256 == "" then null else $tool_input_sha256 end)
   }' 2>/dev/null)"
 
-[ -n "$record" ] || exit 0   # malformed stdin JSON: nothing sane to append, skip silently
+[ -n "$record" ] || exit 0   # malformed stdin JSON (shouldn't happen — already checked above): skip silently
 
 printf '%s\n' "$record" >> "$log_dir/invocations.jsonl" 2>/dev/null
 

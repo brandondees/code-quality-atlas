@@ -24,9 +24,11 @@ specifically `SessionEnd` exposing `transcript_path` and `PostToolUse` matching 
 (`session_id`, `transcript_path`, `cwd`, `hook_event_name`, `tool_name`, `tool_input`) and
 the `"matcher": "Skill"` syntax are confirmed against the current hooks reference, but
 the *inner shape* of `tool_input` for the `Skill` tool specifically is undocumented as of
-this writing — the stage-1 hooks route around that gap by logging `tool_input` verbatim
-rather than parsing out a skill name, so a later analysis pass parses whatever shape it
-turns out to be, once. Revisit §3.1 if the common envelope itself changes. (b) GitHub
+this writing — the stage-1 hooks route around that gap by recording only `tool_input`'s
+byte length and a SHA-256 digest (#364; §5's "what abstracted means" note) rather than
+parsing out a skill name or storing the payload itself, so no field-name guess is needed
+and nothing raw is captured either way. Revisit §3.1 if the common envelope itself
+changes. (b) GitHub
 issues are viable transport — assumes the atlas repo stays
 public-readable and report volume stays tens-per-week; revisit (§8.4, private channel) if
 either breaks. (c) Consumers opt in at all — the loop is worthless at zero tier-≥1
@@ -264,6 +266,23 @@ owner-ratified control surface; an env var can override for harness-level setup.
 The privacy boundary lives at **record creation, not transmission**: even tier-1 local
 records are written abstracted, so promotion to tier 2/3 never requires re-scrubbing, and
 a leaked learnings file is not a leaked codebase.
+
+**What "abstracted" means for the two shipped stage-1 hooks (#364).**
+`hooks/log-skill-invocation.sh` never writes the Skill tool's raw `tool_input` — only its
+byte length and a SHA-256 digest of its compact JSON serialization (`tool_input_len`,
+`tool_input_sha256`). `hooks/queue-session-retro.sh` never writes the full
+`transcript_path` — only its basename (`transcript_basename`), since the full path is an
+absolute local path (OS username, `$HOME`, project layout) that the privacy boundary
+above is meant to keep out of a file the design commits to the repo. Neither hook needs
+the undocumented inner shape of `tool_input` (§3.1's assumption (a)) to do this: a length
+and a digest abstract *any* payload shape without parsing it, which is also why this
+approach — rather than guessing a field to keep — was picked as the fix for #364.
+
+**Retention.** `.code-quality-atlas/learnings/*.jsonl` grows without bound by default;
+stage 1 ships no rotation or expiry. A team that enables tier `local` should periodically
+prune or archive old lines (e.g. drop records past some age, or move a full file into a
+dated archive) as ordinary repo hygiene — the design doesn't mandate a specific window,
+but an ever-growing committed file with no prune policy is itself worth flagging.
 
 **D17 note (2026-07-06):** the "reaches upstream?" column above is about the atlas
 project, not the consumer's own infrastructure. D17 commits the tier-1 log to the

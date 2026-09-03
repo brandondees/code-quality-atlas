@@ -156,6 +156,10 @@ reason: team wants review noise low by default; individual reviewers can still
      code-quality-atlas project on its own; tiers 2/3 (upstreaming) are a
      human- or agent-driven command run separately (unbuilt as of stage 1),
      never this file by itself.
+
+     Retention: .code-quality-atlas/learnings/*.jsonl grows without bound —
+     stage 1 ships no rotation or expiry. Prune or archive old lines
+     periodically as ordinary repo hygiene (see the design doc §5).
      ============================================================ -->
 
 ## Feedback & learnings
@@ -167,7 +171,8 @@ feedback: off      # off (default, hooks no-op) | local (invocation log +
 #                     retro tooling — never transmitted anywhere by this
 #                     setting alone) | draft | auto (stages 2+, unbuilt)
 decided: 2026-01-01, @alice
-reason: local-only telemetry is safe by construction (abstracted at creation,
-  see the design doc) and feeds this team's own Q13 tuning; upstream tiers
-  wait until stage 2+ ships
+reason: local-only telemetry is safe by construction (abstracted at creation —
+  a hashed/length-only tool-input record and a transcript basename, never the
+  raw payload or full path, see the design doc) and feeds this team's own
+  Q13 tuning; upstream tiers wait until stage 2+ ships
 -->

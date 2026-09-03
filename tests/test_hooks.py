@@ -5,6 +5,7 @@ queue must default to off, gate correctly on the feedback tier (env override,
 then a ratified `.code-quality-atlas/preferences.md` line, ignoring commented-
 out template examples), and degrade to a clean no-op on malformed input or a
 missing `jq` — never block or crash the calling session."""
+import hashlib
 import json
 import shutil
 import subprocess
@@ -60,9 +61,14 @@ def test_env_override_enables_logging(tmp_path):
     record = json.loads(log.read_text().strip().splitlines()[-1])
     assert record["session_id"] == "s1"
     assert record["tool_name"] == "Skill"
-    assert record["tool_input"] == {"skill": "checking-restraint"}
     assert record["plugin_sha"]   # this repo is a git checkout; resolvable
     assert "ts" in record
+    # #364: the raw tool_input payload is never written — only its shape-
+    # independent abstraction (byte length + digest of the compact JSON).
+    assert "tool_input" not in record
+    compact = json.dumps({"skill": "checking-restraint"}, separators=(",", ":"))
+    assert record["tool_input_len"] == len(compact)
+    assert record["tool_input_sha256"] == hashlib.sha256(compact.encode()).hexdigest()
 
 
 def test_session_end_queues_retro_under_env_override(tmp_path):
@@ -72,7 +78,10 @@ def test_session_end_queues_retro_under_env_override(tmp_path):
     queue = _learnings_dir(tmp_path) / "pending-retro.jsonl"
     assert queue.exists()
     record = json.loads(queue.read_text().strip().splitlines()[-1])
-    assert record["transcript_path"] == "/tmp/some-transcript.jsonl"
+    # #364: never the full absolute transcript_path (leaks OS username,
+    # $HOME, and project layout) — only its basename.
+    assert "transcript_path" not in record
+    assert record["transcript_basename"] == "some-transcript.jsonl"
     assert record["reason"] == "clear"
 
 

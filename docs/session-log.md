@@ -4329,3 +4329,60 @@ valid), `pytest` (451/451), `markdownlint-cli2` (0 issues) on the touched
 files. No cross-model re-gate this session (design doc frames Phase 1's
 evidence bar as "produces signal," not a pre-ship hardened-floor gate — see
 the plan doc's own note on this).
+
+### 2026-09-03 — #364: stop writing raw `tool_input` and absolute `transcript_path` into the committed learnings log
+
+The 2026-09-03 whole-repo audit (#347) raised #364 (Major, security):
+`hooks/log-skill-invocation.sh` recorded the Skill tool's `tool_input`
+verbatim and `hooks/queue-session-retro.sh` recorded the full, absolute
+`transcript_path` — both into `.code-quality-atlas/learnings/*.jsonl`, which
+D17 commits to the consumer repo on the stated grounds that stage-1 records
+are "abstracted at creation" (self-improvement-loop.md §5,
+templates/preferences-template.md §7's ratified reason line). Only
+`docs/install.md` described the actual behavior honestly, as "the raw
+tool-input payload." The design promise and the shipped hooks disagreed, and
+nothing tied them together.
+
+Picked the issue's option (a) — implement the abstraction — over (b)
+striking the promise from the docs, since the design's own privacy-boundary
+rationale (D17: local records safe to commit because abstracted, not
+because never pushed) depends on it actually holding, and a length + digest
+is a strictly better signal for stage 2's future analysis pass than a
+capture-or-nothing choice between raw payloads and no invocation evidence at
+all. `hooks/log-skill-invocation.sh` now writes `tool_input_len` (byte count
+of the compact JSON) and `tool_input_sha256` (its SHA-256 digest,
+`sha256sum`/`shasum -a 256`, whichever is present) instead of `tool_input` —
+neither needs to know the Skill tool's still-undocumented `tool_input` inner
+shape, so the original reason for storing it verbatim (avoid guessing a
+field name) survives untouched. `hooks/queue-session-retro.sh` now writes
+`transcript_basename` (`.transcript_path | split("/") | last` in jq) instead
+of `transcript_path`, dropping the OS username/`$HOME`/project-layout
+leakage the issue named. Re-synced `collapsed/hooks/` (byte-identical to
+`hooks/` for these two generic scripts per existing test coverage).
+
+Updated every surface that described the old (or the promised-but-false)
+shape: `docs/self-improvement-loop.md` §3.1's revisited-assumption note and
+a new §5 paragraph naming the two fields precisely (so a future edit can't
+quietly reintroduce raw capture without also touching prose that names the
+opposite), `docs/install.md`'s "what `local` writes" paragraph,
+`docs/open-questions.md`'s D17 entry, and `templates/preferences-template.md`'s
+ratified example reason and a new retention note (the issue's third ask —
+stage 1 ships no rotation/expiry for the JSONL files; documented as a
+prune-periodically hygiene expectation rather than a mandated window, since
+nothing in the design needs a specific one). Updated
+`tests/test_hooks.py`'s two logging-shape assertions to match (they
+previously *enforced* the old raw shape) and added
+`tests/test_learnings_abstraction_sync.py` — the sync test the issue asked
+for, in `test_review_template_sync.py`'s shape: asserts the hook scripts
+never reference the raw fields and do reference the abstracted ones, and
+that the design doc/install doc/template keep naming the actual shape
+rather than the old promise-only language.
+
+**Verification:** manual end-to-end runs of both hooks against sample
+PostToolUse/SessionEnd payloads (confirmed `tool_input_len`/`tool_input_sha256`
+match an independent `sha256sum` of the same compact JSON, and
+`transcript_basename` strips a synthetic absolute path correctly),
+`pytest` (460/460, up from 454 — 2 updated + 6 new in the sync-test file),
+`tooling.cli drift` (clean), `tooling.cli generate` (no output diff —
+these two hooks aren't manifest-generated, so this confirms nothing else
+drifted), `markdownlint-cli2` (0 issues on the touched docs).
