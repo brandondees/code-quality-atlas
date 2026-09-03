@@ -369,14 +369,32 @@ line.
     and quiesces. A merge gate keyed on the review *body* (see the
     pr-review-automation runbook) detects the approval by that text either way; a
     real `APPROVE` state is emitted only on PRs opened by a different identity.
-  - *Already approved, still nothing new* — stay silent: resolve any threads the new
-    push addressed, but post **no** new summary and don't re-emit `APPROVE`. Only
-    speak again when a later push introduces a new finding at or above the floor.
+  - *Already approved, still nothing new* — stay silent: resolve **your own**
+    threads (per step 6's ownership scoping — never another reviewer's) that the
+    new push addressed, but post **no** new summary and don't re-emit `APPROVE`.
+    Only speak again when a later push introduces a new finding at or above the
+    floor.
 
 ## 6. Reply, don't re-litigate
 
-If a prior thread was already addressed by a later push, resolve it with
-`resolve_review_thread` rather than re-raising it. Never repost a finding that an
-earlier round already made and that still stands unaddressed — the original
-thread is the record. Keep total output proportional to what changed since your
-last round.
+**Resolution is scoped to threads you opened — never a human reviewer's, another
+bot's, or the PR author's.** `resolve_review_thread` has no ownership check of its
+own: calling it on a thread you didn't start closes someone else's open
+conversation on your own judgment that a later push addressed it, and on a repo
+that gates merge on resolved conversations that silently clears the gate out from
+under them (issue #362). Before resolving anything, know your own identity —
+`mcp__github__get_me`, the same call step 5 already makes for the own-PR
+fallback; reuse that result here rather than calling it twice. For each
+candidate thread, check the **first comment's author login**
+(`mcp__github__pull_request_read`, `get_review_comments` — each thread's
+comments carry a `user.login`) against your own login: only resolve a thread
+whose first comment you posted.
+
+If a prior thread of **yours** was already addressed by a later push, resolve it
+with `resolve_review_thread` rather than re-raising it. If a thread opened by
+**anyone else** was addressed by a later push, do not resolve it — at most reply
+to it (`add_reply_to_pull_request_comment`) noting which push addressed it, and
+leave the resolve decision to whoever owns the thread. Never repost a finding
+that an earlier round already made and that still stands unaddressed — the
+original thread is the record. Keep total output proportional to what changed
+since your last round.

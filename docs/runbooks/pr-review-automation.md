@@ -251,8 +251,10 @@ In the Claude Code web app → **Routines** → **New routine**:
   memory only as a performance cache, and always defer to GitHub when they differ —
   especially after a `/compact`, which drops in-memory state and would otherwise
   restart the loop from round 1, re-post the ACK, and re-raise settled findings.
-  Resolve threads that later pushes addressed, and never re-litigate ones that
-  still stand. Each round, apply REVIEW.md's convergence policy — raise the
+  Resolve **your own** threads (first-comment author is your own login, per
+  `mcp__github__get_me` — never a human reviewer's, another bot's, or the PR
+  author's, issue #362) that later pushes addressed, and never re-litigate
+  ones that still stand. Each round, apply REVIEW.md's convergence policy — raise the
   severity floor once after the first pass and then hold it at Major (round 1:
   all; round 2+: Major+, so genuine Majors keep getting surfaced), post inline
   only findings that are NEW this round, and submit a single APPROVE (or its
