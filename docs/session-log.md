@@ -4600,3 +4600,57 @@ one adjusted test); `ruff check .` (clean); `shellcheck --source-path=SCRIPTDIR
 -x` across the full `tooling/`, `hooks/`, `collapsed/hooks/` trees with the
 same globstar/dotglob flags CI uses (15 files, clean); `tooling.cli drift`
 (clean); `markdownlint-cli2` (clean).
+
+### 2026-09-03 — #362: the unattended reviewer could resolve a human reviewer's own thread
+
+The 2026-09-03 whole-repo audit (#347) raised #362 (Major, security, lens
+`reviewing-agentic-safety`): `mcp__github__resolve_review_thread` is granted
+to the atlas reviewer (`commands/atlas-review-pr.md:15`,
+`commands/atlas-poll-and-review.md:13` for the subagent it spawns) with no
+ownership scoping in the instructions that call it —
+`commands/atlas-review-pr.md`'s step 6 said "if a prior thread was already
+addressed by a later push, resolve it," `REVIEW.md`/`templates/REVIEW.md`
+said "resolve any threads the new push addressed," and the
+`pr-review-automation` runbook said "resolve threads that later pushes
+addressed" — all three keyed the decision on the agent's own judgment that a
+push addressed the thread, never on who opened it. In the Model B
+(poll-driven) design this runs from an unattended, scheduled subagent, so it
+could close a *human* reviewer's still-open thread on its own say-so, and on
+a repo that gates merge on resolved conversations that silently clears the
+gate out from under them — adjacent to but distinct from #360's identity
+binding of the ACK/round markers.
+
+**Fix:** scoped resolution to threads whose first comment's author matches
+the reviewer's own login. `commands/atlas-review-pr.md` step 6 now has the
+reviewer establish its own identity via `mcp__github__get_me` (reusing the
+call step 5 already makes for the own-PR fallback rather than calling it
+twice), read each candidate thread's first comment author via
+`mcp__github__pull_request_read`'s `get_review_comments` method, and resolve
+only a thread whose first comment it posted itself — a thread opened by
+anyone else gets at most a reply (`add_reply_to_pull_request_comment`)
+noting which push addressed it, never a resolve. Swept all three other
+copies the issue named (`REVIEW.md`, `templates/REVIEW.md` — kept
+byte-identical per `test_review_template_sync.py` — and the runbook) to the
+same "your own threads only" language, plus the "already approved, still
+nothing new" bullet in `commands/atlas-review-pr.md` step 5, which had the
+same unscoped instruction.
+
+Added `tests/test_review_thread_resolution_scoping.py`: asserts none of the
+four files still carry the exact unscoped phrasing the issue quoted
+(normalizing whitespace so a harmless re-wrap can't defeat the check),
+asserts all four keep the "your own" scoping language, and asserts
+`atlas-review-pr.md` names the actual mechanism (`get_me`,
+`get_review_comments`, "first comment") rather than leaving "your own
+threads" as unenforceable prose. Verified the test fails against the
+pre-fix content first (stashed the fix, confirmed all four checks catch the
+regression, then restored it) before trusting it as a real regression
+guard — these are prompt-instruction files with no interpreter to run them
+against, so the sync/phrasing test is the only mechanical check available.
+
+**Verification:** reproduced the gap by reading the unattended-agent
+instructions as the agent itself would follow them (confirmed the
+unscoped "resolve any threads the new push addressed" language was
+actually reachable, not just visually present) before fixing; new
+regression test confirmed to fail on the pre-fix text and pass on the
+fix; `pytest` (515/515, up from 511 — 4 new); `markdownlint-cli2` (clean,
+490 files); `ruff check .` (clean); `tooling.cli drift` (clean).

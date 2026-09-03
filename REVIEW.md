@@ -102,9 +102,11 @@ review summary on every push:
   `commands/atlas-review-pr.md` step 5 for the full heading-first/marker-fallback
   derivation rule, #354/#355) and, if any exist, the advisory list.
 - **Subsequent quiet pushes** (still nothing new at/above the floor): stay
-  silent. Resolve any threads the new push addressed, but post **no** new
-  summary — there is no news. Don't re-emit `APPROVE`, and don't re-dump the
-  advisory list verbatim each push.
+  silent. Resolve **your own** threads — ones whose first comment you posted,
+  never a human reviewer's, another bot's, or the PR author's (issue #362) —
+  that the new push addressed, but post **no** new summary — there is no news.
+  Don't re-emit `APPROVE`, and don't re-dump the advisory list verbatim each
+  push.
 - **A push that does bring new at/above-floor findings** re-opens the loop: post
   those inline as usual. Speak again after a quiet spell only when there's
   genuinely something new.
