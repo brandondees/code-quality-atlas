@@ -171,3 +171,7 @@ hard enough for it, and manufacturing usability findings from one is the fastest
 way to get this lens muted. Note that a **CLI is** a user interface — prompts,
 progress on long operations, confirmation before destruction, and `--help` all
 fall inside this lens's scope even with no pixels involved.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-usability-and-interaction/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

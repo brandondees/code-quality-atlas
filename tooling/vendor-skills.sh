@@ -307,20 +307,23 @@ check_source_repo_provenance() {
   fi
 }
 
-# Appends a trailing, do-not-edit marker to a vendored SKILL.md — the file an
-# agent asked to "fix lens X" is actually likely to open and edit directly
-# (it's literally what the Skill tool resolves and loads), unlike the
+# Appends a trailing, do-not-edit marker to a vendored SKILL.md/examples.md —
+# the two files an agent asked to "fix lens X" is actually likely to open and
+# edit directly (SKILL.md is literally what the Skill tool resolves and
+# loads; examples.md is the other hand-editable runtime file), unlike the
 # directory-level .atlas-vendored marker / NOTICE.md that don't sit next to
-# it. Appended at the very END of the file, never before the frontmatter
-# fence, so it can never interfere with frontmatter parsing.
-# reference/*.md and examples.md deliberately do NOT get this — SKILL.md is
-# the concrete edit target the finding named, and marking every runtime file
-# would multiply the sync-test's stripping logic for little added benefit.
+# either. Appended at the very END of the file, never before SKILL.md's
+# frontmatter fence, so it can never interfere with frontmatter parsing.
+# reference/*.md deliberately does NOT get this — it's assembled output an
+# agent has no reason to hand-edit in the first place (unlike SKILL.md/
+# examples.md, which read as ordinary editable prose), so marking it would
+# multiply the sync-test's stripping logic for no realistic benefit (#374
+# scoped the fix to the two files agents actually edit by hand).
 append_generated_marker() {
-  local file=$1 name=$2
+  local file=$1 name=$2 src_filename=$3
   {
     printf '\n<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh\n'
-    printf '     from %s/%s/SKILL.md in code-quality-atlas.\n' "$SRC_SUBDIR" "$name"
+    printf '     from %s/%s/%s in code-quality-atlas.\n' "$SRC_SUBDIR" "$name" "$src_filename"
     printf '     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->\n'
   } >>"$file"
 }
@@ -366,8 +369,11 @@ vendor_one() {
   rm -rf "${dest:?}"
   mkdir -p "$dest"
   cp "$src/SKILL.md" "$dest/SKILL.md"
-  append_generated_marker "$dest/SKILL.md" "$name"
-  [ -f "$src/examples.md" ] && cp "$src/examples.md" "$dest/examples.md"
+  append_generated_marker "$dest/SKILL.md" "$name" "SKILL.md"
+  if [ -f "$src/examples.md" ]; then
+    cp "$src/examples.md" "$dest/examples.md"
+    append_generated_marker "$dest/examples.md" "$name" "examples.md"
+  fi
   [ -d "$src/reference" ] && cp -R "$src/reference" "$dest/reference"
   return 0
 }

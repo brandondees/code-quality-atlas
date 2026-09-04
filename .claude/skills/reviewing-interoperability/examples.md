@@ -143,3 +143,7 @@ reviews (no protocol, wire format, versioned surface, or shared resource), match
 this lens's own explicit skip clause. Say so with a line starting "Not applicable:".
 Do NOT report "No findings" (which implies the checks ran and found nothing) and do
 NOT invent an interoperability angle on a purely internal refactor.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-interoperability/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

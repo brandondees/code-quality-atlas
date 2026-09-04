@@ -287,3 +287,7 @@ type PaymentState =
 **Expected finding:** None — a tagged union where each state carries exactly its own
 data; illegal combinations are unrepresentable and `switch` over `kind` is
 compiler-checked for exhaustiveness. Report "No findings"; do not invent issues.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-module-design/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

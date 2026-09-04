@@ -238,3 +238,7 @@ this lens to review. Say so with a line starting "Not applicable:", naming
 what's missing. Do not report "No findings" (which implies the checks ran and
 found nothing) and do not invent a resilience or scale concern in a
 text-only content change.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-resilience-and-scalability/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

@@ -94,3 +94,7 @@ config, or upgrade surface". Do NOT report "No findings: the install/upgrade
 experience is intact" here — that sentence means the consumer path was checked
 and found clean, which implies there was a consumer path to check. There
 wasn't one.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-install-and-upgrade-experience/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

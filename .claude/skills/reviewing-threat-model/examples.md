@@ -112,3 +112,7 @@ No component map, no STRIDE table — the surface triage gate stops the model be
 
 Proportional to the surface: a one-line observation, not a speculative `malicious-filename` or
 `symlink-attack` escalation absent any untrusted input feeding the directory.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-threat-model/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

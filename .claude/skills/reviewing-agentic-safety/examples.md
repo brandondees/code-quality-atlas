@@ -126,3 +126,7 @@ Say so with a line starting "Not applicable:", naming what's missing; that
 review belongs to `reviewing-llm-integration` (#25). Do not report "No
 findings" (which implies the checks ran and found nothing) and do not invent
 an agentic-safety concern where there's no action surface at all.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-agentic-safety/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

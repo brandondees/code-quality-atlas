@@ -112,3 +112,7 @@ applicable: no PR metadata (commits, description, diff stats) was provided
 for this lens to review". Do NOT report "No findings: PR process hygiene is
 healthy" — that sentence means a PR's structure was checked and found sound,
 which implies there was a PR to check. There wasn't.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-pr-and-process-hygiene/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

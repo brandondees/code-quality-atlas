@@ -95,6 +95,18 @@ def _gen_header(skill: Skill | None = None, *, with_examples: bool = False) -> s
     )
 
 
+def _gen_trailer(skill: Skill | None = None, *, with_examples: bool = False) -> str:
+    """Trailing counterpart to `_gen_header`, for the two file kinds whose YAML
+    frontmatter must be the first bytes for skill discovery to parse it — the
+    standalone tree's `SKILL.md` (`generate_skill.build_skill_md`) and the
+    collapsed tree's per-entrypoint `SKILL.md` (`generate_collapsed.build_entrypoint_md`)
+    — so `_gen_header`'s leading comment can't be prepended there (issue #374:
+    every other generated file carries a marker; these two carried none). Same
+    marker text and same `skill`/`with_examples` semantics, appended after the
+    body instead of before it."""
+    return "\n" + _gen_header(skill, with_examples=with_examples).rstrip("\n") + "\n"
+
+
 def build_reference(skill: Skill, kind: str, docs_root: str = ".") -> str:
     """Concatenate the `kind` subsection from each source category into one
     reference file, each under a `## From category #n` header, with a ToC."""

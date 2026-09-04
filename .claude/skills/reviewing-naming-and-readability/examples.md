@@ -86,3 +86,7 @@ for (let i = 0; i < rows.length; i++) {
 **Expected finding:** None — a one-letter index is fine for a three-line loop (name
 length proportional to scope), and `amountCents` already carries its unit. Report
 "No findings"; do not invent issues.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-naming-and-readability/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

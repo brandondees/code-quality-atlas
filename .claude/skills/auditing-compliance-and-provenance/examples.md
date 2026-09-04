@@ -78,3 +78,7 @@ information for this lens to audit". Do NOT report "No findings: compliance
 and provenance are clean" here — that sentence means licenses, PII flows, and
 provenance were checked and found clean, which implies there was compliance
 data to check. There wasn't any.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/auditing-compliance-and-provenance/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

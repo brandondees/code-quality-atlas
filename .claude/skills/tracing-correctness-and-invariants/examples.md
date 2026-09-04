@@ -551,3 +551,7 @@ with db.connection() as conn:
 
 **Expected finding:** None — connection released on all paths, monotonic clock for
 the deadline, loop provably terminates. Report "No findings"; do not invent issues.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/tracing-correctness-and-invariants/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

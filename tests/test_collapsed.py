@@ -285,6 +285,12 @@ def test_build_entrypoint_md_has_trigger_routing_modes_and_load_instructions():
     assert "reference/lenses/hunting-silent-failures/body.md" in md  # load instruction
     assert "reference/synthesis.md" in md               # synthesize pointer
     assert "Bug fix" in md                              # the in-shape route
+    # Frontmatter must lead (skill discovery), so the generated marker
+    # trails instead -- same fix as the standalone tree's SKILL.md (#374).
+    assert md.rstrip().endswith(
+        "Direct edits are overwritten on regeneration and fail the CI "
+        "drift/regenerate gate. -->"
+    )
 
 
 def test_build_entrypoint_md_routes_table_excludes_lens_overlap_from_wrong_shape():

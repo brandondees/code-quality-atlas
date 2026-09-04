@@ -215,3 +215,7 @@ alters neither the words a user reads nor the things a user must choose between
 has nothing for this lens. Manufacturing a coherence argument from a refactor is
 this lens's own failure mode, and it is more likely than the incoherence it
 guards against.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-conceptual-integrity/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

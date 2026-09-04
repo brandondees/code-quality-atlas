@@ -102,3 +102,7 @@ the database enforces the atomicity (no app-level check-then-act). Report
 "No findings". Do NOT demand a lock where a database constraint already provides
 the atomicity, and do NOT flag at-least-once redelivery as a bug when the handler
 is idempotent — that is the correct design for it.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-concurrency-and-async/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

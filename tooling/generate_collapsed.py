@@ -16,6 +16,7 @@ import yaml
 from tooling.generate_common import (
     _escape_table_cell,
     _gen_header,
+    _gen_trailer,
     _scope_line,
     build_reference,
     modes_section,
@@ -323,7 +324,7 @@ def build_entrypoint_md(manifest: Manifest, entrypoint: Entrypoint) -> str:
         "◆ = design-capable.\n\n"
         f"{catalog}\n"
     )
-    return f"---\n{fm}\n---\n\n{body}"
+    return f"---\n{fm}\n---\n\n{body}" + _gen_trailer()
 
 
 def collapsed_plugin_manifest(root_plugin_path: str = ".claude-plugin/plugin.json") -> dict:

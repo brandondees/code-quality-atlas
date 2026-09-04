@@ -300,3 +300,7 @@ ALTER TABLE payments ADD COLUMN amount_cents bigint;
    handles it is not itself a database constraint — add a DB-level `CHECK`
    constraint (e.g. `amount_cents >= 0`) as defense-in-depth regardless of what
    validates it upstream.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-migration-and-data-safety/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

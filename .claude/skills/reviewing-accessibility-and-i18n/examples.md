@@ -87,3 +87,7 @@ see" — and manufacturing those is the fastest way to get this lens muted befor
 the change that needed it. Note the boundary: **operator-facing** output (logs,
 metrics, error text read by an on-call engineer) is not user-facing copy and
 does not belong to this lens.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-accessibility-and-i18n/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

@@ -213,3 +213,7 @@ fabricated finding, not a real one. Do NOT report "No findings: documentation
 is healthy" either — that sentence means documentation was checked and found
 to match the surface, which implies there was documentation content to check.
 There wasn't any in this scan.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/auditing-documentation-health/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

@@ -221,3 +221,7 @@ consumed schema, matching this lens's own explicit skip clause.
 Say so with a line starting "Not applicable:", not "No findings" — the latter
 implies the data-plane checks ran and found nothing, when there is no
 data-plane surface here at all to check.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-data-transformations-and-contracts/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

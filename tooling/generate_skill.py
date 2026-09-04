@@ -13,6 +13,7 @@ import yaml
 from tooling.generate_common import (
     _escape_table_cell,
     _gen_header,
+    _gen_trailer,
     _scope_line,
     build_reference,
 )
@@ -282,7 +283,7 @@ def build_skill_md(skill: Skill, taxonomy_version: str, docs_root: str = ".",
         f"{_process_notes_footer()}"
         f"{going_deeper}"
     )
-    return f"---\n{fm}\n---\n\n{body}"
+    return f"---\n{fm}\n---\n\n{body}" + _gen_trailer(skill)
 
 
 def build_artifact_rubric(skill: Skill, artifact: Artifact, docs_root: str = ".") -> str:

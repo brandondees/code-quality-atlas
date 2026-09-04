@@ -88,3 +88,7 @@ dependency manifest, lockfile, or vendored code for this lens to audit". Do
 NOT report "No findings: dependencies and supply chain are healthy" — that
 sentence means a dependency tree was checked and found sound, which implies
 there was one to check. There wasn't.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/auditing-dependencies-and-supply-chain/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

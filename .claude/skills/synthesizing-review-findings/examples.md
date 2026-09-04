@@ -74,3 +74,7 @@ Verdict: approve — No findings. All lenses clear.
 
 **Bad synthesis:** inventing a "consider adding a test" Nit so the report doesn't
 look empty. No lens raised it; synthesis adds nothing.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/synthesizing-review-findings/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

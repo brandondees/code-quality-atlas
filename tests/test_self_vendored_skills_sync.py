@@ -20,13 +20,14 @@ one commit behind the commit that carries it (a commit's own hash isn't known
 until after it's made) — expected staleness in metadata, not drift in the
 load-bearing skill content this test actually guards.
 
-Also accounted for: every vendored `SKILL.md` carries a trailing do-not-edit
-marker (`append_generated_marker` in `vendor-skills.sh`) that its `skills/`
-source doesn't — added so an agent asked to "fix lens X" who opens the
-vendored copy directly (exactly what the `Skill` tool resolves and loads)
-sees where the real source lives before editing the wrong file. `examples.md`
-and `reference/*.md` don't get this marker, so they're still compared as
-plain byte-identity.
+Also accounted for: both vendored runtime files an agent is likely to open
+and hand-edit directly — `SKILL.md` (exactly what the `Skill` tool resolves
+and loads) and `examples.md` — carry a trailing do-not-edit marker
+(`append_generated_marker` in `vendor-skills.sh`) their `skills/` source
+doesn't (#374: initially only `SKILL.md` carried this, `examples.md` was
+still compared as plain byte-identity). `reference/*.md` doesn't get the
+marker (assembled output with no realistic hand-edit target), so it's still
+compared as plain byte-identity.
 """
 from pathlib import Path
 
@@ -44,10 +45,11 @@ def _skill_names():
     return sorted(p.name for p in SRC.iterdir() if p.is_dir() and (p / "SKILL.md").exists())
 
 
-def _skill_md_matches_source(dest_file, src_text):
-    """SKILL.md gets a trailing generated-marker the source doesn't have —
-    strip it before comparing, and treat a missing marker as staleness rather
-    than silently accepting a vendored copy from before this marker existed."""
+def _marked_runtime_file_matches_source(dest_file, src_text):
+    """SKILL.md and examples.md both get a trailing generated-marker their
+    source doesn't have — strip it before comparing, and treat a missing
+    marker as staleness rather than silently accepting a vendored copy from
+    before this marker existed on that file."""
     dest_text = dest_file.read_text(encoding="utf-8")
     idx = dest_text.find(_GENERATED_MARKER_START)
     if idx == -1:
@@ -70,17 +72,17 @@ def test_vendored_skills_match_their_source():
         src_dir = SRC / name
         dest_dir = VENDORED / name
 
+        # Both _RUNTIME_FILES carry the trailing generated-marker (#374), so
+        # every iteration here uses the marker-aware comparison; only
+        # reference/*.md (handled separately below) is plain byte-identity.
         for fname in _RUNTIME_FILES:
             src_file = src_dir / fname
             if not src_file.exists():
                 continue  # not every skill ships examples.md
             dest_file = dest_dir / fname
-            if not dest_file.exists():
-                stale.append(str((dest_dir / fname).relative_to(ROOT)))
-            elif fname == "SKILL.md":
-                if not _skill_md_matches_source(dest_file, src_file.read_text(encoding="utf-8")):
-                    stale.append(str((dest_dir / fname).relative_to(ROOT)))
-            elif dest_file.read_bytes() != src_file.read_bytes():
+            if not dest_file.exists() or not _marked_runtime_file_matches_source(
+                dest_file, src_file.read_text(encoding="utf-8")
+            ):
                 stale.append(str((dest_dir / fname).relative_to(ROOT)))
 
         src_ref = src_dir / "reference"

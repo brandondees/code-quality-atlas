@@ -111,3 +111,7 @@ concrete code (shape: diff), and a bare description with no code attached gives
 it nothing to check. Report "Not applicable: no code diff was provided for this
 lens to review". Do NOT report "No findings" — that would imply code was
 examined and found clean. There wasn't any to examine.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-ai-authored-code/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->
