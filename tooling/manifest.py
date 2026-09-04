@@ -60,9 +60,12 @@ class Skill:
     shape: str
     built_from: list[Source]
     # Not read by anything downstream (verified: no generator, router, or
-    # entrypoint code touches it) -- retained only because every manifest
-    # entry already writes one and requiring it costs an author nothing, but
-    # it need not block construction the way a load-bearing field should.
+    # entrypoint code touches it). Optional rather than deleted outright --
+    # every existing manifest entry still writes one and there's no value in
+    # forcing a mechanical edit across all of them -- but a dead field
+    # shouldn't force a new entry to supply a value it needs for nothing
+    # (#381; contrast `primary_owner`, deleted outright since setting it also
+    # cost nothing to skip).
     wave: int = 0
     cross_ref: list[int] = field(default_factory=list)
     design: bool = False  # diff lens that also applies to design docs/plans
@@ -273,15 +276,11 @@ def _validate_skills(manifest: Manifest, docs_root: str) -> set[str]:
             raise ValidationError(
                 f"{s.name}: eval_min must be >=3 (D8's baseline), got {s.eval_min!r}"
             )
-        if s.design and s.shape != "diff":
-            raise ValidationError(
-                f"{s.name}: design applies only to diff-shaped lenses"
-            )
+        # design-requires-diff and artifact-shape-requires-artifacts are
+        # enforced in Skill.__post_init__ (unconditionally, at construction —
+        # every Skill in manifest.skills already passed through it, load_manifest
+        # being the only production construction site), not re-checked here.
         if s.shape == "artifact":
-            if not s.artifacts:
-                raise ValidationError(
-                    f"{s.name}: an artifact-shaped lens needs a non-empty `artifacts` table"
-                )
             built_cats = {src.category for src in s.built_from}
             seen_slugs: set[str] = set()
             for a in s.artifacts:
@@ -686,6 +685,10 @@ def _prose(
     body, note), where trimming incidental whitespace is the desired
     normalization.
     """
+    if not isinstance(mapping, dict):
+        raise ValidationError(
+            f"{where}: must be a mapping, got {type(mapping).__name__}"
+        )
     if key not in mapping:
         if required:
             raise ValidationError(f"{where}: missing field {key!r}")
@@ -710,6 +713,10 @@ def _str_list(mapping: dict, key: str, where: str) -> list[str]:
     """A list-of-strings field. A present-but-null value normalizes to [] (the
     emptiness is caught by validation, with a message about the *table* rather
     than about Python types); a non-list, or any non-string entry, is malformed."""
+    if not isinstance(mapping, dict):
+        raise ValidationError(
+            f"{where}: must be a mapping, got {type(mapping).__name__}"
+        )
     value = mapping.get(key)
     if value is None:
         return []
@@ -731,6 +738,10 @@ def _optional_str_list(mapping: dict, key: str, where: str) -> list[str] | None:
     rather than normalizing to `[]` — for a field whose absence is itself
     meaningful (`Route.shapes`: `None` means "defaults to `['diff']`",
     distinct from an explicit, empty list)."""
+    if not isinstance(mapping, dict):
+        raise ValidationError(
+            f"{where}: must be a mapping, got {type(mapping).__name__}"
+        )
     value = mapping.get(key)
     if value is None:
         return None
@@ -828,12 +839,12 @@ def load_manifest(path: str) -> Manifest:
     router = None
     if "router" in data:
         r = data["router"]
-        raw_routes = r["routes"]
-        if raw_routes is not None and not isinstance(raw_routes, list):
-            raise ValidationError(
-                f"router: 'routes' must be a list, got {type(raw_routes).__name__}"
-            )
         try:
+            raw_routes = r["routes"]
+            if raw_routes is not None and not isinstance(raw_routes, list):
+                raise ValidationError(
+                    f"router: 'routes' must be a list, got {type(raw_routes).__name__}"
+                )
             router = Router(
                 name=_prose(r, "name", "router", null_ok=True, strip=False),
                 description=_prose(r, "description", "router", null_ok=True),

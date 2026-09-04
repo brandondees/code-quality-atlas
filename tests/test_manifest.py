@@ -1203,6 +1203,60 @@ def test_load_manifest_treats_bare_router_routes_as_empty_list(tmp_path):
     assert m.router.routes == []
 
 
+def test_load_manifest_rejects_router_with_no_routes_key_at_all(tmp_path):
+    # Regression (PR #411 review, round 1): a `router:` section that omits
+    # `routes:` entirely — distinct from the present-but-null case above —
+    # used to raise a raw, uncaught KeyError instead of a ValidationError.
+    # The list-type check added for #381 read `r["routes"]` *before* the
+    # try/except KeyError block that every other malformed-router case goes
+    # through, reintroducing the exact failure signature #381 fixed
+    # elsewhere in this same file.
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    picker: p\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        "router:\n"
+        "  name: choosing-review-lenses\n"
+        "  description: d\n",
+    )
+    with pytest.raises(ValidationError, match="missing field 'routes'"):
+        load_manifest(path)
+
+
+def test_load_manifest_rejects_non_mapping_route_entry(tmp_path):
+    # Regression (PR #411 review, round 1, Copilot finding): a routes entry
+    # that isn't a mapping at all (a bare scalar or null) used to escape as
+    # a raw, uncaught TypeError from _prose's `key not in mapping` check —
+    # `in` doesn't raise for a string (a misleading "missing field" message)
+    # but does for an int or None ("argument of type 'X' is not iterable").
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    picker: p\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        "router:\n"
+        "  name: choosing-review-lenses\n"
+        "  description: d\n"
+        "  routes:\n"
+        "    - 5\n",
+    )
+    with pytest.raises(ValidationError, match="must be a mapping"):
+        load_manifest(path)
+
+
 from tooling.manifest import Synthesizer, Tension
 
 
