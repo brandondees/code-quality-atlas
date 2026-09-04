@@ -11,6 +11,16 @@ from tooling.manifest import Skill, Source
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def _touch_skill_md(skill_dir: Path) -> None:
+    """`eval`'s directory-based skill enumeration requires a SKILL.md to
+    exist, matching `drift`'s own definition of "a skill" (PR #412 review) —
+    fixtures that don't generate one via `generate_skill` need a placeholder
+    so they're still recognized as a skill directory. Content is never read
+    on this path; only presence matters."""
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text("---\nname: placeholder\n---\n\nbody\n")
+
+
 def test_cli_generate_then_drift_reports_clean(tmp_path, capsys):
     rc = main(
         [
@@ -106,13 +116,44 @@ def test_cli_eval_reports_missing_eval_json(tmp_path, capsys):
     # Regression (#367): the MISSING: branch was unreachable on the default
     # (no --skill) path, since eval_files was built by globbing only
     # eval.json files that already exist — a skill directory with no
-    # evals/ at all never produced a glob hit to report as missing.
-    (tmp_path / "no-evals-skill").mkdir()
+    # evals/ at all never produced a glob hit to report as missing. A
+    # SKILL.md marks it as a real skill directory (PR #412 review) so it
+    # isn't excluded by the same gate that filters out stray directories.
+    _touch_skill_md(tmp_path / "no-evals-skill")
     manifest = str(ROOT / "skills" / "manifest.yaml")
     rc = main(["eval", "--skills-root", str(tmp_path), "--manifest", manifest])
     out = capsys.readouterr().out
     assert rc == 1
     assert "MISSING: no-evals-skill — no evals/eval.json" in out
+
+
+def test_cli_eval_ignores_stray_non_skill_directory(tmp_path, capsys):
+    # Regression (PR #412 review, dees-bot round 1): a directory under
+    # --skills-root with no SKILL.md — a leftover cache dir, a dot-prefixed
+    # tool dir, anything that isn't a generated skill — must be silently
+    # ignored, not misreported as MISSING: <name> — no evals/eval.json.
+    import json
+
+    _touch_skill_md(tmp_path / "real-skill")
+    (tmp_path / "real-skill" / "evals").mkdir()
+    (tmp_path / "real-skill" / "evals" / "eval.json").write_text(
+        json.dumps(
+            {
+                "skills": ["real-skill"],
+                "scenarios": [
+                    {"query": f"q{i}", "expected_behavior": ["b"]} for i in range(3)
+                ],
+            }
+        )
+    )
+    (tmp_path / "not-a-skill").mkdir()  # no SKILL.md — a stray directory
+
+    manifest = str(ROOT / "skills" / "manifest.yaml")
+    rc = main(["eval", "--skills-root", str(tmp_path), "--manifest", manifest])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "OK: real-skill (3 scenarios)" in out
+    assert "not-a-skill" not in out
 
 
 def test_cli_generate_fails_loudly_on_missing_manifest(tmp_path, capsys):
@@ -205,6 +246,7 @@ def test_cli_runs_as_module(tmp_path):
 def test_cli_eval_reports_valid_and_invalid(tmp_path, capsys):
     import json
 
+    _touch_skill_md(tmp_path / "good-skill")
     good = tmp_path / "good-skill" / "evals"
     good.mkdir(parents=True)
     (good / "eval.json").write_text(
@@ -217,6 +259,7 @@ def test_cli_eval_reports_valid_and_invalid(tmp_path, capsys):
             }
         )
     )
+    _touch_skill_md(tmp_path / "bad-skill")
     bad = tmp_path / "bad-skill" / "evals"
     bad.mkdir(parents=True)
     (bad / "eval.json").write_text(
@@ -250,6 +293,7 @@ def test_cli_eval_honors_manifest_eval_min(tmp_path, capsys):
     # skill absent from the manifest keeps the default baseline of 3.
     import json
 
+    _touch_skill_md(tmp_path / "skills" / "hardened-skill")
     hardened = tmp_path / "skills" / "hardened-skill" / "evals"
     hardened.mkdir(parents=True)
     (hardened / "eval.json").write_text(
@@ -262,6 +306,7 @@ def test_cli_eval_honors_manifest_eval_min(tmp_path, capsys):
             }
         )
     )
+    _touch_skill_md(tmp_path / "skills" / "unlisted-skill")
     unlisted = tmp_path / "skills" / "unlisted-skill" / "evals"
     unlisted.mkdir(parents=True)
     (unlisted / "eval.json").write_text(
@@ -313,6 +358,7 @@ def test_cli_eval_fails_loudly_when_manifest_missing(tmp_path, capsys):
     # would silently un-enforce every hardened lens's raised floor).
     import json
 
+    _touch_skill_md(tmp_path / "skills" / "some-skill")
     some_skill = tmp_path / "skills" / "some-skill" / "evals"
     some_skill.mkdir(parents=True)
     (some_skill / "eval.json").write_text(
@@ -347,6 +393,7 @@ def test_cli_eval_fails_loudly_on_malformed_manifest_yaml(tmp_path, capsys):
     # together, end to end.
     import json
 
+    _touch_skill_md(tmp_path / "skills" / "some-skill")
     some_skill = tmp_path / "skills" / "some-skill" / "evals"
     some_skill.mkdir(parents=True)
     (some_skill / "eval.json").write_text(

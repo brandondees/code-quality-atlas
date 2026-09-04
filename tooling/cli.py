@@ -110,10 +110,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: {exc}")
             return 1
         if not reports:
-            print(
-                f"No drift: all {len(skill_mds)} skills are in sync with their "
-                "source research."
-            )
+            if len(skill_mds) == 1:
+                print("No drift: 1 skill is in sync with its source research.")
+            else:
+                print(
+                    f"No drift: all {len(skill_mds)} skills are in sync with "
+                    "their source research."
+                )
             return 0
         for r in reports:
             secs = ", ".join(f"#{s.section}" for s in r.changed)
@@ -129,10 +132,20 @@ def main(argv: list[str] | None = None) -> int:
             # MISSING branch below unreachable (a skill with no evals/
             # never produces a glob hit to iterate), and silently drops a
             # nonexistent/empty --skills-root to zero iterations instead of
-            # failing (#367).
+            # failing (#367). Gated on a SKILL.md existing, matching
+            # `drift`'s own definition of "a skill" a few lines up — a
+            # stray non-skill directory under --skills-root (a leftover
+            # cache dir, a dot-prefixed tool dir) would otherwise be
+            # misreported as MISSING instead of ignored.
             root = Path(args.skills_root)
             skill_dirs = (
-                sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
+                sorted(
+                    p
+                    for p in root.iterdir()
+                    if p.is_dir() and (p / "SKILL.md").exists()
+                )
+                if root.is_dir()
+                else []
             )
             if not skill_dirs:
                 print(f"ERROR: no skills found under {args.skills_root}")
