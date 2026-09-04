@@ -13,20 +13,16 @@ alongside this test) with nobody catching the class of bug that style invites.
 import re
 from pathlib import Path
 
-import yaml
+from tooling.frontmatter import read_frontmatter
 
 _ROOT = Path(__file__).resolve().parent.parent
 _COMMANDS_DIR = _ROOT / "commands"
 _COMMENT_RISK = re.compile(r"\s#")
+_KEY_RE = re.compile(r"^(\s*)([\w-]+):\s*(.*)$")
 
 
 def _frontmatter(command_md: Path) -> tuple[str, dict]:
-    text = command_md.read_text(encoding="utf-8-sig").replace("\r\n", "\n")
-    parts = text.split("---\n", 2)
-    assert len(parts) >= 3 and not parts[0].strip(), (
-        f"{command_md}: missing or malformed YAML frontmatter"
-    )
-    return parts[1], yaml.safe_load(parts[1])
+    return read_frontmatter(command_md)
 
 
 def test_command_frontmatter_parses_and_has_description():
@@ -60,22 +56,42 @@ def test_command_description_is_a_block_scalar():
 
 
 def test_command_frontmatter_has_no_comment_truncation_risk():
-    """Independent of the description-specific check above: no plain-scalar
-    frontmatter line anywhere in `commands/*.md` may contain a bare ' #',
-    since YAML would read it as a comment and drop the rest of the line."""
+    """No plain-scalar frontmatter value anywhere in `commands/*.md` may
+    contain a bare ' #', on its first line or on a wrapped continuation line
+    — YAML would read either as a comment and silently drop the rest.
+    Tracks `prose_indent` across continuation lines the same way
+    `tooling/manifest.py`'s `_check_comment_truncation` does, generalized to
+    every key rather than a fixed allowlist: unlike `manifest.yaml`,
+    `commands/*.md` frontmatter has no fixed schema, so any key could turn
+    into a wrapped plain scalar (PR #407 review, round 1, nit)."""
     for command_md in sorted(_COMMANDS_DIR.glob("*.md")):
         raw, _ = _frontmatter(command_md)
+        prose_indent: int | None = None
         for n, line in enumerate(raw.splitlines(), 1):
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
+                prose_indent = None
                 continue
-            m = re.match(r"^([\w-]+):\s*(.*)$", line)
-            if not m:
+            m = _KEY_RE.match(line)
+            if m:
+                indent, value = len(m.group(1)), m.group(3)
+                if value[:1] in ('"', "'", ">", "|", ""):
+                    prose_indent = None
+                else:
+                    assert not _COMMENT_RISK.search(" " + value), (
+                        f"{command_md}:{n}: unquoted value contains ' #' — YAML "
+                        "reads it as a comment and silently truncates the value"
+                    )
+                    prose_indent = indent
                 continue
-            value = m.group(2)
-            if value[:1] in ('"', "'", ">", "|", ""):
-                continue
-            assert not _COMMENT_RISK.search(" " + value), (
-                f"{command_md}:{n}: unquoted value contains ' #' — YAML reads it "
-                "as a comment and silently truncates the value"
-            )
+            # a continuation line of the current plain-scalar value
+            if (
+                prose_indent is not None
+                and len(line) - len(line.lstrip()) > prose_indent
+            ):
+                assert not _COMMENT_RISK.search(line), (
+                    f"{command_md}:{n}: unquoted value continuation contains ' #' "
+                    "— YAML reads it as a comment and silently truncates the value"
+                )
+            else:
+                prose_indent = None
