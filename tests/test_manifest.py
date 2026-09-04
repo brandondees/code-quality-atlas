@@ -1294,6 +1294,107 @@ def test_load_manifest_rejects_non_mapping_router_section(tmp_path, bad_router_y
         load_manifest(path)
 
 
+_VALID_SKILL_YAML = (
+    "  - name: hunting-silent-failures\n"
+    "    description: x\n"
+    "    shape: diff\n"
+    "    wave: 1\n"
+    "    picker: p\n"
+    "    built_from:\n"
+    "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+)
+
+
+@pytest.mark.parametrize(
+    "bad_yaml,expected_match",
+    [
+        # Regression (PR #411 review, CodeRabbit): `x.get(key) or []` treats
+        # any falsy value — not just an absent/null one — as an empty list,
+        # so a non-list-but-falsy `tensions: {}` silently passed as though
+        # no tensions were declared, while a truthy scalar (`tensions: 5`)
+        # escaped the list comprehension as a raw TypeError.
+        (
+            "taxonomy_version: v0.2\nskills:\n"
+            + _VALID_SKILL_YAML
+            + "synthesizer:\n  name: s\n  description: d\n  tensions: {}\n",
+            "synthesizer: 'tensions' must be a list, got dict",
+        ),
+        (
+            "taxonomy_version: v0.2\nskills:\n"
+            + _VALID_SKILL_YAML
+            + "synthesizer:\n  name: s\n  description: d\n  tensions: 5\n",
+            "synthesizer: 'tensions' must be a list, got int",
+        ),
+        (
+            "taxonomy_version: v0.2\nskills:\n" + _VALID_SKILL_YAML + "modes: false\n",
+            "'modes' must be a list, got bool",
+        ),
+        (
+            "taxonomy_version: v0.2\nskills:\n" + _VALID_SKILL_YAML + "modes: 5\n",
+            "'modes' must be a list, got int",
+        ),
+        (
+            "taxonomy_version: v0.2\nskills:\n"
+            + _VALID_SKILL_YAML
+            + "entrypoints: 0\n",
+            "'entrypoints' must be a list, got int",
+        ),
+        (
+            "taxonomy_version: v0.2\nskills:\n"
+            + _VALID_SKILL_YAML
+            + "entrypoints: 5\n",
+            "'entrypoints' must be a list, got int",
+        ),
+    ],
+)
+def test_load_manifest_rejects_non_list_optional_sequence_fields(
+    tmp_path, bad_yaml, expected_match
+):
+    path = _write_manifest(tmp_path, bad_yaml)
+    with pytest.raises(ValidationError, match=re.escape(expected_match)):
+        load_manifest(path)
+
+
+def test_load_manifest_rejects_non_mapping_skill_entry(tmp_path):
+    # Regression (PR #411 review, CodeRabbit): a scalar entry in `skills:`
+    # reached `s["built_from"]` and escaped as a raw, uncaught TypeError.
+    path = _write_manifest(tmp_path, "taxonomy_version: v0.2\nskills:\n  - 5\n")
+    with pytest.raises(ValidationError, match="skill #0: must be a mapping, got int"):
+        load_manifest(path)
+
+
+@pytest.mark.parametrize(
+    "built_from_yaml,expected_type",
+    [
+        ("    built_from: 5\n", "int"),
+        ("    built_from: {}\n", "dict"),
+    ],
+)
+def test_load_manifest_rejects_non_list_built_from(
+    tmp_path, built_from_yaml, expected_type
+):
+    # Regression (PR #411 review, CodeRabbit): a scalar `built_from` escaped
+    # as a raw TypeError from the `for b in s["built_from"]` comprehension;
+    # a falsy-but-present non-list (`built_from: {}`) silently iterated as
+    # zero entries, producing a `Skill` with an empty source list that
+    # `load_manifest` itself accepted (only a later, separate `validate()`
+    # call would have caught the resulting emptiness).
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: x\n"
+        "    description: d\n"
+        "    shape: diff\n"
+        "    picker: p\n" + built_from_yaml,
+    )
+    with pytest.raises(
+        ValidationError,
+        match=re.escape(f"skill #0: 'built_from' must be a list, got {expected_type}"),
+    ):
+        load_manifest(path)
+
+
 from tooling.manifest import Synthesizer, Tension
 
 

@@ -627,18 +627,24 @@ def _raise_truncation(path: str, line_no: int, key: str) -> None:
     )
 
 
-def _list_field(s: dict, key: str, skill_index: int) -> list:
+def _list_field(s: dict, key: str, where: str) -> list:
     # A missing key or an explicit YAML null (bare "key:") both normalize to
     # [] -- but any other non-list value (e.g. `cross_ref: false`) is a
     # malformed manifest, not a normalization case, and must raise the same
     # actionable ValidationError every other malformed field gets here (#140,
-    # #142 review).
+    # #142 review). Also used for top-level `modes`/`entrypoints` and
+    # `synthesizer.tensions`, which had the same gap under their own
+    # `x.get(...) or []` normalization: a falsy non-list (`{}`, `0`, `false`)
+    # silently passed as though absent, and a truthy scalar (`tensions: 5`)
+    # escaped as a raw TypeError from the list comprehension/enumerate() that
+    # consumed it, in both cases bypassing load_manifest's ValidationError
+    # contract entirely (CodeRabbit review on #411).
     value = s.get(key)
     if value is None:
         return []
     if not isinstance(value, list):
         raise ValidationError(
-            f"skill #{skill_index}: {key!r} must be a list, got {type(value).__name__}"
+            f"{where}: {key!r} must be a list, got {type(value).__name__}"
         )
     return value
 
@@ -788,10 +794,19 @@ def load_manifest(path: str) -> Manifest:
         )
     skills = []
     for i, s in enumerate(data["skills"]):
+        if not isinstance(s, dict):
+            raise ValidationError(
+                f"skill #{i}: must be a mapping, got {type(s).__name__}"
+            )
         try:
+            raw_built = s["built_from"]
+            if not isinstance(raw_built, list):
+                raise ValidationError(
+                    f"skill #{i}: 'built_from' must be a list, "
+                    f"got {type(raw_built).__name__}"
+                )
             built = [
-                Source(category=b["category"], source=b["source"])
-                for b in s["built_from"]
+                Source(category=b["category"], source=b["source"]) for b in raw_built
             ]
             artifacts = [
                 Artifact(
@@ -802,7 +817,7 @@ def load_manifest(path: str) -> Manifest:
                         a, "slug", f"skill #{i} artifact", null_ok=True, strip=False
                     ),
                 )
-                for a in _list_field(s, "artifacts", i)
+                for a in _list_field(s, "artifacts", f"skill #{i}")
             ]
             wave = s.get("wave", 0)
             if not isinstance(wave, int) or isinstance(wave, bool):
@@ -824,7 +839,7 @@ def load_manifest(path: str) -> Manifest:
                     shape=s["shape"],
                     wave=wave,
                     built_from=built,
-                    cross_ref=_list_field(s, "cross_ref", i),
+                    cross_ref=_list_field(s, "cross_ref", f"skill #{i}"),
                     design=s.get("design", False),
                     picker=_prose(s, "picker", f"skill #{i}", required=False),
                     artifacts=artifacts,
@@ -935,13 +950,13 @@ def load_manifest(path: str) -> Manifest:
                             t, "resolve", "synthesizer tension", null_ok=True
                         ),
                     )
-                    for t in (sy.get("tensions") or [])
+                    for t in _list_field(sy, "tensions", "synthesizer")
                 ],
             )
         except KeyError as e:
             raise ValidationError(f"synthesizer: missing field {e}") from e
     modes: list[Mode] = []
-    for i, raw_mode in enumerate(data.get("modes", []) or []):
+    for i, raw_mode in enumerate(_list_field(data, "modes", path)):
         try:
             modes.append(
                 Mode(
@@ -959,7 +974,7 @@ def load_manifest(path: str) -> Manifest:
         except (KeyError, TypeError) as e:
             raise ValidationError(f"modes[{i}] in {path}: malformed mode ({e})")
     entrypoints: list[Entrypoint] = []
-    for i, raw_ep in enumerate(data.get("entrypoints", []) or []):
+    for i, raw_ep in enumerate(_list_field(data, "entrypoints", path)):
         try:
             shapes = raw_ep["shapes"]
             if not isinstance(shapes, list) or not all(
