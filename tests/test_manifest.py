@@ -1262,6 +1262,8 @@ def test_load_manifest_rejects_non_mapping_route_entry(tmp_path):
     [
         'router: "a string"\n',
         "router:\n  - 1\n  - 2\n",
+        "router: 5\n",
+        "router:\n",
     ],
 )
 def test_load_manifest_rejects_non_mapping_router_section(tmp_path, bad_router_yaml):
@@ -1272,7 +1274,9 @@ def test_load_manifest_rejects_non_mapping_router_section(tmp_path, bad_router_y
     # key on a str/list, which raises a raw TypeError ("string indices must
     # be integers" / "list indices must be integers or slices, not str")
     # instead of the ValidationError every other malformed top-level
-    # section produces.
+    # section produces. The int and null cases (`router: 5`, bare `router:`)
+    # were already broken pre-#411 (dees-bot's round-2 table), not a new
+    # regression, but get the same guard and the same test coverage.
     path = _write_manifest(
         tmp_path,
         "taxonomy_version: v0.2\n"
