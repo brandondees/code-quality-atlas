@@ -19,6 +19,7 @@ _ROOT = Path(__file__).resolve().parent.parent
 _COMMANDS_DIR = _ROOT / "commands"
 _COMMENT_RISK = re.compile(r"\s#")
 _KEY_RE = re.compile(r"^(\s*)([\w-]+):\s*(.*)$")
+_BLOCK_SCALAR_INDICATOR = re.compile(r"^[|>][+-]?\d*$")
 
 
 def _frontmatter(command_md: Path) -> tuple[str, dict]:
@@ -63,32 +64,45 @@ def test_command_frontmatter_has_no_comment_truncation_risk():
     `tooling/manifest.py`'s `_check_comment_truncation` does, generalized to
     every key rather than a fixed allowlist: unlike `manifest.yaml`,
     `commands/*.md` frontmatter has no fixed schema, so any key could turn
-    into a wrapped plain scalar (PR #407 review, round 1, nit)."""
+    into a wrapped plain scalar (PR #407 review, round 1, nit).
+
+    Also tracks `block_scalar_indent` so a `>-`/`|` body line is never
+    mistaken for a nested mapping key: inside a block scalar `#` is literal
+    text, not a YAML comment, so a body line like `Note: unsafe #123` (a
+    real false positive CodeRabbit caught on this test's first version) must
+    never be flagged (PR #407 review, round 2)."""
     for command_md in sorted(_COMMANDS_DIR.glob("*.md")):
         raw, _ = _frontmatter(command_md)
         prose_indent: int | None = None
+        block_scalar_indent: int | None = None
         for n, line in enumerate(raw.splitlines(), 1):
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
-                prose_indent = None
+                if block_scalar_indent is None:
+                    prose_indent = None
                 continue
+            indent = len(line) - len(line.lstrip())
+            if block_scalar_indent is not None:
+                if indent > block_scalar_indent:
+                    continue  # block-scalar body line — '#' here is literal
+                block_scalar_indent = None  # dedented past the block scalar
             m = _KEY_RE.match(line)
             if m:
-                indent, value = len(m.group(1)), m.group(3)
-                if value[:1] in ('"', "'", ">", "|", ""):
+                key_indent, value = len(m.group(1)), m.group(3)
+                if _BLOCK_SCALAR_INDICATOR.match(value.strip()):
+                    block_scalar_indent = key_indent
+                    prose_indent = None
+                elif value[:1] in ('"', "'", ""):
                     prose_indent = None
                 else:
                     assert not _COMMENT_RISK.search(" " + value), (
                         f"{command_md}:{n}: unquoted value contains ' #' — YAML "
                         "reads it as a comment and silently truncates the value"
                     )
-                    prose_indent = indent
+                    prose_indent = key_indent
                 continue
             # a continuation line of the current plain-scalar value
-            if (
-                prose_indent is not None
-                and len(line) - len(line.lstrip()) > prose_indent
-            ):
+            if prose_indent is not None and indent > prose_indent:
                 assert not _COMMENT_RISK.search(line), (
                     f"{command_md}:{n}: unquoted value continuation contains ' #' "
                     "— YAML reads it as a comment and silently truncates the value"
