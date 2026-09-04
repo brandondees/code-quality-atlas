@@ -18,7 +18,12 @@ from tooling.manifest import Manifest
 def mode_floor_policy(manifest: Manifest) -> str:
     """The synthesizer's per-mode severity-floor policy. Empty when no modes.
     `escalating` keeps today's round-based floor; any other value pins the floor
-    at that severity level (findings below it are dropped from the merged report)."""
+    at that severity level. A below-floor finding is dropped from the ranked,
+    verdict-setting sections, not from the report altogether — it still
+    surfaces in the Output format's Non-blocking (advisory) list (#370: the
+    prior wording here ("omitted from the verdict" / "nothing below") said
+    the opposite of what templates/REVIEW.md promises and
+    commands/atlas-review-pr.md actually implements)."""
     if not manifest.modes:
         return ""
     lines = [
@@ -26,7 +31,9 @@ def mode_floor_policy(manifest: Manifest) -> str:
         "",
         (
             "The merged report's severity floor depends on the active depth mode. "
-            "Below the floor, findings are omitted from the verdict."
+            "Below the floor, a finding is dropped from the ranked, verdict-setting "
+            "sections — not from the report: it still surfaces in the Non-blocking "
+            "(advisory) list (see Output format below)."
         ),
         "",
         "| Mode | Floor | Effect |",
@@ -38,7 +45,8 @@ def mode_floor_policy(manifest: Manifest) -> str:
             effect = "round-based escalation (as today) — later re-review rounds raise the floor"
         else:
             effect = (
-                f"pinned at {floor} — report everything down to {floor}, nothing below"
+                f"pinned at {floor} — ranked sections report everything down to "
+                f"{floor}; below that, the advisory list only"
             )
         lines.append(f"| **{mode.name}** | {floor} | {effect} |")
     return (
@@ -238,6 +246,8 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "Pre-existing — noticed in touched code, not introduced here\n"
         "- <location> — <defect> (<lens>) [pre-existing, route: implementer]."
         " <fix now | file a ticket | ignore>\n\n"
+        "Non-blocking (advisory) — below the floor, not actionable\n"
+        "- <severity> · <location> — <one-clause description> (<lens>)\n\n"
         "Tensions\n"
         "- <lens> ↔ <lens>: <how it was resolved here>\n\n"
         "Coverage & limitations\n"
@@ -248,14 +258,21 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         '- <one-line process observation>, or exactly "Process: clean" if none.\n'
         "```\n\n"
         "Omit any **findings** section with nothing in it — including **Routed**, "
-        "**Improvements**, and **Pre-existing** (the last two are absent entirely "
-        "unless the team opted into improvement-valence / Boy-Scout surfacing). "
-        "**Coverage & limitations** and **Process notes** are the exceptions: both "
-        'are always present, even on a "No findings" report. '
-        "Keep each finding to one or two lines; the detail lives in the "
-        "originating lens's output, not restated here.\n\n"
-        + mode_floor_policy(manifest)
-        + "## Reviewer discipline\n\n"
+        "**Improvements**, **Pre-existing** (the last two are absent entirely "
+        "unless the team opted into improvement-valence / Boy-Scout surfacing), "
+        "and **Non-blocking (advisory)**. **Coverage & limitations** and "
+        "**Process notes** are the exceptions: both are always present, even on "
+        'a "No findings" report. Keep each finding to one or two lines; the '
+        "detail lives in the originating lens's output, not restated here.\n\n"
+        "**Non-blocking (advisory) is not a dumping ground for every below-floor "
+        "observation** — it is specifically the findings a floor (mode or round) "
+        "dropped from the ranked sections above; a mode with no floor "
+        "configured (`manifest.modes` empty) never populates it. List each as "
+        "*severity · location · one clause* — never restate a finding already "
+        "ranked above at its full detail. This section is informational only: "
+        "it never sets the verdict, is never posted as an inline review "
+        "thread, and the implementer may apply, defer, or ignore each item "
+        "freely.\n\n" + mode_floor_policy(manifest) + "## Reviewer discipline\n\n"
         "Synthesis must not inflate. Do not raise a finding no lens reported, do "
         'not upgrade a severity to seem thorough, and do not turn "No findings" '
         "into a verdict with changes. The merged report is exactly the union of "

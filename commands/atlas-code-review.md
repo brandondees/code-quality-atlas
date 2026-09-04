@@ -93,5 +93,11 @@ severity-ranked report with a single block / approve-with-changes / approve
 verdict, applying the mode's severity floor: **triage** pins at Major,
 **comprehensive** pins at Nit, and **review** uses the round-1 floor (Nit and
 above) for this single pass, since an ad-hoc diff has no round history to
-escalate across. Report only real problems; if the change is clean, say "No
+escalate across. A below-floor finding is not dropped outright — list it
+under the synthesizer's **`Non-blocking (advisory)`** heading (one line
+each: severity · location · one-clause description) rather than in the
+ranked/verdict-setting sections above, same as a PR review's advisory list
+(`templates/REVIEW.md`) — a local review has no thread to post it against,
+but the finding still surfaces instead of vanishing under a pinned floor
+(#370). Report only real problems; if the change is clean, say "No
 findings" and stop rather than inventing issues.
