@@ -4766,3 +4766,95 @@ before fixing; new regression test confirmed to fail against the pre-fix
 content on all six checks and pass on the fix (after the recovery above);
 `pytest` (521/521, up from 515 — 6 new); `markdownlint-cli2` (clean, 490
 files); `ruff check .` (clean); `tooling.cli drift` (clean).
+
+### 2026-09-03 (same day, follow-up) — #360 PR review rounds: a self-inflicted destructive race, then a real body-marker fix
+
+Three further review rounds on #360's own PR (#402), each finding a real gap
+in the previous round's fix — `tests/test_ack_round_identity_binding.py`
+grew from the 6 tests above to 13, in three steps (+2, +1, +4); the counts
+below are each round's own delta, not the file's running total.
+
+**Round 1 (the atlas reviewer, Major):** the ACK lock added above had a
+known-and-acknowledged failure mode with no recovery path — if the session
+holding it dies between `create` succeeding and `delete_pending` running
+(container reset, `/compact`, reclaim), the lock orphans, and every
+backstop (poller, self-nudge) shares the same reviewer identity, so none
+could route around it; the PR would silently stop being reviewed forever.
+Fixed by having the independently-scheduled pollers (`atlas-poll-and-review.md`,
+`atlas-rebase-stale.md`, both runbook restatements) detect and self-heal
+it: `pull_request_read`'s `get_reviews` method returns the caller's own
+pending review even though it's otherwise invisible to anyone else, so a
+`PENDING` review under your own identity older than 30 minutes was treated
+as almost certainly stuck and cleared with `delete_pending`. Also fixed a
+smaller, related finding: a `create` failure was uniformly read as
+"someone else has the lock," silently swallowing real errors (permissions,
+rate limits) under the same branch as ordinary contention — now
+distinguished. Added `test_pollers_recover_a_stuck_ack_lock` and
+`test_create_failure_distinguishes_contention_from_a_real_error`.
+
+**Round 2 (the atlas reviewer, Major):** round 1's recovery couldn't
+distinguish `atlas-review-pr.md`'s short-lived step-2 ACK lock from its own
+step 5's much longer-lived pending review for building up a round's inline
+findings — `get_reviews` shows both identically as "a `PENDING` review
+under your own identity on this PR." A poller sweeping mid-review during a
+long round (the same event-triggered-reviewer-plus-poller-sweep
+combination #360 itself is about) could delete an actively in-progress
+review's collected findings — a new, self-inflicted failure mode likely
+*more* common in practice than the orphaned-session case round 1 fixed,
+since it needs no crash, just an ordinary review that runs long. Fixed by
+narrowing auto-recovery to the one case that's actually unambiguous: a
+findings review can only ever open after the ACK issue comment already
+exists, so a stale `PENDING` review is now only auto-cleared when the ack
+is **absent**; when the ack is present, a lingering `PENDING` review is
+only flagged in the report, never auto-cleared. Added
+`test_stuck_lock_recovery_never_blindly_clears_an_in_progress_review`,
+verified to fail against the round-1 commit.
+
+**Round 3 (CodeRabbit, several Major):** ack-absence and age alone still
+weren't judged a safe enough signal on their own — a manually deleted ack
+comment, both ack signals lost to the #354/#355 HTML-comment-stripping bug,
+or read-after-write lag could all make an in-progress findings review look
+ack-absent to the recovery pass. Fixed by having every ACK lock create its
+pending review with `body` set to the literal marker `(atlas-ack-lock)` — a
+direct, load-bearing signal recovery now requires as a third, independent
+condition alongside ack-absence and age. CodeRabbit also caught: (a)
+`get_reviews` returns the caller's own not-yet-submitted `PENDING` review
+(confirmed via GitHub's own REST API docs), which every round-derivation
+site was counting as "a review with no parseable heading," wrongly tripping
+`unknown` during the lock's hold window — fixed by excluding `PENDING`
+reviews from round derivation everywhere; (b) `atlas-rebase-stale.md` said
+to check for a stuck lock "once per sweep, not per PR" — backwards, since a
+pending review is scoped per-PR per identity, so this would have left every
+PR but the first unchecked — fixed to check every open PR; (c)
+`atlas-poll-and-review.md`'s "ack 90+ minutes old → crashed, respawn"
+branch could spawn a second review subagent while the first was still
+legitimately building a large round — fixed to check the recovery pass's
+own ambiguous-lock flag first and skip respawning when set; (d)
+`atlas-rebase-stale.md`'s report claimed nothing goes to GitHub beyond
+pokes and `delete_pending`, omitting the coverage escalation's review
+re-requests — fixed the claim. Declined one Trivial finding asking for
+fully ordered, section-scoped test assertions in place of the substring
+checks used throughout this file and `test_review_thread_resolution_scoping.py`
+(#362): the file's own docstring already states these are best-effort
+drift tripwires for prose files with no interpreter, not runtime proof, and
+the atlas reviewer's own round-1/round-2 reviews independently validated
+the anchoring as adequate; a full rewrite is disproportionate to a
+Trivial-severity nitpick given the added parsing complexity it would need.
+Added `test_ack_lock_is_created_with_a_body_marker`,
+`test_recovery_matches_the_body_marker_before_clearing`,
+`test_round_derivation_excludes_pending_reviews`, and
+`test_rebase_stale_lock_recovery_checks_every_pr_not_once_globally`,
+verified to fail against the round-2 commit.
+
+**Verification (round 1):** `pytest` 523/523 (521 + 2 new),
+`ruff`/`markdownlint-cli2`/`tooling.cli drift` clean.
+
+**Verification (round 2):** reproduced the destructive scenario by reading
+the round-1 recovery logic against a hypothetical long-running review;
+`pytest` 524/524 (523 + 1 new), `ruff`/`markdownlint-cli2`/`tooling.cli drift`
+clean.
+
+**Verification (round 3):** confirmed via GitHub's REST API docs that
+`PENDING` reviews are returned by the list-reviews endpoint to their own
+author; `pytest` 528/528 (524 + 4 new),
+`ruff`/`markdownlint-cli2`/`tooling.cli drift` clean.
