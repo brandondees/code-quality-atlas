@@ -26,3 +26,7 @@ e.g. `reviewing-api-contract-safety` for the export format contract,
 **Bad selection:** `reviewing-naming-and-readability` or
 `checking-idioms-and-consistency` — there is no code for them to read; they are
 not design-capable.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/choosing-review-lenses/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

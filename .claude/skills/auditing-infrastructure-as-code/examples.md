@@ -151,3 +151,7 @@ def calculate_total(cart):
 manifests or plan output present to audit." Do NOT report "No findings" here —
 that sentence means a check ran and found nothing, not that nothing in this
 input was checkable.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/auditing-infrastructure-as-code/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

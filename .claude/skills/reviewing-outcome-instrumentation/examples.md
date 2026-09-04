@@ -208,3 +208,7 @@ randomization, the experiment-only checks — guardrails, assignment stability,
 exposure-logging point, flag end-condition — correctly do not apply; asking for
 them anyway would be this lens's own over-flagging failure. A well-instrumented
 change is a legitimate, and worth-stating-plainly, clean result.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-outcome-instrumentation/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

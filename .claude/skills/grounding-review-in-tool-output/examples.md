@@ -121,3 +121,7 @@ No deterministic coverage: every selected lens — judgment only.
 The lenses then run exactly as they would have without a pre-pass. The value
 delivered here is not evidence; it is an honest edge on the review, which is
 what a reader needs to decide how much the verdict is worth.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/grounding-review-in-tool-output/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

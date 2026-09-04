@@ -300,3 +300,7 @@ execution wiring is present anywhere in the input, examine it against this
 lens's own checks and report "No findings" (if it holds up) or a real finding
 — reserve "Not applicable" strictly for input with **no** deployment/execution
 wiring surface anywhere in it, like the pure-library example above.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/auditing-deployment-and-trust-boundaries/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

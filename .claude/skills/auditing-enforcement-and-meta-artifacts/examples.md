@@ -49,3 +49,7 @@ This is a **repo-shaped** audit: it scans the *machinery around the code* — su
 - **Severity** (Blocker / Major / Minor / Nit) — **the meta-artifact and location** (the suppression file:line, the alert rule, the generated path) — what's unhealthy, as a *trend or standing condition*, not a one-off — the fix (scope+justify the suppression / make the alert symptom-based + runbooked / add the regenerate-and-diff gate).
 - A healthy apparatus gets **"No findings"** — do not invent suppression or drift issues where the scan is clean.
 - This audit reviews the *enforcement machinery*; product-logic findings belong to the diff lenses, not here.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/auditing-enforcement-and-meta-artifacts/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

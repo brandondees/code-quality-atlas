@@ -108,3 +108,7 @@ archive to audit at all, matching this lens's own explicit skip clause. Say
 so with a line starting "Not applicable:". Do NOT report "No findings:
 decision records are current" (which implies an archive was scanned and
 found clean) and do NOT invent a decision-record structure to review against.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/auditing-decision-record-currency/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

@@ -42,3 +42,7 @@ This lens reviews a **decision** (ADR / RFC / adoption PR / deprecation plan), n
 - **Severity** (Blocker / Major / Minor / Nit) — **the decision/record location** (ADR-N, the RFC section, the proposal) — what's missing or unsound in the *reasoning*, concretely — the fix (record the rationale / weigh option Y / add a revisit-trigger / state the exit), **or** the evidence needed to decide.
 - For decisions that are genuinely sound and well-recorded, say **"No findings"** — do not manufacture process for a cheap, reversible, well-signaled call.
 - Business calls (TCO, procurement, contract terms) are **escalated to humans**, not adjudicated here.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-decision-lifecycle/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

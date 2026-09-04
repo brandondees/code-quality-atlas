@@ -119,3 +119,7 @@ return resp.json()
 
 **Expected finding:** None — the call has a timeout and `raise_for_status()` surfaces
 non-2xx responses loudly. Report "No findings"; do not invent issues.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/hunting-silent-failures/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

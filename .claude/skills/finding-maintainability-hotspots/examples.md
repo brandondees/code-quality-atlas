@@ -70,3 +70,7 @@ numbers in the table** — every table has a maximum row; a maximum is not a fin
 When asked "what should we act on?" and the scan is healthy, the correct,
 complete answer is "No findings: no maintainability hotspots in this scan" — do not
 pad it with refactoring recommendations for the biggest healthy file.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/finding-maintainability-hotspots/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

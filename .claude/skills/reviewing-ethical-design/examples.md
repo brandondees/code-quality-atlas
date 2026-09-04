@@ -149,3 +149,7 @@ with no user-facing behavior, matching this lens's own explicit skip clause. Say
 so with a line starting "Not applicable:". Do NOT report "No findings" (which
 implies the checks ran and found nothing) and do NOT invent an ethical-design
 concern in internal-only code.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-ethical-design/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

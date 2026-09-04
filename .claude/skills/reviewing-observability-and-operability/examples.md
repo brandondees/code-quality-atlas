@@ -111,3 +111,7 @@ system/software design docs, and a marketing-planning memo has neither. Report
 "Not applicable: no code, system design, or operational surface was provided
 for this lens to review". Do NOT report "No findings" — that would imply an
 operational surface was checked and found sound. There wasn't one.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-observability-and-operability/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

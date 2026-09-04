@@ -88,10 +88,18 @@ def test_generate_skill_reference_files_carry_generated_header(tmp_path):
         text = (out / "reference" / name).read_text()
         assert text.startswith(marker), name
         assert "fail the CI drift/regenerate gate" in text
-    # SKILL.md itself is exempt: it must start with `---` for frontmatter
-    # parsing, and already carries a machine-readable generated marker via
-    # its own `provenance:` block.
-    assert (out / "SKILL.md").read_text().startswith("---\n")
+    # SKILL.md's YAML frontmatter must be the first bytes in the file for
+    # skill discovery to parse it, so the marker can't lead there -- but it
+    # is not exempt from carrying one (issue #374: SKILL.md carried no
+    # human-visible marker at all, only the machine-readable `provenance:`
+    # block). It gets the same marker text, trailing instead of leading.
+    skill_md_text = (out / "SKILL.md").read_text()
+    assert skill_md_text.startswith("---\n")
+    assert skill_md_text.rstrip().endswith(
+        "Direct edits are overwritten on regeneration and fail the CI "
+        "drift/regenerate gate. -->"
+    )
+    assert marker in skill_md_text
 
 
 from tooling.generate import top_checks

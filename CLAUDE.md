@@ -88,14 +88,24 @@ instructions, then follow them exactly.
 
 **Plugin consumers:** don't hand-copy this section — run the `/code-quality-atlas:atlas-init` command, which writes the routing block into your repo's `CLAUDE.md` **and** `AGENTS.md` (agents read different files) and keeps it current. The canonical block lives in [`templates/agents-routing-snippet.md`](templates/agents-routing-snippet.md). This repo's own [`AGENTS.md`](AGENTS.md) mirrors the block as a dogfood.
 
-**`.claude/skills/` in this repo is generated, not authored.** It's a
-self-vendored mirror of `skills/<name>/` (via `tooling/vendor-skills.sh .`,
-see [`docs/distribution.md`](docs/distribution.md) Channel B) so that
-reviewing this repo itself resolves lens content through the same `Skill`
-tool path any repo that vendored the suite gets. If you're asked to fix a
-lens, edit `skills/<name>/` — never `.claude/skills/<name>/` directly, even
-though that's what the `Skill` tool actually resolves and loads. Each
-vendored `SKILL.md` carries a trailing generated-marker saying the same
-thing; re-run `tooling/vendor-skills.sh .` and commit the refresh after any
-`skills/` change (see
+**A lens fix goes into its sources, never a generated or mirrored copy.**
+Per lens under `skills/<name>/`: `skills/manifest.yaml` + the relevant
+`docs/research/*.md` sections are the **sources**; `SKILL.md` +
+`reference/*.md` are **generated** from them by `tooling.cli generate`
+(every generated file carries a `<!-- GENERATED ... -->` marker — leading
+for `reference/*.md`, trailing on `SKILL.md` since its YAML frontmatter
+must lead the file); `examples.md` + `evals/eval.json` are
+**hand-authored** and never overwritten by regeneration. `.claude/skills/`
+and `collapsed/` are both **mirrors** one level further out — a
+self-vendored copy of `skills/<name>/` (via `tooling/vendor-skills.sh .`,
+see [`docs/distribution.md`](docs/distribution.md) Channel B, so reviewing
+this repo itself resolves lens content through the same `Skill` tool path
+any repo that vendored the suite gets) and the generated 4-entrypoint
+bundled form, respectively — never edit either directly, even though
+`.claude/skills/` is what the `Skill` tool actually resolves and loads. If
+you're asked to fix a lens: edit the *sources* (manifest and/or research)
+for generated content, or `skills/<name>/examples.md`/`evals/eval.json`
+directly for hand-authored content; then run `python -m tooling.cli
+generate` and re-run `tooling/vendor-skills.sh .`, committing the refresh
+(see
 [`docs/runbooks/regenerating-skills.md`](docs/runbooks/regenerating-skills.md)).

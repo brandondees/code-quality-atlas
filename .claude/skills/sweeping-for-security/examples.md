@@ -135,3 +135,7 @@ gate plus an explicit check that the approver is not the requester, so no single
 actor completes the payout alone. Report "No findings". Do NOT invent further
 dual-control requirements, and do NOT flag the role-gated `get(id=...)` as an IDOR
 — an approver is meant to act on others' refunds.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/sweeping-for-security/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

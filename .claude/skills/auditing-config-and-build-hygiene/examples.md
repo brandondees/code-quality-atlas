@@ -345,3 +345,7 @@ flaky-test review) instead of assessing it here. Do NOT report "No findings:
 config and build hygiene are sound" — that sentence means config and build
 artifacts were checked and found sound, which implies there were some to
 check. There weren't any.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/auditing-config-and-build-hygiene/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

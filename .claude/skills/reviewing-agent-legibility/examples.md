@@ -150,3 +150,7 @@ or agent-onboarding content for this lens to review. Say so with a line
 starting "Not applicable:", naming what's missing. Do NOT report "No
 findings" (which implies the checks ran and found nothing) and do NOT invent
 an agent-legibility concern in a marketing-copy-only change.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-agent-legibility/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

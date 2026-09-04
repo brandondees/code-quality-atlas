@@ -74,3 +74,7 @@ def test_refund_allowed_on_day_30():
 bug. Report "No findings". Do NOT demand mocks for collaborators that are already
 fast and deterministic, and do NOT ask for more tests when the changed behavior's
 branches and boundary are covered — coverage padding is not a finding.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-test-quality/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

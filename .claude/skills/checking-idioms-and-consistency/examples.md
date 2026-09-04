@@ -112,3 +112,7 @@ formatting, or convention surface for this lens to check". Do NOT report "No
 findings" here — that sentence means the code was checked against project
 convention and matched it, which implies there was code to check. There
 wasn't any.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/checking-idioms-and-consistency/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

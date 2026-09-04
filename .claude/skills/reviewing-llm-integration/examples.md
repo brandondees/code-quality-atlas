@@ -69,3 +69,7 @@ for a classification task, bounded tokens and timeout, schema-validated output w
 a defined fallback, and no tool/egress surface. Report "No findings". Do NOT demand
 guardrails that are already present, and do NOT flag the mere act of calling an LLM
 as a risk when the integration is bounded like this.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-llm-integration/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

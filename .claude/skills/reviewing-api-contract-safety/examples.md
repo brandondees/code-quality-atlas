@@ -102,3 +102,7 @@ with no public API/SDK/webhook surface no external caller depends on. Report
 "Not applicable: this is an internal-only helper with no consumer-facing
 contract surface". Do NOT report "No findings" — that would imply a public
 contract was checked and found sound. There wasn't one to check.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-api-contract-safety/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

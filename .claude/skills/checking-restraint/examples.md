@@ -86,3 +86,7 @@ def round_to_cents(amount: Decimal) -> Decimal:
 **Expected finding:** None — this extraction is justified by real, repeated need
 (rule of three: third occurrence, sites named). Report "No findings"; the rule-of-three
 counterweight cuts both ways — do not call a well-evidenced extraction premature.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/checking-restraint/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

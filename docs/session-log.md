@@ -4950,3 +4950,62 @@ trusted.
 **Verification:** `pytest` 531/531 (528 + 3 new); `ruff check`/`ruff format
 --check` clean on the new test file; `tooling.cli drift` clean;
 `markdownlint-cli2` (pinned to CI's v0.23.2) 0 issues across all 490 files.
+
+### 2026-09-04 — #374: onboarding guardrail sent lens fixes to generated files; SKILL.md carried no visible generated marker
+
+The do-not-touch guardrail in `CLAUDE.md`/`AGENTS.md` (the one place either
+file explains where a lens fix goes) said "edit `skills/<name>/`" without
+naming that `SKILL.md` + `reference/*.md` under that path are themselves
+*generated* (from `skills/manifest.yaml` + `docs/research/`) — only
+`examples.md` + `evals/eval.json` are hand-authored. Provenance markers were
+inverted to match: every generated `reference/*.md` carries a leading
+`<!-- GENERATED ... -->` comment; 0 of 44 `skills/*/SKILL.md` and 0 of 4
+`collapsed/skills/*/SKILL.md` carried any visible marker (only a
+machine-readable `provenance:` block in the frontmatter) — so the guardrail's
+own instruction terminates at an unmarked file with no visible sign it's
+generated.
+
+Fixed the marker gap first, since it's what the guardrail rewrite depends on
+being true: added `_gen_trailer()` to `tooling/generate_common.py` — the
+trailing counterpart to the existing `_gen_header()`, for the two file kinds
+whose YAML frontmatter must lead (so a leading comment can't be prepended).
+Wired it into `generate_skill.build_skill_md` and
+`generate_collapsed.build_entrypoint_md`; both now end with the same marker
+text every other generated file already carries, just trailing instead of
+leading. Extended `test_generate.py` and `test_collapsed.py` to assert it.
+
+Rewrote the guardrail paragraph in both `CLAUDE.md` and `AGENTS.md`
+(byte-identical, verified via `diff`) to name the real split: sources
+(`manifest.yaml` + `docs/research/`), generated (`SKILL.md` +
+`reference/*.md`), hand-authored (`examples.md` + `evals/eval.json`), and
+mirrors one level further out (`.claude/skills/`, `collapsed/` — self-
+vendored / generated respectively, never hand-edited either). Left the
+`.claude/skills/icm-architect` carve-out out of this rewrite — issue #375
+owns that decision and explicitly reserves it as "the owner's call," not
+something to fold in here.
+
+Extended `tooling/vendor-skills.sh`'s `append_generated_marker` to also
+stamp vendored `examples.md` (previously SKILL.md-only) with a source
+pointer, generalizing the marker text to take the source filename as a
+parameter instead of hardcoding `SKILL.md`. This meant updating
+`tests/test_self_vendored_skills_sync.py`'s comparison logic too — it had a
+`SKILL.md`-specific marker-stripping branch and compared `examples.md` by
+plain byte-identity, which would now always report every vendored
+`examples.md` as stale; generalized `_skill_md_matches_source` into
+`_marked_runtime_file_matches_source` and applied it to both `_RUNTIME_FILES`
+uniformly (the dead byte-comparison branch it left behind was removed, since
+the loop only ever iterates over `_RUNTIME_FILES` now).
+
+Fixed `README.md`'s `skills/` row, which the issue's own repo-layout table
+had described with no mention of the generated/hand-authored split
+`collapsed/`'s row states as a matter of course.
+
+**Verification:** `pytest` 540/540 (the vendor-skills "clean git target"
+test transiently fails against this repo's own uncommitted `skills/`
+changes, as its own docstring already explains — passes clean post-commit);
+`ruff check .` clean (`ruff format --check .`'s 122-file-reformat backlog
+predates this branch — #380's still-unmerged fix, not touched here);
+`tooling.cli drift` clean; `markdownlint-cli2` (pinned to CI's v0.23.2) 0
+issues across all 490 files; re-vendored `.claude/skills/` via
+`tooling/vendor-skills.sh .` and confirmed the new `examples.md` markers
+render correctly.

@@ -269,3 +269,7 @@ Say so with a line starting "Not applicable:", not "No findings" — the latter
 would incorrectly imply the checks ran and found nothing, when there was no
 data-plane surface here to check at all. Keep the output to a one-line scope
 note rather than producing a full audit report on an inapplicable repo.
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/auditing-data-pipeline-health/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->

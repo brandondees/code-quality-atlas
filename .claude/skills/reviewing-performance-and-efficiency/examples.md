@@ -70,3 +70,7 @@ the simple loop is appropriate. Report "No findings". Do NOT recommend streaming
 caching, parallelism, or batching that no profile has justified — an unforced
 "make it faster" suggestion is itself a finding-quality failure (premature
 optimization).
+
+<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
+     from skills/reviewing-performance-and-efficiency/examples.md in code-quality-atlas.
+     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->
