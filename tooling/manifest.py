@@ -58,9 +58,15 @@ class Skill:
     name: str
     description: str
     shape: str
-    wave: int
     built_from: list[Source]
-    primary_owner: int | None = None
+    # Not read by anything downstream (verified: no generator, router, or
+    # entrypoint code touches it). Optional rather than deleted outright --
+    # every existing manifest entry still writes one and there's no value in
+    # forcing a mechanical edit across all of them -- but a dead field
+    # shouldn't force a new entry to supply a value it needs for nothing
+    # (#381; contrast `primary_owner`, deleted outright since setting it also
+    # cost nothing to skip).
+    wave: int = 0
     cross_ref: list[int] = field(default_factory=list)
     design: bool = False  # diff lens that also applies to design docs/plans
     picker: str = ""  # one-line differentiator for the router catalog
@@ -79,6 +85,23 @@ class Skill:
     # D8 baseline of 3" — set only on lenses whose eval suite has actually
     # been raised to this bar.
     eval_min: int | None = None
+
+    def __post_init__(self) -> None:
+        # Structural invariants a caller shouldn't be able to construct
+        # around, mirroring Source.__post_init__'s pattern -- these were
+        # previously enforced only by validate(), so a Skill built directly
+        # (a test fixture, a future call site) and never passed to
+        # validate() could carry a self-contradictory shape/design or
+        # shape/artifacts combination that _scope_line, the router catalog,
+        # and entrypoint_lenses would then each read differently (#381).
+        if self.design and self.shape != "diff":
+            raise ValidationError(
+                f"{self.name}: design applies only to diff-shaped lenses"
+            )
+        if self.shape == "artifact" and not self.artifacts:
+            raise ValidationError(
+                f"{self.name}: an artifact-shaped lens needs a non-empty `artifacts` table"
+            )
 
 
 @dataclass
@@ -253,15 +276,11 @@ def _validate_skills(manifest: Manifest, docs_root: str) -> set[str]:
             raise ValidationError(
                 f"{s.name}: eval_min must be >=3 (D8's baseline), got {s.eval_min!r}"
             )
-        if s.design and s.shape != "diff":
-            raise ValidationError(
-                f"{s.name}: design applies only to diff-shaped lenses"
-            )
+        # design-requires-diff and artifact-shape-requires-artifacts are
+        # enforced in Skill.__post_init__ (unconditionally, at construction —
+        # every Skill in manifest.skills already passed through it, load_manifest
+        # being the only production construction site), not re-checked here.
         if s.shape == "artifact":
-            if not s.artifacts:
-                raise ValidationError(
-                    f"{s.name}: an artifact-shaped lens needs a non-empty `artifacts` table"
-                )
             built_cats = {src.category for src in s.built_from}
             seen_slugs: set[str] = set()
             for a in s.artifacts:
@@ -608,18 +627,24 @@ def _raise_truncation(path: str, line_no: int, key: str) -> None:
     )
 
 
-def _list_field(s: dict, key: str, skill_index: int) -> list:
+def _list_field(s: dict, key: str, where: str) -> list:
     # A missing key or an explicit YAML null (bare "key:") both normalize to
     # [] -- but any other non-list value (e.g. `cross_ref: false`) is a
     # malformed manifest, not a normalization case, and must raise the same
     # actionable ValidationError every other malformed field gets here (#140,
-    # #142 review).
+    # #142 review). Also used for top-level `modes`/`entrypoints` and
+    # `synthesizer.tensions`, which had the same gap under their own
+    # `x.get(...) or []` normalization: a falsy non-list (`{}`, `0`, `false`)
+    # silently passed as though absent, and a truthy scalar (`tensions: 5`)
+    # escaped as a raw TypeError from the list comprehension/enumerate() that
+    # consumed it, in both cases bypassing load_manifest's ValidationError
+    # contract entirely (CodeRabbit review on #411).
     value = s.get(key)
     if value is None:
         return []
     if not isinstance(value, list):
         raise ValidationError(
-            f"skill #{skill_index}: {key!r} must be a list, got {type(value).__name__}"
+            f"{where}: {key!r} must be a list, got {type(value).__name__}"
         )
     return value
 
@@ -666,6 +691,10 @@ def _prose(
     body, note), where trimming incidental whitespace is the desired
     normalization.
     """
+    if not isinstance(mapping, dict):
+        raise ValidationError(
+            f"{where}: must be a mapping, got {type(mapping).__name__}"
+        )
     if key not in mapping:
         if required:
             raise ValidationError(f"{where}: missing field {key!r}")
@@ -690,9 +719,38 @@ def _str_list(mapping: dict, key: str, where: str) -> list[str]:
     """A list-of-strings field. A present-but-null value normalizes to [] (the
     emptiness is caught by validation, with a message about the *table* rather
     than about Python types); a non-list, or any non-string entry, is malformed."""
+    if not isinstance(mapping, dict):
+        raise ValidationError(
+            f"{where}: must be a mapping, got {type(mapping).__name__}"
+        )
     value = mapping.get(key)
     if value is None:
         return []
+    if not isinstance(value, list):
+        raise ValidationError(
+            f"{where}: {key!r} must be a list, got {type(value).__name__}"
+        )
+    for item in value:
+        if not isinstance(item, str):
+            raise ValidationError(
+                f"{where}: every {key!r} entry must be a string, "
+                f"got {type(item).__name__} ({item!r})"
+            )
+    return list(value)
+
+
+def _optional_str_list(mapping: dict, key: str, where: str) -> list[str] | None:
+    """Like `_str_list`, but a present-but-null or absent value stays `None`
+    rather than normalizing to `[]` — for a field whose absence is itself
+    meaningful (`Route.shapes`: `None` means "defaults to `['diff']`",
+    distinct from an explicit, empty list)."""
+    if not isinstance(mapping, dict):
+        raise ValidationError(
+            f"{where}: must be a mapping, got {type(mapping).__name__}"
+        )
+    value = mapping.get(key)
+    if value is None:
+        return None
     if not isinstance(value, list):
         raise ValidationError(
             f"{where}: {key!r} must be a list, got {type(value).__name__}"
@@ -736,10 +794,19 @@ def load_manifest(path: str) -> Manifest:
         )
     skills = []
     for i, s in enumerate(data["skills"]):
+        if not isinstance(s, dict):
+            raise ValidationError(
+                f"skill #{i}: must be a mapping, got {type(s).__name__}"
+            )
         try:
+            raw_built = s["built_from"]
+            if not isinstance(raw_built, list):
+                raise ValidationError(
+                    f"skill #{i}: 'built_from' must be a list, "
+                    f"got {type(raw_built).__name__}"
+                )
             built = [
-                Source(category=b["category"], source=b["source"])
-                for b in s["built_from"]
+                Source(category=b["category"], source=b["source"]) for b in raw_built
             ]
             artifacts = [
                 Artifact(
@@ -750,22 +817,34 @@ def load_manifest(path: str) -> Manifest:
                         a, "slug", f"skill #{i} artifact", null_ok=True, strip=False
                     ),
                 )
-                for a in _list_field(s, "artifacts", i)
+                for a in _list_field(s, "artifacts", f"skill #{i}")
             ]
+            wave = s.get("wave", 0)
+            if not isinstance(wave, int) or isinstance(wave, bool):
+                raise ValidationError(
+                    f"skill #{i}: 'wave' must be an integer, got {type(wave).__name__}"
+                )
+            eval_min = s.get("eval_min")
+            if eval_min is not None and (
+                not isinstance(eval_min, int) or isinstance(eval_min, bool)
+            ):
+                raise ValidationError(
+                    f"skill #{i}: 'eval_min' must be an integer, "
+                    f"got {type(eval_min).__name__}"
+                )
             skills.append(
                 Skill(
                     name=_prose(s, "name", f"skill #{i}", null_ok=True, strip=False),
                     description=_prose(s, "description", f"skill #{i}", null_ok=True),
                     shape=s["shape"],
-                    wave=s["wave"],
+                    wave=wave,
                     built_from=built,
-                    primary_owner=s.get("primary_owner"),
-                    cross_ref=_list_field(s, "cross_ref", i),
+                    cross_ref=_list_field(s, "cross_ref", f"skill #{i}"),
                     design=s.get("design", False),
                     picker=_prose(s, "picker", f"skill #{i}", required=False),
                     artifacts=artifacts,
                     tier=s.get("tier", "preference"),
-                    eval_min=s.get("eval_min"),
+                    eval_min=eval_min,
                 )
             )
         except KeyError as e:
@@ -775,18 +854,25 @@ def load_manifest(path: str) -> Manifest:
     router = None
     if "router" in data:
         r = data["router"]
+        if not isinstance(r, dict):
+            raise ValidationError(f"router: must be a mapping, got {type(r).__name__}")
         try:
+            raw_routes = r["routes"]
+            if raw_routes is not None and not isinstance(raw_routes, list):
+                raise ValidationError(
+                    f"router: 'routes' must be a list, got {type(raw_routes).__name__}"
+                )
             router = Router(
                 name=_prose(r, "name", "router", null_ok=True, strip=False),
                 description=_prose(r, "description", "router", null_ok=True),
                 routes=[
                     Route(
                         when=_prose(x, "when", "router route"),
-                        run=x["run"],
+                        run=_str_list(x, "run", "router route"),
                         note=_prose(x, "note", "router route", required=False),
-                        shapes=x.get("shapes"),
+                        shapes=_optional_str_list(x, "shapes", "router route"),
                     )
-                    for x in (r["routes"] or [])
+                    for x in (raw_routes or [])
                 ],
                 body=_prose(r, "body", "router", required=False),
             )
@@ -855,31 +941,31 @@ def load_manifest(path: str) -> Manifest:
             synthesizer = Synthesizer(
                 name=_prose(sy, "name", "synthesizer", null_ok=True, strip=False),
                 description=_prose(sy, "description", "synthesizer", null_ok=True),
-                severity_order=sy["severity_order"],
+                severity_order=_str_list(sy, "severity_order", "synthesizer"),
                 tensions=[
                     Tension(
-                        between=t["between"],
+                        between=_str_list(t, "between", "synthesizer tension"),
                         about=_prose(t, "about", "synthesizer tension", null_ok=True),
                         resolve=_prose(
                             t, "resolve", "synthesizer tension", null_ok=True
                         ),
                     )
-                    for t in (sy.get("tensions") or [])
+                    for t in _list_field(sy, "tensions", "synthesizer")
                 ],
             )
         except KeyError as e:
             raise ValidationError(f"synthesizer: missing field {e}") from e
     modes: list[Mode] = []
-    for i, raw_mode in enumerate(data.get("modes", []) or []):
+    for i, raw_mode in enumerate(_list_field(data, "modes", path)):
         try:
             modes.append(
                 Mode(
-                    name=raw_mode["name"],
+                    name=_prose(raw_mode, "name", f"modes[{i}] in {path}", strip=False),
                     breadth=_prose(
                         raw_mode, "breadth", f"modes[{i}] in {path}", null_ok=True
                     ),
-                    floor=raw_mode["floor"],
-                    triggers=list(raw_mode.get("triggers") or []),
+                    floor=_prose(raw_mode, "floor", f"modes[{i}] in {path}"),
+                    triggers=_str_list(raw_mode, "triggers", f"modes[{i}] in {path}"),
                     note=_prose(
                         raw_mode, "note", f"modes[{i}] in {path}", required=False
                     ),
@@ -888,7 +974,7 @@ def load_manifest(path: str) -> Manifest:
         except (KeyError, TypeError) as e:
             raise ValidationError(f"modes[{i}] in {path}: malformed mode ({e})")
     entrypoints: list[Entrypoint] = []
-    for i, raw_ep in enumerate(data.get("entrypoints", []) or []):
+    for i, raw_ep in enumerate(_list_field(data, "entrypoints", path)):
         try:
             shapes = raw_ep["shapes"]
             if not isinstance(shapes, list) or not all(
