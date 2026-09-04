@@ -378,6 +378,194 @@ def test_load_manifest_rejects_non_list_artifacts(tmp_path):
         load_manifest(path)
 
 
+_BASE_SKILL_YAML = (
+    "skills:\n"
+    "  - name: hunting-silent-failures\n"
+    "    description: x\n"
+    "    shape: diff\n"
+    "    wave: 1\n"
+    "    built_from:\n"
+    "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+)
+
+
+def test_load_manifest_rejects_a_scalar_eval_min(tmp_path):
+    # #381: eval_min: "5" used to reach _validate_skills' `eval_min < 3`
+    # comparison unchecked and raise a bare TypeError (str < int).
+    path = _write_manifest(
+        tmp_path,
+        f'taxonomy_version: v0.2\n{_BASE_SKILL_YAML}    eval_min: "5"\n',
+    )
+    with pytest.raises(ValidationError, match="'eval_min' must be an integer"):
+        load_manifest(path)
+
+
+def test_load_manifest_rejects_a_non_int_wave(tmp_path):
+    # #381: wave was unchecked entirely; a mapping value passed straight
+    # through to the Skill dataclass with no error at all.
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: { a: 1 }\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
+    )
+    with pytest.raises(ValidationError, match="'wave' must be an integer"):
+        load_manifest(path)
+
+
+def test_load_manifest_defaults_wave_to_zero_when_absent(tmp_path):
+    # #381: wave is read by nothing downstream, so requiring it at all was
+    # pure authoring overhead — it's optional now, defaulting to 0.
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
+    )
+    m = load_manifest(path)
+    assert m.skills[0].wave == 0
+
+
+def test_load_manifest_rejects_a_scalar_severity_order(tmp_path):
+    # #381: a scalar severity_order (e.g. "Blocker") is itself a string of
+    # length 7 with 7 distinct characters, so it silently satisfied
+    # _validate_synthesizer's own length/duplicate checks and rendered
+    # letter-by-letter into the generated synthesizer SKILL.md.
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        f"{_BASE_SKILL_YAML}"
+        "synthesizer:\n"
+        "  name: synthesizing-review-findings\n"
+        "  description: merge\n"
+        "  severity_order: Blocker\n"
+        "  tensions: []\n",
+    )
+    with pytest.raises(ValidationError, match="'severity_order' must be a list"):
+        load_manifest(path)
+
+
+def test_load_manifest_rejects_a_scalar_tension_between(tmp_path):
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        f"{_BASE_SKILL_YAML}"
+        "synthesizer:\n"
+        "  name: synthesizing-review-findings\n"
+        "  description: merge\n"
+        "  severity_order: [Blocker, Nit]\n"
+        "  tensions:\n"
+        "    - between: hunting-silent-failures\n"
+        "      about: x\n"
+        "      resolve: y\n",
+    )
+    with pytest.raises(ValidationError, match="'between' must be a list"):
+        load_manifest(path)
+
+
+def test_load_manifest_rejects_a_scalar_route_run(tmp_path):
+    # #381: Route.run was taken unchecked; a scalar string is truthy (so it
+    # passed the "needs when and run" check) and then iterated character by
+    # character against the known-skill-names set.
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        f"{_BASE_SKILL_YAML}"
+        "router:\n"
+        "  name: choosing-review-lenses\n"
+        "  description: route\n"
+        "  routes:\n"
+        "    - when: Bug fix\n"
+        "      run: hunting-silent-failures\n",
+    )
+    with pytest.raises(ValidationError, match="'run' must be a list"):
+        load_manifest(path)
+
+
+def test_load_manifest_rejects_a_non_list_router_routes(tmp_path):
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        f"{_BASE_SKILL_YAML}"
+        "router:\n"
+        "  name: choosing-review-lenses\n"
+        "  description: route\n"
+        '  routes: "not a list"\n',
+    )
+    with pytest.raises(ValidationError, match="'routes' must be a list"):
+        load_manifest(path)
+
+
+def test_load_manifest_rejects_a_non_string_mode_name(tmp_path):
+    # #381: Mode.name/floor bypassed _prose entirely; a non-string name
+    # died as a raw TypeError inside _validate_modes' re.match call.
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        f"{_BASE_SKILL_YAML}"
+        "modes:\n"
+        "  - name: 3\n"
+        "    breadth: x\n"
+        "    floor: escalating\n"
+        "    triggers: [a]\n",
+    )
+    with pytest.raises(ValidationError, match="'name' must be a string"):
+        load_manifest(path)
+
+
+def test_load_manifest_rejects_a_scalar_mode_triggers(tmp_path):
+    # #381: `triggers: quick` reached `list(raw_mode.get("triggers") or [])`
+    # unchecked, and `list("quick")` silently split it into five one-letter
+    # "triggers" instead of raising.
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        f"{_BASE_SKILL_YAML}"
+        "modes:\n"
+        "  - name: triage\n"
+        "    breadth: x\n"
+        "    floor: escalating\n"
+        "    triggers: quick\n",
+    )
+    with pytest.raises(ValidationError, match="'triggers' must be a list"):
+        load_manifest(path)
+
+
+def test_skill_construction_rejects_design_on_a_non_diff_shape():
+    # #381: Skill(shape="repo", design=True) was constructible directly —
+    # this invariant was enforced only by validate(), so a Skill built
+    # outside the loader (a test fixture, a future call site) and never
+    # validated could carry it silently.
+    with pytest.raises(ValidationError, match="design applies only to diff-shaped"):
+        Skill(
+            name="x",
+            description="d",
+            shape="repo",
+            built_from=[Source(1, "a#1")],
+            design=True,
+        )
+
+
+def test_skill_construction_rejects_empty_artifacts_on_artifact_shape():
+    with pytest.raises(ValidationError, match="non-empty `artifacts`"):
+        Skill(
+            name="x",
+            description="d",
+            shape="artifact",
+            built_from=[Source(1, "a#1")],
+            artifacts=[],
+        )
+
+
 def test_load_manifest_treats_bare_picker_as_empty_string(tmp_path):
     # Review follow-up on #142: picker=s.get("picker", "").strip() has the
     # same bare-null gap cross_ref/artifacts had -- .get(key, "") only

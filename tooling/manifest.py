@@ -58,9 +58,12 @@ class Skill:
     name: str
     description: str
     shape: str
-    wave: int
     built_from: list[Source]
-    primary_owner: int | None = None
+    # Not read by anything downstream (verified: no generator, router, or
+    # entrypoint code touches it) -- retained only because every manifest
+    # entry already writes one and requiring it costs an author nothing, but
+    # it need not block construction the way a load-bearing field should.
+    wave: int = 0
     cross_ref: list[int] = field(default_factory=list)
     design: bool = False  # diff lens that also applies to design docs/plans
     picker: str = ""  # one-line differentiator for the router catalog
@@ -79,6 +82,23 @@ class Skill:
     # D8 baseline of 3" — set only on lenses whose eval suite has actually
     # been raised to this bar.
     eval_min: int | None = None
+
+    def __post_init__(self) -> None:
+        # Structural invariants a caller shouldn't be able to construct
+        # around, mirroring Source.__post_init__'s pattern -- these were
+        # previously enforced only by validate(), so a Skill built directly
+        # (a test fixture, a future call site) and never passed to
+        # validate() could carry a self-contradictory shape/design or
+        # shape/artifacts combination that _scope_line, the router catalog,
+        # and entrypoint_lenses would then each read differently (#381).
+        if self.design and self.shape != "diff":
+            raise ValidationError(
+                f"{self.name}: design applies only to diff-shaped lenses"
+            )
+        if self.shape == "artifact" and not self.artifacts:
+            raise ValidationError(
+                f"{self.name}: an artifact-shaped lens needs a non-empty `artifacts` table"
+            )
 
 
 @dataclass
@@ -706,6 +726,27 @@ def _str_list(mapping: dict, key: str, where: str) -> list[str]:
     return list(value)
 
 
+def _optional_str_list(mapping: dict, key: str, where: str) -> list[str] | None:
+    """Like `_str_list`, but a present-but-null or absent value stays `None`
+    rather than normalizing to `[]` — for a field whose absence is itself
+    meaningful (`Route.shapes`: `None` means "defaults to `['diff']`",
+    distinct from an explicit, empty list)."""
+    value = mapping.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise ValidationError(
+            f"{where}: {key!r} must be a list, got {type(value).__name__}"
+        )
+    for item in value:
+        if not isinstance(item, str):
+            raise ValidationError(
+                f"{where}: every {key!r} entry must be a string, "
+                f"got {type(item).__name__} ({item!r})"
+            )
+    return list(value)
+
+
 def load_manifest(path: str) -> Manifest:
     with open(path, encoding="utf-8") as fh:
         raw = fh.read()
@@ -752,20 +793,32 @@ def load_manifest(path: str) -> Manifest:
                 )
                 for a in _list_field(s, "artifacts", i)
             ]
+            wave = s.get("wave", 0)
+            if not isinstance(wave, int) or isinstance(wave, bool):
+                raise ValidationError(
+                    f"skill #{i}: 'wave' must be an integer, got {type(wave).__name__}"
+                )
+            eval_min = s.get("eval_min")
+            if eval_min is not None and (
+                not isinstance(eval_min, int) or isinstance(eval_min, bool)
+            ):
+                raise ValidationError(
+                    f"skill #{i}: 'eval_min' must be an integer, "
+                    f"got {type(eval_min).__name__}"
+                )
             skills.append(
                 Skill(
                     name=_prose(s, "name", f"skill #{i}", null_ok=True, strip=False),
                     description=_prose(s, "description", f"skill #{i}", null_ok=True),
                     shape=s["shape"],
-                    wave=s["wave"],
+                    wave=wave,
                     built_from=built,
-                    primary_owner=s.get("primary_owner"),
                     cross_ref=_list_field(s, "cross_ref", i),
                     design=s.get("design", False),
                     picker=_prose(s, "picker", f"skill #{i}", required=False),
                     artifacts=artifacts,
                     tier=s.get("tier", "preference"),
-                    eval_min=s.get("eval_min"),
+                    eval_min=eval_min,
                 )
             )
         except KeyError as e:
@@ -775,6 +828,11 @@ def load_manifest(path: str) -> Manifest:
     router = None
     if "router" in data:
         r = data["router"]
+        raw_routes = r["routes"]
+        if raw_routes is not None and not isinstance(raw_routes, list):
+            raise ValidationError(
+                f"router: 'routes' must be a list, got {type(raw_routes).__name__}"
+            )
         try:
             router = Router(
                 name=_prose(r, "name", "router", null_ok=True, strip=False),
@@ -782,11 +840,11 @@ def load_manifest(path: str) -> Manifest:
                 routes=[
                     Route(
                         when=_prose(x, "when", "router route"),
-                        run=x["run"],
+                        run=_str_list(x, "run", "router route"),
                         note=_prose(x, "note", "router route", required=False),
-                        shapes=x.get("shapes"),
+                        shapes=_optional_str_list(x, "shapes", "router route"),
                     )
-                    for x in (r["routes"] or [])
+                    for x in (raw_routes or [])
                 ],
                 body=_prose(r, "body", "router", required=False),
             )
@@ -855,10 +913,10 @@ def load_manifest(path: str) -> Manifest:
             synthesizer = Synthesizer(
                 name=_prose(sy, "name", "synthesizer", null_ok=True, strip=False),
                 description=_prose(sy, "description", "synthesizer", null_ok=True),
-                severity_order=sy["severity_order"],
+                severity_order=_str_list(sy, "severity_order", "synthesizer"),
                 tensions=[
                     Tension(
-                        between=t["between"],
+                        between=_str_list(t, "between", "synthesizer tension"),
                         about=_prose(t, "about", "synthesizer tension", null_ok=True),
                         resolve=_prose(
                             t, "resolve", "synthesizer tension", null_ok=True
@@ -874,12 +932,12 @@ def load_manifest(path: str) -> Manifest:
         try:
             modes.append(
                 Mode(
-                    name=raw_mode["name"],
+                    name=_prose(raw_mode, "name", f"modes[{i}] in {path}", strip=False),
                     breadth=_prose(
                         raw_mode, "breadth", f"modes[{i}] in {path}", null_ok=True
                     ),
-                    floor=raw_mode["floor"],
-                    triggers=list(raw_mode.get("triggers") or []),
+                    floor=_prose(raw_mode, "floor", f"modes[{i}] in {path}"),
+                    triggers=_str_list(raw_mode, "triggers", f"modes[{i}] in {path}"),
                     note=_prose(
                         raw_mode, "note", f"modes[{i}] in {path}", required=False
                     ),
