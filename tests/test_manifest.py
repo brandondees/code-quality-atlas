@@ -1257,6 +1257,39 @@ def test_load_manifest_rejects_non_mapping_route_entry(tmp_path):
         load_manifest(path)
 
 
+@pytest.mark.parametrize(
+    "bad_router_yaml",
+    [
+        'router: "a string"\n',
+        "router:\n  - 1\n  - 2\n",
+    ],
+)
+def test_load_manifest_rejects_non_mapping_router_section(tmp_path, bad_router_yaml):
+    # Regression (PR #411 review, round 2): the round-1 fix for the router
+    # routes KeyError placed `raw_routes = r["routes"]` ahead of any check
+    # that `r` (the `router:` section itself) is a mapping at all. A
+    # `router:` value that's a bare string or list indexes with a string
+    # key on a str/list, which raises a raw TypeError ("string indices must
+    # be integers" / "list indices must be integers or slices, not str")
+    # instead of the ValidationError every other malformed top-level
+    # section produces.
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    picker: p\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+        + bad_router_yaml,
+    )
+    with pytest.raises(ValidationError, match="router: must be a mapping"):
+        load_manifest(path)
+
+
 from tooling.manifest import Synthesizer, Tension
 
 

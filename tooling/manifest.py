@@ -839,6 +839,8 @@ def load_manifest(path: str) -> Manifest:
     router = None
     if "router" in data:
         r = data["router"]
+        if not isinstance(r, dict):
+            raise ValidationError(f"router: must be a mapping, got {type(r).__name__}")
         try:
             raw_routes = r["routes"]
             if raw_routes is not None and not isinstance(raw_routes, list):
