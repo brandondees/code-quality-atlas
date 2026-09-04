@@ -5,8 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
-
+from tooling.frontmatter import read_frontmatter
 from tooling.manifest import Source
 from tooling.sections import section_hash
 
@@ -24,16 +23,9 @@ class DriftReport:
 
 
 def _read_provenance(skill_md: Path) -> tuple[str, list[dict]]:
-    # `utf-8-sig` drops a BOM and `\r\n` -> `\n` normalizes a Windows checkout,
-    # so the `---\n` fence split works regardless of line endings/encoding mark.
-    text = skill_md.read_text(encoding="utf-8-sig").replace("\r\n", "\n")
-    # Frontmatter is the block between the first two `---` fences. Limit the
-    # split to 2 so a `---` in the body can't shift the parse, and validate the
-    # shape so a malformed header/body gives a clear ValueError, not Index/Type/KeyError.
-    parts = text.split("---\n", 2)
-    if len(parts) < 3 or parts[0].strip():
-        raise ValueError(f"{skill_md}: missing or malformed YAML frontmatter")
-    front = yaml.safe_load(parts[1])
+    # Validate the shape so a malformed header/body gives a clear
+    # ValueError, not Index/Type/KeyError.
+    _, front = read_frontmatter(skill_md)
     if (
         not isinstance(front, dict)
         or "name" not in front

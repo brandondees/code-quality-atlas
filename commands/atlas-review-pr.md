@@ -58,12 +58,12 @@ Pull only what step 2 needs right now: the PR's identifying metadata and its
 author's login (`mcp__github__pull_request_read`, `get` method — step 5's
 own-PR fallback needs that login), and from that same call note the PR's
 **base ref** (`base.ref`, e.g. `main`) — steps 3 and 4 pin policy and lens
-content to it — plus its existing reviews/comments (the `reviews`/`comments`
+content to it — plus its existing reviews/comments (the `get_reviews`/`get_comments`
 methods) so step 2 can count rounds. Those two methods return an
 `author_association` per review and per comment; the `get` method returns
 none for the PR itself, which is why step 4.1 gates the depth mode on
-comments and reviews and never on the description. **Defer the `diff`
-and `files` methods to step 4**, where the lenses actually consume them —
+comments and reviews and never on the description. **Defer the `get_diff`
+and `get_files` methods to step 4**, where the lenses actually consume them —
 pulling the full diff now buys nothing before the ack and only delays it.
 
 ## 2. Determine the review round, then post the ACK before anything else
@@ -375,8 +375,12 @@ line.
   not already raised in a still-standing thread from an earlier round. Don't repost a
   finding an open thread already records; the original thread is the record.
 - For new findings **at or above the floor**, post **inline review comments** anchored
-  to the diff hunk (`add_comment_to_pending_review`, then submit with
-  `pull_request_review_write`). When a finding is a flaw in code that was *pushed
+  to the diff hunk: first open this round's pending review
+  (`mcp__github__pull_request_review_write`, method `create`, no `event` — this
+  is the "step 5's own pending review" referenced elsewhere in this file), then
+  attach each finding with `add_comment_to_pending_review`, then submit with
+  `pull_request_review_write` (method `submit_pending`, carrying the verdict
+  decided below). When a finding is a flaw in code that was *pushed
   in response to an earlier round*, say so in the comment — that's the highest-value
   catch.
 - For findings **below the floor**, do **not** open inline threads. Instead list

@@ -19,6 +19,13 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Weekly, path-independent: the "dependency vulnerability audit" step below
+  # is path-gated (only runs when python/requirements changed), so a CVE
+  # published against an unchanged pin is never scanned between pushes (#379).
+  # This trigger and the step's own `if:` (search "schedule" below) exist so
+  # pip-audit runs against main on a fixed cadence regardless of diff.
+  schedule:
+    - cron: "0 6 * * 1"
 
 permissions:
   contents: read
@@ -106,8 +113,9 @@ jobs:
       # `AGENTS.md`/`CLAUDE.md` (test_routing_snippet_sync.py, issues
       # #64/#167's drift guard); `templates/REVIEW.md`/`REVIEW.md`
       # (test_review_template_sync.py); `docs/map/**`
-      # (test_map_twins_sync.py); `LICENSE` (test_license_paths_exhaustive.py,
-      # walking top-level dirs); `.pre-commit-config.yaml`
+      # (test_map_twins_sync.py); `LICENSE*` (test_license_paths_exhaustive.py,
+      # walking top-level dirs; also covers `LICENSE-CC-BY-4.0`, read by
+      # test_vendor_skills.py/test_package_account_zips.py); `.pre-commit-config.yaml`
       # (test_precommit_ci_version_sync.py); `hooks/**`
       # (test_hooks.py -- NOT covered by being in the `shell` filter below,
       # since `shell` doesn't gate the `tests` step); `.claude-plugin/
@@ -140,7 +148,7 @@ jobs:
               - "CLAUDE.md"
               - "README.md"
               - "REVIEW.md"
-              - "LICENSE"
+              - "LICENSE*"
               - ".claude-plugin/plugin.json"
               - ".claude-plugin/marketplace.json"
               - "docs/distribution.md"
@@ -160,11 +168,18 @@ jobs:
               - "tooling/**/*.sh"
               - "hooks/**"
               - "collapsed/hooks/**"
+              - ".github/workflows/ci.yml"
             markdown:
               - "**/*.md"
               - ".markdownlint-cli2.jsonc"
+              - ".markdownlint-cli2.yaml"
+              - ".markdownlint-cli2.cjs"
+              - ".markdownlint-cli2.mjs"
+              - ".markdownlint.cjs"
+              - ".markdownlint.mjs"
+              - ".github/workflows/ci.yml"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        if: github.event_name == 'schedule' || steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         with:
           python-version: "3.12"
           cache: 'pip'
@@ -182,7 +197,7 @@ jobs:
       # this step -- carries the same guarantee through every later step that
       # invokes pip/python/ruff/pytest (pip-tools and pip-audit below
       # included), without touching each of them individually.
-      - if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+      - if: github.event_name == 'schedule' || steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: |
           python -m venv --clear "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/pip" install --require-hashes -r requirements.txt
@@ -267,7 +282,10 @@ jobs:
             exit 1
           }
       - name: dependency vulnerability audit
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        # Also runs on the weekly `schedule` trigger above (#379), independent
+        # of the path filter, so a CVE against an unchanged pin doesn't wait
+        # for the next python/requirements-touching push to be caught.
+        if: github.event_name == 'schedule' || steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: |
           # pip-audit IS the CI vulnerability gate this repo relies on — unlike
           # requirements.txt's deps (hash-pinned, resolved once and committed),

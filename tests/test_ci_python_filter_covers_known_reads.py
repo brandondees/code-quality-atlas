@@ -42,6 +42,7 @@ _KNOWN_EXTERNAL_READS = (
     "docs/map/routing.md",
     "docs/map/_templates/process.md",
     "LICENSE",  # test_license_paths_exhaustive.py
+    "LICENSE-CC-BY-4.0",  # test_vendor_skills.py, test_package_account_zips.py
     ".pre-commit-config.yaml",  # test_precommit_ci_version_sync.py
     ".github/workflows/ci.yml",
     "hooks/hooks.json",  # test_hooks.py
