@@ -9,7 +9,8 @@ from tooling.sections import (
     strip_priority,
 )
 
-SAMPLE = Path("tests/fixtures/research_sample.md").read_text()
+ROOT = Path(__file__).resolve().parent.parent
+SAMPLE = (ROOT / "tests" / "fixtures" / "research_sample.md").read_text()
 
 
 def test_priority_marker_detection_and_stripping():

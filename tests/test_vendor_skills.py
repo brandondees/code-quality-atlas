@@ -43,7 +43,15 @@ def test_switching_to_collapsed_preserves_standalone_names_in_marker(tmp_path):
 
     run_vendor(target)
     standalone_names = marker_names(target)
-    assert len(standalone_names) > 4  # sanity: the standalone suite is large
+    expected_standalone_names = {
+        p.parent.name for p in (REPO_ROOT / "skills").glob("*/SKILL.md")
+    }
+    assert standalone_names == expected_standalone_names, (
+        "the marker must record exactly the skills/*/SKILL.md directories — "
+        "a threshold check here would miss a narrowed vendoring glob "
+        f"(missing: {expected_standalone_names - standalone_names}, "
+        f"extra: {standalone_names - expected_standalone_names})"
+    )
 
     run_vendor(target, "--collapsed")
     names_after_collapsed = marker_names(target)
@@ -118,17 +126,29 @@ def test_vendor_writes_attribution_notice(tmp_path):
 
 def test_vendor_refreshes_attribution_notice_on_rerun(tmp_path):
     """A second run must rewrite NOTICE.md (refresh), not leave a stale one from
-    an earlier commit — mirroring how vendor_one refreshes the skill dirs."""
+    an earlier commit — mirroring how vendor_one refreshes the skill dirs.
+
+    An mtime comparison here is true by construction (a fresh write's mtime
+    is never earlier than the previous one) and would pass even if the second
+    run short-circuited on an already-existing NOTICE.md and never touched
+    it. Prove an actual rewrite instead: corrupt the file's content after the
+    first run, then assert the second run overwrites the corruption back to
+    the correct notice — that's only possible if the script actually
+    rewrites the file every run."""
     target = tmp_path / "target-repo"
     target.mkdir()
 
     run_vendor(target)
-    first_mtime = (target / ".claude" / "skills" / "NOTICE.md").stat().st_mtime_ns
+    correct_notice = notice_text(target)
+
+    notice_path = target / ".claude" / "skills" / "NOTICE.md"
+    notice_path.write_text("stale corrupted content from a previous commit\n")
 
     run_vendor(target)
-    second_mtime = (target / ".claude" / "skills" / "NOTICE.md").stat().st_mtime_ns
-    assert second_mtime >= first_mtime
-    assert notice_text(target)  # still present and non-empty
+    assert notice_text(target) == correct_notice, (
+        "a second run must rewrite NOTICE.md unconditionally — it left the "
+        "corrupted content in place instead of overwriting it"
+    )
 
 
 def test_collapsed_vendor_also_writes_attribution_notice(tmp_path):

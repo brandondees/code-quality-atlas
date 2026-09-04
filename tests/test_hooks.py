@@ -36,9 +36,49 @@ _SESSION_END_INPUT = json.dumps(
     }
 )
 
+# Every external tool a hook script under test might shell out to.
+_COMMON_TOOLS = (
+    "bash",
+    "sh",
+    "cat",
+    "mkdir",
+    "printf",
+    "date",
+    "git",
+    "grep",
+    "sed",
+    "awk",
+    "dirname",
+    "jq",
+    "wc",
+    "tr",
+    "cut",
+    "sha256sum",
+    "shasum",
+)
+
+
+def _resolved_path() -> str:
+    """A PATH built from `shutil.which` for the tools above, not a hardcoded
+    FHS-shaped guess (`/usr/bin:/bin:/usr/local/bin`). A fixed guess silently
+    makes a genuinely-installed tool invisible to the subprocess on any
+    non-FHS system (Homebrew, Nix, ...) — and worse, a test meant to exercise
+    a hook's *own* fallback logic (e.g. an invalid feedback tier) would then
+    pass for the wrong reason: jq being merely unreachable via the hardcoded
+    PATH trips the hook's *own* "no jq" no-op branch instead of the logic
+    actually under test (#390)."""
+    seen: list[str] = []
+    for tool in _COMMON_TOOLS:
+        found = shutil.which(tool)
+        if found:
+            directory = str(Path(found).parent)
+            if directory not in seen:
+                seen.append(directory)
+    return ":".join(seen) if seen else "/usr/bin:/bin:/usr/local/bin"
+
 
 def _run(hook, cwd, stdin, env_extra=None):
-    env = {"PATH": "/usr/bin:/bin:/usr/local/bin", "HOME": str(cwd)}
+    env = {"PATH": _resolved_path(), "HOME": str(cwd)}
     if env_extra:
         env.update(env_extra)
     result = subprocess.run(
@@ -731,7 +771,7 @@ def test_track_rejects_a_path_traversal_shaped_session_id(tmp_path):
 
 
 def _run_gate(cwd, stdin, env_extra=None):
-    env = {"PATH": "/usr/bin:/bin:/usr/local/bin", "HOME": str(cwd)}
+    env = {"PATH": _resolved_path(), "HOME": str(cwd)}
     if env_extra:
         env.update(env_extra)
     return subprocess.run(

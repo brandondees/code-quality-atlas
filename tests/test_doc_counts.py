@@ -91,13 +91,21 @@ def test_documented_counts_match_manifest():
 # and the dated per-entry history in docs/open-questions.md are narrative logs
 # that intentionally freeze *past* counts at the time they were written (e.g.
 # "README 31->32 lenses / 33->34 total") -- sweeping those would false-positive
-# on correct historical prose, not catch drift.
+# on correct historical prose, not catch drift. docs/taxonomy.md is the same
+# shape as those (a "v0.N changes" dated changelog, not a living-state doc)
+# and its own top-of-file "N categories" figure tracks a different noun
+# (categories/clusters/factors) this sweep's keyword set doesn't track at
+# all -- deliberately excluded here too, for the same reason, not omitted
+# by oversight (#390).
 _LIVING_COUNT_FILES = (
     "README.md",
+    "AGENTS.md",
+    "CLAUDE.md",
     "docs/distribution.md",
     "docs/install.md",
     "docs/collapsed-entrypoints-and-depth-modes.md",
     "docs/review-depth-modes.md",
+    "templates/agents-routing-snippet.md",
     "tooling/vendor-skills.sh",
     "tooling/package-account-zips.sh",
     # docs/open-questions.md is otherwise excluded (see above): it mixes

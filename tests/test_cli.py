@@ -6,15 +6,17 @@ from pathlib import Path
 
 from tooling.cli import main
 
+ROOT = Path(__file__).resolve().parent.parent
+
 
 def test_cli_generate_then_drift_reports_clean(tmp_path, capsys):
     rc = main(
         [
             "generate",
             "--manifest",
-            "tests/fixtures/manifest_sample.yaml",
+            str(ROOT / "tests" / "fixtures" / "manifest_sample.yaml"),
             "--docs-root",
-            ".",
+            str(ROOT),
             "--skills-root",
             str(tmp_path),
         ]
@@ -22,7 +24,7 @@ def test_cli_generate_then_drift_reports_clean(tmp_path, capsys):
     assert rc == 0
     assert (tmp_path / "hunting-silent-failures" / "SKILL.md").exists()
 
-    rc = main(["drift", "--skills-root", str(tmp_path), "--docs-root", "."])
+    rc = main(["drift", "--skills-root", str(tmp_path), "--docs-root", str(ROOT)])
     out = capsys.readouterr().out
     assert rc == 0
     assert "No drift" in out
@@ -73,13 +75,24 @@ def test_cli_eval_reports_valid_and_invalid(tmp_path, capsys):
         json.dumps({"skills": ["bad-skill"], "scenarios": []})
     )
 
-    rc = main(["eval", "--skills-root", str(tmp_path)])
+    manifest = str(ROOT / "skills" / "manifest.yaml")
+    rc = main(["eval", "--skills-root", str(tmp_path), "--manifest", manifest])
     out = capsys.readouterr().out
     assert rc == 1  # at least one invalid
     assert "OK: good-skill (3 scenarios)" in out
     assert "INVALID: bad-skill" in out
 
-    rc = main(["eval", "--skills-root", str(tmp_path), "--skill", "good-skill"])
+    rc = main(
+        [
+            "eval",
+            "--skills-root",
+            str(tmp_path),
+            "--skill",
+            "good-skill",
+            "--manifest",
+            manifest,
+        ]
+    )
     assert rc == 0  # filtering to the valid one passes
 
 
@@ -223,9 +236,9 @@ def test_cli_generate_emits_collapsed(tmp_path):
         [
             "generate",
             "--manifest",
-            "skills/manifest.yaml",
+            str(ROOT / "skills" / "manifest.yaml"),
             "--docs-root",
-            ".",
+            str(ROOT),
             "--skills-root",
             str(tmp_path / "skills"),
             "--collapsed-root",
@@ -247,9 +260,9 @@ def test_cli_generate_reports_collapsed_overlap_cleanly(tmp_path, capsys):
         [
             "generate",
             "--manifest",
-            "skills/manifest.yaml",
+            str(ROOT / "skills" / "manifest.yaml"),
             "--docs-root",
-            ".",
+            str(ROOT),
             "--skills-root",
             str(tmp_path / "skills"),
             "--collapsed-root",
