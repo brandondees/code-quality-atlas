@@ -707,11 +707,12 @@ def load_manifest(path: str) -> Manifest:
         p = data["prepass"]
         try:
             # Every prose field goes through _prose(), which *rejects* a
-            # non-string rather than coercing it. The sibling blocks' `or ""`
-            # idiom is not enough here: `str(value)` would turn a bare
-            # `source:` (YAML null) into the literal string "None", which then
-            # sails past _validate_prepass's non-empty check and ships a table
-            # row reading "None" (CodeRabbit review on #206). A number would
+            # non-string rather than coercing it. The sibling blocks' looser
+            # `null_ok=True` tolerance (present-but-null normalizes to "") is
+            # not enough here: `str(value)` would turn a bare `source:` (YAML
+            # null) into the literal string "None", which then sails past
+            # _validate_prepass's non-empty check and ships a table row
+            # reading "None" (CodeRabbit review on #206). A number would
             # instead raise a raw AttributeError from `.strip()`. Both are
             # malformed-manifest cases and both must surface as the
             # ValidationError naming the field. `or []` on the lists is

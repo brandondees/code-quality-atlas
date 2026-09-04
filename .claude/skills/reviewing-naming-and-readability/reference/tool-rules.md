@@ -21,9 +21,9 @@
 - **ESLint `id-match`** — identifiers must match a configurable regex (encode a naming convention as a rule).
 - **ESLint `id-denylist`** (formerly `id-blacklist`) — bans specific low-information names project-wide (`data`, `err`, `cb`, `temp`). The denylist is itself a reusable "vague-name" seed list.
 - **Pylint `invalid-name` (C0103)** — identifier doesn't match the naming style for its kind (module/class/const/var/arg); per-kind regex config models "different name shapes for different roles." ([docs](https://pylint.readthedocs.io/en/latest/user_guide/messages/convention/invalid-name.html))
-- **Pylint `disallowed-name` (C0104)** — flags placeholder names; **default `bad-names` = `foo`, `bar`, `baz`** (configurable). ([docs](https://pylint.pycqa.org/en/latest/user_guide/messages/convention/disallowed-name.html)) Direct hit on the "placeholder/vague name" facet.
+- **Pylint `disallowed-name` (C0104)** — flags placeholder names; **default `bad-names` = `foo`, `bar`, `baz`, `toto`, `tutu`, `tata`** (configurable). ([docs](https://pylint.pycqa.org/en/latest/user_guide/messages/convention/disallowed-name.html)) Direct hit on the "placeholder/vague name" facet.
 - **RuboCop `Naming/MethodName`, `Naming/VariableName`, `Naming/ClassAndModuleCamelCase`, `Naming/ConstantName`** — Ruby naming conventions per identifier kind.
-- **RuboCop `Naming/PredicateName`, `Naming/PredicateMethod`** — predicate methods should read as questions, avoid redundant `is_`/`has_` prefixes (Ruby idiom).
+- **RuboCop `Naming/PredicatePrefix`** (renamed from `Naming/PredicateName` in 1.76.0), **`Naming/PredicateMethod`** — predicate methods should read as questions, avoid redundant `is_`/`has_` prefixes (Ruby idiom).
 - **RuboCop `Naming/AccessorMethodName`** — getters/setters shouldn't be `get_`/`set_`-prefixed in Ruby (idiom-specific; cross-links #8).
 - **golangci-lint `revive` (`var-naming`) / legacy `golint`** — flag stutter (`http.HTTPServer`), non-idiomatic initialisms (`Url` vs `URL`), missing doc-comment on exported names.
 - **Reek `UncommunicativeVariableName`, `UncommunicativeMethodName`, `UncommunicativeModuleName`** — single-letter/numeric-suffixed/low-information names (Ruby). Strong direct mapping to "vague name."

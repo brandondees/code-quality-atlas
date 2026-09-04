@@ -1293,7 +1293,7 @@ Second **Wave C** new lens, first **v0.5** promotion, and the deliberate **mirro
 
 **What shipped:**
 
-- **Research §#35** in [`cluster-2-readability.md`](research/cluster-2-readability.md) (next to #5–#8), grounded in cited prior art: "AI-friendly codebases" and "coding agents as a first-class project-structure concern" (the **40% context rule**, depth-first slices, self-contained modules, AST-grounded interfaces), *Lost in the Middle* (Liu et al. — retrieval degrades mid-context, so context economy is a correctness-adjacent property, not style), the `llms.txt` proposal, GitClear's "superficially clean but intrinsically complex" read from the reader's side, and the Anthropic AGENTS.md/skill-authoring spine. 9 heuristics, 2 priority-marked (G9): context economy / self-containment, and present-accurate-scoped agent onboarding.
+- **Research §#35** in [`cluster-2-readability.md`](research/cluster-2-readability.md) (next to #5–#8), grounded in cited prior art: "AI-friendly codebases" and "coding agents as a first-class project-structure concern" (the **40% context rule**, depth-first slices, self-contained modules), *Lost in the Middle* (Liu et al. — retrieval degrades mid-context, so context economy is a correctness-adjacent property, not style), the `llms.txt` proposal, GitClear's "superficially clean but intrinsically complex" read from the reader's side, and the Anthropic AGENTS.md/skill-authoring spine. 9 heuristics, 2 priority-marked (G9): context economy / self-containment, and present-accurate-scoped agent onboarding.
 - **Taxonomy v0.5** — new category **#35 Agent-legibility** in Cluster II; version header, count (34→35), changes note, and numbering note updated.
 - **Lens `reviewing-agent-legibility`** (shape: diff, wave 5) — a **single-category lens** (built_from #35, no cross_ref): the agent-as-reader vantage is genuinely new, so its checks live in #35 rather than being shared. Cross-links #5–#8/#21/#22/#24/#30 in prose; the sharp seam with #30 (artifact *conformance* vs. onboarding *content fit*) and #24 (operator parity) is stated. **Diff arm only**; a whole-repo agent-navigability audit arm is a noted follow-up, mirroring the #32/#33 incremental precedent (restraint over shipping both arms at once).
 - **Router** — a dedicated route ("change to an AI-/agent-maintained codebase, to agent-onboarding files or repo structure an agent must navigate, or a large/scattered change whose context economy matters" → `reviewing-agent-legibility` + naming/readability + restraint); auto-listed in the diff catalog.
@@ -4858,3 +4858,54 @@ clean.
 `PENDING` reviews are returned by the list-reviews endpoint to their own
 author; `pytest` 528/528 (524 + 4 new),
 `ruff`/`markdownlint-cli2`/`tooling.cli drift` clean.
+
+### 2026-09-04 — #393: research/comment accuracy sweep (128-tool cap, RuboCop rename, Pylint default, picomatch, two stale comments)
+
+Six independently-verified inaccuracies from the whole-repo audit (#347),
+each checked against the tool's own current docs/source rather than taken
+on the issue's word:
+
+1. `artifact-scoped-lenses.md` claimed all three major providers "cap hard
+   at ~128 tools." Confirmed via web search against each provider's own
+   docs: OpenAI (128 functions/request) and Gemini (128 function
+   declarations/request, per Firebase's Gemini docs) do; Anthropic
+   documents no fixed cap and ships a tool-search tool for large catalogs
+   instead. Rewrote as provider-specific with a citation per provider.
+2. Four sites (`cluster-2-readability.md`, `map-gaps.md`,
+   `taxonomy-gap-hunt-round-3.md`, `session-log.md`) credited a dev.to
+   article with "AST-grounded agent interfaces"; the article never
+   mentions AST or interfaces. Dropped the phrase from all four `→ mine:`
+   notes.
+3. `cluster-2-readability.md` cited RuboCop `Naming/PredicateName`,
+   renamed to `Naming/PredicatePrefix` in 1.76.0 — confirmed via RuboCop's
+   own changelog/docs. Updated the citation, kept `Naming/PredicateMethod`
+   as-is.
+4. Same file understated Pylint's `bad-names` default as `foo, bar, baz`;
+   confirmed via Pylint's own docs the real default is `foo, bar, baz,
+   toto, tutu, tata`.
+5. `tests/test_ci_python_filter_covers_known_reads.py` called
+   dorny/paths-filter "minimatch-backed" in two places; `ci.yml` and the
+   action's own `src/filter.ts` (v4.0.3) say picomatch. Fixed both.
+6. Two stale code comments: `tooling/generate.py`'s facade docstring used
+   `_checklist_body` as the example of a call-based re-export that can't
+   be monkeypatched through the facade — but `_checklist_body` was never
+   re-exported there at all (only `_escape_table_cell` is); swapped in the
+   real example. `tooling/manifest.py`'s prepass-validation comment
+   contrasted itself against "the sibling blocks' `or \"\"` idiom" — that
+   literal idiom no longer exists anywhere in `tooling/` (grepped to
+   confirm); the sibling skill/router/synthesizer blocks now go through
+   `_prose(..., null_ok=True)` instead. Reworded the comment to name the
+   actual current mechanism.
+
+Regenerated affected skills (`reviewing-agent-legibility`,
+`reviewing-naming-and-readability`) and their collapsed/vendored mirrors
+after the research-doc edits, per the standing authoring rule.
+
+**Verification:** `pytest` 528/528 (the vendor-skills "clean git target"
+test transiently fails against an uncommitted working tree by design — it
+warns exactly because this repo, as its own vendoring source, had
+uncommitted `skills/` changes; passes once committed); `ruff check` clean
+on touched files (a pre-existing, unrelated `ruff format` diff in
+`tooling/manifest.py` predates this change, confirmed via `git stash`);
+`tooling.cli drift` clean; `markdownlint-cli2` (pinned to CI's v0.23.2) 0
+issues across all 490 files.
