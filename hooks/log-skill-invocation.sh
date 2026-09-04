@@ -45,18 +45,37 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
 else
   _lib="${_hook_dir}/lib/feedback-tier.sh"
 fi
+# A missing/unreadable lib can't tell us the tier at all, so this exits the
+# same way "off" would rather than let `set -u` and no lib functions defined
+# fail loudly out from under `source` (#365).
+[ -f "$_lib" ] || exit 0
 # shellcheck source=lib/feedback-tier.sh
 source "$_lib"
 
-case "$(feedback_tier)" in
-  local|draft|auto) ;;
+_tier="$(feedback_tier)"
+case "$_tier" in
+  local) ;;
+  draft | auto)
+    # Stages 2+ (drafting a PR comment, auto-posting it) are unbuilt — both
+    # tiers are accepted and currently behave exactly like "local" (#365).
+    # One trace line so an operator who deliberately opted into draft/auto
+    # isn't left assuming they got that tier's not-yet-existing behavior.
+    printf 'code-quality-atlas: feedback tier %s is not yet distinguished from local\n' \
+      "$_tier" >&2
+    ;;
   *) exit 0 ;;
 esac
 
-command -v jq >/dev/null 2>&1 || exit 0   # no jq: skip logging rather than guess-parse JSON by hand
+if ! command -v jq >/dev/null 2>&1; then
+  printf 'code-quality-atlas: jq not found on PATH; skipping this invocation\n' >&2
+  exit 0
+fi
 
-log_dir=".code-quality-atlas/learnings"
-mkdir -p "$log_dir" 2>/dev/null || exit 0
+log_dir="$(_code_quality_atlas_project_dir)/.code-quality-atlas/learnings"
+if ! mkdir -p "$log_dir" 2>/dev/null; then
+  printf 'code-quality-atlas: could not create %s; skipping this invocation\n' "$log_dir" >&2
+  exit 0
+fi
 
 plugin_sha=""
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
@@ -99,6 +118,6 @@ record="$(printf '%s' "$input" | jq -c \
 
 [ -n "$record" ] || exit 0   # malformed stdin JSON (shouldn't happen — already checked above): skip silently
 
-printf '%s\n' "$record" >> "$log_dir/invocations.jsonl" 2>/dev/null
+_code_quality_atlas_append "$log_dir/invocations.jsonl" "$record"
 
 exit 0
