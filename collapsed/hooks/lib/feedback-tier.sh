@@ -161,6 +161,22 @@ _code_quality_atlas_append() {
     attempt=$((attempt + 1))
     sleep 0.02 2>/dev/null || true
   done
+  # Re-checked here, not just above: the symlink/regular-file check before
+  # the lock leaves a check-then-act window (dees-bot review, PR #413) where
+  # a second writer with the same access could swap $target for a symlink
+  # between that check and this write. Re-validating immediately before the
+  # `printf >>` shrinks that window from "the whole lock-acquisition
+  # sequence" to effectively nothing — not a full fix (POSIX shell has no
+  # O_NOFOLLOW-guarded append), but this hook's actual threat model is a
+  # symlink already committed in a cloned repo (fully closed by the earlier
+  # check), not a concurrent local attacker who could just as easily have
+  # committed that symlink in the first place.
+  if [ -L "$target" ] || { [ -e "$target" ] && [ ! -f "$target" ]; }; then
+    [ "$locked" -eq 1 ] && rmdir "$lock_dir" 2>/dev/null
+    printf 'code-quality-atlas: refusing to write to %s (not a regular file)\n' \
+      "$target" >&2
+    return 1
+  fi
   printf '%s\n' "$line" >>"$target" 2>/dev/null
   [ "$locked" -eq 1 ] && rmdir "$lock_dir" 2>/dev/null
   return 0

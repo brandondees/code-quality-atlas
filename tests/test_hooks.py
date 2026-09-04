@@ -742,6 +742,30 @@ def test_log_destination_size_cap_stops_further_appends(tmp_path):
     assert log.stat().st_size == size_before
 
 
+def test_append_falls_through_to_unlocked_write_when_lock_is_contended(tmp_path):
+    # Regression (dees-bot review, PR #413): the sixth named fix (writer
+    # serialization via a bounded mkdir-based lock) had no test exercising
+    # the lock itself — pre-creating <target>.lock forces the bounded-retry-
+    # then-degrade branch, and the line must still land (not silently drop)
+    # once the retries are exhausted, since this hook must never block the
+    # calling tool call indefinitely.
+    learnings_dir = _learnings_dir(tmp_path)
+    learnings_dir.mkdir(parents=True)
+    (learnings_dir / "invocations.jsonl.lock").mkdir()
+    env = {
+        "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+    }
+    _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra=env)
+    log = learnings_dir / "invocations.jsonl"
+    assert log.exists()
+    record = json.loads(log.read_text().strip().splitlines()[-1])
+    assert record["session_id"] == "s1"
+    # The pre-existing lock (held by someone else, in this scenario) must be
+    # left alone — this hook only ever removes a lock directory it created.
+    assert (learnings_dir / "invocations.jsonl.lock").is_dir()
+
+
 # --- #310: route.sh was the one hook with real content (the SessionStart
 # steering message) that no test ever executed — only that hooks.json
 # *declares* the SessionStart key (test_hooks_registered_in_hooks_json
