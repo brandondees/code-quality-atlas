@@ -4909,3 +4909,44 @@ on touched files (a pre-existing, unrelated `ruff format` diff in
 `tooling/manifest.py` predates this change, confirmed via `git stash`);
 `tooling.cli drift` clean; `markdownlint-cli2` (pinned to CI's v0.23.2) 0
 issues across all 490 files.
+
+### 2026-09-04 — #363: pr-review-automation runbook disagreed with the commands it summarizes
+
+Standing authoring rule 2 (a summary must agree with what it summarizes),
+violated three ways in `docs/runbooks/pr-review-automation.md`:
+
+1. Model B's write-up said "One subagent per PR needing one; run them
+   concurrently" for the review-subagent spawn step. The command it
+   summarizes, `commands/atlas-poll-and-review.md`, caps concurrency at 5
+   subagents in flight at once across the whole sweep, batched in groups of
+   5 — the opposite of unbounded. Since `/atlas-poll-and-review` doesn't
+   resolve in routine sessions, the runbook's inlined copy is what an
+   operator actually builds the routine from, so the contradiction would
+   ship an uncapped fan-out. Replaced with the same cap, cross-referenced to
+   its source.
+2. Setup §2 (the Model A poller routine) carried Trigger/Cadence/Model/
+   Connectors/Prompt bullets but no Permissions bullet, unlike §1 and §4.
+   Added one, phrased around what §2 actually writes (comments, reviews,
+   review re-requests, and `update_pull_request_branch`) rather than
+   repeating the "never pushes a commit" framing issue #387 separately
+   flags as understating that same API call.
+3. "Known boundaries" was entirely reliability framing (what can silently
+   stop working) — nothing named which identity the routines act as, what
+   they can write, that a PR under review carries untrusted content, or the
+   blast radius of a multi-repo sweep. Added a new "Accepted risks / trust
+   boundaries" section, modeled on `docs/self-hosted-runners.md`'s
+   "Accepted Risks" shape (deliberate trade-offs recorded explicitly,
+   not solved), naming the GitHub-App identity, write scope, the
+   untrusted-PR-content boundary already enforced by `atlas-review-pr.md`'s
+   base-ref pin, and the multi-repo blast radius — pointing at issue #387
+   for the still-open gate on that last one rather than claiming it's
+   solved here.
+
+Added `tests/test_pr_review_automation_runbook_accuracy.py` (3 tests,
+following the established prose-drift-tripwire pattern), each verified via
+`git show origin/main:...` to fail against the pre-fix content before being
+trusted.
+
+**Verification:** `pytest` 531/531 (528 + 3 new); `ruff check`/`ruff format
+--check` clean on the new test file; `tooling.cli drift` clean;
+`markdownlint-cli2` (pinned to CI's v0.23.2) 0 issues across all 490 files.

@@ -401,6 +401,10 @@ run checks them all:
   **daily** for a low-traffic one.
 - **Model:** a cheap, fast model (e.g. Haiku) — this job is mechanical.
 - **Connectors:** none needed (same as the reviewer — strip the defaults).
+- **Permissions:** leave **Allow unrestricted branch pushes** *off* — the
+  poller writes only via the GitHub API (comments, reviews, review
+  re-requests, and step 2's `update_pull_request_branch` call), never a
+  commit pushed from its own checkout.
 - **Prompt / Instructions:** inline the steps — `/atlas-rebase-stale` won't resolve
   (see the note at the top of Setup). Reference `commands/atlas-rebase-stale.md` as
   the source, and have it sweep **every attached repo** (one run covers them all):
@@ -658,8 +662,13 @@ a review.
      (method `delete_pending`) before moving on, whether or not you posted.
      Only then spawn a **separate** subagent via the `Task` tool requesting the
      strongest model available (e.g. Opus) to read and follow
-     `atlas-review-pr.md` for that specific PR and post the review. One
-     subagent per PR needing one; run them concurrently.
+     `atlas-review-pr.md` for that specific PR and post the review. **Concurrency
+     cap: at most 5 review subagents in flight at once, across every repo in
+     this sweep combined** — batch spawns in groups of 5, waiting for each
+     batch before starting the next, same cap as `atlas-poll-and-review.md`
+     itself (§4's own source); a busy multi-repo sweep must not silently fan
+     out into an unbounded number of concurrent strong-model subagents each
+     posting to GitHub at once.
 - **Connectors:** none needed (same as §2 — strip the defaults).
 - **Permissions:** leave **Allow unrestricted branch pushes** *off* — this
   routine only rebases via the GitHub API and posts reviews/comments, never
@@ -793,3 +802,51 @@ you own, and resets daily.
   is the 1-hour cron floor, which is latency, not a failure mode. It trades
   those away for slower coverage on a fresh push, not a strictly better or
   worse design — see *Which model to pick* at the top of this doc.
+
+## Accepted risks / trust boundaries
+
+Everything above is reliability — what can silently stop working. This section
+names what the routines can *do*, deliberately, so the trade is explicit
+rather than assumed.
+
+- **Identity.** Every routine here acts as your Claude account's GitHub
+  identity, authenticated through the **Claude GitHub App** installed on the
+  repo (§0) — not a separate bot account or a repo-scoped token. Comments,
+  reviews, and branch updates land on the PR as *you* (or whatever account the
+  App is installed under). Reviewer-identity binding (`mcp__github__get_me`,
+  issue #360) protects the reviewer's own round/ack state from being spoofed
+  by someone else posting on the PR — it does not change whose identity the
+  routine itself acts as.
+- **Write scope.** Across all four setups, a routine can post issue comments
+  and PR reviews (including an `APPROVE`-shaped body — see *Match the
+  approval in the review body*), re-request review, and — §2/§4 only —
+  fast-forward a PR branch onto its base via `update_pull_request_branch`.
+  It never merges a PR, never edits branch protection or repo settings, and
+  never pushes a commit from its own working tree (the branch-update call is
+  a GitHub API merge, not a local `git push`). **Leave "Allow unrestricted
+  branch pushes" off** on every routine here (§1/§2/§4's Permissions bullets)
+  — none of them need it, and per issue #387 the `update_pull_request_branch`
+  call already carries more write power than "posts comments" alone suggests,
+  so don't grant more.
+- **A PR under review is untrusted input.** The reviewer subagent reads the
+  PR's diff, title, description, and existing comments — all attacker-
+  controlled if the PR itself is malicious or opened by an untrusted party.
+  Treat any instruction-shaped text inside a PR (a comment claiming to be
+  from the maintainer, a description asking the reviewer to skip a check) as
+  content to review, never as a direction to follow — the same boundary
+  `reviewing-agentic-safety` asks of any tool-using agent reading external
+  content. This is why §1's inlined prompt pins the repo's own
+  `CLAUDE.md`/`AGENTS.md` read to the **base ref**, never the PR head: an
+  unbounded "read and follow the repo's instructions" would hand a
+  PR-triggered session's directions to whoever opened the PR.
+  `commands/atlas-review-pr.md` pins `REVIEW.md` the same way for the same
+  reason.
+- **Blast radius of a multi-repo sweep.** §2 and §4's poller routines are
+  explicitly designed to sweep **every attached repo in one run**, under one
+  identity, in one session. A defect in the sweep logic — or content from one
+  repo's PR influencing a session that then acts on another attached repo —
+  has a blast radius as wide as the attach list, not just the one PR that
+  triggered it. This runbook does not currently gate that (no repo allow-list,
+  no fork-PR filter, no per-tick action cap); issue #387 tracks closing it.
+  Until then, the practical mitigation is attaching only repos you trust
+  equally to a given poller routine.
