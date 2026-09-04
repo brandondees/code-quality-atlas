@@ -48,8 +48,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.cmd == "generate":
-        manifest = load_manifest(args.manifest)
-        validate(manifest, docs_root=args.docs_root)
+        try:
+            manifest = load_manifest(args.manifest)
+            validate(manifest, docs_root=args.docs_root)
+        except (OSError, ValidationError) as exc:
+            print(f"ERROR: {exc}")
+            return 1
         owners = primary_owners(manifest)
         for skill in manifest.skills:
             out = generate_skill(
@@ -89,6 +93,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "drift":
+        # check_drift's own glob (*/SKILL.md) would silently return [] for a
+        # nonexistent or empty --skills-root, reporting "No drift" — a rename
+        # or typo would turn a required CI gate into a green no-op (#367).
+        # Counted here (rather than inside check_drift) so the same number
+        # can also report how many skills were actually checked.
+        skill_mds = sorted(Path(args.skills_root).glob("*/SKILL.md"))
+        if not skill_mds:
+            print(f"ERROR: no skills found under {args.skills_root}")
+            return 1
         try:
             reports = check_drift(
                 skills_root=args.skills_root, docs_root=args.docs_root
@@ -97,7 +110,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"ERROR: {exc}")
             return 1
         if not reports:
-            print("No drift: all skills are in sync with their source research.")
+            if len(skill_mds) == 1:
+                print("No drift: 1 skill is in sync with its source research.")
+            else:
+                print(
+                    f"No drift: all {len(skill_mds)} skills are in sync with "
+                    "their source research."
+                )
             return 0
         for r in reports:
             secs = ", ".join(f"#{s.section}" for s in r.changed)
@@ -106,9 +125,31 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "eval":
         if args.skill:
-            eval_files = [Path(args.skills_root, args.skill, "evals", "eval.json")]
+            skill_dirs = [Path(args.skills_root, args.skill)]
         else:
-            eval_files = sorted(Path(args.skills_root).glob("*/evals/eval.json"))
+            # Enumerated by *directory*, not by globbing existing eval.json
+            # files: globbing only files that already exist makes the
+            # MISSING branch below unreachable (a skill with no evals/
+            # never produces a glob hit to iterate), and silently drops a
+            # nonexistent/empty --skills-root to zero iterations instead of
+            # failing (#367). Gated on a SKILL.md existing, matching
+            # `drift`'s own definition of "a skill" a few lines up — a
+            # stray non-skill directory under --skills-root (a leftover
+            # cache dir, a dot-prefixed tool dir) would otherwise be
+            # misreported as MISSING instead of ignored.
+            root = Path(args.skills_root)
+            skill_dirs = (
+                sorted(
+                    p
+                    for p in root.iterdir()
+                    if p.is_dir() and (p / "SKILL.md").exists()
+                )
+                if root.is_dir()
+                else []
+            )
+            if not skill_dirs:
+                print(f"ERROR: no skills found under {args.skills_root}")
+                return 1
         # Q21: a lens can opt into a raised eval-scenario floor via the
         # manifest's `eval_min`. This lookup is by skill *name*, so it's a
         # harmless no-op against collapsed/entrypoint runs (different names,
@@ -131,8 +172,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 1
         ok = True
-        for path in eval_files:
-            name = path.parent.parent.name
+        for skill_dir in skill_dirs:
+            name = skill_dir.name
+            path = skill_dir / "evals" / "eval.json"
             if not path.exists():
                 print(f"MISSING: {name} — no evals/eval.json")
                 ok = False
