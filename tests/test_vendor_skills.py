@@ -3,6 +3,7 @@
 """Regression tests for tooling/vendor-skills.sh's marker bookkeeping (issue
 #112), --with-lens-coverage-hook (issue #357/Q23, #398), and marker-line
 trust boundary, --dry-run, and provenance/UX gaps (issue #377)."""
+
 import subprocess
 from pathlib import Path
 
@@ -14,7 +15,10 @@ def run_vendor(target, *extra_args):
     result = subprocess.run(
         [str(SCRIPT), str(target), *extra_args],
         cwd=str(REPO_ROOT),
-        capture_output=True, text=True, timeout=30, check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     return result
@@ -23,7 +27,8 @@ def run_vendor(target, *extra_args):
 def marker_names(target):
     marker = target / ".claude" / "skills" / ".atlas-vendored"
     return {
-        line for line in marker.read_text().splitlines()
+        line
+        for line in marker.read_text().splitlines()
         if line and not line.startswith("#")
     }
 
@@ -45,7 +50,8 @@ def test_switching_to_collapsed_preserves_standalone_names_in_marker(tmp_path):
 
     collapsed_dir = target / ".claude" / "skills"
     collapsed_entrypoints = {
-        p.name for p in collapsed_dir.iterdir()
+        p.name
+        for p in collapsed_dir.iterdir()
         if p.is_dir() and (p / "SKILL.md").exists()
     } - standalone_names
     assert collapsed_entrypoints, "collapsed run should add new entrypoint dirs"
@@ -99,7 +105,12 @@ def test_vendor_writes_attribution_notice(tmp_path):
 
     result = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
-        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10, check=True)
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    )
     sha = result.stdout.strip()
     assert sha in notice
     assert f"blob/{sha}/LICENSE-CC-BY-4.0" in notice
@@ -172,7 +183,12 @@ def test_attribution_notice_references_the_vendored_license_file(tmp_path):
     # The link to the pinned-commit source stays too, as a cross-check.
     result = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
-        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10, check=True)
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    )
     sha = result.stdout.strip()
     assert f"blob/{sha}/LICENSE-CC-BY-4.0" in notice
 
@@ -183,7 +199,10 @@ def run_vendor_raw(target, *extra_args):
     return subprocess.run(
         [str(SCRIPT), str(target), *extra_args],
         cwd=str(REPO_ROOT),
-        capture_output=True, text=True, timeout=30, check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
     )
 
 
@@ -216,8 +235,11 @@ def test_vendor_skips_preexisting_non_tool_managed_directory(tmp_path):
 
     # Every other (non-colliding) skill must still have been vendored normally.
     other_skill_dirs = [
-        p for p in skills_dir.iterdir()
-        if p.is_dir() and p.name not in ("checking-restraint",) and (p / "SKILL.md").exists()
+        p
+        for p in skills_dir.iterdir()
+        if p.is_dir()
+        and p.name not in ("checking-restraint",)
+        and (p / "SKILL.md").exists()
     ]
     assert len(other_skill_dirs) > 1
 
@@ -273,8 +295,10 @@ def test_vendor_all_collisions_leaves_marker_names_empty_without_crashing(tmp_pa
     target = tmp_path / "target-repo"
     skills_dir = target / ".claude" / "skills"
     for name in (
-        "reviewing-a-change", "auditing-a-repository",
-        "reviewing-a-decision", "reviewing-an-artifact",
+        "reviewing-a-change",
+        "auditing-a-repository",
+        "reviewing-a-decision",
+        "reviewing-an-artifact",
     ):
         d = skills_dir / name
         d.mkdir(parents=True)
@@ -294,8 +318,10 @@ def test_vendor_all_collisions_leaves_marker_names_empty_without_crashing(tmp_pa
 
     # Every pre-existing directory must still be completely untouched.
     for name in (
-        "reviewing-a-change", "auditing-a-repository",
-        "reviewing-a-decision", "reviewing-an-artifact",
+        "reviewing-a-change",
+        "auditing-a-repository",
+        "reviewing-a-decision",
+        "reviewing-an-artifact",
     ):
         assert (skills_dir / name / "SKILL.md").read_text() == f"mine: {name}\n"
 
@@ -304,8 +330,9 @@ def _source_functions_only():
     """The script's functions/vars, without the trailing `main "$@"` call, so
     a caller can invoke individual functions (e.g. vendor_one) directly."""
     lines = SCRIPT.read_text().splitlines()
-    assert lines[-1].strip() == 'main "$@"', \
+    assert lines[-1].strip() == 'main "$@"', (
         "script's last line changed shape; update this helper"
+    )
     return "\n".join(lines[:-1])
 
 
@@ -336,7 +363,11 @@ vendor_one "etc" ""
 """
     result = subprocess.run(
         ["bash", "-c", bash_script],
-        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10, check=False,
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
     )
     assert result.returncode != 0, (
         f"vendor_one should have aborted on empty dest_root; "
@@ -388,7 +419,10 @@ rm -rf "$target"
 """
     result = subprocess.run(
         ["bash", "-c", bash_script],
-        capture_output=True, text=True, timeout=10, check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
     )
     assert result.returncode != 0
     assert "dest_root" in result.stderr
@@ -399,6 +433,7 @@ rm -rf "$target"
 
 
 # --- #377: the marker's trust boundary, --dry-run, and provenance/UX gaps ---
+
 
 def test_prune_rejects_path_traversal_marker_line(tmp_path):
     """Regression for #377's reproduction: the marker is a generated,
@@ -472,7 +507,9 @@ def test_forged_marker_name_does_not_bypass_the_collision_check_on_refresh(tmp_p
     skills_dir = target / ".claude" / "skills"
     colliding = skills_dir / "checking-restraint"
     colliding.mkdir(parents=True)
-    (colliding / "SKILL.md").write_text("# hand-authored, never vendored by this tool\n")
+    (colliding / "SKILL.md").write_text(
+        "# hand-authored, never vendored by this tool\n"
+    )
     (colliding / "my-private-notes.txt").write_text("do not delete\n")
     marker = skills_dir / ".atlas-vendored"
     marker.write_text(
@@ -491,7 +528,9 @@ def test_forged_marker_name_does_not_bypass_the_collision_check_on_refresh(tmp_p
 
     # The critical assertion: the hand-authored content must be completely
     # untouched, exactly like the #175 regression this mirrors.
-    assert (colliding / "SKILL.md").read_text() == "# hand-authored, never vendored by this tool\n"
+    assert (
+        colliding / "SKILL.md"
+    ).read_text() == "# hand-authored, never vendored by this tool\n"
     assert (colliding / "my-private-notes.txt").read_text() == "do not delete\n"
 
 
@@ -523,7 +562,9 @@ def test_forged_stale_marker_name_does_not_authorize_prune_deletion(tmp_path):
     # The critical assertion: survives untouched, and stays recorded in the
     # marker rather than being silently dropped now that it wasn't deleted.
     assert victim.is_dir()
-    assert (victim / "SKILL.md").read_text() == "# hand-authored, never vendored by this tool\n"
+    assert (
+        victim / "SKILL.md"
+    ).read_text() == "# hand-authored, never vendored by this tool\n"
     assert "not-actually-vendored" in marker_names(target)
 
 
@@ -617,7 +658,9 @@ def test_warns_when_target_is_not_a_git_worktree(tmp_path):
 
 def _init_git_repo(path):
     subprocess.run(["git", "init", "-q"], cwd=str(path), check=True)
-    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=str(path), check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@example.com"], cwd=str(path), check=True
+    )
     subprocess.run(["git", "config", "user.name", "t"], cwd=str(path), check=True)
 
 
@@ -677,7 +720,11 @@ printf 'OK\\n'
 """
     result = subprocess.run(
         ["bash", "-c", bash_script],
-        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10, check=False,
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
     )
     assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
     assert result.stdout.strip() == "OK"
@@ -693,7 +740,11 @@ is_bare_skill_name ""
 """
     result = subprocess.run(
         ["bash", "-c", bash_script],
-        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10, check=False,
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
     )
     assert result.returncode != 0
 
@@ -721,7 +772,11 @@ confirm_child_of_dest_root "{outside}/victim" "{dest_root}"
 """
     result = subprocess.run(
         ["bash", "-c", bash_script],
-        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10, check=False,
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
     )
     assert result.returncode != 0
     assert "refusing to delete" in result.stderr
@@ -738,14 +793,21 @@ confirm_child_of_dest_root "{dest_root}/some-skill" "{dest_root}"
 """
     result = subprocess.run(
         ["bash", "-c", bash_script],
-        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10, check=False,
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
     )
     assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
 
 
 # --- #398: the --with-lens-coverage-hook errexit-suspension / atomic-write regressions ---
 
-def test_with_lens_coverage_hook_never_corrupts_a_settings_json_it_cannot_merge_into(tmp_path):
+
+def test_with_lens_coverage_hook_never_corrupts_a_settings_json_it_cannot_merge_into(
+    tmp_path,
+):
     """Regression for a Copilot-review finding on PR #398: a target's
     .claude/settings.json with a valid-but-unexpected .hooks shape (an
     object instead of an array under an event name -- itself a malformed
@@ -761,7 +823,9 @@ def test_with_lens_coverage_hook_never_corrupts_a_settings_json_it_cannot_merge_
     target = tmp_path / "target-repo"
     settings_dir = target / ".claude"
     settings_dir.mkdir(parents=True)
-    original = '{\n  "hooks": {\n    "PostToolUse": {"matcher": "Read", "hooks": []}\n  }\n}\n'
+    original = (
+        '{\n  "hooks": {\n    "PostToolUse": {"matcher": "Read", "hooks": []}\n  }\n}\n'
+    )
     (settings_dir / "settings.json").write_text(original)
 
     result = run_vendor_raw(target, "--with-lens-coverage-hook")
@@ -780,7 +844,9 @@ def test_with_lens_coverage_hook_never_corrupts_a_settings_json_it_cannot_merge_
     assert leftovers == [], f"temp file(s) not cleaned up: {leftovers}"
 
 
-def test_with_lens_coverage_hook_leaves_no_settings_json_when_script_install_fails(tmp_path):
+def test_with_lens_coverage_hook_leaves_no_settings_json_when_script_install_fails(
+    tmp_path,
+):
     """Round-3 atlas review on PR #398: the fix above guarded the merge/
     write path but not vendor_lens_coverage_hook's mkdir/cp/chmod block
     above it, which sits in the same function called as `... || exit 1` in

@@ -11,6 +11,7 @@ any OpenAI-compatible /v1/chat/completions server such as llama-server
 (`--api openai`). Network calls are isolated in `query_*` so tests mock
 them (no model server needed in CI).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -95,9 +96,15 @@ def _post_json(url: str, payload: dict, timeout: int, label: str) -> object:
         raise RuntimeError(f"{label} returned a non-JSON response: {e}") from e
 
 
-def query_ollama(model: str, system: str, user: str,
-                 host: str = OLLAMA_HOST, timeout: int = 600,
-                 num_ctx: int = OLLAMA_NUM_CTX, think: bool | None = None) -> str:
+def query_ollama(
+    model: str,
+    system: str,
+    user: str,
+    host: str = OLLAMA_HOST,
+    timeout: int = 600,
+    num_ctx: int = OLLAMA_NUM_CTX,
+    think: bool | None = None,
+) -> str:
     """Ollama /api/chat with sampling pinned and the context window widened so
     the full skill prompt isn't silently truncated (see OLLAMA_NUM_CTX).
 
@@ -134,8 +141,9 @@ def query_ollama(model: str, system: str, user: str,
     return content
 
 
-def query_openai(model: str, system: str, user: str,
-                 host: str = OPENAI_HOST, timeout: int = 600) -> str:
+def query_openai(
+    model: str, system: str, user: str, host: str = OPENAI_HOST, timeout: int = 600
+) -> str:
     """OpenAI-compatible /v1/chat/completions (llama-server, vLLM, ...)."""
     payload = {
         "model": model,
@@ -147,8 +155,9 @@ def query_openai(model: str, system: str, user: str,
         # evals must be reproducible — never inherit a server's sampling default
         "temperature": 0,
     }
-    data = _post_json(f"{host}/v1/chat/completions", payload, timeout,
-                      "OpenAI-compatible")
+    data = _post_json(
+        f"{host}/v1/chat/completions", payload, timeout, "OpenAI-compatible"
+    )
     if isinstance(data, dict) and data.get("error"):
         # OpenAI-compatible errors are objects ({"error": {"message": ...}});
         # surface the message text rather than the dict repr.
@@ -160,7 +169,8 @@ def query_openai(model: str, system: str, user: str,
         content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as e:
         raise RuntimeError(
-            f"unexpected OpenAI-compatible response shape: {data!r}") from e
+            f"unexpected OpenAI-compatible response shape: {data!r}"
+        ) from e
     if not isinstance(content, str):
         # RuntimeError (not TypeError) is deliberate: see the matching comment in
         # query_ollama above — a single except clause covers every failure mode.
@@ -186,15 +196,22 @@ class ScenarioRun:
 DEFAULT_HOSTS = {"ollama": OLLAMA_HOST, "openai": OPENAI_HOST}
 
 
-def run_skill_evals(skill_dir: Path, model: str,
-                    host: str | None = None, api: str = "ollama",
-                    num_ctx: int = OLLAMA_NUM_CTX,
-                    think: bool | None = None, timeout: int = 600) -> list[ScenarioRun]:
+def run_skill_evals(
+    skill_dir: Path,
+    model: str,
+    host: str | None = None,
+    api: str = "ollama",
+    num_ctx: int = OLLAMA_NUM_CTX,
+    think: bool | None = None,
+    timeout: int = 600,
+) -> list[ScenarioRun]:
     if api not in DEFAULT_HOSTS:
         # Fail fast on an unrecognized api regardless of whether host is also
         # passed explicitly — `host or DEFAULT_HOSTS[api]` alone would skip this
         # check whenever host is truthy, silently misrouting to the else branch.
-        raise ValueError(f"unknown api: {api!r} (expected one of {sorted(DEFAULT_HOSTS)})")
+        raise ValueError(
+            f"unknown api: {api!r} (expected one of {sorted(DEFAULT_HOSTS)})"
+        )
     host = host or DEFAULT_HOSTS[api]
     system = assemble_context(skill_dir) + _REVIEWER_DIRECTIVE
     doc = load_evals(str(skill_dir / "evals" / "eval.json"))
@@ -208,11 +225,19 @@ def run_skill_evals(skill_dir: Path, model: str,
         # mistaken for a complete one.
         try:
             if api == "ollama":
-                response = query_ollama(model, system, s["query"], host=host,
-                                        num_ctx=num_ctx, think=think, timeout=timeout)
+                response = query_ollama(
+                    model,
+                    system,
+                    s["query"],
+                    host=host,
+                    num_ctx=num_ctx,
+                    think=think,
+                    timeout=timeout,
+                )
             else:
-                response = query_openai(model, system, s["query"], host=host,
-                                        timeout=timeout)
+                response = query_openai(
+                    model, system, s["query"], host=host, timeout=timeout
+                )
             error = None
         except RuntimeError as exc:
             # `str(RuntimeError())` is "" — fall back to repr so the operator
@@ -235,25 +260,52 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--skills-root", default="skills")
     ap.add_argument("--model", default="llama3.2:3b")
     ap.add_argument("--api", choices=["ollama", "openai"], default="ollama")
-    ap.add_argument("--host", default=None,
-                    help="defaults to the chosen api's local port")
-    ap.add_argument("--num-ctx", type=_positive_int, default=OLLAMA_NUM_CTX,
-                    help="Ollama context window (ollama only); widen for "
-                         "thinking-capable models, whose reasoning overhead "
-                         "can otherwise leave no room for the final answer")
+    ap.add_argument(
+        "--host", default=None, help="defaults to the chosen api's local port"
+    )
+    ap.add_argument(
+        "--num-ctx",
+        type=_positive_int,
+        default=OLLAMA_NUM_CTX,
+        help="Ollama context window (ollama only); widen for "
+        "thinking-capable models, whose reasoning overhead "
+        "can otherwise leave no room for the final answer",
+    )
     think_group = ap.add_mutually_exclusive_group()
-    think_group.add_argument("--think", dest="think", action="store_const", const=True,
-                             default=None, help="force thinking mode on (ollama only)")
-    think_group.add_argument("--no-think", dest="think", action="store_const",
-                             const=False, help="force thinking mode off (ollama only)")
-    ap.add_argument("--timeout", type=_positive_int, default=600,
-                    help="per-scenario request timeout in seconds; widen for "
-                         "thinking-mode models under a large num_ctx")
+    think_group.add_argument(
+        "--think",
+        dest="think",
+        action="store_const",
+        const=True,
+        default=None,
+        help="force thinking mode on (ollama only)",
+    )
+    think_group.add_argument(
+        "--no-think",
+        dest="think",
+        action="store_const",
+        const=False,
+        help="force thinking mode off (ollama only)",
+    )
+    ap.add_argument(
+        "--timeout",
+        type=_positive_int,
+        default=600,
+        help="per-scenario request timeout in seconds; widen for "
+        "thinking-mode models under a large num_ctx",
+    )
     args = ap.parse_args(argv)
 
     skill_dir = Path(args.skills_root, args.skill)
-    runs = run_skill_evals(skill_dir, args.model, host=args.host, api=args.api,
-                           num_ctx=args.num_ctx, think=args.think, timeout=args.timeout)
+    runs = run_skill_evals(
+        skill_dir,
+        args.model,
+        host=args.host,
+        api=args.api,
+        num_ctx=args.num_ctx,
+        think=args.think,
+        timeout=args.timeout,
+    )
     for i, r in enumerate(runs, 1):
         print(f"\n{'=' * 72}\nSCENARIO {i}")
         print(f"QUERY:\n{r.query}\n")
@@ -280,4 +332,5 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     import sys
+
     sys.exit(main())

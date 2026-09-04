@@ -24,7 +24,7 @@ checklist shipped as generator-level prose. Eval scenarios live in
 3-scenario baseline (9 scenarios), so no `eval_min` change was required —
 `python -m tooling.cli eval` uses the D8 default floor for this skill.
 
-**Tech Stack:** Python 3.11+, PyYAML, pytest; generated artifacts are plain
+**Tech Stack:** Python 3.12+, PyYAML, pytest; generated artifacts are plain
 markdown + JSON (D7).
 
 ---

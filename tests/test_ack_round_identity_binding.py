@@ -40,6 +40,7 @@ so -- following the same pattern as
 tests/test_review_thread_resolution_scoping.py (#362) -- this test guards
 the prose shape directly rather than exercising behavior.
 """
+
 import re
 from pathlib import Path
 
@@ -49,7 +50,10 @@ FILES = {
     "atlas-review-pr command": ROOT / "commands" / "atlas-review-pr.md",
     "atlas-poll-and-review command": ROOT / "commands" / "atlas-poll-and-review.md",
     "atlas-rebase-stale command": ROOT / "commands" / "atlas-rebase-stale.md",
-    "pr-review-automation runbook": ROOT / "docs" / "runbooks" / "pr-review-automation.md",
+    "pr-review-automation runbook": ROOT
+    / "docs"
+    / "runbooks"
+    / "pr-review-automation.md",
 }
 
 # Only the two ack-posting surfaces (plus the runbook's prose describing
@@ -58,7 +62,10 @@ FILES = {
 ACK_POSTING_FILES = {
     "atlas-review-pr command": ROOT / "commands" / "atlas-review-pr.md",
     "atlas-poll-and-review command": ROOT / "commands" / "atlas-poll-and-review.md",
-    "pr-review-automation runbook": ROOT / "docs" / "runbooks" / "pr-review-automation.md",
+    "pr-review-automation runbook": ROOT
+    / "docs"
+    / "runbooks"
+    / "pr-review-automation.md",
 }
 
 # The three independently-scheduled surfaces that actually run the
@@ -68,7 +75,10 @@ ACK_POSTING_FILES = {
 RECOVERY_FILES = {
     "atlas-poll-and-review command": ROOT / "commands" / "atlas-poll-and-review.md",
     "atlas-rebase-stale command": ROOT / "commands" / "atlas-rebase-stale.md",
-    "pr-review-automation runbook": ROOT / "docs" / "runbooks" / "pr-review-automation.md",
+    "pr-review-automation runbook": ROOT
+    / "docs"
+    / "runbooks"
+    / "pr-review-automation.md",
 }
 
 
@@ -102,11 +112,11 @@ def test_every_file_handles_an_unknown_round_state():
     for label, path in FILES.items():
         text = _read(path)
         assert re.search(r"unknown", text, re.IGNORECASE), (
-            f"{label} ({path}) no longer names an \"unknown\" round state -- "
+            f'{label} ({path}) no longer names an "unknown" round state -- '
             "re-add the tri-state handling (#360, gap 3): a review/comment "
             "from the expected identity that carries neither a parseable "
-            "heading nor marker must not be silently folded into \"no round "
-            "review\" / \"round 1\"."
+            'heading nor marker must not be silently folded into "no round '
+            'review" / "round 1".'
         )
 
 
@@ -153,7 +163,7 @@ def test_identity_filtering_is_tied_to_round_or_ack_not_just_present():
     for label, path in FILES.items():
         text = _read(path)
         assert round_ack_identity_re.search(text), (
-            f"{label} ({path}) has get_me and \"unknown\" language but "
+            f'{label} ({path}) has get_me and "unknown" language but '
             "nothing ties an author's login to round/ack detection "
             "specifically -- the identity check must scope round/ack "
             "candidates, not just exist somewhere else in the file (#360, "
@@ -246,9 +256,9 @@ def test_create_failure_distinguishes_contention_from_a_real_error():
         assert re.search(r"real\s+(failure|error)", text, re.IGNORECASE), (
             f"{label} ({path}) no longer distinguishes a real create "
             "failure (permissions, rate limit, a transient API error) from "
-            "ordinary lock contention (\"a pending review already "
-            "exists\") -- re-add the distinction so a genuine failure gets "
-            "surfaced instead of silently read as \"someone else has it.\""
+            'ordinary lock contention ("a pending review already '
+            'exists") -- re-add the distinction so a genuine failure gets '
+            'surfaced instead of silently read as "someone else has it."'
         )
 
 
@@ -293,7 +303,9 @@ def test_round_derivation_excludes_pending_reviews():
     # state instead of proceeding normally or detecting real contention.
     for label, path in FILES.items():
         text = _read(path)
-        assert re.search(r"not\s+.{0,20}PENDING|PENDING.{0,40}exclu", text, re.IGNORECASE), (
+        assert re.search(
+            r"not\s+.{0,20}PENDING|PENDING.{0,40}exclu", text, re.IGNORECASE
+        ), (
             f"{label} ({path}) no longer excludes PENDING-state reviews "
             "from round derivation -- re-add the exclusion (PR #402 "
             "round-3 review) so your own ACK lock or in-progress findings "
@@ -309,8 +321,8 @@ def test_rebase_stale_lock_recovery_checks_every_pr_not_once_globally():
     for label, path in RECOVERY_FILES.items():
         text = _read(path)
         assert "once per sweep, not per pr" not in text.lower(), (
-            f"{label} ({path}) still says to check for a stuck lock \"once "
-            "per sweep, not per PR\" -- this is backwards: a pending "
+            f'{label} ({path}) still says to check for a stuck lock "once '
+            'per sweep, not per PR" -- this is backwards: a pending '
             "review is scoped per-PR per identity, so this must check "
             "every open PR in the sweep, not a single global check (PR "
             "#402 round-3 review)."

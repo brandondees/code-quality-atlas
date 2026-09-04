@@ -19,6 +19,7 @@ test_ci_shellcheck_glob_covers_tree.py, test_precommit_ci_version_sync.py):
 it doesn't exercise pip at all, just asserts the step's shape can't quietly
 regress to the vulnerable one.
 """
+
 from pathlib import Path
 
 import yaml

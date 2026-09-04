@@ -36,11 +36,14 @@ def main(argv: list[str] | None = None) -> int:
     e = sub.add_parser("eval")
     e.add_argument("--skills-root", default="skills")
     e.add_argument("--skill", default=None, help="validate one skill; default: all")
-    e.add_argument("--manifest", default="skills/manifest.yaml",
-                   help="source of each lens's eval_min (Q21); a missing or "
-                        "malformed manifest fails the eval command loudly rather "
-                        "than silently falling back to D8's baseline, since that "
-                        "would silently under-enforce every lens's raised floor")
+    e.add_argument(
+        "--manifest",
+        default="skills/manifest.yaml",
+        help="source of each lens's eval_min (Q21); a missing or "
+        "malformed manifest fails the eval command loudly rather "
+        "than silently falling back to D8's baseline, since that "
+        "would silently under-enforce every lens's raised floor",
+    )
 
     args = parser.parse_args(argv)
 
@@ -49,9 +52,13 @@ def main(argv: list[str] | None = None) -> int:
         validate(manifest, docs_root=args.docs_root)
         owners = primary_owners(manifest)
         for skill in manifest.skills:
-            out = generate_skill(skill, manifest.taxonomy_version,
-                                 docs_root=args.docs_root, skills_root=args.skills_root,
-                                 owners=owners)
+            out = generate_skill(
+                skill,
+                manifest.taxonomy_version,
+                docs_root=args.docs_root,
+                skills_root=args.skills_root,
+                owners=owners,
+            )
             print(f"generated {out}")
         if manifest.router is not None:
             out = generate_router(manifest, skills_root=args.skills_root)
@@ -68,9 +75,12 @@ def main(argv: list[str] | None = None) -> int:
             # traceback, matching the drift/eval branches. Catch the specific
             # error so an unrelated internal ValueError still surfaces as a bug.
             try:
-                collapsed = generate_collapsed(manifest, docs_root=args.docs_root,
-                                               skills_root=args.skills_root,
-                                               collapsed_root=args.collapsed_root)
+                collapsed = generate_collapsed(
+                    manifest,
+                    docs_root=args.docs_root,
+                    skills_root=args.skills_root,
+                    collapsed_root=args.collapsed_root,
+                )
             except CollapsedOverlapError as exc:
                 print(f"ERROR: {exc}")
                 return 1
@@ -80,7 +90,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "drift":
         try:
-            reports = check_drift(skills_root=args.skills_root, docs_root=args.docs_root)
+            reports = check_drift(
+                skills_root=args.skills_root, docs_root=args.docs_root
+            )
         except DriftError as exc:
             print(f"ERROR: {exc}")
             return 1
@@ -108,12 +120,15 @@ def main(argv: list[str] | None = None) -> int:
         # (found by the atlas's own review of PR #159).
         try:
             eval_min_by_skill = {
-                s.name: s.eval_min for s in load_manifest(args.manifest).skills
+                s.name: s.eval_min
+                for s in load_manifest(args.manifest).skills
                 if s.eval_min is not None
             }
         except (OSError, ValidationError) as exc:
-            print(f"ERROR: could not load {args.manifest} to resolve each lens's "
-                  f"eval-scenario floor (Q21): {exc}")
+            print(
+                f"ERROR: could not load {args.manifest} to resolve each lens's "
+                f"eval-scenario floor (Q21): {exc}"
+            )
             return 1
         ok = True
         for path in eval_files:
@@ -136,4 +151,5 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     import sys
+
     sys.exit(main())

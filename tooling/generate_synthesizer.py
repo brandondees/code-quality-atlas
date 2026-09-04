@@ -3,6 +3,7 @@
 """Renders the synthesizer skill: the back half of composition, merging the
 findings of the lenses the router picked into one deduplicated, ranked report
 with a single verdict."""
+
 from __future__ import annotations
 
 import json
@@ -23,8 +24,10 @@ def mode_floor_policy(manifest: Manifest) -> str:
     lines = [
         "## Severity floor by mode",
         "",
-        ("The merged report's severity floor depends on the active depth mode. "
-        "Below the floor, findings are omitted from the verdict."),
+        (
+            "The merged report's severity floor depends on the active depth mode. "
+            "Below the floor, findings are omitted from the verdict."
+        ),
         "",
         "| Mode | Floor | Effect |",
         "|---|---|---|",
@@ -34,9 +37,13 @@ def mode_floor_policy(manifest: Manifest) -> str:
         if mode.floor == "escalating":
             effect = "round-based escalation (as today) — later re-review rounds raise the floor"
         else:
-            effect = f"pinned at {floor} — report everything down to {floor}, nothing below"
+            effect = (
+                f"pinned at {floor} — report everything down to {floor}, nothing below"
+            )
         lines.append(f"| **{mode.name}** | {floor} | {effect} |")
-    return "\n".join(lines).rstrip() + "\n\n"   # block ends with a blank line; "" when no modes
+    return (
+        "\n".join(lines).rstrip() + "\n\n"
+    )  # block ends with a blank line; "" when no modes
 
 
 def build_synthesizer_md(manifest: Manifest) -> str:
@@ -51,14 +58,16 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "description": sy.description,
         "provenance": {"taxonomy_version": manifest.taxonomy_version, "built_from": []},
     }
-    fm = yaml.safe_dump(front, sort_keys=False, default_flow_style=False,
-                        allow_unicode=True).strip()
+    fm = yaml.safe_dump(
+        front, sort_keys=False, default_flow_style=False, allow_unicode=True
+    ).strip()
     severity = " > ".join(f"**{s}**" for s in sy.severity_order)
     top, *_ = sy.severity_order
     tension_rows = "\n".join(
         f"| `{t.between[0]}` ↔ `{t.between[1]}` | {_escape_table_cell(t.about)} | "
         f"{_escape_table_cell(t.resolve)} |"
-        for t in sy.tensions)
+        for t in sy.tensions
+    )
     router_name = manifest.router.name if manifest.router else "choosing-review-lenses"
     body = (
         f"# {sy.name}\n\n"
@@ -87,7 +96,7 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "run alongside the atlas lenses — the built-in code-review skill, a "
         "framework review (e.g. BMAD), linter or scanner output, or human notes "
         "— tagging each with its source so the merge is non-exclusive rather than "
-        "atlas-only. A source that reported \"No findings\" contributes nothing; "
+        'atlas-only. A source that reported "No findings" contributes nothing; '
         "do not pad the report on its behalf.\n"
         "2. **Dedupe** — two findings at the **same location with the same root "
         "cause** are one finding. Keep the most specific wording and attribute "
@@ -105,7 +114,7 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "nits left means approve. **Valence governs the verdict, not route.** A "
         "`defect` sets the verdict per its severity *even when its remediation "
         "decision is routed elsewhere* — a GPL-incompatible dependency is a "
-        "blocking defect **and** a `route: legal` escalation, not an \"approve\" "
+        'blocking defect **and** a `route: legal` escalation, not an "approve" '
         "that quietly defers to legal. Route only changes *who decides the fix*, "
         "never whether the diff has a problem. Only `improvement` nits and "
         "**non-defect** routed findings (a product, design, or leadership "
@@ -119,8 +128,8 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "acknowledgement alone does not drive the verdict to block — the team "
         "recorded and accepted it. A `suppress`ed preference-tier finding never "
         "reaches this report at all; only `acknowledge` (floor-tier) leaves a "
-        "visible trace. If every lens found nothing, the whole report is \"No "
-        "findings\" — do not "
+        'visible trace. If every lens found nothing, the whole report is "No '
+        'findings" — do not '
         "manufacture a harsher verdict than the findings justify.\n"
         "6. **State coverage & limitations** — close the report with what the "
         "review did *not* establish: which lenses ran and which the router did "
@@ -131,7 +140,7 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "the review. Name the gaps so the reader knows the review's edges. Keep it "
         "to a few lines; if coverage was complete and nothing was unverifiable, "
         "say so in one line rather than padding. This block is **always present**, "
-        "including on a \"No findings\" report.\n"
+        'including on a "No findings" report.\n'
         "7. **Note the process** — close with 0-3 one-line observations on the "
         "*review process itself*, never on the reviewed code: a lens that "
         "should have run per the router's own criteria but didn't, a finding two "
@@ -139,7 +148,7 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "output that broke the finding contract. This is the suite's own "
         "self-improvement signal — every lens carries a one-line prompt to "
         "report a misfire here instead of inventing its own feedback format. "
-        "When the process worked, write exactly \"Process: clean\" and stop — "
+        'When the process worked, write exactly "Process: clean" and stop — '
         "the same anti-invention discipline the lenses apply to findings, "
         "never a note manufactured to fill the section.\n\n"
         "## Reconciling lens tensions\n\n"
@@ -232,23 +241,23 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "Tensions\n"
         "- <lens> ↔ <lens>: <how it was resolved here>\n\n"
         "Coverage & limitations\n"
-        "- Lenses run: <names>. Not selected: <names, or \"none\">.\n"
+        '- Lenses run: <names>. Not selected: <names, or "none">.\n'
         "- Not verifiable from this diff: <what needs runtime, data, or repo-wide "
-        "context to confirm, or \"nothing\">.\n\n"
+        'context to confirm, or "nothing">.\n\n'
         "Process notes\n"
-        "- <one-line process observation>, or exactly \"Process: clean\" if none.\n"
+        '- <one-line process observation>, or exactly "Process: clean" if none.\n'
         "```\n\n"
         "Omit any **findings** section with nothing in it — including **Routed**, "
         "**Improvements**, and **Pre-existing** (the last two are absent entirely "
         "unless the team opted into improvement-valence / Boy-Scout surfacing). "
         "**Coverage & limitations** and **Process notes** are the exceptions: both "
-        "are always present, even on a \"No findings\" report. "
+        'are always present, even on a "No findings" report. '
         "Keep each finding to one or two lines; the detail lives in the "
         "originating lens's output, not restated here.\n\n"
         + mode_floor_policy(manifest)
         + "## Reviewer discipline\n\n"
         "Synthesis must not inflate. Do not raise a finding no lens reported, do "
-        "not upgrade a severity to seem thorough, and do not turn \"No findings\" "
+        'not upgrade a severity to seem thorough, and do not turn "No findings" '
         "into a verdict with changes. The merged report is exactly the union of "
         "real lens findings, deduplicated and ordered — nothing added.\n\n"
         "**Check standing disputes before affirming a claim.** Before "
@@ -282,7 +291,11 @@ def generate_synthesizer(manifest: Manifest, skills_root: str = "skills") -> Pat
     (out / "evals").mkdir(parents=True, exist_ok=True)
     (out / "SKILL.md").write_text(build_synthesizer_md(manifest), encoding="utf-8")
     if not (out / "evals" / "eval.json").exists():
-        (out / "evals" / "eval.json").write_text(json.dumps(
-            {"skills": [manifest.synthesizer.name], "scenarios": []}, indent=2) + "\n",
-            encoding="utf-8")
+        (out / "evals" / "eval.json").write_text(
+            json.dumps(
+                {"skills": [manifest.synthesizer.name], "scenarios": []}, indent=2
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     return out

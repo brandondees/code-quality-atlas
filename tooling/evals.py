@@ -28,7 +28,8 @@ def load_evals(path: str) -> EvalDoc:
             data = json.loads(fh.read())
         if not isinstance(data, dict):
             raise EvalError(
-                f"{path}: eval doc must be a JSON object, got {type(data).__name__}")
+                f"{path}: eval doc must be a JSON object, got {type(data).__name__}"
+            )
         return EvalDoc(skills=data["skills"], scenarios=data["scenarios"])
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError) as exc:
         raise EvalError(f"{path}: {exc}") from exc

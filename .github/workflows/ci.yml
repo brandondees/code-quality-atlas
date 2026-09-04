@@ -150,6 +150,7 @@ jobs:
               - "docs/open-questions.md"
               - "*.py"
               - "pyproject.toml"
+              - ".python-version"
               - ".pre-commit-config.yaml"
               - ".github/workflows/ci.yml"
             requirements:
@@ -291,6 +292,9 @@ jobs:
       - name: lint (ruff)
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: ruff check .
+      - name: format (ruff)
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        run: ruff format --check .
       - name: tests
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: python -m pytest tests/ -q

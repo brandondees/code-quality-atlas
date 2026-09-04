@@ -11,6 +11,7 @@ Compare *sets*, not the rendered string: the Index compresses runs into ranges
 ("#5-#8, #35") and which runs are worth compressing is a formatting choice, not
 a fact. Only membership is the fact.
 """
+
 import re
 from pathlib import Path
 
@@ -86,7 +87,9 @@ def test_index_categories_match_headings():
         if missing := sorted(real - claimed):
             problems.append(f"{fname}: defines {missing} but the Index omits them")
         if phantom := sorted(claimed - real):
-            problems.append(f"{fname}: Index claims {phantom} but the file has no such section")
+            problems.append(
+                f"{fname}: Index claims {phantom} but the file has no such section"
+            )
     assert not problems, (
         "docs/research/README.md's Index is stale — update it when promoting a category:\n"
         + "\n".join(problems)
@@ -102,4 +105,6 @@ def test_no_category_is_defined_in_two_files():
             if cid in seen:
                 dupes.append(f"#{cid} defined in both {seen[cid]} and {fname}")
             seen[cid] = fname
-    assert not dupes, "a category has more than one research section:\n" + "\n".join(dupes)
+    assert not dupes, "a category has more than one research section:\n" + "\n".join(
+        dupes
+    )

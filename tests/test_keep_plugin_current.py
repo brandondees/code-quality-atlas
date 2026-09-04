@@ -7,6 +7,7 @@ every project scope, per-scope failure tracking that must not `set -e`-
 abort). Covers arg parsing, the missing-claude/missing-jq failure paths,
 and the per-scope update walk (including a failing scope not aborting the
 rest)."""
+
 import json
 import shutil
 import subprocess
@@ -21,7 +22,11 @@ DEFAULT_PLUGIN = "code-quality-atlas@code-quality-atlas"
 def _run(args, env, timeout=10):
     return subprocess.run(
         [str(SCRIPT), *args],
-        capture_output=True, text=True, timeout=timeout, env=env, check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=env,
+        check=False,
     )
 
 
@@ -62,8 +67,10 @@ def _read_log(log_path):
 def test_help_prints_header_and_exits_0_without_claude_or_jq(tmp_path):
     # --help must work even before check_requirements ever runs, since a
     # user checking usage shouldn't need claude/jq installed first.
-    env = {"PATH": _minimal_path_env(tmp_path, include=("bash", "awk", "cat")),
-           "HOME": str(tmp_path)}
+    env = {
+        "PATH": _minimal_path_env(tmp_path, include=("bash", "awk", "cat")),
+        "HOME": str(tmp_path),
+    }
     result = _run(["--help"], env)
     assert result.returncode == 0
     assert "keep-plugin-current.sh" in result.stdout
@@ -94,7 +101,9 @@ def test_missing_claude_binary_exits_1(tmp_path):
 
 
 def test_missing_jq_exits_1(tmp_path):
-    fake_bin_dir = Path(_minimal_path_env(tmp_path, include=("bash", "cat", "cd", "sh")))
+    fake_bin_dir = Path(
+        _minimal_path_env(tmp_path, include=("bash", "cat", "cd", "sh"))
+    )
     log_path = tmp_path / "claude.log"
     _fake_claude(tmp_path, fake_bin_dir, log_path)
     env = {"PATH": str(fake_bin_dir), "HOME": str(tmp_path)}
@@ -114,14 +123,23 @@ def test_user_only_skips_project_scope_and_uses_default_plugin(tmp_path):
     (claude_config_dir / "plugins").mkdir(parents=True)
     proj = tmp_path / "some-project"
     proj.mkdir()
-    (claude_config_dir / "plugins" / "installed_plugins.json").write_text(json.dumps({
-        "plugins": {DEFAULT_PLUGIN: [
-            {"scope": "project", "projectPath": str(proj)},
-        ]}
-    }))
+    (claude_config_dir / "plugins" / "installed_plugins.json").write_text(
+        json.dumps(
+            {
+                "plugins": {
+                    DEFAULT_PLUGIN: [
+                        {"scope": "project", "projectPath": str(proj)},
+                    ]
+                }
+            }
+        )
+    )
 
-    env = {"PATH": str(fake_bin_dir), "HOME": str(tmp_path),
-           "CLAUDE_CONFIG_DIR": str(claude_config_dir)}
+    env = {
+        "PATH": str(fake_bin_dir),
+        "HOME": str(tmp_path),
+        "CLAUDE_CONFIG_DIR": str(claude_config_dir),
+    }
     result = _run(["--user-only"], env)
 
     assert result.returncode == 0, result.stderr
@@ -144,17 +162,28 @@ def test_walks_every_project_scope_from_installed_plugins_json(tmp_path):
     proj_b = tmp_path / "proj-b"
     proj_b.mkdir()
     missing_proj = tmp_path / "does-not-exist"
-    (claude_config_dir / "plugins" / "installed_plugins.json").write_text(json.dumps({
-        "plugins": {DEFAULT_PLUGIN: [
-            {"scope": "project", "projectPath": str(proj_a)},
-            {"scope": "project", "projectPath": str(proj_b)},
-            {"scope": "project", "projectPath": str(missing_proj)},
-            {"scope": "user"},  # not a project scope -- must be ignored here
-        ]}
-    }))
+    (claude_config_dir / "plugins" / "installed_plugins.json").write_text(
+        json.dumps(
+            {
+                "plugins": {
+                    DEFAULT_PLUGIN: [
+                        {"scope": "project", "projectPath": str(proj_a)},
+                        {"scope": "project", "projectPath": str(proj_b)},
+                        {"scope": "project", "projectPath": str(missing_proj)},
+                        {
+                            "scope": "user"
+                        },  # not a project scope -- must be ignored here
+                    ]
+                }
+            }
+        )
+    )
 
-    env = {"PATH": str(fake_bin_dir), "HOME": str(tmp_path),
-           "CLAUDE_CONFIG_DIR": str(claude_config_dir)}
+    env = {
+        "PATH": str(fake_bin_dir),
+        "HOME": str(tmp_path),
+        "CLAUDE_CONFIG_DIR": str(claude_config_dir),
+    }
     result = _run([], env)
 
     assert result.returncode == 0, result.stderr
@@ -178,15 +207,24 @@ def test_one_failing_project_scope_does_not_abort_remaining_updates(tmp_path):
     (failing_proj / ".should_fail").touch()
     ok_proj = tmp_path / "ok-proj"
     ok_proj.mkdir()
-    (claude_config_dir / "plugins" / "installed_plugins.json").write_text(json.dumps({
-        "plugins": {DEFAULT_PLUGIN: [
-            {"scope": "project", "projectPath": str(failing_proj)},
-            {"scope": "project", "projectPath": str(ok_proj)},
-        ]}
-    }))
+    (claude_config_dir / "plugins" / "installed_plugins.json").write_text(
+        json.dumps(
+            {
+                "plugins": {
+                    DEFAULT_PLUGIN: [
+                        {"scope": "project", "projectPath": str(failing_proj)},
+                        {"scope": "project", "projectPath": str(ok_proj)},
+                    ]
+                }
+            }
+        )
+    )
 
-    env = {"PATH": str(fake_bin_dir), "HOME": str(tmp_path),
-           "CLAUDE_CONFIG_DIR": str(claude_config_dir)}
+    env = {
+        "PATH": str(fake_bin_dir),
+        "HOME": str(tmp_path),
+        "CLAUDE_CONFIG_DIR": str(claude_config_dir),
+    }
     result = _run([], env)
 
     # set -u only; the script deliberately avoids set -e so one failing
@@ -212,8 +250,11 @@ def test_missing_installed_plugins_json_is_tolerated(tmp_path):
     claude_config_dir = tmp_path / "dot-claude"
     claude_config_dir.mkdir()
 
-    env = {"PATH": str(fake_bin_dir), "HOME": str(tmp_path),
-           "CLAUDE_CONFIG_DIR": str(claude_config_dir)}
+    env = {
+        "PATH": str(fake_bin_dir),
+        "HOME": str(tmp_path),
+        "CLAUDE_CONFIG_DIR": str(claude_config_dir),
+    }
     result = _run([], env)
 
     assert result.returncode == 0, result.stderr
@@ -228,8 +269,11 @@ def test_explicit_plugin_argument_overrides_default(tmp_path):
     claude_config_dir = tmp_path / "dot-claude"
     claude_config_dir.mkdir()
 
-    env = {"PATH": str(fake_bin_dir), "HOME": str(tmp_path),
-           "CLAUDE_CONFIG_DIR": str(claude_config_dir)}
+    env = {
+        "PATH": str(fake_bin_dir),
+        "HOME": str(tmp_path),
+        "CLAUDE_CONFIG_DIR": str(claude_config_dir),
+    }
     result = _run(["some-other-plugin@some-other-marketplace", "--user-only"], env)
 
     assert result.returncode == 0, result.stderr

@@ -9,6 +9,7 @@ content) implicitly caught by the "everything else is MIT" catch-all
 is added without being named in LICENSE, so the split can't silently go
 stale again.
 """
+
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -37,9 +38,7 @@ _PROSE_ALIASES = {
 
 def _top_level_dirs() -> list[str]:
     return sorted(
-        p.name
-        for p in ROOT.iterdir()
-        if p.is_dir() and p.name not in _EXEMPT
+        p.name for p in ROOT.iterdir() if p.is_dir() and p.name not in _EXEMPT
     )
 
 

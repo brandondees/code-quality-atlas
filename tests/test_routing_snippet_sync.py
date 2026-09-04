@@ -13,6 +13,7 @@ Neither was covered by the check above, which let `CLAUDE.md`'s copy drift
 from the template unnoticed (issue #167). Parametrized below alongside the
 `atlas-init.md` fallback check so any of the three copies drifting fails CI.
 """
+
 from pathlib import Path
 
 import pytest
@@ -37,16 +38,18 @@ def _extract_block(text: str, begin: str = _BEGIN, end: str = _END) -> str:
     assert len(starts) == 1, f"expected exactly one {begin!r}, found {len(starts)}"
     assert len(ends) == 1, f"expected exactly one {end!r}, found {len(ends)}"
     assert ends[0] > starts[0], "END marker precedes BEGIN marker"
-    block = lines[starts[0]:ends[0] + 1]
+    block = lines[starts[0] : ends[0] + 1]
     return "\n".join(ln.rstrip() for ln in block)
 
 
 def test_atlas_init_fallback_matches_template():
     root = Path(__file__).resolve().parent.parent
     template = _extract_block(
-        (root / "templates" / "agents-routing-snippet.md").read_text(encoding="utf-8"))
+        (root / "templates" / "agents-routing-snippet.md").read_text(encoding="utf-8")
+    )
     fallback = _extract_block(
-        (root / "commands" / "atlas-init.md").read_text(encoding="utf-8"))
+        (root / "commands" / "atlas-init.md").read_text(encoding="utf-8")
+    )
     assert fallback == template, (
         "The embedded fallback block in commands/atlas-init.md has drifted from "
         "templates/agents-routing-snippet.md (the source of truth). Re-copy the "
@@ -58,7 +61,8 @@ def test_atlas_init_fallback_matches_template():
 def test_own_dogfood_file_matches_template(dogfood_file):
     root = Path(__file__).resolve().parent.parent
     template = _extract_block(
-        (root / "templates" / "agents-routing-snippet.md").read_text(encoding="utf-8"))
+        (root / "templates" / "agents-routing-snippet.md").read_text(encoding="utf-8")
+    )
     dogfood = _extract_block((root / dogfood_file).read_text(encoding="utf-8"))
     assert dogfood == template, (
         f"This repo's own {dogfood_file} routing block has drifted from "
@@ -80,7 +84,8 @@ def test_shared_orientation_matches_across_agent_files():
     root = Path(__file__).resolve().parent.parent
     blocks = {
         name: _extract_block(
-            (root / name).read_text(encoding="utf-8"), _ORIENT_BEGIN, _ORIENT_END)
+            (root / name).read_text(encoding="utf-8"), _ORIENT_BEGIN, _ORIENT_END
+        )
         for name in ("AGENTS.md", "CLAUDE.md")
     }
     assert blocks["AGENTS.md"] == blocks["CLAUDE.md"], (
@@ -129,7 +134,8 @@ def test_routing_block_names_collapsed_equivalent_for_standalone_only_skills():
     is, so they're not held to the same requirement."""
     root = Path(__file__).resolve().parent.parent
     block = _extract_block(
-        (root / "templates" / "agents-routing-snippet.md").read_text(encoding="utf-8"))
+        (root / "templates" / "agents-routing-snippet.md").read_text(encoding="utf-8")
+    )
     standalone_only = _standalone_only_skill_names()
     table_rows = [ln for ln in block.split("\n") if ln.lstrip().startswith("|")]
     # Only skills the block's table actually names are checked below. If the
@@ -138,7 +144,11 @@ def test_routing_block_names_collapsed_equivalent_for_standalone_only_skills():
     # requirement — "if named, must have collapsed guidance in that row" —
     # vacuously, so this loop intentionally does not assert `named` is
     # non-empty.
-    named = [name for name in standalone_only if any(f"`{name}`" in row for row in table_rows)]
+    named = [
+        name
+        for name in standalone_only
+        if any(f"`{name}`" in row for row in table_rows)
+    ]
     for name in named:
         needle = f"`{name}`"
         mentioning_rows = [row for row in table_rows if needle in row]

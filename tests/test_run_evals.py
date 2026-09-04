@@ -13,12 +13,16 @@ from tooling.manifest import Skill, Source
 
 class _FakeResp:
     """Minimal stand-in for the urlopen context manager."""
+
     def __init__(self, body: bytes):
         self._body = body
+
     def read(self):
         return self._body
+
     def __enter__(self):
         return self
+
     def __exit__(self, *exc):
         return False
 
@@ -28,6 +32,7 @@ def _patch_urlopen(monkeypatch, *, body=None, exc=None):
         if exc is not None:
             raise exc
         return _FakeResp(body)
+
     monkeypatch.setattr(run_evals.urllib.request, "urlopen", fake_urlopen)
 
 
@@ -41,15 +46,27 @@ def _valid_eval_json():
 
 
 def test_run_skill_evals_assembles_context_and_collects(tmp_path, monkeypatch):
-    skill = Skill(name="hunting-silent-failures", description="x", shape="diff",
-                  wave=1, built_from=[Source(2, "tests/fixtures/research_sample.md#2")])
+    skill = Skill(
+        name="hunting-silent-failures",
+        description="x",
+        shape="diff",
+        wave=1,
+        built_from=[Source(2, "tests/fixtures/research_sample.md#2")],
+    )
     out = generate_skill(skill, "v0.2", docs_root=".", skills_root=str(tmp_path))
     (out / "evals" / "eval.json").write_text(_valid_eval_json())
 
     captured = {}
 
-    def fake_query(model, system, user, host=run_evals.OLLAMA_HOST, timeout=600,
-                  num_ctx=run_evals.OLLAMA_NUM_CTX, think=None):
+    def fake_query(
+        model,
+        system,
+        user,
+        host=run_evals.OLLAMA_HOST,
+        timeout=600,
+        num_ctx=run_evals.OLLAMA_NUM_CTX,
+        think=None,
+    ):
         captured["system"] = system
         captured["model"] = model
         captured["num_ctx"] = num_ctx
@@ -60,11 +77,16 @@ def test_run_skill_evals_assembles_context_and_collects(tmp_path, monkeypatch):
     monkeypatch.setattr(run_evals, "query_ollama", fake_query)
     # non-default overrides so the assertions below would catch a dropped or
     # mis-forwarded kwarg in run_skill_evals's dispatch, not just query_ollama's.
-    runs = run_evals.run_skill_evals(out, "fake-model", num_ctx=32768, think=False,
-                                     timeout=42)
+    runs = run_evals.run_skill_evals(
+        out, "fake-model", num_ctx=32768, think=False, timeout=42
+    )
 
     assert len(runs) == 3
-    assert [r.response for r in runs] == ["reviewed: q1", "reviewed: q2", "reviewed: q3"]
+    assert [r.response for r in runs] == [
+        "reviewed: q1",
+        "reviewed: q2",
+        "reviewed: q3",
+    ]
     assert runs[0].expected_behavior == ["b1"]
     # context is assembled from the skill's own files (SKILL.md mentions its name)
     assert "hunting-silent-failures" in captured["system"]
@@ -75,8 +97,13 @@ def test_run_skill_evals_assembles_context_and_collects(tmp_path, monkeypatch):
 
 
 def test_run_skill_evals_openai_backend(tmp_path, monkeypatch):
-    skill = Skill(name="hunting-silent-failures", description="x", shape="diff",
-                  wave=1, built_from=[Source(2, "tests/fixtures/research_sample.md#2")])
+    skill = Skill(
+        name="hunting-silent-failures",
+        description="x",
+        shape="diff",
+        wave=1,
+        built_from=[Source(2, "tests/fixtures/research_sample.md#2")],
+    )
     out = generate_skill(skill, "v0.2", docs_root=".", skills_root=str(tmp_path))
     (out / "evals" / "eval.json").write_text(_valid_eval_json())
 
@@ -91,11 +118,15 @@ def test_run_skill_evals_openai_backend(tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_evals, "query_openai", fake_openai)
     monkeypatch.setattr(run_evals, "query_ollama", fail_ollama)
-    runs = run_evals.run_skill_evals(out, "fake-model",
-                                     host="http://localhost:9999", api="openai")
+    runs = run_evals.run_skill_evals(
+        out, "fake-model", host="http://localhost:9999", api="openai"
+    )
 
     assert [r.response for r in runs] == [
-        "openai-reviewed: q1", "openai-reviewed: q2", "openai-reviewed: q3"]
+        "openai-reviewed: q1",
+        "openai-reviewed: q2",
+        "openai-reviewed: q3",
+    ]
     assert calls == ["http://localhost:9999"] * 3
 
     # host omitted -> defaults to the chosen api's port, not Ollama's
@@ -106,9 +137,11 @@ def test_run_skill_evals_openai_backend(tmp_path, monkeypatch):
 
 # --- query_ollama / query_openai: network + response-shape robustness (#23) ---
 
+
 def test_query_ollama_returns_content(monkeypatch):
-    _patch_urlopen(monkeypatch,
-                   body=json.dumps({"message": {"content": "a finding"}}).encode())
+    _patch_urlopen(
+        monkeypatch, body=json.dumps({"message": {"content": "a finding"}}).encode()
+    )
     assert run_evals.query_ollama("m", "sys", "usr") == "a finding"
 
 
@@ -168,8 +201,9 @@ def test_query_ollama_http_exception_raises(monkeypatch):
 
 
 def test_query_ollama_surfaces_api_error_message(monkeypatch):
-    _patch_urlopen(monkeypatch,
-                   body=json.dumps({"error": "model 'x' not found"}).encode())
+    _patch_urlopen(
+        monkeypatch, body=json.dumps({"error": "model 'x' not found"}).encode()
+    )
     with pytest.raises(RuntimeError, match="not found"):
         run_evals.query_ollama("m", "sys", "usr")
 
@@ -187,8 +221,10 @@ def test_query_ollama_non_json_raises(monkeypatch):
 
 
 def test_query_openai_returns_content(monkeypatch):
-    _patch_urlopen(monkeypatch, body=json.dumps(
-        {"choices": [{"message": {"content": "ok"}}]}).encode())
+    _patch_urlopen(
+        monkeypatch,
+        body=json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode(),
+    )
     assert run_evals.query_openai("m", "sys", "usr") == "ok"
 
 
@@ -199,19 +235,23 @@ def test_query_openai_network_error_raises_runtimeerror(monkeypatch):
 
 
 def test_query_openai_surfaces_api_error_message(monkeypatch):
-    _patch_urlopen(monkeypatch, body=json.dumps(
-        {"error": {"message": "rate limited"}}).encode())
+    _patch_urlopen(
+        monkeypatch, body=json.dumps({"error": {"message": "rate limited"}}).encode()
+    )
     with pytest.raises(RuntimeError, match="rate limited"):
         run_evals.query_openai("m", "sys", "usr")
 
 
 def test_query_openai_unexpected_shape_raises(monkeypatch):
     _patch_urlopen(monkeypatch, body=json.dumps({"choices": []}).encode())
-    with pytest.raises(RuntimeError, match="unexpected OpenAI-compatible response shape"):
+    with pytest.raises(
+        RuntimeError, match="unexpected OpenAI-compatible response shape"
+    ):
         run_evals.query_openai("m", "sys", "usr")
 
 
 # --- run_skill_evals: unrecognized api fails fast, even with host set (#23) ---
+
 
 def test_run_skill_evals_rejects_unknown_api_even_with_host(tmp_path, monkeypatch):
     # The dict-lookup dispatch this replaced (`{"ollama": ..., "openai": ...}[api]`)
@@ -219,8 +259,13 @@ def test_run_skill_evals_rejects_unknown_api_even_with_host(tmp_path, monkeypatc
     # not silently misroute an unrecognized api to the openai backend just because
     # `host` was also passed explicitly (which otherwise short-circuits `host or
     # DEFAULT_HOSTS[api]`'s own fail-fast check).
-    skill = Skill(name="hunting-silent-failures", description="x", shape="diff",
-                  wave=1, built_from=[Source(2, "tests/fixtures/research_sample.md#2")])
+    skill = Skill(
+        name="hunting-silent-failures",
+        description="x",
+        shape="diff",
+        wave=1,
+        built_from=[Source(2, "tests/fixtures/research_sample.md#2")],
+    )
     out = generate_skill(skill, "v0.2", docs_root=".", skills_root=str(tmp_path))
     (out / "evals" / "eval.json").write_text(_valid_eval_json())
 
@@ -230,16 +275,19 @@ def test_run_skill_evals_rejects_unknown_api_even_with_host(tmp_path, monkeypatc
     monkeypatch.setattr(run_evals, "query_ollama", fail_any)
     monkeypatch.setattr(run_evals, "query_openai", fail_any)
     with pytest.raises(ValueError, match="unknown api"):
-        run_evals.run_skill_evals(out, "fake-model", host="http://localhost:9999",
-                                  api="bogus")
+        run_evals.run_skill_evals(
+            out, "fake-model", host="http://localhost:9999", api="bogus"
+        )
 
 
 # --- CLI argument validation (#23) ---
 
+
 def test_cli_think_and_no_think_are_mutually_exclusive(tmp_path, capsys):
     with pytest.raises(SystemExit):
-        run_evals.main(["--skill", "x", "--skills-root", str(tmp_path),
-                       "--think", "--no-think"])
+        run_evals.main(
+            ["--skill", "x", "--skills-root", str(tmp_path), "--think", "--no-think"]
+        )
     assert "not allowed with argument" in capsys.readouterr().err
 
 
@@ -252,15 +300,23 @@ def test_cli_rejects_non_positive_int_options(flag, tmp_path, capsys):
 
 # --- partial-run resilience (the 2026-08-08 cross-model re-gate) ---
 
+
 def _skill_with_evals(tmp_path):
-    skill = Skill(name="hunting-silent-failures", description="x", shape="diff",
-                  wave=1, built_from=[Source(2, "tests/fixtures/research_sample.md#2")])
+    skill = Skill(
+        name="hunting-silent-failures",
+        description="x",
+        shape="diff",
+        wave=1,
+        built_from=[Source(2, "tests/fixtures/research_sample.md#2")],
+    )
     out = generate_skill(skill, "v0.2", docs_root=".", skills_root=str(tmp_path))
     (out / "evals" / "eval.json").write_text(_valid_eval_json())
     return out
 
 
-def test_run_skill_evals_records_a_failed_scenario_and_keeps_going(tmp_path, monkeypatch):
+def test_run_skill_evals_records_a_failed_scenario_and_keeps_going(
+    tmp_path, monkeypatch
+):
     # A re-gate is 20+ slow requests; one transient must not discard the rest.
     # The failed scenario carries `error` and an empty `response` — the caller
     # needs `error` to tell "the request died" from "the model found nothing".
@@ -286,10 +342,14 @@ def test_cli_exits_non_zero_on_an_empty_message_failure(tmp_path, monkeypatch, c
     # scenario as a clean one — the guard failing silently in exactly the way it
     # exists to prevent. `error` is a presence flag: only None means "no failure".
     out = _skill_with_evals(tmp_path)
-    monkeypatch.setattr(run_evals, "query_ollama",
-                        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError()))
-    rc = run_evals.main(["--skill", out.name, "--skills-root", str(tmp_path),
-                         "--model", "fake-model"])
+    monkeypatch.setattr(
+        run_evals,
+        "query_ollama",
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError()),
+    )
+    rc = run_evals.main(
+        ["--skill", out.name, "--skills-root", str(tmp_path), "--model", "fake-model"]
+    )
     assert rc == 1
     printed = capsys.readouterr().out
     assert "do not grade it" in printed
@@ -302,9 +362,13 @@ def test_cli_exits_non_zero_when_any_scenario_failed(tmp_path, monkeypatch, caps
     # An unfailed exit would let 15 dead scenarios be graded as 15 "no findings"
     # misses — a broken run reported as a bad model.
     out = _skill_with_evals(tmp_path)
-    monkeypatch.setattr(run_evals, "query_ollama",
-                        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")))
-    rc = run_evals.main(["--skill", out.name, "--skills-root", str(tmp_path),
-                         "--model", "fake-model"])
+    monkeypatch.setattr(
+        run_evals,
+        "query_ollama",
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    rc = run_evals.main(
+        ["--skill", out.name, "--skills-root", str(tmp_path), "--model", "fake-model"]
+    )
     assert rc == 1
     assert "do not grade it" in capsys.readouterr().out

@@ -10,7 +10,7 @@ record; the shipped behavior is the source of truth.
 
 **Architecture:** A new `Mode` dataclass + a `modes:` manifest section (generated content, `built_from: []`, like `router:`/`synthesizer:`). `tooling/manifest.py` parses and validates it; `tooling/generate.py` renders (a) a "Depth modes" section into `choosing-review-lenses/SKILL.md` that separates *relevance* (which lenses apply) from *breadth* (how many to run), and (b) a per-mode severity-floor policy into `synthesizing-review-findings/SKILL.md`. This is the first half of Q20 / resolves D16's relevance-vs-depth split; the collapsed-entrypoint emission is a separate follow-up plan that reuses this routing model. Spec: [`docs/collapsed-entrypoints-and-depth-modes.md`](../collapsed-entrypoints-and-depth-modes.md).
 
-**Tech Stack:** Python 3.11+, PyYAML, pytest. Stdlib `dataclasses`, `pathlib`. Generated artifacts are plain markdown (model/harness-agnostic, D7).
+**Tech Stack:** Python 3.12+, PyYAML, pytest. Stdlib `dataclasses`, `pathlib`. Generated artifacts are plain markdown (model/harness-agnostic, D7).
 
 ---
 

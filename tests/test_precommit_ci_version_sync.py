@@ -8,6 +8,7 @@ github-actions/pip ecosystems, not the pre-commit repo — so a CI action bump
 audit caught it (#134, fixed by #135). This test closes that gap: it fails
 the build whenever either half of the claimed alignment goes stale again.
 """
+
 import re
 from pathlib import Path
 

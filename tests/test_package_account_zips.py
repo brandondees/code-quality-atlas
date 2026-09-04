@@ -3,6 +3,7 @@
 """Regression tests for tooling/package-account-zips.sh's CC BY attribution
 (issue #161's Major finding: the account-zips distribution channel had no
 equivalent of vendor-skills.sh's NOTICE.md)."""
+
 import os
 import subprocess
 import zipfile
@@ -16,7 +17,10 @@ def run_package(out_dir, *extra_args):
     result = subprocess.run(
         [str(SCRIPT), "--out", str(out_dir), *extra_args],
         cwd=str(REPO_ROOT),
-        capture_output=True, text=True, timeout=60, check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     return result
@@ -25,7 +29,12 @@ def run_package(out_dir, *extra_args):
 def _current_sha():
     result = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
-        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=10, check=True)
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    )
     return result.stdout.strip()
 
 
@@ -167,13 +176,19 @@ def test_unresolvable_sha_warns_on_stderr(tmp_path):
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
     result = subprocess.run(
         [str(SCRIPT), "--out", str(out_dir), "--collapsed"],
-        cwd=str(REPO_ROOT), env=env,
-        capture_output=True, text=True, timeout=60, check=False,
+        cwd=str(REPO_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     assert "could not resolve a git commit SHA" in result.stderr
 
-    notice = _read_from_zip(out_dir / "reviewing-a-change.zip", "reviewing-a-change/NOTICE.md")
+    notice = _read_from_zip(
+        out_dir / "reviewing-a-change.zip", "reviewing-a-change/NOTICE.md"
+    )
     assert "blob/unknown/LICENSE-CC-BY-4.0" in notice
 
 

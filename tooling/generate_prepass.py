@@ -5,6 +5,7 @@ router's lens selection and the lenses themselves, which runs the linters,
 type checkers, scanners, and data/infra tools the reviewed repository has
 already configured and turns their output into evidence each lens confirms,
 contextualizes, or dismisses (map-gaps G34 Tier 1, enacting G5)."""
+
 from __future__ import annotations
 
 import json
@@ -26,11 +27,15 @@ def build_prepass_md(manifest: Manifest) -> str:
         "description": p.description,
         "provenance": {"taxonomy_version": manifest.taxonomy_version, "built_from": []},
     }
-    fm = yaml.safe_dump(front, sort_keys=False, default_flow_style=False,
-                        allow_unicode=True).strip()
+    fm = yaml.safe_dump(
+        front, sort_keys=False, default_flow_style=False, allow_unicode=True
+    ).strip()
     router_name = manifest.router.name if manifest.router else "choosing-review-lenses"
-    synth_name = (manifest.synthesizer.name if manifest.synthesizer
-                  else "synthesizing-review-findings")
+    synth_name = (
+        manifest.synthesizer.name
+        if manifest.synthesizer
+        else "synthesizing-review-findings"
+    )
     body = (
         f"# {p.name}\n\n"
         "## When to use\n\n"
@@ -81,7 +86,8 @@ def _discover_section(p: Prepass) -> str:
     documented, from the manifest's `discover:` list."""
     rows = "\n".join(
         f"| {_escape_table_cell(d.source)} | {_escape_table_cell(d.tells)} |"
-        for d in p.discover)
+        for d in p.discover
+    )
     return (
         "## 1. Discover what the repo already runs\n\n"
         "Read, in this order — the earlier sources say what is **enforced**, "
@@ -109,9 +115,9 @@ def _run_section() -> str:
         "directory or stack, a data tool works over its DAG. For those, use the "
         "tool's own documented diff mode if it has one, otherwise its normal "
         "project scope — then **filter the output** to what the change touches "
-        "rather than pretending the run was scoped. Record which it was: \"ran "
-        "over the tree, filtered to the diff\" is a different fact from \"ran "
-        "over the 6 changed files,\" and only one of them says anything about "
+        'rather than pretending the run was scoped. Record which it was: "ran '
+        'over the tree, filtered to the diff" is a different fact from "ran '
+        'over the 6 changed files," and only one of them says anything about '
         "the rest of the repo.\n"
         "- **Use the repo's config, never your own defaults.** Output about a "
         "rule set the team never chose is noise, and reporting it as findings "
@@ -134,8 +140,10 @@ def _families_section(p: Prepass) -> str:
     `families:` list, whose `grounds` names validation has already checked."""
     rows = "\n".join(
         f"| {_escape_table_cell(f.kind)} | {_escape_table_cell(f.tools)} | "
-        + ", ".join(f"`{lens}`" for lens in f.grounds) + " |"
-        for f in p.families)
+        + ", ".join(f"`{lens}`" for lens in f.grounds)
+        + " |"
+        for f in p.families
+    )
     return (
         "## 3. Route each hit to the lens that owns it\n\n"
         "Tool families and the lenses whose findings their output can evidence. "
@@ -156,7 +164,8 @@ def _dispositions_section(p: Prepass) -> str:
     rows = "\n".join(
         f"| **{_escape_table_cell(d.name)}** | {_escape_table_cell(d.when)} | "
         f"{_escape_table_cell(d.do)} |"
-        for d in p.dispositions)
+        for d in p.dispositions
+    )
     names = ", ".join(f"**{d.name}**" for d in p.dispositions)
     return (
         "## 4. Confirm, contextualize, or dismiss — every hit, exactly once\n\n"
@@ -172,12 +181,8 @@ def _dispositions_section(p: Prepass) -> str:
 def _rules_section(p: Prepass) -> str:
     # Not a table, so no cell escaping — but a `|`-free rule can still carry a
     # folded newline; collapse whitespace so each rule stays one bullet.
-    items = "\n".join(
-        f"- **{r.name}.** {' '.join(r.rule.split())}" for r in p.rules)
-    return (
-        "## Discipline\n\n"
-        f"{items}\n\n"
-    )
+    items = "\n".join(f"- **{r.name}.** {' '.join(r.rule.split())}" for r in p.rules)
+    return f"## Discipline\n\n{items}\n\n"
 
 
 def _handoff_section(synth_name: str) -> str:
@@ -212,10 +217,10 @@ def build_collapsed_prepass(manifest: Manifest) -> str:
     full = build_prepass_md(manifest)
     if not full.startswith("---\n"):
         raise ValueError("build_prepass_md output has no leading frontmatter to strip")
-    end = full.find("\n---\n", len("---\n"))   # closing fence of the first block only
+    end = full.find("\n---\n", len("---\n"))  # closing fence of the first block only
     if end == -1:
         raise ValueError("build_prepass_md frontmatter block is not terminated")
-    body = full[end + len("\n---\n"):].lstrip("\n")
+    body = full[end + len("\n---\n") :].lstrip("\n")
     marker = "\n## Going deeper\n"
     idx = body.find(marker)
     if idx != -1:
@@ -228,7 +233,9 @@ def generate_prepass(manifest: Manifest, skills_root: str = "skills") -> Path:
     (out / "evals").mkdir(parents=True, exist_ok=True)
     (out / "SKILL.md").write_text(build_prepass_md(manifest), encoding="utf-8")
     if not (out / "evals" / "eval.json").exists():
-        (out / "evals" / "eval.json").write_text(json.dumps(
-            {"skills": [manifest.prepass.name], "scenarios": []}, indent=2) + "\n",
-            encoding="utf-8")
+        (out / "evals" / "eval.json").write_text(
+            json.dumps({"skills": [manifest.prepass.name], "scenarios": []}, indent=2)
+            + "\n",
+            encoding="utf-8",
+        )
     return out

@@ -17,6 +17,7 @@ match every `*.sh` file actually present under the trees the `shell:`
 filter itself declares (derived from the filter's own YAML, not a
 hand-maintained parallel list -- round-1 review finding).
 """
+
 import re
 from pathlib import Path
 
