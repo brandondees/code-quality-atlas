@@ -21,6 +21,7 @@ says is explicitly out of scope here — that is a semantic question, and assert
 a keyword proxy for it would be the failure mode a reviewer already caught once
 in this same file (a count threshold standing in for the invariant).
 """
+
 import re
 from pathlib import Path
 
@@ -124,8 +125,8 @@ def test_examples_open_with_an_intro_line(path: Path):
         ("Bad – finding", True),
         ("Bad—finding", True),
         ("Bad–finding", True),
-        ("Bad\u00a0—\u00a0finding", True),   # no-break spaces around the dash
-        ("Bad\u202f—\u202ffinding", True),   # narrow no-break spaces
+        ("Bad\u00a0—\u00a0finding", True),  # no-break spaces around the dash
+        ("Bad\u202f—\u202ffinding", True),  # narrow no-break spaces
         ("Bad → finding", False),
         ("Good → no finding (skipped — no user-facing surface)", False),
         # hyphenation is not a separator

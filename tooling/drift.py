@@ -34,11 +34,15 @@ def _read_provenance(skill_md: Path) -> tuple[str, list[dict]]:
     if len(parts) < 3 or parts[0].strip():
         raise ValueError(f"{skill_md}: missing or malformed YAML frontmatter")
     front = yaml.safe_load(parts[1])
-    if (not isinstance(front, dict) or "name" not in front
-            or not isinstance(front.get("provenance"), dict)
-            or "built_from" not in front["provenance"]):
+    if (
+        not isinstance(front, dict)
+        or "name" not in front
+        or not isinstance(front.get("provenance"), dict)
+        or "built_from" not in front["provenance"]
+    ):
         raise ValueError(
-            f"{skill_md}: frontmatter must define `name` and `provenance.built_from`")
+            f"{skill_md}: frontmatter must define `name` and `provenance.built_from`"
+        )
     return front["name"], front["provenance"]["built_from"]
 
 
@@ -57,7 +61,8 @@ def check_drift(skills_root: str = "skills", docs_root: str = ".") -> list[Drift
                 source_text = Path(docs_root, src.path).read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as exc:
                 raise DriftError(
-                    f"{name}: cannot read source {src.path!r}: {exc}") from exc
+                    f"{name}: cannot read source {src.path!r}: {exc}"
+                ) from exc
             current = section_hash(source_text, src.section)
             if current != b["hash"]:
                 changed.append(src)

@@ -4,6 +4,7 @@
 its lenses (loaded on demand as reference/lenses/<lens>/{body,tool-rules,
 sources}.md) plus the synthesis procedure, for cloud / account-skill /
 context-budget-constrained installs."""
+
 from __future__ import annotations
 
 import json
@@ -67,14 +68,16 @@ def _artifacts_block(skill: Skill) -> str:
     rows = "\n".join(
         f"| {_escape_table_cell(a.name)} | {_escape_table_cell(a.detect)} | "
         f"[{a.slug}.md]({a.slug}.md) |"
-        for a in skill.artifacts)
+        for a in skill.artifacts
+    )
     return (
         "## Artifacts\n\n"
         "Detect which artifact the change adds or touches, then open its rubric "
         "and review the artifact against that published standard:\n\n"
         "| Artifact | Activate when | Rubric to apply |\n"
         "|---|---|---|\n"
-        f"{rows}\n\n")
+        f"{rows}\n\n"
+    )
 
 
 def _github_anchor(heading: str) -> str:
@@ -158,7 +161,9 @@ def _toc_for_body(body: str) -> str:
     return "## Contents\n\n" + "\n".join(lines) + "\n\n"
 
 
-def lens_bundle_body(skill: Skill, docs_root: str = ".", skills_root: str = "skills") -> str:
+def lens_bundle_body(
+    skill: Skill, docs_root: str = ".", skills_root: str = "skills"
+) -> str:
     """The `body.md` an entrypoint loads for one lens: when-to-use + the full
     heuristics checklist (or, for an artifact-shaped lens, the detect→rubric
     table — its checks live in the per-artifact rubric files generate_lens_bundle
@@ -168,7 +173,9 @@ def lens_bundle_body(skill: Skill, docs_root: str = ".", skills_root: str = "ski
     are a further disclosure level, linked not inlined."""
     picker = f"{skill.picker}\n\n" if skill.picker else ""
     examples_path = Path(skills_root, skill.name, "examples.md")
-    examples = examples_path.read_text(encoding="utf-8") if examples_path.exists() else ""
+    examples = (
+        examples_path.read_text(encoding="utf-8") if examples_path.exists() else ""
+    )
     # The standalone examples.md carries its own `# Examples — <lens>` H1; strip a
     # leading H1 so the bundle keeps one top-level heading. Its `## Contents` ToC,
     # where present, goes the same way — the bundle builds its own below.
@@ -181,14 +188,17 @@ def lens_bundle_body(skill: Skill, docs_root: str = ".", skills_root: str = "ski
         core_block = _artifacts_block(skill)
         going_deeper = (
             "## Going deeper\n\n"
-            + "".join(f"- [{a.slug}.md]({a.slug}.md) — the rubric for {a.name}; "
-                     f"open it on a presence hit and review against it.\n"
-                     for a in skill.artifacts)
+            + "".join(
+                f"- [{a.slug}.md]({a.slug}.md) — the rubric for {a.name}; "
+                f"open it on a presence hit and review against it.\n"
+                for a in skill.artifacts
+            )
             + "- [tool-rules.md](tool-rules.md) — the tools that mechanize part of "
             "each rubric; for wiring up checks, not needed for the judgment review "
             "itself.\n"
             "- [sources.md](sources.md) — the published standards behind each "
-            "rubric; for provenance, not needed during a review.\n")
+            "rubric; for provenance, not needed during a review.\n"
+        )
     else:
         heuristics = _checklist_body(skill, docs_root=docs_root)
         # Give `## Checklist` a lead-in before the per-category heuristics, mirroring
@@ -198,18 +208,23 @@ def lens_bundle_body(skill: Skill, docs_root: str = ".", skills_root: str = "ski
         # lens carries no heuristics, so a future heuristics-less lens never ships a
         # bare `## Checklist`.
         core_block = (
-            "## Checklist\n\n"
-            "The full review checklist, grouped by the research category each check "
-            "draws from:\n\n"
-            f"{heuristics}\n\n"
-        ) if heuristics else ""
+            (
+                "## Checklist\n\n"
+                "The full review checklist, grouped by the research category each check "
+                "draws from:\n\n"
+                f"{heuristics}\n\n"
+            )
+            if heuristics
+            else ""
+        )
         going_deeper = (
             "## Going deeper\n\n"
             "- [tool-rules.md](tool-rules.md) — static-analysis rules for the "
             "mechanical subset; for wiring linters, not needed for the judgment "
             "review.\n"
             "- [sources.md](sources.md) — the research behind each check; for "
-            "provenance.\n")
+            "provenance.\n"
+        )
     header = f"# {skill.name}\n\n{picker}"
     sections = (
         "## When to use\n\n"
@@ -224,8 +239,9 @@ def lens_bundle_body(skill: Skill, docs_root: str = ".", skills_root: str = "ski
     return header + toc + sections
 
 
-def generate_lens_bundle(skill: Skill, lenses_dir: Path, docs_root: str = ".",
-                         skills_root: str = "skills") -> Path:
+def generate_lens_bundle(
+    skill: Skill, lenses_dir: Path, docs_root: str = ".", skills_root: str = "skills"
+) -> Path:
     """Write reference/lenses/<skill>/{body,tool-rules,sources}.md and return the
     dir. An artifact-shaped lens additionally gets one rubric file per artifact
     (<slug>.md, loaded on a presence hit — see _artifacts_block), mirroring how
@@ -234,17 +250,24 @@ def generate_lens_bundle(skill: Skill, lenses_dir: Path, docs_root: str = ".",
     dest.mkdir(parents=True, exist_ok=True)
     # Only body.md inlines examples.md; tool-rules.md / sources.md draw from docs/research only.
     (dest / "body.md").write_text(
-        _gen_header(skill, with_examples=True) + lens_bundle_body(skill, docs_root, skills_root),
-        encoding="utf-8")
+        _gen_header(skill, with_examples=True)
+        + lens_bundle_body(skill, docs_root, skills_root),
+        encoding="utf-8",
+    )
     if skill.shape == "artifact":
         for a in skill.artifacts:
             (dest / f"{a.slug}.md").write_text(
                 _gen_header(skill) + build_artifact_rubric(skill, a, docs_root),
-                encoding="utf-8")
+                encoding="utf-8",
+            )
     (dest / "tool-rules.md").write_text(
-        _gen_header(skill) + build_reference(skill, "tooling", docs_root), encoding="utf-8")
+        _gen_header(skill) + build_reference(skill, "tooling", docs_root),
+        encoding="utf-8",
+    )
     (dest / "sources.md").write_text(
-        _gen_header(skill) + build_reference(skill, "references", docs_root), encoding="utf-8")
+        _gen_header(skill) + build_reference(skill, "references", docs_root),
+        encoding="utf-8",
+    )
     return dest
 
 
@@ -256,8 +279,9 @@ def build_entrypoint_md(manifest: Manifest, entrypoint: Entrypoint) -> str:
         "description": entrypoint.description,
         "provenance": {"taxonomy_version": manifest.taxonomy_version, "built_from": []},
     }
-    fm = yaml.safe_dump(front, sort_keys=False, default_flow_style=False,
-                        allow_unicode=True).strip()
+    fm = yaml.safe_dump(
+        front, sort_keys=False, default_flow_style=False, allow_unicode=True
+    ).strip()
 
     # Routes from the router that (a) belong to this entrypoint's own shape
     # and (b) touch this entrypoint's lenses. (a) alone isn't enough: lens
@@ -280,20 +304,24 @@ def build_entrypoint_md(manifest: Manifest, entrypoint: Entrypoint) -> str:
     if manifest.router:
         for route in manifest.router.routes:
             route_shapes = route.shapes or ["diff"]
-            if (any(shape in entrypoint.shapes for shape in route_shapes)
-                    and any(lens in lens_names for lens in route.run)):
+            if any(shape in entrypoint.shapes for shape in route_shapes) and any(
+                lens in lens_names for lens in route.run
+            ):
                 run = ", ".join(f"`{lens}`" for lens in route.run if lens in lens_names)
                 if route.note:
                     run += f" — {_escape_table_cell(route.note)}"
                 rows.append(f"| {_escape_table_cell(route.when)} | {run} |")
-    routes_table = "\n".join(rows) if rows else "| (any item in scope) | all lenses below |"
+    routes_table = (
+        "\n".join(rows) if rows else "| (any item in scope) | all lenses below |"
+    )
 
     # Each lens links to its loadable bundle, so the entrypoint can Read it on
     # demand; ◆ marks design-capable lenses and the picker gives the one-liner.
     catalog = "\n".join(
         f"- [`{s.name}`](reference/lenses/{s.name}/body.md){' ◆' if s.design else ''}"
         + (f" — {s.picker}" if s.picker else "")
-        for s in lenses)
+        for s in lenses
+    )
 
     body = (
         f"# {entrypoint.name}\n\n"
@@ -303,13 +331,17 @@ def build_entrypoint_md(manifest: Manifest, entrypoint: Entrypoint) -> str:
         "Rank the relevant lenses below by relevance to what is being reviewed, "
         "pick the breadth from the depth mode (default **review**), then for each "
         "selected lens **load its bundle** and apply it:\n\n"
-        + ("- Before the lenses judge anything, gather deterministic evidence "
-           "with the procedure in `reference/tool-evidence.md` — run the "
-           "linters, type checkers, and scanners this repo *already* "
-           "configures, scoped to what's under review, and hand each lens its "
-           "hits. Skip it when the repo configures none, or when running them "
-           "would execute untrusted code; say so in the coverage line either "
-           "way.\n" if manifest.prepass else "")
+        + (
+            "- Before the lenses judge anything, gather deterministic evidence "
+            "with the procedure in `reference/tool-evidence.md` — run the "
+            "linters, type checkers, and scanners this repo *already* "
+            "configures, scoped to what's under review, and hand each lens its "
+            "hits. Skip it when the repo configures none, or when running them "
+            "would execute untrusted code; say so in the coverage line either "
+            "way.\n"
+            if manifest.prepass
+            else ""
+        )
         + "- Read `reference/lenses/<lens>/body.md` — the lens's checklist and examples. "
         "Open `reference/lenses/<lens>/tool-rules.md` or `sources.md` only if deeper "
         "tooling/provenance is called for.\n"
@@ -327,20 +359,25 @@ def build_entrypoint_md(manifest: Manifest, entrypoint: Entrypoint) -> str:
     return f"---\n{fm}\n---\n\n{body}" + _gen_trailer()
 
 
-def collapsed_plugin_manifest(root_plugin_path: str = ".claude-plugin/plugin.json") -> dict:
+def collapsed_plugin_manifest(
+    root_plugin_path: str = ".claude-plugin/plugin.json",
+) -> dict:
     """Derive the collapsed plugin manifest from the root one (single source) so
     metadata stays in sync; only name/displayName/description differ."""
     p = Path(root_plugin_path)
     if not p.exists():
         raise FileNotFoundError(
             f"root plugin manifest not found at {root_plugin_path}; "
-            "cannot derive the collapsed plugin manifest")
+            "cannot derive the collapsed plugin manifest"
+        )
     base = json.loads(p.read_text(encoding="utf-8"))
     base["name"] = "code-quality-atlas-collapsed"
     base["displayName"] = base.get("displayName", "Code Quality Atlas") + " (collapsed)"
-    base["description"] = ("Collapsed 4-entrypoint form of the code-quality-atlas "
-                           "suite for cloud / account-skill / context-budget installs. "
-                           "Lenses are bundled and loaded on demand.")
+    base["description"] = (
+        "Collapsed 4-entrypoint form of the code-quality-atlas "
+        "suite for cloud / account-skill / context-budget installs. "
+        "Lenses are bundled and loaded on demand."
+    )
     return base
 
 
@@ -357,11 +394,13 @@ def build_collapsed_synthesis(manifest: Manifest) -> str:
     # Raise loudly rather than silently shipping a frontmatter-laden bundle if the
     # synthesizer's output shape ever changes.
     if not full.startswith("---\n"):
-        raise ValueError("build_synthesizer_md output has no leading frontmatter to strip")
-    end = full.find("\n---\n", len("---\n"))   # closing fence of the first block only
+        raise ValueError(
+            "build_synthesizer_md output has no leading frontmatter to strip"
+        )
+    end = full.find("\n---\n", len("---\n"))  # closing fence of the first block only
     if end == -1:
         raise ValueError("build_synthesizer_md frontmatter block is not terminated")
-    body = full[end + len("\n---\n"):].lstrip("\n")
+    body = full[end + len("\n---\n") :].lstrip("\n")
     marker = "\n## Going deeper\n"
     idx = body.find(marker)
     if idx != -1:
@@ -373,8 +412,12 @@ def build_collapsed_synthesis(manifest: Manifest) -> str:
     return body
 
 
-def generate_collapsed(manifest: Manifest, docs_root: str = ".", skills_root: str = "skills",
-                       collapsed_root: str = "collapsed") -> list[Path]:
+def generate_collapsed(
+    manifest: Manifest,
+    docs_root: str = ".",
+    skills_root: str = "skills",
+    collapsed_root: str = "collapsed",
+) -> list[Path]:
     """Emit the collapsed form: 4 entrypoint skills (each bundling its shape's
     lenses + synthesis) plus a generated .claude-plugin/plugin.json. Prunes any
     entrypoint directory no longer in the manifest so the committed tree can't go
@@ -393,20 +436,24 @@ def generate_collapsed(manifest: Manifest, docs_root: str = ".", skills_root: st
         raise CollapsedOverlapError(
             f"refusing to generate collapsed output into {skills_dir}: its prune "
             f"step would delete the standalone skills tree at {skills_root}; "
-            f"collapsed_root must not overlap skills_root")
+            f"collapsed_root must not overlap skills_root"
+        )
     current = {ep.name for ep in manifest.entrypoints}
     if skills_dir.exists():
         for child in skills_dir.iterdir():
             if child.is_dir() and child.name not in current:
-                shutil.rmtree(child)   # prune a removed entrypoint
+                shutil.rmtree(child)  # prune a removed entrypoint
     for ep in manifest.entrypoints:
         out = Path(collapsed_root, "skills", ep.name)
         lenses_dir = out / "reference" / "lenses"
         lenses_dir.mkdir(parents=True, exist_ok=True)
         (out / "evals").mkdir(parents=True, exist_ok=True)
-        (out / "SKILL.md").write_text(build_entrypoint_md(manifest, ep), encoding="utf-8")
+        (out / "SKILL.md").write_text(
+            build_entrypoint_md(manifest, ep), encoding="utf-8"
+        )
         (out / "reference" / "synthesis.md").write_text(
-            _gen_header() + build_collapsed_synthesis(manifest), encoding="utf-8")
+            _gen_header() + build_collapsed_synthesis(manifest), encoding="utf-8"
+        )
         # The pre-pass is bundled the same way synthesis.md is — both are
         # manifest-built procedures with no owning lens. Remove a stale copy if
         # the manifest ever drops the block, so the committed tree can't keep
@@ -414,7 +461,8 @@ def generate_collapsed(manifest: Manifest, docs_root: str = ".", skills_root: st
         tool_evidence = out / "reference" / "tool-evidence.md"
         if manifest.prepass is not None:
             tool_evidence.write_text(
-                _gen_header() + build_collapsed_prepass(manifest), encoding="utf-8")
+                _gen_header() + build_collapsed_prepass(manifest), encoding="utf-8"
+            )
         elif tool_evidence.exists():
             tool_evidence.unlink()
         ep_lenses = entrypoint_lenses(manifest, ep)
@@ -427,19 +475,27 @@ def generate_collapsed(manifest: Manifest, docs_root: str = ".", skills_root: st
             if child.is_dir() and child.name not in current_lens_names:
                 shutil.rmtree(child)
         for skill in ep_lenses:
-            generate_lens_bundle(skill, lenses_dir,
-                                 docs_root=docs_root, skills_root=skills_root)
+            generate_lens_bundle(
+                skill, lenses_dir, docs_root=docs_root, skills_root=skills_root
+            )
         if not (out / "evals" / "eval.json").exists():
             (out / "evals" / "eval.json").write_text(
                 json.dumps({"skills": [ep.name], "scenarios": []}, indent=2) + "\n",
-                encoding="utf-8")
+                encoding="utf-8",
+            )
         written.append(out)
     pm_dir = Path(collapsed_root, ".claude-plugin")
     pm_dir.mkdir(parents=True, exist_ok=True)
     plugin_json = pm_dir / "plugin.json"
     plugin_json.write_text(
-        json.dumps(collapsed_plugin_manifest(
-            root_plugin_path=str(Path(docs_root, ".claude-plugin", "plugin.json"))),
-            indent=2) + "\n", encoding="utf-8")
-    written.append(plugin_json)   # the generated manifest is an emitted artifact too
+        json.dumps(
+            collapsed_plugin_manifest(
+                root_plugin_path=str(Path(docs_root, ".claude-plugin", "plugin.json"))
+            ),
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    written.append(plugin_json)  # the generated manifest is an emitted artifact too
     return written

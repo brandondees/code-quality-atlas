@@ -14,6 +14,7 @@ when called from `generate_collapsed.lens_bundle_body`, so `monkeypatch.setattr`
 (or any rebind) on `tooling.generate._escape_table_cell` does not reach that
 call — patch the defining submodule directly instead, as tests/test_collapsed.py
 does for `_checklist_body`, a same-module helper with the identical hazard."""
+
 from __future__ import annotations
 
 from tooling.generate_collapsed import (
@@ -52,11 +53,26 @@ from tooling.generate_synthesizer import (
 
 __all__ = [
     "CollapsedOverlapError",
-    "build_artifact_rubric", "build_collapsed_prepass", "build_collapsed_synthesis",
-    "build_entrypoint_md", "build_prepass_md",
-    "build_reference", "build_router_md", "build_skill_md", "build_synthesizer_md",
-    "collapsed_plugin_manifest", "entrypoint_lenses", "generate_collapsed",
-    "generate_lens_bundle", "generate_prepass", "generate_router", "generate_skill",
-    "generate_synthesizer", "lens_bundle_body", "mode_floor_policy",
-    "modes_section", "primary_owners", "top_checks",
+    "build_artifact_rubric",
+    "build_collapsed_prepass",
+    "build_collapsed_synthesis",
+    "build_entrypoint_md",
+    "build_prepass_md",
+    "build_reference",
+    "build_router_md",
+    "build_skill_md",
+    "build_synthesizer_md",
+    "collapsed_plugin_manifest",
+    "entrypoint_lenses",
+    "generate_collapsed",
+    "generate_lens_bundle",
+    "generate_prepass",
+    "generate_router",
+    "generate_skill",
+    "generate_synthesizer",
+    "lens_bundle_body",
+    "mode_floor_policy",
+    "modes_section",
+    "primary_owners",
+    "top_checks",
 ]

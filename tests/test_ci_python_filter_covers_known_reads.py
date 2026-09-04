@@ -19,6 +19,7 @@ skills/**, collapsed/**, tooling/**, tests/**, docs/research/**, and *.py
 (already covered by the filter's broad directory/extension globs and not
 itemized here).
 """
+
 import fnmatch
 from pathlib import Path
 
@@ -30,27 +31,27 @@ ROOT = Path(__file__).resolve().parent.parent
 
 _KNOWN_EXTERNAL_READS = (
     *_LIVING_COUNT_FILES,  # test_doc_counts.py's own inventory -- imported, not copied
-    "commands/atlas-init.md",       # test_routing_snippet_sync.py
+    "commands/atlas-init.md",  # test_routing_snippet_sync.py
     "templates/agents-routing-snippet.md",
-    "templates/REVIEW.md",          # test_review_template_sync.py
+    "templates/REVIEW.md",  # test_review_template_sync.py
     "REVIEW.md",
-    "AGENTS.md",                    # test_routing_snippet_sync.py
+    "AGENTS.md",  # test_routing_snippet_sync.py
     "CLAUDE.md",
-    "docs/map/CLAUDE.md",           # test_map_twins_sync.py
+    "docs/map/CLAUDE.md",  # test_map_twins_sync.py
     "docs/map/AGENTS.md",
     "docs/map/routing.md",
     "docs/map/_templates/process.md",
-    "LICENSE",                      # test_license_paths_exhaustive.py
-    ".pre-commit-config.yaml",      # test_precommit_ci_version_sync.py
+    "LICENSE",  # test_license_paths_exhaustive.py
+    ".pre-commit-config.yaml",  # test_precommit_ci_version_sync.py
     ".github/workflows/ci.yml",
-    "hooks/hooks.json",             # test_hooks.py
+    "hooks/hooks.json",  # test_hooks.py
     "hooks/log-skill-invocation.sh",
     "hooks/queue-session-retro.sh",
     "hooks/route.sh",
     "hooks/lib/feedback-tier.sh",
-    ".claude-plugin/plugin.json",   # test_doc_counts.py
+    ".claude-plugin/plugin.json",  # test_doc_counts.py
     ".claude-plugin/marketplace.json",
-    ".claude/skills/**",            # test_self_vendored_skills_sync.py, test_map_twins_sync.py
+    ".claude/skills/**",  # test_self_vendored_skills_sync.py, test_map_twins_sync.py
 )
 
 
@@ -58,7 +59,8 @@ def _load_filter_globs() -> dict:
     ci_text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     ci = yaml.safe_load(ci_text)
     filter_step = next(
-        s for s in ci["jobs"]["gate"]["steps"]
+        s
+        for s in ci["jobs"]["gate"]["steps"]
         if s.get("uses", "").startswith("dorny/paths-filter@")
     )
     # dorny/paths-filter's `filters:` input is itself a YAML document
@@ -115,7 +117,8 @@ def test_python_filter_covers_every_known_external_read():
     # `python` specifically to make the `tests` step itself run).
     covering_globs = filters["python"] + filters.get("requirements", [])
     uncovered = [
-        rel for rel in _KNOWN_EXTERNAL_READS
+        rel
+        for rel in _KNOWN_EXTERNAL_READS
         if not _matches_any_glob(rel, covering_globs)
     ]
     assert not uncovered, (

@@ -60,12 +60,16 @@ class _FenceTracker:
         # tab is 4 columns all by itself, so lstrip(" ") alone (which a tab
         # survives untouched) would misreport it as indent 0 and let a
         # tab-indented delimiter-like line wrongly open/close a fence.
-        leading = line[:len(line) - len(line.lstrip(" \t"))]
+        leading = line[: len(line) - len(line.lstrip(" \t"))]
         indent = len(leading.expandtabs(4))
         stripped = line.strip()
         if self._fence is not None:
-            if (indent < 4 and stripped and len(stripped) >= len(self._fence)
-                    and set(stripped) == {self._fence[0]}):
+            if (
+                indent < 4
+                and stripped
+                and len(stripped) >= len(self._fence)
+                and set(stripped) == {self._fence[0]}
+            ):
                 self._fence = None
             return True
         if indent < 4:
@@ -78,7 +82,7 @@ class _FenceTracker:
                 # "```contains ` a backtick" open a fence that never
                 # legitimately closes, swallowing every real heading/bullet
                 # after it as "content".
-                if fence[0] == "`" and "`" in stripped[match.end():]:
+                if fence[0] == "`" and "`" in stripped[match.end() :]:
                     return False
                 self._fence = fence
                 return True
@@ -103,7 +107,9 @@ def _iter_lines(text: str) -> Iterator[str]:
         yield part if i == last else part + "\n"
 
 
-def _match_offsets(text: str, pattern: re.Pattern[str]) -> list[tuple[int, re.Match[str]]]:
+def _match_offsets(
+    text: str, pattern: re.Pattern[str]
+) -> list[tuple[int, re.Match[str]]]:
     """(offset, match) for each line in `text` matched by `pattern` at its
     start, skipping lines inside a fenced code block (see `_FenceTracker`).
     `offset` is the string index the line begins at, so callers can slice
@@ -187,7 +193,7 @@ def extract_bullets(text: str) -> list[str]:
     items = []
     for i, pos in enumerate(starts):
         end = starts[i + 1] if i + 1 < len(starts) else len(text)
-        item = text[pos + 2:end].strip()
+        item = text[pos + 2 : end].strip()
         # A heading/horizontal rule after the last bullet is not bullet content.
         item = re.split(r"\n(?=#|---)", item)[0].strip()
         if item:
@@ -197,5 +203,7 @@ def extract_bullets(text: str) -> list[str]:
 
 def section_hash(markdown: str, n: int) -> str:
     """SHA-256 (hex) of the normalized text of section #n."""
-    normalized = extract_section(markdown, n).replace("\r\n", "\n").strip().encode("utf-8")
+    normalized = (
+        extract_section(markdown, n).replace("\r\n", "\n").strip().encode("utf-8")
+    )
     return hashlib.sha256(normalized).hexdigest()

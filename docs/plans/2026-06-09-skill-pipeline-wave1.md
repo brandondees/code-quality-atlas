@@ -8,7 +8,7 @@
 
 **Architecture:** A small Python tool reads `skills/manifest.yaml` (the adaptation lever) plus the verified research in `docs/research/cluster-*.md`, and emits one directory per skill (`SKILL.md` + `reference/*.md` + `evals/`), stamping each source research section's SHA-256 into the skill's provenance frontmatter. A drift command recomputes those hashes against current docs to flag skills whose source changed. This realizes D6 (docs are source of truth; skills derived & regenerable), D7 (progressive disclosure, portable lean SKILL.md), and D8 (eval-first).
 
-**Tech Stack:** Python 3.11+, PyYAML, pytest. Stdlib `hashlib`, `pathlib`, `re`, `dataclasses`, `argparse`. (Tooling language is dev-only and does not affect the model/harness-agnostic skill format.)
+**Tech Stack:** Python 3.12+, PyYAML, pytest. Stdlib `hashlib`, `pathlib`, `re`, `dataclasses`, `argparse`. (Tooling language is dev-only and does not affect the model/harness-agnostic skill format.)
 
 ---
 

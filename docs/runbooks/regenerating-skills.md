@@ -1,5 +1,10 @@
 # Runbook — Regenerating skills after a docs change
 
+Prerequisite: repo cloned and its Python environment set up per
+[AGENTS.md's Development setup](../../AGENTS.md#development-setup) — every
+command below assumes the repo root as the working directory and the
+`requirements.txt` dependencies installed.
+
 The taxonomy + `docs/research/cluster-*.md` are the source of truth. Skills are
 derived. After you critique/improve a research section, flow it into the skills:
 

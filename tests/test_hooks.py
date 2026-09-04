@@ -5,6 +5,7 @@ queue must default to off, gate correctly on the feedback tier (env override,
 then a ratified `.code-quality-atlas/preferences.md` line, ignoring commented-
 out template examples), and degrade to a clean no-op on malformed input or a
 missing `jq` — never block or crash the calling session."""
+
 import hashlib
 import json
 import shutil
@@ -18,18 +19,22 @@ ROUTE_HOOK = REPO_ROOT / "hooks" / "route.sh"
 TRACK_HOOK = REPO_ROOT / "hooks" / "lens-coverage" / "track-lens-reads.sh"
 GATE_HOOK = REPO_ROOT / "hooks" / "lens-coverage" / "gate-lens-coverage.sh"
 
-_SKILL_INPUT = json.dumps({
-    "session_id": "s1",
-    "hook_event_name": "PostToolUse",
-    "tool_name": "Skill",
-    "tool_input": {"skill": "checking-restraint"},
-})
-_SESSION_END_INPUT = json.dumps({
-    "session_id": "s1",
-    "hook_event_name": "SessionEnd",
-    "transcript_path": "/tmp/some-transcript.jsonl",
-    "reason": "clear",
-})
+_SKILL_INPUT = json.dumps(
+    {
+        "session_id": "s1",
+        "hook_event_name": "PostToolUse",
+        "tool_name": "Skill",
+        "tool_input": {"skill": "checking-restraint"},
+    }
+)
+_SESSION_END_INPUT = json.dumps(
+    {
+        "session_id": "s1",
+        "hook_event_name": "SessionEnd",
+        "transcript_path": "/tmp/some-transcript.jsonl",
+        "reason": "clear",
+    }
+)
 
 
 def _run(hook, cwd, stdin, env_extra=None):
@@ -37,8 +42,14 @@ def _run(hook, cwd, stdin, env_extra=None):
     if env_extra:
         env.update(env_extra)
     result = subprocess.run(
-        ["bash", str(hook)], cwd=str(cwd), input=stdin,
-        capture_output=True, text=True, timeout=10, env=env, check=False,
+        ["bash", str(hook)],
+        cwd=str(cwd),
+        input=stdin,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=env,
+        check=False,
     )
     assert result.returncode == 0, f"{hook.name} must always exit 0: {result.stderr}"
     return result
@@ -55,15 +66,17 @@ def test_default_off_no_ops(tmp_path):
 
 
 def test_env_override_enables_logging(tmp_path):
-    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    env = {
+        "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+    }
     _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra=env)
     log = _learnings_dir(tmp_path) / "invocations.jsonl"
     assert log.exists()
     record = json.loads(log.read_text().strip().splitlines()[-1])
     assert record["session_id"] == "s1"
     assert record["tool_name"] == "Skill"
-    assert record["plugin_sha"]   # this repo is a git checkout; resolvable
+    assert record["plugin_sha"]  # this repo is a git checkout; resolvable
     assert "ts" in record
     # #364: the raw tool_input payload is never written — only its shape-
     # independent abstraction (byte length + digest of the compact JSON).
@@ -81,14 +94,18 @@ def test_env_override_byte_length_is_utf8_bytes_not_codepoints(tmp_path):
     # Regression for Copilot's PR #397 finding: a codepoint-count assertion
     # would pass by coincidence on ASCII input and mask the hook computing
     # something other than a true byte count for multi-byte characters.
-    skill_input = json.dumps({
-        "session_id": "s1",
-        "hook_event_name": "PostToolUse",
-        "tool_name": "Skill",
-        "tool_input": {"skill": "café ☂"},
-    })
-    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    skill_input = json.dumps(
+        {
+            "session_id": "s1",
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Skill",
+            "tool_input": {"skill": "café ☂"},
+        }
+    )
+    env = {
+        "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+    }
     _run(LOG_HOOK, tmp_path, skill_input, env_extra=env)
     log = _learnings_dir(tmp_path) / "invocations.jsonl"
     record = json.loads(log.read_text().strip().splitlines()[-1])
@@ -96,9 +113,14 @@ def test_env_override_byte_length_is_utf8_bytes_not_codepoints(tmp_path):
     # expected serialization must be built the same way to match what the
     # hook actually hashes/measures.
     compact = json.dumps({"skill": "café ☂"}, separators=(",", ":"), ensure_ascii=False)
-    assert len(compact.encode("utf-8")) != len(compact)   # the fixture must actually be multi-byte
+    assert len(compact.encode("utf-8")) != len(
+        compact
+    )  # the fixture must actually be multi-byte
     assert record["tool_input_len"] == len(compact.encode("utf-8"))
-    assert record["tool_input_sha256"] == hashlib.sha256(compact.encode("utf-8")).hexdigest()
+    assert (
+        record["tool_input_sha256"]
+        == hashlib.sha256(compact.encode("utf-8")).hexdigest()
+    )
 
 
 def test_env_override_hashes_with_sorted_keys_so_key_order_does_not_matter(tmp_path):
@@ -107,19 +129,34 @@ def test_env_override_hashes_with_sorted_keys_so_key_order_does_not_matter(tmp_p
     # with differently ordered keys would hash differently — undermining
     # tool_input_sha256's use for future repeat-input analysis (§3.4). The
     # hook must serialize with sorted keys (jq -cS) before hashing.
-    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
-    ordered_a = json.dumps({
-        "session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Skill",
-        "tool_input": {"a": 1, "b": 2},
-    })
-    ordered_b = json.dumps({
-        "session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Skill",
-        "tool_input": {"b": 2, "a": 1},
-    })
+    env = {
+        "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+    }
+    ordered_a = json.dumps(
+        {
+            "session_id": "s1",
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Skill",
+            "tool_input": {"a": 1, "b": 2},
+        }
+    )
+    ordered_b = json.dumps(
+        {
+            "session_id": "s1",
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Skill",
+            "tool_input": {"b": 2, "a": 1},
+        }
+    )
     _run(LOG_HOOK, tmp_path, ordered_a, env_extra=env)
     _run(LOG_HOOK, tmp_path, ordered_b, env_extra=env)
-    lines = (_learnings_dir(tmp_path) / "invocations.jsonl").read_text().strip().splitlines()
+    lines = (
+        (_learnings_dir(tmp_path) / "invocations.jsonl")
+        .read_text()
+        .strip()
+        .splitlines()
+    )
     record_a, record_b = (json.loads(line) for line in lines[-2:])
     assert record_a["tool_input_sha256"] == record_b["tool_input_sha256"]
     assert record_a["tool_input_len"] == record_b["tool_input_len"]
@@ -132,14 +169,25 @@ def test_env_override_preserves_explicit_false_tool_input(tmp_path):
     # via jq's `//` operator treating false as falsy too. The hook must
     # distinguish "tool_input is present and false" from "tool_input is
     # absent or null" so the recorded length/hash reflect what was sent.
-    skill_input = json.dumps({
-        "session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Skill",
-        "tool_input": False,
-    })
-    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    skill_input = json.dumps(
+        {
+            "session_id": "s1",
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Skill",
+            "tool_input": False,
+        }
+    )
+    env = {
+        "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+    }
     _run(LOG_HOOK, tmp_path, skill_input, env_extra=env)
-    record = json.loads((_learnings_dir(tmp_path) / "invocations.jsonl").read_text().strip().splitlines()[-1])
+    record = json.loads(
+        (_learnings_dir(tmp_path) / "invocations.jsonl")
+        .read_text()
+        .strip()
+        .splitlines()[-1]
+    )
     assert record["tool_input_len"] == len("false")
     assert record["tool_input_sha256"] == hashlib.sha256(b"false").hexdigest()
 
@@ -152,19 +200,44 @@ def test_env_override_degrades_to_null_digest_without_a_hashing_tool(tmp_path):
     # producing an undocumented shape.
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()
-    for tool in ("bash", "cat", "mkdir", "printf", "date", "git", "grep",
-                 "sed", "awk", "dirname", "cd", "sh", "jq", "wc", "tr", "cut"):
+    for tool in (
+        "bash",
+        "cat",
+        "mkdir",
+        "printf",
+        "date",
+        "git",
+        "grep",
+        "sed",
+        "awk",
+        "dirname",
+        "cd",
+        "sh",
+        "jq",
+        "wc",
+        "tr",
+        "cut",
+    ):
         found = shutil.which(tool)
         if found:
             (fake_bin / tool).symlink_to(found)
     assert not (fake_bin / "sha256sum").exists()
     assert not (fake_bin / "shasum").exists()
-    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
-           "PATH": str(fake_bin), "HOME": str(tmp_path)}
+    env = {
+        "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+        "PATH": str(fake_bin),
+        "HOME": str(tmp_path),
+    }
     result = subprocess.run(
-        ["bash", str(LOG_HOOK)], cwd=str(tmp_path), input=_SKILL_INPUT,
-        capture_output=True, text=True, timeout=10, env=env, check=False,
+        ["bash", str(LOG_HOOK)],
+        cwd=str(tmp_path),
+        input=_SKILL_INPUT,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=env,
+        check=False,
     )
     assert result.returncode == 0
     log = _learnings_dir(tmp_path) / "invocations.jsonl"
@@ -176,8 +249,10 @@ def test_env_override_degrades_to_null_digest_without_a_hashing_tool(tmp_path):
 
 
 def test_session_end_queues_retro_under_env_override(tmp_path):
-    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    env = {
+        "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+    }
     _run(RETRO_HOOK, tmp_path, _SESSION_END_INPUT, env_extra=env)
     queue = _learnings_dir(tmp_path) / "pending-retro.jsonl"
     assert queue.exists()
@@ -194,14 +269,18 @@ def test_session_end_basename_strips_windows_backslash_paths_too(tmp_path):
     # Windows-style transcript_path (backslash separators) un-reduced, so the
     # full absolute path — OS username, home directory, project layout —
     # would still leak into the committed pending-retro.jsonl.
-    session_end_input = json.dumps({
-        "session_id": "s1",
-        "hook_event_name": "SessionEnd",
-        "transcript_path": r"C:\Users\alice\.claude\projects\foo\abc-123.jsonl",
-        "reason": "clear",
-    })
-    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    session_end_input = json.dumps(
+        {
+            "session_id": "s1",
+            "hook_event_name": "SessionEnd",
+            "transcript_path": r"C:\Users\alice\.claude\projects\foo\abc-123.jsonl",
+            "reason": "clear",
+        }
+    )
+    env = {
+        "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+    }
     _run(RETRO_HOOK, tmp_path, session_end_input, env_extra=env)
     queue = _learnings_dir(tmp_path) / "pending-retro.jsonl"
     record = json.loads(queue.read_text().strip().splitlines()[-1])
@@ -209,20 +288,26 @@ def test_session_end_basename_strips_windows_backslash_paths_too(tmp_path):
     assert record["transcript_basename"] == "abc-123.jsonl"
 
 
-def test_session_end_empty_transcript_path_yields_null_basename_not_empty_string(tmp_path):
+def test_session_end_empty_transcript_path_yields_null_basename_not_empty_string(
+    tmp_path,
+):
     # Regression for the atlas reviewer's PR #397 finding: jq's `if` only
     # treats null/false as falsy, so `if .transcript_path then ...` alone
     # would turn an (unlikely but possible) empty-string transcript_path
     # into transcript_basename: "" instead of null, diverging from the
     # documented "basename or null" contract.
-    session_end_input = json.dumps({
-        "session_id": "s1",
-        "hook_event_name": "SessionEnd",
-        "transcript_path": "",
-        "reason": "clear",
-    })
-    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    session_end_input = json.dumps(
+        {
+            "session_id": "s1",
+            "hook_event_name": "SessionEnd",
+            "transcript_path": "",
+            "reason": "clear",
+        }
+    )
+    env = {
+        "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+    }
     _run(RETRO_HOOK, tmp_path, session_end_input, env_extra=env)
     queue = _learnings_dir(tmp_path) / "pending-retro.jsonl"
     record = json.loads(queue.read_text().strip().splitlines()[-1])
@@ -242,10 +327,8 @@ def test_commented_out_template_example_does_not_activate(tmp_path):
     prefs_dir = tmp_path / ".code-quality-atlas"
     prefs_dir.mkdir()
     (prefs_dir / "preferences.md").write_text(
-        "## Feedback & learnings\n\n"
-        "<!--\n"
-        "feedback: local\n"
-        "-->\n")
+        "## Feedback & learnings\n\n<!--\nfeedback: local\n-->\n"
+    )
     _run(LOG_HOOK, tmp_path, _SKILL_INPUT)
     assert not _learnings_dir(tmp_path).exists()
 
@@ -265,8 +348,14 @@ def test_earlier_single_line_comment_does_not_swallow_a_later_ratified_line(tmp_
         "<!-- ratified 2026-01-01, see PR #42 -->\n\n"
         "## Feedback & learnings\n\n"
         "feedback: local\n"
-        "decided: 2026-07-18, @alice\n")
-    _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra={"CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)})
+        "decided: 2026-07-18, @alice\n"
+    )
+    _run(
+        LOG_HOOK,
+        tmp_path,
+        _SKILL_INPUT,
+        env_extra={"CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+    )
     assert (_learnings_dir(tmp_path) / "invocations.jsonl").exists()
 
 
@@ -276,10 +365,14 @@ def test_ratified_preferences_line_activates_logging(tmp_path):
     prefs_dir = tmp_path / ".code-quality-atlas"
     prefs_dir.mkdir()
     (prefs_dir / "preferences.md").write_text(
-        "## Feedback & learnings\n\n"
-        "feedback: local\n"
-        "decided: 2026-07-18, @alice\n")
-    _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra={"CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)})
+        "## Feedback & learnings\n\nfeedback: local\ndecided: 2026-07-18, @alice\n"
+    )
+    _run(
+        LOG_HOOK,
+        tmp_path,
+        _SKILL_INPUT,
+        env_extra={"CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+    )
     assert (_learnings_dir(tmp_path) / "invocations.jsonl").exists()
 
 
@@ -301,14 +394,22 @@ def test_template_shaped_trailing_comment_still_activates_logging(tmp_path):
         "#                     retro tooling — never transmitted anywhere by this\n"
         "#                     setting alone) | draft | auto (stages 2+, unbuilt)\n"
         "decided: 2026-01-01, @alice\n"
-        "reason: local-only telemetry is safe by construction\n")
-    _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra={"CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)})
+        "reason: local-only telemetry is safe by construction\n"
+    )
+    _run(
+        LOG_HOOK,
+        tmp_path,
+        _SKILL_INPUT,
+        env_extra={"CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+    )
     assert (_learnings_dir(tmp_path) / "invocations.jsonl").exists()
 
 
 def test_malformed_stdin_json_is_a_clean_no_op(tmp_path):
-    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    env = {
+        "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+    }
     _run(LOG_HOOK, tmp_path, "not json at all", env_extra=env)
     # Directory creation is allowed (mkdir -p happens before the jq parse
     # attempt); the file must simply gain no bogus line.
@@ -349,25 +450,38 @@ def test_collapsed_generic_hook_scripts_match_standalone():
     ):
         standalone = (REPO_ROOT / "hooks" / rel).read_text(encoding="utf-8")
         collapsed = (COLLAPSED_HOOKS_DIR / rel).read_text(encoding="utf-8")
-        assert collapsed == standalone, f"collapsed/hooks/{rel} has drifted from hooks/{rel}"
+        assert collapsed == standalone, (
+            f"collapsed/hooks/{rel} has drifted from hooks/{rel}"
+        )
 
 
 def test_collapsed_route_hook_names_collapsed_entrypoints_not_standalone_surface():
     result = subprocess.run(
         ["bash", str(COLLAPSED_HOOKS_DIR / "route.sh")],
-        capture_output=True, text=True, timeout=10, check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
     )
     assert result.returncode == 0
     payload = json.loads(result.stdout)
     context = payload["hookSpecificOutput"]["additionalContext"]
-    for entrypoint in ("reviewing-a-change", "auditing-a-repository",
-                       "reviewing-a-decision", "reviewing-an-artifact"):
+    for entrypoint in (
+        "reviewing-a-change",
+        "auditing-a-repository",
+        "reviewing-a-decision",
+        "reviewing-an-artifact",
+    ):
         assert entrypoint in context
     # Standalone-only surface (not shipped under collapsed/'s own plugin root)
     # must not be named — it doesn't exist in this install.
-    for standalone_only in ("choosing-review-lenses", "grounding-review-in-tool-output",
-                             "synthesizing-review-findings", "atlas-review-pr",
-                             "atlas-code-review"):
+    for standalone_only in (
+        "choosing-review-lenses",
+        "grounding-review-in-tool-output",
+        "synthesizing-review-findings",
+        "atlas-review-pr",
+        "atlas-code-review",
+    ):
         assert standalone_only not in context
 
 
@@ -375,9 +489,16 @@ def test_collapsed_log_hook_activates_under_its_own_plugin_root(tmp_path):
     # End-to-end: CLAUDE_PLUGIN_ROOT pointed at collapsed/ (as the real plugin
     # runtime sets it for a code-quality-atlas-collapsed install) must resolve
     # collapsed/hooks/lib/feedback-tier.sh, not the standalone copy.
-    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT / "collapsed")}
-    _run(COLLAPSED_HOOKS_DIR / "log-skill-invocation.sh", tmp_path, _SKILL_INPUT, env_extra=env)
+    env = {
+        "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT / "collapsed"),
+    }
+    _run(
+        COLLAPSED_HOOKS_DIR / "log-skill-invocation.sh",
+        tmp_path,
+        _SKILL_INPUT,
+        env_extra=env,
+    )
     assert (_learnings_dir(tmp_path) / "invocations.jsonl").exists()
 
 
@@ -387,9 +508,16 @@ def test_collapsed_retro_hook_activates_under_its_own_plugin_root(tmp_path):
     # above but only had a byte-identity check, not an equivalent end-to-end
     # activation test — a future edit that broke path resolution specifically
     # in this script would slip through undetected.
-    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT / "collapsed")}
-    _run(COLLAPSED_HOOKS_DIR / "queue-session-retro.sh", tmp_path, _SESSION_END_INPUT, env_extra=env)
+    env = {
+        "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT / "collapsed"),
+    }
+    _run(
+        COLLAPSED_HOOKS_DIR / "queue-session-retro.sh",
+        tmp_path,
+        _SESSION_END_INPUT,
+        env_extra=env,
+    )
     assert (_learnings_dir(tmp_path) / "pending-retro.jsonl").exists()
 
 
@@ -399,17 +527,38 @@ def test_missing_jq_degrades_to_no_op(tmp_path):
     # env trick.
     fake_bin = tmp_path / "fake-bin"
     fake_bin.mkdir()
-    for tool in ("bash", "cat", "mkdir", "printf", "date", "git", "grep",
-                 "sed", "awk", "dirname", "cd", "sh"):
+    for tool in (
+        "bash",
+        "cat",
+        "mkdir",
+        "printf",
+        "date",
+        "git",
+        "grep",
+        "sed",
+        "awk",
+        "dirname",
+        "cd",
+        "sh",
+    ):
         found = shutil.which(tool)
         if found:
             (fake_bin / tool).symlink_to(found)
-    env = {"CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-           "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
-           "PATH": str(fake_bin), "HOME": str(tmp_path)}
+    env = {
+        "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+        "PATH": str(fake_bin),
+        "HOME": str(tmp_path),
+    }
     result = subprocess.run(
-        ["bash", str(LOG_HOOK)], cwd=str(tmp_path), input=_SKILL_INPUT,
-        capture_output=True, text=True, timeout=10, env=env, check=False,
+        ["bash", str(LOG_HOOK)],
+        cwd=str(tmp_path),
+        input=_SKILL_INPUT,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=env,
+        check=False,
     )
     assert result.returncode == 0
     assert not _learnings_dir(tmp_path).exists()
@@ -422,10 +571,14 @@ def test_missing_jq_degrades_to_no_op(tmp_path):
 # ship with CI green, since shellcheck only checks shell syntax, not the
 # emitted JSON.
 
+
 def test_route_hook_emits_valid_session_start_json_and_names_standalone_entrypoints():
     result = subprocess.run(
         ["bash", str(ROUTE_HOOK)],
-        capture_output=True, text=True, timeout=10, check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
     )
     assert result.returncode == 0
     payload = json.loads(result.stdout)
@@ -435,8 +588,13 @@ def test_route_hook_emits_valid_session_start_json_and_names_standalone_entrypoi
     # The standalone plugin's full surface (44 skills + router + commands/),
     # distinct from the collapsed plugin's 4 entrypoints covered by
     # test_collapsed_route_hook_names_collapsed_entrypoints_not_standalone_surface.
-    for surface in ("atlas-review-pr", "atlas-code-review", "choosing-review-lenses",
-                    "grounding-review-in-tool-output", "synthesizing-review-findings"):
+    for surface in (
+        "atlas-review-pr",
+        "atlas-code-review",
+        "choosing-review-lenses",
+        "grounding-review-in-tool-output",
+        "synthesizing-review-findings",
+    ):
         assert surface in context
 
 
@@ -445,7 +603,7 @@ def test_hooks_registered_in_hooks_json():
     post_tool_use = hooks["hooks"]["PostToolUse"]
     assert any(h["matcher"] == "Skill" for h in post_tool_use)
     assert "SessionEnd" in hooks["hooks"]
-    assert "SessionStart" in hooks["hooks"]   # the pre-existing router hook survives
+    assert "SessionStart" in hooks["hooks"]  # the pre-existing router hook survives
 
 
 # --- #357/Q23 lens-coverage hooks: track-lens-reads.sh (PostToolUse Read|Skill)
@@ -458,6 +616,7 @@ def test_hooks_registered_in_hooks_json():
 # opt-in check could mis-parse a template-shaped preferences.md line. These
 # tests cover both, plus the core pass/block behavior.
 
+
 def _lens_coverage_hooks_registered_for(matcher, hooks_json_path):
     hooks = json.loads(hooks_json_path.read_text())
     return [h for h in hooks["hooks"].get("PostToolUse", []) if h["matcher"] == matcher]
@@ -469,10 +628,13 @@ def test_track_lens_reads_registered_under_both_read_and_skill_matchers():
     # the wiring itself, independent of the script's own tool_name branching
     # tested below.
     for matcher in ("Read", "Skill"):
-        entries = _lens_coverage_hooks_registered_for(matcher, REPO_ROOT / "hooks" / "hooks.json")
+        entries = _lens_coverage_hooks_registered_for(
+            matcher, REPO_ROOT / "hooks" / "hooks.json"
+        )
         assert any(
             "lens-coverage/track-lens-reads.sh" in h["command"]
-            for entry in entries for h in entry["hooks"]
+            for entry in entries
+            for h in entry["hooks"]
         ), f"track-lens-reads.sh not registered under PostToolUse matcher {matcher!r}"
 
 
@@ -483,59 +645,87 @@ def _lens_coverage_state(cwd, session_id="s1"):
 def test_track_records_a_skill_tool_invocation_of_a_lens(tmp_path):
     # The Major finding itself: a lens invoked via Skill (tool_input.skill),
     # not Read, must still be recorded.
-    stdin = json.dumps({
-        "session_id": "s1", "tool_name": "Skill",
-        "tool_input": {"skill": "hunting-silent-failures", "args": ""},
-    })
+    stdin = json.dumps(
+        {
+            "session_id": "s1",
+            "tool_name": "Skill",
+            "tool_input": {"skill": "hunting-silent-failures", "args": ""},
+        }
+    )
     _run(TRACK_HOOK, tmp_path, stdin)
-    assert _lens_coverage_state(tmp_path).read_text().splitlines() == ["hunting-silent-failures"]
+    assert _lens_coverage_state(tmp_path).read_text().splitlines() == [
+        "hunting-silent-failures"
+    ]
 
 
 def test_track_records_a_standalone_skill_md_read(tmp_path):
-    stdin = json.dumps({
-        "session_id": "s1", "tool_name": "Read",
-        "tool_input": {"file_path": "skills/checking-restraint/SKILL.md"},
-    })
+    stdin = json.dumps(
+        {
+            "session_id": "s1",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "skills/checking-restraint/SKILL.md"},
+        }
+    )
     _run(TRACK_HOOK, tmp_path, stdin)
-    assert _lens_coverage_state(tmp_path).read_text().splitlines() == ["checking-restraint"]
+    assert _lens_coverage_state(tmp_path).read_text().splitlines() == [
+        "checking-restraint"
+    ]
 
 
 def test_track_records_a_collapsed_entrypoint_lens_body_read(tmp_path):
-    stdin = json.dumps({
-        "session_id": "s1", "tool_name": "Read",
-        "tool_input": {"file_path": "collapsed/skills/reviewing-a-change/reference/lenses/checking-restraint/body.md"},
-    })
+    stdin = json.dumps(
+        {
+            "session_id": "s1",
+            "tool_name": "Read",
+            "tool_input": {
+                "file_path": "collapsed/skills/reviewing-a-change/reference/lenses/checking-restraint/body.md"
+            },
+        }
+    )
     _run(TRACK_HOOK, tmp_path, stdin)
-    assert _lens_coverage_state(tmp_path).read_text().splitlines() == ["checking-restraint"]
+    assert _lens_coverage_state(tmp_path).read_text().splitlines() == [
+        "checking-restraint"
+    ]
 
 
 def test_track_ignores_an_unrelated_read(tmp_path):
-    stdin = json.dumps({
-        "session_id": "s1", "tool_name": "Read",
-        "tool_input": {"file_path": "README.md"},
-    })
+    stdin = json.dumps(
+        {
+            "session_id": "s1",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "README.md"},
+        }
+    )
     _run(TRACK_HOOK, tmp_path, stdin)
     assert not _lens_coverage_state(tmp_path).exists()
 
 
 def test_track_dedupes_repeat_reads_of_the_same_lens(tmp_path):
-    stdin = json.dumps({
-        "session_id": "s1", "tool_name": "Skill",
-        "tool_input": {"skill": "hunting-silent-failures"},
-    })
+    stdin = json.dumps(
+        {
+            "session_id": "s1",
+            "tool_name": "Skill",
+            "tool_input": {"skill": "hunting-silent-failures"},
+        }
+    )
     _run(TRACK_HOOK, tmp_path, stdin)
     _run(TRACK_HOOK, tmp_path, stdin)
-    assert _lens_coverage_state(tmp_path).read_text().splitlines() == ["hunting-silent-failures"]
+    assert _lens_coverage_state(tmp_path).read_text().splitlines() == [
+        "hunting-silent-failures"
+    ]
 
 
 def test_track_rejects_a_path_traversal_shaped_session_id(tmp_path):
     # Copilot review, PR #398: session_id is interpolated straight into a
     # filesystem path -- confirm a hostile-shaped value is rejected rather
     # than escaping the intended state directory.
-    stdin = json.dumps({
-        "session_id": "../../../../tmp/evil", "tool_name": "Skill",
-        "tool_input": {"skill": "hunting-silent-failures"},
-    })
+    stdin = json.dumps(
+        {
+            "session_id": "../../../../tmp/evil",
+            "tool_name": "Skill",
+            "tool_input": {"skill": "hunting-silent-failures"},
+        }
+    )
     _run(TRACK_HOOK, tmp_path, stdin)
     assert not (tmp_path / ".claude" / ".atlas-lens-coverage").exists()
 
@@ -545,13 +735,24 @@ def _run_gate(cwd, stdin, env_extra=None):
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
-        ["bash", str(GATE_HOOK)], cwd=str(cwd), input=stdin,
-        capture_output=True, text=True, timeout=10, env=env, check=False,
+        ["bash", str(GATE_HOOK)],
+        cwd=str(cwd),
+        input=stdin,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=env,
+        check=False,
     )
 
 
 def _gate_body(finding_lens):
-    return json.dumps({"session_id": "s1", "tool_input": {"body": f"Major\n- x.py:1 ({finding_lens})"}})
+    return json.dumps(
+        {
+            "session_id": "s1",
+            "tool_input": {"body": f"Major\n- x.py:1 ({finding_lens})"},
+        }
+    )
 
 
 def _enable_gate(cwd, prefs_text="lens-coverage-gate: on\n"):
@@ -611,11 +812,13 @@ def test_gate_template_shaped_trailing_comment_still_activates(tmp_path):
     # against the pushed fix, but worth locking in either way) false
     # negative: the exact multi-line trailing-comment shape
     # templates/preferences-template.md ships for every ratified key.
-    _enable_gate(tmp_path,
+    _enable_gate(
+        tmp_path,
         "lens-coverage-gate: on      # off (default) | on (blocks a review\n"
         "#                     post that attributes a finding to an unread\n"
         "#                     lens)\n"
-        "decided: 2026-01-01, @alice\n")
+        "decided: 2026-01-01, @alice\n",
+    )
     _make_known_lens(tmp_path, "tracing-correctness-and-invariants")
     _record_prior_read(tmp_path, "some-other-lens")
     result = _run_gate(tmp_path, _gate_body("tracing-correctness-and-invariants"))
@@ -625,10 +828,17 @@ def test_gate_template_shaped_trailing_comment_still_activates(tmp_path):
 def test_gate_passes_when_the_cited_lens_was_actually_read(tmp_path):
     _enable_gate(tmp_path)
     _make_known_lens(tmp_path, "hunting-silent-failures")
-    _run(TRACK_HOOK, tmp_path, json.dumps({
-        "session_id": "s1", "tool_name": "Skill",
-        "tool_input": {"skill": "hunting-silent-failures"},
-    }))
+    _run(
+        TRACK_HOOK,
+        tmp_path,
+        json.dumps(
+            {
+                "session_id": "s1",
+                "tool_name": "Skill",
+                "tool_input": {"skill": "hunting-silent-failures"},
+            }
+        ),
+    )
     result = _run_gate(tmp_path, _gate_body("hunting-silent-failures"))
     assert result.returncode == 0
 
@@ -637,10 +847,17 @@ def test_gate_ignores_a_benign_parenthetical_that_is_not_a_known_lens(tmp_path):
     _enable_gate(tmp_path)
     _make_known_lens(tmp_path, "tracing-correctness-and-invariants")
     _record_prior_read(tmp_path, "some-other-lens")
-    result = _run_gate(tmp_path, json.dumps({
-        "session_id": "s1",
-        "tool_input": {"body": "See the summary above (see below) for details."},
-    }))
+    result = _run_gate(
+        tmp_path,
+        json.dumps(
+            {
+                "session_id": "s1",
+                "tool_input": {
+                    "body": "See the summary above (see below) for details."
+                },
+            }
+        ),
+    )
     assert result.returncode == 0
 
 
@@ -655,10 +872,15 @@ def test_gate_ignores_a_skills_directory_with_no_skill_md_marker(tmp_path):
     _make_known_lens(tmp_path, "tracing-correctness-and-invariants")
     (tmp_path / "skills" / "todo").mkdir(parents=True)
     _record_prior_read(tmp_path, "some-other-lens")
-    result = _run_gate(tmp_path, json.dumps({
-        "session_id": "s1",
-        "tool_input": {"body": "See the todo list (todo) for details."},
-    }))
+    result = _run_gate(
+        tmp_path,
+        json.dumps(
+            {
+                "session_id": "s1",
+                "tool_input": {"body": "See the todo list (todo) for details."},
+            }
+        ),
+    )
     assert result.returncode == 0
 
 
@@ -683,10 +905,17 @@ def test_gate_rejects_a_path_traversal_shaped_session_id(tmp_path):
     # fail open (harmlessly), never touch a path outside the state directory.
     _enable_gate(tmp_path)
     _make_known_lens(tmp_path, "tracing-correctness-and-invariants")
-    result = _run_gate(tmp_path, json.dumps({
-        "session_id": "../../../../tmp/evil",
-        "tool_input": {"body": "Major\n- x.py:1 (tracing-correctness-and-invariants)"},
-    }))
+    result = _run_gate(
+        tmp_path,
+        json.dumps(
+            {
+                "session_id": "../../../../tmp/evil",
+                "tool_input": {
+                    "body": "Major\n- x.py:1 (tracing-correctness-and-invariants)"
+                },
+            }
+        ),
+    )
     assert result.returncode == 0
 
 
@@ -697,32 +926,46 @@ def test_gate_rejects_a_path_traversal_shaped_session_id(tmp_path):
 # than the project root would silently disagree with itself about where the
 # state file lives.
 
+
 def test_track_strips_plugin_prefix_from_a_skill_invocation(tmp_path):
-    stdin = json.dumps({
-        "session_id": "s1", "tool_name": "Skill",
-        "tool_input": {"skill": "code-quality-atlas:hunting-silent-failures"},
-    })
+    stdin = json.dumps(
+        {
+            "session_id": "s1",
+            "tool_name": "Skill",
+            "tool_input": {"skill": "code-quality-atlas:hunting-silent-failures"},
+        }
+    )
     _run(TRACK_HOOK, tmp_path, stdin)
-    assert _lens_coverage_state(tmp_path).read_text().splitlines() == ["hunting-silent-failures"]
+    assert _lens_coverage_state(tmp_path).read_text().splitlines() == [
+        "hunting-silent-failures"
+    ]
 
 
 def test_track_collapses_a_stray_dot_slash_path_segment(tmp_path):
-    stdin = json.dumps({
-        "session_id": "s1", "tool_name": "Read",
-        "tool_input": {"file_path": "skills/./checking-restraint/SKILL.md"},
-    })
+    stdin = json.dumps(
+        {
+            "session_id": "s1",
+            "tool_name": "Read",
+            "tool_input": {"file_path": "skills/./checking-restraint/SKILL.md"},
+        }
+    )
     _run(TRACK_HOOK, tmp_path, stdin)
-    assert _lens_coverage_state(tmp_path).read_text().splitlines() == ["checking-restraint"]
+    assert _lens_coverage_state(tmp_path).read_text().splitlines() == [
+        "checking-restraint"
+    ]
 
 
 def test_track_rejects_a_lens_value_shaped_like_an_injection_attempt(tmp_path):
     # An embedded newline in tool_input.skill could otherwise let a crafted
     # value inject an extra, fabricated "line" into the state file gate-
     # lens-coverage.sh trusts as a record of what was actually read.
-    stdin = json.dumps({
-        "session_id": "s1", "tool_name": "Skill",
-        "tool_input": {"skill": "evil\nfake-lens"},
-    })
+    stdin = json.dumps(
+        {
+            "session_id": "s1",
+            "tool_name": "Skill",
+            "tool_input": {"skill": "evil\nfake-lens"},
+        }
+    )
     _run(TRACK_HOOK, tmp_path, stdin)
     assert not _lens_coverage_state(tmp_path).exists()
 
@@ -739,14 +982,23 @@ def test_track_and_gate_agree_on_claude_project_dir_over_cwd(tmp_path):
     (project_dir / "skills" / "hunting-silent-failures").mkdir(parents=True)
     env = {"CLAUDE_PROJECT_DIR": str(project_dir)}
 
-    _run(TRACK_HOOK, other_cwd, json.dumps({
-        "session_id": "s1", "tool_name": "Skill",
-        "tool_input": {"skill": "hunting-silent-failures"},
-    }), env_extra=env)
+    _run(
+        TRACK_HOOK,
+        other_cwd,
+        json.dumps(
+            {
+                "session_id": "s1",
+                "tool_name": "Skill",
+                "tool_input": {"skill": "hunting-silent-failures"},
+            }
+        ),
+        env_extra=env,
+    )
 
     # Landed under the project dir, not a cwd-relative .claude/ in other_cwd.
-    assert (project_dir / ".claude" / ".atlas-lens-coverage" / "s1.txt").read_text().strip() \
-        == "hunting-silent-failures"
+    assert (
+        project_dir / ".claude" / ".atlas-lens-coverage" / "s1.txt"
+    ).read_text().strip() == "hunting-silent-failures"
     assert not (other_cwd / ".claude").exists()
 
     _enable_gate(project_dir)

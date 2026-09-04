@@ -20,6 +20,7 @@ which test_review_template_sync.py keeps byte-identical) -- so this test
 guards the prose shape directly: the vulnerable unscoped phrasing must not
 reappear, and the ownership-check language must stay present in all four.
 """
+
 import re
 from pathlib import Path
 
@@ -29,7 +30,10 @@ FILES = {
     "atlas-review-pr command": ROOT / "commands" / "atlas-review-pr.md",
     "REVIEW.md": ROOT / "REVIEW.md",
     "templates/REVIEW.md": ROOT / "templates" / "REVIEW.md",
-    "pr-review-automation runbook": ROOT / "docs" / "runbooks" / "pr-review-automation.md",
+    "pr-review-automation runbook": ROOT
+    / "docs"
+    / "runbooks"
+    / "pr-review-automation.md",
 }
 
 # The exact unscoped phrasings issue #362 quoted from each file, with
@@ -61,7 +65,7 @@ def test_no_file_still_carries_the_unscoped_resolve_instruction():
             assert phrase not in text, (
                 f"{label} ({path}) still contains the unscoped resolve "
                 f"instruction {phrase!r} -- this is the #362 regression: "
-                "resolving a thread on \"the push addressed it\" alone, with "
+                'resolving a thread on "the push addressed it" alone, with '
                 "no check that the reviewer itself opened the thread, lets "
                 "the unattended reviewer close a human reviewer's open "
                 "thread and clear a merge-blocking-conversations gate."
@@ -81,15 +85,15 @@ def test_every_file_scopes_resolution_to_the_reviewer_s_own_threads():
         text = _read(path)
         assert "your own" in text.lower(), (
             f"{label} ({path}) no longer scopes thread resolution to "
-            "\"your own\" threads -- re-add the ownership check (#362): only "
+            '"your own" threads -- re-add the ownership check (#362): only '
             "resolve a thread whose first comment the reviewer itself "
             "posted, never a human reviewer's, another bot's, or the PR "
             "author's."
         )
         assert first_comment_re.search(text), (
-            f"{label} ({path}) says \"your own\" but no longer names the "
+            f'{label} ({path}) says "your own" but no longer names the '
             "first-comment-author mechanism that makes it an actual check "
-            "(#362) -- \"your own threads\" with nothing tying it to a "
+            '(#362) -- "your own threads" with nothing tying it to a '
             "concrete comparison is unenforceable prose."
         )
 
@@ -100,7 +104,7 @@ def test_atlas_review_pr_names_the_ownership_check_mechanism():
         "atlas-review-pr.md's resolve step no longer names checking the "
         "thread's first comment author -- without a concrete mechanism "
         "(first comment's author login vs. mcp__github__get_me), \"your own "
-        "threads\" is unenforceable prose, not an actual check."
+        'threads" is unenforceable prose, not an actual check.'
     )
     assert "get_me" in text, (
         "atlas-review-pr.md's resolve step no longer ties the ownership "

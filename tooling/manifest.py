@@ -19,12 +19,12 @@ class Source:
         # Validate the "<path>#<n>" shape up front so a malformed source raises a
         # clear error here rather than a bare IndexError/ValueError later in .section.
         if "#" not in self.source:
-            raise ValueError(
-                f"source must be '<path>#<section>', got {self.source!r}")
+            raise ValueError(f"source must be '<path>#<section>', got {self.source!r}")
         fragment = self.source.rsplit("#", 1)[1]
         if not fragment.isdigit():
             raise ValueError(
-                f"source section must be a non-negative integer, got {self.source!r}")
+                f"source section must be a non-negative integer, got {self.source!r}"
+            )
         if self.category != self.section:
             raise ValueError(
                 f"manifest category {self.category} != source section {self.section}"
@@ -46,10 +46,11 @@ class Artifact:
     is the research section the artifact is reviewed against and must also appear
     in the lens's `built_from` (so the existing drift checker tracks it); `slug`
     names the bundled rubric file `reference/<slug>.md`."""
-    name: str        # human label, e.g. "SKILL.md / agent skill"
-    detect: str      # the presence signal, e.g. "a SKILL.md file is added or changed"
-    rubric: int      # the rubric research section (also in built_from)
-    slug: str        # filename stem for the bundled rubric, e.g. "skill-md"
+
+    name: str  # human label, e.g. "SKILL.md / agent skill"
+    detect: str  # the presence signal, e.g. "a SKILL.md file is added or changed"
+    rubric: int  # the rubric research section (also in built_from)
+    slug: str  # filename stem for the bundled rubric, e.g. "skill-md"
 
 
 @dataclass
@@ -61,8 +62,8 @@ class Skill:
     built_from: list[Source]
     primary_owner: int | None = None
     cross_ref: list[int] = field(default_factory=list)
-    design: bool = False     # diff lens that also applies to design docs/plans
-    picker: str = ""         # one-line differentiator for the router catalog
+    design: bool = False  # diff lens that also applies to design docs/plans
+    picker: str = ""  # one-line differentiator for the router catalog
     artifacts: list[Artifact] = field(default_factory=list)  # shape: artifact only
     # Q13 team-preferences overlay: whole-lens tier (coarse; per-check granularity
     # is a later refinement, see docs/team-preferences-overlay.md, section 9,
@@ -82,8 +83,8 @@ class Skill:
 
 @dataclass
 class Route:
-    when: str                # the change shape, e.g. "Schema migration or backfill"
-    run: list[str]           # skill names to run for it
+    when: str  # the change shape, e.g. "Schema migration or backfill"
+    run: list[str]  # skill names to run for it
     note: str = ""
     # Which collapsed-entrypoint shape(s) this route's own *topic* belongs to
     # (diff|repo|decision|artifact, matching Skill.shape/Entrypoint.shapes) --
@@ -99,14 +100,14 @@ class Router:
     name: str
     description: str
     routes: list[Route]
-    body: str = ""           # richer "When to use" text; falls back to description
+    body: str = ""  # richer "When to use" text; falls back to description
 
 
 @dataclass
 class Tension:
-    between: list[str]       # the two lenses that pull opposite ways
-    about: str               # what they disagree on, one line
-    resolve: str             # the default the synthesizer applies
+    between: list[str]  # the two lenses that pull opposite ways
+    about: str  # what they disagree on, one line
+    resolve: str  # the default the synthesizer applies
 
 
 @dataclass
@@ -122,6 +123,7 @@ class DiscoverySource:
     """One place the pre-pass looks to learn which deterministic tools the
     reviewed repo already runs. `tells` says what that source establishes that
     the others don't (enforced vs. merely installed vs. documented)."""
+
     source: str
     tells: str
 
@@ -131,6 +133,7 @@ class ToolFamily:
     """A family of deterministic tools and the atlas lenses whose findings its
     output can evidence. `grounds` names real lenses and is validated, so a
     renamed lens can't leave a dangling pointer in the generated table."""
+
     kind: str
     tools: str
     grounds: list[str]
@@ -140,6 +143,7 @@ class ToolFamily:
 class Disposition:
     """What the owning lens does with one tool hit. Exactly one applies per hit
     — passing a hit through unexamined is not a disposition."""
+
     name: str
     when: str
     do: str
@@ -149,6 +153,7 @@ class Disposition:
 class PrepassRule:
     """One standing discipline rule for the pre-pass (what keeps tool grounding
     from degrading the review rather than improving it)."""
+
     name: str
     rule: str
 
@@ -158,13 +163,14 @@ class Prepass:
     """The deterministic-tool evidence pre-pass (G34 Tier 1): runs between the
     router's lens selection and the lenses themselves. Built entirely from the
     manifest, like the router and synthesizer."""
+
     name: str
     description: str
     discover: list[DiscoverySource]
     families: list[ToolFamily]
     dispositions: list[Disposition]
     rules: list[PrepassRule]
-    body: str = ""           # richer "When to use" text; falls back to description
+    body: str = ""  # richer "When to use" text; falls back to description
 
 
 @dataclass
@@ -177,6 +183,7 @@ class Mode:
     round-based default). `triggers` are natural-language phrases that
     select this mode in the entrypoint/router body (D7-portable).
     """
+
     name: str
     breadth: str
     floor: str
@@ -191,6 +198,7 @@ class Entrypoint:
     Membership = skills whose `shape` is in `shapes`, plus (when `include_design`)
     the design-capable lenses regardless of shape (so the decision entrypoint can
     carry the ◆ diff lenses). `body` is optional richer when-to-use text."""
+
     name: str
     description: str
     shapes: list[str]
@@ -230,42 +238,54 @@ def _validate_skills(manifest: Manifest, docs_root: str) -> set[str]:
             raise ValidationError(f"duplicate skill name: {s.name!r}")
         seen.add(s.name)
         if not s.description or len(s.description) > 1024:
-            raise ValidationError(f"{s.name}: description must be non-empty and <=1024 chars")
+            raise ValidationError(
+                f"{s.name}: description must be non-empty and <=1024 chars"
+            )
         if s.shape not in _SHAPES:
             raise ValidationError(
-                f"{s.name}: shape must be diff|repo|decision|artifact, got {s.shape!r}")
+                f"{s.name}: shape must be diff|repo|decision|artifact, got {s.shape!r}"
+            )
         if s.tier not in ("floor", "preference"):
             raise ValidationError(
-                f"{s.name}: tier must be floor|preference, got {s.tier!r}")
+                f"{s.name}: tier must be floor|preference, got {s.tier!r}"
+            )
         if s.eval_min is not None and s.eval_min < 3:
             raise ValidationError(
-                f"{s.name}: eval_min must be >=3 (D8's baseline), got {s.eval_min!r}")
+                f"{s.name}: eval_min must be >=3 (D8's baseline), got {s.eval_min!r}"
+            )
         if s.design and s.shape != "diff":
             raise ValidationError(
-                f"{s.name}: design applies only to diff-shaped lenses")
+                f"{s.name}: design applies only to diff-shaped lenses"
+            )
         if s.shape == "artifact":
             if not s.artifacts:
                 raise ValidationError(
-                    f"{s.name}: an artifact-shaped lens needs a non-empty `artifacts` table")
+                    f"{s.name}: an artifact-shaped lens needs a non-empty `artifacts` table"
+                )
             built_cats = {src.category for src in s.built_from}
             seen_slugs: set[str] = set()
             for a in s.artifacts:
                 if not a.name or not a.detect:
                     raise ValidationError(
-                        f"{s.name}: each artifact needs `name` and `detect`")
+                        f"{s.name}: each artifact needs `name` and `detect`"
+                    )
                 if not _NAME_RE.match(a.slug):
                     raise ValidationError(
-                        f"{s.name}: artifact slug must be lowercase/hyphen, got {a.slug!r}")
+                        f"{s.name}: artifact slug must be lowercase/hyphen, got {a.slug!r}"
+                    )
                 if a.slug in seen_slugs:
                     raise ValidationError(
-                        f"{s.name}: duplicate artifact slug {a.slug!r}")
+                        f"{s.name}: duplicate artifact slug {a.slug!r}"
+                    )
                 seen_slugs.add(a.slug)
                 if a.rubric not in built_cats:
                     raise ValidationError(
-                        f"{s.name}: artifact {a.name!r} rubric #{a.rubric} is not in built_from")
+                        f"{s.name}: artifact {a.name!r} rubric #{a.rubric} is not in built_from"
+                    )
         elif s.artifacts:
             raise ValidationError(
-                f"{s.name}: `artifacts` is only valid on an artifact-shaped lens")
+                f"{s.name}: `artifacts` is only valid on an artifact-shaped lens"
+            )
         if len(s.picker) > 160:
             raise ValidationError(f"{s.name}: picker must be <=160 chars")
         if not s.built_from:
@@ -273,21 +293,26 @@ def _validate_skills(manifest: Manifest, docs_root: str) -> set[str]:
         categories = [src.category for src in s.built_from]
         if len(categories) != len(set(categories)):
             raise ValidationError(
-                f"{s.name}: built_from lists a category more than once")
+                f"{s.name}: built_from lists a category more than once"
+            )
         for c in s.cross_ref:
             if c not in categories:
                 raise ValidationError(
-                    f"{s.name}: cross_ref category {c} is not in built_from")
+                    f"{s.name}: cross_ref category {c} is not in built_from"
+                )
         for src in s.built_from:
             try:
                 text = Path(docs_root, src.path).read_text(encoding="utf-8")
             except (OSError, UnicodeError) as exc:
                 raise ValidationError(
-                    f"{s.name}: cannot read source file {src.path}: {exc}") from exc
+                    f"{s.name}: cannot read source file {src.path}: {exc}"
+                ) from exc
             try:
                 extract_section(text, src.section)
             except KeyError:
-                raise ValidationError(f"{s.name}: source not found: section #{src.section} in {src.path}")
+                raise ValidationError(
+                    f"{s.name}: source not found: section #{src.section} in {src.path}"
+                )
             if src.category not in s.cross_ref:
                 primaries.setdefault(src.category, []).append(s.name)
     # G1: one primary owner per category — skills sharing a category must mark
@@ -296,7 +321,8 @@ def _validate_skills(manifest: Manifest, docs_root: str) -> set[str]:
         if len(owners) > 1:
             raise ValidationError(
                 f"category #{category} has multiple primary owners: {', '.join(owners)} "
-                f"— mark all but one with cross_ref: [{category}]")
+                f"— mark all but one with cross_ref: [{category}]"
+            )
     return seen
 
 
@@ -316,26 +342,33 @@ def _validate_router(manifest: Manifest, seen: set[str]) -> None:
         if not route.when or not route.run:
             raise ValidationError("router: every route needs `when` and `run`")
         if route.shapes is not None:
-            if (not isinstance(route.shapes, list)
-                    or not all(isinstance(shape, str) for shape in route.shapes)):
+            if not isinstance(route.shapes, list) or not all(
+                isinstance(shape, str) for shape in route.shapes
+            ):
                 raise ValidationError(
-                    f"router: route {route.when!r}: shapes must be a list of strings")
+                    f"router: route {route.when!r}: shapes must be a list of strings"
+                )
             if not route.shapes:
-                raise ValidationError(f"router: route {route.when!r}: shapes must be non-empty if set")
+                raise ValidationError(
+                    f"router: route {route.when!r}: shapes must be non-empty if set"
+                )
             for shape in route.shapes:
                 if shape not in _SHAPES:
                     raise ValidationError(
-                        f"router: route {route.when!r}: unknown shape {shape!r}")
+                        f"router: route {route.when!r}: unknown shape {shape!r}"
+                    )
         for lens in route.run:
             if lens not in seen:
                 raise ValidationError(
-                    f"router: route {route.when!r} runs unknown skill {lens!r}")
+                    f"router: route {route.when!r} runs unknown skill {lens!r}"
+                )
     # The catalog lists every lens by its picker line; a missing picker
     # would silently leave that lens undiscoverable to the router.
     for s in manifest.skills:
         if not s.picker:
             raise ValidationError(
-                f"{s.name}: picker is required when a router is defined")
+                f"{s.name}: picker is required when a router is defined"
+            )
 
 
 def _validate_synthesizer(manifest: Manifest, seen: set[str]) -> None:
@@ -345,7 +378,9 @@ def _validate_synthesizer(manifest: Manifest, seen: set[str]) -> None:
     if not _NAME_RE.match(sy.name) or len(sy.name) > 64 or sy.name in seen:
         raise ValidationError(f"synthesizer: invalid or duplicate name {sy.name!r}")
     if not sy.description or len(sy.description) > 1024:
-        raise ValidationError("synthesizer: description must be non-empty and <=1024 chars")
+        raise ValidationError(
+            "synthesizer: description must be non-empty and <=1024 chars"
+        )
     if len(sy.severity_order) < 2:
         raise ValidationError("synthesizer: severity_order needs at least two levels")
     if len(sy.severity_order) != len(set(sy.severity_order)):
@@ -355,14 +390,17 @@ def _validate_synthesizer(manifest: Manifest, seen: set[str]) -> None:
     for t in sy.tensions:
         if len(t.between) != 2 or t.between[0] == t.between[1]:
             raise ValidationError(
-                f"synthesizer: tension `between` must name two distinct lenses, got {t.between}")
+                f"synthesizer: tension `between` must name two distinct lenses, got {t.between}"
+            )
         for lens in t.between:
             if lens not in seen:
                 raise ValidationError(
-                    f"synthesizer: tension references unknown skill {lens!r}")
+                    f"synthesizer: tension references unknown skill {lens!r}"
+                )
         if not t.about or not t.resolve:
             raise ValidationError(
-                f"synthesizer: tension {t.between} needs `about` and `resolve`")
+                f"synthesizer: tension {t.between} needs `about` and `resolve`"
+            )
 
 
 def _validate_prepass(manifest: Manifest, seen: set[str]) -> None:
@@ -384,7 +422,9 @@ def _validate_prepass(manifest: Manifest, seen: set[str]) -> None:
             raise ValidationError(f"prepass: {attr} must be non-empty")
     for d in p.discover:
         if not d.source or not d.tells:
-            raise ValidationError("prepass: every discover entry needs `source` and `tells`")
+            raise ValidationError(
+                "prepass: every discover entry needs `source` and `tells`"
+            )
     seen_kinds: set[str] = set()
     for f in p.families:
         if not f.kind or not f.tools:
@@ -395,16 +435,19 @@ def _validate_prepass(manifest: Manifest, seen: set[str]) -> None:
         if not f.grounds:
             raise ValidationError(
                 f"prepass: family {f.kind!r} must ground at least one lens — a tool "
-                "family whose output no lens owns has nowhere to send its hits")
+                "family whose output no lens owns has nowhere to send its hits"
+            )
         for lens in f.grounds:
             if lens not in seen:
                 raise ValidationError(
-                    f"prepass: family {f.kind!r} grounds unknown skill {lens!r}")
+                    f"prepass: family {f.kind!r} grounds unknown skill {lens!r}"
+                )
     seen_dispositions: set[str] = set()
     for disp in p.dispositions:
         if not disp.name or not disp.when or not disp.do:
             raise ValidationError(
-                "prepass: every disposition needs `name`, `when`, and `do`")
+                "prepass: every disposition needs `name`, `when`, and `do`"
+            )
         if disp.name in seen_dispositions:
             raise ValidationError(f"prepass: duplicate disposition {disp.name!r}")
         seen_dispositions.add(disp.name)
@@ -418,11 +461,15 @@ def _validate_composition_names(manifest: Manifest) -> None:
     two sharing a name would silently overwrite one another's SKILL.md. Each is
     already checked against the *lens* names in its own validator; this catches
     the collisions only visible across the three of them."""
-    names = [c.name for c in (manifest.router, manifest.prepass, manifest.synthesizer)
-             if c is not None]
+    names = [
+        c.name
+        for c in (manifest.router, manifest.prepass, manifest.synthesizer)
+        if c is not None
+    ]
     if len(names) != len(set(names)):
         raise ValidationError(
-            f"router/prepass/synthesizer must have distinct names, got {names}")
+            f"router/prepass/synthesizer must have distinct names, got {names}"
+        )
 
 
 def _validate_modes(manifest: Manifest) -> None:
@@ -442,7 +489,9 @@ def _validate_modes(manifest: Manifest) -> None:
         if not mode.breadth.strip():
             raise ValidationError(f"mode {mode.name}: breadth must be non-empty")
         if not mode.triggers:
-            raise ValidationError(f"mode {mode.name}: needs at least one trigger phrase")
+            raise ValidationError(
+                f"mode {mode.name}: needs at least one trigger phrase"
+            )
         if mode.floor not in allowed_floors:
             raise ValidationError(
                 f"mode {mode.name}: floor {mode.floor!r} is not a severity level "
@@ -455,7 +504,8 @@ def _validate_entrypoints(manifest: Manifest) -> None:
         return
     if manifest.synthesizer is None:
         raise ValidationError(
-            "entrypoints require a synthesizer (synthesis.md is bundled into every entrypoint)")
+            "entrypoints require a synthesizer (synthesis.md is bundled into every entrypoint)"
+        )
     skill_names = {s.name for s in manifest.skills}
     reserved = set(skill_names)
     if manifest.router:
@@ -472,15 +522,21 @@ def _validate_entrypoints(manifest: Manifest) -> None:
         seen_eps.add(ep.name)
         if ep.name in reserved:
             raise ValidationError(
-                f"entrypoint {ep.name} collides with an existing skill/router/synthesizer name")
+                f"entrypoint {ep.name} collides with an existing skill/router/synthesizer name"
+            )
         if not re.fullmatch(r"[a-z0-9-]{1,64}", ep.name):
             raise ValidationError(
                 f"entrypoint {ep.name!r}: name must be 1-64 lowercase letters, digits, "
-                "or hyphens (it becomes a directory under collapsed/skills/)")
+                "or hyphens (it becomes a directory under collapsed/skills/)"
+            )
         if not ep.description:
-            raise ValidationError(f"entrypoint {ep.name}: description must be non-empty")
+            raise ValidationError(
+                f"entrypoint {ep.name}: description must be non-empty"
+            )
         if len(ep.description) > 1024:
-            raise ValidationError(f"entrypoint {ep.name}: description exceeds 1024 chars")
+            raise ValidationError(
+                f"entrypoint {ep.name}: description exceeds 1024 chars"
+            )
         if not ep.shapes:
             raise ValidationError(f"entrypoint {ep.name}: shapes must be non-empty")
         for shape in ep.shapes:
@@ -492,7 +548,8 @@ def _validate_entrypoints(manifest: Manifest) -> None:
     orphans = skill_names - covered
     if orphans:
         raise ValidationError(
-            f"lenses not covered by any entrypoint: {sorted(orphans)}")
+            f"lenses not covered by any entrypoint: {sorted(orphans)}"
+        )
 
 
 def validate(manifest: Manifest, docs_root: str = ".") -> None:
@@ -547,7 +604,8 @@ def _raise_truncation(path: str, line_no: int, key: str) -> None:
     raise ValidationError(
         f"{path}:{line_no}: unquoted {key} contains ' #' — YAML reads it as a "
         f"comment and silently truncates the value. Wrap the value in quotes "
-        f'(e.g. note: "… pairs with #16 …").')
+        f'(e.g. note: "… pairs with #16 …").'
+    )
 
 
 def _list_field(s: dict, key: str, skill_index: int) -> list:
@@ -561,12 +619,21 @@ def _list_field(s: dict, key: str, skill_index: int) -> list:
         return []
     if not isinstance(value, list):
         raise ValidationError(
-            f"skill #{skill_index}: {key!r} must be a list, got {type(value).__name__}")
+            f"skill #{skill_index}: {key!r} must be a list, got {type(value).__name__}"
+        )
     return value
 
 
-def _prose(mapping: dict, key: str, where: str, *, required: bool = True,
-           collapse: bool = False, null_ok: bool = False, strip: bool = True) -> str:
+def _prose(
+    mapping: dict,
+    key: str,
+    where: str,
+    *,
+    required: bool = True,
+    collapse: bool = False,
+    null_ok: bool = False,
+    strip: bool = True,
+) -> str:
     """A prose field, type-checked before normalization.
 
     Coercing with `str(...)` is the trap this exists to avoid: it turns a bare
@@ -606,11 +673,14 @@ def _prose(mapping: dict, key: str, where: str, *, required: bool = True,
     value = mapping[key]
     if value is None:
         if required and not null_ok:
-            raise ValidationError(f"{where}: {key!r} must be a non-empty string, got null")
+            raise ValidationError(
+                f"{where}: {key!r} must be a non-empty string, got null"
+            )
         return ""
     if not isinstance(value, str):
         raise ValidationError(
-            f"{where}: {key!r} must be a string, got {type(value).__name__}")
+            f"{where}: {key!r} must be a string, got {type(value).__name__}"
+        )
     if not strip:
         return value
     return " ".join(value.split()) if collapse else value.strip()
@@ -625,12 +695,14 @@ def _str_list(mapping: dict, key: str, where: str) -> list[str]:
         return []
     if not isinstance(value, list):
         raise ValidationError(
-            f"{where}: {key!r} must be a list, got {type(value).__name__}")
+            f"{where}: {key!r} must be a list, got {type(value).__name__}"
+        )
     for item in value:
         if not isinstance(item, str):
             raise ValidationError(
                 f"{where}: every {key!r} entry must be a string, "
-                f"got {type(item).__name__} ({item!r})")
+                f"got {type(item).__name__} ({item!r})"
+            )
     return list(value)
 
 
@@ -653,36 +725,49 @@ def load_manifest(path: str) -> Manifest:
     # offending key rather than a raw TypeError/KeyError into manifest.py internals.
     if not isinstance(data, dict):
         raise ValidationError(
-            f"{path}: expected a YAML mapping, got {type(data).__name__}")
+            f"{path}: expected a YAML mapping, got {type(data).__name__}"
+        )
     for key in ("skills", "taxonomy_version"):
         if key not in data:
             raise ValidationError(f"{path}: missing required key {key!r}")
     if not isinstance(data["skills"], list):
         raise ValidationError(
-            f"{path}: 'skills' must be a list, got {type(data['skills']).__name__}")
+            f"{path}: 'skills' must be a list, got {type(data['skills']).__name__}"
+        )
     skills = []
     for i, s in enumerate(data["skills"]):
         try:
-            built = [Source(category=b["category"], source=b["source"]) for b in s["built_from"]]
-            artifacts = [Artifact(name=_prose(a, "name", f"skill #{i} artifact"),
-                                  detect=_prose(a, "detect", f"skill #{i} artifact"),
-                                  rubric=a["rubric"],
-                                  slug=_prose(a, "slug", f"skill #{i} artifact", null_ok=True, strip=False))
-                         for a in _list_field(s, "artifacts", i)]
-            skills.append(Skill(
-                name=_prose(s, "name", f"skill #{i}", null_ok=True, strip=False),
-                description=_prose(s, "description", f"skill #{i}", null_ok=True),
-                shape=s["shape"],
-                wave=s["wave"],
-                built_from=built,
-                primary_owner=s.get("primary_owner"),
-                cross_ref=_list_field(s, "cross_ref", i),
-                design=s.get("design", False),
-                picker=_prose(s, "picker", f"skill #{i}", required=False),
-                artifacts=artifacts,
-                tier=s.get("tier", "preference"),
-                eval_min=s.get("eval_min"),
-            ))
+            built = [
+                Source(category=b["category"], source=b["source"])
+                for b in s["built_from"]
+            ]
+            artifacts = [
+                Artifact(
+                    name=_prose(a, "name", f"skill #{i} artifact"),
+                    detect=_prose(a, "detect", f"skill #{i} artifact"),
+                    rubric=a["rubric"],
+                    slug=_prose(
+                        a, "slug", f"skill #{i} artifact", null_ok=True, strip=False
+                    ),
+                )
+                for a in _list_field(s, "artifacts", i)
+            ]
+            skills.append(
+                Skill(
+                    name=_prose(s, "name", f"skill #{i}", null_ok=True, strip=False),
+                    description=_prose(s, "description", f"skill #{i}", null_ok=True),
+                    shape=s["shape"],
+                    wave=s["wave"],
+                    built_from=built,
+                    primary_owner=s.get("primary_owner"),
+                    cross_ref=_list_field(s, "cross_ref", i),
+                    design=s.get("design", False),
+                    picker=_prose(s, "picker", f"skill #{i}", required=False),
+                    artifacts=artifacts,
+                    tier=s.get("tier", "preference"),
+                    eval_min=s.get("eval_min"),
+                )
+            )
         except KeyError as e:
             raise ValidationError(f"skill #{i}: missing field {e}") from e
         except ValueError as e:  # malformed Source string
@@ -694,10 +779,15 @@ def load_manifest(path: str) -> Manifest:
             router = Router(
                 name=_prose(r, "name", "router", null_ok=True, strip=False),
                 description=_prose(r, "description", "router", null_ok=True),
-                routes=[Route(when=_prose(x, "when", "router route"), run=x["run"],
-                              note=_prose(x, "note", "router route", required=False),
-                              shapes=x.get("shapes"))
-                        for x in (r["routes"] or [])],
+                routes=[
+                    Route(
+                        when=_prose(x, "when", "router route"),
+                        run=x["run"],
+                        note=_prose(x, "note", "router route", required=False),
+                        shapes=x.get("shapes"),
+                    )
+                    for x in (r["routes"] or [])
+                ],
                 body=_prose(r, "body", "router", required=False),
             )
         except KeyError as e:
@@ -723,22 +813,36 @@ def load_manifest(path: str) -> Manifest:
                 name=_prose(p, "name", "prepass"),
                 description=_prose(p, "description", "prepass"),
                 body=_prose(p, "body", "prepass", required=False),
-                discover=[DiscoverySource(
-                              source=_prose(d, "source", "prepass discover", collapse=True),
-                              tells=_prose(d, "tells", "prepass discover"))
-                          for d in (p.get("discover") or [])],
-                families=[ToolFamily(kind=_prose(f, "kind", "prepass family"),
-                                     tools=_prose(f, "tools", "prepass family",
-                                                  collapse=True),
-                                     grounds=_str_list(f, "grounds", "prepass family"))
-                          for f in (p.get("families") or [])],
-                dispositions=[Disposition(name=_prose(d, "name", "prepass disposition"),
-                                          when=_prose(d, "when", "prepass disposition"),
-                                          do=_prose(d, "do", "prepass disposition"))
-                              for d in (p.get("dispositions") or [])],
-                rules=[PrepassRule(name=_prose(r, "name", "prepass rule"),
-                                   rule=_prose(r, "rule", "prepass rule"))
-                       for r in (p.get("rules") or [])],
+                discover=[
+                    DiscoverySource(
+                        source=_prose(d, "source", "prepass discover", collapse=True),
+                        tells=_prose(d, "tells", "prepass discover"),
+                    )
+                    for d in (p.get("discover") or [])
+                ],
+                families=[
+                    ToolFamily(
+                        kind=_prose(f, "kind", "prepass family"),
+                        tools=_prose(f, "tools", "prepass family", collapse=True),
+                        grounds=_str_list(f, "grounds", "prepass family"),
+                    )
+                    for f in (p.get("families") or [])
+                ],
+                dispositions=[
+                    Disposition(
+                        name=_prose(d, "name", "prepass disposition"),
+                        when=_prose(d, "when", "prepass disposition"),
+                        do=_prose(d, "do", "prepass disposition"),
+                    )
+                    for d in (p.get("dispositions") or [])
+                ],
+                rules=[
+                    PrepassRule(
+                        name=_prose(r, "name", "prepass rule"),
+                        rule=_prose(r, "rule", "prepass rule"),
+                    )
+                    for r in (p.get("rules") or [])
+                ],
             )
         except KeyError as e:
             raise ValidationError(f"prepass: missing field {e}") from e
@@ -752,42 +856,80 @@ def load_manifest(path: str) -> Manifest:
                 name=_prose(sy, "name", "synthesizer", null_ok=True, strip=False),
                 description=_prose(sy, "description", "synthesizer", null_ok=True),
                 severity_order=sy["severity_order"],
-                tensions=[Tension(between=t["between"],
-                                  about=_prose(t, "about", "synthesizer tension", null_ok=True),
-                                  resolve=_prose(t, "resolve", "synthesizer tension", null_ok=True))
-                          for t in (sy.get("tensions") or [])],
+                tensions=[
+                    Tension(
+                        between=t["between"],
+                        about=_prose(t, "about", "synthesizer tension", null_ok=True),
+                        resolve=_prose(
+                            t, "resolve", "synthesizer tension", null_ok=True
+                        ),
+                    )
+                    for t in (sy.get("tensions") or [])
+                ],
             )
         except KeyError as e:
             raise ValidationError(f"synthesizer: missing field {e}") from e
     modes: list[Mode] = []
     for i, raw_mode in enumerate(data.get("modes", []) or []):
         try:
-            modes.append(Mode(
-                name=raw_mode["name"],
-                breadth=_prose(raw_mode, "breadth", f"modes[{i}] in {path}", null_ok=True),
-                floor=raw_mode["floor"],
-                triggers=list(raw_mode.get("triggers") or []),
-                note=_prose(raw_mode, "note", f"modes[{i}] in {path}", required=False),
-            ))
+            modes.append(
+                Mode(
+                    name=raw_mode["name"],
+                    breadth=_prose(
+                        raw_mode, "breadth", f"modes[{i}] in {path}", null_ok=True
+                    ),
+                    floor=raw_mode["floor"],
+                    triggers=list(raw_mode.get("triggers") or []),
+                    note=_prose(
+                        raw_mode, "note", f"modes[{i}] in {path}", required=False
+                    ),
+                )
+            )
         except (KeyError, TypeError) as e:
             raise ValidationError(f"modes[{i}] in {path}: malformed mode ({e})")
     entrypoints: list[Entrypoint] = []
     for i, raw_ep in enumerate(data.get("entrypoints", []) or []):
         try:
             shapes = raw_ep["shapes"]
-            if not isinstance(shapes, list) or not all(isinstance(x, str) for x in shapes):
+            if not isinstance(shapes, list) or not all(
+                isinstance(x, str) for x in shapes
+            ):
                 raise ValidationError(
                     f"entrypoints[{i}] in {path}: 'shapes' must be a list of strings "
-                    f"(got {shapes!r}) — use 'shapes: [diff]', not 'shapes: diff'")
-            entrypoints.append(Entrypoint(
-                name=_prose(raw_ep, "name", f"entrypoints[{i}] in {path}", null_ok=True, strip=False),
-                description=_prose(raw_ep, "description", f"entrypoints[{i}] in {path}", null_ok=True),
-                shapes=list(shapes),
-                include_design=bool(raw_ep.get("include_design", False)),
-                body=_prose(raw_ep, "body", f"entrypoints[{i}] in {path}", required=False),
-            ))
+                    f"(got {shapes!r}) — use 'shapes: [diff]', not 'shapes: diff'"
+                )
+            entrypoints.append(
+                Entrypoint(
+                    name=_prose(
+                        raw_ep,
+                        "name",
+                        f"entrypoints[{i}] in {path}",
+                        null_ok=True,
+                        strip=False,
+                    ),
+                    description=_prose(
+                        raw_ep,
+                        "description",
+                        f"entrypoints[{i}] in {path}",
+                        null_ok=True,
+                    ),
+                    shapes=list(shapes),
+                    include_design=bool(raw_ep.get("include_design", False)),
+                    body=_prose(
+                        raw_ep, "body", f"entrypoints[{i}] in {path}", required=False
+                    ),
+                )
+            )
         except (KeyError, TypeError) as e:
-            raise ValidationError(f"entrypoints[{i}] in {path}: malformed entrypoint ({e})")
-    return Manifest(taxonomy_version=data["taxonomy_version"], skills=skills,
-                    router=router, prepass=prepass, synthesizer=synthesizer,
-                    modes=modes, entrypoints=entrypoints)
+            raise ValidationError(
+                f"entrypoints[{i}] in {path}: malformed entrypoint ({e})"
+            )
+    return Manifest(
+        taxonomy_version=data["taxonomy_version"],
+        skills=skills,
+        router=router,
+        prepass=prepass,
+        synthesizer=synthesizer,
+        modes=modes,
+        entrypoints=entrypoints,
+    )

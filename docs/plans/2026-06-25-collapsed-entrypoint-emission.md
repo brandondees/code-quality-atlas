@@ -10,7 +10,7 @@ record; the shipped behavior is the source of truth.
 
 **Architecture:** Dual-emit from the one manifest (D6, no drift): keep `generate_skill`/`generate_router`/`generate_synthesizer` as-is; add `generate_collapsed(manifest)` writing a committed `collapsed/` tree (its own `.claude-plugin/plugin.json`, generated) listed as a second plugin in `marketplace.json`. Each entrypoint's `SKILL.md` carries the shape-scoped trigger, the relevance-ranked routing + depth modes (reusing Plan 1's `modes_section`), and instructions to `Read` a lens bundle; lens bundles preserve progressive disclosure (`body.md` → deeper `tool-rules.md`/`sources.md`). Depends on **Plan 1** (`Mode`, `modes_section`, `mode_floor_policy`). Spec: [`docs/collapsed-entrypoints-and-depth-modes.md`](../collapsed-entrypoints-and-depth-modes.md).
 
-**Tech Stack:** Python 3.11+, PyYAML, pytest; Bash 3.2 (distribution scripts). Generated artifacts are plain markdown + JSON.
+**Tech Stack:** Python 3.12+, PyYAML, pytest; Bash 3.2 (distribution scripts). Generated artifacts are plain markdown + JSON.
 
 **Prerequisite:** Plan 1 (depth modes) is merged — `modes_section`, `mode_floor_policy`, and the `Mode`/`modes:` machinery exist.
 

@@ -29,6 +29,7 @@ still compared as plain byte-identity). `reference/*.md` doesn't get the
 marker (assembled output with no realistic hand-edit target), so it's still
 compared as plain byte-identity.
 """
+
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -42,7 +43,9 @@ _GENERATED_MARKER_START = "\n<!-- GENERATED — do not hand-edit this file."
 
 
 def _skill_names():
-    return sorted(p.name for p in SRC.iterdir() if p.is_dir() and (p / "SKILL.md").exists())
+    return sorted(
+        p.name for p in SRC.iterdir() if p.is_dir() and (p / "SKILL.md").exists()
+    )
 
 
 def _marked_runtime_file_matches_source(dest_file, src_text):
@@ -58,7 +61,9 @@ def _marked_runtime_file_matches_source(dest_file, src_text):
 
 
 def test_every_skill_is_vendored_into_dot_claude_skills():
-    missing = [name for name in _skill_names() if not (VENDORED / name / "SKILL.md").exists()]
+    missing = [
+        name for name in _skill_names() if not (VENDORED / name / "SKILL.md").exists()
+    ]
     assert not missing, (
         f"skill(s) missing from .claude/skills/: {missing} — run "
         "`tooling/vendor-skills.sh .` from the repo root and commit the result "
@@ -93,7 +98,10 @@ def test_vendored_skills_match_their_source():
             if src_file.is_dir():
                 continue
             dest_file = dest_ref / src_file.relative_to(src_ref)
-            if not dest_file.exists() or dest_file.read_bytes() != src_file.read_bytes():
+            if (
+                not dest_file.exists()
+                or dest_file.read_bytes() != src_file.read_bytes()
+            ):
                 stale.append(str(dest_file.relative_to(ROOT)))
 
     assert not stale, (

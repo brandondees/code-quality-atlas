@@ -8,6 +8,7 @@ twins"). Nothing mechanically tied the three together, which is the exact
 drift class the root CLAUDE.md/AGENTS.md pair already hit once (issue #167,
 guarded by test_routing_snippet_sync.py) -- flagged in atlas-review round 1
 on the PR that introduced docs/map/ before it could repeat unnoticed here."""
+
 from pathlib import Path
 
 import pytest

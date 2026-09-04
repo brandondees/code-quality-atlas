@@ -3,6 +3,7 @@
 """Renders the router skill: the composition layer that routes a 'what am I
 reviewing' situation to the recommended range of lenses, plus a one-line
 catalog of every lens."""
+
 from __future__ import annotations
 
 import json
@@ -30,8 +31,9 @@ def build_router_md(manifest: Manifest) -> str:
         "description": r.description,
         "provenance": {"taxonomy_version": manifest.taxonomy_version, "built_from": []},
     }
-    fm = yaml.safe_dump(front, sort_keys=False, default_flow_style=False,
-                        allow_unicode=True).strip()
+    fm = yaml.safe_dump(
+        front, sort_keys=False, default_flow_style=False, allow_unicode=True
+    ).strip()
     rows = []
     for route in r.routes:
         run = ", ".join(f"`{lens}`" for lens in route.run)
@@ -45,8 +47,8 @@ def build_router_md(manifest: Manifest) -> str:
     # doesn't read as though they never run against a single change.
     _diff_scoped_exception = {
         "auditing-documentation-health": (
-            "also auto-included, diff-scoped, on a docs-only change — see "
-            "How to pick"),
+            "also auto-included, diff-scoped, on a docs-only change — see How to pick"
+        ),
     }
 
     def catalog(shape: str) -> str:
@@ -117,17 +119,26 @@ def build_router_md(manifest: Manifest) -> str:
         "their SKILL.md; report each shared finding once, under the owner.\n"
         "- Nothing matches: default to `tracing-correctness-and-invariants` + "
         "`reviewing-naming-and-readability` + `checking-restraint`.\n"
-        + (f"- **Before the selected lenses judge anything, run "
-           f"`{manifest.prepass.name}`** — the repo's own linters, type "
-           "checkers, and scanners, scoped to what's under review, so each lens "
-           "gets deterministic evidence to confirm, contextualize, or dismiss "
-           "instead of re-deriving it. Skip it when the repo configures no such "
-           "tools or when running them would execute untrusted code, and say so "
-           "in the report's coverage line either way.\n" if manifest.prepass else "")
-        + (f"- After the lenses run, merge their findings with "
-           f"`{manifest.synthesizer.name}` — one deduplicated, ranked report "
-           "with a single verdict.\n" if manifest.synthesizer else "")
-        + "\n" + modes_section(manifest)
+        + (
+            f"- **Before the selected lenses judge anything, run "
+            f"`{manifest.prepass.name}`** — the repo's own linters, type "
+            "checkers, and scanners, scoped to what's under review, so each lens "
+            "gets deterministic evidence to confirm, contextualize, or dismiss "
+            "instead of re-deriving it. Skip it when the repo configures no such "
+            "tools or when running them would execute untrusted code, and say so "
+            "in the report's coverage line either way.\n"
+            if manifest.prepass
+            else ""
+        )
+        + (
+            f"- After the lenses run, merge their findings with "
+            f"`{manifest.synthesizer.name}` — one deduplicated, ranked report "
+            "with a single verdict.\n"
+            if manifest.synthesizer
+            else ""
+        )
+        + "\n"
+        + modes_section(manifest)
         + "## Routes\n\n"
         "| When reviewing… | Run |\n"
         "|---|---|\n"
@@ -153,7 +164,9 @@ def generate_router(manifest: Manifest, skills_root: str = "skills") -> Path:
     (out / "evals").mkdir(parents=True, exist_ok=True)
     (out / "SKILL.md").write_text(build_router_md(manifest), encoding="utf-8")
     if not (out / "evals" / "eval.json").exists():
-        (out / "evals" / "eval.json").write_text(json.dumps(
-            {"skills": [manifest.router.name], "scenarios": []}, indent=2) + "\n",
-            encoding="utf-8")
+        (out / "evals" / "eval.json").write_text(
+            json.dumps({"skills": [manifest.router.name], "scenarios": []}, indent=2)
+            + "\n",
+            encoding="utf-8",
+        )
     return out

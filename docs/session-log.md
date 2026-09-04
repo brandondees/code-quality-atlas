@@ -4951,7 +4951,67 @@ trusted.
 --check` clean on the new test file; `tooling.cli drift` clean;
 `markdownlint-cli2` (pinned to CI's v0.23.2) 0 issues across all 490 files.
 
-### 2026-09-04 — #374: onboarding guardrail sent lens fixes to generated files; SKILL.md carried no visible generated marker
+### 2026-09-04 — #380: declare the Python floor, add a contributor setup block, gate `ruff format` in CI
+
+Three carry-over gaps from #347: no stated Python floor, no documented setup
+anywhere in the repo, and no format gate in CI.
+
+1. **Floor.** `pyproject.toml` had no `[project]` table (so no
+   `requires-python`) and no `.python-version`; five plan docs (dated,
+   already-implemented) claimed "Python 3.11+" while `ruff`'s
+   `target-version`, `requirements.txt`'s pip-compile header, and CI's own
+   matrix all say 3.12. Chose **3.12** as the stated floor — matching
+   what's actually tested, rather than adding an untested 3.11 CI matrix
+   entry purely to keep the older plan docs' claim technically true. Added
+   `requires-python = ">=3.12"` under a new `[project]` table (ruff's own
+   pyproject parser requires `name`/`version` once `[project]` exists at
+   all — RUF200 — so both are stubbed with a comment explaining this isn't
+   a distributable package) and a `.python-version` file; corrected the
+   five plan docs' `Tech Stack` lines to 3.12+.
+2. **Setup docs.** Neither `AGENTS.md` nor `CLAUDE.md` documented a build/
+   test/lint command anywhere (confirmed by grep — verified the issue's
+   own claim before trusting it). Added a `## Development setup` section
+   to the shared-orientation block both files carry (kept in sync by
+   `test_shared_orientation_matches_across_agent_files`, so one edit
+   covers both): venv, `pip install -r requirements.txt`, the
+   test/lint/format/drift commands, and an explicit repo-root-required
+   note — verified by reproducing the `ModuleNotFoundError` from `/tmp`
+   the issue described. Pointed `docs/runbooks/regenerating-skills.md` at
+   it as a stated prerequisite instead of assuming an already-set-up
+   environment.
+3. **`ruff format --check` in CI.** The "one line" the issue described
+   turned out to need real scoping work first: `ruff format .` reformats
+   fenced Python code blocks inside Markdown by default (a real ruff
+   feature, not a bug), which would have touched every skill's
+   hand-authored `examples.md`, every generated `collapsed/**/body.md`,
+   and the `.claude/skills/` vendored mirror — fighting the
+   generation/vendoring pipeline (those files' content is owned by
+   `tooling.cli generate` / `vendor-skills.sh`, not by hand-formatting)
+   and turning a one-line CI change into a 130-file diff touching content
+   this fix has no business deciding the formatting policy for. Added
+   `extend-exclude = ["*.md"]` under `[tool.ruff]` to scope `ruff format`
+   to Python source only, matching what `ruff check` already implicitly
+   covers; formatting-policy-for-example-code-blocks is left as a
+   separate, undecided question. With that scoped, ran `ruff format .`
+   once repo-wide (45 `.py` files, all mechanical whitespace-only diffs,
+   verified by `git stash`-comparing behavior before/after) and added a
+   `format (ruff)` step next to CI's existing `lint (ruff)` step, same
+   `if:` gate.
+4. **Type checker.** The issue's remaining ask — adopt a type checker on
+   `tooling/` or record the decision not to — recorded as **D19** in
+   `docs/open-questions.md`: not adopted for now, reasoned explicitly
+   (cost of adoption vs. what it would catch beyond the existing test
+   suite + `ValidationError`-shaped runtime checks), with a stated revisit
+   trigger rather than a silent "not yet."
+
+**Verification:** `pytest` 541/541 (no new test files — the count moved
+since #380 branched from a `main` that had already picked up #403's
+merge); `ruff check .` / `ruff format --check .` clean; `tooling.cli drift`
+clean;
+`markdownlint-cli2` (pinned to CI's v0.23.2) 0 issues across all 490 files;
+CI's `ci.yml` re-parsed as valid YAML after the edit.
+
+### 2026-09-04 (same day) — #374: onboarding guardrail sent lens fixes to generated files; SKILL.md carried no visible generated marker
 
 The do-not-touch guardrail in `CLAUDE.md`/`AGENTS.md` (the one place either
 file explains where a lens fix goes) said "edit `skills/<name>/`" without

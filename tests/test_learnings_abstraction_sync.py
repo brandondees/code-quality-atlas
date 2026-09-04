@@ -9,15 +9,20 @@ against that gap reopening: the hook scripts must never regain a raw field,
 and the docs that describe the written shape must keep naming the abstracted
 one — the same drift-prevention shape as test_review_template_sync.py.
 """
+
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
 LOG_HOOK = (ROOT / "hooks" / "log-skill-invocation.sh").read_text(encoding="utf-8")
 RETRO_HOOK = (ROOT / "hooks" / "queue-session-retro.sh").read_text(encoding="utf-8")
-SELF_IMPROVEMENT_LOOP = (ROOT / "docs" / "self-improvement-loop.md").read_text(encoding="utf-8")
+SELF_IMPROVEMENT_LOOP = (ROOT / "docs" / "self-improvement-loop.md").read_text(
+    encoding="utf-8"
+)
 INSTALL = (ROOT / "docs" / "install.md").read_text(encoding="utf-8")
-PREFS_TEMPLATE = (ROOT / "templates" / "preferences-template.md").read_text(encoding="utf-8")
+PREFS_TEMPLATE = (ROOT / "templates" / "preferences-template.md").read_text(
+    encoding="utf-8"
+)
 
 
 def test_log_hook_never_emits_raw_tool_input():
@@ -58,7 +63,10 @@ def test_design_doc_states_a_retention_rule():
     assert "prune or archive old lines" in SELF_IMPROVEMENT_LOOP
     # Pruning the working file doesn't purge Git history/clones/backups —
     # a real gap CodeRabbit caught in the first version of this note.
-    assert "doesn't purge" in SELF_IMPROVEMENT_LOOP or "stay reachable through Git history" in SELF_IMPROVEMENT_LOOP
+    assert (
+        "doesn't purge" in SELF_IMPROVEMENT_LOOP
+        or "stay reachable through Git history" in SELF_IMPROVEMENT_LOOP
+    )
 
 
 def test_install_doc_does_not_claim_raw_capture():

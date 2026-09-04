@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # tests/test_doc_counts.py
 """Assert documented skill/lens counts in prose files match the manifest (issue #95)."""
+
 import re
 from pathlib import Path
 from typing import NamedTuple
@@ -12,8 +13,9 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def _counts() -> dict[str, int]:
     m = load_manifest(str(ROOT / "skills" / "manifest.yaml"))
-    composition = ((1 if m.router else 0) + (1 if m.prepass else 0)
-                   + (1 if m.synthesizer else 0))
+    composition = (
+        (1 if m.router else 0) + (1 if m.prepass else 0) + (1 if m.synthesizer else 0)
+    )
     return {
         "lenses": len(m.skills),
         "diff": sum(1 for s in m.skills if s.shape == "diff"),
@@ -44,7 +46,9 @@ def test_documented_counts_match_manifest():
     dist = ROOT / "docs" / "distribution.md"
     # Match the plain count text, not its markdown presentation — the count is the
     # invariant; bold/heading formatting is incidental and may change.
-    assert _has(readme, f"{c['total']} review skills"), "README total skill count is stale"
+    assert _has(readme, f"{c['total']} review skills"), (
+        "README total skill count is stale"
+    )
     assert _has(readme, f"{c['lenses']} review lenses"), "README lens count is stale"
     # plugin.json quotes the *lens* count and names the router and synthesizer as
     # additions; marketplace.json quotes the *total*. Both said "N code-review and
@@ -64,8 +68,12 @@ def test_documented_counts_match_manifest():
     )
     # distribution.md repeats the total in several phrasings (#95 drift originated
     # partly here); guard the stable ones so a count bump can't skip this file.
-    assert _has(dist, f"standalone ({c['total']})"), "distribution.md standalone total is stale"
-    assert _has(dist, f"Standalone ({c['total']} skills)"), "distribution.md Standalone heading is stale"
+    assert _has(dist, f"standalone ({c['total']})"), (
+        "distribution.md standalone total is stale"
+    )
+    assert _has(dist, f"Standalone ({c['total']} skills)"), (
+        "distribution.md Standalone heading is stale"
+    )
     assert _has(dist, f"~{c['total']} total"), "distribution.md upload count is stale"
 
 
@@ -121,17 +129,37 @@ _CANDIDATE_RE = re.compile(r"(?<![#\w.])[1-9][0-9](?![\w.])")
 # prose to sweep safely, exactly the noise _CANDIDATE_RE already excludes by
 # skipping single digits.
 _NUMBER_WORD_ONES = {
-    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
-    "seven": 7, "eight": 8, "nine": 9,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
 }
 _NUMBER_WORD_TEENS = {
-    "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
-    "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
     "nineteen": 19,
 }
 _NUMBER_WORD_TENS = {
-    "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60,
-    "seventy": 70, "eighty": 80, "ninety": 90,
+    "twenty": 20,
+    "thirty": 30,
+    "forty": 40,
+    "fifty": 50,
+    "sixty": 60,
+    "seventy": 70,
+    "eighty": 80,
+    "ninety": 90,
 }
 
 
@@ -150,7 +178,9 @@ _NUMBER_WORDS = _build_number_words()
 # attempted before its shorter prefix ("twenty") — both are valid standalone
 # words, and regex alternation doesn't prefer the longer match on its own.
 _WORD_NUM_RE = re.compile(
-    r"\b(" + "|".join(re.escape(w) for w in sorted(_NUMBER_WORDS, key=len, reverse=True)) + r")\b",
+    r"\b("
+    + "|".join(re.escape(w) for w in sorted(_NUMBER_WORDS, key=len, reverse=True))
+    + r")\b",
     re.IGNORECASE,
 )
 # Split so a candidate's *category* -- which current count it must equal --
@@ -161,9 +191,13 @@ _WORD_NUM_RE = re.compile(
 # must equal the repo count specifically, so a repo-shaped-audit sentence
 # that accidentally quotes the total or lens count is still caught rather
 # than passing because that number happens to be valid for something else.
-_SKILL_KEYWORD_RE = re.compile(r"\b(skills?|lens(?:es)?|zips?|uploads?)\b", re.IGNORECASE)
+_SKILL_KEYWORD_RE = re.compile(
+    r"\b(skills?|lens(?:es)?|zips?|uploads?)\b", re.IGNORECASE
+)
 _AUDIT_KEYWORD_RE = re.compile(r"\baudits?\b", re.IGNORECASE)
-_KEYWORD_RE = re.compile(r"\b(skills?|lens(?:es)?|zips?|uploads?|audits?)\b", re.IGNORECASE)
+_KEYWORD_RE = re.compile(
+    r"\b(skills?|lens(?:es)?|zips?|uploads?|audits?)\b", re.IGNORECASE
+)
 # "33+" is a threshold phrase ("once past 33"), not a claimed current count.
 _THRESHOLD_SUFFIX = "+"
 # "27->30" / "27→30" style historical deltas, if they ever appear in a living
@@ -250,17 +284,32 @@ def _line_candidates(
     same-line proximity to measure and every candidate on the anchor line
     shares the next line's keyword category(ies) instead.
     """
+
     def categories_for(start: int, end: int) -> frozenset[str]:
         if fallback_categories is not None:
             return fallback_categories
         return _nearest_keyword_category(line, start, end)
 
-    found = [_Candidate(m.start(), m.end(), m.group(), int(m.group()),
-                         categories_for(m.start(), m.end()))
-             for m in _CANDIDATE_RE.finditer(line)]
-    found += [_Candidate(m.start(), m.end(), m.group(), _NUMBER_WORDS[m.group().lower()],
-                          categories_for(m.start(), m.end()))
-              for m in _WORD_NUM_RE.finditer(line)]
+    found = [
+        _Candidate(
+            m.start(),
+            m.end(),
+            m.group(),
+            int(m.group()),
+            categories_for(m.start(), m.end()),
+        )
+        for m in _CANDIDATE_RE.finditer(line)
+    ]
+    found += [
+        _Candidate(
+            m.start(),
+            m.end(),
+            m.group(),
+            _NUMBER_WORDS[m.group().lower()],
+            categories_for(m.start(), m.end()),
+        )
+        for m in _WORD_NUM_RE.finditer(line)
+    ]
     return sorted(found, key=lambda c: c.start)
 
 
@@ -278,8 +327,11 @@ def _wrapped_candidates(lines: list[str], i: int) -> list[_Candidate]:
     if same:
         return _line_candidates(line)
     following_cats = _keyword_categories(lines[i + 1])
-    return [c for c in _line_candidates(line, fallback_categories=following_cats)
-            if len(line) - c.end <= _WRAP_TAIL]
+    return [
+        c
+        for c in _line_candidates(line, fallback_categories=following_cats)
+        if len(line) - c.end <= _WRAP_TAIL
+    ]
 
 
 def _line_is_marked_live(lines: list[str], i: int) -> bool:
@@ -307,7 +359,9 @@ def _allowed_values(categories: frozenset[str], counts: dict[str, int]) -> set[i
     return allowed
 
 
-def _candidate_failure(cand: _Candidate, line: str, counts: dict[str, int]) -> str | None:
+def _candidate_failure(
+    cand: _Candidate, line: str, counts: dict[str, int]
+) -> str | None:
     """None if `cand` is a valid current count for its category; otherwise a
     failure message. Shared by the full sweep and by direct unit tests, so
     the exact logic that had a bug (CodeRabbit finding on PR #220: every
@@ -336,7 +390,9 @@ def test_living_docs_count_sweep():
     # lenses), so assert they're still in that range -- if a future addition
     # pushes any of them to 100+, this fails loudly instead of the sweep
     # silently going blind to new drift.
-    assert 10 <= c["lenses"] < 100 and 10 <= c["total"] < 100 and 10 <= c["repo"] < 100, (
+    assert (
+        10 <= c["lenses"] < 100 and 10 <= c["total"] < 100 and 10 <= c["repo"] < 100
+    ), (
         f"lenses={c['lenses']} total={c['total']} repo={c['repo']} have crossed out "
         "of the 2-digit range _CANDIDATE_RE/_WORD_NUM_RE cover -- widen them (and "
         "this range) before relying on the living-docs sweep further"
@@ -353,8 +409,9 @@ def test_living_docs_count_sweep():
                 msg = _candidate_failure(cand, line, c)
                 if msg:
                     failures.append(f"{rel}:{lineno}: {msg} — {line.strip()!r}")
-    assert not failures, "stale skill/lens count(s) found by the living-docs sweep:\n" + "\n".join(
-        failures
+    assert not failures, (
+        "stale skill/lens count(s) found by the living-docs sweep:\n"
+        + "\n".join(failures)
     )
 
 
@@ -378,8 +435,10 @@ def test_wrap_window_sees_a_count_whose_noun_is_on_the_next_line():
     docs/distribution.md because "39 standalone" ended the line and "skills"
     began the next. Assert the detector fires on that, not merely that today's
     tree is clean."""
-    lines = ["`--collapsed` vendors the 4 collapsed entrypoints instead of the 39 standalone",
-             "skills (skills/)."]
+    lines = [
+        "`--collapsed` vendors the 4 collapsed entrypoints instead of the 39 standalone",
+        "skills (skills/).",
+    ]
     found = [c.text for c in _wrapped_candidates(lines, 0)]
     assert "39" in found, "a wrapped count is still invisible to the sweep"
 
@@ -388,14 +447,18 @@ def test_wrap_window_does_not_swallow_a_neighbouring_sentence():
     """The anchor that keeps the widened window honest. A number far from the
     end of its line belongs to its own clause, not to the next line's noun —
     a date and a mid-sentence aside both false-positived without this."""
-    dated = ["*Status: design approved 2026-06-25, build pending. Resolves **Q20**",
-             "(top-level skill count).*"]
+    dated = [
+        "*Status: design approved 2026-06-25, build pending. Resolves **Q20**",
+        "(top-level skill count).*",
+    ]
     assert [c.text for c in _wrapped_candidates(dated, 0)] == []
     # Looking *backward* is what admitted "and 11 more" under a lens-bearing
     # line above it; the window is forward-only, so it stays out.
-    backward = ["  artifact lens that reviews authored artifacts,",
-                "  standard, and 11 more). Each",
-                "  leads with a one-line tagline."]
+    backward = [
+        "  artifact lens that reviews authored artifacts,",
+        "  standard, and 11 more). Each",
+        "  leads with a one-line tagline.",
+    ]
     assert [c.text for c in _wrapped_candidates(backward, 1)] == []
 
 
@@ -435,7 +498,9 @@ def test_wrapped_candidates_tags_audit_and_skill_claims_with_distinct_categories
     would have false-passed just because that number happened to be valid
     for something else. Candidates must carry which count they're actually
     claiming, not just "some tracked count or other"."""
-    audit_line = ["The ten repo-shaped audits are the repo arm of the comprehensive tier."]
+    audit_line = [
+        "The ten repo-shaped audits are the repo arm of the comprehensive tier."
+    ]
     (audit_cand,) = [c for c in _wrapped_candidates(audit_line, 0) if c.text == "ten"]
     assert audit_cand.categories == frozenset({"audit"})
 
@@ -454,13 +519,17 @@ def test_wrapped_candidates_uses_nearest_keyword_on_a_mixed_keyword_line():
     happened to equal the (unrelated, much farther away) lens/total count.
     Each number must instead be tagged by whichever keyword occurrence sits
     closest to it."""
-    line = ["fields: diff lenses -> `reviewing-a-change`; the 10 audits -> `auditing-a-repository`;"]
+    line = [
+        "fields: diff lenses -> `reviewing-a-change`; the 10 audits -> `auditing-a-repository`;"
+    ]
     (lens_adjacent,) = [c for c in _wrapped_candidates(line, 0) if c.text == "10"]
     assert lens_adjacent.categories == frozenset({"audit"})
 
     # Same shape, numbers swapped, to prove it's proximity-driven and not
     # positional (e.g. "always the second number is the audit one").
-    swapped = ["fields: diff 40 lenses -> `reviewing-a-change`; the audits -> `auditing-a-repository`;"]
+    swapped = [
+        "fields: diff 40 lenses -> `reviewing-a-change`; the audits -> `auditing-a-repository`;"
+    ]
     (near_lenses,) = [c for c in _wrapped_candidates(swapped, 0) if c.text == "40"]
     assert near_lenses.categories == frozenset({"skill"})
 

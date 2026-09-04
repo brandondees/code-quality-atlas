@@ -6,6 +6,7 @@ mechanically tied the two together, so a template edit could silently leave
 the dogfood copy stale — the same class of drift test_routing_snippet_sync.py
 guards for templates/agents-routing-snippet.md (issue #134, Improvements).
 """
+
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent

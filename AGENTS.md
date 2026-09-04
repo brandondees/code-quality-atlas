@@ -36,6 +36,23 @@ reports success. The mirror image is a tracking ref left stale when a merged bra
 is deleted server-side, which makes tooling report phantom unpushed commits —
 `git merge-base --is-ancestor HEAD origin/main` distinguishes the two.
 
+## Development setup
+
+Python **3.12+** (`pyproject.toml`'s `requires-python`, matching ruff's
+`target-version` and `requirements.txt`'s pip-compile header — the only
+version CI tests against). From the repo root:
+
+```sh
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python -m pytest tests/ -q      # test suite
+ruff check . && ruff format --check .   # lint + format
+python -m tooling.cli drift     # skills in sync with their research sources?
+```
+
+Everything here assumes the repo root as the working directory — `tooling.cli`
+imports break run from elsewhere (e.g. `ModuleNotFoundError` from `/tmp`).
+
 <!-- END shared orientation -->
 
 This is separate from the code-review routing block below: that block answers
