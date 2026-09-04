@@ -150,6 +150,7 @@ jobs:
               - "docs/open-questions.md"
               - "*.py"
               - "pyproject.toml"
+              - ".python-version"
               - ".pre-commit-config.yaml"
               - ".github/workflows/ci.yml"
             requirements:
