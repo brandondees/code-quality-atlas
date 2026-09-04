@@ -17,7 +17,7 @@ provenance:
   built_from:
   - category: 35
     source: docs/research/cluster-2-readability.md#35
-    hash: 5b915385ac18d7d22cf9b5836b342f177debb19643e749bceaa8d4284f159a59
+    hash: 74c855df280d704e2e29bf91fb701acefdafe7cabbdd89e7e929dbf47b849dc1
 ---
 
 # reviewing-agent-legibility

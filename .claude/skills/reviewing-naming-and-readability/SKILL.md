@@ -9,7 +9,7 @@ provenance:
   built_from:
   - category: 5
     source: docs/research/cluster-2-readability.md#5
-    hash: bed0a9380176c7dba9c8db79f4210b17fe0c0394535b60b13f4a03ad9f363be0
+    hash: c21ecdea93dc6692d28393958d7528d980fdad20643072ad1bb0a7c9ab678f89
   - category: 6
     source: docs/research/cluster-2-readability.md#6
     hash: 89afcabd80accc6737f64bc5a565165ad39c008b4a5f1408d1379c8f5303b135

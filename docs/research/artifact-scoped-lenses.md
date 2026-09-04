@@ -51,8 +51,19 @@ skill budget. Adding a lens per artifact type makes that strictly worse. The lit
   agents from efficient strategies." ([Anthropic, Writing effective tools for AI agents](https://www.anthropic.com/engineering/writing-tools-for-agents))
   RAG-MCP quantifies it: flooding the prompt with tool descriptions causes *prompt bloat* and
   *context rot*; retrieving only the relevant tools **more than tripled** selection accuracy
-  (43.13% vs 13.62% baseline) and cut prompt tokens >50%. Providers (OpenAI/Anthropic/Google) cap
-  hard at ~128 tools. ([RAG-MCP, arXiv 2505.03275](https://arxiv.org/abs/2505.03275))
+  (43.13% vs 13.62% baseline) and cut prompt tokens >50%. The ~128 figure is provider-specific, not
+  a shared hard cap: Gemini documents a 128-function-declaration-per-request limit ([Firebase,
+  function calling with the Gemini API](https://firebase.google.com/docs/ai-logic/function-calling));
+  OpenAI enforces the same 128-tool ceiling on `tools` array length — an empirically observed, hard
+  400-level API error (`"Invalid 'tools': array too long. Expected an array with maximum length
+  128"`), reproduced independently across several projects ([e.g. a Zed IDE
+  report](https://github.com/zed-industries/zed/issues/42393)) — though OpenAI's own
+  function-calling guide doesn't state the number itself, only a *soft* "fewer than 20 functions"
+  suggestion ([OpenAI, function
+  calling](https://developers.openai.com/api/docs/guides/function-calling)); Anthropic documents no
+  fixed tool-count limit and instead ships a tool-search tool for large catalogs ([Anthropic, tool
+  search tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool)).
+  ([RAG-MCP, arXiv 2505.03275](https://arxiv.org/abs/2505.03275))
 - **Long context is not free even when it fits.** *Lost in the middle*: a U-shaped attention curve
   (RoPE-induced) drops multi-document QA accuracy 30%+ when the needle moves from the edges to the
   middle, even in long-context models. ([Liu et al., arXiv 2307.03172](https://arxiv.org/abs/2307.03172))

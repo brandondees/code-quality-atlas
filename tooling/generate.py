@@ -9,11 +9,11 @@ exists so `from tooling.generate import X` keeps working for existing callers
 (tooling/cli.py, tests/).
 
 This facade supports *calling* a re-exported name, not *patching* it. A name
-like `_checklist_body` resolves inside `generate_collapsed`'s own globals when
-called from `generate_collapsed.lens_bundle_body`, so `monkeypatch.setattr`
-(or any rebind) on `tooling.generate._checklist_body` does not reach that call
-— patch the defining submodule directly instead, as tests/test_collapsed.py
-does for this exact name."""
+like `_escape_table_cell` resolves inside `generate_collapsed`'s own globals
+when called from `generate_collapsed.lens_bundle_body`, so `monkeypatch.setattr`
+(or any rebind) on `tooling.generate._escape_table_cell` does not reach that
+call — patch the defining submodule directly instead, as tests/test_collapsed.py
+does for `_checklist_body`, a same-module helper with the identical hazard."""
 from __future__ import annotations
 
 from tooling.generate_collapsed import (
