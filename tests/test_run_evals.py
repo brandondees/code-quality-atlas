@@ -3,12 +3,15 @@
 import http.client
 import json
 import urllib.error
+from pathlib import Path
 
 import pytest
 
 from tooling import run_evals
 from tooling.generate import generate_skill
 from tooling.manifest import Skill, Source
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 class _FakeResp:
@@ -53,7 +56,7 @@ def test_run_skill_evals_assembles_context_and_collects(tmp_path, monkeypatch):
         wave=1,
         built_from=[Source(2, "tests/fixtures/research_sample.md#2")],
     )
-    out = generate_skill(skill, "v0.2", docs_root=".", skills_root=str(tmp_path))
+    out = generate_skill(skill, "v0.2", docs_root=str(ROOT), skills_root=str(tmp_path))
     (out / "evals" / "eval.json").write_text(_valid_eval_json())
 
     captured = {}
@@ -104,7 +107,7 @@ def test_run_skill_evals_openai_backend(tmp_path, monkeypatch):
         wave=1,
         built_from=[Source(2, "tests/fixtures/research_sample.md#2")],
     )
-    out = generate_skill(skill, "v0.2", docs_root=".", skills_root=str(tmp_path))
+    out = generate_skill(skill, "v0.2", docs_root=str(ROOT), skills_root=str(tmp_path))
     (out / "evals" / "eval.json").write_text(_valid_eval_json())
 
     calls = []
@@ -266,7 +269,7 @@ def test_run_skill_evals_rejects_unknown_api_even_with_host(tmp_path, monkeypatc
         wave=1,
         built_from=[Source(2, "tests/fixtures/research_sample.md#2")],
     )
-    out = generate_skill(skill, "v0.2", docs_root=".", skills_root=str(tmp_path))
+    out = generate_skill(skill, "v0.2", docs_root=str(ROOT), skills_root=str(tmp_path))
     (out / "evals" / "eval.json").write_text(_valid_eval_json())
 
     def fail_any(*a, **kw):
@@ -309,7 +312,7 @@ def _skill_with_evals(tmp_path):
         wave=1,
         built_from=[Source(2, "tests/fixtures/research_sample.md#2")],
     )
-    out = generate_skill(skill, "v0.2", docs_root=".", skills_root=str(tmp_path))
+    out = generate_skill(skill, "v0.2", docs_root=str(ROOT), skills_root=str(tmp_path))
     (out / "evals" / "eval.json").write_text(_valid_eval_json())
     return out
 

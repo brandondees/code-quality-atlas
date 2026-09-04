@@ -6,6 +6,8 @@ from tooling.drift import DriftReport, check_drift
 from tooling.generate import generate_skill
 from tooling.manifest import Skill, Source
 
+ROOT = Path(__file__).resolve().parent.parent
+
 
 def _skill():
     return Skill(
@@ -18,17 +20,17 @@ def _skill():
 
 
 def test_no_drift_right_after_generation(tmp_path):
-    generate_skill(_skill(), "v0.2", docs_root=".", skills_root=str(tmp_path))
-    reports = check_drift(skills_root=str(tmp_path), docs_root=".")
+    generate_skill(_skill(), "v0.2", docs_root=str(ROOT), skills_root=str(tmp_path))
+    reports = check_drift(skills_root=str(tmp_path), docs_root=str(ROOT))
     assert reports == []
 
 
 def test_drift_detected_when_source_changes(tmp_path, monkeypatch):
-    generate_skill(_skill(), "v0.2", docs_root=".", skills_root=str(tmp_path))
+    generate_skill(_skill(), "v0.2", docs_root=str(ROOT), skills_root=str(tmp_path))
     # Simulate a docs edit by pointing drift at an altered copy of the docs root.
     altered = tmp_path / "docs_altered"
     (altered / "tests" / "fixtures").mkdir(parents=True)
-    original = Path("tests/fixtures/research_sample.md").read_text()
+    original = (ROOT / "tests" / "fixtures" / "research_sample.md").read_text()
     (altered / "tests" / "fixtures" / "research_sample.md").write_text(
         original.replace(
             "Does every remote call have a timeout?",
@@ -58,12 +60,12 @@ def _two_source_skill():
 def test_multi_source_drift_only_changed_source_reported(tmp_path):
     """Only the section that was actually edited should appear in DriftReport.changed."""
     generate_skill(
-        _two_source_skill(), "v0.2", docs_root=".", skills_root=str(tmp_path)
+        _two_source_skill(), "v0.2", docs_root=str(ROOT), skills_root=str(tmp_path)
     )
     # Build altered docs root where ONLY section #2 is changed.
     altered = tmp_path / "docs_altered"
     (altered / "tests" / "fixtures").mkdir(parents=True)
-    original = Path("tests/fixtures/research_sample.md").read_text()
+    original = (ROOT / "tests" / "fixtures" / "research_sample.md").read_text()
     (altered / "tests" / "fixtures" / "research_sample.md").write_text(
         original.replace(
             "Does every remote call have a timeout?",
@@ -87,16 +89,16 @@ def test_malformed_skill_md_raises_clear_error(tmp_path):
     skill_dir.mkdir()
     (skill_dir / "SKILL.md").write_text("# broken\n\nno frontmatter here\n")
     with pytest.raises(ValueError, match="frontmatter"):
-        check_drift(skills_root=str(tmp_path), docs_root=".")
+        check_drift(skills_root=str(tmp_path), docs_root=str(ROOT))
 
 
 def test_drift_tolerates_crlf_skill_md(tmp_path):
     """A Windows (CRLF) checkout must not break frontmatter parsing."""
-    generate_skill(_skill(), "v0.2", docs_root=".", skills_root=str(tmp_path))
+    generate_skill(_skill(), "v0.2", docs_root=str(ROOT), skills_root=str(tmp_path))
     skill_md = tmp_path / "hunting-silent-failures" / "SKILL.md"
     crlf = skill_md.read_text(encoding="utf-8").replace("\n", "\r\n")
     skill_md.write_bytes(crlf.encode("utf-8"))
-    assert check_drift(skills_root=str(tmp_path), docs_root=".") == []
+    assert check_drift(skills_root=str(tmp_path), docs_root=str(ROOT)) == []
 
 
 def test_drift_rejects_frontmatter_without_provenance(tmp_path):
@@ -108,7 +110,7 @@ def test_drift_rejects_frontmatter_without_provenance(tmp_path):
     skill_dir.mkdir()
     (skill_dir / "SKILL.md").write_text("---\nname: noprov\n---\n\nbody\n")
     with pytest.raises(ValueError, match="provenance"):
-        check_drift(skills_root=str(tmp_path), docs_root=".")
+        check_drift(skills_root=str(tmp_path), docs_root=str(ROOT))
 
 
 def test_drift_missing_source_file_raises_clear_drift_error(tmp_path):
@@ -118,7 +120,7 @@ def test_drift_missing_source_file_raises_clear_drift_error(tmp_path):
 
     from tooling.drift import DriftError
 
-    generate_skill(_skill(), "v0.2", docs_root=".", skills_root=str(tmp_path))
+    generate_skill(_skill(), "v0.2", docs_root=str(ROOT), skills_root=str(tmp_path))
     # Point docs-root at an empty dir so the referenced source file is missing.
     empty_docs = tmp_path / "empty_docs"
     empty_docs.mkdir()
@@ -135,7 +137,7 @@ def test_drift_non_utf8_source_file_raises_clear_drift_error(tmp_path):
 
     from tooling.drift import DriftError
 
-    generate_skill(_skill(), "v0.2", docs_root=".", skills_root=str(tmp_path))
+    generate_skill(_skill(), "v0.2", docs_root=str(ROOT), skills_root=str(tmp_path))
     bad_docs = tmp_path / "bad_docs"
     (bad_docs / "tests" / "fixtures").mkdir(parents=True)
     # invalid UTF-8 bytes at the referenced source path

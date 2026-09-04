@@ -43,6 +43,10 @@ def _read_from_zip(zip_path, member):
         return zf.read(member).decode("utf-8")
 
 
+def _expected_standalone_skill_names():
+    return {p.parent.name for p in (REPO_ROOT / "skills").glob("*/SKILL.md")}
+
+
 def test_every_per_skill_zip_contains_a_notice(tmp_path):
     """Every ZIP the claude.ai GUI accepts must carry its own attribution —
     each ZIP is uploaded and extracted independently, so a single notice
@@ -51,7 +55,13 @@ def test_every_per_skill_zip_contains_a_notice(tmp_path):
     run_package(out_dir)
 
     zips = sorted(out_dir.glob("*.zip"))
-    assert len(zips) > 30  # sanity: the standalone suite is large
+    zip_names = {z.stem for z in zips}
+    expected = _expected_standalone_skill_names()
+    assert zip_names == expected, (
+        "one ZIP per skills/*/SKILL.md directory, no more, no fewer — a "
+        "threshold check here would miss a narrowed packaging glob "
+        f"(missing: {expected - zip_names}, extra: {zip_names - expected})"
+    )
 
     for zip_path in zips:
         name = zip_path.stem
@@ -86,7 +96,13 @@ def test_every_per_skill_zip_vendors_the_license_text(tmp_path):
     source_license = (REPO_ROOT / "LICENSE-CC-BY-4.0").read_bytes()
 
     zips = sorted(out_dir.glob("*.zip"))
-    assert len(zips) > 30  # sanity: the standalone suite is large
+    zip_names = {z.stem for z in zips}
+    expected = _expected_standalone_skill_names()
+    assert zip_names == expected, (
+        "one ZIP per skills/*/SKILL.md directory, no more, no fewer — a "
+        "threshold check here would miss a narrowed packaging glob "
+        f"(missing: {expected - zip_names}, extra: {zip_names - expected})"
+    )
 
     for zip_path in zips:
         name = zip_path.stem

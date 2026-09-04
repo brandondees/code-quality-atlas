@@ -12,6 +12,8 @@ the build whenever either half of the claimed alignment goes stale again.
 import re
 from pathlib import Path
 
+import yaml
+
 _ROOT = Path(__file__).resolve().parent.parent
 _ACTION_PIN_RE = re.compile(
     r"DavidAnson/markdownlint-cli2-action@[0-9a-f]{40}\s*#\s*(v[\d.]+)"
@@ -19,7 +21,22 @@ _ACTION_PIN_RE = re.compile(
 _PRECOMMIT_COMMENT_RE = re.compile(
     r"action\s+(v[\d.]+)\s+bundles\s+markdownlint-cli2\n#\s*(v[\d.]+)"
 )
-_PRECOMMIT_REV_RE = re.compile(r"rev:\s*(v[\d.]+)")
+_MARKDOWNLINT_REPO_URL = "https://github.com/DavidAnson/markdownlint-cli2"
+
+
+def _markdownlint_hook_rev(precommit_text: str) -> str:
+    """The hook's own `rev:`, selected by matching `repo:` — not the first
+    `rev:` line the file happens to contain. A regex search for a bare
+    `rev:\\s*(v[\\d.]+)` matches whichever repo entry comes first in the
+    file, so adding a second hook repo above this one would silently
+    retarget the claimed version at the new entry's rev instead (#390)."""
+    config = yaml.safe_load(precommit_text)
+    for repo in config.get("repos", []):
+        if repo.get("repo") == _MARKDOWNLINT_REPO_URL:
+            return repo["rev"]
+    raise AssertionError(
+        f"No {_MARKDOWNLINT_REPO_URL} entry found in .pre-commit-config.yaml"
+    )
 
 
 def test_precommit_markdownlint_rev_matches_ci_claimed_version():
@@ -39,9 +56,7 @@ def test_precommit_markdownlint_rev_matches_ci_claimed_version():
     )
     claimed_action_version, claimed_bundled_version = comment_match.groups()
 
-    rev_match = _PRECOMMIT_REV_RE.search(precommit_text)
-    assert rev_match, "Could not find 'rev: vX.Y.Z' in .pre-commit-config.yaml"
-    actual_rev = rev_match.group(1)
+    actual_rev = _markdownlint_hook_rev(precommit_text)
 
     assert claimed_action_version == ci_action_version, (
         f".pre-commit-config.yaml's comment claims CI pins "
