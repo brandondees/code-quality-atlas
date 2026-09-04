@@ -360,6 +360,72 @@ def test_invalid_env_tier_falls_back_to_off(tmp_path):
     assert not _learnings_dir(tmp_path).exists()
 
 
+def test_invalid_env_tier_is_terminal_even_with_a_ratified_preferences_line(tmp_path):
+    # Regression (#365): a *set* but invalid env override previously fell
+    # through to check .code-quality-atlas/preferences.md instead of
+    # resolving to "off" outright — so CODE_QUALITY_ATLAS_FEEDBACK_TIER=nope
+    # with a ratified `feedback: local` still activated logging. The prior
+    # test above never caught this: with no preferences.md at all, an
+    # invalid env value and a correctly-terminal one produce the same
+    # observable result (off), by coincidence rather than by testing the
+    # actual precedence rule.
+    prefs_dir = tmp_path / ".code-quality-atlas"
+    prefs_dir.mkdir()
+    (prefs_dir / "preferences.md").write_text(
+        "## Feedback & learnings\n\nfeedback: local\ndecided: 2026-07-18, @alice\n"
+    )
+    env = {
+        "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "nope",
+        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+    }
+    _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra=env)
+    assert not _learnings_dir(tmp_path).exists()
+
+
+def test_symlinked_log_destination_is_refused(tmp_path):
+    # Regression (#365): a cloned repo with `feedback: local` ratified and
+    # .code-quality-atlas/learnings/invocations.jsonl committed as a symlink
+    # must not have this hook write through it — the symlink can point
+    # anywhere, including outside the repo entirely. Covers the actual
+    # attack shape: the symlink's target need not exist yet ([ -e ] on a
+    # symlink follows it and reports on the target, so a naive existence
+    # check misses a dangling symlink like this one).
+    learnings_dir = _learnings_dir(tmp_path)
+    learnings_dir.mkdir(parents=True)
+    outside = tmp_path.parent / "outside-the-repo.jsonl"
+    (learnings_dir / "invocations.jsonl").symlink_to(outside)
+    env = {
+        "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+    }
+    _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra=env)
+    assert not outside.exists()
+    # The symlink itself must be left alone too, not replaced or deleted.
+    assert (learnings_dir / "invocations.jsonl").is_symlink()
+
+
+def test_feedback_tier_resolves_preferences_against_claude_project_dir(tmp_path):
+    # Regression (#365): the hooks previously resolved
+    # .code-quality-atlas/preferences.md (and the log destination) relative
+    # to CWD only, ignoring CLAUDE_PROJECT_DIR — so a ratified opt-in
+    # silently resolved to "off" whenever the hook ran from a subdirectory
+    # of the project, matching the CLAUDE_PROJECT_DIR-over-cwd precedent
+    # already established for lens-coverage/track-lens-reads.sh.
+    project_dir = tmp_path / "project"
+    other_cwd = tmp_path / "elsewhere"
+    (project_dir / ".code-quality-atlas").mkdir(parents=True)
+    other_cwd.mkdir()
+    (project_dir / ".code-quality-atlas" / "preferences.md").write_text(
+        "feedback: local\n"
+    )
+    env = {"CLAUDE_PROJECT_DIR": str(project_dir), "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    _run(LOG_HOOK, other_cwd, _SKILL_INPUT, env_extra=env)
+    assert (
+        project_dir / ".code-quality-atlas" / "learnings" / "invocations.jsonl"
+    ).exists()
+    assert not (other_cwd / ".code-quality-atlas").exists()
+
+
 def test_commented_out_template_example_does_not_activate(tmp_path):
     # The shipped preferences template ships every example, including a
     # feedback tier, commented out inside an HTML comment block; a repo that
@@ -602,6 +668,78 @@ def test_missing_jq_degrades_to_no_op(tmp_path):
     )
     assert result.returncode == 0
     assert not _learnings_dir(tmp_path).exists()
+
+
+def test_missing_lib_degrades_to_no_op_instead_of_a_failed_source(tmp_path):
+    # Regression (#365): CLAUDE_PLUGIN_ROOT pointing at a directory with no
+    # hooks/lib/feedback-tier.sh previously still reached `source "$_lib"`,
+    # which fails loudly under `set -u` with no functions defined afterward
+    # — the script happened to still exit 0 overall (the empty
+    # `feedback_tier` call falls through the case statement's `*` branch),
+    # but only by accident, with a raw "No such file or directory" on
+    # stderr. An explicit `[ -f "$_lib" ] || exit 0` makes this a clean,
+    # intentional no-op instead.
+    fake_plugin_root = tmp_path / "fake-plugin-root"
+    fake_plugin_root.mkdir()
+    env = {
+        "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+        "CLAUDE_PLUGIN_ROOT": str(fake_plugin_root),
+    }
+    result = subprocess.run(
+        ["bash", str(LOG_HOOK)],
+        cwd=str(tmp_path),
+        input=_SKILL_INPUT,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env={**env, "PATH": _resolved_path(), "HOME": str(tmp_path)},
+        check=False,
+    )
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert not _learnings_dir(tmp_path).exists()
+
+
+def test_draft_and_auto_tiers_log_like_local_with_a_stderr_note(tmp_path):
+    # Regression (#365): `draft`/`auto` are accepted and silently treated
+    # exactly like `local` (stages 2+ are unbuilt) — an operator who
+    # deliberately opted into one of them should see a note saying so on
+    # stderr, not silence indistinguishable from "local" was requested.
+    for tier in ("draft", "auto"):
+        env = {
+            "CODE_QUALITY_ATLAS_FEEDBACK_TIER": tier,
+            "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+        }
+        result = subprocess.run(
+            ["bash", str(LOG_HOOK)],
+            cwd=str(tmp_path),
+            input=_SKILL_INPUT,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env={**env, "PATH": _resolved_path(), "HOME": str(tmp_path)},
+            check=False,
+        )
+        assert result.returncode == 0
+        assert tier in result.stderr
+        assert (_learnings_dir(tmp_path) / "invocations.jsonl").exists()
+
+
+def test_log_destination_size_cap_stops_further_appends(tmp_path):
+    # Regression (#365): nothing rotates or caps the log file's growth —
+    # this hook must at least refuse to keep appending to one that has
+    # already grown past a size cap rather than let it grow unbounded.
+    learnings_dir = _learnings_dir(tmp_path)
+    learnings_dir.mkdir(parents=True)
+    log = learnings_dir / "invocations.jsonl"
+    log.write_bytes(b"x" * (6 * 1024 * 1024))
+    size_before = log.stat().st_size
+    env = {
+        "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+    }
+    _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra=env)
+    assert log.stat().st_size == size_before
 
 
 # --- #310: route.sh was the one hook with real content (the SessionStart
