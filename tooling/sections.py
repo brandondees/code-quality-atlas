@@ -2,6 +2,7 @@
 # tooling/sections.py
 import hashlib
 import re
+from collections.abc import Iterator
 
 _SECTION_START = re.compile(r"^## #(\d+)\b")
 _ANY_H2 = re.compile(r"^## ")
@@ -84,6 +85,24 @@ class _FenceTracker:
         return False
 
 
+def _iter_lines(text: str) -> Iterator[str]:
+    """Yield each line of `text`, trailing `\\n` included except possibly on
+    the last, splitting only on a literal `\\n`.
+
+    Deliberately NOT `text.splitlines(keepends=True)`: that also treats
+    `\\v`, `\\f`, `\\x1c`-`\\x1e`, NEL (`\\x85`), U+2028/U+2029, and a lone
+    `\\r` as line breaks, while the `re.MULTILINE` `^`/`pattern.finditer`
+    scan this replaced only ever treated `\\n` as one. Splitting on the
+    wider set would let a `##`/`###`/`- `-prefixed fragment right after one
+    of those characters be newly (mis)matched as if it started its own
+    line — the same class of false-structure bug this module exists to
+    prevent, just via a different trigger than a fence."""
+    parts = text.split("\n")
+    last = len(parts) - 1
+    for i, part in enumerate(parts):
+        yield part if i == last else part + "\n"
+
+
 def _match_offsets(text: str, pattern: re.Pattern[str]) -> list[tuple[int, re.Match[str]]]:
     """(offset, match) for each line in `text` matched by `pattern` at its
     start, skipping lines inside a fenced code block (see `_FenceTracker`).
@@ -92,7 +111,7 @@ def _match_offsets(text: str, pattern: re.Pattern[str]) -> list[tuple[int, re.Ma
     results: list[tuple[int, re.Match[str]]] = []
     offset = 0
     fence = _FenceTracker()
-    for line in text.splitlines(keepends=True):
+    for line in _iter_lines(text):
         if not fence.consume(line):
             m = pattern.match(line)
             if m:

@@ -266,3 +266,20 @@ def test_extract_section_not_blinded_by_a_backtick_in_a_fence_info_string():
     assert "## #2" not in section
     sec2 = extract_section(markdown, 2)
     assert "Real content." in sec2
+
+
+def test_extract_section_only_splits_lines_on_literal_newline():
+    # atlas review finding on PR #403: str.splitlines() (unlike re.MULTILINE's
+    # `^`, which the old whole-document regex scan relied on) also treats
+    # \v, \f, \x1c-\x1e, NEL, U+2028/2029, and a lone \r as line breaks. A
+    # "## " fragment immediately after one of those characters must NOT be
+    # newly (mis)matched as its own heading line.
+    markdown = (
+        "# Doc\n\n"
+        "## #1 First\n\n"
+        "para one\x0c## fake heading, not a real line start\n\n"
+        "## #2 Second\n\nReal content.\n"
+    )
+    section = extract_section(markdown, 1)
+    assert "fake heading" in section          # stayed part of section #1's text...
+    assert "## #2" not in section             # ...and still stops at the real next H2
