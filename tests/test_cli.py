@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 
 from tooling.cli import main
+from tooling.generate import generate_skill
+from tooling.manifest import Skill, Source
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -30,10 +32,156 @@ def test_cli_generate_then_drift_reports_clean(tmp_path, capsys):
     assert "No drift" in out
 
 
+def test_cli_drift_detected_reports_and_returns_1(tmp_path, capsys):
+    # Regression (#367): the DRIFT: reporting branch (a detected drift
+    # returning rc 1) was unexercised by any test — flipping that `return 1`
+    # to `return 0` left the whole 454-test suite green.
+    rc = main(
+        [
+            "generate",
+            "--manifest",
+            str(ROOT / "tests" / "fixtures" / "manifest_sample.yaml"),
+            "--docs-root",
+            str(ROOT),
+            "--skills-root",
+            str(tmp_path / "skills"),
+        ]
+    )
+    assert rc == 0
+
+    altered = tmp_path / "docs_altered"
+    (altered / "tests" / "fixtures").mkdir(parents=True)
+    original = (ROOT / "tests" / "fixtures" / "research_sample.md").read_text()
+    (altered / "tests" / "fixtures" / "research_sample.md").write_text(
+        original.replace(
+            "Does every remote call have a timeout?",
+            "Does every remote call have a timeout and deadline?",
+        )
+    )
+    rc = main(
+        [
+            "drift",
+            "--skills-root",
+            str(tmp_path / "skills"),
+            "--docs-root",
+            str(altered),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "DRIFT: hunting-silent-failures" in out
+
+
+def test_cli_drift_fails_loudly_on_empty_skills_root(tmp_path, capsys):
+    # Regression (#367): an empty or nonexistent --skills-root previously
+    # globbed to zero skills and reported "No drift" with rc 0 — a renamed
+    # or mistyped --skills-root would silently turn CI's drift gate into a
+    # green no-op instead of failing.
+    rc = main(["drift", "--skills-root", str(tmp_path / "does-not-exist")])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "ERROR: no skills found under" in out
+    assert "No drift" not in out
+
+
+def test_cli_eval_fails_loudly_on_empty_skills_root(tmp_path, capsys):
+    # Regression (#367): mirrors the drift gate above for the eval command —
+    # a nonexistent/empty --skills-root previously globbed zero eval.json
+    # files and printed nothing while exiting 0.
+    rc = main(
+        [
+            "eval",
+            "--skills-root",
+            str(tmp_path / "does-not-exist"),
+            "--manifest",
+            str(ROOT / "skills" / "manifest.yaml"),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "ERROR: no skills found under" in out
+
+
+def test_cli_eval_reports_missing_eval_json(tmp_path, capsys):
+    # Regression (#367): the MISSING: branch was unreachable on the default
+    # (no --skill) path, since eval_files was built by globbing only
+    # eval.json files that already exist — a skill directory with no
+    # evals/ at all never produced a glob hit to report as missing.
+    (tmp_path / "no-evals-skill").mkdir()
+    manifest = str(ROOT / "skills" / "manifest.yaml")
+    rc = main(["eval", "--skills-root", str(tmp_path), "--manifest", manifest])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "MISSING: no-evals-skill — no evals/eval.json" in out
+
+
+def test_cli_generate_fails_loudly_on_missing_manifest(tmp_path, capsys):
+    # Regression (#367): a nonexistent --manifest previously escaped the
+    # generate command as a raw, uncaught exception instead of the clean
+    # `ERROR:` + exit 1 the drift/eval branches already give.
+    rc = main(
+        [
+            "generate",
+            "--manifest",
+            str(tmp_path / "does-not-exist.yaml"),
+            "--docs-root",
+            str(ROOT),
+            "--skills-root",
+            str(tmp_path / "skills"),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "ERROR:" in out
+
+
+def test_cli_generate_fails_loudly_on_malformed_manifest(tmp_path, capsys):
+    # Regression (#367): a manifest that loads but fails validate() (here, an
+    # invalid skill name) previously escaped as a raw ValidationError
+    # traceback instead of a clean `ERROR:` + exit 1.
+    bad_manifest = tmp_path / "bad_manifest.yaml"
+    bad_manifest.write_text(
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: BAD NAME\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    built_from:\n"
+        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+    )
+    rc = main(
+        [
+            "generate",
+            "--manifest",
+            str(bad_manifest),
+            "--docs-root",
+            str(ROOT),
+            "--skills-root",
+            str(tmp_path / "skills"),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "ERROR:" in out
+
+
 def test_cli_runs_as_module(tmp_path):
     """Regression: `python -m tooling.cli` must actually invoke main() (needs the
     __name__ == '__main__' guard). The unit test above calls main() directly and
     would not catch a missing guard."""
+    generate_skill(
+        Skill(
+            name="hunting-silent-failures",
+            description="x",
+            shape="diff",
+            wave=1,
+            built_from=[Source(2, "tests/fixtures/research_sample.md#2")],
+        ),
+        "v0.2",
+        docs_root=str(ROOT),
+        skills_root=str(tmp_path),
+    )
     result = subprocess.run(
         [
             sys.executable,
