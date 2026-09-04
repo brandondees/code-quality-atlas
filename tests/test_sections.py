@@ -132,3 +132,80 @@ def test_extract_bullets_joins_continuation_lines_and_skips_trailing_rule():
     )
     bullets = extract_bullets(text)
     assert bullets == ["First check spanning two lines?", "Second check?"]
+
+
+# --- Fence-awareness (#368) ---
+# All three MULTILINE-regex scanners below (extract_section, extract_subsection,
+# extract_bullets) previously matched `## `/`### `/`- ` lines anywhere in the
+# document, including inside a fenced code block — a fenced example truncated
+# the section/subsection early or spawned a phantom bullet, and section_hash
+# (built on extract_section) silently stopped covering anything after the
+# fence, so drift went undetected.
+
+
+def test_extract_section_skips_a_fenced_heading_and_keeps_content_after_it():
+    markdown = (
+        "# Doc\n\n"
+        "## #7 Comments\n\n"
+        "Good comments explain intent.\n\n"
+        "```markdown\n"
+        "## Instructions\n"
+        "This looks like a heading but is fenced example content.\n"
+        "```\n\n"
+        "More real prose after the fence.\n\n"
+        "## #8 Next section\n\nOther content.\n"
+    )
+    section = extract_section(markdown, 7)
+    assert "Instructions" in section          # fenced example content is kept...
+    assert "More real prose after the fence." in section  # ...and doesn't end the section
+    assert "## #8" not in section             # still stops at the real next H2
+
+
+def test_extract_subsection_skips_a_fenced_subheading():
+    section = (
+        "## #2 Error handling\n\n"
+        "### Reviewable heuristics\n\n"
+        "- Is any error swallowed?\n\n"
+        "```yaml\n"
+        "### Not a real subheading\n"
+        "```\n\n"
+        "- Does every remote call have a timeout?\n"
+    )
+    heur = extract_subsection(section, "heuristics")
+    assert "Not a real subheading" in heur     # fenced text stays part of the subsection...
+    assert "Does every remote call have a timeout?" in heur  # ...instead of truncating it
+
+
+def test_extract_bullets_does_not_split_on_a_fenced_bullet_line():
+    text = (
+        "### Heuristics\n"
+        "- A check. Bad example:\n"
+        "```yaml\n"
+        "- name: not-a-check\n"
+        "  run: echo hi\n"
+        "```\n"
+        "- Second real check?\n"
+    )
+    bullets = extract_bullets(text)
+    assert len(bullets) == 2                   # not 3 — no phantom bullet from the fence
+    assert bullets[0].startswith("A check. Bad example:")
+    assert "not-a-check" in bullets[0]          # fenced example folded into its parent bullet
+    assert bullets[1] == "Second real check?"
+
+
+def test_section_hash_covers_text_after_a_fenced_heading():
+    base = (
+        "# Doc\n\n"
+        "## #3 Testing\n\n"
+        "Some intro.\n\n"
+        "```python\n"
+        "## fake heading in code\n"
+        "```\n\n"
+        "Content after the fence that matters.\n\n"
+        "## #4 Next\n\nOther.\n"
+    )
+    edited = base.replace(
+        "Content after the fence that matters.",
+        "Content after the fence that matters a lot more now.",
+    )
+    assert section_hash(edited, 3) != section_hash(base, 3)

@@ -24,14 +24,12 @@ from tooling.generate_prepass import build_collapsed_prepass
 from tooling.generate_skill import build_artifact_rubric
 from tooling.generate_synthesizer import build_synthesizer_md
 from tooling.manifest import Entrypoint, Manifest, Skill
+from tooling.sections import _FenceTracker
 
 # Matches skill-md.md's own ~100-line ToC rubric (category #101); a lens
 # bundle this long benefits from the same navigability the rubric demands
 # of a third party's SKILL.md.
 _TOC_LINE_THRESHOLD = 100
-
-# Opening fence marker for a fenced code block: 3+ backticks or tildes.
-_FENCE_OPEN_RE = re.compile(r"^(`{3,}|~{3,})")
 
 
 class CollapsedOverlapError(ValueError):
@@ -89,40 +87,6 @@ def _github_anchor(heading: str) -> str:
     return re.sub(r"\s", "-", slug)
 
 
-class _FenceTracker:
-    """Tracks fenced-code-block state across a Markdown document, line by
-    line, so a heading-like line inside a fence (``` or ~~~, any length,
-    closing fence must match the opener's character and be at least as
-    long) is treated as content, not a real heading. Fence detection is
-    gated on indentation `< 4`, matching CommonMark's rule that a 4+-space
-    *indented* code block is never a fence, even if a line in it starts
-    with backticks/tildes after stripping.
-
-    `_strip_toc_section` and `_toc_for_body` each independently grew this
-    exact logic (#313, then #317 for the second, unnoticed copy) — extracted
-    here so a third recurrence isn't possible."""
-
-    def __init__(self) -> None:
-        self._fence: str | None = None
-
-    def consume(self, line: str) -> bool:
-        """Update state for `line`; return True if `line` is inside a fence
-        (an opening or closing fence-marker line itself counts as inside)."""
-        indent = len(line) - len(line.lstrip(" "))
-        stripped = line.strip()
-        if self._fence is not None:
-            if (indent < 4 and stripped and len(stripped) >= len(self._fence)
-                    and set(stripped) == {self._fence[0]}):
-                self._fence = None
-            return True
-        if indent < 4:
-            match = _FENCE_OPEN_RE.match(stripped)
-            if match:
-                self._fence = match.group(1)
-                return True
-        return False
-
-
 def _strip_toc_section(md: str) -> str:
     """Drop a `## Contents` section (heading through to the next `## `) from
     hand-authored examples before they are inlined into a bundle body.
@@ -141,10 +105,11 @@ def _strip_toc_section(md: str) -> str:
     heading" is a rule an author has to remember and a generator can simply
     enforce.
 
-    Fence-aware via `_FenceTracker` (#317, the same gap #313 fixed in
-    `_toc_for_body`): a `## `-prefixed line inside a fenced code block is
-    example content, not a real heading, and can't start or end the skipped
-    section."""
+    Fence-aware via `tooling.sections._FenceTracker` (#317, the same gap
+    #313 fixed in `_toc_for_body`; the class itself now lives in
+    `sections.py`, see #368): a `## `-prefixed line inside a fenced code
+    block is example content, not a real heading, and can't start or end
+    the skipped section."""
     out: list[str] = []
     skipping = False
     fence = _FenceTracker()
@@ -166,9 +131,10 @@ def _toc_for_body(body: str) -> str:
     """A `## Contents` heading list linking every `## ` heading in `body`, in
     order, with GitHub's duplicate-heading dedup suffixing (`-1`, `-2`, ...
     appended to the *n*th repeat of an identical slug). Returns "" if `body`
-    has no `## ` headings to link. Fence-aware via `_FenceTracker` (#313 — a
-    worked example's fenced Markdown excerpt was otherwise picked up as a
-    heading, producing a broken anchor): a `## `-prefixed line inside a
+    has no `## ` headings to link. Fence-aware via
+    `tooling.sections._FenceTracker` (#313 — a worked example's fenced
+    Markdown excerpt was otherwise picked up as a heading, producing a
+    broken anchor): a `## `-prefixed line inside a
     fenced code block is example content, not a real heading, and is
     skipped."""
     headings = []
