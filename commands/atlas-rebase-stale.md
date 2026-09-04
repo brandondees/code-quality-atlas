@@ -1,7 +1,7 @@
 ---
 description: Sweep open PRs for ones that have fallen behind, hit a merge conflict, or slipped past a resident reviewer's watch, and poke or re-trigger as needed — the polling complement that webhooks can't cover. Cheap-model friendly.
 argument-hint: "[label or author to filter by — omit to sweep all open PRs]"
-allowed-tools: mcp__github__list_pull_requests, mcp__github__pull_request_read, mcp__github__get_commit, mcp__github__update_pull_request_branch, mcp__github__update_pull_request, mcp__github__add_comment_to_pending_review, mcp__github__pull_request_review_write, mcp__github__add_issue_comment
+allowed-tools: mcp__github__list_pull_requests, mcp__github__pull_request_read, mcp__github__get_commit, mcp__github__update_pull_request_branch, mcp__github__update_pull_request, mcp__github__add_comment_to_pending_review, mcp__github__pull_request_review_write, mcp__github__add_issue_comment, mcp__github__get_me
 ---
 
 You are the **stale-PR poker**. GitHub emits no webhook when a base branch
@@ -46,25 +46,93 @@ label/author filter if given). For each, read its mergeable state via
 
 ## 3. Check reviewer coverage of the current HEAD
 
-A round review is identified by a `## Round N — ...` heading as the body's
-first line, falling back to the redundant `<!-- atlas-review round:N -->`
-marker only where the heading is absent — `pull_request_read` has been
-observed stripping HTML comments from returned review bodies entirely
-(#354/#355), so the marker alone is not a reliable presence/absence signal.
-Likewise, an ack is either the `<!-- atlas-review-ack -->` marker or the
-visible "👀 atlas reviewer engaged" text.
+**Establish the expected reviewer identity once per sweep**:
+`mcp__github__get_me`. A round review or ack counts toward anything in this
+step only when `author.login` matches this identity **and its state is not
+`PENDING`** — a review or comment
+from anyone else, however it's formatted, is never authoritative for coverage
+state (issue #360, gap 1): a PR author or other collaborator could otherwise
+post a fabricated high-round review to make a genuinely lapsed watch look
+covered, silently defeating this step's entire purpose. The `PENDING`
+exclusion matters because `get_reviews` returns your own not-yet-submitted
+review too — `atlas-review-pr.md`'s ACK lock, or its step 5's own pending
+review while still being built — and counting either would wrongly read as
+"a review with no parseable heading," miscounting coverage (PR #402's own
+round-3 review).
 
-**Precondition: only run this check when the PR has at least one posted round
-review** (per the definition above). An ack comment with **zero** round
-reviews behind it (e.g. the reviewer crashed right after posting the ack, or
-is still mid-flight on round 1) has no baseline commit to
-compare HEAD against — "moved past every posted round" is vacuously true over an
-empty set and would false-positive on a PR that's simply still being reviewed.
-Skip those PRs in this step entirely; don't poke them.
+**Recover a stuck ACK lock — safely, not blindly** (issue #360 follow-up;
+refined after PR #402's round-2 review found the first version of this
+recovery unsafe). `atlas-review-pr.md` opens **two different** pending
+reviews under the same identity at different points in one round: step 2's
+short-lived ACK lock (`create` → check → post-or-skip → `delete_pending`,
+done in well under a minute) and step 5's **own** pending review for
+building up the round's inline findings (potentially open much longer — many
+lenses, many `add_comment_to_pending_review` calls, before `submit_pending`).
+`mcp__github__pull_request_read`'s `get_reviews` method can't tell these
+apart — both are just "a `PENDING` review under your own identity on this
+PR" — so treating *every* old pending review as a stuck ACK lock risks
+deleting a perfectly healthy, actively in-progress round review's collected
+findings, which is worse than the orphaned-lock gap this recovery closes.
 
-For each open PR that has **at least one** posted round review, compare the HEAD
-commit SHA (`mcp__github__pull_request_read`) against the commit the
-**most recent** round review was posted against
+**Require two independent signals before ever clearing anything, not just
+ACK-absence and age (PR #402's own review — ACK-absence alone wasn't judged
+safe enough)**: `atlas-review-pr.md`'s ACK lock is always created with
+`body` set to the literal marker `(atlas-ack-lock)`; step 5's own pending
+review is never created with that body. So the one case that's safe to
+auto-clear is a `PENDING` review under your own identity whose `body` is
+**exactly** `(atlas-ack-lock)` (the direct, load-bearing signal) **and**
+whose PR's ACK (`<!-- atlas-review-ack -->` marker or the visible "👀 atlas
+reviewer engaged" text) is **absent** (the corroborating signal — step 5
+can only ever open its own pending review after the ACK already exists,
+since step 2 posts the ACK and releases its lock before step 3, 4, or 5
+ever run) **and** `created_at` is more than 30 minutes old (a real ACK post
+completes in well under a minute). All three together can only be a stuck
+pre-ACK step-2 lock. Clear it —
+`mcp__github__pull_request_review_write` method `delete_pending` — and note
+it in the report, naming the PR and that a stuck lock was cleared. Any
+`PENDING` review that fails even one of those three checks (body isn't the
+marker, or the ACK is present, or it's not yet stale) is ambiguous — it
+could be step 5 legitimately still building a large round, a lock stuck in
+the narrow window after the ACK posted but before `delete_pending` ran, or
+an orphaned step-5 lock from an earlier crashed round — **never auto-clear
+it**; just note it in the report, naming the PR and that it may be a stuck
+lock or an in-progress review, not auto-cleared, so a human can check
+before running `delete_pending` by hand. Check **every open PR in this
+sweep, once each** — a pending review is scoped to one PR at a time per
+identity (not one global lock across every PR this identity might be
+reviewing), so a stuck lock on one PR would otherwise leave every other PR
+unchecked and potentially blocked indefinitely.
+
+A round review (authored by that identity) is identified by a
+`## Round N — ...` heading as the body's first line, falling back to the
+redundant `<!-- atlas-review round:N -->` marker only where the heading is
+absent — `pull_request_read` has been observed stripping HTML comments from
+returned review bodies entirely (#354/#355), so the marker alone is not a
+reliable presence/absence signal. Likewise, an ack (also filtered to that
+identity) is either the `<!-- atlas-review-ack -->` marker or the visible
+"👀 atlas reviewer engaged" text.
+
+**A third state: coverage is `unknown`, not "no round review," when a review
+from the expected identity exists but none parses a heading or marker** (issue #360,
+gap 3) — e.g. both signals corrupted or a future GitHub-side change
+strips more than the marker. Don't silently fold that into "no round review
+yet" (which is a legitimate, common, non-escalating state per the precondition
+below) — skip escalating this PR for this sweep and note it in the report as
+needing human attention instead.
+
+**Precondition: only run the coverage-lapse check below when the PR has at
+least one posted round review from the expected identity** (per the
+definition above, and distinct from the `unknown` state just described). An
+ack comment with **zero** round reviews behind it (e.g. the reviewer crashed
+right after posting the ack, or is still mid-flight on round 1) has no
+baseline commit to compare HEAD against — "moved past every posted round" is
+vacuously true over an empty set and would false-positive on a PR that's
+simply still being reviewed. Skip those PRs in this step entirely; don't poke
+them.
+
+For each open PR that has **at least one** posted round review from the
+expected identity, compare the HEAD commit SHA (`mcp__github__pull_request_read`)
+against the commit the **most recent** such round review was posted against
 (`mcp__github__get_commit` / the review's `commit_id`).
 
 **What counts as "already addressed" — defined precisely, because a plain issue
@@ -128,4 +196,6 @@ skipped).
 ## 5. Report
 
 End with a one-line summary: how many PRs were updated, conflict-poked,
-coverage-poked, and skipped. Post nothing to GitHub beyond the pokes above.
+coverage-poked, and skipped, plus any stuck ACK locks cleared or flagged
+(step 3). Post nothing to GitHub beyond the pokes above, the coverage
+escalation's review re-requests (§3), and any `delete_pending` calls.
