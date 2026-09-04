@@ -209,3 +209,60 @@ def test_section_hash_covers_text_after_a_fenced_heading():
         "Content after the fence that matters a lot more now.",
     )
     assert section_hash(edited, 3) != section_hash(base, 3)
+
+
+# --- _FenceTracker edge cases (review findings on PR #403) ---
+from tooling.sections import _FenceTracker
+
+
+def test_fence_tracker_never_opens_on_a_tab_indented_delimiter():
+    # A leading tab is 4 columns under CommonMark's tab-stop rule, so a
+    # tab-indented "```" is a 4+-column indented line, not a fence opener —
+    # `line.lstrip(" ")` alone leaves a leading tab untouched and would
+    # otherwise misreport this line as indent 0.
+    fence = _FenceTracker()
+    assert fence.consume("\t```\n") is False
+    assert fence.consume("plain text\n") is False  # confirms no fence is open
+
+
+def test_fence_tracker_ignores_a_tab_indented_line_as_a_closer():
+    fence = _FenceTracker()
+    assert fence.consume("```\n") is True
+    assert fence.consume("\t```\n") is True         # tab-indented: doesn't close it
+    assert fence.consume("still inside\n") is True  # confirms the fence didn't close above
+    assert fence.consume("```\n") is True            # this (unindented) line closes it
+    assert fence.consume("outside now\n") is False   # confirms it actually closed
+
+
+def test_fence_tracker_rejects_backtick_in_backtick_fence_info_string():
+    # CommonMark: a backtick fence's info string may not itself contain a
+    # backtick (ambiguous with inline code spans); a tilde fence has no such
+    # restriction.
+    fence = _FenceTracker()
+    assert fence.consume("```has a ` backtick\n") is False
+    assert fence.consume("plain text\n") is False  # confirms no fence is open
+
+
+def test_fence_tracker_tilde_fence_info_string_may_contain_a_backtick():
+    fence = _FenceTracker()
+    assert fence.consume("~~~has a ` backtick\n") is True
+    assert fence.consume("content\n") is True
+    assert fence.consume("~~~\n") is True
+    assert fence.consume("outside\n") is False
+
+
+def test_extract_section_not_blinded_by_a_backtick_in_a_fence_info_string():
+    # Before the fix, a backtick in a backtick-fence's info string was
+    # accepted as a valid opener anyway. That "fence" never legitimately
+    # closes (no real ``` follows), so every real heading after it —
+    # including "## #2" below — read as fence content and was skipped.
+    markdown = (
+        "# Doc\n\n"
+        "## #1 First\n\n"
+        "Example: ```inline-ish info with a ` backtick, not a real fence\n\n"
+        "## #2 Second\n\nReal content.\n"
+    )
+    section = extract_section(markdown, 1)
+    assert "## #2" not in section
+    sec2 = extract_section(markdown, 2)
+    assert "Real content." in sec2

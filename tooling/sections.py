@@ -54,7 +54,13 @@ class _FenceTracker:
     def consume(self, line: str) -> bool:
         """Update state for `line`; return True if `line` is inside a fence
         (an opening or closing fence-marker line itself counts as inside)."""
-        indent = len(line) - len(line.lstrip(" "))
+        # CommonMark counts indentation in columns, where a tab advances to the
+        # next multiple of 4 — not in raw leading-space characters. A leading
+        # tab is 4 columns all by itself, so lstrip(" ") alone (which a tab
+        # survives untouched) would misreport it as indent 0 and let a
+        # tab-indented delimiter-like line wrongly open/close a fence.
+        leading = line[:len(line) - len(line.lstrip(" \t"))]
+        indent = len(leading.expandtabs(4))
         stripped = line.strip()
         if self._fence is not None:
             if (indent < 4 and stripped and len(stripped) >= len(self._fence)
@@ -64,7 +70,16 @@ class _FenceTracker:
         if indent < 4:
             match = _FENCE_OPEN_RE.match(stripped)
             if match:
-                self._fence = match.group(1)
+                fence = match.group(1)
+                # A backtick fence's info string may not itself contain a
+                # backtick (CommonMark); a tilde fence has no such
+                # restriction. Getting this wrong lets a line like
+                # "```contains ` a backtick" open a fence that never
+                # legitimately closes, swallowing every real heading/bullet
+                # after it as "content".
+                if fence[0] == "`" and "`" in stripped[match.end():]:
+                    return False
+                self._fence = fence
                 return True
         return False
 
