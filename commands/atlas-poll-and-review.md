@@ -10,16 +10,21 @@ description: >-
   webhook trigger surviving. See `docs/runbooks/pr-review-automation.md`
   ("Model B") for when to pick this over the event-triggered design.
 argument-hint: "[repo, or label/author filter — omit to sweep every attached repo's open PRs]"
-allowed-tools: Task, Skill, Read, Grep, Bash, mcp__github__list_pull_requests, mcp__github__pull_request_read, mcp__github__get_file_contents, mcp__github__get_commit, mcp__github__list_commits, mcp__github__get_me, mcp__github__update_pull_request_branch, mcp__github__add_comment_to_pending_review, mcp__github__pull_request_review_write, mcp__github__add_issue_comment, mcp__github__add_reply_to_pull_request_comment, mcp__github__resolve_review_thread
+allowed-tools: Task, Skill, Read, Grep, Glob, Bash, mcp__github__list_pull_requests, mcp__github__pull_request_read, mcp__github__get_file_contents, mcp__github__get_commit, mcp__github__list_commits, mcp__github__get_me, mcp__github__update_pull_request_branch, mcp__github__add_comment_to_pending_review, mcp__github__pull_request_review_write, mcp__github__add_issue_comment, mcp__github__add_reply_to_pull_request_comment, mcp__github__resolve_review_thread
 ---
 
-**`allowed-tools` above covers both the top-level sweep and every subagent it
-spawns** — a `Task`-spawned subagent inherits this session's tool grants
-rather than needing a separate list, which is why it's wider than what steps
-1-2 call directly: the review subagent in step 3 needs everything
-`atlas-review-pr.md` itself requires (`Skill`, `get_file_contents`, `get_me`,
-`resolve_review_thread`, and the rest), inherited from here rather than
-granted again per spawn. Nothing here is unused — it's used one level down.
+**`allowed-tools` above is intended to cover both the top-level sweep and every
+subagent it spawns, on the assumption that a `Task`-spawned subagent inherits
+this session's tool grants** rather than needing a separate list — verify this
+against your platform's actual `Task`-tool inheritance behavior before relying
+on it, since it is not otherwise cited here. On that assumption, it's why the
+list above is wider than what steps 1-2 call directly: the review subagent in
+step 3 needs everything `atlas-review-pr.md` itself requires (`Skill`, `Glob`,
+`get_file_contents`, `get_me`, `resolve_review_thread`, and the rest),
+inherited from here rather than granted again per spawn. If your platform's
+`Task` tool does *not* inherit grants, the review subagent needs its own
+explicit `allowed-tools` matching `atlas-review-pr.md`'s list. Nothing in the
+list above is unused — it's used one level down.
 
 You are the **poller-reviewer**: a single scheduled sweep that replaces both
 the event-triggered reviewer routine and the escalation-only poller
@@ -74,10 +79,12 @@ From the triage report, for each non-draft PR:
   routine).
 - **`mergeable_state` = `dirty`**: if no unresolved `<!-- atlas-rebase-poke -->`
   review thread already exists, post one — read the diff
-  (`mcp__github__pull_request_read`, files method), anchor an inline comment to
-  a line on the `RIGHT` side, submit as a `COMMENT` review
-  (`mcp__github__add_comment_to_pending_review` then
-  `mcp__github__pull_request_review_write`) whose body is unambiguous that this
+  (`mcp__github__pull_request_read`, `get_files` method), open a pending review
+  (`mcp__github__pull_request_review_write`, method `create`, no `event`), anchor
+  an inline comment to a line on the `RIGHT` side with
+  `mcp__github__add_comment_to_pending_review`, then submit as a `COMMENT` review
+  (`mcp__github__pull_request_review_write`, method `submit_pending`,
+  `event: COMMENT`) whose body is unambiguous that this
   is a **whole-PR conflict notice**, not a line-level issue: rebase onto base
   and resolve, don't attempt the resolution yourself — that's a code judgment
   this step never makes.
