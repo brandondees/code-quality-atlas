@@ -93,6 +93,9 @@ Improvements — opt-in, optional
 Pre-existing — noticed in touched code, not introduced here
 - <location> — <defect> (<lens>) [pre-existing, route: implementer]. <fix now | file a ticket | ignore>
 
+Non-blocking (advisory) — below the floor, not actionable
+- <severity> · <location> — <one-clause description> (<lens>)
+
 Tensions
 - <lens> ↔ <lens>: <how it was resolved here>
 
@@ -104,17 +107,19 @@ Process notes
 - <one-line process observation>, or exactly "Process: clean" if none.
 ```
 
-Omit any **findings** section with nothing in it — including **Routed**, **Improvements**, and **Pre-existing** (the last two are absent entirely unless the team opted into improvement-valence / Boy-Scout surfacing). **Coverage & limitations** and **Process notes** are the exceptions: both are always present, even on a "No findings" report. Keep each finding to one or two lines; the detail lives in the originating lens's output, not restated here.
+Omit any **findings** section with nothing in it — including **Routed**, **Improvements**, **Pre-existing** (the last two are absent entirely unless the team opted into improvement-valence / Boy-Scout surfacing), and **Non-blocking (advisory)**. **Coverage & limitations** and **Process notes** are the exceptions: both are always present, even on a "No findings" report. Keep each finding to one or two lines; the detail lives in the originating lens's output, not restated here.
+
+**Non-blocking (advisory) is not a dumping ground for every below-floor observation** — it is specifically the findings a floor (mode or round) dropped from the ranked sections above; a mode with no floor configured (`manifest.modes` empty) never populates it. List each as *severity · location · one clause* — never restate a finding already ranked above at its full detail. This section is informational only: it never sets the verdict, is never posted as an inline review thread, and the implementer may apply, defer, or ignore each item freely.
 
 ## Severity floor by mode
 
-The merged report's severity floor depends on the active depth mode. Below the floor, findings are omitted from the verdict.
+The merged report's severity floor depends on the active depth mode. Below the floor, a finding is dropped from the ranked, verdict-setting sections — not from the report: it still surfaces in the Non-blocking (advisory) list (see Output format below).
 
 | Mode | Floor | Effect |
 |---|---|---|
-| **triage** | Major | pinned at Major — report everything down to Major, nothing below |
+| **triage** | Major | pinned at Major — ranked sections report everything down to Major; below that, the advisory list only |
 | **review** | escalating | round-based escalation (as today) — later re-review rounds raise the floor |
-| **comprehensive** | Nit | pinned at Nit — report everything down to Nit, nothing below |
+| **comprehensive** | Nit | pinned at Nit — ranked sections report everything down to Nit; below that, the advisory list only |
 
 ## Reviewer discipline
 

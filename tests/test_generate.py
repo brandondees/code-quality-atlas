@@ -732,6 +732,22 @@ def test_build_synthesizer_md_includes_floor_policy():
     assert "## Severity floor by mode" in md
 
 
+def test_synthesizer_below_floor_findings_are_advisory_not_omitted():
+    # Regression (#370): the synthesizer's own emitted contract said a
+    # below-floor finding is "omitted from the verdict" / pinned modes
+    # report "nothing below" the floor — directly contradicting
+    # templates/REVIEW.md's promise (and commands/atlas-review-pr.md's own
+    # implementation) that a below-floor finding is dropped from the
+    # inline/ranked sections only, not from the report: it still surfaces
+    # in a Non-blocking (advisory) list. The Output format template must
+    # carry that section, and the floor-policy prose must say so rather
+    # than claim the finding disappears.
+    md = build_synthesizer_md(_syn_manifest(_modes()))
+    assert "Non-blocking (advisory)" in md
+    assert "omitted from the verdict" not in md
+    assert "nothing below" not in md
+
+
 # --- generate_collapsed destructive-prune guard ---
 from tooling.generate import generate_collapsed
 
