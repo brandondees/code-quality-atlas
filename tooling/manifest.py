@@ -765,8 +765,17 @@ def _optional_str_list(mapping: dict, key: str, where: str) -> list[str] | None:
 
 
 def load_manifest(path: str) -> Manifest:
-    with open(path, encoding="utf-8") as fh:
-        raw = fh.read()
+    # A manifest file with invalid UTF-8 bytes must surface as a
+    # ValidationError naming the file, same as every other malformed-input
+    # case here — not a raw UnicodeDecodeError escaping to a caller that
+    # only catches (OSError, ValidationError) (CodeRabbit review on #412;
+    # mirrors the existing (OSError, UnicodeError) guard around a *source*
+    # file's own read in `validate`, just applied to the manifest itself).
+    try:
+        with open(path, encoding="utf-8") as fh:
+            raw = fh.read()
+    except UnicodeError as exc:
+        raise ValidationError(f"{path}: not valid UTF-8: {exc}") from exc
     _check_comment_truncation(raw, path)
     # Syntactically-invalid YAML must surface the same way every other
     # malformed-input case in this function does — as a ValidationError naming

@@ -166,6 +166,18 @@ def test_load_manifest_wraps_malformed_yaml_as_validation_error(tmp_path):
         load_manifest(path)
 
 
+def test_load_manifest_rejects_non_utf8_bytes(tmp_path):
+    # Regression (PR #412 review, CodeRabbit): a manifest file with invalid
+    # UTF-8 bytes must raise ValidationError, like every other malformed-
+    # input case here — not let a raw UnicodeDecodeError escape `open(...).
+    # read()` to a caller that only catches (OSError, ValidationError), as
+    # `tooling.cli generate` does.
+    path = tmp_path / "bad.yaml"
+    path.write_bytes(b"taxonomy_version: v0.2\nskills: []\n\xff\xfe not valid utf-8\n")
+    with pytest.raises(ValidationError, match="not valid UTF-8"):
+        load_manifest(str(path))
+
+
 def test_load_manifest_rejects_missing_taxonomy_version(tmp_path):
     path = _write_manifest(tmp_path, "skills: []\n")
     with pytest.raises(

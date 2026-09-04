@@ -207,6 +207,31 @@ def test_cli_generate_fails_loudly_on_malformed_manifest(tmp_path, capsys):
     assert "ERROR:" in out
 
 
+def test_cli_generate_fails_loudly_on_non_utf8_manifest(tmp_path, capsys):
+    # Regression (PR #412 review, CodeRabbit): a --manifest file with invalid
+    # UTF-8 bytes previously escaped load_manifest's plain `open(...).read()`
+    # as a raw UnicodeDecodeError, uncaught by generate's
+    # `except (OSError, ValidationError)` — neither base class covers it.
+    bad_manifest = tmp_path / "bad_manifest.yaml"
+    bad_manifest.write_bytes(
+        b"taxonomy_version: v0.2\nskills: []\n\xff\xfe not valid utf-8\n"
+    )
+    rc = main(
+        [
+            "generate",
+            "--manifest",
+            str(bad_manifest),
+            "--docs-root",
+            str(ROOT),
+            "--skills-root",
+            str(tmp_path / "skills"),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "ERROR:" in out
+
+
 def test_cli_runs_as_module(tmp_path):
     """Regression: `python -m tooling.cli` must actually invoke main() (needs the
     __name__ == '__main__' guard). The unit test above calls main() directly and
