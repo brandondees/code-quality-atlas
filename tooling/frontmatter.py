@@ -13,10 +13,16 @@ from pathlib import Path
 import yaml
 
 
-def read_frontmatter(path: Path) -> tuple[str, object]:
+def read_frontmatter(path: Path) -> tuple[str, dict]:
     """Return `(raw_frontmatter_text, parsed_yaml)` for the `---`-fenced
     block at the top of `path`. Raises `ValueError` if the file has no
     well-formed frontmatter fence.
+
+    The parsed value is typed as `dict` because every caller treats it as a
+    mapping; `yaml.safe_load` can technically return any YAML scalar, so a
+    malformed frontmatter block (not a mapping at all) still needs its own
+    `isinstance` check at the call site rather than relying on this
+    annotation (PR #407 review, round 2).
 
     `utf-8-sig` drops a BOM and `\\r\\n` -> `\\n` normalizes a Windows
     checkout, so the `---\\n` fence split works regardless of line

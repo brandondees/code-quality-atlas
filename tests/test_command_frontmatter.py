@@ -8,6 +8,17 @@ added for after PR #37 truncated two router notes at a bare `#16`/`#14`.
 `manifest.py` only guards `skills/manifest.yaml`; nothing checked `commands/`
 (#386), so `atlas-rebase-stale.md` carried a plain-scalar `description` (fixed
 alongside this test) with nobody catching the class of bug that style invites.
+
+Round 2 of this PR's own review (`code-quality-atlas:reviewing-test-quality`)
+found the first two versions of the truncation-risk check below still missed
+three real shapes: a `description:` whose value starts on the *next* line, a
+YAML list item, and a dotted key — each demonstrated truncating for real
+against `yaml.safe_load` while the guard stayed silent. The design here
+replaces per-key-shape reconstruction with the simpler, complete rule that
+review suggested: check every frontmatter line unless it is a block-scalar
+body line (where `#` is literal) or a single-line, fully-quoted value (where
+the quotes protect it) — matching YAML's actual truncation surface instead of
+enumerating the shapes that can carry it.
 """
 
 import re
@@ -18,19 +29,21 @@ from tooling.frontmatter import read_frontmatter
 _ROOT = Path(__file__).resolve().parent.parent
 _COMMANDS_DIR = _ROOT / "commands"
 _COMMENT_RISK = re.compile(r"\s#")
-_KEY_RE = re.compile(r"^(\s*)([\w-]+):\s*(.*)$")
+_KEY_LINE_RE = re.compile(r"^(\s*)(?:-\s+)?([\w.-]+):\s*(.*)$")
 _BLOCK_SCALAR_INDICATOR = re.compile(r"^[|>][+-]?\d*$")
 
 
-def _frontmatter(command_md: Path) -> tuple[str, dict]:
-    return read_frontmatter(command_md)
+def _is_fully_quoted(value: str) -> bool:
+    return (value.startswith('"') and value.endswith('"') and len(value) >= 2) or (
+        value.startswith("'") and value.endswith("'") and len(value) >= 2
+    )
 
 
 def test_command_frontmatter_parses_and_has_description():
     command_files = sorted(_COMMANDS_DIR.glob("*.md"))
     assert command_files, f"no command files found under {_COMMANDS_DIR}"
     for command_md in command_files:
-        _, front = _frontmatter(command_md)
+        _, front = read_frontmatter(command_md)
         assert isinstance(front, dict), f"{command_md}: frontmatter is not a mapping"
         assert front.get("description"), f"{command_md}: description must be non-empty"
 
@@ -39,14 +52,19 @@ def test_command_description_is_a_block_scalar():
     """A block scalar (`>-`/`>`/`|`) reads `#` literally; a plain scalar does
     not, and a future edit adding a bare `#123` cross-reference to a plain
     description would truncate silently. Require the safe form everywhere,
-    matching every other command file's existing convention."""
+    matching every other command file's existing convention.
+
+    An *empty* first-line value (`description:` with the scalar starting on
+    the next line) is rejected, not accepted: that shape is a plain scalar
+    with no indicator at all — the exact risky form this test exists to
+    forbid, not a safe one (PR #407 review, round 2)."""
     for command_md in sorted(_COMMANDS_DIR.glob("*.md")):
-        raw, _ = _frontmatter(command_md)
+        raw, _ = read_frontmatter(command_md)
         for line in raw.splitlines():
             m = re.match(r"^description:\s*(.*)$", line)
             if m:
                 value = m.group(1).strip()
-                assert value[:1] in (">", "|", ""), (
+                assert value[:1] in (">", "|"), (
                     f"{command_md}: description is a plain scalar ({value[:20]!r}...) "
                     "— use a block scalar ('>-') so a bare ' #' in the text can't "
                     "silently truncate the value"
@@ -57,55 +75,37 @@ def test_command_description_is_a_block_scalar():
 
 
 def test_command_frontmatter_has_no_comment_truncation_risk():
-    """No plain-scalar frontmatter value anywhere in `commands/*.md` may
-    contain a bare ' #', on its first line or on a wrapped continuation line
-    — YAML would read either as a comment and silently drop the rest.
-    Tracks `prose_indent` across continuation lines the same way
-    `tooling/manifest.py`'s `_check_comment_truncation` does, generalized to
-    every key rather than a fixed allowlist: unlike `manifest.yaml`,
-    `commands/*.md` frontmatter has no fixed schema, so any key could turn
-    into a wrapped plain scalar (PR #407 review, round 1, nit).
-
-    Also tracks `block_scalar_indent` so a `>-`/`|` body line is never
-    mistaken for a nested mapping key: inside a block scalar `#` is literal
-    text, not a YAML comment, so a body line like `Note: unsafe #123` (a
-    real false positive CodeRabbit caught on this test's first version) must
-    never be flagged (PR #407 review, round 2)."""
+    """No line in `commands/*.md` frontmatter may contain a bare ' #' unless
+    it is inside a block-scalar body (where '#' is literal text, not a YAML
+    comment) or is a single-line value fully wrapped in quotes (where the
+    quotes protect it) — those are the only two shapes YAML itself treats as
+    safe. Every other line — a key's plain-scalar value, a wrapped
+    continuation line, a list item, a dotted key — is checked verbatim,
+    rather than re-deriving which specific shape it is: round 2 of this PR's
+    own review demonstrated three shapes (next-line scalar, list item, dotted
+    key) that a per-shape reconstruction missed while YAML still truncated
+    them for real."""
     for command_md in sorted(_COMMANDS_DIR.glob("*.md")):
-        raw, _ = _frontmatter(command_md)
-        prose_indent: int | None = None
+        raw, _ = read_frontmatter(command_md)
         block_scalar_indent: int | None = None
         for n, line in enumerate(raw.splitlines(), 1):
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
-                if block_scalar_indent is None:
-                    prose_indent = None
                 continue
             indent = len(line) - len(line.lstrip())
             if block_scalar_indent is not None:
                 if indent > block_scalar_indent:
                     continue  # block-scalar body line — '#' here is literal
                 block_scalar_indent = None  # dedented past the block scalar
-            m = _KEY_RE.match(line)
+            m = _KEY_LINE_RE.match(line)
             if m:
-                key_indent, value = len(m.group(1)), m.group(3)
-                if _BLOCK_SCALAR_INDICATOR.match(value.strip()):
+                key_indent, value = len(m.group(1)), m.group(3).strip()
+                if _BLOCK_SCALAR_INDICATOR.match(value):
                     block_scalar_indent = key_indent
-                    prose_indent = None
-                elif value[:1] in ('"', "'", ""):
-                    prose_indent = None
-                else:
-                    assert not _COMMENT_RISK.search(" " + value), (
-                        f"{command_md}:{n}: unquoted value contains ' #' — YAML "
-                        "reads it as a comment and silently truncates the value"
-                    )
-                    prose_indent = key_indent
-                continue
-            # a continuation line of the current plain-scalar value
-            if prose_indent is not None and indent > prose_indent:
-                assert not _COMMENT_RISK.search(line), (
-                    f"{command_md}:{n}: unquoted value continuation contains ' #' "
-                    "— YAML reads it as a comment and silently truncates the value"
-                )
-            else:
-                prose_indent = None
+                    continue
+                if _is_fully_quoted(value):
+                    continue
+            assert not _COMMENT_RISK.search(line), (
+                f"{command_md}:{n}: unquoted content contains ' #' — YAML reads "
+                "it as a comment and silently truncates the value"
+            )
