@@ -1996,3 +1996,40 @@ def test_validate_rejects_bad_mode_name():
     ]
     with pytest.raises(ValidationError, match="invalid mode name"):
         validate(Manifest("v0", [_skill()], synthesizer=_syn(), modes=bad))
+
+
+def test_no_test_module_calls_load_manifest_with_a_bare_relative_path():
+    """The same CWD-relative-literal bug (`pytest` run from outside the repo
+    root fails because `load_manifest` -- which always opens its argument
+    directly, with no docs_root involved -- was called with a bare relative
+    string) recurred three times: #390 fixed five modules, #409 found seven
+    more bare `load_manifest` calls against the manifest's own path in this
+    module, and
+    #409's own follow-up (#438) found 13 more in test_generate.py and one
+    more in test_collapsed.py -- because each fix patched only the
+    instances a manual audit happened to find, with nothing to catch a
+    fourth. After every one of those fixes, every real `load_manifest` call
+    in tests/ is anchored on ROOT (e.g. `str(ROOT / "skills" /
+    "manifest.yaml")`) instead of a bare quoted literal, so a bare literal
+    argument reappearing there is exactly this regression (dees-bot review
+    on #438 suggested this guard).
+
+    Deliberately scoped to `load_manifest` only, not `Source(...)`: a bare
+    relative `Source` path is safe whenever the caller supplies an absolute
+    `docs_root` at its own call site (several already-fixed modules do
+    exactly that), so flagging every `Source(...)` literal would false-
+    positive on that legitimate, already-CWD-safe pattern instead of the
+    real bug -- a relative path with no absolute anchor anywhere in the
+    resolution chain."""
+    call_re = re.compile(
+        r"""\bload_manifest\(\s*["'](?:skills/manifest\.yaml|tests/fixtures/[^"']*)["']"""
+    )
+    offenders = []
+    for path in sorted((ROOT / "tests").glob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        for m in call_re.finditer(text):
+            offenders.append(f"{path.relative_to(ROOT)}: {m.group(0)!r}")
+    assert not offenders, (
+        "bare CWD-relative load_manifest(...) call(s) found -- anchor on "
+        f"ROOT instead, the same fix applied for #390/#409/#438: {offenders}"
+    )
