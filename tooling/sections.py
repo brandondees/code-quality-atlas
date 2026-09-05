@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 # tooling/sections.py
+from __future__ import annotations
+
 import hashlib
 import re
 from collections.abc import Iterator

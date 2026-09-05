@@ -348,12 +348,25 @@ def test_vendor_all_collisions_leaves_marker_names_empty_without_crashing(tmp_pa
 
 def _source_functions_only():
     """The script's functions/vars, without the trailing `main "$@"` call, so
-    a caller can invoke individual functions (e.g. vendor_one) directly."""
+    a caller can invoke individual functions (e.g. vendor_one) directly.
+
+    The real script locates tooling/lib/skills-common.sh relative to its own
+    $0, which only resolves correctly when bash reads it from a real file.
+    This helper instead inlines the whole script into a `bash -c '...'`
+    string (see callers below), where $0 is "bash" itself -- so the dynamic
+    source line is rewritten to an absolute path the test already knows,
+    rather than trying to preserve $0 through that indirection.
+    """
     lines = SCRIPT.read_text().splitlines()
     assert lines[-1].strip() == 'main "$@"', (
         "script's last line changed shape; update this helper"
     )
-    return "\n".join(lines[:-1])
+    text = "\n".join(lines[:-1])
+    source_line = 'source "$(cd "$(dirname "$0")" && pwd)/lib/skills-common.sh"'
+    assert source_line in text, "script's lib-sourcing line changed; update this helper"
+    return text.replace(
+        source_line, f'source "{REPO_ROOT}/tooling/lib/skills-common.sh"'
+    )
 
 
 # A fake `rm` shadowing the real binary as a shell function (bash resolves a

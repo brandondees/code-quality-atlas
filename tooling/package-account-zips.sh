@@ -29,6 +29,10 @@
 
 set -euo pipefail
 
+# check_requirements/repo_root/collect_skill_names (issue #392).
+# shellcheck source=lib/skills-common.sh
+source "$(cd "$(dirname "$0")" && pwd)/lib/skills-common.sh"
+
 REQUIRED_PROGRAMS=("zip")
 
 OUT_DIR="dist/account-skills"
@@ -65,22 +69,6 @@ Examples:
 EOF
 }
 
-check_requirements() {
-  local missing=0
-  local program
-  for program in "${REQUIRED_PROGRAMS[@]}"; do
-    if ! command -v "$program" >/dev/null 2>&1; then
-      printf 'Error: Required program %s is not installed or not on PATH. Please install it first.\n' "$program" >&2
-      missing=1
-    fi
-  done
-  if [ "$missing" -ne 0 ]; then
-    printf '\n' >&2
-    usage >&2
-    return 1
-  fi
-}
-
 parse_args() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -113,39 +101,8 @@ parse_args() {
   done
 }
 
-# Echo the repo root (directory containing skills/), or fail.
-repo_root() {
-  local root
-  if root=$(git rev-parse --show-toplevel 2>/dev/null) && [ -d "$root/skills" ]; then
-    printf '%s\n' "$root"
-    return 0
-  fi
-  # Fallback: walk up from this script's location.
-  local here
-  here=$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)
-  if [ -n "$here" ] && [ -d "$here/skills" ]; then
-    printf '%s\n' "$here"
-    return 0
-  fi
-  printf 'Error: could not locate the repo root (no skills/ directory found).\n' >&2
-  return 1
-}
-
-# A skill directory is any immediate child of skills/ that holds a SKILL.md.
-# Sets the global SKILL_NAMES array (bash 3.2: no mapfile).
-collect_skill_names() {
-  SKILL_NAMES=()
-  local md name
-  for md in "$SKILLS_SUBDIR"/*/SKILL.md; do
-    [ -e "$md" ] || continue
-    name=$(basename "$(dirname "$md")")
-    SKILL_NAMES+=("$name")
-  done
-  if [ "${#SKILL_NAMES[@]}" -eq 0 ]; then
-    printf 'Error: no %s/*/SKILL.md found under %s\n' "$SKILLS_SUBDIR" "$(pwd)" >&2
-    return 1
-  fi
-}
+# repo_root and collect_skill_names come from lib/skills-common.sh (sourced
+# above).
 
 # Warn (do not fail) when a skill's frontmatter name does not match its folder —
 # the GUI keys on the folder, and a mismatch is usually a packaging mistake.

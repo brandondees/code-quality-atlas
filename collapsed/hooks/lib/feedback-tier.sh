@@ -1,12 +1,18 @@
 # shellcheck shell=bash
 # SPDX-License-Identifier: MIT
-# code-quality-atlas — shared feedback-tier resolution (Q17/D17 stage 1).
+# code-quality-atlas — shared feedback-tier resolution (Q17/D17 stage 1) and
+# the hook prologue built on top of it (issue #392).
 #
 # Resolves which opt-in tier the reviewed repo has enabled for the
 # self-improvement loop (docs/self-improvement-loop.md §5): off (default),
 # local, draft, or auto. Meant to be `source`d by the PostToolUse/SessionEnd
 # hooks in this directory, then called as `feedback_tier`, which prints one
-# of the four tier names to stdout.
+# of the four tier names to stdout. Also hosts _code_quality_atlas_hook_prologue
+# below, the ~30 shared lines those same two hooks used to each carry
+# byte-for-byte (tier gate, jq check, log-dir resolution, plugin-SHA
+# resolution) -- added here, rather than a separate hooks/lib/hook-prologue.sh,
+# so a hook sources exactly one file instead of two, and the prologue can call
+# feedback_tier directly without a second source chain.
 #
 # Precedence: the CODE_QUALITY_ATLAS_FEEDBACK_TIER env var (a harness-level
 # override, e.g. for CI) beats a `feedback:` line under the reviewed repo's
@@ -98,6 +104,59 @@ feedback_tier() {
   fi
 
   printf 'off'
+}
+
+# Shared prologue for the opt-in learnings hooks (issue #392): the tier gate,
+# jq check, log-dir resolution, and plugin-SHA resolution every one of them
+# needs before doing its own hook-specific work, previously duplicated
+# byte-for-byte (differing only in the word used in the two skip messages)
+# between log-skill-invocation.sh and queue-session-retro.sh.
+#
+# $1 is that word (e.g. "invocation" or "session"), used only in the two
+# `jq not found` / `could not create` skip messages so each hook's own
+# stderr text still names what it actually skipped.
+#
+# Every skip path here calls `exit 0` directly rather than returning a
+# failure status — sourced into the caller's shell, `exit` here ends the
+# whole hook process, matching every hook's own "always exit 0" contract
+# (a broken dependency or unwritable directory degrades to "don't log this
+# one", never to a nonzero exit). On success, sets (not just returns) two
+# globals the caller uses afterward: LOG_DIR and PLUGIN_SHA.
+_code_quality_atlas_hook_prologue() {
+  local label="$1" _tier
+  _tier="$(feedback_tier)"
+  case "$_tier" in
+    local) ;;
+    draft | auto)
+      # Stages 2+ (drafting a PR comment, auto-posting it) are unbuilt — both
+      # tiers are accepted and currently behave exactly like "local" (#365).
+      # One trace line so an operator who deliberately opted into draft/auto
+      # isn't left assuming they got that tier's not-yet-existing behavior.
+      printf 'code-quality-atlas: feedback tier %s is not yet distinguished from local\n' \
+        "$_tier" >&2
+      ;;
+    *) exit 0 ;;
+  esac
+
+  if ! command -v jq >/dev/null 2>&1; then
+    printf 'code-quality-atlas: jq not found on PATH; skipping this %s\n' "$label" >&2
+    exit 0
+  fi
+
+  LOG_DIR="$(_code_quality_atlas_project_dir)/.code-quality-atlas/learnings"
+  if ! mkdir -p "$LOG_DIR" 2>/dev/null; then
+    printf 'code-quality-atlas: could not create %s; skipping this %s\n' "$LOG_DIR" "$label" >&2
+    exit 0
+  fi
+
+  PLUGIN_SHA=""
+  # Read only by the caller after this function returns (an intentional
+  # "output" global, same as LOG_DIR above) -- shellcheck's unused-variable
+  # check doesn't trace a use that far across the source boundary.
+  # shellcheck disable=SC2034
+  if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+    PLUGIN_SHA="$(git -C "$CLAUDE_PLUGIN_ROOT" rev-parse HEAD 2>/dev/null || true)"
+  fi
 }
 
 # Appends one line to $1, called only once a hook has already confirmed its
