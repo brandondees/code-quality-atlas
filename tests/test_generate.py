@@ -731,8 +731,14 @@ def test_synthesizer_contract_carries_route_and_valence_axes():
     # and carries its two named bullets (not just the heading phrase).
     assert "Coverage & limitations" in md
     assert "always present" in md
-    assert "- Lenses run:" in md
+    assert "- Lenses run (body.md opened):" in md
     assert "- Not verifiable from this diff:" in md
+    # issue #357: "ran" means body.md was actually opened, not merely selected,
+    # and a finding may only be attributed to a lens that was actually opened.
+    assert "Selected but not opened" in md
+    assert "Not selected" in md
+    assert "Attribute a finding only to a lens whose bundle was actually opened" in md
+    assert "drop the finding and report that lens under" in md
 
 
 def test_router_points_forward_to_synthesizer_when_present():

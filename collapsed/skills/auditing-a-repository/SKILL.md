@@ -22,6 +22,7 @@ Rank the relevant lenses below by relevance to what is being reviewed, pick the 
 
 - Before the lenses judge anything, gather deterministic evidence with the procedure in `reference/tool-evidence.md` — run the linters, type checkers, and scanners this repo *already* configures, scoped to what's under review, and hand each lens its hits. Skip it when the repo configures none, or when running them would execute untrusted code; say so in the coverage line either way.
 - Read `reference/lenses/<lens>/body.md` — the lens's checklist and examples. Open `reference/lenses/<lens>/tool-rules.md` or `sources.md` only if deeper tooling/provenance is called for.
+- **A finding written in a lens's voice is valid only if that lens's `body.md` was actually read this round.** The one-line description in the Lenses list below exists to rank and select lenses, not to write findings in their style — it is specific enough on its own to produce a fluent, plausible-sounding finding for a lens whose bundle was never opened (issue #357). Selecting N lenses and loading only one, then backfilling the rest from their one-liners, reads identically to a review that ran every checklist. If a selected lens's `body.md` was not opened, it did not run: drop any finding attributed to it and say so in the coverage line instead.
 - After the lenses run, merge their findings with the procedure in `reference/synthesis.md` — one deduplicated, ranked report with a single verdict.
 
 ## Depth modes
