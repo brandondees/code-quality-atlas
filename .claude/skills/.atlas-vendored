@@ -1,6 +1,6 @@
 # code-quality-atlas vendored skills — do not hand-edit; regenerate with tooling/vendor-skills.sh
 # format=1
-# source=brandondees/code-quality-atlas@0b154fb
+# source=brandondees/code-quality-atlas@11ea81e
 auditing-architecture-conformance
 auditing-compliance-and-provenance
 auditing-config-and-build-hygiene
