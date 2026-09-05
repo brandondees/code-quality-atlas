@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
         # the drift-checkable pattern the rest of this branch already follows.
         try:
             doc_count_updates = sync_doc_counts(manifest, docs_root=args.docs_root)
-        except ValueError as exc:
+        except (OSError, ValueError) as exc:
             print(f"ERROR: {exc}")
             return 1
         for out in doc_count_updates:

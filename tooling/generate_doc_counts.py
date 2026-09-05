@@ -271,13 +271,18 @@ def sync_doc_counts(manifest: Manifest, docs_root: str = ".") -> list[Path]:
     was never there (a stale template entry) or the surrounding prose has
     since been edited out from under it. Either way, that's a bug to fix in
     this module or the doc, not something to silently skip: a template entry
-    that stops matching is exactly the drift this module exists to prevent."""
+    that stops matching is exactly the drift this module exists to prevent.
+
+    Every file is rendered and validated in memory before any file is written,
+    so a bad anchor in one file can't leave an earlier file already rewritten
+    while a later one fails — either the whole batch renders cleanly and is
+    written, or nothing is (PR #419 review)."""
     counts = compute_counts(manifest)
     by_file: dict[str, list[CountOccurrence]] = {}
     for occ in _TEMPLATE:
         by_file.setdefault(occ.path, []).append(occ)
 
-    changed: list[Path] = []
+    to_write: dict[Path, str] = {}
     for rel_path, occurrences in by_file.items():
         file_path = Path(docs_root, rel_path)
         original = file_path.read_text(encoding="utf-8")
@@ -299,6 +304,8 @@ def sync_doc_counts(manifest: Manifest, docs_root: str = ".") -> list[Path]:
                 count=1,
             )
         if text != original:
-            file_path.write_text(text, encoding="utf-8")
-            changed.append(file_path)
-    return changed
+            to_write[file_path] = text
+
+    for file_path, text in to_write.items():
+        file_path.write_text(text, encoding="utf-8")
+    return list(to_write)
