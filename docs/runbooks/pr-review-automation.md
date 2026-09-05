@@ -636,7 +636,11 @@ a review.
      already missed.
   2. **Mechanical actions** (rebase behind PRs, poke conflicts) happen
      directly in the top-level session — no subagent needed, these are pure
-     API calls with no judgment involved.
+     API calls with no judgment involved. **Skip the rebase call for a fork
+     PR** (`head.repo.full_name != base.repo.full_name`) — `update_pull_
+     request_branch` writes a merge commit onto the PR's branch, which for a
+     fork PR belongs to the contributor's own repo, not this one; note the
+     skip in the final report instead (issue #387).
   3. **The review itself.** For each PR needing round 1 or a re-review, the
      top-level session first acquires the ack lock itself:
      `mcp__github__pull_request_review_write`, method `create`, no `event`,
@@ -668,7 +672,11 @@ a review.
      batch before starting the next, same cap as `atlas-poll-and-review.md`
      itself (§4's own source); a busy multi-repo sweep must not silently fan
      out into an unbounded number of concurrent strong-model subagents each
-     posting to GitHub at once.
+     posting to GitHub at once. **Per-tick total cap: at most 20 review
+     subagents spawned in one sweep, across every repo combined** (issue
+     #387, same as `atlas-poll-and-review.md`'s own cap) — order candidates
+     oldest-`created_at`-first and defer any PR needing a review beyond the
+     cap to the next sweep, named as deferred in the final report.
 - **Connectors:** none needed (same as §2 — strip the defaults).
 - **Permissions:** leave **Allow unrestricted branch pushes** *off* — this
   routine writes only via the GitHub API (comments, reviews, and step 2's
@@ -842,12 +850,18 @@ rather than assumed.
   PR-triggered session's directions to whoever opened the PR.
   `commands/atlas-review-pr.md` pins `REVIEW.md` the same way for the same
   reason.
-- **Blast radius of a multi-repo sweep.** §2 and §4's poller routines are
-  explicitly designed to sweep **every attached repo in one run**, under one
+- **Blast radius of a multi-repo sweep.** §2 and §4's poller routines were
+  originally designed to sweep **every attached repo in one run**, under one
   identity, in one session. A defect in the sweep logic — or content from one
   repo's PR influencing a session that then acts on another attached repo —
   has a blast radius as wide as the attach list, not just the one PR that
-  triggered it. This runbook does not currently gate that (no repo allow-list,
-  no fork-PR filter, no per-tick action cap); issue #387 tracks closing it.
-  Until then, the practical mitigation is attaching only repos you trust
-  equally to a given poller routine.
+  triggered it. Issue #387 closed part of this for §4: `atlas-poll-and-
+  review.md` now requires an explicit repo (or comma-separated repo list) in
+  `$ARGUMENTS` rather than defaulting to every attached repo, skips
+  `update_pull_request_branch` on fork PRs, and caps total review-subagent
+  spawns at 20 per tick. §2's `atlas-rebase-stale.md` picked up the same
+  fork-PR skip, but still has **no repo allow-list** — it still sweeps every
+  attached repo's open PRs in one run (issue #440 tracks closing that; a
+  per-tick action cap doesn't apply to §2, which never spawns review
+  subagents itself). Until #440 is closed, the practical mitigation for §2
+  is attaching only repos you trust equally to that routine.

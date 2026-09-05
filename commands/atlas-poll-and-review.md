@@ -59,7 +59,9 @@ scope, telling it the login from above. Its job is purely mechanical listing,
 not judgment, so keep it off the stronger tier entirely: list every open PR
 in that one repo (`mcp__github__list_pull_requests`, paginate fully, applying
 `$ARGUMENTS`'s label/author filter if one was given), and for each PR report
-back: PR number, `draft` (true/false),
+back: PR number, `draft` (true/false), whether it's a fork PR
+(`head.repo.full_name != base.repo.full_name` — both fields are already on
+the PR object `list_pull_requests` returns, no extra call needed),
 `mergeable_state`, HEAD commit SHA, whether an ack **authored by the given
 login** exists — either an `<!-- atlas-review-ack -->` issue comment or the
 visible text "👀 atlas reviewer engaged" (`pull_request_read` has been observed
