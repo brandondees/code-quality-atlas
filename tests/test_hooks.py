@@ -8,6 +8,7 @@ missing `jq` — never block or crash the calling session."""
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -825,6 +826,85 @@ def test_route_hook_emits_valid_session_start_json_and_names_standalone_entrypoi
         "synthesizing-review-findings",
     ):
         assert surface in context
+
+
+# --- #389 round-1 finding: the new build-SHA interpolation in route.sh
+# (both copies) had no test setting CLAUDE_PLUGIN_ROOT, so the
+# ${build_note} splice was never actually exercised by CI -- exactly the
+# "heredoc edit ships green, breaks the emitted JSON" risk #310's own
+# comment above warns about.
+
+
+def test_route_hook_includes_build_note_when_plugin_root_is_a_git_checkout():
+    result = subprocess.run(
+        ["bash", str(ROUTE_HOOK)],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        check=False,
+    )
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    context = payload["hookSpecificOutput"]["additionalContext"]
+    assert "code-quality-atlas build " in context
+    sha = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "rev-parse", "--short", "HEAD"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    ).stdout.strip()
+    assert sha in context
+
+
+def test_route_hook_json_stays_valid_with_no_plugin_root():
+    # CLAUDE_PLUGIN_ROOT absent entirely (the ordinary case outside a plugin
+    # install) -- build_note must be empty and the JSON still well-formed.
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PLUGIN_ROOT"}
+    result = subprocess.run(
+        ["bash", str(ROUTE_HOOK)],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=env,
+        check=False,
+    )
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    context = payload["hookSpecificOutput"]["additionalContext"]
+    assert "code-quality-atlas build " not in context
+    assert "The code-quality-atlas review suite is installed and is" in context
+
+
+def test_route_hook_json_stays_valid_when_plugin_root_is_not_a_git_checkout(tmp_path):
+    result = subprocess.run(
+        ["bash", str(ROUTE_HOOK)],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(tmp_path)},
+        check=False,
+    )
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    context = payload["hookSpecificOutput"]["additionalContext"]
+    assert "code-quality-atlas build " not in context
+
+
+def test_collapsed_route_hook_includes_build_note_when_plugin_root_is_a_git_checkout():
+    result = subprocess.run(
+        ["bash", str(COLLAPSED_HOOKS_DIR / "route.sh")],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        check=False,
+    )
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    context = payload["hookSpecificOutput"]["additionalContext"]
+    assert "code-quality-atlas build " in context
 
 
 def test_hooks_registered_in_hooks_json():

@@ -21,21 +21,51 @@ from tooling.manifest import ValidationError, load_manifest, validate
 
 
 def main(argv: list[str] | None = None) -> int:  # noqa: C901 -- tracked in #441
-    parser = argparse.ArgumentParser(prog="skills")
+    # prog matches the actual invocation (`python -m tooling.cli ...`, per
+    # docs/runbooks/regenerating-skills.md) — "skills" is not a real command.
+    parser = argparse.ArgumentParser(prog="python -m tooling.cli")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     g = sub.add_parser("generate")
-    g.add_argument("--manifest", default="skills/manifest.yaml")
-    g.add_argument("--docs-root", default=".")
-    g.add_argument("--skills-root", default="skills")
-    g.add_argument("--collapsed-root", default="collapsed")
+    g.add_argument(
+        "--manifest",
+        default="skills/manifest.yaml",
+        help="the skills manifest to generate from",
+    )
+    g.add_argument(
+        "--docs-root",
+        default=".",
+        help="repo root the manifest's research-section paths resolve against",
+    )
+    g.add_argument(
+        "--skills-root",
+        default="skills",
+        help="directory to write generated standalone skills into",
+    )
+    g.add_argument(
+        "--collapsed-root",
+        default="collapsed",
+        help="directory to write the generated collapsed entrypoints into",
+    )
 
     d = sub.add_parser("drift")
-    d.add_argument("--skills-root", default="skills")
-    d.add_argument("--docs-root", default=".")
+    d.add_argument(
+        "--skills-root",
+        default="skills",
+        help="directory of generated skills to check for drift",
+    )
+    d.add_argument(
+        "--docs-root",
+        default=".",
+        help="repo root each skill's source research resolves against",
+    )
 
     e = sub.add_parser("eval")
-    e.add_argument("--skills-root", default="skills")
+    e.add_argument(
+        "--skills-root",
+        default="skills",
+        help="directory of skills whose evals/eval.json to validate",
+    )
     e.add_argument("--skill", default=None, help="validate one skill; default: all")
     e.add_argument(
         "--manifest",

@@ -25,6 +25,7 @@
 #   tooling/vendor-skills.sh <target-repo-dir> --prune       # also drop stale vendored skills
 #   tooling/vendor-skills.sh <target-repo-dir> --force       # overwrite a colliding non-vendored dir
 #   tooling/vendor-skills.sh <target-repo-dir> --dry-run     # report what would happen, touch nothing
+#   tooling/vendor-skills.sh <target-repo-dir> --uninstall   # remove everything this tool vendored, and stop
 #   tooling/vendor-skills.sh <target-repo-dir> --with-lens-coverage-hook
 #                                                             # also vendor the #357/Q23
 #                                                             # lens-coverage enforcement hook
@@ -41,6 +42,7 @@ TARGET=""
 PRUNE=0
 FORCE=0
 DRY_RUN=0
+UNINSTALL=0
 WITH_LENS_COVERAGE_HOOK=0
 SUBDIR=".claude/skills"
 MARKER_NAME=".atlas-vendored"
@@ -61,7 +63,7 @@ HOOK_SUBDIR=".claude/hooks/lens-coverage"
 
 usage() {
   cat <<'EOF'
-Usage: tooling/vendor-skills.sh <target-repo-dir> [--collapsed] [--prune] [--force] [--dry-run] [--with-lens-coverage-hook]
+Usage: tooling/vendor-skills.sh <target-repo-dir> [--collapsed] [--prune] [--force] [--dry-run] [--uninstall] [--with-lens-coverage-hook]
 
 Copies skills/<name>/{SKILL.md, reference/, examples.md} (no evals/) into
 <target-repo-dir>/.claude/skills/<name>/. Run the script from inside the
@@ -81,6 +83,19 @@ Options:
                 in vendor_one)
   --dry-run     Report what would be vendored/pruned/skipped without writing,
                 deleting, or overwriting anything
+  --uninstall   Remove every skill this tool previously vendored into the
+                target (from the .atlas-vendored marker), plus the marker,
+                NOTICE.md, and LICENSE-CC-BY-4.0 it wrote -- and stop there;
+                no vendoring runs in the same invocation. Only removes a
+                directory that still carries this tool's generated-marker
+                comment (same ownership check --prune uses; pass --force to
+                remove a name the marker lists but that check rejects). Does
+                NOT retract --with-lens-coverage-hook's separate wiring into
+                the target's .claude/settings.json (that flag has no
+                --prune/--uninstall equivalent yet -- remove the
+                PostToolUse(Read)/PostToolUse(Skill)/PreToolUse entries and
+                .claude/hooks/lens-coverage/ by hand). Combine with
+                --dry-run to preview.
   --with-lens-coverage-hook
                 Also vendor the #357/Q23 lens-coverage enforcement hook: two
                 scripts copied to .claude/hooks/lens-coverage/, plus
@@ -106,6 +121,7 @@ Examples:
   tooling/vendor-skills.sh ~/code/my-service
   tooling/vendor-skills.sh ~/code/my-service --dry-run
   tooling/vendor-skills.sh ~/code/my-service --prune
+  tooling/vendor-skills.sh ~/code/my-service --uninstall
   tooling/vendor-skills.sh ~/code/my-service --with-lens-coverage-hook
 EOF
 }
@@ -138,6 +154,7 @@ parse_args() {
       --prune) PRUNE=1 ;;
       --force) FORCE=1 ;;
       --dry-run) DRY_RUN=1 ;;
+      --uninstall) UNINSTALL=1 ;;
       --with-lens-coverage-hook) WITH_LENS_COVERAGE_HOOK=1 ;;
       -h | --help)
         usage
@@ -586,6 +603,111 @@ vendor_lens_coverage_hook() {
   printf 'Vendored lens-coverage hook -> %s (wiring merged into %s, %s updated)\n' "$hook_dest" "$settings_file" "$gitignore_file"
 }
 
+# --uninstall (#389): remove everything this tool previously vendored into
+# TARGET and stop there -- no vendoring runs in the same invocation. Reads
+# OLD_NAMES from the marker (already populated by main() before this is
+# called) and reuses the same tool-ownership check (is_tool_vendored_skill_dir)
+# --prune's stale-removal already relies on, so this never deletes a
+# directory it didn't actually vendor. A name the ownership check rejects is
+# left in place (and kept in a rewritten marker) unless --force says
+# otherwise, mirroring --prune's own SKIPPED_STALE_NAMES handling.
+do_uninstall() {
+  local dest_root=$1 marker=$2
+  if [ ! -f "$marker" ]; then
+    printf 'Nothing to uninstall: no %s found (this tool has not vendored into %s).\n' \
+      "$marker" "$dest_root"
+    return 0
+  fi
+
+  local removed=0
+  local skipped_names=()
+  local old target
+  for old in "${OLD_NAMES[@]}"; do
+    target="${dest_root:?}/$old"
+    [ -e "$target" ] || continue
+    if [ "$FORCE" -ne 1 ] && ! is_tool_vendored_skill_dir "$target"; then
+      printf 'Warning: %s is listed in the marker but does not look like something this tool vendored (no generated-marker comment in its SKILL.md)%s; pass --force to remove it anyway, or delete it by hand if you are sure.\n' \
+        "$target" "$([ "$DRY_RUN" -eq 1 ] && printf ' -- would skip in a real run' || printf ' -- skipping deletion')" >&2
+      skipped_names+=("$old")
+      continue
+    fi
+    if [ "$DRY_RUN" -eq 1 ]; then
+      printf '  - (dry-run) would remove: %s\n' "$target"
+    else
+      confirm_child_of_dest_root "$target" "$dest_root" || exit 1
+      rm -rf "$target"
+      printf '  - removed: %s\n' "$old"
+    fi
+    removed=$((removed + 1))
+  done
+
+  local notice="$dest_root/NOTICE.md" license="$dest_root/LICENSE-CC-BY-4.0"
+  # Ownership check for the two attribution files, same reasoning as
+  # is_tool_vendored_skill_dir above but for flat files instead of a skill
+  # directory (CodeRabbit finding on #389): write_attribution always signs
+  # NOTICE.md with this exact phrase, so its absence means either the file
+  # was never written by this tool, or a user edited it since -- in either
+  # case, deleting it without --force would remove content this tool doesn't
+  # actually own. A missing NOTICE.md counts as "ours" (nothing to protect).
+  local attribution_is_ours=1
+  # Literal markdown backticks in a grep -F pattern below, not an unexpanded
+  # command substitution.
+  # shellcheck disable=SC2016
+  if [ -e "$notice" ] && ! grep -qF 'by `tooling/vendor-skills.sh`.' "$notice" 2>/dev/null; then
+    attribution_is_ours=0
+  fi
+  local clear_attribution=0
+  if [ "${#skipped_names[@]}" -eq 0 ] && { [ "$attribution_is_ours" -eq 1 ] || [ "$FORCE" -eq 1 ]; }; then
+    clear_attribution=1
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    if [ "$clear_attribution" -eq 1 ]; then
+      [ -e "$notice" ] && printf '  - (dry-run) would remove: %s\n' "$notice"
+      [ -e "$license" ] && printf '  - (dry-run) would remove: %s\n' "$license"
+      printf '  - (dry-run) would remove marker: %s\n' "$marker"
+    elif [ "$attribution_is_ours" -ne 1 ]; then
+      printf 'Warning: %s does not look like something this tool wrote (missing its attribution signature)%s; pass --force to remove it anyway, or delete it by hand if you are sure.\n' \
+        "$notice" ' -- would skip in a real run' >&2
+    fi
+    printf '(dry-run) would remove %s skill(s) -- no files were actually removed. Re-run without --dry-run to apply.\n' \
+      "$removed"
+    return 0
+  fi
+
+  if [ "$clear_attribution" -ne 1 ]; then
+    # Either some skill names stayed, or the attribution files aren't ours to
+    # remove -- rewrite the marker with whatever names stayed (possibly none)
+    # rather than delete it outright, so a later --uninstall (or --prune)
+    # still knows what's left instead of silently orphaning the record
+    # (#377's own reasoning for why --prune rewrites rather than deletes
+    # wholesale). NOTICE.md/LICENSE-CC-BY-4.0 stay too in this case.
+    if [ "$attribution_is_ours" -ne 1 ]; then
+      printf 'Warning: %s does not look like something this tool wrote (missing its attribution signature) -- leaving it and %s in place; pass --force to remove them anyway, or delete them by hand if you are sure.\n' \
+        "$notice" "$license" >&2
+    fi
+    {
+      printf '# code-quality-atlas vendored skills — do not hand-edit; regenerate with tooling/vendor-skills.sh\n'
+      printf '# format=%s\n' "$MARKER_FORMAT"
+      local old
+      for old in "${skipped_names[@]}"; do
+        printf '%s\n' "$old"
+      done
+    } >"$marker"
+    printf 'Uninstalled %s skill(s) from %s; left %s name(s) in place (see warnings above).\n' \
+      "$removed" "$dest_root" "${#skipped_names[@]}" >&2
+    return 1
+  fi
+
+  rm -f "$notice" "$license" "$marker"
+  # Remove the vendored root itself only if uninstalling emptied it -- other,
+  # non-tool-managed content may share the same .claude/skills/ directory.
+  if [ -d "$dest_root" ] && [ -z "$(ls -A "$dest_root" 2>/dev/null)" ]; then
+    rmdir "$dest_root"
+  fi
+  printf 'Uninstalled %s skill(s) from %s.\n' "$removed" "$dest_root"
+}
+
 main() {
   parse_args "$@"
   check_requirements || exit 1
@@ -600,8 +722,11 @@ main() {
   local dest_root="$abs_target/$SUBDIR"
   local marker="$dest_root/$MARKER_NAME"
   check_target_git_state "$abs_target" "$SUBDIR"
-  # #377: --dry-run must not create so much as an empty directory.
-  [ "$DRY_RUN" -eq 1 ] || mkdir -p "$dest_root"
+  # #377/#389: --dry-run must not create so much as an empty directory, and
+  # neither must --uninstall on a target with nothing vendored (dest_root
+  # not existing yet is exactly how do_uninstall below knows there's nothing
+  # to do -- creating it here first would defeat that check).
+  [ "$DRY_RUN" -eq 1 ] || [ "$UNINSTALL" -eq 1 ] || mkdir -p "$dest_root"
 
   # Previously-vendored names (for safe prune), from the marker if present.
   # #377: only a bare skill name (is_bare_skill_name) is trusted -- anything
@@ -633,6 +758,11 @@ main() {
       printf 'Warning: %s declares format=%s; this tool understands format=%s. Proceeding -- unrecognized lines are dropped above, never treated as skill names -- but the marker may carry fields this version does not know about.\n' \
         "$marker" "$marker_format" "$MARKER_FORMAT" >&2
     fi
+  fi
+
+  if [ "$UNINSTALL" -eq 1 ]; then
+    do_uninstall "$dest_root" "$marker"
+    return
   fi
 
   local sha

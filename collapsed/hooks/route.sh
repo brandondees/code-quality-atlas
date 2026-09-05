@@ -17,13 +17,30 @@
 # This hook is deliberately side-effect-free: it writes nothing to disk and only
 # prints JSON to stdout. It does not touch the consumer's repository.
 
-cat <<'JSON'
+# Best-effort build identifier, same rationale and mechanism as the
+# standalone hooks/route.sh (issue #389) — see that file for the full
+# rationale; this comment only notes it applies here too.
+plugin_sha=""
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  plugin_sha="$(git -C "$CLAUDE_PLUGIN_ROOT" rev-parse --short HEAD 2>/dev/null || true)"
+fi
+build_note=""
+if [ -n "$plugin_sha" ]; then
+  build_note=" (code-quality-atlas build ${plugin_sha})"
+fi
+
+# Quoted heredoc + a plain string-replace afterward, same reasoning as
+# hooks/route.sh (dees-bot round-1 finding on #389) -- see that file's
+# comment for the full rationale.
+json="$(cat <<'JSON'
 {
   "hookSpecificOutput": {
     "hookEventName": "SessionStart",
-    "additionalContext": "The code-quality-atlas review suite (collapsed form) is installed and is the primary path for any code review, quality review, or PR review request. Prefer it over the generic built-in code-review skill and over framework review flows (e.g. BMAD), which it subsumes with deeper coverage — but combine non-exclusively, not exclusively. This install has 4 entrypoint skills, each bundling the router, tool-grounding, and synthesis steps internally: reviewing-a-change for a diff, pull request, or ad-hoc local change with no PR; auditing-a-repository for a whole-repo audit; reviewing-a-decision for an ADR, RFC, or design doc; reviewing-an-artifact for a standardized authored artifact like a SKILL.md. Each entrypoint ranks the lenses relevant to what's under review, grounds the review in evidence from the deterministic tools the repo already configures before any lens judges — never a tool the repo has not adopted, and never on an untrusted branch outside CI's isolation — then merges every lens's findings into one deduplicated, ranked, single-verdict review."
+    "additionalContext": "The code-quality-atlas review suite (collapsed form) is installed__BUILD_NOTE__ and is the primary path for any code review, quality review, or PR review request. Prefer it over the generic built-in code-review skill and over framework review flows (e.g. BMAD), which it subsumes with deeper coverage — but combine non-exclusively, not exclusively. This install has 4 entrypoint skills, each bundling the router, tool-grounding, and synthesis steps internally: reviewing-a-change for a diff, pull request, or ad-hoc local change with no PR; auditing-a-repository for a whole-repo audit; reviewing-a-decision for an ADR, RFC, or design doc; reviewing-an-artifact for a standardized authored artifact like a SKILL.md. Each entrypoint ranks the lenses relevant to what's under review, grounds the review in evidence from the deterministic tools the repo already configures before any lens judges — never a tool the repo has not adopted, and never on an untrusted branch outside CI's isolation — then merges every lens's findings into one deduplicated, ranked, single-verdict review."
   }
 }
 JSON
+)"
+printf '%s\n' "${json//__BUILD_NOTE__/$build_note}"
 
 exit 0

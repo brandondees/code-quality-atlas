@@ -30,7 +30,9 @@ def _run(args, env, timeout=10):
     )
 
 
-def _minimal_path_env(tmp_path, include=("bash", "jq", "awk", "cat", "cd", "sh")):
+def _minimal_path_env(
+    tmp_path, include=("bash", "jq", "awk", "cat", "cd", "sh", "mkdir", "rmdir")
+):
     """A PATH containing only the named real coreutils, symlinked into a
     fresh directory -- so a command's absence (e.g. no `claude`) is genuine,
     not just shadowed by a fuller ambient PATH."""
@@ -261,6 +263,38 @@ def test_missing_installed_plugins_json_is_tolerated(tmp_path):
     assert "Done." in result.stdout
 
 
+def test_malformed_installed_plugins_json_fails_run_instead_of_silent_done(tmp_path):
+    # #389: a malformed/unparseable installed_plugins.json used to be
+    # tolerated the same way a genuinely *missing* file is -- jq's stderr was
+    # silenced, its exit status unchecked, and the loop over project scopes
+    # ran zero times either way, so the script still printed "Done." Zero
+    # project scopes actually got checked, but nothing said so. A malformed
+    # file must now fail the run.
+    fake_bin_dir = Path(_minimal_path_env(tmp_path))
+    log_path = tmp_path / "claude.log"
+    _fake_claude(tmp_path, fake_bin_dir, log_path)
+
+    claude_config_dir = tmp_path / "dot-claude"
+    (claude_config_dir / "plugins").mkdir(parents=True)
+    (claude_config_dir / "plugins" / "installed_plugins.json").write_text(
+        "{ this is not valid json"
+    )
+
+    env = {
+        "PATH": str(fake_bin_dir),
+        "HOME": str(tmp_path),
+        "CLAUDE_CONFIG_DIR": str(claude_config_dir),
+    }
+    result = _run([], env)
+
+    assert result.returncode == 1
+    assert "could not read project-scope installs" in result.stderr
+    assert "Done." not in result.stdout
+    # No project scope was attempted -- the file couldn't be read at all.
+    calls = _read_log(log_path)
+    assert not [c for c in calls if "--scope project" in c]
+
+
 def test_explicit_plugin_argument_overrides_default(tmp_path):
     fake_bin_dir = Path(_minimal_path_env(tmp_path))
     log_path = tmp_path / "claude.log"
@@ -280,3 +314,64 @@ def test_explicit_plugin_argument_overrides_default(tmp_path):
     calls = _read_log(log_path)
     assert any("some-other-plugin@some-other-marketplace" in c for c in calls)
     assert not any(DEFAULT_PLUGIN in c for c in calls)
+
+
+# --- #389 round-1 finding: moving the SessionStart throttle stamp to
+# "written only after success" (fixing the silent-failure bug) widens the
+# window in which two session starts in quick succession could each launch
+# a concurrent run. A single-instance mkdir-based lock closes that.
+
+
+def test_second_concurrent_run_skips_while_lock_is_held(tmp_path):
+    fake_bin_dir = Path(_minimal_path_env(tmp_path))
+    log_path = tmp_path / "claude.log"
+    _fake_claude(tmp_path, fake_bin_dir, log_path)
+
+    claude_config_dir = tmp_path / "dot-claude"
+    claude_config_dir.mkdir()
+    # Simulate a run already in progress by pre-creating the lock directory
+    # this script itself would have created.
+    (claude_config_dir / ".keep-plugin-current.lock").mkdir()
+
+    env = {
+        "PATH": str(fake_bin_dir),
+        "HOME": str(tmp_path),
+        "CLAUDE_CONFIG_DIR": str(claude_config_dir),
+    }
+    result = _run([], env)
+
+    # Nonzero, not 0: the SessionStart wrapper only stamps the throttle on a
+    # 0 exit, specifically so a run that skipped due to lock contention never
+    # resets the throttle on the in-progress run's behalf (CodeRabbit round-2
+    # finding on #389).
+    assert result.returncode == 1
+    assert "appears to be in progress" in result.stderr
+    # No update was attempted while another run holds the lock.
+    assert not log_path.exists() or _read_log(log_path) == []
+    # The pre-existing lock (held by "someone else" in this scenario) is left
+    # alone -- this run never created it, so it must not remove it either.
+    assert (claude_config_dir / ".keep-plugin-current.lock").is_dir()
+
+
+def test_lock_is_released_after_a_normal_run_so_the_next_one_can_proceed(tmp_path):
+    fake_bin_dir = Path(_minimal_path_env(tmp_path))
+    log_path = tmp_path / "claude.log"
+    _fake_claude(tmp_path, fake_bin_dir, log_path)
+
+    claude_config_dir = tmp_path / "dot-claude"
+    claude_config_dir.mkdir()
+    env = {
+        "PATH": str(fake_bin_dir),
+        "HOME": str(tmp_path),
+        "CLAUDE_CONFIG_DIR": str(claude_config_dir),
+    }
+
+    first = _run([], env)
+    assert first.returncode == 0, first.stderr
+    assert not (claude_config_dir / ".keep-plugin-current.lock").exists()
+
+    # A second, later run must not be blocked by a lock the first run left
+    # behind -- it released it on exit.
+    second = _run([], env)
+    assert second.returncode == 0, second.stderr
+    assert "appears to be in progress" not in second.stderr

@@ -1,6 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "code-quality-atlas-collapsed",
+  "version": "0.1.0",
   "displayName": "Code Quality Atlas (collapsed)",
   "description": "Collapsed 4-entrypoint form of the code-quality-atlas suite for cloud / account-skill / context-budget installs. Lenses are bundled and loaded on demand.",
   "author": {

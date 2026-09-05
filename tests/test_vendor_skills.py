@@ -647,6 +647,154 @@ def test_refresh_without_prune_notes_stale_names(tmp_path):
     assert "re-run with --prune to remove them" in result.stdout
 
 
+# --- #389: --uninstall removes everything this tool vendored and stops --
+# there was previously no teardown path at all (--prune only drops names
+# that fell out of the current vendoring run, while still vendoring the
+# rest).
+
+
+def test_uninstall_removes_every_vendored_skill_and_the_marker(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    run_vendor(target)
+    skills_dir = target / ".claude" / "skills"
+    marker = skills_dir / ".atlas-vendored"
+    assert (skills_dir / "checking-restraint").is_dir()
+    assert marker.exists()
+
+    result = run_vendor_raw(target, "--uninstall")
+    assert result.returncode == 0, result.stderr
+    assert "Uninstalled 44 skill(s)" in result.stdout
+
+    # Every vendored skill, the marker, and the attribution files are gone;
+    # an emptied .claude/skills/ is removed too.
+    assert not skills_dir.exists()
+
+
+def test_uninstall_dry_run_reports_without_deleting(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    run_vendor(target)
+    skills_dir = target / ".claude" / "skills"
+
+    result = run_vendor_raw(target, "--uninstall", "--dry-run")
+    assert result.returncode == 0, result.stderr
+    assert "(dry-run) would remove: " in result.stdout
+    assert "would remove 44 skill(s)" in result.stdout
+    assert "no files were actually removed" in result.stdout
+
+    # Untouched.
+    assert (skills_dir / "checking-restraint").is_dir()
+    assert (skills_dir / ".atlas-vendored").exists()
+
+
+def test_uninstall_nothing_vendored_is_a_no_op(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+
+    result = run_vendor_raw(target, "--uninstall")
+    assert result.returncode == 0, result.stderr
+    assert "Nothing to uninstall" in result.stdout
+    # Must not create .claude/skills/ just to report there's nothing there.
+    assert not (target / ".claude").exists()
+
+
+def test_uninstall_leaves_a_non_tool_vendored_directory_in_place(tmp_path):
+    """Same ownership check --prune's stale-removal relies on
+    (is_tool_vendored_skill_dir): a marker line naming a directory that no
+    longer carries this tool's generated-marker comment must not be deleted
+    by --uninstall either, and must survive in a rewritten marker rather
+    than being silently dropped."""
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    run_vendor(target)
+    skills_dir = target / ".claude" / "skills"
+    victim = skills_dir / "checking-restraint"
+    # Overwrite with hand-authored content carrying none of this tool's
+    # generated-marker comment, simulating a user who edited it in place.
+    (victim / "SKILL.md").write_text("# hand-edited, no longer tool-owned\n")
+
+    result = run_vendor_raw(target, "--uninstall")
+    assert result.returncode == 1
+    assert "does not look like something this tool vendored" in result.stderr
+    assert "left 1 name(s) in place" in result.stderr.lower()
+
+    assert victim.is_dir()
+    assert (victim / "SKILL.md").read_text() == "# hand-edited, no longer tool-owned\n"
+    assert marker_names(target) == {"checking-restraint"}
+    # Every other, still-tool-owned skill was actually removed.
+    assert not (skills_dir / "tracing-correctness-and-invariants").exists()
+
+
+def test_uninstall_force_removes_a_non_tool_vendored_directory_too(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    run_vendor(target)
+    skills_dir = target / ".claude" / "skills"
+    victim = skills_dir / "checking-restraint"
+    (victim / "SKILL.md").write_text("# hand-edited, no longer tool-owned\n")
+
+    result = run_vendor_raw(target, "--uninstall", "--force")
+    assert result.returncode == 0, result.stderr
+    assert not skills_dir.exists()
+
+
+def test_uninstall_leaves_a_hand_edited_notice_in_place(tmp_path):
+    """CodeRabbit finding on #389: NOTICE.md/LICENSE-CC-BY-4.0 have no
+    per-directory ownership marker the way a skill's SKILL.md does, so
+    --uninstall must check NOTICE.md's own attribution signature before
+    deleting either file -- otherwise a user who hand-edited NOTICE.md (or
+    replaced it) after a real vendoring run would have it silently deleted
+    once every skill directory it listed was gone or already removed."""
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    run_vendor(target)
+    skills_dir = target / ".claude" / "skills"
+    notice = skills_dir / "NOTICE.md"
+    license_file = skills_dir / "LICENSE-CC-BY-4.0"
+    notice.write_text("# hand-edited, no longer this tool's attribution text\n")
+
+    result = run_vendor_raw(target, "--uninstall")
+    assert result.returncode == 1
+    assert "does not look like something this tool wrote" in result.stderr
+
+    # Every skill directory was still removed -- only the attribution files
+    # (and the marker recording that nothing else is left) are protected.
+    assert not (skills_dir / "checking-restraint").exists()
+    assert (
+        notice.read_text() == "# hand-edited, no longer this tool's attribution text\n"
+    )
+    assert license_file.exists()
+    assert (skills_dir / ".atlas-vendored").exists()
+
+
+def test_uninstall_force_removes_a_hand_edited_notice_too(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    run_vendor(target)
+    skills_dir = target / ".claude" / "skills"
+    (skills_dir / "NOTICE.md").write_text("# hand-edited\n")
+
+    result = run_vendor_raw(target, "--uninstall", "--force")
+    assert result.returncode == 0, result.stderr
+    assert not skills_dir.exists()
+
+
+def test_uninstall_dry_run_warns_about_hand_edited_notice_without_deleting(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    run_vendor(target)
+    skills_dir = target / ".claude" / "skills"
+    notice = skills_dir / "NOTICE.md"
+    notice.write_text("# hand-edited\n")
+
+    result = run_vendor_raw(target, "--uninstall", "--dry-run")
+    assert result.returncode == 0, result.stderr
+    assert "does not look like something this tool wrote" in result.stderr
+    assert notice.read_text() == "# hand-edited\n"
+    assert (skills_dir / "checking-restraint").is_dir()
+
+
 def test_marker_has_format_header(tmp_path):
     target = tmp_path / "target-repo"
     target.mkdir()
