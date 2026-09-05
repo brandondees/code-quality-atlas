@@ -27,6 +27,18 @@ on:
   schedule:
     - cron: "0 6 * * 1"
 
+# Self-hosted runners don't get a fresh VM per run and this repo's own
+# runner registration processes one job at a time (docs/self-hosted-
+# runners.md), so without a concurrency group, superseded pushes to a
+# branch don't cancel -- they queue behind each other. Observed on this
+# fleet: three obsolete runs of the same workflow stacked on one branch,
+# each holding the single runner in turn ahead of everything else (#378).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Cancel superseded PR runs; let a push to main (or a scheduled run)
+  # always finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -214,6 +226,47 @@ jobs:
           python -m venv --clear "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/pip" install --require-hashes -r requirements.txt
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+      - name: lint (ruff)
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        run: ruff check .
+      - name: format (ruff)
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        run: ruff format --check .
+      - name: tests
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        run: python -m pytest tests/ -q
+      - name: eval structure (all skills)
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        run: python -m tooling.cli eval
+      - name: eval structure (collapsed entrypoints)
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        run: python -m tooling.cli eval --skills-root collapsed/skills
+      - name: provenance drift
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        run: python -m tooling.cli drift
+      - name: Generated trees are in sync
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        run: |
+          python -m tooling.cli generate --manifest skills/manifest.yaml --docs-root . --skills-root skills --collapsed-root collapsed
+          ok=1
+          # `git diff --exit-code` only sees paths git already tracks — a generator
+          # emitting a brand-new file (or leaving one orphaned untracked after a
+          # rename) shows up as untracked, not modified, and the plain diff below
+          # would report clean. `git add -A -- <path>` stages creations/deletions
+          # too, so `git diff --cached` actually sees them (#382).
+          git add -A -- skills/ collapsed/
+          git diff --cached --exit-code -- skills/    || { git diff --cached --stat -- skills/;    echo "::error::standalone skills/ drifted — regenerate and commit"; ok=0; }
+          git diff --cached --exit-code -- collapsed/ || { git diff --cached --stat -- collapsed/; echo "::error::collapsed/ drifted — regenerate and commit"; ok=0; }
+          git diff --exit-code -- README.md docs/distribution.md docs/install.md docs/collapsed-entrypoints-and-depth-modes.md docs/review-depth-modes.md .claude-plugin/plugin.json .claude-plugin/marketplace.json || { git diff --stat -- README.md docs/distribution.md docs/install.md docs/collapsed-entrypoints-and-depth-modes.md docs/review-depth-modes.md .claude-plugin/plugin.json .claude-plugin/marketplace.json; echo "::error::documented counts drifted — regenerate and commit"; ok=0; }
+          [ "$ok" -eq 1 ]
+      # requirements.txt-is-in-sync and dependency-vulnerability-audit run
+      # last among the python-filtered steps, deliberately (#378): both
+      # `pip install` an unpinned tool (pip-tools/pip-audit) straight into
+      # this job's fresh venv, on top of the hash-verified `requirements.txt`
+      # install above. Every trusted gate above them (lint, format, tests,
+      # eval structure, drift, generated-tree sync) has already run and
+      # passed against the hash-verified install alone by the time either of
+      # these unpinned tools lands in the same interpreter.
       - name: requirements.txt is in sync with requirements.in
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: |
@@ -270,26 +323,38 @@ jobs:
           # diff in any of them — pip-compile started emitting `--no-index` in
           # its own regenerated header comment (Python 3.12, pip-tools 7.6.1)
           # where it previously didn't. requirements.in itself is NOT fully
-          # pinned (>= floors, e.g. `ruff>=0.16.4`) — the reason pip-compile
-          # can skip the index is the mechanism the comment block above this
-          # one already names: the seeded requirements.txt already carries
-          # exact, satisfying pins pip-compile reuses verbatim, and with a
-          # warm local wheel cache behind those pins it never needs to query
-          # an index to complete the resolution. Confirmed via a from-scratch
-          # pip-tools install (its own transitive deps —
-          # build/click/pyproject_hooks/setuptools/wheel — are deliberately
-          # unpinned per the comment above) that this is deterministic given
-          # that seeded lockfile and a satisfiable local cache, not a one-off:
-          # it now says so truthfully in the command line it re-emits. Zero
-          # package/hash changes accompanied it.
-          # Regenerated once to match (no `pip install pip-tools==7.6.1` pin
-          # bump involved); if this recurs, regenerate again rather than
-          # treating it as a real drift — the diff to actually worry about is
-          # in the pinned packages/hashes below this header, not the comment
-          # documenting how the file was produced.
-          mkdir -p /tmp/reqcheck && cp requirements.in requirements.txt /tmp/reqcheck/
-          ( cd /tmp/reqcheck && pip-compile --generate-hashes --output-file=requirements.txt requirements.in )
-          diff -u requirements.txt /tmp/reqcheck/requirements.txt || {
+          # pinned (>= floors, e.g. `ruff>=0.16.4`). #378's audit found the
+          # comment that used to sit here (blaming a "warm local wheel cache")
+          # was wrong: reading piptools.utils.get_compile_command (7.6.1)
+          # shows the regenerated header re-includes any option whose
+          # *resolved* value differs from that click Option's own hardcoded
+          # default -- regardless of whether the CLI, a discovered pip-tools
+          # config file, or a `PIP_*`-style environment variable is what
+          # actually set it, and regardless of wheel-cache state. A
+          # machine-local default for `--no-index` (or any other flag) making
+          # the header differ between two otherwise-identical runs is exactly
+          # that: an environment difference on the header line, not a
+          # resolution difference in the pins below it. Reproduced cold (fresh
+          # venv, cleared pip cache) that the header's presence/absence tracks
+          # the machine's own pip-tools-visible defaults, not cache warmth.
+          #
+          # Since the header can legitimately vary by machine for reasons that
+          # have nothing to do with requirements.in/.txt actually drifting,
+          # this step now diffs only the non-comment lines (#378) -- the
+          # pinned packages and hashes, which is what this step exists to
+          # verify -- rather than the whole file. The comment lines
+          # documenting how the file was produced are informational, not part
+          # of the contract this gate checks.
+          # $RUNNER_TEMP unconditionally, no ${RUNNER_TEMP:-/tmp} fallback --
+          # matching the convention the require-hashes install and shellcheck
+          # steps in this same job already use (#366/#378): GitHub Actions
+          # guarantees the var is set on every runner, so a fallback here
+          # would only mask it silently going missing rather than failing loudly.
+          work="$(mktemp -d "$RUNNER_TEMP/reqcheck.XXXXXX")"
+          trap 'rm -rf "$work"' EXIT
+          cp requirements.in requirements.txt "$work"/
+          ( cd "$work" && pip-compile --generate-hashes --output-file=requirements.txt requirements.in )
+          diff -u <(grep -v '^#' requirements.txt) <(grep -v '^#' "$work/requirements.txt") || {
             echo "::error::requirements.txt is not consistent with requirements.in (or was hand-edited) — recompile with pip-compile --generate-hashes and commit"
             exit 1
           }
@@ -319,39 +384,6 @@ jobs:
           # Dependabot-tracked requirements-dev.txt if it drifts noticeably.
           pip install pip-audit==2.10.1
           pip-audit --requirement requirements.txt
-      - name: lint (ruff)
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
-        run: ruff check .
-      - name: format (ruff)
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
-        run: ruff format --check .
-      - name: tests
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
-        run: python -m pytest tests/ -q
-      - name: eval structure (all skills)
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
-        run: python -m tooling.cli eval
-      - name: eval structure (collapsed entrypoints)
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
-        run: python -m tooling.cli eval --skills-root collapsed/skills
-      - name: provenance drift
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
-        run: python -m tooling.cli drift
-      - name: Generated trees are in sync
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
-        run: |
-          python -m tooling.cli generate --manifest skills/manifest.yaml --docs-root . --skills-root skills --collapsed-root collapsed
-          ok=1
-          # `git diff --exit-code` only sees paths git already tracks — a generator
-          # emitting a brand-new file (or leaving one orphaned untracked after a
-          # rename) shows up as untracked, not modified, and the plain diff below
-          # would report clean. `git add -A -- <path>` stages creations/deletions
-          # too, so `git diff --cached` actually sees them (#382).
-          git add -A -- skills/ collapsed/
-          git diff --cached --exit-code -- skills/    || { git diff --cached --stat -- skills/;    echo "::error::standalone skills/ drifted — regenerate and commit"; ok=0; }
-          git diff --cached --exit-code -- collapsed/ || { git diff --cached --stat -- collapsed/; echo "::error::collapsed/ drifted — regenerate and commit"; ok=0; }
-          git diff --exit-code -- README.md docs/distribution.md docs/install.md docs/collapsed-entrypoints-and-depth-modes.md docs/review-depth-modes.md .claude-plugin/plugin.json .claude-plugin/marketplace.json || { git diff --stat -- README.md docs/distribution.md docs/install.md docs/collapsed-entrypoints-and-depth-modes.md docs/review-depth-modes.md .claude-plugin/plugin.json .claude-plugin/marketplace.json; echo "::error::documented counts drifted — regenerate and commit"; ok=0; }
-          [ "$ok" -eq 1 ]
       - name: markdownlint
         if: steps.filter.outputs.markdown == 'true'
         uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
@@ -403,21 +435,28 @@ jobs:
             x86_64|amd64)  arch=x86_64;  sha=6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87 ;;
             *) echo "::error::unsupported architecture $(uname -m) for the pinned shellcheck release"; exit 1 ;;
           esac
-          curl --connect-timeout 10 --max-time 120 -fsSL -o /tmp/shellcheck.tar.xz \
+          curl --connect-timeout 10 --max-time 120 -fsSL -o "$RUNNER_TEMP/shellcheck.tar.xz" \
             "https://github.com/koalaman/shellcheck/releases/download/${version}/shellcheck-${version}.linux.${arch}.tar.xz"
-          echo "${sha}  /tmp/shellcheck.tar.xz" | sha256sum -c -
-          tar -xJf /tmp/shellcheck.tar.xz -C /tmp
-          # $HOME/.local/bin, not /usr/local/bin: a self-hosted runner's user
-          # is not guaranteed write access to system directories.
-          mkdir -p "$HOME/.local/bin"
-          mv "/tmp/shellcheck-${version}/shellcheck" "$HOME/.local/bin/shellcheck"
-          chmod +x "$HOME/.local/bin/shellcheck"
-          "$HOME/.local/bin/shellcheck" --version
+          echo "${sha}  $RUNNER_TEMP/shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP"
+          # $RUNNER_TEMP, not $HOME/.local/bin (#378): this host is shared
+          # across repos with nothing reset between jobs, and $HOME/.local/bin
+          # persisted the binary onto every later job's PATH indefinitely.
+          # $RUNNER_TEMP is documented to be wiped between jobs, though (per
+          # the same hedge the require-hashes install above makes, #366) this
+          # step doesn't actually depend on that: it downloads, checksums,
+          # and overwrites the pinned binary unconditionally every run, so a
+          # leftover from a prior job here would just be clobbered, never
+          # trusted-as-is.
+          mkdir -p "$RUNNER_TEMP/bin"
+          mv "$RUNNER_TEMP/shellcheck-${version}/shellcheck" "$RUNNER_TEMP/bin/shellcheck"
+          chmod +x "$RUNNER_TEMP/bin/shellcheck"
+          "$RUNNER_TEMP/bin/shellcheck" --version
           # actionlint (below) shells out to `shellcheck` via a bare PATH
           # lookup for embedded run: scripts -- without this, it silently
           # skips that check rather than failing, so the gap wouldn't even
           # show up as red CI (#379).
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
           # globstar makes `**` recurse into subdirectories, matching what
           # the `shell:` paths-filter above actually promises to cover
           # (`tooling/**/*.sh`, `hooks/**`, `collapsed/hooks/**`) -- the
@@ -435,7 +474,7 @@ jobs:
           # the exact bug this PR exists to close, just for hidden paths
           # instead of nested ones (round-1 review finding).
           shopt -s nullglob globstar dotglob
-          "$HOME/.local/bin/shellcheck" --source-path=SCRIPTDIR -x tooling/**/*.sh hooks/**/*.sh collapsed/hooks/**/*.sh
+          "$RUNNER_TEMP/bin/shellcheck" --source-path=SCRIPTDIR -x tooling/**/*.sh hooks/**/*.sh collapsed/hooks/**/*.sh
       - name: actionlint
         if: steps.filter.outputs.workflows == 'true'
         # timeout-minutes is a backstop, not the primary fix -- see the
