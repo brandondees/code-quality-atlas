@@ -15,13 +15,17 @@ from pathlib import Path
 import yaml
 
 from tooling.generate_common import (
+    _cross_ref_note,
     _escape_table_cell,
     _gen_header,
     _gen_trailer,
     _scope_line,
     _strip_leading_frontmatter_and_going_deeper,
     build_reference,
+    mechanizing_and_process_notes,
     modes_section,
+    primary_owners,
+    reviewer_discipline_intro,
 )
 from tooling.generate_prepass import build_collapsed_prepass
 from tooling.generate_skill import build_artifact_rubric
@@ -163,15 +167,26 @@ def _toc_for_body(body: str) -> str:
 
 
 def lens_bundle_body(
-    skill: Skill, docs_root: str = ".", skills_root: str = "skills"
+    skill: Skill,
+    docs_root: str = ".",
+    skills_root: str = "skills",
+    owners: dict[int, str] | None = None,
 ) -> str:
-    """The `body.md` an entrypoint loads for one lens: when-to-use + the full
-    heuristics checklist (or, for an artifact-shaped lens, the detect→rubric
-    table — its checks live in the per-artifact rubric files generate_lens_bundle
-    writes alongside this one, loaded on a presence hit, mirroring build_skill_md)
-    + curated examples + links to the deeper bundled files. Examples come from
-    the standalone tree's hand-refined examples.md (canonical); tool-rules/sources
-    are a further disclosure level, linked not inlined."""
+    """The `body.md` an entrypoint loads for one lens: when-to-use +
+    reviewer-discipline contract + the full heuristics checklist (or, for an
+    artifact-shaped lens, the detect→rubric table — its checks live in the
+    per-artifact rubric files generate_lens_bundle writes alongside this one,
+    loaded on a presence hit, mirroring build_skill_md) + curated examples +
+    mechanizing-checks/process-notes footer + links to the deeper bundled
+    files. Examples come from the standalone tree's hand-refined examples.md
+    (canonical); tool-rules/sources are a further disclosure level, linked
+    not inlined.
+
+    The reviewer-discipline contract (report-only-real-problems, anti-churn,
+    Team preferences, the diff-shaped attribution guard, Shared categories,
+    Mechanizing these checks, Process notes) mirrors every standalone
+    SKILL.md's own copy — previously this bundle carried none of it at all
+    (#369)."""
     picker = f"{skill.picker}\n\n" if skill.picker else ""
     examples_path = Path(skills_root, skill.name, "examples.md")
     examples = (
@@ -213,7 +228,8 @@ def lens_bundle_body(
                 "## Checklist\n\n"
                 "The full review checklist, grouped by the research category each check "
                 "draws from:\n\n"
-                f"{heuristics}\n\n"
+                f"{heuristics}\n"
+                f"{_cross_ref_note(skill, owners)}\n"
             )
             if heuristics
             else ""
@@ -230,8 +246,10 @@ def lens_bundle_body(
     sections = (
         "## When to use\n\n"
         f"{_scope_line(skill)}\n\n"
+        f"{reviewer_discipline_intro(skill)}"
         f"{core_block}"
         f"{examples_block}"
+        f"{mechanizing_and_process_notes('tool-rules.md')}"
         f"{going_deeper}"
     )
     toc = ""
@@ -241,7 +259,11 @@ def lens_bundle_body(
 
 
 def generate_lens_bundle(
-    skill: Skill, lenses_dir: Path, docs_root: str = ".", skills_root: str = "skills"
+    skill: Skill,
+    lenses_dir: Path,
+    docs_root: str = ".",
+    skills_root: str = "skills",
+    owners: dict[int, str] | None = None,
 ) -> Path:
     """Write reference/lenses/<skill>/{body,tool-rules,sources}.md and return the
     dir. An artifact-shaped lens additionally gets one rubric file per artifact
@@ -252,7 +274,7 @@ def generate_lens_bundle(
     # Only body.md inlines examples.md; tool-rules.md / sources.md draw from docs/research only.
     (dest / "body.md").write_text(
         _gen_header(skill, with_examples=True)
-        + lens_bundle_body(skill, docs_root, skills_root),
+        + lens_bundle_body(skill, docs_root, skills_root, owners=owners),
         encoding="utf-8",
     )
     if skill.shape == "artifact":
@@ -412,6 +434,7 @@ def generate_collapsed(
     entrypoint directory no longer in the manifest so the committed tree can't go
     stale."""
     written: list[Path] = []
+    owners = primary_owners(manifest)
     skills_dir = Path(collapsed_root, "skills")
     # Guard the prune below: it rmtree's every child of `skills_dir` not in the
     # manifest. If a miscall points `skills_dir` at — or above — the standalone
@@ -465,7 +488,11 @@ def generate_collapsed(
                 shutil.rmtree(child)
         for skill in ep_lenses:
             generate_lens_bundle(
-                skill, lenses_dir, docs_root=docs_root, skills_root=skills_root
+                skill,
+                lenses_dir,
+                docs_root=docs_root,
+                skills_root=skills_root,
+                owners=owners,
             )
         if not (out / "evals" / "eval.json").exists():
             (out / "evals" / "eval.json").write_text(

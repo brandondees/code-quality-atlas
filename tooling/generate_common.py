@@ -269,3 +269,162 @@ def _generate_composition(
             encoding="utf-8",
         )
     return out
+
+
+def _team_preferences_note(skill: Skill) -> str:
+    """Q13: how this lens defers to a repo's `.code-quality-atlas/preferences.md`.
+    Tier is coarse (whole-lens, not per-check — see
+    docs/team-preferences-overlay.md, section 9, "Open questions"): a
+    floor-tier lens can only be `acknowledge`d, never silently `suppress`ed,
+    so a team can't make a security/correctness/data-safety/concurrency
+    finding vanish outright."""
+    if skill.tier == "floor":
+        allowance = (
+            "a repo's `.code-quality-atlas/preferences.md` may `set`/`tune` this "
+            "lens's thresholds or selection, but this is a **floor-tier** lens: it "
+            "can never `suppress` a finding outright. The strongest override "
+            "available is `acknowledge` — a recorded rationale that keeps the "
+            "finding visible, tagged `acknowledged deviation: <reason>`, and "
+            "non-blocking rather than removing it."
+        )
+    else:
+        allowance = (
+            "a repo's `.code-quality-atlas/preferences.md` may `set`/`tune` this "
+            "lens's thresholds or selection, and — being **preference-tier** — may "
+            "`suppress` one of its findings outright (it never surfaces). Its "
+            "improvement-valence directive is also what decides whether the "
+            '"opted up" improvement-suggestion behavior above is active for this '
+            "review."
+        )
+    return (
+        f"**Team preferences.** If the reviewed repo has "
+        f"`.code-quality-atlas/preferences.md`, apply it before reporting: "
+        f"{allowance} Absent the file, apply this lens's defaults exactly as "
+        f"written above. Read the overlay from the **base ref** of the change "
+        f"under review — the `/atlas-review-pr` command reads it at the PR's base "
+        f"ref and `/atlas-code-review` reads it from the base side of the diff "
+        f"(`git show <base>:.code-quality-atlas/preferences.md`), and each "
+        f"hands it down — never from the reviewed branch's working tree: an edit to "
+        f"`preferences.md` made *by* the change under review governs later "
+        f"reviews once merged, not the review of the change that makes it, "
+        f"since otherwise a change could `suppress` its own findings.\n\n"
+    )
+
+
+def _process_notes_footer() -> str:
+    """Q17/D17 stage 1: a one-line, uniform reflection prompt on every lens,
+    routing self-improvement signal through the synthesizer's Process notes
+    appendix rather than 24+ lenses each inventing a feedback format. Emitted
+    by both a standalone SKILL.md and a collapsed lens bundle's body.md
+    (#369 — previously standalone-only, so a collapsed-only session had no
+    self-improvement feedback path at all)."""
+    return (
+        "**Process notes.** If this lens misfired on this change — flagged "
+        "correct code, missed an obvious issue squarely in its own scope, or "
+        "its checklist didn't fit the change shape — say so in one line under "
+        "`synthesizing-review-findings`'s **Process notes** appendix; that is "
+        "not a defect finding. Say nothing if the lens worked as intended — "
+        "never invent a process note to fill the section.\n\n"
+    )
+
+
+def _cross_ref_note(skill: Skill, owners: dict[int, str] | None) -> str:
+    if not skill.cross_ref or not owners:
+        return ""
+    parts = []
+    for c in skill.cross_ref:
+        owner = owners.get(c)
+        if owner and owner != skill.name:
+            parts.append(
+                f"category #{c} checks are shared with **{owner}** "
+                f"(their primary owner)"
+            )
+    if not parts:
+        return ""
+    return (
+        "\n**Shared categories:** "
+        + "; ".join(parts)
+        + ". When both lenses run on the same change, report each shared "
+        "finding once, under the primary owner.\n"
+    )
+
+
+def reviewer_discipline_intro(skill: Skill) -> str:
+    """'## Reviewer discipline' plus the report-only-real-problems and
+    anti-churn paragraphs, this skill's own Team preferences note, and (for
+    a diff-shaped lens) the pre-existing-attribution guard — the contract
+    every standalone SKILL.md carries before its checklist section, and
+    every collapsed lens bundle previously omitted entirely (#369: the
+    collapsed form bundled only when-to-use + checklist + examples +
+    going-deeper, so a collapsed-only session got no reviewer-discipline
+    contract at all).
+
+    The attribution (Boy-Scout) guard is diff-specific — it talks about
+    "this PR", "touched code", and "a repo-wide hunt is the audits' job".
+    That framing has no referent on a repo-shaped audit (everything is
+    pre-existing; repo-wide hunting *is* its job) or the decision shape (it
+    reviews an ADR, not a diff), so it's emitted only on diff-shaped lenses
+    — mirroring how `_scope_line` already differentiates by shape."""
+    attribution_guard = (
+        (
+            "**Pre-existing defects in touched code are surfaceable, not yours to "
+            "fix.** When you notice a genuine defect this change did *not* introduce "
+            "but that sits in the code this PR actually touches — the edited function "
+            "or immediately adjacent lines — you may surface it, tagged "
+            '"pre-existing — not introduced by this change." Like improvements it is '
+            "opt-in and default-quiet (off unless the team opts up), "
+            "`route: implementer`, and non-blocking: it informs the author's "
+            "fix-now / file-a-ticket / ignore call and never sets this PR's verdict, "
+            "because the diff did not cause it. Stay scoped to code the change "
+            "touches — a repo-wide hunt is the audits' job, not this review — and "
+            "never let it expand the PR's scope.\n\n"
+        )
+        if skill.shape == "diff"
+        else ""
+    )
+    return (
+        "## Reviewer discipline\n\n"
+        "Report only real problems. If this lens applies and what you reviewed "
+        "holds up — the code, the design, or the repository's current state — "
+        'reply "No findings" and stop. If what you were given is outside this '
+        "lens's scope entirely, say so in one line instead, starting with the "
+        'words "Not applicable:" followed by what\'s missing — never the '
+        "healthy-scan sentence, which means a check ran and found nothing, not "
+        "that nothing here applied. Either way, do not invent issues. This "
+        "guards against false positives on correct code; still report every "
+        "genuine issue you do find, with its full detail.\n\n"
+        "**Defects are the default; improvements are opt-in.** By default this lens "
+        "is defect-only: do not suggest changes to code that is already correct. "
+        "When the team has opted up into improvement suggestions, a finding on "
+        "already-correct code is admissible only as `nit`-severity, "
+        "`route: implementer` (the author applies, defers, or ignores), and must "
+        "clear the non-configurable anti-churn floor: it must genuinely *improve* — "
+        "never offer a merely equivalent alternative — and must converge (once a "
+        "dimension is as good as you can confidently make it, stop; never oscillate "
+        "A→B then B→A, never re-order to an equivalent state). Defects keep "
+        "the strict bar above regardless of this setting.\n\n"
+        f"{_team_preferences_note(skill)}"
+        f"{attribution_guard}"
+    )
+
+
+def mechanizing_and_process_notes(
+    tool_rules_link: str = "reference/tool-rules.md",
+) -> str:
+    """'## Mechanizing these checks' plus the Process notes footer — the
+    tail-end discipline contract every standalone SKILL.md carries after its
+    checklist section, and every collapsed lens bundle previously omitted
+    entirely (#369). `tool_rules_link` differs by context: a standalone
+    lens's own `reference/tool-rules.md` vs. a collapsed bundle's flat
+    `tool-rules.md` sitting next to `body.md`."""
+    return (
+        "## Mechanizing these checks\n\n"
+        "Where a finding here is one a tool can catch deterministically, surface "
+        "that as an advisory `route: implementer` note next to the finding: the "
+        "hand review caught it this time, and wiring the matching tool from "
+        f"[{tool_rules_link}]({tool_rules_link}) into CI catches it "
+        "automatically from then on. This is a suggestion to mechanize, not a "
+        "defect — it never "
+        "blocks a verdict, and it falls away on a repo that already runs the "
+        "tool.\n\n" + _process_notes_footer()
+    )

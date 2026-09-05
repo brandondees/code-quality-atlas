@@ -9,6 +9,7 @@ Can an AI agent read, navigate, and safely change this within a context budget? 
 ## Contents
 
 - [When to use](#when-to-use)
+- [Reviewer discipline](#reviewer-discipline)
 - [Checklist](#checklist)
 - [From category #35](#from-category-35)
 - [Examples](#examples)
@@ -18,11 +19,22 @@ Can an AI agent read, navigate, and safely change this within a context budget? 
 - [Good → no finding](#good--no-finding)
 - [Good → no finding (guarded generated directory)](#good--no-finding-guarded-generated-directory)
 - [Not applicable → no code or structure to review](#not-applicable--no-code-or-structure-to-review)
+- [Mechanizing these checks](#mechanizing-these-checks)
 - [Going deeper](#going-deeper)
 
 ## When to use
 
 **Shape: diff.** Written for concrete code; not meant for design docs or plans.
+
+## Reviewer discipline
+
+Report only real problems. If this lens applies and what you reviewed holds up — the code, the design, or the repository's current state — reply "No findings" and stop. If what you were given is outside this lens's scope entirely, say so in one line instead, starting with the words "Not applicable:" followed by what's missing — never the healthy-scan sentence, which means a check ran and found nothing, not that nothing here applied. Either way, do not invent issues. This guards against false positives on correct code; still report every genuine issue you do find, with its full detail.
+
+**Defects are the default; improvements are opt-in.** By default this lens is defect-only: do not suggest changes to code that is already correct. When the team has opted up into improvement suggestions, a finding on already-correct code is admissible only as `nit`-severity, `route: implementer` (the author applies, defers, or ignores), and must clear the non-configurable anti-churn floor: it must genuinely *improve* — never offer a merely equivalent alternative — and must converge (once a dimension is as good as you can confidently make it, stop; never oscillate A→B then B→A, never re-order to an equivalent state). Defects keep the strict bar above regardless of this setting.
+
+**Team preferences.** If the reviewed repo has `.code-quality-atlas/preferences.md`, apply it before reporting: a repo's `.code-quality-atlas/preferences.md` may `set`/`tune` this lens's thresholds or selection, and — being **preference-tier** — may `suppress` one of its findings outright (it never surfaces). Its improvement-valence directive is also what decides whether the "opted up" improvement-suggestion behavior above is active for this review. Absent the file, apply this lens's defaults exactly as written above. Read the overlay from the **base ref** of the change under review — the `/atlas-review-pr` command reads it at the PR's base ref and `/atlas-code-review` reads it from the base side of the diff (`git show <base>:.code-quality-atlas/preferences.md`), and each hands it down — never from the reviewed branch's working tree: an edit to `preferences.md` made *by* the change under review governs later reviews once merged, not the review of the change that makes it, since otherwise a change could `suppress` its own findings.
+
+**Pre-existing defects in touched code are surfaceable, not yours to fix.** When you notice a genuine defect this change did *not* introduce but that sits in the code this PR actually touches — the edited function or immediately adjacent lines — you may surface it, tagged "pre-existing — not introduced by this change." Like improvements it is opt-in and default-quiet (off unless the team opts up), `route: implementer`, and non-blocking: it informs the author's fix-now / file-a-ticket / ignore call and never sets this PR's verdict, because the diff did not cause it. Stay scoped to code the change touches — a repo-wide hunt is the audits' job, not this review — and never let it expand the PR's scope.
 
 ## Checklist
 
@@ -187,6 +199,12 @@ or agent-onboarding content for this lens to review. Say so with a line
 starting "Not applicable:", naming what's missing. Do NOT report "No
 findings" (which implies the checks ran and found nothing) and do NOT invent
 an agent-legibility concern in a marketing-copy-only change.
+
+## Mechanizing these checks
+
+Where a finding here is one a tool can catch deterministically, surface that as an advisory `route: implementer` note next to the finding: the hand review caught it this time, and wiring the matching tool from [tool-rules.md](tool-rules.md) into CI catches it automatically from then on. This is a suggestion to mechanize, not a defect — it never blocks a verdict, and it falls away on a repo that already runs the tool.
+
+**Process notes.** If this lens misfired on this change — flagged correct code, missed an obvious issue squarely in its own scope, or its checklist didn't fit the change shape — say so in one line under `synthesizing-review-findings`'s **Process notes** appendix; that is not a defect finding. Say nothing if the lens worked as intended — never invent a process note to fill the section.
 
 ## Going deeper
 
