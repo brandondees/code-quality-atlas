@@ -17,11 +17,23 @@ location. A regenerate-and-diff CI gate (mirroring the one already guarding
 `skills/` and `collapsed/`) then catches drift the same way template drift is
 already caught elsewhere — no detector left to fool.
 
-Scope is deliberately the 7 files the issue names, not every doc that mentions
-a count — see the file list on `_TEMPLATE` below and docs/open-questions.md /
-docs/session-log.md / docs/plans/** / docs/taxonomy.md, which stay hand-authored
-narrative logs that intentionally freeze *past* counts, exactly as the old
-sweep's own file scope already excluded them."""
+Scope is deliberately the 7 files issue #372 names, not every doc that mentions
+a count — see the file list on `_TEMPLATE` below. docs/session-log.md,
+docs/plans/**, and docs/taxonomy.md stay hand-authored narrative logs that
+intentionally freeze *past* counts, the same way the old sweep's own file
+scope excluded them.
+
+Three locations the old sweep *did* cover are now unmanaged, a deliberate
+narrowing to issue #372's literal file list rather than a continuation of
+prior exclusion (PR #419 review, dees-bot): `tooling/vendor-skills.sh` and
+`tooling/package-account-zips.sh` both hardcode "the 44 standalone skills" in
+their header comments, and docs/open-questions.md's Q8 answer opts into the
+old sweep via a `<!-- doc-counts:live -->` marker ("the eleven repo-shaped
+audits") that nothing reads anymore. All three are correct today; a future
+manifest count change would drift there silently. Tracked as issue #420 rather
+than folded into this module, since covering `.sh` files and a marker-gated
+narrative doc is a different (and larger) shape of problem than the 7 files'
+plain substitution this module already does."""
 
 from __future__ import annotations
 
@@ -32,6 +44,16 @@ from pathlib import Path
 from tooling.manifest import Manifest
 
 CountKey = str  # one of "lenses", "diff", "repo", "total"
+
+
+class DocCountAnchorError(ValueError):
+    """Raised when a `_TEMPLATE` anchor doesn't match exactly once — a stale
+    template entry or prose edited out from under it, not an internal failure.
+    Subclasses ValueError so it reads as the bad-anchor condition it is, while
+    giving a caller a precise type to catch (so an unrelated internal
+    ValueError elsewhere in the render path still surfaces as a bug instead of
+    being misreported as "documented count(s) out of sync") — mirroring
+    `generate_collapsed.CollapsedOverlapError`'s identical rationale."""
 
 
 def compute_counts(manifest: Manifest) -> dict[str, int]:
@@ -266,7 +288,7 @@ def sync_doc_counts(manifest: Manifest, docs_root: str = ".") -> list[Path]:
     the list of files rewritten (empty when everything was already current —
     the expected, common case once `skills/manifest.yaml` stops moving).
 
-    Raises `ValueError` naming the file and anchor when an occurrence's anchor
+    Raises `DocCountAnchorError` naming the file and anchor when an occurrence's anchor
     text doesn't match exactly once in the file's current content — either it
     was never there (a stale template entry) or the surrounding prose has
     since been edited out from under it. Either way, that's a bug to fix in
@@ -291,7 +313,7 @@ def sync_doc_counts(manifest: Manifest, docs_root: str = ".") -> list[Path]:
             pattern = occ.pattern()
             matches = pattern.findall(text)
             if len(matches) != 1:
-                raise ValueError(
+                raise DocCountAnchorError(
                     f"{rel_path}: expected exactly one match for anchor "
                     f"{occ.prefix!r} ... {occ.suffix!r} (count_key={occ.count_key!r}), "
                     f"found {len(matches)} -- the surrounding prose likely changed; "

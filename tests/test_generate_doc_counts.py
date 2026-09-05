@@ -5,7 +5,12 @@ independent of the real repo docs test_doc_counts.py checks (issue #372)."""
 
 import pytest
 
-from tooling.generate_doc_counts import CountOccurrence, compute_counts, sync_doc_counts
+from tooling.generate_doc_counts import (
+    CountOccurrence,
+    DocCountAnchorError,
+    compute_counts,
+    sync_doc_counts,
+)
 from tooling.manifest import Manifest, Skill, Source
 
 
@@ -60,7 +65,7 @@ def test_sync_doc_counts_raises_on_missing_anchor(tmp_path, monkeypatch):
     template = (CountOccurrence("doc.md", "lenses", "ships ", " lenses today."),)
     monkeypatch.setattr("tooling.generate_doc_counts._TEMPLATE", template)
 
-    with pytest.raises(ValueError, match="expected exactly one match"):
+    with pytest.raises(DocCountAnchorError, match="expected exactly one match"):
         sync_doc_counts(_manifest(), docs_root=str(tmp_path))
 
 
@@ -73,7 +78,7 @@ def test_sync_doc_counts_raises_on_ambiguous_anchor(tmp_path, monkeypatch):
     template = (CountOccurrence("doc.md", "lenses", "ships ", " lenses today."),)
     monkeypatch.setattr("tooling.generate_doc_counts._TEMPLATE", template)
 
-    with pytest.raises(ValueError, match="found 2"):
+    with pytest.raises(DocCountAnchorError, match="found 2"):
         sync_doc_counts(_manifest(), docs_root=str(tmp_path))
 
 
@@ -91,7 +96,7 @@ def test_sync_doc_counts_is_atomic_across_files(tmp_path, monkeypatch):
     )
     monkeypatch.setattr("tooling.generate_doc_counts._TEMPLATE", template)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(DocCountAnchorError):
         sync_doc_counts(_manifest(n_diff=3, n_repo=0), docs_root=str(tmp_path))
 
     # `good.md` must be untouched -- still the stale "99", not rewritten to "3"

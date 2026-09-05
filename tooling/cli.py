@@ -16,7 +16,7 @@ from tooling.generate import (
     generate_synthesizer,
     primary_owners,
 )
-from tooling.generate_doc_counts import sync_doc_counts
+from tooling.generate_doc_counts import DocCountAnchorError, sync_doc_counts
 from tooling.manifest import ValidationError, load_manifest, validate
 
 
@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
         # the drift-checkable pattern the rest of this branch already follows.
         try:
             doc_count_updates = sync_doc_counts(manifest, docs_root=args.docs_root)
-        except (OSError, ValueError) as exc:
+        except (OSError, DocCountAnchorError) as exc:
             print(f"ERROR: {exc}")
             return 1
         for out in doc_count_updates:
