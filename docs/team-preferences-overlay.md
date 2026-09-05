@@ -114,8 +114,10 @@ exist. The line runs through the *kind of claim a finding makes*, not the topic:
   (`tracing-correctness-and-invariants`), data/migration safety, concurrency-correctness, and the
   hard parts of silent-failure hunting.
 
-Each check already knows which it is (a check is floor-tier if it claims *broken/unsafe*, else
-preference-tier). The overlay then has three verbs, and what they may touch differs:
+Each lens already knows which it is — the split ships as a manifest `tier: floor|preference`
+field per lens, not per finding or per individual check within a lens (a lens is floor-tier
+if it claims *broken/unsafe*, else preference-tier), and every finding a lens raises
+inherits its lens's tier. The overlay then has three verbs, and what they may touch differs:
 
 | Verb | Effect | Allowed on preference-tier | Allowed on floor-tier |
 |---|---|---|---|
@@ -134,7 +136,7 @@ from Q13: full flexibility on taste, an honest paper trail on safety.
 Six directive kinds, each mapping onto the verbs above:
 
 1. **Lens selection / weighting** — enable/disable lenses, or mark some advisory vs blocking.
-   (`set`, capped by the router's 2-4 rule — preferences re-rank within the cap, they don't lift it.)
+   (`set`, capped by the router's 3-8 rule — preferences re-rank within the cap, they don't lift it.)
 2. **Threshold tuning** — per-check numeric knobs (function length, complexity, coverage, PR LOC).
    (`set`.)
 3. **House conventions** — judgment-level idiom rulings that override the lens's generic taste

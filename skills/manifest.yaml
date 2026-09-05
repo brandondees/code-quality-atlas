@@ -1988,7 +1988,11 @@ router:
       run: [tracing-correctness-and-invariants, reviewing-concurrency-and-async,
             reviewing-migration-and-data-safety, reviewing-api-contract-safety,
             reviewing-conceptual-integrity]
-      note: pick by the design's domain, from design-capable (◆) lenses only
+      note: "pick by the design's domain, from design-capable (◆) lenses — not
+            \"◆ lenses only\": a decision-shaped design doc (an ADR, RFC, or
+            deprecation plan) also pairs with reviewing-decision-lifecycle,
+            which auto-includes via the decision route regardless of ranking
+            even though it carries no ◆ itself (#383/#430)"
       shapes: [diff, decision]
     - when: Dependency add or bump
       run: [auditing-dependencies-and-supply-chain, checking-restraint]

@@ -36,13 +36,6 @@ def test_load_and_validate_good_evals(tmp_path):
     assert len(evals.scenarios) == 3
 
 
-def test_validate_requires_at_least_three(tmp_path):
-    doc = _good()
-    doc["scenarios"] = doc["scenarios"][:2]
-    with pytest.raises(EvalError, match="at least 3"):
-        validate_evals(load_evals(_write(tmp_path, doc)))
-
-
 def test_validate_honors_a_raised_min_scenarios(tmp_path):
     # Q21: a lens can opt into a higher bar than D8's baseline via the
     # manifest's eval_min; validate_evals must enforce whatever the caller

@@ -96,8 +96,9 @@ wrappers over the manifest modes, not the source of truth.
 The team-preferences overlay (Q13, designed/[`team-preferences-overlay.md`](team-preferences-overlay.md))
 sets the **per-repo default mode** and the **critical-tier definition** when it is built.
 Until then the defaults are: review mode, and the critical tier = correctness + security +
-data/migration safety + concurrency (the same floor-tier set Q13 already names as
-never-silently-droppable).
+data/migration safety + concurrency — a 4-lens **subset** of, not identical to, the
+manifest's `tier: floor` set (5 lenses: the same 4 plus `hunting-silent-failures`, which
+Q13's never-silently-droppable guarantee still covers but which triage does not run).
 
 ## Relation to prior decisions
 

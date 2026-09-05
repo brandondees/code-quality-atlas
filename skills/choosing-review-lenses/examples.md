@@ -18,10 +18,13 @@ get reported twice.
 
 **Input:** "Can you review our design doc for the new export pipeline? No code yet."
 
-**Good selection:** only ◆ design-capable lenses, picked by the design's domain —
+**Good selection:** design-capable (◆) lenses, picked by the design's domain —
 e.g. `reviewing-api-contract-safety` for the export format contract,
 `reviewing-performance-and-efficiency` for the full-table read it proposes,
-`checking-restraint` for the plugin system it sketches for one consumer.
+`checking-restraint` for the plugin system it sketches for one consumer. (A
+decision-shaped design doc — an ADR/RFC/deprecation plan, not a plain design
+doc like this one — also pairs `reviewing-decision-lifecycle`, which carries
+no ◆ but auto-includes on that shape regardless of ranking.)
 
 **Bad selection:** `reviewing-naming-and-readability` or
 `checking-idioms-and-consistency` — there is no code for them to read; they are

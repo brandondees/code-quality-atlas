@@ -21,8 +21,8 @@ shorter-named default win on keyword match alone.
 
 | Task | Use |
 |---|---|
-| Review a pull request (number, URL, or named branch) | the `/code-quality-atlas:atlas-review-pr` command |
-| Code review of local changes with no PR (working tree, or a pushed branch without a PR) | the `/code-quality-atlas:atlas-code-review` command |
+| Review a pull request (number, URL, or named branch) | standalone form: the `/code-quality-atlas:atlas-review-pr` command. Collapsed form: no command ships — describe the request in natural language ("review this PR") and let `reviewing-a-change` trigger directly |
+| Code review of local changes with no PR (working tree, or a pushed branch without a PR) | standalone form: the `/code-quality-atlas:atlas-code-review` command. Collapsed form: no command ships — describe the request in natural language and let `reviewing-a-change` trigger directly |
 | Unsure which lenses a change needs | standalone form: the `choosing-review-lenses` skill, then the lenses it names. Collapsed form: invoke the matching entrypoint (e.g. `reviewing-a-change`) directly — it ranks and selects the relevant lenses internally |
 | Ground a review in the repo's own linters, type checkers, and scanners before judging | standalone form: the `grounding-review-in-tool-output` skill, run before the lenses. Collapsed form: the same procedure ships bundled as each entrypoint's `reference/tool-evidence.md` and runs ahead of its lenses |
 | Merge several reviewers' findings into one verdict | standalone form: the `synthesizing-review-findings` skill. Collapsed form: the same procedure ships bundled as each entrypoint's `reference/synthesis.md` (e.g. `reviewing-a-change/reference/synthesis.md`) and runs automatically after its lenses |
