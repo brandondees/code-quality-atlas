@@ -41,7 +41,7 @@ def mode_floor_policy(manifest: Manifest) -> str:
     for mode in manifest.modes:
         floor = _escape_table_cell(mode.floor)
         if mode.floor == "escalating":
-            effect = "round-based escalation (as today) — later re-review rounds raise the floor"
+            effect = "round-based escalation — later re-review rounds raise the floor"
         else:
             effect = (
                 f"pinned at {floor} — ranked sections report everything down to "

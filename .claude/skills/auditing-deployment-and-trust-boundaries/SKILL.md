@@ -41,7 +41,7 @@ Report only real problems. If this lens applies and what you reviewed holds up �
 
 ## Top checks
 
-The head of the full checklist — enough for a first pass without opening any reference file:
+This is the full checklist — nothing else to open for it:
 
 - **Trace what auto-executes off an unattended pull, merge, or webhook — scoped to attacker-controlled or unreviewed content.** Find every cron/systemd/launchd unit, `post-merge`/`post-receive` git hook, container entrypoint, or webhook-triggered job that runs unattended against a branch this repo controls. For each: what does it execute (a script, a binary, a container image), and is that thing read from the **same tree** the trigger just fetched? A branch protected by required PR review and required status checks is an intended trust gate, not an omission — treat what merges there as *reviewed*, not attacker-controlled. Emit **Poisoned Pipeline Execution** only when the revision that ends up executing, or an input the pipeline consumes, can change *without* that same review (a direct push the protection doesn't actually cover, a webhook/PR trigger that runs before any human looks at the content, a secondary file the CI config trusts but the branch rule doesn't cover, a bot/app with a bypass allowance) — or when the review gate itself can be bypassed. The mere absence of a *second*, post-merge execution gate on top of an already-required-review branch is not PPE by itself; note it instead as a deployment trust-boundary observation (defense-in-depth worth naming, not an active exploit path) unless the input above shows the review gate is bypassable.
 - **Check the deploy identity's blast radius against what it deploys.** The credential, token, or service account a deploy/sync job uses — does its scope match the single service/environment it's meant to touch, or does it carry broader reach (the whole cloud account, every secret, admin on the orchestrator)? A narrow trigger (one service's redeploy) behind a broad credential is a mismatch worth flagging even with no other finding attached.
@@ -61,7 +61,6 @@ Where a finding here is one a tool can catch deterministically, surface that as 
 
 ## Going deeper
 
-- [reference/heuristics.md](reference/heuristics.md) — the full checklist; open it when the change sits squarely in this lens's domain.
 - [examples.md](examples.md) — concrete good/bad findings, and the output format to match.
 - [reference/tool-rules.md](reference/tool-rules.md) — static-analysis rules covering the mechanical subset; for wiring up linters, not needed for the judgment review itself.
 - [reference/sources.md](reference/sources.md) — the research behind each check; for provenance, not needed during a review.

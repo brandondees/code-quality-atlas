@@ -43,6 +43,7 @@ from tooling.generate_skill import (
     build_artifact_rubric,
     build_skill_md,
     generate_skill,
+    heuristics_is_duplicate,
     top_checks,
 )
 from tooling.generate_synthesizer import (
@@ -70,6 +71,7 @@ __all__ = [
     "generate_router",
     "generate_skill",
     "generate_synthesizer",
+    "heuristics_is_duplicate",
     "lens_bundle_body",
     "mode_floor_policy",
     "modes_section",

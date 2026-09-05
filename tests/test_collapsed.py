@@ -487,6 +487,30 @@ def test_build_entrypoint_md_routes_table_excludes_lens_overlap_from_wrong_shape
     assert "Design doc / plan / RFC" in decision_md
 
 
+def test_iac_route_note_stays_attributed_when_repo_lens_is_filtered_out():
+    # #391 problem 4: the IaC route's `run` names both auditing-infrastructure-
+    # as-code (repo-shaped) and sweeping-for-security (diff-shaped), but the
+    # diff entrypoint's shape filter drops the former from the rendered `run`
+    # column while the note (deliberately, per #188) still travels with the
+    # row. Before the fix, the note's "judges blast radius... declared-vs-live
+    # drift" clause read as a claim about sweeping-for-security — the only
+    # lens left in the row — which is wrong; that's auditing-infrastructure-
+    # as-code's job. The note must name its own subject explicitly so it stays
+    # correct however the row gets filtered.
+    from tooling.manifest import load_manifest
+
+    m = load_manifest("skills/manifest.yaml")
+    ep_change = next(e for e in m.entrypoints if e.name == "reviewing-a-change")
+    md = build_entrypoint_md(m, ep_change)
+    line = next(line for line in md.splitlines() if "Infrastructure-as-code" in line)
+    assert "`sweeping-for-security`" in line  # the only lens left after filtering
+    assert "`auditing-infrastructure-as-code`" not in line  # filtered out of `run`
+    # the note itself must still name the audit lens as the blast-radius/drift
+    # subject, not leave that clause dangling on whatever lens survived
+    assert "auditing-infrastructure-as-code" in line
+    assert "declared-vs-live drift" in line
+
+
 def test_build_collapsed_synthesis_carries_floor_policy_without_frontmatter():
     md = build_collapsed_synthesis(_full_manifest())
     assert not md.startswith("---")  # bundled body, no frontmatter

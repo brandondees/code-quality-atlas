@@ -16,6 +16,8 @@
 - Is any error swallowed (empty catch/rescue, `except: pass`)?
 - Does every remote call have a timeout?
 - Are retries capped with backoff?
+- Does a circuit breaker reset only after a successful health probe?
+- Is a failed retry logged with enough context to debug without re-running?
 
 ## #4 Resource & state management
 
@@ -31,6 +33,8 @@
 
 - Is every acquired resource released on all paths?
 - Are caches bounded with eviction/TTL?
+- Is a released resource actually unusable afterward (no use-after-free)?
+- Does a long-lived cache expose its current size for capacity monitoring?
 
 ---
 

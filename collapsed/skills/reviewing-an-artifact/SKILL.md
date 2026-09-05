@@ -25,7 +25,7 @@ Rank the relevant lenses below by relevance to what is being reviewed, pick the 
 
 ## Depth modes
 
-Routing first ranks **every** lens whose scope the change touches by **relevance** — it is no longer a hard cap. A depth mode then sets the **breadth** (how far down the ranked list to run, plus room for judgment calls above that floor) and the severity floor. Pick the mode from the request; default to **review**.
+Routing first ranks **every** lens in scope by **relevance**, with no hard cap on the ranking itself — for a single change, scope is what the diff touches; for a whole-repo audit, scope is the repository. A depth mode then sets the **breadth** (how far down the ranked list to run, plus room for judgment calls above that floor) and the severity floor. Pick the mode from the request; default to **review**.
 
 | Mode | Breadth | Triggers |
 |---|---|---|
@@ -41,7 +41,7 @@ Routing first ranks **every** lens whose scope the change touches by **relevance
 
 | When reviewing… | Run |
 |---|---|
-| A standardized authored artifact rather than source code — a SKILL.md or agent-skill definition (more artifact rubrics to come) | `reviewing-artifact-conventions` — artifact-shaped — detect the artifact, then review it against its own published standard, not as application code |
+| A standardized authored artifact rather than source code — a SKILL.md or agent-skill definition | `reviewing-artifact-conventions` — artifact-shaped — detect the artifact, then review it against its own published standard, not as application code |
 
 ## Lenses
 

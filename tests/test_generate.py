@@ -111,7 +111,7 @@ def test_generate_skill_reference_files_carry_generated_header(tmp_path):
     assert marker in skill_md_text
 
 
-from tooling.generate import top_checks
+from tooling.generate import heuristics_is_duplicate, top_checks
 
 
 def test_top_checks_are_inlined_so_skill_md_is_self_sufficient():
@@ -129,6 +129,95 @@ def test_top_checks_cap_cross_ref_categories():
         c for c in checks if "acquired resource" in c or "caches bounded" in c.lower()
     ]
     assert len(from_4) <= 2
+
+
+def _research_short(tmp_path):
+    # A single category with fewer bullets than the top-checks budget, so
+    # `top_checks` inlines every one of them — the #391-problem-3 scenario
+    # where reference/heuristics.md would otherwise be a verbatim duplicate.
+    doc = (
+        "# Research — Short Sample\n\n"
+        "## #9 Some category\n\n"
+        "### Reviewable heuristics (skill-checklist seeds)\n\n"
+        "- First short check?\n"
+        "- Second short check?\n"
+        "- Third short check?\n"
+    )
+    p = tmp_path / "research.md"
+    p.write_text(doc, encoding="utf-8")
+    return Skill(
+        name="short-lens",
+        description="x",
+        shape="diff",
+        wave=1,
+        built_from=[Source(9, "research.md#9")],
+    )
+
+
+def _research_short_with_out_of_position_priority(tmp_path):
+    # Same budget-fitting shape as _research_short, but the priority-marked
+    # bullet is last in the source file rather than first. top_checks()
+    # promotes priority bullets to the front of its output while
+    # _all_heuristics_bullets() preserves file order — so the two functions
+    # return the identical bullet set in different order here. An
+    # order-sensitive (`==`) comparison would miss this as a duplicate; only a
+    # multiset comparison catches it (dees-bot / CodeRabbit PR #417 review).
+    doc = (
+        "# Research — Short Priority Sample\n\n"
+        "## #9 Some category\n\n"
+        "### Reviewable heuristics (skill-checklist seeds)\n\n"
+        "- First short check?\n"
+        "- Second short check?\n"
+        "- ★ Deep but high-value check that must surface?\n"
+    )
+    p = tmp_path / "research.md"
+    p.write_text(doc, encoding="utf-8")
+    return Skill(
+        name="short-priority-lens",
+        description="x",
+        shape="diff",
+        wave=1,
+        built_from=[Source(9, "research.md#9")],
+    )
+
+
+def test_heuristics_is_duplicate_ignores_priority_reordering(tmp_path):
+    skill = _research_short_with_out_of_position_priority(tmp_path)
+    assert heuristics_is_duplicate(skill, docs_root=str(tmp_path))
+    md = build_skill_md(skill, taxonomy_version="v0.2", docs_root=str(tmp_path))
+    assert "reference/heuristics.md" not in md
+
+
+def test_going_deeper_omits_heuristics_pointer_when_it_would_duplicate_top_checks(
+    tmp_path,
+):
+    skill = _research_short(tmp_path)
+    md = build_skill_md(skill, taxonomy_version="v0.2", docs_root=str(tmp_path))
+    assert "reference/heuristics.md" not in md
+    assert "This is the full checklist — nothing else to open for it" in md
+    assert "First short check?" in md
+    assert "Second short check?" in md
+    assert "Third short check?" in md
+
+
+def test_generate_skill_skips_and_prunes_duplicate_heuristics_file(tmp_path):
+    skill = _research_short(tmp_path)
+    out_root = tmp_path / "skills-out"
+    heuristics_path = out_root / "short-lens" / "reference" / "heuristics.md"
+    # Simulate a stale file left over from before the lens's checklist shrank
+    # under the budget (or from before this fix existed at all).
+    heuristics_path.parent.mkdir(parents=True)
+    heuristics_path.write_text("stale", encoding="utf-8")
+
+    generate_skill(
+        skill,
+        taxonomy_version="v0.2",
+        docs_root=str(tmp_path),
+        skills_root=str(out_root),
+    )
+    assert not heuristics_path.exists()
+    assert (out_root / "short-lens" / "reference" / "tool-rules.md").exists()
+    assert (out_root / "short-lens" / "reference" / "sources.md").exists()
 
 
 def _research_with_deep_priority(tmp_path):
@@ -690,6 +779,17 @@ def test_build_router_md_includes_modes_section():
     md = build_router_md(_router_manifest(_modes()))
     assert "## Depth modes" in md
     assert "comprehensive" in md
+
+
+def test_generated_text_avoids_time_sensitive_phrasing():
+    # #391 problem 2: generated prose that names a delta from a past state
+    # ("no longer", "today", "to come") goes stale the moment that past state
+    # is forgotten — state the rule, not the change.
+    router_md = build_router_md(_router_manifest(_modes()))
+    assert "it is no longer a hard cap" not in router_md
+    assert "today's defaults, unchanged" not in router_md
+    syn_md = build_synthesizer_md(_syn_manifest(_modes()))
+    assert "(as today)" not in syn_md
 
 
 def test_router_points_2to4_at_review_mode():

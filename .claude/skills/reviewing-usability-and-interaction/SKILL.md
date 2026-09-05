@@ -43,7 +43,7 @@ Report only real problems. If this lens applies and what you reviewed holds up �
 
 ## Top checks
 
-The head of the full checklist — enough for a first pass without opening any reference file:
+This is the full checklist — nothing else to open for it:
 
 - **Every state this code can reach has something designed for it.** An async read introduces at minimum **loading**, **empty / zero-data**, **error**, and **success**; a mutation adds **in-flight** and **failed**. A component that renders only the success path has shipped the others undesigned — the user sees a blank region, a spinner that never resolves, or a stray `0`. Enumerate the states from the code (the hook's flags, the union's variants, the promise's rejection path), not from the mockup, and name each one nothing handles. **This is a defect, not a preference:** the code produces the state whether or not anyone designed it. The durable fix is a type, not a checklist item — a discriminated union over the states **plus an exhaustiveness check** (`assertNever`, or the stack's equivalent) — #10's illegal-states-unrepresentable move aimed at UI state (cross #10) — so a new variant that nothing renders fails the build; the union without the check still compiles with a branch missing.
 - **A destructive or irreversible action has a way back.** A new delete, archive, revoke, overwrite, cancel-subscription, or send flow needs **undo** (preferred, where the action can be deferred or reversed) or a confirmation that **names what will be lost** — "Delete 3 projects and 47 files?" and not "Are you sure?". A confirmation that names nothing is not error prevention; it is a click the user has been trained to dismiss. And check the *slip* case separately from the *mistake* case: a destructive control identical in size, colour, and position to its safe neighbour will be hit by accident no matter how good the confirmation copy is.
@@ -63,7 +63,6 @@ Where a finding here is one a tool can catch deterministically, surface that as 
 
 ## Going deeper
 
-- [reference/heuristics.md](reference/heuristics.md) — the full checklist; open it when the change sits squarely in this lens's domain.
 - [examples.md](examples.md) — concrete good/bad findings, and the output format to match.
 - [reference/tool-rules.md](reference/tool-rules.md) — static-analysis rules covering the mechanical subset; for wiring up linters, not needed for the judgment review itself.
 - [reference/sources.md](reference/sources.md) — the research behind each check; for provenance, not needed during a review.

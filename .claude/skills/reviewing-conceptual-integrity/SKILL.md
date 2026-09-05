@@ -43,7 +43,7 @@ Report only real problems. If this lens applies and what you reviewed holds up �
 
 ## Top checks
 
-The head of the full checklist — enough for a first pass without opening any reference file:
+This is the full checklist — nothing else to open for it:
 
 - **A new user-facing concept either earns its place or reuses one that already exists.** When a change introduces a noun a user must learn — an entity, a mode, a status, a container — name it, then find whether the product already has one covering the job. **Evidence is required before reporting anything:** the existing concept, where it lives, and the one-sentence rule a user would apply to choose between them. If you cannot state that rule, that *is* the finding — and if you cannot name an existing concept at all, there is no finding, because a genuinely new idea filling a real gap is not a defect for being new.
 - **A second path to a job the product already does.** Distinct from a second *widget* (`#42`'s): a new page, command, endpoint, or setting that reaches an outcome the product already reaches, with nothing retiring or subsuming the old one. The reviewable fact is narrow and checkable — both now exist, and the change says nothing about the relationship. Whether to unify them is product's call and routes; that the review found two is not a matter of opinion.
@@ -63,7 +63,6 @@ Where a finding here is one a tool can catch deterministically, surface that as 
 
 ## Going deeper
 
-- [reference/heuristics.md](reference/heuristics.md) — the full checklist; open it when the change sits squarely in this lens's domain.
 - [examples.md](examples.md) — concrete good/bad findings, and the output format to match.
 - [reference/tool-rules.md](reference/tool-rules.md) — static-analysis rules covering the mechanical subset; for wiring up linters, not needed for the judgment review itself.
 - [reference/sources.md](reference/sources.md) — the research behind each check; for provenance, not needed during a review.

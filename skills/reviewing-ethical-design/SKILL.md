@@ -43,7 +43,7 @@ Report only real problems. If this lens applies and what you reviewed holds up �
 
 ## Top checks
 
-The head of the full checklist — enough for a first pass without opening any reference file:
+This is the full checklist — nothing else to open for it:
 
 - **Dark pattern / deceptive flow (detect-and-route):** Does the change introduce a recognized dark pattern — **sneaking** (hidden costs, sneak-into-basket), **fabricated urgency/scarcity** (a countdown or "only 2 left" not backed by truth), **misdirection / confirmshaming**, **obstruction** (roach-motel cancel), **forced action**, or **nagging** (Mathur's 7 / the EDPB's 6 families)? Name the specific category and cite the code that implements it; route the keep-or-kill product judgment to `product` and any consent-law facet to #27 / `legal`. Surface with evidence — never decide the product trade-off here, never drop it either.
 - **Manipulative defaults & asymmetric choices:** Are defaults set to benefit the business against the user's likely intent — **pre-checked** consent / marketing opt-in, opt-out materially harder than opt-in, "accept all" prominent while "reject" is buried or absent, negative-option / auto-renew with no clear disclosure? The default value and the *asymmetry of the choice* are the defect, visible right in the code that sets them.
@@ -63,7 +63,6 @@ Where a finding here is one a tool can catch deterministically, surface that as 
 
 ## Going deeper
 
-- [reference/heuristics.md](reference/heuristics.md) — the full checklist; open it when the change sits squarely in this lens's domain.
 - [examples.md](examples.md) — concrete good/bad findings, and the output format to match.
 - [reference/tool-rules.md](reference/tool-rules.md) — static-analysis rules covering the mechanical subset; for wiring up linters, not needed for the judgment review itself.
 - [reference/sources.md](reference/sources.md) — the research behind each check; for provenance, not needed during a review.
