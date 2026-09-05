@@ -6,11 +6,11 @@ This is the cross-model eval harness (spec phase-2 §7). It assembles the
 progressive-disclosure context a model with the skill loaded would see
 (SKILL.md + reference/*.md, excluding the deeper tool-rules.md/sources.md +
 examples.md), sends each scenario's query to the model, and prints the
-response next to its expected_behavior so
-a human/judge can grade. Two backends: the Ollama API (`--api ollama`) and
-any OpenAI-compatible /v1/chat/completions server such as llama-server
-(`--api openai`). Network calls are isolated in `query_*` so tests mock
-them (no model server needed in CI).
+response next to its expected_behavior so a human/judge can grade. Two
+backends: the Ollama API (`--api ollama`) and any OpenAI-compatible
+/v1/chat/completions server such as llama-server (`--api openai`). Network
+calls are isolated in `query_*` so tests mock them (no model server needed
+in CI).
 """
 
 from __future__ import annotations
@@ -365,10 +365,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--num-ctx",
         type=_positive_int,
-        default=OLLAMA_NUM_CTX,
+        default=None,
         help="Ollama context window (ollama only); widen for "
         "thinking-capable models, whose reasoning overhead "
-        "can otherwise leave no room for the final answer",
+        "can otherwise leave no room for the final answer "
+        f"(default: {OLLAMA_NUM_CTX})",
     )
     think_group = ap.add_mutually_exclusive_group()
     think_group.add_argument(
@@ -405,16 +406,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
 
-    if args.api != "ollama" and args.num_ctx != OLLAMA_NUM_CTX:
-        # Unlike --think (validated in run_skill_evals, where an explicit
-        # None default distinguishes "not set" from a real value), --num-ctx
-        # always carries a concrete int -- so the CLI layer is where an
-        # explicit override is distinguishable from the untouched default.
+    if args.api != "ollama" and args.num_ctx is not None:
+        # An explicit `None` default (like --think's) distinguishes "the
+        # user passed --num-ctx" from "the untouched default applies" --
+        # a concrete int default here would silently accept
+        # `--num-ctx <the current OLLAMA_NUM_CTX value>` as if it were the
+        # untouched default, defeating this very check for the one value
+        # that value happens to coincide with (round-1 review finding).
         # OLLAMA_NUM_CTX has no OpenAI-compatible equivalent request field at
         # all (that server sets its window at startup via -c), so silently
         # accepting an override here would leave an operator believing
         # they'd widened the window when nothing was sent (#371).
         ap.error("--num-ctx is ollama-only, not valid with --api openai")
+    num_ctx = OLLAMA_NUM_CTX if args.num_ctx is None else args.num_ctx
 
     skill_dir = Path(args.skills_root, args.skill)
     runs = run_skill_evals(
@@ -422,7 +426,7 @@ def main(argv: list[str] | None = None) -> int:
         args.model,
         host=args.host,
         api=args.api,
-        num_ctx=args.num_ctx,
+        num_ctx=num_ctx,
         think=args.think,
         timeout=args.timeout,
         max_tokens=args.max_tokens,

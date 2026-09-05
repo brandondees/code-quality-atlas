@@ -102,6 +102,66 @@ def test_run_skill_evals_assembles_context_and_collects(tmp_path, monkeypatch):
     assert captured["max_tokens"] == 512
 
 
+def test_assemble_context_includes_artifact_shaped_reference_file(tmp_path):
+    """An artifact-shaped lens (e.g. reviewing-artifact-conventions) has no
+    reference/heuristics.md at all -- its checklist lives in one bundled
+    rubric file per artifact, reference/<slug>.md. Before #371's fix,
+    assemble_context hardcoded reference/heuristics.md and silently skipped
+    a missing file, so this shape was evaluated with an empty checklist."""
+    skill_dir = tmp_path / "reviewing-artifact-conventions"
+    (skill_dir / "reference").mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# reviewing-artifact-conventions\n")
+    (skill_dir / "reference" / "skill-md.md").write_text(
+        "UNIQUE_ARTIFACT_RUBRIC_CONTENT"
+    )
+
+    context = run_evals.assemble_context(skill_dir)
+
+    assert "UNIQUE_ARTIFACT_RUBRIC_CONTENT" in context
+
+
+def test_assemble_context_excludes_deeper_reference_files(tmp_path):
+    """tool-rules.md and sources.md are deliberately deeper, on-demand
+    disclosure levels a model with the skill loaded wouldn't have in
+    context by default -- assemble_context must not bundle them in."""
+    skill_dir = tmp_path / "hunting-silent-failures"
+    (skill_dir / "reference").mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# hunting-silent-failures\n")
+    (skill_dir / "reference" / "heuristics.md").write_text("UNIQUE_HEURISTICS_CONTENT")
+    (skill_dir / "reference" / "tool-rules.md").write_text("UNIQUE_TOOL_RULES_CONTENT")
+    (skill_dir / "reference" / "sources.md").write_text("UNIQUE_SOURCES_CONTENT")
+
+    context = run_evals.assemble_context(skill_dir)
+
+    assert "UNIQUE_HEURISTICS_CONTENT" in context
+    assert "UNIQUE_TOOL_RULES_CONTENT" not in context
+    assert "UNIQUE_SOURCES_CONTENT" not in context
+
+
+def test_assemble_context_raises_when_nothing_beyond_skill_md(tmp_path):
+    skill_dir = tmp_path / "empty-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("# empty-skill\n")
+
+    with pytest.raises(RuntimeError, match="no checklist content"):
+        run_evals.assemble_context(skill_dir)
+
+
+def test_assemble_context_raises_when_reference_dir_is_only_deeper_files(tmp_path):
+    """A reference/ dir that exists but contains only tool-rules.md/sources.md
+    must still trip the empty-context guard -- those files are excluded from
+    the assembled context, so their mere presence on disk doesn't count as
+    checklist content."""
+    skill_dir = tmp_path / "only-deeper-files"
+    (skill_dir / "reference").mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# only-deeper-files\n")
+    (skill_dir / "reference" / "tool-rules.md").write_text("x")
+    (skill_dir / "reference" / "sources.md").write_text("x")
+
+    with pytest.raises(RuntimeError, match="no checklist content"):
+        run_evals.assemble_context(skill_dir)
+
+
 def test_run_skill_evals_openai_backend(tmp_path, monkeypatch):
     skill = Skill(
         name="hunting-silent-failures",
@@ -473,6 +533,31 @@ def test_cli_rejects_explicit_num_ctx_with_openai_backend(tmp_path, capsys):
                 "openai",
                 "--num-ctx",
                 "16384",
+            ]
+        )
+    assert "ollama-only" in capsys.readouterr().err
+
+
+def test_cli_rejects_explicit_num_ctx_matching_the_default_with_openai_backend(
+    tmp_path, capsys
+):
+    """Round-1 review finding: comparing args.num_ctx against OLLAMA_NUM_CTX
+    to detect "was --num-ctx explicitly passed" is defeated the instant an
+    operator's explicit value happens to equal the current default (e.g.
+    passing today's OLLAMA_NUM_CTX because that's what they intend, or
+    because they don't realize this default just changed) -- that combination
+    must still be rejected, not silently accepted as "the untouched default"."""
+    with pytest.raises(SystemExit):
+        run_evals.main(
+            [
+                "--skill",
+                "x",
+                "--skills-root",
+                str(tmp_path),
+                "--api",
+                "openai",
+                "--num-ctx",
+                str(run_evals.OLLAMA_NUM_CTX),
             ]
         )
     assert "ollama-only" in capsys.readouterr().err
