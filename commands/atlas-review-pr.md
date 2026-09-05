@@ -207,7 +207,8 @@ Read `REVIEW.md` from the **PR's repo root at the PR's base ref** if it exists:
 ref noted in step 1). Pass the `ref` explicitly every time — omitting it reads
 the default branch, which is usually but not always the base, and reading the
 working tree instead reads whatever the session checked out, which in a
-PR-triggered routine session can be the PR head. If the base ref has no `REVIEW.md`, fall back
+PR-triggered routine session can be the PR head. If that read **confirms** no
+`REVIEW.md` exists at the base ref (a not-found response), fall back
 to the canonical template at `templates/REVIEW.md` — read it from the plugin
 clone if you can locate it, otherwise fetch it from the source repo with
 `mcp__github__get_file_contents` (`owner: brandondees`, `repo:
@@ -222,6 +223,15 @@ which is a fixed, locatable path that works in web/routine sessions where
 the plugin clone location is unknown. It defines the severity floor per
 round, the round cap, and the approve-on-clean behavior. The repo's own
 `REVIEW.md` always wins over the template.
+
+**If that first read fails without confirming absence** (a transient 5xx, a
+rate limit, or a forbidden/auth error, as opposed to a clean not-found) —
+do not treat it as "no `REVIEW.md` here" and silently fall back to the
+template: that would mean silently discarding the repo's own custom
+convergence policy in favor of the generic default because of an
+unrelated, possibly-transient error. Apply the same disclosure below as a
+failed fallback fetch — report the *actual* error rather than a guessed
+diagnosis, and do not proceed as if the template applies.
 
 **If that final fallback fetch also fails** — check *why* before deciding
 what to report, the same discipline step 2's ACK-lock handling already

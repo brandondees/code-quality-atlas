@@ -602,12 +602,15 @@ a review.
   no equivalent up front today, and a poll-driven sweep has no PR event to
   make the gap visible the way a missing ACK does): one
   `mcp__github__get_file_contents` call against `brandondees/code-quality-
-  atlas`, `path: commands/atlas-poll-and-review.md`. If it fails on access,
-  that's a real blocker — this session's GitHub authorization is scoped
+  atlas`, `path: commands/atlas-poll-and-review.md`. **Any failure of that
+  call is a real blocker, not only an access failure** — a missing-access
+  error most likely means this session's GitHub authorization is scoped
   per-repo and separate from whatever's vendored into the repos being swept
-  (see §0's Prerequisites). Report the failure in this tick's final report
-  and skip the sweep entirely rather than falling back to a stale or
-  approximated copy of the poll-and-review protocol.
+  (see §0's Prerequisites), but a transient 5xx, rate limit, or moved path
+  is a different problem; either way, do not guess which one it was. Report
+  the actual failure in this tick's final report and skip the sweep
+  entirely rather than falling back to a stale or approximated copy of the
+  poll-and-review protocol.
 
   The command's own two-tier subagent design is the
   point of this model, so don't flatten it into the top-level session's own
