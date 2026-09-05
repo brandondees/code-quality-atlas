@@ -249,7 +249,7 @@ class ValidationError(Exception):
     pass
 
 
-def _validate_skills(manifest: Manifest, docs_root: str) -> set[str]:
+def _validate_skills(manifest: Manifest, docs_root: str) -> set[str]:  # noqa: C901 -- tracked in #441
     seen: set[str] = set()
     primaries: dict[int, list[str]] = {}
     for s in manifest.skills:
@@ -345,7 +345,7 @@ def _validate_skills(manifest: Manifest, docs_root: str) -> set[str]:
     return seen
 
 
-def _validate_router(manifest: Manifest, seen: set[str]) -> None:
+def _validate_router(manifest: Manifest, seen: set[str]) -> None:  # noqa: C901 -- tracked in #441
     if manifest.router is None:
         return
     r = manifest.router
@@ -422,7 +422,7 @@ def _validate_synthesizer(manifest: Manifest, seen: set[str]) -> None:
             )
 
 
-def _validate_prepass(manifest: Manifest, seen: set[str]) -> None:
+def _validate_prepass(manifest: Manifest, seen: set[str]) -> None:  # noqa: C901 -- tracked in #441
     if manifest.prepass is None:
         return
     p = manifest.prepass
@@ -518,7 +518,7 @@ def _validate_modes(manifest: Manifest) -> None:
             )
 
 
-def _validate_entrypoints(manifest: Manifest) -> None:
+def _validate_entrypoints(manifest: Manifest) -> None:  # noqa: C901 -- tracked in #441
     if not manifest.entrypoints:
         return
     if manifest.synthesizer is None:

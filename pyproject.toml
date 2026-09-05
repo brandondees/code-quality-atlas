@@ -25,7 +25,14 @@ extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 # Default rule set (E4, E7, E9, F) — see docs/open-questions.md D-series for
-# any future decision to broaden this.
+# any future decision to broaden this. C901 (mccabe complexity) is the one
+# addition: a budget, not a rewrite of everything already over it (issue
+# #395) — the 5 pre-existing functions above the limit each carry their own
+# `# noqa: C901` pointing at #441, which tracks bringing them down.
+extend-select = ["C901"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
 
 [tool.ruff.lint.per-file-ignores]
 # tests/*.py deliberately interleave imports with the test sections that use
@@ -33,3 +40,12 @@ extend-exclude = ["*.md"]
 # what it needs, right above it) rather than front-loading everything at the
 # top of an already-large file. That's intentional organization, not drift.
 "tests/*.py" = ["E402"]
+
+[tool.coverage.run]
+branch = true
+
+[tool.coverage.report]
+# A ratchet, not a target: set below the coverage measured on tooling/ at the
+# time this gate was added (94.6%, branch-inclusive) so it can only be raised
+# as coverage improves, never silently lowered (issue #395).
+fail_under = 94
