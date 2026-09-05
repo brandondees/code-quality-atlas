@@ -30,6 +30,29 @@ State both once here rather than re-discovering the mismatch per session:
   in. A lens can carry an old `wave:` value in the manifest and still be
   un-hardened, or vice versa — check which sense a document means from
   context, never from the number alone.
+- **"tier"** carries at least five distinct senses. (1) The manifest's
+  per-lens `tier: floor | preference` field (Q13's overlay: floor-tier
+  findings can be `acknowledge`d but never silently `suppress`ed). (2) The
+  triage mode's "critical tier" (`docs/review-depth-modes.md`) — a **subset**
+  of (1)'s floor-tier lenses (4 of the 5, missing `hunting-silent-failures`),
+  not the same set. (3) A depth mode itself, used loosely as a tier name
+  (`docs/review-depth-modes.md`: "the repo arm of the **comprehensive tier**").
+  (4) The self-improvement loop's `feedback:` opt-in tier
+  (`docs/team-preferences-overlay.md`: off/local/draft/auto). (5) A
+  model-capability tier in cross-model eval gating (`docs/open-questions.md`
+  D17: "model-tier shunting"; "the 7-8B tier"). Check which sense a document
+  means from context, never from the bare word.
+- **"floor"** carries at least four distinct senses, and (1) and (2) are the
+  most easily confused since both appear together in the same depth-mode
+  discussion. (1) Q13's floor-tier lens classification (see "tier" above —
+  a lens property). (2) The synthesizer's per-mode **severity floor**
+  (`Mode.floor` in the manifest; "floor Major+", "floor pinned at Nit") — an
+  unrelated axis: which severities a report surfaces, not which lenses are
+  suppressible. (3) The eval-scenario floor (Q21's `eval_min`, "D8's baseline"
+  of 3 scenarios per lens). (4) A model's "reliable floor" for a given lens in
+  cross-model eval gating (`docs/open-questions.md`: "below this lens's
+  reliable floor for lethal-trifecta..."). Same rule: context decides which,
+  never the bare word.
 
 ## Reading order
 
