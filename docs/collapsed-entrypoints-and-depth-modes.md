@@ -50,8 +50,9 @@ with **all** relevant lenses," up to the full set at repo scope, and cannot get 
   Major+), **review** (default; top 2–4 by relevance; today's escalating floor),
   **comprehensive** (all relevant lenses, uncapped; floor pinned at Nit so
   long-tail findings actually surface). The floor policy lives in the synthesizer.
-- **D-Q20-6 — Non-goal:** removing the standalone 39. Dual-emit keeps them for
-  filesystem / Skulto / other-agent installs and direct per-lens auto-triggering.
+- **D-Q20-6 — Non-goal:** removing the standalone form's dozens of skills.
+  Dual-emit keeps them for filesystem / Skulto / other-agent installs and
+  direct per-lens auto-triggering.
 - **Revisit trigger.** Reopen the dual-emit decision if **both** original pains go
   away: the claude.ai GUI gains multi-skill-bundle upload (removing the ~44-upload
   cost) **and** the CLI skill-listing context budget stops truncating descriptions
@@ -151,9 +152,11 @@ The router (`built_from: []`) and the 4 entrypoints share generated routing logi
   effect — comprehensive must both *run* the soft lenses and *not trim* their
   findings.
 - **Trigger surface (D7-portable):** natural language the entrypoint/router body
-  interprets (phrasing → mode). CLI installs may add command sugar
-  (`/atlas-review --depth comprehensive`, `/atlas-triage`); the account-skill/cloud
-  form relies on phrasing since it has no commands. Mode is orthogonal to shape.
+  interprets (phrasing → mode), the same way in every install form. CLI installs
+  gained no `--depth` flag or `/atlas-triage`-style command sugar for this (see
+  *Command sugar naming for CLI installs* under Resolved sub-questions below); the
+  account-skill/cloud form relies on phrasing too, since it has no commands at all.
+  Mode is orthogonal to shape.
 
 ## Manifest & generator changes
 
@@ -215,10 +218,10 @@ artifact detection (unchanged from D15).
   `marketplace.json` (not hand-kept), to avoid drift.
 - **Command sugar naming for CLI installs (resolved-by-different-means):** decided
   against. `commands/` ships `atlas-code-review`, `atlas-init`,
-  `atlas-propose-preferences`, `atlas-rebase-stale`, and `atlas-review-pr` — no
-  `atlas-triage` or `atlas-audit-comprehensive`. Depth mode is instead selected via
-  natural-language triggers, per `choosing-review-lenses`'s Depth modes table (see
-  `commands/atlas-review-pr.md` step 4.1).
+  `atlas-poll-and-review`, `atlas-propose-preferences`, `atlas-rebase-stale`, and
+  `atlas-review-pr` — no `atlas-triage` or `atlas-audit-comprehensive`. Depth mode
+  is instead selected via natural-language triggers, per `choosing-review-lenses`'s
+  Depth modes table (see `commands/atlas-review-pr.md` step 4.1).
 
 ## Cross-references
 

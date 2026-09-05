@@ -4271,6 +4271,44 @@ the ACK.
 exercises the command's own step ordering directly, so this is prose-level
 verification), `tooling.cli drift` (no drift).
 
+### 2026-08-31 — #349: manifest prose-field parsing's shotgun surgery routed through `_prose()`
+
+The 2026-08-30 weekly atlas audit (#347) flagged a Minor shotgun-surgery
+finding: five of `load_manifest`'s six manifest-section parsers (skills,
+router, synthesizer, modes, entrypoints) hand-rolled the same
+present-but-null guard (`x["key"] or ""`), each independently re-citing the
+same historical bugs (#142, #145, #206), while only the prepass block used
+the `_prose()` helper that exists to centralize exactly this. Routing the
+other five through `_prose()` also closed a latent gap it already fixed for
+prepass: a non-string, non-null value (a bare YAML number) is truthy and
+survived the old `x or ""` guard, then crashed with a raw `AttributeError`
+on the following `.strip()` instead of a `ValidationError` naming the
+field — confirmed by reverting locally and reproducing the crash.
+
+Needed one new parameter, `null_ok`, independent of `required`, since these
+fields' present-but-null tolerance (locked in by existing tests) is neither
+`_prose()`'s `required=True` (errors on null) nor `required=False` (also
+tolerates a missing key). Two review rounds followed on PR #349: round 1
+(CodeRabbit) caught `_prose()`'s default `strip=True` silently trimming
+padded identifier fields (name/slug) before their own regex validation ran,
+fixed with a `strip: bool = True` parameter defaulted off for the five
+identifier-shaped fields, plus `Route.when`/`Artifact.name`/`Artifact.detect`
+bypassing `_prose()` entirely (a pre-existing gap, same bug class); atlas's
+own round-1 review then caught that `modes.breadth`/`entrypoints.name`/
+`.description` lost the wrapping `except` clause's `in {path}` context when
+routed through `_prose()`'s own `ValidationError`, fixed by folding the path
+into `_prose()`'s `where` argument; a round-2 Nit extended the same path
+context to `entrypoints.body` and `modes.note` for consistency. No
+generated-output change throughout — `tooling.cli generate`/`drift` confirmed
+byte-identical output before and after every round.
+
+**Verification:** `python -m pytest tests/ -q` (451/451 by the final round,
+including new regression tests for the AttributeError-to-ValidationError
+fix, the strip=False padded-identifier case, and the restored path context —
+each verified to fail against the pre-fix code), `ruff check .` (clean),
+`tooling.cli eval`/`drift`/`generate` + diff (no drift, no generated-tree
+change).
+
 ### 2026-09-01 — Q22 Phase 1 shipped: the standing-dispute check
 
 A fresh session opened with "what's next?" and worked the repo's own
@@ -4329,6 +4367,70 @@ valid), `pytest` (451/451), `markdownlint-cli2` (0 issues) on the touched
 files. No cross-model re-gate this session (design doc frames Phase 1's
 evidence bar as "produces signal," not a pre-ship hardened-floor gate — see
 the plan doc's own note on this).
+
+### 2026-09-01 (same day, follow-up) — #351: vendor the CC BY license text into account-skill zips, not just a link
+
+`tooling/package-account-zips.sh`'s `write_attribution()` shipped only a
+`NOTICE.md` linking back to `LICENSE-CC-BY-4.0` on GitHub. `tooling/
+vendor-skills.sh` got the equivalent fix for
+`brandondees/second-brain-config#1157` (PR #341), but that PR only touched
+the vendor-skills.sh channel — `package-account-zips.sh`'s own header and
+inline comments still claimed the two channels "mirror" each other, which
+stopped being true. Worse for this channel than for #1157: an uploaded
+account-skill zip is extracted into a claude.ai account skill with no
+ongoing relationship to this git repo at all, so a dead or unreachable link
+would be the *only* copy of the license terms that skill will ever have.
+
+Vendored `LICENSE-CC-BY-4.0` into every staged skill directory before
+zipping, updated the `NOTICE.md` wording and surrounding comments to match,
+and added regression tests mirroring `test_vendor_skills.py`'s coverage for
+both the standalone and `--collapsed` paths.
+
+**Verification:** new regression tests covering both packaging paths; no
+generated-tree change (packaging-script fix only).
+
+### 2026-09-02 — #359: dual-encode round/ack state so it survives HTML-comment stripping
+
+`pull_request_read` had been observed stripping HTML comments entirely from
+returned review/comment bodies, so a round-state protocol relying solely on
+the invisible `<!-- atlas-review round:N -->` marker (and
+`<!-- atlas-review-ack -->`) could silently undercount: a resumed or
+restarted session reading back its own prior reviews would see no markers,
+conclude it's round 1, re-post the ACK, and potentially re-raise findings a
+human had already settled in an earlier round. Closed #355 and addressed the
+actionable (repo-side) portion of #354 — the underlying `pull_request_read`
+behavior itself is Claude Code/GitHub-MCP tooling this repo doesn't control.
+
+Made the visible signal primary instead of an afterthought: every
+round-posting review now opens with a visible `## Round N — ...` heading as
+its first line, in addition to (not instead of) the existing HTML-comment
+marker; the ACK comment now also carries the literal visible phrase "atlas
+reviewer engaged" alongside its marker, with detection checking for either
+signal; round-derivation logic in `atlas-review-pr.md`, `atlas-poll-and-
+review.md`, `atlas-rebase-stale.md`, and the routine prompts embedded in
+`docs/runbooks/pr-review-automation.md` all updated to parse the heading
+first, falling back to the marker only where the heading is absent. Three
+review rounds on PR #359 followed: a Copilot pass caught the "past review
+summaries carry both" wording overstating the guarantee (reworded to say
+only reviews posted by the updated command going forward are guaranteed
+dual-encoded); a CodeRabbit finding caught the poller's round-1 ack branch
+triggering on ack-absence alone rather than also checking round count (a PR
+with an already-missing-or-unreadable ack but existing round reviews could
+get a spurious "round 1" re-ack); an atlas review finding caught
+`REVIEW.md`/`templates/REVIEW.md` still describing the ACK's visible phrase
+as mere illustrative wording, with no mention of the heading-first/
+marker-fallback rule, despite being the canonical copy other repos vendor
+and what `atlas-review-pr.md` step 3 treats as authoritative when present;
+and a CodeRabbit finding caught the Model B poller's own ack-posting
+instruction still saying to post only the invisible marker, missed when the
+rest of the PR updated every other ack-posting site. Three further
+CodeRabbit findings (no reviewer-identity binding on ACK/round detection,
+the ack-as-lock pattern not being atomic, "unreadable" collapsing into
+"absent") were knowingly deferred to #360.
+
+**Verification:** clean CI, atlas round-2 APPROVE, no author-stated hold;
+`REVIEW.md`/`templates/REVIEW.md` kept byte-identical per
+`test_review_template_sync.py`.
 
 ### 2026-09-03 — #364: stop writing raw `tool_input` and absolute `transcript_path` into the committed learnings log
 

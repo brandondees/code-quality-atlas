@@ -191,7 +191,7 @@ of the standalone plugin's 44 skills, router, and `commands/`, none of which shi
 under `collapsed/`'s own source tree.
 
 The two forms need the hook for different reasons. For the **standalone**
-plugin: with 33+ skills, individual skill **descriptions** can be dropped from
+plugin: with dozens of skills, individual skill **descriptions** can be dropped from
 the model's skill listing (budgeted to ~1% of context, not re-injected after
 `/compact`), which makes the lenses easy to overlook on a plain "review this"
 request. The **collapsed** form only ships 4 skills, so that mechanism doesn't

@@ -2,9 +2,11 @@
 
 **Status: implemented** (PR #80, branch `claude/plans-implementation-5abwaw`). The
 unchecked task boxes below are the original execution plan, kept as the historical
-record; the shipped behavior is the source of truth.
+record; the shipped behavior is the source of truth. This document is historical —
+do not execute the unchecked tasks below; the sub-skill instruction that follows
+applied only while the plan was unimplemented.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** ~~REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.~~ (superseded — see Status above)
 
 **Goal:** Replace the router's 2–4 lens *cap* with a relevance-**ranked** list plus three depth **modes** (triage / review / comprehensive), each with a severity floor, all declared in a new manifest `modes:` section and rendered into the generated router and synthesizer — so a reviewer can ask for "all relevant lenses" and the long-tail findings actually surface.
 
