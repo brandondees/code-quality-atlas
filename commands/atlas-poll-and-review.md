@@ -10,7 +10,7 @@ description: >-
   webhook trigger surviving. See the source repo's
   (brandondees/code-quality-atlas) docs/runbooks/pr-review-automation.md
   ("Model B") for when to pick this over the event-triggered design.
-argument-hint: "[repo, or label/author filter — omit to sweep every attached repo's open PRs]"
+argument-hint: "<repo, or comma-separated repo list> [label/author filter] — a repo scope is required, not optional"
 allowed-tools: Task, Skill, Read, Grep, Glob, Bash, mcp__github__list_pull_requests, mcp__github__pull_request_read, mcp__github__get_file_contents, mcp__github__get_commit, mcp__github__list_commits, mcp__github__get_me, mcp__github__update_pull_request_branch, mcp__github__add_comment_to_pending_review, mcp__github__pull_request_review_write, mcp__github__add_issue_comment, mcp__github__add_reply_to_pull_request_comment, mcp__github__resolve_review_thread
 ---
 
@@ -37,8 +37,12 @@ does the actual review inline rather than escalating to something else that
 might also fail to fire. Keep the model split as strict as the split below —
 it's what keeps a repo with no open PRs cheap to poll every cycle.
 
-$ARGUMENTS names a repo (`owner/name`) or a label/author filter; omit it to
-sweep every repo this session has access to.
+$ARGUMENTS must open with a repo scope: a single `owner/name`, or a
+comma-separated list of them. An optional label/author filter may follow the
+repo scope, space-separated. **Do not sweep every attached repo when
+`$ARGUMENTS` is empty or omits the repo scope** — a blast radius that wide
+was never intended (issue #387); instead stop and report that a repo scope
+is required, without touching any repo.
 
 ## 1. Cheap triage — spawn a fast/cheap-model subagent
 
@@ -50,11 +54,12 @@ taken from any commenter (issue #360, gap 1). Calling it once here, not once
 per subagent, keeps the cheap pass cheap.
 
 Spawn one subagent (the `Task` tool, requesting the fastest/cheapest model
-your platform offers — e.g. Haiku) per repo being swept, telling it the login
-from above. Its job is purely mechanical listing, not judgment, so keep it off
-the stronger tier entirely: list every open PR (`mcp__github__list_pull_requests`,
-paginate fully, applying `$ARGUMENTS`'s filter if a label/author was given —
-not a repo name), and for each PR report back: PR number, `draft` (true/false),
+your platform offers — e.g. Haiku) per repo named in `$ARGUMENTS`'s repo
+scope, telling it the login from above. Its job is purely mechanical listing,
+not judgment, so keep it off the stronger tier entirely: list every open PR
+in that one repo (`mcp__github__list_pull_requests`, paginate fully, applying
+`$ARGUMENTS`'s label/author filter if one was given), and for each PR report
+back: PR number, `draft` (true/false),
 `mergeable_state`, HEAD commit SHA, whether an ack **authored by the given
 login** exists — either an `<!-- atlas-review-ack -->` issue comment or the
 visible text "👀 atlas reviewer engaged" (`pull_request_read` has been observed
@@ -75,9 +80,15 @@ acting, so keep it structured and compact.
 
 From the triage report, for each non-draft PR:
 
-- **`mergeable_state` = `behind`, no conflicts**: bring it up to date with
-  `mcp__github__update_pull_request_branch` (no comment — this is silent and
-  routine).
+- **`mergeable_state` = `behind`, no conflicts**: **first check whether the PR
+  is from a fork** (`head.repo.full_name != base.repo.full_name`, from step
+  1's PR data or a fresh `pull_request_read` if not already reported) — a
+  fork PR's branch belongs to the contributor's own repo, not this one, and
+  `update_pull_request_branch` writes a merge commit onto it, which is more
+  write power than this sweep should exercise on someone else's fork without
+  their say-so (issue #387). **Skip fork PRs here** — note the skip in step
+  5's report — and only call `mcp__github__update_pull_request_branch` for
+  same-repo PRs (no comment — this is silent and routine).
 - **`mergeable_state` = `dirty`**: if no unresolved `<!-- atlas-rebase-poke -->`
   review thread already exists, post one — read the diff
   (`mcp__github__pull_request_read`, `get_files` method), open a pending review
@@ -222,6 +233,15 @@ subagents each posting to GitHub simultaneously. This is a starting number,
 not a hard platform limit — raise or lower it per the account's actual
 concurrency/rate-limit headroom.
 
+**Per-tick total cap: at most 20 review subagents spawned in one sweep,
+across every repo combined**, independent of the in-flight concurrency cap
+above (issue #387) — a repo scope covering many busy repos could otherwise
+queue far more review work than one tick should take on. Order candidate PRs
+oldest-`created_at`-first within the combined list and spawn only up to the
+cap; any PR needing a review beyond it is not spawned this tick — name it as
+deferred in step 5's report so it's picked up on the next sweep instead of
+silently dropped.
+
 ## 4. Idempotency
 
 Never spawn two review subagents for the same PR in one sweep. Never post a
@@ -233,6 +253,7 @@ naturally idempotent.
 ## 5. Report
 
 End with one line per repo swept: counts of updated (rebased), conflict-poked,
-round-1-reviewed, re-reviewed, skipped, and any stuck ACK locks cleared or
-flagged (step 3). Nothing else goes to GitHub beyond the actions above and
-any `delete_pending` calls.
+round-1-reviewed, re-reviewed, skipped, fork-PR branch-updates skipped (step
+2), reviews deferred past the per-tick cap (step 3), and any stuck ACK locks
+cleared or flagged (step 3). Nothing else goes to GitHub beyond the actions
+above and any `delete_pending` calls.

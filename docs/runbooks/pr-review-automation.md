@@ -671,8 +671,9 @@ a review.
      posting to GitHub at once.
 - **Connectors:** none needed (same as §2 — strip the defaults).
 - **Permissions:** leave **Allow unrestricted branch pushes** *off* — this
-  routine only rebases via the GitHub API and posts reviews/comments, never
-  pushes a commit.
+  routine writes only via the GitHub API (comments, reviews, and step 2's
+  `update_pull_request_branch` call), never a commit pushed from its own
+  checkout.
 
 **This absorbs §1a and most of §2's coverage-escalation step.** With this
 routine running, there's no separate "re-request review" escalation to wire
