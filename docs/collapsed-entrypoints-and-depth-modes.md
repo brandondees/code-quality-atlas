@@ -130,7 +130,7 @@ generated from the manifest so both forms behave identically.
   `/plugin install code-quality-atlas-collapsed@code-quality-atlas`. Auto-updates
   via the same marketplace-clone refresh.
 - `tooling/package-account-zips.sh --collapsed` zips the 4 entrypoints (4 uploads,
-  not 41) for the claude.ai GUI.
+  not 44) for the claude.ai GUI.
 - `tooling/vendor-skills.sh <repo> --collapsed` vendors the 4 entrypoints into a
   repo's `.claude/skills/`.
 - **Install one form, not both** — both would double-register/trigger. Documented
