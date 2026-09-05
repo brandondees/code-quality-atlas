@@ -22,13 +22,13 @@ Chronological record of how the research evolved. Newest at the bottom.
 
 **Next:** continue iterating the *research* — fill `references.md` TODOs, mine static-analysis tools for concrete checks per category, resolve candidate additions — before moving to phase 2 (skill-suite architecture).
 
-### 2026-06-08 (cont.) — map pressure-test → v0.2
+## 2026-06-08 (cont.) — map pressure-test → v0.2
 
 - Resolved all 7 candidate additions *(→ D5)*. Map now **27 categories**: added #25 AI/LLM-integration, #26 Configuration & environment, #27 Compliance/licensing/provenance; broadened #3 and #9; cross-linked #4 ↔ #23.
 - Logged new open question Q9 (compliance scope boundary).
 - Kicked off the parallel research pass: one research agent per cluster (references + static-analysis-tool rule mining + reviewable-heuristic seeds), output filed under `docs/research/`. Cluster I taken extra-deep as the template.
 
-### 2026-06-08 (cont.) — research pass: web-access blocker + salvage
+## 2026-06-08 (cont.) — research pass: web-access blocker + salvage
 
 - **Key environment finding:** general-purpose subagents are **sandboxed without network** (WebSearch/WebFetch/curl all denied), but the **main loop has working web access**. Future research must be run from the main loop (or hand sources to subagents), not delegated to web-less subagents.
 - Of 6 cluster agents: **3 correctly refused to fabricate and stopped** (I, III, V — no files); **3 wrote from-memory drafts** with `(verify)` tags + caveats (II readability, IV runtime, VI evolution). Drafts committed as **unverified v0** for safekeeping. (Cluster IV left ~15 canonical URLs unmarked — to be verified.)
@@ -36,7 +36,7 @@ Chronological record of how the research evolved. Newest at the bottom.
 
 **Next:** redo the research properly from the main loop (where web works) — write the 3 missing clusters (I/III/V) with verified citations, and verify/upgrade the 3 drafts (clear `(verify)`, add real URLs). Cluster I first, as the exemplar.
 
-### 2026-06-09 — full web-grounded research pass complete (all 6 clusters)
+## 2026-06-09 — full web-grounded research pass complete (all 6 clusters)
 
 Ran the whole research pass from the **main loop** (web works there; subagents are sandboxed without it). For each cluster: verified references, static-analysis tool rule IDs, and reviewable heuristics against live sources, committing per cluster.
 
@@ -49,7 +49,7 @@ Ran the whole research pass from the **main loop** (web works there; subagents a
 
 **Phase 1 (research & taxonomy) is effectively complete.** Remaining before phase 2: resolve the granularity question (Q1) and a few residual open questions; then design the skill-suite architecture.
 
-### 2026-06-09/10 — phases 2–3: architecture, pipeline, all 22 skills built (sessions 2–5)
+## 2026-06-09/10 — phases 2–3: architecture, pipeline, all 22 skills built (sessions 2–5)
 
 - **Phase 2 designed & built:** manifest-driven generator with provenance hashes, drift-checker, eval validator, cross-model runner (Ollama + any OpenAI-compatible server; llama-server/GGUF path for sandboxes). Docs are the source of truth; skills regenerate. (PRs #1–#2.)
 - **Wave 1 (6 ★ skills)** refined + cross-model gated on a local 7B (qwen2.5-coder, temp 0). Found the 3B over-flagging mode and the ~7–8B clean-code-precision floor. (PR #3.)
@@ -57,7 +57,7 @@ Ran the whole research pass from the **main loop** (web works there; subagents a
 - **Wave 3 (11 skills: 6 diff-shaped + 5 repo-shaped audits)** + wave-1 retrofit + **G1 single-owner enforcement** in the manifest validator. New lessons: the list template needs an explicit "correct code → exactly 'No findings'" escape hatch (it induced list-filling on clean code); audit skills hallucinate scan data without a "cite only what the scan shows" rule; range-arithmetic is a 7B ceiling.
 - **Phase 3 complete: all 22 behaviors / 27 categories built**, each with examples + ≥3 eval scenarios, gated on two model tiers. Remaining: Q12 packaging (plugin wrap).
 
-### 2026-06-10 (cont.) — Q12 packaging: repo is now an installable plugin
+## 2026-06-10 (cont.) — Q12 packaging: repo is now an installable plugin
 
 - Added `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json`; `skills/` already matched the
   plugin-default layout, so packaging was purely additive *(→ D9)*.
@@ -69,7 +69,7 @@ Ran the whole research pass from the **main loop** (web works there; subagents a
   (critique research → drift → regenerate → re-gate) plus future re-granularization
   via the manifest as model capability shifts.
 
-### 2026-06-11 — first dogfood feedback → packaging fixes (D10)
+## 2026-06-11 — first dogfood feedback → packaging fixes (D10)
 
 A user session that drove the suite by hand (fetching SKILL.md + heuristics from
 the repo to review a sync-engine design and a diff) returned the first real
@@ -100,7 +100,7 @@ router exists, `design` only on diff lenses. The router carries
 `built_from: []` (manifest-derived; docs drift can't flag it) and ships 4 eval
 scenarios + examples. Suite is now **23 skills**; CI gate updated.
 
-### 2026-06-11 (cont.) — license for public release (D11)
+## 2026-06-11 (cont.) — license for public release (D11)
 
 Private-repo install friction prompted flipping the repo public. Pre-publication
 sweep: no secrets/PII (example credentials are labeled fakes), no third-party
@@ -110,7 +110,7 @@ LICENSE-CC-BY-4.0, SPDX headers on Python sources, `license: MIT AND CC-BY-4.0`
 in plugin.json, and a README License section. Visibility flip itself happens in
 GitHub settings.
 
-### 2026-06-12 — composition back half: the synthesizer (D12)
+## 2026-06-12 — composition back half: the synthesizer (D12)
 
 Picked up the one substantive open thread after a clean "what's next" sweep
 (all phases done, CI green, no open PRs/issues): the residual half of Q7. D10's
@@ -139,7 +139,7 @@ manifest-canonical, `built_from: []`, no-docs-drift generation pattern.
   severity-ranking with a Blocker float) + examples. Suite is now **24 skills**;
   CI gate, README, and Q7 (now RESOLVED) updated. 60 tests pass, no drift.
 
-### 2026-06-12 (cont.) — reconcile the open-questions ledger
+## 2026-06-12 (cont.) — reconcile the open-questions ledger
 
 A "let's look at the other questions" pass found the *Open questions* section
 significantly stale: five questions still listed as open were actually answered
@@ -164,7 +164,7 @@ Added a "Live state" banner naming what's **genuinely** open: Q3 (review-vs-
 maintenance modes), Q4 (findings-vs-scores), Q6 (idiom packs), the Q8 fixing
 residual, and the Q2 low-priority candidates. Docs-only; 61 tests pass, no drift.
 
-### 2026-06-12 (cont.) — team preferences overlay (Q13, design)
+## 2026-06-12 (cont.) — team preferences overlay (Q13, design)
 
 First-usage feedback (user): the suite is research-rooted and pushes "objectively
 better" defaults, but has nowhere to incorporate the **owner's/team's considered
@@ -183,7 +183,7 @@ standards. Overlay lives in the *reviewed* repo (`.code-quality-atlas/preference
 read at review time by the router, kept out of generated-skill provenance (D6).
 Status: design, awaiting review before implementation planning.
 
-### 2026-06-12 (cont.) — factor-level coverage audit (G9) + router-intent question (Q14)
+## 2026-06-12 (cont.) — factor-level coverage audit (G9) + router-intent question (Q14)
 
 User asked whether the suite has scope gaps — research that settled into the docs
 without reaching the skills — prompted by noticing **no naming findings ever
@@ -212,7 +212,7 @@ much to run) — and captures four candidate directions: review-depth *modes*
 catalog, signal-based matching+ranking, and progressive-phase routing. Framing
 captured, no decisions yet. Docs-only.
 
-### 2026-06-12 (cont.) — G10 (the enforcement apparatus as un-framed surface) + round-2 gap hunt opened
+## 2026-06-12 (cont.) — G10 (the enforcement apparatus as un-framed surface) + round-2 gap hunt opened
 
 Follow-on from the G9/Q14 discussion. User asked where "improve the quality
 *tooling*" lands — e.g. propose a vuln scanner, tidy up linter ignores. Chasing it
@@ -244,7 +244,7 @@ dependency-*selection*-vs-patching point), (D) socio-technical & responsible eng
 covered? distinct behavior? shape? prior art? disposition) to avoid re-flagging covered
 facets. Feeds a possible taxonomy v0.3. Research running; synthesis to follow.
 
-### 2026-06-12 (cont.) — round-2 gap hunt synthesized (→ taxonomy v0.3 proposal + Q15)
+## 2026-06-12 (cont.) — round-2 gap hunt synthesized (→ taxonomy v0.3 proposal + Q15)
 
 Five parallel research agents (axes A–E) returned; synthesized into
 [`research/taxonomy-gap-hunt-round-2.md`](research/taxonomy-gap-hunt-round-2.md).
@@ -273,7 +273,7 @@ docs-as-system; …). Plus the cross-cutting tool-mechanization `mechanize-with:
 **Not editing `taxonomy.md` yet — owner decision pending on how much to promote vs.
 fold (a restraint call).** Docs-only.
 
-### 2026-06-12 (cont.) — taxonomy v0.3 drafted (D13) + decision-time shape design (Q15 resolved)
+## 2026-06-12 (cont.) — taxonomy v0.3 drafted (D13) + decision-time shape design (Q15 resolved)
 
 Owner chose **full v0.3 draft** + **design pass first** for the decision-time shape.
 Did the design pass first (it gates how #29 enters the map):
@@ -295,7 +295,7 @@ clean (61 tests pass). **Next: the v0.3 build phase** — research sections for 
 new categories + manifest entries + generated skills/evals, and regenerating the
 add-factor-affected skills (#16/#17/#19/#20/#22/#25/#27) whose research sections change.
 
-### 2026-06-12 (cont.) — v0.3 build, wave 1: the first decision-time lens
+## 2026-06-12 (cont.) — v0.3 build, wave 1: the first decision-time lens
 
 Owner chose **decision-time (#29) first**. Shipped `reviewing-decision-lifecycle`
 end-to-end — the suite's first **decision-shaped** lens, validating the new shape
@@ -319,7 +319,7 @@ the ~10 add-factor regenerations (#16/#17/#19/#20/#22/#25/#27). Optional polish:
 shape-aware "Reviewer discipline" wording (says "code" for decision/repo lenses)
 and a decision-specific synthesizer verdict vocabulary (adopt / revisit / reject).
 
-### 2026-06-12 (cont.) — research review & expansion pass (first compounding-loop iteration on the research itself)
+## 2026-06-12 (cont.) — research review & expansion pass (first compounding-loop iteration on the research itself)
 
 A "review the research, find more to add" pass — the first substantive *research*
 critique since the 2026-06-09 pass, run from the main loop with live web access.
@@ -356,7 +356,7 @@ TODOs annotated). Pipeline: drift flagged 6 skills → regenerate → no drift,
 sandbox; additions are appended checks, not changed behavior — re-gate per the
 runbook when next on a machine with Ollama).
 
-### 2026-06-12 (cont.) — PR #21 reconciled with main; v0.3 build wave 2 (#30) on a new branch
+## 2026-06-12 (cont.) — PR #21 reconciled with main; v0.3 build wave 2 (#30) on a new branch
 
 PR #21 reconciled with `main` (merged PRs #22 research-expansion + #25 hook).
 One numbering collision: `main` and this work both minted a **Q14**, and main's
@@ -423,7 +423,7 @@ valid. **Not yet addressed:** the harness-level cost of 22 names in the listing
 and the fact that frontmatter descriptions can be dropped from the model's skill
 budget remain harness constraints the SessionStart hook mitigates but can't fix.
 
-### 2026-06-12 (cont.) — G11 + artifact-scoped-lens research (the foundational pattern)
+## 2026-06-12 (cont.) — G11 + artifact-scoped-lens research (the foundational pattern)
 
 Owner question while discussing the decision-gated open questions: *do we have anything
 correlating to Anthropic's Agent Skill authoring best-practices guide?* — then, on finding we
@@ -547,7 +547,7 @@ clean-code over-flagging). Posture for this skill at 7-8B stays detection +
 pair with deterministic linters (hadolint for `:latest`, a flag-audit tool) for
 exhaustiveness. The other five skills signed off as-is.
 
-### 2026-06-12 (cont.) — decision sweep: Q16 resolved (D14, promote agentic safety → #32)
+## 2026-06-12 (cont.) — decision sweep: Q16 resolved (D14, promote agentic safety → #32)
 
 Resumed the decision-gated open questions as a sweep (the back half of the "let's discuss the
 decision questions" thread). First call: **Q16 → promote** (user, D5-style). Agentic/tool-use
@@ -570,7 +570,7 @@ commit** to bundle Q16/Q13/Q18 decision-records into one docs PR at the end of t
 categories. Remaining sweep decisions: **Q13** (team-preferences overlay — keystone) and **Q18**
 (artifact-scoped lens hosting pattern).
 
-### 2026-06-12 (cont.) — decision sweep complete: Q13 (approved/deferred) + Q18 → D15
+## 2026-06-12 (cont.) — decision sweep complete: Q13 (approved/deferred) + Q18 → D15
 
 Closed the remaining two sweep decisions.
 
@@ -1136,7 +1136,7 @@ Net: G27 **passes the cross-model gate at the documented floor.** Follow-up wort
 considering: the `num_ctx` harness fix means earlier Ollama-based eval runs in the
 repo's history may have been silently truncated too — worth a spot re-check.
 
-### 2026-06-15 (cont.) — Wave A primitives: G23 detect-and-route + G26 valence axis
+## 2026-06-15 (cont.) — Wave A primitives: G23 detect-and-route + G26 valence axis
 
 **Goal:** build the two Wave A foundation primitives from [`research/gap-hunt-synthesis.md`](research/gap-hunt-synthesis.md) — they sit upstream of most high-value lenses, so they go first.
 
@@ -1149,7 +1149,7 @@ repo's history may have been silently truncated too — worth a spot re-check.
 
 **Resolves:** G23, G26 dispositions → shipped; **Q3 largely resolved** (review/maintenance is a valence toggle, not a separate mode). Remaining Wave A: G19 (synthesizer coverage/limitations block), G31 (tensions enrichment), Q19 (mechanize-with nudge).
 
-### 2026-06-15 (cont.) — Wave A finish: G19 coverage block + G31 tensions + Q19 mechanize-with
+## 2026-06-15 (cont.) — Wave A finish: G19 coverage block + G31 tensions + Q19 mechanize-with
 
 Closed out Wave A from [`research/gap-hunt-synthesis.md`](research/gap-hunt-synthesis.md) — three near-free synthesizer/generator edits, all regenerating cleanly (no drift).
 
@@ -1161,7 +1161,7 @@ Closed out Wave A from [`research/gap-hunt-synthesis.md`](research/gap-hunt-synt
 
 **Resolves:** G19, G31 dispositions → shipped; **Q19 → resolved/built**. Wave A is complete. Next per the synthesis: **Wave B add-factors** (G21 operational time-bombs, G28 claims-vs-evidence, G29 root-cause, G25 green/FinOps, G13 tidyings, G32 pre-existing defects, G12 acceptance-criteria) — cheap, regenerate from the manifest.
 
-### 2026-06-15 (cont.) — Wave A cross-model re-gate (#45 + #46)
+## 2026-06-15 (cont.) — Wave A cross-model re-gate (#45 + #46)
 
 Closed the deferred D6/D8 ratchet on the Wave A mechanism work. Ran on local
 Ollama 0.23.2 with **qwen2.5:7b** (the documented 7-8B floor) and **llama3.2:3b**
@@ -1197,7 +1197,7 @@ surfaces:
 **Verdict: Wave A passes the cross-model gate at the 7-8B floor; the core
 no-over-flagging property holds even at 3B.** Q19's pending eval pass is now done.
 
-### 2026-06-15 (cont.) — Wave B wave 1: G21 operational time-bombs + G28 claims-vs-evidence
+## 2026-06-15 (cont.) — Wave B wave 1: G21 operational time-bombs + G28 claims-vs-evidence
 
 First Wave B add-factors from [`research/gap-hunt-synthesis.md`](research/gap-hunt-synthesis.md) — pure heuristic additions to existing lenses, edited at the research source and regenerated (drift clean), each with a single G1 owner and an eval.
 
@@ -1217,7 +1217,7 @@ The cohesive "latent / time-delayed defect" thread is threaded into each factor 
 
 **Resolves:** G21, G28 → shipped. Wave B remaining: G29 (root-cause-vs-symptom), G25 (green/FinOps), G13 (tidyings, now that G26 valence exists), G32 (pre-existing/adjacent defects, needs G23+G26 — both shipped), G12 (acceptance-criteria traceability).
 
-### 2026-06-15 (cont.) — G9 budget layer: inline-priority marker (deep factors now surface)
+## 2026-06-15 (cont.) — G9 budget layer: inline-priority marker (deep factors now surface)
 
 The Wave A/B add-factors kept landing in the **full checklist** (`reference/heuristics.md`) but not the inlined **Top checks**, because a bundled lens splits the ~8-check budget across its categories and a factor past position ~4 never makes the head. That is the G9 propagation leak — "category ownership is complete, factor *surfacing* leaks." Fixed the budget layer of G9 (the router/Q14 and severity-trim layers remain open).
 
@@ -1233,7 +1233,7 @@ The Wave A/B add-factors kept landing in the **full checklist** (`reference/heur
 
 **Resolves:** G9 **budget layer** (partial — router under-selection Q14 and severity-trimming remain). Unblocks the rest of Wave B: future add-factors can be marked to surface immediately.
 
-### 2026-06-15 (cont.) — Wave B wave 2: G29 band-aid, G25 cost+carbon, G13 economics, G12 acceptance-criteria
+## 2026-06-15 (cont.) — Wave B wave 2: G29 band-aid, G25 cost+carbon, G13 economics, G12 acceptance-criteria
 
 Four more Wave B add-factors, each at a single G1 owner, regenerated from research (drift clean), with evals. The G9 priority marker (shipped earlier today) is now used to surface the two highest-value ones as top-checks.
 
@@ -1248,7 +1248,7 @@ Four more Wave B add-factors, each at a single G1 owner, regenerated from resear
 
 **Resolves:** G29, G25 → shipped; G13 parts (1)+(3) shipped (part 2 = Q8); G12 shipped as factor. **Wave B remaining: G32** (pre-existing/adjacent defects — the attribution axis, its own PR next).
 
-### 2026-06-16 — Wave B close-out: G32 pre-existing/adjacent defects (the attribution axis)
+## 2026-06-16 — Wave B close-out: G32 pre-existing/adjacent defects (the attribution axis)
 
 The last Wave B item from [`research/gap-hunt-synthesis.md`](research/gap-hunt-synthesis.md). G32 is **the fourth instance of the conflation pattern** — *reviewability ⊥ attribution* — after G23 (⊥ authority/route) and G26 (⊥ application-timing/valence). Its three predecessors shipped in Wave A as **cross-cutting generator prose** (the per-lens *Reviewer discipline* guard + the synthesizer finding contract), so G32 lands the same way rather than as a single-lens topic heuristic. This keeps it a true primitive (every lens) and keeps `built_from` untouched, so drift stays clean.
 
@@ -1263,11 +1263,11 @@ The last Wave B item from [`research/gap-hunt-synthesis.md`](research/gap-hunt-s
 
 **Resolves:** G32 → shipped. **Wave B is closed** (G27, G21, G28, G29, G25, G13(1)+(3), G12, G32 all shipped; G13 part 2 = Q8 auto-apply). **Cross-model re-gate still owed** — batched across the Wave B add-factor PRs (#48 / #50) + this G32 close-out; it needs Ollama/local models (qwen2.5:7b floor + a 3B canary) and so runs on a machine with that substrate, not in this environment. Next strategic step is Wave C, led by **G14** (AI-authored-code-defects lens).
 
-### 2026-06-16 (cont.) — dogfood fix: shape-gate the G32 attribution guard
+## 2026-06-16 (cont.) — dogfood fix: shape-gate the G32 attribution guard
 
 Ran the atlas suite against PR #53 itself (the feature route: tracing-correctness, checking-restraint, test-quality, naming-readability, + pr-hygiene). The restraint+correctness lenses surfaced one Minor that CodeRabbit's clean pass missed: `build_skill_md` emitted the diff-specific attribution guard ("this PR", "touched code", "a repo-wide hunt is the audits' job") onto **all** lenses, including the 8 repo-shaped audits (where repo-wide hunting *is* the job — self-referential) and the decision lens (which reviews an ADR, not a diff). Fixed by gating the paragraph on `skill.shape == "diff"`, mirroring `_scope_line`. The guard now renders on the 18 diff lenses only; the defect/improvement valence guard stays shape-neutral (unchanged). Test added (`test_attribution_guard_is_diff_shaped_only`). `pytest` 96 pass; drift clean; eval OK; markdownlint 0 errors.
 
-### 2026-06-17 — Wave C opens: G14 AI-authored-code defects (taxonomy v0.4, new lens #34)
+## 2026-06-17 — Wave C opens: G14 AI-authored-code defects (taxonomy v0.4, new lens #34)
 
 First **Wave C** new lens, and the first **v0.4** taxonomy promotion. Unlike the Wave B add-factors (cross-cutting prose that regenerates), a new lens carries the full compounding loop (D6/D8): a dedicated research section → taxonomy category → manifest entry → generate → evals. G14 is the highest-base-rate new lens and **reflexively important — this suite is itself AI-built**, so it should hold its own output to this bar.
 
@@ -1285,7 +1285,7 @@ First **Wave C** new lens, and the first **v0.4** taxonomy promotion. Unlike the
 
 **Resolves:** G14 → shipped. **Wave C opened.** Remaining Wave C (each a full research+eval pass): G16 ethical/responsible-design (needs G23), G20 agent-legibility (cluster-II rotation), G30 threat-modeling (decision-shape, needs Q15), G18-interoperability. **Cross-model re-gate still owed** — now also covers this new lens; batch on a machine with the Ollama substrate (qwen2.5:7b floor + 3B canary), not this environment.
 
-### 2026-06-17 (cont.) — Wave C: G20 agent-legibility (taxonomy v0.5, new lens #35)
+## 2026-06-17 (cont.) — Wave C: G20 agent-legibility (taxonomy v0.5, new lens #35)
 
 Second **Wave C** new lens, first **v0.5** promotion, and the deliberate **mirror of G14**: G14 reviews the quality *of* AI-authored code; G20 reviews the quality of code *for* AI readers — same readability axis, opposite direction, neither subsuming the other. Framing and prior art were fresh from the G14 pass, so this was the natural next pick.
 
@@ -1303,7 +1303,7 @@ Second **Wave C** new lens, first **v0.5** promotion, and the deliberate **mirro
 
 **Resolves:** G20 (code-owner role) → shipped. Remaining Wave C: G16 ethical/responsible-design (needs G23), G30 threat-modeling (decision-shape, needs Q15), G18-interoperability; plus the noted G20 **repo arm** follow-up. **Cross-model re-gate still owed** — now also covers this lens; batch on the Ollama substrate (qwen2.5:7b floor + 3B canary), not this environment.
 
-### 2026-06-17 (cont.) — Wave C: G16 ethical / responsible-design defects (taxonomy v0.6, new lens #36)
+## 2026-06-17 (cont.) — Wave C: G16 ethical / responsible-design defects (taxonomy v0.6, new lens #36)
 
 Third **Wave C** new lens, first **v0.6** promotion. The first Wave-C lens whose primitive dependency was already in place: G16 **needs G23** (the route axis), shipped in Wave A — so this lens is built around **detect-and-route** from the ground up rather than retrofitting it.
 
@@ -1322,7 +1322,7 @@ Third **Wave C** new lens, first **v0.6** promotion. The first Wave-C lens whose
 
 **Resolves:** G16 → shipped. Remaining Wave C: G30 threat-modeling (decision-shape, needs Q15), G18-interoperability; plus the noted G20 repo arm and G16 design-time arm follow-ups. **Cross-model re-gate still owed** — now also covers this lens; batch on the Ollama substrate (qwen2.5:7b floor + 3B canary), not this environment.
 
-### 2026-06-24 — bug-backlog sweep: clear-cut issues + count reconciliation
+## 2026-06-24 — bug-backlog sweep: clear-cut issues + count reconciliation
 
 Cleared the unambiguous slice of the open-issue backlog (no PRs were open) in one
 pass, and **flagged the issues that turned out to be non-bugs or design calls**
@@ -1372,7 +1372,7 @@ rather than forcing a fix.
 **Verification:** `pytest tests/` 100 pass; `cli drift` clean (the #58 warning changes
 no output); `cli eval` OK; markdownlint 0 errors.
 
-### 2026-06-24 (cont.) — backlog sweep, round 2: the flagged design-decision issues
+## 2026-06-24 (cont.) — backlog sweep, round 2: the flagged design-decision issues
 
 Followed up the clear-cut batch by resolving the three issues previously flagged as
 needing a maintainer call, making the conventional choice on each and documenting it:
@@ -1402,7 +1402,7 @@ are valid `SessionStart` matcher source values.
 `cli drift` clean (regeneration touched only the router); `cli eval` OK; markdownlint
 0 errors.
 
-### 2026-06-24 (cont.) — Wave C: G18 interoperability arm (taxonomy v0.7, new lens #37)
+## 2026-06-24 (cont.) — Wave C: G18 interoperability arm (taxonomy v0.7, new lens #37)
 
 Fourth **Wave C** new lens, first **v0.7** promotion, and the **last clearly-scoped
 Wave C item with a built dependency**. Resolves the **interoperability arm** of gap
@@ -1457,7 +1457,7 @@ plus the noted G20 repo arm and G16 design-time arm follow-ups. **Cross-model re
 owed** — now also covers this lens; batch on the Ollama substrate (qwen2.5:7b floor + 3B
 canary), not this environment.
 
-### 2026-06-24 (cont.) — build: #32 Agentic & tool-use safety lens (D14, closes the oldest build-backlog item)
+## 2026-06-24 (cont.) — build: #32 Agentic & tool-use safety lens (D14, closes the oldest build-backlog item)
 
 **Goal (from "what's ready to work on?" → "yep 32"):** ship `reviewing-agentic-safety`,
 the longest-standing decided-but-unbuilt item — #32 was promoted at D14/v0.3 with the
@@ -1504,7 +1504,7 @@ bump — #32 already lives in v0.7's taxonomy.
 re-gate still owed** — now also covers this lens; batch on the Ollama substrate (qwen2.5:7b
 floor + 3B canary), not this environment.
 
-### 2026-06-24 (cont.) — build: the `shape: artifact` family (D15 / Q18 / map-gaps G11)
+## 2026-06-24 (cont.) — build: the `shape: artifact` family (D15 / Q18 / map-gaps G11)
 
 **Goal (after merging #70 / #32):** ship the second decided-but-unbuilt backlog item — the
 **artifact review shape**. Not just a lens: a new *shape* (sibling to diff / repo / decision)
@@ -1553,7 +1553,7 @@ taxonomy category; #30 already documents the artifact-authoring factor.
 also covers this lens (new behavior); batch on the Ollama substrate (qwen2.5:7b floor + 3B
 canary), not this environment.
 
-### 2026-06-24 (cont.) — Cross-model re-gate: the six Wave C / D14 / D15 lenses
+## 2026-06-24 (cont.) — Cross-model re-gate: the six Wave C / D14 / D15 lenses
 
 Closed the deferred D6/D8 re-gate that had been **owed since 2026-06-15** across every
 lens shipped 2026-06-17→24 — the substrate (local Ollama) turned out to be available
@@ -1615,7 +1615,7 @@ clean-code precision floor by long-standing documentation; the two 7-8B tiers ar
 gate of record). **The re-gate debt carried across the Wave B/C/D14/D15 builds is
 cleared.**
 
-### 2026-06-24 (cont.) — Cross-model re-gate: the Wave B add-factors (G21 + G28)
+## 2026-06-24 (cont.) — Cross-model re-gate: the Wave B add-factors (G21 + G28)
 
 Closed the *other* half of the owed re-gate — the Wave B add-factor heuristics that
 shipped 2026-06-15 onto four existing lenses and were marked "cross-model re-gate
@@ -1691,7 +1691,7 @@ used the general `qwen2.5:7b` (the only qwen on this machine), not the documente
 `qwen2.5-coder:7b` floor — the SoD and clean-precision deltas above are attributable to
 that substrate difference, not to the heuristics.
 
-### 2026-06-24 (cont.) — Build: G18 safety arm (fail-toward-safe add-factors on #2/#28) — closes G18
+## 2026-06-24 (cont.) — Build: G18 safety arm (fail-toward-safe add-factors on #2/#28) — closes G18
 
 Built the **second and final arm of round-3 gap G18** — the ISO/IEC 25010:2023 **safety**
 characteristic (harm-prevention, distinct from #14 security = attacker-prevention). The
@@ -1741,7 +1741,7 @@ complete (both ISO 25010:2023 characteristics owned).** The general-model over-f
 known substrate caveat, now first-hand confirmed against the coder model side by side. The
 machine now has `qwen2.5-coder:7b` so future re-gates can use the documented floor directly.
 
-### 2026-06-27 — Build: #38 Threat modeling / design-time security lens (G30, v0.8) + cross-model re-gate
+## 2026-06-27 — Build: #38 Threat modeling / design-time security lens (G30, v0.8) + cross-model re-gate
 
 Shipped `reviewing-threat-model` (#38), the generative design-time threat-enumeration lens (STRIDE / trust boundaries / DFD / abuse cases), via the standard doc-driven build: a new #38 research section in [`research/cluster-4-runtime.md`](research/cluster-4-runtime.md), taxonomy v0.8, a manifest entry, and generated standalone + collapsed bundles. Realized as **`shape: diff` + `design: true`** (not `shape: decision`): the generator's `include_design` rule lands it in **both** the `reviewing-a-change` (code-only / no-design-doc path) and `reviewing-a-decision` (artifact-present path) collapsed entrypoints natively — the dual entry-path with no generator change. Owns enumeration; **delegates** the deep verdict to #14 (code vuln) / #32 (agent action) / #25 (model call) and **detect-and-escalates (G8)** to a human only for custom-crypto correctness or third-party-auth adjudication. The synthesizer's dedup was taught to recognize the non-file `boundary:<from>→<to>` / `component:<name>` finding location. Design spec: [`threat-modeling-design-time-security.md`](threat-modeling-design-time-security.md); plan: [`plans/2026-06-27-threat-modeling-lens.md`](plans/2026-06-27-threat-modeling-lens.md). The eval suite is deliberately adversarial — 21 scenarios across core-firing / per-STRIDE / delegate-and-escalate / red-team / precision, weighted toward false-negative hunting.
 
@@ -1753,7 +1753,7 @@ Shipped `reviewing-threat-model` (#38), the generative design-time threat-enumer
 
 **Verdict: SHIP with a RAISED supported-model floor for this lens.** Both independent families confirm the ~7-8B re-gate tier reliably misses the lethal-trifecta composition (the single most important threat class for an agentic-security lens) and under-fires the delegate/escalate routing — while the clean cases, injection traps, and theater traps hold, and in every miss the EXPECTED behavior is unambiguous and correctly specified by the lens. That is a **model-capability floor, not a heuristic defect**: the structure, delegation targets, and escalation predicates are right and are followed whenever the model is strong enough to see the threat locally; the trifecta-composition miss (false negatives) and the template-filling inflation (false positives, llama) are both floor effects of the tier. Per spec §5.3, this lens's supported floor is therefore set **above the standard 7-8B re-gate substrate** — real reviews should run on a stronger model (the standard cloud model). Two follow-ups tracked (spec §8 / Q21): (1) obtain the `qwen2.5-coder:7b` floor-of-record run once the harness timeout is resolved; (2) strengthen the lens's proportionality guard for no-/low-surface inputs (the S19/S20 over-flag wobble) — the one place the lens may marginally over-prompt toward noise. **Heuristics are NOT tuned** — they fire correctly; the failures are model execution, not lens specification.
 
-### 2026-06-28 — Threat-model lens follow-up (2): proportionality guard for no-/low-surface inputs
+## 2026-06-28 — Threat-model lens follow-up (2): proportionality guard for no-/low-surface inputs
 
 Closed **follow-up (2)** of the two tracked at the end of the 2026-06-27 #38 re-gate
 (spec §8 / Q21): the S19/S20 over-flag wobble — the one place the lens marginally
@@ -1796,7 +1796,7 @@ an output-template change (not a heuristic change), so per the playbook it does 
 cross-model re-gate to ship; the S19/S20 cases should simply be re-scored alongside follow-up
 (1)'s run when the substrate is next available, to confirm the over-flag is gone on the floor.
 
-### 2026-07-05 — Q15 build: the shared decision-record checklist (§5 item 2)
+## 2026-07-05 — Q15 build: the shared decision-record checklist (§5 item 2)
 
 Picked up the remaining decision-time-shape residue from Q15/[`decision-time-review-shape.md`](decision-time-review-shape.md). Items 1 and 4 of §5's concrete proposal (the `shape: decision` capability, `reviewing-decision-lifecycle`, the router's decision route) had already shipped 2026-06-12; item 2 — a shared decision-record checklist every design-capable lens applies when reviewing an ADR/RFC/adoption/deprecation artifact, closing §2's "the design-time mode is passive, it never asks the decision-native questions" gap — had not.
 
@@ -1806,7 +1806,7 @@ Added one demonstrating eval scenario each to the two lenses the router's decisi
 
 **Still open from Q15:** a standalone `adoption-&-exit` lens and a `shape: repo` cron `decision-record-audit` lens (§5 item 3) remain unbuilt — `reviewing-decision-lifecycle` currently folds that judgment into one lens. Docs updated: [`decision-time-review-shape.md`](decision-time-review-shape.md)§5a (new) and [`open-questions.md`](open-questions.md) Q15 status.
 
-### 2026-07-06 — Q15 build: decision-record currency (#39), resolving Q15
+## 2026-07-06 — Q15 build: decision-record currency (#39), resolving Q15
 
 Closed out Q15's last remaining piece — §5 item 3's `decision-record-audit` — after a scope check with the owner on how to split it from `reviewing-decision-lifecycle` without duplicating content.
 
@@ -1820,7 +1820,7 @@ Closed out Q15's last remaining piece — §5 item 3's `decision-record-audit` �
 
 **Q15 is now fully resolved** — see [`decision-time-review-shape.md`](decision-time-review-shape.md)§5b and [`open-questions.md`](open-questions.md) Q15.
 
-### 2026-07-06 — Q17 review: self-improvement loop, stage 1 approved (D17)
+## 2026-07-06 — Q17 review: self-improvement loop, stage 1 approved (D17)
 
 Reviewed [`self-improvement-loop.md`](self-improvement-loop.md) end to end (brainstorm since 2026-06-12) with the owner. Assessment: the signal taxonomy (S1–S8), the reuse of the existing docs→drift→regenerate→evals→ship pipeline as the "back half," and the named mitigations for the meta-loop's own failure modes (self-report bias, taste-laundering via S7, poisoned tier-3 input) all held up — no design gaps found.
 
@@ -1828,13 +1828,13 @@ Two calls made, recorded as **D17**: (a) the tier-1 local learnings log is **com
 
 Docs updated: [`open-questions.md`](open-questions.md) (D17 added, Q17 marked partially resolved) and `self-improvement-loop.md` (status header, §8 sub-question 2 resolved inline). **Build not started** — next session can pick up stage 1 (generator `feedback:` section + hooks) as its own scoped task.
 
-### 2026-07-12 — Fix markdownlint engine-version drift between CI and pre-commit (#134)
+## 2026-07-12 — Fix markdownlint engine-version drift between CI and pre-commit (#134)
 
 The 2026-06-13 entry above records `.github/workflows/ci.yml` and `.pre-commit-config.yaml` pinned to matching markdownlint-cli2 versions (action v23.2.0 / hook v0.22.1) — true at the time, but dependabot PR #119 bumped the CI action to v24.0.0 (bundling markdownlint-cli2 v0.23.0) without a corresponding pre-commit bump, since dependabot only tracks the `github-actions`/`pip` ecosystems, not the pre-commit repo. Flagged by the weekly Atlas self-audit (issue #134) as a Major finding: commit-time and CI now run different rule-engine versions.
 
 Bumped `.pre-commit-config.yaml`'s `rev` to `v0.23.0` to match, and updated its own "bump them together" comment. Left the 2026-06-13 log entry above untouched — it accurately described that session's state; this entry is the changelog-appropriate way to record the drift and its fix rather than rewriting history.
 
-### 2026-07-16 — Close out issue #134: remaining Atlas self-audit findings
+## 2026-07-16 — Close out issue #134: remaining Atlas self-audit findings
 
 Worked through the findings in issue #134 still open (the markdownlint drift above, the stale `hooks/route.sh` figures, the SPDX-header gap, and the README lens-count miscount had already been fixed in the interim — verified each against the current tree before touching anything, so nothing here duplicates those).
 
@@ -1849,7 +1849,7 @@ Worked through the findings in issue #134 still open (the markdownlint drift abo
 
 Full pipeline clean: `generate`/`drift`/`eval` (standalone + collapsed) all pass, 192 tests, markdownlint 0 errors across the repo.
 
-### 2026-07-18 — Close issue #149: orientation pointer for cold "what's next?" sessions
+## 2026-07-18 — Close issue #149: orientation pointer for cold "what's next?" sessions
 
 A prior session, asked "what's next?" cold, had no way to discover that this repo tracks its own active roadmap in `docs/` (`open-questions.md`'s decisions log + "genuinely still open" list, `docs/plans/`, `docs/map-gaps.md`) — it defaulted to scanning GitHub issues/PRs alone, closed out #134, fixed #147, and reported "nothing else queued" while a substantial pre-triaged backlog sat unread in the docs tree. Filed as issue #149 with a concrete suggested fix.
 
@@ -1857,7 +1857,7 @@ Added a short **"Orientation for new sessions"** section to this repo's own `AGE
 
 `python -m pytest` (210 tests) and `markdownlint-cli2` both clean. This closes issue #149. Picked over the other genuinely-open items (Q21 eval-hardening, Q17 stage-1 build, Q13 §9 residuals, Q6 idiom packs) because it was the smallest, most concretely-specified, owner-filed gap — and, fittingly, exactly the meta-problem this session itself would otherwise have repeated.
 
-### 2026-07-18 — Q17 build: self-improvement loop stage 1 ("Process notes + local log")
+## 2026-07-18 — Q17 build: self-improvement loop stage 1 ("Process notes + local log")
 
 With #149 closed, picked up the next concretely-scoped, already-approved item: D17 (2026-07-06) approved stage 1 of [`self-improvement-loop.md`](self-improvement-loop.md)'s §7 staged rollout for build — the generated Process-notes reflection step plus the opt-in invocation-logging hooks — and the previous session's log entry explicitly flagged it as "next session can pick up."
 
@@ -1871,7 +1871,7 @@ Updated `docs/open-questions.md` (Q17/D17 marked stage-1 ✅ built) and `docs/se
 
 `python -m pytest` (219 tests, 9 new) and `markdownlint-cli2` both clean; `python -m tooling.cli generate`/`drift` confirm no drift. **Stages 2-5 remain design-only**, per D17's original scoping — this session built exactly stage 1, nothing further.
 
-### 2026-07-18 — Q21 build: risk-tiered eval-min mechanism + sweeping-for-security hardened suite
+## 2026-07-18 — Q21 build: risk-tiered eval-min mechanism + sweeping-for-security hardened suite
 
 Asked to pick the next "what's next" item; offered a shortlist of the remaining genuinely-open, owner-judgment items (Q6 idiom packs, Q13 §9 residuals, Q21 eval comprehensiveness) since none of them had the kind of prior scoping/approval that made #149 and Q17 stage 1 safe to build unilaterally. Owner picked Q21.
 
@@ -1883,7 +1883,7 @@ Added test coverage for the mechanism itself, not just the content: `tests/test_
 
 Updated `docs/open-questions.md`'s Q21 entry (marked partially resolved: sub-questions 1-2 done, sub-question 3 and the remaining four floor-tier lenses' hardened suites tracked as the next steps) and the "Genuinely still open" summary line. **Generalizing to the other four floor-tier lenses, then eventually the preference tier, is the next tracked step** — the mechanism exists and one lens proves the pattern transfers; each additional lens is an independent, reversible follow-up, not a blocker on this entry.
 
-### 2026-07-26 — Q21 build: second hardened lens, `tracing-correctness-and-invariants` — and a genuine floor-of-record gap
+## 2026-07-26 — Q21 build: second hardened lens, `tracing-correctness-and-invariants` — and a genuine floor-of-record gap
 
 Picked up the next tracked Q21 step (the 2026-07-18 entry's explicit next-step pointer): generalize the `eval_min` hardening pattern to a second floor-tier lens. Chose `tracing-correctness-and-invariants` over the other three (`reviewing-migration-and-data-safety`, `reviewing-concurrency-and-async`, `hunting-silent-failures`) for no reason beyond it being next in the manifest's floor-tier list.
 
@@ -1895,7 +1895,7 @@ Picked up the next tracked Q21 step (the 2026-07-18 entry's explicit next-step p
 
 Updated `docs/open-questions.md`'s Q21 entry (second hardened instance recorded, the floor-of-record residual added, next step narrowed to the remaining three floor-tier lenses).
 
-### 2026-07-26 (same day, follow-up) — Q21: tuning pass + newer-model research for `tracing-correctness-and-invariants`'s floor gap
+## 2026-07-26 (same day, follow-up) — Q21: tuning pass + newer-model research for `tracing-correctness-and-invariants`'s floor gap
 
 Owner direction on the floor-of-record gap logged above: try a tuning pass first (option b), then document a recommendation (option a), and separately research whether a newer self-hosted model in the same size class does better — weighing inference speed as a real constraint, since this suite is meant to work for self-hosted deployments, not only frontier-model Claude Code sessions.
 
@@ -1910,7 +1910,7 @@ Owner direction on the floor-of-record gap logged above: try a tuning pass first
 
 **Disposition.** No single self-hosted 7-8B-class model reliably clears this lens's hardened bar — now confirmed across two independent models, so it's a real ceiling, not one model's training quirk. Recorded as this session's actual "(a)" recommendation in `open-questions.md`'s Q21 residual: at comparable, interactive-review-friendly latency, `qwen2.5-coder:7b` (tuned) and `qwen3.5:4b` (`think: false`) are roughly equivalent viable floor picks with non-overlapping miss profiles; for scheduled/batch (non-interactive) runs where latency doesn't matter, `qwen3.5:4b` with thinking on is the strongest self-hosted option seen so far, pending a follow-up run with a widened context window to resolve the four inconclusive scenarios. Deliberately not done this pass: widening `OLLAMA_NUM_CTX` in `tooling/run_evals.py` (a harness-wide change, not scoped to one lens's re-gate); a full thinking-mode-on run at that wider context; the `llama3.1:8b` cross-confirm (hit the same 600s-timeout infra flake as scenario 17, twice, still deferred).
 
-### 2026-07-26 (same day, second follow-up) — closing the two deferred infra items: scenario-17 hang didn't reproduce, and widening `num_ctx` doesn't fix the empty-answer scenarios
+## 2026-07-26 (same day, second follow-up) — closing the two deferred infra items: scenario-17 hang didn't reproduce, and widening `num_ctx` doesn't fix the empty-answer scenarios
 
 Picked up the two items the prior entry deliberately left open, after PR #182 (the hardened `tracing-correctness-and-invariants` suite) merged.
 
@@ -1922,7 +1922,7 @@ Picked up the two items the prior entry deliberately left open, after PR #182 (t
 
 **Corrected framing.** The prior write-up's "inconclusive, pending a wider-context re-run" framing was wrong at the two budgets actually tested — this looks like a **non-convergent reasoning-loop failure mode**, not a context-truncation measurement gap. For a subset of scenarios (~15%, 4/26), `qwen3.5:4b` with thinking on consumed its *entire* generation budget at both 8192 and 16384 without ever converging to an answer, and the 32768 attempt was aborted before completing a scenario (untested, not confirmed-unhelpful — so this isn't a claim that no context size could ever fix it, only that it remains unresolved within what was actually tried). The thinking-on recall advantage documented in the prior entry still stands on the scenarios where it *does* converge, but it now carries a known empty-answer rate at the tested budgets on top of the already-documented ~19× latency cost — a real reliability concern to weigh against the recall gain. Updated `open-questions.md`'s Q21 residual accordingly; the `llama3.1:8b` cross-confirm remains deferred (out of scope for this pass).
 
-### 2026-07-26 (same day, third follow-up) — Q21 build: third hardened lens, `reviewing-migration-and-data-safety`
+## 2026-07-26 (same day, third follow-up) — Q21 build: third hardened lens, `reviewing-migration-and-data-safety`
 
 Picked up the next tracked Q21 step: generalize the `eval_min` hardening pattern to a third floor-tier lens, choosing `reviewing-migration-and-data-safety` as the next one in the established floor-tier list order — no other reason, matching how `tracing-correctness-and-invariants` was picked over its two floor-tier siblings.
 
@@ -1936,7 +1936,7 @@ Picked up the next tracked Q21 step: generalize the `eval_min` hardening pattern
 
 Updated `docs/open-questions.md`'s Q21 entry (third hardened instance recorded, the floor-of-record result and template-recitation finding added, next step narrowed to the two remaining floor-tier lenses).
 
-### 2026-07-26 (same day, fourth follow-up) — Q21 build: fourth hardened lens, `reviewing-concurrency-and-async` — the campaign's worst floor gap yet
+## 2026-07-26 (same day, fourth follow-up) — Q21 build: fourth hardened lens, `reviewing-concurrency-and-async` — the campaign's worst floor gap yet
 
 Picked up the next tracked Q21 step: `reviewing-concurrency-and-async`, the fourth of the five floor-tier lenses.
 
@@ -1952,7 +1952,7 @@ Picked up the next tracked Q21 step: `reviewing-concurrency-and-async`, the four
 
 Updated `docs/open-questions.md`'s Q21 entry (fourth hardened instance recorded, flagged as the campaign's worst floor result so far, next step narrowed to the one remaining floor-tier lens).
 
-### 2026-07-27 — Q21: tuning pass on `reviewing-concurrency-and-async`'s floor gap
+## 2026-07-27 — Q21: tuning pass on `reviewing-concurrency-and-async`'s floor gap
 
 Owner direction: revisit the "documented as a raised floor, not tuned away" default across the Q21 lenses that got it — actually attempt tuning before accepting a gap, and only escalate to a baseline-model swap if tuning doesn't make good progress. The explicit goal: this eval-hardening effort exists to raise the bar, not to find a comfortable place to stop.
 
@@ -1962,7 +1962,7 @@ Flagged, not fixed: the harness's `_REVIEWER_DIRECTIVE` in `tooling/run_evals.py
 
 **Disposition revised to "real ceiling, confirmed by an actual tuning attempt"** — a stronger claim than the original "documented as a raised floor" (which had no tuning attempt behind it for this lens, same as `tracing-correctness-and-invariants` and `reviewing-migration-and-data-safety`). This is the first Q21 lens where the "not a fixable prompt artifact" conclusion is backed by evidence rather than being the default when a tuning pass wasn't tried. Kept the hardened suite as-authored. Next: apply the same real-tuning-attempt standard to the other two lenses with documented gaps (`reviewing-migration-and-data-safety`, then revisiting `tracing-correctness-and-invariants`'s narrower prior pass) before drawing a suite-wide conclusion about whether a baseline-model swap is warranted.
 
-### 2026-07-27 (same day, second tuning pass) — `reviewing-migration-and-data-safety`: 8 misses down to 3
+## 2026-07-27 (same day, second tuning pass) — `reviewing-migration-and-data-safety`: 8 misses down to 3
 
 Continued the tuning-attempt sweep with the next lens on the gap list: `reviewing-migration-and-data-safety` (8/24 missed from the original re-gate).
 
@@ -1974,7 +1974,7 @@ Continued the tuning-attempt sweep with the next lens on the gap list: `reviewin
 
 Updated `docs/open-questions.md`'s Q21 entry with the full before/after breakdown. Next: revisit `tracing-correctness-and-invariants`'s existing tuning pass (only one narrow decision-rule addition was tried previously, fixing 2 of 10 misses) with the same two-round approach before drawing any suite-wide conclusion about a baseline-model swap.
 
-### 2026-07-27 (same day, third tuning pass) — `tracing-correctness-and-invariants` revisited: strongest result of the sweep, plus a new reproducible infra hang
+## 2026-07-27 (same day, third tuning pass) — `tracing-correctness-and-invariants` revisited: strongest result of the sweep, plus a new reproducible infra hang
 
 Closed out the owner-directed tuning sweep with the last lens carrying a documented gap: `tracing-correctness-and-invariants`, whose only prior tuning attempt (a single decision-rule addition, from the original 2026-07-26 pass) had fixed 2 of ~10 misses. Re-graded fresh against the current `examples.md` rather than trusting the earlier session's count from memory — the accurate current baseline was **12 of 26 missed**, slightly more than the "roughly half" description implied.
 
@@ -1990,7 +1990,7 @@ Added six new worked bad→finding examples targeting the least-ambiguous misses
 
 **Suite-wide tuning-sweep verdict.** Three lenses tuned this session: concurrency (7/24→9/24, ~12% of its gap closed — a real ceiling), migration (16/24→21/24, ~63% closed — strong), tracing-correctness (14/26→21/26 pass with 1 inconclusive, ~64% of the 11 resolved misses closed — strongest). Two of three responded well to real tuning effort; this is the evidence the owner asked for before considering a baseline-model swap. Recommendation: **don't swap the baseline model wholesale** — most of this campaign's documented gap turned out to be a fixable prompt/example gap, not a hard model ceiling, so blaming the model first would have been premature. `reviewing-concurrency-and-async` remains the one lens where the evidence points toward an actual model-capability limit rather than a prompt-tuning opportunity, worth keeping in mind specifically (not suite-wide) for a future model comparison.
 
-### 2026-08-02 — Q21 build: fifth and final floor-tier lens, `hunting-silent-failures` — the floor-tier wave closes
+## 2026-08-02 — Q21 build: fifth and final floor-tier lens, `hunting-silent-failures` — the floor-tier wave closes
 
 Picked up the last tracked Q21 step: `hunting-silent-failures`, the fifth and final floor-tier lens (`sweeping-for-security`, `tracing-correctness-and-invariants`, `reviewing-migration-and-data-safety`, and `reviewing-concurrency-and-async` were hardened in prior sessions).
 
@@ -2000,7 +2000,7 @@ Picked up the last tracked Q21 step: `hunting-silent-failures`, the fifth and fi
 
 **All five floor-tier lenses are now hardened**, closing Q21's first wave. Updated `docs/open-questions.md`'s Q21 entry (fifth and final floor-tier instance recorded; the top-of-file "genuinely still open" summary and the section header both updated to reflect the wave's completion; next step narrowed to generalizing the mechanism to preference-tier lenses, a fresh scope decision rather than a continuation of this sweep).
 
-### 2026-08-02 (same day, follow-up) — Q21: preference-tier rollout kicks off with `reviewing-module-design`
+## 2026-08-02 (same day, follow-up) — Q21: preference-tier rollout kicks off with `reviewing-module-design`
 
 With all five floor-tier lenses hardened (PR #192), picked up the next tracked Q21 step: generalizing the A-E mechanism to preference-tier lenses. This is a fresh scope decision the docs explicitly flagged as undecided — the manifest has no `tier: preference` value, so all 30 non-floor lenses are preference-tier by omission, and hardening all 30 at once isn't a reasonable unit of work.
 
@@ -2012,7 +2012,7 @@ With all five floor-tier lenses hardened (PR #192), picked up the next tracked Q
 
 Updated `docs/open-questions.md`'s Q21 entry (the wave-1-first scope decision recorded, first preference-tier instance documented, 29 preference-tier lenses remaining).
 
-### 2026-08-02 (same day, second follow-up) — Q21: preference-tier rollout, second lens `checking-restraint`
+## 2026-08-02 (same day, second follow-up) — Q21: preference-tier rollout, second lens `checking-restraint`
 
 Continued the wave-1-first preference-tier rollout (PR #193): second lens is `checking-restraint`.
 
@@ -2026,7 +2026,7 @@ Expanded from 4 to 24 scenarios (kept the original 4 unchanged), same A-E taxono
 
 Updated `docs/open-questions.md`'s Q21 entry (second preference-tier instance documented, 28 preference-tier lenses remaining, three left in the wave-1-first sub-wave: `reviewing-naming-and-readability`, `reviewing-llm-integration`, then `finding-maintainability-hotspots`).
 
-### 2026-08-03 — Q21: preference-tier rollout, third lens `reviewing-naming-and-readability`
+## 2026-08-03 — Q21: preference-tier rollout, third lens `reviewing-naming-and-readability`
 
 Continued the wave-1-first preference-tier rollout: third lens is `reviewing-naming-and-readability`.
 
@@ -2040,7 +2040,7 @@ Mapped onto this lens's own checklist ([`reference/heuristics.md`](../skills/rev
 
 Updated `docs/open-questions.md`'s Q21 entry (third preference-tier instance documented, 27 preference-tier lenses remaining, two left in the wave-1-first sub-wave: `reviewing-llm-integration`, then `finding-maintainability-hotspots`).
 
-### 2026-08-03 (same day, follow-up) — Q21: preference-tier rollout, fourth lens `reviewing-llm-integration`
+## 2026-08-03 (same day, follow-up) — Q21: preference-tier rollout, fourth lens `reviewing-llm-integration`
 
 Continued the wave-1-first preference-tier rollout (PR #195 merged): fourth lens is `reviewing-llm-integration`.
 
@@ -2054,7 +2054,7 @@ Mapped onto this lens's own primary checklist ([`reference/heuristics.md`](../sk
 
 Updated `docs/open-questions.md`'s Q21 entry (fourth preference-tier instance documented, 26 preference-tier lenses remaining, one left in the wave-1-first sub-wave: `finding-maintainability-hotspots`).
 
-### 2026-08-03 (same day, follow-up) — Q21: preference-tier rollout, fifth lens `finding-maintainability-hotspots`, wave-1-first sub-wave complete
+## 2026-08-03 (same day, follow-up) — Q21: preference-tier rollout, fifth lens `finding-maintainability-hotspots`, wave-1-first sub-wave complete
 
 Continued the wave-1-first preference-tier rollout (PR #196 merged): fifth and final lens in this sub-wave is `finding-maintainability-hotspots`.
 
@@ -2068,7 +2068,7 @@ Mapped onto this lens's own single checklist ([`reference/heuristics.md`](../ski
 
 **Wave-1-first sub-wave complete.** All five original wave-1 lenses (`reviewing-module-design`, `checking-restraint`, `reviewing-naming-and-readability`, `reviewing-llm-integration`, `finding-maintainability-hotspots`) are now hardened to the same A-E standard as the floor tier. Updated `docs/open-questions.md`'s Q21 entry accordingly: fifth preference-tier instance documented, 25 preference-tier lenses remain, entirely unscoped/unordered — a later pass, not decided here.
 
-### 2026-08-04 — G17: data-engineering & data-contract quality, category #40 (taxonomy v0.10)
+## 2026-08-04 — G17: data-engineering & data-contract quality, category #40 (taxonomy v0.10)
 
 **Change of scenery from the Q21 eval-hardening campaign** (owner's call, after five consecutive preference-tier hardening passes). Surveyed the non-eval pending work across `open-questions.md`, `plans/`, `map-gaps.md`, and `research/gap-hunt-synthesis.md`, and picked **G17 — data-engineering & data-contract quality**, one of `gap-hunt-synthesis.md`'s Wave D "bigger bets" (value High / cost High / confidence Med-High).
 
@@ -2090,7 +2090,7 @@ Thirteen heuristics, **two ★**: *declare and defend the grain* (a join to a on
 
 **Left open deliberately:** G17's **repo/cron contract-drift arm** — the scheduled sweep for standing conditions (a published schema whose declared contract no longer matches the emitted data, a model whose grain test was never added, a source whose freshness expectation has silently lapsed). Held back on the #35/#32 incremental precedent: ship the diff arm, prove it, then decide whether the standing-condition half earns its own repo-shaped lens or folds into an existing audit. Recorded in `map-gaps.md` G17 and `gap-hunt-synthesis.md`.
 
-### 2026-08-04 (same day, follow-up) — G17 complete: the data-plane repo/cron arm, category #41 (taxonomy v0.11)
+## 2026-08-04 (same day, follow-up) — G17 complete: the data-plane repo/cron arm, category #41 (taxonomy v0.11)
 
 Finished what the previous entry deliberately deferred (PR #199 merged): G17's **repo/cron contract-drift arm**, shipped as **#41 Data-contract drift & pipeline health** → `auditing-data-pipeline-health` (`shape: repo`), sited immediately after #40 in Cluster V.
 
@@ -2112,7 +2112,7 @@ Finished what the previous entry deliberately deferred (PR #199 merged): G17's *
 
 **Process note carried forward from #199's review** (not addressed here, logged for Q17/D17): every substantive finding on the #40 PR was a **domain-fact error about third-party tool behavior** — Avro promotion rules, field-deletion compatibility, `dbt build` vs `dbt test` semantics, Delta Lake column mapping — and the atlas self-review approved that content in round 1 while catching structure and convention reliably. Nothing in the review pass forces a docs check per cited tool behavior, which is exactly what a research section full of third-party claims needs. A candidate factor for `reviewing-artifact-conventions` or the research-authoring loop.
 
-### 2026-08-06 — closing the loop the last two PRs opened: behavioral-claim grounding in the research-authoring contract
+## 2026-08-06 — closing the loop the last two PRs opened: behavioral-claim grounding in the research-authoring contract
 
 The previous entry logged a process note "carried forward, not addressed." This addresses it, and the finding sharpened while being written.
 
@@ -2134,7 +2134,7 @@ The rule ships with the evidence: a four-row table of claim-as-written vs. what 
 
 **Still open from the same review round:** `generate_collapsed` inlines `examples.md` verbatim, so a `## Contents` heading inside one emits a duplicate mid-document heading plus a self-referencing TOC entry in the collapsed body. 8 of 39 `examples.md` carry the heading, producing 12 affected collapsed bodies. The fix is in the generator (demote or strip on inline), which closes all of them at once instead of relying on authors to remember — its own change.
 
-### 2026-08-06 (same day, follow-up) — the collapsed-bundle duplicate-`## Contents` defect, fixed in the generator
+## 2026-08-06 (same day, follow-up) — the collapsed-bundle duplicate-`## Contents` defect, fixed in the generator
 
 Closes the item the previous entry left open, and the reason it was left for its own change holds up: the fix belongs in `generate_collapsed`, not in seven `examples.md` files.
 
@@ -2148,7 +2148,7 @@ Closes the item the previous entry left open, and the reason it was left for its
 
 270 tests pass; `generate`/`drift`/`eval` clean; ruff clean; markdownlint clean across 410 files.
 
-### 2026-08-07 — G34 Tier 1 (1): the deterministic-tool evidence pre-pass
+## 2026-08-07 — G34 Tier 1 (1): the deterministic-tool evidence pre-pass
 
 The map has stated **G5** since the first gap hunt — *where mature linters cover a category, the skill's job is to orchestrate and triage tool output, not re-implement it* — and had never acted on it at review time. G34 named that as the architecture gap against CodeRabbit and Copilot code review, both of which are hybrid pipelines: deterministic tools first, LLM to contextualize on top. This ships the Tier 1 answer.
 
@@ -2186,7 +2186,7 @@ Also accepted: two eval scenarios named only *some* of the selected lenses as ju
 
 286 tests pass; the rest of the pipeline stays clean.
 
-### 2026-08-07 (same day, follow-up) — Cluster VII opened: the product as experienced and valued (G24, VII-A + VII-F)
+## 2026-08-07 (same day, follow-up) — Cluster VII opened: the product as experienced and valued (G24, VII-A + VII-F)
 
 The map had six clusters, all of them about **the code and its lifecycle**. None was about the product as experienced and valued by the people who use it. G24 called that a topic-cluster-sized hole in June and it stayed open for two months, which is about right — it is the largest scope expansion since the maximal-scope decision, and it is the one most likely to go wrong.
 
@@ -2248,7 +2248,7 @@ The one remaining unresolved thread from round 2 (exhaustiveness in the decision
 
 286 tests pass; the rest of the pipeline stays clean.
 
-### 2026-08-07 (same day, third) — Reflection: three lessons made standing, one made mechanical, one recurring CI cost removed
+## 2026-08-07 (same day, third) — Reflection: three lessons made standing, one made mechanical, one recurring CI cost removed
 
 No new lens. This entry closes the day by asking what the day's two PRs (#206 the tool-grounding pre-pass, #208 Cluster VII) actually taught, and putting each answer somewhere it will be read again — because the pattern in the review record is that **every lesson left only in this log gets re-learned**.
 
@@ -2307,7 +2307,7 @@ The other two findings are both this PR's own new rules applied to it. `reviewin
 
 387 tests pass; the rest of the pipeline stays clean.
 
-### 2026-08-07 (same day, fourth) — #44 conceptual integrity: Cluster VII gets its brake (G24 VII-H)
+## 2026-08-07 (same day, fourth) — #44 conceptual integrity: Cluster VII gets its brake (G24 VII-H)
 
 Cluster VII opened this morning with two lenses that both push in the same direction — `#42` finds usability gaps, `#43` finds outcome gaps, and the fix for each is usually *more*: another state designed, another event emitted. The cluster's own research file named the problem in its open threads the day it was written: a cluster that surfaces those two with no coherence lens pushes a product toward more surfaces, each individually justified. Taxonomy **v0.13**, `#44 reviewing-conceptual-integrity`.
 
@@ -2355,7 +2355,7 @@ Nothing here was wrong in a way a test could see. All four are the same failure 
 
 389 tests pass; the rest of the pipeline stays clean.
 
-### 2026-08-07 (same day, fifth) — Q21 wave 2 opens: `reviewing-accessibility-and-i18n` hardened 3 → 25
+## 2026-08-07 (same day, fifth) — Q21 wave 2 opens: `reviewing-accessibility-and-i18n` hardened 3 → 25
 
 Three lenses shipped today, all judgment-heavy with near-zero deterministic coverage. The counterweight to that is the eval suite, which is the only backstop those lenses have — so the next move was the campaign the repo already tracks as its top open item rather than a fourth lens.
 
@@ -2392,7 +2392,7 @@ The second is rule 3 for the **third** time today (a convention that lives only 
 
 389 tests pass; the rest of the pipeline stays clean.
 
-### 2026-08-08 — Q21 wave 2 continues: `reviewing-test-quality` hardened 5 → 24
+## 2026-08-08 — Q21 wave 2 continues: `reviewing-test-quality` hardened 5 → 24
 
 The second wave-2 lens, picked because its false negatives **compound**. Every other lens's miss costs one finding; a missed test-quality defect quietly rots the regression net protecting all of them. Its heuristics were also unusually far ahead of its suite — 15 owned checks against 5 scenarios covering 5 of them.
 
@@ -2418,7 +2418,7 @@ Worth noting which way this one went. The previous entry's tally *was* wrong and
 
 389 tests pass; the rest of the pipeline stays clean.
 
-### 2026-08-08 (same day, follow-up) — Q21 wave 2 closes: `reviewing-performance-and-efficiency` hardened 4 → 26
+## 2026-08-08 (same day, follow-up) — Q21 wave 2 closes: `reviewing-performance-and-efficiency` hardened 4 → 26
 
 The last un-hardened lens in waves 1 and 2. With it, **11 of 11 lenses in the first two waves carry an A-E suite** — the first time a whole wave boundary is clean rather than partially swept.
 
@@ -2439,7 +2439,7 @@ The last un-hardened lens in waves 1 and 2. With it, **11 of 11 lenses in the fi
 
 Swept for the same defect elsewhere rather than fixing only the flagged sites: the only other pagination recommendation in the suite is `reviewing-migration-and-data-safety`'s backfill scenario, which recommends checkpointing on `id` over a unique primary key and needs no tie-breaker. `docs/open-questions.md`'s account of the parser scenario carried the same overstatement and was corrected with it.
 
-### 2026-08-08 (same day, follow-up) — Q21: the cross-model re-gate, finally run — and a single total turns out to be the wrong measure
+## 2026-08-08 (same day, follow-up) — Q21: the cross-model re-gate, finally run — and a single total turns out to be the wrong measure
 
 Owner direction: evaluate a stronger self-hosted baseline rather than harden a ninth lens against an unmeasured floor. Mid-session correction, and the right one: the first candidate was `qwen2.5-coder:14b` — **wrong axis**. The steer was to stay small and fast and move on *generation*, not size. Every model below is at or under the floor model's footprint; two are smaller.
 
@@ -2466,7 +2466,7 @@ So: no swap, and a sharp follow-up instead of a vague one — **is `qwen3:8b`'s 
 
 391 tests pass; the rest of the pipeline stays clean.
 
-### 2026-08-08 (same day, follow-up) — Q21: two tuning variants both trade recall for precision, and the harness runs deterministically
+## 2026-08-08 (same day, follow-up) — Q21: two tuning variants both trade recall for precision, and the harness runs deterministically
 
 The re-gate entry above ended with one sharp question rather than a vague one: over-flagging is the failure mode most likely to respond to `examples.md` work, so if discipline tuning recovered `qwen3:8b`'s 1/4 precision at unchanged recall, the baseline swap became a clear call. Answered by measurement, for the two variants tried: **neither improved the trade-off.**
 
@@ -2490,7 +2490,7 @@ Each buys one precision scenario and pays at least one recall scenario. Two poin
 
 Net: baseline `examples.md` unchanged, floor of record unchanged, `qwen3:8b` not adopted. 392 tests pass; the rest of the pipeline stays clean.
 
-### 2026-08-09 — Q22 opened: does the atlas's own review pass execute the checks it cites?
+## 2026-08-09 — Q22 opened: does the atlas's own review pass execute the checks it cites?
 
 Recorded after a second consecutive PR where the atlas review approved a change, **named the exact rule that would have caught the defect, and cleared it anyway** — with an external reviewer finding it minutes later both times.
 
@@ -2506,7 +2506,7 @@ One more thing worth saying out loud: both defects *were* caught, by external re
 
 **A placement drift noticed, not fixed.** Q21's follow-up entries — including the four added this session — have been appended at the end of `open-questions.md`, which puts them physically under Q8's heading rather than Q21's (the drift predates this session; the wave-2 accessibility entry from 2026-08-07 sits there too). Q22 is placed correctly, as a `### Q22` heading at the top of the Open questions section. Relocating the Q21 tail is a ~90-line move with no content change and belongs in its own PR, where the diff is reviewable as a pure move.
 
-### 2026-08-09 (same day, follow-up) — Q21 wave 3 opens: `auditing-config-and-build-hygiene` 3 → 28, and the first re-gate that wasn't deferred
+## 2026-08-09 (same day, follow-up) — Q21 wave 3 opens: `auditing-config-and-build-hygiene` 3 → 28, and the first re-gate that wasn't deferred
 
 Two separable changes this pass, kept to one commit each: relocating Q21's follow-up entries under their own heading (a verified pure move — sorted line multiset identical, 88/88 symmetric), then the first wave-3 hardening.
 
@@ -2524,7 +2524,7 @@ D at 1/5 repeats the campaign's most consistent result. Its single pass is the i
 
 392 tests pass; the rest of the pipeline stays clean.
 
-### 2026-08-09 (same day, follow-up) — seven models, a monotonic frontier, and the deficit named
+## 2026-08-09 (same day, follow-up) — seven models, a monotonic frontier, and the deficit named
 
 Owner question, after two prose fixes failed: is the small-model setup itself inadequate — context window, response tokens, or model choice? Answered in that order.
 
@@ -2558,7 +2558,7 @@ That is the most economical explanation for both failed tunings. The guard-check
 
 392 tests pass; the rest of the pipeline stays clean.
 
-### 2026-08-14 — Q21 wave 3 continues: `reviewing-install-and-upgrade-experience` 4 → 28, and a paired test that catches the guard-recognition deficit cleanly
+## 2026-08-14 — Q21 wave 3 continues: `reviewing-install-and-upgrade-experience` 4 → 28, and a paired test that catches the guard-recognition deficit cleanly
 
 Five days after the last entry (session gap; this session started by re-standing up the local-model substrate from the runbook and confirming it was a setup gap, not an environment limitation — `apt-get zstd`, the Ollama install script, `OLLAMA_MAX_LOADED_MODELS=1 ollama serve &`, `ollama pull qwen2.5-coder:7b`, all as documented, no changes needed).
 
@@ -2584,7 +2584,7 @@ Five days after the last entry (session gap; this session started by re-standing
 
 400 tests pass; the rest of the pipeline stays clean.
 
-### 2026-08-14 (same day, follow-up) — Q21 wave 3 continues: `auditing-documentation-health` 3 → 23, and the campaign's best recall yet on the same model
+## 2026-08-14 (same day, follow-up) — Q21 wave 3 continues: `auditing-documentation-health` 3 → 23, and the campaign's best recall yet on the same model
 
 Third wave-3 pick by the unchanged scope-to-coverage criterion: 13 owned checks (category #22) against 3 scenarios (0.231) was the widest gap left once `reviewing-install-and-upgrade-experience` shipped. **3 originals + A 2 + B 8 + C 2 + D 5 + E 3 = 23 scenarios, 69 assertions.** A gives this repo-shaped lens raw files rather than a pre-digested scan, following the `auditing-config-and-build-hygiene` precedent — including matching that precedent's exact phrasing ("not a pre-digested scan," no "summary") after this session's own atlas-review pass on the PR caught a cosmetic deviation from it. Floor gates in both directions, verified via a scratch copy rather than mutating the working tree (the 2026-08-14 earlier session lost 24 scenarios to a `git checkout --` during that exact check; not repeated here). 400 tests pass.
 
@@ -2602,7 +2602,7 @@ Third wave-3 pick by the unchanged scope-to-coverage criterion: 13 owned checks 
 
 400 tests pass; the rest of the pipeline stays clean.
 
-### 2026-08-15 — Q21 wave 3 continues: `checking-idioms-and-consistency` 3 → 21, a reproducible cold-start bug fixed, and the counterweight check fails its own dedicated test
+## 2026-08-15 — Q21 wave 3 continues: `checking-idioms-and-consistency` 3 → 21, a reproducible cold-start bug fixed, and the counterweight check fails its own dedicated test
 
 Fourth wave-3 pick, at the user's direction rather than the scope-to-coverage ranking (tied for widest gap with `auditing-compliance-and-provenance`: 12 owned checks against 3 scenarios, 0.250). **3 originals + B 8 + C 2 + D 5 + E 3 = 21 scenarios, 63 assertions.** No A group — this lens is diff-only, no `design: true` (precedent: `reviewing-naming-and-readability`). B covers the 8 owned checks the originals never reached: formatter enforcement, file-layout convention, log-format consistency, mid-migration third-style drift, framework-idiom violation, folder-by-feature placement, competing serialization, and constant-naming casing. E includes a dedicated scenario for the lens's own **counterweight check** — a stated, meaningful exception to an established convention that must not be flagged. Floor gates in both directions, verified via a scratch copy. 400 tests pass.
 
@@ -2622,7 +2622,7 @@ Fourth wave-3 pick, at the user's direction rather than the scope-to-coverage ra
 
 400 tests pass; the rest of the pipeline stays clean.
 
-### 2026-08-15 (same day, follow-up) — Q21 wave 3 continues: `auditing-compliance-and-provenance` 3 → 22, a self-review-caught factual error in the eval itself, and the campaign's best recall yet on this lens's classic checks
+## 2026-08-15 (same day, follow-up) — Q21 wave 3 continues: `auditing-compliance-and-provenance` 3 → 22, a self-review-caught factual error in the eval itself, and the campaign's best recall yet on this lens's classic checks
 
 Fifth wave-3 pick by the scope-to-coverage criterion, re-derived after fixing a bug in the ranking script: a stray `## Open threads` section (present at the end of most research-doc clusters) was bleeding into the last category's owned-check count, which had briefly misranked `reviewing-api-contract-safety` (falsely 16 owned checks, actually 10) ahead of this lens. Corrected, `auditing-compliance-and-provenance` was the true widest gap: 12 owned checks (category #27) against 3 scenarios, 0.250 — tied with `checking-idioms-and-consistency`'s pick earlier the same day, this time reached by the ranking itself rather than user direction. **3 originals + A 2 + B 7 + C 2 + D 5 + E 3 = 22 scenarios, 67 assertions.** A gives this repo-shaped lens raw files rather than a pre-digested scan, same precedent as `auditing-config-and-build-hygiene` and `auditing-documentation-health`. B covers seven of the checklist's under-covered axes: per-file SPDX headers, PII sent to a third-party LLM API (data residency), accessibility-as-legal-requirement, a retention-policy-vs-implementation gap, unverified AI-generated-code provenance, consent purpose-limitation/scope-creep, and a specific GPLv2-only/Apache-2.0 license-pair incompatibility. C: two detect-and-route calls the checklist itself flags as genuinely unsettled — subprocess-invocation copyleft linkage ("mere aggregation," flag for legal if unsure) and export/crypto classification. D: five claim-vs-evidence adversarials — a false in-code "legal already approved this" claim, a false "SBOM regenerates automatically, always current" claim contradicted by a stale file and a dependency-count mismatch, a false "verified license-compatible" claim over a vendored directory with no LICENSE file at all, a false "PII minimized per privacy review" claim contradicted by four fields actually sent instead of one, and a false "compliance check skipped, internal-only, no PII" exemption claim sitting over a real bulk export of employee SSNs/salaries/addresses. E: a clean completed license migration, a proportionate low-risk internal-tool context, and the not-applicable-vs-"No findings" test. Floor gates in both directions, verified via a scratch copy. 400 tests pass; ruff and markdownlint clean; generate/drift clean.
 
@@ -2642,7 +2642,7 @@ Fifth wave-3 pick by the scope-to-coverage criterion, re-derived after fixing a 
 
 400 tests pass; the rest of the pipeline stays clean.
 
-### 2026-08-15 (same day, third follow-up) — Q21 tuning experiment: closing the not-applicable gap, and finding out tuning still has teeth
+## 2026-08-15 (same day, third follow-up) — Q21 tuning experiment: closing the not-applicable gap, and finding out tuning still has teeth
 
 User's framing, verbatim: the campaign had been "letting [the floor model] fail the harder test and recording it without actively improving the prompt or raising the model capability floor." Fair — five wave-3 lenses in a row got authored, re-gated, and documented with zero tuning attempted after the re-gate, despite the not-applicable-vs-"No findings" gap failing on 7 of the last ~9 lenses. Agreed plan: one real tuning attempt targeting that specific gap, full re-gate across multiple lenses to check it generalizes and doesn't just move the miss elsewhere, and if it doesn't help, pivot to hunting for a better floor model. It helped.
 
@@ -2679,7 +2679,7 @@ Net +5 recall hits — all five of the unplanned bonus flips above (compliance �
 
 400 tests pass; ruff, markdownlint, drift clean throughout.
 
-### 2026-08-15 (same day, fourth follow-up) — attempting the two regressions: one attempt inert, one attempt caused a runaway generation and was reverted
+## 2026-08-15 (same day, fourth follow-up) — attempting the two regressions: one attempt inert, one attempt caused a runaway generation and was reverted
 
 Owner's direction after the last entry's open follow-up items: fix the two regressions first. Both attempts used the same recipe that closed the not-applicable gap — a new worked example targeting the specific restraint case that broke, using different concrete content than the eval scenario it was meant to help.
 
@@ -2693,7 +2693,7 @@ Owner's direction after the last entry's open follow-up items: fix the two regre
 
 **Net for this round: one regression attempt inert (kept, harmless), one attempt reverted after discovering it broke a working scenario in a new way (a runaway generation, not just a wrong verdict).** Neither of the two regressions from the previous round is fixed. Runbook updated with the generalizable finding: a new worked example's risk isn't only whether it moves its target or flips an unrelated verdict — it can also destabilize an unrelated scenario's *generation* outright if the two are thematically close, a failure mode a full re-gate catches (a transport failure is impossible to miss) but that a spot-check on the target scenario alone never would have surfaced.
 
-### 2026-08-15 (same day, fifth follow-up) — reconciling the other agent-facing docs now that the ICM map is built (PR #240)
+## 2026-08-15 (same day, fifth follow-up) — reconciling the other agent-facing docs now that the ICM map is built (PR #240)
 
 Owner's direction: with the ICM system map (`docs/map/`) finished (the prior session's Slice 4), sweep the rest of the repo's agent-facing documentation and instructions for drift before returning to Q21. Five parallel read-only Explore-agent audits, each scoped to a distinct surface: root docs (README/REVIEW.md/overview/install/distribution), `commands/*.md`, `docs/runbooks/*.md`, hooks/templates/plugin manifests, and the standing-authoring-rules cross-references.
 
@@ -2714,7 +2714,7 @@ Also tightened `docs/map/processes/cross-model-re-gate.md`'s warm-up-step wordin
 
 400 tests pass; ruff, markdownlint, drift clean.
 
-### 2026-08-16 — Q21: both open regressions attempted again (still open), not-applicable rollout finishes on 2 of 4 remaining lenses
+## 2026-08-16 — Q21: both open regressions attempted again (still open), not-applicable rollout finishes on 2 of 4 remaining lenses
 
 Owner's direction: pick up the two follow-ups the prior entry left out of scope, regressions first. Local Ollama substrate stood up fresh this session (`apt-get zstd`, the install script, `OLLAMA_MAX_LOADED_MODELS=1 ollama serve &`, `ollama pull qwen2.5-coder:7b`, warm-up request) — no environment gap, matching the runbook's own precedent that this is a one-time setup step, not a per-session limitation.
 
@@ -2737,7 +2737,7 @@ Owner's direction: pick up the two follow-ups the prior entry left out of scope,
 
 403 tests pass throughout every intermediate state; `npx markdownlint-cli2` and `python -m tooling.cli drift` clean on the final diff.
 
-### 2026-08-16 (follow-up) — Q21 wave 3 continues: `auditing-dependencies-and-supply-chain` 3 → 22, and a distinct fabrication pattern from prior lenses
+## 2026-08-16 (follow-up) — Q21 wave 3 continues: `auditing-dependencies-and-supply-chain` 3 → 22, and a distinct fabrication pattern from prior lenses
 
 Owner's direction: proceed with the next wave-3 lens. Picked by the same scope-to-coverage criterion the wave has used throughout: 20 of 40 lenses are still at the D8 3-scenario baseline, and `auditing-dependencies-and-supply-chain` is one of five tied for the widest gap (9 owned checks under category #18 against 3 scenarios). `auditing-compliance-and-provenance` already owns category #27 (this lens's `cross_ref`) as primary, so category-27 material — PII, retention, export control, accessibility-as-legal — was treated as delegate/escalate content here, not a second copy of compliance-provenance's own checklist, consistent with G1.
 
@@ -2757,7 +2757,7 @@ Owner's direction: proceed with the next wave-3 lens. Picked by the same scope-t
 
 403 tests pass; `npx markdownlint-cli2` and `python -m tooling.cli drift` clean throughout.
 
-### 2026-08-16 (follow-up) — llama-server vs Ollama, and an LFM2.5-2.6B floor-model candidate: a small, non-conclusive first look
+## 2026-08-16 (follow-up) — llama-server vs Ollama, and an LFM2.5-2.6B floor-model candidate: a small, non-conclusive first look
 
 Owner's direction, after the dependencies-and-supply-chain merge: try running evals through `llama-server`/`vllm`/llama.cpp instead of Ollama on the hypothesis it's faster and less flaky, and try LiquidAI's LFM2.5-2.6B as a lower-resource floor-of-record candidate. Scoped deliberately small before committing to a full re-gate: one shared 3-scenario suite (`reviewing-api-contract-safety`, the D8-baseline lens, chosen for speed rather than coverage), one run per combination, on a CPU-only 4-core/15 GiB remote container. **This is a single-run, 3-scenario sample — an order of magnitude below the 22-28 scenario hardened suites the rest of Q21 re-gates against — so nothing here rises to the level of a backend or baseline-model decision.** vllm was not attempted (no attempt made to install or run it in this session).
 
@@ -2773,7 +2773,7 @@ Owner's direction, after the dependencies-and-supply-chain merge: try running ev
 
 **Disposition: neither claim is settled, and neither should be acted on from this session's evidence alone.** llama-server showed a real, single-run speed edge over Ollama on the identical model and suite, worth a proper measurement (repeated runs, a full hardened suite, a clean unshared log) before treating it as the new default substrate for re-gates. LFM2.5-2.6B did not demonstrate a wall-clock or quality win here — its raw per-token speed advantage was real but consumed by verbosity, and it missed a finding qwen caught on both backends — so it is not yet a floor-model candidate on this evidence; the untried next step, if pursued, is testing whether an explicit brevity instruction/example (the harness's `_REVIEWER_DIRECTIVE` already says "Be concise") closes the verbosity gap, then re-running a full hardened suite rather than a 3-scenario spot check. vllm remains completely untested. No repo files (skills, harness, manifest) were changed in this session; all artifacts (binaries, weights, logs) are outside the repo in the container's temp storage.
 
-### 2026-08-16 (second follow-up) — same 3-scenario spot check, three more candidates: `qwen3.5:9b`, `qwen3.5:4b`, `ornith:9b`
+## 2026-08-16 (second follow-up) — same 3-scenario spot check, three more candidates: `qwen3.5:9b`, `qwen3.5:4b`, `ornith:9b`
 
 Owner's direction, immediately after the above merged: extend the same small comparison to "newer qwen and ornith variants at similar sizes." Same method as the entry above, same caveats — one run each of the identical 3-scenario `reviewing-api-contract-safety` suite, this time all three via Ollama (not llama-server) for a controlled same-backend comparison against the recorded `qwen2.5-coder:7b` floor. **Still a single-run, 3-scenario sample; still not evidence for a backend or baseline-model decision.**
 
@@ -2794,7 +2794,7 @@ Owner's direction, immediately after the above merged: extend the same small com
 
 **Disposition: `qwen3.5:4b` is the most promising single data point this exploration has produced, and it is still one data point.** Nothing here changes the standing guidance — a floor-model swap needs a full 22-28 scenario hardened-suite re-gate, repeated runs, and the recall/precision split this repo's own re-gate discipline insists on (a 3-scenario sample has only one precision/clean-code scenario — passed cleanly by every model tested here, but one scenario is nowhere near enough to establish any of these four models' false-positive behavior with confidence). If this is pursued further, `qwen3.5:4b` is the one candidate worth spending that full re-gate on first. `qwen3.5:9b` and `ornith:9b` are correct-but-slower on this sample; neither shows the resource-savings case the exploration set out to test. vllm remains untested. No repo files (skills, harness, manifest) changed.
 
-### 2026-08-17 — the larger-sample probe: all four models re-gated on the full 22-scenario `auditing-dependencies-and-supply-chain` suite
+## 2026-08-17 — the larger-sample probe: all four models re-gated on the full 22-scenario `auditing-dependencies-and-supply-chain` suite
 
 Owner's direction: the 3-scenario probes above are too small to prove anything on their own — run a larger sample, and if that builds confidence, queue up a full campaign-wide floor-model-swap pass. Picked `auditing-dependencies-and-supply-chain` (22 scenarios, hardened this session's earlier arc — see the 2026-08-16 entry) rather than authoring a new suite: it already has a real recall/precision split (18 defect scenarios, 4 precision scenarios), a documented floor-of-record baseline, and it's the freshest hardened lens, authored on what is very likely this same container. All four models — `qwen2.5-coder:7b` (re-run fresh rather than cited, matching this campaign's own "measure on the same substrate" rule), `qwen3.5:4b`, `qwen3.5:9b`, `ornith:9b` — ran once each, same session, same host, `--no-think` where applicable, full 22-scenario suites (not partial runs).
 
@@ -2817,7 +2817,7 @@ Owner's direction: the 3-scenario probes above are too small to prove anything o
 
 **Disposition: confidence is built — `qwen3.5:4b` is a genuine candidate for a full floor-model-swap campaign, not just a promising probe result.** A 5-scenario recall margin with matched precision, zero fabrication across 22 scenarios, and a same-session/same-host measurement against a freshly-reproduced floor number is real evidence, not a coin flip on 3 scenarios. It is still **one lens** — this suite's own history shows lenses vary widely in what they're hard on (concurrency-and-async's floor recall was 6/20, this lens's was 10/18 recall on a differently-shaped defect mix), so this result does not by itself establish `qwen3.5:4b` as better *everywhere*. **Recommended next step, not done in this session: queue the full campaign-wide re-gate** — run `qwen3.5:4b` against every hardened Q21 suite (the 13 preference-tier lenses currently at the A-E standard, plus the five floor-tier lenses), compare recall/precision per lens against the recorded floor numbers, and only then decide whether to update the documented floor-of-record. That is a multi-hour undertaking (13-18 suites × ~10-30 min each) deliberately left for an explicit go-ahead rather than started here. `qwen3.5:9b`, `ornith:9b`, and vllm are not recommended for that campaign on this evidence — the former two cost 3x the wall-clock for a smaller recall gain than `qwen3.5:4b`, and vllm remains completely untested throughout this whole exploration.
 
-### 2026-08-17 (follow-up) — widening the search deliberately: less-mainstream labs, `granite4.1:8b` and `nemotron-3-nano:4b`
+## 2026-08-17 (follow-up) — widening the search deliberately: less-mainstream labs, `granite4.1:8b` and `nemotron-3-nano:4b`
 
 Owner's direction: research competitive models in the same size range beyond the Qwen/Ornith names already tested, specifically recent (as of 2026-08-16) releases and less-well-known families that might be cheaper for equivalent results. A web research pass (not yet a test run) surfaced two models practical for this CPU-only, 15 GiB host with official Ollama support — `ibm-granite/granite4.1:8b` (5.3 GB, dense/hybrid Mamba-Transformer, Apache 2.0, released 2026-04-29) and `nvidia/nemotron-3-nano:4b` (2.8 GB, hybrid Mamba-2 + attention, edge-optimized, 262K context) — plus three efficiency-interesting candidates ruled out for this host specifically: `zyphra/ZAYA1-8B` (MoE, ~760M active of 8B total — no stock llama.cpp support, would need compiling an unmerged PR), `poolside/laguna-xs-2.1` and `cohere/north-mini-code-1.0` (both 30B+-total/3B-active MoE coding specialists — 19-20 GB Q4_K_M, exceeds this host's RAM outright). The MoE efficiency story in 2026 cuts *compute*, not *memory footprint* — a real limitation for a RAM-capped container that a GPU-backed host wouldn't hit.
 
@@ -2837,7 +2837,7 @@ Owner's direction: research competitive models in the same size range beyond the
 
 **Disposition: neither result unseats `qwen3.5:4b` as the leading candidate.** Both are single small-sample data points (same caveats as every 3-scenario probe in this exploration), and neither shows the combination `qwen3.5:4b` already demonstrated on a full 22-scenario suite — meaningfully higher recall *and* zero fabrication (its speed advantage was limited to the earlier 3-scenario probe; on the full 22-scenario suite it was slower than the floor, per the 2026-08-17 entry above). `granite4.1:8b` is a plausible second-tier candidate if a larger sample is wanted (clean, no fabrication, just not fast); `nemotron-3-nano:4b` would need the scenario-1 pattern (precision-danger omission, fabricated tangent) checked against a larger sample before treating its speed/size advantage as a reason to pursue it further. The queued full campaign-wide re-gate (2026-08-17, above) still targets `qwen3.5:4b` first.
 
-### 2026-08-17 (follow-up) — Q21 wave 3 continues: `reviewing-pr-and-process-hygiene` hardened 6 → 31 scenarios
+## 2026-08-17 (follow-up) — Q21 wave 3 continues: `reviewing-pr-and-process-hygiene` hardened 6 → 31 scenarios
 
 Owner's direction: continue the wave-3 preference-tier rollout (routine orientation pass, no floor-model substrate available in this container — same standing gap as every recent entry). Picked `reviewing-pr-and-process-hygiene` as the widest scope-to-coverage gap remaining among the 19 still-unhardened lenses: it owns **29 checks across two full categories** (#24 process hygiene, 16 checks; #22 docs-health, 13 checks — `cross_ref: [22]`, primary owner `auditing-documentation-health`) on only 6 baseline scenarios, the same "one suite, two domains" shape that opened wave 2's `reviewing-accessibility-and-i18n`. (An initial pass under-read category #22's heuristics file and miscounted 26 checks, missing the *comment rot*, *discoverability*, and *agent-instructions drift* bullets at the end of the file — caught before this shipped, not after; see the corrected B-group count below.)
 
@@ -2847,7 +2847,7 @@ Owner's direction: continue the wave-3 preference-tier rollout (routine orientat
 
 **Cross-model re-gate: deferred, same standing reason.** No Ollama in this container (confirmed via `which ollama`) — the floor-of-record run against `qwen2.5-coder:7b` is ordinary follow-up work, to run alongside the other still-pending re-gates (`sweeping-for-security`, `hunting-silent-failures` — the two floor-tier lenses whose own re-gates remain deferred, per Q21) when the substrate is next available, per the standing runbook.
 
-### 2026-08-17 (follow-up) — Q21 wave 3 continues: `reviewing-ai-authored-code` hardened 4 → 20 scenarios
+## 2026-08-17 (follow-up) — Q21 wave 3 continues: `reviewing-ai-authored-code` hardened 4 → 20 scenarios
 
 Continuing the preference-tier rollout after `reviewing-pr-and-process-hygiene` merged (PR #252). Recomputed scope-to-coverage gaps across the 19 lenses still at D8's baseline: `reviewing-ai-authored-code` stood out clearly — **18 owned checks** (9 under #34, this lens's own AI-authorship-signature territory; 9 under #18, shared with `auditing-dependencies-and-supply-chain`) on only 4 baseline scenarios, a wider ratio than any other remaining candidate (the next closest, `reviewing-resilience-and-scalability`, is 14 checks / 6 scenarios).
 
@@ -2861,7 +2861,7 @@ Continuing the preference-tier rollout after `reviewing-pr-and-process-hygiene` 
 
 **Cross-model re-gate: deferred, same standing reason as every other recent entry.** No Ollama in this container.
 
-### 2026-08-18 — Q21 wave 3 continues: `reviewing-observability-and-operability` hardened 3 → 20 scenarios
+## 2026-08-18 — Q21 wave 3 continues: `reviewing-observability-and-operability` hardened 3 → 20 scenarios
 
 Continuing the preference-tier rollout after `reviewing-ai-authored-code` merged (PR #253). Recomputed scope-to-coverage gaps: four lenses tied at 10 owned checks / 3 baseline scenarios (`reviewing-api-contract-safety`, `reviewing-observability-and-operability`, `auditing-architecture-conformance`, `auditing-infrastructure-as-code`). Picked `reviewing-observability-and-operability` over the other three — it directly answers a logging/telemetry coverage question raised earlier in this same session, a legitimate tie-breaker among genuinely equal candidates.
 
@@ -2871,7 +2871,7 @@ Continuing the preference-tier rollout after `reviewing-ai-authored-code` merged
 
 **Cross-model re-gate: deferred, same standing reason as every other recent entry.** No Ollama in this container.
 
-### 2026-08-18 (follow-up) — Q21 wave 3 continues: `reviewing-api-contract-safety` hardened 3 → 20 scenarios
+## 2026-08-18 (follow-up) — Q21 wave 3 continues: `reviewing-api-contract-safety` hardened 3 → 20 scenarios
 
 Continuing the preference-tier rollout after `reviewing-observability-and-operability` merged (PR #254) with a clean round-1 pass — no findings this time. Recomputed scope-to-coverage gaps: several lenses still tied at 10 checks / 3 baseline scenarios. Picked `reviewing-api-contract-safety` — not by a topical tie-breaker this time, but because it's the most frequently cited foundational lens across this campaign's own history (repeatedly used as the standard "D8-baseline" example lens in earlier floor-model comparison sessions), a reasonable priority pick among equals.
 
@@ -2881,7 +2881,7 @@ Continuing the preference-tier rollout after `reviewing-observability-and-operab
 
 **Cross-model re-gate: deferred, same standing reason as every other recent entry.** No Ollama in this container.
 
-### 2026-08-18 (third follow-up) — Q21 wave 3 continues: `auditing-architecture-conformance` hardened 3 → 20 scenarios
+## 2026-08-18 (third follow-up) — Q21 wave 3 continues: `auditing-architecture-conformance` hardened 3 → 20 scenarios
 
 Continuing the preference-tier rollout after `reviewing-api-contract-safety` merged (PR #255). Recomputed scope-to-coverage gaps: `auditing-architecture-conformance` and `auditing-infrastructure-as-code` remain tied at 10 owned checks / 3 baseline scenarios, the last pair from the four-way tie this wave opened with. Picked `auditing-architecture-conformance` — both are repo-shaped and equally thin, so the tie-break favored the lens whose defects are reachable without needing to fabricate cloud-provider-specific facts (Terraform/K8s/IAM specifics), lower risk on this campaign's recurring factual-accuracy concern than a topical or historical tie-breaker would have settled. `auditing-infrastructure-as-code` is next.
 
@@ -2893,7 +2893,7 @@ Continuing the preference-tier rollout after `reviewing-api-contract-safety` mer
 
 **Post-review fix (same PR, #256):** CodeRabbit caught two real defects in the new scenarios before merge — the raw-import A-group scenario's declared rule used an arrow-chain notation (`ui -> app -> domain -> infra`) that, read literally as an import chain, implied `domain -> infra` was an allowed edge, directly conflicting with the appended "domain must not import infra" clause; and two precision (E-group) scenarios required only a generic "no findings" result instead of this lens's own documented exact response contract ("No findings: the codebase conforms to its declared architecture"). Both fixed in a follow-up commit, verified against the repo's own tooling, and confirmed by CodeRabbit before merge — see PR #256.
 
-### 2026-08-18 (fourth follow-up) — Q21 wave 3 closes: `auditing-infrastructure-as-code` hardened 3 → 20 scenarios
+## 2026-08-18 (fourth follow-up) — Q21 wave 3 closes: `auditing-infrastructure-as-code` hardened 3 → 20 scenarios
 
 Continuing the preference-tier rollout after `auditing-architecture-conformance` merged (PR #256). `auditing-infrastructure-as-code` was the last of the four-way tie this wave opened with (10 owned checks / 3 baseline scenarios).
 
@@ -2911,7 +2911,7 @@ Two scenarios — one C-group (delegate/escalate), one D-group (adversarial) —
 
 **Cross-model re-gate: deferred, same standing reason as every other recent entry.** No Ollama in this container.
 
-### 2026-08-18 (fifth follow-up) — Q21 wave 3 continues: `reviewing-resilience-and-scalability` hardened 6 → 23 scenarios
+## 2026-08-18 (fifth follow-up) — Q21 wave 3 continues: `reviewing-resilience-and-scalability` hardened 6 → 23 scenarios
 
 Continuing the preference-tier rollout after `auditing-infrastructure-as-code` merged (PR #257), which closed wave 3's original four-way tie. This pick came by direct user request rather than a recomputed scope-to-coverage tie-break — `reviewing-resilience-and-scalability` was already a reasonable next candidate (13 owned checks against 6 baseline scenarios, denser than the usual 3-scenario baseline but still thin relative to its scope).
 
@@ -2925,7 +2925,7 @@ Continuing the preference-tier rollout after `auditing-infrastructure-as-code` m
 
 **Correction (same session, before shipping further):** the line above should read 14, not 15 — 35 preference-tier lenses total, 21 now hardened (20 before this entry, +1 for this one), 35 − 21 = 14. The stale "15" was carried forward from the prior entry's own closing line without being recomputed against this entry's own increment — exactly the "a summary must agree with what it summarizes" failure class this repo's `docs/research/README.md` §2 names. Caught and fixed while authoring the next entry, before it propagated further.
 
-### 2026-08-18 (sixth follow-up) — Q21 wave 3 continues: `auditing-enforcement-and-meta-artifacts` hardened 4 → 20 scenarios
+## 2026-08-18 (sixth follow-up) — Q21 wave 3 continues: `auditing-enforcement-and-meta-artifacts` hardened 4 → 20 scenarios
 
 Continuing the preference-tier rollout after `reviewing-resilience-and-scalability` merged (PR #259). Restarted the branch from `origin/main` first (the prior PR's merge left the old branch stale). Recomputed scope-to-coverage across the 14 remaining unhardened lenses: `reviewing-decision-lifecycle` and `auditing-enforcement-and-meta-artifacts` tied at the widest gap (10 owned checks against 4 baseline scenarios each). Picked `auditing-enforcement-and-meta-artifacts` over its tie — both are thin, but this one is repo-shaped with three direct wave-3 precedents to follow (`auditing-architecture-conformance`, `auditing-infrastructure-as-code`, `auditing-config-and-build-hygiene`), while `reviewing-decision-lifecycle` is the suite's only `shape: decision` lens with no prior A-E hardening pass to model the eval-authoring pattern on — lower risk this session.
 
@@ -2939,7 +2939,7 @@ Continuing the preference-tier rollout after `reviewing-resilience-and-scalabili
 
 13 preference-tier lenses remain unhardened; the next pick needs a fresh scope-to-coverage recompute unless directed otherwise.
 
-### 2026-08-18 (seventh follow-up) — Q21 wave 3 continues: `reviewing-decision-lifecycle` hardened 4 → 18 scenarios
+## 2026-08-18 (seventh follow-up) — Q21 wave 3 continues: `reviewing-decision-lifecycle` hardened 4 → 18 scenarios
 
 Continuing the preference-tier rollout after `auditing-enforcement-and-meta-artifacts` merged (PR #260). Restarted the branch from `origin/main` first. Recomputed scope-to-coverage: `reviewing-decision-lifecycle`'s tie partner from the last recompute (`auditing-enforcement-and-meta-artifacts`) is now hardened, leaving this lens alone at the widest remaining gap (10 owned checks / 4 baseline scenarios). Picked it up despite the prior entry's stated caution about its novel `shape: decision` — that caution turned out to be overweighted: every scenario in this lens is already a decision-record text block (ADR/RFC/adoption PR), the same shape the design-capable diff lenses' single "A" scenario has already used twice this wave (`reviewing-resilience-and-scalability`, `reviewing-api-contract-safety`), so there's no distinct input-shape gap the way there was for the repo-shaped lenses — no separate A group was needed here.
 
@@ -2953,7 +2953,7 @@ Continuing the preference-tier rollout after `auditing-enforcement-and-meta-arti
 
 12 preference-tier lenses remain unhardened; the next pick needs a fresh scope-to-coverage recompute unless directed otherwise.
 
-### 2026-08-19 — Q21 wave 3 continues: `reviewing-agentic-safety` hardened 4 → 22 scenarios
+## 2026-08-19 — Q21 wave 3 continues: `reviewing-agentic-safety` hardened 4 → 22 scenarios
 
 Continuing the preference-tier rollout after `reviewing-decision-lifecycle` merged (PR #261). Restarted the branch from `origin/main` first. Recomputed scope-to-coverage: a three-way tie at the widest remaining gap between `reviewing-agentic-safety`, `reviewing-agent-legibility`, and `reviewing-ethical-design` (all 9 owned checks against 4 baseline scenarios). Picked `reviewing-agentic-safety` — not by a topical or historical tie-breaker this time, but for direct thematic relevance: this repo runs its own agentic PR-review routines (the `dees-bot` Atlas PR Reviewer routine caught the not-applicable inconsistency fixed in the previous PR), so the action/tool-surface-safety lens this repo depends on for its own review tooling seemed worth prioritizing among genuinely equal candidates. `design: true` also gave this pick a fourth data point on the A-group design-doc pattern already proven out three times this wave.
 
@@ -2965,7 +2965,7 @@ Continuing the preference-tier rollout after `reviewing-decision-lifecycle` merg
 
 11 preference-tier lenses remain unhardened; the next pick needs a fresh scope-to-coverage recompute unless directed otherwise.
 
-### 2026-08-19 (follow-up) — Q21 wave 3 continues: `reviewing-agent-legibility` hardened 4 → 21 scenarios
+## 2026-08-19 (follow-up) — Q21 wave 3 continues: `reviewing-agent-legibility` hardened 4 → 21 scenarios
 
 Continuing the preference-tier rollout after `reviewing-agentic-safety` merged (PR #262). Restarted the branch from `origin/main` first. Recomputed scope-to-coverage: a two-way tie at the widest remaining gap between `reviewing-agent-legibility` and `reviewing-ethical-design` (both 9 owned checks against 4 baseline scenarios). Picked `reviewing-agent-legibility` as the technically lower-risk of the two (a structural/technical domain vs. `reviewing-ethical-design`'s more sensitive dark-patterns/discrimination territory) and a natural continuation of the prior pick's agent-tooling theme.
 
@@ -2979,7 +2979,7 @@ Continuing the preference-tier rollout after `reviewing-agentic-safety` merged (
 
 10 preference-tier lenses remain unhardened; the next pick needs a fresh scope-to-coverage recompute unless directed otherwise.
 
-### 2026-08-19 (second follow-up) — Q21 wave 3 continues: `reviewing-ethical-design` hardened 4 → 21 scenarios
+## 2026-08-19 (second follow-up) — Q21 wave 3 continues: `reviewing-ethical-design` hardened 4 → 21 scenarios
 
 Continuing the preference-tier rollout after `reviewing-agent-legibility` merged (PR #264). Restarted the branch from `origin/main` first. Recomputed scope-to-coverage: `reviewing-ethical-design`'s tie partner from the last recompute (`reviewing-agent-legibility`) is now hardened, leaving this lens alone at the widest remaining gap (9 owned checks / 4 baseline scenarios).
 
@@ -2991,7 +2991,7 @@ Continuing the preference-tier rollout after `reviewing-agent-legibility` merged
 
 9 preference-tier lenses remain unhardened; the next pick needs a fresh scope-to-coverage recompute unless directed otherwise.
 
-### 2026-08-19 (third follow-up) — Q21 wave 3 continues: `auditing-decision-record-currency` hardened 5 → 20 scenarios
+## 2026-08-19 (third follow-up) — Q21 wave 3 continues: `auditing-decision-record-currency` hardened 5 → 20 scenarios
 
 Continuing the preference-tier rollout after `reviewing-ethical-design` merged (PR #265). Restarted the branch from `origin/main` first (the local remote-tracking ref for the working branch was stale from before it was deleted server-side on merge; `git fetch origin main` before the first edit surfaced the real head). Recomputed scope-to-coverage across the 9 remaining lenses: `auditing-decision-record-currency` had the widest gap (10 owned checks against 5 baseline scenarios) among the lenses that fit the established `shape: diff`/`shape: repo` A-E pattern cleanly. `reviewing-artifact-conventions` scored a nominally wider raw gap (17 rubric items / 4 scenarios) but is `shape: artifact` — presence-activated, single-rubric, a taxonomy this campaign hasn't adapted an A-E pattern for yet — so it was set aside rather than forced into this pass. `reviewing-threat-model` was excluded from the count entirely: it already ships its own native 21-scenario adversarial suite from authorship (see the 2026-06-27 entry), just without an `eval_min` floor ever recorded in the manifest — a real, separate gap, but a floor-annotation task, not a fresh eval-authoring one.
 
@@ -3007,7 +3007,7 @@ Continuing the preference-tier rollout after `reviewing-ethical-design` merged (
 
 **Correction (caught at the top of the next entry):** the running tally above undercounted by one. `auditing-decision-record-currency` merging (PR #266) brought the hardened count to 27, leaving **8** preference-tier lenses unhardened, not 7 as the prior status message stated. The owner asked to continue through all 8, with standing authorization to self-merge each PR once it has green CI and an approving external review.
 
-### 2026-08-19 (fourth follow-up) — Q21 wave 3 continues: `reviewing-interoperability` hardened 4 → 21 scenarios
+## 2026-08-19 (fourth follow-up) — Q21 wave 3 continues: `reviewing-interoperability` hardened 4 → 21 scenarios
 
 Continuing the preference-tier rollout after `auditing-decision-record-currency` merged (PR #266), with the owner's standing authorization to self-merge each subsequent PR in this run once it has green CI and an approving external review. Restarted the branch from `origin/main` first. Recomputed scope-to-coverage across the (corrected) 8 remaining lenses: `reviewing-interoperability` had the widest gap among the lenses fitting the established A-E pattern (8 owned checks against 4 baseline scenarios) — `reviewing-threat-model` (already at 21 scenarios natively, just missing an `eval_min` floor) and `reviewing-artifact-conventions` (`shape: artifact`, a taxonomy not yet adapted) were again set aside for the same reasons as the prior recompute.
 
@@ -3023,7 +3023,7 @@ Continuing the preference-tier rollout after `auditing-decision-record-currency`
 
 **The owner authorized self-merge for the remainder of this run**: once a PR has green CI and an approving review from the repo's own `dees-bot` atlas-review routine, merge it directly rather than waiting for a human. PR #267 merged this way.
 
-### 2026-08-19 (fifth follow-up) — Q21 wave 3 continues: `reviewing-data-transformations-and-contracts` hardened 12 → 28 scenarios
+## 2026-08-19 (fifth follow-up) — Q21 wave 3 continues: `reviewing-data-transformations-and-contracts` hardened 12 → 28 scenarios
 
 Continuing the preference-tier rollout after `reviewing-interoperability` merged (PR #267), self-merged under the owner's standing authorization for this run. Restarted the branch from `origin/main` first. Recomputed scope-to-coverage across the 7 remaining lenses: picked `reviewing-data-transformations-and-contracts` not purely by widest raw gap but because its own manifest comment, written at G17 build time, explicitly named this exact campaign as the deferred next step: *"the full Q21 A-E adversarial hardening pass rides with that campaign rather than shipping here."* 13 owned checks against a 12-scenario G17 baseline — a genuinely different starting shape than the usual thin 4-scenario baseline, since G17 already built a rich first pass (both star checks, three delegate/escalate boundaries, one adversarial scenario, two precision guards). `auditing-data-pipeline-health` is the closest sibling in shape (the scheduled repo-audit companion to this lens, also from G17) but its own manifest comment carries no such Q21 deferral language — it was never explicitly promised to this campaign, just not yet picked. The next pick still needs a fresh scope-to-coverage recompute, not an assumption from this pairing.
 
@@ -3037,7 +3037,7 @@ Continuing the preference-tier rollout after `reviewing-interoperability` merged
 
 **Round-1 review on PR #269 caught two documentation-accuracy findings, both fixed and worth noting for the pattern:** a Major finding that this entry's own predecessor overstated `auditing-data-pipeline-health`'s manifest comment as carrying "the identical deferral note" as the lens just hardened — checked directly, it does not, it simply hadn't been picked yet — and a Minor finding that the stated assertion count (90) didn't match the actual `eval.json` (107). Both are exactly the "summary must agree with what it summarizes" failure mode this repo's own standing authoring rules name, caught in the one place with no mechanical check (session-log prose). PR #269 self-merged clean after both fixes, with green CI (no repeat of PR #267's shellcheck hang this time).
 
-### 2026-08-19 (sixth follow-up) — Q21 wave 3 continues: `auditing-data-pipeline-health` hardened 12 → 25 scenarios
+## 2026-08-19 (sixth follow-up) — Q21 wave 3 continues: `auditing-data-pipeline-health` hardened 12 → 25 scenarios
 
 Continuing the preference-tier rollout after `reviewing-data-transformations-and-contracts` merged (PR #269), self-merged under the owner's standing authorization. Restarted the branch from `origin/main` first. Recomputed scope-to-coverage across the 6 remaining lenses: picked `auditing-data-pipeline-health` — the scheduled repo-audit companion to the lens just hardened, from the same G17 build — as the closest sibling in shape, correcting the prior entry's overstatement: this lens's own manifest comment carries no explicit Q21 deferral language, it simply hadn't been picked yet. 12 owned checks against a 12-scenario G17 baseline that already covered 11 of them well: declared-vs-unverified, coverage ranked by fan-out, freshness lapsed/decorative, expired deprecation, ungated/soft-failed gates (with repo-vs-registry divergence folded in), hidden lineage, a rich multi-delegate scenario (routing to #20/#22/#21 in one pass), stale-ownership escalation (with PII-inventory-gap folded in), a refuse-to-confirm-drift precision case, and a trend-reporting case — leaving orphaned/dead-model detection as the one bullet with no standalone bad-case scenario.
 
@@ -3053,7 +3053,7 @@ Continuing the preference-tier rollout after `reviewing-data-transformations-and
 
 **PR #270's own round-1 review was a clean APPROVE with zero findings** — the atlas-review routine independently re-derived the checklist-bullet-to-scenario mapping and the assertion count and confirmed both matched exactly, including a specific callback that this session's own PR #269 mistake (an overstated claim) did not repeat here. Self-merged with green CI, no shellcheck hang.
 
-### 2026-08-19 (seventh follow-up) — Q21 wave 3 continues: `reviewing-outcome-instrumentation` hardened 10 → 23 scenarios
+## 2026-08-19 (seventh follow-up) — Q21 wave 3 continues: `reviewing-outcome-instrumentation` hardened 10 → 23 scenarios
 
 Continuing the preference-tier rollout after `auditing-data-pipeline-health` merged (PR #270), self-merged under the owner's standing authorization. Restarted the branch from `origin/main` first. Recomputed scope-to-coverage across the 5 remaining lenses: picked `reviewing-outcome-instrumentation` as the widest gap among those fitting the established A-E pattern (11 owned checks against 10 baseline scenarios) — `reviewing-threat-model` and `reviewing-artifact-conventions` set aside again for the same reasons as the prior three recomputes.
 
@@ -3069,7 +3069,7 @@ Continuing the preference-tier rollout after `auditing-data-pipeline-health` mer
 
 **Round-1 review on PR #271 caught a real defect in the new B-group scenario's code sample**, not a documentation-accuracy issue this time: the redirect check ran before `log_exposure` in the code as written, so exposure was only ever logged for non-redirected users — the code was already correct, the opposite of what the finding text and expected_behavior described. A reviewer correctly applying the eval's own expected finding to that exact code would have been rewarded for flagging a bug that wasn't there. Fixed by reordering the code (moving `log_exposure` before the redirect check, unconditional) so it actually demonstrates the described defect, in both `eval.json` and `examples.md`, then regenerating the two `collapsed/` copies that had propagated the same bug. Worth naming as its own failure mode alongside the prior two PRs' documentation-accuracy misses: this campaign's authoring mistakes have now spanned narrative-claim inaccuracy (PR #266), assertion-count arithmetic (PR #269), and — this time — a code sample that doesn't actually exhibit the behavior its own finding text asserts. Self-merged with green CI after the fix.
 
-### 2026-08-19 (eighth follow-up) — Q21 wave 3 continues: `reviewing-conceptual-integrity` hardened 10 → 22 scenarios
+## 2026-08-19 (eighth follow-up) — Q21 wave 3 continues: `reviewing-conceptual-integrity` hardened 10 → 22 scenarios
 
 Continuing the preference-tier rollout after `reviewing-outcome-instrumentation` merged (PR #271), self-merged under the owner's standing authorization. Restarted the branch from `origin/main` first. Recomputed scope-to-coverage across the 4 remaining lenses: a tie between `reviewing-conceptual-integrity` and `reviewing-usability-and-interaction`, both 9 owned checks against 10 baseline scenarios. Broke the tie by checking what was actually still uncovered in each rather than the raw scope number: `reviewing-usability-and-interaction`'s baseline already covered all 9 of its checklist bullets, but had never exercised `design: true` at all — no A-group scenario existed despite the lens being design-capable. `reviewing-conceptual-integrity`'s baseline already had its A-group covered (a Spaces design-doc scenario), but left one checklist bullet — the release-note-duplication-cost proxy — with no standalone scenario, and its own description and examples.md named richer, mostly-unused delegate targets (`reviewing-module-design`, `checking-idioms-and-consistency`, a second `checking-restraint` instance) than usability's only two named cross-refs, both already exercised in its baseline. Picked `reviewing-conceptual-integrity` on that basis; `reviewing-usability-and-interaction` is now the clean next pick with a single, well-defined gap.
 
@@ -3083,7 +3083,7 @@ Continuing the preference-tier rollout after `reviewing-outcome-instrumentation`
 
 **Round-1 review on PR #272 caught an undisclosed-reuse finding, a new failure mode for this campaign.** Three of the twelve new scenarios (the cascade-suppression, deadline-framing, and release-note-counterweight cases) held a kept baseline scenario's exact fact pattern constant while only varying the new adversarial or precision angle — a legitimate isolation technique in principle, but the rationale (manifest comment, PR body, this entry) described each as freshly grounded without disclosing the reuse, and the reviewer noted it also lets a model pattern-match on the three kept scenarios' specific entities without engaging the actual new pressure being tested — undercutting the coverage-diversity gain that's this campaign's whole point. Fixed by swapping in fresh, independently-grounded fact patterns for all three (Playlist/PlaylistTrack replacing Report/ReportSection; Team/Workspace replacing Collection/Folder; Waitlist/Favorites replacing Snapshots/Versions) rather than disclosing the reuse as deliberate, since fresh grounding is the stronger fix when it costs little. Swept this entry's own E-group description for the same stale entity names. Self-merged with green CI after the fix.
 
-### 2026-08-19 (ninth follow-up) — Q21 cross-model re-gate: substrate stood up, `sweeping-for-security` re-gated (never previously gated)
+## 2026-08-19 (ninth follow-up) — Q21 cross-model re-gate: substrate stood up, `sweeping-for-security` re-gated (never previously gated)
 
 New session, continuing the standing Q21 backlog rather than wave-3 hardening: nearly every suite hardened since 2026-08-08 had closed its own entry with "Cross-model re-gate: deferred — No Ollama in this container," including two floor-tier lenses (`sweeping-for-security`, `hunting-silent-failures`) that had *never* been re-gated at all despite being the five highest-stakes lenses in the suite. First attempt this session hit a genuine environment blocker distinct from every prior "not installed yet" deferral: this container's egress policy returned a hard `403` on `ollama.com` and `huggingface.co` via the proxy status endpoint (`connect_rejected`, policy denial) — confirmed via `curl -sS "$HTTPS_PROXY/__agentproxy/status"`, which is the documented way to distinguish a policy block from a transient failure. Per the proxy's own README ("do not retry or route around it — report the blocked host"), reported this to the owner rather than attempting a workaround (e.g. sourcing weights through an alternate host). Owner corrected the environment's network-access policy from **Trusted** to **Full**; a re-check of the proxy status endpoint showed the fix took effect **without needing a new session** — `recentRelayFailures` cleared and both hosts returned `200`, contrary to this session's own initial (over-general) assumption that environment-config changes never apply to an already-running session. That assumption was based on the docs' env-var behavior ("running sessions don't re-read the configuration"); the network-policy path evidently works differently, at least in this instance — worth treating as re-confirmable case-by-case rather than a settled rule.
 
@@ -3101,7 +3101,7 @@ New session, continuing the standing Q21 backlog rather than wave-3 hardening: n
 
 **Both floor-tier gaps that had never been re-gated are now closed.** `open-questions.md` Q21 updated with both results.
 
-### 2026-08-19 (tenth follow-up) — CI hardening: bound the shellcheck-step apt-get hang, root-caused from PR #274's own run
+## 2026-08-19 (tenth follow-up) — CI hardening: bound the shellcheck-step apt-get hang, root-caused from PR #274's own run
 
 Diagnosed, at the owner's request, the exact CI hang PR #274 hit and worked around by cancel+rerun rather than diagnosing at the time. Pulled the actual job log for the cancelled attempt (`get_job_logs` on job `96234330398`) rather than re-citing the PR #267 session-log note from memory, since this repo's own standing rule treats an unverified recall of a prior entry as exactly the kind of claim that needs re-grounding, not re-quoting.
 
@@ -3111,7 +3111,7 @@ Diagnosed, at the owner's request, the exact CI hang PR #274 hit and worked arou
 
 **Not fixed, deliberately out of scope:** the job as a whole still has no `timeout-minutes`, so a hang in any *other* step would still be unbounded — this pass only bounds the one step with a diagnosed, repeatable cause. A job-level timeout is a reasonable follow-up but wasn't added here to keep this change scoped to what was actually diagnosed.
 
-### 2026-08-19 (eleventh follow-up) — Q21 wave 3 continues: `reviewing-usability-and-interaction` hardened 10 → 22 scenarios
+## 2026-08-19 (eleventh follow-up) — Q21 wave 3 continues: `reviewing-usability-and-interaction` hardened 10 → 22 scenarios
 
 Continuing the preference-tier rollout after `reviewing-conceptual-integrity` merged (PR #272), self-merged under the owner's standing authorization. Restarted the branch from `origin/main` first. This was the clean pick left from the prior recompute's tie: this lens's baseline already covered all 9 of its checklist bullets, but `design: true` had never actually been exercised — no A-group scenario existed despite the lens being design-capable. No B group was needed; the only real gap was the missing A-group scenario, alongside the standard C/D/E groups this campaign's pattern always adds. `reviewing-threat-model` and `reviewing-artifact-conventions` remain the only two unhardened lenses after this one, set aside for the same reasons as every prior recompute.
 
@@ -3123,7 +3123,7 @@ Continuing the preference-tier rollout after `reviewing-conceptual-integrity` me
 
 2 preference-tier lenses remain unhardened: `reviewing-threat-model` (already ships its own native 21-scenario adversarial suite from authorship, just missing an `eval_min` floor annotation — a lightweight follow-up, not a fresh authoring pass) and `reviewing-artifact-conventions` (`shape: artifact`, presence-activated, a taxonomy this campaign has not yet adapted an A-E pattern for). Both were set aside at every recompute this session for these same reasons.
 
-### 2026-08-19 (twelfth follow-up) — Q21: `reviewing-threat-model` gated as-is, no new scenarios needed
+## 2026-08-19 (twelfth follow-up) — Q21: `reviewing-threat-model` gated as-is, no new scenarios needed
 
 Continuing under the owner's standing self-merge authorization, after PR #273 merged. Restarted the branch from `origin/main` first. This lens was set aside at every recompute this session, not because it was unhardened but because it never needed the same treatment: it already ships its own native 21-scenario adversarial suite from original authorship (`docs/threat-modeling-design-time-security.md` §5's core-firing / per-axis-coverage / detect-and-route / red-team / precision groups — this lens's own A-E-equivalent taxonomy, which predates and independently converges on the shape this campaign's A-E pattern uses elsewhere). The only gap was that it had never had an `eval_min` floor recorded in the manifest, leaving it ungated. This follow-up authored no new scenarios — the eval.json content is untouched.
 
@@ -3135,7 +3135,7 @@ Continuing under the owner's standing self-merge authorization, after PR #273 me
 
 1 preference-tier lens remains unhardened: `reviewing-artifact-conventions` (`shape: artifact`, presence-activated, single rubric with ~17 items, only 4 baseline scenarios — a taxonomy this campaign has not yet adapted an A-E pattern for, and will need original design work rather than a mechanical application of the existing pattern).
 
-### 2026-08-19 (thirteenth follow-up) — Q21 cross-model re-gate: `reviewing-module-design` (26 scenarios), first of the preference-tier backlog
+## 2026-08-19 (thirteenth follow-up) — Q21 cross-model re-gate: `reviewing-module-design` (26 scenarios), first of the preference-tier backlog
 
 Continuing the standing Q21 re-gate backlog (30 preference-tier lenses hardened since 2026-08-08 without ever being cross-model gated), now that both the substrate and the CI flake are resolved (PRs #274, #275). Picked `reviewing-module-design` first — the oldest deferred, and the first preference-tier lens this campaign ever hardened (2026-08-02). Ollama's `serve` process had died between sessions (container recycle); restarted it, model was still cached (no re-pull needed), warm-up request completed clean. Concurrent with a separate session's own wave-3 hardening work (the eleventh/twelfth entries above, and `reviewing-artifact-conventions` set aside for that session too) — different axis (re-gating already-hardened suites vs. hardening the last two unhardened ones), no overlap in scope.
 
@@ -3147,7 +3147,7 @@ Continuing the standing Q21 re-gate backlog (30 preference-tier lenses hardened 
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-19 (fourteenth follow-up) — Q21 cross-model re-gate: `checking-restraint` (24 scenarios)
+## 2026-08-19 (fourteenth follow-up) — Q21 cross-model re-gate: `checking-restraint` (24 scenarios)
 
 Second lens of the preference-tier re-gate backlog, run concurrently with #278's CI/review cycle (PR #278, `reviewing-module-design`, merged first). No conflicts this time — branched from `main` after that merge landed.
 
@@ -3159,7 +3159,7 @@ Second lens of the preference-tier re-gate backlog, run concurrently with #278's
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-19 (fifteenth follow-up) — Q21 cross-model re-gate: `reviewing-naming-and-readability` (25 scenarios) — the worst floor result of the campaign so far
+## 2026-08-19 (fifteenth follow-up) — Q21 cross-model re-gate: `reviewing-naming-and-readability` (25 scenarios) — the worst floor result of the campaign so far
 
 Third lens of the preference-tier re-gate backlog, run concurrently with #279's CI/review cycle (`checking-restraint`).
 
@@ -3179,7 +3179,7 @@ Third lens of the preference-tier re-gate backlog, run concurrently with #279's 
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-19 (sixteenth follow-up) — Q21 cross-model re-gate: `reviewing-llm-integration` (26 scenarios)
+## 2026-08-19 (sixteenth follow-up) — Q21 cross-model re-gate: `reviewing-llm-integration` (26 scenarios)
 
 Fourth lens of the preference-tier re-gate backlog.
 
@@ -3197,7 +3197,7 @@ Fourth lens of the preference-tier re-gate backlog.
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-19 (seventeenth follow-up) — Q21 cross-model re-gate: `finding-maintainability-hotspots` (24 scenarios)
+## 2026-08-19 (seventeenth follow-up) — Q21 cross-model re-gate: `finding-maintainability-hotspots` (24 scenarios)
 
 Fifth lens of the preference-tier re-gate backlog, and the last of the original wave-1 five.
 
@@ -3217,7 +3217,7 @@ Fifth lens of the preference-tier re-gate backlog, and the last of the original 
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-19 (eighteenth follow-up) — Q21 cross-model re-gate: `reviewing-accessibility-and-i18n` (25 scenarios) — new worst recall of the session
+## 2026-08-19 (eighteenth follow-up) — Q21 cross-model re-gate: `reviewing-accessibility-and-i18n` (25 scenarios) — new worst recall of the session
 
 Sixth lens of the preference-tier re-gate backlog, and the first from wave 2.
 
@@ -3237,7 +3237,7 @@ Sixth lens of the preference-tier re-gate backlog, and the first from wave 2.
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-19 (nineteenth follow-up) — Q21 closes: `reviewing-artifact-conventions` hardened 4 → 19 scenarios, all 35 preference-tier lenses now done
+## 2026-08-19 (nineteenth follow-up) — Q21 closes: `reviewing-artifact-conventions` hardened 4 → 19 scenarios, all 35 preference-tier lenses now done
 
 Continuing under the owner's standing self-merge authorization, after PR #276 (`reviewing-threat-model`) merged. Restarted the branch from `origin/main` first. This was the last preference-tier lens, and the genuine holdout every recompute this session set aside: `shape: artifact`, presence-activated, reviewing one artifact (a SKILL.md) against a single published rubric rather than a diff or design doc. Re-read `reference/skill-md.md` directly rather than trusting the prior session's "~17 rubric items" estimate carried in this log — the actual **Reviewable heuristics** section lists **9** bullets, not 17; corrected the figure here rather than repeating the stale one. Concurrent with a separate session's own cross-model re-gate backlog (the thirteenth through eighteenth entries above) — different axis (hardening the last unhardened lens vs. re-gating already-hardened ones), no overlap in scope, but the same conflict-resolution pattern as PR #273 applied here too: this branch needed rebasing onto `origin/main` twice mid-flight as that session's PRs (#278-283) landed.
 
@@ -3253,7 +3253,7 @@ Continuing under the owner's standing self-merge authorization, after PR #276 (`
 
 **This closes Q21's preference-tier rollout: 35 of 35 done, alongside all five already-hardened, cross-model-re-gated floor-tier lenses.** What remains open, not closed by this pass: cross-model re-gating the preference tier (the concurrent session's thirteenth-through-eighteenth entries above are actively closing this gap, though not yet complete) and adapting the A-E pattern to whatever lens or artifact shape gets added next. `docs/open-questions.md` Q21 updated to reflect the closed rollout.
 
-### 2026-08-20 — Q21 cross-model re-gate: `reviewing-test-quality` (24 scenarios) — third-worst recall of the campaign
+## 2026-08-20 — Q21 cross-model re-gate: `reviewing-test-quality` (24 scenarios) — third-worst recall of the campaign
 
 Continuing under the owner's standing self-merge authorization, after PR #283 (`reviewing-accessibility-and-i18n`) merged. Restarted the branch from `origin/main` first, which now carries `reviewing-artifact-conventions` (PR #277) closing out the hardening rollout — all 35 preference-tier lenses are hardened, so this and future entries are working purely through the cross-model re-gate backlog.
 
@@ -3279,7 +3279,7 @@ Continuing under the owner's standing self-merge authorization, after PR #283 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (follow-up) — Q21 cross-model re-gate: `reviewing-performance-and-efficiency` (26 scenarios)
+## 2026-08-20 (follow-up) — Q21 cross-model re-gate: `reviewing-performance-and-efficiency` (26 scenarios)
 
 Eighth lens of the preference-tier re-gate backlog, and the last of the original wave-1/wave-2 eleven. Continuing under the owner's standing self-merge authorization, after PR #284 (`reviewing-test-quality`) merged. Restarted the branch from `origin/main` first. Ran the full 26-scenario suite via `python -m tooling.run_evals --timeout 900`; unlike the prior two entries, all 26 scenarios completed on the first attempt with no timeout.
 
@@ -3303,7 +3303,7 @@ Eighth lens of the preference-tier re-gate backlog, and the last of the original
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (second follow-up) — Q21 cross-model re-gate: `auditing-architecture-conformance` (20 scenarios)
+## 2026-08-20 (second follow-up) — Q21 cross-model re-gate: `auditing-architecture-conformance` (20 scenarios)
 
 Ninth lens of the preference-tier re-gate backlog. Continuing under the owner's standing self-merge authorization, after PR #285 (`reviewing-performance-and-efficiency`) merged. Restarted the branch from `origin/main` first. Ran the full 20-scenario suite via `python -m tooling.run_evals --timeout 900`; all 20 scenarios completed on the first attempt with no timeout.
 
@@ -3329,7 +3329,7 @@ Ninth lens of the preference-tier re-gate backlog. Continuing under the owner's 
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (third follow-up) — Q21 cross-model re-gate: `reviewing-api-contract-safety` (20 scenarios)
+## 2026-08-20 (third follow-up) — Q21 cross-model re-gate: `reviewing-api-contract-safety` (20 scenarios)
 
 Continuing under the owner's standing self-merge authorization, after PR #285 (`reviewing-performance-and-efficiency`) merged. Restarted the branch from `origin/main` first. Ran the full 20-scenario suite via `python -m tooling.run_evals --timeout 900`; all 20 scenarios completed on the first attempt with no timeout.
 
@@ -3349,7 +3349,7 @@ Continuing under the owner's standing self-merge authorization, after PR #285 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (fourth follow-up) — Q21 cross-model re-gate: `reviewing-agentic-safety` (22 scenarios)
+## 2026-08-20 (fourth follow-up) — Q21 cross-model re-gate: `reviewing-agentic-safety` (22 scenarios)
 
 Continuing under the owner's standing self-merge authorization, after PR #287 (`reviewing-api-contract-safety`) merged. Restarted the branch from `origin/main` first; the Ollama server needed a manual restart (`ollama serve`) before the run, then answered `qwen2.5-coder:7b list` normally. Ran the full 22-scenario suite via `python -m tooling.run_evals --timeout 900`; all 22 scenarios completed on the first attempt with no timeout.
 
@@ -3371,7 +3371,7 @@ Continuing under the owner's standing self-merge authorization, after PR #287 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (fifth follow-up) — Q21 cross-model re-gate: `reviewing-threat-model` (21 scenarios) — finally obtains the floor-of-record run deferred since 2026-06-27
+## 2026-08-20 (fifth follow-up) — Q21 cross-model re-gate: `reviewing-threat-model` (21 scenarios) — finally obtains the floor-of-record run deferred since 2026-06-27
 
 This closes follow-up (1) tracked at the end of the lens's original 2026-06-27 gate (see that entry above): the `qwen2.5-coder:7b` floor-of-record run, attempted three times back then and aborted every time by a model/harness `/api/chat` timeout specific to that model, while `qwen2.5:7b` and `llama3.1:8b` both completed cleanly. This session's run completed on the first attempt with no timeout, against this lens's original, unchanged 21-scenario suite (never expanded during the hardening pass — `reviewing-threat-model` already shipped its own comprehensive A-E-equivalent taxonomy at authorship, per the Q21 main paragraph).
 
@@ -3395,7 +3395,7 @@ This closes follow-up (1) tracked at the end of the lens's original 2026-06-27 g
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (sixth follow-up) — Q21 cross-model re-gate: `reviewing-ai-authored-code` (20 scenarios)
+## 2026-08-20 (sixth follow-up) — Q21 cross-model re-gate: `reviewing-ai-authored-code` (20 scenarios)
 
 Continuing under the owner's standing self-merge authorization, after PR #289 (`reviewing-threat-model`) merged. Restarted the branch from `origin/main` first. Ran the full 20-scenario suite via `python -m tooling.run_evals --timeout 900`; all 20 scenarios completed on the first attempt with no timeout.
 
@@ -3415,7 +3415,7 @@ Continuing under the owner's standing self-merge authorization, after PR #289 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (seventh follow-up) — Q21 cross-model re-gate: `reviewing-agent-legibility` (21 scenarios)
+## 2026-08-20 (seventh follow-up) — Q21 cross-model re-gate: `reviewing-agent-legibility` (21 scenarios)
 
 Continuing under the owner's standing self-merge authorization, after PR #290 (`reviewing-ai-authored-code`) merged. Restarted the branch from `origin/main` first. Ran the full 21-scenario suite via `python -m tooling.run_evals --timeout 900`; all 21 scenarios completed on the first attempt with no timeout.
 
@@ -3437,7 +3437,7 @@ Continuing under the owner's standing self-merge authorization, after PR #290 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (eighth follow-up) — Q21 cross-model re-gate: `reviewing-ethical-design` (21 scenarios)
+## 2026-08-20 (eighth follow-up) — Q21 cross-model re-gate: `reviewing-ethical-design` (21 scenarios)
 
 Continuing under the owner's standing self-merge authorization, after PR #291 (`reviewing-agent-legibility`) merged. Restarted the branch from `origin/main` first. Ran the full 21-scenario suite via `python -m tooling.run_evals --timeout 900`; all 21 scenarios completed on the first attempt with no timeout.
 
@@ -3461,7 +3461,7 @@ Continuing under the owner's standing self-merge authorization, after PR #291 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (ninth follow-up) — Q21 cross-model re-gate: `reviewing-usability-and-interaction` (22 scenarios)
+## 2026-08-20 (ninth follow-up) — Q21 cross-model re-gate: `reviewing-usability-and-interaction` (22 scenarios)
 
 Continuing under the owner's standing self-merge authorization, after PR #292 (`reviewing-ethical-design`) merged. Restarted the branch from `origin/main` first. Ran the full 22-scenario suite via `python -m tooling.run_evals --timeout 900`; all 22 scenarios completed on the first attempt with no timeout.
 
@@ -3485,7 +3485,7 @@ Continuing under the owner's standing self-merge authorization, after PR #292 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (tenth follow-up) — Q21 cross-model re-gate: `reviewing-outcome-instrumentation` (23 scenarios)
+## 2026-08-20 (tenth follow-up) — Q21 cross-model re-gate: `reviewing-outcome-instrumentation` (23 scenarios)
 
 Continuing under the owner's standing self-merge authorization, after PR #293 (`reviewing-usability-and-interaction`) merged. Restarted the branch from `origin/main` first. Ran the full 23-scenario suite via `python -m tooling.run_evals --timeout 900`; all 23 scenarios completed on the first attempt with no timeout.
 
@@ -3511,7 +3511,7 @@ Continuing under the owner's standing self-merge authorization, after PR #293 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (eleventh follow-up) — Q21 cross-model re-gate: `reviewing-conceptual-integrity` (22 scenarios)
+## 2026-08-20 (eleventh follow-up) — Q21 cross-model re-gate: `reviewing-conceptual-integrity` (22 scenarios)
 
 Continuing under the owner's standing self-merge authorization, after PR #294 (`reviewing-outcome-instrumentation`) merged. Restarted the branch from `origin/main` first. Ran the full 22-scenario suite via `python -m tooling.run_evals --timeout 900`; all 22 scenarios completed on the first attempt with no timeout.
 
@@ -3539,7 +3539,7 @@ Continuing under the owner's standing self-merge authorization, after PR #294 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (twelfth follow-up) — Q21 cross-model re-gate: `reviewing-data-transformations-and-contracts` (28 scenarios)
+## 2026-08-20 (twelfth follow-up) — Q21 cross-model re-gate: `reviewing-data-transformations-and-contracts` (28 scenarios)
 
 Continuing under the owner's standing self-merge authorization, after PR #295 (`reviewing-conceptual-integrity`) merged. Restarted the branch from `origin/main` first. Ran the full 28-scenario suite via `python -m tooling.run_evals --timeout 900`; all 28 scenarios completed on the first attempt with no timeout, though the run itself took considerably longer than smaller suites (this is the largest suite re-gated so far this campaign).
 
@@ -3565,7 +3565,7 @@ Continuing under the owner's standing self-merge authorization, after PR #295 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (thirteenth follow-up) — Q21 cross-model re-gate: `auditing-data-pipeline-health` (25 scenarios)
+## 2026-08-20 (thirteenth follow-up) — Q21 cross-model re-gate: `auditing-data-pipeline-health` (25 scenarios)
 
 Continuing under the owner's standing self-merge authorization, after PR #296 (`reviewing-data-transformations-and-contracts`) merged. Restarted the branch from `origin/main` first. Ran the full 25-scenario suite via `python -m tooling.run_evals --timeout 900`; all 25 scenarios completed on the first attempt with no timeout.
 
@@ -3587,7 +3587,7 @@ Continuing under the owner's standing self-merge authorization, after PR #296 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (fourteenth follow-up) — Q21 cross-model re-gate: `reviewing-observability-and-operability` (20 scenarios)
+## 2026-08-20 (fourteenth follow-up) — Q21 cross-model re-gate: `reviewing-observability-and-operability` (20 scenarios)
 
 Continuing under the owner's standing self-merge authorization, after PR #297 (`auditing-data-pipeline-health`) merged. Restarted the branch from `origin/main` first. Ran the full 20-scenario suite via `python -m tooling.run_evals --timeout 900`; all 20 scenarios completed on the first attempt with no timeout.
 
@@ -3609,7 +3609,7 @@ Continuing under the owner's standing self-merge authorization, after PR #297 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (fifteenth follow-up) — Q21 cross-model re-gate: `reviewing-pr-and-process-hygiene` (31 scenarios)
+## 2026-08-20 (fifteenth follow-up) — Q21 cross-model re-gate: `reviewing-pr-and-process-hygiene` (31 scenarios)
 
 Continuing under the owner's standing self-merge authorization, after PR #298 (`reviewing-observability-and-operability`) merged. Restarted the branch from `origin/main` first. Ran the full 31-scenario suite via `python -m tooling.run_evals --timeout 900` — the largest suite re-gated this campaign; all 31 scenarios completed on the first attempt with no timeout.
 
@@ -3635,7 +3635,7 @@ Continuing under the owner's standing self-merge authorization, after PR #298 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (sixteenth follow-up) — Q21 cross-model re-gate: `reviewing-decision-lifecycle` (18 scenarios)
+## 2026-08-20 (sixteenth follow-up) — Q21 cross-model re-gate: `reviewing-decision-lifecycle` (18 scenarios)
 
 Continuing under the owner's standing self-merge authorization, after PR #299 (`reviewing-pr-and-process-hygiene`) merged. Restarted the branch from `origin/main` first. Ran the full 18-scenario suite via `python -m tooling.run_evals --timeout 900`; all 18 scenarios completed on the first attempt with no timeout.
 
@@ -3659,7 +3659,7 @@ Continuing under the owner's standing self-merge authorization, after PR #299 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (seventeenth follow-up) — Q21 cross-model re-gate: `auditing-decision-record-currency` (20 scenarios)
+## 2026-08-20 (seventeenth follow-up) — Q21 cross-model re-gate: `auditing-decision-record-currency` (20 scenarios)
 
 Continuing under the owner's standing self-merge authorization, after PR #300 (`reviewing-decision-lifecycle`) merged. Restarted the branch from `origin/main` first. Ran the full 20-scenario suite via `python -m tooling.run_evals --timeout 900`; all 20 scenarios completed on the first attempt with no timeout.
 
@@ -3687,7 +3687,7 @@ Continuing under the owner's standing self-merge authorization, after PR #300 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (eighteenth follow-up) — Q21 cross-model re-gate: `auditing-infrastructure-as-code` (20 scenarios)
+## 2026-08-20 (eighteenth follow-up) — Q21 cross-model re-gate: `auditing-infrastructure-as-code` (20 scenarios)
 
 Continuing under the owner's standing self-merge authorization, after PR #301 (`auditing-decision-record-currency`) merged. Fresh worktree from `origin/main`. Ran the full 20-scenario suite via `python -m tooling.run_evals --timeout 900`; all 20 scenarios completed on the first attempt with no timeout.
 
@@ -3713,7 +3713,7 @@ Continuing under the owner's standing self-merge authorization, after PR #301 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (nineteenth follow-up) — Q21 cross-model re-gate: `reviewing-resilience-and-scalability` (23 scenarios)
+## 2026-08-20 (nineteenth follow-up) — Q21 cross-model re-gate: `reviewing-resilience-and-scalability` (23 scenarios)
 
 Continuing under the owner's standing self-merge authorization, after PR #302 (`auditing-infrastructure-as-code`) merged. Fresh worktree from `origin/main`. Ran the full 23-scenario suite via `python -m tooling.run_evals --timeout 900`; all 23 scenarios completed on the first attempt with no timeout.
 
@@ -3733,7 +3733,7 @@ Continuing under the owner's standing self-merge authorization, after PR #302 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (twentieth follow-up) — Q21 cross-model re-gate: `auditing-enforcement-and-meta-artifacts` (20 scenarios)
+## 2026-08-20 (twentieth follow-up) — Q21 cross-model re-gate: `auditing-enforcement-and-meta-artifacts` (20 scenarios)
 
 Continuing under the owner's standing self-merge authorization, after PR #303 (`reviewing-resilience-and-scalability`) merged. Fresh worktree from `origin/main`. Ran the full 20-scenario suite via `python -m tooling.run_evals --timeout 900`; all 20 scenarios completed on the first attempt with no timeout.
 
@@ -3757,7 +3757,7 @@ Continuing under the owner's standing self-merge authorization, after PR #303 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-20 (twenty-first follow-up) — Q21 cross-model re-gate: `reviewing-interoperability` (21 scenarios)
+## 2026-08-20 (twenty-first follow-up) — Q21 cross-model re-gate: `reviewing-interoperability` (21 scenarios)
 
 Continuing under the owner's standing self-merge authorization, after PR #306 (`auditing-enforcement-and-meta-artifacts`) merged. Fresh worktree from `origin/main`. Ran the full 21-scenario suite via `python -m tooling.run_evals --timeout 900`; all 21 scenarios completed on the first attempt with no timeout. This closes the Q21 preference-tier cross-model re-gate backlog — the last of the lenses left deferred from the wave-3 hardening pass.
 
@@ -3785,7 +3785,7 @@ Continuing under the owner's standing self-merge authorization, after PR #306 (`
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-22 — Q21: qwen3.5:4b campaign-wide re-gate complete — all 40 hardened suites, promote/hold verdict
+## 2026-08-22 — Q21: qwen3.5:4b campaign-wide re-gate complete — all 40 hardened suites, promote/hold verdict
 
 Picked up the queued next step from the 2026-08-17 entry ("First real evidence for the standing eval-model-baseline-stability question... This is one lens, not the campaign-wide verdict a baseline swap needs"). Ran the candidate model `qwen3.5:4b` (temperature 0, thinking disabled) against every one of the repo's 40 hardened Q21 eval suites via `python -m tooling.run_evals`, hand-graded scenario-by-scenario against each suite's own `expected_behavior` (never by a firing count, per the runbook's standing warning), and compared against the floor-of-record (`qwen2.5-coder:7b`) numbers already on record in this file. 39 of 40 lenses have a located floor comparison; `reviewing-artifact-conventions` was hardened without a dedicated post-hardening cross-model re-gate ever having been run (only its pre-hardening 4-scenario build-time gate is on record), so its result below is informational only.
 
@@ -3852,7 +3852,7 @@ Picked up the queued next step from the 2026-08-17 entry ("First real evidence f
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-22 (same day, follow-on) — Q21: prompt-tuning pass on the 5 held qwen3.5:4b lenses, all 5 now beat the floor
+## 2026-08-22 (same day, follow-on) — Q21: prompt-tuning pass on the 5 held qwen3.5:4b lenses, all 5 now beat the floor
 
 Picked up the campaign's own recommended next step: a dedicated prompt-tuning pass on the 5 lenses held out of the `qwen3.5:4b` promotion (`auditing-config-and-build-hygiene`, `auditing-documentation-health`, `reviewing-module-design`, `reviewing-migration-and-data-safety`, `tracing-correctness-and-invariants`), following the same two-round, re-run-after-every-edit discipline as the original floor's 2026-07-27 tuning sweep. Two of the five (`auditing-config-and-build-hygiene`, `auditing-documentation-health`) had raw qwen3.5:4b logs surviving from the campaign's own stale scratchpad snapshot and were re-graded fresh from those; the other three (`reviewing-module-design`, `reviewing-migration-and-data-safety`, `tracing-correctness-and-invariants`) had their raw logs lost entirely — fresh baselines were re-run rather than tuning against remembered or guessed failure data.
 
@@ -3882,7 +3882,7 @@ Picked up the campaign's own recommended next step: a dedicated prompt-tuning pa
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-23 — #191: new repo-shaped lens `auditing-deployment-and-trust-boundaries` (taxonomy #45, v0.14)
+## 2026-08-23 — #191: new repo-shaped lens `auditing-deployment-and-trust-boundaries` (taxonomy #45, v0.14)
 
 Picked up field report [#191](https://github.com/brandondees/code-quality-atlas/issues/191) — a whole-repo audit against a real ~184k-LOC system found none of the (then) nine repo-shaped audits could reach its single highest-severity issue: an unattended `git-sync` job fast-forwarding `main` every ~5 minutes and then executing `deploy-binaries.sh`/`install-launchd.sh`/a service-restart script from the freshly-pulled tree — Poisoned Pipeline Execution, live, not hypothetical. Not a dependency CVE (#18), not an architecture-layering violation (#12), not a declared-IaC misconfiguration (#31), not a suppression (#30); only adversarial, boundary-by-boundary reasoning finds it, and that reasoning (`reviewing-threat-model`, #38) only runs diff/decision-shaped, never in repo-audit mode.
 
@@ -3900,7 +3900,7 @@ Picked up field report [#191](https://github.com/brandondees/code-quality-atlas/
 
 **Recorded in `map-gaps.md` G15/G30; closes issue #191 §1.** §2 (field confirmation of already-tracked gaps — G24 VII-H, G12, G13/G21) and §3 (vendored-pin staleness signal) were explicitly not new proposals in the issue's own framing and were not actioned here.
 
-### 2026-08-24 — Q21-harden `auditing-deployment-and-trust-boundaries` (last unhardened lens; campaign now covers all 41)
+## 2026-08-24 — Q21-harden `auditing-deployment-and-trust-boundaries` (last unhardened lens; campaign now covers all 41)
 
 Picked up the loose end the 2026-08-23 build entry named explicitly: `auditing-deployment-and-trust-boundaries` shipped with D8's 3-scenario baseline (6 after authoring) and `eval_min` deliberately left unset, "not yet through the Q21 hardening/cross-model-re-gate pass." A manifest sweep confirmed it was the *only* lens in the suite still in that state — all other 40 lenses already carry `eval_min`.
 
@@ -3914,7 +3914,7 @@ Picked up the loose end the 2026-08-23 build entry named explicitly: `auditing-d
 
 **Recorded in `open-questions.md` Q21.**
 
-### 2026-08-25 — cross-substrate "make illegal states unrepresentable" (map-gaps G37)
+## 2026-08-25 — cross-substrate "make illegal states unrepresentable" (map-gaps G37)
 
 Follow-on from the metareview read (G36) and an owner question about lens-level improvements derivable from it. The "make illegal states unrepresentable" (Minsky) / "parse, don't validate" (King) principle was correctly *sourced* in `reviewing-module-design` (#10) but siloed to the **type substrate** — phrased entirely in tagged-union / smart-constructor vocabulary, with a Minsky note that even asserted "the type system is the enforcement mechanism, not runtime checks" (which contradicts the principle's substrate-independence — a DB `CHECK` is a runtime check that still makes the state unconstructible). The same move showed up unnamed at other boundaries and was absent at two.
 
@@ -3932,7 +3932,7 @@ Follow-on from the metareview read (G36) and an owner question about lens-level 
 
 **Recorded in `map-gaps.md` G37.**
 
-### 2026-08-26 — PR-review automation: subscribe failures, a self-nudge fallback, and a review-request retrigger
+## 2026-08-26 — PR-review automation: subscribe failures, a self-nudge fallback, and a review-request retrigger
 
 Surfaced while the atlas reviewer was live on PR #327: `subscribe_pr_activity`
 failed outright (three separate calls, all erroring, not just missing an
@@ -4081,7 +4081,7 @@ matches (`MATCH — CI step would now pass`); `pip install --require-hashes`,
 `pip-audit`, `ruff check`, `pytest` (435/435), `tooling.cli drift`, and
 `markdownlint-cli2` all clean against the fix.
 
-### 2026-08-26 (cont.) — Model B: a poll-driven alternative to the event-triggered reviewer
+## 2026-08-26 (cont.) — Model B: a poll-driven alternative to the event-triggered reviewer
 
 Same evening, same repo. The owner asked whether the trigger-management API
 could create the review-requested/opened GitHub-event routines directly
@@ -4136,7 +4136,7 @@ both side by side — this doesn't deprecate that path, it adds a second one.
 `map-gaps.md`/`open-questions.md` entry — operational-tooling documentation,
 same scope note as the two 2026-08-26 entries above.
 
-### 2026-08-27 — `atlas-review-pr.md` never actually loaded a selected lens's own content
+## 2026-08-27 — `atlas-review-pr.md` never actually loaded a selected lens's own content
 
 Surfaced by live testing of the routines above: the owner watched a routine
 transcript where the reviewer read `choosing-review-lenses` to pick lenses,
@@ -4213,7 +4213,7 @@ Channel B section now names this repo's own use of it.
 new sync tests included), `tooling.cli drift` (no drift — self-vendoring
 copies generated content, it doesn't change what `drift` itself checks).
 
-### 2026-08-27 (same day, follow-on) — the ACK was arriving late, not first
+## 2026-08-27 (same day, follow-on) — the ACK was arriving late, not first
 
 The owner's original transcript observation actually named two problems, and
 only one (lens content never loaded) had been fixed so far. The other: "it
@@ -4271,7 +4271,7 @@ the ACK.
 exercises the command's own step ordering directly, so this is prose-level
 verification), `tooling.cli drift` (no drift).
 
-### 2026-08-31 — #349: manifest prose-field parsing's shotgun surgery routed through `_prose()`
+## 2026-08-31 — #349: manifest prose-field parsing's shotgun surgery routed through `_prose()`
 
 The 2026-08-30 weekly atlas audit (#347) flagged a Minor shotgun-surgery
 finding: five of `load_manifest`'s six manifest-section parsers (skills,
@@ -4309,7 +4309,7 @@ each verified to fail against the pre-fix code), `ruff check .` (clean),
 `tooling.cli eval`/`drift`/`generate` + diff (no drift, no generated-tree
 change).
 
-### 2026-09-01 — Q22 Phase 1 shipped: the standing-dispute check
+## 2026-09-01 — Q22 Phase 1 shipped: the standing-dispute check
 
 A fresh session opened with "what's next?" and worked the repo's own
 orientation docs rather than starting from a named task. `docs/open-questions.md`'s
@@ -4368,7 +4368,7 @@ files. No cross-model re-gate this session (design doc frames Phase 1's
 evidence bar as "produces signal," not a pre-ship hardened-floor gate — see
 the plan doc's own note on this).
 
-### 2026-09-01 (same day, follow-up) — #351: vendor the CC BY license text into account-skill zips, not just a link
+## 2026-09-01 (same day, follow-up) — #351: vendor the CC BY license text into account-skill zips, not just a link
 
 `tooling/package-account-zips.sh`'s `write_attribution()` shipped only a
 `NOTICE.md` linking back to `LICENSE-CC-BY-4.0` on GitHub. `tooling/
@@ -4389,7 +4389,7 @@ both the standalone and `--collapsed` paths.
 **Verification:** new regression tests covering both packaging paths; no
 generated-tree change (packaging-script fix only).
 
-### 2026-09-02 — #359: dual-encode round/ack state so it survives HTML-comment stripping
+## 2026-09-02 — #359: dual-encode round/ack state so it survives HTML-comment stripping
 
 `pull_request_read` had been observed stripping HTML comments entirely from
 returned review/comment bodies, so a round-state protocol relying solely on
@@ -4432,7 +4432,7 @@ the ack-as-lock pattern not being atomic, "unreadable" collapsing into
 `REVIEW.md`/`templates/REVIEW.md` kept byte-identical per
 `test_review_template_sync.py`.
 
-### 2026-09-03 — #364: stop writing raw `tool_input` and absolute `transcript_path` into the committed learnings log
+## 2026-09-03 — #364: stop writing raw `tool_input` and absolute `transcript_path` into the committed learnings log
 
 The 2026-09-03 whole-repo audit (#347) raised #364 (Major, security):
 `hooks/log-skill-invocation.sh` recorded the Skill tool's `tool_input`
@@ -4489,7 +4489,7 @@ match an independent `sha256sum` of the same compact JSON, and
 these two hooks aren't manifest-generated, so this confirms nothing else
 drifted), `markdownlint-cli2` (0 issues on the touched docs).
 
-### 2026-09-03 — #366: `pip install --require-hashes` verified nothing already-installed on the persistent runner
+## 2026-09-03 — #366: `pip install --require-hashes` verified nothing already-installed on the persistent runner
 
 The same audit (#347) raised #366 (Major, security): `ci.yml`'s
 `pip install --require-hashes -r requirements.txt` ran with no venv and no
@@ -4538,7 +4538,7 @@ No generated-tree or Python-source changes, so `tooling.cli generate` and
 `ruff check` are unaffected by construction — this is a single-file CI
 workflow edit.
 
-### 2026-09-03 — #377: `vendor-skills.sh --prune` path traversal via the target's `.atlas-vendored` marker
+## 2026-09-03 — #377: `vendor-skills.sh --prune` path traversal via the target's `.atlas-vendored` marker
 
 The same audit (#347) raised #377 (Major + Minor): `main()` in
 `tooling/vendor-skills.sh` read every non-comment line of the *target*
@@ -4627,7 +4627,7 @@ pinned v0.10.0 CI uses), `tooling.cli drift` (clean; no skill content
 changed). `docs/distribution.md`'s Channel B section updated to describe
 the marker's trust boundary and `--dry-run`.
 
-### 2026-09-03 (same day, follow-up) — #377 PR review round: forged-marker ownership gap, plus a merge conflict from #398
+## 2026-09-03 (same day, follow-up) — #377 PR review round: forged-marker ownership gap, plus a merge conflict from #398
 
 Two things landed on the #377 PR (#400) after it opened. First, a genuine
 merge conflict: #398 (an unrelated `--with-lens-coverage-hook` feature)
@@ -4703,7 +4703,7 @@ one adjusted test); `ruff check .` (clean); `shellcheck --source-path=SCRIPTDIR
 same globstar/dotglob flags CI uses (15 files, clean); `tooling.cli drift`
 (clean); `markdownlint-cli2` (clean).
 
-### 2026-09-03 — #362: the unattended reviewer could resolve a human reviewer's own thread
+## 2026-09-03 — #362: the unattended reviewer could resolve a human reviewer's own thread
 
 The 2026-09-03 whole-repo audit (#347) raised #362 (Major, security, lens
 `reviewing-agentic-safety`): `mcp__github__resolve_review_thread` is granted
@@ -4757,7 +4757,7 @@ regression test confirmed to fail on the pre-fix text and pass on the
 fix; `pytest` (515/515, up from 511 — 4 new); `markdownlint-cli2` (clean,
 490 files); `ruff check .` (clean); `tooling.cli drift` (clean).
 
-### 2026-09-03 — #360: ACK/round detection had no identity binding, no atomic lock, and collapsed "unreadable" into "absent"
+## 2026-09-03 — #360: ACK/round detection had no identity binding, no atomic lock, and collapsed "unreadable" into "absent"
 
 CodeRabbit's review on PR #359 (the #354/#355 comment-stripping fix)
 surfaced three related, pre-existing gaps in the round/ACK detection
@@ -4869,7 +4869,7 @@ content on all six checks and pass on the fix (after the recovery above);
 `pytest` (521/521, up from 515 — 6 new); `markdownlint-cli2` (clean, 490
 files); `ruff check .` (clean); `tooling.cli drift` (clean).
 
-### 2026-09-03 (same day, follow-up) — #360 PR review rounds: a self-inflicted destructive race, then a real body-marker fix
+## 2026-09-03 (same day, follow-up) — #360 PR review rounds: a self-inflicted destructive race, then a real body-marker fix
 
 Three further review rounds on #360's own PR (#402), each finding a real gap
 in the previous round's fix — `tests/test_ack_round_identity_binding.py`
@@ -4961,7 +4961,7 @@ clean.
 author; `pytest` 528/528 (524 + 4 new),
 `ruff`/`markdownlint-cli2`/`tooling.cli drift` clean.
 
-### 2026-09-04 — #393: research/comment accuracy sweep (128-tool cap, RuboCop rename, Pylint default, picomatch, two stale comments)
+## 2026-09-04 — #393: research/comment accuracy sweep (128-tool cap, RuboCop rename, Pylint default, picomatch, two stale comments)
 
 Six independently-verified inaccuracies from the whole-repo audit (#347),
 each checked against the tool's own current docs/source rather than taken
@@ -5012,7 +5012,7 @@ on touched files (a pre-existing, unrelated `ruff format` diff in
 `tooling.cli drift` clean; `markdownlint-cli2` (pinned to CI's v0.23.2) 0
 issues across all 490 files.
 
-### 2026-09-04 — #363: pr-review-automation runbook disagreed with the commands it summarizes
+## 2026-09-04 — #363: pr-review-automation runbook disagreed with the commands it summarizes
 
 Standing authoring rule 2 (a summary must agree with what it summarizes),
 violated three ways in `docs/runbooks/pr-review-automation.md`:
@@ -5053,7 +5053,7 @@ trusted.
 --check` clean on the new test file; `tooling.cli drift` clean;
 `markdownlint-cli2` (pinned to CI's v0.23.2) 0 issues across all 490 files.
 
-### 2026-09-04 — #380: declare the Python floor, add a contributor setup block, gate `ruff format` in CI
+## 2026-09-04 — #380: declare the Python floor, add a contributor setup block, gate `ruff format` in CI
 
 Three carry-over gaps from #347: no stated Python floor, no documented setup
 anywhere in the repo, and no format gate in CI.
@@ -5113,7 +5113,7 @@ clean;
 `markdownlint-cli2` (pinned to CI's v0.23.2) 0 issues across all 490 files;
 CI's `ci.yml` re-parsed as valid YAML after the edit.
 
-### 2026-09-04 (same day) — #374: onboarding guardrail sent lens fixes to generated files; SKILL.md carried no visible generated marker
+## 2026-09-04 (same day) — #374: onboarding guardrail sent lens fixes to generated files; SKILL.md carried no visible generated marker
 
 The do-not-touch guardrail in `CLAUDE.md`/`AGENTS.md` (the one place either
 file explains where a lens fix goes) said "edit `skills/<name>/`" without
