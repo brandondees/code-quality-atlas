@@ -127,7 +127,7 @@ def test_extract_bullets_from_heuristics_subsection():
     heur = extract_subsection(extract_section(SAMPLE, 2), "heuristics")
     bullets = extract_bullets(heur)
     assert bullets[0].startswith("Is any error swallowed")
-    assert len(bullets) == 3
+    assert len(bullets) == 5
     assert all(not b.startswith("- ") for b in bullets)
 
 

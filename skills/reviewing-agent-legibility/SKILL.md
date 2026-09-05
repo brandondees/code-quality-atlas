@@ -42,7 +42,7 @@ Report only real problems. If this lens applies and what you reviewed holds up �
 
 ## Top checks
 
-The head of the full checklist — enough for a first pass without opening any reference file:
+This is the full checklist — nothing else to open for it:
 
 - **Context economy / self-containment (the 40% rule):** Can this change be understood — and safely modified — *without* loading the whole repo into context? Is the unit of change a **depth-first slice** (the function plus the key callees, types, and constants it depends on sit together or are reachable in one hop) rather than logic scattered across many files each needing the rest to make sense? A change that only makes sense after a large, fragmented read is a legibility defect for an agent *and* a human (models retrieve worst from the middle of a long context); prefer the self-contained shape.
 - **Agent-onboarding files present, accurate, and scoped (AGENTS.md / CLAUDE.md):** If the change alters the build/test/run/convention surface, does the repo's agent-instruction file still tell an agent the truth — and is it **scoped** (the right commands, conventions, and do-not-touch guardrails) rather than absent, stale, or a bloated everything-dump? This is the agent analog of #22's README front-door: file *drift* is #22/#24 and artifact *conformance* is #30, but *"does the repo provide good, scoped agent onboarding to work here"* is owned here. A missing or misleading onboarding file makes every later agent edit start from a worse prior.
@@ -62,7 +62,6 @@ Where a finding here is one a tool can catch deterministically, surface that as 
 
 ## Going deeper
 
-- [reference/heuristics.md](reference/heuristics.md) — the full checklist; open it when the change sits squarely in this lens's domain.
 - [examples.md](examples.md) — concrete good/bad findings, and the output format to match.
 - [reference/tool-rules.md](reference/tool-rules.md) — static-analysis rules covering the mechanical subset; for wiring up linters, not needed for the judgment review itself.
 - [reference/sources.md](reference/sources.md) — the research behind each check; for provenance, not needed during a review.

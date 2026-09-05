@@ -43,7 +43,7 @@ Report only real problems. If this lens applies and what you reviewed holds up �
 
 ## Top checks
 
-The head of the full checklist — enough for a first pass without opening any reference file:
+This is the full checklist — nothing else to open for it:
 
 - **Tool least-privilege (ASI02/ASI03, LLM06):** Does each tool exposed to the model carry the narrowest capability that serves the feature (a `lookup_order` tool, not `execute_sql`; read-only where writes aren't needed; per-tool scopes)? Excessive *functionality*, *permissions*, or *autonomy* in the tool surface is the finding even before any exploit.
 - **Approval gates & autonomy bounds (ASI01/ASI08, LLM10):** Are state-changing, irreversible, or externally visible agent actions gated (human approval, policy check, or allow-list), and is every agent loop bounded — step budget, recursion limit, spend/token cap, wall-clock timeout — so a hijacked or confused agent can't run away?
@@ -63,7 +63,6 @@ Where a finding here is one a tool can catch deterministically, surface that as 
 
 ## Going deeper
 
-- [reference/heuristics.md](reference/heuristics.md) — the full checklist; open it when the change sits squarely in this lens's domain.
 - [examples.md](examples.md) — concrete good/bad findings, and the output format to match.
 - [reference/tool-rules.md](reference/tool-rules.md) — static-analysis rules covering the mechanical subset; for wiring up linters, not needed for the judgment review itself.
 - [reference/sources.md](reference/sources.md) — the research behind each check; for provenance, not needed during a review.

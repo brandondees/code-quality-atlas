@@ -118,7 +118,7 @@ The merged report's severity floor depends on the active depth mode. Below the f
 | Mode | Floor | Effect |
 |---|---|---|
 | **triage** | Major | pinned at Major — ranked sections report everything down to Major; below that, the advisory list only |
-| **review** | escalating | round-based escalation (as today) — later re-review rounds raise the floor |
+| **review** | escalating | round-based escalation — later re-review rounds raise the floor |
 | **comprehensive** | Nit | pinned at Nit — ranked sections report everything down to Nit; below that, the advisory list only |
 
 ## Reviewer discipline

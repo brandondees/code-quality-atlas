@@ -2007,10 +2007,11 @@ router:
     - when: Infrastructure-as-code change (Terraform/OpenTofu, Kubernetes/Helm,
             CloudFormation manifests)
       run: [auditing-infrastructure-as-code, sweeping-for-security]
-      note: "repo-shaped — judges blast radius, public exposure, IAM scope, and
-            declared-vs-live drift; #14 owns the security verdict"
+      note: "auditing-infrastructure-as-code (repo-shaped) judges blast radius,
+            public exposure, IAM scope, and declared-vs-live drift; #14
+            (sweeping-for-security) owns the security verdict"
     - when: A standardized authored artifact rather than source code — a SKILL.md
-            or agent-skill definition (more artifact rubrics to come)
+            or agent-skill definition
       run: [reviewing-artifact-conventions]
       note: artifact-shaped — detect the artifact, then review it against its own
             published standard, not as application code

@@ -88,6 +88,22 @@ def top_checks(skill: Skill, docs_root: str = ".") -> list[str]:
     return checks
 
 
+def _all_heuristics_bullets(skill: Skill, docs_root: str = ".") -> list[str]:
+    """Every heuristics bullet across built_from, in source order, exactly as
+    reference/heuristics.md (build_reference) renders them. Compared against
+    top_checks's budgeted subset to detect a lens whose full checklist already
+    fits the inline budget (#391 problem 3): for those, reference/heuristics.md
+    is a verbatim duplicate of `## Top checks`, not a deeper disclosure level."""
+    bullets: list[str] = []
+    for src in skill.built_from:
+        text = Path(docs_root, src.path).read_text(encoding="utf-8")
+        body = strip_priority(
+            extract_subsection(extract_section(text, src.section), "heuristics").strip()
+        )
+        bullets.extend(extract_bullets(body))
+    return bullets
+
+
 def build_skill_md(
     skill: Skill,
     taxonomy_version: str,
@@ -150,18 +166,33 @@ def build_skill_md(
             "behind each rubric; for provenance, not needed during a review.\n"
         )
     else:
-        checks = "\n".join(f"- {c}" for c in top_checks(skill, docs_root))
+        check_list = top_checks(skill, docs_root)
+        checks = "\n".join(f"- {c}" for c in check_list)
+        # When the whole checklist already fits the inline budget, `## Top checks`
+        # already *is* the full checklist — reference/heuristics.md would be a
+        # verbatim duplicate, not a deeper disclosure level (#391 problem 3).
+        heuristics_is_duplicate = check_list == _all_heuristics_bullets(
+            skill, docs_root
+        )
+        lead_in = (
+            "This is the full checklist — nothing else to open for it:\n\n"
+            if heuristics_is_duplicate
+            else "The head of the full checklist — enough for a first pass without "
+            "opening any reference file:\n\n"
+        )
         core_block = (
-            "## Top checks\n\n"
-            "The head of the full checklist — enough for a first pass without opening "
-            "any reference file:\n\n"
-            f"{checks}\n"
-            f"{_cross_ref_note(skill, owners)}\n"
+            f"## Top checks\n\n{lead_in}{checks}\n{_cross_ref_note(skill, owners)}\n"
+        )
+        heuristics_pointer = (
+            ""
+            if heuristics_is_duplicate
+            else "- [reference/heuristics.md](reference/heuristics.md) — the full "
+            "checklist; open it when the change sits squarely in this lens's "
+            "domain.\n"
         )
         going_deeper = (
             "## Going deeper\n\n"
-            "- [reference/heuristics.md](reference/heuristics.md) — the full checklist; "
-            "open it when the change sits squarely in this lens's domain.\n"
+            f"{heuristics_pointer}"
             "- [examples.md](examples.md) — concrete good/bad findings, and the output "
             "format to match.\n"
             "- [reference/tool-rules.md](reference/tool-rules.md) — static-analysis rules "
@@ -237,10 +268,17 @@ def generate_skill(
                 encoding="utf-8",
             )
     else:
-        (out / "reference" / "heuristics.md").write_text(
-            _gen_header(skill) + build_reference(skill, "heuristics", docs_root),
-            encoding="utf-8",
-        )
+        # Skip (and prune a stale copy of) reference/heuristics.md when it would be
+        # a verbatim duplicate of `## Top checks` — see build_skill_md (#391).
+        heuristics_path = out / "reference" / "heuristics.md"
+        if top_checks(skill, docs_root) == _all_heuristics_bullets(skill, docs_root):
+            if heuristics_path.exists():
+                heuristics_path.unlink()
+        else:
+            heuristics_path.write_text(
+                _gen_header(skill) + build_reference(skill, "heuristics", docs_root),
+                encoding="utf-8",
+            )
     (out / "reference" / "tool-rules.md").write_text(
         _gen_header(skill) + build_reference(skill, "tooling", docs_root),
         encoding="utf-8",

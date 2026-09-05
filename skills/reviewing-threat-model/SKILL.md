@@ -40,7 +40,7 @@ Report only real problems. If this lens applies and what you reviewed holds up �
 
 ## Top checks
 
-The head of the full checklist — enough for a first pass without opening any reference file:
+This is the full checklist — nothing else to open for it:
 
 - **Build the model first — components, data flows, trust boundaries.** Before enumerating, identify external entry points, the agent's tools/capabilities, data stores, third-party/model calls, and the **trust boundaries** between them (untrusted → trusted). If a design doc is present, anchor on it; otherwise **reconstruct** from code/config, bounded to the architecture level (imports/call-sites/config; no function-body recursion; component/module-level — never a full repo audit). Output a trust-boundary / data-flow map.
 - **Enumerate STRIDE per component, and check each mitigation is at the *right* boundary.** For each component/flow crossing a trust boundary, ask the six: Spoofing (identity), Tampering (integrity), Repudiation (audit trail), Information disclosure (confidentiality), Denial of service (availability/exhaustion), Elevation of privilege (authorization). For each identified threat, is there a mitigation — and is it at the correct boundary? A defense at the wrong layer (client-side-only validation, auth *after* the sensitive action) counts as **un-mitigated**.
@@ -59,7 +59,6 @@ Where a finding here is one a tool can catch deterministically, surface that as 
 
 ## Going deeper
 
-- [reference/heuristics.md](reference/heuristics.md) — the full checklist; open it when the change sits squarely in this lens's domain.
 - [examples.md](examples.md) — concrete good/bad findings, and the output format to match.
 - [reference/tool-rules.md](reference/tool-rules.md) — static-analysis rules covering the mechanical subset; for wiring up linters, not needed for the judgment review itself.
 - [reference/sources.md](reference/sources.md) — the research behind each check; for provenance, not needed during a review.

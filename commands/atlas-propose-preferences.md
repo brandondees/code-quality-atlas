@@ -1,8 +1,9 @@
 ---
 description: >-
   Interview this repo and propose a team-preferences overlay
-  (.code-quality-atlas/preferences.md) — the inference path from
-  docs/team-preferences-overlay.md §6. Reads existing linter configs,
+  (.code-quality-atlas/preferences.md) — the inference path from the source
+  repo's (brandondees/code-quality-atlas) docs/team-preferences-overlay.md §6.
+  Reads existing linter configs,
   recurring code patterns, CLAUDE.md/AGENTS.md, and ADRs, then emits a
   proposal document of candidate preferences, each paired with its evidence
   and framed as a yes/no question. Never writes the live overlay directly —

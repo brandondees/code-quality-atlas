@@ -7,7 +7,8 @@ description: >-
   (`Pull request opened` / `Pull request review requested`) needed at all —
   only a schedule. Trades the event-triggered design's near-instant latency
   for zero dependency on PR-activity subscriptions, self-nudge chains, or a
-  webhook trigger surviving. See `docs/runbooks/pr-review-automation.md`
+  webhook trigger surviving. See the source repo's
+  (brandondees/code-quality-atlas) docs/runbooks/pr-review-automation.md
   ("Model B") for when to pick this over the event-triggered design.
 argument-hint: "[repo, or label/author filter — omit to sweep every attached repo's open PRs]"
 allowed-tools: Task, Skill, Read, Grep, Glob, Bash, mcp__github__list_pull_requests, mcp__github__pull_request_read, mcp__github__get_file_contents, mcp__github__get_commit, mcp__github__list_commits, mcp__github__get_me, mcp__github__update_pull_request_branch, mcp__github__add_comment_to_pending_review, mcp__github__pull_request_review_write, mcp__github__add_issue_comment, mcp__github__add_reply_to_pull_request_comment, mcp__github__resolve_review_thread

@@ -43,7 +43,7 @@ Report only real problems. If this lens applies and what you reviewed holds up �
 
 ## Top checks
 
-The head of the full checklist — enough for a first pass without opening any reference file:
+This is the full checklist — nothing else to open for it:
 
 - **Standard protocol semantics (HTTP / OAuth / OIDC):** Does the code obey the **protocol it speaks**, not just a happy-path mock? For HTTP: are methods **safe/idempotent as the spec requires** (a retried `POST` not double-charging; `PUT`/`DELETE` idempotent), are status codes used per their meaning (201/204/409/422, not 200-for-everything), and are conditional requests / caching (`ETag`, `If-None-Match`, `Cache-Control`, `Vary`) correct? For OAuth/OIDC: is `redirect_uri` **exact-matched**, is **`state`** validated (CSRF), is **`nonce`** checked (replay), is **PKCE** present on public clients, and are tokens kept out of the front channel? A flow that authenticates in the demo but skips `state` is interoperable-looking and unsafe.
 - **RFC / format conformance at the boundary (dates, URIs, email, Unicode, JSON/CSV):** Does every value crossing an external boundary **parse and emit per its spec** — dates as **RFC 3339** (offset/`Z`, not a locale string), URIs per **RFC 3986** (proper percent-encoding, no naive string-concat), email per RFC 5321/5322 (and IDN/punycode where relevant), JSON per RFC 8259 (no duplicate keys, number-precision aware), CSV per RFC 4180 (quoting/embedded-newline)? Is text **Unicode-normalized (NFC) before compare/store/index**, UTF-8 validated, and the **YAML "Norway"/sexagesimal** class quoted? A value that *looks* right but a strict third-party parser rejects is the core interoperability defect.
@@ -62,7 +62,6 @@ Where a finding here is one a tool can catch deterministically, surface that as 
 
 ## Going deeper
 
-- [reference/heuristics.md](reference/heuristics.md) — the full checklist; open it when the change sits squarely in this lens's domain.
 - [examples.md](examples.md) — concrete good/bad findings, and the output format to match.
 - [reference/tool-rules.md](reference/tool-rules.md) — static-analysis rules covering the mechanical subset; for wiring up linters, not needed for the judgment review itself.
 - [reference/sources.md](reference/sources.md) — the research behind each check; for provenance, not needed during a review.

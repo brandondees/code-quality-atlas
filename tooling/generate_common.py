@@ -187,10 +187,10 @@ def modes_section(manifest: Manifest) -> str:
         "",
         (
             "Routing first ranks **every** lens whose scope the change touches by "
-            "**relevance** — it is no longer a hard cap. A depth mode then sets the "
-            "**breadth** (how far down the ranked list to run, plus room for judgment "
-            "calls above that floor) and the severity floor. Pick the mode from the "
-            "request; default to **review**."
+            "**relevance**, with no hard cap on the ranking itself. A depth mode "
+            "then sets the **breadth** (how far down the ranked list to run, plus "
+            "room for judgment calls above that floor) and the severity floor. "
+            "Pick the mode from the request; default to **review**."
         ),
         "",
         "| Mode | Breadth | Triggers |",
