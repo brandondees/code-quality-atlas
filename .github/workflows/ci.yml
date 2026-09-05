@@ -237,8 +237,14 @@ jobs:
         run: |
           python -m tooling.cli generate --manifest skills/manifest.yaml --docs-root . --skills-root skills --collapsed-root collapsed
           ok=1
-          git diff --exit-code skills/    || { git diff --stat skills/;    echo "::error::standalone skills/ drifted — regenerate and commit"; ok=0; }
-          git diff --exit-code collapsed/ || { git diff --stat collapsed/; echo "::error::collapsed/ drifted — regenerate and commit"; ok=0; }
+          # `git diff --exit-code` only sees paths git already tracks — a generator
+          # emitting a brand-new file (or leaving one orphaned untracked after a
+          # rename) shows up as untracked, not modified, and the plain diff below
+          # would report clean. `git add -A -- <path>` stages creations/deletions
+          # too, so `git diff --cached` actually sees them (#382).
+          git add -A -- skills/ collapsed/
+          git diff --cached --exit-code -- skills/    || { git diff --cached --stat -- skills/;    echo "::error::standalone skills/ drifted — regenerate and commit"; ok=0; }
+          git diff --cached --exit-code -- collapsed/ || { git diff --cached --stat -- collapsed/; echo "::error::collapsed/ drifted — regenerate and commit"; ok=0; }
           git diff --exit-code -- README.md docs/distribution.md docs/install.md docs/collapsed-entrypoints-and-depth-modes.md docs/review-depth-modes.md .claude-plugin/plugin.json .claude-plugin/marketplace.json || { git diff --stat -- README.md docs/distribution.md docs/install.md docs/collapsed-entrypoints-and-depth-modes.md docs/review-depth-modes.md .claude-plugin/plugin.json .claude-plugin/marketplace.json; echo "::error::documented counts drifted — regenerate and commit"; ok=0; }
           [ "$ok" -eq 1 ]
       # requirements.txt-is-in-sync and dependency-vulnerability-audit run

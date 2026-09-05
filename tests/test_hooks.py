@@ -543,17 +543,44 @@ def test_collapsed_hooks_json_matches_standalone():
     assert collapsed == standalone
 
 
+# hooks.json has its own dedicated byte-identity test above; route.sh is
+# intentionally NOT shared (its steering message differs per plugin form).
+# Every other file under hooks/ carries no skill-name-specific content, so it
+# must stay byte-identical to its collapsed/hooks/ counterpart -- derived from
+# the directory rather than a hand-maintained list, so a new shared hook is
+# covered the moment it's added rather than silently skipped until someone
+# remembers to update this set too (#382).
+_HOOKS_MIRROR_EXCLUDED = {"hooks.json", "route.sh"}
+
+
+def _standalone_hook_files():
+    standalone_dir = REPO_ROOT / "hooks"
+    return {
+        p.relative_to(standalone_dir).as_posix()
+        for p in standalone_dir.rglob("*")
+        if p.is_file() and p.name not in _HOOKS_MIRROR_EXCLUDED
+    }
+
+
+def test_collapsed_hooks_mirror_has_presence_parity_with_standalone():
+    """Neither side may have a file the other lacks -- a new shared hook added
+    only under hooks/ (or only under collapsed/hooks/) is exactly the kind of
+    drift a hand-maintained comparison list can't catch by construction."""
+    standalone_rel = _standalone_hook_files()
+    collapsed_rel = {
+        p.relative_to(COLLAPSED_HOOKS_DIR).as_posix()
+        for p in COLLAPSED_HOOKS_DIR.rglob("*")
+        if p.is_file() and p.name not in _HOOKS_MIRROR_EXCLUDED
+    }
+    assert standalone_rel == collapsed_rel, (
+        f"hooks/ has {sorted(standalone_rel - collapsed_rel)} with no "
+        f"collapsed/hooks/ counterpart, and collapsed/hooks/ has "
+        f"{sorted(collapsed_rel - standalone_rel)} with no hooks/ counterpart"
+    )
+
+
 def test_collapsed_generic_hook_scripts_match_standalone():
-    # log-skill-invocation.sh, queue-session-retro.sh, lib/feedback-tier.sh,
-    # and the lens-coverage/ pair carry no skill-name-specific content (unlike
-    # route.sh), so they must stay byte-identical between the two plugin forms.
-    for rel in (
-        "log-skill-invocation.sh",
-        "queue-session-retro.sh",
-        "lib/feedback-tier.sh",
-        "lens-coverage/track-lens-reads.sh",
-        "lens-coverage/gate-lens-coverage.sh",
-    ):
+    for rel in _standalone_hook_files():
         standalone = (REPO_ROOT / "hooks" / rel).read_text(encoding="utf-8")
         collapsed = (COLLAPSED_HOOKS_DIR / rel).read_text(encoding="utf-8")
         assert collapsed == standalone, (

@@ -387,6 +387,29 @@ vendor_one() {
 write_attribution() {
   local dest_root=$1 sha=$2
   cp "LICENSE-CC-BY-4.0" "$dest_root/LICENSE-CC-BY-4.0"
+  if [ "$sha" = "<self>" ]; then
+    # Self-vendoring (main()'s marker_sha): there is no separate upstream
+    # commit to pin a link to -- the content and this notice are written by
+    # the same commit that carries them, in the very repository being
+    # attributed. Naming a specific SHA here would be false the instant it's
+    # written (#382), so this case gets its own prose instead of a formatted
+    # $sha substitution.
+    cat >"$dest_root/NOTICE.md" <<EOF
+# Attribution notice
+
+The skill content in this directory was vendored from this same repository's
+own \`skills/\` directory (a self-vendored copy — see
+\`commands/atlas-review-pr.md\` step 4 and
+\`tests/test_self_vendored_skills_sync.py\`) by \`tooling/vendor-skills.sh\`.
+
+It is licensed under CC BY 4.0. The full license text is vendored alongside
+this notice as \`LICENSE-CC-BY-4.0\`, copied verbatim from
+[LICENSE-CC-BY-4.0](https://github.com/brandondees/code-quality-atlas/blob/main/LICENSE-CC-BY-4.0)
+at the repository root. This notice satisfies the attribution requirement for
+this vendored copy; do not remove either file while the content remains here.
+EOF
+    return 0
+  fi
   cat >"$dest_root/NOTICE.md" <<EOF
 # Attribution notice
 
@@ -620,6 +643,19 @@ main() {
   fi
   check_source_repo_provenance "$sha"
 
+  # This repo also vendors itself (commands/atlas-review-pr.md step 4;
+  # tests/test_self_vendored_skills_sync.py), so $abs_target can equal $root.
+  # Stamping the real $sha there is provably false the moment it's written:
+  # a commit's own hash isn't known until after it's made, so the marker
+  # always names a commit whose tree is one commit short of the one that
+  # carries it -- and worse, nothing caught it drifting further once vendoring
+  # was simply skipped for several commits (#382). Use a sentinel instead of a
+  # SHA that can never actually be current for a source vendoring into itself.
+  local marker_sha="$sha"
+  if [ "$abs_target" = "$root" ]; then
+    marker_sha="<self>"
+  fi
+
   # Populated by vendor_one when it skips a name it doesn't own (#175).
   SKIPPED_COLLISIONS=()
 
@@ -631,7 +667,7 @@ main() {
     printf '(dry-run) would vendor %s skill(s) -> %s\n' \
       "$((${#SKILL_NAMES[@]} - ${#SKIPPED_COLLISIONS[@]}))" "$dest_root"
   else
-    write_attribution "$dest_root" "$sha"
+    write_attribution "$dest_root" "$marker_sha"
     printf 'Vendored %s skill(s) -> %s\n' \
       "$((${#SKILL_NAMES[@]} - ${#SKIPPED_COLLISIONS[@]}))" "$dest_root"
   fi
@@ -742,7 +778,7 @@ main() {
     {
       printf '# code-quality-atlas vendored skills — do not hand-edit; regenerate with tooling/vendor-skills.sh\n'
       printf '# format=%s\n' "$MARKER_FORMAT"
-      printf '# source=brandondees/code-quality-atlas@%s\n' "$sha"
+      printf '# source=brandondees/code-quality-atlas@%s\n' "$marker_sha"
       # Guard the empty case explicitly: unlike the pre-#175 code (marker_names
       # was always seeded from the never-empty SKILL_NAMES), a run where every
       # skill collides with non-tool-managed content and OLD_NAMES is also
@@ -758,7 +794,7 @@ main() {
       fi
     } >"$marker"
 
-    printf 'Source: code-quality-atlas@%s' "$sha"
+    printf 'Source: code-quality-atlas@%s' "$marker_sha"
     [ "$pruned" -gt 0 ] && printf ' (pruned %s)' "$pruned"
     printf '\nNext: review and commit %s in the target repo.\n' "$SUBDIR"
   fi

@@ -511,6 +511,32 @@ def test_generate_artifact_lens_writes_per_artifact_rubric(tmp_path):
     assert front["provenance"]["built_from"][0]["category"] == 101
 
 
+def test_generate_skill_prunes_an_orphaned_artifact_rubric(tmp_path):
+    # #382: reference/ holds only generator-managed files, so a rubric left
+    # behind by a renamed/removed artifact slug is an orphan invisible to
+    # `drift` (which only reads SKILL.md provenance) and linked from nothing
+    # once the old slug stops appearing in the manifest.
+    m = load_manifest("skills/manifest.yaml")
+    lens = next(s for s in m.skills if s.name == "reviewing-artifact-conventions")
+    out_root = tmp_path / "skills-out"
+    stale = out_root / lens.name / "reference" / "renamed-away-slug.md"
+    stale.parent.mkdir(parents=True)
+    stale.write_text(
+        "stale rubric from a since-renamed artifact slug", encoding="utf-8"
+    )
+
+    out = generate_skill(
+        lens,
+        taxonomy_version=m.taxonomy_version,
+        docs_root=".",
+        skills_root=str(out_root),
+    )
+    assert not stale.exists()
+    assert (out / "reference" / "skill-md.md").exists()
+    assert (out / "reference" / "tool-rules.md").exists()
+    assert (out / "reference" / "sources.md").exists()
+
+
 def test_router_catalog_lists_artifact_shape():
     m = load_manifest("skills/manifest.yaml")
     md = build_router_md(m)
