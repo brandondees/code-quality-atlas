@@ -31,10 +31,17 @@ agents read different files. Create either if it does not exist.
 
 **The template is the source of truth.** If the plugin clone is reachable, read
 the block verbatim from `templates/agents-routing-snippet.md` (the text between
-its `BEGIN`/`END` markers) and install *that* — it is always current. Use the
-embedded copy below only as a **fallback** when the template file is not reachable
-(e.g. an offline or web session without the plugin clone on disk); it is kept in
-sync with the template but can lag it:
+its `BEGIN`/`END` markers) and install *that* — it is always current. A bare
+relative path only resolves when the current working directory happens to be
+the plugin clone itself; when this command runs as an installed Claude Code
+plugin inside a consumer repo (the ordinary case `/code-quality-atlas:atlas-init`
+is built for), read it from `${CLAUDE_PLUGIN_ROOT}/templates/agents-routing-snippet.md`
+instead — `${CLAUDE_PLUGIN_ROOT}` is the plugin's own installed location, not
+the consumer repo's working directory. Use the embedded copy below only as a
+**fallback** when neither path is reachable (e.g. an offline or web session
+with no plugin clone and no `${CLAUDE_PLUGIN_ROOT}` on disk); it is enforced
+byte-identical to the template by `tests/test_routing_snippet_sync.py`, which
+fails CI on any drift between the two:
 
 ```markdown
 <!-- BEGIN code-quality-atlas routing -->
@@ -91,7 +98,23 @@ For **each** of `CLAUDE.md` and `AGENTS.md`:
 
 Never duplicate the block. Match on the marker, not on the heading text.
 
-## 4. (Optional) PR-automation policy
+## 4. (Optional) Uninstalling
+
+If the user asks to remove code-quality-atlas routing from this repo (rather
+than install or refresh it) — issue #389, this command previously had no
+removal step of its own, only idempotent install/refresh: for each of
+`CLAUDE.md` and `AGENTS.md` that carries the block, delete everything between
+the `<!-- BEGIN code-quality-atlas routing -->` / `<!-- END code-quality-atlas
+routing -->` markers, inclusive, leaving the rest of the file untouched — the
+mirror image of step 3's "Block already present" replacement. If deleting the
+block leaves a file with nothing else in it, ask the user whether to delete
+the file too rather than doing so unprompted. This only removes the routing
+block this command wrote; it does not touch a vendored `.claude/skills/` copy
+(`tooling/vendor-skills.sh <target-repo-dir> --uninstall`), an installed
+plugin (`/plugin uninstall`), or any of the other channels — see
+`docs/install.md`'s "Uninstalling" section for the full per-channel list.
+
+## 5. (Optional) PR-automation policy
 
 If this repo runs the hands-off PR reviewer (`/atlas-review-pr` on a schedule or
 trigger) and has no `REVIEW.md` at its root, mention that copying
@@ -99,7 +122,7 @@ trigger) and has no `REVIEW.md` at its root, mention that copying
 policy (see `docs/runbooks/pr-review-automation.md`). Only copy it if the user
 asks — it is not needed for interactive review.
 
-## 5. (Optional) Team preferences overlay
+## 6. (Optional) Team preferences overlay
 
 If the user wants to start recording the team's own ratified opinions — house
 conventions a lens would otherwise nag against, threshold tweaks, scoped
@@ -122,7 +145,7 @@ command's per-item ratification rule). It has no effect on floor-tier findings
 (security, correctness, migration/data safety, concurrency) beyond
 `acknowledge`, which keeps them visible and non-blocking, never silent.
 
-## 6. Report
+## 7. Report
 
 Summarize what changed: for each file, whether it was created, had its block
 inserted, or had an existing block refreshed (and note "no change" if the block

@@ -194,8 +194,8 @@ backgrounded so it never blocks startup:
 > **Replace `/abs/path/to/code-quality-atlas/`** in the command below with the
 > absolute path to your code-quality-atlas clone — for example,
 > `$HOME/code/code-quality-atlas/`. It is a placeholder, not a real path: left
-> as-is, the backgrounded command fails silently (`No such file or directory`,
-> swallowed by `>/dev/null 2>&1 &`) and the updater never runs.
+> as-is, the backgrounded command fails with `No such file or directory` —
+> now visible in `~/.claude/.keep-plugin-current.log` rather than swallowed.
 
 ```json
 {
@@ -205,7 +205,7 @@ backgrounded so it never blocks startup:
         "hooks": [
           {
             "type": "command",
-            "command": "lf=\"$HOME/.claude/.keep-plugin-current-last\"; ts=$(date +%s); { [ -f \"$lf\" ] && [ $((ts-$(cat \"$lf\"))) -lt 86400 ]; } && exit 0; echo \"$ts\" > \"$lf\"; nohup bash /abs/path/to/code-quality-atlas/tooling/keep-plugin-current.sh >/dev/null 2>&1 &",
+            "command": "lf=\"$HOME/.claude/.keep-plugin-current-last\"; ts=$(date +%s); { [ -f \"$lf\" ] && [ $((ts-$(cat \"$lf\"))) -lt 86400 ]; } && exit 0; LF=\"$lf\" nohup bash -c 'bash /abs/path/to/code-quality-atlas/tooling/keep-plugin-current.sh > \"$HOME/.claude/.keep-plugin-current.log\" 2>&1 && date +%s > \"$LF\"' >/dev/null 2>&1 &",
             "timeout": 5
           }
         ]
@@ -217,7 +217,13 @@ backgrounded so it never blocks startup:
 
 The leading timestamp guard runs the updater at most once a day, so most session
 starts exit immediately without a git fetch. Drop the guard to run it every
-session.
+session. **The throttle stamp is written only after the updater exits 0**
+(issue #389 — an earlier version of this snippet stamped *before* running the
+updater and sent all its output to `/dev/null`, so a failed update — wrong
+path, no network, `claude`/`jq` missing — was invisible and silently blocked
+from retrying for a full day). A failure now shows up in
+`~/.claude/.keep-plugin-current.log` and gets retried on the very next session
+start, since no stamp was written for it.
 
 ## Automatic routing (SessionStart hook)
 
@@ -298,3 +304,45 @@ is an absolute local path). Nothing here is transmitted anywhere
 by itself; at tier `local` it stays a file in your own repo for your own team's use
 (design doc §5's "D17 note"). Both hooks degrade to a clean no-op (never blocking or
 crashing the session) if `jq` is missing or a hook receives malformed input.
+
+## Uninstalling
+
+Issue #389: no channel previously documented a removal step. One per channel,
+matching the install sections above:
+
+- **Claude Code (plugin).** `/plugin uninstall code-quality-atlas@code-quality-atlas`
+  (or `code-quality-atlas-collapsed@code-quality-atlas` for the collapsed form)
+  interactively, or non-interactively:
+  `claude plugin uninstall code-quality-atlas@code-quality-atlas [--scope project]`.
+  If you also added the marketplace with nothing else installed from it,
+  `/plugin marketplace remove code-quality-atlas` removes the marketplace too —
+  note this uninstalls every plugin still installed from it, so do this only
+  after (or instead of) the per-plugin uninstall above.
+- **Settings-based marketplace** (`.claude/settings.json`'s `extraKnownMarketplaces`
+  / `enabledPlugins`, per the "Pinning" callout above). Remove the
+  `code-quality-atlas` entries from both objects and commit the change — there
+  is no separate uninstall command for this path since nothing was installed
+  outside the settings file itself.
+- **Skulto.** `skulto uninstall <slug>` removes one previously-installed skill;
+  `skulto remove brandondees/code-quality-atlas` (add `--force` to skip the
+  confirmation prompt) deregisters the whole repo and, per Skulto's own docs,
+  removes what it installed from it.
+- **Repo `.claude/skills/` (vendored).** `tooling/vendor-skills.sh <target-repo-dir>
+  --uninstall` removes every skill this tool vendored into that target (from its
+  own `.atlas-vendored` marker) plus the marker, `NOTICE.md`, and
+  `LICENSE-CC-BY-4.0` it wrote, then review and commit the removal like any other
+  vendoring run. Add `--dry-run` to preview first. This does **not** retract
+  `--with-lens-coverage-hook`'s separate wiring into the target's
+  `.claude/settings.json` — that flag has no prune/uninstall equivalent yet
+  (see the script's own `--help`); remove the
+  `PostToolUse(Read)`/`PostToolUse(Skill)`/`PreToolUse` hook entries and
+  `.claude/hooks/lens-coverage/` by hand if you vendored it.
+- **`/atlas-init`'s routing block** (`CLAUDE.md`/`AGENTS.md`). No automated
+  removal step exists — delete the block between the
+  `<!-- BEGIN code-quality-atlas routing -->` / `<!-- END code-quality-atlas
+  routing -->` markers (inclusive) from both files by hand, and commit the
+  change alongside whichever channel's own removal above you're doing.
+- **Account skills on claude.ai.** Remove each uploaded skill from Settings →
+  Features individually — there is no bulk-delete confirmed for this GUI, the
+  same asymmetry noted for the upload side in
+  [`distribution.md`](distribution.md)'s Channel A.

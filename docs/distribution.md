@@ -65,7 +65,7 @@ clone.
 | **Settings-based marketplace** | plugin cache | ✅ | ❌ **not run in cloud** | ✅ | n/a for cloud; pinnable to a branch/tag (`ref`) |
 | **Skulto sync** | personal/project `SKILL.md` dir | ✅ | only if synced into the cloned repo | depends | `skulto pull` / `update`; roster-pinned (`skulto save`), not content-pinned |
 | **Repo `.claude/skills/`** (vendored) | the cloned repo | ✅ | ✅ **documented** | ❌ (per repo) | re-vendor on update; pinned by default (commit in `.atlas-vendored`, or the `<self>` sentinel for a self-vendored repo — see below) |
-| **Account skills on claude.ai** (GUI) | your Anthropic account | ⚠️ verify for CLI | ✅ **documented, automatic** | ✅ | re-upload on update |
+| **Account skills on claude.ai** (GUI) | your Anthropic account | ⚠️ verify for CLI | ✅ **documented, automatic** | ✅ | re-upload on update — see Channel A's "Updating" below for the procedure |
 
 ✅ works · ⚠️ conditional · ❌ doesn't apply
 
@@ -178,6 +178,20 @@ that motivates the structural rethink in
 (`tracing-correctness-and-invariants.zip`), enable it, open a cloud session on an
 **unrelated** repo, and ask for a review — confirm that lens is offered. If it
 surfaces, upload the rest; if not, fall back to vendoring (B).
+
+**Updating (re-upload on a new commit) — issue #389.** Anthropic's own docs
+describe *uploading* a zip through Settings → Features but document no
+separate "replace" or "update in place" action for an already-uploaded
+custom skill — that mechanic isn't confirmed to exist, so this repo doesn't
+claim one. The procedure that's actually guaranteed by the documented
+upload flow: delete the outdated skill, then re-upload the freshly-built zip
+for the same lens under the same name. Before committing to this at the full
+~44-skill scale, confirm on one skill first whether delete-then-reupload
+preserves its enabled state or requires re-enabling — re-run the one-skill
+validation above after any re-upload either way, since a skill that fails to
+re-surface after an update is otherwise silent (no error, just absence from
+that session's tools). There is no versioning or diffing here: re-upload
+means the whole skill, not a patch, exactly like the first install.
 
 ### B. Vendor into the target repo — committed, offline, CLI too
 

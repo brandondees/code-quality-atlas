@@ -10,9 +10,16 @@ single deduplicated, cross-repo report instead of ten transcripts.
 
 The enabler is the **finding contract** from
 [`synthesizing-review-findings`](../../skills/synthesizing-review-findings/SKILL.md):
-because every lens normalizes to `{location, severity, lens, finding, fix}`, an
-orchestrating session can merge findings it never produced itself — across
-lenses **and** across repos — with the same deterministic dedupe-and-rank rules.
+because every lens normalizes to `{location, severity, valence, route,
+attribution, lens, finding, fix}`, an orchestrating session can merge findings
+it never produced itself — across lenses **and** across repos — with the same
+deterministic dedupe-and-rank rules. Carry `valence`, `route`, and
+`attribution` through the fleet merge, not just the five prose fields: an
+`improvement` or `pre-existing` finding stays non-blocking at fleet scale
+exactly as it is for a single repo, and a `route: legal`/`design`/`product`
+finding still needs escalating to its owner even after being grouped — dropping
+these fields at merge time would let either kind of finding silently set (or
+silently fail to set) the fleet verdict.
 
 ## The shape
 
@@ -57,11 +64,15 @@ in mind — wide fan-out is faster but costs more context and more sandboxes.
 3. **Fan out with background agents.** Spawn one agent per repo (the harness's
    parallel-agent / background-task mechanism). Give each the **same** prompt:
    the lens set, the repo to audit, and the instruction to **return findings in
-   the finding contract** — a JSON list of `{repo, location, severity, lens,
-   finding, fix}` objects (add `repo` to the contract's five base fields so
-   findings stay attributable after the merge). An agent with no findings for a
-   lens returns an empty list for it, not prose; a lens it skipped per step 2
-   does the same.
+   the finding contract** — a JSON list of `{repo, location, severity, valence,
+   route, attribution, lens, finding, fix}` objects (add `repo` to the
+   contract's eight base fields so findings stay attributable after the
+   merge — dropping `valence`/`route`/`attribution` here is exactly how a
+   `route: legal` or `pre-existing` finding, stripped of the metadata that
+   keeps it non-blocking or escalated-not-decided, would end up setting a
+   fleet verdict it never should have). An agent with no findings for a lens
+   returns an empty list for it, not prose; a lens it skipped per step 2 does
+   the same.
 
 4. **Aggregate centrally.** When the agents return, the orchestrator applies
    `synthesizing-review-findings`:

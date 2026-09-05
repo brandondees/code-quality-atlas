@@ -261,6 +261,38 @@ def test_missing_installed_plugins_json_is_tolerated(tmp_path):
     assert "Done." in result.stdout
 
 
+def test_malformed_installed_plugins_json_fails_run_instead_of_silent_done(tmp_path):
+    # #389: a malformed/unparseable installed_plugins.json used to be
+    # tolerated the same way a genuinely *missing* file is -- jq's stderr was
+    # silenced, its exit status unchecked, and the loop over project scopes
+    # ran zero times either way, so the script still printed "Done." Zero
+    # project scopes actually got checked, but nothing said so. A malformed
+    # file must now fail the run.
+    fake_bin_dir = Path(_minimal_path_env(tmp_path))
+    log_path = tmp_path / "claude.log"
+    _fake_claude(tmp_path, fake_bin_dir, log_path)
+
+    claude_config_dir = tmp_path / "dot-claude"
+    (claude_config_dir / "plugins").mkdir(parents=True)
+    (claude_config_dir / "plugins" / "installed_plugins.json").write_text(
+        "{ this is not valid json"
+    )
+
+    env = {
+        "PATH": str(fake_bin_dir),
+        "HOME": str(tmp_path),
+        "CLAUDE_CONFIG_DIR": str(claude_config_dir),
+    }
+    result = _run([], env)
+
+    assert result.returncode == 1
+    assert "could not read project-scope installs" in result.stderr
+    assert "Done." not in result.stdout
+    # No project scope was attempted -- the file couldn't be read at all.
+    calls = _read_log(log_path)
+    assert not [c for c in calls if "--scope project" in c]
+
+
 def test_explicit_plugin_argument_overrides_default(tmp_path):
     fake_bin_dir = Path(_minimal_path_env(tmp_path))
     log_path = tmp_path / "claude.log"
