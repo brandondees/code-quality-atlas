@@ -62,7 +62,7 @@ clone.
 | Channel | Body lives in | CLI / desktop / IDE | Web / cloud | Repo-independent | Update story |
 |---|---|---|---|---|---|
 | **Plugin (marketplace)** | plugin cache | ✅ | ❌ **not run in cloud** | ✅ | per-commit; auto/manual refresh |
-| **Settings-based marketplace** | plugin cache | ✅ | ❌ **not run in cloud** | ✅ | n/a for cloud; pinnable (`ref`) |
+| **Settings-based marketplace** | plugin cache | ✅ | ❌ **not run in cloud** | ✅ | n/a for cloud; pinnable to a branch/tag (`ref`) |
 | **Skulto sync** | personal/project `SKILL.md` dir | ✅ | only if synced into the cloned repo | depends | `skulto pull` / `update`; pinnable (`skulto save`) |
 | **Repo `.claude/skills/`** (vendored) | the cloned repo | ✅ | ✅ **documented** | ❌ (per repo) | re-vendor on update; pinned by default (commit in `.atlas-vendored`) |
 | **Account skills on claude.ai** (GUI) | your Anthropic account | ⚠️ verify for CLI | ✅ **documented, automatic** | ✅ | re-upload on update |
@@ -73,8 +73,12 @@ Every channel above except the interactive **Plugin (marketplace)** flow and
 account skills either pins to a commit by default (vendoring) or *can* be
 pinned instead of tracking latest (settings-based `ref`, Skulto's
 `save`/`sync`) — issue #388: the settings-based channel didn't document its
-pin at all until this was written. See [`install.md`](install.md)'s
-"Pinning" callout for the `ref` example; the interactive `/plugin
+pin at all until this was written. That `ref` is **branch/tag-level, not a
+commit SHA** — exact-commit pinning is a *plugin*-source field inside a
+marketplace's own `marketplace.json`, a schema level a consumer's own
+`settings.json` doesn't reach, and this repo doesn't currently cut tagged
+releases to pin to anyway (see [`install.md`](install.md)'s "Pinning"
+callout for the full caveat and example). The interactive `/plugin
 marketplace add`/`/plugin install` flow's positional `owner/repo` syntax has
 no confirmed pin argument, so it stays update-only (this section) or
 auto-update-off (`install.md`'s stale-install gotcha) for now.
