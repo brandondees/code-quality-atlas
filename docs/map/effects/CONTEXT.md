@@ -7,7 +7,10 @@ ever disagree, fix the card, not this file.
 Only scenarios that cross more than one card are listed. A single-card
 change (a `Command`, a `Runbook`, a `Hook`, a standalone `Decision`, a
 `PlanDoc`) doesn't need a row here — `objects/_index.md` already points
-straight at the one card that covers it.
+straight at the one card that covers it. That holds even for a `Hook`,
+whose one card's own "If you change this" section already names the second
+*file* a change hits (the `collapsed/hooks/` mirror) — a second file within
+one card's scope, not a second card, so it stays off this list.
 
 ## If you're
 

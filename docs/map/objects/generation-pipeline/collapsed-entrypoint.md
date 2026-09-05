@@ -23,7 +23,7 @@ rather than naming a lens directly.
 
 ## Shape
 
-Each `entrypoints:` list item in `skills/manifest.yaml:1627` carries:
+Each `entrypoints:` list item in `skills/manifest.yaml:2449` carries:
 
 - `name` — kebab-case identifier; also the directory name under
   `collapsed/skills/`.
@@ -32,7 +32,7 @@ Each `entrypoints:` list item in `skills/manifest.yaml:1627` carries:
   `artifact`).
 - `include_design` (optional) — whether design-capable lenses are pulled in.
 
-Named entries as of `skills/manifest.yaml:1628-1659` (not restated as a
+Named entries as of `skills/manifest.yaml:2450-2482` (not restated as a
 count — see `docs/map/CONTEXT.md`'s no-count rule): `reviewing-a-change`,
 `auditing-a-repository`, `reviewing-a-decision`, `reviewing-an-artifact`.
 Check `entrypoints:` itself for the current list rather than trusting this
@@ -70,7 +70,7 @@ enumeration as it ages.
 
 ## See
 
-- Source: `skills/manifest.yaml:1627-1659`
+- Source: `skills/manifest.yaml:2449-2482`
 - `docs/open-questions.md` Q20, D16
 - `docs/plans/2026-06-25-collapsed-entrypoint-emission.md`
-- Verified 2026-08-15 @ `ff7c642`
+- Verified 2026-09-05 @ `33504c1`

@@ -86,6 +86,7 @@ collapsed/skills/reviewing-a-change/
     │   ├── body.md               # when-to-use + full heuristics + examples — the review content (what the entrypoint Reads)
     │   ├── tool-rules.md         # static-analysis rules — deeper level, linked from body.md, opened on demand
     │   └── sources.md            # research provenance — deeper level, linked from body.md, opened on demand
+    ├── tool-evidence.md          # the tool pre-pass (build_collapsed_prepass), bundled so no separate skill invocation is needed
     └── synthesis.md              # synthesizer procedure incl. the per-mode severity-floor policy
 ```
 
@@ -167,12 +168,16 @@ The router (`built_from: []`) and the 4 entrypoints share generated routing logi
   and severity-floor policy. Generated; `built_from: []`. (This is D16's `modes:`.)
 - **Generator additions:**
   - `build_entrypoint_md(manifest, entrypoint)` and `generate_collapsed(manifest)` —
-    emit the 4 folders, each with bundled `reference/lenses/*.md` and
+    emit the 4 folders, each with bundled `reference/lenses/*.md`,
+    `reference/tool-evidence.md` (via `build_collapsed_prepass`, from
+    `tooling/generate_prepass.py`), and
     `reference/synthesis.md`, plus `collapsed/.claude-plugin/plugin.json`.
   - Router (`build_router_md`) and synthesizer generation extended with the
     relevance-ranking + mode/floor logic, so the standalone form matches.
-  - `marketplace.json` updated to list the second plugin (manifest- or
-    script-driven so it stays in sync).
+  - `marketplace.json` stays hand-maintained; only its embedded lens/skill
+    counts are kept in sync with the manifest, via the same doc-count sync
+    step `tooling.cli generate` already runs against README.md and
+    `plugin.json`.
 
 ## Evals
 
@@ -214,8 +219,12 @@ artifact detection (unchanged from D15).
   examples; `tool-rules.md` and `sources.md` ship as a deeper, tightly-folded
   disclosure level linked from `body.md` — reachable when deeper context is called
   for, zero overhead until then. (Not omitted.)
-- **Collapsed `plugin.json` (resolved):** generated from a single source alongside
-  `marketplace.json` (not hand-kept), to avoid drift.
+- **Collapsed `plugin.json` (resolved):** generated (`generate_collapsed`) from
+  the root `.claude-plugin/plugin.json` as its single source, to avoid drift.
+  `marketplace.json` itself stays hand-maintained — only the lens/skill counts
+  embedded in its prose are kept in sync with the manifest, the same doc-count
+  sync applied to a handful of other hand-authored files (README.md,
+  `plugin.json`'s own description).
 - **Command sugar naming for CLI installs (resolved-by-different-means):** decided
   against. `commands/` ships `atlas-code-review`, `atlas-init`,
   `atlas-poll-and-review`, `atlas-propose-preferences`, `atlas-rebase-stale`, and

@@ -39,6 +39,18 @@ skill invocation and session end regardless of what the session asked for.
 - D17's logging hooks gate on an opt-in `feedback:` tier
   (`.code-quality-atlas/preferences.md` or an env-var override, default
   `off`) and degrade to a clean no-op on a missing `jq` or malformed input.
+- `hooks/` isn't the only copy: the collapsed plugin ships its own
+  `collapsed/hooks/`, and `tests/test_hooks.py`'s
+  `test_collapsed_hooks_json_matches_standalone` and
+  `test_collapsed_generic_hook_scripts_match_standalone` byte-gate that
+  `hooks.json` plus every generic script (`log-skill-invocation.sh`,
+  `queue-session-retro.sh`, `lib/feedback-tier.sh`, and the
+  `lens-coverage/` pair) stay identical between the two. `route.sh` is the
+  deliberate exception — its steering message differs because the
+  collapsed plugin installs only the 4 collapsed entrypoints, not the
+  standalone's 44 skills/router/commands, and
+  `test_collapsed_route_hook_names_collapsed_entrypoints_not_standalone_surface`
+  checks the collapsed copy names the right surface instead.
 
 ## Connected to
 
@@ -55,7 +67,9 @@ skill invocation and session end regardless of what the session asked for.
 
 - **Hits:** every session's `SessionStart`/`PostToolUse`/`SessionEnd`
   behavior once the plugin is installed — a hook bug is repo-wide and
-  silent (no user-visible invocation to notice)
+  silent (no user-visible invocation to notice); the `collapsed/hooks/`
+  mirror, which must be updated to match (`route.sh`'s content excepted)
+  or `tests/test_hooks.py` fails
 - **Does not hit:** any `Lens`/`CollapsedEntrypoint` file directly (hooks
   steer toward them via injected context, they don't generate or edit them)
 
@@ -65,10 +79,13 @@ skill invocation and session end regardless of what the session asked for.
 |---|---|
 | `hooks/lib/feedback-tier.sh` | shared opt-in-tier resolver for the D17 logging hooks |
 | `.code-quality-atlas/preferences.md` (consumer repo) | sets the `feedback:` tier the logging hooks gate on |
+| `collapsed/hooks/` | byte-identical mirror of `hooks/` (except `route.sh`) for the collapsed plugin install; gated by `tests/test_hooks.py` |
 
 ## See
 
 - Source: `hooks/hooks.json`, `hooks/route.sh`, `hooks/log-skill-invocation.sh`,
-  `hooks/queue-session-retro.sh`, `hooks/lib/feedback-tier.sh`
+  `hooks/queue-session-retro.sh`, `hooks/lib/feedback-tier.sh`,
+  `collapsed/hooks/` (its mirror)
 - `docs/open-questions.md` D17
-- Verified 2026-08-15 @ `ff7c642`
+- Verified 2026-09-05 @ `33504c1` — documented the `collapsed/hooks/` twin
+  and its `route.sh` exception (issue #376)

@@ -64,11 +64,16 @@ Example entry: `skills/manifest.yaml:3-28` (`hunting-silent-failures`).
 
 ## If you change this
 
-- **Hits:** the lens's generated `SKILL.md`/`reference/`/`examples.md` on
+- **Hits:** the lens's generated `SKILL.md`/`reference/` on
   `tooling.cli generate`; any `CollapsedEntrypoint` that composes it; the
-  router (`choosing-review-lenses`) picker text
+  router (`choosing-review-lenses`) picker text; the self-vendored copy at
+  `.claude/skills/<name>/`, which `tooling/vendor-skills.sh .` must re-copy
+  to stay in sync — gated by
+  `tests/test_self_vendored_skills_sync.py::test_vendored_skills_match_their_source`
 - **Does not hit:** other lenses' generated files (each regenerates
-  independently from its own manifest entry)
+  independently from its own manifest entry); the lens's own
+  `examples.md`/`evals/eval.json` — hand-authored and never overwritten by
+  regeneration (see `docs/map/processes/generate.md`)
 
 ## Surfaces
 
@@ -83,5 +88,6 @@ Example entry: `skills/manifest.yaml:3-28` (`hunting-silent-failures`).
 - Source: `skills/manifest.yaml` (`skills:` list, e.g. lines 3-28)
 - `docs/open-questions.md` D6, D7, D10, Q21
 - `docs/map/CONTEXT.md`'s "wave" name-collision entry
-- Verified 2026-08-16 @ `603d8a6` — corrected the `shape` enumeration, which
-  had omitted `decision` and `artifact` (issue #243)
+- Verified 2026-09-05 @ `33504c1` — fixed the false `examples.md`
+  regeneration claim and added the missing `.claude/skills/` re-vendor hit
+  (issue #376)

@@ -17,7 +17,7 @@ this closed list. Do not invent a new type without adding it here first.
 | `PlanDoc` | a dated, scoped, `**Status:**`-tagged design doc | a file in `docs/plans/` |
 | `Command` | a slash-command entry point | a file in `commands/` |
 | `Runbook` | a how-to procedure for a recurring manual task | a file in `docs/runbooks/` |
-| `Hook` | a session-automation trigger | an entry in `hooks/hooks.json` |
+| `Hook` | a session-automation trigger | an entry in `hooks/hooks.json`, mirrored byte-for-byte (script content too, `route.sh` excepted) at `collapsed/hooks/` per `tests/test_hooks.py` |
 
 ## Process types
 
@@ -42,7 +42,7 @@ creation time:
 | `PlanDoc` | the literal filename (already dated and scoped) under `docs/plans/` |
 | `Command` | the literal filename under `commands/` |
 | `Runbook` | the literal filename under `docs/runbooks/` |
-| `Hook` | its identifier as `hooks/hooks.json` names it |
+| `Hook` | its identifier as `hooks/hooks.json` names it (the same identifier in its `collapsed/hooks/hooks.json` mirror) |
 
 Never invent a different label for the same thing than the rule above
 produces — a card's name must be re-derivable from its source alone.

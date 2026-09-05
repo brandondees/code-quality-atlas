@@ -28,15 +28,15 @@ a source doc changes but the generated skill doesn't.
 - `skills:` (`skills/manifest.yaml:2`) — the list of `Lens` entries; each
   item's shape (`built_from`, `eval_min`, `wave`, `tier`, `cross_ref`,
   `design`) is documented on the `Lens` card, not repeated here.
-- `router:` (`skills/manifest.yaml:960`) — drives the generated
+- `router:` (`skills/manifest.yaml:1776`) — drives the generated
   `choosing-review-lenses` skill (picker text per lens).
-- `prepass:` (`skills/manifest.yaml:1254`) — drives
+- `prepass:` (`skills/manifest.yaml:2076`) — drives
   `grounding-review-in-tool-output`.
-- `synthesizer:` (`skills/manifest.yaml:1414`) — drives
+- `synthesizer:` (`skills/manifest.yaml:2236`) — drives
   `synthesizing-review-findings` (dedup/tension/ranking rules).
-- `modes:` (`skills/manifest.yaml:1601`) — the three depth modes (triage /
+- `modes:` (`skills/manifest.yaml:2423`) — the three depth modes (triage /
   review / comprehensive), each with a `breadth` and a severity `floor`.
-- `entrypoints:` (`skills/manifest.yaml:1627`) — the list of
+- `entrypoints:` (`skills/manifest.yaml:2449`) — the list of
   `CollapsedEntrypoint` entries.
 
 `router:`, `prepass:`, `synthesizer:`, and `modes:` each generate their own
@@ -74,4 +74,4 @@ research doc changes — only a manifest edit regenerates them.
 
 - Source: `skills/manifest.yaml`
 - `docs/open-questions.md` D6, D9, D10, D12, D16
-- Verified 2026-08-15 @ `ff7c642`
+- Verified 2026-09-05 @ `33504c1`
