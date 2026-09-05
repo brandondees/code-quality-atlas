@@ -5,6 +5,14 @@ convention wins over personal preference — read the project's config/style and
 sibling code first; consistency findings must point at the existing convention
 being diverged from.
 
+## Contents
+
+- [Bad → finding](#bad--finding)
+- [Bad → finding](#bad--finding-1)
+- [Good → no finding](#good--no-finding)
+- [Good → no finding (no established convention to compare against)](#good--no-finding-no-established-convention-to-compare-against)
+- [Not applicable → outside this lens's scope](#not-applicable--outside-this-lenss-scope)
+
 ## Bad → finding
 
 **Input (diff, with context):**

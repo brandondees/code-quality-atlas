@@ -4,6 +4,14 @@ Report each distinct issue as its own numbered finding. When the input is correc
 contract change: does an existing consumer, built against yesterday's contract,
 still work today — and can a new consumer misuse what you just added?
 
+## Contents
+
+- [Bad → finding](#bad--finding)
+- [Bad → finding](#bad--finding-1)
+- [Good → no finding](#good--no-finding)
+- [Good → no finding (breaking change shipped correctly)](#good--no-finding-breaking-change-shipped-correctly)
+- [Not applicable → outside this lens's scope](#not-applicable--outside-this-lenss-scope)
+
 ## Bad → finding
 
 **Input (diff to a public v1 endpoint):**

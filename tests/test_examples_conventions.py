@@ -112,6 +112,87 @@ def test_examples_open_with_an_intro_line(path: Path):
     )
 
 
+# A file over this many lines gets a `## Contents` ToC, right after the intro
+# and before the first example heading. Mirrors `_TOC_LINE_THRESHOLD` in
+# tooling/generate_collapsed.py, which mechanizes the same convention for
+# *generated* collapsed bundles — but examples.md is hand-authored (the
+# generator inlines it, never writes it), so that generator threshold has
+# nothing to say about these files. The convention here was set by precedent,
+# not generation: PR #165 added the ToC to the first files that crossed 100
+# lines, and the comment beside `_TOC_LINE_THRESHOLD` records why 100 was
+# chosen. This guard is the missing third check for that already-adopted
+# convention, alongside the arrow-separator and intro-line guards above.
+_EXAMPLES_TOC_LINE_THRESHOLD = 100
+
+
+def _github_anchor(heading: str) -> str:
+    """Approximate GitHub's heading-anchor slug algorithm: lowercase, drop
+    everything except word characters, whitespace, and hyphens, then turn
+    whitespace into hyphens."""
+    slug = heading.strip().lower()
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    return re.sub(r"\s", "-", slug)
+
+
+def _expected_toc_entries(headings: list[str]) -> list[str]:
+    """The `- [heading](#anchor)` lines a correct `## Contents` ToC contains,
+    in order, with GitHub's duplicate-anchor suffixing (`-1`, `-2`, ...)."""
+    seen: dict[str, int] = {}
+    entries = []
+    for h in headings:
+        slug = _github_anchor(h)
+        n = seen.get(slug, 0)
+        seen[slug] = n + 1
+        anchor = slug if n == 0 else f"{slug}-{n}"
+        entries.append(f"- [{h}](#{anchor})")
+    return entries
+
+
+def _actual_toc_entries(text: str) -> list[str]:
+    """The `- [...](#...)` bullet lines inside the file's `## Contents`
+    section, in order (empty if there's no such section)."""
+    lines = text.splitlines()
+    if "## Contents" not in lines:
+        return []
+    entries = []
+    for line in lines[lines.index("## Contents") + 1 :]:
+        if line.startswith("## "):
+            break
+        if line.startswith("- ["):
+            entries.append(line)
+    return entries
+
+
+def _has_valid_contents_toc(text: str) -> bool:
+    """True iff the first `## ` heading is `Contents` and its bullet list is
+    exactly one correctly-anchored entry per subsequent `## ` heading, in
+    order — not just that a `## Contents` heading exists somewhere. A ToC
+    missing an entry, out of order, or pointing at the wrong anchor reads
+    fine to a skim but silently misnavigates a reader (CodeRabbit, PR #425)."""
+    headings = _section_headings(text)
+    if not headings or headings[0] != "Contents":
+        return False
+    return _actual_toc_entries(text) == _expected_toc_entries(headings[1:])
+
+
+@pytest.mark.parametrize("path", EXAMPLES, ids=lambda p: p.parent.name)
+def test_long_examples_have_a_contents_toc(path: Path):
+    text = path.read_text(encoding="utf-8")
+    line_count = len(text.splitlines())
+    if line_count <= _EXAMPLES_TOC_LINE_THRESHOLD:
+        pytest.skip(
+            f"{line_count} lines, at or under the {_EXAMPLES_TOC_LINE_THRESHOLD}-line threshold"
+        )
+    assert _has_valid_contents_toc(text), (
+        f"{path.relative_to(ROOT)}: {line_count} lines (over "
+        f"{_EXAMPLES_TOC_LINE_THRESHOLD}) needs a correct `## Contents` ToC — "
+        "one bullet per `## ` heading, in order, each linking that heading's "
+        "GitHub anchor — placed right after the intro and before the first "
+        "example heading. See skills/auditing-deployment-and-trust-"
+        "boundaries/examples.md for the reference format."
+    )
+
+
 # --- the guards must fail on drift, not merely pass on a fixed tree ----------
 
 
@@ -143,3 +224,42 @@ def test_separator_check_flags_the_separator_not_the_prose(heading: str, flagged
 def test_intro_check_rejects_a_file_that_starts_with_a_heading():
     assert not _intro("# Examples — a-lens\n\n## Bad → finding\n\nbody\n")
     assert _intro("# Examples — a-lens\n\nReport each issue.\n\n## Bad → finding\n")
+
+
+def test_toc_check_fails_without_a_toc_and_passes_with_one():
+    """The guard must fail on a long file missing its ToC, catch a ToC with a
+    missing entry, wrong order, or a wrong anchor, and pass a correct one —
+    exercising `_has_valid_contents_toc` itself (the guard's actual check),
+    not `_section_headings` directly, so a weakened guard can't silently
+    keep passing this self-test (CodeRabbit, PR #425)."""
+    filler = "\n".join(f"line {i}" for i in range(_EXAMPLES_TOC_LINE_THRESHOLD + 5))
+
+    no_toc = f"# Examples — a-lens\n\nReport each issue.\n\n{filler}\n\n## Bad → finding\n\nbody\n\n## Good → no finding\n\nbody\n"
+    assert len(no_toc.splitlines()) > _EXAMPLES_TOC_LINE_THRESHOLD
+    assert not _has_valid_contents_toc(no_toc)
+
+    correct_toc = (
+        f"# Examples — a-lens\n\nReport each issue.\n\n{filler}\n\n"
+        "## Contents\n\n- [Bad → finding](#bad--finding)\n"
+        "- [Good → no finding](#good--no-finding)\n\n"
+        "## Bad → finding\n\nbody\n\n## Good → no finding\n\nbody\n"
+    )
+    assert len(correct_toc.splitlines()) > _EXAMPLES_TOC_LINE_THRESHOLD
+    assert _has_valid_contents_toc(correct_toc)
+
+    missing_entry_toc = correct_toc.replace(
+        "- [Good → no finding](#good--no-finding)\n", ""
+    )
+    assert not _has_valid_contents_toc(missing_entry_toc)
+
+    wrong_order_toc = correct_toc.replace(
+        "- [Bad → finding](#bad--finding)\n- [Good → no finding](#good--no-finding)\n",
+        "- [Good → no finding](#good--no-finding)\n- [Bad → finding](#bad--finding)\n",
+    )
+    assert not _has_valid_contents_toc(wrong_order_toc)
+
+    bad_anchor_toc = correct_toc.replace("#bad--finding", "#bad-finding")
+    assert not _has_valid_contents_toc(bad_anchor_toc)
+
+    short = "# Examples — a-lens\n\nReport each issue.\n\n## Bad → finding\n\nbody\n"
+    assert len(short.splitlines()) <= _EXAMPLES_TOC_LINE_THRESHOLD

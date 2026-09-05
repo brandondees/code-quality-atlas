@@ -33,6 +33,20 @@ distinct unsafe operation as its own numbered finding. When the input is correct
   it as if the default weren't there is a fabricated finding on a line whose
   actual keywords already show it's safe.
 
+## Contents
+
+- [Bad → finding](#bad--finding)
+- [Bad → finding](#bad--finding-1)
+- [Bad → finding (in-place type change — same breakage as a rename)](#bad--finding-in-place-type-change--same-breakage-as-a-rename)
+- [Bad → finding (missing dual-write during a column cutover)](#bad--finding-missing-dual-write-during-a-column-cutover)
+- [Bad → finding (no migration statement at all — the guarantee the app assumes doesn't exist in the schema)](#bad--finding-no-migration-statement-at-all--the-guarantee-the-app-assumes-doesnt-exist-in-the-schema)
+- [Good → no finding](#good--no-finding)
+- [Good → no finding (`NOT NULL` *with* a constant default is the safe form, not the unsafe one)](#good--no-finding-not-null-with-a-constant-default-is-the-safe-form-not-the-unsafe-one)
+- [Bad → finding (a bulk `DELETE` is a data operation, not "destructive DDL")](#bad--finding-a-bulk-delete-is-a-data-operation-not-destructive-ddl)
+- [Good → no finding (evidenced contract-phase drop)](#good--no-finding-evidenced-contract-phase-drop)
+- [Bad → finding](#bad--finding-2)
+- [Bad → finding](#bad--finding-3)
+
 ## Bad → finding
 
 **Input (diff):**

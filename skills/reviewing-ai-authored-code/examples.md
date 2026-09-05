@@ -2,6 +2,15 @@
 
 Report each distinct issue as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never manufacture an AI-defect finding for correct code just because it might have been machine-written.
 
+## Contents
+
+- [Bad → finding](#bad--finding)
+- [Bad → finding](#bad--finding-1)
+- [Bad → finding (over-helpful scope creep)](#bad--finding-over-helpful-scope-creep)
+- [Good → no finding](#good--no-finding)
+- [Good → no finding (vague but true comment)](#good--no-finding-vague-but-true-comment)
+- [Not applicable → outside this lens's scope](#not-applicable--outside-this-lenss-scope)
+
 ## Bad → finding
 
 **Input (diff):**

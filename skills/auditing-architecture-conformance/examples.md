@@ -9,6 +9,13 @@ violates. High fan-in alone is not a violation — shared kernels and util layer
 legitimately have many importers. If every declared rule passes, report exactly
 "No findings: the codebase conforms to its declared architecture".
 
+## Contents
+
+- [Bad → finding](#bad--finding)
+- [Good → no finding](#good--no-finding)
+- [Good → no finding (correct dependency inversion)](#good--no-finding-correct-dependency-inversion)
+- [Not applicable](#not-applicable)
+
 ## Bad → finding
 
 **Input (architecture scan; declared rule: ui → app → domain → infra, no upward or skip imports; no cycles):**

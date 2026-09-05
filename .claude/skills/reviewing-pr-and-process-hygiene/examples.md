@@ -3,6 +3,14 @@
 This skill reviews the PR itself — its size, commits, description, and signals —
 not just the code. Report each distinct issue as its own numbered finding. When the input is correct, the entire response is exactly "No findings" — never produce a numbered list of findings for correct code.
 
+## Contents
+
+- [Bad → finding](#bad--finding)
+- [Bad → finding](#bad--finding-1)
+- [Good → no finding](#good--no-finding)
+- [Good → no finding (large but genuinely single-purpose)](#good--no-finding-large-but-genuinely-single-purpose)
+- [Not applicable → outside this lens's scope](#not-applicable--outside-this-lenss-scope)
+
 ## Bad → finding
 
 **Input (PR metadata):**

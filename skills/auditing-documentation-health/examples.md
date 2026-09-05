@@ -37,6 +37,16 @@ call signature — rather than a plausible-sounding guess (an assumed missing
 import, an assumed missing class) about what might be wrong. A confidently
 wrong mechanism is worse than a correctly identified one.
 
+## Contents
+
+- [Bad → finding](#bad--finding)
+- [Bad → finding (ground the mismatch in the actual source, not a guess)](#bad--finding-ground-the-mismatch-in-the-actual-source-not-a-guess)
+- [Bad → finding (stale example — flag the CI gap too, not just the drift)](#bad--finding-stale-example--flag-the-ci-gap-too-not-just-the-drift)
+- [Bad → finding (a concrete stated defect, inside a framed narrative)](#bad--finding-a-concrete-stated-defect-inside-a-framed-narrative)
+- [Good → no finding](#good--no-finding)
+- [Good → no finding (minimal but present, proportionate to the project)](#good--no-finding-minimal-but-present-proportionate-to-the-project)
+- [Not applicable → outside this lens's scope](#not-applicable--outside-this-lenss-scope)
+
 ## Bad → finding
 
 **Input (docs parity scan):**

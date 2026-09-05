@@ -49,6 +49,29 @@ check is the one no linter can do.
   dashboard); a diff that happens to contain no logic this time is still a
   diff this lens checked and found clean.
 
+## Contents
+
+- [Bad → finding (a design doc's own stated policy contradicts its own goal)](#bad--finding-a-design-docs-own-stated-policy-contradicts-its-own-goal)
+- [Bad → finding (a race condition — flag the symptom, delegate the fix, don't drop it)](#bad--finding-a-race-condition--flag-the-symptom-delegate-the-fix-dont-drop-it)
+- [Bad → finding (name the correctness angle in one line, then stop — don't write the other lens's review)](#bad--finding-name-the-correctness-angle-in-one-line-then-stop--dont-write-the-other-lenss-review)
+- [Bad → finding (right check, wrong layer)](#bad--finding-right-check-wrong-layer)
+- [Bad → finding (don't let branch volume dilute the one real defect)](#bad--finding-dont-let-branch-volume-dilute-the-one-real-defect)
+- [Bad → finding (urgency framing doesn't change what the code does)](#bad--finding-urgency-framing-doesnt-change-what-the-code-does)
+- [Good → no finding (branches that look redundant are not automatically unreachable)](#good--no-finding-branches-that-look-redundant-are-not-automatically-unreachable)
+- [Bad → finding (the real defect is in the trailing context, not the code shown)](#bad--finding-the-real-defect-is-in-the-trailing-context-not-the-code-shown)
+- [Good → no finding (a change with no logic is clean, not out of scope)](#good--no-finding-a-change-with-no-logic-is-clean-not-out-of-scope)
+- [Bad → finding](#bad--finding)
+- [Bad → finding](#bad--finding-1)
+- [Bad → finding](#bad--finding-2)
+- [Bad → finding](#bad--finding-3)
+- [Bad → finding](#bad--finding-4)
+- [Bad → finding](#bad--finding-5)
+- [Bad → finding](#bad--finding-6)
+- [Bad → finding](#bad--finding-7)
+- [Bad → finding](#bad--finding-8)
+- [Good → no finding](#good--no-finding)
+- [Good → no finding](#good--no-finding-1)
+
 ## Bad → finding (a design doc's own stated policy contradicts its own goal)
 
 **Input (an ADR):**

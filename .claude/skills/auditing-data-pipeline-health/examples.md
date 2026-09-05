@@ -12,6 +12,17 @@ never as confirmed drift.
 
 ---
 
+## Contents
+
+- [Bad → declared contracts with no enforcement point](#bad--declared-contracts-with-no-enforcement-point)
+- [Bad → coverage as a standing condition, ranked by fan-out](#bad--coverage-as-a-standing-condition-ranked-by-fan-out)
+- [Delegating → the neighbouring audits' halves](#delegating--the-neighbouring-audits-halves)
+- [Refusing → the finding the evidence doesn't support](#refusing--the-finding-the-evidence-doesnt-support)
+- [Clean → a healthy project (the over-flagging guard)](#clean--a-healthy-project-the-over-flagging-guard)
+- [Bad → an orphaned model, and the clean counterweight](#bad--an-orphaned-model-and-the-clean-counterweight)
+- [Bad → an in-repo suppression note, ignored](#bad--an-in-repo-suppression-note-ignored)
+- [Not applicable → no analytics/data plane](#not-applicable--no-analyticsdata-plane)
+
 ## Bad → declared contracts with no enforcement point
 
 **Input (scan):**

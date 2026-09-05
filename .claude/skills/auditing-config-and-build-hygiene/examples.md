@@ -40,6 +40,20 @@ excess — and attribute the deeper verdict there; do not manufacture your own
 security or CVE judgment in its place, and do not let "that's someone else's
 verdict" become a reason to drop the finding.
 
+## Contents
+
+- [Bad → finding (CI + image + config)](#bad--finding-ci--image--config)
+- [Bad → finding (build reproducibility + flags)](#bad--finding-build-reproducibility--flags)
+- [Bad → finding (job-behavior metrics and branching practice, no raw config shown)](#bad--finding-job-behavior-metrics-and-branching-practice-no-raw-config-shown)
+- [Bad → finding (build-once-promote violated)](#bad--finding-build-once-promote-violated)
+- [Bad → finding, security verdict routed elsewhere](#bad--finding-security-verdict-routed-elsewhere)
+- [Bad → finding, security verdict routed elsewhere (Kubernetes)](#bad--finding-security-verdict-routed-elsewhere-kubernetes)
+- [Bad → finding, routed to a different lens (dependency CVE, not IAM)](#bad--finding-routed-to-a-different-lens-dependency-cve-not-iam)
+- [Bad → finding (adversarial — a real defect buried in an accurately-described mechanical diff)](#bad--finding-adversarial--a-real-defect-buried-in-an-accurately-described-mechanical-diff)
+- [Good → no finding (a non-gating job is not a soft-failed gate)](#good--no-finding-a-non-gating-job-is-not-a-soft-failed-gate)
+- [Good → no finding](#good--no-finding)
+- [Not applicable → outside this lens's scope](#not-applicable--outside-this-lenss-scope)
+
 ## Bad → finding (CI + image + config)
 
 **Input (build/config scan):**

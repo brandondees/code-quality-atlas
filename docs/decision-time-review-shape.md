@@ -89,10 +89,7 @@ free. Two representative lenses named in the router's decision route —
 `tracing-correctness-and-invariants` and `checking-restraint` — gained a new eval
 scenario each (an ADR input) demonstrating the checklist firing alongside the
 lens's own topical finding; `python -m tooling.cli generate`/`drift`/`eval` and
-the full pytest suite are clean. **Not yet cross-model re-gated** (no local model
-runtime available in the building session) — pending per the
-[regeneration runbook](runbooks/regenerating-skills.md)'s cross-model gate before
-the next release lands; the remaining 13 design-capable lenses did not get a new
+the full pytest suite are clean. **Cross-model re-gated as part of the Q21 campaign** — `tracing-correctness-and-invariants` (2026-07-26) and `checking-restraint` (2026-08-19), both later re-gated again against `qwen3.5:4b` as the new floor-of-record (session-log.md, 2026-08-22): `tracing-correctness-and-invariants` 19/22 recall + 4/4 precision, with one open, non-blocking gap — its ADR-shaped scenario still misses the shared decision-record-checklist half of its expected finding; `checking-restraint` 16/20 recall + 3/4 precision. The remaining 13 design-capable lenses did not get a new
 eval scenario (their existing scenarios are unaffected since none target decision
 input) and can gain one opportunistically as decision-shaped review gets used.
 
