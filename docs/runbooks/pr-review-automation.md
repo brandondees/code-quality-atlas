@@ -425,8 +425,11 @@ run checks them all:
   either), or slipped past a resident reviewer's watch (missed subscription
   wakeup, its self-nudge chain broke, or its session got reclaimed). All attached
   repos are cloned into the
-  workspace, so first enumerate them (e.g. from the workspace root,
-  `for d in */; do git -C "$d" remote get-url origin 2>/dev/null; done`), then run the
+  workspace, so first list their directories with the Glob tool (`*/` at the
+  workspace root — not a Bash loop; atlas-rebase-stale.md's Bash grant is
+  scoped to one command shape, `git -C <dir> remote get-url origin`, issue
+  #408), then for EACH directory run that one scoped git command to learn
+  its GitHub owner/repo, then run the
   sweep below for EACH repo. The full spec is commands/atlas-rebase-stale.md; the
   /atlas-rebase-stale slash command does NOT resolve in routine sessions, so follow
   these inline steps per repo.
