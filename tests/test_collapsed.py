@@ -64,6 +64,48 @@ def test_lens_bundle_body_has_checklist_and_deeper_links():
     )  # deeper disclosure links
 
 
+def test_lens_bundle_body_carries_the_reviewer_discipline_contract():
+    """A collapsed lens bundle previously carried none of the reviewer-discipline
+    contract every standalone SKILL.md ships — no report-only-real-problems
+    guard, no Team preferences note, no Mechanizing/Process-notes footer (#369).
+    Pin the whole contract's presence so a future refactor can't silently drop
+    it again."""
+    body = lens_bundle_body(
+        _skill(), docs_root=str(ROOT), skills_root=str(ROOT / "skills")
+    )
+    assert "## Reviewer discipline" in body
+    assert "Team preferences" in body
+    assert "## Mechanizing these checks" in body
+    assert "Process notes" in body
+    # Order matters: discipline precedes the checklist, and the mechanizing/
+    # process-notes footer precedes Going deeper.
+    assert body.index("## Reviewer discipline") < body.index("## Checklist")
+    assert body.index("## Mechanizing these checks") < body.index("## Going deeper")
+
+
+def test_lens_bundle_body_attribution_guard_only_for_diff_shape():
+    diff_body = lens_bundle_body(
+        _skill(shape="diff"), docs_root=str(ROOT), skills_root=str(ROOT / "skills")
+    )
+    assert "Pre-existing defects in touched code are surfaceable" in diff_body
+    repo_body = lens_bundle_body(
+        _skill(shape="repo"), docs_root=str(ROOT), skills_root=str(ROOT / "skills")
+    )
+    assert "Pre-existing defects in touched code are surfaceable" not in repo_body
+
+
+def test_lens_bundle_body_cross_ref_note_names_the_owner():
+    skill = _skill(cross_ref=[2])
+    body = lens_bundle_body(
+        skill,
+        docs_root=str(ROOT),
+        skills_root=str(ROOT / "skills"),
+        owners={2: "tracing-correctness-and-invariants"},
+    )
+    assert "Shared categories" in body
+    assert "tracing-correctness-and-invariants" in body
+
+
 def test_lens_bundle_body_for_artifact_shape_has_table_and_rubric_link():
     """An artifact-shaped lens's bundle must not ship the generic heuristics
     checklist — its checks live in per-artifact rubric files loaded on a
