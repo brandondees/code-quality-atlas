@@ -8,6 +8,6 @@
 # v0.23.2, so both gates run the same engine. Bump them together.
 repos:
   - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: v0.23.2
+    rev: b82a6c8896e491b9cb377a99ff3412131920681b # v0.23.2
     hooks:
       - id: markdownlint-cli2
