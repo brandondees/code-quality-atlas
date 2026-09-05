@@ -8,12 +8,15 @@ contextualizes, or dismisses (map-gaps G34 Tier 1, enacting G5)."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import yaml
 
-from tooling.generate_common import _escape_table_cell
+from tooling.generate_common import (
+    _escape_table_cell,
+    _generate_composition,
+    _strip_leading_frontmatter_and_going_deeper,
+)
 from tooling.manifest import Manifest, Prepass
 
 
@@ -214,28 +217,12 @@ def build_collapsed_prepass(manifest: Manifest) -> str:
     frontmatter, no `Going deeper`). Mirrors build_collapsed_synthesis: the
     section's relative links (`../<router>/SKILL.md`) point outside the bundle
     and would 404, and the file is Read directly rather than navigated from."""
-    full = build_prepass_md(manifest)
-    if not full.startswith("---\n"):
-        raise ValueError("build_prepass_md output has no leading frontmatter to strip")
-    end = full.find("\n---\n", len("---\n"))  # closing fence of the first block only
-    if end == -1:
-        raise ValueError("build_prepass_md frontmatter block is not terminated")
-    body = full[end + len("\n---\n") :].lstrip("\n")
-    marker = "\n## Going deeper\n"
-    idx = body.find(marker)
-    if idx != -1:
-        body = body[:idx].rstrip() + "\n"
-    return body
+    return _strip_leading_frontmatter_and_going_deeper(
+        build_prepass_md(manifest), "build_prepass_md"
+    )
 
 
 def generate_prepass(manifest: Manifest, skills_root: str = "skills") -> Path:
-    out = Path(skills_root, manifest.prepass.name)
-    (out / "evals").mkdir(parents=True, exist_ok=True)
-    (out / "SKILL.md").write_text(build_prepass_md(manifest), encoding="utf-8")
-    if not (out / "evals" / "eval.json").exists():
-        (out / "evals" / "eval.json").write_text(
-            json.dumps({"skills": [manifest.prepass.name], "scenarios": []}, indent=2)
-            + "\n",
-            encoding="utf-8",
-        )
-    return out
+    return _generate_composition(
+        manifest, manifest.prepass.name, skills_root, build_prepass_md
+    )

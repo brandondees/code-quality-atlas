@@ -13,6 +13,8 @@ are imported across the sibling generate_*.py modules by design."""
 
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
 from pathlib import Path
 
 from tooling.manifest import Manifest, Skill
@@ -216,3 +218,54 @@ def primary_owners(manifest: Manifest) -> dict[int, str]:
             if src.category not in s.cross_ref:
                 owners[src.category] = s.name
     return owners
+
+
+def _strip_leading_frontmatter_and_going_deeper(full: str, source: str) -> str:
+    """Strips a generated SKILL.md's leading YAML frontmatter block and its
+    trailing "## Going deeper" section, for reuse as a bundled reference file
+    inside a collapsed entrypoint: no frontmatter (the file is Read directly,
+    not resolved as a skill), and the "Going deeper" links are relative to
+    the standalone tree and would 404 from inside the bundle (#392: this
+    exact 11-line strip was previously duplicated byte-for-byte between
+    generate_collapsed.py and generate_prepass.py). `source` names the
+    function whose output is being stripped, for the raised error message
+    only — this only ever operates on this suite's own generated output, so
+    a malformed shape is a bug in that builder, not a malformed input to
+    handle gracefully."""
+    if not full.startswith("---\n"):
+        raise ValueError(f"{source} output has no leading frontmatter to strip")
+    end = full.find("\n---\n", len("---\n"))  # closing fence of the first block only
+    if end == -1:
+        raise ValueError(f"{source} frontmatter block is not terminated")
+    body = full[end + len("\n---\n") :].lstrip("\n")
+    marker = "\n## Going deeper\n"
+    idx = body.find(marker)
+    if idx != -1:
+        body = body[:idx].rstrip() + "\n"
+    return body
+
+
+def _generate_composition(
+    manifest: Manifest,
+    name: str,
+    skills_root: str,
+    build_md: Callable[[Manifest], str],
+) -> Path:
+    """Shared writer for a single-instance composition skill — the router,
+    synthesizer, and prepass each generate exactly one SKILL.md this same way
+    (#392: previously the same 9-line writer, copied three times). `name` is
+    the manifest component's own `.name` field (e.g. `manifest.router.name`)
+    — passed explicitly rather than re-derived here, since which manifest
+    attribute holds it differs per caller and this helper has no way to know
+    which. `evals/eval.json` is seeded once, the first time this component is
+    generated, and never overwritten thereafter: an author's own scenarios,
+    once written, survive every later regeneration."""
+    out = Path(skills_root, name)
+    (out / "evals").mkdir(parents=True, exist_ok=True)
+    (out / "SKILL.md").write_text(build_md(manifest), encoding="utf-8")
+    if not (out / "evals" / "eval.json").exists():
+        (out / "evals" / "eval.json").write_text(
+            json.dumps({"skills": [name], "scenarios": []}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    return out

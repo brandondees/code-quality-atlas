@@ -853,6 +853,75 @@ def test_escape_table_cell_escapes_pipe_and_collapses_newlines():
     assert _escape_table_cell("plain text") == "plain text"
 
 
+# --- Shared composition-skill writer and frontmatter stripper (#392): both
+# were previously the same logic copied byte-for-byte across
+# generate_router.py/generate_synthesizer.py/generate_prepass.py and
+# generate_collapsed.py/generate_prepass.py respectively; consolidated into
+# generate_common.py so a fix (or a bug) in either lands in one place instead
+# of two or three.
+
+
+def test_generate_composition_seeds_eval_json_once_and_never_overwrites_it(tmp_path):
+    from tooling.generate_common import _generate_composition
+
+    calls = []
+
+    def build_md(_manifest):
+        calls.append(1)
+        return f"# call {len(calls)}\n"
+
+    out = _generate_composition(object(), "some-skill", str(tmp_path), build_md)
+    eval_path = out / "evals" / "eval.json"
+    assert json.loads(eval_path.read_text()) == {
+        "skills": ["some-skill"],
+        "scenarios": [],
+    }
+
+    # An author's own scenario, once written, must survive a later regeneration.
+    eval_path.write_text(json.dumps({"skills": ["some-skill"], "scenarios": ["x"]}))
+    _generate_composition(object(), "some-skill", str(tmp_path), build_md)
+    assert json.loads(eval_path.read_text())["scenarios"] == ["x"]
+    # SKILL.md itself is always rewritten, unlike the eval file.
+    assert (out / "SKILL.md").read_text() == "# call 2\n"
+
+
+def test_strip_leading_frontmatter_and_going_deeper_removes_both():
+    from tooling.generate_common import _strip_leading_frontmatter_and_going_deeper
+
+    full = (
+        "---\nname: x\n---\n\n"
+        "# x\n\nbody text\n\n"
+        "## Going deeper\n\n- a link that would 404 outside this bundle\n"
+    )
+    body = _strip_leading_frontmatter_and_going_deeper(full, "build_x_md")
+    assert "---" not in body
+    assert "body text" in body
+    assert "Going deeper" not in body
+    assert "404" not in body
+
+
+def test_strip_leading_frontmatter_and_going_deeper_rejects_missing_frontmatter():
+    import pytest
+
+    from tooling.generate_common import _strip_leading_frontmatter_and_going_deeper
+
+    with pytest.raises(ValueError, match="build_x_md.*no leading frontmatter"):
+        _strip_leading_frontmatter_and_going_deeper(
+            "# no frontmatter here\n", "build_x_md"
+        )
+
+
+def test_strip_leading_frontmatter_and_going_deeper_rejects_unterminated_frontmatter():
+    import pytest
+
+    from tooling.generate_common import _strip_leading_frontmatter_and_going_deeper
+
+    with pytest.raises(ValueError, match="build_x_md.*not terminated"):
+        _strip_leading_frontmatter_and_going_deeper(
+            "---\nname: x\n# no closing fence\n", "build_x_md"
+        )
+
+
 def test_build_skill_md_artifact_table_escapes_pipe_and_newline():
     # D15 artifact-table row (issue #141): `a.name` / `a.detect` are
     # manifest-sourced prose and must not be interpolated raw.

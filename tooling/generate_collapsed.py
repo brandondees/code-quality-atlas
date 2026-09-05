@@ -19,6 +19,7 @@ from tooling.generate_common import (
     _gen_header,
     _gen_trailer,
     _scope_line,
+    _strip_leading_frontmatter_and_going_deeper,
     build_reference,
     modes_section,
 )
@@ -390,21 +391,9 @@ def build_collapsed_synthesis(manifest: Manifest) -> str:
     bundle and would 404 when an agent follows them — the entrypoint SKILL.md
     already links the lenses, and this file is loaded directly, not navigated
     from."""
-    full = build_synthesizer_md(manifest)
-    # Raise loudly rather than silently shipping a frontmatter-laden bundle if the
-    # synthesizer's output shape ever changes.
-    if not full.startswith("---\n"):
-        raise ValueError(
-            "build_synthesizer_md output has no leading frontmatter to strip"
-        )
-    end = full.find("\n---\n", len("---\n"))  # closing fence of the first block only
-    if end == -1:
-        raise ValueError("build_synthesizer_md frontmatter block is not terminated")
-    body = full[end + len("\n---\n") :].lstrip("\n")
-    marker = "\n## Going deeper\n"
-    idx = body.find(marker)
-    if idx != -1:
-        body = body[:idx].rstrip() + "\n"
+    body = _strip_leading_frontmatter_and_going_deeper(
+        build_synthesizer_md(manifest), "build_synthesizer_md"
+    )
     # The Fan-out-model prose cross-refs the now-removed section; drop the dangling
     # "under *Going deeper*" pointer so the bundle is self-consistent (no-op if the
     # phrase ever changes).

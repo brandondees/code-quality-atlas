@@ -6,12 +6,15 @@ catalog of every lens."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import yaml
 
-from tooling.generate_common import _escape_table_cell, modes_section
+from tooling.generate_common import (
+    _escape_table_cell,
+    _generate_composition,
+    modes_section,
+)
 from tooling.manifest import Manifest
 
 
@@ -160,13 +163,6 @@ def build_router_md(manifest: Manifest) -> str:
 
 
 def generate_router(manifest: Manifest, skills_root: str = "skills") -> Path:
-    out = Path(skills_root, manifest.router.name)
-    (out / "evals").mkdir(parents=True, exist_ok=True)
-    (out / "SKILL.md").write_text(build_router_md(manifest), encoding="utf-8")
-    if not (out / "evals" / "eval.json").exists():
-        (out / "evals" / "eval.json").write_text(
-            json.dumps({"skills": [manifest.router.name], "scenarios": []}, indent=2)
-            + "\n",
-            encoding="utf-8",
-        )
-    return out
+    return _generate_composition(
+        manifest, manifest.router.name, skills_root, build_router_md
+    )

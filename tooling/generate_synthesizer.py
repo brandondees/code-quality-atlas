@@ -6,12 +6,11 @@ with a single verdict."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import yaml
 
-from tooling.generate_common import _escape_table_cell
+from tooling.generate_common import _escape_table_cell, _generate_composition
 from tooling.manifest import Manifest
 
 
@@ -304,15 +303,6 @@ def build_synthesizer_md(manifest: Manifest) -> str:
 
 
 def generate_synthesizer(manifest: Manifest, skills_root: str = "skills") -> Path:
-    out = Path(skills_root, manifest.synthesizer.name)
-    (out / "evals").mkdir(parents=True, exist_ok=True)
-    (out / "SKILL.md").write_text(build_synthesizer_md(manifest), encoding="utf-8")
-    if not (out / "evals" / "eval.json").exists():
-        (out / "evals" / "eval.json").write_text(
-            json.dumps(
-                {"skills": [manifest.synthesizer.name], "scenarios": []}, indent=2
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-    return out
+    return _generate_composition(
+        manifest, manifest.synthesizer.name, skills_root, build_synthesizer_md
+    )
