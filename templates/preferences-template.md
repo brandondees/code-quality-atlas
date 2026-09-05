@@ -15,17 +15,18 @@ if an agent proposes entries from observed patterns, ratify each one individuall
 (edit its wording, confirm the rationale is real) before it counts. An entry with
 no `decided:` line is not yet in effect.
 
-Tiered precedence (do not skip): a finding is either PREFERENCE-tier (the code is
-merely suboptimal by a contestable standard — naming, module shape, restraint
-thresholds, idiom, doc depth, PR size, a11y priority for an internal tool) or
-FLOOR-tier (the code is wrong or unsafe — it will break, corrupt, leak, expose, or
-lose data; security, correctness, migration/data safety, and concurrency-safety
-findings are always floor-tier). You can silently `suppress` a preference-tier
-finding. You can never silently `suppress` a floor-tier finding — the strongest
-move available on one is `acknowledge`, which keeps it visible in every report,
-tagged `acknowledged deviation: <reason>`, and marks it non-blocking rather than
-making it disappear. This split is enforced by every lens; nothing in this file
-can turn it off. -->
+Tiered precedence (do not skip): the split ships **per lens**, not per finding or per
+check — each lens is tagged either PREFERENCE-tier (the code is merely suboptimal by
+a contestable standard — naming, module shape, restraint thresholds, idiom, doc depth,
+PR size, a11y priority for an internal tool) or FLOOR-tier (the code is wrong or
+unsafe — it will break, corrupt, leak, expose, or lose data; security, correctness,
+migration/data safety, and concurrency-safety are always floor-tier lenses), and every
+finding that lens raises inherits its lens's tier. You can silently `suppress` a
+preference-tier finding. You can never silently `suppress` a finding from a floor-tier
+lens — the strongest move available on one is `acknowledge`, which keeps it visible in
+every report, tagged `acknowledged deviation: <reason>`, and marks it non-blocking
+rather than making it disappear. This split is enforced by every lens; nothing in this
+file can turn it off. -->
 
 # Team preferences — <repo name>
 

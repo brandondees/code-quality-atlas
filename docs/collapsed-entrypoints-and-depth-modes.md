@@ -47,9 +47,11 @@ with **all** relevant lenses," up to the full set at repo scope, and cannot get 
   generation). This is D16's relevance/depth separation.
 - **D-Q20-5 — Three depth modes with per-mode severity floors.**
   **triage** (critical tier only — correctness/security/data/concurrency — floor
-  Major+), **review** (default; top 2–4 by relevance; today's escalating floor),
-  **comprehensive** (all relevant lenses, uncapped; floor pinned at Nit so
-  long-tail findings actually surface). The floor policy lives in the synthesizer.
+  Major+), **review** (default; top 3-8 by relevance, widened from 2-4 by the
+  2026-07-06 addendum — see [`review-depth-modes.md`](review-depth-modes.md);
+  today's escalating floor), **comprehensive** (all relevant lenses, uncapped;
+  floor pinned at Nit so long-tail findings actually surface). The floor policy
+  lives in the synthesizer.
 - **D-Q20-6 — Non-goal:** removing the standalone form's dozens of skills.
   Dual-emit keeps them for filesystem / Skulto / other-agent installs and
   direct per-lens auto-triggering.
@@ -109,7 +111,8 @@ collapsed/skills/reviewing-a-change/
 1. User: "review this PR" → `reviewing-a-change` triggers (its description carries
    the diff-review trigger surface).
 2. Its SKILL.md ranks the applicable lenses by relevance to the change's scope and
-   selects per the active **mode** (default **review** = top 2–4).
+   selects per the active **mode** (default **review** = top 3-8, see the
+   2026-07-06 addendum in D-Q20-5 above).
 3. Agent **`Read`s** `reference/lenses/<lens>/body.md` for each selected lens and
    applies it — `Read` replaces the Skill-invocation; no new mechanism (skills
    already point at `reference/*.md`).
@@ -139,13 +142,14 @@ The router (`built_from: []`) and the 4 entrypoints share generated routing logi
 
 - **Relevance ranking.** For a change, produce an ordered list of every lens whose
   scope the change touches (from the existing route table, now emitting a ranked
-  list rather than a 2–4 slice). `reviewing-pr-and-process-hygiene` stays additive.
+  list rather than a small fixed-size slice). `reviewing-pr-and-process-hygiene`
+  stays additive.
 - **Modes (breadth × floor):**
 
   | Mode | Lenses run | Severity floor | Typical trigger |
   |---|---|---|---|
   | **triage** | critical tier only (correctness, security, data-safety, concurrency) | Major+ | pre-merge gate; "quick/triage review" |
-  | **review** *(default)* | top 2–4 by relevance (escalating floor as today) | round-based | "review this PR" |
+  | **review** *(default)* | top 3-8 by relevance, widened from 2-4 by the 2026-07-06 addendum (escalating floor as today) | round-based | "review this PR" |
   | **comprehensive** | **all** relevant lenses, uncapped (full audit set at repo scope) | pinned at Nit | "thorough review", "use all relevant lenses", "comprehensive" |
 
 - **Severity-floor policy** lives in the synthesizer / `synthesis.md`: the floor is
