@@ -332,6 +332,7 @@ jobs:
           ok=1
           git diff --exit-code skills/    || { git diff --stat skills/;    echo "::error::standalone skills/ drifted — regenerate and commit"; ok=0; }
           git diff --exit-code collapsed/ || { git diff --stat collapsed/; echo "::error::collapsed/ drifted — regenerate and commit"; ok=0; }
+          git diff --exit-code -- README.md docs/distribution.md docs/install.md docs/collapsed-entrypoints-and-depth-modes.md docs/review-depth-modes.md .claude-plugin/plugin.json .claude-plugin/marketplace.json || { git diff --stat -- README.md docs/distribution.md docs/install.md docs/collapsed-entrypoints-and-depth-modes.md docs/review-depth-modes.md .claude-plugin/plugin.json .claude-plugin/marketplace.json; echo "::error::documented counts drifted — regenerate and commit"; ok=0; }
           [ "$ok" -eq 1 ]
       - name: markdownlint
         if: steps.filter.outputs.markdown == 'true'

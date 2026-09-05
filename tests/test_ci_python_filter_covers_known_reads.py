@@ -25,12 +25,16 @@ from pathlib import Path
 
 import yaml
 
-from tests.test_doc_counts import _LIVING_COUNT_FILES
+from tooling.generate_doc_counts import _TEMPLATE
 
 ROOT = Path(__file__).resolve().parent.parent
 
+# test_doc_counts.py's own inventory of doc-count-bearing files -- imported
+# from the generator's template (single source, see #372) rather than copied.
+_DOC_COUNT_FILES = tuple(sorted({occ.path for occ in _TEMPLATE}))
+
 _KNOWN_EXTERNAL_READS = (
-    *_LIVING_COUNT_FILES,  # test_doc_counts.py's own inventory -- imported, not copied
+    *_DOC_COUNT_FILES,
     "commands/atlas-init.md",  # test_routing_snippet_sync.py
     "templates/agents-routing-snippet.md",
     "templates/REVIEW.md",  # test_review_template_sync.py
@@ -50,8 +54,6 @@ _KNOWN_EXTERNAL_READS = (
     "hooks/queue-session-retro.sh",
     "hooks/route.sh",
     "hooks/lib/feedback-tier.sh",
-    ".claude-plugin/plugin.json",  # test_doc_counts.py
-    ".claude-plugin/marketplace.json",
     ".claude/skills/**",  # test_self_vendored_skills_sync.py, test_map_twins_sync.py
 )
 
