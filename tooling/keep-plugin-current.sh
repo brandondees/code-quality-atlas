@@ -80,11 +80,22 @@ check_requirements || exit 1
 # Best-effort only: a lock left behind by a killed process blocks future runs
 # until removed by hand -- an accepted trade-off over the alternative (no
 # guard at all).
+# A nonzero exit here matters, not just for this script's own caller: the
+# recommended SessionStart wrapper only writes its throttle stamp when this
+# script exits 0, specifically so a run that did NOT complete an update never
+# resets the throttle (issue #389 CodeRabbit round-2 finding -- an earlier
+# version of this guard exited 0 on lock contention, which meant a session
+# that merely detected another run in progress would still stamp the
+# throttle on the wrapper's behalf, exactly the silent-reset bug the wrapper
+# fix was meant to close, just moved here instead).
 LOCK_DIR="$CLAUDE_DIR/.keep-plugin-current.lock"
-mkdir -p "$CLAUDE_DIR" 2>/dev/null || true
+if ! mkdir -p "$CLAUDE_DIR" 2>/dev/null; then
+  echo "error: could not create $CLAUDE_DIR" >&2
+  exit 1
+fi
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   echo "Another keep-plugin-current.sh run appears to be in progress ($LOCK_DIR exists) -- skipping to avoid racing it. If no run is actually active (e.g. a previous run was killed), remove $LOCK_DIR and retry." >&2
-  exit 0
+  exit 1
 fi
 trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 

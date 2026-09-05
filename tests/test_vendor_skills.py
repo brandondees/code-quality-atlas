@@ -739,6 +739,62 @@ def test_uninstall_force_removes_a_non_tool_vendored_directory_too(tmp_path):
     assert not skills_dir.exists()
 
 
+def test_uninstall_leaves_a_hand_edited_notice_in_place(tmp_path):
+    """CodeRabbit finding on #389: NOTICE.md/LICENSE-CC-BY-4.0 have no
+    per-directory ownership marker the way a skill's SKILL.md does, so
+    --uninstall must check NOTICE.md's own attribution signature before
+    deleting either file -- otherwise a user who hand-edited NOTICE.md (or
+    replaced it) after a real vendoring run would have it silently deleted
+    once every skill directory it listed was gone or already removed."""
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    run_vendor(target)
+    skills_dir = target / ".claude" / "skills"
+    notice = skills_dir / "NOTICE.md"
+    license_file = skills_dir / "LICENSE-CC-BY-4.0"
+    notice.write_text("# hand-edited, no longer this tool's attribution text\n")
+
+    result = run_vendor_raw(target, "--uninstall")
+    assert result.returncode == 1
+    assert "does not look like something this tool wrote" in result.stderr
+
+    # Every skill directory was still removed -- only the attribution files
+    # (and the marker recording that nothing else is left) are protected.
+    assert not (skills_dir / "checking-restraint").exists()
+    assert (
+        notice.read_text() == "# hand-edited, no longer this tool's attribution text\n"
+    )
+    assert license_file.exists()
+    assert (skills_dir / ".atlas-vendored").exists()
+
+
+def test_uninstall_force_removes_a_hand_edited_notice_too(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    run_vendor(target)
+    skills_dir = target / ".claude" / "skills"
+    (skills_dir / "NOTICE.md").write_text("# hand-edited\n")
+
+    result = run_vendor_raw(target, "--uninstall", "--force")
+    assert result.returncode == 0, result.stderr
+    assert not skills_dir.exists()
+
+
+def test_uninstall_dry_run_warns_about_hand_edited_notice_without_deleting(tmp_path):
+    target = tmp_path / "target-repo"
+    target.mkdir()
+    run_vendor(target)
+    skills_dir = target / ".claude" / "skills"
+    notice = skills_dir / "NOTICE.md"
+    notice.write_text("# hand-edited\n")
+
+    result = run_vendor_raw(target, "--uninstall", "--dry-run")
+    assert result.returncode == 0, result.stderr
+    assert "does not look like something this tool wrote" in result.stderr
+    assert notice.read_text() == "# hand-edited\n"
+    assert (skills_dir / "checking-restraint").is_dir()
+
+
 def test_marker_has_format_header(tmp_path):
     target = tmp_path / "target-repo"
     target.mkdir()

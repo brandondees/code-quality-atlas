@@ -340,7 +340,11 @@ def test_second_concurrent_run_skips_while_lock_is_held(tmp_path):
     }
     result = _run([], env)
 
-    assert result.returncode == 0, result.stderr
+    # Nonzero, not 0: the SessionStart wrapper only stamps the throttle on a
+    # 0 exit, specifically so a run that skipped due to lock contention never
+    # resets the throttle on the in-progress run's behalf (CodeRabbit round-2
+    # finding on #389).
+    assert result.returncode == 1
     assert "appears to be in progress" in result.stderr
     # No update was attempted while another run holds the lock.
     assert not log_path.exists() or _read_log(log_path) == []

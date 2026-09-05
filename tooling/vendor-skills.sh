@@ -642,22 +642,50 @@ do_uninstall() {
   done
 
   local notice="$dest_root/NOTICE.md" license="$dest_root/LICENSE-CC-BY-4.0"
+  # Ownership check for the two attribution files, same reasoning as
+  # is_tool_vendored_skill_dir above but for flat files instead of a skill
+  # directory (CodeRabbit finding on #389): write_attribution always signs
+  # NOTICE.md with this exact phrase, so its absence means either the file
+  # was never written by this tool, or a user edited it since -- in either
+  # case, deleting it without --force would remove content this tool doesn't
+  # actually own. A missing NOTICE.md counts as "ours" (nothing to protect).
+  local attribution_is_ours=1
+  # Literal markdown backticks in a grep -F pattern below, not an unexpanded
+  # command substitution.
+  # shellcheck disable=SC2016
+  if [ -e "$notice" ] && ! grep -qF 'by `tooling/vendor-skills.sh`.' "$notice" 2>/dev/null; then
+    attribution_is_ours=0
+  fi
+  local clear_attribution=0
+  if [ "${#skipped_names[@]}" -eq 0 ] && { [ "$attribution_is_ours" -eq 1 ] || [ "$FORCE" -eq 1 ]; }; then
+    clear_attribution=1
+  fi
+
   if [ "$DRY_RUN" -eq 1 ]; then
-    [ "${#skipped_names[@]}" -eq 0 ] && [ -e "$notice" ] && printf '  - (dry-run) would remove: %s\n' "$notice"
-    [ "${#skipped_names[@]}" -eq 0 ] && [ -e "$license" ] && printf '  - (dry-run) would remove: %s\n' "$license"
-    [ "${#skipped_names[@]}" -eq 0 ] && printf '  - (dry-run) would remove marker: %s\n' "$marker"
+    if [ "$clear_attribution" -eq 1 ]; then
+      [ -e "$notice" ] && printf '  - (dry-run) would remove: %s\n' "$notice"
+      [ -e "$license" ] && printf '  - (dry-run) would remove: %s\n' "$license"
+      printf '  - (dry-run) would remove marker: %s\n' "$marker"
+    elif [ "$attribution_is_ours" -ne 1 ]; then
+      printf 'Warning: %s does not look like something this tool wrote (missing its attribution signature)%s; pass --force to remove it anyway, or delete it by hand if you are sure.\n' \
+        "$notice" ' -- would skip in a real run' >&2
+    fi
     printf '(dry-run) would remove %s skill(s) -- no files were actually removed. Re-run without --dry-run to apply.\n' \
       "$removed"
     return 0
   fi
 
-  if [ "${#skipped_names[@]}" -gt 0 ]; then
-    # Some names stayed -- rewrite the marker with just those, rather than
-    # delete it outright, so a later --uninstall (or --prune) still knows
-    # about them instead of silently orphaning the record (#377's own
-    # reasoning for why --prune rewrites rather than deletes wholesale).
-    # NOTICE.md/LICENSE-CC-BY-4.0 stay too: they attribute whatever vendored
-    # content remains under dest_root.
+  if [ "$clear_attribution" -ne 1 ]; then
+    # Either some skill names stayed, or the attribution files aren't ours to
+    # remove -- rewrite the marker with whatever names stayed (possibly none)
+    # rather than delete it outright, so a later --uninstall (or --prune)
+    # still knows what's left instead of silently orphaning the record
+    # (#377's own reasoning for why --prune rewrites rather than deletes
+    # wholesale). NOTICE.md/LICENSE-CC-BY-4.0 stay too in this case.
+    if [ "$attribution_is_ours" -ne 1 ]; then
+      printf 'Warning: %s does not look like something this tool wrote (missing its attribution signature) -- leaving it and %s in place; pass --force to remove them anyway, or delete them by hand if you are sure.\n' \
+        "$notice" "$license" >&2
+    fi
     {
       printf '# code-quality-atlas vendored skills — do not hand-edit; regenerate with tooling/vendor-skills.sh\n'
       printf '# format=%s\n' "$MARKER_FORMAT"
