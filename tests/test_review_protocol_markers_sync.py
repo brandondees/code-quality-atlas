@@ -41,13 +41,24 @@ _SITES = [
 
 # The four literal tokens the protocol's round/ACK detection depends on.
 # `N` stands for the literal placeholder digit position, not a regex group --
-# these are checked as exact substrings, not patterns.
-_PROTOCOL_TOKENS = [
+# these are checked as exact substrings, not patterns. The two HTML comment
+# markers are machine-parsed byte-for-byte by the review tooling, so they are
+# matched literally, with no whitespace tolerance -- a stray extra space
+# inside one (`<!--  atlas-review-ack -->`) is itself a real drift, not
+# formatting noise, and must fail this guard, not pass it silently.
+_EXACT_TOKENS = [
     "<!-- atlas-review-ack -->",
-    "👀 atlas reviewer engaged",
     "<!-- atlas-review round:N -->",
+]
+# Visible prose/heading tokens. These can have a literal newline in the
+# middle from this repo's ~80-column hard-wrap (confirmed for the emoji
+# phrase in at least two of the six sites) without that being a spelling
+# drift, so these alone get whitespace-normalized before comparison.
+_WRAP_TOLERANT_TOKENS = [
+    "👀 atlas reviewer engaged",
     "## Round N — ",
 ]
+_PROTOCOL_TOKENS = _EXACT_TOKENS + _WRAP_TOLERANT_TOKENS
 
 
 def _normalize_whitespace(text: str) -> str:
@@ -62,17 +73,29 @@ def _normalize_whitespace(text: str) -> str:
 def _missing_tokens(
     site_texts: dict[str, str], tokens: list[str]
 ) -> dict[str, list[str]]:
-    """For each token, the sites (by name) whose (already-normalized) text
-    doesn't contain it. Empty dict means every token is present everywhere."""
+    """For each token, the sites (by name) that don't contain it. HTML
+    comment markers (`<!-- ... -->`) are matched literally against the raw
+    text -- no whitespace tolerance, since those are machine-parsed and a
+    formatting drift inside one is a real bug, not noise. Every other token
+    is matched against whitespace-normalized text, so a hard-wrapped line
+    break inside visible prose doesn't read as a drift. Empty dict means
+    every token is present everywhere it should be."""
     normalized = {
         site: _normalize_whitespace(text) for site, text in site_texts.items()
     }
     missing: dict[str, list[str]] = {}
     for token in tokens:
-        normalized_token = _normalize_whitespace(token)
-        absent_from = [
-            site for site, text in normalized.items() if normalized_token not in text
-        ]
+        if token.startswith("<!--"):
+            absent_from = [
+                site for site, text in site_texts.items() if token not in text
+            ]
+        else:
+            normalized_token = _normalize_whitespace(token)
+            absent_from = [
+                site
+                for site, text in normalized.items()
+                if normalized_token not in text
+            ]
         if absent_from:
             missing[token] = absent_from
     return missing
@@ -122,3 +145,17 @@ def test_missing_tokens_normalizes_line_wrapping():
     matches this file's own `## Contents`-ToC-style guard discipline."""
     wrapped = {"a.md": 'the phrase "👀 atlas\n  reviewer engaged" appears here'}
     assert _missing_tokens(wrapped, ["👀 atlas reviewer engaged"]) == {}
+
+
+def test_missing_tokens_matches_html_comment_markers_literally():
+    """A whitespace change *inside* an HTML comment marker is a real drift,
+    not formatting noise -- the marker is machine-parsed byte-for-byte by
+    the review tooling, so normalizing it away would hide exactly the bug
+    class this guard exists to catch (CodeRabbit, PR #427)."""
+    extra_space = {"a.md": "carries <!--  atlas-review-ack --> here"}
+    assert _missing_tokens(extra_space, ["<!-- atlas-review-ack -->"]) == {
+        "<!-- atlas-review-ack -->": ["a.md"]
+    }
+
+    exact = {"a.md": "carries <!-- atlas-review-ack --> here"}
+    assert _missing_tokens(exact, ["<!-- atlas-review-ack -->"]) == {}
