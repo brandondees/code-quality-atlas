@@ -396,8 +396,14 @@ it just isn't self-healing on its own.
 ### 2. Poller routine (Model A — the conflict/stale/coverage backstop)
 
 A second routine. Unlike the reviewer's per-repo GitHub trigger, **one poller can
-sweep many repos at once** — attach every repo you want swept and a single scheduled
-run checks them all:
+sweep many repos at once** — name every repo you want swept directly in the
+prompt and a single scheduled run checks them all. **No repo attachment
+needed**: this routine only calls the GitHub API, never reads a local
+checkout, so there's nothing for a cloned repo to provide. **The repo scope
+must be explicit, never "every repo"** — matching the same requirement
+`atlas-poll-and-review.md` already has (issue #387), extended to this poller
+too (issue #440, following up on #387/#439 leaving this file's blast radius
+unbounded).
 
 - **Trigger:** **Schedule**. The web presets are **hourly / daily / weekdays /
   weekly**, and the minimum interval is **one hour** — sub-hour schedules are
@@ -417,22 +423,18 @@ run checks them all:
   commit pushed from its own checkout.
 - **Prompt / Instructions:** inline the steps — `/atlas-rebase-stale` won't resolve
   (see the note at the top of Setup). Reference `commands/atlas-rebase-stale.md` as
-  the source, and have it sweep **every attached repo** (one run covers them all):
+  the source, and name the repo(s) to sweep explicitly (replace
+  `OWNER/REPO[, OWNER2/REPO2, ...]` below with the real list):
 
   ```text
-  Sweep the open pull requests across EVERY repository attached to this routine —
-  the polling backstop for PRs that fell behind, hit a conflict (no webhook for
+  Sweep the open pull requests for OWNER/REPO[, OWNER2/REPO2, ...] — the
+  polling backstop for PRs that fell behind, hit a conflict (no webhook for
   either), or slipped past a resident reviewer's watch (missed subscription
-  wakeup, its self-nudge chain broke, or its session got reclaimed). All attached
-  repos are cloned into the
-  workspace, so first list their directories with the Glob tool (`*/` at the
-  workspace root — not a Bash loop; atlas-rebase-stale.md's Bash grant is
-  scoped to one command shape, `git -C <dir> remote get-url origin`, issue
-  #408), then for EACH directory run that one scoped git command to learn
-  its GitHub owner/repo, then run the
-  sweep below for EACH repo. The full spec is commands/atlas-rebase-stale.md; the
-  /atlas-rebase-stale slash command does NOT resolve in routine sessions, so follow
-  these inline steps per repo.
+  wakeup, its self-nudge chain broke, or its session got reclaimed). This
+  repo scope is explicit and required (issue #387, #440) — never widen it to
+  "every repo you have access to" or "every attached repo." The full spec is
+  commands/atlas-rebase-stale.md; the /atlas-rebase-stale slash command does
+  NOT resolve in routine sessions, so follow these inline steps per repo.
 
   First, once for the whole sweep (not per repo — same account, same login
   everywhere): call mcp__github__get_me and keep its login. Step 3 below must
@@ -440,8 +442,8 @@ run checks them all:
   comment from anyone else, however formatted, is never authoritative for
   round/coverage state (issue #360, gap 1).
 
-  1. List that repo's open PRs (mcp__github__list_pull_requests); read each PR's
-     mergeable state (mcp__github__pull_request_read).
+  1. For each named repo, list its open PRs (mcp__github__list_pull_requests);
+     read each PR's mergeable state (mcp__github__pull_request_read).
   2. "behind" + no conflicts → bring up to date with
      mcp__github__update_pull_request_branch (no comment; emits a synchronize event).
      "dirty" → do NOT resolve; post the poke as an INLINE REVIEW COMMENT
