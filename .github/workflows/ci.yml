@@ -327,7 +327,12 @@ jobs:
           # verify -- rather than the whole file. The comment lines
           # documenting how the file was produced are informational, not part
           # of the contract this gate checks.
-          work="$(mktemp -d "${RUNNER_TEMP:-/tmp}/reqcheck.XXXXXX")"
+          # $RUNNER_TEMP unconditionally, no ${RUNNER_TEMP:-/tmp} fallback --
+          # matching the convention the require-hashes install and shellcheck
+          # steps in this same job already use (#366/#378): GitHub Actions
+          # guarantees the var is set on every runner, so a fallback here
+          # would only mask it silently going missing rather than failing loudly.
+          work="$(mktemp -d "$RUNNER_TEMP/reqcheck.XXXXXX")"
           trap 'rm -rf "$work"' EXIT
           cp requirements.in requirements.txt "$work"/
           ( cd "$work" && pip-compile --generate-hashes --output-file=requirements.txt requirements.in )
@@ -412,9 +417,12 @@ jobs:
           # $RUNNER_TEMP, not $HOME/.local/bin (#378): this host is shared
           # across repos with nothing reset between jobs, and $HOME/.local/bin
           # persisted the binary onto every later job's PATH indefinitely.
-          # $RUNNER_TEMP is wiped between jobs by the runner itself, so this
-          # step reinstalls its pinned version fresh every run without ever
-          # leaving state behind for an unrelated repo's job to inherit.
+          # $RUNNER_TEMP is documented to be wiped between jobs, though (per
+          # the same hedge the require-hashes install above makes, #366) this
+          # step doesn't actually depend on that: it downloads, checksums,
+          # and overwrites the pinned binary unconditionally every run, so a
+          # leftover from a prior job here would just be clobbered, never
+          # trusted-as-is.
           mkdir -p "$RUNNER_TEMP/bin"
           mv "$RUNNER_TEMP/shellcheck-${version}/shellcheck" "$RUNNER_TEMP/bin/shellcheck"
           chmod +x "$RUNNER_TEMP/bin/shellcheck"
