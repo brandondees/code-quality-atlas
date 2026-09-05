@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import http.client
 import json
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -273,6 +274,25 @@ class ScenarioRun:
     # OOM-killed while a second one loaded) and would have scored as 15 silent
     # misses. Callers must check this field before grading.
     error: str | None = None
+
+
+def is_no_findings(text: str) -> bool:
+    """Whether a scenario response amounts to "no findings", across the
+    headline formats models actually use: `**No findings**`, `## No
+    findings`, or `No findings:` with the lens's own healthy-scan sentence
+    appended. A bare `text.lower().startswith("no findings")` misses all
+    three; docs/runbooks/cross-model-re-gate.md records two re-gates that
+    each inflated a reported result because this was retyped by hand instead
+    of imported (the second bug: stripping markdown with a regex leaves a
+    leading space that breaks `startswith` a second time) -- moved here, with
+    tests over the observed formattings, so it stops being retyped.
+    """
+    return (
+        re.sub(r"[*_#\s]+", " ", text.strip())
+        .strip()[:60]
+        .lower()
+        .startswith("no findings")
+    )
 
 
 DEFAULT_HOSTS = {"ollama": OLLAMA_HOST, "openai": OPENAI_HOST}

@@ -13,6 +13,8 @@ __pycache__/
 .ruff_cache/
 .venv/
 venv/
+.coverage
+htmlcov/
 
 # Scratch
 scratch/

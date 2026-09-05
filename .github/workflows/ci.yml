@@ -234,7 +234,10 @@ jobs:
         run: ruff format --check .
       - name: tests
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
-        run: python -m pytest tests/ -q
+        # Coverage settings (branch mode, the fail-under floor) live in
+        # pyproject.toml's [tool.coverage] tables so a contributor running
+        # `pytest --cov=tooling` locally gets the same gate CI enforces.
+        run: python -m pytest tests/ -q --cov=tooling
       - name: eval structure (all skills)
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: python -m tooling.cli eval

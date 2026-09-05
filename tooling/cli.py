@@ -20,7 +20,7 @@ from tooling.generate_doc_counts import DocCountAnchorError, sync_doc_counts
 from tooling.manifest import ValidationError, load_manifest, validate
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:  # noqa: C901 -- tracked in #441
     parser = argparse.ArgumentParser(prog="skills")
     sub = parser.add_subparsers(dest="cmd", required=True)
 

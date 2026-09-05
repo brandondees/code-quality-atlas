@@ -161,15 +161,12 @@ verdict as `**No findings**`, `## No findings`, or `No findings:` with the
 lens's own healthy-scan sentence appended. A naive
 `response.startswith("no findings")` misses all three, and stripping markdown
 with `re.sub(r'[*_#\s]+', ' ', t)` leaves a **leading space** that breaks
-`startswith` a second time. Both bugs occurred in one session and each inflated
-a reported result until it was re-derived:
-
-```python
-import re
-
-def is_no_findings(t):
-    return re.sub(r'[*_#\s]+', ' ', t.strip()).strip()[:60].lower().startswith("no findings")
-```
+`startswith` a second time. Both bugs occurred in one session and each
+inflated a reported result — each time because this check was retyped by hand
+for that re-gate rather than imported. It now lives in
+`tooling/run_evals.is_no_findings`, with unit tests over the three headline
+formats above and both historical bugs (`tests/test_run_evals.py`) — import
+it for a re-gate instead of retyping it again (issue #395).
 
 ## What the models can and cannot do (2026-08-09, seven models)
 

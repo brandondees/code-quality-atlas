@@ -162,6 +162,38 @@ def test_assemble_context_raises_when_reference_dir_is_only_deeper_files(tmp_pat
         run_evals.assemble_context(skill_dir)
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "**No findings**",
+        "## No findings",
+        "No findings: the change looks correct and no defects were spotted.",
+        "no findings",
+        "  No findings  ",
+    ],
+)
+def test_is_no_findings_true_for_observed_formattings(text):
+    """docs/runbooks/cross-model-re-gate.md records the three headline shapes
+    models actually use, plus the two bugs a naive check fell into: a bare
+    `startswith` misses the `**`/`##` markup, and stripping markup with
+    `re.sub(r'[*_#\\s]+', ' ', t)` alone leaves a leading space that breaks
+    `startswith` a second time."""
+    assert run_evals.is_no_findings(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Found one issue: the retry loop has no backoff.",
+        "Not no findings, just kidding -- here's a real one.",
+        "",
+        "Findings: none of the above apply, but see the note below.",
+    ],
+)
+def test_is_no_findings_false_for_real_findings(text):
+    assert not run_evals.is_no_findings(text)
+
+
 def test_run_skill_evals_openai_backend(tmp_path, monkeypatch):
     skill = Skill(
         name="hunting-silent-failures",
