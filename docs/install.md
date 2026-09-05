@@ -223,7 +223,14 @@ updater and sent all its output to `/dev/null`, so a failed update — wrong
 path, no network, `claude`/`jq` missing — was invisible and silently blocked
 from retrying for a full day). A failure now shows up in
 `~/.claude/.keep-plugin-current.log` and gets retried on the very next session
-start, since no stamp was written for it.
+start, since no stamp was written for it. **Trade-off:** the stamp now stays
+absent for the whole duration of an update (a marketplace fetch plus a
+`claude plugin update` per scope), not just the moment it takes to fork the
+background job — so several session starts within that window could each see
+a stale stamp and launch their own run. `keep-plugin-current.sh` guards
+against that itself with a single-instance lock
+(`~/.claude/.keep-plugin-current.lock`); a concurrent run skips with a message
+in the log rather than racing the first one's marketplace/plugin updates.
 
 ## Automatic routing (SessionStart hook)
 

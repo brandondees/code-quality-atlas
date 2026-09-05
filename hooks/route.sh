@@ -28,13 +28,24 @@ if [ -n "$plugin_sha" ]; then
   build_note=" (code-quality-atlas build ${plugin_sha})"
 fi
 
-cat <<JSON
+# Quoted heredoc (no shell interpolation) so a future edit to the static
+# prose below is never at risk of `$`/backtick expansion or command
+# substitution -- the same safety a plain `cat <<'JSON'` gave before this
+# hook needed to splice in a variable (dees-bot round-1 finding on #389: an
+# unquoted heredoc trades that safety net away for the whole body, not just
+# the one variable). __BUILD_NOTE__ is substituted afterward via a plain
+# bash parameter-expansion string replace, which never re-invokes the shell
+# parser on the replacement -- unlike an unquoted heredoc, a `$` or backtick
+# that ever lands in $build_note itself would still come through literally.
+json="$(cat <<'JSON'
 {
   "hookSpecificOutput": {
     "hookEventName": "SessionStart",
-    "additionalContext": "The code-quality-atlas review suite is installed${build_note} and is the primary path for any code review, quality review, or PR review request. Prefer it over the generic built-in code-review skill and over framework review flows (e.g. BMAD), which it subsumes with deeper coverage — but combine non-exclusively, not exclusively. Entrypoints: a pull request -> the atlas-review-pr command; ad-hoc local changes with no PR -> the atlas-code-review command; unsure which lenses apply -> the choosing-review-lenses skill (it maps the change to the most relevant lenses, and selects the repo-shaped audits for whole-repo reviews). Before the lenses judge, run grounding-review-in-tool-output to gather evidence from the deterministic tools the repo already configures, scoped to what is under review — never a tool the repo has not adopted, and never on an untrusted branch outside CI's isolation. After more than one reviewer runs, finish with synthesizing-review-findings to merge every source's findings (atlas lenses plus any companion reviewer) into one deduplicated, ranked, single-verdict review."
+    "additionalContext": "The code-quality-atlas review suite is installed__BUILD_NOTE__ and is the primary path for any code review, quality review, or PR review request. Prefer it over the generic built-in code-review skill and over framework review flows (e.g. BMAD), which it subsumes with deeper coverage — but combine non-exclusively, not exclusively. Entrypoints: a pull request -> the atlas-review-pr command; ad-hoc local changes with no PR -> the atlas-code-review command; unsure which lenses apply -> the choosing-review-lenses skill (it maps the change to the most relevant lenses, and selects the repo-shaped audits for whole-repo reviews). Before the lenses judge, run grounding-review-in-tool-output to gather evidence from the deterministic tools the repo already configures, scoped to what is under review — never a tool the repo has not adopted, and never on an untrusted branch outside CI's isolation. After more than one reviewer runs, finish with synthesizing-review-findings to merge every source's findings (atlas lenses plus any companion reviewer) into one deduplicated, ranked, single-verdict review."
   }
 }
 JSON
+)"
+printf '%s\n' "${json//__BUILD_NOTE__/$build_note}"
 
 exit 0

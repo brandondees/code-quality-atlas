@@ -69,6 +69,25 @@ check_requirements() {
 }
 check_requirements || exit 1
 
+# Single-instance guard (#389 dees-bot finding): the recommended SessionStart
+# wiring in docs/install.md now writes its throttle stamp only after this
+# script exits 0 (fixing a silent-failure bug), which widens the window
+# during which several session starts in quick succession could each see a
+# stale/missing stamp and launch their own concurrent run -- racing `claude
+# plugin update` invocations and git operations against the same marketplace
+# clone. `mkdir` is atomic even across processes/machines sharing $CLAUDE_DIR,
+# and portable to bash 3.2/macOS with no extra dependency (no flock there).
+# Best-effort only: a lock left behind by a killed process blocks future runs
+# until removed by hand -- an accepted trade-off over the alternative (no
+# guard at all).
+LOCK_DIR="$CLAUDE_DIR/.keep-plugin-current.lock"
+mkdir -p "$CLAUDE_DIR" 2>/dev/null || true
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  echo "Another keep-plugin-current.sh run appears to be in progress ($LOCK_DIR exists) -- skipping to avoid racing it. If no run is actually active (e.g. a previous run was killed), remove $LOCK_DIR and retry." >&2
+  exit 0
+fi
+trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+
 # Each `claude` call can fail (network, auth, a bad scope). Track that instead of
 # letting the final success line print unconditionally — an operator who restarts
 # on a false "Done" would still be on the old version. We deliberately do NOT use
