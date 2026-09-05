@@ -4,8 +4,9 @@
 
 This is the cross-model eval harness (spec phase-2 §7). It assembles the
 progressive-disclosure context a model with the skill loaded would see
-(SKILL.md + reference/heuristics.md + examples.md), sends each scenario's
-query to the model, and prints the response next to its expected_behavior so
+(SKILL.md + reference/*.md, excluding the deeper tool-rules.md/sources.md +
+examples.md), sends each scenario's query to the model, and prints the
+response next to its expected_behavior so
 a human/judge can grade. Two backends: the Ollama API (`--api ollama`) and
 any OpenAI-compatible /v1/chat/completions server such as llama-server
 (`--api openai`). Network calls are isolated in `query_*` so tests mock
@@ -27,32 +28,44 @@ from tooling.evals import load_evals
 OLLAMA_HOST = "http://localhost:11434"
 OPENAI_HOST = "http://localhost:8080"  # llama-server default
 
+# Named rather than a bare 600 repeated at each of query_ollama/query_openai/
+# run_skill_evals's own default and the CLI's --timeout default (#371) --
+# one place to widen it for a slow model rather than four literals a future
+# edit could update inconsistently.
+DEFAULT_TIMEOUT_SECONDS = 600
+
 # Ollama defaults to a 2048-token context and *silently truncates* anything
 # longer — which drops the head of the assembled skill context (SKILL.md's
 # discipline + Top checks), so the model reviews against a partial prompt and
-# the run looks valid while being meaningless. Pin a window that comfortably
-# fits the largest assembled context (~3k tokens today) with headroom. The
-# OpenAI-compatible path sets its window server-side (llama-server -c), so this
-# only applies to Ollama. (The llama.cpp runbook uses -c 16384 for the same
-# reason.) Revisit if a skill's assembled context outgrows this — `len(
+# the run looks valid while being meaningless. Pin a window with real headroom
+# over the largest assembled context. The OpenAI-compatible path sets its
+# window server-side (llama-server -c), so this only applies to Ollama.
+# Revisit if a skill's assembled context outgrows this — `len(
 # assemble_context(skill_dir)) // 4` estimates its tokens; bump well above the
 # largest before it can clip.
 #
 # `num_ctx` is the budget for the prompt *and* the generation, so sizing it
-# against the assembled context alone understates it. Measured 2026-08-08 on
-# `reviewing-concurrency-and-async`: adding ~766 tokens to `examples.md` took
-# the assembled context from ~3.2k to ~4.0k, and one scenario that had answered
-# in ~800 tokens instead ran away to 7,300+ and crossed the ceiling
-# (`truncated = 1` in llama-server's slot log) rather than finishing. The
-# failure is deterministic — the same prompt reproduces it. It surfaces to the
-# caller only as a request timeout, which `run_skill_evals` records on
-# `ScenarioRun.error` and `main` reports with a non-zero exit, so the run is not
-# graded as a miss; what the timeout hides is the *cause*, which reads as a
-# transport failure rather than as a window too small for the generation. The
-# server's own `n_decoded` counter is what distinguishes the two. When editing a
-# lens's `examples.md`, re-check this ceiling against prompt + the longest
-# generation the suite provokes, not against the prompt alone.
-OLLAMA_NUM_CTX = 8192
+# against the assembled context alone understates it. Measured 2026-09-05
+# across all 44 standalone skills: the largest assembled context
+# (tracing-correctness-and-invariants) is ~8,971 estimated tokens — already
+# past the previous 8,192 ceiling *before any generation*, meaning the head
+# truncation this constant exists to prevent was silently happening on that
+# skill's evals. 28 of 44 skills exceed half the old window. Separately,
+# measured 2026-08-08 on `reviewing-concurrency-and-async`: one scenario that
+# had answered in ~800 tokens instead ran away to 7,300+ and crossed the
+# ceiling (`truncated = 1` in llama-server's slot log) rather than finishing.
+# Both failure modes are deterministic — the same prompt reproduces them. A
+# context-window truncation surfaces to the caller only as a request timeout
+# (or, worse, a clean-looking partial response — see the stop-reason check in
+# query_ollama/query_openai, added for exactly this), which `run_skill_evals`
+# records on `ScenarioRun.error` and `main` reports with a non-zero exit, so
+# the run is not graded as a miss; what a bare timeout hides is the *cause*,
+# which reads as a transport failure rather than as a window too small. The
+# server's own `n_decoded` counter (or Ollama's `done_reason`) is what
+# distinguishes the two. When editing a lens's `examples.md`, re-check this
+# ceiling against prompt + the longest generation the suite provokes, not
+# against the prompt alone (#371).
+OLLAMA_NUM_CTX = 32768
 
 _REVIEWER_DIRECTIVE = (
     "\n\n---\n\nYou are a code reviewer applying the skill above. Review the "
@@ -61,13 +74,42 @@ _REVIEWER_DIRECTIVE = (
 )
 
 
+# Excluded from assemble_context's reference/ glob below: both are a
+# deliberately *deeper*, on-demand disclosure level per the standalone
+# skill's own progressive-disclosure model (SKILL.md's "Going deeper" links),
+# not what a model reviewing with the skill loaded sees by default -- the
+# same reason a hardcoded "reference/heuristics.md" was wrong for an
+# artifact-shaped lens (whose checklist lives in reference/<slug>.md
+# instead, #371), rather than a reason to bundle everything in reference/.
+_DEEPER_REFERENCE_FILES = {"tool-rules.md", "sources.md"}
+
+
 def assemble_context(skill_dir: Path) -> str:
-    """The content a model with this skill loaded would have available."""
+    """The content a model with this skill loaded would have available.
+
+    reference/*.md is globbed rather than hardcoded to heuristics.md: an
+    artifact-shaped lens (e.g. reviewing-artifact-conventions) has no
+    heuristics.md at all -- its checklist lives in one bundled rubric file
+    per artifact, reference/<slug>.md -- so the hardcoded path silently
+    evaluated it with an empty checklist (#371). Sorted for a deterministic
+    prompt across runs. Raises if nothing at all was found to assemble,
+    rather than silently sending the model a directive with no skill
+    content behind it."""
     parts = [(skill_dir / "SKILL.md").read_text(encoding="utf-8")]
-    for rel in ("reference/heuristics.md", "examples.md"):
-        p = skill_dir / rel
-        if p.exists():
-            parts.append(p.read_text(encoding="utf-8"))
+    reference_dir = skill_dir / "reference"
+    if reference_dir.is_dir():
+        for p in sorted(reference_dir.glob("*.md")):
+            if p.name not in _DEEPER_REFERENCE_FILES:
+                parts.append(p.read_text(encoding="utf-8"))
+    examples = skill_dir / "examples.md"
+    if examples.exists():
+        parts.append(examples.read_text(encoding="utf-8"))
+    if len(parts) < 2:
+        raise RuntimeError(
+            f"{skill_dir}: assembled context has no checklist content beyond "
+            "SKILL.md itself (no reference/*.md, no examples.md) -- refusing "
+            "to run evals against a context this thin"
+        )
     return "\n\n---\n\n".join(parts)
 
 
@@ -101,19 +143,29 @@ def query_ollama(
     system: str,
     user: str,
     host: str = OLLAMA_HOST,
-    timeout: int = 600,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
     num_ctx: int = OLLAMA_NUM_CTX,
     think: bool | None = None,
+    max_tokens: int | None = None,
 ) -> str:
     """Ollama /api/chat with sampling pinned and the context window widened so
     the full skill prompt isn't silently truncated (see OLLAMA_NUM_CTX).
 
     `num_ctx` is overridable per call: thinking-capable models (e.g. qwen3.5)
     spend a large, variable token budget on a `<think>` block before the final
-    answer, and the default 8192 can leave no room for the answer itself once
+    answer, and the default can leave no room for the answer itself once
     that overhead is added to a real skill-context-sized prompt (observed as an
     empty `content` field, not an error). `think` maps to Ollama's per-request
-    `"think"` switch when set; left `None`, the model's own default applies."""
+    `"think"` switch when set; left `None`, the model's own default applies.
+    `max_tokens` maps to Ollama's `num_predict` generation cap when set — a
+    ceiling on worst-case latency/cost, distinct from num_ctx (the window a
+    generation can run away *inside*, #371).
+
+    Raises if the response's `done_reason` is `"length"`: the generation hit
+    num_ctx or num_predict and was cut off mid-answer, which is HTTP 200 with
+    a syntactically valid but truncated `content` — indistinguishable from a
+    genuine short answer by content alone, and would otherwise be graded as
+    if the model had actually finished (#371)."""
     payload = {
         "model": model,
         "messages": [
@@ -128,23 +180,43 @@ def query_ollama(
     }
     if think is not None:
         payload["think"] = think
+    if max_tokens is not None:
+        payload["options"]["num_predict"] = max_tokens
     data = _post_json(f"{host}/api/chat", payload, timeout, "Ollama")
     if isinstance(data, dict) and data.get("error"):
         raise RuntimeError(f"Ollama API error: {data['error']}")
-    content = data.get("message", {}).get("content") if isinstance(data, dict) else None
+    message = data.get("message") if isinstance(data, dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
     if not isinstance(content, str):
         # RuntimeError (not TypeError) is deliberate: consistent with _post_json's
         # failure-wrapping convention, every failure mode in this module wraps into
         # RuntimeError so callers can use a single except clause; tests assert on
         # RuntimeError specifically.
         raise RuntimeError(f"unexpected Ollama response shape: {data!r}")  # noqa: TRY004
+    if isinstance(data, dict) and data.get("done_reason") == "length":
+        raise RuntimeError(
+            "Ollama generation was truncated (done_reason=length) -- the "
+            "response was cut off mid-answer by num_ctx or num_predict, not "
+            "a genuine complete response; widen num_ctx/--max-tokens rather "
+            "than grade this as a real answer"
+        )
     return content
 
 
 def query_openai(
-    model: str, system: str, user: str, host: str = OPENAI_HOST, timeout: int = 600
+    model: str,
+    system: str,
+    user: str,
+    host: str = OPENAI_HOST,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    max_tokens: int | None = None,
 ) -> str:
-    """OpenAI-compatible /v1/chat/completions (llama-server, vLLM, ...)."""
+    """OpenAI-compatible /v1/chat/completions (llama-server, vLLM, ...).
+
+    `max_tokens` caps the generation length, same intent as query_ollama's
+    (a worst-case latency/cost ceiling). Raises if `finish_reason` is
+    `"length"` -- see query_ollama's docstring for why a truncated
+    generation must never be silently graded as a complete answer (#371)."""
     payload = {
         "model": model,
         "messages": [
@@ -155,6 +227,8 @@ def query_openai(
         # evals must be reproducible — never inherit a server's sampling default
         "temperature": 0,
     }
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
     data = _post_json(
         f"{host}/v1/chat/completions", payload, timeout, "OpenAI-compatible"
     )
@@ -166,7 +240,8 @@ def query_openai(
             err = err.get("message", err)
         raise RuntimeError(f"OpenAI-compatible API error: {err}")
     try:
-        content = data["choices"][0]["message"]["content"]
+        choice = data["choices"][0]
+        content = choice["message"]["content"]
     except (KeyError, IndexError, TypeError) as e:
         raise RuntimeError(
             f"unexpected OpenAI-compatible response shape: {data!r}"
@@ -175,6 +250,13 @@ def query_openai(
         # RuntimeError (not TypeError) is deliberate: see the matching comment in
         # query_ollama above — a single except clause covers every failure mode.
         raise RuntimeError(f"unexpected OpenAI-compatible response shape: {data!r}")  # noqa: TRY004
+    if isinstance(choice, dict) and choice.get("finish_reason") == "length":
+        raise RuntimeError(
+            "OpenAI-compatible generation was truncated (finish_reason=length) "
+            "-- the response was cut off mid-answer, not a genuine complete "
+            "response; widen the context window/--max-tokens rather than "
+            "grade this as a real answer"
+        )
     return content
 
 
@@ -203,7 +285,8 @@ def run_skill_evals(
     api: str = "ollama",
     num_ctx: int = OLLAMA_NUM_CTX,
     think: bool | None = None,
-    timeout: int = 600,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    max_tokens: int | None = None,
 ) -> list[ScenarioRun]:
     if api not in DEFAULT_HOSTS:
         # Fail fast on an unrecognized api regardless of whether host is also
@@ -211,6 +294,16 @@ def run_skill_evals(
         # check whenever host is truthy, silently misrouting to the else branch.
         raise ValueError(
             f"unknown api: {api!r} (expected one of {sorted(DEFAULT_HOSTS)})"
+        )
+    if api != "ollama" and think is not None:
+        # num_ctx has its own OpenAI-compatible meaning (the server sets its
+        # window at startup, `-c`), so silently accepting it there wouldn't be
+        # wrong so much as a no-op -- but `think` has no OpenAI-compatible
+        # equivalent at all, and silently dropping it previously left an
+        # operator believing they'd forced thinking on/off when nothing was
+        # sent (#371).
+        raise ValueError(
+            f"--think/--no-think is ollama-only, not valid with api={api!r}"
         )
     host = host or DEFAULT_HOSTS[api]
     system = assemble_context(skill_dir) + _REVIEWER_DIRECTIVE
@@ -233,10 +326,16 @@ def run_skill_evals(
                     num_ctx=num_ctx,
                     think=think,
                     timeout=timeout,
+                    max_tokens=max_tokens,
                 )
             else:
                 response = query_openai(
-                    model, system, s["query"], host=host, timeout=timeout
+                    model,
+                    system,
+                    s["query"],
+                    host=host,
+                    timeout=timeout,
+                    max_tokens=max_tokens,
                 )
             error = None
         except RuntimeError as exc:
@@ -290,11 +389,32 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--timeout",
         type=_positive_int,
-        default=600,
+        default=DEFAULT_TIMEOUT_SECONDS,
         help="per-scenario request timeout in seconds; widen for "
         "thinking-mode models under a large num_ctx",
     )
+    ap.add_argument(
+        "--max-tokens",
+        type=_positive_int,
+        default=None,
+        help="generation cap (Ollama's num_predict / OpenAI-compatible's "
+        "max_tokens) -- a worst-case latency/cost ceiling, distinct from "
+        "--num-ctx (the window a generation can run away inside). A "
+        "generation cut off by either is treated as a hard failure, never "
+        "graded as a real answer",
+    )
     args = ap.parse_args(argv)
+
+    if args.api != "ollama" and args.num_ctx != OLLAMA_NUM_CTX:
+        # Unlike --think (validated in run_skill_evals, where an explicit
+        # None default distinguishes "not set" from a real value), --num-ctx
+        # always carries a concrete int -- so the CLI layer is where an
+        # explicit override is distinguishable from the untouched default.
+        # OLLAMA_NUM_CTX has no OpenAI-compatible equivalent request field at
+        # all (that server sets its window at startup via -c), so silently
+        # accepting an override here would leave an operator believing
+        # they'd widened the window when nothing was sent (#371).
+        ap.error("--num-ctx is ollama-only, not valid with --api openai")
 
     skill_dir = Path(args.skills_root, args.skill)
     runs = run_skill_evals(
@@ -305,6 +425,7 @@ def main(argv: list[str] | None = None) -> int:
         num_ctx=args.num_ctx,
         think=args.think,
         timeout=args.timeout,
+        max_tokens=args.max_tokens,
     )
     for i, r in enumerate(runs, 1):
         print(f"\n{'=' * 72}\nSCENARIO {i}")
