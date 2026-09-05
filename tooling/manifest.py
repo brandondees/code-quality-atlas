@@ -251,92 +251,105 @@ class ValidationError(Exception):
     pass
 
 
-def _validate_skills(manifest: Manifest, docs_root: str) -> set[str]:  # noqa: C901 -- tracked in #441
-    seen: set[str] = set()
-    primaries: dict[int, list[str]] = {}
-    for s in manifest.skills:
-        if not _NAME_RE.match(s.name) or len(s.name) > 64:
-            raise ValidationError(f"invalid name: {s.name!r} (lowercase/hyphen, <=64)")
-        if any(w in s.name for w in _RESERVED):
-            raise ValidationError(f"name uses reserved word: {s.name!r}")
-        if s.name in seen:
-            raise ValidationError(f"duplicate skill name: {s.name!r}")
-        seen.add(s.name)
-        if not s.description or len(s.description) > 1024:
-            raise ValidationError(
-                f"{s.name}: description must be non-empty and <=1024 chars"
-            )
-        if s.shape not in _SHAPES:
-            raise ValidationError(
-                f"{s.name}: shape must be diff|repo|decision|artifact, got {s.shape!r}"
-            )
-        if s.tier not in ("floor", "preference"):
-            raise ValidationError(
-                f"{s.name}: tier must be floor|preference, got {s.tier!r}"
-            )
-        if s.eval_min is not None and s.eval_min < D8_MIN_SCENARIOS:
-            raise ValidationError(
-                f"{s.name}: eval_min must be >={D8_MIN_SCENARIOS} (D8's baseline), "
-                f"got {s.eval_min!r}"
-            )
-        # design-requires-diff and artifact-shape-requires-artifacts are
-        # enforced in Skill.__post_init__ (unconditionally, at construction —
-        # every Skill in manifest.skills already passed through it, load_manifest
-        # being the only production construction site), not re-checked here.
-        if s.shape == "artifact":
-            built_cats = {src.category for src in s.built_from}
-            seen_slugs: set[str] = set()
-            for a in s.artifacts:
-                if not a.name or not a.detect:
-                    raise ValidationError(
-                        f"{s.name}: each artifact needs `name` and `detect`"
-                    )
-                if not _NAME_RE.match(a.slug):
-                    raise ValidationError(
-                        f"{s.name}: artifact slug must be lowercase/hyphen, got {a.slug!r}"
-                    )
-                if a.slug in seen_slugs:
-                    raise ValidationError(
-                        f"{s.name}: duplicate artifact slug {a.slug!r}"
-                    )
-                seen_slugs.add(a.slug)
-                if a.rubric not in built_cats:
-                    raise ValidationError(
-                        f"{s.name}: artifact {a.name!r} rubric #{a.rubric} is not in built_from"
-                    )
-        elif s.artifacts:
-            raise ValidationError(
-                f"{s.name}: `artifacts` is only valid on an artifact-shaped lens"
-            )
-        if len(s.picker) > 160:
-            raise ValidationError(f"{s.name}: picker must be <=160 chars")
-        if not s.built_from:
-            raise ValidationError(f"{s.name}: built_from must be non-empty")
-        categories = [src.category for src in s.built_from]
-        if len(categories) != len(set(categories)):
-            raise ValidationError(
-                f"{s.name}: built_from lists a category more than once"
-            )
-        for c in s.cross_ref:
-            if c not in categories:
+def _validate_skill_identity(s: Skill, seen: set[str]) -> None:
+    if not _NAME_RE.match(s.name) or len(s.name) > 64:
+        raise ValidationError(f"invalid name: {s.name!r} (lowercase/hyphen, <=64)")
+    if any(w in s.name for w in _RESERVED):
+        raise ValidationError(f"name uses reserved word: {s.name!r}")
+    if s.name in seen:
+        raise ValidationError(f"duplicate skill name: {s.name!r}")
+    seen.add(s.name)
+
+
+def _validate_skill_metadata(s: Skill) -> None:
+    if not s.description or len(s.description) > 1024:
+        raise ValidationError(
+            f"{s.name}: description must be non-empty and <=1024 chars"
+        )
+    if s.shape not in _SHAPES:
+        raise ValidationError(
+            f"{s.name}: shape must be diff|repo|decision|artifact, got {s.shape!r}"
+        )
+    if s.tier not in ("floor", "preference"):
+        raise ValidationError(
+            f"{s.name}: tier must be floor|preference, got {s.tier!r}"
+        )
+    if s.eval_min is not None and s.eval_min < D8_MIN_SCENARIOS:
+        raise ValidationError(
+            f"{s.name}: eval_min must be >={D8_MIN_SCENARIOS} (D8's baseline), "
+            f"got {s.eval_min!r}"
+        )
+
+
+def _validate_skill_artifacts(s: Skill) -> None:
+    # design-requires-diff and artifact-shape-requires-artifacts are
+    # enforced in Skill.__post_init__ (unconditionally, at construction —
+    # every Skill in manifest.skills already passed through it, load_manifest
+    # being the only production construction site), not re-checked here.
+    if s.shape == "artifact":
+        built_cats = {src.category for src in s.built_from}
+        seen_slugs: set[str] = set()
+        for a in s.artifacts:
+            if not a.name or not a.detect:
                 raise ValidationError(
-                    f"{s.name}: cross_ref category {c} is not in built_from"
+                    f"{s.name}: each artifact needs `name` and `detect`"
                 )
-        for src in s.built_from:
-            try:
-                text = Path(docs_root, src.path).read_text(encoding="utf-8")
-            except (OSError, UnicodeError) as exc:
+            if not _NAME_RE.match(a.slug):
                 raise ValidationError(
-                    f"{s.name}: cannot read source file {src.path}: {exc}"
-                ) from exc
-            try:
-                extract_section(text, src.section)
-            except KeyError as exc:
+                    f"{s.name}: artifact slug must be lowercase/hyphen, got {a.slug!r}"
+                )
+            if a.slug in seen_slugs:
+                raise ValidationError(f"{s.name}: duplicate artifact slug {a.slug!r}")
+            seen_slugs.add(a.slug)
+            if a.rubric not in built_cats:
                 raise ValidationError(
-                    f"{s.name}: source not found: section #{src.section} in {src.path}"
-                ) from exc
-            if src.category not in s.cross_ref:
-                primaries.setdefault(src.category, []).append(s.name)
+                    f"{s.name}: artifact {a.name!r} rubric #{a.rubric} is not in built_from"
+                )
+    elif s.artifacts:
+        raise ValidationError(
+            f"{s.name}: `artifacts` is only valid on an artifact-shaped lens"
+        )
+
+
+def _validate_skill_picker(s: Skill) -> None:
+    if len(s.picker) > 160:
+        raise ValidationError(f"{s.name}: picker must be <=160 chars")
+
+
+def _validate_skill_built_from(s: Skill) -> None:
+    if not s.built_from:
+        raise ValidationError(f"{s.name}: built_from must be non-empty")
+    categories = [src.category for src in s.built_from]
+    if len(categories) != len(set(categories)):
+        raise ValidationError(f"{s.name}: built_from lists a category more than once")
+    for c in s.cross_ref:
+        if c not in categories:
+            raise ValidationError(
+                f"{s.name}: cross_ref category {c} is not in built_from"
+            )
+
+
+def _validate_skill_sources(
+    s: Skill, docs_root: str, primaries: dict[int, list[str]]
+) -> None:
+    for src in s.built_from:
+        try:
+            text = Path(docs_root, src.path).read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise ValidationError(
+                f"{s.name}: cannot read source file {src.path}: {exc}"
+            ) from exc
+        try:
+            extract_section(text, src.section)
+        except KeyError as exc:
+            raise ValidationError(
+                f"{s.name}: source not found: section #{src.section} in {src.path}"
+            ) from exc
+        if src.category not in s.cross_ref:
+            primaries.setdefault(src.category, []).append(s.name)
+
+
+def _validate_primary_owners(primaries: dict[int, list[str]]) -> None:
     # G1: one primary owner per category — skills sharing a category must mark
     # all but one claim as cross_ref so findings don't double-report.
     for category, owners in sorted(primaries.items()):
@@ -345,45 +358,63 @@ def _validate_skills(manifest: Manifest, docs_root: str) -> set[str]:  # noqa: C
                 f"category #{category} has multiple primary owners: {', '.join(owners)} "
                 f"— mark all but one with cross_ref: [{category}]"
             )
+
+
+def _validate_skills(manifest: Manifest, docs_root: str) -> set[str]:
+    seen: set[str] = set()
+    primaries: dict[int, list[str]] = {}
+    for s in manifest.skills:
+        _validate_skill_identity(s, seen)
+        _validate_skill_metadata(s)
+        _validate_skill_artifacts(s)
+        _validate_skill_picker(s)
+        _validate_skill_built_from(s)
+        _validate_skill_sources(s, docs_root, primaries)
+    _validate_primary_owners(primaries)
     return seen
 
 
-def _validate_router(manifest: Manifest, seen: set[str]) -> None:  # noqa: C901 -- tracked in #441
-    if manifest.router is None:
-        return
-    r = manifest.router
+def _validate_router_identity(r: Router, seen: set[str]) -> None:
     if not _NAME_RE.match(r.name) or len(r.name) > 64 or r.name in seen:
         raise ValidationError(f"router: invalid or duplicate name {r.name!r}")
     if not r.description or len(r.description) > 1024:
         raise ValidationError("router: description must be non-empty and <=1024 chars")
     if len(r.body) > 1024:
         raise ValidationError("router: body must be <=1024 chars")
-    if not r.routes:
-        raise ValidationError("router: routes must be non-empty")
-    for route in r.routes:
-        if not route.when or not route.run:
-            raise ValidationError("router: every route needs `when` and `run`")
-        if route.shapes is not None:
-            if not isinstance(route.shapes, list) or not all(
-                isinstance(shape, str) for shape in route.shapes
-            ):
-                raise ValidationError(
-                    f"router: route {route.when!r}: shapes must be a list of strings"
-                )
-            if not route.shapes:
-                raise ValidationError(
-                    f"router: route {route.when!r}: shapes must be non-empty if set"
-                )
-            for shape in route.shapes:
-                if shape not in _SHAPES:
-                    raise ValidationError(
-                        f"router: route {route.when!r}: unknown shape {shape!r}"
-                    )
-        for lens in route.run:
-            if lens not in seen:
-                raise ValidationError(
-                    f"router: route {route.when!r} runs unknown skill {lens!r}"
-                )
+
+
+def _validate_router_route_shapes(route: Route) -> None:
+    if route.shapes is None:
+        return
+    if not isinstance(route.shapes, list) or not all(
+        isinstance(shape, str) for shape in route.shapes
+    ):
+        raise ValidationError(
+            f"router: route {route.when!r}: shapes must be a list of strings"
+        )
+    if not route.shapes:
+        raise ValidationError(
+            f"router: route {route.when!r}: shapes must be non-empty if set"
+        )
+    for shape in route.shapes:
+        if shape not in _SHAPES:
+            raise ValidationError(
+                f"router: route {route.when!r}: unknown shape {shape!r}"
+            )
+
+
+def _validate_router_route(route: Route, seen: set[str]) -> None:
+    if not route.when or not route.run:
+        raise ValidationError("router: every route needs `when` and `run`")
+    _validate_router_route_shapes(route)
+    for lens in route.run:
+        if lens not in seen:
+            raise ValidationError(
+                f"router: route {route.when!r} runs unknown skill {lens!r}"
+            )
+
+
+def _validate_router_pickers(manifest: Manifest) -> None:
     # The catalog lists every lens by its picker line; a missing picker
     # would silently leave that lens undiscoverable to the router.
     for s in manifest.skills:
@@ -391,6 +422,18 @@ def _validate_router(manifest: Manifest, seen: set[str]) -> None:  # noqa: C901 
             raise ValidationError(
                 f"{s.name}: picker is required when a router is defined"
             )
+
+
+def _validate_router(manifest: Manifest, seen: set[str]) -> None:
+    if manifest.router is None:
+        return
+    r = manifest.router
+    _validate_router_identity(r, seen)
+    if not r.routes:
+        raise ValidationError("router: routes must be non-empty")
+    for route in r.routes:
+        _validate_router_route(route, seen)
+    _validate_router_pickers(manifest)
 
 
 def _validate_synthesizer(manifest: Manifest, seen: set[str]) -> None:
@@ -425,16 +468,16 @@ def _validate_synthesizer(manifest: Manifest, seen: set[str]) -> None:
             )
 
 
-def _validate_prepass(manifest: Manifest, seen: set[str]) -> None:  # noqa: C901 -- tracked in #441
-    if manifest.prepass is None:
-        return
-    p = manifest.prepass
+def _validate_prepass_identity(p: Prepass, seen: set[str]) -> None:
     if not _NAME_RE.match(p.name) or len(p.name) > 64 or p.name in seen:
         raise ValidationError(f"prepass: invalid or duplicate name {p.name!r}")
     if not p.description or len(p.description) > 1024:
         raise ValidationError("prepass: description must be non-empty and <=1024 chars")
     if len(p.body) > 1024:
         raise ValidationError("prepass: body must be <=1024 chars")
+
+
+def _validate_prepass_tables_nonempty(p: Prepass) -> None:
     # Each of the four tables is load-bearing in the generated skill: without
     # discovery there is nothing to run, without families nothing to map output
     # onto, without dispositions a hit has no defined outcome, and without the
@@ -442,11 +485,17 @@ def _validate_prepass(manifest: Manifest, seen: set[str]) -> None:  # noqa: C901
     for attr in ("discover", "families", "dispositions", "rules"):
         if not getattr(p, attr):
             raise ValidationError(f"prepass: {attr} must be non-empty")
+
+
+def _validate_prepass_discover(p: Prepass) -> None:
     for d in p.discover:
         if not d.source or not d.tells:
             raise ValidationError(
                 "prepass: every discover entry needs `source` and `tells`"
             )
+
+
+def _validate_prepass_families(p: Prepass, seen: set[str]) -> None:
     seen_kinds: set[str] = set()
     for f in p.families:
         if not f.kind or not f.tools:
@@ -464,6 +513,9 @@ def _validate_prepass(manifest: Manifest, seen: set[str]) -> None:  # noqa: C901
                 raise ValidationError(
                     f"prepass: family {f.kind!r} grounds unknown skill {lens!r}"
                 )
+
+
+def _validate_prepass_dispositions(p: Prepass) -> None:
     seen_dispositions: set[str] = set()
     for disp in p.dispositions:
         if not disp.name or not disp.when or not disp.do:
@@ -473,9 +525,24 @@ def _validate_prepass(manifest: Manifest, seen: set[str]) -> None:  # noqa: C901
         if disp.name in seen_dispositions:
             raise ValidationError(f"prepass: duplicate disposition {disp.name!r}")
         seen_dispositions.add(disp.name)
+
+
+def _validate_prepass_rules(p: Prepass) -> None:
     for r in p.rules:
         if not r.name or not r.rule:
             raise ValidationError("prepass: every rule needs `name` and `rule`")
+
+
+def _validate_prepass(manifest: Manifest, seen: set[str]) -> None:
+    if manifest.prepass is None:
+        return
+    p = manifest.prepass
+    _validate_prepass_identity(p, seen)
+    _validate_prepass_tables_nonempty(p)
+    _validate_prepass_discover(p)
+    _validate_prepass_families(p, seen)
+    _validate_prepass_dispositions(p)
+    _validate_prepass_rules(p)
 
 
 def _validate_composition_names(manifest: Manifest) -> None:
@@ -521,14 +588,7 @@ def _validate_modes(manifest: Manifest) -> None:
             )
 
 
-def _validate_entrypoints(manifest: Manifest) -> None:  # noqa: C901 -- tracked in #441
-    if not manifest.entrypoints:
-        return
-    if manifest.synthesizer is None:
-        raise ValidationError(
-            "entrypoints require a synthesizer (synthesis.md is bundled into every entrypoint)"
-        )
-    skill_names = {s.name for s in manifest.skills}
+def _entrypoint_reserved_names(manifest: Manifest, skill_names: set[str]) -> set[str]:
     reserved = set(skill_names)
     if manifest.router:
         reserved.add(manifest.router.name)
@@ -536,34 +596,52 @@ def _validate_entrypoints(manifest: Manifest) -> None:  # noqa: C901 -- tracked 
         reserved.add(manifest.prepass.name)
     if manifest.synthesizer:
         reserved.add(manifest.synthesizer.name)
+    return reserved
+
+
+def _validate_entrypoint_identity(
+    ep: Entrypoint, reserved: set[str], seen_eps: set[str]
+) -> None:
+    if ep.name in seen_eps:
+        raise ValidationError(f"duplicate entrypoint name: {ep.name}")
+    seen_eps.add(ep.name)
+    if ep.name in reserved:
+        raise ValidationError(
+            f"entrypoint {ep.name} collides with an existing skill/router/synthesizer name"
+        )
+    if not re.fullmatch(r"[a-z0-9-]{1,64}", ep.name):
+        raise ValidationError(
+            f"entrypoint {ep.name!r}: name must be 1-64 lowercase letters, digits, "
+            "or hyphens (it becomes a directory under collapsed/skills/)"
+        )
+    if not ep.description:
+        raise ValidationError(f"entrypoint {ep.name}: description must be non-empty")
+    if len(ep.description) > 1024:
+        raise ValidationError(f"entrypoint {ep.name}: description exceeds 1024 chars")
+
+
+def _validate_entrypoint_shapes(ep: Entrypoint) -> None:
+    if not ep.shapes:
+        raise ValidationError(f"entrypoint {ep.name}: shapes must be non-empty")
+    for shape in ep.shapes:
+        if shape not in _SHAPES:
+            raise ValidationError(f"entrypoint {ep.name}: unknown shape {shape!r}")
+
+
+def _validate_entrypoints(manifest: Manifest) -> None:
+    if not manifest.entrypoints:
+        return
+    if manifest.synthesizer is None:
+        raise ValidationError(
+            "entrypoints require a synthesizer (synthesis.md is bundled into every entrypoint)"
+        )
+    skill_names = {s.name for s in manifest.skills}
+    reserved = _entrypoint_reserved_names(manifest, skill_names)
     seen_eps: set[str] = set()
     covered: set[str] = set()
     for ep in manifest.entrypoints:
-        if ep.name in seen_eps:
-            raise ValidationError(f"duplicate entrypoint name: {ep.name}")
-        seen_eps.add(ep.name)
-        if ep.name in reserved:
-            raise ValidationError(
-                f"entrypoint {ep.name} collides with an existing skill/router/synthesizer name"
-            )
-        if not re.fullmatch(r"[a-z0-9-]{1,64}", ep.name):
-            raise ValidationError(
-                f"entrypoint {ep.name!r}: name must be 1-64 lowercase letters, digits, "
-                "or hyphens (it becomes a directory under collapsed/skills/)"
-            )
-        if not ep.description:
-            raise ValidationError(
-                f"entrypoint {ep.name}: description must be non-empty"
-            )
-        if len(ep.description) > 1024:
-            raise ValidationError(
-                f"entrypoint {ep.name}: description exceeds 1024 chars"
-            )
-        if not ep.shapes:
-            raise ValidationError(f"entrypoint {ep.name}: shapes must be non-empty")
-        for shape in ep.shapes:
-            if shape not in _SHAPES:
-                raise ValidationError(f"entrypoint {ep.name}: unknown shape {shape!r}")
+        _validate_entrypoint_identity(ep, reserved, seen_eps)
+        _validate_entrypoint_shapes(ep)
         for s in manifest.skills:
             if s.shape in ep.shapes or (ep.include_design and s.design):
                 covered.add(s.name)
