@@ -207,7 +207,8 @@ Read `REVIEW.md` from the **PR's repo root at the PR's base ref** if it exists:
 ref noted in step 1). Pass the `ref` explicitly every time — omitting it reads
 the default branch, which is usually but not always the base, and reading the
 working tree instead reads whatever the session checked out, which in a
-PR-triggered routine session can be the PR head. If the base ref has no `REVIEW.md`, fall back
+PR-triggered routine session can be the PR head. If that read **confirms** no
+`REVIEW.md` exists at the base ref (a not-found response), fall back
 to the canonical template at `templates/REVIEW.md` — read it from the plugin
 clone if you can locate it, otherwise fetch it from the source repo with
 `mcp__github__get_file_contents` (`owner: brandondees`, `repo:
@@ -222,6 +223,32 @@ which is a fixed, locatable path that works in web/routine sessions where
 the plugin clone location is unknown. It defines the severity floor per
 round, the round cap, and the approve-on-clean behavior. The repo's own
 `REVIEW.md` always wins over the template.
+
+**If that first read fails without confirming absence** (a transient 5xx, a
+rate limit, or a forbidden/auth error, as opposed to a clean not-found) —
+do not treat it as "no `REVIEW.md` here" and silently fall back to the
+template: that would mean silently discarding the repo's own custom
+convergence policy in favor of the generic default because of an
+unrelated, possibly-transient error. Apply the same disclosure below as a
+failed fallback fetch — report the *actual* error rather than a guessed
+diagnosis, and do not proceed as if the template applies.
+
+**If that final fallback fetch also fails** — check *why* before deciding
+what to report, the same discipline step 2's ACK-lock handling already
+applies: not every failure means the same thing. A missing-access error
+(not found, forbidden) most likely means this session's GitHub
+authorization to `brandondees/code-quality-atlas` is scoped separately from
+the reviewed repo's own access (issue #356: nothing about a vendored
+skills install grants it), but a transient 5xx, a rate limit, or a
+moved/renamed path is a different problem with a different fix. Either
+way, do not silently proceed as if this file's defaults apply, and do not
+approximate the convergence policy from general pattern knowledge — post
+the *actual* error the call returned as an explicit gap in this round's
+report ("convergence policy unavailable — `templates/REVIEW.md` fetch
+failed: `<the real error>`; applied `<X>` as a stated fallback" naming
+whatever floor/cap you actually used), so a human sees what really failed
+rather than a guessed diagnosis that could send them down the wrong
+remediation path.
 
 Read the team-preferences overlay the same way, in this step, so the lenses
 don't each re-resolve it off the checkout: `.code-quality-atlas/preferences.md`
@@ -356,6 +383,22 @@ line.
    whose content wasn't actually read hasn't run, whatever the synthesis
    report claims. Whichever tier served each lens, and whether the gate at
    the top of this step fired, goes in the coverage line.
+
+   **If every tier fails for a lens** (no `Skill` tool resolution, no
+   vendored copy, and the final fallback fetch to the source repo also
+   fails) — check *why* the fetch failed rather than assuming, same
+   discipline as step 3's fallback above: a missing-access error most
+   likely means this session lacks read access to
+   `brandondees/code-quality-atlas` (issue #356, independent of anything
+   vendored), but a transient 5xx, rate limit, or moved path is a different
+   problem. **Either way, do not run that lens.** Never approximate its
+   checklist from its name or the one-line description in a routing table
+   (that's exactly how a fabricated, lens-styled finding gets produced with
+   nothing behind it — issue #357). Drop it from this round and name it in
+   the coverage line as unreachable, with the *actual* error the call
+   returned, so a human sees what really failed instead of a guessed
+   diagnosis and instead of a review that silently ran fewer lenses than it
+   reported.
 5. Run each chosen lens against the diff, folding in the tool evidence routed
    to it: confirm, contextualize, or dismiss each hit against the checklist
    just loaded, not against a guess at what a lens with that name would

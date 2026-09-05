@@ -138,7 +138,17 @@ build+autofix ──────────────────────
     reviewed one) but works with zero setup on the target repo. `commands/
     atlas-review-pr.md` itself is **never vendored** (only skills are), so even a
     fully-vendored repo still fetches the command file this way — that's expected,
-    not a gap.
+    not a gap **as long as that access requirement is actually met** (issue #356):
+    it's a separate, per-repo grant in this session's GitHub credential proxy, not
+    a network-policy setting — see [`distribution.md`'s "Why 'just fetch it at
+    runtime' can't work
+    either"](../distribution.md#why-just-fetch-it-at-runtime-cant-work-either)
+    for exactly why vendoring skills or enabling a network-policy allowlist entry
+    does nothing to satisfy it. Grant
+    this session read access to `brandondees/code-quality-atlas` itself (in
+    addition to whatever repo you're reviewing) before relying on this fallback,
+    or the command file's own fetch — and every lens's, per §1's ACK check below —
+    fails silently instead of loudly.
   - `commands/atlas-review-pr.md` itself (step 4) is what actually checks for
     lens content in that order — the `Skill` tool first (which resolves a
     vendored copy or an account-enabled skill identically, so there's only one
@@ -585,7 +595,24 @@ a review.
 - **Prompt:** read and follow `commands/atlas-poll-and-review.md` for the repo
   (or repos) being swept — the full spec lives there; inline a copy in the
   routine prompt itself, same reasoning as §1/§2 (`/`-commands don't resolve
-  in routine sessions). The command's own two-tier subagent design is the
+  in routine sessions).
+
+  **Confirm the fetch of that command file itself succeeded before doing
+  anything else this tick** (issue #356, same check as §1's — this model has
+  no equivalent up front today, and a poll-driven sweep has no PR event to
+  make the gap visible the way a missing ACK does): one
+  `mcp__github__get_file_contents` call against `brandondees/code-quality-
+  atlas`, `path: commands/atlas-poll-and-review.md`. **Any failure of that
+  call is a real blocker, not only an access failure** — a missing-access
+  error most likely means this session's GitHub authorization is scoped
+  per-repo and separate from whatever's vendored into the repos being swept
+  (see §0's Prerequisites), but a transient 5xx, rate limit, or moved path
+  is a different problem; either way, do not guess which one it was. Report
+  the actual failure in this tick's final report and skip the sweep
+  entirely rather than falling back to a stale or approximated copy of the
+  poll-and-review protocol.
+
+  The command's own two-tier subagent design is the
   point of this model, so don't flatten it into the top-level session's own
   work:
   1. **Cheap triage.** First, once per tick, the top-level session calls
