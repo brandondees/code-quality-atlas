@@ -29,11 +29,31 @@ def _markdownlint_hook_rev(precommit_text: str) -> str:
     `rev:` line the file happens to contain. A regex search for a bare
     `rev:\\s*(v[\\d.]+)` matches whichever repo entry comes first in the
     file, so adding a second hook repo above this one would silently
-    retarget the claimed version at the new entry's rev instead (#390)."""
+    retarget the claimed version at the new entry's rev instead (#390).
+
+    `rev:` is a SHA, not a mutable tag (#378/#379) -- a tag can be moved to
+    point at different content after the fact, defeating the whole point of
+    pinning it, while a commit SHA can't. The human-readable version lives
+    only in the trailing `# vX.Y.Z` comment on that same line."""
     config = yaml.safe_load(precommit_text)
     for repo in config.get("repos", []):
         if repo.get("repo") == _MARKDOWNLINT_REPO_URL:
-            return repo["rev"]
+            sha = repo["rev"]
+            assert re.fullmatch(r"[0-9a-f]{40}", sha), (
+                f".pre-commit-config.yaml pins markdownlint-cli2's rev to "
+                f"{sha!r}, which isn't a 40-character commit SHA -- a "
+                "mutable tag here can be moved to point at different "
+                "content after the fact (#378/#379)."
+            )
+            comment_match = re.search(
+                rf"rev:\s*{re.escape(sha)}\s*#\s*(v[\d.]+)", precommit_text
+            )
+            assert comment_match, (
+                f".pre-commit-config.yaml's rev ({sha}) has no trailing "
+                "'# vX.Y.Z' comment recording which release that SHA is -- "
+                "add one, e.g. 'rev: <sha> # v0.23.2'."
+            )
+            return comment_match.group(1)
     raise AssertionError(
         f"No {_MARKDOWNLINT_REPO_URL} entry found in .pre-commit-config.yaml"
     )
@@ -56,7 +76,7 @@ def test_precommit_markdownlint_rev_matches_ci_claimed_version():
     )
     claimed_action_version, claimed_bundled_version = comment_match.groups()
 
-    actual_rev = _markdownlint_hook_rev(precommit_text)
+    actual_rev_version = _markdownlint_hook_rev(precommit_text)
 
     assert claimed_action_version == ci_action_version, (
         f".pre-commit-config.yaml's comment claims CI pins "
@@ -64,8 +84,9 @@ def test_precommit_markdownlint_rev_matches_ci_claimed_version():
         f"actually pins {ci_action_version}. Update the comment (and re-check "
         f"the bundled markdownlint-cli2 version it names) to match."
     )
-    assert claimed_bundled_version == actual_rev, (
+    assert claimed_bundled_version == actual_rev_version, (
         f".pre-commit-config.yaml's comment claims the bundled markdownlint-cli2 "
-        f"version is {claimed_bundled_version}, but the hook's 'rev:' is pinned "
-        f"to {actual_rev}. Keep the comment and the rev in sync."
+        f"version is {claimed_bundled_version}, but the hook's 'rev:' SHA is "
+        f"tagged {actual_rev_version} in its own trailing comment. Keep the "
+        "comment above and the rev's own version comment in sync."
     )
