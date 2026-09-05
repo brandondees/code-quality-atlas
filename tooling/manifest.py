@@ -311,9 +311,12 @@ def _validate_skill_artifacts(s: Skill) -> None:
         )
 
 
-def _validate_skill_built_from_shape(s: Skill) -> None:
+def _validate_skill_picker(s: Skill) -> None:
     if len(s.picker) > 160:
         raise ValidationError(f"{s.name}: picker must be <=160 chars")
+
+
+def _validate_skill_built_from(s: Skill) -> None:
     if not s.built_from:
         raise ValidationError(f"{s.name}: built_from must be non-empty")
     categories = [src.category for src in s.built_from]
@@ -364,7 +367,8 @@ def _validate_skills(manifest: Manifest, docs_root: str) -> set[str]:
         _validate_skill_identity(s, seen)
         _validate_skill_metadata(s)
         _validate_skill_artifacts(s)
-        _validate_skill_built_from_shape(s)
+        _validate_skill_picker(s)
+        _validate_skill_built_from(s)
         _validate_skill_sources(s, docs_root, primaries)
     _validate_primary_owners(primaries)
     return seen
