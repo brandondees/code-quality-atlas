@@ -223,6 +223,18 @@ the plugin clone location is unknown. It defines the severity floor per
 round, the round cap, and the approve-on-clean behavior. The repo's own
 `REVIEW.md` always wins over the template.
 
+**If that final fallback fetch also fails** (no read access to
+`brandondees/code-quality-atlas` — issue #356: this session's GitHub
+authorization is scoped per-repo, separate from the reviewed repo's own
+access, and nothing about a vendored skills install grants it) — do not
+silently proceed as if this file's defaults apply, and do not approximate
+the convergence policy from general pattern knowledge. Post that as an
+explicit gap in this round's report ("convergence policy unavailable — no
+read access to the source repo for `templates/REVIEW.md`; applied `<X>` as
+a stated fallback" naming whatever floor/cap you actually used), so a human
+reading the review knows the round/severity discipline wasn't loaded from
+either source rather than assuming it silently was.
+
 Read the team-preferences overlay the same way, in this step, so the lenses
 don't each re-resolve it off the checkout: `.code-quality-atlas/preferences.md`
 at `ref: refs/heads/<base.ref>` (absent → every lens applies its defaults). Hand
@@ -356,6 +368,18 @@ line.
    whose content wasn't actually read hasn't run, whatever the synthesis
    report claims. Whichever tier served each lens, and whether the gate at
    the top of this step fired, goes in the coverage line.
+
+   **If every tier fails for a lens** (no `Skill` tool resolution, no
+   vendored copy, and the final fallback fetch to the source repo also
+   fails — issue #356: this session may simply lack read access to
+   `brandondees/code-quality-atlas`, independent of anything vendored) —
+   **do not run that lens.** Never approximate its checklist from its name
+   or the one-line description in a routing table (that's exactly how a
+   fabricated, lens-styled finding gets produced with nothing behind it —
+   issue #357). Drop it from this round and name it in the coverage line as
+   unreachable, with the reason ("no read access to the source repo"), so a
+   human sees a stated gap instead of a review that silently ran fewer
+   lenses than it reported.
 5. Run each chosen lens against the diff, folding in the tool evidence routed
    to it: confirm, contextualize, or dismiss each hit against the checklist
    just loaded, not against a guess at what a lens with that name would
