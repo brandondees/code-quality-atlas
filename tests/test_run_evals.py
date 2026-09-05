@@ -66,22 +66,24 @@ def test_run_skill_evals_assembles_context_and_collects(tmp_path, monkeypatch):
         system,
         user,
         host=run_evals.OLLAMA_HOST,
-        timeout=600,
+        timeout=run_evals.DEFAULT_TIMEOUT_SECONDS,
         num_ctx=run_evals.OLLAMA_NUM_CTX,
         think=None,
+        max_tokens=None,
     ):
         captured["system"] = system
         captured["model"] = model
         captured["num_ctx"] = num_ctx
         captured["think"] = think
         captured["timeout"] = timeout
+        captured["max_tokens"] = max_tokens
         return f"reviewed: {user}"
 
     monkeypatch.setattr(run_evals, "query_ollama", fake_query)
     # non-default overrides so the assertions below would catch a dropped or
     # mis-forwarded kwarg in run_skill_evals's dispatch, not just query_ollama's.
     runs = run_evals.run_skill_evals(
-        out, "fake-model", num_ctx=32768, think=False, timeout=42
+        out, "fake-model", num_ctx=32768, think=False, timeout=42, max_tokens=512
     )
 
     assert len(runs) == 3
@@ -97,6 +99,67 @@ def test_run_skill_evals_assembles_context_and_collects(tmp_path, monkeypatch):
     assert captured["num_ctx"] == 32768
     assert captured["think"] is False
     assert captured["timeout"] == 42
+    assert captured["max_tokens"] == 512
+
+
+def test_assemble_context_includes_artifact_shaped_reference_file(tmp_path):
+    """An artifact-shaped lens (e.g. reviewing-artifact-conventions) has no
+    reference/heuristics.md at all -- its checklist lives in one bundled
+    rubric file per artifact, reference/<slug>.md. Before #371's fix,
+    assemble_context hardcoded reference/heuristics.md and silently skipped
+    a missing file, so this shape was evaluated with an empty checklist."""
+    skill_dir = tmp_path / "reviewing-artifact-conventions"
+    (skill_dir / "reference").mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# reviewing-artifact-conventions\n")
+    (skill_dir / "reference" / "skill-md.md").write_text(
+        "UNIQUE_ARTIFACT_RUBRIC_CONTENT"
+    )
+
+    context = run_evals.assemble_context(skill_dir)
+
+    assert "UNIQUE_ARTIFACT_RUBRIC_CONTENT" in context
+
+
+def test_assemble_context_excludes_deeper_reference_files(tmp_path):
+    """tool-rules.md and sources.md are deliberately deeper, on-demand
+    disclosure levels a model with the skill loaded wouldn't have in
+    context by default -- assemble_context must not bundle them in."""
+    skill_dir = tmp_path / "hunting-silent-failures"
+    (skill_dir / "reference").mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# hunting-silent-failures\n")
+    (skill_dir / "reference" / "heuristics.md").write_text("UNIQUE_HEURISTICS_CONTENT")
+    (skill_dir / "reference" / "tool-rules.md").write_text("UNIQUE_TOOL_RULES_CONTENT")
+    (skill_dir / "reference" / "sources.md").write_text("UNIQUE_SOURCES_CONTENT")
+
+    context = run_evals.assemble_context(skill_dir)
+
+    assert "UNIQUE_HEURISTICS_CONTENT" in context
+    assert "UNIQUE_TOOL_RULES_CONTENT" not in context
+    assert "UNIQUE_SOURCES_CONTENT" not in context
+
+
+def test_assemble_context_raises_when_nothing_beyond_skill_md(tmp_path):
+    skill_dir = tmp_path / "empty-skill"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text("# empty-skill\n")
+
+    with pytest.raises(RuntimeError, match="no checklist content"):
+        run_evals.assemble_context(skill_dir)
+
+
+def test_assemble_context_raises_when_reference_dir_is_only_deeper_files(tmp_path):
+    """A reference/ dir that exists but contains only tool-rules.md/sources.md
+    must still trip the empty-context guard -- those files are excluded from
+    the assembled context, so their mere presence on disk doesn't count as
+    checklist content."""
+    skill_dir = tmp_path / "only-deeper-files"
+    (skill_dir / "reference").mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# only-deeper-files\n")
+    (skill_dir / "reference" / "tool-rules.md").write_text("x")
+    (skill_dir / "reference" / "sources.md").write_text("x")
+
+    with pytest.raises(RuntimeError, match="no checklist content"):
+        run_evals.assemble_context(skill_dir)
 
 
 def test_run_skill_evals_openai_backend(tmp_path, monkeypatch):
@@ -112,7 +175,14 @@ def test_run_skill_evals_openai_backend(tmp_path, monkeypatch):
 
     calls = []
 
-    def fake_openai(model, system, user, host=run_evals.OPENAI_HOST, timeout=600):
+    def fake_openai(
+        model,
+        system,
+        user,
+        host=run_evals.OPENAI_HOST,
+        timeout=run_evals.DEFAULT_TIMEOUT_SECONDS,
+        max_tokens=None,
+    ):
         calls.append(host)
         return f"openai-reviewed: {user}"
 
@@ -223,6 +293,64 @@ def test_query_ollama_non_json_raises(monkeypatch):
         run_evals.query_ollama("m", "sys", "usr")
 
 
+def test_query_ollama_string_message_raises_cleanly(monkeypatch):
+    # #371: `data.get("message", {}).get("content")` raised a raw AttributeError
+    # on this shape (a proxy error body with `message` as a bare string, not a
+    # dict) instead of the module's RuntimeError-only contract -- aborting the
+    # whole eval suite instead of being recorded as one failed scenario.
+    _patch_urlopen(monkeypatch, body=json.dumps({"message": "<string>"}).encode())
+    with pytest.raises(RuntimeError, match="unexpected Ollama response shape"):
+        run_evals.query_ollama("m", "sys", "usr")
+
+
+def test_query_ollama_truncated_generation_raises(monkeypatch):
+    # #371: done_reason=length means the generation was cut off mid-answer by
+    # num_ctx or num_predict -- HTTP 200 with syntactically valid but truncated
+    # content, indistinguishable from a genuine short answer by content alone.
+    _patch_urlopen(
+        monkeypatch,
+        body=json.dumps(
+            {"message": {"content": "partial answer cut off"}, "done_reason": "length"}
+        ).encode(),
+    )
+    with pytest.raises(RuntimeError, match="truncated"):
+        run_evals.query_ollama("m", "sys", "usr")
+
+
+def test_query_ollama_non_length_done_reason_does_not_raise(monkeypatch):
+    _patch_urlopen(
+        monkeypatch,
+        body=json.dumps(
+            {"message": {"content": "a complete finding"}, "done_reason": "stop"}
+        ).encode(),
+    )
+    assert run_evals.query_ollama("m", "sys", "usr") == "a complete finding"
+
+
+def test_query_ollama_sends_num_predict_when_max_tokens_set(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["payload"] = json.loads(req.data)
+        return _FakeResp(json.dumps({"message": {"content": "ok"}}).encode())
+
+    monkeypatch.setattr(run_evals.urllib.request, "urlopen", fake_urlopen)
+    run_evals.query_ollama("m", "sys", "usr", max_tokens=256)
+    assert captured["payload"]["options"]["num_predict"] == 256
+
+
+def test_query_ollama_omits_num_predict_by_default(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["payload"] = json.loads(req.data)
+        return _FakeResp(json.dumps({"message": {"content": "ok"}}).encode())
+
+    monkeypatch.setattr(run_evals.urllib.request, "urlopen", fake_urlopen)
+    run_evals.query_ollama("m", "sys", "usr")
+    assert "num_predict" not in captured["payload"]["options"]
+
+
 def test_query_openai_returns_content(monkeypatch):
     _patch_urlopen(
         monkeypatch,
@@ -251,6 +379,71 @@ def test_query_openai_unexpected_shape_raises(monkeypatch):
         RuntimeError, match="unexpected OpenAI-compatible response shape"
     ):
         run_evals.query_openai("m", "sys", "usr")
+
+
+def test_query_openai_truncated_generation_raises(monkeypatch):
+    # #371: mirror of query_ollama's done_reason check for the
+    # OpenAI-compatible shape (choices[0].finish_reason).
+    _patch_urlopen(
+        monkeypatch,
+        body=json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {"content": "partial answer cut off"},
+                        "finish_reason": "length",
+                    }
+                ]
+            }
+        ).encode(),
+    )
+    with pytest.raises(RuntimeError, match="truncated"):
+        run_evals.query_openai("m", "sys", "usr")
+
+
+def test_query_openai_non_length_finish_reason_does_not_raise(monkeypatch):
+    _patch_urlopen(
+        monkeypatch,
+        body=json.dumps(
+            {
+                "choices": [
+                    {
+                        "message": {"content": "a complete finding"},
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+        ).encode(),
+    )
+    assert run_evals.query_openai("m", "sys", "usr") == "a complete finding"
+
+
+def test_query_openai_sends_max_tokens_when_set(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["payload"] = json.loads(req.data)
+        return _FakeResp(
+            json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode()
+        )
+
+    monkeypatch.setattr(run_evals.urllib.request, "urlopen", fake_urlopen)
+    run_evals.query_openai("m", "sys", "usr", max_tokens=256)
+    assert captured["payload"]["max_tokens"] == 256
+
+
+def test_query_openai_omits_max_tokens_by_default(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["payload"] = json.loads(req.data)
+        return _FakeResp(
+            json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode()
+        )
+
+    monkeypatch.setattr(run_evals.urllib.request, "urlopen", fake_urlopen)
+    run_evals.query_openai("m", "sys", "usr")
+    assert "max_tokens" not in captured["payload"]
 
 
 # --- run_skill_evals: unrecognized api fails fast, even with host set (#23) ---
@@ -283,6 +476,29 @@ def test_run_skill_evals_rejects_unknown_api_even_with_host(tmp_path, monkeypatc
         )
 
 
+def test_run_skill_evals_rejects_think_with_openai_backend(tmp_path, monkeypatch):
+    # #371: --think has no OpenAI-compatible equivalent at all; silently
+    # dropping it previously left an operator believing they'd forced
+    # thinking mode when nothing was actually sent.
+    skill = Skill(
+        name="hunting-silent-failures",
+        description="x",
+        shape="diff",
+        wave=1,
+        built_from=[Source(2, "tests/fixtures/research_sample.md#2")],
+    )
+    out = generate_skill(skill, "v0.2", docs_root=str(ROOT), skills_root=str(tmp_path))
+    (out / "evals" / "eval.json").write_text(_valid_eval_json())
+
+    def fail_any(*a, **kw):
+        raise AssertionError("no backend should be called on a rejected combination")
+
+    monkeypatch.setattr(run_evals, "query_ollama", fail_any)
+    monkeypatch.setattr(run_evals, "query_openai", fail_any)
+    with pytest.raises(ValueError, match="ollama-only"):
+        run_evals.run_skill_evals(out, "fake-model", api="openai", think=True)
+
+
 # --- CLI argument validation (#23) ---
 
 
@@ -294,11 +510,57 @@ def test_cli_think_and_no_think_are_mutually_exclusive(tmp_path, capsys):
     assert "not allowed with argument" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("flag", ["--num-ctx", "--timeout"])
+@pytest.mark.parametrize("flag", ["--num-ctx", "--timeout", "--max-tokens"])
 def test_cli_rejects_non_positive_int_options(flag, tmp_path, capsys):
     with pytest.raises(SystemExit):
         run_evals.main(["--skill", "x", "--skills-root", str(tmp_path), flag, "0"])
     assert "positive integer" in capsys.readouterr().err
+
+
+def test_cli_rejects_explicit_num_ctx_with_openai_backend(tmp_path, capsys):
+    # #371: OLLAMA_NUM_CTX has no OpenAI-compatible request field at all (that
+    # server sets its window at startup via -c) -- an explicit --num-ctx with
+    # --api openai would silently be a no-op rather than actually widening
+    # anything, leaving an operator believing they'd changed the window.
+    with pytest.raises(SystemExit):
+        run_evals.main(
+            [
+                "--skill",
+                "x",
+                "--skills-root",
+                str(tmp_path),
+                "--api",
+                "openai",
+                "--num-ctx",
+                "16384",
+            ]
+        )
+    assert "ollama-only" in capsys.readouterr().err
+
+
+def test_cli_rejects_explicit_num_ctx_matching_the_default_with_openai_backend(
+    tmp_path, capsys
+):
+    """Round-1 review finding: comparing args.num_ctx against OLLAMA_NUM_CTX
+    to detect "was --num-ctx explicitly passed" is defeated the instant an
+    operator's explicit value happens to equal the current default (e.g.
+    passing today's OLLAMA_NUM_CTX because that's what they intend, or
+    because they don't realize this default just changed) -- that combination
+    must still be rejected, not silently accepted as "the untouched default"."""
+    with pytest.raises(SystemExit):
+        run_evals.main(
+            [
+                "--skill",
+                "x",
+                "--skills-root",
+                str(tmp_path),
+                "--api",
+                "openai",
+                "--num-ctx",
+                str(run_evals.OLLAMA_NUM_CTX),
+            ]
+        )
+    assert "ollama-only" in capsys.readouterr().err
 
 
 # --- partial-run resilience (the 2026-08-08 cross-model re-gate) ---
