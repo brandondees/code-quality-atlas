@@ -36,6 +36,10 @@
 
 set -euo pipefail
 
+# check_requirements/repo_root/collect_skill_names (issue #392).
+# shellcheck source=lib/skills-common.sh
+source "$(cd "$(dirname "$0")" && pwd)/lib/skills-common.sh"
+
 REQUIRED_PROGRAMS=("git")
 
 TARGET=""
@@ -52,7 +56,7 @@ MARKER_NAME=".atlas-vendored"
 MARKER_FORMAT=1
 # Which tree to vendor: the 44 standalone skills (default) or the 4 collapsed
 # entrypoints (--collapsed).
-SRC_SUBDIR="skills"
+SKILLS_SUBDIR="skills"
 # Destination for --with-lens-coverage-hook's two scripts, relative to the
 # target repo root. Deliberately NOT under .claude/skills/ (SUBDIR) — that
 # tree's contents are Skill-tool-loaded bundles governed by the
@@ -126,31 +130,10 @@ Examples:
 EOF
 }
 
-check_requirements() {
-  local missing=0
-  local program
-  local required=("${REQUIRED_PROGRAMS[@]}")
-  # jq is only needed to merge (not clobber) the target's .claude/settings.json
-  # for --with-lens-coverage-hook -- every other path in this script has never
-  # needed it, so it stays out of the always-required list.
-  [ "$WITH_LENS_COVERAGE_HOOK" -eq 1 ] && required+=("jq")
-  for program in "${required[@]}"; do
-    if ! command -v "$program" >/dev/null 2>&1; then
-      printf 'Error: Required program %s is not installed or not on PATH. Please install it first.\n' "$program" >&2
-      missing=1
-    fi
-  done
-  if [ "$missing" -ne 0 ]; then
-    printf '\n' >&2
-    usage >&2
-    return 1
-  fi
-}
-
 parse_args() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --collapsed) SRC_SUBDIR="collapsed/skills" ;;
+      --collapsed) SKILLS_SUBDIR="collapsed/skills" ;;
       --prune) PRUNE=1 ;;
       --force) FORCE=1 ;;
       --dry-run) DRY_RUN=1 ;;
@@ -188,37 +171,8 @@ parse_args() {
   fi
 }
 
-# Echo the source repo root (the code-quality-atlas clone), or fail.
-repo_root() {
-  local root
-  if root=$(git rev-parse --show-toplevel 2>/dev/null) && [ -d "$root/skills" ]; then
-    printf '%s\n' "$root"
-    return 0
-  fi
-  local here
-  here=$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)
-  if [ -n "$here" ] && [ -d "$here/skills" ]; then
-    printf '%s\n' "$here"
-    return 0
-  fi
-  printf 'Error: run this from inside the code-quality-atlas clone (no skills/ found).\n' >&2
-  return 1
-}
-
-# Populate SKILL_NAMES (bash 3.2: no mapfile).
-collect_skill_names() {
-  SKILL_NAMES=()
-  local md name
-  for md in "$SRC_SUBDIR"/*/SKILL.md; do
-    [ -e "$md" ] || continue
-    name=$(basename "$(dirname "$md")")
-    SKILL_NAMES+=("$name")
-  done
-  if [ "${#SKILL_NAMES[@]}" -eq 0 ]; then
-    printf 'Error: no %s/*/SKILL.md found under %s\n' "$SRC_SUBDIR" "$(pwd)" >&2
-    return 1
-  fi
-}
+# repo_root and collect_skill_names come from lib/skills-common.sh (sourced
+# above).
 
 contains() {
   local needle=$1
@@ -316,8 +270,8 @@ check_target_git_state() {
 check_source_repo_provenance() {
   local sha=$1
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
-  if [ -n "$(git status --porcelain -- "$SRC_SUBDIR" LICENSE-CC-BY-4.0 2>/dev/null)" ]; then
-    printf 'Warning: this source repo has uncommitted changes under %s or LICENSE-CC-BY-4.0 -- the content just vendored may not match commit %s exactly.\n' "$SRC_SUBDIR" "$sha" >&2
+  if [ -n "$(git status --porcelain -- "$SKILLS_SUBDIR" LICENSE-CC-BY-4.0 2>/dev/null)" ]; then
+    printf 'Warning: this source repo has uncommitted changes under %s or LICENSE-CC-BY-4.0 -- the content just vendored may not match commit %s exactly.\n' "$SKILLS_SUBDIR" "$sha" >&2
   fi
   if [ "$sha" != "unknown" ] && ! git branch -r --contains "$sha" 2>/dev/null | grep -q .; then
     printf 'Warning: commit %s does not appear on any remote-tracking branch -- NOTICE.md links to a GitHub blob URL at this commit that may 404 until it is pushed.\n' "$sha" >&2
@@ -340,14 +294,14 @@ append_generated_marker() {
   local file=$1 name=$2 src_filename=$3
   {
     printf '\n<!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh\n'
-    printf '     from %s/%s/%s in code-quality-atlas.\n' "$SRC_SUBDIR" "$name" "$src_filename"
+    printf '     from %s/%s/%s in code-quality-atlas.\n' "$SKILLS_SUBDIR" "$name" "$src_filename"
     printf '     Edit that file and re-run tooling/vendor-skills.sh to refresh this copy. -->\n'
   } >>"$file"
 }
 
 vendor_one() {
   local name=$1 dest_root=$2
-  local src="$SRC_SUBDIR/$name"
+  local src="$SKILLS_SUBDIR/$name"
   # Guard dest_root directly, not just the concatenated dest: "$dest_root/$name"
   # is never empty even when dest_root is (it's still "/$name"), so a dest-only
   # guard can't catch an empty dest_root widening the delete to a rooted path.
@@ -710,6 +664,10 @@ do_uninstall() {
 
 main() {
   parse_args "$@"
+  # jq is only needed to merge (not clobber) the target's .claude/settings.json
+  # for --with-lens-coverage-hook -- every other path in this script has never
+  # needed it, so it stays out of the always-required list.
+  [ "$WITH_LENS_COVERAGE_HOOK" -eq 1 ] && REQUIRED_PROGRAMS+=("jq")
   check_requirements || exit 1
 
   local root

@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+# tooling/manifest.py
 from __future__ import annotations
 
 import re
@@ -7,6 +8,7 @@ from pathlib import Path
 
 import yaml
 
+from tooling.evals import D8_MIN_SCENARIOS
 from tooling.sections import extract_section
 
 
@@ -272,9 +274,10 @@ def _validate_skills(manifest: Manifest, docs_root: str) -> set[str]:  # noqa: C
             raise ValidationError(
                 f"{s.name}: tier must be floor|preference, got {s.tier!r}"
             )
-        if s.eval_min is not None and s.eval_min < 3:
+        if s.eval_min is not None and s.eval_min < D8_MIN_SCENARIOS:
             raise ValidationError(
-                f"{s.name}: eval_min must be >=3 (D8's baseline), got {s.eval_min!r}"
+                f"{s.name}: eval_min must be >={D8_MIN_SCENARIOS} (D8's baseline), "
+                f"got {s.eval_min!r}"
             )
         # design-requires-diff and artifact-shape-requires-artifacts are
         # enforced in Skill.__post_init__ (unconditionally, at construction —
@@ -328,10 +331,10 @@ def _validate_skills(manifest: Manifest, docs_root: str) -> set[str]:  # noqa: C
                 ) from exc
             try:
                 extract_section(text, src.section)
-            except KeyError:
+            except KeyError as exc:
                 raise ValidationError(
                     f"{s.name}: source not found: section #{src.section} in {src.path}"
-                )
+                ) from exc
             if src.category not in s.cross_ref:
                 primaries.setdefault(src.category, []).append(s.name)
     # G1: one primary owner per category — skills sharing a category must mark
@@ -962,7 +965,7 @@ def _load_modes(data: dict, path: str) -> list[Mode]:
                 )
             )
         except (KeyError, TypeError) as e:
-            raise ValidationError(f"modes[{i}] in {path}: malformed mode ({e})")
+            raise ValidationError(f"modes[{i}] in {path}: malformed mode ({e})") from e
     return modes
 
 
@@ -1003,7 +1006,7 @@ def _load_entrypoints(data: dict, path: str) -> list[Entrypoint]:
         except (KeyError, TypeError) as e:
             raise ValidationError(
                 f"entrypoints[{i}] in {path}: malformed entrypoint ({e})"
-            )
+            ) from e
     return entrypoints
 
 
@@ -1015,8 +1018,7 @@ def load_manifest(path: str) -> Manifest:
     # mirrors the existing (OSError, UnicodeError) guard around a *source*
     # file's own read in `validate`, just applied to the manifest itself).
     try:
-        with open(path, encoding="utf-8") as fh:
-            raw = fh.read()
+        raw = Path(path).read_text(encoding="utf-8")
     except UnicodeError as exc:
         raise ValidationError(f"{path}: not valid UTF-8: {exc}") from exc
     _check_comment_truncation(raw, path)

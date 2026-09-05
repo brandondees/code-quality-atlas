@@ -4,10 +4,18 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 
 
 class EvalError(Exception):
     pass
+
+
+# D8's baseline eval-scenario floor. A lens can opt into a higher, hardened
+# bar via the manifest's `eval_min` (Q21); this is the default every skill
+# must clear regardless. Single source of truth for the three call sites
+# that previously each hardcoded the literal `3` (issue #392).
+D8_MIN_SCENARIOS = 3
 
 
 @dataclass
@@ -24,8 +32,7 @@ def load_evals(path: str) -> EvalDoc:
     # explicit isinstance check gives a non-object body an actionable message
     # rather than Python's raw "list indices must be integers" TypeError text.
     try:
-        with open(path, encoding="utf-8") as fh:
-            data = json.loads(fh.read())
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise EvalError(
                 f"{path}: eval doc must be a JSON object, got {type(data).__name__}"
@@ -35,7 +42,7 @@ def load_evals(path: str) -> EvalDoc:
         raise EvalError(f"{path}: {exc}") from exc
 
 
-def validate_evals(doc: EvalDoc, min_scenarios: int = 3) -> None:
+def validate_evals(doc: EvalDoc, min_scenarios: int = D8_MIN_SCENARIOS) -> None:
     # D8's baseline is 3; a lens can opt into a higher, hardened bar via the
     # manifest's `eval_min` (Q21) — the caller resolves which applies and
     # passes it in, so this function stays agnostic to *why* the bar differs.

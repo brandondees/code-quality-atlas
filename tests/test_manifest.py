@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+# tests/test_manifest.py
 import re
 from pathlib import Path
 

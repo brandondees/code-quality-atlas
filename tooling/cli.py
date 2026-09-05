@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 
 from tooling.drift import DriftError, check_drift
-from tooling.evals import EvalError, load_evals, validate_evals
+from tooling.evals import D8_MIN_SCENARIOS, EvalError, load_evals, validate_evals
 from tooling.generate import (
     CollapsedOverlapError,
     generate_collapsed,
@@ -222,7 +222,9 @@ def main(argv: list[str] | None = None) -> int:  # noqa: C901 -- tracked in #441
                 continue
             try:
                 doc = load_evals(str(path))
-                validate_evals(doc, min_scenarios=eval_min_by_skill.get(name, 3))
+                validate_evals(
+                    doc, min_scenarios=eval_min_by_skill.get(name, D8_MIN_SCENARIOS)
+                )
                 print(f"OK: {name} ({len(doc.scenarios)} scenarios)")
             except EvalError as exc:
                 print(f"INVALID: {name} — {exc}")

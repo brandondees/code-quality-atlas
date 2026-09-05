@@ -25,11 +25,13 @@ extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 # Default rule set (E4, E7, E9, F) — see docs/open-questions.md D-series for
-# any future decision to broaden this. C901 (mccabe complexity) is the one
+# any future decision to broaden this. C901 (mccabe complexity) is one
 # addition: a budget, not a rewrite of everything already over it (issue
 # #395) — the 5 pre-existing functions above the limit each carry their own
-# `# noqa: C901` pointing at #441, which tracks bringing them down.
-extend-select = ["C901"]
+# `# noqa: C901` pointing at #441, which tracks bringing them down. B904
+# (raise-without-from-inside-except) is the other: two real misses in
+# manifest.py had gone uncaught with only the default rule set (issue #392).
+extend-select = ["C901", "B904"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 15

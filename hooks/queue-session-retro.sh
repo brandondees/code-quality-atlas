@@ -44,35 +44,9 @@ fi
 # shellcheck source=lib/feedback-tier.sh
 source "$_lib"
 
-_tier="$(feedback_tier)"
-case "$_tier" in
-  local) ;;
-  draft | auto)
-    # Stages 2+ (drafting a PR comment, auto-posting it) are unbuilt — both
-    # tiers are accepted and currently behave exactly like "local" (#365).
-    # One trace line so an operator who deliberately opted into draft/auto
-    # isn't left assuming they got that tier's not-yet-existing behavior.
-    printf 'code-quality-atlas: feedback tier %s is not yet distinguished from local\n' \
-      "$_tier" >&2
-    ;;
-  *) exit 0 ;;
-esac
-
-if ! command -v jq >/dev/null 2>&1; then
-  printf 'code-quality-atlas: jq not found on PATH; skipping this session\n' >&2
-  exit 0
-fi
-
-log_dir="$(_code_quality_atlas_project_dir)/.code-quality-atlas/learnings"
-if ! mkdir -p "$log_dir" 2>/dev/null; then
-  printf 'code-quality-atlas: could not create %s; skipping this session\n' "$log_dir" >&2
-  exit 0
-fi
-
-plugin_sha=""
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
-  plugin_sha="$(git -C "$CLAUDE_PLUGIN_ROOT" rev-parse HEAD 2>/dev/null || true)"
-fi
+_code_quality_atlas_hook_prologue "session"
+log_dir="$LOG_DIR"
+plugin_sha="$PLUGIN_SHA"
 
 record="$(printf '%s' "$input" | jq -c \
   --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
