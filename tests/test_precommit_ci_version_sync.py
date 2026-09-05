@@ -12,6 +12,7 @@ the build whenever either half of the claimed alignment goes stale again.
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -45,18 +46,54 @@ def _markdownlint_hook_rev(precommit_text: str) -> str:
                 "mutable tag here can be moved to point at different "
                 "content after the fact (#378/#379)."
             )
+            # (?m) + `^`/`$` + horizontal-whitespace-only classes, not a bare
+            # `\s*`: the latter matches across newlines too, so a comment on
+            # the *next* line ("rev: <sha>\n# v0.23.2") would satisfy this
+            # search even though it isn't the trailing same-line comment the
+            # docstring above promises (CodeRabbit review finding on #379).
             comment_match = re.search(
-                rf"rev:\s*{re.escape(sha)}\s*#\s*(v[\d.]+)", precommit_text
+                rf"(?m)^[ \t]*rev:[ \t]*{re.escape(sha)}"
+                rf"[ \t]*#[ \t]*(v\d+\.\d+\.\d+)[ \t]*$",
+                precommit_text,
             )
             assert comment_match, (
-                f".pre-commit-config.yaml's rev ({sha}) has no trailing "
-                "'# vX.Y.Z' comment recording which release that SHA is -- "
-                "add one, e.g. 'rev: <sha> # v0.23.2'."
+                f".pre-commit-config.yaml's rev ({sha}) has no trailing, "
+                "same-line '# vX.Y.Z' comment recording which release that "
+                "SHA is -- add one, e.g. 'rev: <sha> # v0.23.2'."
             )
             return comment_match.group(1)
     raise AssertionError(
         f"No {_MARKDOWNLINT_REPO_URL} entry found in .pre-commit-config.yaml"
     )
+
+
+def _precommit_yaml(rev_and_comment: str) -> str:
+    return (
+        "repos:\n"
+        "  - repo: https://github.com/DavidAnson/markdownlint-cli2\n"
+        f"    {rev_and_comment}\n"
+        "    hooks:\n"
+        "      - id: markdownlint-cli2\n"
+    )
+
+
+def test_markdownlint_hook_rev_requires_same_line_comment():
+    """CodeRabbit review finding on #379: a bare `\\s*` between the SHA and
+    the `#` comment matches across newlines too, so a comment on the line
+    *after* `rev:` would previously satisfy the search even though it isn't
+    the trailing same-line comment the function's own contract promises."""
+    sha = "b82a6c8896e491b9cb377a99ff3412131920681b"
+    precommit_text = _precommit_yaml(f"rev: {sha}\n    # v0.23.2")
+
+    with pytest.raises(AssertionError, match="no trailing, same-line"):
+        _markdownlint_hook_rev(precommit_text)
+
+
+def test_markdownlint_hook_rev_accepts_same_line_comment():
+    sha = "b82a6c8896e491b9cb377a99ff3412131920681b"
+    precommit_text = _precommit_yaml(f"rev: {sha} # v0.23.2")
+
+    assert _markdownlint_hook_rev(precommit_text) == "v0.23.2"
 
 
 def test_precommit_markdownlint_rev_matches_ci_claimed_version():

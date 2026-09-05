@@ -168,7 +168,12 @@ jobs:
               - "tooling/**/*.sh"
               - "hooks/**"
               - "collapsed/hooks/**"
-              - ".github/workflows/ci.yml"
+              # The whole workflows/ tree, not just ci.yml: actionlint below
+              # also shells out to shellcheck for embedded run: scripts in
+              # *any* workflow file, so a change to a workflow other than
+              # ci.yml must install shellcheck too, not just gate actionlint
+              # itself via `workflows:` below (#379).
+              - ".github/workflows/**"
             markdown:
               - "**/*.md"
               - ".markdownlint-cli2.jsonc"
@@ -395,6 +400,11 @@ jobs:
           mv "/tmp/shellcheck-${version}/shellcheck" "$HOME/.local/bin/shellcheck"
           chmod +x "$HOME/.local/bin/shellcheck"
           "$HOME/.local/bin/shellcheck" --version
+          # actionlint (below) shells out to `shellcheck` via a bare PATH
+          # lookup for embedded run: scripts -- without this, it silently
+          # skips that check rather than failing, so the gap wouldn't even
+          # show up as red CI (#379).
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           # globstar makes `**` recurse into subdirectories, matching what
           # the `shell:` paths-filter above actually promises to cover
           # (`tooling/**/*.sh`, `hooks/**`, `collapsed/hooks/**`) -- the
