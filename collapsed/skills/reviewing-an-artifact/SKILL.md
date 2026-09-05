@@ -25,7 +25,7 @@ Rank the relevant lenses below by relevance to what is being reviewed, pick the 
 
 ## Depth modes
 
-Routing first ranks **every** lens whose scope the change touches by **relevance**, with no hard cap on the ranking itself. A depth mode then sets the **breadth** (how far down the ranked list to run, plus room for judgment calls above that floor) and the severity floor. Pick the mode from the request; default to **review**.
+Routing first ranks **every** lens in scope by **relevance**, with no hard cap on the ranking itself — for a single change, scope is what the diff touches; for a whole-repo audit, scope is the repository. A depth mode then sets the **breadth** (how far down the ranked list to run, plus room for judgment calls above that floor) and the severity floor. Pick the mode from the request; default to **review**.
 
 | Mode | Breadth | Triggers |
 |---|---|---|

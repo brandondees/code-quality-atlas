@@ -111,7 +111,7 @@ def test_generate_skill_reference_files_carry_generated_header(tmp_path):
     assert marker in skill_md_text
 
 
-from tooling.generate import top_checks
+from tooling.generate import heuristics_is_duplicate, top_checks
 
 
 def test_top_checks_are_inlined_so_skill_md_is_self_sufficient():
@@ -152,6 +152,40 @@ def _research_short(tmp_path):
         wave=1,
         built_from=[Source(9, "research.md#9")],
     )
+
+
+def _research_short_with_out_of_position_priority(tmp_path):
+    # Same budget-fitting shape as _research_short, but the priority-marked
+    # bullet is last in the source file rather than first. top_checks()
+    # promotes priority bullets to the front of its output while
+    # _all_heuristics_bullets() preserves file order — so the two functions
+    # return the identical bullet set in different order here. An
+    # order-sensitive (`==`) comparison would miss this as a duplicate; only a
+    # multiset comparison catches it (dees-bot / CodeRabbit PR #417 review).
+    doc = (
+        "# Research — Short Priority Sample\n\n"
+        "## #9 Some category\n\n"
+        "### Reviewable heuristics (skill-checklist seeds)\n\n"
+        "- First short check?\n"
+        "- Second short check?\n"
+        "- ★ Deep but high-value check that must surface?\n"
+    )
+    p = tmp_path / "research.md"
+    p.write_text(doc, encoding="utf-8")
+    return Skill(
+        name="short-priority-lens",
+        description="x",
+        shape="diff",
+        wave=1,
+        built_from=[Source(9, "research.md#9")],
+    )
+
+
+def test_heuristics_is_duplicate_ignores_priority_reordering(tmp_path):
+    skill = _research_short_with_out_of_position_priority(tmp_path)
+    assert heuristics_is_duplicate(skill, docs_root=str(tmp_path))
+    md = build_skill_md(skill, taxonomy_version="v0.2", docs_root=str(tmp_path))
+    assert "reference/heuristics.md" not in md
 
 
 def test_going_deeper_omits_heuristics_pointer_when_it_would_duplicate_top_checks(

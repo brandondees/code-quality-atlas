@@ -104,6 +104,24 @@ def _all_heuristics_bullets(skill: Skill, docs_root: str = ".") -> list[str]:
     return bullets
 
 
+def heuristics_is_duplicate(skill: Skill, docs_root: str = ".") -> bool:
+    """True when a lens's full heuristics checklist already fits the inline
+    `## Top checks` budget, making reference/heuristics.md a verbatim duplicate
+    rather than a deeper disclosure level (#391 problem 3). Shared by
+    build_skill_md and generate_skill so both derive the same answer from one
+    place instead of two independent re-derivations (PR #417 review).
+
+    Compared as a multiset (`sorted`), not ordered-list equality: `top_checks`
+    promotes priority-marked bullets to the front of their primary category
+    before appending the rest in position order, while `_all_heuristics_bullets`
+    preserves source-file order — so the identical bullet set can come back in
+    a different order when a priority marker sits out of position, which would
+    make an ordered comparison wrongly report `False` (PR #417 review)."""
+    return sorted(top_checks(skill, docs_root)) == sorted(
+        _all_heuristics_bullets(skill, docs_root)
+    )
+
+
 def build_skill_md(
     skill: Skill,
     taxonomy_version: str,
@@ -166,17 +184,14 @@ def build_skill_md(
             "behind each rubric; for provenance, not needed during a review.\n"
         )
     else:
-        check_list = top_checks(skill, docs_root)
-        checks = "\n".join(f"- {c}" for c in check_list)
+        checks = "\n".join(f"- {c}" for c in top_checks(skill, docs_root))
         # When the whole checklist already fits the inline budget, `## Top checks`
         # already *is* the full checklist — reference/heuristics.md would be a
         # verbatim duplicate, not a deeper disclosure level (#391 problem 3).
-        heuristics_is_duplicate = check_list == _all_heuristics_bullets(
-            skill, docs_root
-        )
+        is_duplicate = heuristics_is_duplicate(skill, docs_root)
         lead_in = (
             "This is the full checklist — nothing else to open for it:\n\n"
-            if heuristics_is_duplicate
+            if is_duplicate
             else "The head of the full checklist — enough for a first pass without "
             "opening any reference file:\n\n"
         )
@@ -185,7 +200,7 @@ def build_skill_md(
         )
         heuristics_pointer = (
             ""
-            if heuristics_is_duplicate
+            if is_duplicate
             else "- [reference/heuristics.md](reference/heuristics.md) — the full "
             "checklist; open it when the change sits squarely in this lens's "
             "domain.\n"
@@ -271,7 +286,7 @@ def generate_skill(
         # Skip (and prune a stale copy of) reference/heuristics.md when it would be
         # a verbatim duplicate of `## Top checks` — see build_skill_md (#391).
         heuristics_path = out / "reference" / "heuristics.md"
-        if top_checks(skill, docs_root) == _all_heuristics_bullets(skill, docs_root):
+        if heuristics_is_duplicate(skill, docs_root):
             if heuristics_path.exists():
                 heuristics_path.unlink()
         else:
