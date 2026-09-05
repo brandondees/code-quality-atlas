@@ -98,9 +98,13 @@ are **Claude Code slash commands** — invoke them with the leading `/`, not as
 Skill-tool skill names. In routine / web sessions where slash commands don't
 resolve, fetch and follow the command file directly: call
 `mcp__github__get_file_contents` with `owner: brandondees`, `repo:
-code-quality-atlas`, and `path: commands/atlas-review-pr.md` (or `path:
-commands/atlas-code-review.md` for local changes) to retrieve the current
-instructions, then follow them exactly.
+code-quality-atlas`, `path: commands/atlas-review-pr.md` (or `path:
+commands/atlas-code-review.md` for local changes), and **`ref`** — pass the
+commit noted in this repo's `.claude/skills/.atlas-vendored` (`source=...@<sha>`)
+if that file exists, otherwise `refs/heads/main` (issue #388: an
+explicit `ref` here, even branch-level, beats the implicit default-branch
+fetch this omitted before) — to retrieve the current instructions, then
+follow them exactly.
 <!-- END code-quality-atlas routing -->
 
 **Plugin consumers:** don't hand-copy this section — run the `/code-quality-atlas:atlas-init` command, which writes the routing block into your repo's `CLAUDE.md` **and** `AGENTS.md` (agents read different files) and keeps it current. The canonical block lives in [`templates/agents-routing-snippet.md`](templates/agents-routing-snippet.md). This repo's own [`AGENTS.md`](AGENTS.md) mirrors the block as a dogfood.
