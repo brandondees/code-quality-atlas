@@ -632,13 +632,14 @@ def _list_field(s: dict, key: str, where: str) -> list:
     # [] -- but any other non-list value (e.g. `cross_ref: false`) is a
     # malformed manifest, not a normalization case, and must raise the same
     # actionable ValidationError every other malformed field gets here (#140,
-    # #142 review). Also used for top-level `modes`/`entrypoints` and
-    # `synthesizer.tensions`, which had the same gap under their own
-    # `x.get(...) or []` normalization: a falsy non-list (`{}`, `0`, `false`)
-    # silently passed as though absent, and a truthy scalar (`tensions: 5`)
-    # escaped as a raw TypeError from the list comprehension/enumerate() that
-    # consumed it, in both cases bypassing load_manifest's ValidationError
-    # contract entirely (CodeRabbit review on #411).
+    # #142 review). Also used for top-level `modes`/`entrypoints`,
+    # `synthesizer.tensions`, and the prepass `discover`/`families`/
+    # `dispositions`/`rules` tables (#381), which had the same gap under
+    # their own `x.get(...) or []` normalization: a falsy non-list (`{}`,
+    # `0`, `false`) silently passed as though absent, and a truthy scalar
+    # (`tensions: 5`) escaped as a raw TypeError from the list comprehension/
+    # enumerate() that consumed it, in both cases bypassing load_manifest's
+    # ValidationError contract entirely (CodeRabbit review on #411).
     value = s.get(key)
     if value is None:
         return []
