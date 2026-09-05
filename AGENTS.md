@@ -45,7 +45,7 @@ version CI tests against). From the repo root:
 ```sh
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-python -m pytest tests/ -q      # test suite
+python -m pytest tests/ -q --cov=tooling   # test suite + coverage gate (94% floor)
 ruff check . && ruff format --check .   # lint + format
 python -m tooling.cli drift     # skills in sync with their research sources?
 ```

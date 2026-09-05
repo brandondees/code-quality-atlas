@@ -280,8 +280,10 @@ def is_no_findings(text: str) -> bool:
     """Whether a scenario response amounts to "no findings", across the
     headline formats models actually use: `**No findings**`, `## No
     findings`, or `No findings:` with the lens's own healthy-scan sentence
-    appended. A bare `text.lower().startswith("no findings")` catches the
-    plain form but misses the two markdown-prefixed ones;
+    appended. The runbook's own naive baseline (case-sensitive
+    `response.startswith("no findings")`) misses all three; a
+    case-insensitive `text.lower().startswith("no findings")` catches the
+    plain form but still misses the two markdown-prefixed ones.
     docs/runbooks/cross-model-re-gate.md records two re-gates that
     each inflated a reported result because this was retyped by hand instead
     of imported (the second bug: stripping markdown with a regex leaves a
