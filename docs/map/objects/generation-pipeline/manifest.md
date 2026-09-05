@@ -17,9 +17,9 @@ D6 (`docs/open-questions.md`) made docs the source of truth and skills
 derived/regenerable, not hand-maintained. The manifest is the mechanism: one
 file a generator reads, so a doc change (a new research category, a raised
 `eval_min`) flows into every affected `Lens` file by re-running
-`python -m tooling.cli generate`, instead of hand-editing 30+ `SKILL.md`
-files in sync. `python -m tooling.cli drift` catches the gap when a source
-doc changes but the generated skill doesn't.
+`python -m tooling.cli generate`, instead of hand-editing dozens of
+`SKILL.md` files in sync. `python -m tooling.cli drift` catches the gap when
+a source doc changes but the generated skill doesn't.
 
 ## Shape
 
