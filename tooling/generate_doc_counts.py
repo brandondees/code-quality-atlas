@@ -17,23 +17,27 @@ location. A regenerate-and-diff CI gate (mirroring the one already guarding
 `skills/` and `collapsed/`) then catches drift the same way template drift is
 already caught elsewhere — no detector left to fool.
 
-Scope is deliberately the 7 files issue #372 names, not every doc that mentions
-a count — see the file list on `_TEMPLATE` below. docs/session-log.md,
-docs/plans/**, and docs/taxonomy.md stay hand-authored narrative logs that
-intentionally freeze *past* counts, the same way the old sweep's own file
-scope excluded them.
+Scope is deliberately the 7 files issue #372 names plus the 3 issue #420
+added, not every doc that mentions a count — see the file list on
+`_TEMPLATE` below. docs/session-log.md, docs/plans/**, and docs/taxonomy.md
+stay hand-authored narrative logs that intentionally freeze *past* counts,
+the same way the old sweep's own file scope excluded them.
 
-Three locations the old sweep *did* cover are now unmanaged, a deliberate
-narrowing to issue #372's literal file list rather than a continuation of
-prior exclusion (PR #419 review, dees-bot): `tooling/vendor-skills.sh` and
-`tooling/package-account-zips.sh` both hardcode "the 44 standalone skills" in
-their header comments, and docs/open-questions.md's Q8 answer opts into the
-old sweep via a `<!-- doc-counts:live -->` marker ("the eleven repo-shaped
-audits") that nothing reads anymore. All three are correct today; a future
-manifest count change would drift there silently. Tracked as issue #420 rather
-than folded into this module, since covering `.sh` files and a marker-gated
-narrative doc is a different (and larger) shape of problem than the 7 files'
-plain substitution this module already does."""
+Three locations the old sweep *did* cover were briefly unmanaged after #372
+narrowed scope to that issue's literal 7-file list (PR #419 review,
+dees-bot): `tooling/vendor-skills.sh` and `tooling/package-account-zips.sh`
+both hardcode "the 44 standalone skills" in comments and `--help` text, and
+docs/open-questions.md's Q8 answer named the repo-shaped-audit count in
+prose. Issue #420 closed the gap: `CountOccurrence`'s prefix/suffix
+substitution is plain-text and was never markdown-specific, so the two `.sh`
+files needed no code change, only new `_TEMPLATE` entries below. Q8's count
+was spelled out ("eleven") rather than a digit, so it couldn't be matched by
+the digit-only `pattern()` regex as-is; rather than teach this module a
+words-to-digits round trip for one call site, the doc itself was changed to
+the digit form ("11"), which is also what every other `_TEMPLATE` occurrence
+already uses. Q8's now-inert `<!-- doc-counts:live -->` marker (a leftover
+from the old sweep that nothing has read since #372) was removed rather than
+kept as a second, redundant source of truth alongside the anchor entry."""
 
 from __future__ import annotations
 
@@ -274,6 +278,47 @@ _TEMPLATE: tuple[CountOccurrence, ...] = (
         "lenses",
         "don't collide with the ",
         " lens\n  names.",
+    ),
+    # -- tooling/vendor-skills.sh (issue #420) --
+    CountOccurrence(
+        "tooling/vendor-skills.sh",
+        "total",
+        "# Which tree to vendor: the ",
+        " standalone skills (default) or the 4 collapsed",
+    ),
+    CountOccurrence(
+        "tooling/vendor-skills.sh",
+        "total",
+        "  --collapsed   Vendor the 4 collapsed entrypoints (collapsed/skills/) instead of\n"
+        "                the ",
+        " standalone skills (skills/)",
+    ),
+    # -- tooling/package-account-zips.sh (issue #420) --
+    CountOccurrence(
+        "tooling/package-account-zips.sh",
+        "total",
+        "#   tooling/package-account-zips.sh --collapsed     # the 4 collapsed entrypoints instead of the ",
+        " skills",
+    ),
+    CountOccurrence(
+        "tooling/package-account-zips.sh",
+        "total",
+        "# Which tree to package: the ",
+        " standalone skills (default) or the 4 collapsed",
+    ),
+    CountOccurrence(
+        "tooling/package-account-zips.sh",
+        "total",
+        "  --collapsed    Package the 4 collapsed entrypoints (collapsed/skills/) instead\n"
+        "                 of the ",
+        " standalone skills (skills/)",
+    ),
+    # -- docs/open-questions.md (issue #420) --
+    CountOccurrence(
+        "docs/open-questions.md",
+        "repo",
+        "**Yes, and the cron shape is built for detection:** the ",
+        " repo-shaped audits (including `finding-maintainability-hotspots`) are scheduled",
     ),
 )
 
