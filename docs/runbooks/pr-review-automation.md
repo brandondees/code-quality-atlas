@@ -526,9 +526,8 @@ unbounded).
      cleared or flagged (step 3).
   ```
 
-  (For just one repo, name it instead of enumerating — `Sweep the open pull requests
-  in acme/my-app …`. Verified live: a Haiku run enumerated 12 attached repos, rebased
-  the `behind` PRs, and posted review-comment pokes on the conflicted ones.)
+  (A single-repo sweep just names that one repo — `Sweep the open pull requests
+  in acme/my-app …`.)
 
 ### 3. (Optional) merge gate (either model)
 
@@ -891,9 +890,11 @@ rather than assumed.
   review.md` now requires an explicit repo (or comma-separated repo list) in
   `$ARGUMENTS` rather than defaulting to every attached repo, skips
   `update_pull_request_branch` on fork PRs, and caps total review-subagent
-  spawns at 20 per tick. §2's `atlas-rebase-stale.md` picked up the same
-  fork-PR skip, but still has **no repo allow-list** — it still sweeps every
-  attached repo's open PRs in one run (issue #440 tracks closing that; a
-  per-tick action cap doesn't apply to §2, which never spawns review
-  subagents itself). Until #440 is closed, the practical mitigation for §2
-  is attaching only repos you trust equally to that routine.
+  spawns at 20 per tick. Issue #440 closed the remaining gap for §2:
+  `atlas-rebase-stale.md` now requires that same explicit repo scope (a
+  per-tick action cap doesn't apply there, since it never spawns review
+  subagents itself). Neither poller relies on repo attachment at all
+  anymore — both call the GitHub API directly against the named repo(s) in
+  the prompt, so there's no separate "attach only repos you trust" mitigation
+  needed: the sweep's blast radius is exactly the repo scope named in the
+  prompt, never wider.

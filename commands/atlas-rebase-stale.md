@@ -3,7 +3,7 @@ description: >-
   Sweep open PRs for ones that have fallen behind, hit a merge conflict, or
   slipped past a resident reviewer's watch, and poke or re-trigger as needed —
   the polling complement that webhooks can't cover. Cheap-model friendly.
-argument-hint: "<repo, or comma-separated repo list> [label or author to filter by] — a repo scope is required, not optional"
+argument-hint: "<repo, or comma-separated repo list> [label/author filter] — a repo scope is required, not optional"
 allowed-tools: mcp__github__list_pull_requests, mcp__github__pull_request_read, mcp__github__get_commit, mcp__github__update_pull_request_branch, mcp__github__update_pull_request, mcp__github__add_comment_to_pending_review, mcp__github__pull_request_review_write, mcp__github__add_issue_comment, mcp__github__get_me
 ---
 
