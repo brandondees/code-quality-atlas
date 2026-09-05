@@ -352,7 +352,14 @@ jobs:
         with:
           globs: '**/*.md'
       - name: shellcheck
-        if: steps.filter.outputs.shell == 'true'
+        # workflows is included, not just shell: actionlint (below) is gated
+        # on the broader `workflows` filter (.github/**) and shells out to
+        # shellcheck for embedded run: scripts in any workflow file -- a
+        # change confined to a non-workflow file under .github/ (e.g.
+        # .github/dependabot.yml) would set workflows=true/shell=false and
+        # run actionlint with shellcheck nowhere on PATH, silently skipping
+        # its embedded-script checks (dees-bot round-2 review on #379).
+        if: steps.filter.outputs.shell == 'true' || steps.filter.outputs.workflows == 'true'
         # timeout-minutes is a backstop, not the primary fix: normal runtime here
         # is a few seconds, so 3 minutes only bounds a hang, never a real run.
         timeout-minutes: 3
