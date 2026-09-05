@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 import re
+from pathlib import Path
 
 import pytest
 
@@ -13,6 +14,15 @@ from tooling.manifest import (
     _check_comment_truncation,
     load_manifest,
     validate,
+)
+
+ROOT = Path(__file__).resolve().parent.parent
+# CWD-anchored, not a bare relative path (#409): a bare "tests/fixtures/..."
+# broke every one of this line's many literal uses below when pytest ran
+# from outside the repo root.
+_BUILT_FROM_LINE = (
+    f"      - {{ category: 2, source: "
+    f"{ROOT / 'tests' / 'fixtures' / 'research_sample.md'}#2 }}\n"
 )
 
 
@@ -51,14 +61,14 @@ def test_comment_truncation_allows_quoted_and_blockscalar_and_real_comments():
 
 def test_real_manifest_passes_comment_truncation_guard():
     # the shipped manifest must stay clean (and load_manifest enforces the guard)
-    load_manifest("skills/manifest.yaml")
+    load_manifest(str(ROOT / "skills" / "manifest.yaml"))
 
 
 def test_real_manifest_has_cross_quality_tensions():
     # G31: the tensions table must cover pairs where neither side is restraint,
     # so cross-quality collisions get a default instead of falling back to the
     # generic "safer and simpler".
-    m = load_manifest("skills/manifest.yaml")
+    m = load_manifest(str(ROOT / "skills" / "manifest.yaml"))
     cross_quality = [
         t for t in m.synthesizer.tensions if "checking-restraint" not in t.between
     ]
@@ -96,11 +106,11 @@ def test_real_manifest_has_cross_quality_tensions():
         )
         in pairs
     )
-    validate(m)  # the new tensions reference real, distinct lenses
+    validate(m, docs_root=str(ROOT))  # the new tensions reference real, distinct lenses
 
 
 def test_load_manifest_parses_skill_and_sources():
-    m = load_manifest("tests/fixtures/manifest_sample.yaml")
+    m = load_manifest(str(ROOT / "tests" / "fixtures" / "manifest_sample.yaml"))
     assert isinstance(m, Manifest)
     assert m.taxonomy_version == "v0.2"
     assert len(m.skills) == 1
@@ -215,7 +225,13 @@ def _skill(**kw):
         "description": "x",
         "shape": "diff",
         "wave": 1,
-        "built_from": [Source(2, "tests/fixtures/research_sample.md#2")],
+        # CWD-anchored, not a bare relative path (#409): validate() resolves
+        # this against its own docs_root default (".") when a call site
+        # doesn't override it, so a bare "tests/fixtures/..." here broke
+        # every such call when pytest ran from outside the repo root.
+        "built_from": [
+            Source(2, f"{ROOT / 'tests' / 'fixtures' / 'research_sample.md'}#2")
+        ],
     }
     base.update(kw)
     return Skill(**base)
@@ -263,15 +279,14 @@ def test_load_manifest_parses_tier(tmp_path):
         "    shape: diff\n"
         "    wave: 1\n"
         "    tier: floor\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
+        "    built_from:\n" + _BUILT_FROM_LINE,
     )
     m = load_manifest(path)
     assert m.skills[0].tier == "floor"
 
 
 def test_load_manifest_defaults_tier_when_absent():
-    m = load_manifest("tests/fixtures/manifest_sample.yaml")
+    m = load_manifest(str(ROOT / "tests" / "fixtures" / "manifest_sample.yaml"))
     assert m.skills[0].tier == "preference"
 
 
@@ -298,15 +313,14 @@ def test_load_manifest_parses_eval_min(tmp_path):
         "    shape: diff\n"
         "    wave: 1\n"
         "    eval_min: 27\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
+        "    built_from:\n" + _BUILT_FROM_LINE,
     )
     m = load_manifest(path)
     assert m.skills[0].eval_min == 27
 
 
 def test_load_manifest_defaults_eval_min_to_none_when_absent():
-    m = load_manifest("tests/fixtures/manifest_sample.yaml")
+    m = load_manifest(str(ROOT / "tests" / "fixtures" / "manifest_sample.yaml"))
     assert m.skills[0].eval_min is None
 
 
@@ -324,8 +338,7 @@ def test_load_manifest_treats_bare_cross_ref_as_empty_list(tmp_path):
         "    shape: diff\n"
         "    wave: 1\n"
         "    cross_ref:\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
+        "    built_from:\n" + _BUILT_FROM_LINE,
     )
     m = load_manifest(path)
     assert m.skills[0].cross_ref == []
@@ -345,8 +358,7 @@ def test_load_manifest_treats_bare_artifacts_as_empty_list(tmp_path):
         "    shape: diff\n"
         "    wave: 1\n"
         "    artifacts:\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
+        "    built_from:\n" + _BUILT_FROM_LINE,
     )
     m = load_manifest(path)
     assert m.skills[0].artifacts == []
@@ -366,8 +378,7 @@ def test_load_manifest_rejects_non_list_cross_ref(tmp_path):
         "    shape: diff\n"
         "    wave: 1\n"
         "    cross_ref: false\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
+        "    built_from:\n" + _BUILT_FROM_LINE,
     )
     with pytest.raises(ValidationError, match="'cross_ref' must be a list"):
         load_manifest(path)
@@ -383,8 +394,7 @@ def test_load_manifest_rejects_non_list_artifacts(tmp_path):
         "    shape: diff\n"
         "    wave: 1\n"
         '    artifacts: ""\n'
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
+        "    built_from:\n" + _BUILT_FROM_LINE,
     )
     with pytest.raises(ValidationError, match="'artifacts' must be a list"):
         load_manifest(path)
@@ -396,8 +406,7 @@ _BASE_SKILL_YAML = (
     "    description: x\n"
     "    shape: diff\n"
     "    wave: 1\n"
-    "    built_from:\n"
-    "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+    "    built_from:\n" + _BUILT_FROM_LINE
 )
 
 
@@ -423,8 +432,7 @@ def test_load_manifest_rejects_a_non_int_wave(tmp_path):
         "    description: x\n"
         "    shape: diff\n"
         "    wave: { a: 1 }\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
+        "    built_from:\n" + _BUILT_FROM_LINE,
     )
     with pytest.raises(ValidationError, match="'wave' must be an integer"):
         load_manifest(path)
@@ -440,8 +448,7 @@ def test_load_manifest_defaults_wave_to_zero_when_absent(tmp_path):
         "  - name: hunting-silent-failures\n"
         "    description: x\n"
         "    shape: diff\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
+        "    built_from:\n" + _BUILT_FROM_LINE,
     )
     m = load_manifest(path)
     assert m.skills[0].wave == 0
@@ -657,8 +664,7 @@ def test_load_manifest_treats_bare_picker_as_empty_string(tmp_path):
         "    shape: diff\n"
         "    wave: 1\n"
         "    picker:\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
+        "    built_from:\n" + _BUILT_FROM_LINE,
     )
     m = load_manifest(path)
     assert m.skills[0].picker == ""
@@ -681,8 +687,7 @@ def test_load_manifest_rejects_a_non_string_picker(tmp_path):
         "    shape: diff\n"
         "    wave: 1\n"
         "    picker: 42\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
+        "    built_from:\n" + _BUILT_FROM_LINE,
     )
     with pytest.raises(ValidationError, match="'picker' must be a string, got int"):
         load_manifest(path)
@@ -700,8 +705,7 @@ def test_load_manifest_treats_bare_description_as_empty_string(tmp_path):
         "    description:\n"
         "    shape: diff\n"
         "    wave: 1\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
+        "    built_from:\n" + _BUILT_FROM_LINE,
     )
     m = load_manifest(path)
     assert m.skills[0].description == ""
@@ -719,8 +723,7 @@ def test_load_manifest_treats_bare_skill_name_as_empty_string(tmp_path):
         "    description: x\n"
         "    shape: diff\n"
         "    wave: 1\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
+        "    built_from:\n" + _BUILT_FROM_LINE,
     )
     m = load_manifest(path)
     assert m.skills[0].name == ""
@@ -742,8 +745,7 @@ def test_load_manifest_does_not_strip_a_padded_skill_name_before_validation(tmp_
         "    description: x\n"
         "    shape: diff\n"
         "    wave: 1\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n",
+        "    built_from:\n" + _BUILT_FROM_LINE,
     )
     m = load_manifest(path)
     assert m.skills[0].name == " valid-name "
@@ -752,7 +754,11 @@ def test_load_manifest_does_not_strip_a_padded_skill_name_before_validation(tmp_
 
 
 def test_validate_rejects_unresolvable_source():
-    bad = _skill(built_from=[Source(99, "tests/fixtures/research_sample.md#99")])
+    bad = _skill(
+        built_from=[
+            Source(99, f"{ROOT / 'tests' / 'fixtures' / 'research_sample.md'}#99")
+        ]
+    )
     with pytest.raises(ValidationError, match="section #99"):
         validate(Manifest("v0.2", [bad]))
 
@@ -930,9 +936,7 @@ def test_load_manifest_treats_bare_artifact_slug_as_empty_string(tmp_path):
         "    description: x\n"
         "    shape: artifact\n"
         "    wave: 1\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
-        "    artifacts:\n"
+        "    built_from:\n" + _BUILT_FROM_LINE + "    artifacts:\n"
         "      - name: SKILL.md\n"
         "        detect: presence of SKILL.md\n"
         "        rubric: 2\n"
@@ -1042,7 +1046,7 @@ def test_router_route_shapes_must_be_non_empty_if_set():
 
 
 def test_router_route_shapes_defaults_to_none_and_real_manifest_loads_them():
-    real = load_manifest("skills/manifest.yaml")
+    real = load_manifest(str(ROOT / "skills" / "manifest.yaml"))
     decision_routes = [
         r for r in real.router.routes if r.when.startswith("A decision, not a diff")
     ]
@@ -1062,7 +1066,7 @@ def test_valid_router_accepted_and_real_manifest_loads():
         ),
     )
     validate(m)  # no raise
-    real = load_manifest("skills/manifest.yaml")
+    real = load_manifest(str(ROOT / "skills" / "manifest.yaml"))
     assert real.router is not None
     assert all(s.picker for s in real.skills)
 
@@ -1080,9 +1084,7 @@ def test_load_manifest_treats_bare_router_name_as_empty_string(tmp_path):
         "    shape: diff\n"
         "    wave: 1\n"
         "    picker: p\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
-        "router:\n"
+        "    built_from:\n" + _BUILT_FROM_LINE + "router:\n"
         "  name:\n"
         "  description: d\n"
         "  routes:\n"
@@ -1109,9 +1111,7 @@ def test_load_manifest_treats_bare_router_description_as_empty_string(tmp_path):
         "    shape: diff\n"
         "    wave: 1\n"
         "    picker: p\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
-        "router:\n"
+        "    built_from:\n" + _BUILT_FROM_LINE + "router:\n"
         "  name: choosing-review-lenses\n"
         "  description:\n"
         "  routes:\n"
@@ -1136,9 +1136,7 @@ def test_load_manifest_treats_bare_router_body_as_empty_string(tmp_path):
         "    shape: diff\n"
         "    wave: 1\n"
         "    picker: p\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
-        "router:\n"
+        "    built_from:\n" + _BUILT_FROM_LINE + "router:\n"
         "  name: choosing-review-lenses\n"
         "  description: d\n"
         "  routes:\n"
@@ -1164,9 +1162,7 @@ def test_load_manifest_treats_bare_route_note_as_empty_string(tmp_path):
         "    shape: diff\n"
         "    wave: 1\n"
         "    picker: p\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
-        "router:\n"
+        "    built_from:\n" + _BUILT_FROM_LINE + "router:\n"
         "  name: choosing-review-lenses\n"
         "  description: d\n"
         "  routes:\n"
@@ -1192,9 +1188,7 @@ def test_load_manifest_rejects_a_non_string_route_note(tmp_path):
         "    shape: diff\n"
         "    wave: 1\n"
         "    picker: p\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
-        "router:\n"
+        "    built_from:\n" + _BUILT_FROM_LINE + "router:\n"
         "  name: choosing-review-lenses\n"
         "  description: d\n"
         "  routes:\n"
@@ -1221,9 +1215,7 @@ def test_load_manifest_rejects_a_non_string_route_when(tmp_path):
         "    shape: diff\n"
         "    wave: 1\n"
         "    picker: p\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
-        "router:\n"
+        "    built_from:\n" + _BUILT_FROM_LINE + "router:\n"
         "  name: choosing-review-lenses\n"
         "  description: d\n"
         "  routes:\n"
@@ -1246,9 +1238,7 @@ def test_load_manifest_rejects_a_non_string_artifact_name_or_detect(tmp_path):
         "    description: x\n"
         "    shape: artifact\n"
         "    wave: 1\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
-        "    artifacts:\n"
+        "    built_from:\n" + _BUILT_FROM_LINE + "    artifacts:\n"
         "      - { name: 7, detect: y, rubric: 2, slug: x }\n",
     )
     with pytest.raises(ValidationError, match="'name' must be a string, got int"):
@@ -1268,9 +1258,7 @@ def test_load_manifest_treats_bare_router_routes_as_empty_list(tmp_path):
         "    shape: diff\n"
         "    wave: 1\n"
         "    picker: p\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
-        "router:\n"
+        "    built_from:\n" + _BUILT_FROM_LINE + "router:\n"
         "  name: choosing-review-lenses\n"
         "  description: d\n"
         "  routes:\n",
@@ -1296,9 +1284,7 @@ def test_load_manifest_rejects_router_with_no_routes_key_at_all(tmp_path):
         "    shape: diff\n"
         "    wave: 1\n"
         "    picker: p\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
-        "router:\n"
+        "    built_from:\n" + _BUILT_FROM_LINE + "router:\n"
         "  name: choosing-review-lenses\n"
         "  description: d\n",
     )
@@ -1321,9 +1307,7 @@ def test_load_manifest_rejects_non_mapping_route_entry(tmp_path):
         "    shape: diff\n"
         "    wave: 1\n"
         "    picker: p\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
-        "router:\n"
+        "    built_from:\n" + _BUILT_FROM_LINE + "router:\n"
         "  name: choosing-review-lenses\n"
         "  description: d\n"
         "  routes:\n"
@@ -1362,9 +1346,7 @@ def test_load_manifest_rejects_non_mapping_router_section(tmp_path, bad_router_y
         "    shape: diff\n"
         "    wave: 1\n"
         "    picker: p\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
-        + bad_router_yaml,
+        "    built_from:\n" + _BUILT_FROM_LINE + bad_router_yaml,
     )
     with pytest.raises(ValidationError, match="router: must be a mapping"):
         load_manifest(path)
@@ -1376,8 +1358,7 @@ _VALID_SKILL_YAML = (
     "    shape: diff\n"
     "    wave: 1\n"
     "    picker: p\n"
-    "    built_from:\n"
-    "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
+    "    built_from:\n" + _BUILT_FROM_LINE
 )
 
 
@@ -1481,7 +1462,9 @@ def _two_lens_skills():
             name="checking-restraint",
             picker="brake",
             design=True,
-            built_from=[Source(4, "tests/fixtures/research_sample.md#4")],
+            built_from=[
+                Source(4, f"{ROOT / 'tests' / 'fixtures' / 'research_sample.md'}#4")
+            ],
         ),
     ]
 
@@ -1557,7 +1540,7 @@ def test_synthesizer_name_must_not_collide_with_a_lens():
 
 def test_valid_synthesizer_accepted_and_real_manifest_loads():
     validate(Manifest("v0.2", _two_lens_skills(), synthesizer=_synth()))  # no raise
-    real = load_manifest("skills/manifest.yaml")
+    real = load_manifest(str(ROOT / "skills" / "manifest.yaml"))
     assert real.synthesizer is not None
     assert real.synthesizer.severity_order[0] == "Blocker"
     assert all(t.between[0] != t.between[1] for t in real.synthesizer.tensions)
@@ -1575,9 +1558,7 @@ def test_load_manifest_treats_bare_synthesizer_name_as_empty_string(tmp_path):
         "    description: x\n"
         "    shape: diff\n"
         "    wave: 1\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
-        "synthesizer:\n"
+        "    built_from:\n" + _BUILT_FROM_LINE + "synthesizer:\n"
         "  name:\n"
         "  description: d\n"
         "  severity_order: [Blocker, Major, Minor, Nit]\n",
@@ -1601,9 +1582,7 @@ def test_load_manifest_treats_bare_synthesizer_description_as_empty_string(tmp_p
         "    description: x\n"
         "    shape: diff\n"
         "    wave: 1\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
-        "synthesizer:\n"
+        "    built_from:\n" + _BUILT_FROM_LINE + "synthesizer:\n"
         "  name: synthesizing-review-findings\n"
         "  description:\n"
         "  severity_order: [Blocker, Major, Minor, Nit]\n",
@@ -1623,9 +1602,7 @@ def test_load_manifest_treats_bare_tension_about_and_resolve_as_empty_string(tmp
         "    description: x\n"
         "    shape: diff\n"
         "    wave: 1\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
-        "synthesizer:\n"
+        "    built_from:\n" + _BUILT_FROM_LINE + "synthesizer:\n"
         "  name: synthesizing-review-findings\n"
         "  description: d\n"
         "  severity_order: [Blocker, Major, Minor, Nit]\n"
@@ -1653,9 +1630,7 @@ def test_load_manifest_treats_bare_synthesizer_tensions_as_empty_list(tmp_path):
         "    description: x\n"
         "    shape: diff\n"
         "    wave: 1\n"
-        "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n"
-        "synthesizer:\n"
+        "    built_from:\n" + _BUILT_FROM_LINE + "synthesizer:\n"
         "  name: synthesizing-review-findings\n"
         "  description: d\n"
         "  severity_order: [Blocker, Major, Minor, Nit]\n"
@@ -1669,6 +1644,9 @@ def test_load_manifest_treats_bare_synthesizer_tensions_as_empty_list(tmp_path):
 
 
 def _manifest_with_body(tmp_path, body: str) -> str:
+    # CWD-anchored source path (#409): a bare "tests/fixtures/..." literal
+    # here broke every caller when pytest ran from outside the repo root.
+    research_sample = ROOT / "tests" / "fixtures" / "research_sample.md"
     p = tmp_path / "manifest.yaml"
     p.write_text(
         "taxonomy_version: v0\n"
@@ -1678,7 +1656,7 @@ def _manifest_with_body(tmp_path, body: str) -> str:
         "    shape: diff\n"
         "    wave: 1\n"
         "    built_from:\n"
-        "      - { category: 2, source: tests/fixtures/research_sample.md#2 }\n" + body
+        f"      - {{ category: 2, source: {research_sample}#2 }}\n" + body
     )
     return str(p)
 
@@ -1785,7 +1763,7 @@ def test_validate_rejects_mode_without_triggers():
 
 
 def test_real_manifest_declares_three_modes():
-    m = load_manifest("skills/manifest.yaml")
+    m = load_manifest(str(ROOT / "skills" / "manifest.yaml"))
     names = [mode.name for mode in m.modes]
     assert names == ["triage", "review", "comprehensive"]
     # comprehensive must pin the floor at the least-severe level so long-tail findings surface
@@ -1987,7 +1965,7 @@ def test_real_manifest_declares_four_entrypoints_covering_all_lenses():
     # a divergence between the two would otherwise go unnoticed (#390).
     from tooling.generate_collapsed import entrypoint_lenses
 
-    m = load_manifest("skills/manifest.yaml")
+    m = load_manifest(str(ROOT / "skills" / "manifest.yaml"))
     assert {e.name for e in m.entrypoints} == {
         "reviewing-a-change",
         "auditing-a-repository",
@@ -2018,3 +1996,40 @@ def test_validate_rejects_bad_mode_name():
     ]
     with pytest.raises(ValidationError, match="invalid mode name"):
         validate(Manifest("v0", [_skill()], synthesizer=_syn(), modes=bad))
+
+
+def test_no_test_module_calls_load_manifest_with_a_bare_relative_path():
+    """The same CWD-relative-literal bug (`pytest` run from outside the repo
+    root fails because `load_manifest` -- which always opens its argument
+    directly, with no docs_root involved -- was called with a bare relative
+    string) recurred three times: #390 fixed five modules, #409 found seven
+    more bare `load_manifest` calls against the manifest's own path in this
+    module, and
+    #409's own follow-up (#438) found 13 more in test_generate.py and one
+    more in test_collapsed.py -- because each fix patched only the
+    instances a manual audit happened to find, with nothing to catch a
+    fourth. After every one of those fixes, every real `load_manifest` call
+    in tests/ is anchored on ROOT (e.g. `str(ROOT / "skills" /
+    "manifest.yaml")`) instead of a bare quoted literal, so a bare literal
+    argument reappearing there is exactly this regression (dees-bot review
+    on #438 suggested this guard).
+
+    Deliberately scoped to `load_manifest` only, not `Source(...)`: a bare
+    relative `Source` path is safe whenever the caller supplies an absolute
+    `docs_root` at its own call site (several already-fixed modules do
+    exactly that), so flagging every `Source(...)` literal would false-
+    positive on that legitimate, already-CWD-safe pattern instead of the
+    real bug -- a relative path with no absolute anchor anywhere in the
+    resolution chain."""
+    call_re = re.compile(
+        r"""\bload_manifest\(\s*["'](?:skills/manifest\.yaml|tests/fixtures/[^"']*)["']"""
+    )
+    offenders = []
+    for path in sorted((ROOT / "tests").glob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        for m in call_re.finditer(text):
+            offenders.append(f"{path.relative_to(ROOT)}: {m.group(0)!r}")
+    assert not offenders, (
+        "bare CWD-relative load_manifest(...) call(s) found -- anchor on "
+        f"ROOT instead, the same fix applied for #390/#409/#438: {offenders}"
+    )
