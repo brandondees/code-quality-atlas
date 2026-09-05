@@ -89,6 +89,43 @@ the folder (it avoids the interactive `/plugin` command):
 }
 ```
 
+> **Pinning (issue #388).** The snippet above tracks `main` — every session
+> installs whatever commit is there the moment it starts, including the three
+> `SessionStart`/`PostToolUse`/`SessionEnd` hooks that then run unattended for
+> that whole session. Claude Code's **marketplace**-source schema (what
+> `extraKnownMarketplaces` uses) accepts a `ref` — but only a **branch or
+> tag, not a commit SHA**: exact-commit pinning exists only one level down,
+> on a *plugin* source inside a marketplace's own `marketplace.json`, a
+> schema this repo's consumers can't reach from their own `settings.json`
+> (confirmed against Claude Code's own docs, "Marketplace sources vs plugin
+> sources" — don't take this at face value either, re-check before relying
+> on it, since the schema can change):
+>
+> ```json
+> {
+>   "extraKnownMarketplaces": {
+>     "code-quality-atlas": {
+>       "source": {
+>         "source": "github",
+>         "repo": "brandondees/code-quality-atlas",
+>         "ref": "<branch-or-tag>"
+>       }
+>     }
+>   }
+> }
+> ```
+>
+> This repo doesn't currently cut release tags — every update ships as a
+> plain commit to `main` (see "How updates reach you" below) — so today a
+> `ref` here can only pin to a branch: your own fork's frozen branch, for
+> instance, advanced deliberately after you've reviewed what changed. That's
+> real integrity over tracking `main` outright, but it is **not** the
+> commit-level pin `tooling/vendor-skills.sh` already gives a vendored
+> install via `.atlas-vendored` (`distribution.md`'s Channel B) — if you need
+> that level of guarantee for the plugin's hooks specifically, vendoring (or
+> asking upstream to start cutting tagged releases) is the path, not this
+> field.
+
 For the **collapsed** form instead, keep the same `extraKnownMarketplaces` block
 (one marketplace serves both) and swap the `enabledPlugins` key to
 `"code-quality-atlas-collapsed@code-quality-atlas": true` — enable one form, not
@@ -126,7 +163,14 @@ the collapsed form by re-enabling its account skills or re-running
 > silently run a months-old copy — the tell is a session reporting that
 > `commands/atlas-review-pr.md` or `REVIEW.md` is *"not in the repo or its
 > history."* For any repo a routine reviews, prefer the **settings-based install**
-> (always fresh per session) or **enable auto-update**.
+> (always fresh per session) or **enable auto-update**. "Always fresh" is a
+> tradeoff, though, not a free lunch: it also means every session runs
+> whatever lands on `main` before you've had a chance to look at it, for
+> hooks that then execute unattended. If you'd rather review before you
+> trust, pin the settings-based install's `ref` to a branch you control and
+> vet (see above — it's branch/tag-level, not a commit SHA) and advance it
+> deliberately, or keep an interactive install with auto-update off and
+> refresh it on your own schedule.
 
 ## Keeping an interactive install current (opt-in)
 

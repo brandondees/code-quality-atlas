@@ -211,11 +211,17 @@ PR-triggered routine session can be the PR head. If the base ref has no `REVIEW.
 to the canonical template at `templates/REVIEW.md` — read it from the plugin
 clone if you can locate it, otherwise fetch it from the source repo with
 `mcp__github__get_file_contents` (`owner: brandondees`, `repo:
-code-quality-atlas`, `path: templates/REVIEW.md`, `ref: refs/heads/main`), which is a fixed, locatable
-path that works in web/routine sessions where the plugin clone location is
-unknown. It defines the severity floor per round, the round cap, and the
-approve-on-clean behavior. The repo's own `REVIEW.md` always wins over the
-template.
+code-quality-atlas`, `path: templates/REVIEW.md`, `ref:` the commit noted in
+the reviewed repo's own `.claude/skills/.atlas-vendored` at the base ref
+(`source=...@<sha>`) if that file exists there **and names an actual commit,
+not the `<self>` self-vendoring sentinel** `tooling/vendor-skills.sh` writes
+when a repo vendors the suite into itself, otherwise `refs/heads/main`
+(issue #388: prefer the commit the reviewed repo already vetted by
+vendoring over always trusting whatever is at `main`'s HEAD right now) —
+which is a fixed, locatable path that works in web/routine sessions where
+the plugin clone location is unknown. It defines the severity floor per
+round, the round cap, and the approve-on-clean behavior. The repo's own
+`REVIEW.md` always wins over the template.
 
 Read the team-preferences overlay the same way, in this step, so the lenses
 don't each re-resolve it off the checkout: `.code-quality-atlas/preferences.md`
@@ -333,8 +339,15 @@ line.
         checkout of the base, so the review runs at the suite version the
         reviewed repo pinned, not whatever the source repo holds today;
      2. else the source repo (`owner: brandondees`, `repo:
-        code-quality-atlas`, `path: skills/<lens-name>/SKILL.md`, `ref:
-        refs/heads/main`, and its `reference/` files as needed) — the same
+        code-quality-atlas`, `path: skills/<lens-name>/SKILL.md`, `ref:` the
+        commit noted in the reviewed repo's own `.claude/skills/.atlas-vendored`
+        at the base ref if that file exists there **and names an actual
+        commit, not the `<self>` self-vendoring sentinel**
+        `tooling/vendor-skills.sh` writes when a repo vendors the suite into
+        itself (issue #388 — even a repo with no vendored copy of *this*
+        lens may have vetted the suite at a commit via other vendored
+        lenses), otherwise `refs/heads/main`, and
+        its `reference/` files as needed) — the same
         fixed, locatable path used for the `templates/REVIEW.md` fallback in
         step 3, for a repo with neither a vendored copy nor an
         account-enabled skill, and for every skill whenever the gate at the
