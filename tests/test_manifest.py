@@ -1918,6 +1918,11 @@ def test_validate_rejects_orphaned_lens():
 
 
 def test_real_manifest_declares_four_entrypoints_covering_all_lenses():
+    # Coverage computed via entrypoint_lenses itself (tooling/generate_collapsed.py)
+    # rather than a hand-copied re-implementation of its shape/design matching —
+    # a divergence between the two would otherwise go unnoticed (#390).
+    from tooling.generate_collapsed import entrypoint_lenses
+
     m = load_manifest("skills/manifest.yaml")
     assert {e.name for e in m.entrypoints} == {
         "reviewing-a-change",
@@ -1925,11 +1930,7 @@ def test_real_manifest_declares_four_entrypoints_covering_all_lenses():
         "reviewing-a-decision",
         "reviewing-an-artifact",
     }
-    covered = set()
-    for ep in m.entrypoints:
-        for s in m.skills:
-            if s.shape in ep.shapes or (ep.include_design and s.design):
-                covered.add(s.name)
+    covered = {s.name for ep in m.entrypoints for s in entrypoint_lenses(m, ep)}
     assert {s.name for s in m.skills} <= covered  # every lens covered
 
 
