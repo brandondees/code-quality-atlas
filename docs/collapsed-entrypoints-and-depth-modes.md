@@ -86,7 +86,7 @@ collapsed/skills/reviewing-a-change/
     │   ├── body.md               # when-to-use + full heuristics + examples — the review content (what the entrypoint Reads)
     │   ├── tool-rules.md         # static-analysis rules — deeper level, linked from body.md, opened on demand
     │   └── sources.md            # research provenance — deeper level, linked from body.md, opened on demand
-    ├── tool-evidence.md          # the tool pre-pass (generate_prepass), bundled so no separate skill invocation is needed
+    ├── tool-evidence.md          # the tool pre-pass (build_collapsed_prepass), bundled so no separate skill invocation is needed
     └── synthesis.md              # synthesizer procedure incl. the per-mode severity-floor policy
 ```
 
@@ -169,7 +169,8 @@ The router (`built_from: []`) and the 4 entrypoints share generated routing logi
 - **Generator additions:**
   - `build_entrypoint_md(manifest, entrypoint)` and `generate_collapsed(manifest)` —
     emit the 4 folders, each with bundled `reference/lenses/*.md`,
-    `reference/tool-evidence.md` (via `generate_prepass`), and
+    `reference/tool-evidence.md` (via `build_collapsed_prepass`, from
+    `tooling/generate_prepass.py`), and
     `reference/synthesis.md`, plus `collapsed/.claude-plugin/plugin.json`.
   - Router (`build_router_md`) and synthesizer generation extended with the
     relevance-ranking + mode/floor logic, so the standalone form matches.

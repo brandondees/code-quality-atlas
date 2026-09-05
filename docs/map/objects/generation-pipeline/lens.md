@@ -68,11 +68,12 @@ Example entry: `skills/manifest.yaml:3-28` (`hunting-silent-failures`).
   `tooling.cli generate`; any `CollapsedEntrypoint` that composes it; the
   router (`choosing-review-lenses`) picker text; the self-vendored copy at
   `.claude/skills/<name>/`, which `tooling/vendor-skills.sh .` must re-copy
-  to stay in sync — gated by `tests/test_self_vendored_skills_sync.py`
+  to stay in sync — gated by
+  `tests/test_self_vendored_skills_sync.py::test_vendored_skills_match_their_source`
 - **Does not hit:** other lenses' generated files (each regenerates
   independently from its own manifest entry); the lens's own
   `examples.md`/`evals/eval.json` — hand-authored and never overwritten by
-  regeneration (see `generate`'s own card)
+  regeneration (see `docs/map/processes/generate.md`)
 
 ## Surfaces
 
