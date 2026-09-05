@@ -499,7 +499,7 @@ def test_iac_route_note_stays_attributed_when_repo_lens_is_filtered_out():
     # correct however the row gets filtered.
     from tooling.manifest import load_manifest
 
-    m = load_manifest("skills/manifest.yaml")
+    m = load_manifest(str(ROOT / "skills" / "manifest.yaml"))
     ep_change = next(e for e in m.entrypoints if e.name == "reviewing-a-change")
     md = build_entrypoint_md(m, ep_change)
     line = next(line for line in md.splitlines() if "Infrastructure-as-code" in line)
