@@ -55,9 +55,15 @@ label/author filter if given). For each, read its mergeable state via
 ## 2. Classify each PR
 
 - **Behind but auto-mergeable** (`mergeable_state` = `behind`, no conflicts):
-  bring it up to date with `mcp__github__update_pull_request_branch`. This emits
-  a `synchronize` event, which re-triggers the reviewer and any auto-fix session
-  naturally — no comment needed.
+  **first check whether the PR is from a fork**
+  (`head.repo.full_name != base.repo.full_name`) — a fork PR's branch belongs
+  to the contributor's own repo, not this one, and `update_pull_request_branch`
+  writes a merge commit onto it, which is more write power than this sweep
+  should exercise on someone else's fork without their say-so (issue #387).
+  **Skip fork PRs here** and note the skip in the final report. For same-repo
+  PRs, bring it up to date with `mcp__github__update_pull_request_branch`. This
+  emits a `synchronize` event, which re-triggers the reviewer and any auto-fix
+  session naturally — no comment needed.
 - **Conflicted** (`mergeable_state` = `dirty`): do **not** try to
   resolve it — that's a code judgment for a full session. Flag it where the PR
   author's auto-fix subscription will actually see it: that subscription reads
@@ -226,6 +232,7 @@ skipped).
 ## 5. Report
 
 End with a one-line summary: how many PRs were updated, conflict-poked,
-coverage-poked, and skipped, plus any stuck ACK locks cleared or flagged
-(step 3). Post nothing to GitHub beyond the pokes above, the coverage
-escalation's review re-requests (§3), and any `delete_pending` calls.
+coverage-poked, skipped, and fork-PR branch-updates skipped (step 2), plus
+any stuck ACK locks cleared or flagged (step 3). Post nothing to GitHub
+beyond the pokes above, the coverage escalation's review re-requests (§3),
+and any `delete_pending` calls.
