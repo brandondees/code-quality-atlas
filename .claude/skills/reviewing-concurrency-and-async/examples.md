@@ -18,6 +18,13 @@ question. Do this trace for every candidate before concluding there's nothing
 to flag — "no findings" is a conclusion the trace must reach, not a default
 for code that doesn't obviously mention threads, locks, or races.
 
+## Contents
+
+- [Bad → finding](#bad--finding)
+- [Bad → finding](#bad--finding-1)
+- [Bad → finding](#bad--finding-2)
+- [Good → no finding](#good--no-finding)
+
 ## Bad → finding
 
 **Input (diff):**

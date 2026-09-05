@@ -2,6 +2,17 @@
 
 Report each distinct issue as its own numbered finding, naming the **specific standard** the code fails (the RFC / spec / protocol) and citing the code at the boundary. This lens owns conformance to an *external* standard; it **defers** the contract we author to #13, internal time/encoding correctness to #4, idiom to #8, and config validity to #26 — and routes the security verdict on an auth-flow defect to #14. When the code already speaks the standard correctly, the entire response is exactly "No findings".
 
+## Contents
+
+- [Bad → finding (non-RFC-3339 date on the wire)](#bad--finding-non-rfc-3339-date-on-the-wire)
+- [Bad → finding (OAuth `state` not validated — detect-and-route)](#bad--finding-oauth-state-not-validated--detect-and-route)
+- [Bad → finding (cron-dialect mismatch)](#bad--finding-cron-dialect-mismatch)
+- [Good → no finding](#good--no-finding)
+- [Bad → finding (breaking change, unreflected version)](#bad--finding-breaking-change-unreflected-version)
+- [Bad → finding (co-existence: hardcoded shared resource)](#bad--finding-co-existence-hardcoded-shared-resource)
+- [Good → no finding (breaking change, correctly versioned)](#good--no-finding-breaking-change-correctly-versioned)
+- [Not applicable → no boundary-crossing surface](#not-applicable--no-boundary-crossing-surface)
+
 ## Bad → finding (non-RFC-3339 date on the wire)
 
 **Input (diff):**

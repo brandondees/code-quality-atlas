@@ -112,6 +112,36 @@ def test_examples_open_with_an_intro_line(path: Path):
     )
 
 
+# A file over this many lines gets a `## Contents` ToC, right after the intro
+# and before the first example heading. Mirrors `_TOC_LINE_THRESHOLD` in
+# tooling/generate_collapsed.py, which mechanizes the same convention for
+# *generated* collapsed bundles — but examples.md is hand-authored (the
+# generator inlines it, never writes it), so that generator threshold has
+# nothing to say about these files. The convention here was set by precedent,
+# not generation: PR #165 added the ToC to the first files that crossed 100
+# lines, and the comment beside `_TOC_LINE_THRESHOLD` records why 100 was
+# chosen. This guard is the missing third check for that already-adopted
+# convention, alongside the arrow-separator and intro-line guards above.
+_EXAMPLES_TOC_LINE_THRESHOLD = 100
+
+
+@pytest.mark.parametrize("path", EXAMPLES, ids=lambda p: p.parent.name)
+def test_long_examples_have_a_contents_toc(path: Path):
+    text = path.read_text(encoding="utf-8")
+    line_count = len(text.splitlines())
+    if line_count <= _EXAMPLES_TOC_LINE_THRESHOLD:
+        pytest.skip(
+            f"{line_count} lines, at or under the {_EXAMPLES_TOC_LINE_THRESHOLD}-line threshold"
+        )
+    assert _section_headings(text)[:1] == ["Contents"], (
+        f"{path.relative_to(ROOT)}: {line_count} lines (over "
+        f"{_EXAMPLES_TOC_LINE_THRESHOLD}) needs a `## Contents` ToC — a bullet "
+        "per `## ` heading, in order — placed right after the intro and before "
+        "the first example heading. See skills/auditing-deployment-and-trust-"
+        "boundaries/examples.md for the reference format."
+    )
+
+
 # --- the guards must fail on drift, not merely pass on a fixed tree ----------
 
 
@@ -143,3 +173,24 @@ def test_separator_check_flags_the_separator_not_the_prose(heading: str, flagged
 def test_intro_check_rejects_a_file_that_starts_with_a_heading():
     assert not _intro("# Examples — a-lens\n\n## Bad → finding\n\nbody\n")
     assert _intro("# Examples — a-lens\n\nReport each issue.\n\n## Bad → finding\n")
+
+
+def test_toc_check_fails_without_a_toc_and_passes_with_one():
+    """The guard must fail on a long file missing its ToC, not merely pass on
+    a fixed tree — same discipline as the separator/intro self-tests above."""
+    filler = "\n".join(f"line {i}" for i in range(_EXAMPLES_TOC_LINE_THRESHOLD + 5))
+    no_toc = f"# Examples — a-lens\n\nReport each issue.\n\n{filler}\n\n## Bad → finding\n\nbody\n\n## Good → no finding\n\nbody\n"
+    assert len(no_toc.splitlines()) > _EXAMPLES_TOC_LINE_THRESHOLD
+    assert _section_headings(no_toc)[:1] != ["Contents"]
+
+    with_toc = (
+        f"# Examples — a-lens\n\nReport each issue.\n\n{filler}\n\n"
+        "## Contents\n\n- [Bad → finding](#bad--finding)\n"
+        "- [Good → no finding](#good--no-finding)\n\n"
+        "## Bad → finding\n\nbody\n\n## Good → no finding\n\nbody\n"
+    )
+    assert len(with_toc.splitlines()) > _EXAMPLES_TOC_LINE_THRESHOLD
+    assert _section_headings(with_toc)[:1] == ["Contents"]
+
+    short = "# Examples — a-lens\n\nReport each issue.\n\n## Bad → finding\n\nbody\n"
+    assert len(short.splitlines()) <= _EXAMPLES_TOC_LINE_THRESHOLD

@@ -4,6 +4,14 @@ Report each distinct issue as its own numbered finding. When the input is correc
 at 3am, can on-call see what this code is doing, why it failed, and turn it off
 without a redeploy?
 
+## Contents
+
+- [Bad → finding](#bad--finding)
+- [Bad → finding](#bad--finding-1)
+- [Good → no finding](#good--no-finding)
+- [Good → no finding (trivial, reversible helper)](#good--no-finding-trivial-reversible-helper)
+- [Not applicable → outside this lens's scope](#not-applicable--outside-this-lenss-scope)
+
 ## Bad → finding
 
 **Input (diff):**

@@ -2,6 +2,16 @@
 
 Report each distinct issue as its own numbered finding, naming the specific pattern and citing the code. This lens **detects and routes** — surface every finding with evidence and route the *decision* (consent-as-law → #27 / legal, product trade-off → product, a11y mechanics → #23); never silently drop a finding because "that's product's call," and never adjudicate one that isn't engineering's. When the flow treats the user honestly, the entire response is exactly "No findings".
 
+## Contents
+
+- [Bad → finding (manipulative default + consent symmetry)](#bad--finding-manipulative-default--consent-symmetry)
+- [Bad → finding (discriminatory business logic)](#bad--finding-discriminatory-business-logic)
+- [Bad → finding (fabricated urgency + obstruction)](#bad--finding-fabricated-urgency--obstruction)
+- [Good → no finding](#good--no-finding)
+- [Bad → finding (dishonest state signal)](#bad--finding-dishonest-state-signal)
+- [Good → no finding (consent actually wired)](#good--no-finding-consent-actually-wired)
+- [Not applicable → no user-facing behavior](#not-applicable--no-user-facing-behavior)
+
 ## Bad → finding (manipulative default + consent symmetry)
 
 **Input (diff):**

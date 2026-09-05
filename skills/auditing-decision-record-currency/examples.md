@@ -22,6 +22,14 @@ status is internally consistent, every stated trigger's condition is
 unmet, no adopted technology is EOL, and every record is still referenced,
 report exactly "No findings: decision records are current".
 
+## Contents
+
+- [Bad → finding](#bad--finding)
+- [Good → no finding](#good--no-finding)
+- [Bad → finding (revisit-trigger met, routed to its owner)](#bad--finding-revisit-trigger-met-routed-to-its-owner)
+- [Bad → finding (in-diff suppression note ignored)](#bad--finding-in-diff-suppression-note-ignored)
+- [Not applicable → no decision-record archive](#not-applicable--no-decision-record-archive)
+
 ## Bad → finding
 
 **Input (decision-record scan; repo has 27 contributors per CODEOWNERS, no `redis` in current lockfile):**

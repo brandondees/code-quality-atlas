@@ -7,6 +7,15 @@ model is permitted to *do*; it **defers** the model call itself to #25
 and the tool *contract* to #13. When the action surface is already least-privilege,
 gated, and bounded, the entire response is exactly "No findings".
 
+## Contents
+
+- [Bad → finding (over-broad tool — ASI02 least-privilege)](#bad--finding-over-broad-tool--asi02-least-privilege)
+- [Bad → finding (unbounded loop + ungated action — ASI01/ASI08)](#bad--finding-unbounded-loop--ungated-action--asi01asi08)
+- [Bad → finding (token passthrough / confused deputy — ASI03, detect-and-route)](#bad--finding-token-passthrough--confused-deputy--asi03-detect-and-route)
+- [Good → no finding](#good--no-finding)
+- [Good → no finding (sandboxed execution)](#good--no-finding-sandboxed-execution)
+- [Not applicable → no action surface](#not-applicable--no-action-surface)
+
 ## Bad → finding (over-broad tool — ASI02 least-privilege)
 
 **Input (diff):**

@@ -6,7 +6,9 @@ Surfaced during the phase-1 research pass (2026-06-08). These are **structural**
 
 Several factors legitimately appear under multiple categories. For the *map* that's fine (it's a graph). For *skills* it's a hazard: two skills flagging the same issue produces duplicate, possibly-conflicting findings. Each concern below needs one owning skill; the others reference it.
 
-| Concern | Appears in | Proposed owner (TBD phase 2) |
+**Update (2026-09-05):** phase 2 (skill-suite architecture) is long since built — every category named in the "Owner" column below shipped as a real lens (e.g. #18 → `auditing-dependencies-and-supply-chain`, #27 → `auditing-compliance-and-provenance`, #26 → `auditing-config-and-build-hygiene`, #16 → `reviewing-observability-and-operability`, #4 → `tracing-correctness-and-invariants`, #23 → `reviewing-accessibility-and-i18n`, #7 → `reviewing-naming-and-readability`), each carrying this table's single-owner split in its manifest `cross_ref`/dedupe notes. "TBD phase 2" below is a phase-1-era label; the assignments were decided and built, not left open.
+
+| Concern | Appears in | Owner (built) |
 |---|---|---|
 | Dependency / CVE / supply-chain | #14 security, #18 deps, #25 (LLM03) | #18, with #14 deferring to it |
 | PII / sensitive-data handling | #14 security, #16 logging, #27 compliance | #27 detects, #14/#16 enforce at their boundary |
