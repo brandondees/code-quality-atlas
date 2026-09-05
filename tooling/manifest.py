@@ -764,39 +764,7 @@ def _optional_str_list(mapping: dict, key: str, where: str) -> list[str] | None:
     return list(value)
 
 
-def load_manifest(path: str) -> Manifest:
-    # A manifest file with invalid UTF-8 bytes must surface as a
-    # ValidationError naming the file, same as every other malformed-input
-    # case here — not a raw UnicodeDecodeError escaping to a caller that
-    # only catches (OSError, ValidationError) (CodeRabbit review on #412;
-    # mirrors the existing (OSError, UnicodeError) guard around a *source*
-    # file's own read in `validate`, just applied to the manifest itself).
-    try:
-        with open(path, encoding="utf-8") as fh:
-            raw = fh.read()
-    except UnicodeError as exc:
-        raise ValidationError(f"{path}: not valid UTF-8: {exc}") from exc
-    _check_comment_truncation(raw, path)
-    # Syntactically-invalid YAML must surface the same way every other
-    # malformed-input case in this function does — as a ValidationError naming
-    # the file — not as a raw yaml.YAMLError escaping to a caller that only
-    # catches ValidationError (found by the atlas's own review of PR #159:
-    # a caller assuming "OSError or ValidationError covers every load failure"
-    # crashed uncaught on a bad manifest instead of degrading gracefully).
-    try:
-        data = yaml.safe_load(raw)
-    except yaml.YAMLError as exc:
-        raise ValidationError(f"{path}: invalid YAML: {exc}") from exc
-    # Guard the parsed structure before indexing into it, so a malformed or
-    # partially-written manifest yields a ValidationError naming the file and the
-    # offending key rather than a raw TypeError/KeyError into manifest.py internals.
-    if not isinstance(data, dict):
-        raise ValidationError(
-            f"{path}: expected a YAML mapping, got {type(data).__name__}"
-        )
-    for key in ("skills", "taxonomy_version"):
-        if key not in data:
-            raise ValidationError(f"{path}: missing required key {key!r}")
+def _load_skills(data: dict, path: str) -> list[Skill]:
     if not isinstance(data["skills"], list):
         raise ValidationError(
             f"{path}: 'skills' must be a list, got {type(data['skills']).__name__}"
@@ -860,110 +828,122 @@ def load_manifest(path: str) -> Manifest:
             raise ValidationError(f"skill #{i}: missing field {e}") from e
         except ValueError as e:  # malformed Source string
             raise ValidationError(f"skill #{i}: {e}") from e
-    router = None
-    if "router" in data:
-        r = data["router"]
-        if not isinstance(r, dict):
-            raise ValidationError(f"router: must be a mapping, got {type(r).__name__}")
-        try:
-            raw_routes = r["routes"]
-            if raw_routes is not None and not isinstance(raw_routes, list):
-                raise ValidationError(
-                    f"router: 'routes' must be a list, got {type(raw_routes).__name__}"
+    return skills
+
+
+def _load_router(data: dict) -> Router | None:
+    if "router" not in data:
+        return None
+    r = data["router"]
+    if not isinstance(r, dict):
+        raise ValidationError(f"router: must be a mapping, got {type(r).__name__}")
+    try:
+        raw_routes = r["routes"]
+        if raw_routes is not None and not isinstance(raw_routes, list):
+            raise ValidationError(
+                f"router: 'routes' must be a list, got {type(raw_routes).__name__}"
+            )
+        return Router(
+            name=_prose(r, "name", "router", null_ok=True, strip=False),
+            description=_prose(r, "description", "router", null_ok=True),
+            routes=[
+                Route(
+                    when=_prose(x, "when", "router route"),
+                    run=_str_list(x, "run", "router route"),
+                    note=_prose(x, "note", "router route", required=False),
+                    shapes=_optional_str_list(x, "shapes", "router route"),
                 )
-            router = Router(
-                name=_prose(r, "name", "router", null_ok=True, strip=False),
-                description=_prose(r, "description", "router", null_ok=True),
-                routes=[
-                    Route(
-                        when=_prose(x, "when", "router route"),
-                        run=_str_list(x, "run", "router route"),
-                        note=_prose(x, "note", "router route", required=False),
-                        shapes=_optional_str_list(x, "shapes", "router route"),
-                    )
-                    for x in (raw_routes or [])
-                ],
-                body=_prose(r, "body", "router", required=False),
-            )
-        except KeyError as e:
-            raise ValidationError(f"router: missing field {e}") from e
-    prepass = None
-    if "prepass" in data:
-        p = data["prepass"]
-        try:
-            # Every prose field goes through _prose(), which *rejects* a
-            # non-string rather than coercing it. The sibling blocks' looser
-            # `null_ok=True` tolerance (present-but-null normalizes to "") is
-            # not enough here: `str(value)` would turn a bare `source:` (YAML
-            # null) into the literal string "None", which then sails past
-            # _validate_prepass's non-empty check and ships a table row
-            # reading "None" (CodeRabbit review on #206). A number would
-            # instead raise a raw AttributeError from `.strip()`. Both are
-            # malformed-manifest cases and both must surface as the
-            # ValidationError naming the field. `or []` on the lists is
-            # deliberately *not* a default — an empty table fails
-            # _validate_prepass loudly; it only keeps the failure a
-            # ValidationError instead of a raw TypeError.
-            prepass = Prepass(
-                name=_prose(p, "name", "prepass"),
-                description=_prose(p, "description", "prepass"),
-                body=_prose(p, "body", "prepass", required=False),
-                discover=[
-                    DiscoverySource(
-                        source=_prose(d, "source", "prepass discover", collapse=True),
-                        tells=_prose(d, "tells", "prepass discover"),
-                    )
-                    for d in (p.get("discover") or [])
-                ],
-                families=[
-                    ToolFamily(
-                        kind=_prose(f, "kind", "prepass family"),
-                        tools=_prose(f, "tools", "prepass family", collapse=True),
-                        grounds=_str_list(f, "grounds", "prepass family"),
-                    )
-                    for f in (p.get("families") or [])
-                ],
-                dispositions=[
-                    Disposition(
-                        name=_prose(d, "name", "prepass disposition"),
-                        when=_prose(d, "when", "prepass disposition"),
-                        do=_prose(d, "do", "prepass disposition"),
-                    )
-                    for d in (p.get("dispositions") or [])
-                ],
-                rules=[
-                    PrepassRule(
-                        name=_prose(r, "name", "prepass rule"),
-                        rule=_prose(r, "rule", "prepass rule"),
-                    )
-                    for r in (p.get("rules") or [])
-                ],
-            )
-        except KeyError as e:
-            raise ValidationError(f"prepass: missing field {e}") from e
-        except TypeError as e:
-            raise ValidationError(f"prepass: malformed entry ({e})") from e
-    synthesizer = None
-    if "synthesizer" in data:
-        sy = data["synthesizer"]
-        try:
-            synthesizer = Synthesizer(
-                name=_prose(sy, "name", "synthesizer", null_ok=True, strip=False),
-                description=_prose(sy, "description", "synthesizer", null_ok=True),
-                severity_order=_str_list(sy, "severity_order", "synthesizer"),
-                tensions=[
-                    Tension(
-                        between=_str_list(t, "between", "synthesizer tension"),
-                        about=_prose(t, "about", "synthesizer tension", null_ok=True),
-                        resolve=_prose(
-                            t, "resolve", "synthesizer tension", null_ok=True
-                        ),
-                    )
-                    for t in _list_field(sy, "tensions", "synthesizer")
-                ],
-            )
-        except KeyError as e:
-            raise ValidationError(f"synthesizer: missing field {e}") from e
+                for x in (raw_routes or [])
+            ],
+            body=_prose(r, "body", "router", required=False),
+        )
+    except KeyError as e:
+        raise ValidationError(f"router: missing field {e}") from e
+
+
+def _load_prepass(data: dict) -> Prepass | None:
+    if "prepass" not in data:
+        return None
+    p = data["prepass"]
+    try:
+        # Every prose field goes through _prose(), which *rejects* a
+        # non-string rather than coercing it. The sibling blocks' looser
+        # `null_ok=True` tolerance (present-but-null normalizes to "") is
+        # not enough here: `str(value)` would turn a bare `source:` (YAML
+        # null) into the literal string "None", which then sails past
+        # _validate_prepass's non-empty check and ships a table row
+        # reading "None" (CodeRabbit review on #206). A number would
+        # instead raise a raw AttributeError from `.strip()`. Both are
+        # malformed-manifest cases and both must surface as the
+        # ValidationError naming the field. Each list field is routed
+        # through _list_field rather than `p.get(x) or []`, so a truthy
+        # non-list (`discover: 5`) raises instead of iterating character-
+        # by-character, and a falsy-but-present non-list (`rules: {}`)
+        # raises instead of silently normalizing to [] (#381).
+        return Prepass(
+            name=_prose(p, "name", "prepass"),
+            description=_prose(p, "description", "prepass"),
+            body=_prose(p, "body", "prepass", required=False),
+            discover=[
+                DiscoverySource(
+                    source=_prose(d, "source", "prepass discover", collapse=True),
+                    tells=_prose(d, "tells", "prepass discover"),
+                )
+                for d in _list_field(p, "discover", "prepass")
+            ],
+            families=[
+                ToolFamily(
+                    kind=_prose(f, "kind", "prepass family"),
+                    tools=_prose(f, "tools", "prepass family", collapse=True),
+                    grounds=_str_list(f, "grounds", "prepass family"),
+                )
+                for f in _list_field(p, "families", "prepass")
+            ],
+            dispositions=[
+                Disposition(
+                    name=_prose(d, "name", "prepass disposition"),
+                    when=_prose(d, "when", "prepass disposition"),
+                    do=_prose(d, "do", "prepass disposition"),
+                )
+                for d in _list_field(p, "dispositions", "prepass")
+            ],
+            rules=[
+                PrepassRule(
+                    name=_prose(r, "name", "prepass rule"),
+                    rule=_prose(r, "rule", "prepass rule"),
+                )
+                for r in _list_field(p, "rules", "prepass")
+            ],
+        )
+    except KeyError as e:
+        raise ValidationError(f"prepass: missing field {e}") from e
+    except TypeError as e:
+        raise ValidationError(f"prepass: malformed entry ({e})") from e
+
+
+def _load_synthesizer(data: dict) -> Synthesizer | None:
+    if "synthesizer" not in data:
+        return None
+    sy = data["synthesizer"]
+    try:
+        return Synthesizer(
+            name=_prose(sy, "name", "synthesizer", null_ok=True, strip=False),
+            description=_prose(sy, "description", "synthesizer", null_ok=True),
+            severity_order=_str_list(sy, "severity_order", "synthesizer"),
+            tensions=[
+                Tension(
+                    between=_str_list(t, "between", "synthesizer tension"),
+                    about=_prose(t, "about", "synthesizer tension", null_ok=True),
+                    resolve=_prose(t, "resolve", "synthesizer tension", null_ok=True),
+                )
+                for t in _list_field(sy, "tensions", "synthesizer")
+            ],
+        )
+    except KeyError as e:
+        raise ValidationError(f"synthesizer: missing field {e}") from e
+
+
+def _load_modes(data: dict, path: str) -> list[Mode]:
     modes: list[Mode] = []
     for i, raw_mode in enumerate(_list_field(data, "modes", path)):
         try:
@@ -982,6 +962,10 @@ def load_manifest(path: str) -> Manifest:
             )
         except (KeyError, TypeError) as e:
             raise ValidationError(f"modes[{i}] in {path}: malformed mode ({e})")
+    return modes
+
+
+def _load_entrypoints(data: dict, path: str) -> list[Entrypoint]:
     entrypoints: list[Entrypoint] = []
     for i, raw_ep in enumerate(_list_field(data, "entrypoints", path)):
         try:
@@ -1019,12 +1003,52 @@ def load_manifest(path: str) -> Manifest:
             raise ValidationError(
                 f"entrypoints[{i}] in {path}: malformed entrypoint ({e})"
             )
+    return entrypoints
+
+
+def load_manifest(path: str) -> Manifest:
+    # A manifest file with invalid UTF-8 bytes must surface as a
+    # ValidationError naming the file, same as every other malformed-input
+    # case here — not a raw UnicodeDecodeError escaping to a caller that
+    # only catches (OSError, ValidationError) (CodeRabbit review on #412;
+    # mirrors the existing (OSError, UnicodeError) guard around a *source*
+    # file's own read in `validate`, just applied to the manifest itself).
+    try:
+        with open(path, encoding="utf-8") as fh:
+            raw = fh.read()
+    except UnicodeError as exc:
+        raise ValidationError(f"{path}: not valid UTF-8: {exc}") from exc
+    _check_comment_truncation(raw, path)
+    # Syntactically-invalid YAML must surface the same way every other
+    # malformed-input case in this function does — as a ValidationError naming
+    # the file — not as a raw yaml.YAMLError escaping to a caller that only
+    # catches ValidationError (found by the atlas's own review of PR #159:
+    # a caller assuming "OSError or ValidationError covers every load failure"
+    # crashed uncaught on a bad manifest instead of degrading gracefully).
+    try:
+        data = yaml.safe_load(raw)
+    except yaml.YAMLError as exc:
+        raise ValidationError(f"{path}: invalid YAML: {exc}") from exc
+    # Guard the parsed structure before indexing into it, so a malformed or
+    # partially-written manifest yields a ValidationError naming the file and the
+    # offending key rather than a raw TypeError/KeyError into manifest.py internals.
+    if not isinstance(data, dict):
+        raise ValidationError(
+            f"{path}: expected a YAML mapping, got {type(data).__name__}"
+        )
+    for key in ("skills", "taxonomy_version"):
+        if key not in data:
+            raise ValidationError(f"{path}: missing required key {key!r}")
+    # Split by manifest section (skills / router / prepass / synthesizer / modes /
+    # entrypoints) rather than one 260-line function, mirroring how validate()
+    # is already decomposed per section below (#381: load_manifest was the
+    # unswept sibling of that decomposition, at cyclomatic complexity 41).
     return Manifest(
         taxonomy_version=data["taxonomy_version"],
-        skills=skills,
-        router=router,
-        prepass=prepass,
-        synthesizer=synthesizer,
-        modes=modes,
-        entrypoints=entrypoints,
+        skills=_load_skills(data, path),
+        router=_load_router(data),
+        prepass=_load_prepass(data),
+        synthesizer=_load_synthesizer(data),
+        modes=_load_modes(data, path),
+        entrypoints=_load_entrypoints(data, path),
     )

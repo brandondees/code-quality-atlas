@@ -552,6 +552,70 @@ def test_load_manifest_rejects_a_scalar_mode_triggers(tmp_path):
         load_manifest(path)
 
 
+def test_load_manifest_rejects_a_scalar_prepass_discover(tmp_path):
+    # #381: prepass's four list fields (discover/families/dispositions/rules)
+    # were taken via `(p.get(x) or [])`, which passes a truthy non-list
+    # (`discover: 5`) straight into a list comprehension that iterates it
+    # character-by-character or index-by-index instead of raising — and
+    # silently drops a falsy-but-present non-list (`discover: {}`) to []
+    # instead of flagging it as malformed.
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        f"{_BASE_SKILL_YAML}"
+        "prepass:\n"
+        "  name: grounding-review-in-tool-output\n"
+        "  description: ground findings in tool output\n"
+        "  discover: 5\n",
+    )
+    with pytest.raises(ValidationError, match="'discover' must be a list"):
+        load_manifest(path)
+
+
+def test_load_manifest_rejects_a_scalar_prepass_families(tmp_path):
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        f"{_BASE_SKILL_YAML}"
+        "prepass:\n"
+        "  name: grounding-review-in-tool-output\n"
+        "  description: ground findings in tool output\n"
+        "  families: lint\n",
+    )
+    with pytest.raises(ValidationError, match="'families' must be a list"):
+        load_manifest(path)
+
+
+def test_load_manifest_rejects_a_falsy_non_list_prepass_dispositions(tmp_path):
+    # A falsy-but-present non-list (an empty mapping) must still be flagged,
+    # not silently normalized to [] the way `x.get(key) or []` would.
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        f"{_BASE_SKILL_YAML}"
+        "prepass:\n"
+        "  name: grounding-review-in-tool-output\n"
+        "  description: ground findings in tool output\n"
+        "  dispositions: {}\n",
+    )
+    with pytest.raises(ValidationError, match="'dispositions' must be a list"):
+        load_manifest(path)
+
+
+def test_load_manifest_rejects_a_scalar_prepass_rules(tmp_path):
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        f"{_BASE_SKILL_YAML}"
+        "prepass:\n"
+        "  name: grounding-review-in-tool-output\n"
+        "  description: ground findings in tool output\n"
+        "  rules: 0\n",
+    )
+    with pytest.raises(ValidationError, match="'rules' must be a list"):
+        load_manifest(path)
+
+
 def test_skill_construction_rejects_design_on_a_non_diff_shape():
     # #381: Skill(shape="repo", design=True) was constructible directly —
     # this invariant was enforced only by validate(), so a Skill built
