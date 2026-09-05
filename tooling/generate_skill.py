@@ -273,6 +273,14 @@ def generate_skill(
     (out / "SKILL.md").write_text(
         build_skill_md(skill, taxonomy_version, docs_root, owners), encoding="utf-8"
     )
+    # reference/ holds only generator-managed files (no hand-authored content
+    # lives there), so anything not in this run's expected set is an orphan —
+    # e.g. a rubric left behind by a renamed/removed artifact slug, invisible
+    # to `drift` (which only reads SKILL.md provenance) and linked from
+    # nothing once its old name stops appearing in the manifest (#382).
+    # Populated as each branch below decides what it's writing this run;
+    # pruned against the actual directory contents at the end.
+    expected_reference_files = {"tool-rules.md", "sources.md"}
     # An artifact lens replaces the single concatenated heuristics.md with one
     # bundled rubric file per artifact (loaded on a presence hit); the combined
     # tool-rules.md / sources.md still back the Mechanizing and Going-deeper links.
@@ -282,6 +290,7 @@ def generate_skill(
                 _gen_header(skill) + build_artifact_rubric(skill, a, docs_root),
                 encoding="utf-8",
             )
+            expected_reference_files.add(f"{a.slug}.md")
     else:
         # Skip (and prune a stale copy of) reference/heuristics.md when it would be
         # a verbatim duplicate of `## Top checks` — see build_skill_md (#391).
@@ -294,6 +303,7 @@ def generate_skill(
                 _gen_header(skill) + build_reference(skill, "heuristics", docs_root),
                 encoding="utf-8",
             )
+            expected_reference_files.add("heuristics.md")
     (out / "reference" / "tool-rules.md").write_text(
         _gen_header(skill) + build_reference(skill, "tooling", docs_root),
         encoding="utf-8",
@@ -302,6 +312,9 @@ def generate_skill(
         _gen_header(skill) + build_reference(skill, "references", docs_root),
         encoding="utf-8",
     )
+    for stale in (out / "reference").glob("*.md"):
+        if stale.name not in expected_reference_files:
+            stale.unlink()
     if not (out / "examples.md").exists():
         (out / "examples.md").write_text(
             f"# Examples — {skill.name}\n\n"

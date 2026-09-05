@@ -12,13 +12,16 @@ to a lens's SKILL.md/reference/examples.md could silently leave the vendored
 copy stale — the same drift class test_review_template_sync.py guards for
 REVIEW.md vs. templates/REVIEW.md.
 
-Deliberately excluded from the comparison: `.atlas-vendored` and `NOTICE.md`,
-which both embed the vendoring commit's own SHA. For a normal consumer repo
-that SHA is stable — it names a fixed upstream commit. Here the "source" and
-the "target" are the same repo, so the SHA recorded at vendor time is always
-one commit behind the commit that carries it (a commit's own hash isn't known
-until after it's made) — expected staleness in metadata, not drift in the
-load-bearing skill content this test actually guards.
+`.atlas-vendored` and `NOTICE.md` are excluded from the byte-identity walk
+below, but not left unchecked: `tooling/vendor-skills.sh` stamps them with a
+`<self>` sentinel instead of a literal commit SHA when the vendoring source
+and target are the same repo (as they are here) — a real SHA would be false
+the instant it's written (a commit's own hash isn't known until after it's
+made) and, worse, nothing previously caught it drifting further once
+vendoring was simply skipped for several commits (#382, where the marker
+named a commit 12 revisions stale). `test_self_vendor_marker_uses_self_sentinel`
+below asserts the sentinel is actually there, rather than silently excluding
+both files from any check at all.
 
 Also accounted for: both vendored runtime files an agent is likely to open
 and hand-edit directly — `SKILL.md` (exactly what the `Skill` tool resolves
@@ -36,6 +39,14 @@ ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "skills"
 VENDORED = ROOT / ".claude" / "skills"
 _RUNTIME_FILES = ("SKILL.md", "examples.md")
+# Vendored directories under .claude/skills/ that are NOT sourced from
+# skills/ and must not be flagged as orphans by the reverse walk below --
+# icm-architect is this repo's own ICM-methodology skill for its cloud
+# sessions (docs/distribution.md's Channel B), vendored directly rather than
+# generated from skills/manifest.yaml (issue #375 tracks documenting this
+# exception properly; until then, this is where a reviewer would otherwise
+# rediscover it as "drift").
+_NON_SUITE_VENDORED_DIRS = frozenset({"icm-architect"})
 # Must match the marker `append_generated_marker` in tooling/vendor-skills.sh
 # writes — only the start is asserted, not the full wording, so a rewording
 # doesn't require touching this test too.
@@ -108,4 +119,57 @@ def test_vendored_skills_match_their_source():
         "the following vendored file(s) under .claude/skills/ have drifted from "
         f"their skills/ source: {stale} — re-run `tooling/vendor-skills.sh .` "
         "from the repo root and commit the refreshed .claude/skills/."
+    )
+
+
+def test_no_orphaned_vendored_skill_directories():
+    """The forward walk above (skills/ -> .claude/skills/) can never catch an
+    orphan on the *other* side: a vendored directory with no skills/ source at
+    all (a withdrawn lens vendor-skills.sh --prune never ran for, or a stray
+    directory the `Skill` tool would still happily load) passes it silently
+    since the forward walk only ever iterates skills/ names (#382). Walk
+    .claude/skills/ itself instead, allowlisting the one legitimate
+    non-suite directory."""
+    source_names = set(_skill_names())
+    vendored_dirs = {p.name for p in VENDORED.iterdir() if p.is_dir()}
+    orphans = vendored_dirs - source_names - _NON_SUITE_VENDORED_DIRS
+    assert not orphans, (
+        f"{sorted(orphans)} under .claude/skills/ have no corresponding "
+        "skills/ source and aren't in _NON_SUITE_VENDORED_DIRS -- either "
+        "re-run `tooling/vendor-skills.sh . --prune` to remove a genuinely "
+        "withdrawn lens, or add a deliberate non-suite directory to the "
+        "allowlist above with a reason."
+    )
+
+
+def test_vendored_license_matches_source():
+    """`.claude/skills/LICENSE-CC-BY-4.0` is vendored alongside the skills
+    (write_attribution in tooling/vendor-skills.sh) so a diverged copy would
+    ship terms that don't match what this repo actually licenses its content
+    under -- not caught by the skills/-keyed forward walk above, since the
+    license lives at the repo root, not under skills/ (#382)."""
+    vendored_license = VENDORED / "LICENSE-CC-BY-4.0"
+    assert vendored_license.is_file(), "expected a vendored LICENSE-CC-BY-4.0"
+    assert vendored_license.read_bytes() == (ROOT / "LICENSE-CC-BY-4.0").read_bytes(), (
+        ".claude/skills/LICENSE-CC-BY-4.0 has diverged from the repo root's "
+        "LICENSE-CC-BY-4.0 -- re-run `tooling/vendor-skills.sh .` and commit "
+        "the refresh."
+    )
+
+
+def test_self_vendor_marker_uses_self_sentinel():
+    """`vendor-skills.sh` must recognize this as a self-vendor run (source ==
+    target) and stamp `<self>` rather than a literal SHA -- a real SHA in
+    these two files would be false the moment it's written and, unlike the
+    sentinel, gives no signal at all if vendoring is skipped for several
+    commits while skills/ keeps changing (#382)."""
+    marker = (VENDORED / ".atlas-vendored").read_text(encoding="utf-8")
+    assert "@<self>" in marker, (
+        "the vendored marker's source= line should read "
+        f"'...code-quality-atlas@<self>', not a literal commit SHA: {marker!r}"
+    )
+    notice = (VENDORED / "NOTICE.md").read_text(encoding="utf-8")
+    assert "self-vendored copy" in notice, (
+        "NOTICE.md should describe this as a self-vendored copy rather than "
+        f"naming a specific upstream commit: {notice!r}"
     )
