@@ -32,7 +32,7 @@ def _extract_shellcheck_globs() -> list[str]:
     # re-parseable YAML flow content -- pull out the shellcheck invocation
     # line directly rather than parsing the whole `run:` string generically.
     match = re.search(
-        r'^\s*"\$HOME/\.local/bin/shellcheck" --source-path=SCRIPTDIR -x (.+)$',
+        r'^\s*"\$RUNNER_TEMP/bin/shellcheck" --source-path=SCRIPTDIR -x (.+)$',
         ci_text,
         re.MULTILINE,
     )
