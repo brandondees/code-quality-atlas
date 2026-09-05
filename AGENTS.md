@@ -123,7 +123,10 @@ see [`docs/distribution.md`](docs/distribution.md) Channel B, so reviewing
 this repo itself resolves lens content through the same `Skill` tool path
 any repo that vendored the suite gets) and the generated 4-entrypoint
 bundled form, respectively — never edit either directly, even though
-`.claude/skills/` is what the `Skill` tool actually resolves and loads. If
+`.claude/skills/` is what the `Skill` tool actually resolves and loads.
+**One exception:** `.claude/skills/icm-architect/` is a vendored
+third-party skill (issue #375), not a mirror of anything under `skills/` —
+it has no source here to edit; see its own `LICENSE`/`NOTICE.md`. If
 you're asked to fix a lens: edit the *sources* (manifest and/or research)
 for generated content, or `skills/<name>/examples.md`/`evals/eval.json`
 directly for hand-authored content; then run `python -m tooling.cli

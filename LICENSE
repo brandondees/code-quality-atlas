@@ -7,12 +7,16 @@ This repository is dual-licensed by content type.
   byte-derived repackaging of `skills/`; its own `collapsed/hooks/` and
   `collapsed/.claude-plugin/` are MIT, see below), `commands/` (the
   slash-command reviewer instructions, prose like the skills they invoke),
-  and `templates/` (the `REVIEW.md` convergence policy and the
-  routing-snippet prose), plus `README.md` — is licensed under the Creative
-  Commons Attribution 4.0 International License. Full text:
-  [`LICENSE-CC-BY-4.0`](LICENSE-CC-BY-4.0). Reuse, adapt, and redistribute
-  freely, including commercially, with attribution to **Brandon Dees /
-  code-quality-atlas** (a link to this repository satisfies it).
+  `templates/` (the `REVIEW.md` convergence policy and the routing-snippet
+  prose), and `.claude/` (this repo's own self-vendored mirror of `skills/`,
+  written by `tooling/vendor-skills.sh`), plus `README.md` — is licensed
+  under the Creative Commons Attribution 4.0 International License. Full
+  text: [`LICENSE-CC-BY-4.0`](LICENSE-CC-BY-4.0). Reuse, adapt, and
+  redistribute freely, including commercially, with attribution to
+  **Brandon Dees / code-quality-atlas** (a link to this repository satisfies
+  it). **One exception:** `.claude/skills/icm-architect/` is a vendored
+  third-party skill, not this repo's own content — MIT-licensed, © Jake Van
+  Clief; see its own `LICENSE` and `NOTICE.md`, not this file.
 
 - **Code — MIT.** Everything else — the generation/drift/eval pipeline under
   `tooling/`, the `hooks/` routing script, the tests, the repo's CI and
