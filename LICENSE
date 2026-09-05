@@ -8,22 +8,26 @@ This repository is dual-licensed by content type.
   `collapsed/.claude-plugin/` are MIT, see below), `commands/` (the
   slash-command reviewer instructions, prose like the skills they invoke),
   `templates/` (the `REVIEW.md` convergence policy and the routing-snippet
-  prose), and `.claude/` (this repo's own self-vendored mirror of `skills/`,
-  written by `tooling/vendor-skills.sh`), plus `README.md` — is licensed
-  under the Creative Commons Attribution 4.0 International License. Full
-  text: [`LICENSE-CC-BY-4.0`](LICENSE-CC-BY-4.0). Reuse, adapt, and
-  redistribute freely, including commercially, with attribution to
-  **Brandon Dees / code-quality-atlas** (a link to this repository satisfies
-  it). **One exception:** `.claude/skills/icm-architect/` is a vendored
-  third-party skill, not this repo's own content — MIT-licensed, © Jake Van
-  Clief; see its own `LICENSE` and `NOTICE.md`, not this file.
+  prose), and `.claude/` — specifically `.claude/skills/`, this repo's own
+  self-vendored mirror of `skills/` written by `tooling/vendor-skills.sh`;
+  `.claude/settings.json` is Claude Code configuration, not vendored
+  content, and falls under the MIT bucket's configuration-files catch-all
+  below instead — plus `README.md` — is licensed under the Creative Commons
+  Attribution 4.0 International License. Full text:
+  [`LICENSE-CC-BY-4.0`](LICENSE-CC-BY-4.0). Reuse, adapt, and redistribute
+  freely, including commercially, with attribution to **Brandon Dees /
+  code-quality-atlas** (a link to this repository satisfies it). **One
+  exception:** `.claude/skills/icm-architect/` is a vendored third-party
+  skill, not this repo's own content — MIT-licensed, © Jake Van Clief; see
+  its own `LICENSE` and `NOTICE.md`, not this file.
 
 - **Code — MIT.** Everything else — the generation/drift/eval pipeline under
   `tooling/`, the `hooks/` routing script, the tests, the repo's CI and
-  configuration files, and `collapsed/`'s own `collapsed/hooks/` routing
-  script and `collapsed/.claude-plugin/plugin.json` manifest — is licensed
-  under the MIT License. Full text: [`LICENSE-MIT`](LICENSE-MIT). Python and
-  shell sources carry `SPDX-License-Identifier: MIT` headers; the collapsed
+  configuration files (including `.claude/settings.json`), and
+  `collapsed/`'s own `collapsed/hooks/` routing script and
+  `collapsed/.claude-plugin/plugin.json` manifest — is licensed under the
+  MIT License. Full text: [`LICENSE-MIT`](LICENSE-MIT). Python and shell
+  sources carry `SPDX-License-Identifier: MIT` headers; the collapsed
   plugin manifest declares `MIT AND CC-BY-4.0`, same as the standalone one
   below.
 
