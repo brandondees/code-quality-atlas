@@ -64,7 +64,7 @@ clone.
 | **Plugin (marketplace)** | plugin cache | ✅ | ❌ **not run in cloud** | ✅ | per-commit; auto/manual refresh |
 | **Settings-based marketplace** | plugin cache | ✅ | ❌ **not run in cloud** | ✅ | n/a for cloud; pinnable to a branch/tag (`ref`) |
 | **Skulto sync** | personal/project `SKILL.md` dir | ✅ | only if synced into the cloned repo | depends | `skulto pull` / `update`; roster-pinned (`skulto save`), not content-pinned |
-| **Repo `.claude/skills/`** (vendored) | the cloned repo | ✅ | ✅ **documented** | ❌ (per repo) | re-vendor on update; pinned by default (commit in `.atlas-vendored`) |
+| **Repo `.claude/skills/`** (vendored) | the cloned repo | ✅ | ✅ **documented** | ❌ (per repo) | re-vendor on update; pinned by default (commit in `.atlas-vendored`, or the `<self>` sentinel for a self-vendored repo — see below) |
 | **Account skills on claude.ai** (GUI) | your Anthropic account | ⚠️ verify for CLI | ✅ **documented, automatic** | ✅ | re-upload on update |
 
 ✅ works · ⚠️ conditional · ❌ doesn't apply
