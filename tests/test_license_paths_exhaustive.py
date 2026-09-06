@@ -40,10 +40,11 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # Directories that aren't content or code shipped under either license bucket
 # (editor/tool state, CI/plugin manifests already covered by LICENSE's "CI
-# and configuration files" MIT catch-all).
+# and configuration files" MIT catch-all). `.claude` is deliberately NOT here
+# (issue #375) -- it's real vendored content (CC BY, one third-party MIT
+# exception), not editor/tool state, so it's classified below instead.
 _EXEMPT = {
     ".github",
-    ".claude",
     ".claude-plugin",
     ".serena",
 }
@@ -63,6 +64,7 @@ _EXPECTED_BUCKET = {
     "collapsed": "cc_by",
     "commands": "cc_by",
     "templates": "cc_by",
+    ".claude": "cc_by",
     "tooling": "mit",
     "hooks": "mit",
     "tests": "mit",
