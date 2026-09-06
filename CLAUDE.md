@@ -9,7 +9,7 @@ a named task? This repo's active roadmap lives in `docs/`, not just in GitHub
 issues/PRs — check these before reporting nothing's queued:
 
 - [`docs/open-questions.md`](docs/open-questions.md) — the decisions log
-  (`D1`-`D18`+) and the live "Genuinely still open (undecided)" list. Start here.
+  (`D1`-`D20`+) and the live "Genuinely still open (undecided)" list. Start here.
 - [`docs/plans/`](docs/plans/) — dated, scoped design docs, each carrying its
   own `**Status:**` header; check that header per file rather than assuming
   the whole directory is a live work queue or a historical record.
@@ -17,10 +17,26 @@ issues/PRs — check these before reporting nothing's queued:
   feeding future categories/lenses.
 - [`docs/session-log.md`](docs/session-log.md) — narrative history of what
   shipped and why, for when a doc pointer alone isn't enough context.
+- [`docs/eval-hardening-campaign-log.md`](docs/eval-hardening-campaign-log.md)
+  — the wave-by-wave narrative of the Q21 suite-wide eval-hardening campaign,
+  extracted out of `open-questions.md` once it grew to ~700 lines there (#426).
 - [`docs/map/CLAUDE.md`](docs/map/CLAUDE.md) — the repo's own ICM system map:
   what the nouns are (a lens, a category, an eval scenario, a decision...)
   and what a change hits, cited against source rather than re-derived from
   scratch each session.
+
+**Read fully vs. read partially (#426).** Not every doc above is meant to be
+read the same way. `docs/open-questions.md`, `docs/map-gaps.md`, and
+`docs/map/CLAUDE.md` are reference-shaped and short enough to walk in full —
+that's the point of consulting them. `docs/session-log.md` and
+`docs/eval-hardening-campaign-log.md` are narrative logs, not reference docs:
+read them **partially**, filtered by date or topic to what the task actually
+needs, the way `docs/open-questions.md`'s own `### Q<N>` sections point into
+`session-log.md` for "the full breakdown" of one specific event rather than
+expecting the whole multi-thousand-line file read start to finish. Treating a
+narrative log as required full-context reading is exactly the mistake that
+made `open-questions.md` balloon to ~700 lines of half-relevant history in the
+first place.
 
 Before authoring anything here, read the **standing authoring rules** in
 [`docs/research/README.md`](docs/research/README.md) — behavioral claims,
