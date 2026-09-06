@@ -492,7 +492,16 @@ def main(argv: list[str] | None = None) -> int:
     # across servers (llama-server, vLLM, ...), so there's nothing reliable
     # to call there. Best-effort -- an older Ollama server or a lookup
     # failure prints as "unavailable" rather than aborting a run whose
-    # scenarios would otherwise succeed.
+    # scenarios would otherwise succeed. Resolved and validated BEFORE the
+    # digest lookup below: a typo'd --skill must still fail fast on this
+    # cheap local check rather than block on a best-effort network call
+    # first (up to --timeout, 600s by default) — a real regression dees-bot
+    # caught on PR #460's round 1 (the digest lookup used to run first).
+    skill_dir = Path(args.skills_root, args.skill)
+    if not (skill_dir / "SKILL.md").exists():
+        print(f"ERROR: no SKILL.md found under {skill_dir}")
+        return 1
+
     print(f"MODEL: {args.model}")
     if args.api == "ollama":
         digest = resolve_ollama_digest(
@@ -500,7 +509,6 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"DIGEST: {digest or 'unavailable (no digest reported by /api/show)'}")
 
-    skill_dir = Path(args.skills_root, args.skill)
     runs = run_skill_evals(
         skill_dir,
         args.model,

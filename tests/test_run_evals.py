@@ -520,18 +520,12 @@ def test_resolve_ollama_digest_returns_digest(monkeypatch):
     assert run_evals.resolve_ollama_digest("m") == "sha256:abc123"
 
 
-def test_resolve_ollama_digest_none_when_field_absent():
+def test_resolve_ollama_digest_none_when_field_absent(monkeypatch):
     def fake_show(model, host=None, timeout=None):
         return {"parameters": "..."}
 
-    import tooling.run_evals as re_mod
-
-    original = re_mod.query_ollama_show
-    re_mod.query_ollama_show = fake_show
-    try:
-        assert re_mod.resolve_ollama_digest("m") is None
-    finally:
-        re_mod.query_ollama_show = original
+    monkeypatch.setattr(run_evals, "query_ollama_show", fake_show)
+    assert run_evals.resolve_ollama_digest("m") is None
 
 
 def test_resolve_ollama_digest_none_on_lookup_failure(monkeypatch):
@@ -544,9 +538,14 @@ def test_resolve_ollama_digest_none_on_lookup_failure(monkeypatch):
 def test_cli_prints_model_and_digest_for_ollama(tmp_path, monkeypatch, capsys):
     out = _skill_with_evals(tmp_path)
     monkeypatch.setattr(run_evals, "query_ollama", lambda *a, **kw: "No findings")
-    monkeypatch.setattr(
-        run_evals, "resolve_ollama_digest", lambda *a, **kw: "sha256:abc123"
-    )
+    captured = {}
+
+    def fake_resolve_digest(model, **kw):
+        captured["model"] = model
+        captured.update(kw)
+        return "sha256:abc123"
+
+    monkeypatch.setattr(run_evals, "resolve_ollama_digest", fake_resolve_digest)
     rc = run_evals.main(
         ["--skill", out.name, "--skills-root", str(tmp_path), "--model", "fake-model"]
     )
@@ -554,6 +553,14 @@ def test_cli_prints_model_and_digest_for_ollama(tmp_path, monkeypatch, capsys):
     printed = capsys.readouterr().out
     assert "MODEL: fake-model" in printed
     assert "DIGEST: sha256:abc123" in printed
+    # main() wires host/timeout into the digest lookup, not just the model
+    # name -- an argument-agnostic stub here wouldn't catch a dropped
+    # `or OLLAMA_HOST` fallback or the wrong timeout reaching this call.
+    assert captured == {
+        "model": "fake-model",
+        "host": run_evals.OLLAMA_HOST,
+        "timeout": run_evals.DEFAULT_TIMEOUT_SECONDS,
+    }
 
 
 def test_cli_reports_digest_unavailable_when_lookup_returns_none(
@@ -593,6 +600,30 @@ def test_cli_skips_digest_lookup_for_openai_backend(tmp_path, monkeypatch, capsy
     )
     assert rc == 0
     assert "DIGEST" not in capsys.readouterr().out
+
+
+def test_cli_rejects_missing_skill_before_attempting_digest_lookup(
+    tmp_path, monkeypatch, capsys
+):
+    # dees-bot round 1 (PR #460): the digest lookup used to run before
+    # skill_dir was validated, so a typo'd --skill blocked on a real network
+    # call (up to --timeout) before ever reaching this cheap local check.
+    def fail_any(*a, **kw):
+        raise AssertionError("digest lookup must not run before skill_dir is validated")
+
+    monkeypatch.setattr(run_evals, "resolve_ollama_digest", fail_any)
+    rc = run_evals.main(
+        [
+            "--skill",
+            "no-such-skill",
+            "--skills-root",
+            str(tmp_path),
+            "--model",
+            "fake-model",
+        ]
+    )
+    assert rc == 1
+    assert "no-such-skill" in capsys.readouterr().out
 
 
 # --- run_skill_evals: unrecognized api fails fast, even with host set (#23) ---
