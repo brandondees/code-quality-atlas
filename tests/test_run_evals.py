@@ -478,6 +478,123 @@ def test_query_openai_omits_max_tokens_by_default(monkeypatch):
     assert "max_tokens" not in captured["payload"]
 
 
+# --- model digest recording (#434) ---
+
+
+def test_query_ollama_show_returns_response_dict(monkeypatch):
+    _patch_urlopen(
+        monkeypatch,
+        body=json.dumps({"digest": "sha256:abc123", "parameters": "..."}).encode(),
+    )
+    assert run_evals.query_ollama_show("m")["digest"] == "sha256:abc123"
+
+
+def test_query_ollama_show_sends_model_field(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["payload"] = json.loads(req.data)
+        return _FakeResp(json.dumps({"digest": "sha256:abc123"}).encode())
+
+    monkeypatch.setattr(run_evals.urllib.request, "urlopen", fake_urlopen)
+    run_evals.query_ollama_show("m")
+    assert captured["payload"] == {"model": "m"}
+
+
+def test_query_ollama_show_surfaces_api_error_message(monkeypatch):
+    _patch_urlopen(
+        monkeypatch, body=json.dumps({"error": "model 'x' not found"}).encode()
+    )
+    with pytest.raises(RuntimeError, match="model 'x' not found"):
+        run_evals.query_ollama_show("m")
+
+
+def test_query_ollama_show_unexpected_shape_raises(monkeypatch):
+    _patch_urlopen(monkeypatch, body=json.dumps(["not", "a", "dict"]).encode())
+    with pytest.raises(RuntimeError, match="unexpected Ollama /api/show response"):
+        run_evals.query_ollama_show("m")
+
+
+def test_resolve_ollama_digest_returns_digest(monkeypatch):
+    _patch_urlopen(monkeypatch, body=json.dumps({"digest": "sha256:abc123"}).encode())
+    assert run_evals.resolve_ollama_digest("m") == "sha256:abc123"
+
+
+def test_resolve_ollama_digest_none_when_field_absent():
+    def fake_show(model, host=None, timeout=None):
+        return {"parameters": "..."}
+
+    import tooling.run_evals as re_mod
+
+    original = re_mod.query_ollama_show
+    re_mod.query_ollama_show = fake_show
+    try:
+        assert re_mod.resolve_ollama_digest("m") is None
+    finally:
+        re_mod.query_ollama_show = original
+
+
+def test_resolve_ollama_digest_none_on_lookup_failure(monkeypatch):
+    # An older Ollama server without /api/show, or any network failure, must
+    # not raise out of a provenance lookup and abort an otherwise-good run.
+    _patch_urlopen(monkeypatch, exc=urllib.error.URLError("connection refused"))
+    assert run_evals.resolve_ollama_digest("m") is None
+
+
+def test_cli_prints_model_and_digest_for_ollama(tmp_path, monkeypatch, capsys):
+    out = _skill_with_evals(tmp_path)
+    monkeypatch.setattr(run_evals, "query_ollama", lambda *a, **kw: "No findings")
+    monkeypatch.setattr(
+        run_evals, "resolve_ollama_digest", lambda *a, **kw: "sha256:abc123"
+    )
+    rc = run_evals.main(
+        ["--skill", out.name, "--skills-root", str(tmp_path), "--model", "fake-model"]
+    )
+    assert rc == 0
+    printed = capsys.readouterr().out
+    assert "MODEL: fake-model" in printed
+    assert "DIGEST: sha256:abc123" in printed
+
+
+def test_cli_reports_digest_unavailable_when_lookup_returns_none(
+    tmp_path, monkeypatch, capsys
+):
+    out = _skill_with_evals(tmp_path)
+    monkeypatch.setattr(run_evals, "query_ollama", lambda *a, **kw: "No findings")
+    monkeypatch.setattr(run_evals, "resolve_ollama_digest", lambda *a, **kw: None)
+    rc = run_evals.main(
+        ["--skill", out.name, "--skills-root", str(tmp_path), "--model", "fake-model"]
+    )
+    assert rc == 0
+    assert "DIGEST: unavailable" in capsys.readouterr().out
+
+
+def test_cli_skips_digest_lookup_for_openai_backend(tmp_path, monkeypatch, capsys):
+    # No standardized digest endpoint exists across OpenAI-compatible servers
+    # (llama-server, vLLM, ...) -- must not even attempt the lookup.
+    out = _skill_with_evals(tmp_path)
+    monkeypatch.setattr(run_evals, "query_openai", lambda *a, **kw: "No findings")
+
+    def fail_any(*a, **kw):
+        raise AssertionError("digest lookup must not run for --api openai")
+
+    monkeypatch.setattr(run_evals, "resolve_ollama_digest", fail_any)
+    rc = run_evals.main(
+        [
+            "--skill",
+            out.name,
+            "--skills-root",
+            str(tmp_path),
+            "--model",
+            "fake-model",
+            "--api",
+            "openai",
+        ]
+    )
+    assert rc == 0
+    assert "DIGEST" not in capsys.readouterr().out
+
+
 # --- run_skill_evals: unrecognized api fails fast, even with host set (#23) ---
 
 
@@ -644,6 +761,9 @@ def test_cli_exits_non_zero_on_an_empty_message_failure(tmp_path, monkeypatch, c
         "query_ollama",
         lambda *a, **kw: (_ for _ in ()).throw(RuntimeError()),
     )
+    # #434's digest lookup is a separate network call from query_ollama above;
+    # stub it too so this test stays hermetic (no real socket attempt).
+    monkeypatch.setattr(run_evals, "resolve_ollama_digest", lambda *a, **kw: None)
     rc = run_evals.main(
         ["--skill", out.name, "--skills-root", str(tmp_path), "--model", "fake-model"]
     )
@@ -664,6 +784,7 @@ def test_cli_exits_non_zero_when_any_scenario_failed(tmp_path, monkeypatch, caps
         "query_ollama",
         lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("boom")),
     )
+    monkeypatch.setattr(run_evals, "resolve_ollama_digest", lambda *a, **kw: None)
     rc = run_evals.main(
         ["--skill", out.name, "--skills-root", str(tmp_path), "--model", "fake-model"]
     )
