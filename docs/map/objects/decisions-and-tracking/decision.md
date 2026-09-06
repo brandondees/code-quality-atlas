@@ -33,7 +33,7 @@ Both marker forms below are `Decision` instances, as defined by
   `→ PARTIALLY RESOLVED` (with a pointer to the `DN` that closed it, e.g.
   Q16 → D14) or left genuinely open — the live roster is
   `docs/open-questions.md`'s own "Genuinely still open (undecided)" list
-  (`docs/open-questions.md:40`), not this card.
+  (`docs/open-questions.md:47`), not this card.
 - A `DN` and a `QN` about the same question cross-reference each other by
   number; they are not duplicates — `QN` is the question and its resolution
   narrative, `DN` is the settled-decision ledger entry.

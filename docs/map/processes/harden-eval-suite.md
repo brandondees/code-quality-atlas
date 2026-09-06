@@ -45,7 +45,7 @@ gap rather than an unexamined one.
 5. Record the A-E breakdown, scenario count, and rationale as a dated entry
    under the lens's name in the `Decision` (Q21 in `docs/open-questions.md`)
    — e.g. the first hardened instance, `sweeping-for-security`
-   (`docs/open-questions.md:848`).
+   (`docs/open-questions.md::sweeping-for-security`).
 6. Often followed by `cross-model-re-gate` (a separate process — the
    hardening and the re-gate are independently schedulable, per Q21's own
    deferred-re-gate entries).
