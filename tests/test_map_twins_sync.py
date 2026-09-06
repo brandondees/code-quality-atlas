@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-_ROOT = Path(__file__).resolve().parent.parent / "docs" / "map"
+MAP_ROOT = Path(__file__).resolve().parent.parent / "docs" / "map"
 _VENDORED = (
     Path(__file__).resolve().parent.parent / ".claude" / "skills" / "icm-architect"
 )
@@ -21,8 +21,8 @@ _VENDORED = (
 
 @pytest.mark.parametrize("twin", ["AGENTS.md", "routing.md"])
 def test_map_twin_matches_claude_md(twin):
-    source = (_ROOT / "CLAUDE.md").read_bytes()
-    copy = (_ROOT / twin).read_bytes()
+    source = (MAP_ROOT / "CLAUDE.md").read_bytes()
+    copy = (MAP_ROOT / twin).read_bytes()
     assert copy == source, (
         f"docs/map/{twin} has drifted from docs/map/CLAUDE.md, the hand-edited "
         f"source. Re-copy CLAUDE.md over {twin} in the same change -- never "
@@ -38,7 +38,7 @@ def test_process_template_matches_vendored_copy():
     earlier fix wrongly claimed process.md was also a deliberate fork without
     actually forking it, which would have hidden real drift instead of
     catching it."""
-    ours = (_ROOT / "_templates" / "process.md").read_bytes()
+    ours = (MAP_ROOT / "_templates" / "process.md").read_bytes()
     vendored = (_VENDORED / "assets" / "templates" / "process.md").read_bytes()
     assert ours == vendored, (
         "docs/map/_templates/process.md has diverged from the vendored "

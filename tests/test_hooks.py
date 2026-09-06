@@ -13,12 +13,12 @@ import shutil
 import subprocess
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-LOG_HOOK = REPO_ROOT / "hooks" / "log-skill-invocation.sh"
-RETRO_HOOK = REPO_ROOT / "hooks" / "queue-session-retro.sh"
-ROUTE_HOOK = REPO_ROOT / "hooks" / "route.sh"
-TRACK_HOOK = REPO_ROOT / "hooks" / "lens-coverage" / "track-lens-reads.sh"
-GATE_HOOK = REPO_ROOT / "hooks" / "lens-coverage" / "gate-lens-coverage.sh"
+ROOT = Path(__file__).resolve().parent.parent
+LOG_HOOK = ROOT / "hooks" / "log-skill-invocation.sh"
+RETRO_HOOK = ROOT / "hooks" / "queue-session-retro.sh"
+ROUTE_HOOK = ROOT / "hooks" / "route.sh"
+TRACK_HOOK = ROOT / "hooks" / "lens-coverage" / "track-lens-reads.sh"
+GATE_HOOK = ROOT / "hooks" / "lens-coverage" / "gate-lens-coverage.sh"
 
 _SKILL_INPUT = json.dumps(
     {
@@ -109,7 +109,7 @@ def test_default_off_no_ops(tmp_path):
 def test_env_override_enables_logging(tmp_path):
     env = {
         "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+        "CLAUDE_PLUGIN_ROOT": str(ROOT),
     }
     _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra=env)
     log = _learnings_dir(tmp_path) / "invocations.jsonl"
@@ -145,7 +145,7 @@ def test_env_override_byte_length_is_utf8_bytes_not_codepoints(tmp_path):
     )
     env = {
         "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+        "CLAUDE_PLUGIN_ROOT": str(ROOT),
     }
     _run(LOG_HOOK, tmp_path, skill_input, env_extra=env)
     log = _learnings_dir(tmp_path) / "invocations.jsonl"
@@ -172,7 +172,7 @@ def test_env_override_hashes_with_sorted_keys_so_key_order_does_not_matter(tmp_p
     # hook must serialize with sorted keys (jq -cS) before hashing.
     env = {
         "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+        "CLAUDE_PLUGIN_ROOT": str(ROOT),
     }
     ordered_a = json.dumps(
         {
@@ -220,7 +220,7 @@ def test_env_override_preserves_explicit_false_tool_input(tmp_path):
     )
     env = {
         "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+        "CLAUDE_PLUGIN_ROOT": str(ROOT),
     }
     _run(LOG_HOOK, tmp_path, skill_input, env_extra=env)
     record = json.loads(
@@ -266,7 +266,7 @@ def test_env_override_degrades_to_null_digest_without_a_hashing_tool(tmp_path):
     assert not (fake_bin / "shasum").exists()
     env = {
         "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+        "CLAUDE_PLUGIN_ROOT": str(ROOT),
         "PATH": str(fake_bin),
         "HOME": str(tmp_path),
     }
@@ -292,7 +292,7 @@ def test_env_override_degrades_to_null_digest_without_a_hashing_tool(tmp_path):
 def test_session_end_queues_retro_under_env_override(tmp_path):
     env = {
         "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+        "CLAUDE_PLUGIN_ROOT": str(ROOT),
     }
     _run(RETRO_HOOK, tmp_path, _SESSION_END_INPUT, env_extra=env)
     queue = _learnings_dir(tmp_path) / "pending-retro.jsonl"
@@ -320,7 +320,7 @@ def test_session_end_basename_strips_windows_backslash_paths_too(tmp_path):
     )
     env = {
         "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+        "CLAUDE_PLUGIN_ROOT": str(ROOT),
     }
     _run(RETRO_HOOK, tmp_path, session_end_input, env_extra=env)
     queue = _learnings_dir(tmp_path) / "pending-retro.jsonl"
@@ -347,7 +347,7 @@ def test_session_end_empty_transcript_path_yields_null_basename_not_empty_string
     )
     env = {
         "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+        "CLAUDE_PLUGIN_ROOT": str(ROOT),
     }
     _run(RETRO_HOOK, tmp_path, session_end_input, env_extra=env)
     queue = _learnings_dir(tmp_path) / "pending-retro.jsonl"
@@ -377,7 +377,7 @@ def test_invalid_env_tier_is_terminal_even_with_a_ratified_preferences_line(tmp_
     )
     env = {
         "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "nope",
-        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+        "CLAUDE_PLUGIN_ROOT": str(ROOT),
     }
     _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra=env)
     assert not _learnings_dir(tmp_path).exists()
@@ -397,7 +397,7 @@ def test_symlinked_log_destination_is_refused(tmp_path):
     (learnings_dir / "invocations.jsonl").symlink_to(outside)
     env = {
         "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+        "CLAUDE_PLUGIN_ROOT": str(ROOT),
     }
     _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra=env)
     assert not outside.exists()
@@ -419,7 +419,7 @@ def test_feedback_tier_resolves_preferences_against_claude_project_dir(tmp_path)
     (project_dir / ".code-quality-atlas" / "preferences.md").write_text(
         "feedback: local\n"
     )
-    env = {"CLAUDE_PROJECT_DIR": str(project_dir), "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)}
+    env = {"CLAUDE_PROJECT_DIR": str(project_dir), "CLAUDE_PLUGIN_ROOT": str(ROOT)}
     _run(LOG_HOOK, other_cwd, _SKILL_INPUT, env_extra=env)
     assert (
         project_dir / ".code-quality-atlas" / "learnings" / "invocations.jsonl"
@@ -461,7 +461,7 @@ def test_earlier_single_line_comment_does_not_swallow_a_later_ratified_line(tmp_
         LOG_HOOK,
         tmp_path,
         _SKILL_INPUT,
-        env_extra={"CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        env_extra={"CLAUDE_PLUGIN_ROOT": str(ROOT)},
     )
     assert (_learnings_dir(tmp_path) / "invocations.jsonl").exists()
 
@@ -478,7 +478,7 @@ def test_ratified_preferences_line_activates_logging(tmp_path):
         LOG_HOOK,
         tmp_path,
         _SKILL_INPUT,
-        env_extra={"CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        env_extra={"CLAUDE_PLUGIN_ROOT": str(ROOT)},
     )
     assert (_learnings_dir(tmp_path) / "invocations.jsonl").exists()
 
@@ -507,7 +507,7 @@ def test_template_shaped_trailing_comment_still_activates_logging(tmp_path):
         LOG_HOOK,
         tmp_path,
         _SKILL_INPUT,
-        env_extra={"CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        env_extra={"CLAUDE_PLUGIN_ROOT": str(ROOT)},
     )
     assert (_learnings_dir(tmp_path) / "invocations.jsonl").exists()
 
@@ -515,7 +515,7 @@ def test_template_shaped_trailing_comment_still_activates_logging(tmp_path):
 def test_malformed_stdin_json_is_a_clean_no_op(tmp_path):
     env = {
         "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+        "CLAUDE_PLUGIN_ROOT": str(ROOT),
     }
     _run(LOG_HOOK, tmp_path, "not json at all", env_extra=env)
     # Directory creation is allowed (mkdir -p happens before the jq parse
@@ -532,14 +532,14 @@ def test_malformed_stdin_json_is_a_clean_no_op(tmp_path):
 # standalone plugin's 44 skills, router, or commands/ — only the 4 collapsed
 # entrypoints — so the nudge must name what's actually installed.
 
-COLLAPSED_HOOKS_DIR = REPO_ROOT / "collapsed" / "hooks"
+COLLAPSED_HOOKS_DIR = ROOT / "collapsed" / "hooks"
 
 
 def test_collapsed_hooks_json_matches_standalone():
     # hooks.json's structure (which hooks fire on which events) has no
     # collapsed-specific content, so it must stay byte-identical to the
     # standalone copy rather than silently drifting apart.
-    standalone = (REPO_ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8")
+    standalone = (ROOT / "hooks" / "hooks.json").read_text(encoding="utf-8")
     collapsed = (COLLAPSED_HOOKS_DIR / "hooks.json").read_text(encoding="utf-8")
     assert collapsed == standalone
 
@@ -555,7 +555,7 @@ _HOOKS_MIRROR_EXCLUDED = {"hooks.json", "route.sh"}
 
 
 def _standalone_hook_files():
-    standalone_dir = REPO_ROOT / "hooks"
+    standalone_dir = ROOT / "hooks"
     return {
         p.relative_to(standalone_dir).as_posix()
         for p in standalone_dir.rglob("*")
@@ -582,7 +582,7 @@ def test_collapsed_hooks_mirror_has_presence_parity_with_standalone():
 
 def test_collapsed_generic_hook_scripts_match_standalone():
     for rel in _standalone_hook_files():
-        standalone = (REPO_ROOT / "hooks" / rel).read_text(encoding="utf-8")
+        standalone = (ROOT / "hooks" / rel).read_text(encoding="utf-8")
         collapsed = (COLLAPSED_HOOKS_DIR / rel).read_text(encoding="utf-8")
         assert collapsed == standalone, (
             f"collapsed/hooks/{rel} has drifted from hooks/{rel}"
@@ -625,7 +625,7 @@ def test_collapsed_log_hook_activates_under_its_own_plugin_root(tmp_path):
     # collapsed/hooks/lib/feedback-tier.sh, not the standalone copy.
     env = {
         "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT / "collapsed"),
+        "CLAUDE_PLUGIN_ROOT": str(ROOT / "collapsed"),
     }
     _run(
         COLLAPSED_HOOKS_DIR / "log-skill-invocation.sh",
@@ -644,7 +644,7 @@ def test_collapsed_retro_hook_activates_under_its_own_plugin_root(tmp_path):
     # in this script would slip through undetected.
     env = {
         "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT / "collapsed"),
+        "CLAUDE_PLUGIN_ROOT": str(ROOT / "collapsed"),
     }
     _run(
         COLLAPSED_HOOKS_DIR / "queue-session-retro.sh",
@@ -680,7 +680,7 @@ def test_missing_jq_degrades_to_no_op(tmp_path):
             (fake_bin / tool).symlink_to(found)
     env = {
         "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+        "CLAUDE_PLUGIN_ROOT": str(ROOT),
         "PATH": str(fake_bin),
         "HOME": str(tmp_path),
     }
@@ -736,7 +736,7 @@ def test_draft_and_auto_tiers_log_like_local_with_a_stderr_note(tmp_path):
     for tier in ("draft", "auto"):
         env = {
             "CODE_QUALITY_ATLAS_FEEDBACK_TIER": tier,
-            "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+            "CLAUDE_PLUGIN_ROOT": str(ROOT),
         }
         result = subprocess.run(
             ["bash", str(LOG_HOOK)],
@@ -764,7 +764,7 @@ def test_log_destination_size_cap_stops_further_appends(tmp_path):
     size_before = log.stat().st_size
     env = {
         "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+        "CLAUDE_PLUGIN_ROOT": str(ROOT),
     }
     _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra=env)
     assert log.stat().st_size == size_before
@@ -782,7 +782,7 @@ def test_append_falls_through_to_unlocked_write_when_lock_is_contended(tmp_path)
     (learnings_dir / "invocations.jsonl.lock").mkdir()
     env = {
         "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
-        "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+        "CLAUDE_PLUGIN_ROOT": str(ROOT),
     }
     _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra=env)
     log = learnings_dir / "invocations.jsonl"
@@ -841,7 +841,7 @@ def test_route_hook_includes_build_note_when_plugin_root_is_a_git_checkout():
         capture_output=True,
         text=True,
         timeout=10,
-        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(ROOT)},
         check=False,
     )
     assert result.returncode == 0
@@ -849,7 +849,7 @@ def test_route_hook_includes_build_note_when_plugin_root_is_a_git_checkout():
     context = payload["hookSpecificOutput"]["additionalContext"]
     assert "code-quality-atlas build " in context
     sha = subprocess.run(
-        ["git", "-C", str(REPO_ROOT), "rev-parse", "--short", "HEAD"],
+        ["git", "-C", str(ROOT), "rev-parse", "--short", "HEAD"],
         capture_output=True,
         text=True,
         timeout=10,
@@ -898,7 +898,7 @@ def test_collapsed_route_hook_includes_build_note_when_plugin_root_is_a_git_chec
         capture_output=True,
         text=True,
         timeout=10,
-        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(ROOT)},
         check=False,
     )
     assert result.returncode == 0
@@ -908,7 +908,7 @@ def test_collapsed_route_hook_includes_build_note_when_plugin_root_is_a_git_chec
 
 
 def test_hooks_registered_in_hooks_json():
-    hooks = json.loads((REPO_ROOT / "hooks" / "hooks.json").read_text())
+    hooks = json.loads((ROOT / "hooks" / "hooks.json").read_text())
     post_tool_use = hooks["hooks"]["PostToolUse"]
     assert any(h["matcher"] == "Skill" for h in post_tool_use)
     assert "SessionEnd" in hooks["hooks"]
@@ -938,7 +938,7 @@ def test_track_lens_reads_registered_under_both_read_and_skill_matchers():
     # tested below.
     for matcher in ("Read", "Skill"):
         entries = _lens_coverage_hooks_registered_for(
-            matcher, REPO_ROOT / "hooks" / "hooks.json"
+            matcher, ROOT / "hooks" / "hooks.json"
         )
         assert any(
             "lens-coverage/track-lens-reads.sh" in h["command"]

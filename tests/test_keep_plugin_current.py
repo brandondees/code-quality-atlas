@@ -13,8 +13,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = REPO_ROOT / "tooling" / "keep-plugin-current.sh"
+ROOT = Path(__file__).resolve().parent.parent
+SCRIPT = ROOT / "tooling" / "keep-plugin-current.sh"
 
 DEFAULT_PLUGIN = "code-quality-atlas@code-quality-atlas"
 
@@ -238,7 +238,7 @@ def test_one_failing_project_scope_does_not_abort_remaining_updates(tmp_path):
     # The overall run reports failure so an operator doesn't think every
     # scope is current when one genuinely isn't.
     assert result.returncode == 1
-    assert "One or more updates FAILED" in result.stderr
+    assert "Error: one or more updates failed" in result.stderr
 
 
 def test_missing_installed_plugins_json_is_tolerated(tmp_path):
