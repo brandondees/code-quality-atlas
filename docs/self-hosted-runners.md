@@ -28,7 +28,7 @@ for what actually runs where and the operational trade-offs; this page is the
 > they are not claims about the repo you are reading this in.
 >
 > Fleet as of 2026-08-29: **three Linux hosts across two architectures.**
-> `runner-2604` (an OrbStack Ubuntu 26.04 LTS VM on the Mac, 6 CPU / 12 GB,
+> `<vm-name>` (an OrbStack Ubuntu 26.04 LTS VM on the Mac, 6 CPU / 12 GB,
 > arm64) serves six repos as `orbstack-linux-mbp`; the Bazzite host (x86_64,
 > 32 cores) serves seven repos as `bazzite-runner-<id>-<n>`; and
 > `orbstack-linux` (x86_64) runs on another laptop. Plus `macos-local`, the Mac
@@ -67,12 +67,12 @@ several registrations of one machine, not one shared runner. Labels are what
 `runs-on:` actually matches, and they are matched **case-insensitively**
 (`linux` matches the `Linux` label).
 
-| Name                              | OS    | Arch   | Host                                   | Labels                                      |
-| --------------------------------- | ----- | ------ | -------------------------------------- | ------------------------------------------- |
-| `macos-local`                     | macOS | ARM64  | The Mac itself (native, launchd)       | `self-hosted`, `macOS`, `ARM64`             |
-| `orbstack-linux-mbp`              | Linux | ARM64  | The Mac, OrbStack VM **`runner-2604`** | `self-hosted`, `Linux`, `ARM64`, `orbstack` |
-| `orbstack-linux`                  | Linux | x86_64 | Other laptop (OrbStack VM)             | `self-hosted`, `Linux`, `X64`, `orbstack`   |
-| `bazzite-runner-9cbf0d01cf92-<n>` | Linux | x86_64 | Bazzite host (other machine)           | `self-hosted`, `Linux`, `X64`, `bazzite`    |
+| Name                              | OS    | Arch   | Host                                 | Labels                                      |
+| --------------------------------- | ----- | ------ | ------------------------------------ | ------------------------------------------- |
+| `macos-local`                     | macOS | ARM64  | The Mac itself (native, launchd)     | `self-hosted`, `macOS`, `ARM64`             |
+| `orbstack-linux-mbp`              | Linux | ARM64  | The Mac, OrbStack VM **`<vm-name>`** | `self-hosted`, `Linux`, `ARM64`, `orbstack` |
+| `orbstack-linux`                  | Linux | x86_64 | Other laptop (OrbStack VM)           | `self-hosted`, `Linux`, `X64`, `orbstack`   |
+| `bazzite-runner-9cbf0d01cf92-<n>` | Linux | x86_64 | Bazzite host (other machine)         | `self-hosted`, `Linux`, `X64`, `bazzite`    |
 
 The Bazzite host runs one container per repo, numbered rather than named after
 the repo. **Instance numbers are the `<n>` suffix** in
@@ -112,11 +112,11 @@ gh api repos/<owner>/<repo>/actions/runners \
 ```
 
 > **`orbstack-linux-mbp` moved hosts on 2026-08-29.** It previously lived in
-> an OrbStack VM named `actions-runner-mbp` running Ubuntu 25.10 — an interim
+> an OrbStack VM named `<old-vm-name>` running Ubuntu 25.10 — an interim
 > release that went EOL 2026-07-01 and was still serving CI for six repos two
 > months later. The runner was re-registered under the same name and labels
-> into `runner-2604` (Ubuntu 26.04 LTS) and the old VM deleted. Anything still
-> naming `actions-runner-mbp` is stale.
+> into `<vm-name>` (Ubuntu 26.04 LTS) and the old VM deleted. Anything still
+> naming `<old-vm-name>` is stale.
 
 ## Registering a runner
 
@@ -197,19 +197,19 @@ launchctl bootstrap "gui/$(id -u)" "$P"   # start
 The runner is a systemd unit **inside** the VM. The Mac never talks to GitHub
 directly — the VM does.
 
-| Layer               | Where                                                         |
-| ------------------- | ------------------------------------------------------------- |
-| Host OrbStack app   | `/Applications/OrbStack.app` (start-at-login on)              |
-| VM name             | `runner-2604`                                                 |
-| Runner install path | `/home/dees/actions-runner-<repo>/` (per repo, inside the VM) |
-| Runner systemd unit | `actions.runner.<owner>-<repo>.orbstack-linux-mbp.service`    |
+| Layer               | Where                                                                  |
+| ------------------- | ---------------------------------------------------------------------- |
+| Host OrbStack app   | `/Applications/OrbStack.app` (start-at-login on)                       |
+| VM name             | `<vm-name>`                                                            |
+| Runner install path | `/home/<runner-user>/actions-runner-<repo>/` (per repo, inside the VM) |
+| Runner systemd unit | `actions.runner.<owner>-<repo>.orbstack-linux-mbp.service`             |
 
 #### Boot chain, and its weak link
 
 ```text
 macOS login  →  OrbStack launches (start_at_login=true)
                  │
-                 └─ VM `runner-2604` starts ON DEMAND
+                 └─ VM `<vm-name>` starts ON DEMAND
                                     │
                                     └─ systemd brings up
                                        actions.runner.*.service
@@ -235,7 +235,7 @@ heartbeat, run hourly, closes that gap without operator intervention.
 Two lessons from operating it:
 
 - **A watchdog that hardcodes a VM name is a liability during a host
-  migration.** When `actions-runner-mbp` was deleted, that script's default
+  migration.** When `<old-vm-name>` was deleted, that script's default
   `VM_NAME` still named it, so every hourly run failed at step 1 and exited
   _before_ checking the runner — silently disabling the self-healing while CI
   itself kept working, which is what hid it. Deleting a host means grepping
@@ -282,8 +282,8 @@ sudo systemctl edit 'actions.runner.<owner>-<repo>.<name>.service'
 
 ```sh
 orb list                                        # is the VM up?
-orb -m runner-2604 systemctl status 'actions.runner.*'
-orb -m runner-2604 journalctl -u 'actions.runner.*' -n 50 --no-pager
+orb -m <vm-name> systemctl status 'actions.runner.*'
+orb -m <vm-name> journalctl -u 'actions.runner.*' -n 50 --no-pager
 gh api repos/<owner>/<repo>/actions/runners \
   --jq '.runners[] | "\(.name) \(.status) busy=\(.busy)"'
 gh api repos/<owner>/<repo>/actions/runs \
@@ -348,9 +348,9 @@ also lose the test signal.
 1. Is at least one runner with the required labels `online`? A `linux` job
    needs any Linux runner; a `macOS` job needs `macos-local` specifically.
 2. If the local Linux runner is offline, is the VM even up? `orb list`, then
-   `orb start runner-2604`. This is the on-demand weak link described above.
+   `orb start <vm-name>`. This is the on-demand weak link described above.
 3. Is the runner service active inside the VM?
-   `orb -m runner-2604 systemctl status 'actions.runner.*'`
+   `orb -m <vm-name> systemctl status 'actions.runner.*'`
 4. Is this repo's runner simply busy with one of **its own** jobs? One
    registration runs one job at a time. Note the runner API's `busy` flag is
    per-repo — another repo's job does **not** show up there and does not
@@ -362,10 +362,10 @@ landed on a Linux runner whose VM has no Docker. Nothing installs it
 automatically:
 
 ```sh
-orb -m runner-2604 bash -c '
+orb -m <vm-name> bash -c '
   sudo apt-get update -qq &&
   sudo apt-get install -y docker.io docker-compose-v2 &&
-  sudo usermod -aG docker dees &&   # see the caveat below
+  sudo usermod -aG docker <runner-user> &&   # see the caveat below
   sudo systemctl enable --now docker &&
   sudo systemctl restart "actions.runner.*"
 '
@@ -389,7 +389,7 @@ a wedged agent looks identical from outside the VM. Read its own diagnostic
 log, which is per-repo:
 
 ```sh
-orb -m runner-2604 tail -50 ~/actions-runner-<repo>/_diag/Runner_*.log
+orb -m <vm-name> tail -50 ~/actions-runner-<repo>/_diag/Runner_*.log
 ```
 
 If the newest entry is hours old, or shows endless `BrokerServer` errors with
