@@ -44,7 +44,9 @@ MAP_ROOT = ROOT / "docs" / "map"
 
 # Extensions actually used by citations under docs/map/** today (verified via
 # grep before writing this test). Widen if a citation into a new file type
-# is ever added and this test starts under-matching.
+# is ever added and this test starts under-matching -- test_no_citations_use_
+# an_unlisted_extension below fails loudly when that happens instead of
+# letting this allowlist silently narrow what gets checked.
 _CITABLE_EXTENSIONS = ("md", "py", "sh", "yaml", "yml", "json", "jsonc", "txt")
 
 # A backtick-quoted `path:spec` or `path::name`, where path ends in one of
@@ -52,6 +54,14 @@ _CITABLE_EXTENSIONS = ("md", "py", "sh", "yaml", "yml", "json", "jsonc", "txt")
 _CITATION_RE = re.compile(
     r"`(?P<path>[\w./-]+\.(?:" + "|".join(_CITABLE_EXTENSIONS) + r"))"
     r"(?P<sep>::?)(?P<rest>[\w.,-]+)`"
+)
+# Same citation shape as _CITATION_RE but with no extension restriction --
+# used only to catch a citation into an extension _CITATION_RE's allowlist
+# doesn't cover, which would otherwise be invisible to it (issue #424 review,
+# the same "false all green" shape as #421, one layer down: the allowlist
+# itself silently narrowing coverage rather than the extractor breaking).
+_ANY_EXTENSION_CITATION_RE = re.compile(
+    r"`(?P<path>[\w./-]+\.(?P<ext>[A-Za-z0-9]+))(?P<sep>::?)[\w.,-]+`"
 )
 # One line-form segment: N or N-M.
 _LINE_SEGMENT_RE = re.compile(r"^(\d+)(?:-(\d+))?$")
@@ -100,36 +110,89 @@ def test_at_least_one_citation_found():
     )
 
 
-@pytest.mark.parametrize("path,sep,rest", _CASES)
-def test_citation_resolves(path, sep, rest):
+def test_no_citations_use_an_unlisted_extension():
+    """Guards _CITABLE_EXTENSIONS itself: a citation into a file type not on
+    that list is invisible to _CITATION_RE (never extracted, never checked
+    by test_citation_resolves below), so drift into it would pass silently.
+    Fails loudly instead, naming the extension to add."""
+    unlisted = []
+    for md_path in _iter_map_markdown_files():
+        rel_md = md_path.relative_to(ROOT)
+        text = md_path.read_text(encoding="utf-8")
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            for m in _ANY_EXTENSION_CITATION_RE.finditer(line):
+                if m.group("ext") not in _CITABLE_EXTENSIONS:
+                    unlisted.append(f"{rel_md}:{lineno}: `{m.group(0)}`")
+    assert not unlisted, (
+        "citation(s) use a file extension not in _CITABLE_EXTENSIONS, so "
+        "_CITATION_RE never extracts them and test_citation_resolves never "
+        "checks them -- add the extension to _CITABLE_EXTENSIONS:\n"
+        + "\n".join(unlisted)
+    )
+
+
+def _resolves(path, sep, rest):
+    """True if citation (path, sep, rest) resolves against the tree rooted
+    at ROOT. Shared by test_citation_resolves (real citations, should all
+    pass) and test_citation_does_not_resolve (synthetic bad input, should
+    all fail) so both are checked against the same logic."""
     target = ROOT / path
-    assert target.exists(), f"cited file does not exist: {path}"
+    if not target.exists():
+        return False
 
     if sep == "::":
         # Named-anchor form: `rest` must appear literally somewhere in the
         # target file. Immune to line drift by construction.
-        content = target.read_text(encoding="utf-8")
-        assert rest in content, (
-            f"{path}::{rest} does not resolve -- '{rest}' no longer appears "
-            f"anywhere in {path}. Update the citation (or, if the anchor was "
-            f"renamed, retarget it)."
-        )
-        return
+        return rest in target.read_text(encoding="utf-8")
 
     # Line form: every comma-separated segment must be a sane N or N-M
     # within the target's current line count.
     line_count = len(target.read_text(encoding="utf-8").splitlines())
     for segment in rest.split(","):
         m = _LINE_SEGMENT_RE.match(segment)
-        assert m, f"{path}:{rest} -- '{segment}' is not a line number or range"
+        if not m:
+            return False
         start = int(m.group(1))
         end = int(m.group(2)) if m.group(2) else start
-        assert start >= 1 and end >= start, (
-            f"{path}:{rest} -- '{segment}' is not a sane line range"
-        )
-        assert end <= line_count, (
-            f"{path}:{segment} has drifted -- {path} now has only "
-            f"{line_count} lines. Re-check what this citation should point "
-            f"at and update the line number (consider a `{path}::name` "
-            f"anchor instead if the target has one, per docs/map/CONTEXT.md)."
-        )
+        if not (start >= 1 and end >= start):
+            return False
+        if end > line_count:
+            return False
+    return True
+
+
+@pytest.mark.parametrize("path,sep,rest", _CASES)
+def test_citation_resolves(path, sep, rest):
+    assert _resolves(path, sep, rest), (
+        f"{path}{sep}{rest} has drifted or no longer resolves -- see "
+        "docs/map/CONTEXT.md's 'Citation syntax' section for what makes "
+        "each form resolve, and consider a `path::name` anchor (immune to "
+        "line drift) over a raw line number if the target has a namable one."
+    )
+
+
+@pytest.mark.parametrize(
+    "path,sep,rest",
+    [
+        pytest.param("docs/map/CONTEXT.md", ":", "999999", id="line-past-eof"),
+        pytest.param("docs/map/CONTEXT.md", ":", "abc", id="malformed-segment"),
+        pytest.param(
+            "docs/map/CONTEXT.md",
+            "::",
+            "this-anchor-definitely-does-not-exist-anywhere",
+            id="anchor-not-found",
+        ),
+        pytest.param(
+            "docs/map/this-file-does-not-exist.md",
+            ":",
+            "1",
+            id="nonexistent-file",
+        ),
+    ],
+)
+def test_citation_does_not_resolve(path, sep, rest):
+    """Synthetic bad-input cases for _resolves, so the checker's own failure
+    paths are asserted by CI rather than verified once by hand before
+    merge (a regex/logic regression that makes resolution vacuously true
+    would otherwise go undetected)."""
+    assert not _resolves(path, sep, rest)
