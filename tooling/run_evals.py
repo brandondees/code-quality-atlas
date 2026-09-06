@@ -261,6 +261,48 @@ def query_openai(
     return content
 
 
+def query_ollama_show(
+    model: str,
+    host: str = OLLAMA_HOST,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+) -> dict:
+    """Ollama /api/show — the model's metadata (parameters, template, and, on
+    servers that report one, a content digest). Used to record which exact
+    weights a re-gate run actually hit (#434): a mutable tag like
+    `qwen2.5-coder:7b` can point at different weights across re-gates if the
+    upstream tag was repulled between them, and nothing about the tag name
+    alone would show that -- docs/runbooks/cross-model-re-gate.md's "floor of
+    record" is defined by tag today, so a silent re-pull would misattribute a
+    recall delta to a prompt/suite edit instead."""
+    data = _post_json(f"{host}/api/show", {"model": model}, timeout, "Ollama /api/show")
+    if not isinstance(data, dict):
+        # RuntimeError (not TypeError) is deliberate: see the matching comment in
+        # query_ollama above -- a single except clause covers every failure mode.
+        raise RuntimeError(f"unexpected Ollama /api/show response shape: {data!r}")  # noqa: TRY004
+    if data.get("error"):
+        raise RuntimeError(f"Ollama /api/show error: {data['error']}")
+    return data
+
+
+def resolve_ollama_digest(
+    model: str,
+    host: str = OLLAMA_HOST,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+) -> str | None:
+    """The model's content digest per /api/show, or None when the server
+    doesn't report one (an older Ollama version, or a `digest` field that's
+    present but empty). Never raises: a digest lookup is provenance, not the
+    eval itself, so a failure here (network, unsupported endpoint) must not
+    abort a run whose actual scenarios already succeeded -- mirroring how one
+    scenario's failure doesn't abort the rest of run_skill_evals."""
+    try:
+        data = query_ollama_show(model, host=host, timeout=timeout)
+    except RuntimeError:
+        return None
+    digest = data.get("digest")
+    return digest if isinstance(digest, str) and digest else None
+
+
 @dataclass
 class ScenarioRun:
     query: str
@@ -443,7 +485,30 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("--num-ctx is ollama-only, not valid with --api openai")
     num_ctx = OLLAMA_NUM_CTX if args.num_ctx is None else args.num_ctx
 
+    # #434: record which exact weights this run hit, not just the mutable tag
+    # name -- a re-pulled tag between two re-gates would otherwise look like
+    # the same "model" while actually being different weights. Ollama-only:
+    # the OpenAI-compatible path has no standardized equivalent endpoint
+    # across servers (llama-server, vLLM, ...), so there's nothing reliable
+    # to call there. Best-effort -- an older Ollama server or a lookup
+    # failure prints as "unavailable" rather than aborting a run whose
+    # scenarios would otherwise succeed. Resolved and validated BEFORE the
+    # digest lookup below: a typo'd --skill must still fail fast on this
+    # cheap local check rather than block on a best-effort network call
+    # first (up to --timeout, 600s by default) — a real regression dees-bot
+    # caught on PR #460's round 1 (the digest lookup used to run first).
     skill_dir = Path(args.skills_root, args.skill)
+    if not (skill_dir / "SKILL.md").exists():
+        print(f"ERROR: no SKILL.md found under {skill_dir}")
+        return 1
+
+    print(f"MODEL: {args.model}")
+    if args.api == "ollama":
+        digest = resolve_ollama_digest(
+            args.model, host=args.host or OLLAMA_HOST, timeout=args.timeout
+        )
+        print(f"DIGEST: {digest or 'unavailable (no digest reported by /api/show)'}")
+
     runs = run_skill_evals(
         skill_dir,
         args.model,

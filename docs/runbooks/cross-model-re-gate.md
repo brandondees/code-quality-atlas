@@ -14,6 +14,17 @@ re-gated against the **floor of record** — the weakest model the suite is
 expected to be useful on. Without the re-gate, `eval_min: 26` asserts that 26
 scenarios exist, not that any of them discriminate.
 
+**The floor of record is defined by tag today (`qwen2.5-coder:7b`), not by a
+pinned digest** (#434) — a re-pull of that tag between two re-gates can point
+at different weights while looking like the same model in every comparison. A
+re-gate's recall/precision delta gets attributed to a prompt or suite edit;
+a silent weights change would produce the identical signal. `run_evals`
+prints the model's content digest (via Ollama's `/api/show`, when the server
+reports one) at the top of every run's output — record it alongside the
+result, and diff it against the prior recorded digest before attributing any
+delta to anything else. A changed digest with an unchanged tag means the
+re-gate isn't comparing what it thinks it's comparing.
+
 ## Setup (remote container, CPU-only)
 
 ```sh
@@ -69,6 +80,13 @@ Useful flags: `--num-ctx` (widen for thinking-capable models), `--think` /
 `--no-think`, `--timeout`. For a thinking-mode model, read the `qwen3.5:4b`
 findings in [`../open-questions.md`](../open-questions.md) first — the campaign
 has twice measured non-convergence rather than a context-size problem.
+
+**Record the printed `MODEL:`/`DIGEST:` lines with the result** (`--api
+ollama` only — no OpenAI-compatible server exposes a standardized digest
+endpoint, so `--api openai` prints `MODEL:` alone). `DIGEST: unavailable ...`
+means the Ollama server didn't report one (an older version, most likely) —
+still worth noting in the result, since it's the same gap the runbook's own
+floor-of-record caveat above describes.
 
 **Check the exit code.** `run_evals` exits non-zero when any scenario's request
 failed, and prints which ones. A failed scenario has an empty response, which is
