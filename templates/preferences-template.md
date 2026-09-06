@@ -30,10 +30,11 @@ file can turn it off.
 
 Lens/skill names have no rename alias (D20). If a lens named below is later renamed or
 retired, an entry naming the old name silently stops matching anything — nothing
-migrates it automatically. A reviewing agent that notices the mismatch reports it in
-its own Process notes so you know to fix this file, but that's a courtesy heads-up on
-the review's output, not a guarantee you'll be watching for it; treat it the same as
-any other manual edit this file needs when the suite's catalog changes. -->
+migrates it automatically. A reviewing agent that notices the mismatch reports it as a
+regular finding (route: implementer) in the review output, so you know to fix this
+file, but that's a courtesy heads-up on the review's output, not a guarantee you'll be
+watching for it; treat it the same as any other manual edit this file needs when the
+suite's catalog changes. -->
 
 # Team preferences — <repo name>
 

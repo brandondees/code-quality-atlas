@@ -257,9 +257,11 @@ incapable of writing a standard the owner didn't consciously choose.
 
 - **~~Whether `preferences.md` gets a real schema, and what happens to a stale lens
   name after a rename.~~ Resolved (D20, #447):** no rename alias, stays hand-authored
-  prose (no schema/version field), a stale name is surfaced via the synthesizer's
-  Process notes rather than silently dropped or migrated. Revisit only if that
-  awareness mechanism proves unreliable in practice.
+  prose (no schema/version field), a stale name is surfaced through the normal
+  finding contract (`route: implementer`, attributed to `choosing-review-lenses`)
+  rather than silently dropped, migrated, or routed through the synthesizer's
+  capped Process notes. Revisit only if that awareness mechanism proves
+  unreliable in practice.
 - **Granularity of the tier tag.** Per-check is cleanest but adds manifest surface. Could start
   coarser (whole-lens floor/preference) and refine. → resolve during implementation planning.
 - **Conflict between overlay and linter config** (e.g. overlay says "long functions fine," but
