@@ -102,3 +102,33 @@ own reconciliations (cited above) are exactly that: a number that was true
 when written and is recorded as history, not asserted as the current state.
 The distinction is "as of right now" vs. "as of this dated entry" — the
 first goes stale, the second is already correctly timestamped.
+
+## Citation syntax
+
+Two forms, both backtick-quoted:
+
+- **`path:N`** or **`path:N-M`**, comma-separable (`path:N,M-K`) — a raw
+  line or range citation. Cheapest to write, cheapest to drift: any edit
+  above line N silently invalidates it, which is what recurred twice on
+  this map (#376, its own follow-up #424). Use only when the target has no
+  natural named anchor to cite instead.
+- **`path::name`** — a named-anchor citation (the `::` borrowed from
+  pytest's own `path::test_name` node-id syntax, first used this way in
+  #423). `name` is anything a plain-text search of `path` would find
+  literally: a function/class/test name, a YAML key, a markdown heading, a
+  skill name. Immune to line drift — the citation still resolves after the
+  target grows or reshuffles above it, as long as `name` itself isn't
+  renamed. **Prefer this form whenever the target has a namable anchor near
+  the cited content** — reserve `path:N` for prose with no such anchor (a
+  specific sentence in a flat paragraph, a line in a script with no
+  enclosing function).
+
+`tests/test_map_citations.py` parses every citation matching either form out
+of `docs/map/**/*.md` and checks it resolves: a `path::name` citation fails
+if `name` no longer appears anywhere in `path`; a `path:N`/`path:N-M`
+citation fails if `path` doesn't exist or doesn't have that many lines. The
+line-form check is deliberately weak — it catches a deleted file or a
+citation past EOF, not content that quietly moved to a different line —
+which is exactly why the anchor form is preferred; migrating an existing
+`path:N` citation to `path::name` is welcome opportunistically (e.g. while
+fixing an unrelated drift), not required in one pass.
