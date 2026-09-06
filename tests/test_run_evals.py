@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from tooling import run_evals
-from tooling.generate import generate_skill
+from tooling.generate_skill import generate_skill
 from tooling.manifest import Skill, Source
 
 ROOT = Path(__file__).resolve().parent.parent

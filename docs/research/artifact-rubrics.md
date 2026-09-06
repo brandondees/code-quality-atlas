@@ -18,7 +18,7 @@
 ## #101 SKILL.md / agent-skill authoring
 
 > The first artifact rubric, and the highest-confidence one: the atlas is a reference
-> *implementation* of this standard — `tooling/manifest.py` and `tooling/generate.py`
+> *implementation* of this standard — `tooling/manifest.py` and `tooling/generate_skill.py`
 > already enforce most of it on our own skills (D7) — so the rubric is "review someone
 > else's `SKILL.md` against the standard we hold ourselves to." The standard is
 > Anthropic's **Agent Skill authoring best practices**: a lean, progressively-disclosed

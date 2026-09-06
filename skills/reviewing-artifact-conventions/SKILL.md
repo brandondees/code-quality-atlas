@@ -16,7 +16,7 @@ provenance:
   built_from:
   - category: 101
     source: docs/research/artifact-rubrics.md#101
-    hash: ecb1c4bd2787e47cb7ab520f57763b56a641f65170d669cf0ca6e8a6dcf01f21
+    hash: 88c5cef6b7b6370804fc417868a07711515901c89f9490b39fc9560072248b19
 ---
 
 # reviewing-artifact-conventions

@@ -15,60 +15,15 @@ from tooling.generate_common import (
     _generate_composition,
     modes_section,
 )
-from tooling.manifest import Manifest
+from tooling.manifest import Manifest, Router
 
 
-def build_router_md(manifest: Manifest) -> str:
-    """The composition layer: routes a 'what am I reviewing' situation to the
-    recommended range of lenses worth running, plus a one-line catalog of every
-    lens. Built entirely from the manifest — provenance carries no research
-    sections, so regeneration is triggered by manifest edits, not docs drift."""
-    r = manifest.router
-    # Derived, not hardcoded: the whole-repo audit route's count moved 8 -> 9 -> 10
-    # as audits landed, and each bump previously had to be remembered by hand in
-    # this prose. Counting the manifest keeps the sentence true by construction
-    # the next time a repo-shaped lens is added.
-    n_repo_audits = sum(1 for s in manifest.skills if s.shape == "repo")
-    front = {
-        "name": r.name,
-        "description": r.description,
-        "provenance": {"taxonomy_version": manifest.taxonomy_version, "built_from": []},
-    }
-    fm = yaml.safe_dump(
-        front, sort_keys=False, default_flow_style=False, allow_unicode=True
-    ).strip()
-    rows = []
-    for route in r.routes:
-        run = ", ".join(f"`{lens}`" for lens in route.run)
-        if route.note:
-            run += f" — {_escape_table_cell(route.note)}"
-        rows.append(f"| {_escape_table_cell(route.when)} | {run} |")
-    routes_table = "\n".join(rows)
-
-    # Repo-shaped lenses that also auto-include at diff scope (see the How to
-    # pick auto-include callout) get a one-clause caveat here so the Catalog
-    # doesn't read as though they never run against a single change.
-    _diff_scoped_exception = {
-        "auditing-documentation-health": (
-            "also auto-included, diff-scoped, on a docs-only change — see How to pick"
-        ),
-    }
-
-    def catalog(shape: str) -> str:
-        lines = []
-        for s in manifest.skills:
-            if s.shape != shape:
-                continue
-            mark = " ◆" if s.design else ""
-            exception = _diff_scoped_exception.get(s.name)
-            suffix = f" ({exception})" if exception else ""
-            lines.append(f"- `{s.name}`{mark} — {s.picker}{suffix}")
-        return "\n".join(lines)
-
-    body = (
-        f"# {r.name}\n\n"
-        "## When to use\n\n"
-        f"{r.body or r.description}\n\n"
+def _how_to_pick_section(manifest: Manifest, n_repo_audits: int) -> str:
+    """Steps for picking lenses: team preferences, the 3-8 breadth guideline
+    and its exceptions, matching routes, keeping restraint, design docs, the
+    no-match default, then the prepass/synthesizer handoff (each conditional
+    on the manifest actually declaring one)."""
+    return (
         "## How to pick\n\n"
         "- **Load team preferences first.** If the reviewed repo has "
         "`.code-quality-atlas/preferences.md`, read it before ranking: apply any "
@@ -145,11 +100,34 @@ def build_router_md(manifest: Manifest) -> str:
             else ""
         )
         + "\n"
-        + modes_section(manifest)
-        + "## Routes\n\n"
-        "| When reviewing… | Run |\n"
-        "|---|---|\n"
-        f"{routes_table}\n\n"
+    )
+
+
+def _catalog_section(manifest: Manifest) -> str:
+    """The four shape-grouped one-line lens catalogs (diff/repo/decision/
+    artifact), each line's shape/exception rendered by the closure below."""
+
+    # Repo-shaped lenses that also auto-include at diff scope (see the How to
+    # pick auto-include callout) get a one-clause caveat here so the Catalog
+    # doesn't read as though they never run against a single change.
+    _diff_scoped_exception = {
+        "auditing-documentation-health": (
+            "also auto-included, diff-scoped, on a docs-only change — see How to pick"
+        ),
+    }
+
+    def catalog(shape: str) -> str:
+        lines = []
+        for s in manifest.skills:
+            if s.shape != shape:
+                continue
+            mark = " ◆" if s.design else ""
+            exception = _diff_scoped_exception.get(s.name)
+            suffix = f" ({exception})" if exception else ""
+            lines.append(f"- `{s.name}`{mark} — {s.picker}{suffix}")
+        return "\n".join(lines)
+
+    return (
         "## Catalog\n\n"
         "◆ = design-capable (also works on design docs and plans).\n\n"
         "**Diff-shaped — run on a change:**\n\n"
@@ -162,6 +140,48 @@ def build_router_md(manifest: Manifest) -> str:
         "**Artifact-shaped — run when a standardized non-source artifact is "
         "present; detect the artifact, then load and apply its rubric:**\n\n"
         f"{catalog('artifact')}\n"
+    )
+
+
+def _routes_table_section(r: Router) -> str:
+    """The 'When reviewing… / Run' routing table itself."""
+    rows = []
+    for route in r.routes:
+        run = ", ".join(f"`{lens}`" for lens in route.run)
+        if route.note:
+            run += f" — {_escape_table_cell(route.note)}"
+        rows.append(f"| {_escape_table_cell(route.when)} | {run} |")
+    routes_table = "\n".join(rows)
+    return f"## Routes\n\n| When reviewing… | Run |\n|---|---|\n{routes_table}\n\n"
+
+
+def build_router_md(manifest: Manifest) -> str:
+    """The composition layer: routes a 'what am I reviewing' situation to the
+    recommended range of lenses worth running, plus a one-line catalog of every
+    lens. Built entirely from the manifest — provenance carries no research
+    sections, so regeneration is triggered by manifest edits, not docs drift."""
+    r = manifest.router
+    # Derived, not hardcoded: the whole-repo audit route's count moved 8 -> 9 -> 10
+    # as audits landed, and each bump previously had to be remembered by hand in
+    # this prose. Counting the manifest keeps the sentence true by construction
+    # the next time a repo-shaped lens is added.
+    n_repo_audits = sum(1 for s in manifest.skills if s.shape == "repo")
+    front = {
+        "name": r.name,
+        "description": r.description,
+        "provenance": {"taxonomy_version": manifest.taxonomy_version, "built_from": []},
+    }
+    fm = yaml.safe_dump(
+        front, sort_keys=False, default_flow_style=False, allow_unicode=True
+    ).strip()
+    body = (
+        f"# {r.name}\n\n"
+        "## When to use\n\n"
+        f"{r.body or r.description}\n\n"
+        + _how_to_pick_section(manifest, n_repo_audits)
+        + modes_section(manifest)
+        + _routes_table_section(r)
+        + _catalog_section(manifest)
     )
     return f"---\n{fm}\n---\n\n{body}"
 

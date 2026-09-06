@@ -7,16 +7,13 @@ from pathlib import Path
 
 from tooling.drift import DriftError, check_drift
 from tooling.evals import D8_MIN_SCENARIOS, EvalError, load_evals, validate_evals
-from tooling.generate import (
-    CollapsedOverlapError,
-    generate_collapsed,
-    generate_prepass,
-    generate_router,
-    generate_skill,
-    generate_synthesizer,
-    primary_owners,
-)
+from tooling.generate_collapsed import CollapsedOverlapError, generate_collapsed
+from tooling.generate_common import primary_owners
 from tooling.generate_doc_counts import DocCountAnchorError, sync_doc_counts
+from tooling.generate_prepass import generate_prepass
+from tooling.generate_router import generate_router
+from tooling.generate_skill import generate_skill
+from tooling.generate_synthesizer import generate_synthesizer
 from tooling.manifest import ValidationError, load_manifest, validate
 
 

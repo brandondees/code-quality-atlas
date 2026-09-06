@@ -2,7 +2,8 @@
 # tests/test_generate.py
 from pathlib import Path
 
-from tooling.generate import build_reference, build_skill_md, primary_owners
+from tooling.generate_common import build_reference, primary_owners
+from tooling.generate_skill import build_skill_md
 from tooling.manifest import Manifest, Mode, Route, Router, Skill, Source, load_manifest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -75,7 +76,7 @@ def test_build_skill_md_has_frontmatter_and_provenance_and_links():
 
 import json
 
-from tooling.generate import generate_skill
+from tooling.generate_skill import generate_skill
 
 
 def test_generate_skill_writes_full_tree(tmp_path):
@@ -126,7 +127,7 @@ def test_generate_skill_reference_files_carry_generated_header(tmp_path):
     assert marker in skill_md_text
 
 
-from tooling.generate import heuristics_is_duplicate, top_checks
+from tooling.generate_skill import heuristics_is_duplicate, top_checks
 
 
 def test_top_checks_are_inlined_so_skill_md_is_self_sufficient():
@@ -613,7 +614,7 @@ def test_cross_ref_note_names_primary_owner():
     )
 
 
-from tooling.generate import build_router_md, generate_router
+from tooling.generate_router import build_router_md, generate_router
 
 
 def _manifest_with_router():
@@ -666,7 +667,7 @@ def test_generate_router_writes_skill_and_draft_eval(tmp_path):
     assert eval_doc["skills"] == ["choosing-review-lenses"]
 
 
-from tooling.generate import build_synthesizer_md, generate_synthesizer
+from tooling.generate_synthesizer import build_synthesizer_md, generate_synthesizer
 from tooling.manifest import Synthesizer, Tension
 
 
@@ -759,7 +760,7 @@ def test_generate_synthesizer_writes_skill_and_draft_eval(tmp_path):
 
 
 # --- Depth modes rendering (Plan 1) ---
-from tooling.generate import modes_section
+from tooling.generate_common import modes_section
 
 
 def _router_manifest(modes=None):
@@ -849,7 +850,7 @@ def test_router_points_2to4_at_review_mode():
 
 
 # --- Per-mode severity floor policy (Plan 1) ---
-from tooling.generate import mode_floor_policy
+from tooling.generate_synthesizer import mode_floor_policy
 
 
 def _syn_manifest(modes=None):
@@ -900,7 +901,7 @@ def test_synthesizer_below_floor_findings_are_advisory_not_omitted():
 
 
 # --- generate_collapsed destructive-prune guard ---
-from tooling.generate import generate_collapsed
+from tooling.generate_collapsed import generate_collapsed
 
 
 def test_generate_collapsed_refuses_to_prune_standalone_skills_tree(tmp_path):
@@ -1001,7 +1002,7 @@ def _row_columns(line):
 
 
 def test_escape_table_cell_escapes_pipe_and_collapses_newlines():
-    from tooling.generate import _escape_table_cell
+    from tooling.generate_common import _escape_table_cell
 
     assert _escape_table_cell("a | b") == "a \\| b"
     assert _escape_table_cell("a\nb") == "a b"
@@ -1121,7 +1122,7 @@ def test_build_router_md_escapes_pipe_and_newline_in_route_when_and_note():
 
 
 def test_build_entrypoint_md_escapes_pipe_and_newline_in_route_fields():
-    from tooling.generate import build_entrypoint_md
+    from tooling.generate_collapsed import build_entrypoint_md
     from tooling.manifest import Entrypoint
 
     skill = _skill(picker="Where do errors vanish?")
