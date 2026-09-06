@@ -26,7 +26,14 @@ preference-tier finding. You can never silently `suppress` a finding from a floo
 lens — the strongest move available on one is `acknowledge`, which keeps it visible in
 every report, tagged `acknowledged deviation: <reason>`, and marks it non-blocking
 rather than making it disappear. This split is enforced by every lens; nothing in this
-file can turn it off. -->
+file can turn it off.
+
+Lens/skill names have no rename alias (D20). If a lens named below is later renamed or
+retired, an entry naming the old name silently stops matching anything — nothing
+migrates it automatically. A reviewing agent that notices the mismatch reports it in
+its own Process notes so you know to fix this file, but that's a courtesy heads-up on
+the review's output, not a guarantee you'll be watching for it; treat it the same as
+any other manual edit this file needs when the suite's catalog changes. -->
 
 # Team preferences — <repo name>
 
