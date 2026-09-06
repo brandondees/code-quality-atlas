@@ -11,7 +11,7 @@ from pathlib import Path
 import yaml
 
 from tooling.generate_common import _escape_table_cell, _generate_composition
-from tooling.manifest import Manifest
+from tooling.manifest import Manifest, Synthesizer
 
 
 def mode_floor_policy(manifest: Manifest) -> str:
@@ -53,30 +53,11 @@ def mode_floor_policy(manifest: Manifest) -> str:
     )  # block ends with a blank line; "" when no modes
 
 
-def build_synthesizer_md(manifest: Manifest) -> str:
-    """The back half of composition: merges the findings of the lenses the
-    router picked into one report — deduplicated, conflicts reconciled,
-    severity-ranked, single verdict. Like the router, it is built entirely from
-    the manifest (provenance carries no research sections), so regeneration is
-    triggered by manifest edits, not docs drift."""
-    sy = manifest.synthesizer
-    front = {
-        "name": sy.name,
-        "description": sy.description,
-        "provenance": {"taxonomy_version": manifest.taxonomy_version, "built_from": []},
-    }
-    fm = yaml.safe_dump(
-        front, sort_keys=False, default_flow_style=False, allow_unicode=True
-    ).strip()
-    severity = " > ".join(f"**{s}**" for s in sy.severity_order)
-    top, *_ = sy.severity_order
-    tension_rows = "\n".join(
-        f"| `{t.between[0]}` ↔ `{t.between[1]}` | {_escape_table_cell(t.about)} | "
-        f"{_escape_table_cell(t.resolve)} |"
-        for t in sy.tensions
-    )
-    router_name = manifest.router.name if manifest.router else "choosing-review-lenses"
-    body = (
+def _when_to_use_and_fanout_section(sy: Synthesizer, router_name: str) -> str:
+    """Header, "When to use", and "Fan-out model" — the synthesizer's role
+    relative to the router and how fan-out can be mechanized or spread across
+    repos."""
+    return (
         f"# {sy.name}\n\n"
         "## When to use\n\n"
         f"{sy.description}\n\n"
@@ -97,6 +78,13 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "fan out across **many repositories** — one agent per repo emitting "
         "findings in this contract — and aggregate them centrally (see the "
         "multi-repo runbook under *Going deeper*).\n\n"
+    )
+
+
+def _how_to_synthesize_section(severity: str, top: str) -> str:
+    """The 7-step synthesis procedure: collect, dedupe, reconcile, rank,
+    verdict, coverage & limitations, process notes."""
+    return (
         "## How to synthesize\n\n"
         "1. **Collect** — gather every lens's findings, tagging each with the "
         "lens that raised it. Fold in findings from any **companion reviewer** "
@@ -161,6 +149,12 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         'When the process worked, write exactly "Process: clean" and stop — '
         "the same anti-invention discipline the lenses apply to findings, "
         "never a note manufactured to fill the section.\n\n"
+    )
+
+
+def _tensions_section(tension_rows: str) -> str:
+    """The known-tensions table and the default for one not in it."""
+    return (
         "## Reconciling lens tensions\n\n"
         "When the change trips one of these known opposing pairs, apply the "
         "default and state the trade-off:\n\n"
@@ -169,6 +163,14 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         f"{tension_rows}\n\n"
         "For a tension not in this table, prefer the **safer and simpler** "
         "option, and say what evidence would change the call.\n\n"
+    )
+
+
+def _finding_contract_section() -> str:
+    """The normalized per-finding shape merging is built on, plus the three
+    axes (surfacing/routing, valence, attribution) that govern what the merged
+    report does with each finding. Static: no manifest input."""
+    return (
         "## Finding contract\n\n"
         "Normalize every lens finding to this shape before merging — it is what "
         "makes dedupe and ranking mechanical:\n\n"
@@ -231,6 +233,13 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "attribution axis — reviewable is not the same as introduced-here, just as "
         "it is not the same as who-decides (route) or defect-vs-improvement "
         "(valence).\n\n"
+    )
+
+
+def _output_format_section(sy: Synthesizer) -> str:
+    """The literal report template plus the rules for omitting empty sections
+    and what Non-blocking (advisory) is and isn't for."""
+    return (
         "## Output format\n\n"
         "```text\n"
         "Verdict: <block | approve with changes | approve> — <one-line reason>\n\n"
@@ -275,7 +284,16 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "ranked above at its full detail. This section is informational only: "
         "it never sets the verdict, is never posted as an inline review "
         "thread, and the implementer may apply, defer, or ignore each item "
-        "freely.\n\n" + mode_floor_policy(manifest) + "## Reviewer discipline\n\n"
+        "freely.\n\n"
+    )
+
+
+def _reviewer_discipline_section() -> str:
+    """The two anti-inflation guards: standing disputes, and attributing a
+    finding only to a lens whose bundle was actually opened. Static: no
+    manifest input."""
+    return (
+        "## Reviewer discipline\n\n"
         "Synthesis must not inflate. Do not raise a finding no lens reported, do "
         'not upgrade a severity to seem thorough, and do not turn "No findings" '
         "into a verdict with changes. The merged report is exactly the union of "
@@ -303,6 +321,13 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "this round; if it was not, drop the finding and report that lens under "
         "*Coverage & limitations* as selected but not opened, rather than let a "
         "lens-styled fabrication stand in for it.\n\n"
+    )
+
+
+def _going_deeper_section(router_name: str) -> str:
+    """Links out to the router and the two runbooks that give fan-out and the
+    self-improvement loop their fuller context."""
+    return (
         "## Going deeper\n\n"
         f"- [{router_name}](../{router_name}/SKILL.md) — the front half: picks "
         "which lenses to run before you synthesize their output.\n"
@@ -313,6 +338,41 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         "Process notes exist, the opt-in feedback tiers a repo can turn on to "
         "keep them (`.code-quality-atlas/preferences.md`), and where the signal "
         "goes from there.\n"
+    )
+
+
+def build_synthesizer_md(manifest: Manifest) -> str:
+    """The back half of composition: merges the findings of the lenses the
+    router picked into one report — deduplicated, conflicts reconciled,
+    severity-ranked, single verdict. Like the router, it is built entirely from
+    the manifest (provenance carries no research sections), so regeneration is
+    triggered by manifest edits, not docs drift."""
+    sy = manifest.synthesizer
+    front = {
+        "name": sy.name,
+        "description": sy.description,
+        "provenance": {"taxonomy_version": manifest.taxonomy_version, "built_from": []},
+    }
+    fm = yaml.safe_dump(
+        front, sort_keys=False, default_flow_style=False, allow_unicode=True
+    ).strip()
+    severity = " > ".join(f"**{s}**" for s in sy.severity_order)
+    top, *_ = sy.severity_order
+    tension_rows = "\n".join(
+        f"| `{t.between[0]}` ↔ `{t.between[1]}` | {_escape_table_cell(t.about)} | "
+        f"{_escape_table_cell(t.resolve)} |"
+        for t in sy.tensions
+    )
+    router_name = manifest.router.name if manifest.router else "choosing-review-lenses"
+    body = (
+        _when_to_use_and_fanout_section(sy, router_name)
+        + _how_to_synthesize_section(severity, top)
+        + _tensions_section(tension_rows)
+        + _finding_contract_section()
+        + _output_format_section(sy)
+        + mode_floor_policy(manifest)
+        + _reviewer_discipline_section()
+        + _going_deeper_section(router_name)
     )
     return f"---\n{fm}\n---\n\n{body}"
 

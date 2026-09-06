@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from tooling.cli import main
-from tooling.generate import generate_skill
+from tooling.generate_skill import generate_skill
 from tooling.manifest import Skill, Source
 
 ROOT = Path(__file__).resolve().parent.parent

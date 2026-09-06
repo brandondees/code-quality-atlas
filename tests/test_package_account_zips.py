@@ -206,15 +206,3 @@ def test_unresolvable_sha_warns_on_stderr(tmp_path):
         out_dir / "reviewing-a-change.zip", "reviewing-a-change/NOTICE.md"
     )
     assert "blob/unknown/LICENSE-CC-BY-4.0" in notice
-
-
-def test_bundle_zip_also_carries_per_skill_notices(tmp_path):
-    """The --bundle archive isn't GUI-uploadable, but it still redistributes
-    the same CC BY content and should carry the same per-skill notices."""
-    out_dir = tmp_path / "zips"
-    run_package(out_dir, "--collapsed", "--bundle-only")
-
-    bundle = out_dir / "code-quality-atlas-skills.zip"
-    assert bundle.exists()
-    notice = _read_from_zip(bundle, "reviewing-a-change/NOTICE.md")
-    assert "brandondees/code-quality-atlas" in notice

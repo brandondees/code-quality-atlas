@@ -3,7 +3,11 @@
 import json
 from pathlib import Path
 
-from tooling.generate import entrypoint_lenses, generate_lens_bundle, lens_bundle_body
+from tooling.generate_collapsed import (
+    entrypoint_lenses,
+    generate_lens_bundle,
+    lens_bundle_body,
+)
 from tooling.manifest import Entrypoint, Manifest, Skill, Source
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -367,7 +371,7 @@ def test_generate_lens_bundle_files_carry_generation_header(tmp_path):
 
 
 # --- Task 5: entrypoint SKILL.md + collapsed synthesis ---
-from tooling.generate import build_collapsed_synthesis, build_entrypoint_md
+from tooling.generate_collapsed import build_collapsed_synthesis, build_entrypoint_md
 from tooling.manifest import Mode, Route, Router, Synthesizer
 
 
@@ -530,7 +534,7 @@ def test_build_collapsed_synthesis_drops_going_deeper_and_broken_links():
 
 
 def test_generate_collapsed_writes_full_tree(tmp_path):
-    from tooling.generate import generate_collapsed
+    from tooling.generate_collapsed import generate_collapsed
 
     m = _full_manifest()
     outs = generate_collapsed(
@@ -564,7 +568,7 @@ import os
 
 
 def test_committed_collapsed_matches_regeneration(tmp_path):
-    from tooling.generate import generate_collapsed
+    from tooling.generate_collapsed import generate_collapsed
     from tooling.manifest import load_manifest, validate
 
     # Regenerate ONLY the collapsed tree into tmp_path — generate_collapsed reads
@@ -614,7 +618,7 @@ def test_committed_collapsed_matches_regeneration(tmp_path):
 
 
 def test_generate_collapsed_returns_plugin_json_path(tmp_path):
-    from tooling.generate import generate_collapsed
+    from tooling.generate_collapsed import generate_collapsed
 
     outs = generate_collapsed(
         _full_manifest(),
@@ -626,7 +630,7 @@ def test_generate_collapsed_returns_plugin_json_path(tmp_path):
 
 
 def test_generate_collapsed_prunes_stale_entrypoint(tmp_path):
-    from tooling.generate import generate_collapsed
+    from tooling.generate_collapsed import generate_collapsed
 
     skills_dir = tmp_path / "skills"
     stale = skills_dir / "reviewing-an-obsolete-thing"
@@ -646,7 +650,7 @@ def test_generate_collapsed_prunes_lens_dropped_from_existing_entrypoint(tmp_pat
     """A lens deleted, reshaped, or unbundled from an entrypoint must not leave
     its stale reference/lenses/<name>/ behind — only the whole-entrypoint prune
     existed before; this covers the finer-grained per-lens case (#144 review)."""
-    from tooling.generate import generate_collapsed
+    from tooling.generate_collapsed import generate_collapsed
 
     m = _full_manifest()
     ep_lenses_dir = tmp_path / "skills" / "reviewing-a-change" / "reference" / "lenses"

@@ -662,37 +662,36 @@ do_uninstall() {
   printf 'Uninstalled %s skill(s) from %s.\n' "$removed" "$dest_root"
 }
 
-main() {
-  parse_args "$@"
-  # jq is only needed to merge (not clobber) the target's .claude/settings.json
-  # for --with-lens-coverage-hook -- every other path in this script has never
-  # needed it, so it stays out of the always-required list.
-  [ "$WITH_LENS_COVERAGE_HOOK" -eq 1 ] && REQUIRED_PROGRAMS+=("jq")
-  check_requirements || exit 1
+# main()'s seven jobs (#449), split into named steps in call order. Each sets
+# its outputs as plain (non-`local`) variables, following the same
+# already-established pattern as SKILL_NAMES/OLD_NAMES/SKIPPED_COLLISIONS/
+# SKIPPED_STALE_NAMES -- main() and later steps read them without
+# re-resolving anything.
 
-  local root
-  root=$(repo_root) || exit 1
-  cd "$root"
-  collect_skill_names || exit 1
-
-  local abs_target
+# Step 1: resolve $TARGET into absolute paths and (unless --dry-run or
+# --uninstall) create the destination directory. Sets abs_target, dest_root,
+# marker.
+resolve_target_paths() {
   abs_target=$(cd "$TARGET" && pwd)
-  local dest_root="$abs_target/$SUBDIR"
-  local marker="$dest_root/$MARKER_NAME"
+  dest_root="$abs_target/$SUBDIR"
+  marker="$dest_root/$MARKER_NAME"
   check_target_git_state "$abs_target" "$SUBDIR"
   # #377/#389: --dry-run must not create so much as an empty directory, and
   # neither must --uninstall on a target with nothing vendored (dest_root
   # not existing yet is exactly how do_uninstall below knows there's nothing
   # to do -- creating it here first would defeat that check).
   [ "$DRY_RUN" -eq 1 ] || [ "$UNINSTALL" -eq 1 ] || mkdir -p "$dest_root"
+}
 
-  # Previously-vendored names (for safe prune), from the marker if present.
-  # #377: only a bare skill name (is_bare_skill_name) is trusted -- anything
-  # else is a malformed or maliciously-planted line (e.g. "../../victim")
-  # and must never reach OLD_NAMES, since OLD_NAMES feeds both the --prune
-  # `rm -rf` below and vendor_one's collision check.
+# Step 2: read previously-vendored names (for safe prune) from the marker at
+# $marker, if present. Sets OLD_NAMES, skipped_invalid_marker_lines.
+# #377: only a bare skill name (is_bare_skill_name) is trusted -- anything
+# else is a malformed or maliciously-planted line (e.g. "../../victim") and
+# must never reach OLD_NAMES, since OLD_NAMES feeds both the --prune `rm -rf`
+# in prune_stale_skills and vendor_one's collision check.
+load_old_names() {
   OLD_NAMES=()
-  local skipped_invalid_marker_lines=0
+  skipped_invalid_marker_lines=0
   local marker_format=""
   if [ -f "$marker" ]; then
     local line
@@ -717,12 +716,13 @@ main() {
         "$marker" "$marker_format" "$MARKER_FORMAT" >&2
     fi
   fi
+}
 
-  if [ "$UNINSTALL" -eq 1 ]; then
-    do_uninstall "$dest_root" "$marker"
-    return
-  fi
-
+# Step 3 (skipped on --uninstall, see main()): resolve the source commit SHA
+# and the sentinel/pinned value to stamp into the marker and NOTICE.md. Takes
+# $1=root $2=abs_target. Sets marker_sha.
+resolve_source_sha() {
+  local root=$1 abs_target=$2
   local sha
   sha=$(git rev-parse --short HEAD 2>/dev/null || printf 'unknown')
   if [ "$sha" = "unknown" ]; then
@@ -739,12 +739,18 @@ main() {
   # carries it -- and worse, nothing caught it drifting further once vendoring
   # was simply skipped for several commits (#382). Use a sentinel instead of a
   # SHA that can never actually be current for a source vendoring into itself.
-  local marker_sha="$sha"
+  marker_sha="$sha"
   if [ "$abs_target" = "$root" ]; then
     marker_sha="<self>"
   fi
+}
 
-  # Populated by vendor_one when it skips a name it doesn't own (#175).
+# Step 4: copy every skill in SKILL_NAMES into $1=dest_root, then write the
+# attribution files (unless --dry-run) with $2=marker_sha. Sets
+# SKIPPED_COLLISIONS (populated by vendor_one when it skips a name it doesn't
+# own, #175).
+vendor_all_skills() {
+  local dest_root=$1 marker_sha=$2
   SKIPPED_COLLISIONS=()
 
   local name
@@ -759,47 +765,62 @@ main() {
     printf 'Vendored %s skill(s) -> %s\n' \
       "$((${#SKILL_NAMES[@]} - ${#SKIPPED_COLLISIONS[@]}))" "$dest_root"
   fi
+}
 
-  if [ "$WITH_LENS_COVERAGE_HOOK" -eq 1 ]; then
-    if [ "$DRY_RUN" -eq 1 ]; then
-      # #377: --dry-run's whole point is touching nothing -- the hook
-      # vendoring writes real files and merges into the target's own
-      # settings.json, so it must not run for real here.
-      printf '(dry-run) would vendor the lens-coverage hook -> %s (and merge wiring into %s/.claude/settings.json)\n' \
-        "$abs_target/$HOOK_SUBDIR" "$abs_target"
-    else
-      # Called as a bare statement, deliberately -- see the function's own
-      # header for why testing its exit status here (an `if`, or `|| exit 1`
-      # as this line previously read) would suspend `set -e` for the ENTIRE
-      # function body, not just this call. Left untested, a failure inside
-      # the function (an explicit `return 1`, or any unguarded command) exits
-      # this whole script immediately with that same status, exactly like an
-      # ordinary top-level command failing under `set -e` -- no explicit
-      # check needed here at all.
-      vendor_lens_coverage_hook "$abs_target"
-    fi
+# Step 5: vendor the #357/Q23 lens-coverage hook into $1=abs_target, if
+# --with-lens-coverage-hook was passed; a no-op otherwise.
+maybe_vendor_lens_coverage_hook() {
+  local abs_target=$1
+  [ "$WITH_LENS_COVERAGE_HOOK" -eq 1 ] || return 0
+  if [ "$DRY_RUN" -eq 1 ]; then
+    # #377: --dry-run's whole point is touching nothing -- the hook
+    # vendoring writes real files and merges into the target's own
+    # settings.json, so it must not run for real here.
+    printf '(dry-run) would vendor the lens-coverage hook -> %s (and merge wiring into %s/.claude/settings.json)\n' \
+      "$abs_target/$HOOK_SUBDIR" "$abs_target"
+  else
+    # Called as a bare statement, deliberately -- see the function's own
+    # header for why testing its exit status here (an `if`, or `|| exit 1`
+    # as this line previously read) would suspend `set -e` for the ENTIRE
+    # function body, not just this call. Left untested, a failure inside
+    # the function (an explicit `return 1`, or any unguarded command) exits
+    # this whole script immediately with that same status, exactly like an
+    # ordinary top-level command failing under `set -e` -- no explicit
+    # check needed here at all. maybe_vendor_lens_coverage_hook itself is
+    # likewise called as a bare statement from main(), so that propagation
+    # still reaches all the way out.
+    vendor_lens_coverage_hook "$abs_target"
   fi
+}
 
-  # #377: names present in the old marker but no longer in this run's
-  # SKILL_NAMES -- computed once and shared by the --prune loop below and
-  # the stale-names notice (previously only reachable via --prune's own
-  # inline check, so a refresh with no --prune silently left withdrawn
-  # lenses on disk with no indication anything was stale).
-  local stale_names=()
+# Step 6: names present in the old marker (OLD_NAMES) but no longer in this
+# run's SKILL_NAMES. Sets stale_names -- computed once and shared by
+# prune_stale_skills and its own no-prune notice (previously only reachable
+# via --prune's own inline check, so a refresh with no --prune silently left
+# withdrawn lenses on disk with no indication anything was stale).
+compute_stale_names() {
+  stale_names=()
   if [ "${#OLD_NAMES[@]}" -gt 0 ]; then
     local old
     for old in "${OLD_NAMES[@]}"; do
       contains "$old" "${SKILL_NAMES[@]}" || stale_names+=("$old")
     done
   fi
+}
 
-  local pruned=0
-  # #377 review: names --prune skipped because the target directory doesn't
-  # carry this tool's own generated-marker comment -- a forged-but-valid
-  # stale marker line must not authorize deleting a target-owned directory
-  # that merely happens to share its name. Populated only on a real (non
-  # --dry-run) run; excluded from the marker rewrite below so a name this
-  # run declined to touch is never silently dropped from the record.
+# Step 7: remove stale_names from $1=dest_root when --prune was passed
+# (otherwise just note what a --prune run would remove). Sets pruned,
+# SKIPPED_STALE_NAMES.
+# #377 review: names --prune skips because the target directory doesn't
+# carry this tool's own generated-marker comment -- a forged-but-valid stale
+# marker line must not authorize deleting a target-owned directory that
+# merely happens to share its name. SKIPPED_STALE_NAMES is populated only on
+# a real (non --dry-run) run; excluded from the marker rewrite in
+# write_marker_and_summary so a name this run declined to touch is never
+# silently dropped from the record.
+prune_stale_skills() {
+  local dest_root=$1
+  pruned=0
   SKIPPED_STALE_NAMES=()
   if [ "$PRUNE" -eq 1 ] && [ "${#stale_names[@]}" -gt 0 ]; then
     local old target
@@ -829,63 +850,99 @@ main() {
     printf 'Note: %s previously-vendored skill(s) are no longer in the suite and were left in place: %s -- re-run with --prune to remove them.\n' \
       "${#stale_names[@]}" "${stale_names[*]}"
   fi
+}
 
+# Step 8 (final): rewrite the marker at $1=marker with $2=marker_sha and
+# print the run summary, or (on --dry-run) just say nothing was written.
+# $3=pruned feeds the summary line's "(pruned N)" suffix.
+write_marker_and_summary() {
+  local marker=$1 marker_sha=$2 pruned=$3
   if [ "$DRY_RUN" -eq 1 ]; then
     printf '(dry-run) no files were written, deleted, or overwritten. Re-run without --dry-run to apply.\n'
-  else
-    # Rewrite the marker: everything vendored this run, plus any name from the
-    # previous marker not covered by this run and not just pruned above.
-    # Previously this unconditionally overwrote the marker with only
-    # SKILL_NAMES, so switching modes (standalone <-> --collapsed) against the
-    # same target silently dropped the other form's names from the marker —
-    # orphaning those directories beyond --prune's reach (issue #112).
-    # Names skipped this run due to a collision (#175) are excluded: this tool
-    # does not own that directory, so the marker must not claim it does.
-    local marker_names=()
-    for name in "${SKILL_NAMES[@]}"; do
-      if [ "${#SKIPPED_COLLISIONS[@]}" -gt 0 ] && contains "$name" "${SKIPPED_COLLISIONS[@]}"; then
-        continue
+    return 0
+  fi
+
+  # Rewrite the marker: everything vendored this run, plus any name from the
+  # previous marker not covered by this run and not just pruned above.
+  # Previously this unconditionally overwrote the marker with only
+  # SKILL_NAMES, so switching modes (standalone <-> --collapsed) against the
+  # same target silently dropped the other form's names from the marker —
+  # orphaning those directories beyond --prune's reach (issue #112).
+  # Names skipped this run due to a collision (#175) are excluded: this tool
+  # does not own that directory, so the marker must not claim it does.
+  local marker_names=() name
+  for name in "${SKILL_NAMES[@]}"; do
+    if [ "${#SKIPPED_COLLISIONS[@]}" -gt 0 ] && contains "$name" "${SKIPPED_COLLISIONS[@]}"; then
+      continue
+    fi
+    marker_names+=("$name")
+  done
+  if [ "${#stale_names[@]}" -gt 0 ]; then
+    # Keep a stale name recorded when it wasn't actually removed this run
+    # -- either because this wasn't a --prune run at all, or (#377 review)
+    # because --prune declined to delete it (SKIPPED_STALE_NAMES: no
+    # generated-marker evidence of real ownership). Only a name genuinely
+    # deleted above is dropped from the marker.
+    local old
+    for old in "${stale_names[@]}"; do
+      if [ "$PRUNE" -eq 1 ] && ! { [ "${#SKIPPED_STALE_NAMES[@]}" -gt 0 ] && contains "$old" "${SKIPPED_STALE_NAMES[@]}"; }; then
+        continue  # actually pruned this run
       fi
-      marker_names+=("$name")
+      marker_names+=("$old")
     done
-    if [ "${#stale_names[@]}" -gt 0 ]; then
-      # Keep a stale name recorded when it wasn't actually removed this run
-      # -- either because this wasn't a --prune run at all, or (#377 review)
-      # because --prune declined to delete it (SKIPPED_STALE_NAMES: no
-      # generated-marker evidence of real ownership). Only a name genuinely
-      # deleted above is dropped from the marker.
-      local old
-      for old in "${stale_names[@]}"; do
-        if [ "$PRUNE" -eq 1 ] && ! { [ "${#SKIPPED_STALE_NAMES[@]}" -gt 0 ] && contains "$old" "${SKIPPED_STALE_NAMES[@]}"; }; then
-          continue  # actually pruned this run
-        fi
-        marker_names+=("$old")
+  fi
+
+  {
+    printf '# code-quality-atlas vendored skills — do not hand-edit; regenerate with tooling/vendor-skills.sh\n'
+    printf '# format=%s\n' "$MARKER_FORMAT"
+    printf '# source=brandondees/code-quality-atlas@%s\n' "$marker_sha"
+    # Guard the empty case explicitly: unlike the pre-#175 code (marker_names
+    # was always seeded from the never-empty SKILL_NAMES), a run where every
+    # skill collides with non-tool-managed content and OLD_NAMES is also
+    # empty (e.g. the target's first-ever vendoring attempt) now leaves
+    # marker_names genuinely empty. Expanding "${marker_names[@]}" directly
+    # in that state is a bash 3.2 `set -u` nounset hazard (fixed in bash 4.4+
+    # but this script targets 3.2/macOS) — mirror the same guard already used
+    # for OLD_NAMES/SKIPPED_COLLISIONS elsewhere in this script.
+    if [ "${#marker_names[@]}" -gt 0 ]; then
+      for name in "${marker_names[@]}"; do
+        printf '%s\n' "$name"
       done
     fi
+  } >"$marker"
 
-    {
-      printf '# code-quality-atlas vendored skills — do not hand-edit; regenerate with tooling/vendor-skills.sh\n'
-      printf '# format=%s\n' "$MARKER_FORMAT"
-      printf '# source=brandondees/code-quality-atlas@%s\n' "$marker_sha"
-      # Guard the empty case explicitly: unlike the pre-#175 code (marker_names
-      # was always seeded from the never-empty SKILL_NAMES), a run where every
-      # skill collides with non-tool-managed content and OLD_NAMES is also
-      # empty (e.g. the target's first-ever vendoring attempt) now leaves
-      # marker_names genuinely empty. Expanding "${marker_names[@]}" directly
-      # in that state is a bash 3.2 `set -u` nounset hazard (fixed in bash 4.4+
-      # but this script targets 3.2/macOS) — mirror the same guard already used
-      # for OLD_NAMES/SKIPPED_COLLISIONS elsewhere in this function.
-      if [ "${#marker_names[@]}" -gt 0 ]; then
-        for name in "${marker_names[@]}"; do
-          printf '%s\n' "$name"
-        done
-      fi
-    } >"$marker"
+  printf 'Source: code-quality-atlas@%s' "$marker_sha"
+  [ "$pruned" -gt 0 ] && printf ' (pruned %s)' "$pruned"
+  printf '\nNext: review and commit %s in the target repo.\n' "$SUBDIR"
+}
 
-    printf 'Source: code-quality-atlas@%s' "$marker_sha"
-    [ "$pruned" -gt 0 ] && printf ' (pruned %s)' "$pruned"
-    printf '\nNext: review and commit %s in the target repo.\n' "$SUBDIR"
+main() {
+  parse_args "$@"
+  # jq is only needed to merge (not clobber) the target's .claude/settings.json
+  # for --with-lens-coverage-hook -- every other path in this script has never
+  # needed it, so it stays out of the always-required list.
+  [ "$WITH_LENS_COVERAGE_HOOK" -eq 1 ] && REQUIRED_PROGRAMS+=("jq")
+  check_requirements || exit 1
+
+  local root
+  root=$(repo_root) || exit 1
+  cd "$root"
+  collect_skill_names || exit 1
+
+  resolve_target_paths
+  load_old_names
+
+  if [ "$UNINSTALL" -eq 1 ]; then
+    do_uninstall "$dest_root" "$marker"
+    return
   fi
+
+  resolve_source_sha "$root" "$abs_target"
+  vendor_all_skills "$dest_root" "$marker_sha"
+  maybe_vendor_lens_coverage_hook "$abs_target"
+  compute_stale_names
+  prune_stale_skills "$dest_root"
+  write_marker_and_summary "$marker" "$marker_sha" "$pruned"
 
   if [ "$skipped_invalid_marker_lines" -gt 0 ]; then
     printf 'Ignored %s malformed marker line(s) in %s -- see the warning(s) above.\n' \
