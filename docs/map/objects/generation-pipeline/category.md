@@ -52,11 +52,14 @@ thing a research edit changes when a lens needs regenerating (D6).
 | Surface | Role |
 |---|---|
 | `tooling/manifest.py` | validates `built_from` citations against category numbers |
-| `tooling/generate.py` | pulls category prose into generated skill files |
+| `tooling/generate_skill.py` | pulls category prose into generated `SKILL.md` (top checks) |
+| `tooling/generate_common.py` | pulls category prose into generated `reference/*.md` (`build_reference`) |
 
 ## See
 
 - Source: `docs/research/cluster-1-correctness.md` through `cluster-7-product.md`
 - `docs/research/README.md`'s standing authoring rules
 - `docs/open-questions.md` D3, D5, D13, D14, D15
-- Verified 2026-08-15 @ `ff7c642`
+- Verified 2026-09-06 — `tooling/generate.py` (a re-export facade over these
+  two modules) was deleted; the Surfaces row above now cites the actual
+  successor modules directly (issue #449)

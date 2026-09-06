@@ -79,7 +79,7 @@ Example entry: `skills/manifest.yaml:3-28` (`hunting-silent-failures`).
 
 | Surface | Role |
 |---|---|
-| `tooling/generate.py` | emits `skills/<name>/` from a `skills:` entry |
+| `tooling/generate_skill.py` | emits `skills/<name>/` from a `skills:` entry |
 | `tooling/evals.py` | validates `EvalScenario` count against `eval_min` |
 | `choosing-review-lenses` (generated) | ranks lenses by relevance per change |
 
@@ -91,3 +91,6 @@ Example entry: `skills/manifest.yaml:3-28` (`hunting-silent-failures`).
 - Verified 2026-09-05 @ `33504c1` — fixed the false `examples.md`
   regeneration claim and added the missing `.claude/skills/` re-vendor hit
   (issue #376)
+- Verified 2026-09-06 — `tooling/generate.py` (a re-export facade over
+  `generate_skill.py`) was deleted; the Surfaces row above now cites
+  `generate_skill.py` directly (issue #449)

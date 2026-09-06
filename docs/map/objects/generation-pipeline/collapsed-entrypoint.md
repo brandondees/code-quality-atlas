@@ -65,7 +65,7 @@ enumeration as it ages.
 
 | Surface | Role |
 |---|---|
-| `tooling/generate.py` | emits `collapsed/skills/<name>/` from an `entrypoints:` entry |
+| `tooling/generate_collapsed.py` | emits `collapsed/skills/<name>/` from an `entrypoints:` entry |
 | Root `CLAUDE.md`/`AGENTS.md` routing table | sends "review this" requests here over a bare `Lens` |
 
 ## See
@@ -74,3 +74,6 @@ enumeration as it ages.
 - `docs/open-questions.md` Q20, D16
 - `docs/plans/2026-06-25-collapsed-entrypoint-emission.md`
 - Verified 2026-09-05 @ `33504c1`
+- Verified 2026-09-06 — `tooling/generate.py` (a re-export facade over
+  `generate_collapsed.py`) was deleted; the Surfaces row above now cites
+  `generate_collapsed.py` directly (issue #449)
