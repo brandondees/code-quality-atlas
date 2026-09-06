@@ -141,6 +141,17 @@ stage_skill() {
 # be the *only* copy of the license terms that skill will ever have (issue
 # #351). Mirrors vendor-skills.sh's write_attribution() so both distribution
 # channels for this same content carry the same notice.
+#
+# Deliberately NOT moved into lib/skills-common.sh alongside check_requirements/
+# repo_root/collect_skill_names (issue #392): unlike those three, this function
+# isn't actually duplicated text -- vendor-skills.sh's version carries a whole
+# extra self-vendoring branch (the "<self>" sha case, #382) this script never
+# hits, plus different prose throughout ("vendored" vs "packaged", different
+# caller names, an extra unlisted-subdirectory caveat vendor-skills.sh needs
+# and this script doesn't). The only truly identical line is the `cp
+# LICENSE-CC-BY-4.0` below; forcing the rest through a shared, parameterized
+# function would trade real duplication for a worse readability problem than
+# it solves. Keep them separate; if the prose ever converges for real, revisit.
 write_attribution() {
   local dest=$1 sha=$2
   cp "LICENSE-CC-BY-4.0" "$dest/LICENSE-CC-BY-4.0"

@@ -26,8 +26,8 @@ from pathlib import Path
 
 from tooling.frontmatter import read_frontmatter
 
-_ROOT = Path(__file__).resolve().parent.parent
-_COMMANDS_DIR = _ROOT / "commands"
+ROOT = Path(__file__).resolve().parent.parent
+_COMMANDS_DIR = ROOT / "commands"
 _COMMENT_RISK = re.compile(r"\s#")
 _KEY_LINE_RE = re.compile(r"^(\s*)(?:-\s+)?([\w.-]+):\s*(.*)$")
 _BLOCK_SCALAR_INDICATOR = re.compile(r"^[|>][+-]?\d*$")

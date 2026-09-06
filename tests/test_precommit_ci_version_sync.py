@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-_ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent
 _ACTION_PIN_RE = re.compile(
     r"DavidAnson/markdownlint-cli2-action@[0-9a-f]{40}\s*#\s*(v[\d.]+)"
 )
@@ -97,7 +97,7 @@ def test_markdownlint_hook_rev_accepts_same_line_comment():
 
 
 def test_precommit_markdownlint_rev_matches_ci_claimed_version():
-    ci_text = (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    ci_text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     action_match = _ACTION_PIN_RE.search(ci_text)
     assert action_match, (
         "Could not find a SHA-pinned DavidAnson/markdownlint-cli2-action step "
@@ -105,7 +105,7 @@ def test_precommit_markdownlint_rev_matches_ci_claimed_version():
     )
     ci_action_version = action_match.group(1)
 
-    precommit_text = (_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+    precommit_text = (ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
     comment_match = _PRECOMMIT_COMMENT_RE.search(precommit_text)
     assert comment_match, (
         "Could not find the 'action vX.Y.Z bundles markdownlint-cli2 vA.B.C' "

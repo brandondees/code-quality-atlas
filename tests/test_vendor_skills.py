@@ -7,14 +7,14 @@ trust boundary, --dry-run, and provenance/UX gaps (issue #377)."""
 import subprocess
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = REPO_ROOT / "tooling" / "vendor-skills.sh"
+ROOT = Path(__file__).resolve().parent.parent
+SCRIPT = ROOT / "tooling" / "vendor-skills.sh"
 
 
 def run_vendor(target, *extra_args):
     result = subprocess.run(
         [str(SCRIPT), str(target), *extra_args],
-        cwd=str(REPO_ROOT),
+        cwd=str(ROOT),
         capture_output=True,
         text=True,
         timeout=30,
@@ -44,7 +44,7 @@ def test_switching_to_collapsed_preserves_standalone_names_in_marker(tmp_path):
     run_vendor(target)
     standalone_names = marker_names(target)
     expected_standalone_names = {
-        p.parent.name for p in (REPO_ROOT / "skills").glob("*/SKILL.md")
+        p.parent.name for p in (ROOT / "skills").glob("*/SKILL.md")
     }
     assert standalone_names == expected_standalone_names, (
         "the marker must record exactly the skills/*/SKILL.md directories — "
@@ -113,7 +113,7 @@ def test_vendor_writes_attribution_notice(tmp_path):
 
     result = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
-        cwd=str(REPO_ROOT),
+        cwd=str(ROOT),
         capture_output=True,
         text=True,
         timeout=10,
@@ -179,7 +179,7 @@ def test_vendor_writes_license_file_matching_source(tmp_path):
 
     vendored = license_file(target)
     assert vendored.is_file()
-    assert vendored.read_bytes() == (REPO_ROOT / "LICENSE-CC-BY-4.0").read_bytes()
+    assert vendored.read_bytes() == (ROOT / "LICENSE-CC-BY-4.0").read_bytes()
 
 
 def test_collapsed_vendor_also_writes_license_file(tmp_path):
@@ -190,7 +190,7 @@ def test_collapsed_vendor_also_writes_license_file(tmp_path):
 
     vendored = license_file(target)
     assert vendored.is_file()
-    assert vendored.read_bytes() == (REPO_ROOT / "LICENSE-CC-BY-4.0").read_bytes()
+    assert vendored.read_bytes() == (ROOT / "LICENSE-CC-BY-4.0").read_bytes()
 
 
 def test_attribution_notice_references_the_vendored_license_file(tmp_path):
@@ -203,7 +203,7 @@ def test_attribution_notice_references_the_vendored_license_file(tmp_path):
     # The link to the pinned-commit source stays too, as a cross-check.
     result = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
-        cwd=str(REPO_ROOT),
+        cwd=str(ROOT),
         capture_output=True,
         text=True,
         timeout=10,
@@ -218,7 +218,7 @@ def run_vendor_raw(target, *extra_args):
     # success and expected-failure cases), matching run_vendor's pattern.
     return subprocess.run(
         [str(SCRIPT), str(target), *extra_args],
-        cwd=str(REPO_ROOT),
+        cwd=str(ROOT),
         capture_output=True,
         text=True,
         timeout=30,
@@ -364,9 +364,7 @@ def _source_functions_only():
     text = "\n".join(lines[:-1])
     source_line = 'source "$(cd "$(dirname "$0")" && pwd)/lib/skills-common.sh"'
     assert source_line in text, "script's lib-sourcing line changed; update this helper"
-    return text.replace(
-        source_line, f'source "{REPO_ROOT}/tooling/lib/skills-common.sh"'
-    )
+    return text.replace(source_line, f'source "{ROOT}/tooling/lib/skills-common.sh"')
 
 
 # A fake `rm` shadowing the real binary as a shell function (bash resolves a
@@ -396,7 +394,7 @@ vendor_one "etc" ""
 """
     result = subprocess.run(
         ["bash", "-c", bash_script],
-        cwd=str(REPO_ROOT),
+        cwd=str(ROOT),
         capture_output=True,
         text=True,
         timeout=10,
@@ -901,7 +899,7 @@ printf 'OK\\n'
 """
     result = subprocess.run(
         ["bash", "-c", bash_script],
-        cwd=str(REPO_ROOT),
+        cwd=str(ROOT),
         capture_output=True,
         text=True,
         timeout=10,
@@ -921,7 +919,7 @@ is_bare_skill_name ""
 """
     result = subprocess.run(
         ["bash", "-c", bash_script],
-        cwd=str(REPO_ROOT),
+        cwd=str(ROOT),
         capture_output=True,
         text=True,
         timeout=10,
@@ -953,7 +951,7 @@ confirm_child_of_dest_root "{outside}/victim" "{dest_root}"
 """
     result = subprocess.run(
         ["bash", "-c", bash_script],
-        cwd=str(REPO_ROOT),
+        cwd=str(ROOT),
         capture_output=True,
         text=True,
         timeout=10,
@@ -974,7 +972,7 @@ confirm_child_of_dest_root "{dest_root}/some-skill" "{dest_root}"
 """
     result = subprocess.run(
         ["bash", "-c", bash_script],
-        cwd=str(REPO_ROOT),
+        cwd=str(ROOT),
         capture_output=True,
         text=True,
         timeout=10,

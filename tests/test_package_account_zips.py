@@ -11,14 +11,14 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = REPO_ROOT / "tooling" / "package-account-zips.sh"
+ROOT = Path(__file__).resolve().parent.parent
+SCRIPT = ROOT / "tooling" / "package-account-zips.sh"
 
 
 def run_package(out_dir, *extra_args):
     result = subprocess.run(
         [str(SCRIPT), "--out", str(out_dir), *extra_args],
-        cwd=str(REPO_ROOT),
+        cwd=str(ROOT),
         capture_output=True,
         text=True,
         timeout=60,
@@ -31,7 +31,7 @@ def run_package(out_dir, *extra_args):
 def _current_sha():
     result = subprocess.run(
         ["git", "rev-parse", "--short", "HEAD"],
-        cwd=str(REPO_ROOT),
+        cwd=str(ROOT),
         capture_output=True,
         text=True,
         timeout=10,
@@ -46,7 +46,7 @@ def _read_from_zip(zip_path, member):
 
 
 def _expected_standalone_skill_names():
-    return {p.parent.name for p in (REPO_ROOT / "skills").glob("*/SKILL.md")}
+    return {p.parent.name for p in (ROOT / "skills").glob("*/SKILL.md")}
 
 
 def test_every_per_skill_zip_contains_a_notice(tmp_path):
@@ -95,7 +95,7 @@ def test_every_per_skill_zip_vendors_the_license_text(tmp_path):
     out_dir = tmp_path / "zips"
     run_package(out_dir)
 
-    source_license = (REPO_ROOT / "LICENSE-CC-BY-4.0").read_bytes()
+    source_license = (ROOT / "LICENSE-CC-BY-4.0").read_bytes()
 
     zips = sorted(out_dir.glob("*.zip"))
     zip_names = {z.stem for z in zips}
@@ -128,7 +128,7 @@ def test_collapsed_zips_also_vendor_the_license_text(tmp_path):
     out_dir = tmp_path / "zips"
     run_package(out_dir, "--collapsed")
 
-    source_license = (REPO_ROOT / "LICENSE-CC-BY-4.0").read_bytes()
+    source_license = (ROOT / "LICENSE-CC-BY-4.0").read_bytes()
     zip_path = out_dir / "reviewing-a-change.zip"
     with zipfile.ZipFile(zip_path) as zf:
         vendored = zf.read("reviewing-a-change/LICENSE-CC-BY-4.0")
@@ -194,7 +194,7 @@ def test_unresolvable_sha_warns_on_stderr(tmp_path):
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
     result = subprocess.run(
         [str(SCRIPT), "--out", str(out_dir), "--collapsed"],
-        cwd=str(REPO_ROOT),
+        cwd=str(ROOT),
         env=env,
         capture_output=True,
         text=True,
@@ -218,7 +218,7 @@ def test_removed_bundle_flags_name_the_replacement(tmp_path, flag):
     (vendor-skills.sh), not left with a bare "unknown argument"."""
     result = subprocess.run(
         [str(SCRIPT), "--out", str(tmp_path), flag],
-        cwd=str(REPO_ROOT),
+        cwd=str(ROOT),
         capture_output=True,
         text=True,
         timeout=60,
