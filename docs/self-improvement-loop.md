@@ -54,7 +54,7 @@ and CI-gated:
                                               (D6)                  │
             ┌──────────────  EXISTS: back half  ─────────────────────┘
             │
-            └─► regenerate (manifest/generate.py) ─► evals re-gate (D8) ─► ship (D9, every merged commit)
+            └─► regenerate (manifest/generate_*.py) ─► evals re-gate (D8) ─► ship (D9, every merged commit)
 ```
 
 A "learning," once expressed as a research-doc edit + eval scenario, flows into improved

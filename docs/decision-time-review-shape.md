@@ -67,7 +67,7 @@ A topic and its natural shape are different axes — the same way #21 (maintaina
 ## 5a. §5 item 2 — built 2026-07-05
 
 The shared decision-record checklist landed as a generator-level addition rather
-than a research section: `tooling/generate.py`'s `_scope_line` now appends it to
+than a research section: `tooling/generate_common.py`'s `_scope_line` now appends it to
 every `design: true` lens's scope line (`skill.design` branch) — *"When the design
 doc is specifically a decision record (an ADR, RFC, or adoption/deprecation plan),
 also run the shared decision-record checklist: is the rationale actually recorded

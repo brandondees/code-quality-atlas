@@ -9,6 +9,8 @@ import subprocess
 import zipfile
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = REPO_ROOT / "tooling" / "package-account-zips.sh"
 
@@ -206,3 +208,23 @@ def test_unresolvable_sha_warns_on_stderr(tmp_path):
         out_dir / "reviewing-a-change.zip", "reviewing-a-change/NOTICE.md"
     )
     assert "blob/unknown/LICENSE-CC-BY-4.0" in notice
+
+
+@pytest.mark.parametrize("flag", ["--bundle", "--bundle-only"])
+def test_removed_bundle_flags_name_the_replacement(tmp_path, flag):
+    """--bundle/--bundle-only were removed (#449, no real consumer -- the
+    claude.ai GUI rejects a multi-skill ZIP outright). A caller who still
+    remembers either flag should be pointed at the actual replacement
+    (vendor-skills.sh), not left with a bare "unknown argument"."""
+    result = subprocess.run(
+        [str(SCRIPT), "--out", str(tmp_path), flag],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert flag in result.stderr
+    assert "was removed" in result.stderr
+    assert "tooling/vendor-skills.sh" in result.stderr

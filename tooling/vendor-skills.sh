@@ -663,10 +663,19 @@ do_uninstall() {
 }
 
 # main()'s seven jobs (#449), split into named steps in call order. Each sets
-# its outputs as plain (non-`local`) variables, following the same
-# already-established pattern as SKILL_NAMES/OLD_NAMES/SKIPPED_COLLISIONS/
-# SKIPPED_STALE_NAMES -- main() and later steps read them without
-# re-resolving anything.
+# its outputs as plain (non-`local`) script-scope variables that main() and
+# later steps read without re-resolving anything -- the same *mechanism*
+# already used for SKILL_NAMES/OLD_NAMES/SKIPPED_COLLISIONS/SKIPPED_STALE_NAMES,
+# though not their naming convention: those four (and every other
+# script-scope global here -- TARGET, PRUNE, DRY_RUN, SUBDIR, MARKER_NAME,
+# MARKER_FORMAT, HOOK_SUBDIR, ...) are UPPERCASE, while the seven new
+# cross-function globals below (abs_target, dest_root, marker, marker_sha,
+# stale_names, pruned, skipped_invalid_marker_lines) are lowercase, matching
+# the parameter names several of them are also passed as into later steps
+# (e.g. write_marker_and_summary's `local marker=$1 marker_sha=$2 pruned=$3`
+# intentionally shadows the script-scope global of the same name for the
+# duration of that call) -- read each one as script-scope unless the
+# function you're in declares it `local` itself.
 
 # Step 1: resolve $TARGET into absolute paths and (unless --dry-run or
 # --uninstall) create the destination directory. Sets abs_target, dest_root,

@@ -27,7 +27,8 @@ with **all** relevant lenses," up to the full set at repo scope, and cannot get 
 ## Decisions
 
 - **D-Q20-1 — Dual-emit.** The manifest + `built_from` research sections stay the
-  single source. `generate.py` emits **two forms** from the same lens content, so
+  single source. `tooling/generate_skill.py` (standalone) and `tooling/generate_collapsed.py`
+  (collapsed) emit **two forms** from the same lens content, so
   they cannot drift (D6): the existing **standalone** form (44 skills, unchanged
   by this decision) and a new **collapsed** form.
 - **D-Q20-2 — Collapsed form = 4 entrypoints by review shape.** `reviewing-a-change`

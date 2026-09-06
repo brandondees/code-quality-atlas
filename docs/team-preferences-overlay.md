@@ -17,7 +17,7 @@ later refinement:
   reads `.code-quality-atlas/preferences.md` when present, applies `set`/`tune` always,
   and applies `suppress` only on a preference-tier lens — a floor-tier lens's strongest
   override is `acknowledge` (visible, non-blocking). Absent the file, behavior is
-  unchanged (`tooling/generate.py::_team_preferences_note`).
+  unchanged (`tooling/generate_common.py::_team_preferences_note`).
 - The router (`choosing-review-lenses`) gains a first "How to pick" step: load the
   overlay, apply lens-selection/weighting, pass the rest to each selected lens.
 - The synthesizer (`synthesizing-review-findings`) documents that an `acknowledge`d

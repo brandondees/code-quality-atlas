@@ -85,7 +85,7 @@ whose rule set is the heuristic goldmine (the same "mine the linters" move as ph
 
 | Artifact | Canonical standard | Dedicated tool / rules | Atlas status |
 |---|---|---|---|
-| `SKILL.md` / agent skill | [Anthropic skill-authoring best practices](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices) (frontmatter limits, <500-line body, one-level refs, ToC>100, no time-sensitive text, single default, eval-first) | our own `manifest.py`/`generate.py` validators (no public linter yet) | **unowned as a review lens** (G11); enforced only on *our* skills |
+| `SKILL.md` / agent skill | [Anthropic skill-authoring best practices](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices) (frontmatter limits, <500-line body, one-level refs, ToC>100, no time-sensitive text, single default, eval-first) | our own `manifest.py`/`generate_skill.py` validators (no public linter yet) | **unowned as a review lens** (G11); enforced only on *our* skills |
 | `AGENTS.md` / agent instructions | [agents.md](https://agents.md/) (Markdown, no required fields, **nearest-file-wins** cascade; Linux Foundation Agentic AI Foundation since 2025-12) | none canonical | drift covered by #22/#24; *authoring* uncovered |
 | MCP server / tool surface | [MCP security best practices](https://modelcontextprotocol.io/docs/tutorials/security/security_best_practices) (confused deputy, token passthrough, tool poisoning); least-privilege scopes, namespacing | — | runtime-security heuristics under #25 (Q16) |
 | Model card | [Mitchell et al. 2019, arXiv 1810.03993](https://arxiv.org/abs/1810.03993) (intended use, eval, limitations, ethical considerations) | HF model-card schema | uncovered |

@@ -82,6 +82,17 @@ parse_args() {
         usage
         exit 0
         ;;
+      --bundle | --bundle-only)
+        # Removed (#449): the claude.ai Skills GUI rejects a multi-skill ZIP
+        # outright, so the archive this used to build had no real consumer.
+        # Named explicitly here (unlike the generic unknown-argument case
+        # below) so a caller who remembers this flag is pointed at the
+        # actual replacement instead of a bare "unknown argument".
+        printf 'Error: %s was removed (#449) -- the claude.ai GUI never accepted a multi-skill\n' "$1" >&2
+        printf '  ZIP anyway. Use tooling/vendor-skills.sh instead to put the whole suite inside a repo.\n\n' >&2
+        usage >&2
+        exit 1
+        ;;
       *)
         printf 'Error: Unknown argument: %s\n\n' "$1" >&2
         usage >&2
