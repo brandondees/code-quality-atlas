@@ -1,9 +1,12 @@
 # Eval-hardening campaign log
 
-This is the full, chronological narrative of the Q21 suite-wide eval-hardening
+This is the full campaign narrative of the Q21 suite-wide eval-hardening
 campaign (risk-tiered rollout across the floor tier and all 35 preference-tier
 lenses, cross-model re-gating, tuning passes, and the model-baseline research
-along the way) — moved out of [`open-questions.md`](open-questions.md) on
+along the way). It's mostly written in the order events happened, but not
+strictly chronological throughout — e.g. the closing "Pending eval re-gate"
+entry near the end dates to 2026-06-12, earlier than most of what precedes
+it. Moved out of [`open-questions.md`](open-questions.md) on
 2026-09-06 (#426), where it had grown to occupy roughly 700 lines of the
 "Genuinely still open (undecided)" section, crowding out the handful of lines
 that were actually still-open items. Nothing here was trimmed or summarized in

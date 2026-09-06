@@ -63,9 +63,11 @@ own `### Q<N>` section further down with full context.)*
   attempts) stays owner-gated pending signal.
 - **Q21** — suite-wide eval comprehensiveness. Risk-tiered rollout + the
   opt-in `eval_min` mechanism ✅ built 2026-07-18; all 5 floor-tier lenses and
-  all 35 preference-tier lenses are now hardened and cross-model re-gated
-  (`qwen3.5:4b` promoted to floor-of-record 2026-08-22) — the full wave-by-wave
-  history is [`eval-hardening-campaign-log.md`](eval-hardening-campaign-log.md).
+  (as of the 2026-08-20 snapshot) all 35 preference-tier lenses then in the
+  catalog are hardened and cross-model re-gated (`qwen3.5:4b` promoted to
+  floor-of-record 2026-08-22); a 36th lens shipped 2026-08-23 and was closed
+  out the next day — the full wave-by-wave history is
+  [`eval-hardening-campaign-log.md`](eval-hardening-campaign-log.md).
   **Still open:** adapting the A-E pattern to any *new* lens or shape added
   after this one.
 - **Q17** — self-improving loop. Stage 1 ✅ built 2026-07-18 (D17); stages 2-5
@@ -81,14 +83,16 @@ own `### Q<N>` section further down with full context.)*
   SLO/error-budget, telemetry/analytics privacy) — see Q2's own entry.
 
 **Map-taxonomy gap hunt (G12-G32).** Two gap-hunting rounds (2026-06-12
-through 2026-06-14) plus a cross-discipline review-analog sweep found and
-disposed of gaps **G12** through **G32** (validation-vs-verification, a
-candidate Cluster VII product/experience/value, threat modeling as a
+through 2026-06-14) plus a cross-discipline review-analog sweep identified and
+recorded dispositions for gaps **G12** through **G32** (validation-vs-verification,
+a candidate Cluster VII product/experience/value, threat modeling as a
 design-time discipline, the synthesizer's own tension table, reviewability ⊥
-attribution, and more) — full detail, disposition, and promotion status live
-in [`map-gaps.md`](map-gaps.md), including its own synthesis section ranking
-what to promote first. None of that gap-hunt is itself a still-open item
-distinct from the list above; the full recap that used to run through here is
+attribution, and more) — not every gap's disposition is "resolved" (e.g. G13's
+economics half and several round-3 gaps stay explicitly open/provisional); the
+full detail, current disposition, and promotion status for each live in
+[`map-gaps.md`](map-gaps.md), including its own synthesis section ranking what
+to promote first. None of that gap-hunt is itself a still-open item distinct
+from the list above; the full recap that used to run through here is
 preserved verbatim in
 [`eval-hardening-campaign-log.md`](eval-hardening-campaign-log.md) alongside
 the eval-hardening narrative it was interleaved with.
