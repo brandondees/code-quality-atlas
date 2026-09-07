@@ -205,16 +205,21 @@ _BARE_SURFACES_PATH_RE = re.compile(
 )
 
 
+_SURFACES_HEADING_RE = re.compile(r"^##\s+surfaces\s*$", re.IGNORECASE)
+
+
 def _iter_surfaces_table_rows(md_path):
     """Yield (lineno, line) for every markdown table row under md_path's own
-    top-level '## Surfaces' heading, if it has one."""
+    top-level '## Surfaces' heading, if it has one. Matches the exact `##`
+    level (not `#`/`###`/deeper) so a differently-scoped or nested heading
+    that happens to say "Surfaces" can't widen or narrow what this checks."""
     in_surfaces = False
     for lineno, line in enumerate(
         md_path.read_text(encoding="utf-8").splitlines(), start=1
     ):
         stripped = line.strip()
         if stripped.startswith("#"):
-            in_surfaces = stripped.lstrip("#").strip().lower() == "surfaces"
+            in_surfaces = bool(_SURFACES_HEADING_RE.match(stripped))
             continue
         if in_surfaces and stripped.startswith("|"):
             yield lineno, line
@@ -245,6 +250,49 @@ def test_at_least_one_surfaces_bare_path_found():
         "mentions -- expected more than a handful; the heading or table-row "
         "matching in this test may have broken"
     )
+
+
+def test_no_surfaces_bare_paths_use_an_unlisted_code_extension():
+    """Mirrors test_no_citations_use_an_unlisted_extension above, scoped to
+    Surfaces-table rows: a bare path citing a code extension not in
+    _CODE_EXTENSIONS is invisible to _BARE_SURFACES_PATH_RE (never extracted,
+    never checked by test_surfaces_bare_path_exists), so drift into it would
+    pass silently -- the same "false all green" risk this file already
+    guards against for the sibling formal-citation extractor."""
+    any_ext_re = re.compile(r"`(?P<path>[\w.-]+(?:/[\w.-]+)+\.(?P<ext>[A-Za-z0-9]+))`")
+    unlisted = []
+    for md_path in _iter_map_markdown_files():
+        rel_md = md_path.relative_to(ROOT)
+        for lineno, line in _iter_surfaces_table_rows(md_path):
+            for m in any_ext_re.finditer(line):
+                ext = m.group("ext")
+                # md/txt are excluded deliberately, not a gap: see
+                # _BARE_SURFACES_PATH_RE's own comment on why those two
+                # extensions (the same-directory cross-reference pattern)
+                # are out of scope for this check entirely.
+                if ext not in _CODE_EXTENSIONS and ext not in ("md", "txt"):
+                    unlisted.append(f"{rel_md}:{lineno}: `{m.group(0)}`")
+    assert not unlisted, (
+        "Surfaces-table bare path(s) use a code extension not in "
+        "_CODE_EXTENSIONS, so _BARE_SURFACES_PATH_RE never extracts them and "
+        "test_surfaces_bare_path_exists never checks them -- add the "
+        "extension to _CODE_EXTENSIONS:\n" + "\n".join(unlisted)
+    )
+
+
+def test_iter_surfaces_table_rows_ignores_a_non_level_two_heading(tmp_path):
+    """A '### Surfaces' (or '# Surfaces') heading must NOT be treated as the
+    top-level Surfaces table -- only an exact '## Surfaces' does. Without
+    this, a nested or differently-scoped heading that happens to say
+    "Surfaces" could pull an unrelated table's bare paths into this check,
+    or a real Surfaces table nested under the wrong level could be missed."""
+    md_path = tmp_path / "synthetic.md"
+    md_path.write_text(
+        "# Some Card\n\n### Surfaces\n\n| Surface | Role |\n|---|---|\n"
+        "| `tooling/this-module-does-not-exist.py` | nested, not top-level |\n",
+        encoding="utf-8",
+    )
+    assert list(_iter_surfaces_table_rows(md_path)) == []
 
 
 def _surfaces_bare_path_exists(path):
