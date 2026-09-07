@@ -12,6 +12,7 @@ import yaml
 
 from tooling.generate_common import (
     _escape_table_cell,
+    _gen_trailer,
     _generate_composition,
     modes_section,
 )
@@ -196,7 +197,7 @@ def build_router_md(manifest: Manifest) -> str:
         + _routes_table_section(r)
         + _catalog_section(manifest)
     )
-    return f"---\n{fm}\n---\n\n{body}"
+    return f"---\n{fm}\n---\n\n{body}" + _gen_trailer()
 
 
 def generate_router(manifest: Manifest, skills_root: str = "skills") -> Path:
