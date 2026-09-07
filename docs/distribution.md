@@ -69,6 +69,16 @@ clone.
 
 ✅ works · ⚠️ conditional · ❌ doesn't apply
 
+**Two different "version" signals — don't confuse them.** `.claude-plugin/plugin.json`
+carries a `version` field (currently a static `0.1.0`, added for marketplace-listing
+display) — that is *not* what tells you which build you're actually running. The
+"per-commit" update story in the table above is real and is reported separately by
+`hooks/route.sh`, which resolves `git rev-parse --short HEAD` against the plugin's
+own installed checkout specifically because a hand-maintained version string can
+drift from it. Treat `plugin.json`'s `version` as cosmetic marketplace metadata;
+treat the commit SHA `route.sh` reports as the actual installed build identifier.
+See [`docs/open-questions.md`](open-questions.md)'s D9 addendum for the full history.
+
 Only vendoring pins to a commit by default. The settings-based marketplace
 *can* be pinned instead of tracking latest, but only to a **branch or
 tag** — issue #388: this wasn't documented at all until this was written.
