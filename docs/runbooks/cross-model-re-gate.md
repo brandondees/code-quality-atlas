@@ -14,7 +14,7 @@ re-gated against the **floor of record** — the weakest model the suite is
 expected to be useful on. Without the re-gate, `eval_min: 26` asserts that 26
 scenarios exist, not that any of them discriminate.
 
-**The floor of record is defined by tag today (`qwen2.5-coder:7b`), not by a
+**The floor of record is defined by tag today (`qwen3.5:4b`), not by a
 pinned digest** (#434) — a re-pull of that tag between two re-gates can point
 at different weights while looking like the same model in every comparison. A
 re-gate's recall/precision delta gets attributed to a prompt or suite edit;
@@ -31,7 +31,7 @@ re-gate isn't comparing what it thinks it's comparing.
 apt-get install -y zstd                       # the installer needs it to extract
 curl -fsSL https://ollama.com/install.sh | sh # warns about systemd; harmless
 OLLAMA_MAX_LOADED_MODELS=1 ollama serve &     # see the OOM note below
-ollama pull qwen2.5-coder:7b                  # the floor of record
+ollama pull qwen3.5:4b                        # the floor of record
 ```
 
 **`OLLAMA_MAX_LOADED_MODELS=1` is not optional on a memory-constrained host.**
@@ -61,7 +61,7 @@ time on its own:
 
 ```sh
 curl -s http://127.0.0.1:11434/api/chat -d \
-  '{"model":"qwen2.5-coder:7b","messages":[{"role":"user","content":"hi"}],"stream":false}' \
+  '{"model":"qwen3.5:4b","messages":[{"role":"user","content":"hi"}],"stream":false}' \
   > /dev/null
 ```
 
@@ -73,7 +73,7 @@ prevented the scenario-1 failure every time it's been tried.
 
 ```sh
 python -m tooling.run_evals --skill reviewing-concurrency-and-async \
-    --model qwen2.5-coder:7b
+    --model qwen3.5:4b
 ```
 
 Useful flags: `--num-ctx` (widen for thinking-capable models), `--think` /
