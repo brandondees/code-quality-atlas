@@ -203,6 +203,13 @@ _CODE_EXTENSIONS = ("py", "sh", "yaml", "yml", "json", "jsonc")
 _BARE_SURFACES_PATH_RE = re.compile(
     r"`(?P<path>[\w.-]+(?:/[\w.-]+)+\.(?:" + "|".join(_CODE_EXTENSIONS) + r"))`"
 )
+# Same shape as _BARE_SURFACES_PATH_RE but with no extension restriction --
+# used only by test_no_surfaces_bare_paths_use_an_unlisted_code_extension
+# below, mirroring _ANY_EXTENSION_CITATION_RE's role for the sibling
+# formal-citation extractor above.
+_ANY_EXTENSION_BARE_SURFACES_PATH_RE = re.compile(
+    r"`(?P<path>[\w.-]+(?:/[\w.-]+)+\.(?P<ext>[A-Za-z0-9]+))`"
+)
 
 
 _SURFACES_HEADING_RE = re.compile(r"^##\s+surfaces\s*$", re.IGNORECASE)
@@ -259,12 +266,11 @@ def test_no_surfaces_bare_paths_use_an_unlisted_code_extension():
     never checked by test_surfaces_bare_path_exists), so drift into it would
     pass silently -- the same "false all green" risk this file already
     guards against for the sibling formal-citation extractor."""
-    any_ext_re = re.compile(r"`(?P<path>[\w.-]+(?:/[\w.-]+)+\.(?P<ext>[A-Za-z0-9]+))`")
     unlisted = []
     for md_path in _iter_map_markdown_files():
         rel_md = md_path.relative_to(ROOT)
         for lineno, line in _iter_surfaces_table_rows(md_path):
-            for m in any_ext_re.finditer(line):
+            for m in _ANY_EXTENSION_BARE_SURFACES_PATH_RE.finditer(line):
                 ext = m.group("ext")
                 # md/txt are excluded deliberately, not a gap: see
                 # _BARE_SURFACES_PATH_RE's own comment on why those two
