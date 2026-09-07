@@ -27,9 +27,10 @@ extend-exclude = ["*.md"]
 # NOT just "the classic E4/E7/E9/F default" some older ruff docs describe.
 # Verified against the exact pinned ruff==0.16.5 via
 # `ruff check --isolated --show-settings .` (which ignores this file
-# entirely): ruff's own built-in default already enables ~415 rules,
+# entirely): ruff's own built-in default already enables 413 rules,
 # spanning categories like S, BLE, DTZ, SIM, TRY, PERF, FURB, and
-# PLE/PLR/PLW. This is why the three `# noqa: TRY004` suppressions in
+# PLE/PLR/PLW (415 once this repo's own `extend-select` below is applied).
+# This is why the three `# noqa: TRY004` suppressions in
 # tooling/run_evals.py exist at all -- TRY isn't in either addition below,
 # yet it fires. The surface is implicit and version-pinned rather than
 # selected here explicitly, so a future ruff bump can change it again; see
