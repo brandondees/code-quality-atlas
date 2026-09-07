@@ -24,13 +24,28 @@ target-version = "py312"
 extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
-# Default rule set (E4, E7, E9, F) — see docs/open-questions.md D-series for
-# any future decision to broaden this. C901 (mccabe complexity) is one
-# addition: a budget, not a rewrite of everything already over it (issue
-# #395) — the 5 pre-existing functions above the limit each carry their own
-# `# noqa: C901` pointing at #441, which tracks bringing them down. B904
-# (raise-without-from-inside-except) is the other: two real misses in
-# manifest.py had gone uncaught with only the default rule set (issue #392).
+# NOT just "the classic E4/E7/E9/F default" some older ruff docs describe.
+# Verified against the exact pinned ruff==0.16.5 via
+# `ruff check --isolated --show-settings .` (which ignores this file
+# entirely): ruff's own built-in default already enables 413 rules,
+# spanning categories like S, BLE, DTZ, SIM, TRY, PERF, FURB, and
+# PLE/PLR/PLW (415 once this repo's own `extend-select` below is applied).
+# This is why the three `# noqa: TRY004` suppressions in
+# tooling/run_evals.py exist at all -- TRY isn't in either addition below,
+# yet it fires. The surface is implicit and version-pinned rather than
+# selected here explicitly, so a future ruff bump can change it again; see
+# docs/open-questions.md D-series for any decision to pin an explicit
+# `select =` list instead. `extend-select` below layers two further
+# additions on top of that already-large default:
+#
+# - C901 (mccabe complexity): a budget, not a rewrite of everything
+#   already over it (issue #395). The 5 functions once over the limit have
+#   since been decomposed below it (issue #441, closed via #451) -- none
+#   carry a `# noqa: C901` anymore; this is a forward-looking gate on new
+#   code, not a marker of a suppressed backlog.
+# - B904 (raise-without-from-inside-except): two real misses in
+#   manifest.py had gone uncaught with only the default rule set (issue
+#   #392).
 extend-select = ["C901", "B904"]
 
 [tool.ruff.lint.mccabe]
