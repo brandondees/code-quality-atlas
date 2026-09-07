@@ -206,20 +206,26 @@ jobs:
         if: github.event_name == 'schedule' || steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         with:
           python-version: "3.12"
-      # #475: no `cache: 'pip'` above -- this job runs on both an x86_64 and
-      # an arm64 self-hosted runner (see the job's own comment above), but
-      # setup-python's built-in pip cache keys purely on `runner.os` (always
-      # "Linux" here), never `runner.arch`. Per docs/self-hosted-runners.md's
-      # "Known gotchas" (cache keys holding compiled artifacts must include
-      # runner.arch), that would let one architecture's cache silently win
-      # the shared key -- actions/cache entries are immutable once saved --
-      # and the other arch would restore a cache pip can't use for its own
-      # platform. Dropped rather than re-keyed: these are also persistent
+      # #475: no `cache: 'pip'` above. #475 originally suspected this pinned
+      # action's pip cache key was arch-blind (`runner.os` only, per
+      # docs/self-hosted-runners.md's general "Known gotchas" warning for
+      # actions/cache) and would let one of this job's two self-hosted
+      # architectures (x86_64/arm64, see the job's own comment above)
+      # silently restore the other's incompatible wheels. That premise
+      # doesn't hold for this pinned commit: setup-python@v7.0.0's
+      # `pip-cache.ts` `computeKeys()` already includes `process.arch` in
+      # both the primary and restore keys (verified directly against the
+      # pinned SHA's source), so it's already arch-safe -- no different
+      # from `Swatinem/rust-cache` keying on the rustc host triple, per
+      # that same doc section. `cache: 'pip'` is still dropped, but for an
+      # unrelated, independently-valid reason: these are persistent
       # self-hosted runners (not ephemeral hosted ones), so each host's own
-      # local pip cache already survives between jobs on that host without
-      # actions/cache at all, and the fresh-venv `--require-hashes` install
-      # below is already the source of correctness, not the cache -- so
-      # there's no real speed loss to trade against the arch-mixing risk.
+      # local `~/.cache/pip` already survives between jobs without
+      # actions/cache's network round-trip to GitHub's cache API, and the
+      # fresh-venv `--require-hashes` install below is already the source
+      # of correctness, not the cache -- so actions/cache here would add
+      # network overhead for a warm cache that's already local, not close
+      # an arch-mixing gap.
       # #366: this runner is self-hosted and persistent (see the job's own
       # comment above) -- installing straight into its interpreter meant any
       # pin already present in site-packages from a prior job was reported
