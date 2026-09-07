@@ -10,7 +10,11 @@ from pathlib import Path
 
 import yaml
 
-from tooling.generate_common import _escape_table_cell, _generate_composition
+from tooling.generate_common import (
+    _escape_table_cell,
+    _gen_trailer,
+    _generate_composition,
+)
 from tooling.manifest import Manifest, Synthesizer
 
 
@@ -374,7 +378,7 @@ def build_synthesizer_md(manifest: Manifest) -> str:
         + _reviewer_discipline_section()
         + _going_deeper_section(router_name)
     )
-    return f"---\n{fm}\n---\n\n{body}"
+    return f"---\n{fm}\n---\n\n{body}" + _gen_trailer()
 
 
 def generate_synthesizer(manifest: Manifest, skills_root: str = "skills") -> Path:

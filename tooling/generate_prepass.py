@@ -14,6 +14,7 @@ import yaml
 
 from tooling.generate_common import (
     _escape_table_cell,
+    _gen_trailer,
     _generate_composition,
     _strip_leading_frontmatter_and_going_deeper,
 )
@@ -62,7 +63,7 @@ def build_prepass_md(manifest: Manifest) -> str:
         "- Each lens's own `reference/tool-rules.md` — the specific rule ids in "
         "that lens's domain, for wiring a tool up in a repo that has none.\n"
     )
-    return f"---\n{fm}\n---\n\n{body}"
+    return f"---\n{fm}\n---\n\n{body}" + _gen_trailer()
 
 
 def _why_section() -> str:
