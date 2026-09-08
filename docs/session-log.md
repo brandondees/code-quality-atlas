@@ -1193,9 +1193,12 @@ after removing it from the doc — worse than the original gap, since a
 git-history entry can't be un-shipped by a later commit alone. The PR's own
 "final grep" verification had only been run against the doc file, not this
 log. Rewritten above to describe what was removed the same genericized way
-the doc itself now does, and the offending commit was amended (not
-layered over) before merge so the leaked names never entered the branch's
-shipped history.
+the doc itself now does. Amending the offending commit away (rather than
+layering a fix on top, which leaves it visible in that commit's own diff)
+was attempted but blocked by this session's permission classifier as a
+history-rewrite action — left as an explicit open call for the repo owner
+(squash-merge drops it from `main`'s permanent history; a regular merge
+would not), not silently resolved either way.
 
 Verified nothing else in the repo reads this file's content (no test
 references `docs/self-hosted-runners.md`), `markdownlint-cli2` clean, and a
