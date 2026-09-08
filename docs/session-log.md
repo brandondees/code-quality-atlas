@@ -1204,3 +1204,12 @@ Verified nothing else in the repo reads this file's content (no test
 references `docs/self-hosted-runners.md`), `markdownlint-cli2` clean, and a
 final grep for every scrubbed name/pattern across **both** changed files
 returns no matches.
+
+**Follow-up (CodeRabbit, Minor):** the doc's own note already said a future
+verbatim re-copy from the private canonical could reintroduce these names,
+"no guard against that beyond this note." Closed that gap: added
+`tests/test_no_private_repo_names_in_runner_docs.py`, a guard test
+asserting the specific confirmed-private strings never reappear in
+`docs/self-hosted-runners.md`. Verified it actually catches a regression
+(not vacuous) by injecting a known string and confirming the test fails,
+then restoring the file and confirming it passes clean.
