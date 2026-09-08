@@ -288,9 +288,31 @@ jobs:
         # license would merge unnoticed. Allow-list, not a copyleft deny-
         # list: --allow-only fails on anything not explicitly known-
         # compatible, so a license this list has never seen is treated as
-        # unproven rather than assumed fine (--partial-match matches a
-        # license variant string against these prefixes, e.g. pip-licenses'
-        # own combined "Apache-2.0 OR BSD-2-Clause" for `packaging`).
+        # unproven rather than assumed fine.
+        #
+        # Exact match, deliberately NOT --partial-match: a first version of
+        # this step used --partial-match for convenience (so "MIT" matches
+        # "MIT License" etc.), but pip-licenses implements that as a plain
+        # case-insensitive substring test of each allow-list entry against
+        # the package's *whole* reported license string
+        # (case_insensitive_partial_match_set_diff in piplicenses.py) --
+        # confirmed directly against the pinned version's source. For a
+        # package reporting a single joined multi-license expression (this
+        # repo already has one real instance: `packaging` reports
+        # "Apache-2.0 OR BSD-2-Clause" as one string, not two), that means a
+        # combined "GPL-3.0-only AND BSD-3-Clause" would also match on the
+        # "BSD-3-Clause" substring and pass silently -- BSD alone being
+        # allowed says nothing about whether the AND'd GPL term is, so
+        # substring matching can't tell an "OR" (either term is fine) apart
+        # from an "AND" (every term must be) (round-1 review finding,
+        # CodeRabbit). Exact match closes this: a package's full reported
+        # license string must appear in the allow-list verbatim, so a new
+        # combined expression -- AND or OR -- has to be explicitly reviewed
+        # and added, not silently pass because one of its terms happens to
+        # already be listed. The list below already carries the one
+        # legitimate combined string this repo's tree currently produces
+        # ("Apache-2.0 OR BSD-2-Clause", both of whose terms are actually
+        # allowed) verbatim for exactly this reason.
         #
         # Placement matters: this step must run here, before
         # requirements.txt-is-in-sync/dependency-vulnerability-audit install
@@ -307,12 +329,12 @@ jobs:
         # CI run before landing here -- extend it deliberately when a new
         # requirements.in addition needs a license already known to be
         # compatible but not yet listed, same revisit-trigger shape as the
-        # pip-tools/pip-audit pins below (see D21 in docs/open-questions.md
-        # for why those two stay unhashed).
+        # pip-tools/pip-audit/pip-licenses pins (see D21 in
+        # docs/open-questions.md for why all three stay unhashed).
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: |
           pip install pip-licenses==5.5.5
-          pip-licenses --allow-only="MIT License;MIT;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;Apache 2.0;Apache-2.0 OR BSD-2-Clause;Python Software Foundation License;PSF-2.0;ISC License (ISCL);The Unlicense (Unlicense)" --partial-match
+          pip-licenses --allow-only="MIT License;MIT;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;Apache 2.0;Apache-2.0 OR BSD-2-Clause;Python Software Foundation License;PSF-2.0;ISC License (ISCL);The Unlicense (Unlicense)"
       # requirements.txt-is-in-sync and dependency-vulnerability-audit run
       # last among the python-filtered steps, deliberately (#378): both
       # `pip install` an unpinned tool (pip-tools/pip-audit) straight into
