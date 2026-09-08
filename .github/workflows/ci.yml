@@ -406,6 +406,26 @@ jobs:
           # Dependabot-tracked requirements-dev.txt if it drifts noticeably.
           pip install pip-audit==2.10.1
           pip-audit --requirement requirements.txt
+      - name: license compatibility
+        # #472: pip-audit above gates CVEs, but nothing previously checked
+        # dependency *licenses* against this repo's own MIT + CC BY posture
+        # (D11) -- a future requirements.in addition with an incompatible
+        # license would merge unnoticed. Allow-list, not a copyleft deny-
+        # list: --allow-only fails on anything not explicitly known-
+        # compatible, so a license this list has never seen is treated as
+        # unproven rather than assumed fine (--partial-match matches a
+        # license variant string against these prefixes, e.g. pip-licenses'
+        # own combined "Apache-2.0 OR BSD-2-Clause" for `packaging`). The
+        # list below is exactly the set `pip-licenses` reports for this
+        # repo's current dependency tree, verified locally before adding
+        # this step -- extend it deliberately when a new dependency needs a
+        # license already known to be compatible but not yet listed, same
+        # revisit-trigger shape as the pip-tools/pip-audit pins above (see
+        # D21 in docs/open-questions.md for why those two stay unhashed).
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        run: |
+          pip install pip-licenses==5.5.5
+          pip-licenses --allow-only="MIT License;MIT;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;Apache 2.0;Apache-2.0 OR BSD-2-Clause;Python Software Foundation License;ISC License (ISCL);The Unlicense (Unlicense)" --partial-match
       - name: markdownlint
         if: steps.filter.outputs.markdown == 'true'
         uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0

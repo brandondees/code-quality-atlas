@@ -16,7 +16,11 @@ issues/PRs — check these before reporting nothing's queued:
 - [`docs/map-gaps.md`](docs/map-gaps.md) — structural taxonomy gaps (`G1`-`G32`+)
   feeding future categories/lenses.
 - [`docs/session-log.md`](docs/session-log.md) — narrative history of what
-  shipped and why, for when a doc pointer alone isn't enough context.
+  shipped and why, for when a doc pointer alone isn't enough context. Carries
+  September 2026 onward; older months rotate out into dated
+  `docs/session-log-<range>.md` archives once this file grows past ~1,500
+  lines (#467) — see its own header for the current rotation policy and the
+  first archive, [`docs/session-log-2026-06-to-08.md`](docs/session-log-2026-06-to-08.md).
 - [`docs/eval-hardening-campaign-log.md`](docs/eval-hardening-campaign-log.md)
   — the wave-by-wave narrative of the Q21 suite-wide eval-hardening campaign,
   extracted out of `open-questions.md` once it grew to ~700 lines there (#426).
@@ -28,7 +32,8 @@ issues/PRs — check these before reporting nothing's queued:
 **Read fully vs. read partially (#426).** Not every doc above is meant to be
 read the same way. `docs/open-questions.md`, `docs/map-gaps.md`, and
 `docs/map/CLAUDE.md` are reference-shaped and short enough to walk in full —
-that's the point of consulting them. `docs/session-log.md` and
+that's the point of consulting them. `docs/session-log.md` (and its rotated-
+out archives, e.g. `docs/session-log-2026-06-to-08.md`) and
 `docs/eval-hardening-campaign-log.md` are narrative logs, not reference docs:
 read them **partially**, filtered by date or topic to what the task actually
 needs, the way `docs/open-questions.md`'s own `### Q<N>` sections point into
