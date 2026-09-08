@@ -4,28 +4,22 @@ How to register a self-hosted GitHub Actions runner, size the host it runs on,
 diagnose a job that never started, and migrate a runner to a new machine —
 plus the gotchas that would otherwise resurface on every new host.
 
-See [calendar-proxy's `docs/runtime.md`](https://github.com/brandondees/calendar-proxy/blob/main/docs/runtime.md#self-hosted-ci-runners)
-for what actually runs where and the operational trade-offs; this page is the
-"how to set one up" companion.
-
-> **This file is copied verbatim into every repo on the runner fleet.**
-> `calendar-proxy/docs/self-hosted-runners.md` is the canonical copy — fix it
-> there and re-copy, rather than patching a copy in place. Copies are used
-> instead of a cross-repo link because most work in these repos happens in
-> isolated containers where a link to another repo is not reachable. The
-> accepted cost is drift: a copy may lag the canonical, so check the canonical
-> before trusting anything here that looks surprising.
+> **This file is copied verbatim into every repo on a private, personal
+> runner fleet.** A private canonical repo (not linked here, since it isn't
+> reachable from a public checkout) holds the source copy — fix it there and
+> re-copy, rather than patching a copy in place. Copies are used instead of a
+> cross-repo link because most work in these repos happens in isolated
+> containers where a link to another repo is not reachable. The accepted
+> cost is drift: a copy may lag the canonical, so treat anything here that
+> looks surprising or stale with suspicion.
 >
-> **Links to `calendar-proxy` in this file require access to that repo**,
-> which is private. They resolve for the fleet's operators and `404` for
-> anyone else — relevant because some repos carrying this copy are public.
-> Nothing here depends on following them; they are provenance, not
-> instructions.
->
-> Concrete file references in the gotchas below (`fly-deploy.yml`,
-> `nightly.yml`, `markdown.yml`, …) are **examples from calendar-proxy**,
-> where each gotcha was first hit. They illustrate the shape of the problem;
-> they are not claims about the repo you are reading this in.
+> **This copy has been genericized for a public repo (#394):** every other
+> repo name, host identifier, and private-repo link that appeared in the
+> original fleet-wide version has been replaced with a placeholder or
+> removed outright. The lessons below are unchanged; only the identifying
+> specifics of which private project first hit each one are gone. A future
+> verbatim re-copy from the canonical could reintroduce them — there is no
+> guard against that beyond this note.
 >
 > Fleet as of 2026-08-29: **three Linux hosts across two architectures.**
 > `<vm-name>` (an OrbStack Ubuntu 26.04 LTS VM on the Mac, 6 CPU / 12 GB,
@@ -34,10 +28,10 @@ for what actually runs where and the operational trade-offs; this page is the
 > `orbstack-linux` (x86_64) runs on another laptop. Plus `macos-local`, the Mac
 > itself.
 >
-> The Bazzite host uses one registration per repo, except `second-brain-config`,
-> which has two (instances 2 and 3) so its jobs can run two at a time. Runner
-> names are per-repo, so the same name across six repos is six registrations of
-> one host, not a conflict.
+> The Bazzite host uses one registration per repo, except one repo which has
+> two (instances 2 and 3) so its jobs can run two at a time. Runner names are
+> per-repo, so the same name across six repos is six registrations of one
+> host, not a conflict.
 >
 > **The two architectures are what matters most** before editing a `runs-on:`
 > or a tool-download step — the host count is bookkeeping, the arch split
@@ -69,38 +63,40 @@ several registrations of one machine, not one shared runner. Labels are what
 
 | Name                              | OS    | Arch   | Host                                 | Labels                                      |
 | --------------------------------- | ----- | ------ | ------------------------------------ | ------------------------------------------- |
-| `macos-local`                     | macOS | ARM64  | The Mac itself (native, launchd)     | `self-hosted`, `macOS`, `ARM64`             |
-| `orbstack-linux-mbp`              | Linux | ARM64  | The Mac, OrbStack VM **`<vm-name>`** | `self-hosted`, `Linux`, `ARM64`, `orbstack` |
-| `orbstack-linux`                  | Linux | x86_64 | Other laptop (OrbStack VM)           | `self-hosted`, `Linux`, `X64`, `orbstack`   |
-| `bazzite-runner-9cbf0d01cf92-<n>` | Linux | x86_64 | Bazzite host (other machine)         | `self-hosted`, `Linux`, `X64`, `bazzite`    |
+| `macos-local`                | macOS | ARM64  | The Mac itself (native, launchd)     | `self-hosted`, `macOS`, `ARM64`             |
+| `orbstack-linux-mbp`         | Linux | ARM64  | The Mac, OrbStack VM **`<vm-name>`** | `self-hosted`, `Linux`, `ARM64`, `orbstack` |
+| `orbstack-linux`             | Linux | x86_64 | Other laptop (OrbStack VM)           | `self-hosted`, `Linux`, `X64`, `orbstack`   |
+| `bazzite-runner-<id>-<n>`    | Linux | x86_64 | Bazzite host (other machine)         | `self-hosted`, `Linux`, `X64`, `bazzite`    |
 
 The Bazzite host runs one container per repo, numbered rather than named after
 the repo. **Instance numbers are the `<n>` suffix** in
-`bazzite-runner-9cbf0d01cf92-<n>` from the row above — so instance 5 is the
-runner named `bazzite-runner-9cbf0d01cf92-5`, which is what
-`gh api .../actions/runners` will show. Verified live on 2026-08-29:
+`bazzite-runner-<id>-<n>` from the row above — so instance 5 is the runner
+named `bazzite-runner-<id>-5`, which is what `gh api .../actions/runners`
+will show. Verified live on 2026-08-29 (repos on this fleet are otherwise
+private, so they're numbered `<repo-a>`-`<repo-f>` here rather than named,
+except this repo itself):
 
 | Instance | Repository            |
-| -------- | --------------------- |
-| 1        | `bazzite-config`      |
-| 2, 3     | `second-brain-config` |
-| 4        | `calendar-proxy`      |
-| 5        | `git_archive_sync`    |
-| 6        | `code-quality-atlas`  |
-| 7        | `cuddly-palm-tree`    |
-| 8        | `software-factory`    |
+| -------- | ---------------------- |
+| 1        | `<repo-a>`             |
+| 2, 3     | `<repo-b>`             |
+| 4        | `<repo-c>`             |
+| 5        | `<repo-d>`             |
+| 6        | `code-quality-atlas`   |
+| 7        | `<repo-e>`             |
+| 8        | `<repo-f>`             |
 
 > **The `orbstack` label is not on every registration of `orbstack-linux-mbp`.**
-> Checked live on 2026-08-29: it is present on `second-brain-config`, and
-> **absent** on `calendar-proxy`, `git_archive_sync`, and `code-quality-atlas`,
-> where the labels are just `self-hosted`, `Linux`, `ARM64`. This is the
-> "custom labels must be re-supplied" gotcha from
+> Checked live on 2026-08-29: it is present on `<repo-b>`, and **absent** on
+> `<repo-c>`, `<repo-d>`, and `code-quality-atlas`, where the labels are just
+> `self-hosted`, `Linux`, `ARM64`. This is the "custom labels must be
+> re-supplied" gotcha from
 > [Migrating a runner](#migrating-a-runner-to-another-host) having already
 > happened, and it is why the table above lists labels per _runner_ while the
 > real answer is per _registration_. Nothing is broken today — only
-> `second-brain-config` has jobs naming `orbstack`, and its copy has the label
-> — but a job routed to `[self-hosted, orbstack]` in any of the other three
-> would queue forever with no error.
+> `<repo-b>` has jobs naming `orbstack`, and its copy has the label — but a
+> job routed to `[self-hosted, orbstack]` in any of the other three would
+> queue forever with no error.
 
 Not every repo has every runner registered. **Check the live list rather than
 trusting this table** — it has gone stale before, and a table that names a
@@ -228,9 +224,9 @@ their own. The gap is purely "who starts the VM".
 
 A host-side agent that (1) starts the VM if it isn't running, (2) restarts the
 runner service inside it if that is `inactive`/`failed`, and (3) logs a
-heartbeat, run hourly, closes that gap without operator intervention.
-`second-brain-config` implements exactly this in
-`scripts/runner-healthcheck.sh`, driven by a launchd agent.
+heartbeat, run hourly, closes that gap without operator intervention. One
+repo on this fleet implements exactly this in a `runner-healthcheck.sh`
+script, driven by a launchd agent.
 
 Two lessons from operating it:
 
@@ -560,8 +556,8 @@ honest pin.
 
 The Bazzite host runs each runner in a Podman container rather than as a
 systemd unit on the host, which changes three things worth knowing before
-routing a job there. Its own runbook (`bazzite-config/runbooks/09-*.md`) is
-authoritative; this is what leaks into workflow authoring.
+routing a job there. A private runbook on the host itself is authoritative;
+this is what leaks into workflow authoring.
 
 - **`docker` inside the job is the _host's_ podman**, reached through a mounted
   socket. Anything that bind-mounts a path into a container —
@@ -577,9 +573,9 @@ authoritative; this is what leaks into workflow authoring.
 
   The fix is host-side (bind the work folder at an identical absolute path on
   both sides), not a workflow change — but if you see that error, this is why.
-  `git_archive_sync`'s bats job is the one that needs it. Note the failure is
-  loud, but its message points at the container path rather than at the
-  namespace mismatch.
+  One repo's `bats` job on this fleet is the one that needs it. Note the
+  failure is loud, but its message points at the container path rather than
+  at the namespace mismatch.
 
 - **The runner image is not `ubuntu-latest`.** It is `ghcr.io/actions/actions-runner`
   plus a few additions, and it carries far less than a GitHub-hosted image. The
@@ -613,9 +609,9 @@ authoritative; this is what leaks into workflow authoring.
 
 ## Known gotchas
 
-Everything below was discovered the hard way wiring up `calendar-proxy`'s two
-runners (PR [#760](https://github.com/brandondees/calendar-proxy/pull/760))
-and will very likely resurface on the next repo/machine:
+Everything below was discovered the hard way wiring up an earlier repo's
+first two runners on this fleet, and will very likely resurface on the next
+repo/machine:
 
 - **The runner user is unprivileged.** Unlike GitHub-hosted `ubuntu-latest`,
   a self-hosted runner typically has no write access to `/usr/local/bin` or
@@ -624,8 +620,7 @@ and will very likely resurface on the next repo/machine:
   that to `$GITHUB_PATH`, not `mv` into a system path — a plain
   `mv ... /usr/local/bin/foo` fails with `Permission denied`.
 - **Architecture-specific binary pins need re-checking.** Any workflow step
-  that downloads a pinned tool release (calendar-proxy's `mise`, `hadolint`)
-  by a
+  that downloads a pinned tool release (e.g. `mise`, `hadolint`) by a
   hardcoded asset name (`*-linux-x64`, `*-Linux-x86_64`) will silently fail
   to execute on an ARM64 runner — re-pin to the matching arch's asset name
   and re-verify its checksum from the tool's actual release page; don't
@@ -637,11 +632,11 @@ and will very likely resurface on the next repo/machine:
   migration — some repos simply can't move.** A locked dependency with no
   `manylinux_aarch64` wheel doesn't error cleanly; the resolver silently
   falls back to building from sdist, which can mean a 20+ minute
-  cargo/cmake compile on every job, or an outright failure. `software-factory`
-  is blocked on exactly this (`libsql` publishes `macosx_11_0_arm64`,
-  `manylinux_x86_64`, and `win_amd64` — no Linux arm64), which takes all of
-  its workflows off the table for an ARM64 host regardless of anything else.
-  Check before planning, not after:
+  cargo/cmake compile on every job, or an outright failure. One repo on this
+  fleet is blocked on exactly this (a dependency publishing
+  `macosx_11_0_arm64`, `manylinux_x86_64`, and `win_amd64` — no Linux
+  arm64), which takes all of its workflows off the table for an ARM64 host
+  regardless of anything else. Check before planning, not after:
 
   ```sh
   curl -s https://pypi.org/pypi/<package>/<version>/json | jq -r '.urls[].filename'
@@ -670,18 +665,18 @@ and will very likely resurface on the next repo/machine:
   Puppeteer at it via `PUPPETEER_EXECUTABLE_PATH` plus
   `PUPPETEER_SKIP_DOWNLOAD=true`; Puppeteer only speaks the DevTools Protocol
   to whatever binary it's given, so it doesn't care who downloaded it. See
-  `.github/workflows/markdown.yml`'s `lint-format` job for the working
-  implementation. If a job only needs `npm ci` to succeed and never actually
-  launches a browser (e.g. `npm-audit-nightly.yml`, which only runs `npm
-audit`), `PUPPETEER_SKIP_DOWNLOAD=true` alone is enough — no need to fetch
-  any browser at all.
+  a Markdown-lint workflow's `lint-format` job elsewhere on this fleet for
+  the working implementation. If a job only needs `npm ci` to succeed and
+  never actually launches a browser (e.g. a nightly `npm audit` job that
+  never touches Puppeteer), `PUPPETEER_SKIP_DOWNLOAD=true` alone is enough —
+  no need to fetch any browser at all.
 - **Gate `pull_request`-triggered jobs against forks before routing them to
   self-hosted hardware.** A self-hosted runner executes checked-out code
   directly on that machine, not an ephemeral disposable VM — a `pull_request`
   workflow with no such gate would run untrusted fork contributors' code (Go
   tests, `npm ci` postinstall scripts, `docker build`, etc.) directly on
   personal hardware. Add this to the gating job (mirrors the check already
-  used in `fly-deploy.yml`'s preview job):
+  used elsewhere on this fleet, e.g. a deploy workflow's preview job):
 
   ```yaml
   if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
@@ -700,20 +695,20 @@ audit`), `PUPPETEER_SKIP_DOWNLOAD=true` alone is enough — no need to fetch
 - **Keep elevated-credential jobs off self-hosted hardware — check the
   credential is actually scoped, not just intended to be.** A self-hosted
   runner also executes untrusted third-party dependency code with no human
-  review gate (Dependabot-authored PRs that auto-merge on green CI, e.g.
-  `dependabot-auto-merge.yml`'s `docker`/`gomod` ecosystems) — co-locating
-  that with release-signing or persistent-deployment credentials on the same
-  physical host is a real lateral-movement risk, not a theoretical one.
-  `release.yml` (cosign OIDC signing, GHCR push) and all of `fly-deploy.yml`
-  stay on GitHub-hosted for this reason. A first pass at this repo moved
-  `fly-deploy.yml`'s `preview`/`cleanup` jobs to self-hosted on the reasoning
-  that their `FLY_API_TOKEN` is scoped to preview-app create/destroy only —
-  but that scoped token was only _planned_ (tracked in a still-open issue), so
+  review gate (Dependabot-authored PRs that auto-merge on green CI) —
+  co-locating that with release-signing or persistent-deployment credentials
+  on the same physical host is a real lateral-movement risk, not a
+  theoretical one. Release-signing (cosign OIDC, registry push) and
+  persistent-deployment jobs should stay on GitHub-hosted for this reason.
+  A first pass on one repo in this fleet moved a deploy workflow's
+  preview/cleanup jobs to self-hosted on the reasoning that their deploy
+  token was scoped to preview-environment create/destroy only — but the
+  scoping was only _planned_ (tracked in a still-open issue elsewhere), so
   those jobs were actually still using the same broad, unscoped token
-  `staging` was deliberately kept off self-hosted to protect. Caught in
-  review before merging (round-1 atlas review, PR #763) — worth double
-  checking a "this token is narrowly scoped" justification actually holds
-  today, not just once a tracked follow-up lands.
+  production was deliberately kept off self-hosted to protect. Caught in
+  review before merging — worth double checking a "this token is narrowly
+  scoped" justification actually holds today, not just once a tracked
+  follow-up lands.
 - **`actions/setup-<lang>` may have no build for your host's OS version, and
   fails outright rather than falling back.** `actions/setup-python` publishes
   linux-arm64 builds only for Ubuntu LTS-ish versions (22.04 / 24.04 /
@@ -793,8 +788,9 @@ for the toolchain`. Fix it in the workflow (`components: clippy`), not by
   found" rather than anything actionable. Add a cheap preflight step
   (`command -v gh >/dev/null || { echo "::error::gh not installed on this
 self-hosted runner"; exit 1; }`) to any job depending on a tool that isn't
-  part of the base OS — see `fly-deploy.yml`'s `preview` job — so a
-  rebuilt/reset runner host fails loudly and immediately instead of mid-job.
+  part of the base OS — see a deploy workflow's preview job elsewhere on this
+  fleet for an example — so a rebuilt/reset runner host fails loudly and
+  immediately instead of mid-job.
 
   **Distinguish two cases, because they want different fixes.** A _toolchain
   component the workflow uses_ (clippy, a Rust toolchain, a Python version)
@@ -838,7 +834,8 @@ self-hosted runner"; exit 1; }`) to any job depending on a tool that isn't
   still isn't moving, the answer is host load or memory
   ([Sizing the host](#sizing-the-host)), not another repo's job "ahead in
   line". Contention also makes timing-sensitive gates noisier than on a
-  dedicated hosted VM — see `nightly.yml`'s `aggregate-nfr1` job.
+  dedicated hosted VM — observed directly on a nightly performance-gate job
+  elsewhere on this fleet.
 
 - **Every workflow needs a `concurrency` group once it's self-hosted, and a
   `push` trigger scoped to the default branch.** Both are near-free on hosted
@@ -884,7 +881,7 @@ self-hosted runner"; exit 1; }`) to any job depending on a tool that isn't
   Recent versions of the action do clean up the builder they create, so in
   principle this should not pile up — but verified on this fleet that it does
   anyway: `docker buildx ls` showed five builders, three of them orphaned
-  `calproxy-verify-builder-*` instances from jobs long finished. Treat the
+  `<job-name>-verify-builder-*` instances from jobs long finished. Treat the
   cleanup as best-effort, because a cancelled or OOM-killed job never reaches
   its cleanup step — precisely the failure mode a contended self-hosted host
   produces most often. `docker builder prune` / `docker buildx prune` with no
@@ -901,9 +898,9 @@ self-hosted runner"; exit 1; }`) to any job depending on a tool that isn't
 These are real downgrades from GitHub-hosted runners. They are accepted
 deliberately for a personal-use fleet rather than solved, and are recorded
 here so the trade is explicit and revisitable instead of discovered during an
-incident. Raised in review across
-[calendar-proxy#763](https://github.com/brandondees/calendar-proxy/pull/763),
-`git_archive_sync#546`, and `code-quality-atlas#338`.
+incident. Raised in review across several repos on this fleet's own
+self-hosted-migration PRs, including this repo's own
+[code-quality-atlas#338](https://github.com/brandondees/code-quality-atlas/pull/338).
 
 - **Single point of failure, with no fallback and no monitoring.** Every
   migrated workflow now depends on one machine being awake, online, and
@@ -955,12 +952,11 @@ incident. Raised in review across
 A persistent runner's Docker state (buildx build caches, dangling images,
 orphaned volumes) only ever grows — nothing tears it down the way an
 ephemeral GitHub-hosted VM would. Left unmanaged, this fills the disk
-silently until a job fails with `ENOSPC` (confirmed in practice — see PR
-[#763](https://github.com/brandondees/calendar-proxy/pull/763)'s review
-thread). Two systemd timers on `orbstack-linux-mbp` handle this automatically
-now; see [`scripts/runner-maintenance/`](https://github.com/brandondees/calendar-proxy/tree/main/scripts/runner-maintenance)
-for
-the actual unit files and install steps.
+silently until a job fails with `ENOSPC` (confirmed in practice, on this
+fleet's own review history). Two systemd timers on `orbstack-linux-mbp`
+handle this automatically now; the actual unit files and install steps live
+in a private `runner-maintenance/` script directory maintained alongside
+this doc's own canonical copy.
 
 - **`docker-gc.timer`** — daily, runs `docker buildx prune
 --max-used-space=10GB` against **every** buildx builder (not just

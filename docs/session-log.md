@@ -1156,3 +1156,41 @@ against this repo's own MIT + CC BY posture, plus **D21** acknowledging —
 rather than changing — the existing `pip-tools`/`pip-audit` unhashed-install
 trade-off #472's second finding surfaced, since both steps already carried
 their own stated revisit trigger inline).
+
+## 2026-09-08 (same day) — #394: `docs/self-hosted-runners.md` still named private repos by name, not just personal identifiers
+
+The earlier #394 fix (above, in the archived June-August log) scrubbed the
+maintainer's OS username and VM hostnames but left the file naming five
+other private repos on the same fleet by name throughout — `calendar-proxy`
+(the file's own canonical source, referenced 9 times including two direct
+PR links), `second-brain-config`, `bazzite-config`, `git_archive_sync`,
+`software-factory`, and `cuddly-palm-tree` — plus a literal Bazzite-host
+container ID (`9cbf0d01cf92`) the fleet intro paragraph had already
+generalized to `<id>` but the fleet-registry table below it hadn't.
+Flagged directly by the repo owner: this is a public repo, and it should
+carry no reference to private projects at all, not just no reference to
+personal machine/account details.
+
+Genericized every instance across the file (24 edits, one file): the
+private-repo names in the fleet registry and instance-mapping tables became
+numbered placeholders (`<repo-a>`-`<repo-f>`, keeping `code-quality-atlas`
+itself named since it's this repo); narrative asides naming a specific
+private repo as the origin of a gotcha ("the watchdog `second-brain-config`
+implements", "`calendar-proxy`'s two runners", "`software-factory` is
+blocked on `libsql`'s missing arm64 wheel", …) became "one repo on this
+fleet"-shaped sentences that keep the technical lesson and drop the
+identifying name; and every direct link to a private repo or PR (two
+`calendar-proxy` PR links, one `git_archive_sync` issue reference) was
+removed, replaced with prose or, where the linked PR happened to be public
+(`code-quality-atlas#338`), kept as the sole surviving citation. The opening
+blockquote was rewritten to describe the fleet-wide-copy mechanism without
+naming the canonical repo, and gained a note stating plainly that this copy
+has been genericized for a public repo and that a future verbatim re-copy
+from the canonical could reintroduce the private names — the same
+un-guarded-regression risk the original #394 fix already flagged for the
+personal-identifier scrub, now extended to cover this class too.
+
+Verified nothing else in the repo reads this file's content (no test
+references `docs/self-hosted-runners.md`), `markdownlint-cli2` clean, and a
+final grep for every scrubbed name/pattern across the file returns no
+matches.
