@@ -1156,3 +1156,60 @@ against this repo's own MIT + CC BY posture, plus **D21** acknowledging —
 rather than changing — the existing `pip-tools`/`pip-audit` unhashed-install
 trade-off #472's second finding surfaced, since both steps already carried
 their own stated revisit trigger inline).
+
+## 2026-09-08 (same day) — #394: `docs/self-hosted-runners.md` still named private repos by name, not just personal identifiers
+
+The earlier #394 fix (above, in the archived June-August log) scrubbed the
+maintainer's OS username and VM hostnames but left the file naming five
+other private repos on the same fleet by name throughout — one of them the
+file's own canonical source, referenced repeatedly including two direct PR
+links — plus a literal Bazzite-host container ID the fleet intro paragraph
+had already generalized to `<id>` but the fleet-registry table below it
+hadn't. Flagged directly by the repo owner: this is a public repo, and it
+should carry no reference to private projects at all, not just no
+reference to personal machine/account details.
+
+Genericized every instance across the file (24 edits, one file): the
+private-repo names in the fleet registry and instance-mapping tables became
+numbered placeholders (`<repo-a>`-`<repo-f>`, keeping `code-quality-atlas`
+itself named since it's this repo); narrative asides naming a specific
+private repo as the origin of a gotcha became "one repo on this
+fleet"-shaped sentences that keep the technical lesson and drop the
+identifying name; and every direct link to a private repo or PR was
+removed, replaced with prose or, where the linked PR happened to be public
+(`code-quality-atlas#338`), kept as the sole surviving citation. The opening
+blockquote was rewritten to describe the fleet-wide-copy mechanism without
+naming the canonical repo, and gained a note stating plainly that this copy
+has been genericized for a public repo and that a future verbatim re-copy
+from the canonical could reintroduce the private names — the same
+un-guarded-regression risk the original #394 fix already flagged for the
+personal-identifier scrub, now extended to cover this class too.
+
+**Round-1 review caught this entry itself doing what the fix was supposed
+to undo** (dees-bot, Blocker): the first version of this paragraph named
+every one of the six scrubbed repos and the container ID in full, leaking
+the same information into this same public repo's git history one commit
+after removing it from the doc — worse than the original gap, since a
+git-history entry can't be un-shipped by a later commit alone. The PR's own
+"final grep" verification had only been run against the doc file, not this
+log. Rewritten above to describe what was removed the same genericized way
+the doc itself now does. Amending the offending commit away (rather than
+layering a fix on top, which leaves it visible in that commit's own diff)
+was attempted but blocked by this session's permission classifier as a
+history-rewrite action — left as an explicit open call for the repo owner
+(squash-merge drops it from `main`'s permanent history; a regular merge
+would not), not silently resolved either way.
+
+Verified nothing else in the repo reads this file's content (no test
+references `docs/self-hosted-runners.md`), `markdownlint-cli2` clean, and a
+final grep for every scrubbed name/pattern across **both** changed files
+returns no matches.
+
+**Follow-up (CodeRabbit, Minor):** the doc's own note already said a future
+verbatim re-copy from the private canonical could reintroduce these names,
+"no guard against that beyond this note." Closed that gap: added
+`tests/test_no_private_repo_names_in_runner_docs.py`, a guard test
+asserting the specific confirmed-private strings never reappear in
+`docs/self-hosted-runners.md`. Verified it actually catches a regression
+(not vacuous) by injecting a known string and confirming the test fails,
+then restoring the file and confirming it passes clean.
