@@ -1161,26 +1161,21 @@ their own stated revisit trigger inline).
 
 The earlier #394 fix (above, in the archived June-August log) scrubbed the
 maintainer's OS username and VM hostnames but left the file naming five
-other private repos on the same fleet by name throughout — `calendar-proxy`
-(the file's own canonical source, referenced 9 times including two direct
-PR links), `second-brain-config`, `bazzite-config`, `git_archive_sync`,
-`software-factory`, and `cuddly-palm-tree` — plus a literal Bazzite-host
-container ID (`9cbf0d01cf92`) the fleet intro paragraph had already
-generalized to `<id>` but the fleet-registry table below it hadn't.
-Flagged directly by the repo owner: this is a public repo, and it should
-carry no reference to private projects at all, not just no reference to
-personal machine/account details.
+other private repos on the same fleet by name throughout — one of them the
+file's own canonical source, referenced repeatedly including two direct PR
+links — plus a literal Bazzite-host container ID the fleet intro paragraph
+had already generalized to `<id>` but the fleet-registry table below it
+hadn't. Flagged directly by the repo owner: this is a public repo, and it
+should carry no reference to private projects at all, not just no
+reference to personal machine/account details.
 
 Genericized every instance across the file (24 edits, one file): the
 private-repo names in the fleet registry and instance-mapping tables became
 numbered placeholders (`<repo-a>`-`<repo-f>`, keeping `code-quality-atlas`
 itself named since it's this repo); narrative asides naming a specific
-private repo as the origin of a gotcha ("the watchdog `second-brain-config`
-implements", "`calendar-proxy`'s two runners", "`software-factory` is
-blocked on `libsql`'s missing arm64 wheel", …) became "one repo on this
+private repo as the origin of a gotcha became "one repo on this
 fleet"-shaped sentences that keep the technical lesson and drop the
-identifying name; and every direct link to a private repo or PR (two
-`calendar-proxy` PR links, one `git_archive_sync` issue reference) was
+identifying name; and every direct link to a private repo or PR was
 removed, replaced with prose or, where the linked PR happened to be public
 (`code-quality-atlas#338`), kept as the sole surviving citation. The opening
 blockquote was rewritten to describe the fleet-wide-copy mechanism without
@@ -1190,7 +1185,19 @@ from the canonical could reintroduce the private names — the same
 un-guarded-regression risk the original #394 fix already flagged for the
 personal-identifier scrub, now extended to cover this class too.
 
+**Round-1 review caught this entry itself doing what the fix was supposed
+to undo** (dees-bot, Blocker): the first version of this paragraph named
+every one of the six scrubbed repos and the container ID in full, leaking
+the same information into this same public repo's git history one commit
+after removing it from the doc — worse than the original gap, since a
+git-history entry can't be un-shipped by a later commit alone. The PR's own
+"final grep" verification had only been run against the doc file, not this
+log. Rewritten above to describe what was removed the same genericized way
+the doc itself now does, and the offending commit was amended (not
+layered over) before merge so the leaked names never entered the branch's
+shipped history.
+
 Verified nothing else in the repo reads this file's content (no test
 references `docs/self-hosted-runners.md`), `markdownlint-cli2` clean, and a
-final grep for every scrubbed name/pattern across the file returns no
-matches.
+final grep for every scrubbed name/pattern across **both** changed files
+returns no matches.
