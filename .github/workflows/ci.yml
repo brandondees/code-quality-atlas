@@ -281,14 +281,47 @@ jobs:
           git diff --cached --exit-code -- collapsed/ || { git diff --cached --stat -- collapsed/; echo "::error::collapsed/ drifted — regenerate and commit"; ok=0; }
           git diff --exit-code -- README.md docs/distribution.md docs/install.md docs/collapsed-entrypoints-and-depth-modes.md docs/review-depth-modes.md .claude-plugin/plugin.json .claude-plugin/marketplace.json || { git diff --stat -- README.md docs/distribution.md docs/install.md docs/collapsed-entrypoints-and-depth-modes.md docs/review-depth-modes.md .claude-plugin/plugin.json .claude-plugin/marketplace.json; echo "::error::documented counts drifted — regenerate and commit"; ok=0; }
           [ "$ok" -eq 1 ]
+      - name: license compatibility
+        # #472: pip-audit (below) gates CVEs, but nothing previously checked
+        # dependency *licenses* against this repo's own MIT + CC BY posture
+        # (D11) -- a future requirements.in addition with an incompatible
+        # license would merge unnoticed. Allow-list, not a copyleft deny-
+        # list: --allow-only fails on anything not explicitly known-
+        # compatible, so a license this list has never seen is treated as
+        # unproven rather than assumed fine (--partial-match matches a
+        # license variant string against these prefixes, e.g. pip-licenses'
+        # own combined "Apache-2.0 OR BSD-2-Clause" for `packaging`).
+        #
+        # Placement matters: this step must run here, before
+        # requirements.txt-is-in-sync/dependency-vulnerability-audit install
+        # pip-tools/pip-audit into this same venv, for the identical reason
+        # those two steps' own comment below states -- pip-licenses scans
+        # every package installed in the interpreter, not just
+        # requirements.txt's own tree, so running it after those unpinned
+        # CI-only tools land would gate their transitive deps too (caught in
+        # CI: pip-audit's own `rich` dependency pulled in typing_extensions,
+        # whose license string didn't match this list, on a tool this repo
+        # never ships or imports). The list below is exactly the set
+        # `pip-licenses` reports for requirements.txt's own dependency tree
+        # at this point in the job, verified both locally and against a live
+        # CI run before landing here -- extend it deliberately when a new
+        # requirements.in addition needs a license already known to be
+        # compatible but not yet listed, same revisit-trigger shape as the
+        # pip-tools/pip-audit pins below (see D21 in docs/open-questions.md
+        # for why those two stay unhashed).
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        run: |
+          pip install pip-licenses==5.5.5
+          pip-licenses --allow-only="MIT License;MIT;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;Apache 2.0;Apache-2.0 OR BSD-2-Clause;Python Software Foundation License;PSF-2.0;ISC License (ISCL);The Unlicense (Unlicense)" --partial-match
       # requirements.txt-is-in-sync and dependency-vulnerability-audit run
       # last among the python-filtered steps, deliberately (#378): both
       # `pip install` an unpinned tool (pip-tools/pip-audit) straight into
       # this job's fresh venv, on top of the hash-verified `requirements.txt`
       # install above. Every trusted gate above them (lint, format, tests,
-      # eval structure, drift, generated-tree sync) has already run and
-      # passed against the hash-verified install alone by the time either of
-      # these unpinned tools lands in the same interpreter.
+      # eval structure, drift, generated-tree sync, license compatibility)
+      # has already run and passed against the hash-verified install alone
+      # by the time either of these unpinned tools lands in the same
+      # interpreter.
       - name: requirements.txt is in sync with requirements.in
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: |
@@ -406,26 +439,6 @@ jobs:
           # Dependabot-tracked requirements-dev.txt if it drifts noticeably.
           pip install pip-audit==2.10.1
           pip-audit --requirement requirements.txt
-      - name: license compatibility
-        # #472: pip-audit above gates CVEs, but nothing previously checked
-        # dependency *licenses* against this repo's own MIT + CC BY posture
-        # (D11) -- a future requirements.in addition with an incompatible
-        # license would merge unnoticed. Allow-list, not a copyleft deny-
-        # list: --allow-only fails on anything not explicitly known-
-        # compatible, so a license this list has never seen is treated as
-        # unproven rather than assumed fine (--partial-match matches a
-        # license variant string against these prefixes, e.g. pip-licenses'
-        # own combined "Apache-2.0 OR BSD-2-Clause" for `packaging`). The
-        # list below is exactly the set `pip-licenses` reports for this
-        # repo's current dependency tree, verified locally before adding
-        # this step -- extend it deliberately when a new dependency needs a
-        # license already known to be compatible but not yet listed, same
-        # revisit-trigger shape as the pip-tools/pip-audit pins above (see
-        # D21 in docs/open-questions.md for why those two stay unhashed).
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
-        run: |
-          pip install pip-licenses==5.5.5
-          pip-licenses --allow-only="MIT License;MIT;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;Apache 2.0;Apache-2.0 OR BSD-2-Clause;Python Software Foundation License;ISC License (ISCL);The Unlicense (Unlicense)" --partial-match
       - name: markdownlint
         if: steps.filter.outputs.markdown == 'true'
         uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
