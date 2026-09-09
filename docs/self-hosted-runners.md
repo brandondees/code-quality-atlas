@@ -695,8 +695,8 @@ repo/machine:
   default there — "Require approval for first-time contributors who are
   new to GitHub" — still auto-triggers (and, without the `if:` gate above,
   would auto-execute on self-hosted hardware) for any contributor who has
-  had a PR merged before. Set it to **"Require approval for all outside
-  collaborators"** so every fork PR from a non-collaborator needs an
+  had a PR merged before. Set it to **"Require approval for all external
+  contributors"** so every fork PR from a non-collaborator needs an
   explicit approval click before any of its workflow runs even start,
   regardless of contributor history. The `if:` gate and this setting are
   two independent layers; both are needed once the repo has (or might
