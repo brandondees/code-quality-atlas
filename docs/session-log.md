@@ -1321,3 +1321,27 @@ non-tampering `pull_request` run — the overwhelming common case, same-repo
 or fork — now lands on ephemeral hosted hardware instead of persistent
 self-hosted hardware, and a fork PR gets real CI signal instead of an
 unconditional `skipped` step.
+
+**Round-2 (this repo's own `atlas` reviewer, `dees-bot`):** two more
+findings, both addressed. **Major** — nothing in the suite guarded this
+`runs-on:` line itself, so a future accidental revert to a bare
+`[self-hosted, Linux]` would silently reopen #471's default-exposure gap
+with zero CI signal, the exact pattern this repo has repeatedly closed
+before (`test_ci_shellcheck_glob_covers_tree.py` #379,
+`test_no_private_repo_names_in_runner_docs.py`). Added
+`tests/test_ci_pull_request_runner_is_hosted.py`: asserts the `gate` job's
+`runs-on` is still an event-conditional expression referencing
+`github.event_name`/`pull_request`, still mentions `self-hosted`, and still
+routes `pull_request` to a recognizable hosted label — loose enough not to
+over-fit today's exact `ubuntu-latest` choice, tight enough to catch a
+revert either direction. Verified it actually catches the regression (not
+vacuous): reverted `runs-on:` to a bare `[self-hosted, Linux]`, confirmed
+two of the three new tests fail with the expected message, restored the
+real fix, confirmed all three pass again. **Nit** — the "arch-agnostic"
+comment's claim that "both arches are still exercised across the two
+paths" was true but incomplete: before this fix, a same-repo `pull_request`
+run could land on either self-hosted host (including arm64), giving a PR a
+chance at arm64 signal pre-merge; after, `pull_request` always lands on
+`ubuntu-latest` (x86_64), so arm64 coverage moved to post-merge only (via
+`push`). Reworded the comment to say so explicitly rather than leave the
+now-incomplete framing standing.

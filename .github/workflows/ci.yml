@@ -89,8 +89,14 @@ jobs:
     # arm64 OrbStack VM, and `push`/`schedule` runs can land on either.
     # Pinning ARM64 would strand this job on one machine and leave it queued
     # whenever that machine is down or busy. `pull_request` runs always land
-    # on `ubuntu-latest` (x86_64), so both arches are still exercised across
-    # the two paths.
+    # on `ubuntu-latest` (x86_64) now, which moves arm64 coverage from
+    # pre-merge to post-merge only (round-1 review, `dees-bot`): before this
+    # change, a same-repo `pull_request` run could land on either self-hosted
+    # host, including arm64, giving a PR a chance at arm64 signal before
+    # merge; now an arm64-specific regression surfaces only once it's already
+    # on `main` via the `push` trigger. Low practical risk given the next
+    # paragraph (nothing here is genuinely arch-specific), but real: arm64 is
+    # still exercised, just later.
     #
     # Nothing in this job is arch-specific either way: the only step that
     # fetches a prebuilt binary is `shellcheck` below, which already selects
