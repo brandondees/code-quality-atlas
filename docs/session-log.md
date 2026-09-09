@@ -1213,3 +1213,68 @@ asserting the specific confirmed-private strings never reappear in
 `docs/self-hosted-runners.md`. Verified it actually catches a regression
 (not vacuous) by injecting a known string and confirming the test fails,
 then restoring the file and confirming it passes clean.
+
+## 2026-09-09 — #471: `ci.yml`'s self-hosted fork-PR gate was an in-tree condition a fork PR could itself edit
+
+A fresh "what's next?" session worked the repo's own orientation docs
+rather than a named task. `docs/open-questions.md`'s "Genuinely still open"
+list was all owner-gated design questions (Q24 platform migration, Q22
+Phase 2, Q17 stages 2-5, Q13 tiering, Q6/Q8/Q2) with nothing buildable
+without a human call; `docs/plans/` had nothing unimplemented. The most
+recent whole-repo audit (#347, 2026-09-06) had one open Major finding with
+a concrete, code-only fix already named in its own text: **#471**.
+
+`.github/workflows/ci.yml`'s `gate` job ran unconditionally on this fleet's
+persistent self-hosted hardware, with an in-tree `if:` skipping
+`pull_request` runs from a fork as the stated protection. #471's finding:
+for `pull_request` (unlike `pull_request_target`), GitHub evaluates and
+runs the workflow file **as it exists on the PR's own head** — so a fork PR
+editing that same `if:` line (or the `runs-on:` below it) gets its modified
+workflow executed as submitted. The actual backstop was a GitHub Settings
+value ("Fork pull request workflows from outside collaborators") this repo
+never recorded as a dependency, whose default lets any *returning* external
+contributor's edited workflow run unreviewed.
+
+Took the issue's own named structural fix (option (a) over the
+Settings-only option (b), since (b) "can't be self-verified from the
+checkout" and this repo has no path to confirm or enforce a live Settings
+value from a session): `runs-on:` is now
+`${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON('["self-hosted", "Linux"]') }}`
+— every `pull_request` run (same-repo or fork) now executes on a
+GitHub-hosted, ephemeral runner instead of self-hosted hardware, closing the
+gap structurally rather than depending on a Settings value or an in-tree
+condition a fork PR could itself edit; `push`/`schedule` (which never carry
+arbitrary fork content) stay self-hosted. Removed the now-obsolete fork-only
+`if:` gate on the job — a `pull_request` run no longer endangers self-hosted
+hardware regardless of the PR's origin, and it was the load-bearing reason
+that gate existed. Side effect the repo's own prior comment had flagged as a
+deferred follow-up ("if external contributions become common, split this
+into a hosted job for `pull_request`..."): fork PRs now get a real CI run
+instead of an unconditional `skipped` step.
+
+Rewrote the job's header comment block to record the reasoning above (the
+next reader shouldn't have to reconstruct the `pull_request`/
+`pull_request_target` distinction from the issue thread) and to note the
+self-hosted arch-agnostic reasoning now only applies to the `push`/`schedule`
+path (`pull_request` always lands on `ubuntu-latest`/x86_64).
+
+**Verified, not just reasoned through:** downloaded the exact pinned
+`actionlint` release (`v1.7.12`, checksum-verified against the pin already
+in this file) and ran it against the edited workflow — clean, no findings.
+`python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))"`
+confirms the file still parses (the `runs-on:` value is a GitHub Actions
+expression string, not YAML syntax actionlint alone wouldn't catch a broken
+quote in). Grepped `tests/` for anything asserting the old fork-gate/`runs-on`
+shape — nothing does. Ran the full local suite against the unrelated
+tooling this touches: `ruff check .` / `ruff format --check .` clean,
+`pytest tests/ -q --cov=tooling` (774 passed, 14 skipped, 95.13% coverage),
+`python -m tooling.cli drift` clean (44/44 skills in sync) — none of these
+exercise `ci.yml` directly, but confirm the change didn't collaterally
+break anything else in the tree.
+
+**Not fixed here, left for the doc's own follow-on scope:** #347's audit
+comment on #394 separately noted `docs/self-hosted-runners.md`'s "Known
+gotchas" bullet overclaims the in-tree `if:` gate as sufficient on its own —
+that fleet-wide doc describes the pattern generically (other repos on the
+fleet still rely on it), so amending it belongs with #394/that doc's own
+canonical-source constraint, not folded into this code-only fix.

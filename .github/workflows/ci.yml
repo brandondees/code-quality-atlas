@@ -44,36 +44,48 @@ permissions:
 
 jobs:
   gate:
-    # Fork-PR gate. This is the load-bearing one in this repo: unlike the
-    # other repos on this runner, code-quality-atlas is PUBLIC, so `on:
-    # pull_request` genuinely can carry code from an arbitrary contributor.
-    # A self-hosted runner executes the checked-out tree directly on
-    # personally-owned hardware rather than an ephemeral VM, so a fork PR
-    # must report "skipped" (which branch protection treats as passing)
-    # instead of running here. Same-repo branch PRs are unaffected.
+    # #471: this job used to be self-hosted unconditionally, gated by an
+    # in-tree `if:` that skipped `pull_request` runs from a fork (persistent,
+    # personally-owned hardware executing arbitrary fork code was judged
+    # unacceptable). That gate was found insufficient on its own: for
+    # `pull_request` (unlike `pull_request_target`), GitHub evaluates and
+    # runs the workflow file AS IT EXISTS ON THE PR'S OWN HEAD -- so a fork
+    # PR that edits this same `if:` line (or this file's `runs-on:`) gets its
+    # modified workflow executed as submitted. The actual backstop was a
+    # GitHub Settings value ("Fork pull request workflows from outside
+    # collaborators") this repo never recorded as a dependency, and whose
+    # default ("require approval for first-time contributors only") lets any
+    # *returning* external contributor's edited workflow run unreviewed, with
+    # no further human review step.
     #
-    # NOTE: this means fork PRs get no CI signal at all rather than a
-    # GitHub-hosted one -- an accepted trade, since the alternative is
-    # executing untrusted code on a personal machine. If external
-    # contributions become common, split this into a hosted job for
-    # `pull_request` and a self-hosted job for `push`.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    # Arch-agnostic on purpose: the fleet now has an x86_64 Linux host
-    # (bazzite-runner-*) registered alongside the Mac's arm64 OrbStack VM, and
-    # this job can run on either. Pinning ARM64 would strand it on one machine
-    # and leave it queued whenever that machine is down or busy.
+    # Fix: every `pull_request` run now executes on a GitHub-hosted,
+    # ephemeral runner (see `runs-on:` below) instead of this fleet's
+    # persistent self-hosted hardware -- closing the gap structurally rather
+    # than depending on a Settings value or an in-tree condition a fork PR
+    # could itself edit. `push`/`schedule` (which never carry arbitrary fork
+    # content -- `push` here is branch-limited to `main` above, and
+    # `schedule` has no PR at all) stay on self-hosted. This also lifts the
+    # previous "fork PRs get no CI signal at all" trade-off the old fork-gate
+    # accepted, noted here before as a follow-up once external contributions
+    # became worth the ephemeral-runner cost: a fork PR now gets a real CI
+    # run rather than a `skipped` step, since there is no more self-hosted
+    # hardware for it to endanger.
     #
-    # Nothing in this job is arch-specific: the only step that fetches a
-    # prebuilt binary is `shellcheck` below, which already selects its asset
-    # and checksum from `uname -m` and errors loudly on an unrecognized arch
-    # rather than downloading the wrong one. Everything else is Python,
-    # actions/setup-python (which publishes both arches), or pure-Node actions.
+    # Arch-agnostic on the self-hosted side on purpose: the fleet has an
+    # x86_64 Linux host (bazzite-runner-*) registered alongside the Mac's
+    # arm64 OrbStack VM, and `push`/`schedule` runs can land on either.
+    # Pinning ARM64 would strand this job on one machine and leave it queued
+    # whenever that machine is down or busy. `pull_request` runs always land
+    # on `ubuntu-latest` (x86_64), so both arches are still exercised across
+    # the two paths.
     #
-    # Keep the fork gate above in front of this. It matters more, not less,
-    # with a second host: this repo is public, so `on: pull_request` can carry
-    # arbitrary contributors' code, and a self-hosted runner executes the
-    # checked-out tree directly on personally-owned hardware.
-    runs-on: [self-hosted, Linux]
+    # Nothing in this job is arch-specific either way: the only step that
+    # fetches a prebuilt binary is `shellcheck` below, which already selects
+    # its asset and checksum from `uname -m` and errors loudly on an
+    # unrecognized arch rather than downloading the wrong one. Everything
+    # else is Python, actions/setup-python (which publishes both arches), or
+    # pure-Node actions.
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON('["self-hosted", "Linux"]') }}
     timeout-minutes: 15
     # pull-requests:read is required by dorny/paths-filter (below) to list a
     # PR's changed files via the GitHub API; push events don't hit that path,
