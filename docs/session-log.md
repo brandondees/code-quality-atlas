@@ -1278,3 +1278,46 @@ gotchas" bullet overclaims the in-tree `if:` gate as sufficient on its own —
 that fleet-wide doc describes the pattern generically (other repos on the
 fleet still rely on it), so amending it belongs with #394/that doc's own
 canonical-source constraint, not folded into this code-only fix.
+
+**Correction (same day, round-1 review) — the fix above overstated what it
+closes.** CodeRabbit flagged (Merge Risk: Critical) that "the claim that a
+fork pull request can modify `runs-on` is not established by the supplied
+evidence" — a direct challenge to this entry's own "closing the gap
+structurally" language, exactly the kind of asserted-not-verified claim
+`docs/open-questions.md`'s Q22 exists to catch. Checked rather than
+defended: fetched GitHub's own "Approving workflow runs from forks" guidance
+(`docs.github.com/en/actions/how-tos/manage-workflow-runs/approve-runs-from-forks`),
+which instructs an approver to specifically scrutinize proposed
+`.github/workflows/` changes before approving a fork PR's run — guidance
+that is meaningless unless such changes actually take effect. Corroborated
+against GitHub's own contrast of `pull_request_target` ("runs in the
+context of the... base repository, rather than in the... merge commit, as
+the `pull_request` event does") — plain `pull_request` runs in the context
+of the merge commit, which includes the PR's own edits to the workflow file
+itself.
+
+**Conclusion: CodeRabbit's finding is correct.** For plain `pull_request`,
+GitHub evaluates the workflow file as merged from the PR's own head — same
+for a fork PR as for a same-repo one. A hostile PR editing this file's
+`runs-on:` expression back to an unconditional `[self-hosted, Linux]` gets
+that edit evaluated for its own run, exactly as it could have edited the
+old `if:` gate. Neither an editable in-tree condition nor an editable
+in-tree expression can structurally stop the PR that is editing it — which
+means **this fix is not a regression** (the old `if:` gate had the
+identical tamperability weakness, so nothing that was actually secure
+before is less secure now) **but it is not the structural closure of #471
+the original PR description and this log entry claimed.** The actual
+backstop is exactly what #471 itself named as the real dependency before
+proposing its (flawed) option (a): the GitHub Settings "Require approval
+for all outside collaborators" value, which this session cannot verify or
+change from a checkout. Rewrote the job's comment in `ci.yml` to state this
+precisely rather than the earlier overstated claim, corrected the PR
+description, and left #471 open rather than closing it — the honest
+disposition given a real fix needs either that Settings value confirmed/set
+by the repo owner, or a heavier mechanism (a required-reviewers GitHub
+Environment) that GitHub enforces independently of this file's own
+content. What this change still legitimately buys, restated precisely: a
+non-tampering `pull_request` run — the overwhelming common case, same-repo
+or fork — now lands on ephemeral hosted hardware instead of persistent
+self-hosted hardware, and a fork PR gets real CI signal instead of an
+unconditional `skipped` step.
