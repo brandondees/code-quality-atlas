@@ -687,6 +687,25 @@ repo/machine:
   it's cheap insurance against the repo going public or gaining
   collaborators later without anyone revisiting this.
 
+  **This `if:` alone is necessary but not sufficient.** It only stops a
+  workflow _run_ from executing steps on fork-PR content; it does nothing
+  about whether that run is even _triggered_ automatically in the first
+  place. That's governed separately by **Settings → Actions → General →
+  Fork pull request workflows from outside collaborators**, which has
+  three tiers. GitHub's default — "Require approval for first-time
+  contributors" — already requires approval for a fork PR from anyone who
+  hasn't had a commit or PR merged into _this_ repo before. A looser tier
+  ("...who are new to GitHub") instead exempts based on the contributor's
+  GitHub-wide account history, and would still auto-trigger (and, without
+  the `if:` gate above, auto-execute on self-hosted hardware) for someone
+  with unrelated GitHub history but no prior contribution here. Set it to
+  the strictest tier, **"Require approval for all external
+  contributors,"** so every fork PR from a non-collaborator needs an
+  explicit approval click before any of its workflow runs even start,
+  regardless of contribution history anywhere. The `if:` gate and this
+  setting are two independent layers; both are needed once the repo has
+  (or might gain) outside contributors.
+
 - **GitHub-hosted runners are not a given fallback.** If the GitHub account
   has a billing/payment problem, `ubuntu-latest`/`macos-latest` jobs fail
   outright with "recent account payments have failed" — confirmed while
