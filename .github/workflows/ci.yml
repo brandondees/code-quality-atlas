@@ -44,36 +44,67 @@ permissions:
 
 jobs:
   gate:
-    # Fork-PR gate. This is the load-bearing one in this repo: unlike the
-    # other repos on this runner, code-quality-atlas is PUBLIC, so `on:
-    # pull_request` genuinely can carry code from an arbitrary contributor.
-    # A self-hosted runner executes the checked-out tree directly on
-    # personally-owned hardware rather than an ephemeral VM, so a fork PR
-    # must report "skipped" (which branch protection treats as passing)
-    # instead of running here. Same-repo branch PRs are unaffected.
+    # #471: this job used to be self-hosted unconditionally, gated by an
+    # in-tree `if:` that skipped `pull_request` runs from a fork (persistent,
+    # personally-owned hardware executing arbitrary fork code was judged
+    # unacceptable).
     #
-    # NOTE: this means fork PRs get no CI signal at all rather than a
-    # GitHub-hosted one -- an accepted trade, since the alternative is
-    # executing untrusted code on a personal machine. If external
-    # contributions become common, split this into a hosted job for
-    # `pull_request` and a self-hosted job for `push`.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    # Arch-agnostic on purpose: the fleet now has an x86_64 Linux host
-    # (bazzite-runner-*) registered alongside the Mac's arm64 OrbStack VM, and
-    # this job can run on either. Pinning ARM64 would strand it on one machine
-    # and leave it queued whenever that machine is down or busy.
+    # IMPORTANT, corrected after round-1 review (CodeRabbit) questioned the
+    # original version of this comment: for plain `pull_request` (unlike
+    # `pull_request_target`), GitHub evaluates the workflow file as it exists
+    # in the PR's own head -- confirmed against GitHub's own "Approving
+    # workflow runs from forks" guidance, which explicitly tells an approver
+    # to scrutinize proposed `.github/workflows/` changes (guidance that would
+    # be meaningless if such changes never took effect). That means a hostile
+    # PR editing THIS `runs-on:` expression back to an unconditional
+    # `[self-hosted, Linux]` gets that edit evaluated for its own run, exactly
+    # as it could have edited the old `if:` gate -- an editable in-tree
+    # condition can never structurally stop the PR that is editing it. The
+    # change below is therefore **not** a structural fix and does not, by
+    # itself, close #471; it narrows the default exposure window (a
+    # non-tampering `pull_request` run -- the overwhelming common case --
+    # now safely lands on ephemeral hosted hardware, same-repo or fork,
+    # instead of this fleet's persistent self-hosted hardware) while leaving
+    # the tampering case exactly where #471 originally placed it: gated only
+    # by the GitHub Settings value ("Require approval for all outside
+    # collaborators", not the default "first-time contributors only") that
+    # this repo's Settings must actually carry -- unverifiable from a
+    # checkout, and not changed by this commit. Real protection against a
+    # PR that edits its own `runs-on:`/`if:` needs a mechanism GitHub
+    # enforces independently of this file's content (that Settings value, or
+    # a required-reviewers Environment) -- tracked separately, not solved
+    # here.
     #
-    # Nothing in this job is arch-specific: the only step that fetches a
-    # prebuilt binary is `shellcheck` below, which already selects its asset
-    # and checksum from `uname -m` and errors loudly on an unrecognized arch
-    # rather than downloading the wrong one. Everything else is Python,
-    # actions/setup-python (which publishes both arches), or pure-Node actions.
+    # `push`/`schedule` (which never carry arbitrary fork content -- `push`
+    # here is branch-limited to `main` above, and `schedule` has no PR at
+    # all) stay on self-hosted, since neither can be forged by an untrusted
+    # PR branch. A side effect worth keeping regardless of the above: a
+    # non-tampering fork PR now gets a real CI run instead of an
+    # unconditional `skipped` step, the trade-off the old fork-gate's own
+    # comment had already flagged as worth revisiting once external
+    # contributions became common.
     #
-    # Keep the fork gate above in front of this. It matters more, not less,
-    # with a second host: this repo is public, so `on: pull_request` can carry
-    # arbitrary contributors' code, and a self-hosted runner executes the
-    # checked-out tree directly on personally-owned hardware.
-    runs-on: [self-hosted, Linux]
+    # Arch-agnostic on the self-hosted side on purpose: the fleet has an
+    # x86_64 Linux host (bazzite-runner-*) registered alongside the Mac's
+    # arm64 OrbStack VM, and `push`/`schedule` runs can land on either.
+    # Pinning ARM64 would strand this job on one machine and leave it queued
+    # whenever that machine is down or busy. `pull_request` runs always land
+    # on `ubuntu-latest` (x86_64) now, which moves arm64 coverage from
+    # pre-merge to post-merge only (round-1 review, `dees-bot`): before this
+    # change, a same-repo `pull_request` run could land on either self-hosted
+    # host, including arm64, giving a PR a chance at arm64 signal before
+    # merge; now an arm64-specific regression surfaces only once it's already
+    # on `main` via the `push` trigger. Low practical risk given the next
+    # paragraph (nothing here is genuinely arch-specific), but real: arm64 is
+    # still exercised, just later.
+    #
+    # Nothing in this job is arch-specific either way: the only step that
+    # fetches a prebuilt binary is `shellcheck` below, which already selects
+    # its asset and checksum from `uname -m` and errors loudly on an
+    # unrecognized arch rather than downloading the wrong one. Everything
+    # else is Python, actions/setup-python (which publishes both arches), or
+    # pure-Node actions.
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON('["self-hosted", "Linux"]') }}
     timeout-minutes: 15
     # pull-requests:read is required by dorny/paths-filter (below) to list a
     # PR's changed files via the GitHub API; push events don't hit that path,
