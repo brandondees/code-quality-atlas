@@ -26,6 +26,7 @@
 - Is input validated once at the trust boundary (parse-don't-validate)?
 - Are all async rejections handled (no floating promises)?
 - Are *bugs* (assertion-worthy) treated differently from *recoverable errors*?
+- **Bulk non-ASCII text substitutions can silently corrupt content:** a find-replace, codemod, or bulk-rename whose pattern or replacement contains non-ASCII text (em-dashes, curly quotes, accented or non-Latin characters) can exit 0 while either matching nothing — an encoding mismatch between the pattern and the file — or double-encoding the replacement into mojibake. Neither failure is caught by a formatter or linter, since the result stays syntactically valid text or markup; this is a silent-corruption pattern, not a silent-no-op one, so a clean formatting/lint run does not clear it. When a diff shows this kind of bulk substitution, verify against the written file's actual bytes rather than trusting the tool's exit code — scan for common UTF-8 double-encoding byte sequences, or count distinct resulting values, rather than only grepping for the old value's absence.
 
 ---
 

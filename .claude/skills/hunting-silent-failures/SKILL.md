@@ -10,7 +10,7 @@ provenance:
   built_from:
   - category: 2
     source: docs/research/cluster-1-correctness.md#2
-    hash: a030966c208eb1b1dad0436e954ff5582f44e9f15ac37ccf0cbeba4d0f66ad1c
+    hash: 853d4337c88a24c09c3a106920682cf6473b371bfee03dd81ed731dbcddc753b
   - category: 4
     source: docs/research/cluster-1-correctness.md#4
     hash: 63ae9d27a00a6a9575d63c6bc8a91c2d785f7d0ba313fd9416e3f61f8f730043
