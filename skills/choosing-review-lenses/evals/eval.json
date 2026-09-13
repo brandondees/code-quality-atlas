@@ -34,6 +34,14 @@
         "Keeps the combined selection within the 3-8 default range rather than taking both rows in full plus every possible extra",
         "Notes that shared findings (e.g. caching checks appearing in both restraint and performance) are reported once, under the primary owner"
       ]
+    },
+    {
+      "query": "This PR adds a CI step running `pip-licenses --allow-only=\"MIT;Apache-2.0\" --partial-match` to block disallowed dependency licenses. Which lenses should review it?",
+      "expected_behavior": [
+        "Names auditing-compliance-and-provenance as a required lens, not only auditing-config-and-build-hygiene, since this is a dependency-license allow-list/SBOM-policy gate",
+        "Flags that a partial/substring/contains-style license match can pass a disallowed license hidden inside a combined expression (e.g. `GPL-3.0-only OR MIT` clearing an allow-list containing only `MIT`)",
+        "Does not treat this as an ordinary CI/build/config change alone"
+      ]
     }
   ]
 }

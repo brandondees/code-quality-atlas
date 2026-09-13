@@ -30,6 +30,7 @@
 ### Reviewable heuristics (skill-checklist seeds)
 
 - **New dependency license check:** does an added dependency (and its transitive tree) carry a license compatible with the project's distribution model? Block/strongly-flag GPL/AGPL pulled into a permissive or proprietary product.
+- **License-check match mode:** if the diff adds or edits a dependency-license allow-list/deny-list or SBOM-policy gate, does it match each package's license string *exactly* against the allow-list, or via a substring/"partial"/"contains" mode? A substring match can pass a disallowed license hiding inside a combined expression (`GPL-3.0-only OR MIT` clearing an "MIT"-only allow-list) — flag any non-exact match mode as a compliance gap (cross-links #18 supply-chain).
 - **Copyleft contamination / linkage:** does the change *link* or *combine* with copyleft code in a way that triggers obligations (esp. AGPL over a network service)? Static vs. dynamic linking and "mere aggregation" matter — flag for legal if unsure.
 - **License/attribution preservation:** are upstream license texts, copyright notices, and NOTICE files retained when vendoring/copying code? Removed attribution = violation.
 - **Provenance of copied code:** does this diff include code pasted from Stack Overflow, a blog, another repo, or AI generation without attribution/license clarity? Treat as untrusted: verify license, run secret/IP scan, label it.

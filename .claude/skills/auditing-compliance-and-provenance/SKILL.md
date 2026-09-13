@@ -11,7 +11,7 @@ provenance:
   built_from:
   - category: 27
     source: docs/research/cluster-6-evolution.md#27
-    hash: ba00467edc777fed0fce3439c40c1d7cede1c341eafc278465121b57c67c3ccc
+    hash: a4aba766d69e323389cdba76ba6b89828c155e5097a63c2f523fe184b53ffbd3
 ---
 
 # auditing-compliance-and-provenance
@@ -37,13 +37,13 @@ Report only real problems. If this lens applies and what you reviewed holds up �
 The head of the full checklist — enough for a first pass without opening any reference file:
 
 - **New dependency license check:** does an added dependency (and its transitive tree) carry a license compatible with the project's distribution model? Block/strongly-flag GPL/AGPL pulled into a permissive or proprietary product.
+- **License-check match mode:** if the diff adds or edits a dependency-license allow-list/deny-list or SBOM-policy gate, does it match each package's license string *exactly* against the allow-list, or via a substring/"partial"/"contains" mode? A substring match can pass a disallowed license hiding inside a combined expression (`GPL-3.0-only OR MIT` clearing an "MIT"-only allow-list) — flag any non-exact match mode as a compliance gap (cross-links #18 supply-chain).
 - **Copyleft contamination / linkage:** does the change *link* or *combine* with copyleft code in a way that triggers obligations (esp. AGPL over a network service)? Static vs. dynamic linking and "mere aggregation" matter — flag for legal if unsure.
 - **License/attribution preservation:** are upstream license texts, copyright notices, and NOTICE files retained when vendoring/copying code? Removed attribution = violation.
 - **Provenance of copied code:** does this diff include code pasted from Stack Overflow, a blog, another repo, or AI generation without attribution/license clarity? Treat as untrusted: verify license, run secret/IP scan, label it.
 - **Per-file license header:** do new source files have an `SPDX-License-Identifier` + copyright (REUSE)? Missing header = provenance gap.
 - **PII data-flow:** does new code collect, store, log, or transmit personal data? If so — lawful basis/consent present, **minimized** to what's needed, not logged in plaintext, and not sent to a third party/region without basis (cross-links #14, #16, #25).
 - **Retention & deletion:** is there a retention limit and an erasure path for new personal data (right-to-be-forgotten), or does it accumulate indefinitely?
-- **Data residency / cross-border:** does the change move PII to a new region, vendor, or third-party model (incl. LLM APIs) — is that transfer permitted and documented? (cross-links #25 PII-to-model.)
 
 ## Mechanizing these checks
 

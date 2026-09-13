@@ -13,7 +13,7 @@ provenance:
     hash: f876d3646ec45597347f3dd84153ef0d860abaf9eb3211d7d97cb8aca56cc9da
   - category: 27
     source: docs/research/cluster-6-evolution.md#27
-    hash: ba00467edc777fed0fce3439c40c1d7cede1c341eafc278465121b57c67c3ccc
+    hash: a4aba766d69e323389cdba76ba6b89828c155e5097a63c2f523fe184b53ffbd3
 ---
 
 # auditing-dependencies-and-supply-chain
@@ -45,7 +45,7 @@ The head of the full checklist — enough for a first pass without opening any r
 - License **compatible** with the project (cross #27)?
 - Does the install run scripts or request network/filesystem access it shouldn't (malicious-package surface)?
 - **New dependency license check:** does an added dependency (and its transitive tree) carry a license compatible with the project's distribution model? Block/strongly-flag GPL/AGPL pulled into a permissive or proprietary product.
-- **Copyleft contamination / linkage:** does the change *link* or *combine* with copyleft code in a way that triggers obligations (esp. AGPL over a network service)? Static vs. dynamic linking and "mere aggregation" matter — flag for legal if unsure.
+- **License-check match mode:** if the diff adds or edits a dependency-license allow-list/deny-list or SBOM-policy gate, does it match each package's license string *exactly* against the allow-list, or via a substring/"partial"/"contains" mode? A substring match can pass a disallowed license hiding inside a combined expression (`GPL-3.0-only OR MIT` clearing an "MIT"-only allow-list) — flag any non-exact match mode as a compliance gap (cross-links #18 supply-chain).
 
 **Shared categories:** category #27 checks are shared with **auditing-compliance-and-provenance** (their primary owner). When both lenses run on the same change, report each shared finding once, under the primary owner.
 

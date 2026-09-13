@@ -2002,6 +2002,16 @@ router:
       shapes: [diff, decision]
     - when: Dependency add or bump
       run: [auditing-dependencies-and-supply-chain, checking-restraint]
+    - when: Dependency-license allow-list, deny-list, or SBOM-policy gate — a CI
+            step, lockfile-policy tool config (e.g. pip-licenses, license-checker,
+            cargo-deny, go-licenses), or hand-rolled check enforcing which package
+            licenses are permitted
+      run: [auditing-compliance-and-provenance, auditing-config-and-build-hygiene]
+      note: "a license-allow-list gate is a #27 compliance verdict wearing CI-config
+            clothing — the plain CI/config route below never reaches it, so a
+            substring/partial-match false-negative (a combined SPDX expression like
+            `GPL-3.0-only OR MIT` slipping past an allow-list containing only `MIT`)
+            has no lens assigned to catch it; see #487"
     - when: CI / build / config change
       run: [auditing-config-and-build-hygiene, sweeping-for-security]
     - when: Install / setup / packaging change, an upgrade or migration guide, a
