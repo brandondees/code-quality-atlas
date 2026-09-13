@@ -98,6 +98,14 @@
         "Distinguishes a resolved historical disagreement from a standing dispute rather than treating every past objection as permanently blocking affirmation",
         "Affirms the fix as adequate on the basis of the round-2 commit and comment, rather than either ignoring that history entirely or refusing to ever affirm because round 1 once disputed it"
       ]
+    },
+    {
+      "query": "Synthesizing a review: hunting-silent-failures reports a bare `except:` in a payment retry loop and calls it a Blocker. You check the PR's top-level issue comments and its inline review-thread comments — both are completely empty, no one has said anything on either surface. What you haven't checked is that another automated reviewer already submitted a full review consisting only of a summary body with no inline comments attached to any line, stating: 'The bare except here is intentional — the retry policy is documented in RETRY.md to swallow all transient errors by design, not a bug.' Synthesize the review and say what you do with the Blocker finding.",
+      "expected_behavior": [
+        "Recognizes that a standing dispute can live in a full review submission's summary body even when both the top-level issue comments and the inline review-thread comments are empty, and checks that third surface rather than concluding 'no dispute exists' from silence on the other two",
+        "Does not treat 'no inline comment threads' or 'no issue comments' as equivalent to 'no standing dispute' — a review posted with only a body and no anchors is still on-the-record feedback even though it produces no comment thread of its own",
+        "Once the disputing review is found, treats the Blocker claim as unresolved rather than affirming it outright, and adjudicates on the merits (e.g. by checking RETRY.md) rather than accepting either side's framing at face value"
+      ]
     }
   ]
 }
