@@ -836,6 +836,16 @@ you own, and resets daily.
   exhaustive or stable.
 - A subscription/routine can't share context with the build session — they're
   separate sessions communicating only through the PR (comments, reviews, commits).
+- **The standing-dispute check (`synthesizing-review-findings`'s Reviewer
+  discipline section) needs all three GitHub feedback surfaces, not just the two
+  `atlas-review-pr.md` step 1 happens to fetch first for round-counting.** On
+  GitHub these are `get_comments` (top-level issue comments), `get_review_comments`
+  (inline review-thread comments), and `get_reviews` (full review submissions —
+  including one posted with only a summary body and no inline anchors, which
+  shows up in neither of the other two calls and is easy to miss if a session
+  checks only `get_comments`/`get_review_comments` and calls that "no feedback").
+  Fetch all three before affirming any claim the round's synthesis is about to
+  treat as settled.
 - **Most of the boundaries above are specific to Model A.** Model B (§4) has no
   PR-activity subscription to fail, no self-bind reminder to lose, and no
   GitHub-event trigger to be missing from the picker — its only real boundary
