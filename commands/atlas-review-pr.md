@@ -408,7 +408,18 @@ line.
    — the built-in `code-review` skill, a framework review (e.g. BMAD), or linter
    output — you may run it on the same diff and fold its findings in too. The
    atlas lenses lead; the others are additive, not a substitute and not excluded.
-7. `code-quality-atlas:synthesizing-review-findings` — merge every source's
+7. **Before synthesizing, fetch the one feedback surface step 1 deferred.**
+   Step 1 pulled `get_reviews`/`get_comments` for round-counting; it deliberately
+   left out `get_review_comments` (inline review-thread comments) to keep the
+   pre-ACK work minimal. Fetch it now, paginating with `after` until a page
+   returns fewer than `perPage` threads — the synthesizer's standing-dispute
+   check (`code-quality-atlas:synthesizing-review-findings`'s *Reviewer
+   discipline* section) needs all three surfaces before affirming any claim as
+   settled, and this is the last point before that check runs. (Step 6 fetches
+   this same method again later, for thread-ownership on resolution — a fresh
+   call there is fine since threads can change in between; this fetch is only
+   to make the data available for synthesis now.)
+8. `code-quality-atlas:synthesizing-review-findings` — merge every source's
    findings (atlas lenses plus any companion reviewer) into one deduplicated,
    severity-ranked list with a single block/approve verdict, applying the
    active depth mode's severity floor (see the next section).
