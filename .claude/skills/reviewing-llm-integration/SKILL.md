@@ -14,7 +14,7 @@ provenance:
     hash: 3c25b2e7b87bb65211317bfdf8f477ebc281978b8ba6271795c7318cf6018eda
   - category: 27
     source: docs/research/cluster-6-evolution.md#27
-    hash: a4aba766d69e323389cdba76ba6b89828c155e5097a63c2f523fe184b53ffbd3
+    hash: 4899c319feef767139bc981714376fac8e2b0e56642f55355be67f09aaa60343
 ---
 
 # reviewing-llm-integration
@@ -48,7 +48,7 @@ The head of the full checklist — enough for a first pass without opening any r
 - **Eval coverage for nondeterminism:** Is there an eval/regression suite (golden set + assertions/metrics) so prompt or model changes can be measured, not vibe-checked? Are there test cases for failure modes (refusals, hallucination, injection attempts, malformed output)?
 - **Model & prompt versioning/pinning:** Is the model identifier pinned (not a floating "latest" alias) and is the prompt template versioned in source control? Can you reproduce a past output's prompt+model? Is there a plan for provider model deprecations?
 - **New dependency license check:** does an added dependency (and its transitive tree) carry a license compatible with the project's distribution model? Block/strongly-flag GPL/AGPL pulled into a permissive or proprietary product.
-- **License-check match mode:** if the diff adds or edits a dependency-license allow-list/deny-list or SBOM-policy gate, does it match each package's license string *exactly* against the allow-list, or via a substring/"partial"/"contains" mode? A substring match can pass a disallowed license hiding inside a combined expression (`GPL-3.0-only OR MIT` clearing an "MIT"-only allow-list) — flag any non-exact match mode as a compliance gap (cross-links #18 supply-chain).
+- **License-check match mode:** if the diff adds or edits a dependency-license allow-list/deny-list or SBOM-policy gate, does its match semantics fit the list's direction? An **allow-list** needs the reported license string to match an allowed entry *exactly* — a substring/"partial"/"contains" mode can pass a disallowed license hiding inside a combined expression (`GPL-3.0-only OR MIT` clearing an "MIT"-only allow-list). A **deny-list** needs the opposite: parsed-expression matching against *each operand* — whole-expression exact match under-rejects that same combined expression against a `GPL-3.0-only`-only deny-list. Flag either mismatch as a compliance gap (cross-links #18 supply-chain).
 
 **Shared categories:** category #27 checks are shared with **auditing-compliance-and-provenance** (their primary owner). When both lenses run on the same change, report each shared finding once, under the primary owner.
 
