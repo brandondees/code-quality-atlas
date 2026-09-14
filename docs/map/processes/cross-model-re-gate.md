@@ -41,21 +41,21 @@ genuinely discriminating 10/24.
    model, send a throwaway warm-up request unconditionally before every run
    (not only after a cold restart) — it absorbs the model's load time so the
    suite's real first request doesn't compete with it and trip a timeout
-   (`docs/runbooks/cross-model-re-gate.md:17-58`).
+   (`docs/runbooks/cross-model-re-gate.md:28-66`).
 2. Run: `python -m tooling.run_evals --skill <name> --model
-   qwen2.5-coder:7b` (`docs/runbooks/cross-model-re-gate.md:62-65`); check
+   qwen2.5-coder:7b` (`docs/runbooks/cross-model-re-gate.md:74-76`); check
    the exit code — a failed scenario's empty response is byte-identical to
    a genuine "no findings" miss, so an uncaught transport failure silently
-   inflates the miss count (`docs/runbooks/cross-model-re-gate.md:72-75`).
+   inflates the miss count (`docs/runbooks/cross-model-re-gate.md:91-93`).
 3. Grade recall (of the defect-planting scenarios, how many caught) and
    precision (of the clean E-group scenarios, how many correctly left
    alone) as two separate numbers, never one total
-   (`docs/runbooks/cross-model-re-gate.md:80-97`).
+   (`docs/runbooks/cross-model-re-gate.md:99-114`).
 4. If the suite under-performs: add a targeted worked example to
    `examples.md`, then **re-run the whole suite**, not just the target
    scenario — an edit aimed at one behavior can flip unrelated scenarios in
    either direction, confirmed twice in the same session
-   (`docs/runbooks/cross-model-re-gate.md:121-132`).
+   (`docs/runbooks/cross-model-re-gate.md:143-151`).
 5. Record the result — pass/fail, recall/precision split, any tuning
    delta — as a dated addition to the lens's `Decision` (Q21) entry in
    `docs/open-questions.md`.
@@ -80,4 +80,4 @@ genuinely discriminating 10/24.
 - Objects: `EvalScenario`, `Lens`, `Decision`
 - Source: `tooling/run_evals.py`, `docs/runbooks/cross-model-re-gate.md`
 - `docs/open-questions.md` Q21
-- Verified 2026-08-15 @ `914fb35`
+- Verified 2026-09-14 @ `1e1079b`

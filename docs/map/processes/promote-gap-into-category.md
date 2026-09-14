@@ -36,15 +36,15 @@ with an add-factor to something adjacent.
 1. Name the gap's scope and its boundary against neighboring categories
    explicitly — e.g. G2's `#25`↔`#32` boundary: model-call concerns stay
    `#25`, action/tool concerns move to the new `#32`
-   (`docs/open-questions.md:18`, D14).
+   (`docs/open-questions.md:20`, D14).
 2. Add the new `## #N Title` research section to the appropriate
    `docs/research/cluster-*.md` file and update `taxonomy.md`.
 3. Record the call as a `DN` bullet in `docs/open-questions.md` — e.g. D14
    for G2 → `#32 Agentic & tool-use safety`, or D13 for G10 → `#30
-   Enforcement apparatus & meta-artifacts` (`docs/map-gaps.md:97`).
+   Enforcement apparatus & meta-artifacts` (`docs/map-gaps.md:99`).
 4. Mark the `Gap` section itself resolved, inline, with a pointer to the
-   `Decision` that closed it (`docs/map-gaps.md:27` for G2; `docs/
-   map-gaps.md:97` for G10) — there is no separate resolved/open gap list,
+   `Decision` that closed it (`docs/map-gaps.md:29` for G2; `docs/
+   map-gaps.md:99` for G10) — there is no separate resolved/open gap list,
    the resolution lives in the same `GN` section.
 5. Ship a `Lens` built from the new category (see the `generate` process
    card) — often a later, separate step from the taxonomy promotion itself.
@@ -68,6 +68,9 @@ with an add-factor to something adjacent.
 ## See
 
 - Objects: `Gap`, `Category`, `Decision`
-- Source: `docs/map-gaps.md` (G2 at line 21, G10 at line 83)
+- Source: `docs/map-gaps.md` (G2 at line 23, G10 at line 85)
 - `docs/open-questions.md` D5, D13, D14
+- Verified 2026-09-14 @ `1e1079b` — re-pinned every citation in this card
+  into `docs/open-questions.md`/`docs/map-gaps.md`, drifted since both
+  grew above the cited lines
 - Verified 2026-08-15 @ `1ed3006`

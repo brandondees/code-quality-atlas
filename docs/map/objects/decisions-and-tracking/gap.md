@@ -25,9 +25,9 @@ unrecorded hunch.
 
 - Lives as a `## GN — Title` section in `docs/map-gaps.md` (e.g. `## G2 —
   Candidate promotion: "Excessive Agency" / agentic tool-use safety`,
-  `docs/map-gaps.md:21`).
+  `docs/map-gaps.md:23`).
 - Resolution is recorded inline in the same section (e.g. G2:
-  `**Resolved (2026-06-12, D14 / Q16):** ...`, `docs/map-gaps.md:27`) —
+  `**Resolved (2026-06-12, D14 / Q16):** ...`, `docs/map-gaps.md:29`) —
   there is no separate resolved/open list the way `docs/open-questions.md`
   keeps one; check each `GN` section itself for its status.
 - A resolved `Gap` typically promotes into a new `Category` (G2 → `#32`) or
@@ -60,4 +60,6 @@ unrecorded hunch.
 ## See
 
 - Source: `docs/map-gaps.md`
+- Verified 2026-09-14 @ `1e1079b` — re-pinned the G2 example citations,
+  drifted since `docs/map-gaps.md` grew above them
 - Verified 2026-08-15 @ `ff7c642`

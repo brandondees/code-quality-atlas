@@ -31,23 +31,24 @@ skill" that skips this step.
 ## Steps
 
 1. `python -m tooling.cli drift` — see what changed before regenerating
-   blind (`docs/runbooks/regenerating-skills.md:6-7`).
+   blind (`docs/runbooks/regenerating-skills.md:11-12`).
 2. `python -m tooling.cli generate` loads and validates the manifest, then
-   for each `skills:` entry calls `generate_skill` (`tooling/cli.py:47-55`);
+   for each `skills:` entry calls `generate_skill` (`tooling/cli.py:84-92`);
    if `router:`/`prepass:`/`synthesizer:` are present, generates
    `choosing-review-lenses`/`grounding-review-in-tool-output`/
-   `synthesizing-review-findings` (`tooling/cli.py:56-64`); if
+   `synthesizing-review-findings` (`tooling/cli.py:93-101`); if
    `entrypoints:` is present, calls `generate_collapsed` for every
-   `CollapsedEntrypoint` (`tooling/cli.py:65-78`), which also bundles the
+   `CollapsedEntrypoint` (`tooling/cli.py:102-118`), which also bundles the
    pre-pass/synthesizer into each entrypoint's own `reference/` files
-   (`docs/runbooks/regenerating-skills.md:21-23`).
+   (`docs/runbooks/regenerating-skills.md:26-28`).
 3. `examples.md` and `evals/eval.json` are **never** overwritten — hand-
    refined content survives regeneration untouched
-   (`docs/runbooks/regenerating-skills.md:12-13`).
+   (`docs/runbooks/regenerating-skills.md:17-18`).
 4. Re-validate: re-run the affected `EvalScenario` set against the model
-   tiers this suite targets (`docs/runbooks/regenerating-skills.md:24-26`).
-5. `python -m tooling.cli drift` again — confirm "No drift" before
-   committing (`docs/runbooks/regenerating-skills.md:27-28`).
+   tiers this suite targets (`docs/runbooks/regenerating-skills.md:29-31`).
+5. `python -m tooling.cli drift` again — confirm "No drift"
+   (`docs/runbooks/regenerating-skills.md:32`) before committing
+   (`docs/runbooks/regenerating-skills.md:41-42`).
 
 ## If you change this
 
@@ -68,6 +69,6 @@ skill" that skips this step.
 ## See
 
 - Objects: `Manifest`, `Lens`, `CollapsedEntrypoint`, `Category`
-- Source: `tooling/cli.py:47-79`, `docs/runbooks/regenerating-skills.md`
+- Source: `tooling/cli.py:76-129`, `docs/runbooks/regenerating-skills.md`
 - `docs/open-questions.md` D6, D10, D12
-- Verified 2026-08-15 @ `1ed3006`
+- Verified 2026-09-14 @ `1e1079b`
