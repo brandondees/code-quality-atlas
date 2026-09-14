@@ -1494,15 +1494,15 @@ a false "no feedback" read.
   `.claude/skills/synthesizing-review-findings/SKILL.md`.
 
 **Round-1 (CodeRabbit and this repo's own atlas review, independently):**
-both flagged that the first commit only fixed the skill/runbook wording, not
+both flagged that the commit above only fixed the skill/runbook wording, not
 the command that drives it — `commands/atlas-review-pr.md`'s step 1 still
-never fetched `get_review_comments` before synthesis ran. Added a new step 4
-item fetching `get_review_comments` (paginated), placed after the ACK (step
-2) so step 1's deliberately-minimal pre-ACK work stays untouched; step 4
-already does other post-ACK fetches (`get_files`, `get_diff`, lens content),
-so this carries none of step 1's timing risk. Step 6's own later
-`get_review_comments` call (for thread-ownership at reply time) was left
-as-is.
+never fetches `get_review_comments` before synthesis runs. That command-file
+fix was **not** made in this PR (correcting an earlier version of this entry,
+which wrongly described a step-4 `get_review_comments` fetch as having been
+added — it was never committed; `commands/atlas-review-pr.md` still has
+exactly one `get_review_comments` call, step 6's existing thread-ownership
+fetch, unchanged). The gap stays open, tracked by #485 itself, which was not
+closed despite the commit's `Closes #485` trailer.
 
 Verified: `python -m tooling.cli drift` clean; `python -m tooling.cli eval
 --skill synthesizing-review-findings` OK (13 scenarios); `ruff check
