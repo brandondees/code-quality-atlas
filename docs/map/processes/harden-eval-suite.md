@@ -45,10 +45,11 @@ gap rather than an unexamined one.
 5. Record the A-E breakdown, scenario count, and rationale as a dated entry
    under the lens's name in the `Decision` (Q21 in `docs/open-questions.md`)
    — e.g. the first hardened instance, `sweeping-for-security`
-   (`docs/open-questions.md:187`). No unique nearby anchor exists for this
-   one (`sweeping-for-security` itself recurs a dozen-plus times in the same
-   section), so this stays a raw line citation per
-   [`CONTEXT.md`](../CONTEXT.md)'s own stated fallback.
+   (`docs/open-questions.md::First hardened instance`). `sweeping-for-
+   security` itself recurs a dozen-plus times in the same section, so a
+   bare-name anchor wouldn't disambiguate this specific entry, but the
+   "First hardened instance" bolded lead-in is unique in the file (issue
+   #503's fix widened the anchor form to hold a full phrase like this one).
 6. Often followed by `cross-model-re-gate` (a separate process — the
    hardening and the re-gate are independently schedulable, per Q21's own
    deferred-re-gate entries).
@@ -73,6 +74,10 @@ gap rather than an unexamined one.
 - Objects: `Lens`, `EvalScenario`, `Category`, `Decision`
 - Source: `skills/manifest.yaml` (`eval_min` field), `tooling/evals.py`
 - `docs/open-questions.md` D8, Q21
+- Verified 2026-09-14 (#503) — migrated the `open-questions.md` citation to
+  a `::First hardened instance` phrase anchor, now that #503's fix widened
+  the anchor form to hold it; this had re-drifted twice (below) precisely
+  because no anchor narrow enough to fit the old character class existed
 - Verified 2026-09-14 @ `1e1079b` — re-pinned the `open-questions.md`
   citation a second time (drifted again past the #376 re-pin below)
 - Verified 2026-09-05 @ `33504c1` — re-pinned the drifted

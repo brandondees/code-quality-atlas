@@ -1610,3 +1610,17 @@ actually take the anchor form the docs already recommended for them.
 Verified: `pytest tests/ -q --cov=tooling` 786 passed, 14 skipped, 95.04%
 coverage (≥94% floor); `ruff check .`/`ruff format --check .` clean;
 `python -m tooling.cli drift` clean (44/44 skills in sync).
+
+**Round-1 (CodeRabbit, PR #505):** its Linked Issues check flagged that
+`harden-eval-suite.md`'s `docs/open-questions.md` citation still used a raw
+line number, since the card's own text explained that no anchor narrow
+enough for the old `[\w.,-]+` character class disambiguated it from the
+dozen-plus other `sweeping-for-security` mentions in the same section. That
+reasoning no longer holds after the regex widening above: the card's own
+"First hardened instance" bolded lead-in is unique in the file and now
+fits as a phrase anchor. Migrated it (`::First hardened instance`) rather
+than standing pat on a rationale the same PR had just made obsolete.
+
+Verified again: `pytest tests/ -q --cov=tooling` 786 passed, 14 skipped,
+95.04% coverage; `ruff check .`/`ruff format --check .` clean;
+`python -m tooling.cli drift` clean (44/44 skills in sync).
