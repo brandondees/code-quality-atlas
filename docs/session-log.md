@@ -1624,3 +1624,34 @@ than standing pat on a rationale the same PR had just made obsolete.
 Verified again: `pytest tests/ -q --cov=tooling` 786 passed, 14 skipped,
 95.04% coverage; `ruff check .`/`ruff format --check .` clean;
 `python -m tooling.cli drift` clean (44/44 skills in sync).
+
+**Round-2 (this repo's own atlas review and CodeRabbit, independently, PR
+#505):** two real findings.
+
+1. The `rest` widening (`[\w.,-]+` → `[^\`]+`) had been applied to *both*
+   the `::` anchor separator and the `:` line separator, not just the one
+   that needed it. That silently loosened the line-form's grammar too — a
+   plain, never-meant-as-a-citation inline code span like
+   `` `path.md: some description` `` would now parse as a malformed
+   citation and fail `test_citation_resolves`, a new false-positive-
+   extraction path no existing `docs/map/**` content happened to trigger
+   yet. Fixed by splitting `_CITATION_RE`/`_ANY_EXTENSION_CITATION_RE`'s
+   single `(?P<sep>::?)(?P<rest>...)` into two alternatives — `::` keeps
+   the wide `[^\`]+` class, bare `:` keeps the original narrow
+   `[\w.,-]+` — and added a regression test
+   (`test_single_colon_form_does_not_capture_prose`) asserting the
+   extractor doesn't capture that shape, so the boundary is CI-guarded
+   rather than resting on no one ever writing it.
+2. `promote-gap-into-category.md`'s "Verified 2026-09-14 (#503)" note
+   claimed "migrated every citation in this card," but the card's own
+   `docs/open-questions.md` D5/D13/D14 line is a bare, non-backtick
+   cross-reference that was never migrated (nor needed to be — it's the
+   same "name related decisions without a location" convention `hook.md`'s
+   "D17, Q23" line and other cards already use, distinct from a citation
+   asserting a specific spot in the file). Reworded the claim to be
+   precise about what was actually migrated instead of forcing that
+   cross-reference into citation form it was never meant to take.
+
+Verified again: `pytest tests/ -q --cov=tooling` 787 passed (1 new), 14
+skipped, 95.04% coverage; `ruff check .`/`ruff format --check .` clean;
+`python -m tooling.cli drift` clean (44/44 skills in sync).

@@ -74,10 +74,15 @@ with an add-factor to something adjacent.
 - Source: `docs/map-gaps.md::## G2 — Candidate promotion` (G2),
   `docs/map-gaps.md::## G10 — The enforcement apparatus` (G10)
 - `docs/open-questions.md` D5, D13, D14
-- Verified 2026-09-14 (#503) — migrated every citation in this card
-  (including this "See" section's own bare, uncited path mention, which
-  wasn't even checked by `test_map_citations.py` before) to `::` phrase
-  anchors, after two of them drifted a second time despite the re-pin below
+- Verified 2026-09-14 (#503) — migrated every raw line citation in this
+  card's Steps and this section's own G2/G10 pointer (previously a bare,
+  uncited path mention `test_map_citations.py` didn't check at all) to
+  `::` phrase anchors, after two of them drifted a second time despite the
+  re-pin below. The `docs/open-questions.md` D5/D13/D14 line just above
+  stays a plain cross-reference by design, not a citation — it names
+  related decisions without asserting a specific location, the same
+  convention `hook.md`'s "D17, Q23" line and other cards' "`DN`, `QN`"
+  mentions already use throughout this map
 - Verified 2026-09-14 @ `1e1079b` — re-pinned every citation in this card
   into `docs/open-questions.md`/`docs/map-gaps.md`, drifted since both
   grew above the cited lines
