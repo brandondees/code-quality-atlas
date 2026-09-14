@@ -21,7 +21,22 @@ def _touch_skill_md(skill_dir: Path) -> None:
     (skill_dir / "SKILL.md").write_text("---\nname: placeholder\n---\n\nbody\n")
 
 
-def test_cli_generate_then_drift_reports_clean(tmp_path, capsys):
+def test_cli_generate_then_drift_reports_clean(tmp_path, capsys, monkeypatch):
+    # The fixture manifest (1 skill) doesn't match the real repo's counts, so
+    # sync_doc_counts must not touch the real, tracked doc-count anchor files
+    # even though --docs-root below points at the real repo root (needed for
+    # generate_skill/validate to resolve the fixture's research-file paths).
+    # Same technique tests/test_generate_doc_counts.py's own unit tests use
+    # (#494).
+    monkeypatch.setattr("tooling.generate_doc_counts._TEMPLATE", ())
+    # Regression guard for #494 itself: assert one real anchor file is
+    # actually left untouched, not just that the monkeypatch line is present
+    # (atlas review round 1) — a future edit that drops or bypasses it would
+    # otherwise regress silently, since nothing else in the suite diffs the
+    # real tree and CI's own "generated trees in sync" step re-runs generate
+    # with the real manifest immediately after, overwriting the corruption
+    # before ever comparing it.
+    readme_before = (ROOT / "README.md").read_bytes()
     rc = main(
         [
             "generate",
@@ -35,6 +50,7 @@ def test_cli_generate_then_drift_reports_clean(tmp_path, capsys):
     )
     assert rc == 0
     assert (tmp_path / "hunting-silent-failures" / "SKILL.md").exists()
+    assert (ROOT / "README.md").read_bytes() == readme_before
 
     rc = main(["drift", "--skills-root", str(tmp_path), "--docs-root", str(ROOT)])
     out = capsys.readouterr().out
@@ -42,10 +58,16 @@ def test_cli_generate_then_drift_reports_clean(tmp_path, capsys):
     assert "No drift" in out
 
 
-def test_cli_drift_detected_reports_and_returns_1(tmp_path, capsys):
+def test_cli_drift_detected_reports_and_returns_1(tmp_path, capsys, monkeypatch):
     # Regression (#367): the DRIFT: reporting branch (a detected drift
     # returning rc 1) was unexercised by any test — flipping that `return 1`
     # to `return 0` left the whole 454-test suite green.
+    #
+    # As in test_cli_generate_then_drift_reports_clean above, sync_doc_counts
+    # must not run against the real repo's doc-count anchor files here either
+    # (#494), and the same regression guard applies (atlas review round 1).
+    monkeypatch.setattr("tooling.generate_doc_counts._TEMPLATE", ())
+    readme_before = (ROOT / "README.md").read_bytes()
     rc = main(
         [
             "generate",
@@ -58,6 +80,7 @@ def test_cli_drift_detected_reports_and_returns_1(tmp_path, capsys):
         ]
     )
     assert rc == 0
+    assert (ROOT / "README.md").read_bytes() == readme_before
 
     altered = tmp_path / "docs_altered"
     (altered / "tests" / "fixtures").mkdir(parents=True)
