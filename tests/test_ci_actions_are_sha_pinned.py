@@ -57,6 +57,9 @@ def _is_third_party_action_ref(uses: str) -> bool:
 
 
 def test_workflow_files_exist():
+    """Sanity check the other tests in this file rest on: an empty glob
+    match would make every assertion below vacuously pass, hiding a real
+    "CI moved and this guard now checks nothing" regression as green."""
     assert list(WORKFLOWS_DIR.glob("*.yml")) or list(WORKFLOWS_DIR.glob("*.yaml")), (
         f"{WORKFLOWS_DIR} has no workflow files -- has CI moved elsewhere? "
         "Update this guard's directory either way."
@@ -64,6 +67,11 @@ def test_workflow_files_exist():
 
 
 def test_every_third_party_action_is_pinned_to_a_full_commit_sha():
+    """The core #496 guard: a tag or branch ref (`@v4`, `@main`) is mutable
+    and can be repointed by the action's maintainer -- or an attacker who
+    compromises their account -- without any diff in this repo to review.
+    Every non-local, non-Docker `uses:` must instead name one immutable
+    commit."""
     unpinned = []
     for wf_path, job_name, step_index, uses in _iter_uses_refs():
         if not _is_third_party_action_ref(uses):
