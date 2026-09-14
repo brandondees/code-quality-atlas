@@ -23,7 +23,7 @@ rather than naming a lens directly.
 
 ## Shape
 
-Each `entrypoints:` list item in `skills/manifest.yaml:2449` carries:
+Each `entrypoints:` list item in `skills/manifest.yaml:2477` carries:
 
 - `name` — kebab-case identifier; also the directory name under
   `collapsed/skills/`.
@@ -32,7 +32,7 @@ Each `entrypoints:` list item in `skills/manifest.yaml:2449` carries:
   `artifact`).
 - `include_design` (optional) — whether design-capable lenses are pulled in.
 
-Named entries as of `skills/manifest.yaml:2450-2482` (not restated as a
+Named entries as of `skills/manifest.yaml:2478-2510` (not restated as a
 count — see `docs/map/CONTEXT.md`'s no-count rule): `reviewing-a-change`,
 `auditing-a-repository`, `reviewing-a-decision`, `reviewing-an-artifact`.
 Check `entrypoints:` itself for the current list rather than trusting this
@@ -70,10 +70,10 @@ enumeration as it ages.
 
 ## See
 
-- Source: `skills/manifest.yaml:2449-2482`
+- Source: `skills/manifest.yaml:2477-2510`
 - `docs/open-questions.md` Q20, D16
 - `docs/plans/2026-06-25-collapsed-entrypoint-emission.md`
-- Verified 2026-09-05 @ `33504c1`
+- Verified 2026-09-14 @ `aaac46c`
 - Verified 2026-09-06 — `tooling/generate.py` (a re-export facade over
   `generate_collapsed.py`) was deleted; the Surfaces row above now cites
   `generate_collapsed.py` directly (issue #449)
