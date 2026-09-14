@@ -1345,3 +1345,209 @@ chance at arm64 signal pre-merge; after, `pull_request` always lands on
 `ubuntu-latest` (x86_64), so arm64 coverage moved to post-merge only (via
 `push`). Reworded the comment to say so explicitly rather than leave the
 now-incomplete framing standing.
+
+## 2026-09-09 (same day) — #394/#484: the fork-PR-gate caveat itself named a stale Settings label and the wrong default tier
+
+The caveat added to `docs/self-hosted-runners.md`'s "Gate `pull_request`-triggered
+jobs against forks" bullet by the earlier #394 follow-on (a fresh copy of the
+canonical fix already merged in `calendar-proxy#888`, re-applied here since
+this repo's own personal-identifier redaction was already done) stated,
+unqualified, that the in-tree workflow-level `if:` condition is sufficient to
+keep a fork PR off self-hosted hardware — omitting that whether the run is
+auto-triggered at all also depends on the repo's own **Settings → Actions →
+General → Fork pull request workflows from outside collaborators** value being
+"Require approval for all outside collaborators," not GitHub's default. PR #484
+added that missing half of the caveat.
+
+**Round-1 (CodeRabbit):** the stricter option's label was stale — the PR quoted
+"Require approval for all outside collaborators," but GitHub's current UI
+spells it "Require approval for all external contributors." Fetched GitHub's
+docs directly and corrected the quoted label, along with the other two tier
+names ("Require approval for first-time contributors who are new to GitHub"
+and "Require approval for first-time contributors").
+
+**Round-1 (this repo's own atlas reviewer, Major):** a second finding on the
+same paragraph — the text named "Require approval for first-time contributors
+who are new to GitHub" as GitHub's default. Verified independently against
+GitHub's own docs ("By default, all first-time contributors require approval
+to run workflows") that the actual default is the plainer, *stricter* "Require
+approval for first-time contributors" tier — it exempts a contributor only on
+a contribution to *this* repo, not on any GitHub-wide contribution history.
+Corrected the description of all three tiers and which one GitHub applies by
+default, so the doc no longer understates how exposed an out-of-the-box repo
+actually is.
+
+Verified with `npx markdownlint-cli2@0.23.2` (pinned to this repo's CI
+version) — 0 issues — after each round; PR #484 merged, closing the
+remaining follow-on finding from #394.
+
+## 2026-09-12 — #489: a mojibake/double-encoding heuristic for `hunting-silent-failures`
+
+Added a new reviewable heuristic to `hunting-silent-failures` (category #2,
+error handling & resilience): a bulk find-replace, codemod, or bulk-rename
+touching non-ASCII text (em-dashes, curly quotes, accented or non-Latin
+characters) can silently corrupt content two ways — exiting 0 while matching
+nothing, or double-encoding the replacement into mojibake — and neither
+failure is caught by a formatter or linter, since the corrupted result stays
+syntactically valid. (This is the exact failure class `calendar-proxy`'s own
+`CLAUDE.md` independently documents under "Never use `perl -i -pe` on text
+containing non-ASCII.")
+
+Followed the repo's own source-of-truth convention throughout: edited
+`docs/research/cluster-1-correctness.md` (the source), regenerated
+`skills/hunting-silent-failures/{SKILL.md,reference/heuristics.md}` plus its
+two collapsed-entrypoint mirrors via `python -m tooling.cli generate`, then
+re-vendored `.claude/skills/hunting-silent-failures/SKILL.md` — no hand-edits
+to any generated file. Scoped deliberately narrow per the originating issue's
+own framing ("worth a checklist line rather than new machinery"): no new eval
+scenario, no change to `grounding-review-in-tool-output`'s tool-inventory
+guidance — both left as optional, not required, follow-ups.
+
+PR #489 auto-merged: clean CI, a clean round-1 atlas verdict ("approve," no
+findings), two CodeRabbit nits addressed and independently re-verified
+against the diff (not just trusting the bot's own "addressed" reply) before
+resolving, docs-only change, no author hold-off — signed off by the scheduled
+PR-housekeeping routine.
+
+## 2026-09-13 — #487: a license allow-list bug this repo's own atlas review should have caught, and didn't
+
+PR #481 had added a CI license-compliance step using `pip-licenses
+--partial-match` — a substring match that can silently pass a disallowed
+license hiding inside a combined SPDX expression (`GPL-3.0-only OR MIT`
+clears an allow-list containing only `MIT`). CodeRabbit caught the bug as a
+Major finding and it was already fixed by the time #487 was filed; #487
+tracked the two *upstream* coverage gaps that let this repo's own atlas
+review miss it in the first place — `choosing-review-lenses` had no route
+sending a license-allow-list/SBOM-policy diff to
+`auditing-compliance-and-provenance` at all, only to
+`auditing-config-and-build-hygiene`, which doesn't own the licensing verdict.
+
+- **Router gap** (`c706fc8`): added a dedicated `choosing-review-lenses` route
+  for a diff that adds or edits a dependency-license allow-list, deny-list, or
+  SBOM-policy gate, running `auditing-compliance-and-provenance` alongside the
+  existing `auditing-config-and-build-hygiene` route.
+- **Heuristic gap** (`c706fc8`): added a generic "exact-match vs.
+  substring/partial-match" bullet to category #27's research
+  (`docs/research/cluster-6-evolution.md`), so it propagates via
+  `built_from`/cross-reference to every lens sourced from that category —
+  `auditing-compliance-and-provenance`, `auditing-dependencies-and-supply-chain`,
+  and `reviewing-llm-integration`.
+- Added a regression eval scenario to `choosing-review-lenses/evals/eval.json`
+  covering this exact PR shape.
+
+**Round-1 (CodeRabbit), `8ca7434`:** the heuristic as first written said
+exact-match-against-the-full-expression is the safe default — true for an
+allow-list, but wrong for a deny-list, where whole-expression exact match
+*under*-rejects: a denied license only has to appear as one operand of a
+compound expression to matter, and comparing the whole string against a
+deny-list containing only `GPL-3.0-only` would miss `GPL-3.0-only OR MIT`
+entirely. Split the guidance by list direction in both the tooling-rule and
+heuristic bullets: allow-lists need exact whole-expression matching,
+deny-lists need the expression actually parsed and checked per-operand.
+Regenerated and re-vendored as before.
+
+Left the eval-scenario suggestion for `auditing-compliance-and-provenance`
+itself as a follow-up, per the issue's own softer "Consider" framing on that
+specific point — its suite is already hardened well past the D8 baseline
+(`eval_min: 22`), and a new adversarial scenario there deserves its own
+scoped A-E pass rather than riding along with a router/heuristic fix.
+
+Verified: `python -m tooling.cli drift` clean (44/44 skills in sync);
+`python -m tooling.cli eval --skill choosing-review-lenses` OK (5 scenarios);
+`ruff check .`/`ruff format --check .` clean; `pytest tests/ -q
+--cov=tooling` 777 passed, 14 skipped, 95.13% coverage (≥94% floor). PR #490
+merged.
+
+## 2026-09-13 (same day) — #485: the standing-dispute check never named which GitHub surfaces it covers
+
+`synthesizing-review-findings`'s "Reviewer discipline" section instructs
+scanning "the PR's existing comment threads and prior review rounds" for a
+standing dispute before affirming a claim — but never enumerated which
+surfaces that means. GitHub has three distinct, non-overlapping ones: top-level
+issue comments (`get_comments`), inline review-thread comments
+(`get_review_comments`), and full review submissions (`get_reviews`) —
+including one posted with only a body and no inline anchors, which shows up in
+*neither* of the other two. Nothing forced an implementing agent to check all
+three, and this repo's own `atlas-review-pr.md` reinforced the ambiguity:
+step 1 fetched `get_reviews`/`get_comments` early for round-counting but not
+`get_review_comments`, with no later step guaranteeing it got fetched before
+the synthesizer ran. The issue cited independent evidence — a downstream repo
+vendoring this suite — where checking only two of the three surfaces produced
+a false "no feedback" read.
+
+- `tooling/generate_synthesizer.py`: the "Check standing disputes" paragraph
+  now names all three feedback surfaces explicitly, in platform-agnostic
+  language (GitHub's three API calls given as a concrete "e.g.") so the
+  generic skill — meant to work with "any other review method run alongside"
+  the atlas lenses — stays portable rather than hard-coding GitHub tool names
+  into generic guidance.
+- `skills/synthesizing-review-findings/evals/eval.json`: new regression
+  scenario shaped exactly like the issue's independent evidence — a dispute
+  living only in a full review's summary body, with both the top-level-comment
+  and inline-thread surfaces empty.
+- `docs/runbooks/pr-review-automation.md`: one-line callout under *Known
+  boundaries* naming the `get_comments`/`get_review_comments`/`get_reviews`
+  mapping explicitly, since this doc (unlike the generic skill) is already
+  GitHub/MCP-specific.
+- Regenerated `skills/synthesizing-review-findings/SKILL.md` and all four
+  collapsed entrypoints' `reference/synthesis.md`, re-vendored
+  `.claude/skills/synthesizing-review-findings/SKILL.md`.
+
+**Round-1 (CodeRabbit and this repo's own atlas review, independently):**
+both flagged that the commit above only fixed the skill/runbook wording, not
+the command that drives it — `commands/atlas-review-pr.md`'s step 1 still
+never fetches `get_review_comments` before synthesis runs. That command-file
+fix was **not** made in this PR (correcting an earlier version of this entry,
+which wrongly described a step-4 `get_review_comments` fetch as having been
+added — it was never committed; `commands/atlas-review-pr.md` still has
+exactly one `get_review_comments` call, step 6's existing thread-ownership
+fetch, unchanged). The gap stays open, tracked by #485 itself, which was not
+closed despite the commit's `Closes #485` trailer.
+
+Verified: `python -m tooling.cli drift` clean; `python -m tooling.cli eval
+--skill synthesizing-review-findings` OK (13 scenarios); `ruff check
+.`/`ruff format --check .` clean; `pytest tests/ -q --cov=tooling` 777
+passed, 14 skipped, 95.13% coverage. PR #491 merged.
+
+## 2026-09-14 — #494: a `generate` test call was silently corrupting the real tracked doc-count files
+
+`test_cli_generate_then_drift_reports_clean` and
+`test_cli_drift_detected_reports_and_returns_1` (`tests/test_cli.py`) point
+`generate --docs-root` at the *real* repo root with a 1-skill fixture
+manifest — needed so `generate_skill`/`validate` can resolve the fixture's
+`research/...` paths — but that also let `generate`'s unconditional
+`sync_doc_counts` call render the fixture manifest's counts (lenses=1, diff=1,
+repo=0, total=1) straight into 9 real, tracked doc-count anchor files
+(`README.md`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`,
+`docs/distribution.md`, `docs/install.md`,
+`docs/collapsed-entrypoints-and-depth-modes.md`, `docs/open-questions.md`,
+`tooling/vendor-skills.sh`, `tooling/package-account-zips.sh`).
+
+The suite only stayed green because two later, alphabetically-subsequent
+tests in the same file happen to re-run `generate` with the real manifest and
+the same `docs_root`, repairing the values before the process exits — an
+ordering accident that silently corrupts the tracked files the moment either
+test runs in isolation, mid-run, or the suite gets parallelized/reordered.
+Reproduced directly before the fix: running either affected test alone left
+`git status --short` showing all 9 files modified.
+
+Fixed (`812064e`) by monkeypatching `tooling.generate_doc_counts._TEMPLATE` to
+an empty tuple for both tests' `generate` calls — the same technique
+`tests/test_generate_doc_counts.py`'s own unit tests already use — so
+`sync_doc_counts` becomes a no-op instead of relying on later tests to paper
+over the real-tree write.
+
+**Round-1 (this repo's own atlas review):** the fix stops the corruption but
+nothing in the suite would catch a future regression of it (e.g. an edit that
+quietly drops the `monkeypatch.setattr` line) — and CI's own "generated trees
+in sync" step wouldn't catch it either, since it re-runs `generate` with the
+real manifest immediately after and silently overwrites the corruption before
+ever diffing. Added (`9e9ca52`) an assertion that `README.md`'s bytes are
+unchanged across the `generate` call in both affected tests. Verified
+independently: reverted the `monkeypatch.setattr` line and confirmed each
+assertion fails on its own, in isolation, with the exact corruption #494
+describes; restored the fix and confirmed both pass clean.
+
+Verified: `pytest tests/ -q --cov=tooling` 777 passed, 14 skipped, 95.04%
+coverage (≥94% floor); `ruff check .`/`ruff format --check .` clean;
+`python -m tooling.cli drift` clean (44/44 skills in sync). PR #499 merged.
