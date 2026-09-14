@@ -87,5 +87,11 @@ skill invocation and session end regardless of what the session asked for.
   `hooks/queue-session-retro.sh`, `hooks/lib/feedback-tier.sh`,
   `collapsed/hooks/` (its mirror)
 - `docs/open-questions.md` D17
+- Verified 2026-09-14 @ `1e1079b` — re-checked `hooks/hooks.json:3,13,48`
+  against current content (unchanged, still correct); the `## Shape`
+  section's omission of the `PreToolUse`/`gate-lens-coverage.sh` hook and
+  its now-false "`PostToolUse` is the only one with a `matcher`" claim
+  (falsified by `hooks/hooks.json:39`) are tracked separately in #504
+  rather than fixed here
 - Verified 2026-09-05 @ `33504c1` — documented the `collapsed/hooks/` twin
   and its `route.sh` exception (issue #376)

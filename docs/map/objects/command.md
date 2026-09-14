@@ -38,8 +38,11 @@ directly-invokable action instead of relying on trigger-phrase matching.
 - **joins:** none of this map's modeled object types directly —
   `atlas-review-pr`/`atlas-code-review` call `choosing-review-lenses`,
   `grounding-review-in-tool-output`, and `synthesizing-review-findings`
-  directly and in sequence (`commands/atlas-review-pr.md:317,329,411`,
-  `commands/atlas-code-review.md:57,73,90`) — the same three skills the
+  directly and in sequence (`commands/atlas-review-pr.md::choosing-review-lenses`,
+  `::grounding-review-in-tool-output`, `::synthesizing-review-findings`,
+  `commands/atlas-code-review.md::choosing-review-lenses`,
+  `::grounding-review-in-tool-output`, `::synthesizing-review-findings`) —
+  the same three skills the
   `reviewing-a-change` `CollapsedEntrypoint` composes, replicated by hand
   rather than invoked through it; see that card's own "Connected to" note.
   `Lens`/`Manifest` indirectly through whichever lens those skills pick
@@ -68,9 +71,12 @@ directly-invokable action instead of relying on trigger-phrase matching.
 ## See
 
 - Source: `commands/`
-- Verified 2026-09-14 @ `1e1079b` — re-pinned the `atlas-review-pr.md`
-  citation a second time (it drifted again past the #376 re-pin below as
-  the command file kept growing); consider migrating this one to a
-  `::name` anchor per #424's stated preference if it drifts a third time
+- Verified 2026-09-14 @ `1e1079b` — migrated the `atlas-review-pr.md`/
+  `atlas-code-review.md` citations above to `::name` anchors: the line-form
+  citation had now drifted twice (#376, then again the same day as this
+  entry) and all three targets are skill names — the first example
+  `CONTEXT.md`'s citation-syntax section gives of a valid anchor, and both
+  command files are among the fastest-growing in the tree, which is why
+  this row kept coming back
 - Verified 2026-09-05 @ `33504c1` — re-pinned the drifted
   `atlas-review-pr.md` citation (issue #376)

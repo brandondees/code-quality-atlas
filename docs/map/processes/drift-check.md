@@ -35,8 +35,13 @@ until someone reads `SKILL.md` against the docs by eye.
 2. `tooling/cli.py:132-159` — no drift: print "No drift..." and exit 0; drift
    found: print one `DRIFT:` line per affected skill naming the changed
    `Category` numbers, exit 1.
-3. A malformed manifest or missing source raises `DriftError` and prints
-   `ERROR: ...` rather than a false "No drift" (`tooling/cli.py:142-146`).
+3. An empty or missing `--skills-root` (`tooling/cli.py:138-141`) and a
+   malformed manifest or missing source (`DriftError`,
+   `tooling/cli.py:142-146`) each print `ERROR: ...` and exit 1 rather than
+   a false "No drift" — the first guards against `check_drift`'s own glob
+   silently returning `[]` for a renamed or mistyped `--skills-root`
+   (#367), which would otherwise turn a required CI gate into a green
+   no-op.
 
 ## If you change this
 

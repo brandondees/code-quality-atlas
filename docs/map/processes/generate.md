@@ -31,7 +31,7 @@ skill" that skips this step.
 ## Steps
 
 1. `python -m tooling.cli drift` — see what changed before regenerating
-   blind (`docs/runbooks/regenerating-skills.md:6-7`).
+   blind (`docs/runbooks/regenerating-skills.md:11-12`).
 2. `python -m tooling.cli generate` loads and validates the manifest, then
    for each `skills:` entry calls `generate_skill` (`tooling/cli.py:84-92`);
    if `router:`/`prepass:`/`synthesizer:` are present, generates
@@ -40,14 +40,15 @@ skill" that skips this step.
    `entrypoints:` is present, calls `generate_collapsed` for every
    `CollapsedEntrypoint` (`tooling/cli.py:102-118`), which also bundles the
    pre-pass/synthesizer into each entrypoint's own `reference/` files
-   (`docs/runbooks/regenerating-skills.md:21-23`).
+   (`docs/runbooks/regenerating-skills.md:26-28`).
 3. `examples.md` and `evals/eval.json` are **never** overwritten — hand-
    refined content survives regeneration untouched
-   (`docs/runbooks/regenerating-skills.md:12-13`).
+   (`docs/runbooks/regenerating-skills.md:17-18`).
 4. Re-validate: re-run the affected `EvalScenario` set against the model
-   tiers this suite targets (`docs/runbooks/regenerating-skills.md:24-26`).
-5. `python -m tooling.cli drift` again — confirm "No drift" before
-   committing (`docs/runbooks/regenerating-skills.md:27-28`).
+   tiers this suite targets (`docs/runbooks/regenerating-skills.md:29-31`).
+5. `python -m tooling.cli drift` again — confirm "No drift"
+   (`docs/runbooks/regenerating-skills.md:32`) before committing
+   (`docs/runbooks/regenerating-skills.md:41-42`).
 
 ## If you change this
 
