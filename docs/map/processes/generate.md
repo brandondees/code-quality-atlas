@@ -33,12 +33,12 @@ skill" that skips this step.
 1. `python -m tooling.cli drift` — see what changed before regenerating
    blind (`docs/runbooks/regenerating-skills.md:6-7`).
 2. `python -m tooling.cli generate` loads and validates the manifest, then
-   for each `skills:` entry calls `generate_skill` (`tooling/cli.py:47-55`);
+   for each `skills:` entry calls `generate_skill` (`tooling/cli.py:84-92`);
    if `router:`/`prepass:`/`synthesizer:` are present, generates
    `choosing-review-lenses`/`grounding-review-in-tool-output`/
-   `synthesizing-review-findings` (`tooling/cli.py:56-64`); if
+   `synthesizing-review-findings` (`tooling/cli.py:93-101`); if
    `entrypoints:` is present, calls `generate_collapsed` for every
-   `CollapsedEntrypoint` (`tooling/cli.py:65-78`), which also bundles the
+   `CollapsedEntrypoint` (`tooling/cli.py:102-118`), which also bundles the
    pre-pass/synthesizer into each entrypoint's own `reference/` files
    (`docs/runbooks/regenerating-skills.md:21-23`).
 3. `examples.md` and `evals/eval.json` are **never** overwritten — hand-
@@ -68,6 +68,6 @@ skill" that skips this step.
 ## See
 
 - Objects: `Manifest`, `Lens`, `CollapsedEntrypoint`, `Category`
-- Source: `tooling/cli.py:47-79`, `docs/runbooks/regenerating-skills.md`
+- Source: `tooling/cli.py:76-129`, `docs/runbooks/regenerating-skills.md`
 - `docs/open-questions.md` D6, D10, D12
-- Verified 2026-08-15 @ `1ed3006`
+- Verified 2026-09-14 @ `1e1079b`

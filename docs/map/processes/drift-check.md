@@ -32,11 +32,11 @@ until someone reads `SKILL.md` against the docs by eye.
 
 1. `check_drift` walks `skills_root` and recomputes each skill's provenance
    hash from its current `built_from` sources (`tooling/drift.py`).
-2. `tooling/cli.py:81-93` — no drift: print "No drift..." and exit 0; drift
+2. `tooling/cli.py:132-159` — no drift: print "No drift..." and exit 0; drift
    found: print one `DRIFT:` line per affected skill naming the changed
    `Category` numbers, exit 1.
 3. A malformed manifest or missing source raises `DriftError` and prints
-   `ERROR: ...` rather than a false "No drift" (`tooling/cli.py:84-86`).
+   `ERROR: ...` rather than a false "No drift" (`tooling/cli.py:142-146`).
 
 ## If you change this
 
@@ -54,6 +54,6 @@ until someone reads `SKILL.md` against the docs by eye.
 ## See
 
 - Objects: `Manifest`, `Lens`, `Category`
-- Source: `tooling/cli.py:81-93`, `tooling/drift.py`
+- Source: `tooling/cli.py:132-159`, `tooling/drift.py`
 - `docs/runbooks/regenerating-skills.md`
-- Verified 2026-08-15 @ `1ed3006`
+- Verified 2026-09-14 @ `1e1079b`
