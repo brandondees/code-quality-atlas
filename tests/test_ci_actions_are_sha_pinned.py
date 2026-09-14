@@ -26,26 +26,70 @@ WORKFLOWS_DIR = ROOT / ".github" / "workflows"
 # abbreviated SHA in `uses:`, but that isn't actually pinned to one commit
 # (it can become ambiguous as a repo grows) -- require the full form.
 _FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_VERSION_COMMENT_RE = re.compile(r"#\s*v\d+(?:\.\d+){0,2}\s*$")
+
+
+def _mapping_get(node: yaml.Node | None, key: str) -> yaml.Node | None:
+    """Look up `key` in a composed YAML MappingNode, returning its value
+    node (not a plain Python value -- callers that need the real value use
+    `.value`, and every node still carries `.start_mark.line`)."""
+    if node is None or not isinstance(node, yaml.MappingNode):
+        return None
+    for key_node, value_node in node.value:
+        if isinstance(key_node, yaml.ScalarNode) and key_node.value == key:
+            return value_node
+    return None
 
 
 def _iter_uses_refs():
-    """Yield (workflow_file, job_name, step_index, uses_value) for every
-    `uses:` step across every workflow file, at every job's `steps:` list
-    AND the top-level reusable-workflow `uses:` some jobs (currently none in
-    this repo) can carry directly on the job itself, so a future reusable-
-    workflow call isn't silently unchecked."""
+    """Yield (workflow_file, job_name, step_index, line_no, uses_value) for
+    every `uses:` step across every workflow file, at every job's `steps:`
+    list AND the top-level reusable-workflow `uses:` some jobs (currently
+    none in this repo) can carry directly on the job itself, so a future
+    reusable-workflow call isn't silently unchecked.
+
+    Walks the composed YAML *node* tree (`yaml.compose`), not
+    `yaml.safe_load`'s plain dicts, so each yielded `uses:` value carries
+    its real source line (`start_mark.line`, 1-indexed here). This is what
+    lets `test_sha_pinned_actions_still_carry_a_version_formatted_comment`
+    below inspect that exact line's trailing comment (PyYAML doesn't
+    preserve comments in its data model at all, so raw text is
+    unavoidable) without a *separate* raw-text regex scan that could match
+    an unrelated line merely mentioning `uses:` in prose rather than a real
+    step (round-1 atlas review finding on this file, #496 PR)."""
     workflow_files = sorted(WORKFLOWS_DIR.glob("*.yml")) + sorted(
         WORKFLOWS_DIR.glob("*.yaml")
     )
     assert workflow_files, f"no workflow files found under {WORKFLOWS_DIR}"
     for wf_path in workflow_files:
-        workflow = yaml.safe_load(wf_path.read_text(encoding="utf-8"))
-        for job_name, job in (workflow.get("jobs") or {}).items():
-            if isinstance(job, dict) and "uses" in job:
-                yield wf_path, job_name, None, job["uses"]
-            for i, step in enumerate(job.get("steps") or []):
-                if isinstance(step, dict) and "uses" in step:
-                    yield wf_path, job_name, i, step["uses"]
+        root = yaml.compose(wf_path.read_text(encoding="utf-8"))
+        jobs_node = _mapping_get(root, "jobs")
+        if not isinstance(jobs_node, yaml.MappingNode):
+            continue
+        for job_name_node, job_node in jobs_node.value:
+            job_name = job_name_node.value
+            job_uses = _mapping_get(job_node, "uses")
+            if job_uses is not None:
+                yield (
+                    wf_path,
+                    job_name,
+                    None,
+                    job_uses.start_mark.line + 1,
+                    job_uses.value,
+                )
+            steps_node = _mapping_get(job_node, "steps")
+            if not isinstance(steps_node, yaml.SequenceNode):
+                continue
+            for i, step_node in enumerate(steps_node.value):
+                step_uses = _mapping_get(step_node, "uses")
+                if step_uses is not None:
+                    yield (
+                        wf_path,
+                        job_name,
+                        i,
+                        step_uses.start_mark.line + 1,
+                        step_uses.value,
+                    )
 
 
 def _is_third_party_action_ref(uses: str) -> bool:
@@ -73,28 +117,18 @@ def test_every_third_party_action_is_pinned_to_a_full_commit_sha():
     Every non-local, non-Docker `uses:` must instead name one immutable
     commit."""
     unpinned = []
-    for wf_path, job_name, step_index, uses in _iter_uses_refs():
+    for wf_path, job_name, step_index, line_no, uses in _iter_uses_refs():
         if not _is_third_party_action_ref(uses):
             continue
         if "@" not in uses:
-            unpinned.append(
-                (wf_path.name, job_name, step_index, uses, "no @ref at all")
-            )
+            unpinned.append(f"{wf_path.name}:{line_no} ({uses!r}): no @ref at all")
             continue
         ref = uses.rsplit("@", 1)[1]
         if not _FULL_SHA_RE.match(ref):
             location = f"job {job_name!r}" + (
                 f", step {step_index}" if step_index is not None else ""
             )
-            unpinned.append(
-                (
-                    wf_path.name,
-                    job_name,
-                    step_index,
-                    uses,
-                    f"{location} uses ref {ref!r}",
-                )
-            )
+            unpinned.append(f"{wf_path.name}:{line_no} ({location}): uses ref {ref!r}")
     assert not unpinned, (
         "the following `uses:` reference(s) are not pinned to a full "
         f"40-hex-char commit SHA: {unpinned} -- a tag or branch ref is "
@@ -105,29 +139,32 @@ def test_every_third_party_action_is_pinned_to_a_full_commit_sha():
     )
 
 
-def test_sha_pinned_actions_still_carry_a_human_readable_version_comment():
+def test_sha_pinned_actions_still_carry_a_version_formatted_comment():
     """Not itself a security property, but the whole point of switching to a
     stable-looking SHA-vs-mutable-tag tradeoff (#496) is worthless if nobody
     can tell what version is actually pinned without resolving the commit on
     GitHub -- this repo's own existing pins all carry a trailing `# vX.Y.Z`
-    comment for exactly that reason. Guard the convention, not just the
-    security property, so a future pin bump doesn't quietly drop it."""
-    missing_comment = []
-    for wf_path in sorted(WORKFLOWS_DIR.glob("*.yml")) + sorted(
-        WORKFLOWS_DIR.glob("*.yaml")
-    ):
-        for line_no, line in enumerate(
-            wf_path.read_text(encoding="utf-8").splitlines(), start=1
-        ):
-            match = re.search(r"uses:\s*(\S+)@([0-9a-f]{40})(?!\S)(.*)$", line)
-            if not match:
-                continue
-            trailing = match.group(3)
-            if "#" not in trailing:
-                missing_comment.append(f"{wf_path.name}:{line_no}: {line.strip()}")
-    assert not missing_comment, (
+    comment for exactly that reason. Guard the *format* of that comment, not
+    just the presence of some `#` (a `# TODO` would otherwise satisfy this),
+    so a future pin bump doesn't quietly drop the human-readable version
+    while technically keeping a comment."""
+    lines_by_file: dict[Path, list[str]] = {}
+    missing_or_malformed = []
+    for wf_path, _job_name, _step_index, line_no, uses in _iter_uses_refs():
+        if not _is_third_party_action_ref(uses) or "@" not in uses:
+            continue
+        ref = uses.rsplit("@", 1)[1]
+        if not _FULL_SHA_RE.match(ref):
+            continue  # not SHA-pinned; test_every_third_party_action_... flags this
+        if wf_path not in lines_by_file:
+            lines_by_file[wf_path] = wf_path.read_text(encoding="utf-8").splitlines()
+        line = lines_by_file[wf_path][line_no - 1]
+        _, _, trailing = line.partition(f"@{ref}")
+        if not _VERSION_COMMENT_RE.search(trailing):
+            missing_or_malformed.append(f"{wf_path.name}:{line_no}: {line.strip()}")
+    assert not missing_or_malformed, (
         "the following SHA-pinned `uses:` line(s) have no trailing "
-        f"`# vX.Y.Z`-style comment: {missing_comment} -- add one so a human "
-        "reviewer can tell what's actually pinned without resolving the "
-        "commit on GitHub."
+        f"`# vX.Y.Z`-style version comment: {missing_or_malformed} -- add "
+        "one (or fix its format) so a human reviewer can tell what's "
+        "actually pinned without resolving the commit on GitHub."
     )
