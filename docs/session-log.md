@@ -1626,19 +1626,19 @@ Verified again: `pytest tests/ -q --cov=tooling` 786 passed, 14 skipped,
 `python -m tooling.cli drift` clean (44/44 skills in sync).
 
 **Round-2 (this repo's own atlas review and CodeRabbit, independently, PR
-#505):** two real findings.
+\#505):** two real findings.
 
-1. The `rest` widening (`[\w.,-]+` → `[^\`]+`) had been applied to *both*
-   the `::` anchor separator and the `:` line separator, not just the one
-   that needed it. That silently loosened the line-form's grammar too — a
-   plain, never-meant-as-a-citation inline code span like
+1. The `rest` widening (`` [\w.,-]+ `` → `` [^`]+ ``) had been applied to
+   *both* the `::` anchor separator and the `:` line separator, not just
+   the one that needed it. That silently loosened the line-form's grammar
+   too — a plain, never-meant-as-a-citation inline code span like
    `` `path.md: some description` `` would now parse as a malformed
    citation and fail `test_citation_resolves`, a new false-positive-
    extraction path no existing `docs/map/**` content happened to trigger
    yet. Fixed by splitting `_CITATION_RE`/`_ANY_EXTENSION_CITATION_RE`'s
    single `(?P<sep>::?)(?P<rest>...)` into two alternatives — `::` keeps
-   the wide `[^\`]+` class, bare `:` keeps the original narrow
-   `[\w.,-]+` — and added a regression test
+   the wide `` [^`]+ `` class, bare `:` keeps the original narrow
+   `` [\w.,-]+ `` — and added a regression test
    (`test_single_colon_form_does_not_capture_prose`) asserting the
    extractor doesn't capture that shape, so the boundary is CI-guarded
    rather than resting on no one ever writing it.
