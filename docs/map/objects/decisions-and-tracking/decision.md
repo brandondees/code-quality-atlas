@@ -29,11 +29,11 @@ Both marker forms below are `Decision` instances, as defined by
   resolved when written; carries a date and often a build-completion note
   added later (`✅ built ...`).
 - **`QN` — a `### QN — Title` header under `## Open questions`**
-  (`docs/open-questions.md:24` onward). May be marked `→ RESOLVED` or
+  (`docs/open-questions.md:29` onward). May be marked `→ RESOLVED` or
   `→ PARTIALLY RESOLVED` (with a pointer to the `DN` that closed it, e.g.
   Q16 → D14) or left genuinely open — the live roster is
   `docs/open-questions.md`'s own "Genuinely still open (undecided)" list
-  (`docs/open-questions.md:47`), not this card.
+  (`docs/open-questions.md:50`), not this card.
 - A `DN` and a `QN` about the same question cross-reference each other by
   number; they are not duplicates — `QN` is the question and its resolution
   narrative, `DN` is the settled-decision ledger entry.
@@ -68,4 +68,6 @@ Both marker forms below are `Decision` instances, as defined by
 ## See
 
 - Source: `docs/open-questions.md`
+- Verified 2026-09-14 @ `1e1079b` — re-pinned the `QN` section citations,
+  drifted since `docs/open-questions.md` grew above them
 - Verified 2026-08-15 @ `ff7c642`

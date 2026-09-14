@@ -25,7 +25,7 @@ skill invocation and session end regardless of what the session asked for.
 - `hooks/hooks.json` is keyed by **event name**, not by a per-hook
   identifier — `_meta/schema.md`'s Naming rule ("its identifier as
   `hooks.json` names it") means the event key itself: `SessionStart`,
-  `PostToolUse`, `SessionEnd` (`hooks/hooks.json:3,13,24`). There is no
+  `PostToolUse`, `SessionEnd` (`hooks/hooks.json:3,13,48`). There is no
   `name` field on an individual hook entry.
 - Each event key holds an array of `{matcher?, hooks: [{type: "command",
   command}]}` objects — `PostToolUse` is the only one with a `matcher`

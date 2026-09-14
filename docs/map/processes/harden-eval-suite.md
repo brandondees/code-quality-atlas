@@ -45,7 +45,7 @@ gap rather than an unexamined one.
 5. Record the A-E breakdown, scenario count, and rationale as a dated entry
    under the lens's name in the `Decision` (Q21 in `docs/open-questions.md`)
    — e.g. the first hardened instance, `sweeping-for-security`
-   (`docs/open-questions.md:184`). No unique nearby anchor exists for this
+   (`docs/open-questions.md:187`). No unique nearby anchor exists for this
    one (`sweeping-for-security` itself recurs a dozen-plus times in the same
    section), so this stays a raw line citation per
    [`CONTEXT.md`](../CONTEXT.md)'s own stated fallback.
@@ -73,5 +73,7 @@ gap rather than an unexamined one.
 - Objects: `Lens`, `EvalScenario`, `Category`, `Decision`
 - Source: `skills/manifest.yaml` (`eval_min` field), `tooling/evals.py`
 - `docs/open-questions.md` D8, Q21
+- Verified 2026-09-14 @ `1e1079b` — re-pinned the `open-questions.md`
+  citation a second time (drifted again past the #376 re-pin below)
 - Verified 2026-09-05 @ `33504c1` — re-pinned the drifted
   `open-questions.md` citation (issue #376)
