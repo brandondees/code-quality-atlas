@@ -75,8 +75,6 @@ directly-invokable action instead of relying on trigger-phrase matching.
   `atlas-code-review.md` citations above to `::name` anchors: the line-form
   citation had now drifted twice (#376, then again the same day as this
   entry) and all three targets are skill names — the first example
-  `CONTEXT.md`'s citation-syntax section gives of a valid anchor, and both
-  command files are among the fastest-growing in the tree, which is why
-  this row kept coming back
+  `CONTEXT.md`'s citation-syntax section gives of a valid anchor
 - Verified 2026-09-05 @ `33504c1` — re-pinned the drifted
   `atlas-review-pr.md` citation (issue #376)
