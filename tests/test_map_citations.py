@@ -51,9 +51,15 @@ _CITABLE_EXTENSIONS = ("md", "py", "sh", "yaml", "yml", "json", "jsonc", "txt")
 
 # A backtick-quoted `path:spec` or `path::name`, where path ends in one of
 # _CITABLE_EXTENSIONS so a stray `word:digit` span isn't mistaken for one.
+# `rest` allows any non-backtick character (not just [\w.,-]) so a
+# `path::name` anchor can quote a full markdown heading or bolded prose
+# phrase verbatim -- CONTEXT.md's own "Citation syntax" section already
+# documents "a markdown heading" as a valid anchor `name`, but headings
+# routinely contain spaces, colons, and punctuation a narrower character
+# class would silently truncate at (issue #503).
 _CITATION_RE = re.compile(
     r"`(?P<path>[\w./-]+\.(?:" + "|".join(_CITABLE_EXTENSIONS) + r"))"
-    r"(?P<sep>::?)(?P<rest>[\w.,-]+)`"
+    r"(?P<sep>::?)(?P<rest>[^`]+)`"
 )
 # Same citation shape as _CITATION_RE but with no extension restriction --
 # used only to catch a citation into an extension _CITATION_RE's allowlist
@@ -61,7 +67,7 @@ _CITATION_RE = re.compile(
 # the same "false all green" shape as #421, one layer down: the allowlist
 # itself silently narrowing coverage rather than the extractor breaking).
 _ANY_EXTENSION_CITATION_RE = re.compile(
-    r"`(?P<path>[\w./-]+\.(?P<ext>[A-Za-z0-9]+))(?P<sep>::?)[\w.,-]+`"
+    r"`(?P<path>[\w./-]+\.(?P<ext>[A-Za-z0-9]+))(?P<sep>::?)[^`]+`"
 )
 # One line-form segment: N or N-M.
 _LINE_SEGMENT_RE = re.compile(r"^(\d+)(?:-(\d+))?$")

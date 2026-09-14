@@ -1551,3 +1551,62 @@ describes; restored the fix and confirmed both pass clean.
 Verified: `pytest tests/ -q --cov=tooling` 777 passed, 14 skipped, 95.04%
 coverage (≥94% floor); `ruff check .`/`ruff format --check .` clean;
 `python -m tooling.cli drift` clean (44/44 skills in sync). PR #499 merged.
+
+## 2026-09-14 (same day) — #503, #504: the map's own anchor-citation form couldn't actually hold the anchors its own docs promised
+
+`docs/map/CONTEXT.md`'s "Citation syntax" section has always said a
+`path::name` anchor's `name` "is anything a plain-text search of `path`
+would find literally: a function/class/test name, a YAML key, **a markdown
+heading**, a skill name" — but `tests/test_map_citations.py`'s extractor
+regex restricted the anchor text to `[\w.,-]+` (word characters, dots,
+commas, hyphens), which cannot capture a heading or bolded prose phrase
+containing spaces, colons, or parentheses. That gap meant the two
+recurring-drift citations #503 found — `decision.md`'s and
+`promote-gap-into-category.md`'s raw line citations into
+`docs/open-questions.md`/`docs/map-gaps.md`, two of which had already
+drifted a second time despite a same-day re-pin in PR #502 — had no way to
+actually take the anchor form the docs already recommended for them.
+
+- `tests/test_map_citations.py`: widened `_CITATION_RE`'s and
+  `_ANY_EXTENSION_CITATION_RE`'s `rest` capture from `[\w.,-]+` to `[^`]+`
+  (any non-backtick character) so an anchor can quote a full heading or
+  bolded phrase verbatim, stopping only at the closing backtick. Confirmed
+  this is purely additive: the full suite (786 tests) still passes
+  unchanged, since every existing citation's text already satisfied the
+  narrower class.
+- Migrated the citations #503 flagged as repeat offenders to phrase
+  anchors: `docs/map/objects/decisions-and-tracking/decision.md` (the
+  `## Decisions made`/`## Open questions` headings and the "Genuinely still
+  open (undecided)" landmark), `docs/map/processes/promote-gap-into-
+  category.md` (the D14 bullet and both G2/G10 `Resolved (...)` lines,
+  plus its own "See" section's bare, non-backtick `docs/map-gaps.md (G2 at
+  line 23, G10 at line 85)` mention — itself invisible to the citation test
+  entirely until converted into real anchor citations), and
+  `docs/map/objects/decisions-and-tracking/gap.md` (the G2 heading/
+  resolution examples). Left `docs/map/processes/harden-eval-suite.md`'s
+  `docs/open-questions.md:187` citation as a raw line citation unchanged —
+  that card already recorded, correctly, that no anchor there is unique
+  (`sweeping-for-security` recurs a dozen-plus times in the same section),
+  which widening the character class doesn't fix.
+- One authoring pitfall hit and corrected while migrating: a phrase anchor
+  wrapped across two markdown source lines is invisible to the extractor,
+  which parses citations per physical line
+  (`docs/map/objects/decisions-and-tracking/gap.md`'s first draft split
+  `` `docs/map-gaps.md::## G2 — Candidate promotion: "Excessive Agency" /
+  agentic tool-use safety` `` across a line-wrap and it silently stopped
+  being checked at all) — shortened to a still-distinguishing prefix that
+  fits on one line instead.
+- `docs/map/objects/hook.md` (#504): its `## Shape` section said
+  `PostToolUse` was "the only one with a matcher" and enumerated only three
+  event keys. Current `hooks/hooks.json` has grown a fourth key
+  (`PreToolUse`, gating `gate-lens-coverage.sh` ahead of a review post) and
+  a second matcher block under `PostToolUse` itself (`"Read"`, alongside
+  `"Skill"`, both firing `lens-coverage/track-lens-reads.sh`) since the
+  card's Q23 lens-coverage-hook follow-up shipped — so both the matcher
+  claim and the "one script per event" bullet had gone stale. Rewrote the
+  section to name all four event keys, both `PostToolUse` matcher blocks
+  and the `PreToolUse` one, and every script actually wired per event.
+
+Verified: `pytest tests/ -q --cov=tooling` 786 passed, 14 skipped, 95.04%
+coverage (≥94% floor); `ruff check .`/`ruff format --check .` clean;
+`python -m tooling.cli drift` clean (44/44 skills in sync).
