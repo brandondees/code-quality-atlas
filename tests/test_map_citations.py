@@ -51,17 +51,34 @@ _CITABLE_EXTENSIONS = ("md", "py", "sh", "yaml", "yml", "json", "jsonc", "txt")
 
 # A backtick-quoted `path:spec` or `path::name`, where path ends in one of
 # _CITABLE_EXTENSIONS so a stray `word:digit` span isn't mistaken for one.
+# The two separator forms get different `rest` character classes, on
+# purpose: `::name` (the anchor form) allows any non-backtick character so
+# it can quote a full markdown heading or bolded prose phrase verbatim --
+# CONTEXT.md's own "Citation syntax" section already documents "a markdown
+# heading" as a valid anchor `name`, but headings routinely contain spaces,
+# colons, and punctuation a narrower character class would silently
+# truncate at (issue #503). `:N`/`:N-M` (the line form) stays restricted to
+# [\w.,-]+ -- widening it too would make a plain, non-citation inline code
+# span like `` `path.md: some description` `` (never meant as a citation)
+# start parsing as a malformed one and fail test_citation_resolves, a false
+# positive no current docs/map/** content happens to trigger yet (round-1
+# review finding on PR #505: the first version of this fix widened both
+# forms uniformly).
 _CITATION_RE = re.compile(
     r"`(?P<path>[\w./-]+\.(?:" + "|".join(_CITABLE_EXTENSIONS) + r"))"
-    r"(?P<sep>::?)(?P<rest>[\w.,-]+)`"
+    r"(?:(?P<anchor_sep>::)(?P<anchor_rest>[^`]+)"
+    r"|(?P<line_sep>:)(?P<line_rest>[\w.,-]+))`"
 )
 # Same citation shape as _CITATION_RE but with no extension restriction --
 # used only to catch a citation into an extension _CITATION_RE's allowlist
 # doesn't cover, which would otherwise be invisible to it (issue #424 review,
 # the same "false all green" shape as #421, one layer down: the allowlist
 # itself silently narrowing coverage rather than the extractor breaking).
+# Only `ext` is ever read out of a match, so the two separator forms don't
+# need distinct named groups here -- but they keep the same asymmetric
+# `rest` character class as _CITATION_RE above, for the same reason.
 _ANY_EXTENSION_CITATION_RE = re.compile(
-    r"`(?P<path>[\w./-]+\.(?P<ext>[A-Za-z0-9]+))(?P<sep>::?)[\w.,-]+`"
+    r"`(?P<path>[\w./-]+\.(?P<ext>[A-Za-z0-9]+))(?:::[^`]+|:[\w.,-]+)`"
 )
 # One line-form segment: N or N-M.
 _LINE_SEGMENT_RE = re.compile(r"^(\d+)(?:-(\d+))?$")
@@ -77,7 +94,11 @@ def _extract_citations(md_path):
     text = md_path.read_text(encoding="utf-8")
     for lineno, line in enumerate(text.splitlines(), start=1):
         for m in _CITATION_RE.finditer(line):
-            yield m.group("path"), m.group("sep"), m.group("rest"), lineno
+            if m.group("anchor_sep") is not None:
+                sep, rest = m.group("anchor_sep"), m.group("anchor_rest")
+            else:
+                sep, rest = m.group("line_sep"), m.group("line_rest")
+            yield m.group("path"), sep, rest, lineno
 
 
 def _citation_cases():
@@ -129,6 +150,21 @@ def test_no_citations_use_an_unlisted_extension():
         "checks them -- add the extension to _CITABLE_EXTENSIONS:\n"
         + "\n".join(unlisted)
     )
+
+
+def test_single_colon_form_does_not_capture_prose():
+    """Guards the asymmetry introduced by #503's anchor-widening fix: only
+    the `::` anchor form should accept arbitrary text -- a single `:`
+    followed by non-line-spec prose (e.g. a plain inline code span like
+    `path.md: some description`, never meant as a citation) must stay
+    invisible to the extractor, exactly as it was before that fix. Round-1
+    review on PR #505 found the first version of the fix widened both
+    separator forms uniformly, which would have made a span like this parse
+    as a citation and fail test_citation_resolves the moment any
+    docs/map/**.md file ever contained one -- a false positive with no
+    existing repro at the time, caught before it had one."""
+    line = "See `docs/map/CONTEXT.md: this file explains the syntax` for more."
+    assert list(_CITATION_RE.finditer(line)) == []
 
 
 def _resolves(path, sep, rest):

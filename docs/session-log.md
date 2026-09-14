@@ -1551,3 +1551,107 @@ describes; restored the fix and confirmed both pass clean.
 Verified: `pytest tests/ -q --cov=tooling` 777 passed, 14 skipped, 95.04%
 coverage (≥94% floor); `ruff check .`/`ruff format --check .` clean;
 `python -m tooling.cli drift` clean (44/44 skills in sync). PR #499 merged.
+
+## 2026-09-14 (same day) — #503, #504: the map's own anchor-citation form couldn't actually hold the anchors its own docs promised
+
+`docs/map/CONTEXT.md`'s "Citation syntax" section has always said a
+`path::name` anchor's `name` "is anything a plain-text search of `path`
+would find literally: a function/class/test name, a YAML key, **a markdown
+heading**, a skill name" — but `tests/test_map_citations.py`'s extractor
+regex restricted the anchor text to `[\w.,-]+` (word characters, dots,
+commas, hyphens), which cannot capture a heading or bolded prose phrase
+containing spaces, colons, or parentheses. That gap meant the two
+recurring-drift citations #503 found — `decision.md`'s and
+`promote-gap-into-category.md`'s raw line citations into
+`docs/open-questions.md`/`docs/map-gaps.md`, two of which had already
+drifted a second time despite a same-day re-pin in PR #502 — had no way to
+actually take the anchor form the docs already recommended for them.
+
+- `tests/test_map_citations.py`: widened `_CITATION_RE`'s and
+  `_ANY_EXTENSION_CITATION_RE`'s `rest` capture from `[\w.,-]+` to `[^`]+`
+  (any non-backtick character) so an anchor can quote a full heading or
+  bolded phrase verbatim, stopping only at the closing backtick. Confirmed
+  this is purely additive: the full suite (786 tests) still passes
+  unchanged, since every existing citation's text already satisfied the
+  narrower class.
+- Migrated the citations #503 flagged as repeat offenders to phrase
+  anchors: `docs/map/objects/decisions-and-tracking/decision.md` (the
+  `## Decisions made`/`## Open questions` headings and the "Genuinely still
+  open (undecided)" landmark), `docs/map/processes/promote-gap-into-
+  category.md` (the D14 bullet and both G2/G10 `Resolved (...)` lines,
+  plus its own "See" section's bare, non-backtick `docs/map-gaps.md (G2 at
+  line 23, G10 at line 85)` mention — itself invisible to the citation test
+  entirely until converted into real anchor citations), and
+  `docs/map/objects/decisions-and-tracking/gap.md` (the G2 heading/
+  resolution examples). Left `docs/map/processes/harden-eval-suite.md`'s
+  `docs/open-questions.md:187` citation as a raw line citation unchanged —
+  that card already recorded, correctly, that no anchor there is unique
+  (`sweeping-for-security` recurs a dozen-plus times in the same section),
+  which widening the character class doesn't fix.
+- One authoring pitfall hit and corrected while migrating: a phrase anchor
+  wrapped across two markdown source lines is invisible to the extractor,
+  which parses citations per physical line
+  (`docs/map/objects/decisions-and-tracking/gap.md`'s first draft split
+  `` `docs/map-gaps.md::## G2 — Candidate promotion: "Excessive Agency" /
+  agentic tool-use safety` `` across a line-wrap and it silently stopped
+  being checked at all) — shortened to a still-distinguishing prefix that
+  fits on one line instead.
+- `docs/map/objects/hook.md` (#504): its `## Shape` section said
+  `PostToolUse` was "the only one with a matcher" and enumerated only three
+  event keys. Current `hooks/hooks.json` has grown a fourth key
+  (`PreToolUse`, gating `gate-lens-coverage.sh` ahead of a review post) and
+  a second matcher block under `PostToolUse` itself (`"Read"`, alongside
+  `"Skill"`, both firing `lens-coverage/track-lens-reads.sh`) since the
+  card's Q23 lens-coverage-hook follow-up shipped — so both the matcher
+  claim and the "one script per event" bullet had gone stale. Rewrote the
+  section to name all four event keys, both `PostToolUse` matcher blocks
+  and the `PreToolUse` one, and every script actually wired per event.
+
+Verified: `pytest tests/ -q --cov=tooling` 786 passed, 14 skipped, 95.04%
+coverage (≥94% floor); `ruff check .`/`ruff format --check .` clean;
+`python -m tooling.cli drift` clean (44/44 skills in sync).
+
+**Round-1 (CodeRabbit, PR #505):** its Linked Issues check flagged that
+`harden-eval-suite.md`'s `docs/open-questions.md` citation still used a raw
+line number, since the card's own text explained that no anchor narrow
+enough for the old `[\w.,-]+` character class disambiguated it from the
+dozen-plus other `sweeping-for-security` mentions in the same section. That
+reasoning no longer holds after the regex widening above: the card's own
+"First hardened instance" bolded lead-in is unique in the file and now
+fits as a phrase anchor. Migrated it (`::First hardened instance`) rather
+than standing pat on a rationale the same PR had just made obsolete.
+
+Verified again: `pytest tests/ -q --cov=tooling` 786 passed, 14 skipped,
+95.04% coverage; `ruff check .`/`ruff format --check .` clean;
+`python -m tooling.cli drift` clean (44/44 skills in sync).
+
+**Round-2 (this repo's own atlas review and CodeRabbit, independently, PR
+\#505):** two real findings.
+
+1. The `rest` widening (`` [\w.,-]+ `` → `` [^`]+ ``) had been applied to
+   *both* the `::` anchor separator and the `:` line separator, not just
+   the one that needed it. That silently loosened the line-form's grammar
+   too — a plain, never-meant-as-a-citation inline code span like
+   `` `path.md: some description` `` would now parse as a malformed
+   citation and fail `test_citation_resolves`, a new false-positive-
+   extraction path no existing `docs/map/**` content happened to trigger
+   yet. Fixed by splitting `_CITATION_RE`/`_ANY_EXTENSION_CITATION_RE`'s
+   single `(?P<sep>::?)(?P<rest>...)` into two alternatives — `::` keeps
+   the wide `` [^`]+ `` class, bare `:` keeps the original narrow
+   `` [\w.,-]+ `` — and added a regression test
+   (`test_single_colon_form_does_not_capture_prose`) asserting the
+   extractor doesn't capture that shape, so the boundary is CI-guarded
+   rather than resting on no one ever writing it.
+2. `promote-gap-into-category.md`'s "Verified 2026-09-14 (#503)" note
+   claimed "migrated every citation in this card," but the card's own
+   `docs/open-questions.md` D5/D13/D14 line is a bare, non-backtick
+   cross-reference that was never migrated (nor needed to be — it's the
+   same "name related decisions without a location" convention `hook.md`'s
+   "D17, Q23" line and other cards already use, distinct from a citation
+   asserting a specific spot in the file). Reworded the claim to be
+   precise about what was actually migrated instead of forcing that
+   cross-reference into citation form it was never meant to take.
+
+Verified again: `pytest tests/ -q --cov=tooling` 787 passed (1 new), 14
+skipped, 95.04% coverage; `ruff check .`/`ruff format --check .` clean;
+`python -m tooling.cli drift` clean (44/44 skills in sync).

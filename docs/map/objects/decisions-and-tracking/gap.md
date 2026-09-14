@@ -23,13 +23,12 @@ unrecorded hunch.
 
 ## Shape
 
-- Lives as a `## GN — Title` section in `docs/map-gaps.md` (e.g. `## G2 —
-  Candidate promotion: "Excessive Agency" / agentic tool-use safety`,
-  `docs/map-gaps.md:23`).
+- Lives as a `## GN — Title` section in `docs/map-gaps.md` (e.g.
+  `docs/map-gaps.md::## G2 — Candidate promotion`).
 - Resolution is recorded inline in the same section (e.g. G2:
-  `**Resolved (2026-06-12, D14 / Q16):** ...`, `docs/map-gaps.md:29`) —
-  there is no separate resolved/open list the way `docs/open-questions.md`
-  keeps one; check each `GN` section itself for its status.
+  `docs/map-gaps.md::Resolved (2026-06-12, D14 / Q16)`) — there is no
+  separate resolved/open list the way `docs/open-questions.md` keeps one;
+  check each `GN` section itself for its status.
 - A resolved `Gap` typically promotes into a new `Category` (G2 → `#32`) or
   gets folded into an existing one — the section says which.
 
