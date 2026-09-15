@@ -166,12 +166,11 @@ def license_file(target):
 
 def test_vendor_writes_license_file_matching_source(tmp_path):
     """A target repo's vendored skills once carried an attribution notice
-    that only *linked* to the license at the
-    pinned commit, with no local copy — so the notice's own promise ("the
-    license text matches what was actually vendored") depended on a live
-    fetch from GitHub rather than anything actually shipped alongside the
-    skills. Vendor the real license text so a target repo's copy is
-    self-contained."""
+    that only *linked* to the license at the pinned commit, with no local
+    copy — so the notice's own promise ("the license text matches what was
+    actually vendored") depended on a live fetch from GitHub rather than
+    anything actually shipped alongside the skills. Vendor the real license
+    text so a target repo's copy is self-contained."""
     target = tmp_path / "target-repo"
     target.mkdir()
 

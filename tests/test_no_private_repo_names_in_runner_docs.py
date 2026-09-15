@@ -49,14 +49,16 @@ _PRIVATE_STRINGS = (
 
 
 def _tracked_files():
+    # `-z` (NUL-separated) avoids git's default quote-escaping of paths with
+    # non-ASCII or otherwise "unusual" bytes -- a quoted path wouldn't
+    # resolve to the real file below, silently scanning zero bytes of it.
     out = subprocess.run(
-        ["git", "ls-files"],
+        ["git", "ls-files", "-z"],
         cwd=ROOT,
         capture_output=True,
-        text=True,
         check=True,
     ).stdout
-    return [ROOT / line for line in out.splitlines() if line]
+    return [ROOT / p for p in out.decode("utf-8").split("\0") if p]
 
 
 def test_doc_exists():
