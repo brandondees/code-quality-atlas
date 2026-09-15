@@ -707,24 +707,37 @@ repo/machine:
   (or might gain) outside contributors.
 
   **The `if:` gate itself is attacker-editable, which is a sharper problem
-  than it first looks.** For a plain `pull_request` event, GitHub evaluates
-  the triggered workflow as it exists in the _PR's own head_ — so a hostile
-  PR can simply edit this same `if:` condition (or, in a `runs-on:`
-  expression shaped like it, the expression itself) back to unconditional
-  self-hosted routing and have that edit evaluated for its own run. The
-  Settings-tier approval above is the only real backstop against that, not
-  the in-tree condition. One repo on this fleet hit this directly: it
-  originally gated self-hosted _steps_ with an `if:` shaped like the one
-  above, discovered the tamper vector, and switched to gating the job's
-  `runs-on:` itself instead —
+  than it first looks — and no in-tree routing expression fixes that by
+  itself.** For a plain `pull_request` event, GitHub evaluates the triggered
+  workflow as it exists in the _PR's own head_ — so a hostile PR can simply
+  edit this same `if:` condition (or, in a `runs-on:` expression shaped like
+  it, the expression itself) back to unconditional self-hosted routing and
+  have that edit evaluated for its own run. **This applies equally to any
+  routing logic that lives in the workflow file**, whatever it's shaped
+  like — the Settings-tier approval above is the only real backstop against
+  a PR-head edit, not the in-tree condition itself, for either pattern
+  below.
+
+  One repo on this fleet still moved from an `if:`-gated _step_ to gating
+  the job's `runs-on:` itself instead —
   `runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' ||
-  fromJSON('["self-hosted", "Linux"]') }}` — so every `pull_request` run,
-  same-repo or fork, lands on ephemeral hosted compute regardless of what
-  the PR's own head contains, and only `push`(default branch)/`schedule`
-  stay self-hosted. That's a stronger default than the `if:`-gate pattern
-  above for any repo that can adopt it; the `if:` pattern is left in this
-  section as the lighter-weight option for a job that genuinely needs to
-  keep running on self-hosted hardware for `pull_request` events.
+  fromJSON('["self-hosted", "Linux"]') }}` — and that move is a real, if
+  narrower, improvement: unlike the `if:` pattern above (which trusts
+  `head.repo.full_name == github.repository` and only gates fork PRs), this
+  `runs-on:` form doesn't check repo origin at all — every `pull_request`
+  run, same-repo or fork, routes to hosted compute by default, so there's
+  no same-repo check for a same-repo contributor (human or a compromised
+  collaborator account) to simply not need to bypass. What it does **not**
+  do is make the routing tamper-proof: a hostile PR can still edit this
+  exact `runs-on:` line to force unconditional self-hosted, exactly as it
+  could edit the `if:` line above, since both are PR-head content evaluated
+  for the PR's own run. Only the Settings-tier fork-approval gate — or a
+  required-reviewer GitHub Environment that jobs continue to reference, not
+  removable from within the PR itself — protects against that edit; a
+  workflow-file expression, however it's shaped, cannot protect itself. The
+  `if:` pattern is left in this section as the lighter-weight option for a
+  job that genuinely needs to keep running on self-hosted hardware for
+  `pull_request` events.
 
 - **GitHub-hosted runners are not a given fallback.** If the GitHub account
   has a billing/payment problem, `ubuntu-latest`/`macos-latest` jobs fail

@@ -69,19 +69,27 @@ def test_doc_exists():
 
 
 def test_no_known_private_strings_in_tracked_tree():
+    private_bytes = [s.encode("utf-8") for s in _PRIVATE_STRINGS]
     offenders = {}
     for path in _tracked_files():
         if path.resolve() == THIS_FILE or not path.is_file():
             # This file's own _PRIVATE_STRINGS list is the one legitimate
             # place these strings appear in the tree.
             continue
+        relative_path = path.relative_to(ROOT).as_posix()
         try:
-            text = path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue  # binary or unreadable -- not a doc/text leak risk
-        hits = [s for s in _PRIVATE_STRINGS if s in text]
+            data = path.read_bytes()
+        except OSError:
+            continue  # unreadable (e.g. broken symlink) -- nothing to scan
+        hits = sorted(
+            {
+                s
+                for s, b in zip(_PRIVATE_STRINGS, private_bytes)
+                if b in data or s in relative_path
+            }
+        )
         if hits:
-            offenders[str(path.relative_to(ROOT))] = hits
+            offenders[relative_path] = hits
     assert not offenders, (
         f"{offenders!r} -- one of the private-repo names/identifiers #394 "
         "scrubbed from this public repo has reappeared, most likely from a "
