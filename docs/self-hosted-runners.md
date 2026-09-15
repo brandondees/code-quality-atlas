@@ -731,12 +731,22 @@ repo/machine:
   do is make the routing tamper-proof: a hostile PR can still edit this
   exact `runs-on:` line to force unconditional self-hosted, exactly as it
   could edit the `if:` line above, since both are PR-head content evaluated
-  for the PR's own run. Only the Settings-tier fork-approval gate — or a
-  required-reviewer GitHub Environment that jobs continue to reference, not
-  removable from within the PR itself — protects against that edit; a
-  workflow-file expression, however it's shaped, cannot protect itself. The
-  `if:` pattern is left in this section as the lighter-weight option for a
-  job that genuinely needs to keep running on self-hosted hardware for
+  for the PR's own run.
+
+  **Only a mechanism GitHub enforces independently of this file protects
+  against that edit, and _which_ one depends on where the PR comes from.**
+  The Settings-tier gate above is scoped to **fork** PRs from _outside_
+  collaborators — its own tiers are phrased in exactly those terms — so it
+  does nothing for a same-repo branch PR; a compromised collaborator
+  account already has write access and opens a same-repo PR, which the
+  fork-approval setting never sees. For that case, the applicable control
+  is a required-reviewer GitHub Environment that the job continues to
+  reference (not removable from within the PR itself), or, structurally,
+  simply not granting write access more broadly than needed. A workflow-
+  file expression, however it's shaped, cannot protect itself against
+  either threat — the enforcement has to live outside the file. The `if:`
+  pattern is left in this section as the lighter-weight option for a job
+  that genuinely needs to keep running on self-hosted hardware for
   `pull_request` events.
 
 - **GitHub-hosted runners are not a given fallback.** If the GitHub account
