@@ -81,11 +81,11 @@ the plan doc's own note on this).
 
 `tooling/package-account-zips.sh`'s `write_attribution()` shipped only a
 `NOTICE.md` linking back to `LICENSE-CC-BY-4.0` on GitHub. `tooling/
-vendor-skills.sh` got the equivalent fix for
-`brandondees/second-brain-config#1157` (PR #341), but that PR only touched
-the vendor-skills.sh channel — `package-account-zips.sh`'s own header and
-inline comments still claimed the two channels "mirror" each other, which
-stopped being true. Worse for this channel than for #1157: an uploaded
+vendor-skills.sh` got the equivalent fix, filed against a consumer repo on
+the same fleet (PR #341), but that PR only touched the vendor-skills.sh
+channel — `package-account-zips.sh`'s own header and inline comments still
+claimed the two channels "mirror" each other, which stopped being true.
+Worse for this channel than for that earlier fix: an uploaded
 account-skill zip is extracted into a claude.ai account skill with no
 ongoing relationship to this git repo at all, so a dead or unreachable link
 would be the *only* copy of the license terms that skill will ever have.
@@ -1349,8 +1349,8 @@ now-incomplete framing standing.
 ## 2026-09-09 (same day) — #394/#484: the fork-PR-gate caveat itself named a stale Settings label and the wrong default tier
 
 The caveat added to `docs/self-hosted-runners.md`'s "Gate `pull_request`-triggered
-jobs against forks" bullet by the earlier #394 follow-on (a fresh copy of the
-canonical fix already merged in `calendar-proxy#888`, re-applied here since
+jobs against forks" bullet by the earlier #394 follow-on (a fresh copy of a
+fix already merged in the private canonical repo, re-applied here since
 this repo's own personal-identifier redaction was already done) stated,
 unqualified, that the in-tree workflow-level `if:` condition is sufficient to
 keep a fork PR off self-hosted hardware — omitting that whether the run is
@@ -1389,9 +1389,9 @@ touching non-ASCII text (em-dashes, curly quotes, accented or non-Latin
 characters) can silently corrupt content two ways — exiting 0 while matching
 nothing, or double-encoding the replacement into mojibake — and neither
 failure is caught by a formatter or linter, since the corrupted result stays
-syntactically valid. (This is the exact failure class `calendar-proxy`'s own
-`CLAUDE.md` independently documents under "Never use `perl -i -pe` on text
-containing non-ASCII.")
+syntactically valid. (This is the exact failure class a private repo on the
+same fleet's own `CLAUDE.md` independently documents under "Never use
+`perl -i -pe` on text containing non-ASCII.")
 
 Followed the repo's own source-of-truth convention throughout: edited
 `docs/research/cluster-1-correctness.md` (the source), regenerated
@@ -1655,3 +1655,54 @@ Verified again: `pytest tests/ -q --cov=tooling` 786 passed, 14 skipped,
 Verified again: `pytest tests/ -q --cov=tooling` 787 passed (1 new), 14
 skipped, 95.04% coverage; `ruff check .`/`ruff format --check .` clean;
 `python -m tooling.cli drift` clean (44/44 skills in sync).
+
+## 2026-09-15 — #394 and #495: widened the private-repo-name guard, fixed the two stale post-#471 doc sections
+
+A fresh session opened with "what's next?" and worked the weekly-audit
+tracking issue (#347) rather than a named task, since `docs/open-questions.md`'s
+"genuinely still open" list is all owner-gated design questions with no
+code-ready item. Two of #347's remaining open, code-actionable findings both
+touch `docs/self-hosted-runners.md` and were fixed together.
+
+**#394's residual half.** The 2026-09-13 audit found that the regression
+guard added for #394 (`tests/test_no_private_repo_names_in_runner_docs.py`)
+only scanned `docs/self-hosted-runners.md`, while the same forbidden
+private-repo strings it polices were still present in three other tracked
+files: `.github/workflows/ci.yml:13` (a comment naming the private canonical
+repo a `changes`-job pattern was borrowed from), `tests/test_vendor_skills.py:168`
+(a docstring citing a private repo's issue number), and `docs/session-log.md:85`
+(a direct link to a private repo's issue). Genericized all three the same
+way the original #394 fix did — dropped the identifying name/issue number,
+kept the technical content — and, while grepping for the guard's known
+strings across the tree to verify no more remained, found two further
+private-canonical-repo mentions earlier in this file that predated the #394
+effort entirely and genericized those too. Then widened the guard itself:
+`test_no_known_private_strings_in_self_hosted_runners_doc`
+became `test_no_known_private_strings_in_tracked_tree`, walking `git
+ls-files` instead of one hardcoded path (skipping itself, since its own
+`_PRIVATE_STRINGS` list is the one legitimate place these strings appear).
+
+**#495 — two sections left stale by #471's runner-routing fix.** The
+"Dependabot PRs share this repo's self-hosted exposure" paragraph described
+an exposure `ci.yml`'s `gate` job no longer has (every `pull_request` event,
+Dependabot included, now routes to `runs-on: ubuntu-latest`) — rewrote it
+past tense, pointing at the current routing instead. The fleet-wide
+fork-PR-gate playbook (`Known gotchas`) taught the `if:`-on-steps gating
+pattern without the lesson #493 itself surfaced: that condition is
+attacker-editable for a `pull_request` event, since GitHub evaluates the
+triggered workflow from the PR's own head. Added that caveat plus the
+stronger `runs-on:`-level routing this repo adopted instead, since this doc
+is copied verbatim to other repos on the fleet and the gap could otherwise
+propagate a known-weaker pattern.
+
+**Left for the repo owner, not fixed here:** #492 (`main` has no branch
+protection) and the Settings/Environment half of #493 (the fork-PR-gate's
+real backstop) both need a GitHub Settings action only `brandondees` can
+take — no code change makes either true.
+
+Verified: `pytest tests/ -q --cov=tooling` 790 passed, 14 skipped, 95.04%
+coverage (≥94% floor); `ruff check .`/`ruff format --check .` clean;
+`python -m tooling.cli drift` clean (44/44 skills in sync); `npx
+markdownlint-cli2 docs/self-hosted-runners.md docs/session-log.md` clean;
+`python -c "import yaml; yaml.safe_load(...)"` confirmed `ci.yml` still
+parses after its one-line comment edit.
