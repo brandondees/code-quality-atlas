@@ -713,10 +713,11 @@ repo/machine:
   edit this same `if:` condition (or, in a `runs-on:` expression shaped like
   it, the expression itself) back to unconditional self-hosted routing and
   have that edit evaluated for its own run. **This applies equally to any
-  routing logic that lives in the workflow file**, whatever it's shaped
-  like — the Settings-tier approval above is the only real backstop against
-  a PR-head edit, not the in-tree condition itself, for either pattern
-  below.
+  routing logic that lives in the workflow file** — no in-tree condition,
+  whatever it's shaped like, can protect itself. But no single external
+  mechanism backstops a PR-head edit for both patterns below either; which
+  one applies depends on where the PR comes from — see the breakdown after
+  the `runs-on:` pattern below.
 
   One repo on this fleet still moved from an `if:`-gated _step_ to gating
   the job's `runs-on:` itself instead —
