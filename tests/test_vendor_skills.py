@@ -165,8 +165,8 @@ def license_file(target):
 
 
 def test_vendor_writes_license_file_matching_source(tmp_path):
-    """Issue #1157 (second-brain-config): a target repo's vendored skills
-    carried an attribution notice that only *linked* to the license at the
+    """A target repo's vendored skills once carried an attribution notice
+    that only *linked* to the license at the
     pinned commit, with no local copy — so the notice's own promise ("the
     license text matches what was actually vendored") depended on a live
     fetch from GitHub rather than anything actually shipped alongside the

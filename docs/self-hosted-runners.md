@@ -706,6 +706,26 @@ repo/machine:
   setting are two independent layers; both are needed once the repo has
   (or might gain) outside contributors.
 
+  **The `if:` gate itself is attacker-editable, which is a sharper problem
+  than it first looks.** For a plain `pull_request` event, GitHub evaluates
+  the triggered workflow as it exists in the _PR's own head_ — so a hostile
+  PR can simply edit this same `if:` condition (or, in a `runs-on:`
+  expression shaped like it, the expression itself) back to unconditional
+  self-hosted routing and have that edit evaluated for its own run. The
+  Settings-tier approval above is the only real backstop against that, not
+  the in-tree condition. One repo on this fleet hit this directly: it
+  originally gated self-hosted _steps_ with an `if:` shaped like the one
+  above, discovered the tamper vector, and switched to gating the job's
+  `runs-on:` itself instead —
+  `runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' ||
+  fromJSON('["self-hosted", "Linux"]') }}` — so every `pull_request` run,
+  same-repo or fork, lands on ephemeral hosted compute regardless of what
+  the PR's own head contains, and only `push`(default branch)/`schedule`
+  stay self-hosted. That's a stronger default than the `if:`-gate pattern
+  above for any repo that can adopt it; the `if:` pattern is left in this
+  section as the lighter-weight option for a job that genuinely needs to
+  keep running on self-hosted hardware for `pull_request` events.
+
 - **GitHub-hosted runners are not a given fallback.** If the GitHub account
   has a billing/payment problem, `ubuntu-latest`/`macos-latest` jobs fail
   outright with "recent account payments have failed" — confirmed while
@@ -1041,16 +1061,14 @@ job whose labels no runner carries sits `queued` with no error:
 grep -rn 'runs-on:' .github/workflows/ | sed 's/:  */: /'
 ```
 
-**Dependabot PRs share this repo's self-hosted exposure.** `ci.yml`'s fork-PR
-gate keeps fork-originated content off the persistent runner, but it can't
-distinguish a same-repo human PR from a same-repo Dependabot dependency-bump
-PR — both satisfy the same "same repo" check. That means `pip install
-pip-tools==7.6.1` and `pip install pip-audit==2.10.1` (both outside the
-hash-pinned `pip install --require-hashes -r requirements.txt` gate) run
-unattended on the shared runner before human review of a proposed version
-bump, same as for any other PR. Consequence is bounded here — this workflow
-holds no secrets and no deploy credentials — so the exposure is
-runner-persistence (state left for the _next_ job), covered by the fleet-wide
-"Cross-repo blast radius" risk above, not credential theft. Tighter isolation
-(a GitHub-hosted runner for Dependabot-authored PRs, or a maintainer-applied
-label gating the pip-install/pip-audit steps) is not currently in place.
+**Dependabot PRs no longer share this repo's self-hosted exposure (fixed by
+issue #471).** This section used to describe Dependabot dependency-bump PRs running
+unattended on the shared self-hosted runner before human review, on the
+reasoning that the fork-PR gate's "same repo" check couldn't distinguish a
+same-repo human PR from a same-repo Dependabot PR. That exposure is gone:
+`ci.yml`'s `gate` job now routes every `pull_request` event — Dependabot
+included — to `runs-on: ubuntu-latest`, an ephemeral GitHub-hosted VM, and
+only `push`(main)/`schedule` still land on the self-hosted fleet, neither of
+which carries Dependabot's own unreviewed content pre-merge. See
+[Known gotchas](#known-gotchas)'s fork-PR-gate entry for the routing
+mechanism and its own residual gap.

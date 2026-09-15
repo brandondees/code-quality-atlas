@@ -10,7 +10,7 @@ name: ci
 # silence. This job's steps have genuinely disjoint input sets (Python code
 # vs. requirements.in/.txt vs. shell scripts vs. Markdown), so per-step
 # gating is used rather than an all-or-nothing job-level gate (the
-# calendar-proxy `changes`-job pattern used elsewhere in this org): a single
+# `changes`-job pattern used on another repo in this org): a single
 # job-level gate can't let e.g. markdownlint run on a docs-only change while
 # skipping the Python pipeline, without also either pulling every Markdown
 # change into the expensive path or dropping Markdown lint coverage

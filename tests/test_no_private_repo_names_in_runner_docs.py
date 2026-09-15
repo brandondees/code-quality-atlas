@@ -16,18 +16,25 @@ strings already confirmed private never reappear here. A new private-repo
 name introduced by some future canonical re-copy wouldn't be caught until
 someone adds it below; this catches regression of the *known* names, not
 every possible future leak.
+
+Originally scoped to `docs/self-hosted-runners.md` alone -- widened
+(2026-09-15, #394 follow-up) to scan the whole tracked tree after an audit
+found the same strings surviving in `ci.yml`, `test_vendor_skills.py`, and
+`session-log.md`, none of which the narrower guard covered.
 """
 
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DOC = ROOT / "docs" / "self-hosted-runners.md"
+THIS_FILE = Path(__file__).resolve()
 
 # Every private-repo name, host identifier, and PR/issue reference confirmed
-# scrubbed from this file (and, separately, from its own session-log entry --
-# see docs/session-log.md's 2026-09-08 "#394" entries) as of the fix. Extend
-# this list if a future audit finds another one; never remove an entry just
-# because it currently passes.
+# scrubbed from this repo (and, separately, from docs/session-log.md's
+# 2026-09-08 "#394" entries) as of the fix. Extend this list if a future
+# audit finds another one; never remove an entry just because it currently
+# passes.
 _PRIVATE_STRINGS = (
     "calendar-proxy",
     "second-brain-config",
@@ -41,6 +48,17 @@ _PRIVATE_STRINGS = (
 )
 
 
+def _tracked_files():
+    out = subprocess.run(
+        ["git", "ls-files"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return [ROOT / line for line in out.splitlines() if line]
+
+
 def test_doc_exists():
     assert DOC.is_file(), (
         f"{DOC} is missing -- has it been renamed or moved? Update this "
@@ -48,14 +66,26 @@ def test_doc_exists():
     )
 
 
-def test_no_known_private_strings_in_self_hosted_runners_doc():
-    text = DOC.read_text(encoding="utf-8")
-    hits = [s for s in _PRIVATE_STRINGS if s in text]
-    assert not hits, (
-        f"docs/self-hosted-runners.md contains {hits!r} -- one of the "
-        "private-repo names/identifiers #394 scrubbed from this public "
-        "repo's copy has reappeared, most likely from a verbatim re-copy "
-        "of the private canonical this file is copied from (see this "
-        "file's own header). Re-genericize before merging; do not "
-        "silence this guard by removing an entry from the list above."
+def test_no_known_private_strings_in_tracked_tree():
+    offenders = {}
+    for path in _tracked_files():
+        if path.resolve() == THIS_FILE or not path.is_file():
+            # This file's own _PRIVATE_STRINGS list is the one legitimate
+            # place these strings appear in the tree.
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue  # binary or unreadable -- not a doc/text leak risk
+        hits = [s for s in _PRIVATE_STRINGS if s in text]
+        if hits:
+            offenders[str(path.relative_to(ROOT))] = hits
+    assert not offenders, (
+        f"{offenders!r} -- one of the private-repo names/identifiers #394 "
+        "scrubbed from this public repo has reappeared, most likely from a "
+        "verbatim re-copy of a private canonical source (see "
+        "docs/self-hosted-runners.md's own header for the pattern this "
+        "guard was originally written against). Re-genericize before "
+        "merging; do not silence this guard by removing an entry from the "
+        "list above."
     )
