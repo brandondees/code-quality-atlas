@@ -134,3 +134,12 @@ def test_load_evals_rejects_non_list_skills(tmp_path):
     doc["skills"] = "hunting-silent-failures"
     with pytest.raises(EvalError, match="'skills' must be a list"):
         load_evals(_write(tmp_path, doc))
+
+
+def test_load_evals_rejects_non_string_skill_entries(tmp_path):
+    """A skills list containing a non-string element must also raise
+    EvalError, not just a non-list skills value."""
+    doc = _good()
+    doc["skills"] = ["hunting-silent-failures", 123]
+    with pytest.raises(EvalError, match="'skills' must be a list of strings"):
+        load_evals(_write(tmp_path, doc))
