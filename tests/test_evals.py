@@ -99,3 +99,38 @@ def test_load_evals_wraps_non_object_json_as_eval_error(tmp_path):
     p.write_text("[1, 2, 3]")
     with pytest.raises(EvalError, match="must be a JSON object"):
         load_evals(str(p))
+
+
+def test_load_evals_rejects_null_scenarios(tmp_path):
+    """scenarios: null must raise EvalError, not TypeError from len(None)."""
+    doc = _good()
+    doc["scenarios"] = None
+    with pytest.raises(EvalError, match="'scenarios' must be a list"):
+        load_evals(_write(tmp_path, doc))
+
+
+def test_load_evals_rejects_string_scenarios(tmp_path):
+    """A bare string for scenarios must raise EvalError, not silently iterate
+    into per-character AttributeErrors downstream."""
+    doc = _good()
+    doc["scenarios"] = "not a list at all"
+    with pytest.raises(EvalError, match="'scenarios' must be a list"):
+        load_evals(_write(tmp_path, doc))
+
+
+def test_load_evals_rejects_non_dict_scenario_entries(tmp_path):
+    """A list of bare query strings (a natural hand-authoring mistake) must
+    raise EvalError, not AttributeError from `.get` on a str."""
+    doc = _good()
+    doc["scenarios"] = ["just a query string", "another", "third"]
+    with pytest.raises(EvalError, match="'scenarios' must be a list of objects"):
+        load_evals(_write(tmp_path, doc))
+
+
+def test_load_evals_rejects_non_list_skills(tmp_path):
+    """skills must be a list of strings; a bare string/scalar must raise
+    EvalError rather than silently round-tripping into EvalDoc."""
+    doc = _good()
+    doc["skills"] = "hunting-silent-failures"
+    with pytest.raises(EvalError, match="'skills' must be a list"):
+        load_evals(_write(tmp_path, doc))

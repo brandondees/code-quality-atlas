@@ -37,9 +37,21 @@ def load_evals(path: str) -> EvalDoc:
             raise EvalError(
                 f"{path}: eval doc must be a JSON object, got {type(data).__name__}"
             )
-        return EvalDoc(skills=data["skills"], scenarios=data["scenarios"])
+        skills = data["skills"]
+        scenarios = data["scenarios"]
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError) as exc:
         raise EvalError(f"{path}: {exc}") from exc
+    # `scenarios`/`skills` are hand-authored (CLAUDE.md's source/generated split),
+    # so a shape mistake here is a plausible typo, not a programming error — it
+    # must surface as EvalError like every other malformed-input case above,
+    # not as a raw TypeError/AttributeError from validate_evals downstream.
+    if not isinstance(skills, list) or not all(isinstance(s, str) for s in skills):
+        raise EvalError(f"{path}: 'skills' must be a list of strings")
+    if not isinstance(scenarios, list) or not all(
+        isinstance(s, dict) for s in scenarios
+    ):
+        raise EvalError(f"{path}: 'scenarios' must be a list of objects")
+    return EvalDoc(skills=skills, scenarios=scenarios)
 
 
 def validate_evals(doc: EvalDoc, min_scenarios: int = D8_MIN_SCENARIOS) -> None:
