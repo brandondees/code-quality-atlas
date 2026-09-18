@@ -26,6 +26,7 @@ def build_prepass_md(manifest: Manifest) -> str:
     from the manifest (provenance carries no research sections), so regeneration
     is triggered by manifest edits, not docs drift."""
     p = manifest.prepass
+    assert p is not None, "callers guard on manifest.prepass is not None"
     front = {
         "name": p.name,
         "description": p.description,
@@ -224,6 +225,7 @@ def build_collapsed_prepass(manifest: Manifest) -> str:
 
 
 def generate_prepass(manifest: Manifest, skills_root: str = "skills") -> Path:
+    assert manifest.prepass is not None, "callers guard on manifest.prepass is not None"
     return _generate_composition(
         manifest, manifest.prepass.name, skills_root, build_prepass_md
     )

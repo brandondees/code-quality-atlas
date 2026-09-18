@@ -361,6 +361,7 @@ def build_synthesizer_md(manifest: Manifest) -> str:
     the manifest (provenance carries no research sections), so regeneration is
     triggered by manifest edits, not docs drift."""
     sy = manifest.synthesizer
+    assert sy is not None, "callers guard on manifest.synthesizer is not None"
     front = {
         "name": sy.name,
         "description": sy.description,
@@ -391,6 +392,9 @@ def build_synthesizer_md(manifest: Manifest) -> str:
 
 
 def generate_synthesizer(manifest: Manifest, skills_root: str = "skills") -> Path:
+    assert manifest.synthesizer is not None, (
+        "callers guard on manifest.synthesizer is not None"
+    )
     return _generate_composition(
         manifest, manifest.synthesizer.name, skills_root, build_synthesizer_md
     )

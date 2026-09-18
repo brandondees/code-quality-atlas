@@ -282,6 +282,11 @@ jobs:
       - name: format (ruff)
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: ruff format --check .
+      - name: type-check (mypy)
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        # Scoped to tooling/ via pyproject.toml's [tool.mypy] files list --
+        # this repo's only fully type-annotated Python package.
+        run: mypy
       - name: tests
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         # Coverage settings (branch mode, the fail-under floor) live in
@@ -362,10 +367,21 @@ jobs:
         # compatible but not yet listed, same revisit-trigger shape as the
         # pip-tools/pip-audit/pip-licenses pins (see D21 in
         # docs/open-questions.md for why all three stay unhashed).
+        #
+        # "Mozilla Public License 2.0 (MPL 2.0)" added for `pathspec`, a
+        # transitive dependency of `mypy` (issue #512): MPL-2.0 is weak,
+        # file-level copyleft -- it only obligates redistributing *modified*
+        # MPL-covered files under MPL, not code that merely depends on an
+        # unmodified MPL package. `pathspec` is a CI-only tool dependency
+        # (mypy's own file-matching backend), never imported by or vendored
+        # into this repo's MIT-licensed `tooling/` (D11), so it imposes no
+        # obligation on this repo's own license. mypy itself (MIT-licensed,
+        # widely adopted) ships the identical dependency for the same
+        # reason.
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: |
           pip install pip-licenses==5.5.5
-          pip-licenses --allow-only="MIT License;MIT;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;Apache 2.0;Apache-2.0 OR BSD-2-Clause;Python Software Foundation License;PSF-2.0;ISC License (ISCL);The Unlicense (Unlicense)"
+          pip-licenses --allow-only="MIT License;MIT;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;Apache 2.0;Apache-2.0 OR BSD-2-Clause;Python Software Foundation License;PSF-2.0;ISC License (ISCL);The Unlicense (Unlicense);Mozilla Public License 2.0 (MPL 2.0)"
       # requirements.txt-is-in-sync and dependency-vulnerability-audit run
       # last among the python-filtered steps, deliberately (#378): both
       # `pip install` an unpinned tool (pip-tools/pip-audit) straight into

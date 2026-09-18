@@ -58,6 +58,18 @@ max-complexity = 15
 # top of an already-large file. That's intentional organization, not drift.
 "tests/*.py" = ["E402"]
 
+[tool.mypy]
+# Scoped to tooling/ -- this repo's only fully type-annotated Python
+# package (every module opens with `from __future__ import annotations`).
+# tests/ is intentionally out of scope: adding it would be a second,
+# separate decision (test doubles/fixtures are typically looser-typed by
+# convention, and this repo's tests aren't currently annotated at all).
+files = ["tooling"]
+python_version = "3.12"
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+
 [tool.coverage.run]
 branch = true
 
