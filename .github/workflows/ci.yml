@@ -282,6 +282,11 @@ jobs:
       - name: format (ruff)
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: ruff format --check .
+      - name: type-check (mypy)
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        # Scoped to tooling/ via pyproject.toml's [tool.mypy] files list --
+        # this repo's only fully type-annotated Python package.
+        run: mypy
       - name: tests
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         # Coverage settings (branch mode, the fail-under floor) live in

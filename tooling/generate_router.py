@@ -175,6 +175,7 @@ def build_router_md(manifest: Manifest) -> str:
     lens. Built entirely from the manifest — provenance carries no research
     sections, so regeneration is triggered by manifest edits, not docs drift."""
     r = manifest.router
+    assert r is not None, "callers guard on manifest.router is not None"
     # Derived, not hardcoded: the whole-repo audit route's count moved 8 -> 9 -> 10
     # as audits landed, and each bump previously had to be remembered by hand in
     # this prose. Counting the manifest keeps the sentence true by construction
@@ -201,6 +202,7 @@ def build_router_md(manifest: Manifest) -> str:
 
 
 def generate_router(manifest: Manifest, skills_root: str = "skills") -> Path:
+    assert manifest.router is not None, "callers guard on manifest.router is not None"
     return _generate_composition(
         manifest, manifest.router.name, skills_root, build_router_md
     )

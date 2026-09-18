@@ -365,11 +365,16 @@ def sync_doc_counts(manifest: Manifest, docs_root: str = ".") -> list[Path]:
                     "update the anchor in tooling/generate_doc_counts.py"
                 )
             new_value = str(counts[occ.count_key])
-            text = pattern.sub(
-                lambda _m, o=occ, v=new_value: o.prefix + v + o.suffix,
-                text,
-                count=1,
-            )
+
+            def _replace(
+                _m: re.Match[str], o: CountOccurrence = occ, v: str = new_value
+            ) -> str:
+                # A callable replacement (not a plain string) so a backslash in
+                # o.prefix/o.suffix is inserted literally, not interpreted by
+                # re.sub as a \g<name>/\1 backreference escape.
+                return o.prefix + v + o.suffix
+
+            text = pattern.sub(_replace, text, count=1)
         if text != original:
             to_write[file_path] = text
 

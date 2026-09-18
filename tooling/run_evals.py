@@ -23,6 +23,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from tooling.evals import load_evals
 
@@ -167,7 +168,7 @@ def query_ollama(
     a syntactically valid but truncated `content` — indistinguishable from a
     genuine short answer by content alone, and would otherwise be graded as
     if the model had actually finished (#371)."""
-    payload = {
+    payload: dict[str, Any] = {
         "model": model,
         "messages": [
             {"role": "system", "content": system},
@@ -240,6 +241,16 @@ def query_openai(
         if isinstance(err, dict):
             err = err.get("message", err)
         raise RuntimeError(f"OpenAI-compatible API error: {err}")
+    if not isinstance(data, dict):
+        # RuntimeError (not TypeError) is deliberate: see the matching comment in
+        # query_ollama above — a single except clause covers every failure mode.
+        # _post_json returns whatever JSON the server sent -- callers must
+        # narrow with isinstance before any dict access. A non-dict response
+        # here is exactly the "unexpected shape" the except clause below
+        # already handles; this narrows the type statically for mypy without
+        # changing which inputs raise (data["choices"] on a non-dict would
+        # already have hit the same TypeError branch).
+        raise RuntimeError(f"unexpected OpenAI-compatible response shape: {data!r}")  # noqa: TRY004
     try:
         choice = data["choices"][0]
         content = choice["message"]["content"]
