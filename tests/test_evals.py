@@ -143,3 +143,16 @@ def test_load_evals_rejects_non_string_skill_entries(tmp_path):
     doc["skills"] = ["hunting-silent-failures", 123]
     with pytest.raises(EvalError, match="'skills' must be a list of strings"):
         load_evals(_write(tmp_path, doc))
+
+
+def test_load_evals_rejects_scenarios_list_with_one_bad_entry(tmp_path):
+    """A scenarios list that is otherwise well-formed but has one non-dict
+    entry mixed in with valid ones must also raise EvalError — not just a
+    list where every entry is bad."""
+    doc = _good()
+    doc["scenarios"] = [
+        {"query": "ok", "expected_behavior": ["x"]},
+        "bad",
+    ]
+    with pytest.raises(EvalError, match="'scenarios' must be a list of objects"):
+        load_evals(_write(tmp_path, doc))
