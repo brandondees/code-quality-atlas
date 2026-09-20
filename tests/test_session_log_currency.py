@@ -85,6 +85,13 @@ def test_session_log_is_current():
     # `schedule: cron` trigger in ci.yml is itself UTC) -- a naive
     # date.today() would silently use the runner's local timezone instead.
     today = datetime.now(UTC).date()
+    # A future-dated header (a typo, or a clock skew during authoring) would
+    # otherwise make `_is_stale` report "not stale" for the wrong reason --
+    # catch that case explicitly rather than let it pass silently.
+    assert last <= today, (
+        f"docs/session-log.md's newest entry is dated {last}, which is in "
+        f"the future relative to today ({today}) -- check for a typo."
+    )
     assert not _is_stale(last, today), (
         f"docs/session-log.md's newest entry is dated {last}, more than "
         f"{_SLACK_DAYS} days before today ({today}). This has silently "

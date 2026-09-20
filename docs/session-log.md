@@ -1841,10 +1841,11 @@ multiple days of substantive work with nothing catching it until a later
 scheduled audit happens to notice. This is the third recorded instance of
 this exact gap. Both issues propose the same fix in two parts.
 
-**Part 1 — backfill.** `docs/session-log.md`'s last entry before today was
-2026-09-15, but PRs #510/#511 (`load_evals` shape validation), #514 (the
-`mypy` gate), and #515 (the D19-superseded addendum) all landed on
-2026-09-17 through 09-19 with no corresponding entries. Added the three
+**Part 1 — backfill.** `docs/session-log.md`'s last entry before this
+backfill (and before the earlier #517/#518 entry above) was 2026-09-15,
+but PRs #510/#511 (`load_evals` shape validation), #514 (the `mypy`
+gate), and #515 (the D19-superseded addendum) all landed on 2026-09-17
+through 09-19 with no corresponding entries. Added the three
 backfill entries above (inserted in chronological order ahead of today's
 earlier #517/#518 entry, not appended after it) summarizing each from
 its commits' own messages.

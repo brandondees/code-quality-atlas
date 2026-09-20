@@ -294,7 +294,16 @@ jobs:
         # this repo's only fully type-annotated Python package.
         run: mypy
       - name: tests
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        # `schedule` runs unconditionally (like the venv-setup and pip-audit
+        # steps above/below) rather than relying on the path filter: on a
+        # `schedule` event dorny/paths-filter has no `before` SHA to diff
+        # against and falls back to the single last commit, so if that
+        # commit happens to touch neither `python` nor `requirements`, this
+        # step -- including tests/test_session_log_currency.py -- would
+        # silently skip on that week's scheduled run, defeating the point
+        # of a periodic, diff-independent currency check (CodeRabbit finding
+        # on PR #522).
+        if: github.event_name == 'schedule' || steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         # Coverage settings (branch mode, the fail-under floor) live in
         # pyproject.toml's [tool.coverage] tables so a contributor running
         # `pytest --cov=tooling` locally gets the same gate CI enforces.
