@@ -1716,21 +1716,27 @@ Picked the two fully-specified, code-ready findings; left #519/#520 (marked
 already-standing #492/#493 (repo-Settings actions only `brandondees` can
 take) alone.
 
-**#517.** The 2026-09-05 changelog entry describing #394's redaction of
-personal/machine identifiers from `docs/self-hosted-runners.md`
-reproduced the exact identifiers it said were removed —
-`docs/session-log.md:915-916` still spelled out `/home/dees/...`,
-`usermod -aG docker dees`, `runner-2604`, and `actions-runner-mbp` in its
-own narrative prose. `tests/test_no_private_repo_names_in_runner_docs.py`'s
-2026-09-15 widening (#495, PR #508) scans the whole tracked tree, but its
-`_PRIVATE_STRINGS` tuple never listed these three strings, so this exact
-passage survived two subsequent #394 sweeps undetected. Genericized the
-passage the same way the original fix genericized
+**#517.** The 2026-09-05 changelog entry describing issue #394's redaction
+of personal/machine identifiers from `docs/self-hosted-runners.md`
+reproduced, in its own narrative prose, the exact identifiers it said were
+removed — an OS account name/home-directory pattern and two VM hostnames,
+still spelled out verbatim at what was then
+`docs/session-log.md:915-916`. (Writing them out again right here would
+repeat the same mistake this fix corrects, so this entry names the class
+of leak rather than quoting the strings — see
+`tests/test_no_private_repo_names_in_runner_docs.py`'s `_PRIVATE_STRINGS`
+for the literal values, which is the one legitimate place they belong.)
+That test's 2026-09-15 widening (#495, PR #508) scans the whole tracked
+tree, but `_PRIVATE_STRINGS` never listed these three strings, so this
+exact passage survived two subsequent #394 audit sweeps undetected.
+Genericized the passage the same way the original fix genericized
 `self-hosted-runners.md` (`<runner-user>`, `<vm-name>`, `<old-vm-name>`)
-and added `runner-2604`, `actions-runner-mbp`, and `/home/dees` to
-`_PRIVATE_STRINGS` so this class can't silently reappear a third time.
-Confirmed no other tracked file contains these strings before adding them
-to the guard.
+and added the three missing strings to `_PRIVATE_STRINGS` so this class
+can't silently reappear a third time. Confirmed no other tracked file
+contained them before adding them to the guard. **Caught by the guard's
+own new run in this PR's CI** — the first draft of this very changelog
+entry quoted the strings while describing the fix, which the widened test
+correctly flagged before merge.
 
 **#518.** `tests/test_license_paths_exhaustive.py` only reasons about
 top-level git-tracked directories, but `LICENSE`'s own prose carries two
