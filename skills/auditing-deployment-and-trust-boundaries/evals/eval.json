@@ -180,6 +180,17 @@
         "Distinguishes this from the git-sync-then-execute pattern this lens normally flags: an unattended job that repeatedly deploys a pinned, already-reviewed revision is not the same as one that fast-forwards to and executes whatever just landed",
         "Does not flag the periodic fetch/checkout itself as risky merely because it is unattended and runs frequently"
       ]
+    },
+    {
+      "query": "Review this fix. A previously-filed finding said: a fork pull request's own `if: github.event.pull_request.head.repo.full_name == github.repository` gate — meant to keep fork PRs off a self-hosted runner — is itself editable by the same fork PR, since GitHub evaluates a `pull_request`-triggered workflow from the PR's own head commit. The fix replaces that gate with:\n```yaml\njobs:\n  build:\n    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || fromJSON('[\"self-hosted\", \"linux\"]') }}\n```\nPR description: \"Closes #123 structurally — every pull_request-triggered run now lands on an ephemeral GitHub-hosted runner, so untrusted fork code never touches the self-hosted runner regardless of what the workflow file says.\"",
+      "expected_behavior": [
+        "Does not accept the PR description's 'closes it structurally' framing at face value — re-derives the threat model against the new code rather than only checking the new conditional's syntax",
+        "Recognizes the new runs-on: expression is itself an in-tree conditional living in the same workflow file a fork PR's own commit can edit — the same trust domain the original if: gate lived in, not a boundary outside it",
+        "States concretely that a fork PR could edit this same file within its own head commit to revert runs-on: to unconditional self-hosted, and that edited version is what GitHub would execute",
+        "Concludes the original finding is NOT closed by this fix alone, since the same attacker and the same class of edit still reaches the same target",
+        "Recommends a boundary genuinely outside the file's own trust domain that gates the run itself before it starts (a platform Settings value such as requiring approval for outside collaborators' workflow runs, or an external policy gate) or an explicit, named acceptance of the residual risk — not a further reword of the in-tree conditional",
+        "Does not credit branch protection on the target branch (e.g. main) as sufficient on its own, since a pull_request-triggered workflow runs from the PR's own head commit regardless of what protection main carries"
+      ]
     }
   ]
 }
