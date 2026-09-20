@@ -1939,3 +1939,19 @@ warning checks the *source* repo's git status), not a real regression;
 `python -m tooling.cli eval` — `auditing-deployment-and-trust-boundaries`
 21 scenarios, structurally valid; `python -m tooling.cli drift` clean
 (44/44 skills in sync).
+
+**Round-2 self-correction (PR #523, before merge):** the atlas's own
+round-2 review of this PR independently verified a point CodeRabbit's
+summary had raised — the new heuristic's own eval scenario listed
+"branch protection on the workflow file" as an example of a boundary
+outside the fork's trust domain, but that's false for exactly the case
+the heuristic exists to catch: a `pull_request`-triggered workflow runs
+from the PR's own head commit regardless of what protection the target
+branch carries. Fixed the same overgeneralization in both places it
+appeared — the research heuristic (`docs/research/cluster-4-
+runtime.md#45`) and the eval scenario's grading criteria — narrowing the
+"boundary outside the trust domain" examples to ones that actually gate
+the run itself before it starts, and adding an explicit note that target-
+branch protection is not such a boundary. Re-verified: `pytest tests/ -q
+--cov=tooling` (803 passed), `python -m tooling.cli eval` (21 scenarios,
+structurally valid), `python -m tooling.cli drift` clean.

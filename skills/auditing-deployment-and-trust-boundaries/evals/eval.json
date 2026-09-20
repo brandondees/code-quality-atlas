@@ -188,7 +188,8 @@
         "Recognizes the new runs-on: expression is itself an in-tree conditional living in the same workflow file a fork PR's own commit can edit — the same trust domain the original if: gate lived in, not a boundary outside it",
         "States concretely that a fork PR could edit this same file within its own head commit to revert runs-on: to unconditional self-hosted, and that edited version is what GitHub would execute",
         "Concludes the original finding is NOT closed by this fix alone, since the same attacker and the same class of edit still reaches the same target",
-        "Recommends a boundary genuinely outside the file's own trust domain (a platform Settings value such as requiring approval for outside collaborators' workflow runs, branch protection on the workflow file, or an external policy gate) or an explicit, named acceptance of the residual risk — not a further reword of the in-tree conditional"
+        "Recommends a boundary genuinely outside the file's own trust domain that gates the run itself before it starts (a platform Settings value such as requiring approval for outside collaborators' workflow runs, or an external policy gate) or an explicit, named acceptance of the residual risk — not a further reword of the in-tree conditional",
+        "Does not credit branch protection on the target branch (e.g. main) as sufficient on its own, since a pull_request-triggered workflow runs from the PR's own head commit regardless of what protection main carries"
       ]
     }
   ]
