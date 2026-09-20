@@ -69,6 +69,11 @@ def _is_stale(last_log_date: date, today: date, slack_days: int = _SLACK_DAYS) -
         (date(2026, 9, 15), False, "exactly at the slack boundary should not be stale"),
         (date(2026, 9, 14), True, "one day past the slack boundary should be stale"),
         (date(2026, 9, 20), False, "zero gap should never be stale"),
+        (
+            date(2026, 9, 25),
+            False,
+            "a future date alone isn't rejected here -- test_session_log_is_current's separate last <= today assertion does that",
+        ),
     ],
 )
 def test_is_stale_pure_logic(last_log_date, expected, reason):
