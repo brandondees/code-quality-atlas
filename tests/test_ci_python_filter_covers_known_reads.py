@@ -45,6 +45,7 @@ _KNOWN_EXTERNAL_READS = (
     "docs/map/AGENTS.md",
     "docs/map/routing.md",
     "docs/map/_templates/process.md",
+    "docs/session-log.md",  # test_session_log_currency.py
     "LICENSE",  # test_license_paths_exhaustive.py
     "LICENSE-CC-BY-4.0",  # test_vendor_skills.py, test_package_account_zips.py
     ".pre-commit-config.yaml",  # test_precommit_ci_version_sync.py

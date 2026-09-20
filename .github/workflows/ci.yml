@@ -199,6 +199,12 @@ jobs:
               - "docs/collapsed-entrypoints-and-depth-modes.md"
               - "docs/review-depth-modes.md"
               - "docs/open-questions.md"
+              # tests/test_session_log_currency.py reads this file's own
+              # newest header date -- a session-log-only backfill PR (the
+              # exact remediation that test asks for) must still run the
+              # `tests` step so the fix is actually verified, not silently
+              # reported as `skipped` (#513/#516).
+              - "docs/session-log.md"
               - "*.py"
               - "pyproject.toml"
               - ".python-version"
