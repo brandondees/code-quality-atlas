@@ -33,6 +33,7 @@ Two escape hatches found in review (#390) are closed here:
    enumerates git-tracked paths instead.
 """
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -165,11 +166,12 @@ def test_nested_mit_exceptions_still_hold():
 
     collapsed_manifest = ROOT / "collapsed/.claude-plugin/plugin.json"
     assert collapsed_manifest.is_file(), f"{collapsed_manifest} is missing."
-    assert '"license": "MIT AND CC-BY-4.0"' in collapsed_manifest.read_text(
-        encoding="utf-8"
-    ), (
-        f"{collapsed_manifest} no longer declares the 'MIT AND CC-BY-4.0' "
-        "SPDX expression LICENSE says this manifest carries."
+    manifest_license = json.loads(collapsed_manifest.read_text(encoding="utf-8")).get(
+        "license"
+    )
+    assert manifest_license == "MIT AND CC-BY-4.0", (
+        f"{collapsed_manifest} declares license {manifest_license!r}, not the "
+        "'MIT AND CC-BY-4.0' SPDX expression LICENSE says this manifest carries."
     )
 
 
