@@ -45,6 +45,9 @@ _PRIVATE_STRINGS = (
     "9cbf0d01cf92",
     "libsql",
     "calproxy",
+    "runner-2604",
+    "actions-runner-mbp",
+    "/home/dees",
 )
 
 

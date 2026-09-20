@@ -912,11 +912,10 @@ make the documentation accurately describe the pre-existing situation.
 
 ## 2026-09-05 (same day) — #394 problem 2: placeholder personal/machine identifiers in `docs/self-hosted-runners.md`
 
-The maintainer's OS account name (`/home/dees/...`, `usermod -aG docker
-dees`) and VM names (`runner-2604`, `actions-runner-mbp`) were spelled out
-directly in a file that is otherwise already placeholdered
-(`<owner>/<repo>`). Replaced with `<runner-user>`, `<vm-name>`, and
-`<old-vm-name>`. This file is a verbatim copy of a private sibling repo's
+The maintainer's OS account name (`<runner-user>` home directory, `usermod
+-aG docker <runner-user>`) and VM names (`<vm-name>`, `<old-vm-name>`) were
+spelled out directly in a file that is otherwise already placeholdered
+(`<owner>/<repo>`). Replaced with those same placeholders. This file is a verbatim copy of a private sibling repo's
 canonical `docs/self-hosted-runners.md` (stated in its own header), so the
 durable fix is upstream, outside this session's repo access — patching this
 copy stops the current public exposure immediately, and may get
@@ -1706,3 +1705,57 @@ coverage (≥94% floor); `ruff check .`/`ruff format --check .` clean;
 markdownlint-cli2 docs/self-hosted-runners.md docs/session-log.md` clean;
 `python -c "import yaml; yaml.safe_load(...)"` confirmed `ci.yml` still
 parses after its one-line comment edit.
+
+## 2026-09-20 — #517, #518: two code-actionable findings from the weekly self-audit (#347)
+
+A fresh "what's next" session with no named task went to #347's latest
+sweep (filed the same day, #516-#520) rather than `docs/open-questions.md`'s
+"genuinely still open" list, which is all owner-gated design questions.
+Picked the two fully-specified, code-ready findings; left #519/#520 (marked
+"needs a decision from the doc's owner" in their own text) and the
+already-standing #492/#493 (repo-Settings actions only `brandondees` can
+take) alone.
+
+**#517.** The 2026-09-05 changelog entry describing issue #394's redaction
+of personal/machine identifiers from `docs/self-hosted-runners.md`
+reproduced, in its own narrative prose, the exact identifiers it said were
+removed — an OS account name/home-directory pattern and two VM hostnames,
+still spelled out verbatim at what was then
+`docs/session-log.md:915-916`. (Writing them out again right here would
+repeat the same mistake this fix corrects, so this entry names the class
+of leak rather than quoting the strings — see
+`tests/test_no_private_repo_names_in_runner_docs.py`'s `_PRIVATE_STRINGS`
+for the literal values, which is the one legitimate place they belong.)
+That test's 2026-09-15 widening (#495, PR #508) scans the whole tracked
+tree, but `_PRIVATE_STRINGS` never listed these three strings, so this
+exact passage survived two subsequent #394 audit sweeps undetected.
+Genericized the passage the same way the original fix genericized
+`self-hosted-runners.md` (`<runner-user>`, `<vm-name>`, `<old-vm-name>`)
+and added the three missing strings to `_PRIVATE_STRINGS` so this class
+can't silently reappear a third time. Confirmed no other tracked file
+contained them before adding them to the guard. **Caught by the guard's
+own new run in this PR's CI** — the first draft of this very changelog
+entry quoted the strings while describing the fix, which the widened test
+correctly flagged before merge.
+
+**#518.** `tests/test_license_paths_exhaustive.py` only reasons about
+top-level git-tracked directories, but `LICENSE`'s own prose carries two
+*nested* MIT exceptions inside otherwise-CC-BY buckets:
+`.claude/skills/icm-architect/` (within `.claude/`) and
+`collapsed/hooks/` + `collapsed/.claude-plugin/` (within `collapsed/`).
+Nothing machine-checked that these nested exceptions still hold — exactly
+the "nested directory, different license than its parent bucket" shape
+the top-level test exists to catch, one level up. Verified as of HEAD the
+content was already self-consistent (a coverage gap, not live drift).
+Added `test_nested_mit_exceptions_still_hold`, asserting:
+`.claude/skills/icm-architect/LICENSE` exists, reads as an MIT license
+text, and still attributes Jake Van Clief; its `NOTICE.md` still states
+MIT; every tracked script under `collapsed/hooks/` still carries the
+`SPDX-License-Identifier: MIT` header; and
+`collapsed/.claude-plugin/plugin.json` still declares
+`"license": "MIT AND CC-BY-4.0"`.
+
+Verified: `pytest tests/ -q --cov=tooling` 797 passed, 14 skipped, 95.00%
+coverage (≥94% floor); `ruff check .`/`ruff format --check .` clean;
+`mypy` clean; `python -m tooling.cli drift` clean (44/44 skills in sync);
+`npx markdownlint-cli2 docs/session-log.md` clean.

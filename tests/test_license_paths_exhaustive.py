@@ -33,6 +33,7 @@ Two escape hatches found in review (#390) are closed here:
    enumerates git-tracked paths instead.
 """
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -99,6 +100,79 @@ def _split_license_buckets(license_text: str) -> tuple[str, str]:
 def _names_in(text: str, name: str) -> bool:
     alias = _PROSE_ALIASES.get(name)
     return f"`{name}/`" in text or (alias is not None and alias in text)
+
+
+def _tracked_files_under(prefix: str) -> list[Path]:
+    result = subprocess.run(
+        ["git", "ls-files", prefix],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=True,
+    )
+    return [ROOT / line for line in result.stdout.splitlines() if line]
+
+
+def test_nested_mit_exceptions_still_hold():
+    """LICENSE's CC BY paragraph carries two nested MIT exceptions the
+    top-level, per-directory check above can't see: `.claude/skills/
+    icm-architect/` within the otherwise-CC-BY `.claude/` bucket, and
+    `collapsed/hooks/` + `collapsed/.claude-plugin/` within the otherwise-
+    CC-BY `collapsed/` bucket (#518). This asserts each still carries the
+    MIT marker LICENSE promises, so a re-vendor or regeneration that
+    silently drops it doesn't go unnoticed."""
+    icm_license = ROOT / ".claude/skills/icm-architect/LICENSE"
+    assert icm_license.is_file(), (
+        f"{icm_license} is missing -- LICENSE's own text names this path as "
+        "a vendored third-party MIT exception; either restore the file or "
+        "update LICENSE if the vendoring changed."
+    )
+    icm_license_text = icm_license.read_text(encoding="utf-8")
+    assert "MIT License" in icm_license_text, (
+        f"{icm_license} no longer reads as an MIT license text -- LICENSE's "
+        "top-level prose promises this directory is MIT-licensed."
+    )
+    assert "Jake Van Clief" in icm_license_text, (
+        f"{icm_license} no longer names the upstream copyright holder LICENSE "
+        "attributes this vendored skill to."
+    )
+
+    icm_notice = ROOT / ".claude/skills/icm-architect/NOTICE.md"
+    assert icm_notice.is_file(), f"{icm_notice} is missing -- see #375/D15."
+    assert "MIT" in icm_notice.read_text(encoding="utf-8"), (
+        f"{icm_notice} no longer states this vendored skill is MIT licensed."
+    )
+
+    collapsed_hooks_scripts = [
+        p
+        for p in _tracked_files_under("collapsed/hooks")
+        if p.suffix in (".sh", "") and p.is_file()
+    ]
+    assert collapsed_hooks_scripts, (
+        "No tracked files found under collapsed/hooks/ -- has it been "
+        "renamed or removed? Update this test's path (and LICENSE) either way."
+    )
+    missing_spdx = [
+        p.relative_to(ROOT).as_posix()
+        for p in collapsed_hooks_scripts
+        if "SPDX-License-Identifier: MIT" not in p.read_text(encoding="utf-8")
+    ]
+    assert not missing_spdx, (
+        f"{missing_spdx} under collapsed/hooks/ no longer carry the "
+        "'SPDX-License-Identifier: MIT' header LICENSE promises for this "
+        "nested exception to the otherwise-CC-BY collapsed/ bucket."
+    )
+
+    collapsed_manifest = ROOT / "collapsed/.claude-plugin/plugin.json"
+    assert collapsed_manifest.is_file(), f"{collapsed_manifest} is missing."
+    manifest_license = json.loads(collapsed_manifest.read_text(encoding="utf-8")).get(
+        "license"
+    )
+    assert manifest_license == "MIT AND CC-BY-4.0", (
+        f"{collapsed_manifest} declares license {manifest_license!r}, not the "
+        "'MIT AND CC-BY-4.0' SPDX expression LICENSE says this manifest carries."
+    )
 
 
 def test_every_top_level_directory_is_named_in_license():
