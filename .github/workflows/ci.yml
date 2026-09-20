@@ -166,11 +166,11 @@ jobs:
       # `docs/install.md`/`docs/collapsed-entrypoints-and-depth-modes.md`/
       # `docs/review-depth-modes.md`/`docs/open-questions.md`
       # (test_doc_counts.py); `.claude/skills/**`
-      # (test_self_vendored_skills_sync.py, test_map_twins_sync.py). The
-      # rest of `docs/` (session-log.md, runbooks/, plans/) remains
-      # genuinely markdown-only -- no test or tooling module reads those
-      # paths, and the drift-guard test above would catch it if that ever
-      # changed.
+      # (test_self_vendored_skills_sync.py, test_map_twins_sync.py);
+      # `docs/session-log.md` (test_session_log_currency.py, #513/#516).
+      # The rest of `docs/` (runbooks/, plans/) remains genuinely
+      # markdown-only -- no test or tooling module reads those paths, and
+      # the drift-guard test above would catch it if that ever changed.
       - name: Detect relevant changes
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3

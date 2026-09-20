@@ -35,6 +35,8 @@ import re
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 SESSION_LOG = ROOT / "docs" / "session-log.md"
 
@@ -61,11 +63,17 @@ def _is_stale(last_log_date: date, today: date, slack_days: int = _SLACK_DAYS) -
     return (today - last_log_date).days > slack_days
 
 
-def test_is_stale_pure_logic():
+@pytest.mark.parametrize(
+    ("last_log_date", "expected", "reason"),
+    [
+        (date(2026, 9, 15), False, "exactly at the slack boundary should not be stale"),
+        (date(2026, 9, 14), True, "one day past the slack boundary should be stale"),
+        (date(2026, 9, 20), False, "zero gap should never be stale"),
+    ],
+)
+def test_is_stale_pure_logic(last_log_date, expected, reason):
     base = date(2026, 9, 20)
-    assert _is_stale(date(2026, 9, 15), base, slack_days=5) is False
-    assert _is_stale(date(2026, 9, 14), base, slack_days=5) is True
-    assert _is_stale(base, base, slack_days=5) is False
+    assert _is_stale(last_log_date, base, slack_days=5) is expected, reason
 
 
 def test_latest_header_date_picks_the_max_not_the_last_occurrence():
