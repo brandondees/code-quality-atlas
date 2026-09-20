@@ -166,11 +166,13 @@ jobs:
       # `docs/install.md`/`docs/collapsed-entrypoints-and-depth-modes.md`/
       # `docs/review-depth-modes.md`/`docs/open-questions.md`
       # (test_doc_counts.py); `.claude/skills/**`
-      # (test_self_vendored_skills_sync.py, test_map_twins_sync.py). The
-      # rest of `docs/` (session-log.md, runbooks/, plans/) remains
-      # genuinely markdown-only -- no test or tooling module reads those
-      # paths, and the drift-guard test above would catch it if that ever
-      # changed.
+      # (test_self_vendored_skills_sync.py, test_map_twins_sync.py);
+      # `docs/session-log.md` (test_session_log_currency.py, #513/#516);
+      # `docs/runbooks/pr-review-automation.md` (4 tests, see below --
+      # atlas review round 2, #522). The rest of `docs/` (`runbooks/`'s
+      # other files, `plans/`) remains genuinely markdown-only -- no test
+      # or tooling module reads those paths, and the drift-guard test
+      # above would catch it if that ever changed.
       - name: Detect relevant changes
         id: filter
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
@@ -199,6 +201,20 @@ jobs:
               - "docs/collapsed-entrypoints-and-depth-modes.md"
               - "docs/review-depth-modes.md"
               - "docs/open-questions.md"
+              # tests/test_session_log_currency.py reads this file's own
+              # newest header date -- a session-log-only backfill PR (the
+              # exact remediation that test asks for) must still run the
+              # `tests` step so the fix is actually verified, not silently
+              # reported as `skipped` (#513/#516).
+              - "docs/session-log.md"
+              # Read by 4 tests (test_ack_round_identity_binding.py,
+              # test_pr_review_automation_runbook_accuracy.py,
+              # test_review_protocol_markers_sync.py,
+              # test_review_thread_resolution_scoping.py) that keep this
+              # runbook honest against commands/atlas-review-pr.md -- a
+              # pre-existing gap in the same class this PR fixes for
+              # session-log.md, caught by atlas review round 2 on #522.
+              - "docs/runbooks/pr-review-automation.md"
               - "*.py"
               - "pyproject.toml"
               - ".python-version"
@@ -276,6 +292,42 @@ jobs:
           python -m venv --clear "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/pip" install --require-hashes -r requirements.txt
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+      - name: dependency vulnerability audit
+        # Also runs on the weekly `schedule` trigger above (#379), independent
+        # of the path filter, so a CVE against an unchanged pin doesn't wait
+        # for the next python/requirements-touching push to be caught.
+        #
+        # Placed immediately after venv setup -- the only thing it needs --
+        # and deliberately ahead of every other schedule-eligible step
+        # (`tests` included) in this fail-fast job: a security scan must run
+        # regardless of whether an unrelated later step (e.g. a stale
+        # session-log currency check on a quiet week) fails and aborts the
+        # rest of the job. Moved here from after `requirements.txt is in
+        # sync` (atlas review round 2, PR #522) after #513/#516's fix put a
+        # second schedule-eligible, potentially-failing step ahead of it —
+        # which would have silently skipped this scan on any quiet week.
+        if: github.event_name == 'schedule' || steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        run: |
+          # pip-audit IS the CI vulnerability gate this repo relies on — unlike
+          # requirements.txt's deps (hash-pinned, resolved once and committed),
+          # an unpinned `pip install pip-audit` re-resolves to whatever is
+          # newest on PyPI on every run, so the gate itself isn't reproducible:
+          # a scanner-tool release could change what CVEs are flagged (or
+          # silently drop advisory coverage) with no diff in this repo to
+          # review. Pinned exact-version like pip-tools below, though for a
+          # different reason: that pin is about the requirements-check step's
+          # own reproducibility (a pip-tools release could change what it
+          # resolves), this one is about the vulnerability-audit gate's.
+          # Like that pin, Dependabot has no manifest that
+          # covers a version pinned inline in a `run:` script (its `pip`
+          # ecosystem entry tracks requirements.txt/.in; `github-actions`
+          # tracks `uses:` refs) — this pin has no automated freshness path.
+          # Revisit trigger: bump manually whenever a new pip-audit release
+          # ships, at minimum whenever `mise run audit`/this step starts
+          # missing a CVE you'd expect it to catch; consider moving this to a
+          # Dependabot-tracked requirements-dev.txt if it drifts noticeably.
+          pip install pip-audit==2.10.1
+          pip-audit --requirement requirements.txt
       - name: lint (ruff)
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: ruff check .
@@ -288,7 +340,16 @@ jobs:
         # this repo's only fully type-annotated Python package.
         run: mypy
       - name: tests
-        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        # `schedule` runs unconditionally (like the venv-setup and pip-audit
+        # steps above/below) rather than relying on the path filter: on a
+        # `schedule` event dorny/paths-filter has no `before` SHA to diff
+        # against and falls back to the single last commit, so if that
+        # commit happens to touch neither `python` nor `requirements`, this
+        # step -- including tests/test_session_log_currency.py -- would
+        # silently skip on that week's scheduled run, defeating the point
+        # of a periodic, diff-independent currency check (CodeRabbit finding
+        # on PR #522).
+        if: github.event_name == 'schedule' || steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         # Coverage settings (branch mode, the fail-under floor) live in
         # pyproject.toml's [tool.coverage] tables so a contributor running
         # `pytest --cov=tooling` locally gets the same gate CI enforces.
@@ -482,32 +543,6 @@ jobs:
             echo "::error::requirements.txt is not consistent with requirements.in (or was hand-edited) — recompile with pip-compile --generate-hashes and commit"
             exit 1
           }
-      - name: dependency vulnerability audit
-        # Also runs on the weekly `schedule` trigger above (#379), independent
-        # of the path filter, so a CVE against an unchanged pin doesn't wait
-        # for the next python/requirements-touching push to be caught.
-        if: github.event_name == 'schedule' || steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
-        run: |
-          # pip-audit IS the CI vulnerability gate this repo relies on — unlike
-          # requirements.txt's deps (hash-pinned, resolved once and committed),
-          # an unpinned `pip install pip-audit` re-resolves to whatever is
-          # newest on PyPI on every run, so the gate itself isn't reproducible:
-          # a scanner-tool release could change what CVEs are flagged (or
-          # silently drop advisory coverage) with no diff in this repo to
-          # review. Pinned exact-version like pip-tools above, though for a
-          # different reason: that pin is about the requirements-check step's
-          # own reproducibility (a pip-tools release could change what it
-          # resolves), this one is about the vulnerability-audit gate's.
-          # Like that pin, Dependabot has no manifest that
-          # covers a version pinned inline in a `run:` script (its `pip`
-          # ecosystem entry tracks requirements.txt/.in; `github-actions`
-          # tracks `uses:` refs) — this pin has no automated freshness path.
-          # Revisit trigger: bump manually whenever a new pip-audit release
-          # ships, at minimum whenever `mise run audit`/this step starts
-          # missing a CVE you'd expect it to catch; consider moving this to a
-          # Dependabot-tracked requirements-dev.txt if it drifts noticeably.
-          pip install pip-audit==2.10.1
-          pip-audit --requirement requirements.txt
       - name: markdownlint
         if: steps.filter.outputs.markdown == 'true'
         uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0

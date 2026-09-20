@@ -1706,6 +1706,78 @@ markdownlint-cli2 docs/self-hosted-runners.md docs/session-log.md` clean;
 `python -c "import yaml; yaml.safe_load(...)"` confirmed `ci.yml` still
 parses after its one-line comment edit.
 
+## 2026-09-18 — #510, #511: `load_evals` crashed instead of reporting INVALID on a malformed `scenarios`/`skills` shape
+
+Same bug class as #106/#268 for a shape neither covered: an `eval.json`
+with `scenarios: null`, a bare string, or a list containing a non-dict
+entry escaped `validate_evals` as an uncaught `TypeError`/`AttributeError`,
+aborting the whole `tooling.cli eval` batch instead of reporting a clean
+`INVALID` line for just that one skill. Fixed `tooling/evals.py` to
+validate the shape explicitly before iterating. Two review-driven
+follow-ups landed in the same PR: a missing direct regression test for the
+`skills`-list isinstance-per-element check (self-review), and a
+`scenarios` test case mixing one bad entry among otherwise-valid ones —
+the existing test used an all-bad list, which `coverage.py --cov-branch`
+correctly flagged as not distinctly proving the `all(isinstance(s, dict)
+...)` guard against a *mixed* list (dees-bot round-1 finding on #511).
+
+## 2026-09-18 (same day) — #512: a `mypy` gate for `tooling/`, closing the dogfooding gap D19 had left open
+
+`tooling/` (~150KB across `cli.py`, `manifest.py`, `drift.py`,
+`generate_*.py`, `run_evals.py`, `sections.py`, `frontmatter.py`,
+`evals.py`) is fully type-annotated (every module opens with `from
+__future__ import annotations`) but nothing in this repo's own CI ever
+type-checked it — this suite's own review content tells *consumer* repos
+to run mypy/pyright, while this repo's own CI didn't. Added `mypy>=2.0.0`
+and `types-PyYAML` to `requirements.in`/`.txt` (hash-pinned, regenerated
+via the same `pip-compile` process CI's own consistency gate uses), a
+`[tool.mypy]` table in `pyproject.toml` (scoped to `tooling/`,
+`python_version = "3.12"`), and a "type-check (mypy)" step in `ci.yml`'s
+gate job. Fixed the 28 errors mypy surfaced, mostly `Optional` manifest
+fields (`manifest.router`/`.prepass`/`.synthesizer`) unpacked without
+narrowing across a function boundary — every call site already guards on
+`is not None` before calling in, so each fix is an `assert x is not None`
+documenting an already-enforced invariant for the type checker, not new
+runtime error handling for a case that can't happen. Documented the new
+command in `CLAUDE.md`/`AGENTS.md`'s Development setup block.
+
+Two round-1 review fixes landed in the same PR: adding `mypy` transitively
+pulled in `pathspec`, which reports an MPL-2.0 license the compatibility
+gate's allow-only list didn't cover — allowed it after confirming MPL-2.0
+is weak, file-level copyleft that only obligates redistributing *modified*
+MPL-covered files, and `pathspec` is a CI-only tool dependency never
+imported into this repo's own MIT-licensed `tooling/` (D11); and
+`requirements.txt`'s regenerated pip-compile header said "Python 3.11"
+because the authoring sandbox's `python3` resolved to 3.11.15 rather than
+the project's pinned 3.12 — exactly the drift class `pyproject.toml`'s own
+`[project]` comment calls out by name — fixed by regenerating under
+`/usr/bin/python3.12` and re-verifying the full local gate suite (mypy,
+ruff, pytest, `pip-licenses`, the requirements-in-sync check) under a
+fresh 3.12 venv matching CI's actual interpreter.
+
+## 2026-09-19 — D19 marked superseded: mypy adoption (#512/PR #514) had reversed its own premise without updating the decision record
+
+A scheduled maintenance audit cross-checked `ci.yml` against
+`docs/open-questions.md` and found D19's central claim ("no `mypy`/
+`pyright` run locally or in CI") had gone false the moment the previous
+day's mypy gate (PR #514, commit `c966e29`) merged — `CLAUDE.md`'s
+Development setup section already documented `mypy` as a standard
+command, but nothing had touched the decision record itself. Added a
+"Superseded (2026-09-19)" addendum to D19 in `docs/open-questions.md`
+stating the operative state plainly (mypy runs in CI, scoped to
+`tooling/`) while leaving D19's original text as the historical record of
+the deferral — the same treatment D21 already gives a reasoning-only
+addendum, and the exact "decision record went stale the moment its own
+premise reversed" pattern D19's own closing sentence was written to
+prevent recurring.
+
+**Backfill note (2026-09-20, #516):** this entry and the two above were
+written retroactively during #516/#513's fix (the mechanical currency
+gate below) — `docs/session-log.md` had gone stale for these three days'
+worth of substantive commits (PRs #514/#515) until this pass, the exact
+recurring gap #513/#516 exist to catch mechanically rather than relying on
+each session remembering to update this file.
+
 ## 2026-09-20 — #517, #518: two code-actionable findings from the weekly self-audit (#347)
 
 A fresh "what's next" session with no named task went to #347's latest
@@ -1759,3 +1831,57 @@ Verified: `pytest tests/ -q --cov=tooling` 797 passed, 14 skipped, 95.00%
 coverage (≥94% floor); `ruff check .`/`ruff format --check .` clean;
 `mypy` clean; `python -m tooling.cli drift` clean (44/44 skills in sync);
 `npx markdownlint-cli2 docs/session-log.md` clean.
+
+## 2026-09-20 (same day) — #513, #516: backfilled the 09-16–09-19 gap and added a mechanical currency gate so this stops being manual
+
+With PR #521 merged, picked up the next roadmap item: #513 (opened
+2026-09-18) and #516 (filed by the same-day weekly audit, #347) both flag
+the *same* recurring defect — `docs/session-log.md` going stale for
+multiple days of substantive work with nothing catching it until a later
+scheduled audit happens to notice. This is the third recorded instance of
+this exact gap. Both issues propose the same fix in two parts.
+
+**Part 1 — backfill.** `docs/session-log.md`'s last entry before this
+backfill (and before the earlier #517/#518 entry above) was 2026-09-15,
+but PRs #510/#511 (`load_evals` shape validation), #514 (the `mypy`
+gate), and #515 (the D19-superseded addendum) all landed on 2026-09-17
+through 09-19 with no corresponding entries. Added the three
+backfill entries above (inserted in chronological order ahead of today's
+earlier #517/#518 entry, not appended after it) summarizing each from
+its commits' own messages.
+
+**Part 2 — the mechanical gate.** Added `tests/test_session_log_currency.py`:
+compares `docs/session-log.md`'s newest `## YYYY-MM-DD` header against
+today's date, failing if the gap exceeds a 5-day slack. Deliberately
+**not** git-log-based, despite both issues suggesting "the latest commit
+touching a substantive path-set" as the comparison point — this repo's CI
+checks out with `fetch-depth: 2` (too shallow to reliably walk back
+further), and a `pull_request` run's checked-out HEAD is GitHub's
+synthetic merge-ref commit, whose message and parentage don't reliably
+reflect what the PR itself touched. Comparing the log's header to
+wall-clock "today" needs no git history at all and is accurate to within
+hours of the actual landing commit on every push-triggered run. Documented
+trade-off in the test's own docstring: a dependency-only PR landing after
+a genuinely quiet stretch could trip this through no fault of its own —
+accepted as the same "good enough, mechanically checked" trade-off
+`test_ci_python_filter_covers_known_reads.py` already makes explicitly for
+a different guard.
+
+Also added `docs/session-log.md` to `ci.yml`'s `python:` path filter (it
+wasn't there) and to `test_ci_python_filter_covers_known_reads.py`'s
+`_KNOWN_EXTERNAL_READS` inventory — without this, a PR whose only change
+*is* the backfill remediation this test asks for (a session-log-only diff)
+would never actually run the `tests` step, silently reporting a `skipped`
+conclusion that branch protection treats as passing instead of verifying
+the fix.
+
+This resolves both #513 and #516 — they're the same defect with the same
+fix, so closing #513 as fixed-alongside-#516 rather than superseded, since
+both land in the one PR.
+
+Verified: `pytest tests/ -q --cov=tooling` 800 passed, 14 skipped, 95%
+coverage (≥94% floor); `ruff check .`/`ruff format --check .` clean;
+`mypy` clean; `python -m tooling.cli drift` clean (44/44 skills in sync);
+`python -c "import yaml; yaml.safe_load(...)"` confirmed `ci.yml` still
+parses after the filter edit; `npx markdownlint-cli2 docs/session-log.md`
+clean.
