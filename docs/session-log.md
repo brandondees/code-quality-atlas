@@ -1885,3 +1885,57 @@ coverage (≥94% floor); `ruff check .`/`ruff format --check .` clean;
 `python -c "import yaml; yaml.safe_load(...)"` confirmed `ci.yml` still
 parses after the filter edit; `npx markdownlint-cli2 docs/session-log.md`
 clean.
+
+## 2026-09-20 (same day) — #488: fix-verification rounds must re-derive the threat model, not inherit a fix's own "closes it" framing
+
+With PRs #521/#522 merged, picked up #488 — the last fully code-actionable,
+non-owner-gated item off #347's queue (#519 and #520 need an owner
+decision; #492 and #493 need a GitHub Settings action only `brandondees`
+can take; #446 needs its own investigation into whether a meta-review
+eval is a per-entrypoint or a new transcript-level category, left for a
+future session).
+
+**The gap.** PR #483 fixed #471 (a fork PR's own `if:` gate on a
+self-hosted runner was editable by that same fork PR) by replacing it with
+a conditional `runs-on:` expression. The atlas's own round-1 review of
+that fix ran the right lenses and accepted the commit's "closes it
+structurally" framing at face value — but the new `runs-on:` expression
+lives in the exact same fork-editable file the old `if:` gate did, so the
+same attacker could revert it in the same diff. CodeRabbit caught it;
+round-2 corrected course and credited the catch. The underlying lens,
+`auditing-deployment-and-trust-boundaries`, had already articulated this
+exact attacker model once, cold, in the audit that produced #471 — round
+1 of the *fix's* review just never re-ran that enumeration against the
+new code, judging only the new conditional's syntax and inheriting the
+fix's own claim about what threat it defeats.
+
+**The fix.** Added a third ★ heuristic to `docs/research/cluster-4-
+runtime.md#45` (the source category `auditing-deployment-and-trust-
+boundaries` builds from): re-derive the threat model — same attacker, does
+the same class of edit still reach the same target — whenever a diff
+claims to close a previously-filed trust-boundary finding, rather than
+accepting the PR's framing; a gate reworded into a different in-tree
+conditional that still lives in the same trust domain isn't closed, it
+needs a boundary genuinely outside that domain or an explicit accepted-
+risk statement. Cites #488/PR #483 as the field-confirming instance,
+matching how #45's own intro cites #191. Added a new eval scenario
+(`skills/auditing-deployment-and-trust-boundaries/evals/eval.json`,
+20 → 21) modeling the exact PR #483 shape generically, so a future
+regression here is a failing eval, not a fourth round.
+
+Ran the full regenerate-and-vendor loop per
+[`docs/runbooks/regenerating-skills.md`](runbooks/regenerating-skills.md):
+`tooling.cli generate` (SKILL.md + the `auditing-a-repository` collapsed
+lens body regenerated, provenance hash re-stamped), `tooling.cli drift`
+(clean), `tooling/vendor-skills.sh .` (re-vendored `.claude/skills/`'s
+copy of this one lens).
+
+Verified: `pytest tests/ -q --cov=tooling` 803 passed, 14 skipped, 95%
+coverage (≥94% floor) — the one local failure
+(`test_no_warning_for_a_clean_git_target`) is this repo's own working
+tree carrying uncommitted changes at test-run time (the vendor script's
+warning checks the *source* repo's git status), not a real regression;
+`ruff check .`/`ruff format --check .` clean; `mypy` clean;
+`python -m tooling.cli eval` — `auditing-deployment-and-trust-boundaries`
+21 scenarios, structurally valid; `python -m tooling.cli drift` clean
+(44/44 skills in sync).
