@@ -2074,7 +2074,9 @@ isn't reliably visible to it. `file-followup` is idempotent via a
 `<!-- atlas-followup pr:<number> -->` marker. `block` is named, in the *GitHub
 review state vs. severity* section, as the one opt-in override of the
 Blocker-only `REQUEST_CHANGES` rule, and it only gates merge where branch
-protection requires an approving review (#492). The PR-watch runbook prompt now
+protection requires an approving review (#492). It can't gate a PR authored by
+the reviewer's own account at all, since GitHub forbids `REQUEST_CHANGES`
+there; the policy says so explicitly (PR #533 round 1). The PR-watch runbook prompt now
 points at the setting for an observed merge. New
 `tests/test_unresolved_findings_policy.py` keeps the three restating files in
 sync.

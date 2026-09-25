@@ -555,7 +555,10 @@ line.
     state at `REQUEST_CHANGES` (own-PR `COMMENT` substitute per the rule
     above) even when nothing new was found, overriding the Blocker-only
     rule, and approve-on-clean waits until they close. Say in the summary
-    that it holds for a still-open finding, not a new one.
+    that it holds for a still-open finding, not a new one. On your own PR
+    the substitute is `COMMENT`, so `block` gates nothing beyond `note`
+    there; say that in the summary too, so the setting doesn't read as
+    enforced when it isn't.
   An unrecognized value is treated as `note`, named under coverage.
 
 ## 6. Reply, don't re-litigate

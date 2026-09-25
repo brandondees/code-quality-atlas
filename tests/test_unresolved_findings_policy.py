@@ -43,5 +43,17 @@ def test_block_mode_is_named_as_the_one_override_of_blocker_only_state():
     # The "GitHub review state vs. severity" section deliberately reserves
     # REQUEST_CHANGES for Blockers; `block` must say it overrides that rather
     # than silently contradict it.
-    text = _read("templates/REVIEW.md")
-    assert "that is the one\noverride of this rule." in text
+    # Whitespace-normalized, like test_review_protocol_markers_sync.py's
+    # wrap-tolerant tokens, so a cosmetic re-wrap doesn't fail this.
+    text = " ".join(_read("templates/REVIEW.md").split())
+    assert "that is the one override of this rule." in text
+
+
+def test_block_mode_says_it_cannot_gate_a_self_authored_pr():
+    # PR #533 round-1: GitHub forbids REQUEST_CHANGES on your own PR, so the
+    # own-PR COMMENT substitute makes `block` no stronger than `note` there.
+    # Both the policy and the command must say so rather than leave it to be
+    # inferred.
+    for rel in ["templates/REVIEW.md", "commands/atlas-review-pr.md"]:
+        text = " ".join(_read(rel).split())
+        assert "gates nothing beyond" in text, rel
