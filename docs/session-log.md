@@ -1955,3 +1955,59 @@ the run itself before it starts, and adding an explicit note that target-
 branch protection is not such a boundary. Re-verified: `pytest tests/ -q
 --cov=tooling` (803 passed), `python -m tooling.cli eval` (21 scenarios,
 structurally valid), `python -m tooling.cli drift` clean.
+
+## 2026-09-25 — #527 (backfill): the quote-the-line evidence gate
+
+*(Backfilled — PR #530 merged without its own entry.)* `synthesizing-review-findings`'s
+finding contract required a `location` but never a quote of what is actually
+there, so a finding could name a plausible `file:line` the reviewer had never
+read. PR #530 added an `evidence` field — the verbatim current line(s) — and a
+*Reviewer discipline* paragraph (the quote-the-line gate), threaded
+`<evidence>` through every ranked section of the output template, and added two
+eval scenarios (the required branch and the `boundary:`/`component:`
+exemption). CodeRabbit's round-1 review found two Majors, both fixed before
+merge: the exemption referred to a "repo-audit finding" shape the location
+contract never defined (a bare file path is now an explicit third location
+shape), and a finding about *deleted* code could never satisfy a gate that only
+read the current file (it now quotes the diff's deleted side, named as such).
+
+## 2026-09-25 (same day) — #525: an unexecuted, falsifiable claim is provisional, not affirmed
+
+A fresh "what's next?" session picked #525 from the self-improvement
+routine's 09-21 batch (#524-#526). The issue: in several projects, a review
+affirmed a concrete claim it had no way to check from a static diff — a
+migration "auto-applies, no drift", a bulkhead cap and a cache byte-bound
+"holding at production scale", suppressions "confirmed dead by a full
+type-check, 0 errors" — and the claim was false. In the clearest case the
+review *disclosed* it had not reproduced the run and approved anyway, so the
+disclosure was a caveat rather than an input to the verdict.
+
+**The fix, at the four places a verdict can rest on such a claim:**
+
+- **Synthesizer** (`tooling/generate_synthesizer.py`) — a new *Reviewer
+  discipline* paragraph: a load-bearing, falsifiable claim this review did
+  not run, reproduce, or measure is reported as **provisional pending
+  verification**, naming what would settle it and who can run it; it caps
+  the verdict at *approve with changes* (the verification is the change),
+  or *block* where the claim is all that stands between the change and a
+  Blocker-class failure. A reported run counts only for files in its
+  scope. A CI result on the exact head commit whose scope covers the code
+  is evidence and is affirmed normally. The *Verdict* step now points at
+  the rule so it can't be read past.
+- **Tool-grounding pre-pass** (`skills/manifest.yaml` `prepass.rules`) — "A
+  reported run is a claim, not evidence", including the vacuous-scope trap
+  (a tool config that excludes the file reports zero errors about it).
+- **#20** (`docs/research/cluster-5-verification.md`) — trace whether a new
+  migration is actually reached by what the deploy runs, rather than
+  accepting "applies on deploy".
+- **#28** (`docs/research/cluster-4-runtime.md`) — evaluate a numeric bound
+  at the real production parameters; a cap can be inert and a
+  microbenchmark's per-item size can undercount resident memory.
+
+Five eval scenarios: two for the synthesizer (unverified claim → not a plain
+approve; CI-verified claim → approve, no redundant demand), one for the
+pre-pass (a pyright `include` that doesn't cover the edited file), one each
+for migration (a migration placed outside the deploy runner's directory) and
+resilience (a `min(64, cpu*32)` cap evaluated at the production vCPU count).
+Two regression tests in `tests/test_generate.py`. Regenerated, re-vendored,
+drift clean.

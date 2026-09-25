@@ -2230,6 +2230,19 @@ prepass:
         the repo has since reconfigured. An unreproduced tool hit reported as a
         finding is an unsupported claim — the same defect
         `reviewing-pr-and-process-hygiene` flags in a PR description.
+    - name: A reported run is a claim, not evidence
+      rule: >
+        "Type-checks clean", "all tests pass", "0 errors", "confirmed dead by a
+        full type-check" in a PR description or an author's comment is a claim
+        about a run this review did not see. It becomes evidence only when the
+        pre-pass reproduces it or CI shows it on this exact head commit — and
+        either way only for the files the run actually covered: a tool whose
+        config or file filter excludes the code in question reports zero
+        errors vacuously, so check the run's scope before counting its
+        silence. When the run cannot be reproduced here, say so under coverage
+        and name the command that would settle it; if the change rests on the
+        claim (a deleted suppression, a removed guard), the synthesizer holds
+        it as provisional rather than affirmed.
     - name: Running the repo's tools runs the repo's code
       rule: >
         Lint and build configuration is executable in most ecosystems — an
