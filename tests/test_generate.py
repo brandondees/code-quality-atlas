@@ -785,6 +785,28 @@ def test_synthesizer_contract_carries_quote_the_line_evidence_field():
     )
 
 
+def test_synthesizer_contract_defines_bare_file_path_location_and_deleted_line_evidence():
+    # PR #530 round-1 CodeRabbit findings: (1) the evidence bullet exempted a
+    # "repo-audit finding with no single anchor line" without the location
+    # contract ever defining a location shape for it; (2) the quote-the-line
+    # gate as first written could only ever be satisfied from the *current*
+    # file, which is the wrong side of the diff for a finding about code the
+    # change deletes.
+    md = build_synthesizer_md(_manifest_with_synthesizer())
+    # (1) a bare-file-path location is now a defined third shape, and the
+    # evidence bullet's exemption points at it by name rather than the
+    # previously-undefined "repo-audit finding" phrase
+    assert "a bare file path with no line" in md
+    assert "a bare-file-path location (no single line to quote)" in md
+    assert "except a bare-file-path or design-time `boundary:`/`component:`" in md
+    # (2) evidence for a finding about removed code may come from the
+    # diff's deleted side, named as such, while the current-file rule still
+    # governs surviving code
+    assert 'the one case where "current content" is the wrong side to read' in md
+    assert "quote the line from the diff's deleted side instead" in md
+    assert "still governs every finding about code that survives the change" in md
+
+
 def test_build_synthesizer_md_carries_trailing_generated_marker():
     # Same #466 gap as the router (see
     # test_build_router_md_carries_trailing_generated_marker): the synthesizer's
