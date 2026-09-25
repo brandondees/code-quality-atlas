@@ -57,6 +57,7 @@ For a tension not in this table, prefer the **safer and simpler** option, and sa
 Normalize every lens finding to this shape before merging — it is what makes dedupe and ranking mechanical:
 
 - **location** — file and line/range, or a design-time `boundary:<from>→<to>` / `component:<name>` reference when a finding lives at an architecture boundary rather than a code line (the dedupe key, with root cause — two findings at the same location and root cause merge regardless of which lens raised them)
+- **evidence** — the verbatim source line(s) the finding rests on, quoted exactly as they currently read in the file (the quote-the-line gate: see *Reviewer discipline*). Required whenever `location` is a `file:line`/range; a design-time `boundary:`/`component:` finding, or a repo-audit finding with no single anchor line, is exempt.
 - **severity** — one of the levels above
 - **valence** — `defect` (something is wrong) or `improvement` (a correct thing could be better). Defects are the default and drive the verdict; improvements are opt-in, `nit`-severity, and `route: implementer`.
 - **route** — who decides: `eng` (the default — engineering owns it), `implementer` (the change's author applies/defers/ignores), or `product` / `design` / `legal` / `leadership` when the decision authority sits outside engineering.
@@ -79,19 +80,19 @@ Two axes sit alongside severity and govern what the merged report does with each
 Verdict: <block | approve with changes | approve> — <one-line reason>
 
 Blocker
-- <location> — <finding> (<lens>). <fix>
+- <location> (`<evidence>`) — <finding> (<lens>). <fix>
 
 Major
-- <location> — <finding> (<lens>) [route: legal]. <fix> — escalate the decision to <owner>
+- <location> (`<evidence>`) — <finding> (<lens>) [route: legal]. <fix> — escalate the decision to <owner>
 
 Routed — non-defect decisions outside engineering
-- <location> — <finding> (<lens>) [route: product|design|legal|leadership]. <what must be decided, and by whom>
+- <location> (`<evidence>`) — <finding> (<lens>) [route: product|design|legal|leadership]. <what must be decided, and by whom>
 
 Improvements — opt-in, optional
-- <location> — <suggestion> (<lens>) [improvement, route: implementer]. <apply | defer | ignore>
+- <location> (`<evidence>`) — <suggestion> (<lens>) [improvement, route: implementer]. <apply | defer | ignore>
 
 Pre-existing — noticed in touched code, not introduced here
-- <location> — <defect> (<lens>) [pre-existing, route: implementer]. <fix now | file a ticket | ignore>
+- <location> (`<evidence>`) — <defect> (<lens>) [pre-existing, route: implementer]. <fix now | file a ticket | ignore>
 
 Non-blocking (advisory) — below the floor, not actionable
 - <severity> · <location> — <one-clause description> (<lens>)
@@ -107,7 +108,7 @@ Process notes
 - <one-line process observation>, or exactly "Process: clean" if none.
 ```
 
-Omit any **findings** section with nothing in it — including **Routed**, **Improvements**, **Pre-existing** (the last two are absent entirely unless the team opted into improvement-valence / Boy-Scout surfacing), and **Non-blocking (advisory)**. **Coverage & limitations** and **Process notes** are the exceptions: both are always present, even on a "No findings" report. Keep each finding to one or two lines; the detail lives in the originating lens's output, not restated here.
+Omit any **findings** section with nothing in it — including **Routed**, **Improvements**, **Pre-existing** (the last two are absent entirely unless the team opted into improvement-valence / Boy-Scout surfacing), and **Non-blocking (advisory)**. **Coverage & limitations** and **Process notes** are the exceptions: both are always present, even on a "No findings" report. Keep each finding to one or two lines; the detail lives in the originating lens's output, not restated here. Every ranked finding's parenthesized `<evidence>` is the verbatim line quoted from *location* per the finding contract, except a design-time `boundary:`/`component:` finding with no single line to quote; the compressed Non-blocking (advisory) list omits it, staying a one-clause summary.
 
 **Non-blocking (advisory) is not a dumping ground for every below-floor observation** — it is specifically the findings a floor (mode or round) dropped from the ranked sections above; a mode with no floor configured (`manifest.modes` empty) never populates it. List each as *severity · location · one clause* — never restate a finding already ranked above at its full detail. This section is informational only: it never sets the verdict, is never posted as an inline review thread, and the implementer may apply, defer, or ignore each item freely.
 
@@ -126,5 +127,7 @@ The merged report's severity floor depends on the active depth mode. Below the f
 Synthesis must not inflate. Do not raise a finding no lens reported, do not upgrade a severity to seem thorough, and do not turn "No findings" into a verdict with changes. The merged report is exactly the union of real lens findings, deduplicated and ordered — nothing added.
 
 **Check standing disputes before affirming a claim.** Before **affirming** any claim you did not independently re-derive — your own earlier reasoning, a lens's conclusion, or a statement under review — scan for a standing dispute of that exact claim across **every surface a prior reviewer could have used to raise one**: top-level (issue-style) comments, inline comments anchored to a line, and full review submissions — including one posted as only a summary with no inline comments of its own, which produces no comment thread and is the easiest of the three to overlook if "scan the comment threads" is read as covering it. A platform that exposes these as separate calls (e.g. GitHub's issue comments, review-thread comments, and review objects, each a distinct API surface) requires checking all of them — treating any one as a stand-in for the rest is exactly how a standing dispute goes unseen. If one exists, treat the claim as **unresolved**, not settled: say so and re-derive it, rather than repeating it as correct. A standing dispute does not make the disputing comment automatically right either — you still adjudicate, you just may not skip the adjudication. This targets a sharper failure than a lens silently missing a check: a *confident, positive affirmation* of something already on the record as disputed, which reads as more authoritative than a miss and is easy to mistake for verification.
+
+**Quote the line before asserting a code-anchored finding (the quote-the-line gate).** Before including any finding whose `location` is a `file:line`/range, read that location's current content and copy the verbatim line(s) into its `evidence` field — not a remembered, inferred, or paraphrased version. A finding you cannot back with an exact quote from the file as it stands right now does not get asserted at that confidence: drop it, or if the underlying concern is still real, say what needs to be re-verified rather than presenting an unconfirmed location as settled. This is the same contact-with-the-real-code discipline the standing-disputes check above applies to claims, applied here as a schema requirement rather than a judgment call. A design-time `boundary:`/`component:` or repo-audit finding with no single anchor line is exempt — there is no one line to quote.
 
 **Attribute a finding only to a lens whose bundle was actually opened this round.** Selecting a lens licenses it to run; it does not by itself produce a finding. A lens's one-line description in the entrypoint's own Lenses list is specific enough to generate a fluent, plausible-sounding finding in that lens's voice without ever reading its `body.md` (issue #357) — indistinguishable, in the output, from a finding the lens actually derived from its checklist. Before including a finding under a lens's name, confirm that lens's `body.md` was read this round; if it was not, drop the finding and report that lens under *Coverage & limitations* as selected but not opened, rather than let a lens-styled fabrication stand in for it.

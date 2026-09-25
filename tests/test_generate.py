@@ -757,6 +757,34 @@ def test_synthesizer_contract_carries_route_and_valence_axes():
     assert "drop the finding and report that lens under" in md
 
 
+def test_synthesizer_contract_carries_quote_the_line_evidence_field():
+    # issue #527: a "quote-the-line" evidence requirement, so a finding
+    # anchored to a code location can't be asserted without the reviewer
+    # having actually read what's currently at that location.
+    md = build_synthesizer_md(_manifest_with_synthesizer())
+    assert "**evidence**" in md
+    assert "the quote-the-line gate" in md
+    # exempt cases: no single line to quote
+    assert "is exempt" in md
+    # the output template threads <evidence> through every ranked section...
+    for heading in (
+        "Blocker\n- <location> (`<evidence>`)",
+        "- <location> (`<evidence>`) — <finding> (<lens>) [route: legal]",
+        "Routed — non-defect decisions outside engineering\n- <location> (`<evidence>`)",
+        "Improvements — opt-in, optional\n- <location> (`<evidence>`)",
+        "Pre-existing — noticed in touched code, not introduced here\n- <location> (`<evidence>`)",
+    ):
+        assert heading in md
+    # ...but not the compressed Non-blocking (advisory) summary line
+    assert "- <severity> · <location> — <one-clause description> (<lens>)" in md
+    # and the reviewer-discipline guard requires reading the real file, not a
+    # remembered/inferred quote, before a finding can be asserted
+    assert (
+        "read that location's current content and copy the verbatim line(s) "
+        "into its `evidence` field" in md
+    )
+
+
 def test_build_synthesizer_md_carries_trailing_generated_marker():
     # Same #466 gap as the router (see
     # test_build_router_md_carries_trailing_generated_marker): the synthesizer's

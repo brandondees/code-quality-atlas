@@ -106,6 +106,14 @@
         "Does not treat 'no inline comment threads' or 'no issue comments' as equivalent to 'no standing dispute' — a review posted with only a body and no anchors is still on-the-record feedback even though it produces no comment thread of its own",
         "Once the disputing review is found, treats the Blocker claim as unresolved rather than affirming it outright, and adjudicates on the merits (e.g. by checking RETRY.md) rather than accepting either side's framing at face value"
       ]
+    },
+    {
+      "query": "hunting-silent-failures reports a Blocker at billing/charge.py:52, described only as 'a bare except Exception: pass swallows the payment failure' — its writeup never quotes the actual current line, just a paraphrase from a similar pattern seen elsewhere in the same session. Before finalizing the merged report you read billing/charge.py:52 yourself; it currently reads `except Exception:` followed on the next line by `logger.exception(\"charge failed\"); raise`. Synthesize the review and say what happens to this finding.",
+      "expected_behavior": [
+        "Does not pass the lens's paraphrased description through into the merged report as-is; treats the missing verbatim quote as a reason to verify the finding against the file before asserting it (the quote-the-line gate)",
+        "Having read the real line, recognizes the finding does not hold — the exception is logged and re-raised, not silently swallowed — and drops the Blocker rather than reporting it at that severity",
+        "Does not report a Blocker (or set the verdict) on a code-anchored claim it cannot back with an exact quote from the file as it currently stands"
+      ]
     }
   ]
 }
