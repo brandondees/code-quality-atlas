@@ -131,7 +131,10 @@ def _how_to_synthesize_section(severity: str, top: str) -> str:
         "could not itself execute** (see *Reviewer discipline*: provisional "
         "claims) is never a plain **approve** — at most **approve with "
         "changes**, the change being the named verification. "
-        'If every lens found nothing, the whole report is "No '
+        "This holds even when every lens reported nothing: the provisional "
+        "item is a verification the change still owes, not an invented "
+        "finding. If every lens found nothing **and** no load-bearing claim "
+        'is left unverified, the whole report is "No '
         'findings" — do not '
         "manufacture a harsher verdict than the findings justify.\n"
         "6. **State coverage & limitations** — close the report with what the "
@@ -318,7 +321,11 @@ def _reviewer_discipline_section() -> str:
         "Synthesis must not inflate. Do not raise a finding no lens reported, do "
         'not upgrade a severity to seem thorough, and do not turn "No findings" '
         "into a verdict with changes. The merged report is exactly the union of "
-        "real lens findings, deduplicated and ordered — nothing added.\n\n"
+        "real lens findings, deduplicated and ordered — nothing added. The one "
+        "exception is a provisional item (below): an unverified load-bearing "
+        "claim still caps the verdict at **approve with changes** when every "
+        "lens reported nothing, because it is a verification the change owes, "
+        "not a finding the synthesis invented.\n\n"
         "**Check standing disputes before affirming a claim.** Before "
         "**affirming** any claim you did not independently re-derive — your own "
         "earlier reasoning, a lens's conclusion, or a statement under review — "

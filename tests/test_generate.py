@@ -822,6 +822,11 @@ def test_synthesizer_holds_unexecuted_falsifiable_claims_as_provisional():
     # and the verdict step itself points at the rule, so it can't be read
     # past when deciding block/approve
     assert "is never a plain **approve**" in md
+    # PR #531 round-1 (CodeRabbit): both "No findings" rules must yield to an
+    # unverified load-bearing claim, or an all-clean-lenses review could still
+    # plainly approve the exact case the rule exists for.
+    assert "no load-bearing claim is left unverified" in " ".join(md.split())
+    assert "The one exception is a provisional item" in md
 
 
 def test_prepass_treats_a_reported_run_as_a_claim():
