@@ -840,6 +840,33 @@ def test_prepass_treats_a_reported_run_as_a_claim():
     assert "reports zero errors vacuously" in md
 
 
+def test_synthesizer_sweeps_a_confirmed_defects_shape():
+    # issue #524: a lens fixed a defect with a nameable shape at one site and
+    # never searched for the same construct elsewhere; siblings surfaced later
+    # as separately filed issues.
+    md = build_synthesizer_md(_manifest_with_synthesizer())
+    flat = " ".join(md.split())
+    assert "Sweep a confirmed defect's shape before closing it" in md
+    assert "- **siblings** —" in md
+    # siblings stay inside the one finding, and the sweep's scope is stated
+    assert "never as separate findings" in md
+    assert (
+        "same shape also at <location>, <location> (searched <pattern> over <scope>)"
+        in flat
+    )
+    assert "reads as partial rather than complete" in flat
+    # pre-existing siblings don't set the verdict unless the change claims to
+    # close the whole defect class
+    assert (
+        "do not set this change's verdict — **except** when the change says it closes"
+        in flat
+    )
+    # a shape no text/AST query can find is reported unswept, never clean
+    assert "never presented as swept clean" in flat
+    # and the attribution axis no longer contradicts it
+    assert "The one reach past touched code is the **shape sweep**" in flat
+
+
 def test_build_synthesizer_md_carries_trailing_generated_marker():
     # Same #466 gap as the router (see
     # test_build_router_md_carries_trailing_generated_marker): the synthesizer's

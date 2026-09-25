@@ -211,6 +211,11 @@ def _finding_contract_section() -> str:
         "`route: implementer`, and does **not** set this PR's verdict — the diff "
         "did not introduce it; keep it scoped to touched code, opt-in, and "
         "default-quiet.\n"
+        "- **siblings** — other locations carrying the same defect *shape*, "
+        "found by the shape sweep (see *Reviewer discipline*), with the pattern "
+        "searched and the scope it covered; omitted when the defect has no "
+        'reusable shape, and stated as "none found in <scope>" when the sweep '
+        "ran and came back empty.\n"
         "- **lens** — which lens raised it (the primary owner after dedupe)\n"
         "- **finding** — what is wrong, concretely\n"
         "- **fix** — the suggested change, or the evidence needed to decide\n\n"
@@ -250,7 +255,10 @@ def _finding_contract_section() -> str:
         "informs the author's fix-now / file-a-ticket / ignore call. This is the "
         "attribution axis — reviewable is not the same as introduced-here, just as "
         "it is not the same as who-decides (route) or defect-vs-improvement "
-        "(valence).\n\n"
+        "(valence). The one reach past touched code is the **shape sweep**: a "
+        "targeted search for the exact construct behind a confirmed defect, "
+        "not an open-ended audit. Its hits are listed as that finding's "
+        "`siblings`, never as separate findings.\n\n"
     )
 
 
@@ -298,7 +306,10 @@ def _output_format_section(sy: Synthesizer) -> str:
         "ranked finding's parenthesized `<evidence>` is the verbatim line quoted "
         "from *location* per the finding contract, except a bare-file-path or "
         "design-time `boundary:`/`component:` finding with no single line to "
-        "quote; the compressed Non-blocking (advisory) list omits it, staying a "
+        "quote. A finding with `siblings` appends them on the same line — `same "
+        "shape also at <location>, <location> (searched <pattern> over "
+        "<scope>)` — rather than splitting into separate findings. The "
+        "compressed Non-blocking (advisory) list omits evidence, staying a "
         "one-clause summary.\n\n"
         "**Non-blocking (advisory) is not a dumping ground for every below-floor "
         "observation** — it is specifically the findings a floor (mode or round) "
@@ -314,7 +325,7 @@ def _output_format_section(sy: Synthesizer) -> str:
 
 def _reviewer_discipline_section() -> str:
     """The anti-inflation guards: standing disputes, the quote-the-line gate,
-    provisional (unexecuted) claims, and attributing a finding only to a lens
+    provisional (unexecuted) claims, the shape sweep, and attributing a finding only to a lens
     whose bundle was actually opened. Static: no manifest input."""
     return (
         "## Reviewer discipline\n\n"
@@ -393,6 +404,29 @@ def _reviewer_discipline_section() -> str:
         "the review *did* reproduce — a check it ran itself, or a CI result "
         "visible on this exact head commit whose scope covers the code in "
         "question — is evidence, and is affirmed normally.\n\n"
+        "**Sweep a confirmed defect's shape before closing it.** When a lens "
+        "confirms a defect that has a nameable, reusable *shape* — a specific "
+        'construct, not merely "this line is wrong" (a rate-limit record '
+        "call reachable only on one branch, an auth header re-sent across a "
+        "redirect, a shell pipeline without `pipefail`, a response path "
+        "missing a header its siblings set) — search the repository for that "
+        "same construct before reporting the finding: a targeted grep or "
+        "AST-pattern query over the whole tree, not only the files the diff "
+        "touches. List every other hit under the finding's `siblings`, each "
+        "held to the quote-the-line gate, and state the pattern and the scope "
+        "it covered, so a sweep that ran over only part of the tree reads as "
+        "partial rather than complete. Siblings outside the diff are "
+        "pre-existing: they are routed to the implementer (extend the fix now, "
+        "or file one tracked follow-up that names every location) and do not "
+        "set this change's verdict — **except** when the change says it closes "
+        "that defect class (its title, description, or linked issue). Then a "
+        "sibling it leaves in place makes that claim incomplete: report it as a "
+        "defect in the claim, at most **approve with changes** on that basis "
+        "alone (extend the fix, or narrow the claim and file the rest). A shape "
+        "that cannot be searched for reliably (it depends on runtime values or "
+        "cross-file data flow a text or AST query cannot see) is named under "
+        "*Coverage & limitations* as not swept, never presented as swept "
+        "clean.\n\n"
         "**Attribute a finding only to a lens whose bundle was actually opened "
         "this round.** Selecting a lens licenses it to run; it does not by "
         "itself produce a finding. A lens's one-line description in the "

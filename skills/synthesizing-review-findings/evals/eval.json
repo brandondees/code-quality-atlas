@@ -140,6 +140,32 @@
         "Does not demand a redundant re-verification or cap the verdict at 'approve with changes' when the load-bearing claim has in fact been reproduced",
         "Keeps the report short, with coverage stating the type-check claim was confirmed by CI"
       ]
+    },
+    {
+      "query": "PR title: 'Don't forward Authorization header on cross-host redirect (Stripe client)'. sweeping-for-security confirms the fix at `billing/stripe_client.py:88`: the old code copied every request header, including `Authorization`, onto the redirected request whatever its host. A grep for the same construct (`headers=dict(resp.request.headers)` inside a redirect handler) finds the identical code at `billing/paypal_client.py:61` and `shipping/easypost_client.py:74`. Neither file is touched by the diff. Synthesize the review.",
+      "expected_behavior": [
+        "Reports the two other hits inside the one credential-leak finding as its siblings (`same shape also at billing/paypal_client.py:61, shipping/easypost_client.py:74`), not as two unrelated findings and not silently dropped",
+        "States the pattern searched and the scope the search covered",
+        "Treats the siblings as pre-existing and routed to the implementer (extend the fix now, or one tracked follow-up naming both locations), and does not block this PR on them, because the title claims to fix only the Stripe client",
+        "Does not describe the credential-leak class as closed repo-wide"
+      ]
+    },
+    {
+      "query": "Same code as before, but this time the PR is titled 'Fix Authorization header leak on cross-host redirects' and its description says 'closes #212: no HTTP client in this repo forwards auth across hosts any more'. It changes only `billing/stripe_client.py`. A grep for the same construct still finds it at `billing/paypal_client.py:61` and `shipping/easypost_client.py:74`. Synthesize the review and give the verdict.",
+      "expected_behavior": [
+        "Recognizes that the change claims to close the whole defect class, so the two unfixed siblings make that claim incomplete, and reports this as a defect in the claim",
+        "Gives a verdict of 'approve with changes', not a plain approve: extend the fix to both siblings, or narrow the claim and file the rest",
+        "Does not escalate to 'block' on the incomplete claim alone",
+        "Lists both sibling locations, each with the line quoted from the file"
+      ]
+    },
+    {
+      "query": "tracing-correctness-and-invariants reports one Minor finding: `reports/summary.py:40` divides by `len(rows)` where the product spec says to average over *active* rows only, so the dashboard's mean is slightly off. It's a one-off business-rule mistake specific to this function. Nothing else was flagged. Synthesize the review.",
+      "expected_behavior": [
+        "Reports the single finding without inventing a repo-wide sweep or a list of siblings, since this is a one-off logic error with no reusable construct to search for",
+        "Does not pad the report with speculative 'this might also occur elsewhere' findings",
+        "Ends on a verdict that fits one Minor defect (approve with changes)"
+      ]
     }
   ]
 }
