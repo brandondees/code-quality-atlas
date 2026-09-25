@@ -285,7 +285,9 @@ In the Claude Code web app → **Routines** → **New routine**:
   speak again if a later push introduces a NEW finding at or above the floor —
   stay silent on quiet pushes rather than re-posting APPROVE or re-dumping the
   advisory list. Stop watching only when the PR is merged or closed, or the hard
-  round cap (default 10) is reached.
+  round cap (default 10) is reached. When you see it merged with findings still
+  open, apply REVIEW.md's `unresolved_findings` setting to them first (default
+  `note`: one final comment naming each; see atlas-review-pr.md step 5).
 
   This session's own subscription is best-effort, not a durable guarantee — a bare
   push with no CI/comment activity may not wake it, and the resident session

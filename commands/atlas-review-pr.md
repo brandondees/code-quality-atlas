@@ -221,7 +221,9 @@ when a repo vendors the suite into itself, otherwise `refs/heads/main`
 vendoring over always trusting whatever is at `main`'s HEAD right now) —
 which is a fixed, locatable path that works in web/routine sessions where
 the plugin clone location is unknown. It defines the severity floor per
-round, the round cap, and the approve-on-clean behavior. The repo's own
+round, the round cap, the approve-on-clean behavior, and what happens to
+findings still open at merge (`unresolved_findings` /
+`unresolved_threshold`, default `note` at `Major`). The repo's own
 `REVIEW.md` always wins over the template.
 
 **If that first read fails without confirming absence** (a transient 5xx, a
@@ -524,6 +526,51 @@ line.
     new push addressed, but post **no** new summary and don't re-emit `APPROVE`.
     Only speak again when a later push introduces a new finding at or above the
     floor.
+
+- **Findings still open at merge (issue #526).** Apply the `REVIEW.md`
+  `unresolved_findings` setting (default `note`) to every finding at or above
+  `unresolved_threshold` (default `Major`) whose thread from an earlier round
+  is still open, i.e. unresolved, not addressed by a later push, and not
+  linked to a tracked issue in a reply:
+  - **`note`** — every summary you post this round carries a `Still open`
+    list naming each one (severity · location · lens · thread link), so it
+    stays visible even though step 6 forbids reposting it inline. If this
+    session observes the PR merged with any still open, post one final issue
+    comment naming them before you stop watching.
+  - **`require-followup`** — as `note`, plus ask for a tracked issue per
+    finding, linked from a reply on its thread. While any is unlinked and
+    unfixed, the approve-on-clean summary's heading is `## Round N — approve
+    pending follow-up` rather than the plain clean heading; the review
+    state itself does not change.
+  - **`file-followup`** — as `note`, plus: when you stand down with findings
+    still open (approve-on-clean, the round-cap notice, or an observed
+    merge), file **one** issue listing them all, each with its location,
+    quoted evidence, and thread link, and with
+    `<!-- atlas-followup pr:<number> -->` in the body. Search the repo's
+    issues for that marker first and update the existing issue instead of
+    filing a duplicate. Count only issues whose author is your own login
+    (step 2's `get_me`), so an issue someone else opened with the marker is
+    never adopted. GitHub has no atomic create-if-absent, so after filing,
+    search again: if more than one of your marked issues exists (a
+    concurrent session filed too), keep the lowest-numbered one, close the
+    others as duplicates (`state_reason: duplicate`) with a link to it, and
+    link only the survivor. Two sessions whose re-searches each ran before
+    the other's issue was visible can both miss the duplicate, so repeat
+    this reconciliation on **every** later round and stand-down for this
+    PR, not only right after filing, and repoint any summary or thread link
+    that names a closed duplicate at the survivor. The PR converges on one
+    issue by the next run even when a race briefly leaves two. Link the issue from the summary and reply with it on
+    each finding's thread. Without issue-write access, say so and fall back
+    to `note` for this round.
+  - **`block`** — an open finding at/above the threshold keeps this round's
+    state at `REQUEST_CHANGES` (own-PR `COMMENT` substitute per the rule
+    above) even when nothing new was found, overriding the Blocker-only
+    rule, and approve-on-clean waits until they close. Say in the summary
+    that it holds for a still-open finding, not a new one. On your own PR
+    the substitute is `COMMENT`, so `block` gates nothing beyond `note`
+    there; say that in the summary too, so the setting doesn't read as
+    enforced when it isn't.
+  An unrecognized value is treated as `note`, named under coverage.
 
 ## 6. Reply, don't re-litigate
 

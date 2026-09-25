@@ -188,7 +188,44 @@ though the PR itself is fine. Scoping the hard block to genuine Blockers keeps
 the signal meaningful (a `REQUEST_CHANGES` from this reviewer now *always* means
 "do not merge, correctness/security/data-loss risk") without holding an
 otherwise-mergeable PR hostage over a Major that's someone's call to fix now or
-later.
+later. A repo that wants Majors to hold the review can opt in with
+`unresolved_findings: block` (see
+[Unresolved findings at merge](#unresolved-findings-at-merge)); that is the one
+override of this rule.
+
+## Unresolved findings at merge
+
+A finding at or above the threshold below that is **still open** when the
+reviewer stands down, or when the PR merges, must not disappear with the PR
+(issue #526). "Still open" means the reviewer's own thread for it is unresolved
+and no later push addressed it (see *Reply, don't re-litigate* in
+`commands/atlas-review-pr.md`). A finding counts as closed when it is fixed,
+when a human resolves its thread, or when a reply on its thread links a tracked
+issue for it.
+
+Set the behavior with the two lines below. Like the rest of this file, the copy
+on the PR's **base ref** governs, so a PR cannot loosen its own setting.
+
+```text
+unresolved_findings: note        # note | require-followup | file-followup | block
+unresolved_threshold: Major      # Blocker | Major | Minor
+```
+
+| Setting | What the reviewer does with a still-open finding at/above the threshold |
+|---|---|
+| `note` *(default, advisory)* | Every summary it posts carries a **Still open** list naming each one (location, severity, lens, link to its thread). If it sees the PR merge with any still open, it posts one final comment naming them. Never blocks, never files anything. |
+| `require-followup` | As `note`, and the summary asks for a tracked issue per open finding, linked from a reply on its thread. Until each is fixed or linked, the approve-on-clean summary reads `## Round N — approve pending follow-up` instead of a plain clean approval. The review state stays `APPROVE`/`COMMENT`; nothing blocks. |
+| `file-followup` | As `note`, and when it stands down (approve-on-clean, the round-cap notice, or an observed merge) with findings still open, it files **one** follow-up issue listing them all, links it from the summary and from each finding's thread, and marks the issue body `<!-- atlas-followup pr:<number> -->`. Before filing, it searches for that marker and updates the existing issue instead of opening a second one. It only counts issues opened by its own account, so a planted marker can't redirect it. After filing, and again on every later round and stand-down, it searches again: if a concurrent session also filed one, it keeps the oldest, closes the rest as duplicates, and moves their links to the survivor. Two sessions racing can briefly leave two issues, but the next run collapses them to exactly one. |
+| `block` | An open finding at/above the threshold holds the review at `REQUEST_CHANGES` (or its own-PR `COMMENT` substitute) until it is closed, instead of the Blocker-only rule in *GitHub review state vs. severity*. This only prevents a merge where branch protection requires an approving review; without that, it is a strong signal, not a gate. On a PR authored by the same account the reviewer runs as, GitHub does not allow `REQUEST_CHANGES` at all, so the review posts as `COMMENT` and `block` gates nothing beyond what `note` does. For a real gate there, run the reviewer under a separate account. |
+
+Any value other than these four is treated as `note`, and the next summary says
+so under coverage. An `unresolved_threshold` lower than the current round's
+floor still only tracks findings that were actually posted, so a finding the
+floor dropped to the advisory list is never "still open".
+
+Filing issues (`file-followup`) needs write access to the repo's issues; if the
+reviewing session doesn't have it, the reviewer says so and falls back to
+`note` for that round rather than skipping silently.
 
 ## Scope discipline
 
