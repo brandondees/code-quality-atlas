@@ -57,3 +57,14 @@ def test_block_mode_says_it_cannot_gate_a_self_authored_pr():
     for rel in ["templates/REVIEW.md", "commands/atlas-review-pr.md"]:
         text = " ".join(_read(rel).split())
         assert "gates nothing beyond" in text, rel
+
+
+def test_file_followup_is_provenance_checked_and_converges_to_one_issue():
+    # PR #533 round-1 (CodeRabbit): a marker alone isn't an ownership signal,
+    # and a search-then-create race between concurrent sessions can file two.
+    for rel in _SITES:
+        text = " ".join(_read(rel).split()).lower()
+        assert "own account" in text or "your own login" in text, rel
+        assert "closes the rest as duplicates" in text or (
+            "close the others as duplicates" in text
+        ), rel

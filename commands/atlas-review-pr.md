@@ -548,7 +548,13 @@ line.
     quoted evidence, and thread link, and with
     `<!-- atlas-followup pr:<number> -->` in the body. Search the repo's
     issues for that marker first and update the existing issue instead of
-    filing a duplicate. Link the issue from the summary and reply with it on
+    filing a duplicate. Count only issues whose author is your own login
+    (step 2's `get_me`), so an issue someone else opened with the marker is
+    never adopted. GitHub has no atomic create-if-absent, so after filing,
+    search again: if more than one of your marked issues exists (a
+    concurrent session filed too), keep the lowest-numbered one, close the
+    others as duplicates (`state_reason: duplicate`) with a link to it, and
+    link only the survivor. Link the issue from the summary and reply with it on
     each finding's thread. Without issue-write access, say so and fall back
     to `note` for this round.
   - **`block`** — an open finding at/above the threshold keeps this round's
