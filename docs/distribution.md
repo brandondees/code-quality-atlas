@@ -77,9 +77,10 @@ display) — that is *not* what tells you which build you're actually running. T
 own installed checkout specifically because a hand-maintained version string can
 drift from it. Treat `plugin.json`'s `version` as cosmetic marketplace metadata;
 treat the commit SHA `route.sh` reports as the actual installed build identifier.
-[`docs/open-questions.md`](open-questions.md)'s D9 (the original commit-SHA call)
-and D23 (its 2026-09-25 re-affirmation, with the concrete conditions for
-switching to semver) have the full history.
+[`docs/open-questions.md`](open-questions.md)'s D9 (the original commit-SHA call,
+plus its 2026-09-07 addendum on this static field) and D23 (the 2026-09-25
+re-affirmation, with the concrete conditions for switching to semver) have the
+full history.
 
 Only vendoring pins to a commit by default. The settings-based marketplace
 *can* be pinned instead of tracking latest, but only to a **branch or

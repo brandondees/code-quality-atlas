@@ -408,8 +408,9 @@ re-affirms commit-SHA versioning and states that the `plugin.json` version is
 cosmetic and deliberately not bumped, with no `CHANGELOG`. It replaces the
 vague trigger with three concrete ones: a consumer asks to pin by
 version/tag, the first non-owner, non-automation PR merges, or 2027-03-31
-arrives. D9 now points forward to D23. `docs/distribution.md` pointed at a "D9
-addendum" that never existed; it now points at D9 and D23.
+arrives. D9's own trigger wording is now marked superseded by D23 (after
+CodeRabbit noted it could still read as an independent reason to switch), and
+`docs/distribution.md`'s pointer names D9's 2026-09-07 addendum and D23.
 
 **#520 → half-month rotation.** September alone had pushed this file to about
 2,080 lines before the month closed, so the "oldest completed month" rule had
