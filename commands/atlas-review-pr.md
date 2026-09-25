@@ -325,7 +325,10 @@ line.
    always pulls in `auditing-documentation-health`, an ADR/RFC change always
    pulls in `reviewing-decision-lifecycle` — see the picker's How to pick
    section) — these ride along additively and don't count against the 3-8.
-   Scope to the **files in this PR's diff**, not the whole repo.
+   Scope to the **files in this PR's diff**, not the whole repo — except for
+   the shape sweep in `synthesizing-review-findings`'s Reviewer discipline (a
+   targeted whole-tree search for the exact construct behind a confirmed
+   defect, reported as that finding's `siblings`).
 3. `code-quality-atlas:grounding-review-in-tool-output` — before the lenses
    judge anything, run the deterministic tools this repo *already* configures
    (from `.pre-commit-config.yaml`, its CI workflows, its package manifests),

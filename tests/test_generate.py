@@ -855,6 +855,8 @@ def test_synthesizer_sweeps_a_confirmed_defects_shape():
         in flat
     )
     assert "reads as partial rather than complete" in flat
+    # PR #532 round-1: the empty-sweep branch has its own rendering too
+    assert "shape searched (<pattern> over <scope>), none found" in flat
     # pre-existing siblings don't set the verdict unless the change claims to
     # close the whole defect class
     assert (

@@ -193,7 +193,11 @@ later.
 ## Scope discipline
 
 - Review only the files in the PR's diff, never the whole repo (that's what the
-  `auditing-*` skills and scheduled audits are for).
+  `auditing-*` skills and scheduled audits are for). The one exception is the
+  **shape sweep** in `synthesizing-review-findings`'s Reviewer discipline: once a
+  finding confirms a defect with a reusable construct, search the whole tree for
+  that one construct and list the hits as the finding's `siblings`. That is a
+  targeted search, not a repo audit.
 - Severity vocabulary is the atlas synthesizer's own (`synthesizing-review-findings`),
   ranked **Blocker > Major > Minor > Nit**: **Blocker** (block: correctness,
   security, data loss — the only tier that hard-blocks merge, see *GitHub review

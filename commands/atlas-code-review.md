@@ -33,7 +33,10 @@ Pick the smallest diff that captures what the user means:
   and stop; do not invent a diff.
 
 Keep scope to the changed files, not the whole repo (whole-repo health is what the
-`auditing-*` skills are for).
+`auditing-*` skills are for). The one exception is the shape sweep in
+`synthesizing-review-findings`'s Reviewer discipline: a targeted whole-tree search
+for the exact construct behind a confirmed defect, reported as that finding's
+`siblings`.
 
 ## 2. Pick the depth mode and lenses
 
