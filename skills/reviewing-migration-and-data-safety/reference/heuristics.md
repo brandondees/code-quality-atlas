@@ -21,5 +21,6 @@
 - Are **transaction boundaries** correct — multi-step writes atomic, no partial commit on failure (cross #2)?
 - Is **destructive DDL** (DROP column/table) gated until the new path is verified live and old code drained?
 - Is there a **tested backup/restore** path before a risky data change?
+- Is "it applies on deploy" **shown, or only asserted**? A claim that a migration "auto-applies", "runs in the deploy step", or leaves "no drift" is deploy-time behavior the diff alone does not demonstrate. Trace the mechanism in the repo — is the new migration actually registered with, and reached by, whatever the deploy runs (the migration runner's discovery path, the release step's command, an ordering or naming convention it depends on)? If that wiring is not visible from the repo, or the claim rests on the PR's own account of a run, hold it as **provisional** and name what would settle it — a migration dry-run/plan or a schema-drift check against the target environment, run by CI or the deployer — rather than approving on the assertion. A schema step that silently never runs fails every write that depends on it once the code ships.
 
 ---

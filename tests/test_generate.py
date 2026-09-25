@@ -807,6 +807,39 @@ def test_synthesizer_contract_defines_bare_file_path_location_and_deleted_line_e
     assert "still governs every finding about code that survives the change" in md
 
 
+def test_synthesizer_holds_unexecuted_falsifiable_claims_as_provisional():
+    # issue #525: a review disclosed it could not reproduce a load-bearing
+    # claim ("0 errors", "auto-applies, no drift", a numeric bound at scale)
+    # and approved anyway; the disclosure has to move the verdict, not sit
+    # beside a clean approve as a caveat.
+    md = build_synthesizer_md(_manifest_with_synthesizer())
+    assert "Hold a falsifiable claim you could not execute as provisional" in md
+    assert "**provisional pending verification**" in md
+    assert "Disclosing the limitation is not the same as accounting for it" in md
+    assert "An unverified load-bearing claim caps the verdict at " in md
+    # a reported run is vacuous for files outside its scope
+    assert "reports zero errors vacuously" in md
+    # and the verdict step itself points at the rule, so it can't be read
+    # past when deciding block/approve
+    assert "is never a plain **approve**" in md
+    # PR #531 round-1 (CodeRabbit): both "No findings" rules must yield to an
+    # unverified load-bearing claim, or an all-clean-lenses review could still
+    # plainly approve the exact case the rule exists for.
+    assert "no load-bearing claim is left unverified" in " ".join(md.split())
+    assert "The one exception is a provisional item" in md
+
+
+def test_prepass_treats_a_reported_run_as_a_claim():
+    # issue #525, the grounding half: an author's "type-checks clean" is not
+    # tool evidence until reproduced here or shown by CI on this head commit.
+    from tooling.generate_prepass import build_prepass_md
+
+    m = load_manifest(str(ROOT / "skills" / "manifest.yaml"))
+    md = build_prepass_md(m)
+    assert "**A reported run is a claim, not evidence.**" in md
+    assert "reports zero errors vacuously" in md
+
+
 def test_build_synthesizer_md_carries_trailing_generated_marker():
     # Same #466 gap as the router (see
     # test_build_router_md_carries_trailing_generated_marker): the synthesizer's

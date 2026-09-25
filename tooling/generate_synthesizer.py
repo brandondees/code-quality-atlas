@@ -127,7 +127,14 @@ def _how_to_synthesize_section(severity: str, top: str) -> str:
         "acknowledgement alone does not drive the verdict to block — the team "
         "recorded and accepted it. A `suppress`ed preference-tier finding never "
         "reaches this report at all; only `acknowledge` (floor-tier) leaves a "
-        'visible trace. If every lens found nothing, the whole report is "No '
+        "visible trace. A verdict that rests on a **falsifiable claim the review "
+        "could not itself execute** (see *Reviewer discipline*: provisional "
+        "claims) is never a plain **approve** — at most **approve with "
+        "changes**, the change being the named verification. "
+        "This holds even when every lens reported nothing: the provisional "
+        "item is a verification the change still owes, not an invented "
+        "finding. If every lens found nothing **and** no load-bearing claim "
+        'is left unverified, the whole report is "No '
         'findings" — do not '
         "manufacture a harsher verdict than the findings justify.\n"
         "6. **State coverage & limitations** — close the report with what the "
@@ -306,15 +313,19 @@ def _output_format_section(sy: Synthesizer) -> str:
 
 
 def _reviewer_discipline_section() -> str:
-    """The two anti-inflation guards: standing disputes, and attributing a
-    finding only to a lens whose bundle was actually opened. Static: no
-    manifest input."""
+    """The anti-inflation guards: standing disputes, the quote-the-line gate,
+    provisional (unexecuted) claims, and attributing a finding only to a lens
+    whose bundle was actually opened. Static: no manifest input."""
     return (
         "## Reviewer discipline\n\n"
         "Synthesis must not inflate. Do not raise a finding no lens reported, do "
         'not upgrade a severity to seem thorough, and do not turn "No findings" '
         "into a verdict with changes. The merged report is exactly the union of "
-        "real lens findings, deduplicated and ordered — nothing added.\n\n"
+        "real lens findings, deduplicated and ordered — nothing added. The one "
+        "exception is a provisional item (below): an unverified load-bearing "
+        "claim still caps the verdict at **approve with changes** when every "
+        "lens reported nothing, because it is a verification the change owes, "
+        "not a finding the synthesis invented.\n\n"
         "**Check standing disputes before affirming a claim.** Before "
         "**affirming** any claim you did not independently re-derive — your own "
         "earlier reasoning, a lens's conclusion, or a statement under review — "
@@ -355,6 +366,33 @@ def _reviewer_discipline_section() -> str:
         '`file:line` in this diff") rather than reading the post-change file '
         "and concluding the line is gone — the current-file rule above still "
         "governs every finding about code that survives the change.\n\n"
+        "**Hold a falsifiable claim you could not execute as provisional, not "
+        "affirmed.** Some claims a verdict can rest on are about behavior no "
+        "static read of the diff can observe: deploy-time behavior (a migration "
+        '"auto-applies, no drift"), a numeric bound holding at real scale (a '
+        "concurrency cap sized by a formula, a cache bounded by a per-item byte "
+        'estimate), or a tool result ("type-checks clean, 0 errors", "confirmed '
+        'dead code"). When such a claim is **load-bearing** — the change is only '
+        "safe if it is true — and this review did not itself run, reproduce, or "
+        "measure it, do not state it as fact, whether it came from the PR "
+        "description, the author, a lens, or your own reasoning. Report it as "
+        "**provisional pending verification**, naming exactly what would settle "
+        "it (the command, measurement, or observation) and who can run it (CI "
+        "on this head commit, the author, an operator with production access). "
+        "Disclosing the limitation is not the same as accounting for it: a "
+        '"taken from the PR\'s own stated run, not reproduced" caveat logged '
+        "beside an otherwise-clean **approve** still ships the unverified claim "
+        "as settled. An unverified load-bearing claim caps the verdict at "
+        "**approve with changes**, with the verification as the change — and "
+        "where the claim is the only thing standing between the change and a "
+        "Blocker-class failure (data loss, a write path erroring in production), "
+        "hold at **block** until it is verified. A reported run also verifies "
+        'only what it actually covered: before accepting "0 errors" as '
+        "evidence about a file, confirm that file was in the run's scope (a "
+        "tool config that excludes it reports zero errors vacuously). A claim "
+        "the review *did* reproduce — a check it ran itself, or a CI result "
+        "visible on this exact head commit whose scope covers the code in "
+        "question — is evidence, and is affirmed normally.\n\n"
         "**Attribute a finding only to a lens whose bundle was actually opened "
         "this round.** Selecting a lens licenses it to run; it does not by "
         "itself produce a finding. A lens's one-line description in the "

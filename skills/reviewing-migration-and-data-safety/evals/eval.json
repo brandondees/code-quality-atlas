@@ -188,6 +188,15 @@
         "Recognizes this is a new, empty table — there is no existing data to lock, backfill, or migrate, so none of the usual large-table safety concerns apply",
         "Does not invent a backward-compatibility or locking concern for a brand-new table with no rows and no prior app code depending on it"
       ]
+    },
+    {
+      "query": "Review this PR. It adds `migrations/0042_add_orders_region.sql`:\n```sql\nALTER TABLE orders ADD COLUMN region text;\n```\nand changes `orders/repo.py` so every `INSERT INTO orders` now writes `region`. The PR description's 'Migration safety' section says: 'The new migration auto-registers and runs in the deploy step, no drift.' The repo's `deploy.sh` runs `./bin/migrate --dir db/migrations`. No other migration runner is configured.",
+      "expected_behavior": [
+        "Notices the new file lives under `migrations/` while the deploy step only runs migrations from `db/migrations`, so the 'auto-registers, no drift' claim is contradicted by the repo's own wiring",
+        "Flags that once the code ships, every insert writing `region` fails if the column was never added — a Blocker-class write-path failure, not a style note",
+        "Does not accept the PR description's deploy-time claim as fact; asks for the migration to be moved into the runner's path and for a dry-run or schema-drift check against the target environment",
+        "Does not raise a long-lock or table-rewrite concern for adding a nullable column with no default — on Postgres that is a catalog-only change needing only a brief lock, not a rewrite"
+      ]
     }
   ]
 }

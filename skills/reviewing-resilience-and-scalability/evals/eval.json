@@ -73,7 +73,7 @@
     {
       "query": "Review this change (called once per partner on a schedule, hundreds of partners):\n```python\ndef sync_partner(partner_id):\n    conn = socket.create_connection((partner_host(partner_id), 443))\n    conn.sendall(build_request(partner_id))\n    data = read_response(conn)\n    return parse(data)\n    # conn is never closed on any path\n```",
       "expected_behavior": [
-        "Flags the leaked socket: conn is opened but never closed via an explicit close() or context manager on any path, success or exception — relying on the runtime's garbage collector to eventually release the fd is not a resource-safety guarantee (an exception that keeps a traceback referencing conn, or a non-refcounting runtime, holds it open far longer than the caller expects)",
+        "Flags the leaked socket: conn is opened but never closed via an explicit close() or context manager on any path, success or exception \u2014 relying on the runtime's garbage collector to eventually release the fd is not a resource-safety guarantee (an exception that keeps a traceback referencing conn, or a non-refcounting runtime, holds it open far longer than the caller expects)",
         "Names it as a resource-exhaustion class distinct from an unbounded queue \u2014 a per-operation leak against a finite OS ceiling (open file descriptors/sockets) that is correct on one call and detonates only as call volume accumulates",
         "Recommends closing the connection deterministically (context manager or a finally block) so the resource is released regardless of outcome"
       ]
@@ -188,6 +188,15 @@
         "Responds with a line starting 'Not applicable:' rather than 'No findings' \u2014 the change is marketing copy with no queue, dependency call, shared state, or recovery surface for this lens to review",
         "Does not report 'No findings', which would imply the checks ran and found nothing, when in fact nothing in scope for this lens is present",
         "Does not invent a resilience or scale concern in a text-only content change"
+      ]
+    },
+    {
+      "query": "This PR 'resolves' an earlier overload finding by adding a bulkhead:\n```python\nMAX_CONCURRENT = min(64, os.cpu_count() * 32)\nsem = asyncio.Semaphore(MAX_CONCURRENT)\n```\nThe description says the cap 'bounds concurrency so the downstream pricing service can't be overwhelmed'. Production runs on 8-vCPU instances; the pricing service's own docs say it degrades above 20 concurrent requests per client. Is the overload finding resolved?",
+      "expected_behavior": [
+        "Evaluates the formula at the real production value: on 8 vCPUs `os.cpu_count() * 32` is 256, so `min(64, 256)` is 64 \u2014 the cap is 64 at production size, above the pricing service's stated 20-per-client limit, so it does not bound what the finding was about",
+        "Does not accept 'resolved' on the strength of the cap existing; states that the bound has to hold at the actual parameters, not in the abstract",
+        "Recommends sizing the cap from the downstream limit (or making it configurable per environment) and verifying it with a load test against production-shaped concurrency",
+        "Does not invent unrelated resilience findings beyond the bulkhead sizing"
       ]
     }
   ]

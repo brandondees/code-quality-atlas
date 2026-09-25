@@ -86,6 +86,15 @@
         "Checks whether the eslint config actually loads an accessibility plugin (eslint-plugin-jsx-a11y) before treating eslint as grounding reviewing-accessibility-and-i18n — plain eslint is the lint-and-style family, and without an a11y plugin that lens is judgment-only too",
         "Notes that a hit landing in a family no selected lens owns is passed to the nearest lens but never becomes a finding on its own authority"
       ]
+    },
+    {
+      "query": "The PR description says 'pyright passes clean, 0 errors', and on that basis deletes three `# pyright: ignore` comments in `src/legacy/adapters.py`. The repo's `pyrightconfig.json` has `\"include\": [\"src/core\", \"src/api\"]`. I can't run pyright in this session. How should the pre-pass treat the '0 errors' claim?",
+      "expected_behavior": [
+        "Treats the PR's '0 errors' as a claim about a run the review did not see, not as tool evidence",
+        "Notices that the repo's own pyright config does not include `src/legacy/`, so even a genuine clean run would say nothing about the edited file — the '0 errors' is vacuous for it",
+        "States the gap under coverage and names the command that would settle it (pyright run with `src/legacy/adapters.py` in scope), rather than silently passing",
+        "Does not install a different type checker or invent pyright errors in the file"
+      ]
     }
   ]
 }

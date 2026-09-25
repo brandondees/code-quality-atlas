@@ -122,6 +122,24 @@
         "Does not drop the finding, downgrade its severity, or hold it back as unverified merely because it lacks a quote — the quote-the-line gate applies to `file:line` locations, not to this kind of finding",
         "Sets the verdict from the finding's Major severity exactly as it would for an equivalent quoted, code-anchored finding — the evidence exemption changes nothing about severity, valence, route, or verdict weight"
       ]
+    },
+    {
+      "query": "Three lenses on a refactor PR all reported 'No findings'. The PR removes two `# type: ignore` comments; its description says they're 'confirmed dead by a full-project mypy run, 0 errors'. tracing-correctness-and-invariants adds a note: 'I couldn't run mypy in this session, so I'm taking the 0-errors claim from the PR description as given.' CI on this commit shows only a lint job, no type-check. Synthesize the review and give the verdict.",
+      "expected_behavior": [
+        "Does not return a plain 'approve' — the removal is only safe if the unreproduced '0 errors' claim is true, so the verdict is at most 'approve with changes', with running the type-check as the named change",
+        "Reports the claim as provisional pending verification rather than affirming it, and names what would settle it (a mypy run over the files the removed ignores were on) and who can run it (CI on this head commit, or the author)",
+        "Treats the disclosed limitation as moving the verdict, not as a caveat logged beside an otherwise-clean approval",
+        "Notes that a reported '0 errors' run only covers the files in its scope, so the files carrying the removed suppressions must be confirmed in scope before the result counts",
+        "Does not invent a type error or claim the suppressions are live — it states the claim is unverified, not that it is false"
+      ]
+    },
+    {
+      "query": "Same PR as before — it removes two `# type: ignore` comments claimed dead by a full mypy run. This time the repo's CI runs `mypy` on every push, its config covers the whole package including the edited files, and the mypy job on this exact head commit is green. The lenses reported 'No findings'. Synthesize the review.",
+      "expected_behavior": [
+        "Approves — the claim is backed by a CI result visible on this head commit whose scope covers the edited files, so it is evidence rather than an unexecuted claim",
+        "Does not demand a redundant re-verification or cap the verdict at 'approve with changes' when the load-bearing claim has in fact been reproduced",
+        "Keeps the report short, with coverage stating the type-check claim was confirmed by CI"
+      ]
     }
   ]
 }
