@@ -554,7 +554,12 @@ line.
     search again: if more than one of your marked issues exists (a
     concurrent session filed too), keep the lowest-numbered one, close the
     others as duplicates (`state_reason: duplicate`) with a link to it, and
-    link only the survivor. Link the issue from the summary and reply with it on
+    link only the survivor. Two sessions whose re-searches each ran before
+    the other's issue was visible can both miss the duplicate, so repeat
+    this reconciliation on **every** later round and stand-down for this
+    PR, not only right after filing, and repoint any summary or thread link
+    that names a closed duplicate at the survivor. The PR converges on one
+    issue by the next run even when a race briefly leaves two. Link the issue from the summary and reply with it on
     each finding's thread. Without issue-write access, say so and fall back
     to `note` for this round.
   - **`block`** — an open finding at/above the threshold keeps this round's

@@ -68,3 +68,12 @@ def test_file_followup_is_provenance_checked_and_converges_to_one_issue():
         assert "closes the rest as duplicates" in text or (
             "close the others as duplicates" in text
         ), rel
+
+
+def test_duplicate_reconciliation_repeats_on_later_runs():
+    # PR #533 round-2 (CodeRabbit): two sessions' post-create re-searches can
+    # both run before the other's issue is visible, so a one-shot check can't
+    # guarantee one issue. Reconciliation must repeat on later runs.
+    for rel in _SITES:
+        text = " ".join(_read(rel).replace("**", "").split()).lower()
+        assert "every later round and stand-down" in text, rel
