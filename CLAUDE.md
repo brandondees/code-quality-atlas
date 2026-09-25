@@ -17,10 +17,11 @@ issues/PRs — check these before reporting nothing's queued:
   feeding future categories/lenses.
 - [`docs/session-log.md`](docs/session-log.md) — narrative history of what
   shipped and why, for when a doc pointer alone isn't enough context. Carries
-  September 2026 onward; older months rotate out into dated
+  2026-09-16 onward; older entries rotate out into dated
   `docs/session-log-<range>.md` archives once this file grows past ~1,500
-  lines (#467) — see its own header for the current rotation policy and the
-  first archive, [`docs/session-log-2026-06-to-08.md`](docs/session-log-2026-06-to-08.md).
+  lines (#467), by whole month or, when one month alone overruns, by
+  half-month (#520). See its own header for the current rotation policy and
+  the archives, e.g. [`docs/session-log-2026-06-to-08.md`](docs/session-log-2026-06-to-08.md).
 - [`docs/eval-hardening-campaign-log.md`](docs/eval-hardening-campaign-log.md)
   — the wave-by-wave narrative of the Q21 suite-wide eval-hardening campaign,
   extracted out of `open-questions.md` once it grew to ~700 lines there (#426).
