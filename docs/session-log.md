@@ -2011,3 +2011,44 @@ for migration (a migration placed outside the deploy runner's directory) and
 resilience (a `min(64, cpu*32)` cap evaluated at the production vCPU count).
 Two regression tests in `tests/test_generate.py`. Regenerated, re-vendored,
 drift clean.
+
+## 2026-09-25 (same day) — #524: sweep a confirmed defect's shape before closing it
+
+Second item from the same "what's next?" session, right after #525 (PR #531)
+merged. The issue: across several projects, a lens confirmed a defect with a
+clearly nameable construct — a rate-limit record call reachable on only one
+branch, an auth header re-sent across a cross-host redirect, a shell pipeline
+masking an early-stage failure, a response path missing a header — and the fix
+landed at the one site the diff touched. The identical construct elsewhere was
+found later, by hand, as separately filed issues. In three of four cases the
+reviewer had *named* the pattern in its own commentary; searching for it simply
+wasn't part of the procedure.
+
+**The fix, in the synthesizer** (`tooling/generate_synthesizer.py`), because it
+applies to every lens, not just the three the evidence happened to name
+(`sweeping-for-security`, `hunting-silent-failures`,
+`reviewing-resilience-and-scalability`), and the synthesizer is bundled into
+every collapsed entrypoint:
+
+- A new *Reviewer discipline* rule: once a lens confirms a defect with a
+  reusable shape, run a targeted grep/AST query for that construct over the
+  whole tree. Report the hits as that finding's `siblings` (each held to the
+  quote-the-line gate), stating the pattern searched and the scope covered, so
+  a partial sweep can't read as a complete one. Siblings are pre-existing:
+  routed to the implementer, not verdict-setting. The exception is a change
+  that claims to close the whole defect class; there an unfixed sibling makes
+  the claim incomplete, which caps the verdict at *approve with changes*. A
+  shape no text or AST query can find is reported as not swept, never as swept
+  clean.
+- A `siblings` field in the finding contract, and a same-line
+  `same shape also at …` form in the output template.
+- The attribution axis ("keep it scoped to touched code; a repo-wide sweep is
+  the audits' job") now names the shape sweep as its one bounded exception, so
+  the two rules don't contradict each other. That is the same class of mismatch
+  CodeRabbit caught in #531's round 1.
+
+Three eval scenarios: siblings listed but not blocking when the PR fixes one
+client; approve-with-changes when the PR claims to close the class; and a
+counterweight (a one-off logic error, where no sweep is invented). Plus one
+regression test in `tests/test_generate.py`. Regenerated, re-vendored, drift
+clean.
