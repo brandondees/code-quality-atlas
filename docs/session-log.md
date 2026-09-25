@@ -2052,3 +2052,29 @@ client; approve-with-changes when the PR claims to close the class; and a
 counterweight (a one-off logic error, where no sweep is invented). Plus one
 regression test in `tests/test_generate.py`. Regenerated, re-vendored, drift
 clean.
+
+## 2026-09-25 (same day) — #526: findings still open at merge (D22)
+
+Third item from the same session, after #525 (PR #531) and #524 (PR #532)
+merged. #526: a Major finding that round 2 explicitly re-noted as still open
+merged with the PR and never became tracked work. Asked the owner whether to
+make this advisory or gated. The answer was advisory by default, with the
+stricter behaviors easy to switch on, recorded as **D22** in
+`open-questions.md`.
+
+Built as one setting in `REVIEW.md` / `templates/REVIEW.md` (new *Unresolved
+findings at merge* section): `unresolved_findings: note | require-followup |
+file-followup | block`, plus `unresolved_threshold` (default `Major`). It lives
+in `REVIEW.md` rather than `preferences.md` because it's reviewer-workflow
+policy, and it's read from the base ref like the rest of that file.
+`commands/atlas-review-pr.md` step 5 says what each value does. It acts at the
+points a reviewer actually observes (every posted summary, approve-on-clean,
+the round-cap notice, and a merge a watching session sees), since merge alone
+isn't reliably visible to it. `file-followup` is idempotent via a
+`<!-- atlas-followup pr:<number> -->` marker. `block` is named, in the *GitHub
+review state vs. severity* section, as the one opt-in override of the
+Blocker-only `REQUEST_CHANGES` rule, and it only gates merge where branch
+protection requires an approving review (#492). The PR-watch runbook prompt now
+points at the setting for an observed merge. New
+`tests/test_unresolved_findings_policy.py` keeps the three restating files in
+sync.
