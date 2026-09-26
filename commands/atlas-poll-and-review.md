@@ -61,20 +61,21 @@ scheduled-task session on Claude Code (2026-09-26): its own system prompt
 carried a literal "Repository Scope" section listing exactly the repos its
 GitHub access was scoped to (worded "GitHub access for this session is
 currently scoped to: <list>"). Where a session's own configuration surfaces
-that kind of declaration, read it fresh at the start of each tick and pass it
-straight through as `$ARGUMENTS`, rather than re-deriving or guessing the
-list. **This is confirmed for that one session shape, not asserted for every
-routine/platform surface** — a routine created a different way (e.g. via a
-GitHub-event-triggered Routine rather than a scheduled task) may or may not
-carry the same declaration; check the specific session's own system prompt
-before relying on this, and fall back to whatever attached-repo signal that
-platform surface actually provides — e.g., where the attached set instead
-shows up as local checkouts, enumerating each one's origin remote (`git
-remote get-url origin`) is an equivalent source. Whichever source applies,
-the enumerated list is still an explicit, auditable scope under the
-environment's control — not a blank check on session credentials — so issue
-#387's guard stays intact; only the *source* of the scope changes from
-"hand-typed in the prompt" to "read fresh each tick."
+that kind of declaration, read it fresh at the start of each tick and pass
+it straight through as `$ARGUMENTS`, rather than re-deriving or guessing
+the list. **This is confirmed for that one session shape, not asserted for
+every routine/platform surface** — a routine created a different way (e.g.
+via a GitHub-event-triggered Routine rather than a scheduled task) may or
+may not carry the same declaration; check the specific session's own
+system prompt before relying on this, and fall back to whatever
+attached-repo signal that platform surface actually provides — e.g.,
+where the attached set instead shows up as local checkouts, enumerating
+each one's origin remote (`git remote get-url origin`) is an equivalent
+source. Whichever source applies, the enumerated list is still an
+explicit, auditable scope under the environment's control — not a blank
+check on session credentials — so the issue #387 guard stays intact; only
+the *source* of the scope changes from "hand-typed in the prompt" to
+"read fresh each tick."
 
 ## 1. Cheap triage — spawn a fast/cheap-model subagent
 
