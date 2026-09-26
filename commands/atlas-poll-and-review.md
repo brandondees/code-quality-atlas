@@ -10,7 +10,7 @@ description: >-
   webhook trigger surviving. See the source repo's
   (brandondees/code-quality-atlas) docs/runbooks/pr-review-automation.md
   ("Model B") for when to pick this over the event-triggered design.
-argument-hint: "<repo, or comma-separated repo list> [label/author filter] — a repo scope is required, not optional"
+argument-hint: "<repo, or comma-separated repo list> [label/author filter] — a repo scope is required, not optional. A scheduled routine sweeping a dynamically-attached repo set should read that set from its own session/system-prompt repo-scope declaration each tick and pass it through explicitly (see body) rather than omitting this argument."
 allowed-tools: Task, Skill, Read, Grep, Glob, Bash, mcp__github__list_pull_requests, mcp__github__pull_request_read, mcp__github__get_file_contents, mcp__github__get_commit, mcp__github__list_commits, mcp__github__get_me, mcp__github__update_pull_request_branch, mcp__github__add_comment_to_pending_review, mcp__github__pull_request_review_write, mcp__github__add_issue_comment, mcp__github__add_reply_to_pull_request_comment, mcp__github__resolve_review_thread
 ---
 
@@ -43,6 +43,39 @@ repo scope, space-separated. **Do not sweep every attached repo when
 `$ARGUMENTS` is empty or omits the repo scope** — a blast radius that wide
 was never intended (issue #387); instead stop and report that a repo scope
 is required, without touching any repo.
+
+**Sweeping a dynamically-attached repo set (issue #535).** A scheduled
+routine's *prompt* is written once but its attached-repo set can change over
+time (repos added or removed via the routine's own config, not by editing the
+prompt) — hardcoding `OWNER/REPO[, ...]` into the prompt text then goes stale.
+That's a real, legitimate use of this command, not the issue #387 threat
+(an unbounded sweep of "every repo this session's credentials can reach"):
+the blast radius stays exactly as bounded, it's just sourced differently.
+The fix is **discovery by the caller, not a default inside this command**:
+before invoking this command, the routine should enumerate its own
+currently-attached repos and pass that exact list through as an explicit,
+real comma-separated `$ARGUMENTS` scope — never omit the scope hoping this
+command will auto-discover it, and never substitute a wildcard/placeholder
+for it. One confirmed enumeration source, directly observed in a live
+scheduled-task session on Claude Code (2026-09-26): its own system prompt
+carried a literal "Repository Scope" section listing exactly the repos its
+GitHub access was scoped to (worded "GitHub access for this session is
+currently scoped to: <list>"). Where a session's own configuration surfaces
+that kind of declaration, read it fresh at the start of each tick and pass
+it straight through as `$ARGUMENTS`, rather than re-deriving or guessing
+the list. **This is confirmed for that one session shape, not asserted for
+every routine/platform surface** — a routine created a different way (e.g.
+via a GitHub-event-triggered Routine rather than a scheduled task) may or
+may not carry the same declaration; check the specific session's own
+system prompt before relying on this, and fall back to whatever
+attached-repo signal that platform surface actually provides — e.g.,
+where the attached set instead shows up as local checkouts, enumerating
+each one's origin remote (`git remote get-url origin`) is an equivalent
+source. Whichever source applies, the enumerated list is still an
+explicit, auditable scope under the environment's control — not a blank
+check on session credentials — so the issue #387 guard stays intact; only
+the *source* of the scope changes from "hand-typed in the prompt" to
+"read fresh each tick."
 
 ## 1. Cheap triage — spawn a fast/cheap-model subagent
 
