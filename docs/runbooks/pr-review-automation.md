@@ -601,7 +601,19 @@ a review.
 - **Prompt:** read and follow `commands/atlas-poll-and-review.md` for the repo
   (or repos) being swept — the full spec lives there; inline a copy in the
   routine prompt itself, same reasoning as §1/§2 (`/`-commands don't resolve
-  in routine sessions).
+  in routine sessions). **If the repo(s) to sweep is a fixed list, hardcode
+  it in the prompt** (same as §2). **If it's a dynamically-attached set that
+  changes over time** (added/removed via the routine's own config rather than
+  by editing the prompt), don't hardcode a list that will go stale — instead
+  have the prompt enumerate the current set fresh each tick and pass it
+  through as the command's explicit repo-scope argument, per that command's
+  own "Sweeping a dynamically-attached repo set" guidance (issue #535): read
+  it from the session's own "Repository Scope"-style system-prompt
+  declaration (or, where the platform instead surfaces attached repos as
+  local checkouts, each one's origin remote). Either way this is still an
+  explicit, enumerated scope bounded by the environment's attached-repo set —
+  never a bare "sweep everything you can reach," which issue #387 already
+  forbids.
 
   **Confirm the fetch of that command file itself succeeded before doing
   anything else this tick** (issue #356, same check as §1's — this model has
