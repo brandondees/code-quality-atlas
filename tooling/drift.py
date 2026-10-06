@@ -42,6 +42,16 @@ def check_drift(skills_root: str = "skills", docs_root: str = ".") -> list[Drift
     reports: list[DriftReport] = []
     for skill_md in sorted(Path(skills_root).glob("*/SKILL.md")):
         name, built_from = _read_provenance(skill_md)
+        # The container itself (not just its entries) can be malformed, e.g.
+        # `built_from: null` or `built_from: 5` in the frontmatter -- that
+        # would otherwise reach `for b in built_from` below and raise an
+        # unwrapped TypeError ("'NoneType'/'int' object is not iterable")
+        # instead of a clear DriftError. Mirrors manifest.py's _load_skills
+        # container-level guard on raw_built (issue #555 round 2).
+        if not isinstance(built_from, list):
+            raise DriftError(
+                f"{name}: 'built_from' must be a list, got {type(built_from).__name__}"
+            )
         changed: list[Source] = []
         for b in built_from:
             # A built_from entry that isn't a mapping at all (e.g. a bare string

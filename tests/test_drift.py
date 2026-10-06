@@ -248,6 +248,25 @@ def test_drift_built_from_entry_non_mapping_raises_clear_drift_error(tmp_path):
     assert "broken" in str(exc.value)
 
 
+def test_drift_built_from_container_non_list_raises_clear_drift_error(tmp_path):
+    """A `built_from` that isn't a list at all (e.g. YAML null or a scalar)
+    must raise a clear DriftError naming the skill, not a bare TypeError from
+    `for b in built_from` ("'NoneType'/'int' object is not iterable")
+    (issue #555 round 2)."""
+    import pytest
+
+    from tooling.drift import DriftError
+
+    skill_dir = tmp_path / "broken"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: broken\nprovenance:\n  built_from:\n---\n\nbody\n"
+    )
+    with pytest.raises(DriftError) as exc:
+        check_drift(skills_root=str(tmp_path), docs_root=str(ROOT))
+    assert "broken" in str(exc.value)
+
+
 def test_drift_built_from_entry_non_string_source_raises_clear_drift_error(tmp_path):
     """A built_from entry whose `source` is a non-string (e.g. `source: 5` or
     `source: null`) must raise a clear DriftError naming the skill, not a bare
