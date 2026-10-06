@@ -42,8 +42,38 @@ def check_drift(skills_root: str = "skills", docs_root: str = ".") -> list[Drift
     reports: list[DriftReport] = []
     for skill_md in sorted(Path(skills_root).glob("*/SKILL.md")):
         name, built_from = _read_provenance(skill_md)
+        # The container itself (not just its entries) can be malformed, e.g.
+        # `built_from: null` or `built_from: 5` in the frontmatter -- that
+        # would otherwise reach `for b in built_from` below and raise an
+        # unwrapped TypeError ("'NoneType'/'int' object is not iterable")
+        # instead of a clear DriftError. Mirrors manifest.py's _load_skills
+        # container-level guard on raw_built (issue #555 round 2).
+        if not isinstance(built_from, list):
+            raise DriftError(
+                f"{name}: 'built_from' must be a list, got {type(built_from).__name__}"
+            )
         changed: list[Source] = []
         for b in built_from:
+            # A built_from entry that isn't a mapping at all (e.g. a bare string
+            # or YAML null) would otherwise reach `b["category"]` below and raise
+            # an unwrapped TypeError ("string indices must be integers" / "'NoneType'
+            # object is not subscriptable") with no skill context -- the same
+            # malformed-input shape as the KeyError/ValueError cases just below,
+            # just one step earlier (issue #555, filed from #554's review threads).
+            if not isinstance(b, dict):
+                raise DriftError(
+                    f"{name}: malformed built_from entry {b!r}: expected a mapping"
+                )
+            # A non-string/null `source` (e.g. `source: 5` or `source: null`)
+            # would otherwise reach Source.__post_init__'s `"#" not in self.source`
+            # check below and raise an unwrapped TypeError ("argument of type
+            # 'int'/'NoneType' is not iterable") instead of a clear DriftError --
+            # the sibling shape to the non-mapping check just above (issue #555).
+            if "source" in b and not isinstance(b["source"], str):
+                raise DriftError(
+                    f"{name}: malformed built_from entry {b!r}: source must be a "
+                    f"string, got {type(b['source']).__name__}"
+                )
             # A built_from entry missing `category`/`source`/`hash` (KeyError), or
             # one whose `category`/`source` is malformed enough for Source's own
             # validation to reject it (ValueError -- e.g. a bool category, which

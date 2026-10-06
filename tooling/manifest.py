@@ -881,11 +881,45 @@ def _load_skills(data: dict, path: str) -> list[Skill]:
                     f"skill #{i}: 'built_from' must be a list, "
                     f"got {type(raw_built).__name__}"
                 )
-            built = [
-                Source(category=b["category"], source=b["source"]) for b in raw_built
-            ]
+            built = []
+            for b in raw_built:
+                # A built_from entry that isn't a mapping (e.g. a bare string
+                # or YAML null) would otherwise reach `b["category"]` below and
+                # raise an unwrapped TypeError ("string indices must be
+                # integers" / "'NoneType' object is not subscriptable") instead
+                # of a clear ValidationError -- the same malformed-input shape
+                # drift.py's check_drift was hardened against for its own
+                # built_from parse (issue #555), just one layer earlier, at
+                # manifest-load time.
+                if not isinstance(b, dict):
+                    raise ValidationError(
+                        f"skill #{i}: built_from entry must be a mapping, "
+                        f"got {type(b).__name__} ({b!r})"
+                    )
+                # A non-string/null `source` (e.g. `source: 5` or `source:
+                # null`) would otherwise reach Source.__post_init__'s `"#" not
+                # in self.source` check and raise an unwrapped TypeError
+                # ("argument of type 'int'/'NoneType' is not iterable")
+                # instead -- the sibling shape to the non-mapping check above.
+                if "source" in b and not isinstance(b["source"], str):
+                    raise ValidationError(
+                        f"skill #{i}: built_from entry 'source' must be a "
+                        f"string, got {type(b['source']).__name__}"
+                    )
+                built.append(Source(category=b["category"], source=b["source"]))
             artifacts = []
             for a in _list_field(s, "artifacts", f"skill #{i}"):
+                # An artifacts entry that isn't a mapping (e.g. YAML null)
+                # would otherwise reach `a["rubric"]` below and raise an
+                # unwrapped TypeError ("'NoneType' object is not
+                # subscriptable") instead of a clear ValidationError -- the
+                # same malformed-input shape as the built_from guard above,
+                # just for the artifacts list.
+                if not isinstance(a, dict):
+                    raise ValidationError(
+                        f"skill #{i}: artifact entry must be a mapping, "
+                        f"got {type(a).__name__} ({a!r})"
+                    )
                 rubric = a["rubric"]
                 # Same bool-is-a-subtype-of-int gotcha as Source.category above:
                 # an unguarded `rubric` would let `rubric: true` silently match
