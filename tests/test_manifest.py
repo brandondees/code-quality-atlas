@@ -229,6 +229,48 @@ def test_load_manifest_wraps_malformed_source(tmp_path):
         load_manifest(path)
 
 
+def test_load_manifest_rejects_non_mapping_built_from_entry(tmp_path):
+    """A built_from entry that isn't a mapping (e.g. a bare string) must raise
+    a clear ValidationError, not a bare TypeError from `b["category"]`
+    ("string indices must be integers") -- the same malformed-input shape
+    drift.py's check_drift was hardened against for its own built_from parse
+    (issue #555), just one layer earlier, at manifest-load time."""
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    built_from:\n"
+        "      - just a string\n",
+    )
+    with pytest.raises(ValidationError, match="skill #0.*mapping"):
+        load_manifest(path)
+
+
+def test_load_manifest_rejects_non_string_built_from_source(tmp_path):
+    """A built_from entry whose `source` is a non-string (e.g. `source: 5`)
+    must raise a clear ValidationError, not a bare TypeError from
+    Source.__post_init__'s `"#" not in self.source` ("argument of type 'int'
+    is not iterable")."""
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: hunting-silent-failures\n"
+        "    description: x\n"
+        "    shape: diff\n"
+        "    wave: 1\n"
+        "    built_from:\n"
+        "      - category: 2\n"
+        "        source: 5\n",
+    )
+    with pytest.raises(ValidationError, match="skill #0.*source.*string"):
+        load_manifest(path)
+
+
 def _skill(**kw):
     base = {
         "name": "hunting-silent-failures",

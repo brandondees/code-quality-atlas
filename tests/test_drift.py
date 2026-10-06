@@ -222,3 +222,53 @@ def test_drift_built_from_entry_bool_category_raises_clear_drift_error(tmp_path)
     with pytest.raises(DriftError) as exc:
         check_drift(skills_root=str(tmp_path), docs_root=str(ROOT))
     assert "broken" in str(exc.value)
+
+
+def test_drift_built_from_entry_non_mapping_raises_clear_drift_error(tmp_path):
+    """A built_from entry that isn't a mapping at all (e.g. a bare string or
+    YAML null) must raise a clear DriftError naming the skill, not a bare
+    TypeError from `b["category"]` ("string indices must be integers" /
+    "'NoneType' object is not subscriptable") (issue #555)."""
+    import pytest
+
+    from tooling.drift import DriftError
+
+    skill_dir = tmp_path / "broken"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: broken\n"
+        "provenance:\n"
+        "  built_from:\n"
+        "    - just a string\n"
+        "---\n\nbody\n"
+    )
+    with pytest.raises(DriftError) as exc:
+        check_drift(skills_root=str(tmp_path), docs_root=str(ROOT))
+    assert "broken" in str(exc.value)
+
+
+def test_drift_built_from_entry_non_string_source_raises_clear_drift_error(tmp_path):
+    """A built_from entry whose `source` is a non-string (e.g. `source: 5` or
+    `source: null`) must raise a clear DriftError naming the skill, not a bare
+    TypeError from Source.__post_init__'s `"#" not in self.source`
+    ("argument of type 'int'/'NoneType' is not iterable") (issue #555)."""
+    import pytest
+
+    from tooling.drift import DriftError
+
+    skill_dir = tmp_path / "broken"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        "---\n"
+        "name: broken\n"
+        "provenance:\n"
+        "  built_from:\n"
+        "    - category: 2\n"
+        "      source: 5\n"
+        '      hash: "deadbeef"\n'
+        "---\n\nbody\n"
+    )
+    with pytest.raises(DriftError) as exc:
+        check_drift(skills_root=str(tmp_path), docs_root=str(ROOT))
+    assert "broken" in str(exc.value)

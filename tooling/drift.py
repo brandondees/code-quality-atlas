@@ -44,6 +44,26 @@ def check_drift(skills_root: str = "skills", docs_root: str = ".") -> list[Drift
         name, built_from = _read_provenance(skill_md)
         changed: list[Source] = []
         for b in built_from:
+            # A built_from entry that isn't a mapping at all (e.g. a bare string
+            # or YAML null) would otherwise reach `b["category"]` below and raise
+            # an unwrapped TypeError ("string indices must be integers" / "'NoneType'
+            # object is not subscriptable") with no skill context -- the same
+            # malformed-input shape as the KeyError/ValueError cases just below,
+            # just one step earlier (issue #555, filed from #554's review threads).
+            if not isinstance(b, dict):
+                raise DriftError(
+                    f"{name}: malformed built_from entry {b!r}: expected a mapping"
+                )
+            # A non-string/null `source` (e.g. `source: 5` or `source: null`)
+            # would otherwise reach Source.__post_init__'s `"#" not in self.source`
+            # check below and raise an unwrapped TypeError ("argument of type
+            # 'int'/'NoneType' is not iterable") instead of a clear DriftError --
+            # the sibling shape to the non-mapping check just above (issue #555).
+            if "source" in b and not isinstance(b["source"], str):
+                raise DriftError(
+                    f"{name}: malformed built_from entry {b!r}: source must be a "
+                    f"string, got {type(b['source']).__name__}"
+                )
             # A built_from entry missing `category`/`source`/`hash` (KeyError), or
             # one whose `category`/`source` is malformed enough for Source's own
             # validation to reject it (ValueError -- e.g. a bool category, which
