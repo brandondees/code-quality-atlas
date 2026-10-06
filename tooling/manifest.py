@@ -909,6 +909,17 @@ def _load_skills(data: dict, path: str) -> list[Skill]:
                 built.append(Source(category=b["category"], source=b["source"]))
             artifacts = []
             for a in _list_field(s, "artifacts", f"skill #{i}"):
+                # An artifacts entry that isn't a mapping (e.g. YAML null)
+                # would otherwise reach `a["rubric"]` below and raise an
+                # unwrapped TypeError ("'NoneType' object is not
+                # subscriptable") instead of a clear ValidationError -- the
+                # same malformed-input shape as the built_from guard above,
+                # just for the artifacts list.
+                if not isinstance(a, dict):
+                    raise ValidationError(
+                        f"skill #{i}: artifact entry must be a mapping, "
+                        f"got {type(a).__name__} ({a!r})"
+                    )
                 rubric = a["rubric"]
                 # Same bool-is-a-subtype-of-int gotcha as Source.category above:
                 # an unguarded `rubric` would let `rubric: true` silently match

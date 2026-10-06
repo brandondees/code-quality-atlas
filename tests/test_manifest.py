@@ -1338,6 +1338,26 @@ def test_load_manifest_rejects_a_bool_artifact_rubric(tmp_path):
         load_manifest(path)
 
 
+def test_load_manifest_rejects_non_mapping_artifact_entry(tmp_path):
+    """An artifacts entry that isn't a mapping (e.g. YAML null) must raise a
+    clear ValidationError, not a bare TypeError from `a["rubric"]`
+    ("'NoneType' object is not subscriptable") -- the same malformed-input
+    shape as the built_from guard, for the artifacts list."""
+    path = _write_manifest(
+        tmp_path,
+        "taxonomy_version: v0.2\n"
+        "skills:\n"
+        "  - name: reviewing-artifact-conventions\n"
+        "    description: x\n"
+        "    shape: artifact\n"
+        "    wave: 1\n"
+        "    built_from:\n" + _BUILT_FROM_LINE + "    artifacts:\n"
+        "      - null\n",
+    )
+    with pytest.raises(ValidationError, match="skill #0.*artifact entry.*mapping"):
+        load_manifest(path)
+
+
 def test_load_manifest_treats_bare_router_routes_as_empty_list(tmp_path):
     # A present-but-null "routes:" key used to crash `for x in
     # r["routes"]` with TypeError: 'NoneType' object is not iterable
