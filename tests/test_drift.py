@@ -2,7 +2,10 @@
 # tests/test_drift.py
 from pathlib import Path
 
-from tooling.drift import DriftReport, check_drift
+import pytest
+import yaml
+
+from tooling.drift import DriftError, DriftReport, check_drift
 from tooling.generate_skill import generate_skill
 from tooling.manifest import Skill, Source
 
@@ -291,3 +294,105 @@ def test_drift_built_from_entry_non_string_source_raises_clear_drift_error(tmp_p
     with pytest.raises(DriftError) as exc:
         check_drift(skills_root=str(tmp_path), docs_root=str(ROOT))
     assert "broken" in str(exc.value)
+
+
+def _entry(**overrides):
+    """A well-formed built_from entry, with one or more fields overridden."""
+    base = {
+        "category": 2,
+        "source": "tests/fixtures/research_sample.md#2",
+        "hash": "deadbeef",
+    }
+    base.update(overrides)
+    return base
+
+
+def _entry_missing(key):
+    """A well-formed built_from entry with one field removed entirely."""
+    entry = _entry()
+    del entry[key]
+    return entry
+
+
+def _write_broken_skill_md(tmp_path, built_from):
+    """Write a SKILL.md at tmp_path/broken whose provenance.built_from is
+    exactly the given value, serialized via YAML to avoid hand-escaping."""
+    skill_dir = tmp_path / "broken"
+    skill_dir.mkdir()
+    frontmatter = {"name": "broken", "provenance": {"built_from": built_from}}
+    (skill_dir / "SKILL.md").write_text(
+        "---\n" + yaml.safe_dump(frontmatter) + "---\n\nbody\n"
+    )
+
+
+# Every cell below is one shape `check_drift` must route through `DriftError`
+# naming the skill, instead of letting a bare Type/Key/ValueError escape
+# uncaught. Four separate fixes (#107, #546, #554, #555) each closed exactly
+# one shape of this same defect family and missed the next one; this table
+# enumerates the type-space of each validated field (the built_from
+# container, an entry, and an entry's category/source/hash) so the next
+# shape is a test failure here instead of a fifth issue (#558).
+MALFORMED_BUILT_FROM_MATRIX = [
+    # built_from container itself: must be a list.
+    ("container-null", None, "must be a list"),
+    ("container-str", "oops", "must be a list"),
+    ("container-int", 5, "must be a list"),
+    ("container-bool", True, "must be a list"),
+    ("container-dict", {"category": 2}, "must be a list"),
+    # a built_from entry: must be a mapping.
+    ("entry-null", [None], "expected a mapping"),
+    ("entry-str", ["just a string"], "expected a mapping"),
+    ("entry-int", [5], "expected a mapping"),
+    ("entry-bool", [True], "expected a mapping"),
+    ("entry-list", [["nested", "list"]], "expected a mapping"),
+    # entry.category: must be a non-bool int.
+    ("category-bool-true", [_entry(category=True)], "category must be an integer"),
+    ("category-bool-false", [_entry(category=False)], "category must be an integer"),
+    ("category-str", [_entry(category="2")], "category must be an integer"),
+    ("category-null", [_entry(category=None)], "category must be an integer"),
+    ("category-list", [_entry(category=[2])], "category must be an integer"),
+    ("category-dict", [_entry(category={"x": 1})], "category must be an integer"),
+    ("category-missing", [_entry_missing("category")], "missing field 'category'"),
+    # entry.source: must be a string.
+    ("source-null", [_entry(source=None)], "source must be a string"),
+    ("source-int", [_entry(source=5)], "source must be a string"),
+    ("source-bool", [_entry(source=True)], "source must be a string"),
+    ("source-list", [_entry(source=["x"])], "source must be a string"),
+    ("source-dict", [_entry(source={"x": 1})], "source must be a string"),
+    ("source-missing", [_entry_missing("source")], "missing field 'source'"),
+    # entry.source: a string, but the wrong shape.
+    (
+        "source-no-hash-sign",
+        [_entry(source="tests/fixtures/research_sample.md")],
+        "must be '<path>#<section>'",
+    ),
+    (
+        "source-non-digit-section",
+        [_entry(source="tests/fixtures/research_sample.md#x")],
+        "non-negative integer",
+    ),
+    # entry.hash: only "missing" is a validated cell. Its *value* is never
+    # type-checked -- it's just compared with `!=` against a freshly
+    # computed hash, so any present value (str, int, ...) degrades to
+    # "drifted" rather than crashing. Missing is the only cell with an
+    # error path to cover.
+    ("hash-missing", [_entry_missing("hash")], "missing field 'hash'"),
+]
+
+
+@pytest.mark.parametrize(
+    "built_from,expected_substring",
+    [(bf, msg) for _case_id, bf, msg in MALFORMED_BUILT_FROM_MATRIX],
+    ids=[case_id for case_id, _bf, _msg in MALFORMED_BUILT_FROM_MATRIX],
+)
+def test_malformed_built_from_type_matrix_raises_drift_error(
+    tmp_path, built_from, expected_substring
+):
+    """Every malformed `built_from` shape in the matrix above must raise a
+    `DriftError` naming the skill and the problem, not a bare
+    Type/Key/ValueError escaping `check_drift` uncaught (issue #558)."""
+    _write_broken_skill_md(tmp_path, built_from)
+    with pytest.raises(DriftError) as exc:
+        check_drift(skills_root=str(tmp_path), docs_root=str(ROOT))
+    assert "broken" in str(exc.value)
+    assert expected_substring in str(exc.value)
