@@ -514,3 +514,23 @@ the log stale" case the calendar check still needs to catch. `ci.yml`'s
 covers the decision table directly, and a new
 `test_ci_yml_wires_the_pr_diff_gate_env_vars` pins the wiring itself so a
 future rename can't silently disable the gate on every PR.
+
+## 2026-10-08 — #558: a table-driven type-matrix test for `check_drift`'s malformed `built_from` handling
+
+`tooling/drift.py::check_drift`'s malformed-`built_from` handling had been
+fixed four times for four different input shapes (#107, #546, #554, #555),
+each fix covering only the exact shape its triggering report showed and
+missing the next one. Added `MALFORMED_BUILT_FROM_MATRIX` to
+`tests/test_drift.py`: a parametrized table enumerating the type-space of
+the container (`built_from` itself), an entry, and an entry's
+`category`/`source`/`hash` fields (null, str, int, bool, list, dict, and
+missing-key, as applicable to each), asserting every cell routes through a
+`DriftError` naming the skill rather than a bare Type/Key/ValueError. 26
+new cases pass against current `main`; reverting the `entry`-is-a-mapping
+guard locally to confirm the matrix is load-bearing reproduces the exact
+pre-#555 bare `TypeError` across its 5 `entry-*` cases, as expected. Left
+the existing per-shape regression tests in place rather than consolidating
+them into the matrix, to keep this change additive. The issue's other two
+suggested follow-ups — a `tracing-correctness-and-invariants` lens check
+for this input-validation pattern, and a hand-authored eval scenario —
+are bigger, separate asks and remain open.
