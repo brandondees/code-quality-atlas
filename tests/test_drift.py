@@ -308,12 +308,15 @@ def _entry(**overrides):
 
 
 def _entry_missing(key):
+    """A well-formed built_from entry with one field removed entirely."""
     entry = _entry()
     del entry[key]
     return entry
 
 
 def _write_broken_skill_md(tmp_path, built_from):
+    """Write a SKILL.md at tmp_path/broken whose provenance.built_from is
+    exactly the given value, serialized via YAML to avoid hand-escaping."""
     skill_dir = tmp_path / "broken"
     skill_dir.mkdir()
     frontmatter = {"name": "broken", "provenance": {"built_from": built_from}}
