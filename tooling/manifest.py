@@ -1184,12 +1184,30 @@ def load_manifest(path: str) -> Manifest:
     for key in ("skills", "taxonomy_version"):
         if key not in data:
             raise ValidationError(f"{path}: missing required key {key!r}")
+    # Unlike every other identifying string field in the manifest (skill/
+    # router/synthesizer/mode/entrypoint name/description), taxonomy_version
+    # is read straight off `data` with no type check at all -- a YAML author
+    # dropping the conventional "v" prefix (`taxonomy_version: 0.15` instead
+    # of `v0.15`) parses as a float, not a string, and would otherwise sail
+    # through unflagged: the dataclass field is typed `str` but nothing at
+    # runtime enforces that, so the wrong type silently propagates into every
+    # generated skill's `provenance.taxonomy_version` frontmatter. Same
+    # malformed-manifest-field shape this file already guards everywhere else
+    # (e.g. the bool-is-an-int-subtype guards on Source.category/Skill.wave/
+    # Skill.eval_min, or _prose()'s type check on name/description) -- this
+    # field was simply the one left unswept.
+    taxonomy_version = data["taxonomy_version"]
+    if not isinstance(taxonomy_version, str) or not taxonomy_version:
+        raise ValidationError(
+            f"{path}: 'taxonomy_version' must be a non-empty string, got "
+            f"{type(taxonomy_version).__name__}"
+        )
     # Split by manifest section (skills / router / prepass / synthesizer / modes /
     # entrypoints) rather than one 260-line function, mirroring how validate()
     # is already decomposed per section below (#381: load_manifest was the
     # unswept sibling of that decomposition, at cyclomatic complexity 41).
     return Manifest(
-        taxonomy_version=data["taxonomy_version"],
+        taxonomy_version=taxonomy_version,
         skills=_load_skills(data, path),
         router=_load_router(data),
         prepass=_load_prepass(data),
