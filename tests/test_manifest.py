@@ -206,6 +206,27 @@ def test_load_manifest_rejects_missing_taxonomy_version(tmp_path):
         load_manifest(path)
 
 
+def test_load_manifest_rejects_non_string_taxonomy_version(tmp_path):
+    # Regression: a YAML author dropping the conventional "v" prefix
+    # (`taxonomy_version: 0.15` instead of `v0.15`) parses as a float, not a
+    # string -- the same malformed-manifest-field shape every other
+    # identifying field here already guards against, this one was simply
+    # unswept.
+    path = _write_manifest(tmp_path, "taxonomy_version: 0.15\nskills: []\n")
+    with pytest.raises(
+        ValidationError, match="'taxonomy_version' must be a non-empty string"
+    ):
+        load_manifest(path)
+
+
+def test_load_manifest_rejects_null_taxonomy_version(tmp_path):
+    path = _write_manifest(tmp_path, "taxonomy_version:\nskills: []\n")
+    with pytest.raises(
+        ValidationError, match="'taxonomy_version' must be a non-empty string"
+    ):
+        load_manifest(path)
+
+
 def test_load_manifest_rejects_non_list_skills(tmp_path):
     path = _write_manifest(tmp_path, "taxonomy_version: v0.2\nskills: not-a-list\n")
     with pytest.raises(ValidationError, match="'skills' must be a list"):
