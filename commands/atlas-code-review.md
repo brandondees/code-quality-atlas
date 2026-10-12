@@ -49,10 +49,16 @@ A file the diff reports as a rename (`rename from .../rename to ...`, with or
 without a content hunk) is a **moved module**, not new code and not a deletion —
 hand each lens the move (old path → new path) rather than letting it read a
 0%-changed rename as nothing to review or a 100%-changed one as a brand-new
-file. `tracing-correctness-and-invariants`, `reviewing-module-design`, and
-`reviewing-naming-and-readability` each have a specific move/rename check; make
-sure the lens selection in step 2 below doesn't skip them solely because the
-diff "looks like" just a rename with no logic change.
+file. Bare `-M` still only catches a move above its default 50% similarity;
+a move combined with a heavy edit can fall below that and show up as an
+unpaired delete and add with no rename header — when that happens, check
+whether a deleted and an added path share a basename or sit in the same
+directory subtree, and treat the pair as a *possible* move too rather than
+trusting `-M`'s silence on it. `tracing-correctness-and-invariants`,
+`reviewing-module-design`, and `reviewing-naming-and-readability` each have a
+specific move/rename check; make sure the lens selection in step 2 below
+doesn't skip them solely because the diff "looks like" just a rename with no
+logic change, or because a heavily-edited move wasn't `-M`-paired at all.
 
 ## 2. Pick the depth mode and lenses
 
@@ -83,9 +89,14 @@ every relevant lens, uncapped. On top of that set, add any **auto-include**
 lens the change shape triggers (e.g. a docs-only change always pulls in
 `auditing-documentation-health`, an ADR/RFC change always pulls in
 `reviewing-decision-lifecycle` — see the picker's How to pick section); these
-ride along additively and don't count against the 3-8. If the relevant lenses
-are already obvious (an async change → `reviewing-concurrency-and-async`),
-call them directly — routing through the picker is optional.
+ride along additively and don't count against the 3-8. **Any move/rename
+found in step 1 is one of these triggers:** always auto-include
+`tracing-correctness-and-invariants`, `reviewing-module-design`, and
+`reviewing-naming-and-readability` when the diff contains at least one moved
+file, even if content-relevance alone would have ranked them out. If the
+relevant lenses are already obvious (an async change →
+`reviewing-concurrency-and-async`), call them directly — routing through the
+picker is optional.
 
 ## 3. Run the lenses, and combine non-exclusively
 
