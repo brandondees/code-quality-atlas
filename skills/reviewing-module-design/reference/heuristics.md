@@ -25,6 +25,7 @@
 - Composition preferred over inheritance; inheritance shallow and not used purely for reuse?
 - Any cyclic dependency between units (break via dependency inversion)?
 - "When in doubt, leave it out": is speculative public surface being added (cross #11)?
+- **A move changes structure, not just address:** when the diff relocates a file or module (rename-detected, not reviewed as an unrelated add+delete), does the new location actually fit the module boundaries — or does it pull the moved code into a namespace whose other members it has no business depending on, cross a layering rule the rest of the tree observes, or leave a cohesive family split across the old and new locations (half a feature moved, half left behind)? A move that only relocates the file without re-examining whether it now sits with the right neighbors is a missed opportunity to catch a boundary violation while it's cheap to fix (cross #12).
 
 ---
 

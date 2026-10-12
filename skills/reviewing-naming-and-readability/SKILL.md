@@ -9,7 +9,7 @@ provenance:
   built_from:
   - category: 5
     source: docs/research/cluster-2-readability.md#5
-    hash: c21ecdea93dc6692d28393958d7528d980fdad20643072ad1bb0a7c9ab678f89
+    hash: 94b06754a889d7841c0b8c81090cabeee163155233ed95adfb9f4e0edb5e1088
   - category: 6
     source: docs/research/cluster-2-readability.md#6
     hash: 89afcabd80accc6737f64bc5a565165ad39c008b4a5f1408d1379c8f5303b135
@@ -42,6 +42,7 @@ Report only real problems. If this lens applies and what you reviewed holds up �
 
 The head of the full checklist — enough for a first pass without opening any reference file:
 
+- **A moved/renamed path is a name too:** when the diff relocates a file or module, apply the same naming bar to the new path/namespace as to a renamed identifier — does it state intent and fit domain language, is it consistent with its new siblings (not a one-off convention in an otherwise-consistent directory), and is it a clearer home than the old one or just a sideways/vaguer move? A move that trades one honest-but-incomplete name for another hasn't actually progressed the naming (cross-links #5's Belshee staging above; structural fit is #9).
 - **Symmetry of expression**: parallel concepts in parallel form (all branches `return x`); paired operations adjacent and mirror-shaped (`acquire`/`release`); consistent argument ordering across sibling calls.
 - Does each name state *intent* (what/why) rather than *mechanism* or type? (`activeUsers` over `userListFiltered`; `retryBudget` over `n`.)
 - Is name length proportional to scope? (One letter fine for a 3-line loop; a field or exported symbol needs a descriptive name.)

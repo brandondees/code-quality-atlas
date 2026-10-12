@@ -534,3 +534,33 @@ them into the matrix, to keep this change additive. The issue's other two
 suggested follow-ups — a `tracing-correctness-and-invariants` lens check
 for this input-validation pattern, and a hand-authored eval scenario —
 are bigger, separate asks and remain open.
+
+## 2026-10-12 — #540: file/module renames and moves now reviewed as an interface change
+
+A rename/move changes the module's import-path namespace the same way a
+signature change alters a function's call contract, but no lens treated it
+that way — the #528 cal.com benchmark found a real `_utils/` → `_utils/oauth/`
+move reviewed as untouched ("only their import path moved") on two separate
+atlas runs. Added one ★ heuristic to each of the three clusters #540 named:
+cluster-1 `#1` gets a dedicated move/rename bullet next to the existing
+"Consumer contract across the diff" one (`tracing-correctness-and-invariants`)
+— every importer, re-export, alias, and string-keyed mock (`jest.mock("old/
+path")`) is a consumer of the old path, not just the diff's own updated
+imports; cluster-3 `#9` gets a structural-fit check (`reviewing-module-design`)
+— does the new location sit with the right neighbors, or does it cross a
+layering rule or split a cohesive family; cluster-2 `#5` gets a naming-bar
+check (`reviewing-naming-and-readability`) — is the new path actually clearer,
+or a sideways move trading one incomplete name for another. Regenerated the
+three skills (`tooling.cli generate`) and re-vendored `.claude/skills/`
+(`tooling/vendor-skills.sh .`, this repo's own self-vendor case); `tooling.cli
+drift` reports clean. Added the eval scenario #540 itself proposed (a module
+move where every import was updated except one `jest.mock` string path) to
+`tracing-correctness-and-invariants/evals/eval.json` — the other two lenses'
+new checks are judgment calls (structural fit, naming clarity) rather than a
+crisp pass/fail the same scenario shape would exercise, so left for a
+follow-up eval pass rather than forcing a scenario that wouldn't discriminate.
+The other proposed change — resolving PR/local diffs with rename detection
+(`git diff -M`, or GitHub's `previous_filename`) so a moved file reaches the
+lenses as a move instead of an unrelated add+delete — landed in both
+`commands/atlas-code-review.md` (step 1) and `commands/atlas-review-pr.md`
+(step 4, point 5), since both commands currently resolve diffs without it.

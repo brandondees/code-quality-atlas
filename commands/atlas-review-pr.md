@@ -408,7 +408,20 @@ line.
    to it: confirm, contextualize, or dismiss each hit against the checklist
    just loaded, not against a guess at what a lens with that name would
    check — a clean tool run clears nothing, so every selected lens still runs
-   in full.
+   in full. **Resolve renames before handing any lens the diff.** Fetch
+   `get_files` (already paginated in full for the `.claude/skills/` gate
+   above) and note every entry's `previous_filename` — GitHub's files API
+   sets it for a detected rename even at low similarity — and prefer
+   `get_diff` over `get_patch`-style per-file reconstruction so a moved file
+   arrives as a rename header (`rename from`/`rename to`), not as an
+   unrelated add+delete pair that hides the move from every lens. A file the
+   diff reports as a rename is a **moved module** — the path is the
+   consumer-facing namespace, so the move is an interface change — hand each
+   lens the move (old path → new path), not a guess at new-file-vs-deletion.
+   `tracing-correctness-and-invariants`, `reviewing-module-design`, and
+   `reviewing-naming-and-readability` each carry a specific move/rename
+   check; don't let step 2's relevance ranking skip them solely because a
+   renamed file's content hunk looks small or empty.
 6. **Combine, don't exclude.** If another review method is available in this repo
    — the built-in `code-review` skill, a framework review (e.g. BMAD), or linter
    output — you may run it on the same diff and fold its findings in too. The

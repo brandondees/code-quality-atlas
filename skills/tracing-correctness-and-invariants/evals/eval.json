@@ -217,6 +217,14 @@
         "Notes that the mismatch holds regardless of outcome: on success the stored row is the wrapper object instead of the parsed payload, and on failure it silently stores a payload-free error record with no failure handling at the call site",
         "Recommends store_webhook_event branch on result.success and pass result.data (or raise/handle on failure) rather than passing result straight through"
       ]
+    },
+    {
+      "query": "Review this change:\n```diff\nrename from src/billing/parseAmount.js\nrename to src/billing/money/parseAmount.js\n```\nEvery import of `billing/parseAmount` in the application code was updated to `billing/money/parseAmount`. One test file was not touched by this diff:\n```javascript\n// src/billing/__tests__/invoice.test.js (unchanged by this diff)\njest.mock('../parseAmount', () => ({ parseAmount: () => 100 }));\n\ntest('invoice total uses parsed amount', () => {\n  const total = computeInvoiceTotal(rawLineItems);\n  expect(total).toBe(100 * rawLineItems.length);\n});\n```",
+      "expected_behavior": [
+        "Flags that the jest.mock string path ('../parseAmount') still points at the pre-move location (src/billing/parseAmount.js), which no longer exists after the rename to src/billing/money/parseAmount.js",
+        "Explains the consequence: the mock silently stops applying, so the test now exercises whatever parseAmount resolves to (a module-not-found failure, or the real unmocked implementation) rather than the intended stubbed value of 100",
+        "Treats the file move as a consumer-contract change on par with a signature change, not a no-op — the fix is updating the mock's path to the new location, not just trusting that the diff's own updated imports were the only consumers"
+      ]
     }
   ]
 }

@@ -21,14 +21,19 @@ convergence rules).
 
 ## 1. Resolve the diff
 
-Pick the smallest diff that captures what the user means:
+Pick the smallest diff that captures what the user means. **Always pass `-M`
+(rename detection)** on every `git diff`/`git show` below — a file move is an
+interface change (the path is the module's import namespace), not a no-op,
+and without `-M` a moved-but-unchanged file shows up as an unrelated add+delete
+pair, which hides the move from every lens rather than handing it the old path
+to check consumers against:
 
-- `$ARGUMENTS` names a ref or range → review `git diff $ARGUMENTS` (or
-  `git show` for a single commit).
+- `$ARGUMENTS` names a ref or range → review `git diff -M $ARGUMENTS` (or
+  `git show -M` for a single commit).
 - "what I pushed" / "my changes" with no ref → compare the current branch against
-  its upstream or the default branch: `git diff @{upstream}...HEAD`, falling back
-  to `git diff <default-branch>...HEAD`, then to uncommitted work
-  (`git diff HEAD`) if those are empty.
+  its upstream or the default branch: `git diff -M @{upstream}...HEAD`, falling back
+  to `git diff -M <default-branch>...HEAD`, then to uncommitted work
+  (`git diff -M HEAD`) if those are empty.
 - Nothing staged, committed-ahead, or modified → say there is nothing to review
   and stop; do not invent a diff.
 
@@ -37,6 +42,15 @@ Keep scope to the changed files, not the whole repo (whole-repo health is what t
 `synthesizing-review-findings`'s Reviewer discipline: a targeted whole-tree search
 for the exact construct behind a confirmed defect, reported as that finding's
 `siblings`.
+
+A file the diff reports as a rename (`rename from .../rename to ...`, with or
+without a content hunk) is a **moved module**, not new code and not a deletion —
+hand each lens the move (old path → new path) rather than letting it read a
+0%-changed rename as nothing to review or a 100%-changed one as a brand-new
+file. `tracing-correctness-and-invariants`, `reviewing-module-design`, and
+`reviewing-naming-and-readability` each have a specific move/rename check; make
+sure the lens selection in step 2 below doesn't skip them solely because the
+diff "looks like" just a rename with no logic change.
 
 ## 2. Pick the depth mode and lenses
 
