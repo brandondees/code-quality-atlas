@@ -298,6 +298,18 @@ identical on head and base, so the `Skill` tool is safe to use there. Record
 which tier served this round, and whether this gate fired, for the coverage
 line.
 
+**From that same `get_files` call, build the rename inventory before step 2
+picks any lens** — picking lenses first and only discovering a move afterward
+(sub-step 5, below) means the picker could rank every move-aware lens low or
+skip it on a move-only PR, before anything told it a move was there. Note
+every entry's `previous_filename` — GitHub's files API sets it for a rename
+detected above its similarity threshold (~50%; below that, `previous_filename`
+is absent and the file arrives as a plain `removed` + `added` pair) — and
+also check for that lower-similarity case: when a `removed` and an `added`
+entry share a basename or sit in the same directory subtree, treat the pair
+as a *possible* move too. Hand this inventory (old path → new path, for each
+entry either signal caught) to step 2 next.
+
 1. Determine the **depth mode**, matching the triggers table in
    `code-quality-atlas:choosing-review-lenses`'s Depth modes section:
    **triage** ("triage", "quick review", "fast check", "pre-merge gate"),
@@ -327,6 +339,12 @@ line.
    always pulls in `auditing-documentation-health`, an ADR/RFC change always
    pulls in `reviewing-decision-lifecycle` — see the picker's How to pick
    section) — these ride along additively and don't count against the 3-8.
+   **A non-empty rename inventory from the step above is one of these
+   triggers:** always auto-include `tracing-correctness-and-invariants`,
+   `reviewing-module-design`, and `reviewing-naming-and-readability` when the
+   PR contains at least one moved file, even if their content-relevance score
+   alone would have ranked them out — a move's content hunk is often small
+   or empty, which is exactly when relevance-only ranking would miss it.
    Scope to the **files in this PR's diff**, not the whole repo — except for
    the shape sweep in `synthesizing-review-findings`'s Reviewer discipline (a
    targeted whole-tree search for the exact construct behind a confirmed
@@ -408,7 +426,13 @@ line.
    to it: confirm, contextualize, or dismiss each hit against the checklist
    just loaded, not against a guess at what a lens with that name would
    check — a clean tool run clears nothing, so every selected lens still runs
-   in full.
+   in full. **Hand each lens the rename inventory built before step 2,** not
+   a guess at new-file-vs-deletion: prefer `get_diff` over reconstructing a
+   moved file's patch from `get_files`' per-file text, so it arrives as a
+   rename header (`rename from`/`rename to`) with its old path attached,
+   the same move the inventory already flagged — `tracing-correctness-and-
+   invariants`, `reviewing-module-design`, and `reviewing-naming-and-
+   readability` each carry a specific move/rename check that needs it.
 6. **Combine, don't exclude.** If another review method is available in this repo
    — the built-in `code-review` skill, a framework review (e.g. BMAD), or linter
    output — you may run it on the same diff and fold its findings in too. The

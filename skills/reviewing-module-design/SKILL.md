@@ -9,7 +9,7 @@ provenance:
   built_from:
   - category: 9
     source: docs/research/cluster-3-structure.md#9
-    hash: 38ffd004ead3132595eb8c0abef6604be65c2ff741e304912c5fe25a0356ef3e
+    hash: dc30b39084a3f2f128ecfc0a318c1a4a69aa24afc3c87d4f3b2064e54a5e6023
   - category: 10
     source: docs/research/cluster-3-structure.md#10
     hash: a0d6f60a2202e76d2ada9c19476a5b3e8c06ad0e4f4f7ab09df8aa6c461000b4
@@ -40,6 +40,7 @@ Report only real problems. If this lens applies and what you reviewed holds up �
 The head of the full checklist — enough for a first pass without opening any reference file:
 
 - Is it **hard to misuse** — invalid argument/call-sequence prevented by types, not docs (caller ergonomics / pit of success)?
+- **A move changes structure, not just address:** when the diff relocates a file or module (rename-detected, not reviewed as an unrelated add+delete), does the new location actually fit the module boundaries — or does it pull the moved code into a namespace whose other members it has no business depending on, cross a layering rule the rest of the tree observes, or leave a cohesive family split across the old and new locations (half a feature moved, half left behind)? A move that only relocates the file without re-examining whether it now sits with the right neighbors is a missed opportunity to catch a boundary violation while it's cheap to fix (cross #12).
 - **Make illegal states unrepresentable — at the earliest, most structural boundary the substrate offers.** The general move behind this whole category: rather than *checking for* a forbidden state correctly on every path, arrange things so the forbidden state **cannot be constructed at all**. The enforcement mechanism is substrate-specific, but the move is one — a **type** in a domain model (a tagged union, a smart constructor); a **schema constraint** in a database (`CHECK`, a scoped `UNIQUE`, a partial index, an exclusion constraint — see the persistence bullets below); a **parsed, typed object** for configuration built once at boot (cross #26); a **validated, discriminated payload** at a wire boundary so an impossible combination can't be expressed (cross #13); a **discriminated union + exhaustiveness check** for UI state (cross #42); a `validation` block or admission schema for infrastructure inputs (cross #31). *Parse, don't validate* is this same move aimed at input — parse untrusted data into a constrained shape **once** at the boundary, rather than validate-then-pass-raw and re-check (or forget to) everywhere downstream. When you see the same guard repeated at call site after call site, ask what one structural change would delete the need for all of them.
 - Does the unit have **one** clear responsibility (high cohesion)? State its job in a sentence without "and."
 - Is the interface **narrow relative to the behavior** behind it (deep module), or a shallow pass-through adding no value?
