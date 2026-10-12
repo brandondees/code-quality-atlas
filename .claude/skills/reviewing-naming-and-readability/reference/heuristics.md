@@ -26,7 +26,7 @@
 - Abbreviations domain-standard or spelled out (`cust`, `usr`); initialisms cased per language idiom (`URL`, `ID`).
 - Does the name avoid encoding the *how* so it survives refactors? (`fetchUser` over `userViaHttpGet`.)
 - When a name is hard to choose, is that a smell pointing at over-broad responsibility? (cross-links #6.)
-- **A moved/renamed path is a name too:** when the diff relocates a file or module, apply the same naming bar to the new path/namespace as to a renamed identifier — does it state intent and fit domain language, is it consistent with its new siblings (not a one-off convention in an otherwise-consistent directory), and is it a clearer home than the old one or just a sideways/vaguer move? A move that trades one honest-but-incomplete name for another hasn't actually progressed the naming (cross-links #5's Belshee staging above; structural fit is #9).
+- **A moved/renamed path is a name too:** when the diff relocates a file or module, apply the same naming bar to the new path/namespace as to a renamed identifier — does it state intent and fit domain language, is it consistent with its new siblings (not a one-off convention in an otherwise-consistent directory), and is it a clearer home than the old one or just a sideways/vaguer move? A move that trades one honest-but-incomplete name for another hasn't actually progressed the naming (cross-links the Belshee staging above — still only "Honest" or "Honest-and-Complete," not "Intent"; structural fit is #9).
 
 ---
 

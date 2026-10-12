@@ -24,9 +24,11 @@ convergence rules).
 Pick the smallest diff that captures what the user means. **Always pass `-M`
 (rename detection)** on every `git diff`/`git show` below — a file move is an
 interface change (the path is the module's import namespace), not a no-op,
-and without `-M` a moved-but-unchanged file shows up as an unrelated add+delete
-pair, which hides the move from every lens rather than handing it the old path
-to check consumers against:
+so make rename detection explicit rather than depending on the reviewer's
+local `diff.renames` setting or git version; a moved-but-unchanged file
+reviewed without it shows up as an unrelated add+delete pair, which hides
+the move from every lens rather than handing it the old path to check
+consumers against:
 
 - `$ARGUMENTS` names a ref or range → review `git diff -M $ARGUMENTS` (or
   `git show -M` for a single commit).

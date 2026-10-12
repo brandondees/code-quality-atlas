@@ -411,10 +411,15 @@ line.
    in full. **Resolve renames before handing any lens the diff.** Fetch
    `get_files` (already paginated in full for the `.claude/skills/` gate
    above) and note every entry's `previous_filename` — GitHub's files API
-   sets it for a detected rename even at low similarity — and prefer
-   `get_diff` over `get_patch`-style per-file reconstruction so a moved file
-   arrives as a rename header (`rename from`/`rename to`), not as an
-   unrelated add+delete pair that hides the move from every lens. A file the
+   sets it for a rename detected above its similarity threshold (~50%) —
+   and prefer `get_diff` over reconstructing the diff from `get_files`'
+   per-file patch text, so a moved file arrives as a rename header
+   (`rename from`/`rename to`), not as an unrelated add+delete pair that
+   hides the move from every lens. Below that threshold `previous_filename`
+   is absent and the file arrives as a plain `removed` + `added` pair —
+   when a removed and an added entry share a basename or sit in the same
+   directory subtree, treat them as a *possible* move and check, rather
+   than relying on `previous_filename` alone. A file the
    diff reports as a rename is a **moved module** — the path is the
    consumer-facing namespace, so the move is an interface change — hand each
    lens the move (old path → new path), not a guess at new-file-vs-deletion.
