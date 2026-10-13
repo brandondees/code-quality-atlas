@@ -527,6 +527,20 @@ def test_load_manifest_defaults_wave_to_zero_when_absent(tmp_path):
     assert m.skills[0].wave == 0
 
 
+def test_load_manifest_rejects_a_non_bool_design(tmp_path):
+    # design was read with a bare `s.get("design", False)` and no type check
+    # at all -- a quoted `design: "false"` is a truthy Python string and would
+    # silently flip the flag to True instead of raising, the opposite of what
+    # the author wrote (unquoted `design: false` already parses as the real
+    # YAML/Python bool and is unaffected).
+    path = _write_manifest(
+        tmp_path,
+        f'taxonomy_version: v0.2\n{_BASE_SKILL_YAML}    design: "false"\n',
+    )
+    with pytest.raises(ValidationError, match="'design' must be a boolean"):
+        load_manifest(path)
+
+
 def test_load_manifest_rejects_a_scalar_severity_order(tmp_path):
     # #381: a scalar severity_order (e.g. "Blocker") is itself a string of
     # length 7 with 7 distinct characters, so it silently satisfied
@@ -1990,6 +2004,24 @@ def test_load_manifest_parses_entrypoints(tmp_path):
     assert m.entrypoints[0].shapes == ["diff"]
     assert m.entrypoints[1].include_design is True
     assert m.entrypoints[0].include_design is False  # default
+
+
+def test_load_manifest_rejects_a_non_bool_include_design(tmp_path):
+    # include_design was read with `bool(raw_ep.get("include_design", False))`
+    # -- a blind coercion, not a validation. bool("false") is True, so a
+    # quoted `include_design: "false"` would silently flip the entrypoint's
+    # membership the opposite way from what the author wrote, instead of
+    # raising (unquoted `include_design: false` already parses as the real
+    # YAML/Python bool and is unaffected).
+    body = (
+        "entrypoints:\n"
+        "  - name: reviewing-a-decision\n"
+        "    description: d\n"
+        "    shapes: [decision]\n"
+        '    include_design: "false"\n'
+    )
+    with pytest.raises(ValidationError, match="'include_design' must be a boolean"):
+        load_manifest(_manifest_with_body(tmp_path, body))
 
 
 def test_load_manifest_defaults_entrypoints_to_empty(tmp_path):
