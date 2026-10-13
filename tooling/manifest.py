@@ -863,6 +863,38 @@ def _optional_str_list(mapping: dict, key: str, where: str) -> list[str] | None:
     return list(value)
 
 
+def _load_skill_scalars(s: dict, i: int) -> tuple[int, int | None, bool]:
+    """Type-check the bare scalar fields read via plain `.get()` rather than
+    through `_prose`/`_list_field`: wave/eval_min (int, bool-guarded against
+    the bool-is-a-subtype-of-int gotcha) and design (bool). Factored out of
+    _load_skills to keep that method under the complexity gate."""
+    wave = s.get("wave", 0)
+    if not isinstance(wave, int) or isinstance(wave, bool):
+        raise ValidationError(
+            f"skill #{i}: 'wave' must be an integer, got {type(wave).__name__}"
+        )
+    eval_min = s.get("eval_min")
+    if eval_min is not None and (
+        not isinstance(eval_min, int) or isinstance(eval_min, bool)
+    ):
+        raise ValidationError(
+            f"skill #{i}: 'eval_min' must be an integer, got {type(eval_min).__name__}"
+        )
+    design = s.get("design", False)
+    # Unlike wave/eval_min above, this field was never type-checked at all --
+    # Skill.design flows straight into truthy checks (generate_collapsed.py,
+    # generate_common.py, generate_router.py) that treat any non-empty string
+    # as "on", so a quoted `design: "false"` (easy to write by mistake;
+    # `design: false` unquoted already parses as the real YAML/Python bool)
+    # would silently flip to True instead of raising the same actionable
+    # ValidationError every other malformed boolean-shaped field here gets.
+    if not isinstance(design, bool):
+        raise ValidationError(
+            f"skill #{i}: 'design' must be a boolean, got {type(design).__name__}"
+        )
+    return wave, eval_min, design
+
+
 def _load_skills(data: dict, path: str) -> list[Skill]:
     if not isinstance(data["skills"], list):
         raise ValidationError(
@@ -942,19 +974,7 @@ def _load_skills(data: dict, path: str) -> list[Skill]:
                         ),
                     )
                 )
-            wave = s.get("wave", 0)
-            if not isinstance(wave, int) or isinstance(wave, bool):
-                raise ValidationError(
-                    f"skill #{i}: 'wave' must be an integer, got {type(wave).__name__}"
-                )
-            eval_min = s.get("eval_min")
-            if eval_min is not None and (
-                not isinstance(eval_min, int) or isinstance(eval_min, bool)
-            ):
-                raise ValidationError(
-                    f"skill #{i}: 'eval_min' must be an integer, "
-                    f"got {type(eval_min).__name__}"
-                )
+            wave, eval_min, design = _load_skill_scalars(s, i)
             skills.append(
                 Skill(
                     name=_prose(s, "name", f"skill #{i}", null_ok=True, strip=False),
@@ -963,7 +983,7 @@ def _load_skills(data: dict, path: str) -> list[Skill]:
                     wave=wave,
                     built_from=built,
                     cross_ref=_list_field(s, "cross_ref", f"skill #{i}"),
-                    design=s.get("design", False),
+                    design=design,
                     picker=_prose(s, "picker", f"skill #{i}", required=False),
                     artifacts=artifacts,
                     tier=s.get("tier", "preference"),
@@ -1123,6 +1143,18 @@ def _load_entrypoints(data: dict, path: str) -> list[Entrypoint]:
                     f"entrypoints[{i}] in {path}: 'shapes' must be a list of strings "
                     f"(got {shapes!r}) — use 'shapes: [diff]', not 'shapes: diff'"
                 )
+            include_design = raw_ep.get("include_design", False)
+            # `bool(...)` coerces rather than validates -- bool("false") is True,
+            # so a quoted `include_design: "false"` would silently flip the
+            # entrypoint's membership the opposite way from what the author
+            # wrote, instead of raising the same malformed-field ValidationError
+            # every other boolean-shaped manifest field gets (see the sibling
+            # 'design' guard added to _load_skills above for the identical gap).
+            if not isinstance(include_design, bool):
+                raise ValidationError(
+                    f"entrypoints[{i}] in {path}: 'include_design' must be a "
+                    f"boolean, got {type(include_design).__name__}"
+                )
             entrypoints.append(
                 Entrypoint(
                     name=_prose(
@@ -1139,7 +1171,7 @@ def _load_entrypoints(data: dict, path: str) -> list[Entrypoint]:
                         null_ok=True,
                     ),
                     shapes=list(shapes),
-                    include_design=bool(raw_ep.get("include_design", False)),
+                    include_design=include_design,
                     body=_prose(
                         raw_ep, "body", f"entrypoints[{i}] in {path}", required=False
                     ),
