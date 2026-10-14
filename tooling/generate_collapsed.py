@@ -31,7 +31,7 @@ from tooling.generate_prepass import build_collapsed_prepass
 from tooling.generate_skill import build_artifact_rubric
 from tooling.generate_synthesizer import build_synthesizer_md
 from tooling.manifest import Entrypoint, Manifest, Skill
-from tooling.sections import _FenceTracker
+from tooling.sections import _FenceTracker, _iter_lines
 
 # Matches skill-md.md's own ~100-line ToC rubric (category #101); a lens
 # bundle this long benefits from the same navigability the rubric demands
@@ -118,11 +118,22 @@ def _strip_toc_section(md: str) -> str:
     #313 fixed in `_toc_for_body`; the class itself now lives in
     `sections.py`, see #368): a `## `-prefixed line inside a fenced code
     block is example content, not a real heading, and can't start or end
-    the skipped section."""
+    the skipped section.
+
+    Line-split via `tooling.sections._iter_lines`, not the bare
+    `str.splitlines()` this used to call directly: `splitlines()` also
+    treats `\\v`, `\\f`, `\\x1c`-`\\x1e`, NEL (`\\x85`), U+2028/U+2029, and
+    a lone `\\r` as line breaks, so a `## `-prefixed fragment right after
+    one of those characters inside a paragraph was newly (mis)matched as
+    its own heading line — the exact bug `_iter_lines` was written to
+    close in `sections.py` (#368's own regression test,
+    `test_extract_section_only_splits_lines_on_literal_newline`), left
+    open here because only `_FenceTracker` was consolidated, not the line
+    splitting that feeds it."""
     out: list[str] = []
     skipping = False
     fence = _FenceTracker()
-    for line in md.splitlines():
+    for line in _iter_lines(md):
         if fence.consume(line):
             if not skipping:
                 out.append(line)
@@ -133,7 +144,7 @@ def _strip_toc_section(md: str) -> str:
                 continue
         if not skipping:
             out.append(line)
-    return "\n".join(out).strip()
+    return "".join(out).strip()
 
 
 def _toc_for_body(body: str) -> str:
@@ -145,10 +156,17 @@ def _toc_for_body(body: str) -> str:
     Markdown excerpt was otherwise picked up as a heading, producing a
     broken anchor): a `## `-prefixed line inside a
     fenced code block is example content, not a real heading, and is
-    skipped."""
+    skipped.
+
+    Line-split via `tooling.sections._iter_lines`, not the bare
+    `str.splitlines()` this used to call directly — see
+    `_strip_toc_section`'s docstring for why: `splitlines()` also breaks on
+    `\\v`/`\\f`/`\\x1c`-`\\x1e`/NEL/U+2028/U+2029/a lone `\\r`, any of which
+    inside a paragraph could turn a trailing `## `-prefixed fragment into a
+    phantom heading in the generated ToC."""
     headings = []
     fence = _FenceTracker()
-    for line in body.splitlines():
+    for line in _iter_lines(body):
         if fence.consume(line):
             continue
         if line.startswith("## "):
