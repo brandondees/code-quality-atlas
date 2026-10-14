@@ -336,6 +336,29 @@ def test_toc_for_body_does_not_close_a_fence_on_a_mismatched_fence_character():
     assert "Quickstart" not in toc
 
 
+def test_toc_for_body_only_splits_lines_on_literal_newline():
+    # `_toc_for_body` used to call bare `str.splitlines()` directly instead of
+    # `tooling.sections._iter_lines` -- the same gap #368 closed in
+    # sections.py's own scanners (see
+    # test_sections.test_extract_section_only_splits_lines_on_literal_newline).
+    # `splitlines()` also treats \v, \f, \x1c-\x1e, NEL, U+2028/2029, and a
+    # lone \r as line breaks, so a "## "-prefixed fragment right after one of
+    # those characters inside a paragraph was newly (mis)matched as its own
+    # heading line, producing a phantom ToC entry linking to a non-existent
+    # anchor.
+    import tooling.generate_collapsed as g
+
+    body = (
+        "## Real heading\n\n"
+        "para one\x0c## fake heading, not a real line start\n\n"
+        "## Another real heading\n\nx\n"
+    )
+    toc = g._toc_for_body(body)
+    assert "[Real heading](#real-heading)" in toc
+    assert "[Another real heading](#another-real-heading)" in toc
+    assert "fake heading" not in toc
+
+
 def test_generate_lens_bundle_writes_three_files(tmp_path):
     dest = generate_lens_bundle(
         _skill(), tmp_path, docs_root=str(ROOT), skills_root=str(ROOT / "skills")
@@ -784,6 +807,23 @@ def test_strip_toc_section_ignores_a_fenced_heading_while_skipping_a_real_toc():
     assert "- [Bad](#bad)" not in out
     assert "Not a real heading" not in out
     assert "## Bad\n\nthe bad case" in out
+
+
+def test_strip_toc_section_only_splits_lines_on_literal_newline():
+    # `_strip_toc_section` used to call bare `str.splitlines()` directly
+    # instead of `tooling.sections._iter_lines` -- the same gap #368 closed
+    # in sections.py's own scanners. Left unfixed, a "## Contents"-shaped
+    # fragment appearing right after a \v/\f/\x1c-\x1e/NEL/U+2028/2029/lone-\r
+    # character mid-paragraph would be newly (mis)matched as a real heading,
+    # either wrongly starting a skip or wrongly ending one early -- and
+    # rejoining with "\n" lost the original non-newline break character from
+    # the output entirely, corrupting unrelated body text.
+    from tooling.generate_collapsed import _strip_toc_section
+
+    md = "## Real\n\npara one\x0c## fake, not a real heading\n\nmore text.\n"
+    out = _strip_toc_section(md)
+    assert "para one\x0c## fake, not a real heading" in out
+    assert "more text." in out
 
 
 def test_no_committed_lens_bundle_has_a_duplicate_contents_heading():
