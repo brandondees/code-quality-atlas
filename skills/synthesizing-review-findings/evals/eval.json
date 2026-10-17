@@ -166,6 +166,22 @@
         "Does not pad the report with speculative 'this might also occur elsewhere' findings",
         "Ends on a verdict that fits one Minor defect (approve with changes)"
       ]
+    },
+    {
+      "query": "You're synthesizing a review. hunting-silent-failures's whole catalog entry (the one-line description a router uses to pick lenses, not its actual checklist) reads: 'Where do errors vanish? Swallowed exceptions, silent fallbacks, missing timeouts and retries.' Its reported finding on `payments/retry.py:40` says: 'This violates the lens's circuit-breaker policy, which requires tripping after exactly 3 consecutive failures and backing off for a fixed 30 seconds before the next retry attempt; this code retries indefinitely with no breaker at all.' Here is hunting-silent-failures's actual checklist, which you have open in this round: it asks whether remote/IO calls have a timeout, whether retries use capped backoff with jitter rather than being unbounded, and whether there is a fallback or circuit breaker for a dependency that fails repeatedly — it states no specific failure count or backoff duration anywhere. No other lens ran. Synthesize the review and say what happens to this finding.",
+      "expected_behavior": [
+        "Notices the finding's specific policy — exactly 3 failures, a fixed 30-second backoff — appears nowhere in the checklist it was just shown, even though the general shape (unbounded retries, no breaker) does track a real check; a precise numeric rule that isn't backed by anything in the lens's own checklist is the fabricated-finding signature (issue #357), not an elaboration of a real one",
+        "Does not pass the invented 3-failures/30-second policy through to the merged report as if it were a real, checklist-grounded rule, and does not attribute that specific claim to hunting-silent-failures at face value",
+        "Still allows the part the checklist does support — unbounded retries with no circuit breaker or backoff is a genuine, reportable concern — rather than discarding the whole finding merely because one detail inside it was fabricated"
+      ]
+    },
+    {
+      "query": "You're synthesizing a review. hunting-silent-failures's reported finding on `payments/retry.py:40` says: 'The retry loop has no timeout on the remote call and retries unboundedly with no backoff or circuit breaker, so a hung dependency retries forever.' Its checklist, open in this round, asks exactly those three things: does every remote/IO call have a timeout, do retries use capped backoff with jitter rather than being unbounded, and is there a fallback or circuit breaker for a dependency that fails repeatedly. No other lens ran. Synthesize the review.",
+      "expected_behavior": [
+        "Reports the finding as a normal, checklist-grounded defect and does not add fabrication hedging, a 'selected but not opened' caveat, or any Coverage & limitations note casting doubt on it — nothing about this finding resembles issue #357's signature",
+        "Does not invent a fabrication concern where none exists just because a nearby eval scenario's point was about detecting one",
+        "Ends on a verdict that fits this one defect (approve with changes or block, per its severity) without manufacturing extra caveats"
+      ]
     }
   ]
 }
