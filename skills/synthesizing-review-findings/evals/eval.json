@@ -166,6 +166,22 @@
         "Does not pad the report with speculative 'this might also occur elsewhere' findings",
         "Ends on a verdict that fits one Minor defect (approve with changes)"
       ]
+    },
+    {
+      "query": "You're synthesizing a review. This round, the router selected hunting-silent-failures from its one-line catalog entry alone — 'Where do errors vanish? Swallowed exceptions, silent fallbacks, missing timeouts and retries.' — and its actual checklist (body.md) was never opened this round; no one read it. hunting-silent-failures nonetheless reported a finding on `payments/retry.py:40`: 'This violates the lens's circuit-breaker policy, which requires tripping after exactly 3 consecutive failures and backing off for a fixed 30 seconds before the next retry attempt; this code retries indefinitely with no breaker at all.' No other lens ran. Synthesize the review and say what happens to this finding.",
+      "expected_behavior": [
+        "Recognizes that hunting-silent-failures's bundle was never actually opened this round, so this reported finding cannot be attributed to the lens at all — selecting a lens licenses it to run, it does not by itself produce a finding — however fluent or lens-styled the wording sounds",
+        "Drops the finding from the merged report rather than passing any part of it through, and instead lists hunting-silent-failures under Coverage & limitations as selected but not opened this round, the exact disposition the attribution guard calls for — not partial credit for the generically-plausible parts of the claim",
+        "Does not treat the specific-sounding 3-failures/30-second detail as evidence the lens must have actually checked something; a confident, numerically precise claim is exactly how a fabricated finding reads (issue #357) when the bundle behind it was never opened, and precision is not proof of a real derivation"
+      ]
+    },
+    {
+      "query": "You're synthesizing a review. This round, hunting-silent-failures's body.md was actually opened and read before it reported its finding on `payments/retry.py:40`: 'The remote call has no timeout, so a hung dependency can block this loop on a single attempt indefinitely; and for a call that fails fast instead, the loop retries it unboundedly with no capped backoff or circuit breaker, hammering a dependency that is already failing.' Its checklist asks exactly those three things: does every remote/IO call have a timeout, do retries use capped backoff with jitter rather than being unbounded, and is there a fallback or circuit breaker for a dependency that fails repeatedly. No other lens ran. Synthesize the review.",
+      "expected_behavior": [
+        "Reports the finding as a normal, checklist-grounded defect and does not add fabrication hedging, a 'selected but not opened' caveat, or any Coverage & limitations note casting doubt on it — the lens's bundle was actually opened this round, so nothing about this finding resembles issue #357's signature",
+        "Does not invent an attribution concern where none exists just because a nearby eval scenario's point was about detecting one",
+        "Ends on a verdict that fits this one defect (approve with changes or block, per its severity) without manufacturing extra caveats"
+      ]
     }
   ]
 }
