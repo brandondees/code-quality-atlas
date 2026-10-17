@@ -182,6 +182,22 @@
         "Does not invent an attribution concern where none exists just because a nearby eval scenario's point was about detecting one",
         "Ends on a verdict that fits this one defect (approve with changes or block, per its severity) without manufacturing extra caveats"
       ]
+    },
+    {
+      "query": "You're finalizing a synthesized review. This round, reviewing-performance-and-efficiency's body.md was actually opened and read, and it reported a Major finding on search/indexer.py:118, grounded in its checklist: the new in-memory result cache has no eviction policy and no size bound, so it grows without limit under sustained query traffic. sweeping-for-security was also selected by the router but its body.md was never opened this round — no one read it — and it reported 'No findings'. Your draft Coverage & limitations line reads: 'Lenses run (body.md opened): reviewing-performance-and-efficiency, sweeping-for-security.' Finalize the review and say what, if anything, is wrong with that draft line.",
+      "expected_behavior": [
+        "Catches that the draft line misstates coverage: sweeping-for-security's body.md was never opened this round, so listing it under 'body.md opened' is inaccurate, regardless of whether its own 'No findings' report is itself trustworthy",
+        "Corrects the line so only reviewing-performance-and-efficiency is listed under 'body.md opened', with sweeping-for-security instead noted as selected but not opened this round (or dropped from that list) rather than passing the inaccurate draft through unchanged",
+        "Treats this as a coverage-accuracy check, separate from finding attribution: reviewing-performance-and-efficiency's Major finding stands on its own merits (its own body.md was genuinely opened) and is reported and verdicted independent of the correction to the coverage line"
+      ]
+    },
+    {
+      "query": "You're finalizing a synthesized review. This round, reviewing-performance-and-efficiency's body.md was actually opened and read, and it reported a Major finding on search/indexer.py:118, grounded in its checklist: the new in-memory result cache has no eviction policy and no size bound, so it grows without limit under sustained query traffic. sweeping-for-security was also selected by the router but its body.md was never opened this round — no one read it — and it reported 'No findings'. Your draft Coverage & limitations line reads: 'Lenses run (body.md opened): reviewing-performance-and-efficiency. Selected but not opened this round: sweeping-for-security.' Finalize the review and say what, if anything, is wrong with that draft line.",
+      "expected_behavior": [
+        "Confirms the draft line is accurate as written — it matches which lens's body.md was actually opened this round against which was only selected — and leaves it unchanged",
+        "Does not invent a coverage discrepancy or add defensive hedging to an already-correct line just because this scenario is probing coverage-line accuracy",
+        "Still reports reviewing-performance-and-efficiency's Major finding and ends on the matching verdict (block or approve with changes, per severity), without manufacturing extra caveats beyond the accurate coverage line already given"
+      ]
     }
   ]
 }
