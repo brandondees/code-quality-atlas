@@ -567,7 +567,7 @@ lenses as a move instead of an unrelated add+delete — landed in both
 
 ## 2026-10-19 — #574: withdrew #347's false "5 dead `# noqa: TRY004`" finding, closed the invocation pitfall that produced it
 
-#347's weekly self-audit flagged five `# noqa: TRY004` suppressions
+\#347's weekly self-audit flagged five `# noqa: TRY004` suppressions
 (`tooling/manifest.py:35`, `tooling/run_evals.py:197/253/264/292`) as dead,
 grounded in `ruff check --select RUF100 .`. #574 showed that invocation is
 itself unsound: `--select` *replaces* the effective rule set for that run
@@ -585,4 +585,4 @@ rather than a one-off ad hoc CLI invocation. Added a rule to
 and `ruff`'s `--extend-select` as the fix, regenerated
 (`tooling.cli generate`) and re-vendored (`tooling/vendor-skills.sh .`); drift
 reports clean. Commented on #347 withdrawing the Minor finding and citing
-#574's evidence.
+\#574's evidence.
