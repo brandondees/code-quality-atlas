@@ -46,7 +46,11 @@ extend-exclude = ["*.md"]
 # - B904 (raise-without-from-inside-except): two real misses in
 #   manifest.py had gone uncaught with only the default rule set (issue
 #   #392).
-extend-select = ["C901", "B904"]
+# - RUF100 (unused `noqa` directive): standing CI gate so a stale suppression
+#   fails plain `ruff check .` (#574). Don't check this with bare `--select`
+#   on the CLI -- it replaces the configured rule set rather than adding to
+#   it, and manufactures false "unused" verdicts.
+extend-select = ["C901", "B904", "RUF100"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 15

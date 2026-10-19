@@ -2267,6 +2267,27 @@ prepass:
         evidenced it, so a reader can tell what was measured from what was
         judged, and so a false positive is traceable to the rule that produced
         it.
+    - name: A narrowing flag changes what "unused" means — never run one to
+        check a suppression
+      rule: >
+        Some tools expose an override flag that *replaces* the project's
+        configured rule set for that invocation rather than adding to it —
+        ruff's `--select` is the canonical example: `ruff check --select
+        RUF100 .` makes RUF100 the only enabled rule for that run, so every
+        `# noqa` in the repo looks unused regardless of whether its named rule
+        actually fires under the real configuration. Checking whether a
+        suppression is stale this way manufactures false positives rather than
+        detecting real ones — e.g. a self-audit that reported several
+        genuinely-necessary suppressions as dead on exactly this invocation.
+        Ground a stale-suppression finding in the tool's additive form
+        instead (`--extend-select` for ruff, or the equivalent for another
+        tool/linter) or in a project-config change plus the tool's own
+        default invocation. Before reporting a finding that would change
+        code (removing the suppression), confirm it by removing the
+        directive and running the project's own unmodified invocation with
+        no override flags: if a diagnostic fires, the suppression was
+        necessary and the additive finding was a false positive; if none
+        does, the additive finding is confirmed.
 
 # The other half of composition (Q7): once the router's chosen lenses each emit
 # findings, this merges them into one report — deduplicated, conflicts
