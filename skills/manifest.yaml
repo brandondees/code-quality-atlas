@@ -2277,14 +2277,17 @@ prepass:
         `# noqa` in the repo looks unused regardless of whether its named rule
         actually fires under the real configuration. Checking whether a
         suppression is stale this way manufactures false positives rather than
-        detecting real ones (code-quality-atlas's own #574, caught after a
-        self-audit reported five genuinely-necessary `# noqa: TRY004`
-        directives as dead on exactly this invocation). Ground a
-        stale-suppression finding in the tool's additive form instead
-        (`--extend-select` for ruff, or the equivalent for another tool/linter)
-        or in a project-config change plus the tool's own default invocation —
-        and if the finding would change code, reproduce it under the
-        unmodified configured rule set before reporting it.
+        detecting real ones — e.g. a self-audit that reported several
+        genuinely-necessary suppressions as dead on exactly this invocation.
+        Ground a stale-suppression finding in the tool's additive form
+        instead (`--extend-select` for ruff, or the equivalent for another
+        tool/linter) or in a project-config change plus the tool's own
+        default invocation. Before reporting a finding that would change
+        code (removing the suppression), confirm it by removing the
+        directive and running the project's own unmodified invocation with
+        no override flags: if a diagnostic fires, the suppression was
+        necessary and the additive finding was a false positive; if none
+        does, the additive finding is confirmed.
 
 # The other half of composition (Q7): once the router's chosen lenses each emit
 # findings, this merges them into one report — deduplicated, conflicts

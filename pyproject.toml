@@ -46,17 +46,10 @@ extend-exclude = ["*.md"]
 # - B904 (raise-without-from-inside-except): two real misses in
 #   manifest.py had gone uncaught with only the default rule set (issue
 #   #392).
-# - RUF100 (unused `noqa` directive): a standing gate so a suppression that
-#   stops being necessary gets caught by CI's plain `ruff check .` instead
-#   of an ad hoc audit invocation. Added via #574/#347 after a false-positive
-#   "all 5 `# noqa: TRY004` suppressions are dead" finding traced back to a
-#   broken verification command (`ruff check --select RUF100 .`, which
-#   *replaces* the effective rule set with just `{RUF100}` instead of
-#   layering it on top of this file's config) -- `ruff check --extend-select
-#   RUF100 .` and plain `ruff check .` with RUF100 added here both agree the
-#   5 suppressions are genuinely in use. Don't re-derive "unused noqa" via
-#   bare `--select` on the CLI; this config entry plus plain `ruff check .`
-#   is the correct check.
+# - RUF100 (unused `noqa` directive): standing CI gate so a stale suppression
+#   fails plain `ruff check .` (#574). Don't check this with bare `--select`
+#   on the CLI -- it replaces the configured rule set rather than adding to
+#   it, and manufactures false "unused" verdicts.
 extend-select = ["C901", "B904", "RUF100"]
 
 [tool.ruff.lint.mccabe]
