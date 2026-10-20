@@ -95,6 +95,24 @@
         "States the gap under coverage and names the command that would settle it (pyright run with `src/legacy/adapters.py` in scope), rather than silently passing",
         "Does not install a different type checker or invent pyright errors in the file"
       ]
+    },
+    {
+      "query": "This PR changes four Python files and one line in docs/CHANGELOG.md: a new entry that reads '#347 fixed the retry bug' (no space after the '#', which markdownlint's MD018 flags). The repo's .pre-commit-config.yaml runs ruff and mypy, and .github/workflows/ci.yml separately gates on `markdownlint-cli2 '**/*.md'` under .markdownlint-cli2.jsonc. What does the pre-pass do before the lenses run?",
+      "expected_behavior": [
+        "Builds the inventory from both the pre-commit config (ruff, mypy) and the CI workflow (markdownlint-cli2), rather than stopping at the Python tooling because four of the five changed files are Python",
+        "Selects markdownlint-cli2 because docs/CHANGELOG.md is one of the changed files and the repo has a configured entry for `.md` files — not because .md matches or loses to the diff's dominant language",
+        "Runs markdownlint-cli2 scoped to the changed Markdown file under the repo's own .markdownlint-cli2.jsonc, and surfaces the MD018 hit as evidence for a lens to confirm, contextualize, or dismiss rather than letting it pass unflagged",
+        "If markdownlint-cli2 genuinely cannot run in this session, states that explicitly under coverage (e.g. 'Not run: markdownlint-cli2 — <reason>') rather than silently reporting only the Python tools as the complete picture"
+      ]
+    },
+    {
+      "query": "A draft coverage line for this PR reads: 'Tools run: ruff (ruff.toml), mypy (pyproject.toml) — over the 5 changed files. No deterministic coverage: none — all categories covered.' The diff is mostly Python, but one of the five changed files is docs/session-log.md, and the repo's .markdownlint-cli2.jsonc is wired into the `gate` CI job. Is this coverage line accurate, and if not, what's missing?",
+      "expected_behavior": [
+        "Says no — flags that markdownlint-cli2 is configured and gated in CI but is named in neither the 'Tools run' nor a 'Not run' line, so the draft's 'all categories covered' claim is false",
+        "Requires naming markdownlint-cli2 explicitly: under 'Tools run' if it was actually executed over docs/session-log.md, or under 'Not run' with a reason if it wasn't — and either way naming docs/session-log.md's extension under the dedicated 'changed file types with no configured tool' slot if no tool for it ran at all",
+        "Does not accept 'the diff is mostly Python' as grounds for leaving a configured Markdown linter off the coverage line",
+        "Does not fold the gap into 'No deterministic coverage,' which names lenses and categories, not file types"
+      ]
     }
   ]
 }

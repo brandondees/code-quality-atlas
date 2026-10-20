@@ -1,6 +1,6 @@
 # Examples — grounding-review-in-tool-output
 
-This pass reports no findings of its own. Every tool hit is confirmed, contextualized, or dismissed by the lens that owns it, and what leaves this pass is an evidence bundle per lens plus the three-fact coverage line. When the repo configures no deterministic tools, or none could run, say so under coverage rather than reporting nothing at all.
+This pass reports no findings of its own. Every tool hit is confirmed, contextualized, or dismissed by the lens that owns it, and what leaves this pass is an evidence bundle per lens plus the coverage line (five facts, each shown only when non-empty). When the repo configures no deterministic tools, or none could run, say so under coverage rather than reporting nothing at all.
 
 ## Contents
 
@@ -9,6 +9,8 @@ This pass reports no findings of its own. Every tool hit is confirmed, contextua
 - [Bad → finding (a clean run read as an approval)](#bad--finding-a-clean-run-read-as-an-approval)
 - [Bad → finding (running the repo's tools on an untrusted branch)](#bad--finding-running-the-repos-tools-on-an-untrusted-branch)
 - [Good → the coverage line when nothing could run](#good--the-coverage-line-when-nothing-could-run)
+- [Good → selecting a tool by file type, not the diff's dominant language](#good--selecting-a-tool-by-file-type-not-the-diffs-dominant-language)
+- [Bad → finding (markdownlint skipped because the diff reads as Python)](#bad--finding-markdownlint-skipped-because-the-diff-reads-as-python)
 
 ## Good → the repo's own tools, triaged
 
@@ -121,6 +123,71 @@ No deterministic coverage: every selected lens — judgment only.
 The lenses then run exactly as they would have without a pre-pass. The value
 delivered here is not evidence; it is an honest edge on the review, which is
 what a reader needs to decide how much the verdict is worth.
+
+## Good → selecting a tool by file type, not the diff's dominant language
+
+**Input:** a PR that changes four Python files and one line in
+`docs/CHANGELOG.md`. `.pre-commit-config.yaml` runs `ruff` and `mypy`;
+`.github/workflows/ci.yml` separately gates on `markdownlint-cli2
+'**/*.md'` under `.markdownlint-cli2.jsonc`. The new changelog line reads
+`#347 fixed the retry bug` — no space after the `#`, which markdownlint's
+MD018 flags.
+
+**Inventory** (step 1), read from both sources rather than stopping at the
+language most files are in:
+
+```text
+ruff              pre-commit  ruff.toml                  gated in CI
+mypy              pre-commit  pyproject.toml             gated in CI
+markdownlint-cli2 CI only     .markdownlint-cli2.jsonc    gated in CI
+```
+
+**Selection:** `docs/CHANGELOG.md` is one of the five changed files, and the
+repo has a configured entry for `.md`. markdownlint-cli2 is selected because
+that file matches the inventory — not because four other files outweigh it.
+
+**Run**, scoped to the one changed Markdown file, raises one hit:
+
+```text
+markdownlint-cli2  docs/CHANGELOG.md:1  MD018  no space after # in atx heading
+```
+
+**Triage:** `checking-idioms-and-consistency` confirms it — the line is a
+changelog entry mis-escaped as a heading, not a deliberate style choice —
+and the coverage line names all three tools:
+
+```text
+Tools run: ruff (ruff.toml), mypy (pyproject.toml), markdownlint-cli2 (.markdownlint-cli2.jsonc) — over the 5 changed files.
+No deterministic coverage: reviewing-module-design, reviewing-test-quality — judgment only.
+```
+
+What makes this right: a diff that is overwhelmingly Python still ran the
+one tool its single Markdown file was configured for, because selection was
+per changed file, not per diff.
+
+## Bad → finding (markdownlint skipped because the diff reads as Python)
+
+**Bad:** the same PR as above, but the pre-pass builds its inventory, sees
+that four of the five changed files are Python, and runs only `ruff` and
+`mypy`. The coverage line it hands to the synthesizer reads:
+
+```text
+Tools run: ruff (ruff.toml), mypy (pyproject.toml) — over the 5 changed files.
+No deterministic coverage: none — all categories covered.
+```
+
+The `docs/CHANGELOG.md` MD018 violation ships unflagged; CI's `gate` job
+catches it only after the PR is already open, and the "all categories
+covered" line was never true.
+
+**Finding:** *Select tools by every changed file's type, not the diff's
+dominant language.* The inventory already had `markdownlint-cli2` in it —
+it was discovered, just not selected, because selection ran once against
+the diff's majority language instead of once per changed file. The correct
+coverage line either runs markdownlint-cli2 over `docs/CHANGELOG.md` or, if
+it genuinely can't run here, says so by name (`Not run: markdownlint-cli2 —
+<reason>`) and names the gap under `Changed file types with no configured
+tool` — never a silent "all categories covered" (#576).
 
 <!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
      from skills/grounding-review-in-tool-output/examples.md in code-quality-atlas.
