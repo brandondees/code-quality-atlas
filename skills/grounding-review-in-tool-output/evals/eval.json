@@ -109,7 +109,8 @@
       "query": "A draft coverage line for this PR reads: 'Tools run: ruff (ruff.toml), mypy (pyproject.toml) — over the 5 changed files. No deterministic coverage: none — all categories covered.' The diff is mostly Python, but one of the five changed files is docs/session-log.md, and the repo's .markdownlint-cli2.jsonc is wired into the `gate` CI job. Is this coverage line accurate, and if not, what's missing?",
       "expected_behavior": [
         "Says no — flags that markdownlint-cli2 is configured and gated in CI but is named in neither the 'Tools run' nor a 'Not run' line, so the draft's 'all categories covered' claim is false",
-        "Requires naming markdownlint-cli2 explicitly: under 'Tools run' if it was actually executed over docs/session-log.md, or under 'Not run' with a reason if it wasn't — and either way naming docs/session-log.md's extension under the dedicated 'changed file types with no configured tool' slot if no tool for it ran at all",
+        "Requires naming markdownlint-cli2 explicitly: under 'Tools run' if it was actually executed over docs/session-log.md, or under 'Not run: markdownlint-cli2 — <reason>' if it wasn't",
+        "Never routes this gap to the 'changed file types with no configured tool' slot — the repo's own .markdownlint-cli2.jsonc already covers .md, so a tool is configured; that slot is reserved for an extension with no inventory entry at all",
         "Does not accept 'the diff is mostly Python' as grounds for leaving a configured Markdown linter off the coverage line",
         "Does not fold the gap into 'No deterministic coverage,' which names lenses and categories, not file types"
       ]

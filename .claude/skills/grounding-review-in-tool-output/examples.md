@@ -157,7 +157,7 @@ changelog entry mis-escaped as a heading, not a deliberate style choice —
 and the coverage line names all three tools:
 
 ```text
-Tools run: ruff (ruff.toml), mypy (pyproject.toml), markdownlint-cli2 (.markdownlint-cli2.jsonc) — over the 5 changed files.
+Tools run: ruff (ruff.toml), mypy (pyproject.toml) — over the 4 changed Python files; markdownlint-cli2 (.markdownlint-cli2.jsonc) — over docs/CHANGELOG.md.
 No deterministic coverage: reviewing-module-design, reviewing-test-quality — judgment only.
 ```
 
@@ -186,8 +186,10 @@ it was discovered, just not selected, because selection ran once against
 the diff's majority language instead of once per changed file. The correct
 coverage line either runs markdownlint-cli2 over `docs/CHANGELOG.md` or, if
 it genuinely can't run here, says so by name (`Not run: markdownlint-cli2 —
-<reason>`) and names the gap under `Changed file types with no configured
-tool` — never a silent "all categories covered" (#576).
+<reason>`) — never a silent "all categories covered" (#576). `Changed file
+types with no configured tool` is a different, narrower slot: it names an
+extension with no inventory entry at all, which isn't this case — a tool
+for `.md` was already discovered, just not run.
 
 <!-- GENERATED — do not hand-edit this file. Vendored by tooling/vendor-skills.sh
      from skills/grounding-review-in-tool-output/examples.md in code-quality-atlas.
