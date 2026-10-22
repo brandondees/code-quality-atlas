@@ -104,6 +104,15 @@ def _discover_section(p: Prepass) -> str:
         "command that invokes it, its config file, and whether CI gates on it. "
         "If the repo configures **nothing**, say so and go straight to the "
         "lenses — an empty inventory is a valid, reportable result.\n\n"
+        "Then match that inventory against **every path the diff touches**, "
+        "not against the type most of the diff happens to be written in. A "
+        "file's own extension or filename pattern is what selects a tool — a "
+        "changed `.md` file against a configured markdownlint, a changed "
+        "`.github/workflows/*.yml` file against actionlint, a changed `.sh` "
+        "file against ShellCheck — even when every other changed file is in "
+        "some other language entirely. Do this for each changed file "
+        "independently; a diff is not one language for tool-selection "
+        "purposes just because most of its files are.\n\n"
     )
 
 
@@ -200,17 +209,29 @@ def _handoff_section(synth_name: str) -> str:
         "the tool, the rule id, and the location, so the lens can confirm, "
         "contextualize, or dismiss them alongside its own reading of the code.\n"
         "2. **A coverage line** for the merged report's *Coverage & limitations* "
-        f"section, which `{synth_name}` already reserves. Three facts, one line "
+        f"section, which `{synth_name}` already reserves. Five facts, one line "
         "each when non-empty:\n\n"
         "```text\n"
         "Tools run: <tool (rule set), ...> over <scope>.\n"
         "Not run: <tool> — <missing toolchain | timed out | untrusted branch | "
         "not configured>.\n"
+        "Pending in CI: <job name> — runs <tool, ...>; not yet reported.\n"
         "No deterministic coverage: <lens or category names> — judgment only.\n"
+        "Changed file types with no configured tool: <extension or filename "
+        "pattern, ...>.\n"
         "```\n\n"
-        "That last line is the one a reader cannot reconstruct for themselves, "
-        "and the one a confident-looking review most often omits. A category "
-        "with no tool behind it is not a category that passed.\n\n"
+        "The last two lines are the ones a reader cannot reconstruct for "
+        "themselves, and the ones a confident-looking review most often "
+        "omits. A category with no tool behind it is not a category that "
+        "passed, and a changed `.md`, workflow, or `.sh` file with no "
+        "matching inventory entry is a real gap, not an implied clean result "
+        "— name the extension or filename pattern rather than folding it "
+        'silently into "No deterministic coverage," which names lenses and '
+        "categories, never file types. When a required check that gates "
+        "deterministic tooling is still running rather than finished, use "
+        "the Pending in CI line to name the job and the linter(s) it runs — "
+        '"in progress" alone tells the reader nothing about what that check '
+        "would have covered if it had finished.\n\n"
     )
 
 

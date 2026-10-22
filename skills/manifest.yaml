@@ -2288,6 +2288,45 @@ prepass:
         no override flags: if a diagnostic fires, the suppression was
         necessary and the additive finding was a false positive; if none
         does, the additive finding is confirmed.
+    - name: Select tools by every changed file's type, not the diff's
+        dominant language
+      rule: >
+        Match the inventory from step 1 against every path the diff touches,
+        not against the type most of the diff is written in. A PR that
+        changes four Python files and one Markdown file still owes whatever
+        tool the repo has configured for `.md` — if `.markdownlint-cli2.jsonc`
+        and a CI job for it exist, select markdownlint-cli2 because that one
+        file matches, not because it loses a popularity count to the other
+        four. The same holds for a lone shell script against ShellCheck or a
+        single workflow YAML against actionlint. This failure mode is
+        specific to a file outnumbered by a different language in the same
+        diff — a same-language diff never hits it — and it is exactly how a
+        configured markdownlint run went unselected on a Python-dominant PR
+        while CI and a second reviewer still caught the violation it would
+        have caught first (#576).
+    - name: A changed file type with no matching tool is a coverage gap, not
+        silence
+      rule: >
+        When a changed path's extension or filename pattern has no entry in
+        the step-1 inventory, that absence belongs in the coverage line by
+        name — the dedicated slot in What to hand on below — not folded into
+        "No deterministic coverage," which names lenses and categories, never
+        file types. A reader scanning "Tools run: ruff, mypy" on a diff that
+        also touched a `.md` file has no way to tell whether the repo simply
+        has no Markdown tooling or whether one exists and was never selected;
+        naming the untested extension removes that ambiguity instead of
+        leaving a silent, implied clean result (#576).
+    - name: Name the pending job and its linters, not just "in progress"
+      rule: >
+        A CI check still running is not yet evidence, but "in progress" alone
+        tells the reader nothing about what it would have covered once it
+        finished. When a required check that gates deterministic tooling has
+        not reported yet, name the specific job(s) still pending and the
+        linter(s) each one runs — sourced from the same workflow file the
+        step-1 inventory already read — e.g. "the `gate` job is still
+        running; it runs ruff, mypy, and markdownlint-cli2" — so a reader can
+        tell which categories are only provisionally clear rather than
+        genuinely covered (#576).
 
 # The other half of composition (Q7): once the router's chosen lenses each emit
 # findings, this merges them into one report — deduplicated, conflicts
