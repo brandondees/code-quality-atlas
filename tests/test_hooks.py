@@ -421,7 +421,13 @@ def test_symlinked_log_dir_itself_is_refused(tmp_path):
         "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
         "CLAUDE_PLUGIN_ROOT": str(ROOT),
     }
-    _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra=env)
+    result = _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra=env)
+    # Not just the side effect (nothing written): assert the guard itself
+    # actually fired, so this can't pass vacuously for an unrelated reason
+    # (CodeRabbit review finding) -- e.g. an early exit from a missing `jq`
+    # or an unresolved tier would leave `outside` empty too, without ever
+    # reaching the symlink check this test exists to cover.
+    assert "refusing to use" in result.stderr
     assert not any(outside.iterdir())
     # The symlink itself must be left alone too, not replaced or deleted.
     assert (prefs_dir / "learnings").is_symlink()
@@ -445,7 +451,8 @@ def test_symlinked_parent_dir_is_also_refused(tmp_path):
         "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
         "CLAUDE_PLUGIN_ROOT": str(ROOT),
     }
-    _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra=env)
+    result = _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra=env)
+    assert "refusing to use" in result.stderr
     assert not any(outside.iterdir())
     # The symlink itself must be left alone too, not replaced or deleted.
     assert (tmp_path / ".code-quality-atlas").is_symlink()
