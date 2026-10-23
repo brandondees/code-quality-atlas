@@ -427,6 +427,30 @@ def test_symlinked_log_dir_itself_is_refused(tmp_path):
     assert (prefs_dir / "learnings").is_symlink()
 
 
+def test_symlinked_parent_dir_is_also_refused(tmp_path):
+    # Regression (dees-bot round-1 review on #579): the guard above checks
+    # LOG_DIR itself but not its parent. If .code-quality-atlas is the
+    # symlink and `learnings` doesn't exist yet inside its target, `[ -L
+    # "$LOG_DIR" ]` lstats a path that doesn't exist (ENOENT) rather than
+    # one that's a symlink, so it reads as false -- sailing straight past
+    # the check added for test_symlinked_log_dir_itself_is_refused and
+    # letting mkdir -p create a brand-new, unguarded real directory inside
+    # the symlink's target.
+    outside = tmp_path.parent / "outside-the-repo-parent"
+    outside.mkdir()
+    tmp_path.joinpath(".code-quality-atlas").symlink_to(
+        outside, target_is_directory=True
+    )
+    env = {
+        "CODE_QUALITY_ATLAS_FEEDBACK_TIER": "local",
+        "CLAUDE_PLUGIN_ROOT": str(ROOT),
+    }
+    _run(LOG_HOOK, tmp_path, _SKILL_INPUT, env_extra=env)
+    assert not any(outside.iterdir())
+    # The symlink itself must be left alone too, not replaced or deleted.
+    assert (tmp_path / ".code-quality-atlas").is_symlink()
+
+
 def test_feedback_tier_resolves_preferences_against_claude_project_dir(tmp_path):
     # Regression (#365): the hooks previously resolved
     # .code-quality-atlas/preferences.md (and the log destination) relative

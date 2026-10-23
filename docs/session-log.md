@@ -606,5 +606,17 @@ regression test `test_symlinked_log_dir_itself_is_refused` plants
 `.code-quality-atlas/learnings` as a symlink to an outside directory and
 asserts nothing gets written there; confirmed it fails against the
 pre-fix code (a file is actually created in the outside directory) and
-passes once the guard is added. `ruff`/`mypy`/the full `pytest` suite/
-`shellcheck`/`tooling.cli drift` all clean.
+passes once the guard is added.
+
+PR #579's own round-1 atlas self-review (`dees-bot`) caught that this
+first pass was still only partial: checking `LOG_DIR` alone misses a
+symlinked *parent* (`.code-quality-atlas` itself) whenever `learnings`
+doesn't exist yet inside the symlink's target — `[ -L "$LOG_DIR" ]` then
+lstats a path that doesn't exist (ENOENT) and reads as "not a symlink",
+so `mkdir -p` still creates a brand-new, unguarded real directory inside
+the symlink's target. Added a second regression test
+(`test_symlinked_parent_dir_is_also_refused`), confirmed it fails the same
+way against the first-pass fix, then extended the guard to
+`[ -L "$LOG_DIR" ] || [ -L "$(dirname "$LOG_DIR")" ]` in both copies.
+`ruff`/`mypy`/the full `pytest` suite (868 passing)/`shellcheck`/
+`tooling.cli drift` all clean on the final version.
