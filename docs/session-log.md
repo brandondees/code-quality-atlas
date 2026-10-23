@@ -586,3 +586,37 @@ and `ruff`'s `--extend-select` as the fix, regenerated
 (`tooling.cli generate`) and re-vendored (`tooling/vendor-skills.sh .`); drift
 reports clean. Commented on #347 withdrawing the Minor finding and citing
 \#574's evidence.
+
+## 2026-10-23 — #347: closed the log-dir symlink guard gap (Minor finding) in the opt-in feedback hooks
+
+\#347's weekly self-audit flagged that `hooks/lib/feedback-tier.sh`'s
+symlink guard "covers only the final file": `_code_quality_atlas_append`
+already refuses to write through a symlinked log *file*, but
+`_code_quality_atlas_hook_prologue` ran `mkdir -p "$LOG_DIR"`
+unconditionally, and `mkdir -p` on a path that already exists as a
+symlink-to-directory succeeds silently — so a cloned repo shipping
+`.code-quality-atlas/learnings` itself as a symlink pointing outside the
+tree would have every append write through it unguarded, one path segment
+above the existing protection. Confirmed live before fixing (the directory
+itself, not just the file inside it, had no `-L` check anywhere in the
+file). Added a `[ -L "$LOG_DIR" ]` refusal before the `mkdir -p` call,
+mirrored byte-identically into `collapsed/hooks/lib/feedback-tier.sh` (kept
+in sync by `test_collapsed_generic_hook_scripts_match_standalone`). New
+regression test `test_symlinked_log_dir_itself_is_refused` plants
+`.code-quality-atlas/learnings` as a symlink to an outside directory and
+asserts nothing gets written there; confirmed it fails against the
+pre-fix code (a file is actually created in the outside directory) and
+passes once the guard is added.
+
+PR #579's own round-1 atlas self-review (`dees-bot`) caught that this
+first pass was still only partial: checking `LOG_DIR` alone misses a
+symlinked *parent* (`.code-quality-atlas` itself) whenever `learnings`
+doesn't exist yet inside the symlink's target — `[ -L "$LOG_DIR" ]` then
+lstats a path that doesn't exist (ENOENT) and reads as "not a symlink",
+so `mkdir -p` still creates a brand-new, unguarded real directory inside
+the symlink's target. Added a second regression test
+(`test_symlinked_parent_dir_is_also_refused`), confirmed it fails the same
+way against the first-pass fix, then extended the guard to
+`[ -L "$LOG_DIR" ] || [ -L "$(dirname "$LOG_DIR")" ]` in both copies.
+`ruff`/`mypy`/the full `pytest` suite (868 passing)/`shellcheck`/
+`tooling.cli drift` all clean on the final version.

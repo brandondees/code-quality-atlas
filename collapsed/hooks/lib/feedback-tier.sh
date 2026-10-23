@@ -144,6 +144,24 @@ _code_quality_atlas_hook_prologue() {
   fi
 
   LOG_DIR="$(_code_quality_atlas_project_dir)/.code-quality-atlas/learnings"
+  # Checked before mkdir -p, not relying on its exit status: mkdir -p on a
+  # path that already exists as a symlink-to-directory succeeds silently
+  # (no error), so every append below would otherwise write through a
+  # cloned-in-Git symlink pointing anywhere outside the tree -- the same
+  # threat _code_quality_atlas_append already guards for the log *file*
+  # itself, just one or two path segments higher. Both segments a cloned
+  # repo's own content could ship as a symlink -- .code-quality-atlas
+  # itself, or .code-quality-atlas/learnings -- are checked explicitly
+  # (dees-bot review, PR #579): checking LOG_DIR alone misses a symlinked
+  # *parent* whenever `learnings` doesn't exist yet inside its target --
+  # `[ -L "$LOG_DIR" ]` then lstats a path that doesn't exist (ENOENT) and
+  # reads as "not a symlink", letting mkdir -p create a brand-new real
+  # directory inside the symlink's target.
+  if [ -L "$LOG_DIR" ] || [ -L "$(dirname "$LOG_DIR")" ]; then
+    printf 'code-quality-atlas: refusing to use %s (it or its parent is a symlink); skipping this %s\n' \
+      "$LOG_DIR" "$label" >&2
+    exit 0
+  fi
   if ! mkdir -p "$LOG_DIR" 2>/dev/null; then
     printf 'code-quality-atlas: could not create %s; skipping this %s\n' "$LOG_DIR" "$label" >&2
     exit 0
