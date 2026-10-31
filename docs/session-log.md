@@ -620,3 +620,28 @@ way against the first-pass fix, then extended the guard to
 `[ -L "$LOG_DIR" ] || [ -L "$(dirname "$LOG_DIR")" ]` in both copies.
 `ruff`/`mypy`/the full `pytest` suite (868 passing)/`shellcheck`/
 `tooling.cli drift` all clean on the final version.
+
+## 2026-10-28 — #583, #584, #585: two routine dependency bumps and the version-pin comment refresh they triggered
+
+Two Dependabot PRs landed back to back on 2026-10-27: ruff 0.17.1 → 0.17.2
+(#584, `requirements.in`/`requirements.txt` only) and
+`actions/setup-python` 7.0.0 → 7.1.0 (#583, one line in `ci.yml`). Both
+are mechanical, dependency-only changes with no source or doc edits of
+their own.
+
+The ruff bump left `pyproject.toml`'s `[tool.ruff.lint]` comment citing
+the now-superseded `ruff==0.17.1` pin it was last verified against — the
+exact stale-pin drift the comment's own closing sentence warns about, and
+the same spot #581/#582 had just finished correcting (0.16.5 → 0.17.1,
+407/409 counts restored after an off-by-one) only a day earlier. #585
+(2026-10-28) re-ran `ruff check --isolated --show-settings .` and this
+repo's own `ruff check --show-settings .` under the newly-pinned 0.17.2:
+both rule counts (407 default, 409 with this repo's `extend-select`) came
+back unchanged, so only the cited version string needed correcting.
+
+**Backfill note (2026-10-31, #586):** this entry was written retroactively
+— none of #583/#584/#585 added one of their own, and the weekly
+`schedule` currency check
+(`tests/test_session_log_currency.py::test_session_log_is_current`) was
+heading toward its next run with the log 8 days stale and no open PR able
+to carry the fix.
