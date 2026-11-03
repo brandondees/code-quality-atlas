@@ -1,6 +1,6 @@
 PyYAML>=6.0.3
 mypy>=2.4.0
-pytest>=9.1.1
+pytest>=9.2.0
 pytest-cov>=7.0.0
 ruff>=0.17.2
 types-PyYAML>=6.0.3
