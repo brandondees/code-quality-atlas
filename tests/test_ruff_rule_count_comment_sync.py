@@ -42,6 +42,11 @@ _WITH_EXTEND_SELECT_COUNT_RE = re.compile(
 _TRY004_COUNT_WORD_RE = re.compile(
     r"the (\w+) `# noqa: TRY004` suppressions in\s*\n#\s*tooling/run_evals\.py"
 )
+# A real trailing TRY004 suppression directive on a code line, not any
+# textual mention of that directive (e.g. inside a docstring/comment
+# explaining the suppression) -- excludes a line whose first non-whitespace
+# character is '#' (round-1 atlas review on PR #591).
+_TRY004_DIRECTIVE_RE = re.compile(r"(?m)^(?!\s*#).*#\s*noqa:\s*TRY004")
 _NUMBER_WORDS = {
     "zero": 0,
     "one": 1,
@@ -84,11 +89,30 @@ def _installed_ruff_version() -> str:
         "first (`pip install -r requirements.txt`)."
     )
     proc = subprocess.run(
-        ["ruff", "--version"], capture_output=True, text=True, check=True
+        ["ruff", "--version"], capture_output=True, text=True, check=False
+    )
+    assert proc.returncode == 0, (
+        f"'ruff --version' exited {proc.returncode}: {proc.stderr}"
     )
     match = re.search(r"ruff (\d+\.\d+\.\d+)", proc.stdout)
     assert match, f"couldn't parse a version out of 'ruff --version': {proc.stdout!r}"
     return match.group(1)
+
+
+def _assert_installed_ruff_matches_pin() -> str:
+    """Returns the installed ruff version, after asserting it matches
+    requirements.txt's pin. Call this before comparing any rule count --
+    otherwise a stale local ruff produces a real-looking mismatch whose
+    message points at the comment instead of at the installed ruff
+    (round-1 atlas review on PR #591)."""
+    installed, pinned = _installed_ruff_version(), _pinned_ruff_version()
+    assert installed == pinned, (
+        f"the ruff on PATH is {installed} but requirements.txt pins "
+        f"{pinned} -- install the pinned version first "
+        "(`pip install -r requirements.txt`); this test's rule-count "
+        "comparisons are only meaningful against the pinned ruff."
+    )
+    return installed
 
 
 def _count_enabled_rules(show_settings_text: str) -> int:
@@ -120,7 +144,11 @@ def _enabled_rule_count(*extra_args: str) -> int:
         cwd=ROOT,
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
+    )
+    assert proc.returncode == 0, (
+        f"'ruff check {' '.join(extra_args)} --show-settings .' exited "
+        f"{proc.returncode}: {proc.stderr}"
     )
     return _count_enabled_rules(proc.stdout)
 
@@ -135,14 +163,8 @@ def test_pyproject_comment_cites_the_installed_ruff_version():
         "in the [tool.ruff.lint] comment -- has its wording changed? Update "
         "this test's regex either way."
     )
-    cited, installed = match.group(1), _installed_ruff_version()
-    pinned = _pinned_ruff_version()
-    assert installed == pinned, (
-        f"the ruff on PATH is {installed} but requirements.txt pins "
-        f"{pinned} -- install the pinned version first "
-        "(`pip install -r requirements.txt`); this test's rule-count "
-        "comparisons are only meaningful against the pinned ruff."
-    )
+    cited = match.group(1)
+    pinned = _assert_installed_ruff_matches_pin()
     assert cited == pinned, (
         f"pyproject.toml's [tool.ruff.lint] comment says its counts were "
         f"verified against ruff=={cited}, but requirements.txt now pins "
@@ -162,6 +184,7 @@ def test_default_enabled_rule_count_matches_comment():
         "test's regex either way."
     )
     claimed = int(match.group(1))
+    _assert_installed_ruff_matches_pin()
     actual = _enabled_rule_count("--isolated")
     assert claimed == actual, (
         f"pyproject.toml's [tool.ruff.lint] comment claims ruff's built-in "
@@ -181,6 +204,7 @@ def test_extend_select_enabled_rule_count_matches_comment():
         "changed? Update this test's regex either way."
     )
     claimed = int(match.group(1))
+    _assert_installed_ruff_matches_pin()
     actual = _enabled_rule_count()
     assert claimed == actual, (
         f"pyproject.toml's [tool.ruff.lint] comment claims {claimed} rules "
@@ -206,9 +230,7 @@ def test_try004_suppression_count_in_run_evals_matches_comment():
         "or reword the comment to use a number this test recognizes."
     )
     claimed = _NUMBER_WORDS[claimed_word]
-    actual = len(
-        re.findall(r"#\s*noqa:\s*TRY004", RUN_EVALS.read_text(encoding="utf-8"))
-    )
+    actual = len(_TRY004_DIRECTIVE_RE.findall(RUN_EVALS.read_text(encoding="utf-8")))
     assert claimed == actual, (
         f"pyproject.toml's [tool.ruff.lint] comment says tooling/run_evals.py "
         f"has {claimed_word!r} (={claimed}) `# noqa: TRY004` suppressions, "
