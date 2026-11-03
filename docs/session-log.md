@@ -645,3 +645,33 @@ back unchanged, so only the cited version string needed correcting.
 (`tests/test_session_log_currency.py::test_session_log_is_current`) was
 heading toward its next run with the log 8 days stale and no open PR able
 to carry the fix.
+
+## 2026-11-03 — #588: drift guard for pyproject.toml's hand-maintained ruff rule-count comment
+
+\#588's scheduled self-improvement sweep (2026-11-02) flagged that the
+`[tool.ruff.lint]` comment's numeric claims (407 rules enabled by ruff's
+default, 409 once this repo's own `extend-select` is applied, and the
+"four" `# noqa: TRY004` suppressions in `tooling/run_evals.py` that
+implicit surface forces) had needed manual correction repeatedly — #581
+refreshed a stale pair of counts, #582 then had to fix an off-by-one in
+that very refresh, and #585 was a third comment-only follow-up to a
+routine `ruff` version bump. Nothing mechanically caught the drift; it
+was only ever found by a human or agent re-deriving the numbers by eye.
+
+Added `tests/test_ruff_rule_count_comment_sync.py` (issue #588's "Option
+2"): it parses the comment's claimed version pin and both counts, derives
+the real numbers via the exact commands the comment itself names
+(`ruff check --isolated --show-settings .` and
+`ruff check --show-settings .`, counting the `linter.rules.enabled = [...]`
+block's actual entries) plus a regex count of `# noqa: TRY004` in
+`tooling/run_evals.py`, and fails with a correction message on any
+mismatch — including a guard that the installed ruff
+matches `requirements.txt`'s pin, so a version mismatch can't masquerade
+as a real drift (or vice versa). Confirmed the new tests pass against the
+current (accurate) comment, and that each one fails with a clear message
+when a claimed number is deliberately corrupted. Not a generation-based
+fix like `test_doc_counts.py`'s #372 mechanism, since this is prose
+explaining a tradeoff rather than a rendered template occurrence — per
+\#588's own framing, a drift-guard test is the right-sized fix here.
+`ruff`/`ruff format`/the full `pytest` suite (coverage gate green) all
+clean.
