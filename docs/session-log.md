@@ -664,8 +664,8 @@ the real numbers via the exact commands the comment itself names
 (`ruff check --isolated --show-settings .` and
 `ruff check --show-settings .`, counting the `linter.rules.enabled = [...]`
 block's actual entries) plus a regex count of `# noqa: TRY004` in
-`tooling/run_evals.py`, and fails with the re-derivation command in the
-message on any mismatch — including a guard that the installed ruff
+`tooling/run_evals.py`, and fails with a correction message on any
+mismatch — including a guard that the installed ruff
 matches `requirements.txt`'s pin, so a version mismatch can't masquerade
 as a real drift (or vice versa). Confirmed the new tests pass against the
 current (accurate) comment, and that each one fails with a clear message

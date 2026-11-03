@@ -45,8 +45,11 @@ _TRY004_COUNT_WORD_RE = re.compile(
 # A real trailing TRY004 suppression directive on a code line, not any
 # textual mention of that directive (e.g. inside a docstring/comment
 # explaining the suppression) -- excludes a line whose first non-whitespace
-# character is '#' (round-1 atlas review on PR #591).
-_TRY004_DIRECTIVE_RE = re.compile(r"(?m)^(?!\s*#).*#\s*noqa:\s*TRY004")
+# character is '#' (round-1 atlas review on PR #591). `[\s,A-Z0-9]*?` allows
+# other rule codes to precede TRY004 in a multi-code suppression, and the
+# trailing `\b` rejects a longer code like TRY0041 (CodeRabbit finding on
+# PR #591).
+_TRY004_DIRECTIVE_RE = re.compile(r"(?m)^(?!\s*#).*#\s*noqa:[\s,A-Z0-9]*?\bTRY004\b")
 _NUMBER_WORDS = {
     "zero": 0,
     "one": 1,
