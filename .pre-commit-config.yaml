@@ -4,10 +4,10 @@
 # caught before they reach a PR. Rules live in .markdownlint-cli2.jsonc.
 #
 # Keep this rev aligned with the markdownlint-cli2 version bundled by
-# markdownlint-cli2-action in CI: action v24.2.0 bundles markdownlint-cli2
-# v0.23.2, so both gates run the same engine. Bump them together.
+# markdownlint-cli2-action in CI: action v25.0.0 bundles markdownlint-cli2
+# v0.24.0, so both gates run the same engine. Bump them together.
 repos:
   - repo: https://github.com/DavidAnson/markdownlint-cli2
-    rev: b82a6c8896e491b9cb377a99ff3412131920681b # v0.23.2
+    rev: 341e2a331ba578029e66c2e01183e7a6b5ca9ab4 # v0.24.0
     hooks:
       - id: markdownlint-cli2
