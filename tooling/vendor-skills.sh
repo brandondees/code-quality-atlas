@@ -589,24 +589,35 @@ do_uninstall() {
   local removed=0
   local skipped_names=()
   local old target
-  for old in "${OLD_NAMES[@]}"; do
-    target="${dest_root:?}/$old"
-    [ -e "$target" ] || continue
-    if [ "$FORCE" -ne 1 ] && ! is_tool_vendored_skill_dir "$target"; then
-      printf 'Warning: %s is listed in the marker but does not look like something this tool vendored (no generated-marker comment in its SKILL.md)%s; pass --force to remove it anyway, or delete it by hand if you are sure.\n' \
-        "$target" "$([ "$DRY_RUN" -eq 1 ] && printf ' -- would skip in a real run' || printf ' -- skipping deletion')" >&2
-      skipped_names+=("$old")
-      continue
-    fi
-    if [ "$DRY_RUN" -eq 1 ]; then
-      printf '  - (dry-run) would remove: %s\n' "$target"
-    else
-      confirm_child_of_dest_root "$target" "$dest_root" || exit 1
-      rm -rf "$target"
-      printf '  - removed: %s\n' "$old"
-    fi
-    removed=$((removed + 1))
-  done
+  # Guarded on count, like every other "${ARR[@]}" expansion of a possibly-
+  # empty array in this script (OLD_NAMES in compute_stale_names,
+  # SKIPPED_COLLISIONS in vendor_all_skills/main, marker_names in
+  # write_marker_and_summary): under `set -u` on bash <4.4 (this script
+  # targets 3.2/macOS), "${OLD_NAMES[@]}" on a zero-element array raises
+  # 'unbound variable' instead of iterating zero times. OLD_NAMES is empty
+  # whenever the marker exists but names zero skills (e.g. only header/
+  # format-comment lines, or every line was malformed) -- the early
+  # file-existence check above does not rule that out.
+  if [ "${#OLD_NAMES[@]}" -gt 0 ]; then
+    for old in "${OLD_NAMES[@]}"; do
+      target="${dest_root:?}/$old"
+      [ -e "$target" ] || continue
+      if [ "$FORCE" -ne 1 ] && ! is_tool_vendored_skill_dir "$target"; then
+        printf 'Warning: %s is listed in the marker but does not look like something this tool vendored (no generated-marker comment in its SKILL.md)%s; pass --force to remove it anyway, or delete it by hand if you are sure.\n' \
+          "$target" "$([ "$DRY_RUN" -eq 1 ] && printf ' -- would skip in a real run' || printf ' -- skipping deletion')" >&2
+        skipped_names+=("$old")
+        continue
+      fi
+      if [ "$DRY_RUN" -eq 1 ]; then
+        printf '  - (dry-run) would remove: %s\n' "$target"
+      else
+        confirm_child_of_dest_root "$target" "$dest_root" || exit 1
+        rm -rf "$target"
+        printf '  - removed: %s\n' "$old"
+      fi
+      removed=$((removed + 1))
+    done
+  fi
 
   local notice="$dest_root/NOTICE.md" license="$dest_root/LICENSE-CC-BY-4.0"
   # Ownership check for the two attribution files, same reasoning as
@@ -657,9 +668,18 @@ do_uninstall() {
       printf '# code-quality-atlas vendored skills — do not hand-edit; regenerate with tooling/vendor-skills.sh\n'
       printf '# format=%s\n' "$MARKER_FORMAT"
       local old
-      for old in "${skipped_names[@]}"; do
-        printf '%s\n' "$old"
-      done
+      # Guarded on count (same bash-3.2 "${ARR[@]}" nounset hazard as the
+      # OLD_NAMES loop above) -- skipped_names is legitimately empty right
+      # here whenever every OLD_NAMES entry was genuinely tool-vendored and
+      # got removed cleanly, but clear_attribution is still 0 because the
+      # attribution files themselves were hand-edited (the comment above
+      # already says "possibly none"; this just makes the empty case not
+      # crash under set -u).
+      if [ "${#skipped_names[@]}" -gt 0 ]; then
+        for old in "${skipped_names[@]}"; do
+          printf '%s\n' "$old"
+        done
+      fi
     } >"$marker"
     printf 'Uninstalled %s skill(s) from %s; left %s name(s) in place (see warnings above).\n' \
       "$removed" "$dest_root" "${#skipped_names[@]}" >&2

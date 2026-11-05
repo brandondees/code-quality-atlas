@@ -709,6 +709,37 @@ def test_uninstall_nothing_vendored_is_a_no_op(tmp_path):
     assert not (target / ".claude").exists()
 
 
+def test_uninstall_marker_present_but_names_empty_does_not_crash(tmp_path):
+    """Sibling gap to test_vendor_all_collisions_leaves_marker_names_empty_without_crashing
+    above, but in do_uninstall rather than write_marker_and_summary: that fix
+    guarded marker_names, but do_uninstall's own `for old in "${OLD_NAMES[@]}"`
+    (and the skipped_names rewrite loop further down the same function) were
+    left unguarded. A marker file that EXISTS but names zero skills -- header/
+    format-comment lines only, as here, or every data line malformed -- leaves
+    OLD_NAMES genuinely empty going into --uninstall; `[ ! -f "$marker" ]`
+    above only rules out a missing file, not an empty one. Under `set -u` on
+    bash <4.4 (the script targets bash 3.2/macOS), "${OLD_NAMES[@]}" on a
+    zero-element array raises 'unbound variable' rather than iterating zero
+    times -- not reproducible on the bash >=4.4 this suite runs under, so this
+    only asserts the observable contract (clean, non-crashing completion)."""
+    target = tmp_path / "target-repo"
+    skills_dir = target / ".claude" / "skills"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / ".atlas-vendored").write_text(
+        "# code-quality-atlas vendored skills — do not hand-edit; "
+        "regenerate with tooling/vendor-skills.sh\n"
+        "# format=1\n"
+    )
+
+    result = run_vendor_raw(target, "--uninstall")
+    assert result.returncode == 0, result.stderr
+    assert "unbound variable" not in result.stderr
+    assert "Uninstalled 0 skill(s)" in result.stdout
+    # Nothing left to vendor into this target -- the emptied marker/dir are
+    # cleaned up exactly as a genuinely-empty uninstall should.
+    assert not skills_dir.exists()
+
+
 def test_uninstall_leaves_a_non_tool_vendored_directory_in_place(tmp_path):
     """Same ownership check --prune's stale-removal relies on
     (is_tool_vendored_skill_dir): a marker line naming a directory that no
