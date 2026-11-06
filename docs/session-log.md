@@ -675,3 +675,50 @@ explaining a tradeoff rather than a rendered template occurrence — per
 \#588's own framing, a drift-guard test is the right-sized fix here.
 `ruff`/`ruff format`/the full `pytest` suite (coverage gate green) all
 clean.
+
+## 2026-11-06 — D24: `atlas_reviewer/`, the first manual, draft-only reviewer service
+
+The owner approved one manual review path. An operator-triggered
+controller takes a PR event (repo, PR number, head SHA), gathers CI
+evidence matched to that exact SHA, runs extra tools in a fresh,
+credential-free Sprite, and writes a review draft to stdout or a file.
+It publishes nothing to GitHub. The service lives here as a new top-level
+package, `atlas_reviewer/`, with its own entry point
+(`python -m atlas_reviewer`), its own tests and coverage run, and two new
+CI steps: the suite, and an offline dry run against
+`atlas_reviewer/fixtures/sample-pr/`. It runs the collapsed
+`reviewing-a-change` skill bundle as data and changes nothing under
+`skills/`, `collapsed/`, or `tooling/`. It is recorded as **D24**, a
+scoped step under the still-open Q24; design in
+[`plans/2026-11-06-manual-reviewer-service.md`](plans/2026-11-06-manual-reviewer-service.md).
+
+The runner lifecycle follows the same-day live Sprites validation. Every
+review gets a fresh Sprite, never a reused one. Deny-all egress is set and
+read back from the outside API before anything executes, and an external
+deadline is enforced by a watchdog. Destroy is the only cleanup primitive.
+It runs in `finally` and from the watchdog, is verified by an existence
+check, and is backed by a ledger that a `sweep` command reads after a
+crash. Mutation checks confirmed the lifecycle tests bite: removing the
+`finally` destroy fails 11 tests, dropping the deny-all read-back fails 2,
+and disabling the watchdog fails its test.
+
+The domain is a closed union. `Matched` / `Stale` / `Missing` evidence
+means only head-SHA evidence can ever PASS. Stale, missing, and
+inconclusive evidence is UNKNOWN. Untrusted text is typed (`RedactedText`
+is minted only by `redact()`), and it reaches the prompt only inside
+nonce-fenced blocks.
+
+Only the offline provider ships. The first live adapter to wire is the
+Anthropic Messages API. Live runs still need three things: a pre-minted
+GitHub App installation token (no in-process JWT minting), confirmation of
+the Sprites exec request shape, and a model choice.
+
+Repo wiring:
+
+- `LICENSE` and `tests/test_license_paths_exhaustive.py` classify the
+  directory as MIT.
+- `[tool.mypy] files` now includes the package. The "only fully annotated
+  package" comments in `pyproject.toml`, `ci.yml`, and both
+  `CLAUDE.md`/`AGENTS.md` copies were updated together.
+- `ci.yml`'s `python` and `session_log_substantive` path filters gained
+  `atlas_reviewer/**`.
