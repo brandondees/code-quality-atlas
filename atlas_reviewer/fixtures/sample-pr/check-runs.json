@@ -1,0 +1,23 @@
+{
+  "total_count": 2,
+  "check_runs": [
+    {
+      "id": 1001,
+      "name": "gate",
+      "head_sha": "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4",
+      "status": "completed",
+      "conclusion": "success",
+      "app": {"slug": "github-actions"},
+      "output": {"title": "gate passed", "summary": "lint, type-check and tests passed"}
+    },
+    {
+      "id": 1002,
+      "name": "integration",
+      "head_sha": "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4",
+      "status": "in_progress",
+      "conclusion": null,
+      "app": {"slug": "github-actions"},
+      "output": {"title": null, "summary": null}
+    }
+  ]
+}

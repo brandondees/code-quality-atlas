@@ -1,0 +1,211 @@
+# SPDX-License-Identifier: MIT
+"""Render the review draft as Markdown. Pure.
+
+The draft is the only output of a review. It is written for the operator
+to read; nothing in it is posted anywhere.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from dataclasses import dataclass
+from datetime import datetime
+
+from atlas_reviewer.classify import tally
+from atlas_reviewer.domain import (
+    Evidence,
+    Matched,
+    Missing,
+    Outcome,
+    PrEvent,
+    RunnerReport,
+    Stale,
+    evidence_key,
+    outcome,
+)
+from atlas_reviewer.ports import Narrative
+
+DRAFT_BANNER = "> **Draft only -- not posted.** Produced by `atlas_reviewer` for an operator to read. Nothing was sent to GitHub."
+
+
+@dataclass(frozen=True)
+class NarrativeFailure:
+    harness: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class DraftInput:
+    event: PrEvent
+    mode: str
+    title: str
+    evidence: tuple[Evidence, ...]
+    runner: RunnerReport
+    narrative: Narrative | NarrativeFailure
+    notes: tuple[str, ...]
+    redactions: int
+    generated_at: datetime
+
+
+def _cell(text: str) -> str:
+    return (
+        text.replace("\\", "\\\\")
+        .replace("|", "\\|")
+        .replace("\r", " ")
+        .replace("\n", " ")
+        .strip()
+        or "-"
+    )
+
+
+def _sort_key(e: Evidence) -> tuple[str, str]:
+    key = evidence_key(e)
+    return key.kind.value, key.name
+
+
+def render_draft(d: DraftInput) -> str:
+    sections = (
+        _header(d),
+        _summary(d),
+        _notes(d.notes),
+        _at_head(d.evidence),
+        _unknowns(d.evidence),
+        _runner(d.runner),
+        _narrative(d.narrative),
+        f"---\n\n{d.redactions} secret-like string(s) were redacted from untrusted input before any model call.",
+    )
+    return "\n\n".join(s for s in sections if s) + "\n"
+
+
+def _header(d: DraftInput) -> str:
+    rows = (
+        ("Repository", d.event.repo),
+        ("Pull request", f"#{d.event.pr_number} -- {d.title}"),
+        ("Reviewed head SHA", f"`{d.event.head_sha}`"),
+        ("Mode", d.mode),
+        ("Generated at", d.generated_at.isoformat(timespec="seconds")),
+    )
+    table = "\n".join(f"| {k} | {_cell(v)} |" for k, v in rows)
+    return f"# Code Quality Atlas review -- DRAFT\n\n{DRAFT_BANNER}\n\n| Field | Value |\n| --- | --- |\n{table}"
+
+
+def _summary(d: DraftInput) -> str:
+    t = tally(d.evidence)
+    return (
+        "## Evidence summary\n\n"
+        f"- Pass: {t.passed}\n- Fail: {t.failed}\n"
+        f"- UNKNOWN at the head SHA (missing or inconclusive): {t.unknown}\n"
+        f"- Stale (other commits; UNKNOWN for this SHA): {t.stale}\n"
+        f"- Present, no verdict (artifacts): {t.present}\n\n"
+        "UNKNOWN is never counted as passing."
+    )
+
+
+def _notes(notes: tuple[str, ...]) -> str:
+    return "## Notes\n\n" + "\n".join(f"- {n}" for n in notes) if notes else ""
+
+
+def _at_head(evidence: Iterable[Evidence]) -> str:
+    matched = sorted((e for e in evidence if isinstance(e, Matched)), key=_sort_key)
+    if not matched:
+        return "## Evidence at the reviewed head SHA\n\nNone."
+    rows = "\n".join(_matched_row(m) for m in matched)
+    return (
+        "## Evidence at the reviewed head SHA\n\n"
+        "| Outcome | Kind | Name | Tool @ version | Provenance | Fetched at |\n"
+        "| --- | --- | --- | --- | --- | --- |\n" + rows
+    )
+
+
+def _matched_row(m: Matched) -> str:
+    i = m.item
+    cells = (
+        _outcome_label(m),
+        i.provenance.key.kind.value,
+        i.provenance.key.name,
+        f"{i.tool.name} @ {i.tool.version}",
+        i.provenance.source_id,
+        i.fetched_at.isoformat(timespec="seconds"),
+    )
+    return "| " + " | ".join(_cell(c) for c in cells) + " |"
+
+
+def _outcome_label(m: Matched) -> str:
+    result = outcome(m)
+    if result is Outcome.UNKNOWN:
+        return f"UNKNOWN ({m.item.conclusion.value})"
+    return result.value.upper() if result is not Outcome.INFO else result.value
+
+
+def _unknowns(evidence: Iterable[Evidence]) -> str:
+    rows = [
+        _unknown_row(e)
+        for e in sorted(evidence, key=_sort_key)
+        if outcome(e) is Outcome.UNKNOWN
+    ]
+    if not rows:
+        return "## UNKNOWN -- not counted as passing\n\nNone."
+    return (
+        "## UNKNOWN -- not counted as passing\n\n"
+        "| Status | Kind | Name | Why |\n| --- | --- | --- | --- |\n" + "\n".join(rows)
+    )
+
+
+def _unknown_row(e: Evidence) -> str:
+    key = evidence_key(e)
+    status, why = _unknown_reason(e)
+    return (
+        "| "
+        + " | ".join(_cell(c) for c in (status, key.kind.value, key.name, why))
+        + " |"
+    )
+
+
+def _unknown_reason(e: Evidence) -> tuple[str, str]:
+    match e:
+        case Stale(item=item):
+            return (
+                "stale",
+                f"evidence is for `{item.head_sha[:12]}` ({item.provenance.source_id})",
+            )
+        case Missing(reason=reason):
+            return "missing", reason
+        case Matched(item=item):
+            return (
+                "inconclusive",
+                f"conclusion `{item.conclusion.value}` at the head SHA",
+            )
+    raise TypeError(f"not evidence: {e!r}")  # pragma: no cover
+
+
+def render_evidence(evidence: tuple[Evidence, ...]) -> str:
+    """The evidence tables plus each head-SHA item's (redacted) detail text."""
+    details = "\n\n".join(
+        f"### {m.item.provenance.source_id}\n{m.item.detail.text}"
+        for m in sorted((e for e in evidence if isinstance(e, Matched)), key=_sort_key)
+        if m.item.detail.text
+    )
+    return f"{_at_head(evidence)}\n\n{_unknowns(evidence)}\n\n## Details\n\n{details or 'None.'}"
+
+
+def _runner(r: RunnerReport) -> str:
+    return (
+        "## Disposable runner\n\n"
+        f"- Runner: `{r.runner_name or 'none'}`\n"
+        f"- Status: {r.status.value}\n"
+        f"- Cleanup: {r.cleanup.value}\n"
+        f"- Note: {_cell(r.note)}"
+    )
+
+
+def _narrative(n: Narrative | NarrativeFailure) -> str:
+    if isinstance(n, NarrativeFailure):
+        return f"## Review narrative\n\nHarness `{n.harness}` produced no narrative: {_cell(n.reason)}"
+    quoted = "\n".join(
+        f"> {line}" if line else ">" for line in n.text.text.splitlines()
+    )
+    return (
+        "## Review narrative\n\n"
+        f"Harness `{n.harness}`, provider `{n.provider}`. Model output is unverified; "
+        "check every claim against the evidence above.\n\n" + quoted
+    )

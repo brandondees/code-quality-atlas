@@ -1,0 +1,35 @@
+{
+  "total_count": 3,
+  "workflow_runs": [
+    {
+      "id": 5001,
+      "name": "ci",
+      "head_sha": "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4",
+      "status": "completed",
+      "conclusion": "failure",
+      "event": "pull_request",
+      "run_attempt": 1,
+      "path": ".github/workflows/ci.yml"
+    },
+    {
+      "id": 4001,
+      "name": "ci",
+      "head_sha": "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a291807",
+      "status": "completed",
+      "conclusion": "success",
+      "event": "pull_request",
+      "run_attempt": 1,
+      "path": ".github/workflows/ci.yml"
+    },
+    {
+      "id": 4002,
+      "name": "docs-lint",
+      "head_sha": "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a291807",
+      "status": "completed",
+      "conclusion": "success",
+      "event": "pull_request",
+      "run_attempt": 1,
+      "path": ".github/workflows/docs.yml"
+    }
+  ]
+}
