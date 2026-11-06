@@ -70,12 +70,16 @@ max-complexity = 15
 "tests/*.py" = ["E402"]
 
 [tool.mypy]
-# Scoped to tooling/ -- this repo's only fully type-annotated Python
-# package (every module opens with `from __future__ import annotations`).
-# tests/ is intentionally out of scope: adding it would be a second,
-# separate decision (test doubles/fixtures are typically looser-typed by
-# convention, and this repo's tests aren't currently annotated at all).
-files = ["tooling"]
+# Scoped to this repo's two fully type-annotated Python packages: tooling/
+# (every module opens with `from __future__ import annotations`) and
+# atlas_reviewer/, the manual reviewer service
+# (docs/plans/2026-11-06-manual-reviewer-service.md). tests/ and
+# atlas_reviewer/tests/ are intentionally out of scope: adding them would be
+# a second, separate decision (test doubles/fixtures are typically
+# looser-typed by convention, and this repo's tests aren't currently
+# annotated at all).
+files = ["tooling", "atlas_reviewer"]
+exclude = ["^atlas_reviewer/tests/"]
 python_version = "3.12"
 warn_unused_ignores = true
 warn_redundant_casts = true
@@ -83,6 +87,11 @@ warn_unused_configs = true
 
 [tool.coverage.run]
 branch = true
+# atlas_reviewer's suite runs as its own `--cov=atlas_reviewer` step; its
+# test modules would otherwise count toward their own coverage, and
+# __main__.py is only exercised through a subprocess, which coverage does
+# not follow.
+omit = ["atlas_reviewer/tests/*", "atlas_reviewer/__main__.py"]
 
 [tool.coverage.report]
 # A ratchet, not a target: set below the coverage measured on tooling/ at the

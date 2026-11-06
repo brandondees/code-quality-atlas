@@ -22,7 +22,8 @@ This repository is dual-licensed by content type.
   its own `LICENSE` and `NOTICE.md`, not this file.
 
 - **Code — MIT.** Everything else — the generation/drift/eval pipeline under
-  `tooling/`, the `hooks/` routing script, the tests, the repo's CI and
+  `tooling/`, the manual reviewer service under `atlas_reviewer/` (its
+  README and fixture data included), the `hooks/` routing script, the tests, the repo's CI and
   configuration files (including `.claude/settings.json`), and
   `collapsed/`'s own `collapsed/hooks/` routing script and
   `collapsed/.claude-plugin/plugin.json` manifest — is licensed under the
