@@ -40,6 +40,7 @@ from atlas_reviewer.domain import (
     InvalidEventError,
     PrEvent,
     RunnerReport,
+    RunnerStatus,
     SourceKey,
     SourceKind,
 )
@@ -370,17 +371,19 @@ def _cmd_probe(args: argparse.Namespace, env: Mapping[str, str], out: TextIO) ->
     telemetry = _telemetry(args, env, f"probe-{args.sequence}", default_file=True)
     sequence = _PROBE_SEQUENCES[args.sequence]
     with single_review_lock(_state_dir(args, env) / "review.lock"):
-        sequence(args, env, out, telemetry)
+        usable = sequence(args, env, out, telemetry)
     out.write(f"\n{telemetry_section(telemetry.events)}\n\n")
     out.write(
         f"telemetry: {len(telemetry.events)} event(s), {_events_path(telemetry)}\n"
     )
-    return EXIT_OK
+    if not usable:
+        out.write("probe: FAILED -- the runner is not usable as probed\n")
+    return EXIT_OK if usable else EXIT_BOUNDARY
 
 
 def _probe_protocol(
     args: argparse.Namespace, env: Mapping[str, str], out: TextIO, telemetry: Telemetry
-) -> None:
+) -> bool:
     clock: Clock = SystemClock()
     outcome = probe_runner(
         args.sprites_factory(env),
@@ -399,11 +402,14 @@ def _probe_protocol(
     )
     out.write(f"raw exec response sample: {outcome.framing_sample[:200]!r}\n")
     out.write(f"stdin round-trip: {outcome.stdin_check}\n")
+    return outcome.report.status is RunnerStatus.COMPLETED and (
+        outcome.stdin_check.startswith("ok:")
+    )
 
 
 def _probe_review_sequence(
     args: argparse.Namespace, env: Mapping[str, str], out: TextIO, telemetry: Telemetry
-) -> None:
+) -> bool:
     """The review's exact exec sequence (tool check, upload, unpack, tools)
     on a real checkout, with no model call and no evidence gathering."""
     tarball = _probe_source(args, env, telemetry)
@@ -426,6 +432,7 @@ def _probe_review_sequence(
     out.writelines(f"{_tool_report(r)}\n" for r in outcome.results)
     out.write(f"{_python_report(outcome.python)}\n")
     out.writelines(f"{_diagnostic_report(d)}\n" for d in outcome.diagnostics)
+    return outcome.report.status is RunnerStatus.COMPLETED
 
 
 def _python_report(python: TrustedPython | None) -> str:
@@ -480,7 +487,7 @@ def _tool_report(result: ToolResult) -> str:
 
 
 _PROBE_SEQUENCES: dict[
-    str, Callable[[argparse.Namespace, Mapping[str, str], TextIO, Telemetry], None]
+    str, Callable[[argparse.Namespace, Mapping[str, str], TextIO, Telemetry], bool]
 ] = {"protocol": _probe_protocol, "review": _probe_review_sequence}
 
 

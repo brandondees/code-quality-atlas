@@ -71,6 +71,12 @@ evidence. The source is a local `.tar.gz` (`--tarball`, for example from
 fetched with the GitHub App (`--event`, needing the three `ATLAS_GITHUB_*`
 variables). Both are held to the review's 9 MiB tarball cap.
 
+`probe-runner` exits 3 when the runner did not complete or, for the
+protocol probe, the stdin round-trip did not come back `ok`, so a script
+cannot take an unusable runner for a ready one. Its report is redacted with
+the controller's own credential values and the usual secret patterns before
+it is printed.
+
 `sweep` takes the same single-review lock as `review` and `probe-runner`.
 The ledger lists a live review's runner too, so sweeping during a review
 would destroy that runner mid-run. While a review holds the lock, `sweep`

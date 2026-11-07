@@ -370,6 +370,36 @@ def test_probe_runner_reports_tool_availability_and_destroys(tmp_path):
     assert api.live_names() == ()
 
 
+def test_probe_runner_exits_nonzero_when_the_stdin_check_mismatches(tmp_path):
+    class ShortStdin(FakeSprites):
+        def _answer(self, script, stdin):
+            return ("12", 0) if "wc -c" in script else super()._answer(script, stdin)
+
+    api = ShortStdin()
+    out = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "probe-runner"],
+        env={}, out=out, err=io.StringIO(), sprites_factory=lambda env: api,
+    )  # fmt: skip
+    assert code == cli.EXIT_BOUNDARY
+    assert "stdin round-trip: MISMATCH" in out.getvalue()
+    assert "probe: FAILED" in out.getvalue()
+
+
+def test_probe_runner_exits_nonzero_when_the_runner_fails(tmp_path):
+    tarball = tmp_path / "checkout.tar.gz"
+    tarball.write_bytes(b"x")
+    api = FakeSprites(fail_on={"create": BoundaryError("HTTP 500")})
+    out = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "probe-runner", "--sequence", "review",
+         "--tarball", str(tarball)],
+        env={}, out=out, err=io.StringIO(), sprites_factory=lambda env: api,
+    )  # fmt: skip
+    assert code == cli.EXIT_BOUNDARY
+    assert "status: failed" in out.getvalue()
+
+
 def test_sweep_destroys_ledgered_runners(tmp_path):
     api = FakeSprites()
     api.create("cqa-rev-leftover")
