@@ -102,16 +102,26 @@ def gather_ci(
         "check runs",
         lambda: github.list_check_runs(repo, sha),
     )
-    out.items.extend(parse_check_runs(checks, now(), redactor))
-    runs = parse_workflow_runs(
+    out.items.extend(
+        _parse_each(
+            ctx,
+            SourceKind.CHECK_RUN,
+            "check runs",
+            checks,
+            lambda e: parse_check_runs(e, now(), redactor),
+        )
+    )
+    runs = _parse_each(
+        ctx,
+        SourceKind.WORKFLOW_RUN,
+        "workflow runs",
         _listing(
             ctx,
             SourceKind.WORKFLOW_RUN,
             "workflow runs",
             lambda: github.list_workflow_runs(repo, head_ref),
         ),
-        now(),
-        redactor,
+        lambda e: parse_workflow_runs(e, now(), redactor),
     )
     out.items.extend(r.item for r in runs)
     at_head = [r for r in runs if r.item.head_sha == sha]
@@ -144,6 +154,25 @@ def _listing(
     return listing.items
 
 
+def _parse_each[T](
+    ctx: _Ctx,
+    kind: SourceKind,
+    what: str,
+    entries: Sequence[Json],
+    parse: Callable[[Sequence[Json]], tuple[T, ...]],
+) -> tuple[T, ...]:
+    """Parse entry by entry, so one malformed entry is UNKNOWN on its own
+    rather than aborting the review and discarding the valid ones."""
+    parsed: list[T] = []
+    for i, entry in enumerate(entries):
+        try:
+            parsed.extend(parse([entry]))
+        except BoundaryError as exc:
+            key = SourceKey(kind, f"({what} entry {i})")
+            ctx.out.failures.append(Missing(key, f"malformed: {exc}"))
+    return tuple(parsed)
+
+
 def _cap_note[T](ctx: _Ctx, what: str, found: Sequence[T], cap: int) -> None:
     if len(found) > cap:
         ctx.out.omit(
@@ -155,29 +184,32 @@ def _cap_note[T](ctx: _Ctx, what: str, found: Sequence[T], cap: int) -> None:
 
 def _gather_run(ctx: _Ctx, run: WorkflowRun) -> None:
     repo, name = ctx.event.repo, run.item.provenance.key.name
-    jobs = parse_jobs(
+    jobs = _parse_each(
+        ctx,
+        SourceKind.JOB,
+        f"jobs of {name}",
         _listing(
             ctx,
             SourceKind.JOB,
             f"jobs of {name}",
             lambda: ctx.github.list_run_jobs(repo, run.run_id),
         ),
-        run,
-        ctx.now(),
-        ctx.redactor,
+        lambda e: parse_jobs(e, run, ctx.now(), ctx.redactor),
     )
     ctx.out.items.extend(j.item for j in jobs)
     ctx.out.links.extend(_job_links(run, jobs))
     _gather_job_logs(ctx, [j for j in jobs if j.item.head_sha == ctx.event.head_sha])
-    artifacts = parse_artifacts(
+    artifacts = _parse_each(
+        ctx,
+        SourceKind.ARTIFACT,
+        f"artifacts of {name}",
         _listing(
             ctx,
             SourceKind.ARTIFACT,
             f"artifacts of {name}",
             lambda: ctx.github.list_run_artifacts(repo, run.run_id),
         ),
-        ctx.now(),
-        ctx.redactor,
+        lambda e: parse_artifacts(e, ctx.now(), ctx.redactor),
     )
     ctx.out.items.extend(a.item for a in artifacts)
     _gather_artifacts(ctx, artifacts)

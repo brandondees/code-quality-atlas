@@ -193,3 +193,27 @@ def test_a_job_without_a_check_run_url_is_not_linked_to_any_check_run():
     out = gather(FixtureGitHub(FIXTURE))
     job_links = {link.supported for link in out.links if link.supporter == "job:7001"}
     assert job_links == set()
+
+
+def test_a_malformed_entry_is_unknown_and_the_rest_are_still_ingested():
+    class Malformed(FixtureGitHub):
+        def list_check_runs(self, repo, sha):
+            full = super().list_check_runs(repo, sha)
+            return Listing(({"id": "x"}, *full.items), False, 1)
+
+        def list_run_jobs(self, repo, run_id):
+            full = super().list_run_jobs(repo, run_id)
+            return Listing((*full.items, "not an object"), False, 1)
+
+    out = gather(Malformed(FIXTURE))
+    reasons = missing_reasons(out)
+    assert reasons["(check runs entry 0)"].startswith("malformed: ")
+    assert reasons["(jobs of ci entry 2)"].startswith("malformed: ")
+    ids = {i.provenance.source_id for i in out.items}
+    assert {"job:7001", "job_log:7001", "artifact:9001:zip"} <= ids
+    assert any(i.provenance.source_id.startswith("check_run:") for i in out.items)
+    evidence = classify(HEAD, out.items, failures=out.failures)
+    bad = next(
+        e for e in evidence if isinstance(e, Missing) and "entry 0" in e.key.name
+    )
+    assert outcome(bad) is Outcome.UNKNOWN
