@@ -35,7 +35,9 @@ DETAIL_CHARS = 2_000
 LOG_TAIL_CHARS = 6_000
 ARTIFACT_EXCERPT_CHARS = 4_000
 _TIMEOUT_EXITS = frozenset({124, 137})
-_CLOSING_REF = re.compile(r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b")
+_CLOSING_REF = re.compile(
+    r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d{1,9})\b"
+)
 _MAX_ISSUE_REFS = 3
 
 
@@ -90,8 +92,12 @@ def parse_pull(data: Json, redactor: Redactor) -> PullInfo:
 
 
 def issue_refs(body: str) -> tuple[int, ...]:
-    refs = dict.fromkeys(int(m.group(1)) for m in _CLOSING_REF.finditer(body))
-    return tuple(refs)[:_MAX_ISSUE_REFS]
+    refs: dict[int, None] = {}
+    for m in _CLOSING_REF.finditer(body):
+        refs[int(m.group(1))] = None
+        if len(refs) == _MAX_ISSUE_REFS:
+            break
+    return tuple(refs)
 
 
 def parse_check_runs(

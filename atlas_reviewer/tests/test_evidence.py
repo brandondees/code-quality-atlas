@@ -164,6 +164,11 @@ def test_pull_parsing_extracts_closing_issue_refs_only():
     assert issue_refs("Fixes #7, closes #8 and mentions #9; resolved #7 #1") == (7, 8)
 
 
+def test_an_oversized_issue_ref_is_skipped_and_parsing_stops_at_three():
+    assert issue_refs("Fixes #" + "9" * 5000 + " fixes #4") == (4,)
+    assert issue_refs("fixes #1 fixes #1 fixes #2 fixes #3 fixes #4") == (1, 2, 3)
+
+
 @pytest.mark.parametrize(
     "exit_code,conclusion",
     [
