@@ -170,6 +170,12 @@ def test_a_cycle_reachable_from_a_real_check_terminates_and_counts_everything():
         Link("job:2", "job:1"),
         Link("job:1", "job:2"),
     ]
-    t = tally(classify(HEAD, items), links)
-    assert t.failed + t.passed >= 1
-    assert t.failed == 1
+    evidence = classify(HEAD, items)
+    (group,) = group_checks(evidence, links)
+    assert group.root.item.provenance.source_id == "check_run:1"
+    assert sorted(m.item.provenance.source_id for m in group.supporting) == [
+        "job:1",
+        "job:2",
+    ]
+    t = tally(evidence, links)
+    assert (t.passed, t.failed, t.supporting) == (0, 1, 2)
