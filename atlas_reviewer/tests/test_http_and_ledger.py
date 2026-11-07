@@ -145,9 +145,18 @@ class _StreamHandler(BaseHTTPRequestHandler):
                 time.sleep(0.05)
             self.wfile.write(b"\r\n\r\nlate body")
             return
+        if self.path.startswith("/trickle-first-chunk"):
+            self.wfile.write(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+            for _ in range(40):
+                self.wfile.write(b"0")
+                self.wfile.flush()
+                time.sleep(0.05)
+            self.wfile.write(b"5\r\n\x01late\r\n0\r\n\r\n")
+            return
         if self.path.startswith("/trickle-chunks"):
+            close = b"Connection: close\r\n" if "close" in self.path else b""
             self.wfile.write(
-                b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+                b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n" + close + b"\r\n"
                 b"5\r\n\x01part\r\n"
             )
             for _ in range(40):
@@ -274,14 +283,43 @@ def test_trickled_headers_cannot_outlast_the_deadline(
     assert info.value.received == b""
 
 
-def test_trickled_chunk_framing_cannot_outlast_the_total_deadline(stream_server):
+@pytest.mark.parametrize("path", ["/trickle-chunks", "/trickle-chunks?close"])
+def test_trickled_chunk_framing_cannot_outlast_the_total_deadline(stream_server, path):
     """A chunk-size line trickled one byte at a time restarted the socket
-    timeout on every byte inside one `read1`, past the window."""
+    timeout on every byte inside one `read1`, past the window. With
+    `Connection: close`, getresponse() clears `conn.sock`, so the cutoff
+    must hold the socket itself."""
     started = time.monotonic()
     with pytest.raises(StreamTimeoutError, match="within 0.4s") as info:
-        _stream(f"{stream_server}/trickle-chunks", StreamWindow(0.4, 0.2))
+        _stream(f"{stream_server}{path}", StreamWindow(0.4, 0.2))
     assert time.monotonic() - started < 1.2
     assert info.value.received == b"\x01part"
+
+
+def test_a_trickled_first_chunk_line_fails_at_the_first_byte_deadline(
+    stream_server,
+):
+    """Headers on time, then the first chunk-size line trickled: the body's
+    first byte must still arrive within the first-byte window, not the
+    total."""
+    started = time.monotonic()
+    with pytest.raises(
+        StreamTimeoutError, match="no response byte within 0.2s"
+    ) as info:
+        _stream(f"{stream_server}/trickle-first-chunk", StreamWindow(5.0, 0.2))
+    assert time.monotonic() - started < 1.0
+    assert info.value.first_byte is True
+    assert info.value.received == b""
+
+
+def test_a_per_request_limit_below_the_transport_cap_is_enforced(stream_server):
+    transport = _streaming(max_bytes=1000)
+    url = f"{stream_server}/big"
+    assert len(transport.stream("POST", url, {}, b"", StreamWindow(5.0)).body) == 100
+    with pytest.raises(BoundaryError, match="exceeded 10 bytes"):
+        transport.stream("POST", url, {}, b"", StreamWindow(5.0), max_bytes=10)
+    with pytest.raises(BoundaryError, match="exceeded 0 bytes"):
+        transport.stream("POST", url, {}, b"", StreamWindow(5.0), max_bytes=0)
 
 
 def test_a_fast_exchange_is_not_cut_and_leaves_no_timer_running(stream_server):
@@ -298,6 +336,6 @@ def test_the_cutoff_marks_itself_fired_even_before_a_socket_exists():
     from atlas_reviewer.http import _Cutoff
 
     conn = http.client.HTTPConnection("127.0.0.1", 1)
-    with _Cutoff(conn, 0.0) as cutoff:
+    with _Cutoff(lambda: conn.sock, 0.0) as cutoff:
         assert cutoff.fired.wait(1.0)
     assert conn.sock is None

@@ -16,7 +16,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol, Self
 from urllib.parse import SplitResult, urlsplit
@@ -154,7 +154,7 @@ class UrllibStreamingTransport(UrllibTransport):
         stream = _Stream(method, url, window, time.monotonic())
         before_body = window.wait_s(0.0, got_any=False)
         conn = _connection(parts, before_body)
-        cutoff = _Cutoff(conn, before_body)
+        cutoff = _Cutoff(lambda: conn.sock, before_body)
         try:
             with cutoff:
                 conn.connect()
@@ -163,8 +163,13 @@ class UrllibStreamingTransport(UrllibTransport):
                 resp = conn.getresponse()
             if cutoff.fired.is_set():
                 raise stream.stalled(b"")
-            with _Cutoff(conn, stream.wait_s(got_any=True)) as body_cutoff:
-                data = _drain(resp, sock, stream, cap, body_cutoff.fired)
+            # getresponse() drops conn.sock when the response will close the
+            # connection, so the body cutoffs hold the socket captured above.
+            with (
+                _Cutoff(lambda: sock, stream.wait_s(got_any=False)) as first,
+                _Cutoff(lambda: sock, stream.wait_s(got_any=True)) as total,
+            ):
+                data = _drain(resp, sock, stream, cap, first, total)
             return HttpResponse(resp.status, dict(resp.getheaders()), data)
         except StreamTimeoutError:
             raise
@@ -179,13 +184,16 @@ class UrllibStreamingTransport(UrllibTransport):
 
 
 class _Cutoff:
-    """Shuts the connection's socket down once `after_s` has passed. A
-    socket timeout restarts on every blocking call, so on its own it lets a
-    server that trickles header bytes hold the exchange open indefinitely;
-    this makes connect, send and the headers share one deadline."""
+    """Shuts a socket down once `after_s` has passed. A socket timeout
+    restarts on every blocking call, so on its own it lets a server that
+    trickles header or chunk-framing bytes hold the exchange open
+    indefinitely; this gives a phase one deadline. `sock_of` is read when
+    the timer fires, because before connect there is no socket yet."""
 
-    def __init__(self, conn: http.client.HTTPConnection, after_s: float) -> None:
-        self._conn = conn
+    def __init__(
+        self, sock_of: Callable[[], socket.socket | None], after_s: float
+    ) -> None:
+        self._sock_of = sock_of
         self.fired = threading.Event()
         self._timer = threading.Timer(max(after_s, 0.0), self._cut)
         self._timer.daemon = True
@@ -195,11 +203,14 @@ class _Cutoff:
         return self
 
     def __exit__(self, *_exc: object) -> None:
+        self.cancel()
+
+    def cancel(self) -> None:
         self._timer.cancel()
 
     def _cut(self) -> None:
         self.fired.set()
-        sock = self._conn.sock
+        sock = self._sock_of()
         if sock is not None:
             with contextlib.suppress(OSError):  # already closed by the caller
                 sock.shutdown(socket.SHUT_RDWR)
@@ -248,12 +259,18 @@ def _drain(
     sock: socket.socket,
     stream: _Stream,
     cap: int,
-    cut: threading.Event,
+    first: _Cutoff,
+    total: _Cutoff,
 ) -> bytes:
-    """`cut` is the total deadline's cutoff: one `read1` can block on many
-    socket reads (a chunk-size line, a trailer), each restarting the
-    socket timeout, so only shutting the socket bounds it."""
+    """One `read1` can block on many socket reads (a chunk-size line, a
+    trailer), each restarting the socket timeout, so only shutting the
+    socket bounds it: `first` at the first-byte deadline until a body byte
+    arrives, `total` at the total deadline throughout."""
     received = bytearray()
+
+    def cut() -> bool:
+        return first.fired.is_set() or total.fired.is_set()
+
     while len(received) <= cap:
         wait = stream.wait_s(got_any=bool(received))
         if wait <= 0:
@@ -264,10 +281,12 @@ def _drain(
         except TimeoutError as exc:
             raise stream.stalled(bytes(received)) from exc
         except (OSError, http.client.HTTPException) as exc:
-            if cut.is_set():
+            if cut():
                 raise stream.stalled(bytes(received)) from exc
             raise
-        if cut.is_set():
+        if chunk:
+            first.cancel()
+        if cut():
             raise stream.stalled(bytes(received + chunk))
         if not chunk:
             return bytes(received)
