@@ -363,10 +363,10 @@ def _review_over_http(tools):
 
 
 def test_every_exec_in_a_review_is_built_the_same_way():
-    """Run #6: the tool check and unpack worked live and the tool version
+    """D28: the tool check and unpack worked live and the tool version
     exec hung. Every exec, whatever its stage, must leave the client in
     one shape: same query keys, headers, minimal `env -i` + `sh -c` wrapper
-    and EOF rule. Run #7: no `dir`/`env` query parameter either; the
+    and EOF rule. D29: no `dir`/`env` query parameter either; the
     wrapper alone sets the environment."""
     from atlas_reviewer.controller import DEFAULT_TOOLS
     from atlas_reviewer.runner import MINIMAL_ENV, START_MARKER, TRIVIAL_TOOL

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Run #7: tools run a Python resolved by absolute path before unpack, never
+"""D29: tools run a Python resolved by absolute path before unpack, never
 the image's pyenv shim, which picks its version from the PR's
 `.python-version`; and the probe's diagnostics test that hypothesis."""
 

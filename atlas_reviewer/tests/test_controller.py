@@ -712,7 +712,7 @@ def test_a_file_too_big_for_one_call_is_reported_cut_not_complete():
     assert diff_blocks(s.provider)[0].rstrip().endswith("to fit one model call ...]")
 
 
-# --- third live pilot findings (run #8) -------------------------------------
+# --- third live pilot findings (D30) ----------------------------------------
 
 
 class NoDiff(FixtureGitHub):

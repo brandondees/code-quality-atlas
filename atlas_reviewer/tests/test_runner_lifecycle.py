@@ -604,7 +604,7 @@ def test_stdin_roundtrip_reports_a_nonzero_exit_as_a_failure():
     assert outcome.stdin_check.startswith("FAILED sending 3145728 bytes: exit 1")
 
 
-# --- one exec shape, and failing fast on silence (run #6) ------------------
+# --- one exec shape, and failing fast on silence (D28) ----------------------
 
 COMPILEALL = ToolSpec(
     "python-compileall",
@@ -676,7 +676,7 @@ def test_the_first_frame_window_never_exceeds_the_exec_budget():
 
 
 class _SilentVersion(FakeSprites):
-    """The run #6 failure: `python3 --version` sends nothing back."""
+    """The failure behind D28: `python3 --version` sends nothing back."""
 
     def __init__(self, clock, **kwargs):
         super().__init__(rules=PY_RULES, **kwargs)
