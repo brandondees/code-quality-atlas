@@ -56,7 +56,13 @@ from atlas_reviewer.ports import (
 )
 from atlas_reviewer.prompt import UntrustedBlock
 from atlas_reviewer.redact import RedactedText, Redactor
-from atlas_reviewer.runner import RunnerJob, ToolResult, ToolSpec, run_disposable
+from atlas_reviewer.runner import (
+    FIRST_FRAME_BUDGET_S,
+    RunnerJob,
+    ToolResult,
+    ToolSpec,
+    run_disposable,
+)
 from atlas_reviewer.telemetry import Telemetry
 
 MAX_MODEL_CALLS = 3
@@ -86,6 +92,7 @@ class ReviewConfig:
     mode: str = "live"
     model_calls: int = MAX_MODEL_CALLS
     diff_chars_per_call: int = DEFAULT_DIFF_CHARS_PER_CALL
+    first_frame_s: float = FIRST_FRAME_BUDGET_S
 
     def __post_init__(self) -> None:
         """`model_calls` is also the number of diff parts: each part gets
@@ -97,6 +104,8 @@ class ReviewConfig:
             raise ValueError(
                 f"diff characters per call must be at least {MIN_DIFF_CHARS_PER_CALL}"
             )
+        if self.first_frame_s <= 0:
+            raise ValueError("first-frame seconds must be positive")
 
 
 @dataclass(frozen=True)
@@ -222,6 +231,7 @@ def _run_tools(
         deadline_s=config.deadline_s,
         clock=deps.clock,
         telemetry=deps.telemetry,
+        first_frame_s=config.first_frame_s,
     )
     _record_tool_results(event, deps, config, collected, result.results, result.report)
     return result.report, result.results

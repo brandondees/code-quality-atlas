@@ -50,7 +50,7 @@ from atlas_reviewer.github_api import GitHubClient
 from atlas_reviewer.github_auth import READ_PERMISSIONS, AppInstallationTokens
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.harness import SkillBundleHarness, load_bundle
-from atlas_reviewer.http import UrllibTransport
+from atlas_reviewer.http import UrllibStreamingTransport, UrllibTransport
 from atlas_reviewer.instrumented import InstrumentedGitHub
 from atlas_reviewer.ledger import FileLedger, ReviewInProgressError, single_review_lock
 from atlas_reviewer.openrouter import OpenRouterProvider
@@ -58,6 +58,7 @@ from atlas_reviewer.ports import BoundaryError, Clock, ModelProvider, SpritesApi
 from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import (
+    FIRST_FRAME_BUDGET_S,
     TRIVIAL_TOOL,
     RunnerJob,
     ToolAbsent,
@@ -288,6 +289,7 @@ def _review_config(args: argparse.Namespace, mode: str) -> ReviewConfig:
             mode=mode,
             model_calls=args.max_model_calls,
             diff_chars_per_call=args.diff_chars_per_call,
+            first_frame_s=args.first_frame_seconds,
         )
     except ValueError as exc:
         raise UsageError(str(exc)) from exc
@@ -324,7 +326,9 @@ def _emit(draft: str, out_path: str | None, out: TextIO) -> None:
 
 
 def _live_sprites(env: Mapping[str, str]) -> SpritesApi:
-    return SpritesClient(UrllibTransport(), _require_env(env, ENV_SPRITES_TOKEN))
+    return SpritesClient(
+        UrllibStreamingTransport(), _require_env(env, ENV_SPRITES_TOKEN)
+    )
 
 
 def _cmd_sweep(args: argparse.Namespace, env: Mapping[str, str], out: TextIO) -> int:
@@ -362,6 +366,7 @@ def _probe_protocol(
         deadline_s=args.deadline_seconds,
         clock=clock,
         telemetry=telemetry,
+        first_frame_s=args.first_frame_seconds,
     )
     _write_report(outcome.report, out)
     out.writelines(
@@ -390,6 +395,7 @@ def _probe_review_sequence(
         deadline_s=args.deadline_seconds,
         clock=clock,
         telemetry=telemetry,
+        first_frame_s=args.first_frame_seconds,
     )
     _write_report(outcome.report, out)
     out.write(f"source tarball: {len(tarball)} bytes\n")
@@ -500,6 +506,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="required with --provider openrouter; spends real money (capped)",
     )
+    _first_frame_arg(rev)
     rev.set_defaults(handler=_cmd_review)
     swp = sub.add_parser(
         "sweep", help="destroy runners a crashed review left in the ledger"
@@ -529,8 +536,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="--sequence review: a trivial file count, or the review's default tools",
     )
     _events_arg(probe)
+    _first_frame_arg(probe)
     probe.set_defaults(handler=_cmd_probe)
     return parser
+
+
+def _first_frame_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--first-frame-seconds",
+        type=_positive_seconds,
+        default=FIRST_FRAME_BUDGET_S,
+        help="fail an exec that sends no input if no output byte arrives in this time",
+    )
+
+
+def _positive_seconds(text: str) -> float:
+    value = float(text)
+    if value <= 0:
+        raise argparse.ArgumentTypeError("must be a positive number of seconds")
+    return value
 
 
 def _events_arg(parser: argparse.ArgumentParser) -> None:

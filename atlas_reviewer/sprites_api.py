@@ -10,12 +10,18 @@ fetched 2026-11-07), and matches the 2026-11-06 live validation:
 - `POST|GET /v1/sprites/{name}/policy/network` `{"rules": [...]}`
 - `POST /v1/sprites/{name}/policy/resources` `{"memory": {"limit_mb"}}`
 - `POST /v1/sprites/{name}/exec` (https://docs.fly.io/sprites/api/exec/execute-command):
-  argv as repeated `cmd` query parameters; `stdin=true` only when a body
-  is sent; the body is raw `application/octet-stream`, at most 10 MiB
-  (413 above that), so larger stdin is refused before sending. The `env`
-  query parameter is never used, so nothing can be injected into a
-  Sprite's environment. The 200 response body is not specified by the
-  OpenAPI document; see `runner.decode_exec_output`.
+  argv as repeated `cmd` query parameters, always with `stdin=true` and a
+  raw `application/octet-stream` body (empty when there is no input), at
+  most 10 MiB (413 above that), so larger stdin is refused before
+  sending. The document defines no `tty` parameter (the endpoint is
+  "non-TTY only") and says nothing about what a command's stdin is when
+  `stdin` is false, so that mode is never used. The `env`, `dir` and
+  `path` parameters are never used either, so nothing can be injected
+  into a Sprite's environment and `sh` resolves the same way for every
+  exec. The 200 response body is not specified by the OpenAPI document;
+  see `runner.decode_exec_output`. Exec responses are streamed
+  (`http.StreamingTransport`), so a silent command fails at its
+  first-byte deadline and a stall keeps the bytes that did arrive.
 
 The token is sent only to the control plane; no method here can pass an
 environment, a file, or a connector into a Sprite.
@@ -24,10 +30,16 @@ environment, a file, or a connector into a Sprite.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from urllib.parse import quote, urlencode
 
-from atlas_reviewer.http import HttpResponse, Transport, safe_url
+from atlas_reviewer.http import (
+    HttpResponse,
+    StreamingTransport,
+    StreamWindow,
+    safe_url,
+)
 from atlas_reviewer.ports import BoundaryError, Json, NotFoundError
 
 API_URL = "https://api.sprites.dev"
@@ -35,10 +47,53 @@ RUNNER_PREFIX = "cqa-rev-"
 EXEC_STDIN_MAX_BYTES = 10 * 1024 * 1024
 
 
+@dataclass(frozen=True)
+class ExecRequest:
+    url: str
+    headers: Mapping[str, str]
+    body: bytes
+
+
+def exec_request(
+    api_url: str, sprite_path: str, argv: Sequence[str], stdin: bytes
+) -> ExecRequest:
+    """The one way an exec request is built, whatever it runs: argv as
+    repeated `cmd`, always `stdin=true`, and an octet-stream body that is
+    exactly the stdin bytes (possibly none), so the request always ends
+    after a known `Content-Length` and the server is never left with an
+    open or undocumented stdin. The command side of the same rule is
+    `runner.exec_argv`."""
+    if not argv:
+        raise BoundaryError("exec needs at least one cmd")
+    if len(stdin) > EXEC_STDIN_MAX_BYTES:
+        raise BoundaryError(
+            f"exec stdin is {len(stdin)} bytes, over the documented "
+            f"{EXEC_STDIN_MAX_BYTES}-byte limit"
+        )
+    query = urlencode([*(("cmd", a) for a in argv), ("stdin", "true")])
+    return ExecRequest(
+        f"{api_url}{sprite_path}/exec?{query}",
+        {
+            "Content-Type": "application/octet-stream",
+            "Content-Length": str(len(stdin)),
+            "Connection": "close",
+        },
+        stdin,
+    )
+
+
+def _checked(method: str, url: str, resp: HttpResponse) -> HttpResponse:
+    if resp.status == 404:
+        raise NotFoundError(f"Sprites 404 for {method} {safe_url(url)}")
+    if not 200 <= resp.status < 300:
+        raise BoundaryError(f"Sprites HTTP {resp.status} for {method} {safe_url(url)}")
+    return resp
+
+
 class SpritesClient:
     def __init__(
         self,
-        transport: Transport,
+        transport: StreamingTransport,
         token: str,
         api_url: str = API_URL,
         timeout_s: float = 30.0,
@@ -49,34 +104,22 @@ class SpritesClient:
         self._timeout_s = timeout_s
 
     def _call(
-        self,
-        method: str,
-        path: str,
-        payload: Json | None = None,
-        raw_body: bytes | None = None,
-        timeout_s: float | None = None,
+        self, method: str, path: str, payload: Json | None = None
     ) -> HttpResponse:
-        headers = {
-            "Authorization": f"Bearer {self._token}",
-            "User-Agent": "code-quality-atlas-reviewer",
-        }
-        body = raw_body
-        if raw_body is not None:
-            headers["Content-Type"] = "application/octet-stream"
+        headers = self._headers()
+        body = None
         if payload is not None:
             headers["Content-Type"] = "application/json"
             body = json.dumps(payload).encode()
         url = f"{self._api_url}{path}"
-        resp = self._transport.request(
-            method, url, headers, body, timeout_s or self._timeout_s
-        )
-        if resp.status == 404:
-            raise NotFoundError(f"Sprites 404 for {method} {safe_url(url)}")
-        if not 200 <= resp.status < 300:
-            raise BoundaryError(
-                f"Sprites HTTP {resp.status} for {method} {safe_url(url)}"
-            )
-        return resp
+        resp = self._transport.request(method, url, headers, body, self._timeout_s)
+        return _checked(method, url, resp)
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self._token}",
+            "User-Agent": "code-quality-atlas-reviewer",
+        }
 
     @staticmethod
     def _path(name: str) -> str:
@@ -115,22 +158,22 @@ class SpritesClient:
         )
 
     def exec(
-        self, name: str, argv: Sequence[str], stdin: bytes, timeout_s: float
+        self,
+        name: str,
+        argv: Sequence[str],
+        stdin: bytes,
+        timeout_s: float,
+        first_byte_s: float | None = None,
     ) -> bytes:
-        if not argv:
-            raise BoundaryError("exec needs at least one cmd")
-        if len(stdin) > EXEC_STDIN_MAX_BYTES:
-            raise BoundaryError(
-                f"exec stdin is {len(stdin)} bytes, over the documented "
-                f"{EXEC_STDIN_MAX_BYTES}-byte limit"
-            )
-        params = [("cmd", a) for a in argv] + ([("stdin", "true")] if stdin else [])
-        return self._call(
+        request = exec_request(self._api_url, self._path(name), argv, stdin)
+        resp = self._transport.stream(
             "POST",
-            f"{self._path(name)}/exec?{urlencode(params)}",
-            raw_body=stdin or None,
-            timeout_s=timeout_s,
-        ).body
+            request.url,
+            {**self._headers(), **request.headers},
+            request.body,
+            StreamWindow(timeout_s, first_byte_s),
+        )
+        return _checked("POST", request.url, resp).body
 
     def delete(self, name: str) -> None:
         self._call("DELETE", self._path(name))

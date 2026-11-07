@@ -18,7 +18,16 @@ telemetry event (`atlas_reviewer.telemetry`):
 
 Upload and unpack are separate execs so a transport stall and a slow or
 stuck extraction fail with different labels. Every exec error names its
-purpose, its timeout, how long it ran and how far into the run it failed.
+stage, its purpose, its timeout, how long it ran and how far into the run
+it failed.
+
+Every exec has one shape (`exec_argv` here, `sprites_api.exec_request` for
+the HTTP request): `sh -c` prints a start marker, runs the script with a
+stdin of exactly the bytes sent and then EOF (`head -c N` with input,
+`/dev/null` without, so no command waits on the exec channel's stdin), and
+prints the exit marker. A command that sends no input must produce its
+first output byte within `first_frame_s`; the start marker makes that
+immediate for any command that actually started.
 
 Exec-session kill is untested against the live API, so it is never relied
 on: destroying the Sprite is the only cleanup primitive used.
@@ -53,6 +62,7 @@ from atlas_reviewer.ports import (
     NotFoundError,
     RunnerLedger,
     SpritesApi,
+    StreamTimeoutError,
 )
 from atlas_reviewer.telemetry import ERROR, Fields, Telemetry
 
@@ -61,17 +71,23 @@ MEMORY_LIMIT_MB = 1024
 WORKDIR = "/work"
 SOURCE_ARCHIVE = "/tmp/atlas-source.tar.gz"
 EXIT_MARKER = "__ATLAS_EXIT__="
+START_MARKER = "__ATLAS_START__"
 EXIT_NOT_FOUND = 127
 PROBE_TAG = "atlas-probe"
 FRAMING_CHECK = "atlas-framing-check"
 _EXIT_RE = re.compile(re.escape(EXIT_MARKER) + r"(\d+)")
 _PROBE_RE = re.compile(re.escape(PROBE_TAG) + r":(present|absent):([A-Za-z0-9._+-]+)")
+_PATH_RE = re.compile(
+    re.escape(PROBE_TAG)
+    + r":present:([A-Za-z0-9._+-]+):([A-Za-z0-9._/+-]{0,200}):([A-Za-z0-9._/+-]{0,200})"
+)
 _BINARY_RE = re.compile(r"[A-Za-z0-9._+-]+")
 _INT_RE = re.compile(r"\d+")
 _EXEC_SLACK_S = 15.0
 PROBE_BUDGET_S = 60.0
 UPLOAD_BUDGET_S = 300.0
 UNPACK_BUDGET_S = 120.0
+FIRST_FRAME_BUDGET_S = 30.0
 STDIN_CHECK_BYTES = 3 * 1024 * 1024
 _FRAMING_BYTES = dict.fromkeys(range(0x05))
 
@@ -171,6 +187,19 @@ class _Run:
     name: str
     deadline: Deadline
     telemetry: Telemetry
+    first_frame_s: float = FIRST_FRAME_BUDGET_S
+
+
+@dataclass(frozen=True)
+class _Exec:
+    """One exec: the lifecycle stage it belongs to, what it is for (its
+    telemetry step), the script, the stdin bytes, and its own budget."""
+
+    stage: str
+    purpose: str
+    script: str
+    stdin: bytes = b""
+    budget_s: float | None = None
 
 
 def runner_name(
@@ -200,10 +229,13 @@ def parse_exit(text: str) -> tuple[int | None, str]:
 
 
 def probe_script(binaries: tuple[str, ...]) -> str:
+    """Resolves each binary without executing it, reporting where it
+    resolved to and what that path finally links to."""
     names = " ".join(dict.fromkeys(binaries))
     return (
-        f'for b in {names}; do if command -v "$b" >/dev/null 2>&1; '
-        f'then echo "{PROBE_TAG}:present:$b"; else echo "{PROBE_TAG}:absent:$b"; fi; done'
+        f'for b in {names}; do if p=$(command -v "$b" 2>/dev/null); '
+        f'then echo "{PROBE_TAG}:present:$b:$p:$(readlink -f "$p" 2>/dev/null)"; '
+        f'else echo "{PROBE_TAG}:absent:$b"; fi; done'
     )
 
 
@@ -214,8 +246,26 @@ def parse_probe(text: str, binaries: tuple[str, ...]) -> dict[str, bool]:
     return {b: seen.get(b, False) for b in binaries}
 
 
-def _sh(script: str) -> tuple[str, ...]:
-    return ("sh", "-c", f"{script}; echo {EXIT_MARKER}$?")
+def parse_paths(text: str) -> dict[str, str]:
+    """`binary -> resolved path -> link target`, as the untrusted guest
+    reported them; a diagnostic only."""
+    return {b: f"{p} -> {real}" for b, p, real in _PATH_RE.findall(text)}
+
+
+def exec_argv(script: str, stdin_len: int) -> tuple[str, ...]:
+    feed, redirect = (
+        (f"head -c {stdin_len} | ", "") if stdin_len else ("", " </dev/null")
+    )
+    return (
+        "sh",
+        "-c",
+        f"echo {START_MARKER}; {feed}{{ {script}\n}}{redirect}; echo {EXIT_MARKER}$?",
+    )
+
+
+def strip_start(text: str) -> str:
+    _, found, rest = text.partition(f"{START_MARKER}\n")
+    return rest if found else text
 
 
 def _last_int(text: str) -> int | None:
@@ -305,9 +355,10 @@ def _disposable(
     deadline_s: float,
     clock: Clock,
     telemetry: Telemetry,
+    first_frame_s: float,
 ) -> RunnerReport:
     """Run `body` on a fresh, policy-verified Sprite; always destroy it."""
-    run = _Run(api, name, Deadline(clock, deadline_s), telemetry)
+    run = _Run(api, name, Deadline(clock, deadline_s), telemetry, first_frame_s)
     destroyer = _Destroyer(api, ledger, name, telemetry)
     ledger.record(name)
     telemetry.record("ledger", "record runner name", {"runner": name})
@@ -344,6 +395,7 @@ def run_disposable(
     deadline_s: float,
     clock: Clock,
     telemetry: Telemetry | None = None,
+    first_frame_s: float = FIRST_FRAME_BUDGET_S,
 ) -> RunnerOutcome:
     """The review's exec sequence: tool check, upload, unpack, then each
     available tool. `probe-runner --sequence review` calls this too."""
@@ -358,7 +410,7 @@ def run_disposable(
 
     report = _disposable(
         api, ledger, body, name=name, deadline_s=deadline_s, clock=clock,
-        telemetry=telemetry or Telemetry(clock),
+        telemetry=telemetry or Telemetry(clock), first_frame_s=first_frame_s,
     )  # fmt: skip
     return RunnerOutcome(report, tuple(results))
 
@@ -372,6 +424,7 @@ def probe_runner(
     deadline_s: float,
     clock: Clock,
     telemetry: Telemetry | None = None,
+    first_frame_s: float = FIRST_FRAME_BUDGET_S,
 ) -> ProbeOutcome:
     """The live-protocol check: provision, probe tools, capture one raw exec
     response for framing, round-trip stdin, destroy. Uploads and runs
@@ -382,13 +435,15 @@ def probe_runner(
 
     def body(run: _Run) -> str:
         found.update(_probe(run, tools))
-        sample.append(_raw_exec(run, f"echo {FRAMING_CHECK}", "framing check"))
+        sample.append(
+            _raw_exec(run, _Exec("probe", "framing check", f"echo {FRAMING_CHECK}"))
+        )
         stdin_check.append(_stdin_roundtrip(run))
         return f"probed {len(found)} binar{'y' if len(found) == 1 else 'ies'}"
 
     report = _disposable(
         api, ledger, body, name=name, deadline_s=deadline_s, clock=clock,
-        telemetry=telemetry or Telemetry(clock),
+        telemetry=telemetry or Telemetry(clock), first_frame_s=first_frame_s,
     )  # fmt: skip
     return ProbeOutcome(
         report, found, b"".join(sample), stdin_check[0] if stdin_check else "not run"
@@ -402,10 +457,7 @@ def _stdin_roundtrip(run: _Run) -> str:
     try:
         code, text = _exec(
             run,
-            f"head -c {sent} | wc -c",
-            "stdin round-trip",
-            stdin=bytes(sent),
-            budget_s=UPLOAD_BUDGET_S,
+            _Exec("probe", "stdin round-trip", "wc -c", bytes(sent), UPLOAD_BUDGET_S),
         )
     except BoundaryError as exc:
         return f"FAILED sending {sent} bytes: {exc}"
@@ -448,26 +500,47 @@ def _require_deny_all(policy: Json) -> None:
         )
 
 
-def _raw_exec(
-    run: _Run,
-    script: str,
-    purpose: str,
-    stdin: bytes = b"",
-    budget_s: float | None = None,
-) -> bytes:
-    left = run.deadline.check(purpose)
-    timeout = left if budget_s is None else min(left, budget_s)
+def _raw_exec(run: _Run, step: _Exec) -> bytes:
+    left = run.deadline.check(step.purpose)
+    timeout = left if step.budget_s is None else min(left, step.budget_s)
+    first = None if step.stdin else min(run.first_frame_s, timeout)
     fields: Fields = {
-        "purpose": purpose,
+        "stage": step.stage,
+        "purpose": step.purpose,
         "timeout_s": round(timeout, 1),
-        "bytes_sent": len(stdin),
+        "first_frame_s": None if first is None else round(first, 1),
+        "bytes_sent": len(step.stdin),
     }
     return run.telemetry.span(
         "exec",
-        purpose,
-        lambda: run.api.exec(run.name, _sh(script), stdin, timeout),
+        step.purpose,
+        lambda: _send(run, step, timeout, first),
         fields,
         _exec_fields,
+    )
+
+
+def _send(run: _Run, step: _Exec, timeout: float, first: float | None) -> bytes:
+    argv = exec_argv(step.script, len(step.stdin))
+    try:
+        return run.api.exec(run.name, argv, step.stdin, timeout, first)
+    except StreamTimeoutError as exc:
+        raise StreamTimeoutError(
+            _timeout_text(step, exc), exc.received, first_byte=exc.first_byte
+        ) from exc
+
+
+def _timeout_text(step: _Exec, exc: StreamTimeoutError) -> str:
+    if exc.first_byte:
+        return (
+            f"{step.stage} stage, {step.purpose}: silent -- no output frame for "
+            f"a command that sends no input, not even the start marker ({exc})"
+        )
+    got = exc.received
+    return (
+        f"{step.stage} stage, {step.purpose}: output stopped before the exit "
+        f"marker after {len(got)} byte(s) (frames {frames_seen(got)}), last "
+        f"output {decode_exec_output(got)[-120:]!r} ({exc})"
     )
 
 
@@ -480,16 +553,8 @@ def _exec_fields(raw: bytes) -> Fields:
     }
 
 
-def _exec(
-    run: _Run,
-    script: str,
-    purpose: str,
-    stdin: bytes = b"",
-    budget_s: float | None = None,
-) -> tuple[int | None, str]:
-    return parse_exit(
-        decode_exec_output(_raw_exec(run, script, purpose, stdin, budget_s))
-    )
+def _exec(run: _Run, step: _Exec) -> tuple[int | None, str]:
+    return parse_exit(strip_start(decode_exec_output(_raw_exec(run, step))))
 
 
 def _probe(run: _Run, tools: tuple[ToolSpec, ...]) -> dict[str, bool]:
@@ -497,27 +562,36 @@ def _probe(run: _Run, tools: tuple[ToolSpec, ...]) -> dict[str, bool]:
     if not binaries:
         return {}
     code, text = _exec(
-        run, probe_script(binaries), "tool check", budget_s=PROBE_BUDGET_S
+        run,
+        _Exec(
+            "tool check", "tool check", probe_script(binaries), budget_s=PROBE_BUDGET_S
+        ),
     )
     found = parse_probe(text, binaries) if code == 0 else dict.fromkeys(binaries, False)
+    paths = parse_paths(text) if code == 0 else {}
     run.telemetry.record(
-        "tool check", "availability", {f"has_{b}": ok for b, ok in found.items()}
+        "tool check",
+        "availability",
+        {
+            **{f"has_{b}": ok for b, ok in found.items()},
+            **{f"path_{b}": where for b, where in paths.items()},
+        },
     )
     return found
 
 
 def _upload(run: _Run, tarball: bytes) -> None:
-    """`head -c` stops reading after exactly the bytes sent, so the upload
-    does not depend on the exec channel delivering a stdin EOF; the runner
-    reports back how many bytes it wrote."""
+    """`exec_argv` feeds exactly the bytes sent through `head -c`, so the
+    upload does not depend on the exec channel delivering a stdin EOF; the
+    runner reports back how many bytes it wrote."""
     size = len(tarball)
-    script = f"head -c {size} > {SOURCE_ARCHIVE} && wc -c < {SOURCE_ARCHIVE}"
+    script = f"cat > {SOURCE_ARCHIVE} && wc -c < {SOURCE_ARCHIVE}"
     run.telemetry.span(
         "upload",
         f"{size}-byte tarball",
         lambda: _confirm_upload(
             _exec(
-                run, script, "source upload", stdin=tarball, budget_s=UPLOAD_BUDGET_S
+                run, _Exec("upload", "source upload", script, tarball, UPLOAD_BUDGET_S)
             ),
             size,
         ),
@@ -546,7 +620,9 @@ def _unpack(run: _Run) -> None:
         "unpack",
         "tar -xzf",
         lambda: _confirm_unpack(
-            _exec(run, script, "source unpack", budget_s=UNPACK_BUDGET_S)
+            _exec(
+                run, _Exec("unpack", "source unpack", script, budget_s=UNPACK_BUDGET_S)
+            )
         ),
         after=lambda code: {"exit_status": code},
     )
@@ -587,14 +663,20 @@ def _run_if_available(
 
 def _run_tool(run: _Run, tool: ToolSpec) -> ToolResult:
     budget = tool.timeout_s + _EXEC_SLACK_S
+    stage = f"tool {tool.name}"
     v_code, v_text = _exec(
-        run, f"cd {WORKDIR} && {tool.version_cmd}", f"{tool.name} version",
-        budget_s=budget,
-    )  # fmt: skip
+        run,
+        _Exec(
+            stage,
+            f"{tool.name} version",
+            f"cd {WORKDIR} && {tool.version_cmd}",
+            budget_s=budget,
+        ),
+    )
     if v_code != 0:
         return ToolAbsent(tool, f"version probe exited {v_code}: {v_text[-300:]}")
     script = f"cd {WORKDIR} && timeout --kill-after=5 {tool.timeout_s} {tool.run_cmd}"
-    code, text = _exec(run, script, f"{tool.name} run", budget_s=budget)
+    code, text = _exec(run, _Exec(stage, f"{tool.name} run", script, budget_s=budget))
     return ToolRan(tool, _first_line(v_text), code, text)
 
 

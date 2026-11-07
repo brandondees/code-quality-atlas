@@ -3,21 +3,23 @@
 No test here touches the network."""
 
 import json
+from urllib.parse import parse_qsl, urlsplit
 
 import pytest
 
 from atlas_reviewer.fakes import StaticToken
 from atlas_reviewer.github_api import GitHubClient
-from atlas_reviewer.http import HttpResponse
+from atlas_reviewer.http import HttpResponse, StreamWindow
 from atlas_reviewer.pagination import next_link
 from atlas_reviewer.ports import BoundaryError, NotFoundError
 from atlas_reviewer.runner import DENY_ALL
-from atlas_reviewer.sprites_api import EXEC_STDIN_MAX_BYTES, SpritesClient
+from atlas_reviewer.sprites_api import EXEC_STDIN_MAX_BYTES, SpritesClient, exec_request
 
 from .helpers import HEAD, fake_token
 
 TOKEN = fake_token("ghs_")
 API = "https://api.github.com"
+API_S = "https://api.sprites.dev"
 NAME = "cqa-rev-20261106-230000-abcdef"
 
 
@@ -28,6 +30,10 @@ class Recorder:
 
     def request(self, method, url, headers, body, timeout_s, max_bytes=None):
         self.requests.append((method, url, dict(headers), body, timeout_s, max_bytes))
+        return self.responses.pop(0)
+
+    def stream(self, method, url, headers, body, window, max_bytes=None):
+        self.requests.append((method, url, dict(headers), body, window, max_bytes))
         return self.responses.pop(0)
 
 
@@ -230,16 +236,37 @@ def test_sprites_client_request_shapes():
     exec_request = t.requests[4]
     assert exec_request[1].endswith("/exec?cmd=sh&cmd=-c&cmd=echo+hi&stdin=true")
     assert exec_request[2]["Content-Type"] == "application/octet-stream"
+    assert exec_request[2]["Content-Length"] == "5"
     assert exec_request[3] == b"stdin"
-    assert exec_request[4] == 5.0
+    assert exec_request[4] == StreamWindow(5.0, None)
 
 
-def test_sprites_exec_without_stdin_sends_no_body_and_no_stdin_flag():
+def test_sprites_exec_without_input_has_the_same_shape_with_an_empty_body():
     t = Recorder(ok(body=b"out"))
-    SpritesClient(t, "t").exec(NAME, ("true",), b"", 5.0)
-    assert t.requests[0][1].endswith("/exec?cmd=true")
-    assert t.requests[0][3] is None
-    assert "Content-Type" not in t.requests[0][2]
+    SpritesClient(t, "t").exec(NAME, ("true",), b"", 5.0, first_byte_s=2.0)
+    method, url, headers, body, window, _ = t.requests[0]
+    assert (method, body, window) == ("POST", b"", StreamWindow(5.0, 2.0))
+    assert url.endswith("/exec?cmd=true&stdin=true")
+    assert headers["Content-Type"] == "application/octet-stream"
+    assert headers["Content-Length"] == "0"
+
+
+def test_exec_request_is_the_only_shape_and_uses_no_env_dir_path_or_tty():
+    with_input = exec_request(API_S, f"/v1/sprites/{NAME}", ("sh", "-c", "x"), b"ab")
+    without = exec_request(API_S, f"/v1/sprites/{NAME}", ("sh", "-c", "x"), b"")
+    for request in (with_input, without):
+        keys = [k for k, _ in parse_qsl(urlsplit(request.url).query)]
+        assert keys == ["cmd", "cmd", "cmd", "stdin"]
+        assert set(request.headers) == {"Content-Type", "Content-Length", "Connection"}
+        assert request.headers["Content-Length"] == str(len(request.body))
+    assert (with_input.body, without.body) == (b"ab", b"")
+
+
+def test_sprites_exec_http_errors_are_checked_like_other_calls():
+    with pytest.raises(NotFoundError):
+        SpritesClient(Recorder(ok(status=404)), "t").exec(NAME, ("true",), b"", 5.0)
+    with pytest.raises(BoundaryError, match="HTTP 500"):
+        SpritesClient(Recorder(ok(status=500)), "t").exec(NAME, ("true",), b"", 5.0)
 
 
 @pytest.mark.parametrize(
@@ -280,54 +307,108 @@ def test_sprites_policy_read_back_must_be_an_object(body):
         SpritesClient(Recorder(ok(body=body)), "t").get_network_policy(NAME)
 
 
-def test_a_review_sends_the_upload_timeout_to_the_transport_not_the_30s_default():
-    from atlas_reviewer.clock import SystemClock
-    from atlas_reviewer.domain import CleanupStatus, RunnerStatus
-    from atlas_reviewer.fakes import MemoryLedger
-    from atlas_reviewer.runner import (
-        UNPACK_BUDGET_S,
-        UPLOAD_BUDGET_S,
-        RunnerJob,
-        run_disposable,
-    )
+class _SpritesServer:
+    """Answers a whole review over the real `SpritesClient`, recording every
+    request the client builds."""
 
-    base = f"https://api.sprites.dev/v1/sprites/{NAME}"
-    deleted = []
+    def __init__(self):
+        self.requests = []
+        self.streams = []
+        self.deleted = False
+        self.base = f"{API_S}/v1/sprites/{NAME}"
 
-    class Transport:
-        def __init__(self):
-            self.requests = []
-
-        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
-            self.requests.append((method, url.split("?")[0], timeout_s, body))
-            path = url.split("?")[0]
-            if method == "DELETE":
-                deleted.append(True)
-                return ok(status=204)
-            if method == "GET" and path == base:
-                return ok(status=404 if deleted else 200)
-            if method == "GET":
-                return ok({"rules": list(DENY_ALL)})
-            if path.endswith("/exec"):
-                count = str(len(body or b"")).encode()
-                return ok(body=b"\x01" + count + b"\n__ATLAS_EXIT__=0\n\x03\x00")
+    def request(self, method, url, headers, body, timeout_s, max_bytes=None):
+        self.requests.append((method, url.split("?")[0], timeout_s, body))
+        path = url.split("?")[0]
+        if method == "DELETE":
+            self.deleted = True
             return ok(status=204)
+        if method == "GET" and path == self.base:
+            return ok(status=404 if self.deleted else 200)
+        if method == "GET":
+            return ok({"rules": list(DENY_ALL)})
+        return ok(status=204)
 
-    transport = Transport()
+    def stream(self, method, url, headers, body, window, max_bytes=None):
+        self.streams.append((method, url, dict(headers), body, window))
+        script = parse_qsl(urlsplit(url).query)[2][1]
+        out = (
+            "atlas-probe:present:python3:/usr/bin/python3:/usr/bin/python3.13\n"
+            "atlas-probe:present:sh:/usr/bin/sh:/usr/bin/dash"
+            if "atlas-probe" in script
+            else str(len(body))
+        )
+        return ok(
+            body=f"\x01__ATLAS_START__\n{out}\n__ATLAS_EXIT__=0\n\x03\x00".encode()
+        )
+
+
+def _review_over_http(tools):
+    from atlas_reviewer.clock import SystemClock
+    from atlas_reviewer.fakes import MemoryLedger
+    from atlas_reviewer.runner import RunnerJob, run_disposable
+
+    server = _SpritesServer()
     outcome = run_disposable(
-        SpritesClient(transport, "org/1/secret"),
+        SpritesClient(server, "org/1/secret"),
         MemoryLedger(),
-        RunnerJob(b"tarball", ()),
+        RunnerJob(b"tarball", tools),
         name=NAME,
         deadline_s=600.0,
         clock=SystemClock(),
     )
-    assert outcome.report.status is RunnerStatus.COMPLETED
-    assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
-    upload, unpack = [r for r in transport.requests if r[1].endswith("/exec")]
-    assert upload[2] == UPLOAD_BUDGET_S
-    assert upload[3] == b"tarball"
-    assert unpack[2] == UNPACK_BUDGET_S
-    assert unpack[3] is None
-    non_exec = {r[2] for r in transport.requests if not r[1].endswith("/exec")}
-    assert non_exec == {30.0}
+    return server, outcome
+
+
+def test_every_exec_in_a_review_is_built_the_same_way():
+    """Run #6: the tool check and unpack worked live and the tool version
+    exec hung. Every exec, whatever its stage, must leave the client in
+    one shape: same query keys, headers, `sh -c` wrapper and EOF rule."""
+    from atlas_reviewer.controller import DEFAULT_TOOLS
+    from atlas_reviewer.runner import START_MARKER, TRIVIAL_TOOL
+
+    server, outcome = _review_over_http((*DEFAULT_TOOLS, TRIVIAL_TOOL))
+    assert outcome.report.status.value == "completed"
+    assert len(server.streams) == 7
+    for method, url, headers, body, window in server.streams:
+        query = parse_qsl(urlsplit(url).query)
+        argv = [v for k, v in query if k == "cmd"]
+        assert method == "POST"
+        assert [k for k, _ in query] == ["cmd", "cmd", "cmd", "stdin"]
+        assert dict(query)["stdin"] == "true"
+        assert set(headers) == {
+            "Authorization", "User-Agent", "Content-Type", "Content-Length", "Connection",
+        }  # fmt: skip
+        assert headers["Content-Type"] == "application/octet-stream"
+        assert headers["Content-Length"] == str(len(body))
+        assert argv[:2] == ["sh", "-c"]
+        assert argv[2].startswith(f"echo {START_MARKER}; ")
+        assert argv[2].endswith("; echo __ATLAS_EXIT__=$?")
+        feed = f"head -c {len(body)} | {{ " if body else "{ "
+        assert argv[2].startswith(f"echo {START_MARKER}; {feed}")
+        assert argv[2].count("</dev/null") == (0 if body else 1)
+        assert (window.first_byte_s is None) == bool(body)
+
+
+def test_a_review_sends_each_exec_its_own_budget_not_the_30s_default():
+    from atlas_reviewer.runner import (
+        FIRST_FRAME_BUDGET_S,
+        PROBE_BUDGET_S,
+        UNPACK_BUDGET_S,
+        UPLOAD_BUDGET_S,
+        ToolSpec,
+    )
+
+    tool = ToolSpec("t", "python3", "python3 --version", "true", timeout_s=120)
+    server, outcome = _review_over_http((tool,))
+    assert outcome.report.cleanup.value == "destroyed (verified absent)"
+    windows = [s[4] for s in server.streams]
+    assert windows == [
+        StreamWindow(PROBE_BUDGET_S, FIRST_FRAME_BUDGET_S),
+        StreamWindow(UPLOAD_BUDGET_S, None),
+        StreamWindow(UNPACK_BUDGET_S, FIRST_FRAME_BUDGET_S),
+        StreamWindow(135.0, FIRST_FRAME_BUDGET_S),
+        StreamWindow(135.0, FIRST_FRAME_BUDGET_S),
+    ]
+    assert [s[3] for s in server.streams][:2] == [b"", b"tarball"]
+    assert {r[2] for r in server.requests} == {30.0}

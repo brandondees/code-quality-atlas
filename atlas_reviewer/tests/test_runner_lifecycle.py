@@ -9,11 +9,13 @@ import pytest
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import CleanupStatus, RunnerStatus
 from atlas_reviewer.fakes import ExecRule, FakeSprites, MemoryLedger
-from atlas_reviewer.ports import BoundaryError
+from atlas_reviewer.ports import BoundaryError, StreamTimeoutError
 from atlas_reviewer.runner import (
     DENY_ALL,
+    FIRST_FRAME_BUDGET_S,
     PROBE_BUDGET_S,
     PROBE_TAG,
+    START_MARKER,
     STDIN_CHECK_BYTES,
     TRIVIAL_TOOL,
     UNPACK_BUDGET_S,
@@ -24,13 +26,16 @@ from atlas_reviewer.runner import (
     ToolSpec,
     decode_exec_output,
     destroy_runner,
+    exec_argv,
     frames_seen,
     parse_exit,
+    parse_paths,
     parse_probe,
     probe_runner,
     probe_script,
     run_disposable,
     runner_name,
+    strip_start,
     sweep,
 )
 from atlas_reviewer.telemetry import Telemetry
@@ -239,8 +244,8 @@ def test_exec_output_decoding_and_exit_marker():
 
 def test_tool_without_exit_marker_reports_no_exit_code():
     class NoMarker(FakeSprites):
-        def exec(self, name, argv, stdin, timeout_s):
-            super().exec(name, argv, stdin, timeout_s)
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
+            super().exec(name, argv, stdin, timeout_s, first_byte_s)
             return b"truncated output"
 
     api = NoMarker(rules=OK_RULES)
@@ -267,7 +272,7 @@ def test_probe_runs_after_deny_all_and_before_the_source_upload():
     run(api)
     scripts = [c[2] for c in api.calls if c[0] == "exec"]
     assert PROBE_TAG in scripts[0]
-    assert scripts[1].startswith("head -c ")
+    assert "head -c 13 | " in scripts[1]
     assert "tar -xzf" in scripts[2]
 
 
@@ -352,7 +357,7 @@ def exec_timeouts(api):
 def test_upload_exec_gets_the_dedicated_upload_budget_not_the_client_default():
     api = FakeSprites(rules=OK_RULES)
     run(api, deadline_s=600.0)
-    (timeout,) = [t for s, t in exec_timeouts(api).items() if s.startswith("head -c")]
+    (timeout,) = [t for s, t in exec_timeouts(api).items() if "head -c" in s]
     assert timeout == UPLOAD_BUDGET_S
     assert timeout > 30.0
 
@@ -360,23 +365,23 @@ def test_upload_exec_gets_the_dedicated_upload_budget_not_the_client_default():
 def test_upload_exec_is_capped_by_the_remaining_review_deadline():
     api = FakeSprites(rules=OK_RULES)
     run(api, deadline_s=90.0)
-    (timeout,) = [t for s, t in exec_timeouts(api).items() if s.startswith("head -c")]
+    (timeout,) = [t for s, t in exec_timeouts(api).items() if "head -c" in s]
     assert 60.0 < timeout <= 90.0
 
 
 def test_upload_does_not_wait_for_a_stdin_eof():
     api = FakeSprites(rules=OK_RULES)
     run(api)
-    (script,) = [s for s in exec_timeouts(api) if s.startswith("head -c")]
-    assert script.startswith(f"head -c {len(b'tarball-bytes')} > ")
+    (script,) = [s for s in exec_timeouts(api) if "head -c" in s]
+    assert f"head -c {len(b'tarball-bytes')} | {{ cat > " in script
 
 
 def test_upload_transport_failure_names_the_size_and_still_destroys():
     class UploadTimesOut(FakeSprites):
-        def exec(self, name, argv, stdin, timeout_s):
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
             if stdin:
                 raise BoundaryError("The read operation timed out")
-            return super().exec(name, argv, stdin, timeout_s)
+            return super().exec(name, argv, stdin, timeout_s, first_byte_s)
 
     api = UploadTimesOut(rules=OK_RULES)
     outcome = run(api)
@@ -391,7 +396,7 @@ def test_upload_transport_failure_names_the_size_and_still_destroys():
 def test_stdin_roundtrip_reports_a_short_read_as_a_mismatch():
     class ShortReads(FakeSprites):
         def _answer(self, script, stdin):
-            if "| wc -c" in script:
+            if "{ wc -c" in script:
                 return "1048576", 0
             return super()._answer(script, stdin)
 
@@ -405,10 +410,10 @@ def test_stdin_roundtrip_reports_a_short_read_as_a_mismatch():
 
 def test_stdin_roundtrip_transport_failure_is_reported_not_fatal_to_the_probe():
     class StdinTimesOut(FakeSprites):
-        def exec(self, name, argv, stdin, timeout_s):
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
             if stdin:
                 raise BoundaryError("The read operation timed out")
-            return super().exec(name, argv, stdin, timeout_s)
+            return super().exec(name, argv, stdin, timeout_s, first_byte_s)
 
     outcome = probe_runner(
         StdinTimesOut(),
@@ -498,14 +503,14 @@ def test_a_timed_out_tool_check_names_its_step_and_timing_not_a_bare_timeout():
     clock = FakeClock()
 
     class ProbeTimesOut(FakeSprites):
-        def exec(self, name, argv, stdin, timeout_s):
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
             if PROBE_TAG in argv[-1]:
                 clock.advance(timeout_s)
                 raise BoundaryError(
                     f"POST https://api.sprites.dev/v1/sprites/{name}/exec failed: "
                     "The read operation timed out"
                 )
-            return super().exec(name, argv, stdin, timeout_s)
+            return super().exec(name, argv, stdin, timeout_s, first_byte_s)
 
     outcome, events = run_traced(ProbeTimesOut(rules=OK_RULES), clock=clock)
     assert outcome.report.status is RunnerStatus.FAILED
@@ -536,7 +541,7 @@ def test_every_error_event_carries_its_label_and_elapsed_time():
 def test_a_short_upload_is_a_labelled_failure_naming_the_byte_counts():
     class ShortWrite(FakeSprites):
         def _answer(self, script, stdin):
-            if script.startswith("head -c"):
+            if "cat > /tmp" in script:
                 return "5", 0
             return super()._answer(script, stdin)
 
@@ -589,7 +594,7 @@ def test_the_trivial_tool_runs_through_the_review_sequence():
 def test_stdin_roundtrip_reports_a_nonzero_exit_as_a_failure():
     class WcFails(FakeSprites):
         def _answer(self, script, stdin):
-            if "| wc -c" in script:
+            if "{ wc -c" in script:
                 return "wc: broken", 1
             return super()._answer(script, stdin)
 
@@ -597,3 +602,147 @@ def test_stdin_roundtrip_reports_a_nonzero_exit_as_a_failure():
         WcFails(), MemoryLedger(), TOOLS, name=NAME, deadline_s=60, clock=FakeClock()
     )
     assert outcome.stdin_check.startswith("FAILED sending 3145728 bytes: exit 1")
+
+
+# --- one exec shape, and failing fast on silence (run #6) ------------------
+
+COMPILEALL = ToolSpec(
+    "python-compileall", "python3", "python3 --version", "python3 -m compileall -q ."
+)
+PY_RULES = (
+    ExecRule("tar -xzf", "", 0),
+    ExecRule("python3 --version", "Python 3.13.7", 0),
+    ExecRule("compileall", "", 0),
+)
+
+
+def test_exec_argv_gives_every_command_exactly_its_stdin_then_eof():
+    assert exec_argv("tar -xzf a", 0) == (
+        "sh",
+        "-c",
+        f"echo {START_MARKER}; {{ tar -xzf a\n}} </dev/null; echo __ATLAS_EXIT__=$?",
+    )
+    assert exec_argv("cat > f", 7) == (
+        "sh",
+        "-c",
+        f"echo {START_MARKER}; head -c 7 | {{ cat > f\n}}; echo __ATLAS_EXIT__=$?",
+    )
+    assert strip_start(f"{START_MARKER}\nout\n") == "out\n"
+    assert strip_start("no marker") == "no marker"
+
+
+def test_every_exec_of_a_review_uses_the_one_wrapper():
+    api = FakeSprites(
+        rules=(
+            *PY_RULES,
+            ExecRule("echo posix-sh", "posix-sh", 0),
+            ExecRule("find .", "3", 0),
+        )
+    )
+    outcome = run(api, tools=(COMPILEALL, TRIVIAL_TOOL))
+    assert outcome.report.status is RunnerStatus.COMPLETED
+    assert len(api.argv_seen) == 7
+    for argv, stdin in zip(api.argv_seen, api.stdin_seen, strict=True):
+        assert argv == exec_argv(_inner(argv[2]), len(stdin))
+
+
+def _inner(script):
+    body = script.split("{ ", 1)[1]
+    return body.rsplit("\n}", 1)[0]
+
+
+def test_only_commands_without_input_get_the_first_frame_window():
+    api = FakeSprites(rules=PY_RULES)
+    run_disposable(
+        api, MemoryLedger(), RunnerJob(b"tarball-bytes", (COMPILEALL,)), name=NAME,
+        deadline_s=600.0, clock=FakeClock(), first_frame_s=5.0,
+    )  # fmt: skip
+    assert api.first_bytes_seen == [5.0, None, 5.0, 5.0, 5.0]
+    run(api := FakeSprites(rules=PY_RULES), tools=(COMPILEALL,), deadline_s=600.0)
+    assert set(api.first_bytes_seen) - {None} == {FIRST_FRAME_BUDGET_S}
+
+
+def test_the_first_frame_window_never_exceeds_the_exec_budget():
+    api = FakeSprites(rules=PY_RULES)
+    run(api, tools=(COMPILEALL,), deadline_s=12.0)
+    assert api.first_bytes_seen[0] == 12.0
+
+
+class _SilentVersion(FakeSprites):
+    """The run #6 failure: `python3 --version` sends nothing back."""
+
+    def __init__(self, clock, **kwargs):
+        super().__init__(rules=PY_RULES, **kwargs)
+        self.clock = clock
+
+    def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
+        if "python3 --version" in argv[-1] and first_byte_s is not None:
+            super().exec(name, argv, stdin, timeout_s, first_byte_s)
+            self.clock.advance(first_byte_s)
+            raise StreamTimeoutError(
+                f"POST https://api.sprites.dev/v1/sprites/{name}/exec: "
+                f"no response byte within {first_byte_s:g}s",
+                first_byte=True,
+            )
+        return super().exec(name, argv, stdin, timeout_s, first_byte_s)
+
+
+def test_a_silent_tool_exec_fails_fast_with_a_stage_aware_label():
+    clock = FakeClock()
+    outcome, events = run_traced(
+        _SilentVersion(clock), clock=clock, tools=(COMPILEALL,)
+    )
+    assert outcome.report.status is RunnerStatus.FAILED
+    assert outcome.report.note == (
+        "exec / python-compileall version failed after 30.0s (30.0s into the run): "
+        "tool python-compileall stage, python-compileall version: silent -- no "
+        "output frame for a command that sends no input, not even the start marker "
+        f"(POST https://api.sprites.dev/v1/sprites/{NAME}/exec: no response byte "
+        "within 30s)"
+    )
+    failed = next(e for e in events if e.status == "error")
+    assert (failed.phase, failed.step) == ("exec", "python-compileall version")
+    assert failed.fields["stage"] == "tool python-compileall"
+    assert failed.fields["first_frame_s"] == FIRST_FRAME_BUDGET_S
+    assert failed.fields["timeout_s"] == 135.0
+    assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
+
+
+def test_a_stalled_exec_reports_the_bytes_and_frames_that_did_arrive():
+    class Stalls(FakeSprites):
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
+            if "tar -xzf" in argv[-1]:
+                raise StreamTimeoutError(
+                    "POST x: response incomplete after 20 byte(s) within 120s",
+                    b"\x01__ATLAS_START__\ntar: ",
+                )
+            return super().exec(name, argv, stdin, timeout_s, first_byte_s)
+
+    outcome = run(Stalls(rules=PY_RULES), tools=(COMPILEALL,))
+    assert outcome.report.note.startswith(
+        "exec / source unpack failed after 0.0s (0.0s into the run): unpack stage, "
+        "source unpack: output stopped before the exit marker after 22 byte(s) "
+        "(frames 0x01:1), last output '__ATLAS_START__\\ntar: ' (POST x: "
+    )
+
+
+def test_the_tool_check_reports_where_each_binary_resolves():
+    _, events = run_traced(FakeSprites(rules=PY_RULES), tools=(COMPILEALL,))
+    availability = next(e for e in events if e.step == "availability")
+    assert availability.fields == {
+        "has_python3": True,
+        "path_python3": "/usr/bin/python3 -> /usr/bin/python3",
+    }
+    assert 'p=$(command -v "$b"' in probe_script(("python3",))
+    assert 'readlink -f "$p"' in probe_script(("python3",))
+
+
+def test_resolved_paths_are_parsed_only_from_well_formed_probe_lines():
+    text = (
+        "atlas-probe:present:python3:/home/sprite/.shims/python3:/usr/bin/mise\n"
+        "atlas-probe:present:ruff:/x y:/z\n"
+        "atlas-probe:absent:shellcheck\n"
+    )
+    assert parse_paths(text) == {
+        "python3": "/home/sprite/.shims/python3 -> /usr/bin/mise"
+    }

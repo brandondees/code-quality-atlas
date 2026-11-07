@@ -487,7 +487,8 @@ def test_probe_runner_review_sequence_runs_the_real_exec_order_on_a_tarball(tmp_
     assert "tool source-file-count (posix-sh): exit 0; output: '3'" in text
     assert "## Lifecycle telemetry" in text
     scripts = [c[2] for c in api.calls if c[0] == "exec"]
-    assert [s.split()[0] for s in scripts] == ["for", "head", "mkdir", "cd", "cd"]
+    steps = ["for b in", "head -c", "tar -xzf", "echo posix-sh", "find ."]
+    assert [step in s for step, s in zip(steps, scripts, strict=True)] == [True] * 5
     (events_file,) = (tmp_path / "telemetry").glob("probe-review-*.jsonl")
     steps = [(e["phase"], e["step"]) for e in jsonl(events_file)]
     assert ("upload", f"{tarball.stat().st_size}-byte tarball") in steps
@@ -558,3 +559,39 @@ def test_probe_runner_review_sequence_reports_a_missing_tool(tmp_path):
         env={}, out=out, err=io.StringIO(), sprites_factory=lambda env: api,
     )  # fmt: skip
     assert "tool source-file-count: not run -- `sh` not found" in out.getvalue()
+
+
+def test_the_first_frame_window_flag_reaches_every_exec_without_input(tmp_path):
+    tarball = tmp_path / "checkout.tar.gz"
+    tarball.write_bytes(FixtureGitHub(FIXTURE).get_tarball("o/r", HEAD))
+    api = FakeSprites.from_script(
+        {"exec": [{"match": "tar -xzf", "stdout": "", "exit_code": 0},
+                  {"match": "echo posix-sh", "stdout": "posix-sh", "exit_code": 0},
+                  {"match": "find .", "stdout": "3", "exit_code": 0}]}
+    )  # fmt: skip
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "probe-runner", "--sequence", "review",
+         "--tarball", str(tarball), "--first-frame-seconds", "7"],
+        env={}, out=io.StringIO(), err=io.StringIO(), sprites_factory=lambda env: api,
+    )  # fmt: skip
+    assert code == cli.EXIT_OK
+    assert api.first_bytes_seen == [7.0, None, 7.0, 7.0, 7.0]
+
+
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_the_first_frame_window_must_be_positive(tmp_path, value, capsys):
+    with pytest.raises(SystemExit) as info:
+        cli.main(
+            ["--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run",
+             "--first-frame-seconds", value],
+            env={}, out=io.StringIO(), err=io.StringIO(),
+        )  # fmt: skip
+    assert info.value.code == 2
+    assert "positive number of seconds" in capsys.readouterr().err
+
+
+def test_review_config_refuses_a_non_positive_first_frame_window():
+    from atlas_reviewer.controller import ReviewConfig
+
+    with pytest.raises(ValueError, match="first-frame"):
+        ReviewConfig(first_frame_s=0)

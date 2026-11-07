@@ -10,16 +10,18 @@ runner's tool-availability probe from its `installed` set.
 
 from __future__ import annotations
 
+import re
 import threading
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from atlas_reviewer.ports import BoundaryError, Json, NotFoundError
-from atlas_reviewer.runner import EXIT_MARKER, EXIT_NOT_FOUND, PROBE_TAG
+from atlas_reviewer.runner import EXIT_MARKER, EXIT_NOT_FOUND, PROBE_TAG, START_MARKER
 
 ExecHandler = Callable[[str, bytes], tuple[str, int]]
 _HANG_LIMIT_S = 10.0
+_FEED_RE = re.compile(r"head -c (\d+) \| ")
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,8 @@ class FakeSprites:
     calls: list[tuple[str, ...]] = field(default_factory=list)
     stdin_seen: list[bytes] = field(default_factory=list)
     timeouts_seen: list[float] = field(default_factory=list)
+    first_bytes_seen: list[float | None] = field(default_factory=list)
+    argv_seen: list[tuple[str, ...]] = field(default_factory=list)
     _sprites: dict[str, _Sprite] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -108,27 +112,34 @@ class FakeSprites:
         self._get(name).memory_mb = limit_mb
 
     def exec(
-        self, name: str, argv: Sequence[str], stdin: bytes, timeout_s: float
+        self,
+        name: str,
+        argv: Sequence[str],
+        stdin: bytes,
+        timeout_s: float,
+        first_byte_s: float | None = None,
     ) -> bytes:
         script = argv[-1]
         self._record("exec", name, script)
         sprite = self._get(name)
         self.stdin_seen.append(stdin)
         self.timeouts_seen.append(timeout_s)
+        self.first_bytes_seen.append(first_byte_s)
+        self.argv_seen.append(tuple(argv))
         if self.hang_on is not None and self.hang_on in script:
             # Ignores timeout_s on purpose: models a stuck exec that only
             # destroying the Sprite can end.
             sprite.destroyed.wait(_HANG_LIMIT_S)
             raise BoundaryError("exec connection closed")
-        stdout, code = self._answer(script, stdin)
-        return b"\x01" + f"{stdout}\n{EXIT_MARKER}{code}\n".encode()
+        stdout, code = self._answer(script, _fed(script, stdin))
+        start = f"{START_MARKER}\n" if START_MARKER in script else ""
+        return b"\x01" + f"{start}{stdout}\n{EXIT_MARKER}{code}\n".encode()
 
     def _answer(self, script: str, stdin: bytes) -> tuple[str, int]:
         if PROBE_TAG in script:
             return self._probe(script), 0
-        if script.startswith("head -c ") and "wc -c" in script:
-            wanted = int(script.split()[2])
-            return str(len(stdin[:wanted])), 0
+        if "wc -c" in script and _FEED_RE.search(script):
+            return str(len(stdin)), 0
         for rule in self.rules:
             if rule.match in script:
                 return rule.handler(script, stdin)
@@ -137,7 +148,10 @@ class FakeSprites:
     def _probe(self, script: str) -> str:
         names = script.split("for b in ", 1)[1].split(";", 1)[0].split()
         return "\n".join(
-            f"{PROBE_TAG}:{'present' if self._has(n) else 'absent'}:{n}" for n in names
+            f"{PROBE_TAG}:present:{n}:/usr/bin/{n}:/usr/bin/{n}"
+            if self._has(n)
+            else f"{PROBE_TAG}:absent:{n}"
+            for n in names
         )
 
     def _has(self, binary: str) -> bool:
@@ -180,3 +194,10 @@ class StaticToken:
 
     def token(self) -> str:
         return self.value
+
+
+def _fed(script: str, stdin: bytes) -> bytes:
+    """What the script itself reads: the `head -c N` feed's bytes, or
+    nothing when its stdin is /dev/null."""
+    feed = _FEED_RE.search(script)
+    return stdin[: int(feed.group(1))] if feed else b""

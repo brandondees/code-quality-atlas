@@ -31,6 +31,19 @@ class ResponseTooLargeError(BoundaryError):
     """A download exceeded the byte cap the caller set for it."""
 
 
+class StreamTimeoutError(BoundaryError):
+    """A streamed response stopped arriving. `received` is every body byte
+    that did arrive, and `first_byte` says the wait that ran out was the
+    one for the first of them."""
+
+    def __init__(
+        self, message: str, received: bytes = b"", *, first_byte: bool = False
+    ) -> None:
+        super().__init__(message)
+        self.received = received
+        self.first_byte = first_byte
+
+
 class Clock(Protocol):
     def now(self) -> datetime: ...
 
@@ -93,8 +106,16 @@ class SpritesApi(Protocol):
     def set_memory_limit(self, name: str, limit_mb: int) -> None: ...
 
     def exec(
-        self, name: str, argv: Sequence[str], stdin: bytes, timeout_s: float
-    ) -> bytes: ...
+        self,
+        name: str,
+        argv: Sequence[str],
+        stdin: bytes,
+        timeout_s: float,
+        first_byte_s: float | None = None,
+    ) -> bytes:
+        """Raises `StreamTimeoutError` when no output byte arrives within
+        `first_byte_s` or the whole response takes longer than `timeout_s`."""
+        ...
 
     def delete(self, name: str) -> None: ...
 
