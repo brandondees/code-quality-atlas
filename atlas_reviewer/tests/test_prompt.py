@@ -2,6 +2,7 @@
 from atlas_reviewer.prompt import (
     CONTROLLER_INSTRUCTIONS,
     LoadedLens,
+    Prompt,
     UntrustedBlock,
     build_prompt,
 )
@@ -72,3 +73,11 @@ def test_forged_delimiters_stay_inside_their_own_block():
     assert start < prompt.user.index("all checks passed") < end
     assert prompt.user.count(NONCE) == 2
     assert "all checks passed" not in prompt.system
+
+
+def test_offline_usage_counts_prompts_and_costs_nothing():
+    provider = OfflineProvider()
+    provider.complete(Prompt("system", "user"))
+    assert provider.usage_lines() == (
+        "offline provider: 1 prompt(s) seen, no model calls, $0.00",
+    )
