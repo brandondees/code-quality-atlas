@@ -6,6 +6,7 @@ from atlas_reviewer.diffs import (
     CONFIG,
     CUT_MARKER,
     DOCS,
+    MAX_FIT_ROUNDS,
     SECURITY,
     SOURCE,
     SUPPLY_CHAIN,
@@ -13,6 +14,7 @@ from atlas_reviewer.diffs import (
     UNPARSED_PATH,
     describe_by_risk,
     diff_paths,
+    fit_diff,
     risk_tier,
     select_diff,
     split_files,
@@ -197,3 +199,57 @@ def test_ci_and_lockfiles_are_reviewed_before_ordinary_code_when_budget_is_short
     sel = select_diff(diff, 1, 900)
     assert paths(sel.parts[0].files) == ["uv.lock", ".github/workflows/ci.yml"]
     assert paths(sel.unseen) == ["app/views.py"]
+
+
+# --- fitting parts to the measured prompt -----------------------------------
+
+BIG = "".join(file_diff(f"src/m{i}.py", "x" * 900) for i in range(10))
+
+
+def largest(sel):
+    return max(p.chars for p in sel.parts)
+
+
+def test_a_selection_that_fits_is_returned_after_one_measurement():
+    seen = []
+    sel = fit_diff(BIG, 2, 50_000, lambda s: seen.append(s) or -1, 1_000)
+    assert len(seen) == 1
+    assert sel.part_chars == 50_000 and sel.complete
+
+
+def test_parts_shrink_until_the_whole_prompt_fits():
+    overhead, room = 700, 3_000
+    sel = fit_diff(BIG, 3, 50_000, lambda s: largest(s) + overhead - room, 1_000)
+    assert largest(sel) + overhead <= room
+    assert sel.part_chars < 50_000
+    assert not sel.complete
+
+
+def test_fitting_stops_at_the_minimum_part_size():
+    sel = fit_diff(BIG, 1, 5_000, lambda s: 10**6, 1_000)
+    assert sel.part_chars == 1_000
+
+
+def test_fitting_gives_up_after_a_bounded_number_of_rounds():
+    seen = []
+    fit_diff(BIG, 1, 50_000, lambda s: seen.append(s) or 1, 1_000)
+    assert len(seen) == MAX_FIT_ROUNDS
+
+
+def test_an_empty_diff_shrinks_by_the_overflow_alone():
+    sel = fit_diff("", 1, 5_000, lambda s: 100 if s.part_chars == 5_000 else -1, 1_000)
+    assert sel.part_chars == 4_900
+
+
+def test_multibyte_parts_shrink_by_characters_not_bytes():
+    wide = "".join(file_diff(f"src/m{i}.py", "\u6f22" * 900) for i in range(10))
+    room = 9_000
+    sel = fit_diff(
+        wide,
+        3,
+        50_000,
+        lambda s: max(len(p.text.encode()) for p in s.parts) - room,
+        1_000,
+    )
+    assert max(len(p.text.encode()) for p in sel.parts) <= room
+    assert max(len(p.text.encode()) for p in sel.parts) > room - 3 * 1_000

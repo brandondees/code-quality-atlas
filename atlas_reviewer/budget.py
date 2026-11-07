@@ -26,6 +26,9 @@ from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.pricing import ModelTerms
 
 MESSAGE_OVERHEAD_TOKENS = 64
+# The pinned model's context window as the operator states it (Sonnet,
+# 200k tokens). Planning with it is stricter than a catalog that reports more.
+ASSUMED_CONTEXT_TOKENS = 200_000
 
 
 class BudgetRefusedError(BoundaryError):
@@ -56,6 +59,16 @@ def input_token_bound(text: str) -> int:
     model's own tokenizer). The response's reported usage is recorded so a
     violated assumption is visible."""
     return len(text.encode("utf-8")) + MESSAGE_OVERHEAD_TOKENS
+
+
+def prompt_token_room(
+    limits: CallLimits, context_tokens: int = ASSUMED_CONTEXT_TOKENS
+) -> int:
+    """The largest prompt bound `check_tokens` accepts under `limits` on a
+    model with `context_tokens` of context. The controller sizes diff parts
+    against it; `check_tokens` still runs on every call against the catalog's
+    own `context_length`."""
+    return min(limits.max_input_tokens, context_tokens - limits.max_output_tokens)
 
 
 def check_tokens(input_tokens: int, terms: ModelTerms, limits: CallLimits) -> None:

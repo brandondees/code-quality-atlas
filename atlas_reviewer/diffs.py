@@ -12,12 +12,15 @@ supply chain.
 
 from __future__ import annotations
 
+import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from functools import reduce
 
 _HEADER = re.compile(r"^diff --git a/(?P<old>.+?) b/(?P<new>.+)$", re.MULTILINE)
 UNPARSED_PATH = "(diff text without file headers)"
+MAX_FIT_ROUNDS = 8
 CUT_MARKER = "\n[... file diff cut by atlas_reviewer to fit one model call ...]\n"
 
 
@@ -113,6 +116,7 @@ class DiffSelection:
     total_chars: int
     parts: tuple[DiffPart, ...]
     unseen: tuple[FileDiff, ...]
+    part_chars: int = 0
 
     @property
     def cut(self) -> tuple[FileDiff, ...]:
@@ -177,7 +181,38 @@ def select_diff(diff: str, max_parts: int, part_chars: int) -> DiffSelection:
         return _place(acc, f, max_parts, part_chars)
 
     packed = reduce(place, by_risk(files), _Packing())
-    return DiffSelection(len(files), len(diff), packed.parts, packed.unseen)
+    return DiffSelection(len(files), len(diff), packed.parts, packed.unseen, part_chars)
+
+
+def fit_diff(
+    diff: str,
+    max_parts: int,
+    part_chars: int,
+    overflow: Callable[[DiffSelection], int],
+    min_chars: int,
+) -> DiffSelection:
+    """`select_diff` with the part size shrunk until `overflow(selection)`,
+    how far the largest part's whole prompt exceeds its token bound in UTF-8
+    bytes, is not positive. Each round shrinks from the byte-largest part's
+    actual size by the overflow converted to its characters. After
+    `MAX_FIT_ROUNDS`, or at `min_chars`, the last selection is returned and
+    the per-call token check refuses any part still too big."""
+    selection = select_diff(diff, max_parts, part_chars)
+    for _ in range(MAX_FIT_ROUNDS):
+        over = overflow(selection)
+        if over <= 0 or selection.part_chars <= min_chars:
+            return selection
+        smaller = max(min_chars, _shrunk(selection, over))
+        selection = select_diff(diff, max_parts, smaller)
+    return selection
+
+
+def _shrunk(sel: DiffSelection, over_bytes: int) -> int:
+    if not sel.parts:
+        return sel.part_chars - over_bytes
+    part = max(sel.parts, key=lambda p: len(p.text.encode("utf-8")))
+    size = max(len(part.text.encode("utf-8")), 1)
+    return min(sel.part_chars, part.chars) - math.ceil(over_bytes * part.chars / size)
 
 
 def _place(acc: _Packing, f: FileDiff, max_parts: int, budget: int) -> _Packing:

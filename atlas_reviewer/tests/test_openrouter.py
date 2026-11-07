@@ -218,6 +218,30 @@ def test_call_whose_worst_case_could_pass_three_dollars_is_refused():
     )
 
 
+def test_the_largest_planned_prompt_passes_the_token_check_and_fits_one_reservation():
+    from atlas_reviewer.budget import check_tokens, prompt_token_room
+    from atlas_reviewer.controller import PROMPT_TOKEN_ROOM
+
+    limits = CallLimits()
+    sonnet = parse_model_terms(
+        {"data": {**catalog()["data"], "context_length": 200_000}}, MODEL_ID
+    )
+    assert PROMPT_TOKEN_ROOM == prompt_token_room(limits) == 176_000
+    check_tokens(PROMPT_TOKEN_ROOM, sonnet, limits)
+    with pytest.raises(BudgetRefusedError, match="context"):
+        check_tokens(PROMPT_TOKEN_ROOM + 1, sonnet, limits)
+    worst = worst_case_usd(PROMPT_TOKEN_ROOM, sonnet, limits)
+    assert worst == Decimal("1.596")
+    budget = ReviewBudget(limits)
+    first = budget.reserve(worst)
+    with pytest.raises(BudgetRefusedError, match="over \\$3.00"):
+        budget.reserve(worst)
+    budget.settle(first, "ok", Decimal("0.70"))
+    budget.settle(budget.reserve(worst), "ok", Decimal("0.70"))
+    budget.reserve(worst)
+    assert budget.committed_usd() == Decimal("2.996")
+
+
 def test_reservation_uses_the_highest_price_tier_and_cache_writes():
     terms = parse_model_terms(catalog(input_cache_write="0.00001"), MODEL_ID)
     assert terms.input_rate == Decimal("0.00001")
