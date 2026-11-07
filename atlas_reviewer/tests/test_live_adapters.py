@@ -368,8 +368,12 @@ def test_every_exec_in_a_review_is_built_the_same_way():
     one shape: same query keys, headers, minimal `env -i` + `sh -c` wrapper
     and EOF rule. D29: no `dir`/`env` query parameter either; the
     wrapper alone sets the environment."""
-    from atlas_reviewer.controller import DEFAULT_TOOLS
-    from atlas_reviewer.runner import MINIMAL_ENV, START_MARKER, TRIVIAL_TOOL
+    from atlas_reviewer.runner import (
+        DEFAULT_TOOLS,
+        MINIMAL_ENV,
+        START_MARKER,
+        TRIVIAL_TOOL,
+    )
 
     server, outcome = _review_over_http((*DEFAULT_TOOLS, TRIVIAL_TOOL))
     assert outcome.report.status.value == "completed"
@@ -395,7 +399,7 @@ def test_every_exec_in_a_review_is_built_the_same_way():
 
 
 def test_a_review_runs_python_tools_only_by_the_resolved_absolute_path():
-    from atlas_reviewer.controller import DEFAULT_TOOLS
+    from atlas_reviewer.runner import DEFAULT_TOOLS
 
     server, outcome = _review_over_http(DEFAULT_TOOLS)
     scripts = [

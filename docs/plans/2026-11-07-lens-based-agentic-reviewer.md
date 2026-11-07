@@ -166,7 +166,7 @@ Python, so PR files can't shim it.
 | `grep` | `git grep -n -I --no-color --max-count=50 -F -e PATTERN HEAD -- PREFIX` (`-E` only if `regex: true`) | `pattern`, `prefix`, `regex` | 200 matches or 32 KiB, 15 s |
 | `log` | `git log --no-color --format=%H%x09%an%x09%ad%x09%s -n N BASE..HEAD -- PATH` | `path`, `n` ≤ 20 | 16 KiB, 10 s |
 | `blame` | `git blame --porcelain -L START,END HEAD -- PATH` | `path`, `start`, `end` | 200 lines or 32 KiB, 15 s |
-| `run_check` | one entry of the controller's closed `ToolSpec` set (today `DEFAULT_TOOLS` in `controller.py` holds only `python-compileall`) | `name` from that set | each spec's own timeout; results cached for the review |
+| `run_check` | one entry of the controller's closed `ToolSpec` set (today `DEFAULT_TOOLS` in `runner.py` holds only `python-compileall`) | `name` from that set | each spec's own timeout; results cached for the review |
 | `read_lens_reference` | **controller-local:** the lens's own `tool-rules.md` or `sources.md` from the trusted bundle | `file` from a closed set | 32 KiB |
 
 **Argument rules.** These apply to every tool before any exec:

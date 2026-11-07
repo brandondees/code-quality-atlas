@@ -66,6 +66,7 @@ from atlas_reviewer.ports import (
 from atlas_reviewer.prompt import UntrustedBlock
 from atlas_reviewer.redact import RedactedText, Redactor
 from atlas_reviewer.runner import (
+    DEFAULT_TOOLS,
     FIRST_FRAME_BUDGET_S,
     RunnerJob,
     ToolResult,
@@ -84,15 +85,6 @@ MIN_DIFF_CHARS_PER_CALL = 1_000
 MAX_LISTED_PATHS = 100
 MAX_PICKER_PATHS = 500
 MAX_TARBALL_BYTES = 9 * 1024 * 1024
-
-DEFAULT_TOOLS = (
-    ToolSpec(
-        "python-compileall",
-        "python3",
-        "{python} -I --version",
-        "{python} -I -m compileall -q .",
-    ),
-)
 
 
 @dataclass(frozen=True)

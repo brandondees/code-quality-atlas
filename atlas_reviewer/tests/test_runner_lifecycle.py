@@ -430,7 +430,7 @@ def test_stdin_roundtrip_transport_failure_is_reported_not_fatal_to_the_probe():
 
 
 def test_default_tools_are_limited_to_what_the_runner_image_is_known_to_have():
-    from atlas_reviewer.controller import DEFAULT_TOOLS
+    from atlas_reviewer.runner import DEFAULT_TOOLS
 
     assert [t.binary for t in DEFAULT_TOOLS] == ["python3"]
 

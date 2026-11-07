@@ -222,7 +222,7 @@ is never reused, so nothing can be installed into a runner, and a binary the
 image lacks can only ever produce UNKNOWN rows. The repo's own CI already
 reports lint, so the CI evidence covers it. To add a tool once the image
 ships its binary, append a `ToolSpec(name, binary, version_cmd, run_cmd)` to
-`DEFAULT_TOOLS` in `controller.py`; `probe-runner` shows which binaries the
+`DEFAULT_TOOLS` in `runner.py`; `probe-runner` shows which binaries the
 image has, and a configured tool whose binary is missing is still reported
 UNKNOWN and never executed. A `python3` tool must write the interpreter as
 `{python}` in both commands (`ToolSpec` refuses it otherwise); a non-Python

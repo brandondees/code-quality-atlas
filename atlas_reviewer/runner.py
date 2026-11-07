@@ -157,6 +157,15 @@ TRIVIAL_TOOL = ToolSpec(
     "source-file-count", "sh", "echo posix-sh", "find . -type f | wc -l", timeout_s=30
 )
 
+DEFAULT_TOOLS = (
+    ToolSpec(
+        "python-compileall",
+        "python3",
+        "{python} -I --version",
+        "{python} -I -m compileall -q .",
+    ),
+)
+
 
 @dataclass(frozen=True)
 class RunnerJob:

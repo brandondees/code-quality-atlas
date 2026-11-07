@@ -9,7 +9,6 @@ import subprocess
 
 import pytest
 
-from atlas_reviewer.controller import DEFAULT_TOOLS
 from atlas_reviewer.domain import CleanupStatus, RunnerStatus
 from atlas_reviewer.fakes import PYENV_PYTHON, ExecRule, FakeSprites, MemoryLedger
 from atlas_reviewer.interpreter import (
@@ -25,6 +24,7 @@ from atlas_reviewer.interpreter import (
 )
 from atlas_reviewer.ports import StreamTimeoutError
 from atlas_reviewer.runner import (
+    DEFAULT_TOOLS,
     MINIMAL_ENV,
     TRIVIAL_TOOL,
     RunnerJob,

@@ -30,7 +30,6 @@ from atlas_reviewer.budget import CallLimits
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.controller import (
     DEFAULT_DIFF_CHARS_PER_CALL,
-    DEFAULT_TOOLS,
     MAX_MODEL_CALLS,
     MAX_TARBALL_BYTES,
     Deps,
@@ -60,6 +59,7 @@ from atlas_reviewer.ports import BoundaryError, Clock, ModelProvider, SpritesApi
 from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import (
+    DEFAULT_TOOLS,
     FIRST_FRAME_BUDGET_S,
     TRIVIAL_TOOL,
     Diagnostic,
