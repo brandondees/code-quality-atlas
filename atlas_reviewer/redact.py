@@ -44,7 +44,8 @@ _ASSIGNMENT = re.compile(
     r"(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|"
     r"private[_-]?key|credentials?)s?"
     r"(?:[_.-][A-Za-z0-9]{1,40}){0,6}[\"']?)"
-    r"(\s*[:=]\s*)(?:([\"'])[^\"'\n]{8,}\3|([\"']?)[^\s\"']{8,})"
+    r"(\s*[:=]\s*)"
+    r"(?:(\")(?:[^\"\\\n]|\\.){8,}\"|(')(?:[^'\\\n]|\\.){8,}'|([\"']?)[^\s\"']{8,})"
 )
 
 
@@ -119,26 +120,32 @@ def _scrub_known(raw: str, known_secrets: Sequence[str]) -> tuple[str, int]:
 
 
 def _assignment(m: re.Match[str]) -> str:
-    """A quoted value is replaced through its closing quote, spaces
-    included; an unquoted one up to the first space or quote."""
-    name, sep, quote, open_quote = m.group(1, 2, 3, 4)
+    """A quoted value is replaced through the matching closing quote, so
+    spaces, the other quote and backslash-escaped quotes stay inside it; an
+    unquoted one up to the first space or quote."""
+    name, sep, double, single, open_quote = m.group(1, 2, 3, 4, 5)
+    quote = double or single
     if quote:
         return f"{name}{sep}{quote}[REDACTED:assignment]{quote}"
     return f"{name}{sep}{open_quote}[REDACTED:assignment]"
 
 
 def _private_keys(text: str) -> tuple[str, int]:
-    """Each BEGIN through the next END. One pass: once a BEGIN has no END
-    after it, no later BEGIN can have one either."""
+    """Each BEGIN through the next END. A BEGIN with no END after it (a log
+    cut before the key's END line) is removed through the end of the text,
+    since what follows it may be key material. One pass: once a BEGIN has
+    no END after it, no later BEGIN can have one either."""
     kept: list[str] = []
     count = pos = 0
     while (begin := _KEY_BEGIN.search(text, pos)) is not None:
+        kept.append(text[pos : begin.start()])
+        count += 1
         end = _KEY_END.search(text, begin.end())
         if end is None:
-            break
-        kept += [text[pos : begin.start()], "[REDACTED:private-key]"]
+            kept.append("[REDACTED:private-key-unterminated]")
+            return "".join(kept), count
+        kept.append("[REDACTED:private-key]")
         pos = end.end()
-        count += 1
     kept.append(text[pos:])
     return "".join(kept), count
 

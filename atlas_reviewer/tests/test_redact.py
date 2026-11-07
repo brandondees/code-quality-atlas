@@ -50,6 +50,9 @@ def test_assignment_keeps_the_key_and_drops_the_value():
         ("secret: 'a b c d e f g h'", "secret: '[REDACTED:assignment]'"),
         ('token="abcdefghij" next', 'token="[REDACTED:assignment]" next'),
         ('password = "abcdefghij', 'password = "[REDACTED:assignment]'),
+        ('password="abc\'defghijklmnop"', 'password="[REDACTED:assignment]"'),
+        ("secret: 'it\"s a long one'", "secret: '[REDACTED:assignment]'"),
+        ('token="abc\\"defghijkl" next', 'token="[REDACTED:assignment]" next'),
     ],
 )
 def test_a_quoted_value_is_redacted_whole_even_with_spaces(text, redacted):
@@ -128,7 +131,25 @@ def test_private_key_redaction_stays_linear_without_end_markers():
     start = time.monotonic()
     out = redact(begin * 20_000 + "no end marker")
     assert time.monotonic() - start < 2.0
-    assert out.redaction_count == 0
+    assert out.text == "[REDACTED:private-key-unterminated]"
+    assert out.redaction_count == 1
+
+
+def test_a_private_key_with_no_end_marker_is_removed_through_the_end():
+    payload = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQ"
+    text = f"log line\n-----BEGIN RSA PRIVATE KEY-----\n{payload}\n{payload}"
+    out = redact(text)
+    assert out.text == "log line\n[REDACTED:private-key-unterminated]"
+    assert payload not in out.text
+    assert out.redaction_count == 1
+
+
+def test_a_terminated_key_before_an_unterminated_one_is_still_counted():
+    out = redact(f"{PRIVATE_KEY}\nkept\n-----BEGIN EC PRIVATE KEY-----\nMIIfake")
+    assert out.text == (
+        "[REDACTED:private-key]\nkept\n[REDACTED:private-key-unterminated]"
+    )
+    assert out.redaction_count == 2
 
 
 def test_each_private_key_block_ends_at_its_own_end_marker():
