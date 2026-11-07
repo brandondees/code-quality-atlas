@@ -38,8 +38,17 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("bearer", re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{16,}=*")),
 )
 
+# The name may carry `_`/`-`/`.`-joined prefixes and suffixes
+# (`DB_PASSWORD`, `client_secret`, `AWS_SECRET_ACCESS_KEY`, `tokens`) and may
+# be a quoted JSON/YAML key. `\b` alone cannot anchor it: `_` is a word
+# character, so `OPENAI_API_KEY` has no boundary before `API`. The bounded
+# repeats keep matching linear on adversarial logs (`a_a_a_...`).
 _ASSIGNMENT = re.compile(
-    r"(?i)\b(password|passwd|secret|token|api[_-]?key|access[_-]?key)"
+    r"(?i)(?<![A-Za-z0-9])"
+    r"((?:[A-Za-z0-9]{1,40}[_.-]){0,6}"
+    r"(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|"
+    r"private[_-]?key|credentials?)s?"
+    r"(?:[_.-][A-Za-z0-9]{1,40}){0,6}[\"']?)"
     r"(\s*[:=]\s*)([\"']?)[^\s\"']{8,}"
 )
 

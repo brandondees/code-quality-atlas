@@ -58,3 +58,42 @@ def test_truncation_is_recorded_with_the_original_length():
 def test_redacted_text_cannot_be_constructed_directly():
     with pytest.raises(TypeError):
         RedactedText("raw secret", 0)
+
+
+@pytest.mark.parametrize(
+    ("text", "kept"),
+    [
+        ("OPENAI_API_KEY=abcdefgh12345", "OPENAI_API_KEY="),
+        ("export DB_PASSWORD=hunter2hunter2", "export DB_PASSWORD="),
+        ("client_secret: 'zzzzzzzzzz'", "client_secret: '"),
+        ("GITHUB_TOKEN=abcdefghij0123", "GITHUB_TOKEN="),
+        ("AWS_SECRET_ACCESS_KEY=abcdefghijkl", "AWS_SECRET_ACCESS_KEY="),
+        ("db.password=abcdefghijkl", "db.password="),
+        ("tokens: abcdefghijk", "tokens: "),
+        ('{"api_key": "abcdefghijk"}', '{"api_key": "'),
+        ("service-credentials=abcdefghijkl", "service-credentials="),
+    ],
+)
+def test_assignments_with_prefixed_suffixed_or_quoted_names_are_redacted(text, kept):
+    """Pilot 3, redactor finding: `\\b` cannot anchor `OPENAI_API_KEY`
+    because `_` is a word character, so prefixed names leaked."""
+    out = redact(text)
+    assert out.text.startswith(f"{kept}[REDACTED:assignment]")
+    assert out.redaction_count == 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["max_tokens: 24000", "tokenizer=abcdefghijkl", "mytoken=abcdefghijkl"],
+)
+def test_names_merely_containing_a_keyword_or_short_values_are_left(text):
+    assert redact(text).text == text
+
+
+def test_assignment_matching_stays_linear_on_adversarial_input():
+    import time
+
+    start = time.monotonic()
+    for text in ("a_" * 200_000, "x-" * 200_000 + "password", "a" * 400_000):
+        redact(text)
+    assert time.monotonic() - start < 2.0
