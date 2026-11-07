@@ -587,11 +587,12 @@ def test_a_short_upload_is_a_labelled_failure_naming_the_byte_counts():
                 return "5", 0
             return super()._answer(script, stdin)
 
-    outcome, _ = run_traced(ShortWrite(rules=OK_RULES))
+    api = ShortWrite(rules=OK_RULES)
+    outcome, _ = run_traced(api)
     assert outcome.report.status is RunnerStatus.FAILED
     assert "upload / 13-byte tarball failed after" in outcome.report.note
     assert "runner wrote 5 of 13 bytes (exit 0)" in outcome.report.note
-    assert "tar -xzf" not in " ".join(c[-1] for c in ShortWrite().calls)
+    assert "tar -xzf" not in " ".join(c[-1] for c in api.calls)
 
 
 def test_destroy_attempts_and_verification_are_recorded_when_delete_fails():
