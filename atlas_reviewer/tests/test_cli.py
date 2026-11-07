@@ -3,6 +3,7 @@ import io
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -59,6 +60,45 @@ def test_dry_run_can_write_the_draft_to_a_file(tmp_path):
     assert "security-scan" in text
     assert "Issue context: off" not in text
     assert "issue-7" in text
+
+
+def test_an_out_path_in_a_missing_directory_is_refused_before_the_review(tmp_path):
+    target = tmp_path / "no-such-dir" / "draft.md"
+    code, out, err = run_cli(
+        "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run", "--out", str(target),
+    )  # fmt: skip
+    assert code == cli.EXIT_USAGE
+    assert "not a file in an existing directory" in err
+    assert out == ""
+
+
+def test_an_unwritable_out_path_is_refused_before_the_review(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.os, "access", lambda path, mode: False)
+    code, _, err = run_cli(
+        "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run",
+        "--out", str(tmp_path / "draft.md"),
+    )  # fmt: skip
+    assert code == cli.EXIT_USAGE
+    assert "not writable" in err
+
+
+def test_a_failed_draft_write_still_prints_the_draft(tmp_path, monkeypatch):
+    target = tmp_path / "draft.md"
+    real = Path.write_text
+
+    def failing(self, *args, **kwargs):
+        if self == target:
+            raise OSError("disk full")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", failing)
+    code, out, err = run_cli(
+        "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run", "--out", str(target),
+    )  # fmt: skip
+    assert code == cli.EXIT_USAGE
+    assert out.startswith("# Code Quality Atlas review -- DRAFT")
+    assert "disk full" in err
+    assert "the draft went to stdout" in err
 
 
 def test_module_entry_point_runs_offline(tmp_path):

@@ -303,6 +303,7 @@ def _cmd_review(args: argparse.Namespace, env: Mapping[str, str], out: TextIO) -
     event_path = Path(args.event)
     event = load_event(event_path)
     _review_config(args, "check")
+    _check_out_path(args.out)
     telemetry = _telemetry(args, env, "review", default_file=not args.dry_run)
     provider = _select_provider(args, env, args.openrouter_factory, telemetry)
     wiring = (
@@ -321,11 +322,30 @@ def _cmd_review(args: argparse.Namespace, env: Mapping[str, str], out: TextIO) -
     return EXIT_OK
 
 
+def _check_out_path(out_path: str | None) -> None:
+    """Refuse an unwritable `--out` before the review spends anything."""
+    if out_path is None:
+        return
+    path = Path(out_path)
+    parent = path.parent
+    if path.is_dir() or not parent.is_dir():
+        raise UsageError(f"--out {out_path}: not a file in an existing directory")
+    target = path if path.exists() else parent
+    if not os.access(target, os.W_OK):
+        raise UsageError(f"--out {out_path}: not writable")
+
+
 def _emit(draft: str, out_path: str | None, out: TextIO) -> None:
     if out_path is None:
         out.write(draft)
         return
-    Path(out_path).write_text(draft, encoding="utf-8")
+    try:
+        Path(out_path).write_text(draft, encoding="utf-8")
+    except OSError as exc:
+        out.write(draft)
+        raise UsageError(
+            f"could not write --out {out_path} ({exc}); the draft went to stdout"
+        ) from exc
     out.write(f"review draft written to {out_path}\n")
 
 
