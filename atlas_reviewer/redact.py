@@ -44,7 +44,7 @@ _ASSIGNMENT = re.compile(
     r"(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|"
     r"private[_-]?key|credentials?)s?"
     r"(?:[_.-][A-Za-z0-9]{1,40}){0,6}[\"']?)"
-    r"(\s*[:=]\s*)([\"']?)[^\s\"']{8,}"
+    r"(\s*[:=]\s*)(?:([\"'])[^\"'\n]{8,}\3|([\"']?)[^\s\"']{8,})"
 )
 
 
@@ -71,7 +71,7 @@ def redact(
     for label, pattern in _PATTERNS:
         text, hits = pattern.subn(f"[REDACTED:{label}]", text)
         count += hits
-    text, hits = _ASSIGNMENT.subn(r"\1\2\3[REDACTED:assignment]", text)
+    text, hits = _ASSIGNMENT.subn(_assignment, text)
     count += hits
     cut = max_chars is not None and len(text) > max_chars
     return RedactedText(
@@ -103,6 +103,15 @@ def _scrub_known(raw: str, known_secrets: Sequence[str]) -> tuple[str, int]:
         count += text.count(secret)
         text = text.replace(secret, "[REDACTED:controller-credential]")
     return text, count
+
+
+def _assignment(m: re.Match[str]) -> str:
+    """A quoted value is replaced through its closing quote, spaces
+    included; an unquoted one up to the first space or quote."""
+    name, sep, quote, open_quote = m.group(1, 2, 3, 4)
+    if quote:
+        return f"{name}{sep}{quote}[REDACTED:assignment]{quote}"
+    return f"{name}{sep}{open_quote}[REDACTED:assignment]"
 
 
 def _private_keys(text: str) -> tuple[str, int]:

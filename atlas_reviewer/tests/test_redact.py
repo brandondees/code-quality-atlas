@@ -34,6 +34,22 @@ def test_assignment_keeps_the_key_and_drops_the_value():
     assert result.text == 'password = "[REDACTED:assignment]"'
 
 
+@pytest.mark.parametrize(
+    ("text", "redacted"),
+    [
+        (
+            'password = "correct horse battery staple"',
+            'password = "[REDACTED:assignment]"',
+        ),
+        ("secret: 'a b c d e f g h'", "secret: '[REDACTED:assignment]'"),
+        ('token="abcdefghij" next', 'token="[REDACTED:assignment]" next'),
+        ('password = "abcdefghij', 'password = "[REDACTED:assignment]'),
+    ],
+)
+def test_a_quoted_value_is_redacted_whole_even_with_spaces(text, redacted):
+    assert redact(text).text == redacted
+
+
 def test_controller_credentials_are_scrubbed_by_exact_value():
     redactor = Redactor(("org/123/plainsecretvalue", "short"))
     result = redactor("token org/123/plainsecretvalue and short")
