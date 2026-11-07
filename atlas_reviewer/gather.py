@@ -47,7 +47,9 @@ from atlas_reviewer.ports import (
 )
 from atlas_reviewer.redact import Redactor
 
-_FAILING = frozenset({Conclusion.FAILURE, Conclusion.TIMED_OUT})
+_FAILING = frozenset(
+    {Conclusion.FAILURE, Conclusion.TIMED_OUT, Conclusion.ACTION_REQUIRED}
+)
 
 
 @dataclass(frozen=True)

@@ -103,6 +103,18 @@ def test_job_log_cap_reads_failing_jobs_first_and_notes_the_rest():
     assert (cap.limit, cap.detail) == ("per-review cap of 1", "1 of 2 not ingested")
 
 
+def test_job_log_cap_counts_action_required_as_failing():
+    class ActionRequired(FixtureGitHub):
+        def list_run_jobs(self, repo, run_id):
+            failing, passing = super().list_run_jobs(repo, run_id).items
+            blocked = {**passing, "conclusion": "action_required"}
+            return Listing(({**failing, "conclusion": "success"}, blocked), False, 1)
+
+    gh = ActionRequired(FIXTURE)
+    gather(gh, max_job_logs=1)
+    assert [c[2] for c in calls(gh, "get_job_logs")] == ["7002"]
+
+
 def test_run_cap_is_noted():
     class TwoRuns(FixtureGitHub):
         def list_workflow_runs(self, repo, branch):
