@@ -675,3 +675,347 @@ explaining a tradeoff rather than a rendered template occurrence — per
 \#588's own framing, a drift-guard test is the right-sized fix here.
 `ruff`/`ruff format`/the full `pytest` suite (coverage gate green) all
 clean.
+
+## 2026-11-06 — D24: `atlas_reviewer/`, the first manual, draft-only reviewer service
+
+**Where the code is:** the `atlas_reviewer/` package lands through the
+stack split from #598 (steps 2-8, #601-#607). Until step 8 merges, a tree
+without those steps has no `atlas_reviewer/`, and links into it resolve
+only on those branches.
+
+The owner approved one manual review path. An operator-triggered
+controller takes a PR event (repo, PR number, head SHA), gathers CI
+evidence matched to that exact SHA, runs extra tools in a fresh,
+credential-free Sprite, and writes a review draft to stdout or a file.
+It publishes nothing to GitHub. The service lives here as a new top-level
+package, `atlas_reviewer/`, with its own entry point
+(`python -m atlas_reviewer`), its own tests and coverage run, and two new
+CI steps: the suite, and an offline dry run against
+`atlas_reviewer/fixtures/sample-pr/`. It runs the collapsed
+`reviewing-a-change` skill bundle as data and changes nothing under
+`skills/`, `collapsed/`, or `tooling/`. It is recorded as **D24**, a
+scoped step under the still-open Q24; design in
+[`plans/2026-11-06-manual-reviewer-service.md`](plans/2026-11-06-manual-reviewer-service.md).
+
+The runner lifecycle follows the same-day live Sprites validation. Every
+review gets a fresh Sprite, never a reused one. Deny-all egress is set and
+read back from the outside API before anything executes, and an external
+deadline is enforced by a watchdog. Destroy is the only cleanup primitive.
+It runs in `finally` and from the watchdog, is verified by an existence
+check, and is backed by a ledger that a `sweep` command reads after a
+crash. Mutation checks confirmed the lifecycle tests bite: removing the
+`finally` destroy fails 11 tests, dropping the deny-all read-back fails 2,
+and disabling the watchdog fails its test.
+
+The domain is a closed union. `Matched` / `Stale` / `Missing` evidence
+means only head-SHA evidence can ever PASS. Stale, missing, and
+inconclusive evidence is UNKNOWN. Untrusted text is typed (`RedactedText`
+is minted only by `redact()`), and it reaches the prompt only inside
+nonce-fenced blocks.
+
+Only the offline provider ships. The first live adapter to wire is the
+Anthropic Messages API. Live runs still need three things: a pre-minted
+GitHub App installation token (no in-process JWT minting), confirmation of
+the Sprites exec request shape, and a model choice.
+
+Repo wiring:
+
+- `LICENSE` and `tests/test_license_paths_exhaustive.py` classify the
+  directory as MIT.
+- `[tool.mypy] files` now includes the package. The "only fully annotated
+  package" comments in `pyproject.toml`, `ci.yml`, and both
+  `CLAUDE.md`/`AGENTS.md` copies were updated together.
+- `ci.yml`'s `python` and `session_log_substantive` path filters gained
+  `atlas_reviewer/**`.
+
+## 2026-11-07 — D25: the reviewer service's live-readiness slice
+
+Second slice of `atlas_reviewer/`, still draft-only and still offline in
+tests and CI. It is recorded as **D25**, which amends D24's "stdlib-only"
+and "no live provider" statements. Design and the remaining live setup are
+in [`plans/2026-11-06-manual-reviewer-service.md`](plans/2026-11-06-manual-reviewer-service.md#live-run-gaps).
+
+- **Pagination.** Every GitHub list follows `Link: rel="next"` up to a
+  10-page cap, and refuses a `next` link that leaves the API origin. A
+  list cut off by the cap is an explicit omission in the draft, and what
+  it did not read is UNKNOWN.
+- **Ingestion.** Job logs and artifact ZIPs are fetched only for the
+  matched head SHA and are capped per download and per review. ZIPs are
+  read in memory with per-entry checks (traversal, symlinks, encryption,
+  type allowlist, binary content, size, ratio, total budget). They are
+  never extracted or executed, and are redacted before use. Every limit
+  hit is listed in a new "Omissions and limits hit" table.
+- **GitHub App auth.** Installation tokens are minted in-process (RS256
+  through `PyJWT[crypto]`, the repo's first runtime dependency beyond the
+  stdlib, controller only). They are read-only and scoped to one
+  repository, and cached until five minutes before expiry. Each minted
+  token feeds the redactor.
+- **Sprites.** Exec now follows the published OpenAPI 0.1.12. The response
+  framing is undocumented, so the decoder strips framing bytes and trusts
+  an in-band exit marker. A tool probe runs before any PR bytes are
+  uploaded, and a missing binary is UNKNOWN, never executed. A new
+  `probe-runner` command lets the owner check the protocol live once.
+- **OpenRouter.** OpenRouter replaces the Anthropic suggestion. The
+  provider is pinned to `anthropic/claude-sonnet-5.5` with no fallbacks
+  and is opt-in with `--allow-live-inference`. It runs at most three calls
+  per review, retries included. Each call reserves its worst case against
+  a $3.00 budget at the highest catalog prices, and unknown pricing fails
+  closed. A preflight refuses any key without a hard limit of at most $5.
+  Writing the tests found a gap: retries were checked against the key's
+  remaining credit one call at a time, not in total. The reservation now
+  caps at the lower of the two.
+
+Writing the archive tests also showed that an "actual compression ratio"
+check could never fire, because `zipfile` never yields more than the
+declared size. That check was removed, and the docstring now states the
+real mechanism, which is tested with a header that under-declares its
+size.
+
+## 2026-11-07 (same day) — provider `only` uses the slugs the public list exposes
+
+A read-only check of OpenRouter's public provider list found Vertex
+exposed as `google-vertex/global`, `google-vertex/us`, and
+`google-vertex/europe`, not as bare `google-vertex`. Bedrock is listed as
+the base slug `amazon-bedrock` plus region slugs that check did not name.
+The provider-selection doc's "Base Slug Matching" says a bare slug in
+`only` matches every eligible endpoint of that provider, regions included,
+so the old pin would have widened routing past the endpoints that were
+reviewed. `PINNED_PROVIDERS` is now those four named slugs, with
+`allow_fallbacks` still false. Anything else, including the bare Vertex
+slug and the docs' region examples `google-vertex/us-east5` and
+`amazon-bedrock/eu-west-1`, is refused before a request. The in-region
+routing doc says a bare `amazon-bedrock` does not pin that provider's
+regional-surcharge endpoints, which is why the unnamed Bedrock regions
+stay off the list rather than being guessed.
+
+Still unverified against live responses: the Sprites exec response body,
+the GitHub and OpenRouter response shapes, and the input-token bound.
+
+## 2026-11-07 (same day) — D26: fixes from the first live pilot
+
+The owner ran one live pilot of PR [#598](https://github.com/brandondees/code-quality-atlas/pull/598)
+at head `9ff859b` and reported: the probe passed with the exec framing the
+decoder already handles; the image has `python3` but no `ruff` or
+`shellcheck`; one model call cost $0.17; the source upload of about 3 MiB
+failed with "The read operation timed out", so no in-Sprite tool ran; and the
+model said no lens ran. Everything below is offline-tested only.
+
+**The timeout was not what the report suggested.** The first hypothesis was
+the 30-second client default. The code does not support it: `_exec` already
+gave the upload `min(remaining deadline, ...)`, about 590 seconds, and
+`SpritesClient.exec` passes it to the transport. The new tests pin the number
+sent to the transport (300 seconds, capped by the deadline) at the fake and
+through a real `SpritesClient` with a recording transport. The cause is
+unknown. The upload now extracts with `head -c N | tar` so it does not wait for
+a stdin EOF, which is a guess, labelled as one, and `probe-runner` gained a 3
+MiB stdin round-trip so the next pilot can separate a stdin problem from a
+tarball problem without PR code.
+
+**Lenses are fed, not named.** The model had no way to open `body.md`, so
+naming lenses in the prompt could never run them. `lenses.py` selects from
+changed paths and PR text, and inlines bodies under a character budget. Real
+bodies run 11k to 35k characters each, so a 60,000-character budget fits about
+three; the draft says which were included, truncated or omitted. The selector
+is a digest of the bundle's route table and a test checks every lens it names
+exists. Writing the ranking showed that letting the generic baseline route
+count the same as specific routes buried the specific lens (security ranked
+third, behind two generic lenses, for an auth change), so specific routes now weigh ten times more.
+
+**Grouping.** A check run, its job, its log and its workflow run were four
+passes. Links come from ids (a job's documented `check_run_url`), never names.
+Writing the tests turned up two traps: a run that fails because of one job
+would fail its passing sibling's group if its verdict were shared, so a run is
+context only and carries no verdict into a group; and a run failure no job
+explains must stay an independent failure rather than vanish into a group. A
+cycle in the links could also have erased a failing check, so anything a
+traversal does not reach becomes its own check.
+
+**Controller notes.** One code-generated section replaces the old Notes and
+Disposable runner sections, and the model is handed the same text as
+established fact. The notes can quote runner output (an upload failure
+includes the guest's output tail), so they are fenced as untrusted data like
+everything else.
+
+Smaller items: `ruff` and `shellcheck` left the default tools; truncation of
+the diff, PR body and issue bodies is an omission, computed before the
+evidence block so the model hears about it (the diff entry names the files it
+never saw, from character offsets); `sweep` takes the single-review lock; the
+OpenRouter key counter is documented as able to lag about 90 seconds and is
+never read after inference.
+
+Not changed, and said so: check summaries, log tails and artifact excerpts are
+still capped without an omission row.
+
+## 2026-11-07 (same day) — D27: lifecycle telemetry and risk-ordered diff coverage
+
+The second owner-run pilot at `d63f087` failed the same way the first did,
+with `POST …/exec failed: The read operation timed out`, after a 3 MiB stdin
+probe at the same head had passed in about 2 seconds. The message had no
+upload label. Reading the runner confirmed the owner's inference: only the
+upload wrapped its errors, so the tool check (60-second budget) and both tool
+execs (135 seconds) could each have produced that bare text, and nothing
+recorded which one did. Its model call also saw only 13 of 77 files, cut in
+diff order, so the auth, redaction, runner and HTTP modules went unread.
+
+**Telemetry.** One `EventSink` (`telemetry.py`) with a JSONL implementation
+and an in-memory record the draft and `probe-runner` render as a table. Every
+phase is one event, and an exec event carries its purpose, timeout, bytes
+each way, the stream-id bytes seen, exit status and duration. `span` re-raises
+a boundary error as the same type with its phase, step, duration and time
+into the run. The innermost span labels it, so nested spans (an exec inside
+the upload) do not stack prefixes. GitHub reads are timed by a wrapper
+(`instrumented.py`) instead of threading telemetry through `gather.py`. Step
+labels use only ids, never branch names. Error text is redacted with the
+environment's credential values before any sink sees it.
+
+**Runner.** Upload and unpack are now two execs, and the upload must report
+writing exactly the bytes sent, so a transport stall, a short write and a slow
+extraction fail differently. `probe-runner --sequence review` calls
+`run_disposable` itself, on a local tarball or the App-fetched head tarball,
+with no model. It reproduces the exact exec order rather than an approximation
+of it.
+
+**Diff coverage.** The single 60,000-character cut became risk-ordered,
+first-fit packing into at most three parts, one model call each. The parts
+share the existing three-call cap (retries included), the $3 reservation and
+the preflight, now exposed as `--max-model-calls` and `--diff-chars-per-call`.
+Writing the end-to-end test against the real `OpenRouterProvider` and its
+budget showed the trade-off plainly: one retry on part 1 leaves part 3
+refused. That part gets its own omissions row listing its files, and the
+post-call controller note says PARTIAL. With the defaults, a diff the size of
+this PR's (412,078 characters) still cannot be fully reviewed, and the draft
+says so, naming the docs and tests that went unsent.
+
+## 2026-11-07 (same day) — D28: one exec shape and fail-fast on silence
+
+The owner's live `probe-runner --sequence review --tools review` at
+`fd56ca0` got further than either pilot: create, egress, the tool check,
+the upload (3,062,571 bytes in 0.25 s) and the unpack (0.33 s) all
+succeeded, and `python3 --version` with no stdin then timed out at 135 s.
+The ask was to diff how the failing exec was built against the ones that
+worked.
+
+The diff came back empty. All three no-input execs went through the same
+`SpritesClient.exec`, with the same method, headers, `Content-Length: 0`
+and query keys, and the same blocking read. Only the third `cmd` value and
+the timeout differed. So the request shape could not be the cause, and the
+write-up says so instead of shipping a "fix" for a difference that did not
+exist. Two real gaps came out of the comparison. No-input execs relied on
+the server's undocumented stdin when `stdin` is false. And the transport's
+one blocking `read` threw away partial output on a timeout, so the
+telemetry's "no frames" was never measured. The leading hypothesis is about
+the command, not the request: `python3` is the first binary the runner ever
+executed rather than resolved, and how the multi-runtime image provides it
+is unknown.
+
+Shipped: one request builder (`exec_request`, always `stdin=true` with an
+exact-length body) and one script wrapper (`exec_argv`: start marker,
+exactly N stdin bytes then EOF, exit marker), checked in a local `sh`
+against a stdin that never closes. A streaming transport on `http.client`
+gives each read a wall-clock budget, so a silent no-input exec fails at
+`--first-frame-seconds` and a stall keeps its bytes. The tool check now
+reports where each binary resolves. One trade-off is stated rather than
+hidden: until a live run shows whether HTTP exec output streams, a long
+tool that prints nothing could trip the window.
+
+## 2026-11-07 (same day) — D29: a controller-chosen interpreter, never the pyenv shim
+
+The owner's next probe, at `9805cfc`, showed the D28 wrapper doing its job.
+The start marker arrived after the unpack, so the shell was running, and
+then `python3 --version` sent nothing more for 135 s. The tool check had
+already said where `python3` lived: `/.sprite/bin/python3`, resolving to
+itself, so it is a script rather than a link. The owner matched that to the
+Sprites docs (pyenv shims in `/.sprite/bin`, default 3.13.x) and to this
+repo's `.python-version` of `3.12`. The suspected cause is the reviewed PR's
+own pin, read by the shim from the checkout. Run #6's write-up had said the
+PR's files could not affect `python3 --version` because it prints before
+Python imports anything. That holds for a real interpreter but not for a
+shim, and the README now says so where it made the claim.
+
+The fix does not wait on the hypothesis. Every exec now gets a minimal
+environment from the shared wrapper (`env -i`, `PATH=/usr/bin:/bin`). Before
+any PR byte is uploaded, one exec from an empty directory lists the real
+interpreters, and the controller accepts only two exact path shapes.
+Python tools can name the chosen interpreter only through a `{python}`
+placeholder and run it with `-I`, so a PR can steer neither the version nor
+the module search path. To confirm or refute the hypothesis,
+`probe-runner --sequence review` gains labelled, never-fatal diagnostics.
+The last one is bare `python3` from the checkout, bounded to 15 s, which is
+expected to hang if the hypothesis is right. The wrapper and both new
+scripts are also run for real in a local shell in the tests, without any
+Sprite or network.
+
+## 2026-11-07 (same day) — D30: third-pilot findings verified, fixed, and untrusted notes quoted
+
+The owner's third live pilot at `a246625` ran end to end, and its draft
+flagged five problems in the reviewer itself. The draft is model output, so
+none was taken on trust: each was reproduced or refuted against the code
+first. Four were real. The assignment redactor's `\b` never matches after an
+underscore, so `OPENAI_API_KEY=...` passed through. Archive entries were
+charged only after a successful read, so ones failing their CRC check were
+never counted. A failed diff fetch still made one model call with an empty
+diff. CI and dependency files ranked below ordinary code, and PR-controlled
+paths and error text reached the authoritative controller notes verbatim.
+The transport finding was partial. Only the streaming exec path lacked a
+cumulative deadline before the body, where trickled headers could hold an
+exec open indefinitely. The plain transport never claimed one.
+
+Each fix has a regression test that failed on the old code. The notes now
+quote every untrusted value as one JSON string literal in a code span and
+say so in their introduction and in the system prompt, so a file name
+cannot pose as a controller statement.
+
+## 2026-11-07 (same day) — D32: diff parts fitted to the 200k-token bound, the repo's own lens picker; D31 proposed
+
+Run #9 asked for a much larger diff part (about 450k characters) and a
+design for a lens-based agentic reviewer. The larger part can't pass the
+existing token check. The input bound counts one token per UTF-8 byte, on
+purpose, so it never under-reserves. The prompt room is therefore
+`min(200k, 200k − 24k output)` = 176,000 characters, and that is the new
+default. Each review then measures every planned prompt and shrinks the part
+until the largest one fits. A first version shrank a nominal budget that
+didn't change the packing when the diff was smaller than it, and
+overshot on multi-byte text. The fix shrinks from the byte-largest actual
+part, and ASCII, `é` and `漢` diffs are tested. One full-room call reserves
+about $1.60, under the unchanged $3.00, and the 3-call cap is unchanged.
+
+Brandon corrected the design brief mid-run: the suite already chooses
+lenses, budgets reviews and merges findings, so reuse that rather than
+invent parallel machinery. That also retired the reviewer's own
+path-and-keyword lens selector. `picker.py` now runs
+`skills/choosing-review-lenses/SKILL.md` as one model call, with a strict
+reply parser and a critical-tier fallback. The design doc,
+`docs/plans/2026-11-07-lens-based-agentic-reviewer.md` (D31, a proposal),
+reuses the picker, depth modes, lens bodies, `tool-evidence.md`,
+`synthesis.md`, `REVIEW.md` and `ReviewBudget` as they are. It specifies only
+what's missing: the controller-run loop, a read-only Sprite tool bridge, the
+security boundaries and the credentials split. Its first open question is the
+call and cost caps a lens loop would need.
+
+## 2026-11-07 (same day) — PR #598 frozen as the single-prompt reviewer; cleanup and a split plan
+
+Brandon marked PR #598 ready for review and froze it as the single-prompt
+manual reviewer, with D31 left as a proposal. The cleanup pass made no
+behaviour change. It removed an unused alias in `fakes.py`, and the draft's
+Review lenses intro no longer says lenses come from changed paths and PR text.
+Test docstrings now cite decision IDs instead of operator run numbers. The
+reviewer README and plan doc no longer say only one pilot ran or that no
+upload had succeeded. The plan's runner steps gained the D29 interpreter
+step, and the plan gained a follow-ups list: the D31 lens loop, a deployed
+controller, and omission rows for check summaries and log tails. The D24-D32
+entries now cross-reference consistently, and Q24 gained a 2026-11-07 update.
+
+A split into a stack of smaller PRs was planned from this branch. The
+branch's commits are time-ordered slices that each touch most modules, so
+the plan was to re-slice by file from the final tree, not cherry-pick. Each
+proposed step's tests were run against only that step's modules as a
+feasibility check, and every step measured 95% or more against the 94% floor.
+The split was carried out later the same day; the next entry records it.
+
+## 2026-11-07 (same day) — the manual reviewer split into #599-#607
+
+The split planned above was carried out, re-sliced by file from #598's
+final tree. #599 is the D31 proposal doc and is merged. #600 is this
+stack's docs step (D24-D32, the service plan, the session log). #601-#607
+are the draft code steps, based on each other. #598 stayed open and was
+not merged.
