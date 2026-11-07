@@ -959,3 +959,30 @@ Each fix has a regression test that failed on the old code. The notes now
 quote every untrusted value as one JSON string literal in a code span and
 say so in their introduction and in the system prompt, so a file name
 cannot pose as a controller statement.
+
+## 2026-11-07 (same day) — D32: diff parts fitted to the 200k-token bound, the repo's own lens picker; D31 proposed
+
+Run #9 asked for a much larger diff part (about 450k characters) and a
+design for a lens-based agentic reviewer. The larger part can't pass the
+existing token check. The input bound counts one token per UTF-8 byte, on
+purpose, so it never under-reserves. The prompt room is therefore
+`min(200k, 200k − 24k output)` = 176,000 characters, and that is the new
+default. Each review then measures every planned prompt and shrinks the part
+until the largest one fits. A first version shrank a nominal budget that
+didn't change the packing when the diff was smaller than it, and
+overshot on multi-byte text. The fix shrinks from the byte-largest actual
+part, and ASCII, `é` and `漢` diffs are tested. One full-room call reserves
+about $1.60, under the unchanged $3.00, and the 3-call cap is unchanged.
+
+Brandon corrected the design brief mid-run: the suite already chooses
+lenses, budgets reviews and merges findings, so reuse that rather than
+invent parallel machinery. That also retired the reviewer's own
+path-and-keyword lens selector. `picker.py` now runs
+`skills/choosing-review-lenses/SKILL.md` as one model call, with a strict
+reply parser and a critical-tier fallback. The design doc,
+`docs/plans/2026-11-07-lens-based-agentic-reviewer.md` (D31, a proposal),
+reuses the picker, depth modes, lens bodies, `tool-evidence.md`,
+`synthesis.md`, `REVIEW.md` and `ReviewBudget` as they are. It specifies only
+what's missing: the controller-run loop, a read-only Sprite tool bridge, the
+security boundaries and the credentials split. Its first open question is the
+call and cost caps a lens loop would need.

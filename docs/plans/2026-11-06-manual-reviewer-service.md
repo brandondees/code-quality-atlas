@@ -336,6 +336,34 @@ four were real and one partial. Details are in the reviewer README's
   literals in code spans, and the notes intro and system prompt say such
   values are data, not controller statements.
 
+### Diff fitting and the repo's own lens picker (D32)
+
+Operator-requested in Run #9. Offline only, no live call made here.
+
+- **Part size.** `--diff-chars-per-call` defaults to the whole prompt room
+  under the token check: `min(200k input, 200k assumed context − 24k
+  output)` = 176,000 characters (`budget.prompt_token_room`). The suggested
+  ~450k characters would need a characters-per-token ratio. The input
+  bound deliberately assumes none (one token per UTF-8 byte), so a 450k
+  part could never pass `check_tokens`. `diffs.fit_diff` measures every
+  planned prompt and shrinks the part size from the byte-largest actual
+  part, for up to 8 rounds, until the largest prompt fits.
+- **Reservation math.** One full-room call reserves at most 176k × $6/M +
+  24k × $22.5/M ≈ $1.60 at the top fixture tier, under $3.00. Two
+  unsettled worst cases ($3.19) don't fit, so a later call is reserved only
+  after earlier ones settle to their actual cost. The 3-call cap and the
+  $3.00 reservation are unchanged.
+- **Too large.** A diff over capacity is PARTIAL. The omissions row says
+  "too large for one review pass", and the cut and unsent files are listed
+  by risk tier.
+- **Lens picker.** `lenses.py`'s path-and-keyword route digest is retired.
+  `picker.py` runs `skills/choosing-review-lenses/SKILL.md` as one model
+  call at the operator's `--depth`. Triage, a 1-call budget or an unusable
+  reply runs the critical tier (`docs/review-depth-modes.md`). The picker
+  call is one of the 3 calls, so review depth reviews at most 2 diff parts.
+- **Next step, proposed only:** a lens-based agentic reviewer (D31,
+  [`2026-11-07-lens-based-agentic-reviewer.md`](2026-11-07-lens-based-agentic-reviewer.md)).
+
 ### Still unverified against live responses
 
 - **The Sprites exec response body.** Observed for a small echo, a 3 MiB
@@ -363,7 +391,8 @@ four were real and one partial. Details are in the reviewer README's
   60,000-character budget and a 6-lens cap. The draft lists each lens as
   included, truncated or omitted. The model has no file tools, so naming
   lenses never ran them. The selector is a coarse heuristic and the table
-  shows its choices.
+  shows its choices. (D32 replaced this selector with the repo's own lens
+  picker and raised the cap to 8.)
 - **Grouped checks.** A check run, its job (via the documented
   `check_run_url`), the job's log and the workflow run are one independent
   check. A run is context for its jobs only when a job carries its verdict;

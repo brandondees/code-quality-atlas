@@ -32,10 +32,13 @@ same command. Useful flags:
   Off by default.
 - `--deadline-seconds N` sets the external runner deadline (default 600).
 - `--max-model-calls N` (1 to 3, default 3) caps model calls per review,
-  retries included, and so also caps how many diff parts are reviewed (see
-  Diff coverage).
-- `--diff-chars-per-call N` (default 60000, at least 1000) is how many diff
-  characters each model call may carry.
+  retries included. One goes to the lens picker (except at triage depth, or
+  with only one call), the rest to diff parts (see Lenses and Diff coverage).
+- `--diff-chars-per-call N` (default 176000, at least 1000) is the most diff
+  characters a model call may carry. Each review shrinks it further until
+  every planned prompt fits the token bound (see Diff coverage).
+- `--depth {triage,review,comprehensive}` (default `review`) is the atlas
+  depth mode. Triage runs the critical tier with no picker call.
 - `--events FILE` writes lifecycle telemetry as JSONL (see Lifecycle
   telemetry). A dry run writes none without it.
 - `--first-frame-seconds N` (default 30, also on `probe-runner`) fails any
@@ -180,21 +183,31 @@ subsection per diff part when the diff was split.
 ## Lenses
 
 The model has no file tools, so a prompt that only names lenses does not run
-them (the first pilot's model said so). `lenses.py` picks lenses from the
-changed paths in the diff and the PR title and body, using a code-side digest
-of the route table in `collapsed/skills/reviewing-a-change/SKILL.md` (a test
-checks that every lens it names exists in the bundle). It ranks them, reads
-each lens's `reference/lenses/<lens>/body.md`, and inlines the bodies into the
-trusted system prompt, in rank order, under a **60,000-character budget** and a
-cap of **6 lenses**. A lens that does not fit is cut at a line boundary and
-marked truncated, or omitted when under 4,000 characters of budget remain.
-The draft's **Review lenses** table and the controller notes say which lenses
-were included, truncated or omitted, with character counts, and the prompt
-tells the model that only inlined lenses ran. The selection is a coarse
-path-and-keyword heuristic, not a classifier: it can pick a lens that does not
-fit and miss one that does, and the table shows what it chose and why. The
-summed prompt is still bound by the 200k-token input check, and a prompt over
-it is refused, not trimmed. `reference/synthesis.md` and
+them (the first pilot's model said so). Lenses are chosen by the repo's own
+lens picker, `skills/choosing-review-lenses/SKILL.md`, run as one model call
+(`picker.py`, D32). There is no code-side route table any more. The picker
+call gets that skill as its instructions, the PR metadata and the changed
+paths (at most 500) as untrusted fenced blocks, and the operator's depth.
+It must reply with only `{"lenses": [...]}`, at most 8 names at review depth
+(the top of review mode's 3-8 breadth) or 40 at comprehensive. The reply is
+parsed strictly, and a name with no body in the bundle is listed as omitted.
+With no diff there is no model call at all (see Diff coverage). At
+**triage** depth or with `--max-model-calls 1`, no picker call is made and
+the critical tier runs (`tracing-correctness-and-invariants`,
+`sweeping-for-security`, `reviewing-migration-and-data-safety`,
+`reviewing-concurrency-and-async`, from `docs/review-depth-modes.md`). An
+unusable reply also falls back to the critical tier, and the controller
+notes quote the reason. The picker call counts toward the 3-call cap.
+
+`lenses.py` then reads each chosen lens's `reference/lenses/<lens>/body.md`
+and inlines the bodies into the trusted system prompt, in pick order, under a
+**60,000-character budget** and a cap of **8 lenses**. A lens that does not
+fit is cut at a line boundary and marked truncated, or omitted when under
+4,000 characters of budget remain. The draft's **Review lenses** table and the
+controller notes say which lenses were included, truncated or omitted, with
+character counts and the picker rank, and the prompt tells the model that
+only inlined lenses ran. PR text can steer the pick, but only within the
+closed set of lens names in the bundle. `reference/synthesis.md` and
 `reference/tool-evidence.md` are not inlined.
 
 ## Runner tools
@@ -246,9 +259,26 @@ complete or PARTIAL and how many files each outcome covers. Nothing short of
 every file sent in full with every call returning a review is called
 complete.
 
-The defaults (3 calls of 60,000 characters) review about 180,000 characters
-of diff. The second pilot's diff was 412,078 characters, so a diff that size
-is still PARTIAL, with the unseen files being the lowest-risk tiers.
+**Part size (D32).** The default part size is the whole prompt room under
+the token check, 176,000 characters: `min(200,000 input, 200,000 assumed
+context − 24,000 output)` (`budget.prompt_token_room`). The input bound is
+one token per UTF-8 byte plus 64 (`input_token_bound`), never an assumed
+characters-per-token ratio, so a part can't under-reserve. A diff part
+shares the prompt with the instructions, lens bodies, PR, evidence and notes,
+so `diffs.fit_diff` measures every planned prompt and shrinks the part size
+from the byte-largest actual part until the largest prompt fits, for up to 8
+rounds. Multi-byte text gets proportionally fewer characters. The worst case
+of one full-room call at the top fixture tier is 176k × $6/M + 24k ×
+$22.5/M, about $1.60, under the $3.00 reservation. Two unsettled worst cases
+would not fit, so a second call is reserved only after the first settles to
+its actual cost.
+
+With the picker call, review depth sends at most 2 parts; triage sends up to
+3. A diff over that capacity is PARTIAL: the omissions row says "too large
+for one review pass", and the coverage note says the cut and unsent files
+are listed there, highest risk first. The second pilot's 412,078-character
+diff would still be PARTIAL, with the unseen files being the lowest-risk
+tiers.
 
 The PR body and each issue body are cut at 2,000 characters, and each cut is
 an omissions row too. Omissions are computed before the evidence block is
@@ -375,10 +405,11 @@ interpreter is chosen before they exist. Every other binary comes from
 | `draft.py` | Markdown draft rendering | no |
 | `groups.py` | one CI gate seen as check run + job + log + workflow run → one independent check | no |
 | `notes.py` | the code-generated Controller notes | no |
-| `diffs.py` | split a diff into files, rank them by risk, pack them into per-call parts | no |
+| `diffs.py` | split a diff into files, rank them by risk, pack them into per-call parts, fit the part size to the measured prompt | no |
+| `picker.py` | run `choosing-review-lenses` as one model call, parse its reply strictly, fall back to the critical tier | reads the bundle |
 | `telemetry.py` | lifecycle events, the `EventSink` (JSONL), labelled timed spans, the summary rows | writes the JSONL file |
 | `instrumented.py` | `GitHubReader` wrapper that records every read as an event | via `GitHubReader` |
-| `lenses.py` | choose lenses from changed paths and PR text, load and budget their bodies | reads the bundle |
+| `lenses.py` | load and budget the chosen lenses' bodies | reads the bundle |
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`) | no |
 | `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → resolve interpreter → upload → unpack → tools → destroy), `probe_runner`, the one exec wrapper (`exec_argv`, minimal `env -i` environment) | via `SpritesApi` |
 | `interpreter.py` | the resolve script, `choose_python` (accepts only the pyenv-versions and `/usr/bin/python3` path shapes), `{python}` substitution, the probe-only diagnostic scripts and output summary | no |
