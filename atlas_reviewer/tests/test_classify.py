@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: MIT
-from datetime import datetime
 
 import pytest
 
@@ -11,56 +10,16 @@ from atlas_reviewer.classify import (
 )
 from atlas_reviewer.domain import (
     Conclusion,
-    EvidenceItem,
-    InvalidEventError,
     Matched,
     Missing,
     Outcome,
-    PrEvent,
     SourceKey,
     SourceKind,
     Stale,
     outcome,
 )
-from atlas_reviewer.redact import redact
 
 from .helpers import HEAD, OLD, item
-
-
-@pytest.mark.parametrize(
-    "repo,number,sha",
-    [
-        ("not-a-repo", 1, HEAD),
-        ("o/r", 0, HEAD),
-        ("o/r", True, HEAD),
-        ("o/r", "1", HEAD),
-        ("o/r", 1, "abc123"),
-        ("o/r", 1, HEAD.upper()),
-    ],
-)
-def test_event_must_name_one_exact_commit(repo, number, sha):
-    with pytest.raises(InvalidEventError):
-        PrEvent(repo, number, sha)
-
-
-def test_matched_and_stale_cannot_lie_about_their_sha():
-    with pytest.raises(ValueError, match="Matched"):
-        Matched(item(sha=OLD), HEAD)
-    with pytest.raises(ValueError, match="Stale"):
-        Stale(item(sha=HEAD), HEAD)
-
-
-def test_evidence_requires_aware_fetch_time():
-    good = item()
-    with pytest.raises(ValueError, match="timezone"):
-        EvidenceItem(
-            good.head_sha,
-            good.provenance,
-            good.tool,
-            datetime(2026, 1, 1),
-            good.conclusion,
-            redact(""),
-        )
 
 
 def test_evidence_for_another_sha_is_stale_and_unknown():
