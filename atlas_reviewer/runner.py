@@ -98,6 +98,7 @@ _PATH_RE = re.compile(
     + r":present:([A-Za-z0-9._+-]+):([A-Za-z0-9._/+-]{0,200}):([A-Za-z0-9._/+-]{0,200})"
 )
 _BINARY_RE = re.compile(r"[A-Za-z0-9._+-]+")
+_NOT_ISOLATED_RE = re.compile(re.escape(PYTHON_PLACEHOLDER) + r"(?! -I[A-Za-z]*(?:\s|$))")
 _INT_RE = re.compile(r"\d+")
 _EXEC_SLACK_S = 15.0
 PROBE_BUDGET_S = 60.0
@@ -131,8 +132,9 @@ class ToolSpec:
     timeout_s: int = 120
 
     def __post_init__(self) -> None:
-        """A `python3` tool must name the interpreter as `{python}` in both
-        commands, so it can only ever run the resolved absolute path."""
+        """A `python3` tool must name the interpreter as `{python} -I` in
+        both commands, so it can only ever run the resolved absolute path,
+        isolated from modules in the checkout."""
         if not _BINARY_RE.fullmatch(self.binary):
             raise ValueError(
                 f"tool binary must be a bare command name: {self.binary!r}"
@@ -146,6 +148,11 @@ class ToolSpec:
             raise ValueError(
                 f"a {PYTHON_BINARY} tool must use {PYTHON_PLACEHOLDER} in both "
                 "commands, and only a python3 tool may use it"
+            )
+        if any(_NOT_ISOLATED_RE.search(c) for c in (self.version_cmd, self.run_cmd)):
+            raise ValueError(
+                f"every {PYTHON_PLACEHOLDER} must be followed by -I, so a PR file "
+                "cannot shadow the module a tool runs"
             )
 
     @property

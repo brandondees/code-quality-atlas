@@ -235,7 +235,7 @@ def test_a_review_sends_each_exec_its_own_budget_not_the_30s_default():
     )
 
     tool = ToolSpec(
-        "t", "python3", "{python} --version", "{python} -c pass", timeout_s=120
+        "t", "python3", "{python} -I --version", "{python} -I -c pass", timeout_s=120
     )
     server, outcome = _review_over_http((tool,))
     assert outcome.report.cleanup.value == "destroyed (verified absent)"

@@ -141,6 +141,20 @@ def test_tool_specs_must_route_python_through_the_placeholder(
         ToolSpec("t", binary, version_cmd, run_cmd)
 
 
+@pytest.mark.parametrize(
+    ("version_cmd", "run_cmd"),
+    [
+        ("{python} --version", "{python} -I -m compileall ."),
+        ("{python} -I --version", "{python} -m compileall ."),
+        ("{python} -I --version", "{python} -m -I compileall ."),
+    ],
+)
+def test_python_tools_must_run_isolated_in_both_commands(version_cmd, run_cmd):
+    with pytest.raises(ValueError, match="followed by -I"):
+        ToolSpec("t", "python3", version_cmd, run_cmd)
+    assert ToolSpec("t", "python3", "{python} -I --version", "{python} -Im x").run_cmd
+
+
 def test_the_default_tool_runs_isolated_by_placeholder():
     (tool,) = DEFAULT_TOOLS
     assert tool.needs_python
