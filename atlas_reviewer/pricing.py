@@ -1,0 +1,133 @@
+# SPDX-License-Identifier: MIT
+"""Parse OpenRouter's live model catalog entry and key status. Pure;
+fails closed.
+
+Catalog shape: `GET /api/v1/model/{author}/{slug}` returns `{"data":
+Model}` with `pricing` in USD per token as decimal strings, optional
+`pricing.overrides` (conditional tiers such as long-context or time-of-day
+prices), `context_length`, and `top_provider.max_completion_tokens`
+(https://openrouter.ai/docs/guides/overview/models). Reservations use the
+**highest** price for each key across the base entry and every override,
+whatever its condition, so no tier can cost more than reserved.
+
+Key shape: `GET /api/v1/key` returns `{"data": {"limit": number|null,
+"limit_remaining": number|null, "usage": number, ...}}`
+(https://openrouter.ai/docs/api_reference/limits).
+
+Anything missing, non-numeric, negative (the catalog uses -1 for unknown),
+non-finite or of an unexpected type raises `PricingUnknownError`.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
+from typing import Any
+
+from atlas_reviewer.ports import BoundaryError, Json
+
+ZERO = Decimal(0)
+
+
+class PricingUnknownError(BoundaryError):
+    """Prices, limits or key status could not be established; refuse."""
+
+
+@dataclass(frozen=True)
+class ModelTerms:
+    model_id: str
+    input_rate: Decimal
+    prompt_rate: Decimal
+    completion_rate: Decimal
+    reasoning_rate: Decimal
+    request_fee: Decimal
+    context_length: int
+    max_completion_tokens: int
+
+
+@dataclass(frozen=True)
+class KeyStatus:
+    limit: Decimal
+    limit_remaining: Decimal
+    usage: Decimal
+
+
+def money(value: Any, what: str) -> Decimal:
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        raise PricingUnknownError(f"{what} is missing or not a number")
+    try:
+        parsed = Decimal(str(value))
+    except InvalidOperation:
+        raise PricingUnknownError(f"{what} is not a number: {value!r}") from None
+    if not parsed.is_finite() or parsed < ZERO:
+        raise PricingUnknownError(f"{what} is unknown (negative or non-finite)")
+    return parsed
+
+
+def _count(value: Any, what: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise PricingUnknownError(f"{what} is missing or not a positive integer")
+    return value
+
+
+def _tiers(pricing: Json) -> list[Json]:
+    overrides = pricing.get("overrides", [])
+    if not isinstance(overrides, list) or not all(
+        isinstance(o, Mapping) for o in overrides
+    ):
+        raise PricingUnknownError("pricing.overrides is not a list of objects")
+    return [pricing, *overrides]
+
+
+def _max_rate(tiers: Iterable[Json], key: str, required: bool) -> Decimal:
+    present = [(i, t[key]) for i, t in enumerate(tiers) if key in t]
+    if required and not any(i == 0 for i, _ in present):
+        raise PricingUnknownError(f"pricing.{key} is missing")
+    return max((money(v, f"pricing.{key}") for _, v in present), default=ZERO)
+
+
+def parse_model_terms(data: Json, expected_id: str) -> ModelTerms:
+    model = data.get("data")
+    if not isinstance(model, Mapping):
+        raise PricingUnknownError("catalog response has no data object")
+    if model.get("id") != expected_id:
+        raise PricingUnknownError(
+            f"catalog returned model {model.get('id')!r}, not {expected_id!r}"
+        )
+    pricing = model.get("pricing")
+    if not isinstance(pricing, Mapping):
+        raise PricingUnknownError("catalog entry has no pricing object")
+    tiers = _tiers(pricing)
+    prompt = _max_rate(tiers, "prompt", required=True)
+    cache_write = max(
+        _max_rate(tiers, "input_cache_write", required=False),
+        _max_rate(tiers, "input_cache_write_1h", required=False),
+    )
+    top = model.get("top_provider")
+    return ModelTerms(
+        model_id=expected_id,
+        input_rate=max(prompt, cache_write),
+        prompt_rate=prompt,
+        completion_rate=_max_rate(tiers, "completion", required=True),
+        reasoning_rate=_max_rate(tiers, "internal_reasoning", required=False),
+        request_fee=_max_rate(tiers, "request", required=False),
+        context_length=_count(model.get("context_length"), "context_length"),
+        max_completion_tokens=_count(
+            top.get("max_completion_tokens") if isinstance(top, Mapping) else None,
+            "top_provider.max_completion_tokens",
+        ),
+    )
+
+
+def parse_key_status(data: Json) -> KeyStatus:
+    key = data.get("data")
+    if not isinstance(key, Mapping):
+        raise PricingUnknownError("key status response has no data object")
+    if key.get("limit") is None:
+        raise PricingUnknownError("the OpenRouter key has no credit limit (unlimited)")
+    return KeyStatus(
+        limit=money(key.get("limit"), "key limit"),
+        limit_remaining=money(key.get("limit_remaining"), "key limit_remaining"),
+        usage=money(key.get("usage"), "key usage"),
+    )
