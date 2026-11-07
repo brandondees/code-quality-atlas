@@ -67,6 +67,7 @@ _EXPECTED_BUCKET = {
     "templates": "cc_by",
     ".claude": "cc_by",
     "tooling": "mit",
+    "atlas_reviewer": "mit",
     "hooks": "mit",
     "tests": "mit",
 }

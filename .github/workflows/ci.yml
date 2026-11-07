@@ -182,6 +182,7 @@ jobs:
               - "skills/**"
               - "collapsed/**"
               - "tooling/**"
+              - "atlas_reviewer/**"
               - "tests/**"
               - "docs/research/**"
               - "commands/**"
@@ -239,6 +240,7 @@ jobs:
               - "skills/**"
               - "collapsed/**"
               - "tooling/**"
+              - "atlas_reviewer/**"
               - "tests/**"
               - "docs/research/**"
               - "commands/**"
@@ -381,8 +383,9 @@ jobs:
         run: ruff format --check .
       - name: type-check (mypy)
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
-        # Scoped to tooling/ via pyproject.toml's [tool.mypy] files list --
-        # this repo's only fully type-annotated Python package.
+        # Scoped to tooling/ and atlas_reviewer/ via pyproject.toml's
+        # [tool.mypy] files list -- this repo's two fully type-annotated
+        # Python packages.
         run: mypy
       - name: tests
         # `schedule` runs unconditionally (like the venv-setup and pip-audit
@@ -419,6 +422,16 @@ jobs:
           CI_EVENT_NAME: ${{ github.event_name }}
           CI_FILTER_SESSION_LOG_SUBSTANTIVE: ${{ steps.filter.outputs.session_log_substantive }}
         run: python -m pytest tests/ -q --cov=tooling
+      - name: reviewer service tests (atlas_reviewer)
+        # A separate service boundary with its own suite and its own
+        # coverage run against the same [tool.coverage.report] floor
+        # (docs/plans/2026-11-06-manual-reviewer-service.md). Fully offline:
+        # GitHub is a fixture directory, the Sprites runner is the in-memory
+        # fake, the model provider is the offline one (OpenRouter, GitHub
+        # App minting and Sprites are driven only through recorded fakes) --
+        # no credentials and no network calls beyond a loopback HTTP server.
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        run: python -m pytest atlas_reviewer/tests -q --cov=atlas_reviewer
       - name: eval structure (all skills)
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: python -m tooling.cli eval
@@ -504,10 +517,17 @@ jobs:
         # obligation on this repo's own license. mypy itself (MIT-licensed,
         # widely adopted) ships the identical dependency for the same
         # reason.
+        #
+        # "Apache-2.0 OR BSD-3-Clause" (`cryptography`) and "MIT-0" (`cffi`)
+        # added for `PyJWT[crypto]`, the GitHub App token signer in
+        # `atlas_reviewer/` (D25). The first is an OR of two terms this list
+        # already allows on their own. MIT-0 is MIT without the attribution
+        # clause, strictly more permissive than MIT. Neither is vendored;
+        # both are runtime dependencies of the controller only.
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: |
           pip install pip-licenses==5.5.5
-          pip-licenses --allow-only="MIT License;MIT;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;Apache 2.0;Apache-2.0 OR BSD-2-Clause;Python Software Foundation License;PSF-2.0;ISC License (ISCL);The Unlicense (Unlicense);Mozilla Public License 2.0 (MPL 2.0)"
+          pip-licenses --allow-only="MIT License;MIT;MIT-0;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;Apache 2.0;Apache-2.0 OR BSD-2-Clause;Apache-2.0 OR BSD-3-Clause;Python Software Foundation License;PSF-2.0;ISC License (ISCL);The Unlicense (Unlicense);Mozilla Public License 2.0 (MPL 2.0)"
       # requirements.txt-is-in-sync and dependency-vulnerability-audit run
       # last among the python-filtered steps, deliberately (#378): both
       # `pip install` an unpinned tool (pip-tools/pip-audit) straight into

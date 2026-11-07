@@ -33,3 +33,7 @@ dist/
 # Isolated git worktrees the Agent tool creates for subagents run with
 # isolation: "worktree" -- session-local scratch, never meant to be committed
 .claude/worktrees/
+
+# atlas_reviewer controller-local state (runner ledger, single-review lock);
+# default location when ATLAS_REVIEWER_STATE_DIR is unset
+.atlas-reviewer-state/
