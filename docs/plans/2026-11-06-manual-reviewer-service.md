@@ -190,7 +190,7 @@ a token into a Sprite.
 
 | Port | Offline (tests, `--dry-run`) | Live |
 | --- | --- | --- |
-| `GitHubReader` | `FixtureGitHub` (fixture directory) | `GitHubClient`: GET-only; redirects followed manually **without** credentials (stdlib urllib would replay `Authorization`, confirmed against CPython 3.12's `redirect_request`); `Link: rel="next"` followed to a 10-page cap, and a link off the API origin is refused |
+| `GitHubReader` | `FixtureGitHub` (fixture directory) | `GitHubClient`: GET-only; redirects followed manually, up to 3, keeping credentials only while the chain stays on the API origin and **without** them once it leaves (stdlib urllib would replay `Authorization`, confirmed against CPython 3.12's `redirect_request`); `Link: rel="next"` followed to a 10-page cap, and a link off the API origin is refused |
 | `TokenSource` | `StaticToken` (tests only) | `AppInstallationTokens`: RS256 JWT → read-only, single-repo installation token, cached until 5 minutes before expiry |
 | `SpritesApi` | `FakeSprites` (records calls; fault/hang injection; configurable installed binaries) | `SpritesClient`: outside control-plane API, per OpenAPI 0.1.12 |
 | `ModelProvider` | `OfflineProvider` (calls no model; the default) | `OpenRouterProvider`: `anthropic/claude-sonnet-5.5`, pinned routing, key preflight, per-review budget (D25) |

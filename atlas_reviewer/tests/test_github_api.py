@@ -152,6 +152,39 @@ def test_redirects_are_followed_without_credentials():
     assert follow[5] == 50
 
 
+def redirect(location, status=301):
+    return ok(status=status, body=b"", headers={"Location": location})
+
+
+def test_a_redirect_within_the_api_keeps_its_headers():
+    moved = f"{API}/repositories/99/pulls/1"
+    t = Recorder(redirect(moved), ok(body=b"diff"))
+    assert github(t).get_pull_diff("o/r", 1) == "diff"
+    follow = t.requests[1]
+    assert follow[1] == moved
+    assert follow[2]["Authorization"] == f"Bearer {TOKEN}"
+    assert follow[2]["Accept"] == "application/vnd.github.diff"
+
+
+def test_credentials_stay_dropped_once_a_redirect_chain_leaves_the_api():
+    t = Recorder(
+        redirect(f"{API}/repositories/99/actions/jobs/5/logs"),
+        redirect("https://blob.example/logs.txt?sig=1", status=302),
+        redirect(f"{API}/back-again", status=302),
+        ok(body=b"logbytes"),
+    )
+    assert github(t).get_job_logs("o/r", 5, max_bytes=50) == b"logbytes"
+    assert "Authorization" in t.requests[1][2]
+    assert all("Authorization" not in r[2] for r in t.requests[2:])
+
+
+def test_a_redirect_chain_is_bounded():
+    t = Recorder(*[redirect(f"{API}/loop")] * 5)
+    with pytest.raises(BoundaryError, match="HTTP 301"):
+        github(t).get_pull("o/r", 1)
+    assert len(t.requests) == 4
+
+
 @pytest.mark.parametrize(
     "response,error",
     [

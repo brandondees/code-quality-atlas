@@ -30,6 +30,7 @@ API_URL = "https://api.github.com"
 _JSON = "application/vnd.github+json"
 _DIFF = "application/vnd.github.diff"
 _PER_PAGE = 100
+_MAX_REDIRECTS = 3
 
 
 class GitHubClient:
@@ -60,11 +61,24 @@ class GitHubClient:
     def _fetch(
         self, url: str, accept: str = _JSON, max_bytes: int | None = None
     ) -> HttpResponse:
+        """Redirects within this API keep the request headers (a transferred
+        repository); once the chain leaves the API, the token is dropped for
+        the rest of it, so a pre-signed download never sees it."""
+        headers = self._headers(accept)
         resp = self._transport.request(
-            "GET", url, self._headers(accept), None, self._timeout_s, max_bytes
+            "GET", url, headers, None, self._timeout_s, max_bytes
         )
-        if resp.status in REDIRECT_STATUSES:
-            resp = self._follow_without_credentials(resp, max_bytes)
+        for _ in range(_MAX_REDIRECTS):
+            if resp.status not in REDIRECT_STATUSES:
+                break
+            location = resp.header("Location")
+            if not location or urlsplit(location).scheme != "https":
+                raise BoundaryError("GitHub redirect without an https Location")
+            if not location.startswith(f"{self._api_url}/"):
+                headers = {"User-Agent": "code-quality-atlas-reviewer"}
+            resp = self._transport.request(
+                "GET", location, headers, None, self._timeout_s, max_bytes
+            )
         _check(resp, url)
         return resp
 
@@ -72,17 +86,6 @@ class GitHubClient:
         self, path: str, accept: str = _JSON, max_bytes: int | None = None
     ) -> bytes:
         return self._fetch(f"{self._api_url}{path}", accept, max_bytes).body
-
-    def _follow_without_credentials(
-        self, resp: HttpResponse, max_bytes: int | None
-    ) -> HttpResponse:
-        location = resp.header("Location")
-        if not location or urlsplit(location).scheme != "https":
-            raise BoundaryError("GitHub redirect without an https Location")
-        headers = {"User-Agent": "code-quality-atlas-reviewer"}
-        return self._transport.request(
-            "GET", location, headers, None, self._timeout_s, max_bytes
-        )
 
     def _json(self, path: str) -> Json:
         return _object(self._get(path), path)
