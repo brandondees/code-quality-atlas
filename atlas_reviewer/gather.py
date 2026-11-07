@@ -37,6 +37,7 @@ from atlas_reviewer.evidence import (
     parse_jobs,
     parse_workflow_runs,
 )
+from atlas_reviewer.groups import Link
 from atlas_reviewer.ports import (
     BoundaryError,
     GitHubReader,
@@ -64,6 +65,7 @@ class Collected:
     failures: list[Missing] = field(default_factory=list)
     omissions: list[Omission] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    links: list[Link] = field(default_factory=list)
 
     def omit(
         self, source: str, limit: str, detail: str, key: SourceKey | None = None
@@ -165,6 +167,7 @@ def _gather_run(ctx: _Ctx, run: WorkflowRun) -> None:
         ctx.redactor,
     )
     ctx.out.items.extend(j.item for j in jobs)
+    ctx.out.links.extend(_job_links(run, jobs))
     _gather_job_logs(ctx, [j for j in jobs if j.item.head_sha == ctx.event.head_sha])
     artifacts = parse_artifacts(
         _listing(
@@ -178,6 +181,17 @@ def _gather_run(ctx: _Ctx, run: WorkflowRun) -> None:
     )
     ctx.out.items.extend(a.item for a in artifacts)
     _gather_artifacts(ctx, artifacts)
+
+
+def _job_links(run: WorkflowRun, jobs: tuple[Job, ...]) -> list[Link]:
+    run_id = run.item.provenance.source_id
+    links = []
+    for job in jobs:
+        job_id = job.item.provenance.source_id
+        links.append(Link(run_id, job_id))
+        if job.check_run_id is not None:
+            links.append(Link(job_id, f"check_run:{job.check_run_id}"))
+    return links
 
 
 def _gather_job_logs(ctx: _Ctx, jobs: list[Job]) -> None:
@@ -204,7 +218,9 @@ def _gather_job_log(ctx: _Ctx, job: Job) -> None:
     except BoundaryError as exc:
         ctx.out.failures.append(Missing(key, f"could not fetch: {exc}"))
         return
-    ctx.out.items.append(job_log_item(job, raw, ctx.now(), ctx.redactor))
+    log = job_log_item(job, raw, ctx.now(), ctx.redactor)
+    ctx.out.items.append(log)
+    ctx.out.links.append(Link(log.provenance.source_id, job.item.provenance.source_id))
 
 
 def _gather_artifacts(ctx: _Ctx, artifacts: tuple[ArtifactRef, ...]) -> None:
@@ -240,4 +256,6 @@ def _gather_artifact(ctx: _Ctx, ref: ArtifactRef) -> None:
         return
     for skipped in read.skipped:
         ctx.out.omit(source, "archive entry skipped", skipped)
-    ctx.out.items.append(artifact_contents_item(ref, read, ctx.now(), ctx.redactor))
+    contents = artifact_contents_item(ref, read, ctx.now(), ctx.redactor)
+    ctx.out.items.append(contents)
+    ctx.out.links.append(Link(contents.provenance.source_id, source))

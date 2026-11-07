@@ -41,7 +41,7 @@ def item(
 ) -> EvidenceItem:
     return EvidenceItem(
         head_sha=sha,
-        provenance=Provenance(SourceKey(kind, name), f"{kind.value}:1"),
+        provenance=Provenance(SourceKey(kind, name), f"{kind.value}:{name}"),
         tool=ToolInfo("github-actions", "unreported"),
         fetched_at=NOW,
         conclusion=conclusion,

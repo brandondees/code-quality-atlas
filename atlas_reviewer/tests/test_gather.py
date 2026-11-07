@@ -174,3 +174,22 @@ def test_secrets_in_logs_and_artifacts_are_redacted():
     log = next(i for i in out.items if i.provenance.source_id == "job_log:7001")
     assert "abcdefghijklmnopqrstuvwxyz0123456789" not in log.detail.text
     assert log.detail.redaction_count >= 1
+
+
+def test_gather_records_the_links_between_views_of_one_check():
+    out = gather(FixtureGitHub(FIXTURE))
+    links = {(link.supporter, link.supported) for link in out.links}
+    assert {
+        ("workflow_run:5001", "job:7002"),
+        ("job:7002", "check_run:7002"),
+        ("job_log:7002", "job:7002"),
+        ("workflow_run:5001", "job:7001"),
+        ("job_log:7001", "job:7001"),
+        ("artifact:9001:zip", "artifact:9001"),
+    } <= links
+
+
+def test_a_job_without_a_check_run_url_is_not_linked_to_any_check_run():
+    out = gather(FixtureGitHub(FIXTURE))
+    job_links = {link.supported for link in out.links if link.supporter == "job:7001"}
+    assert job_links == set()

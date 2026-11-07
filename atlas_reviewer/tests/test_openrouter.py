@@ -365,6 +365,28 @@ def test_preflight_accepts_a_five_dollar_key():
     assert status == parse_key_status(key_status())
 
 
+def test_key_status_is_read_only_by_the_preflight_so_a_lagging_counter_cannot_mismatch():
+    fake = OpenRouterFake(reply(completion()))
+    p = provider(fake)
+    p.complete(SMALL)
+    key_reads = [r for r in fake.requests if r[1] == f"{API}/key"]
+    assert len(key_reads) == 1
+    assert fake.requests.index(key_reads[0]) == 0
+
+
+def test_recorded_spend_comes_from_the_response_even_when_the_key_counter_reads_zero():
+    zero_usage_key = reply(key_status(usage=0))
+    fake = OpenRouterFake(
+        reply(
+            completion(usage={"prompt_tokens": 5, "completion_tokens": 5, "cost": 0.17})
+        ),
+        key=zero_usage_key,
+    )
+    p = provider(fake)
+    p.complete(SMALL)
+    assert any("$0.1700" in line for line in p.usage_lines())
+
+
 def test_no_inference_without_a_passed_preflight():
     fake = OpenRouterFake(reply(completion()))
     with pytest.raises(BudgetRefusedError, match="preflight has not passed"):

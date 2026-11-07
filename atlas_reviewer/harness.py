@@ -40,7 +40,14 @@ class SkillBundleHarness:
         subject = (
             f"{request.repo} pull request #{request.pr_number} at {request.head_sha}"
         )
-        prompt = build_prompt(subject, self._bundle, request.blocks, self._nonce())
+        prompt = build_prompt(
+            subject,
+            self._bundle,
+            request.blocks,
+            self._nonce(),
+            request.lenses,
+            request.lens_coverage,
+        )
         text = self._provider.complete(prompt)
         return Narrative(
             self.name, self._provider.name, self._redactor(text, NARRATIVE_CHARS)

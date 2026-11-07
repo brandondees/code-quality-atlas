@@ -13,6 +13,8 @@ from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.runner import (
     DENY_ALL,
     PROBE_TAG,
+    STDIN_CHECK_BYTES,
+    UPLOAD_BUDGET_S,
     RunnerJob,
     ToolAbsent,
     ToolRan,
@@ -310,7 +312,11 @@ def test_probe_runner_reports_tools_and_raw_framing_then_destroys():
     assert outcome.report.status is RunnerStatus.COMPLETED
     assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
     assert ledger.pending() == ()
-    assert api.stdin_seen == [b"", b""]
+    assert api.stdin_seen[:2] == [b"", b""]
+    assert [len(x) for x in api.stdin_seen[2:]] == [STDIN_CHECK_BYTES]
+    assert outcome.stdin_check == (
+        f"ok: sent {STDIN_CHECK_BYTES} bytes, runner received {STDIN_CHECK_BYTES}"
+    )
     assert ops(api)[:3] == ["create", "set_network_policy", "get_network_policy"]
 
 
@@ -329,3 +335,87 @@ def test_runner_names_are_prefixed_and_unique():
     clock = FakeClock()
     assert runner_name(clock, lambda n: "ab" * n) == "cqa-rev-20261106-230000-ababab"
     assert runner_name(clock) != runner_name(clock)
+
+
+def exec_timeouts(api):
+    execs = [c for c in api.calls if c[0] == "exec"]
+    return dict(zip((c[2] for c in execs), api.timeouts_seen, strict=True))
+
+
+def test_upload_exec_gets_the_dedicated_upload_budget_not_the_client_default():
+    api = FakeSprites(rules=OK_RULES)
+    run(api, deadline_s=600.0)
+    (timeout,) = [t for s, t in exec_timeouts(api).items() if "tar -xzf" in s]
+    assert timeout == UPLOAD_BUDGET_S
+    assert timeout > 30.0
+
+
+def test_upload_exec_is_capped_by_the_remaining_review_deadline():
+    api = FakeSprites(rules=OK_RULES)
+    run(api, deadline_s=90.0)
+    (timeout,) = [t for s, t in exec_timeouts(api).items() if "tar -xzf" in s]
+    assert 60.0 < timeout <= 90.0
+
+
+def test_upload_does_not_wait_for_a_stdin_eof():
+    api = FakeSprites(rules=OK_RULES)
+    run(api)
+    (script,) = [s for s in exec_timeouts(api) if "tar -xzf" in s]
+    assert f"head -c {len(b'tarball-bytes')} |" in script
+
+
+def test_upload_transport_failure_names_the_size_and_still_destroys():
+    class UploadTimesOut(FakeSprites):
+        def exec(self, name, argv, stdin, timeout_s):
+            if "tar -xzf" in argv[-1]:
+                raise BoundaryError("The read operation timed out")
+            return super().exec(name, argv, stdin, timeout_s)
+
+    api = UploadTimesOut(rules=OK_RULES)
+    outcome = run(api)
+    assert outcome.report.status is RunnerStatus.FAILED
+    assert "source upload of 13 bytes did not complete" in outcome.report.note
+    assert "read operation timed out" in outcome.report.note
+    assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
+
+
+def test_stdin_roundtrip_reports_a_short_read_as_a_mismatch():
+    class ShortReads(FakeSprites):
+        def _answer(self, script, stdin):
+            if "| wc -c" in script:
+                return "1048576", 0
+            return super()._answer(script, stdin)
+
+    outcome = probe_runner(
+        ShortReads(), MemoryLedger(), TOOLS, name=NAME, deadline_s=60, clock=FakeClock()
+    )
+    assert outcome.stdin_check.startswith("MISMATCH: sent 3145728 bytes")
+    assert "received 1048576" in outcome.stdin_check
+    assert outcome.report.status is RunnerStatus.COMPLETED
+
+
+def test_stdin_roundtrip_transport_failure_is_reported_not_fatal_to_the_probe():
+    class StdinTimesOut(FakeSprites):
+        def exec(self, name, argv, stdin, timeout_s):
+            if stdin:
+                raise BoundaryError("The read operation timed out")
+            return super().exec(name, argv, stdin, timeout_s)
+
+    outcome = probe_runner(
+        StdinTimesOut(),
+        MemoryLedger(),
+        TOOLS,
+        name=NAME,
+        deadline_s=60,
+        clock=FakeClock(),
+    )
+    assert "FAILED sending 3145728 bytes" in outcome.stdin_check
+    assert "read operation timed out" in outcome.stdin_check
+    assert outcome.available == {"ruff": True, "shellcheck": True}
+    assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
+
+
+def test_default_tools_are_limited_to_what_the_runner_image_is_known_to_have():
+    from atlas_reviewer.controller import DEFAULT_TOOLS
+
+    assert [t.binary for t in DEFAULT_TOOLS] == ["python3"]

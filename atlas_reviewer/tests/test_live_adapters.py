@@ -278,3 +278,48 @@ def test_sprites_client_refuses_to_touch_sprites_it_did_not_name():
 def test_sprites_policy_read_back_must_be_an_object(body):
     with pytest.raises(BoundaryError):
         SpritesClient(Recorder(ok(body=body)), "t").get_network_policy(NAME)
+
+
+def test_a_review_sends_the_upload_timeout_to_the_transport_not_the_30s_default():
+    from atlas_reviewer.clock import SystemClock
+    from atlas_reviewer.domain import CleanupStatus, RunnerStatus
+    from atlas_reviewer.fakes import MemoryLedger
+    from atlas_reviewer.runner import UPLOAD_BUDGET_S, RunnerJob, run_disposable
+
+    base = f"https://api.sprites.dev/v1/sprites/{NAME}"
+    deleted = []
+
+    class Transport:
+        def __init__(self):
+            self.requests = []
+
+        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
+            self.requests.append((method, url.split("?")[0], timeout_s, body))
+            path = url.split("?")[0]
+            if method == "DELETE":
+                deleted.append(True)
+                return ok(status=204)
+            if method == "GET" and path == base:
+                return ok(status=404 if deleted else 200)
+            if method == "GET":
+                return ok({"rules": list(DENY_ALL)})
+            if path.endswith("/exec"):
+                return ok(body=b"\x01\n__ATLAS_EXIT__=0\n\x03\x00")
+            return ok(status=204)
+
+    transport = Transport()
+    outcome = run_disposable(
+        SpritesClient(transport, "org/1/secret"),
+        MemoryLedger(),
+        RunnerJob(b"tarball", ()),
+        name=NAME,
+        deadline_s=600.0,
+        clock=SystemClock(),
+    )
+    assert outcome.report.status is RunnerStatus.COMPLETED
+    assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
+    (upload,) = [r for r in transport.requests if r[1].endswith("/exec")]
+    assert upload[2] == UPLOAD_BUDGET_S
+    assert upload[3] == b"tarball"
+    non_exec = {r[2] for r in transport.requests if not r[1].endswith("/exec")}
+    assert non_exec == {30.0}

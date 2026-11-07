@@ -107,6 +107,24 @@ def test_job_carries_its_run_name_sha_and_provenance():
         _job(head_sha=None)
 
 
+@pytest.mark.parametrize(
+    "url,expected",
+    [
+        ("https://api.github.com/repos/o/r/check-runs/9001", 9001),
+        ("https://api.github.com/repos/o/r/check-runs/9001/annotations", None),
+        ("https://api.github.com/repos/o/r/check-suites/9001", None),
+        (None, None),
+        (42, None),
+    ],
+)
+def test_job_check_run_link_comes_only_from_the_documented_url(url, expected):
+    assert _job(check_run_url=url).check_run_id == expected
+
+
+def test_job_without_check_run_url_has_no_check_run_link():
+    assert _job().check_run_id is None
+
+
 def test_job_log_tail_keeps_the_end_and_is_redacted():
     text = "x" * (LOG_TAIL_CHARS * 2) + "\npassword=supersecretvalue\nFAILED test_a"
     item = job_log_item(_job(), text.encode(), NOW, R)

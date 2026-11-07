@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
-from atlas_reviewer.prompt import Prompt, UntrustedBlock
+from atlas_reviewer.prompt import LoadedLens, Prompt, UntrustedBlock
 from atlas_reviewer.redact import RedactedText
 
 Json = Mapping[str, Any]
@@ -128,6 +128,8 @@ class ReviewRequest:
     pr_number: int
     head_sha: str
     blocks: tuple[UntrustedBlock, ...]
+    lenses: tuple[LoadedLens, ...] = ()
+    lens_coverage: str = ""
 
 
 @dataclass(frozen=True)

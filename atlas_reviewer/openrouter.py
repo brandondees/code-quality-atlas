@@ -30,6 +30,12 @@
   per-review `ReviewBudget` first, capped at the lower of the review
   budget and the key's remaining credit as read by the preflight. Actual usage and cost are read from the
   response's `usage` object.
+- The key's own usage counter (`GET /api/v1/key`) is read once, by the
+  preflight, and never after inference. It can lag a completion by about 90
+  seconds (one owner-reported pilot observation, not checked against
+  OpenRouter's documentation), so a $0 readback right after a call is
+  expected and is not a mismatch with the per-response cost recorded here.
+  Spend is reconciled from `usage.cost`, never from that counter.
 """
 
 from __future__ import annotations

@@ -57,6 +57,8 @@ _EXIT_RE = re.compile(re.escape(EXIT_MARKER) + r"(\d+)")
 _PROBE_RE = re.compile(re.escape(PROBE_TAG) + r":(present|absent):([A-Za-z0-9._+-]+)")
 _BINARY_RE = re.compile(r"[A-Za-z0-9._+-]+")
 _EXEC_SLACK_S = 15.0
+UPLOAD_BUDGET_S = 300.0
+STDIN_CHECK_BYTES = 3 * 1024 * 1024
 _FRAMING_BYTES = dict.fromkeys(range(0x05))
 
 
@@ -120,6 +122,7 @@ class ProbeOutcome:
     report: RunnerReport
     available: dict[str, bool]
     framing_sample: bytes
+    stdin_check: str
 
 
 @dataclass
@@ -300,17 +303,45 @@ def probe_runner(
     response for framing, destroy. Uploads and runs nothing from a PR."""
     found: dict[str, bool] = {}
     sample: list[bytes] = []
+    stdin_check: list[str] = []
 
     def body(api: SpritesApi, name: str, deadline: Deadline) -> str:
         found.update(_probe(api, name, tools, deadline))
         timeout = deadline.check("framing check")
         sample.append(api.exec(name, _sh(f"echo {FRAMING_CHECK}"), b"", timeout))
+        stdin_check.append(_stdin_roundtrip(api, name, deadline))
         return f"probed {len(found)} binar{'y' if len(found) == 1 else 'ies'}"
 
     report = _disposable(
         api, ledger, body, name=name, deadline_s=deadline_s, clock=clock
     )
-    return ProbeOutcome(report, found, b"".join(sample))
+    return ProbeOutcome(
+        report, found, b"".join(sample), stdin_check[0] if stdin_check else "not run"
+    )
+
+
+def _stdin_roundtrip(api: SpritesApi, name: str, deadline: Deadline) -> str:
+    """Send the size of a real upload through the upload's own `head -c`
+    mechanism and read back how many bytes the runner saw."""
+    sent = STDIN_CHECK_BYTES
+    try:
+        code, text = _exec(
+            api,
+            name,
+            f"head -c {sent} | wc -c",
+            deadline,
+            "stdin round-trip",
+            stdin=bytes(sent),
+            budget_s=UPLOAD_BUDGET_S,
+        )
+    except BoundaryError as exc:
+        return f"FAILED sending {sent} bytes: {exc}"
+    digits = text.strip().split()
+    if code != 0 or not digits or not digits[-1].isdigit():
+        return f"FAILED sending {sent} bytes: exit {code}: {text[-200:]!r}"
+    got = int(digits[-1])
+    verdict = "ok" if got == sent else "MISMATCH"
+    return f"{verdict}: sent {sent} bytes, runner received {got}"
 
 
 def _provision(api: SpritesApi, name: str, deadline: Deadline) -> None:
@@ -363,8 +394,27 @@ def _probe(
 
 
 def _upload(api: SpritesApi, name: str, tarball: bytes, deadline: Deadline) -> None:
-    script = f"mkdir -p {WORKDIR} && tar -xzf - -C {WORKDIR} --strip-components=1"
-    code, text = _exec(api, name, script, deadline, "source upload", stdin=tarball)
+    """`head -c` stops reading after exactly the bytes sent, so extraction does
+    not depend on the exec channel delivering a stdin EOF (an unverified
+    hypothesis for the pilot's timed-out upload; see the README)."""
+    script = (
+        f"mkdir -p {WORKDIR} && head -c {len(tarball)} | "
+        f"tar -xzf - -C {WORKDIR} --strip-components=1"
+    )
+    try:
+        code, text = _exec(
+            api,
+            name,
+            script,
+            deadline,
+            "source upload",
+            stdin=tarball,
+            budget_s=UPLOAD_BUDGET_S,
+        )
+    except BoundaryError as exc:
+        raise BoundaryError(
+            f"source upload of {len(tarball)} bytes did not complete: {exc}"
+        ) from exc
     if code != 0:
         raise BoundaryError(f"source upload failed (exit {code}): {text[-500:]}")
 

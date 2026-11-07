@@ -11,18 +11,30 @@ from atlas_reviewer.domain import PrEvent, SourceKey, SourceKind
 from atlas_reviewer.fakes import FakeSprites, MemoryLedger
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.harness import SkillBundleHarness, load_bundle
+from atlas_reviewer.lenses import LensLibrary
 from atlas_reviewer.ports import BoundaryError, Listing, NotFoundError
 from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.redact import Redactor
+from atlas_reviewer.runner import ToolSpec
 
 from .helpers import FIXTURE, HEAD, FakeClock, fake_token
 
 EVENT = PrEvent("example-org/example-app", 42, HEAD)
 RUNNER = "cqa-rev-20261106-230000-abcdef"
+RUFF = ToolSpec("ruff", "ruff", "ruff --version", "ruff check .")
+SHELLCHECK = ToolSpec(
+    "shellcheck", "shellcheck", "shellcheck --version", "shellcheck x.sh"
+)
+COMPILEALL = ToolSpec(
+    "python-compileall", "python3", "python3 --version", "python3 -m compileall -q ."
+)
+FULL_TOOLS = (COMPILEALL, RUFF, SHELLCHECK)
 
 
 class Setup:
-    def __init__(self, github=None, sprites=None, redactor=None, harness=None):
+    def __init__(
+        self, github=None, sprites=None, redactor=None, harness=None, lenses=None
+    ):
         self.github = github or FixtureGitHub(FIXTURE)
         script = json.loads((FIXTURE / "runner-script.json").read_text())
         self.sprites = sprites or FakeSprites.from_script(script)
@@ -43,6 +55,7 @@ class Setup:
             FakeClock(),
             self.redactor,
             lambda: RUNNER,
+            lenses or LensLibrary(),
         )
 
     def run(self, **config):
@@ -55,7 +68,9 @@ class Setup:
 
 def test_draft_is_labelled_as_unposted_and_lists_every_state():
     s = Setup()
-    draft = s.run(expected=(SourceKey(SourceKind.CHECK_RUN, "security-scan"),))
+    draft = s.run(
+        expected=(SourceKey(SourceKind.CHECK_RUN, "security-scan"),), tools=FULL_TOOLS
+    )
     assert draft.startswith("# Code Quality Atlas review -- DRAFT")
     assert "Nothing was sent to GitHub" in draft
     assert "| PASS | check_run | gate |" in draft
@@ -70,7 +85,7 @@ def test_draft_is_labelled_as_unposted_and_lists_every_state():
         "| missing | runner_tool | shellcheck | not available in the runner image"
         in draft
     )
-    assert "Cleanup: destroyed (verified absent)" in draft
+    assert "destroyed and verified absent by an existence check" in draft
     assert "UNKNOWN is never counted as passing." in draft
 
 
@@ -170,10 +185,10 @@ def test_missing_tarball_skips_the_runner_without_creating_one():
             raise NotFoundError("404")
 
     s = Setup(github=NoTarball(FIXTURE))
-    draft = s.run()
+    draft = s.run(tools=FULL_TOOLS)
     assert s.sprites.calls == []
-    assert "Status: skipped" in draft
-    assert "Cleanup: no runner was created" in draft
+    assert "Runner (none): status skipped" in draft
+    assert "no runner was created, so there was nothing to clean up" in draft
     assert "| missing | runner_tool | ruff | runner skipped: could not fetch" in draft
 
 
@@ -189,7 +204,9 @@ def test_runner_failure_marks_every_unrun_tool_unknown():
         sprites=FakeSprites(fail_on={"create": BoundaryError("Sprites HTTP 503")})
     )
     draft = s.run()
-    assert "Status: failed" in draft
+    assert "status failed" in draft
+    assert "Runner did not complete (failed)" in draft
+    assert "Sprites HTTP 503" in draft
     assert (
         "| missing | runner_tool | python-compileall | runner failed before this tool ran"
         in draft
@@ -234,3 +251,230 @@ def test_untrusted_text_outside_the_prompt_is_redacted_in_the_draft_too():
     draft = Setup(github=LeakyName(FIXTURE)).run()
     assert token not in draft
     assert "gate [REDACTED:github-token]" in draft
+
+
+def section(draft, heading):
+    return draft.split(f"## {heading}", 1)[1].split("\n## ", 1)[0]
+
+
+def multi_file_diff(files, body_chars):
+    return "".join(
+        f"diff --git a/f{i}.py b/f{i}.py\n--- a/f{i}.py\n+++ b/f{i}.py\n@@ -1 +1 @@\n+"
+        + "x" * body_chars
+        + "\n"
+        for i in range(files)
+    )
+
+
+class BigDiff(FixtureGitHub):
+    def get_pull_diff(self, repo, number):
+        return multi_file_diff(20, 5_000)
+
+
+def test_a_truncated_diff_is_an_omission_naming_the_files_the_model_never_saw():
+    s = Setup(github=BigDiff(FIXTURE))
+    draft = s.run()
+    omissions = section(draft, "Omissions and limits hit")
+    row = next(r for r in omissions.splitlines() if "pull request diff" in r)
+    assert "60000-character cap" in row
+    assert "kept 60000 of " in row
+    assert "file(s) seen in full" in row
+    assert "cut partway through f11.py" in row
+    assert "never seen (8): f12.py, f13.py" in row
+    assert "f19.py" in row
+    assert "pull request diff (60000-character cap)" in section(
+        draft, "Controller notes"
+    )
+
+
+def test_the_model_is_told_about_the_diff_cut_not_only_the_operator():
+    s = Setup(github=BigDiff(FIXTURE))
+    s.run()
+    prompt = s.user_prompt()
+    evidence = prompt.split('label="ci-and-runner-evidence"', 1)[1]
+    assert "never seen (8): f12.py" in evidence
+    assert (
+        "pull request diff (60000-character cap)"
+        in prompt.split('label="controller-notes"', 1)[1]
+    )
+
+
+def test_an_untruncated_diff_records_no_diff_omission():
+    draft = Setup().run()
+    assert "pull request diff" not in section(draft, "Omissions and limits hit")
+
+
+def test_a_long_pr_body_and_issue_body_are_recorded_as_omissions():
+    pull = json.loads((FIXTURE / "pull.json").read_text())
+    pull["body"] = "Fixes #7\n\n" + "word " * 1_000
+
+    class LongBodies(FixtureGitHub):
+        def get_pull(self, repo, number):
+            return pull
+
+        def get_issue(self, repo, number):
+            return {"title": "t", "body": "y" * 3_000}
+
+    draft = Setup(github=LongBodies(FIXTURE)).run(include_issues=True)
+    omissions = section(draft, "Omissions and limits hit")
+    assert (
+        f"| pull request body | 2000-character cap | kept 2000 of {len(pull['body'])} characters |"
+        in omissions
+    )
+    assert "| issue #7 | 2000-character cap | kept 2000 of " in omissions
+
+
+def test_lens_bodies_from_the_skill_bundle_reach_the_prompt():
+    s = Setup()
+    draft = s.run()
+    (prompt,) = s.provider.prompts
+    library = LensLibrary()
+    table = section(draft, "Review lenses")
+    included = [
+        line.split("|")[1].strip()
+        for line in table.splitlines()
+        if "| included |" in line
+    ]
+    assert included, table
+    for name in included:
+        assert library.body(name) in prompt.system, name
+    assert "Lens coverage: included: " in prompt.system
+    assert "=== lens: tracing-correctness-and-invariants ===" in prompt.system
+
+
+def test_the_draft_reports_included_truncated_and_omitted_lenses_accurately():
+    class BigLenses(LensLibrary):
+        def __init__(self):
+            super().__init__()
+
+        def body(self, name):
+            real = super().body(name)
+            return None if real is None else f"LENS-{name}\n" + ("rule\n" * 8_000)
+
+    s = Setup(lenses=BigLenses())
+    draft = s.run()
+    (prompt,) = s.provider.prompts
+    rows = {
+        line.split("|")[1].strip(): line.split("|")[2].strip()
+        for line in section(draft, "Review lenses").splitlines()
+        if line.startswith("| ") and "---" not in line and "Lens |" not in line
+    }
+    assert list(rows.values()).count("included") == 1
+    assert list(rows.values()).count("truncated") == 1
+    assert "omitted" in rows.values()
+    omitted = [n for n, status in rows.items() if status == "omitted"]
+    truncated = next(n for n, status in rows.items() if status == "truncated")
+    for name in omitted:
+        assert f"LENS-{name}" not in prompt.system
+    assert (
+        "lens body truncated by atlas_reviewer"
+        in prompt.system.split(f"=== lens: {truncated} ===", 1)[1]
+    )
+    assert f"truncated: {truncated} (" in section(draft, "Controller notes")
+
+
+def test_the_bundle_text_alone_does_not_count_as_running_a_lens():
+    s = Setup()
+    s.run()
+    (prompt,) = s.provider.prompts
+    assert "reference/lenses/hunting-silent-failures/body.md" in prompt.system
+    assert "You cannot open files" in prompt.system
+    assert "=== lens: sweeping-for-security ===" not in prompt.system
+
+
+def test_one_ci_gate_is_counted_once_with_its_views_attached():
+    draft = Setup().run()
+    summary = section(draft, "Evidence summary")
+    assert "- Pass: 2\n" in summary
+    assert "- Fail: 1\n" in summary
+    assert "- UNKNOWN at the head SHA (missing or inconclusive): 2\n" in summary
+    checks = section(draft, "Independent checks at the reviewed head SHA")
+    gate = next(r for r in checks.splitlines() if "| check_run | gate |" in r)
+    assert gate.startswith("| PASS |")
+    for view in ("job:7002", "job_log:7002", "workflow_run:5001"):
+        assert view in gate
+    gate_rows = [r for r in checks.splitlines() if "gate" in r and r.startswith("| ")]
+    assert len(gate_rows) == 1
+    failing = next(r for r in checks.splitlines() if "ci / test" in r)
+    assert failing.startswith("| FAIL |")
+    assert "workflow_run:5001" in failing
+
+
+def test_the_model_sees_grouped_checks_and_the_same_counts():
+    s = Setup()
+    s.run()
+    evidence = s.user_prompt().split('label="ci-and-runner-evidence"', 1)[1]
+    assert "## Independent checks at the reviewed head SHA" in evidence
+    gate = next(r for r in evidence.splitlines() if "| check_run | gate |" in r)
+    assert gate.startswith("| PASS |")
+    assert "job_log:7002" in gate and "workflow_run:5001" in gate
+
+
+def test_a_failing_run_no_job_explains_is_not_hidden_by_grouping():
+    class OnlyPassingJobs(FixtureGitHub):
+        def list_run_jobs(self, repo, run_id):
+            listing = super().list_run_jobs(repo, run_id)
+            kept = tuple(j for j in listing.items if j["conclusion"] == "success")
+            return Listing(kept, listing.truncated, listing.pages_read)
+
+    draft = Setup(github=OnlyPassingJobs(FIXTURE)).run()
+    checks = section(draft, "Independent checks at the reviewed head SHA")
+    run_row = next(r for r in checks.splitlines() if "| workflow_run | ci |" in r)
+    assert run_row.startswith("| FAIL |")
+    assert "- Fail: 1\n" in section(draft, "Evidence summary")
+
+
+def test_controller_notes_are_a_distinct_code_generated_section():
+    draft = Setup().run()
+    notes = section(draft, "Controller notes")
+    assert "Generated by code" in notes
+    assert "this section is authoritative" in notes
+    assert (
+        "destroyed and verified absent by an existence check (cleanup proven)" in notes
+    )
+    assert "Tool `python-compileall` (Python 3.13.5): ran, exit 0." in notes
+    assert "Omissions and limits hit: 1" in notes
+    assert "Disposable runner" not in draft
+    assert draft.index("## Controller notes") < draft.index("## Review narrative")
+
+
+def test_controller_notes_report_exec_failures_and_absent_tools():
+    api = FakeSprites.from_script({"installed": ["python3"], "exec": []})
+    draft = Setup(sprites=api).run(tools=FULL_TOOLS)
+    notes = section(draft, "Controller notes")
+    assert "Runner did not complete (failed)" in notes
+    assert "source upload failed" in notes
+    assert "Tool `ruff`: did not run (the runner did not reach it)." in notes
+    assert "destroyed and verified absent" in notes
+
+
+def test_controller_notes_report_unverified_cleanup_and_the_model_is_told():
+    s = Setup(
+        sprites=FakeSprites.from_script(
+            json.loads((FIXTURE / "runner-script.json").read_text())
+        )
+    )
+    s.sprites.delete_takes_effect = False
+    draft = s.run()
+    notes = section(draft, "Controller notes")
+    assert "destroy was NOT verified" in notes
+    assert "`sweep`" in notes
+    told = s.user_prompt().split('label="controller-notes"', 1)[1]
+    assert "destroy was NOT verified" in told
+
+
+def test_the_model_is_given_the_controller_notes_and_told_they_are_facts():
+    s = Setup()
+    s.run()
+    (prompt,) = s.provider.prompts
+    told = prompt.user.split('label="controller-notes"', 1)[1].split(
+        "</untrusted-data", 1
+    )[0]
+    assert (
+        "destroyed and verified absent by an existence check (cleanup proven)" in told
+    )
+    assert "ran, exit 0" in told
+    assert "established facts" in prompt.system
+    assert "do not contradict them or call them unverified" in " ".join(
+        prompt.system.split()
+    )

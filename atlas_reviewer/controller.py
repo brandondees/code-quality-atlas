@@ -13,6 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from atlas_reviewer.classify import classify
+from atlas_reviewer.diffs import diff_coverage, diff_paths
 from atlas_reviewer.domain import (
     CleanupStatus,
     Evidence,
@@ -32,6 +33,8 @@ from atlas_reviewer.draft import (
 )
 from atlas_reviewer.evidence import DETAIL_CHARS, PullInfo, parse_pull, tool_evidence
 from atlas_reviewer.gather import Collected, IngestConfig, gather_ci
+from atlas_reviewer.lenses import LensLibrary, LensPlan, plan_lenses, rank_lenses
+from atlas_reviewer.notes import ControllerFacts, controller_notes
 from atlas_reviewer.ports import (
     BoundaryError,
     Clock,
@@ -56,18 +59,6 @@ DEFAULT_TOOLS = (
         "python3 --version",
         "python3 -m compileall -q .",
     ),
-    ToolSpec(
-        "ruff",
-        "ruff",
-        "ruff --version",
-        "ruff check --no-cache --output-format=concise .",
-    ),
-    ToolSpec(
-        "shellcheck",
-        "shellcheck",
-        "shellcheck --version | sed -n 2p",
-        "sh -c 'find . -name \"*.sh\" -print0 | xargs -0 -r shellcheck -f gcc'",
-    ),
 )
 
 
@@ -91,6 +82,7 @@ class Deps:
     clock: Clock
     redactor: Redactor
     runner_name: Callable[[], str]
+    lenses: LensLibrary = field(default_factory=LensLibrary)
 
 
 def review(event: PrEvent, deps: Deps, config: ReviewConfig) -> str:
@@ -105,21 +97,38 @@ def review(event: PrEvent, deps: Deps, config: ReviewConfig) -> str:
         config.ingest,
         collected,
     )
-    runner = _run_tools(event, deps, config, collected)
+    runner, tool_results = _run_tools(event, deps, config, collected)
     evidence = classify(
         event.head_sha, collected.items, config.expected, collected.failures
     )
-    blocks = _blocks(event, pull, evidence, deps, config, collected)
-    narrative = _narrate(event, blocks, deps)
+    diff, paths = _diff(event, deps, collected)
+    _note_truncation(collected, "pull request body", pull.body, DETAIL_CHARS)
+    issues = _issue_blocks(event, pull, deps, config, collected)
+    plan = plan_lenses(
+        deps.lenses, rank_lenses(paths, f"{pull.title.text}\n{pull.body.text}")
+    )
+    notes = controller_notes(
+        ControllerFacts(
+            runner,
+            tuple(t.name for t in config.tools),
+            tool_results,
+            tuple(collected.omissions),
+            plan,
+            tuple(collected.notes),
+        )
+    )
+    blocks = _blocks(pull, diff, issues, evidence, notes, deps, collected)
+    narrative = _narrate(event, blocks, plan, deps)
     draft = render_draft(
         DraftInput(
             event=event,
             mode=config.mode,
             title=pull.title.text,
             evidence=evidence,
-            runner=runner,
+            links=tuple(collected.links),
+            controller_notes=notes,
+            lenses=plan.uses,
             narrative=narrative,
-            notes=tuple(collected.notes),
             omissions=tuple(collected.omissions),
             model_usage=deps.harness.usage_lines(),
             redactions=_redaction_total(pull, collected.items, blocks),
@@ -146,16 +155,17 @@ def _tool_keys(config: ReviewConfig) -> list[SourceKey]:
 
 def _skip_runner(
     config: ReviewConfig, collected: Collected, reason: str
-) -> RunnerReport:
+) -> tuple[RunnerReport, tuple[ToolResult, ...]]:
     collected.failures.extend(
         Missing(k, f"runner skipped: {reason}") for k in _tool_keys(config)
     )
-    return RunnerReport(RunnerStatus.SKIPPED, CleanupStatus.NOT_CREATED, None, reason)
+    report = RunnerReport(RunnerStatus.SKIPPED, CleanupStatus.NOT_CREATED, None, reason)
+    return report, ()
 
 
 def _run_tools(
     event: PrEvent, deps: Deps, config: ReviewConfig, collected: Collected
-) -> RunnerReport:
+) -> tuple[RunnerReport, tuple[ToolResult, ...]]:
     try:
         tarball = deps.github.get_tarball(event.repo, event.head_sha)
     except BoundaryError as exc:
@@ -177,7 +187,7 @@ def _run_tools(
         clock=deps.clock,
     )
     _record_tool_results(event, deps, config, collected, result.results, result.report)
-    return result.report
+    return result.report, result.results
 
 
 def _record_tool_results(
@@ -203,36 +213,81 @@ def _record_tool_results(
 
 
 def _blocks(
-    event: PrEvent,
     pull: PullInfo,
+    diff: RedactedText,
+    issues: list[UntrustedBlock],
     evidence: tuple[Evidence, ...],
+    notes: tuple[str, ...],
     deps: Deps,
-    config: ReviewConfig,
     collected: Collected,
 ) -> tuple[UntrustedBlock, ...]:
     r = deps.redactor
-    evidence_text = render_evidence(evidence, tuple(collected.omissions))
-    blocks = [
+    evidence_text = render_evidence(
+        evidence, tuple(collected.omissions), tuple(collected.links)
+    )
+    return (
         UntrustedBlock(
             "pull-request", r(f"Title: {pull.title.text}\n\n{pull.body.text}")
         ),
-        UntrustedBlock("diff", _diff(event, deps, collected)),
+        UntrustedBlock("diff", diff),
         UntrustedBlock("ci-and-runner-evidence", r(evidence_text)),
-    ]
-    blocks.extend(_issue_blocks(event, pull, deps, config, collected))
-    return tuple(blocks)
+        UntrustedBlock("controller-notes", r("\n".join(f"- {n}" for n in notes))),
+        *issues,
+    )
 
 
-def _diff(event: PrEvent, deps: Deps, collected: Collected) -> RedactedText:
+def _diff(
+    event: PrEvent, deps: Deps, collected: Collected
+) -> tuple[RedactedText, tuple[str, ...]]:
+    """The diff as the model gets it, plus every changed path (for lens
+    selection). A cut is recorded as an omission naming the files the model
+    never fully saw."""
     try:
-        return deps.redactor(
-            deps.github.get_pull_diff(event.repo, event.pr_number), DIFF_CHARS
-        )
+        raw = deps.github.get_pull_diff(event.repo, event.pr_number)
     except BoundaryError as exc:
         collected.notes.append(
             f"The PR diff could not be fetched ({exc}); the narrative has no diff."
         )
-        return deps.redactor("(diff unavailable)")
+        return deps.redactor("(diff unavailable)"), ()
+    full = deps.redactor(raw)
+    capped = deps.redactor(raw, DIFF_CHARS)
+    if capped.truncated_from is not None:
+        collected.omit(
+            "pull request diff",
+            f"{DIFF_CHARS}-character cap",
+            _diff_cut_detail(full.text, capped.truncated_from),
+        )
+    return capped, diff_paths(full.text)
+
+
+MAX_LISTED_PATHS = 15
+
+
+def _diff_cut_detail(full_text: str, total_chars: int) -> str:
+    cov = diff_coverage(full_text, DIFF_CHARS)
+    parts = [
+        f"kept {DIFF_CHARS} of {total_chars} characters",
+        f"{len(cov.seen)} of {cov.total_files} file(s) seen in full",
+    ]
+    if cov.partial is not None:
+        parts.append(f"cut partway through {cov.partial}")
+    if cov.unseen:
+        shown = ", ".join(cov.unseen[:MAX_LISTED_PATHS])
+        more = len(cov.unseen) - MAX_LISTED_PATHS
+        tail = f", and {more} more" if more > 0 else ""
+        parts.append(f"never seen ({len(cov.unseen)}): {shown}{tail}")
+    return "; ".join(parts)
+
+
+def _note_truncation(
+    collected: Collected, source: str, text: RedactedText, cap: int
+) -> None:
+    if text.truncated_from is not None:
+        collected.omit(
+            source,
+            f"{cap}-character cap",
+            f"kept {cap} of {text.truncated_from} characters",
+        )
 
 
 def _issue_blocks(
@@ -258,13 +313,25 @@ def _issue_block(
         collected.notes.append(f"Issue #{number} could not be fetched: {exc}")
         return None
     text = f"Title: {issue.get('title', '')}\n\n{issue.get('body') or ''}"
-    return UntrustedBlock(f"issue-{number}", deps.redactor(text, DETAIL_CHARS))
+    redacted = deps.redactor(text, DETAIL_CHARS)
+    _note_truncation(collected, f"issue #{number}", redacted, DETAIL_CHARS)
+    return UntrustedBlock(f"issue-{number}", redacted)
 
 
 def _narrate(
-    event: PrEvent, blocks: tuple[UntrustedBlock, ...], deps: Deps
+    event: PrEvent,
+    blocks: tuple[UntrustedBlock, ...],
+    plan: LensPlan,
+    deps: Deps,
 ) -> Narrative | NarrativeFailure:
-    request = ReviewRequest(event.repo, event.pr_number, event.head_sha, blocks)
+    request = ReviewRequest(
+        event.repo,
+        event.pr_number,
+        event.head_sha,
+        blocks,
+        plan.loaded,
+        plan.coverage(),
+    )
     try:
         return deps.harness.review(request)
     except BoundaryError as exc:

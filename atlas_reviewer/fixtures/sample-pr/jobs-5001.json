@@ -12,7 +12,8 @@
     {
       "id": 7002,
       "run_id": 5001,
-      "name": "lint",
+      "name": "gate",
+      "check_run_url": "https://api.github.com/repos/example-org/example-app/check-runs/7002",
       "head_sha": "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4",
       "status": "completed",
       "conclusion": "success"

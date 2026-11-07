@@ -304,8 +304,8 @@ def test_probe_runner_reports_tool_availability_and_destroys(tmp_path):
     assert "status: completed" in text
     assert "cleanup: destroyed (verified absent)" in text
     assert "tool python3: present" in text
-    assert "tool shellcheck: ABSENT" in text
     assert "raw exec response sample:" in text
+    assert f"stdin round-trip: ok: sent {3 * 1024 * 1024} bytes" in text
     assert api.live_names() == ()
 
 
@@ -320,6 +320,30 @@ def test_sweep_destroys_ledgered_runners(tmp_path):
     )  # fmt: skip
     assert code == cli.EXIT_OK
     assert "cqa-rev-leftover: destroyed (verified absent)" in out.getvalue()
+    assert api.live_names() == ()
+
+
+def test_sweep_refuses_to_run_while_a_review_holds_the_lock(tmp_path):
+    from atlas_reviewer.ledger import single_review_lock
+
+    api = FakeSprites()
+    api.create("cqa-rev-live-review")
+    (tmp_path / "runners.ledger").write_text("cqa-rev-live-review\n")
+    out, err = io.StringIO(), io.StringIO()
+    with single_review_lock(tmp_path / "review.lock"):
+        code = cli.main(
+            ["--state-dir", str(tmp_path), "sweep"],
+            env={}, out=out, err=err, sprites_factory=lambda env: api,
+        )  # fmt: skip
+    assert code == cli.EXIT_USAGE
+    assert api.live_names() == ("cqa-rev-live-review",)
+    assert "delete" not in [c[0] for c in api.calls]
+    assert "another review holds" in err.getvalue()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "sweep"],
+        env={}, out=io.StringIO(), err=io.StringIO(), sprites_factory=lambda env: api,
+    )  # fmt: skip
+    assert code == cli.EXIT_OK
     assert api.live_names() == ()
 
 

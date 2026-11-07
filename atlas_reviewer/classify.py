@@ -21,8 +21,8 @@ from atlas_reviewer.domain import (
     Outcome,
     SourceKey,
     Stale,
-    outcome,
 )
+from atlas_reviewer.groups import Link, group_checks
 
 REASON_ONLY_OTHER_SHAS = (
     "observed only on other commits of this PR, not on the reviewed head SHA"
@@ -61,25 +61,33 @@ def _missing(
 
 @dataclass(frozen=True)
 class Tally:
-    """`unknown` counts head-SHA sources with no usable result (missing, or
-    matched but inconclusive); `stale` counts items from other commits,
-    which are UNKNOWN too but say nothing about the head SHA."""
+    """Counts independent checks at the head SHA: a check run, its job, the
+    job's log and the workflow run holding it count once (`supporting` says
+    how many further views were folded in). `unknown` counts checks with no
+    usable result (missing, or present but inconclusive); `stale` counts items
+    from other commits, which are UNKNOWN too but say nothing about the head
+    SHA."""
 
     passed: int
     failed: int
     unknown: int
     stale: int
     present: int
+    supporting: int = 0
 
 
-def tally(evidence: Iterable[Evidence]) -> Tally:
+def tally(evidence: Iterable[Evidence], links: Iterable[Link] = ()) -> Tally:
     evidence = tuple(evidence)
-    stale = sum(isinstance(e, Stale) for e in evidence)
-    counts = Counter(outcome(e) for e in evidence if not isinstance(e, Stale))
+    groups = group_checks(evidence, links)
+    counts = Counter(g.outcome for g in groups)
+    folded = {
+        m.item.provenance.source_id for g in groups for m in (*g.supporting, *g.context)
+    }
     return Tally(
         passed=counts[Outcome.PASS],
         failed=counts[Outcome.FAIL],
-        unknown=counts[Outcome.UNKNOWN],
-        stale=stale,
+        unknown=counts[Outcome.UNKNOWN] + sum(isinstance(e, Missing) for e in evidence),
+        stale=sum(isinstance(e, Stale) for e in evidence),
         present=counts[Outcome.INFO],
+        supporting=len(folded),
     )

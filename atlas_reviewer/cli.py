@@ -232,7 +232,10 @@ def _live_sprites(env: Mapping[str, str]) -> SpritesApi:
 
 def _cmd_sweep(args: argparse.Namespace, env: Mapping[str, str], out: TextIO) -> int:
     api = args.sprites_factory(env)
-    results = sweep(api, FileLedger(_state_dir(args, env) / "runners.ledger"))
+    # The ledger lists a live review's runner too; sweeping during a review
+    # would destroy it mid-run, so sweep waits its turn like review does.
+    with single_review_lock(_state_dir(args, env) / "review.lock"):
+        results = sweep(api, FileLedger(_state_dir(args, env) / "runners.ledger"))
     out.writelines(f"{name}: {status.value}\n" for name, status in results.items())
     out.write(f"{len(results)} runner(s) in the ledger\n")
     return EXIT_OK
@@ -258,6 +261,7 @@ def _cmd_probe(args: argparse.Namespace, env: Mapping[str, str], out: TextIO) ->
         for b, ok in outcome.available.items()
     )
     out.write(f"raw exec response sample: {outcome.framing_sample[:200]!r}\n")
+    out.write(f"stdin round-trip: {outcome.stdin_check}\n")
     return EXIT_OK
 
 

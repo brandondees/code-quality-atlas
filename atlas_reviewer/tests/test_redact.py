@@ -48,6 +48,13 @@ def test_clean_text_is_untouched_and_truncation_is_marked():
     assert long.text == "x" * 10 + TRUNCATION_MARKER
 
 
+def test_truncation_is_recorded_with_the_original_length():
+    cut = redact("x" * 50, max_chars=10)
+    assert cut.truncated_from == 50
+    assert redact("x" * 10, max_chars=10).truncated_from is None
+    assert redact("x" * 50).truncated_from is None
+
+
 def test_redacted_text_cannot_be_constructed_directly():
     with pytest.raises(TypeError):
         RedactedText("raw secret", 0)

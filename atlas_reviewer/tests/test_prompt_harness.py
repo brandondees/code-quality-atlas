@@ -1,7 +1,12 @@
 # SPDX-License-Identifier: MIT
 from atlas_reviewer.harness import DEFAULT_BUNDLE, SkillBundleHarness, load_bundle
 from atlas_reviewer.ports import ReviewRequest
-from atlas_reviewer.prompt import CONTROLLER_INSTRUCTIONS, UntrustedBlock, build_prompt
+from atlas_reviewer.prompt import (
+    CONTROLLER_INSTRUCTIONS,
+    LoadedLens,
+    UntrustedBlock,
+    build_prompt,
+)
 from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.redact import Redactor, redact
 
@@ -52,3 +57,42 @@ def test_offline_provider_describes_what_a_live_call_would_receive():
     text = OfflineProvider().complete(prompt)
     assert "no model was called" in text
     assert "1 untrusted block(s) (diff)" in text
+
+
+def test_lens_bodies_and_coverage_go_into_the_trusted_system_prompt_only():
+    lenses = [LoadedLens("a-lens", "CHECKLIST A"), LoadedLens("b-lens", "CHECKLIST B")]
+    prompt = build_prompt(
+        "o/r #1",
+        "BUNDLE",
+        [UntrustedBlock("diff", redact("x"))],
+        NONCE,
+        lenses,
+        "included: a-lens, b-lens",
+    )
+    lens_part = prompt.system.split("--- lens bodies ---", 1)[1]
+    assert "Lens coverage: included: a-lens, b-lens" in lens_part
+    assert "=== lens: a-lens ===\nCHECKLIST A" in lens_part
+    assert "=== lens: b-lens ===\nCHECKLIST B" in lens_part
+    assert "CHECKLIST" not in prompt.user
+
+
+def test_no_lens_section_without_lenses():
+    prompt = build_prompt("o/r #1", "BUNDLE", [], NONCE)
+    assert "lens bodies" not in prompt.system.split("--- review procedure ---")[1]
+
+
+def test_the_harness_forwards_lenses_to_the_provider():
+    provider = OfflineProvider()
+    harness = SkillBundleHarness(provider, "B", Redactor(), nonce=lambda: NONCE)
+    harness.review(
+        ReviewRequest(
+            "o/r",
+            1,
+            HEAD,
+            (UntrustedBlock("diff", redact("x")),),
+            (LoadedLens("a-lens", "CHECKLIST A"),),
+            "included: a-lens",
+        )
+    )
+    (prompt,) = provider.prompts
+    assert "CHECKLIST A" in prompt.system

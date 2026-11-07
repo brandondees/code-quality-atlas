@@ -168,10 +168,14 @@ def _workflow_run(run: Json, fetched_at: datetime, redactor: Redactor) -> Workfl
     return WorkflowRun(run_id, item)
 
 
+_CHECK_RUN_URL = re.compile(r"/check-runs/(\d+)$")
+
+
 @dataclass(frozen=True)
 class Job:
     job_id: int
     item: EvidenceItem
+    check_run_id: int | None = None
 
 
 def parse_jobs(
@@ -196,7 +200,15 @@ def _job(job: Json, run: WorkflowRun, fetched_at: datetime, redactor: Redactor) 
         ),
         detail=redactor(f"workflow_run={run.run_id}", DETAIL_CHARS),
     )
-    return Job(job_id, item)
+    return Job(job_id, item, _check_run_id(job))
+
+
+def _check_run_id(job: Json) -> int | None:
+    """The job's own check run, from the documented `check_run_url` field.
+    Nothing is inferred from names or from id equality."""
+    url = job.get("check_run_url")
+    match = _CHECK_RUN_URL.search(url) if isinstance(url, str) else None
+    return int(match.group(1)) if match else None
 
 
 def job_log_item(

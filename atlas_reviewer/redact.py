@@ -48,6 +48,7 @@ _ASSIGNMENT = re.compile(
 class RedactedText:
     text: str
     redaction_count: int
+    truncated_from: int | None = None
     _mint: object = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -66,7 +67,10 @@ def redact(
         count += hits
     text, hits = _ASSIGNMENT.subn(r"\1\2\3[REDACTED:assignment]", text)
     count += hits
-    return RedactedText(_truncate(text, max_chars), count, _MINT)
+    cut = max_chars is not None and len(text) > max_chars
+    return RedactedText(
+        _truncate(text, max_chars), count, len(text) if cut else None, _MINT
+    )
 
 
 @dataclass(frozen=True)
