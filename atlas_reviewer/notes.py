@@ -103,7 +103,10 @@ def _tool_line(result: ToolResult) -> str:
 def _omission_line(omissions: Sequence[Omission]) -> str:
     if not omissions:
         return "Omissions and limits hit: none."
-    shown = [f"{o.source} ({o.limit})" for o in omissions[:MAX_LISTED_OMISSIONS]]
+    shown = [
+        f"{quote_untrusted(o.source)} ({quote_untrusted(o.limit)})"
+        for o in omissions[:MAX_LISTED_OMISSIONS]
+    ]
     extra = len(omissions) - len(shown)
     tail = f"; and {extra} more" if extra > 0 else ""
     return (
