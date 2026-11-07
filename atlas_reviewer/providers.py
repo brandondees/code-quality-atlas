@@ -4,11 +4,7 @@
 
 from __future__ import annotations
 
-import re
-
 from atlas_reviewer.prompt import Prompt
-
-_LABEL = re.compile(r'<untrusted-data id="[^"]*" label="([^"]*)">')
 
 
 class OfflineProvider:
@@ -22,7 +18,7 @@ class OfflineProvider:
 
     def complete(self, prompt: Prompt) -> str:
         self.prompts.append(prompt)
-        labels = _LABEL.findall(prompt.user)
+        labels = prompt.labels
         return (
             "Offline provider: no model was called, so this draft contains no model findings.\n"
             f"A live provider would have received {len(labels)} untrusted block(s) "

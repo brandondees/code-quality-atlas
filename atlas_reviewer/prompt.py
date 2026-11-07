@@ -65,8 +65,12 @@ class LoadedLens:
 
 @dataclass(frozen=True)
 class Prompt:
+    """`labels` names the fenced blocks in `user`, set by the controller;
+    count from it, since `user` carries PR text that can forge a fence."""
+
     system: str
     user: str
+    labels: tuple[str, ...] = ()
 
 
 def build_prompt(
@@ -86,7 +90,8 @@ def build_prompt(
         system += f"\n\n--- lens bodies ---\n{_lens_section(lenses, lens_coverage)}"
     fenced = (_fence(b, nonce) for b in blocks)
     user = "\n\n".join((f"Review target (from the operator): {subject}", *fenced))
-    return Prompt(system=system, user=user)
+    labels = tuple(_attr(b.label) for b in blocks)
+    return Prompt(system=system, user=user, labels=labels)
 
 
 def _lens_section(lenses: Sequence[LoadedLens], coverage: str) -> str:
