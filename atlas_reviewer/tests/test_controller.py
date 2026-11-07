@@ -3,6 +3,7 @@
 and through what the (offline) provider was sent."""
 
 import json
+from decimal import Decimal
 
 import pytest
 
@@ -812,6 +813,41 @@ def prompt_bound(prompt):
     from atlas_reviewer.budget import input_token_bound
 
     return input_token_bound(prompt.system + prompt.user)
+
+
+def test_the_largest_planned_prompt_passes_the_token_check_and_fits_one_reservation():
+    from atlas_reviewer.budget import (
+        BudgetRefusedError,
+        CallLimits,
+        ReviewBudget,
+        check_tokens,
+        prompt_token_room,
+        worst_case_usd,
+    )
+    from atlas_reviewer.controller import PROMPT_TOKEN_ROOM
+    from atlas_reviewer.openrouter import MODEL_ID
+    from atlas_reviewer.pricing import parse_model_terms
+
+    from .test_openrouter import catalog
+
+    limits = CallLimits()
+    sonnet = parse_model_terms(
+        {"data": {**catalog()["data"], "context_length": 200_000}}, MODEL_ID
+    )
+    assert PROMPT_TOKEN_ROOM == prompt_token_room(limits) == 176_000
+    check_tokens(PROMPT_TOKEN_ROOM, sonnet, limits)
+    with pytest.raises(BudgetRefusedError, match="context"):
+        check_tokens(PROMPT_TOKEN_ROOM + 1, sonnet, limits)
+    worst = worst_case_usd(PROMPT_TOKEN_ROOM, sonnet, limits)
+    assert worst == Decimal("1.596")
+    budget = ReviewBudget(limits)
+    first = budget.reserve(worst)
+    with pytest.raises(BudgetRefusedError, match="over \\$3.00"):
+        budget.reserve(worst)
+    budget.settle(first, "ok", Decimal("0.70"))
+    budget.settle(budget.reserve(worst), "ok", Decimal("0.70"))
+    budget.reserve(worst)
+    assert budget.committed_usd() == Decimal("2.996")
 
 
 def test_a_diff_that_fits_beside_the_prompt_goes_in_one_call():
