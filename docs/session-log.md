@@ -880,3 +880,35 @@ refused. That part gets its own omissions row listing its files, and the
 post-call controller note says PARTIAL. With the defaults, a diff the size of
 this PR's (412,078 characters) still cannot be fully reviewed, and the draft
 says so, naming the docs and tests that went unsent.
+
+## 2026-11-07 (same day) — D28: one exec shape and fail-fast on silence
+
+The owner's live `probe-runner --sequence review --tools review` at
+`fd56ca0` got further than either pilot: create, egress, the tool check,
+the upload (3,062,571 bytes in 0.25 s) and the unpack (0.33 s) all
+succeeded, and `python3 --version` with no stdin then timed out at 135 s.
+The ask was to diff how the failing exec was built against the ones that
+worked.
+
+The diff came back empty. All three no-input execs went through the same
+`SpritesClient.exec`, with the same method, headers, `Content-Length: 0`
+and query keys, and the same blocking read. Only the third `cmd` value and
+the timeout differed. So the request shape could not be the cause, and the
+write-up says so instead of shipping a "fix" for a difference that did not
+exist. Two real gaps came out of the comparison. No-input execs relied on
+the server's undocumented stdin when `stdin` is false. And the transport's
+one blocking `read` threw away partial output on a timeout, so the
+telemetry's "no frames" was never measured. The leading hypothesis is about
+the command, not the request: `python3` is the first binary the runner ever
+executed rather than resolved, and how the multi-runtime image provides it
+is unknown.
+
+Shipped: one request builder (`exec_request`, always `stdin=true` with an
+exact-length body) and one script wrapper (`exec_argv`: start marker,
+exactly N stdin bytes then EOF, exit marker), checked in a local `sh`
+against a stdin that never closes. A streaming transport on `http.client`
+gives each read a wall-clock budget, so a silent no-input exec fails at
+`--first-frame-seconds` and a stall keeps its bytes. The tool check now
+reports where each binary resolves. One trade-off is stated rather than
+hidden: until a live run shows whether HTTP exec output streams, a long
+tool that prints nothing could trip the window.

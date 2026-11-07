@@ -1,7 +1,7 @@
 # Manual reviewer service — first operator-triggered review path
 
-**Status: implemented; two owner-run live pilots on 2026-11-07, fixes since
-offline only (first slice 2026-11-06; live-readiness slice and pilot fixes
+**Status: implemented; two owner-run live pilots and one live probe on
+2026-11-07, fixes since offline only (first slice 2026-11-06; live-readiness slice and pilot fixes
 2026-11-07).** The service runs end to end offline: fixture GitHub,
 the in-memory Sprites fake, and the offline provider. The second slice adds
 everything a live run needs in code: pagination, head-SHA job-log and
@@ -255,11 +255,39 @@ tool execs passed theirs through bare. D27 records the fixes.
   tier; a part whose call fails lists its files as unreviewed; a controller
   note says complete or PARTIAL after the calls.
 
+### Third live probe and the exec-shape decisions (D28)
+
+The owner's `probe-runner --sequence review --tools review` at `fd56ca0`
+got through create, egress, the tool check, the upload (3,062,571 bytes,
+0.25 s) and the unpack (0.33 s). Then `python3 --version` (no stdin) timed
+out at 135 seconds. In code, the three no-input execs were identical
+requests apart from the third `cmd` value and the timeout. So the cause is
+in the command or the server, not in how the request was built. The old
+transport's single blocking `read` also threw away any bytes that had
+arrived, so "no frames" was never measured. Details and the remaining
+hypotheses are in the reviewer README's "Third live probe" section.
+
+- **One exec shape.** `sprites_api.exec_request` builds every exec: `cmd`
+  repeated, always `stdin=true`, and an octet-stream body that is exactly
+  the stdin bytes (possibly empty) with an explicit `Content-Length`. No
+  `env`, `dir`, `path` or `tty`. `runner.exec_argv` wraps every script:
+  start marker, then the script with exactly N bytes of stdin then EOF
+  (`head -c N |` or `</dev/null`), then the exit marker.
+- **Fail fast on silence.** Exec responses are read as they stream. A
+  command that sends no input fails, labelled with its stage and purpose,
+  if no byte arrives within `--first-frame-seconds` (default 30). A stall
+  keeps the bytes that did arrive and reports their count, the frames seen
+  and the last output.
+- **Resolution, not execution, in the tool check.** It now also reports
+  each binary's `command -v` path and `readlink -f` target.
+
 ### Still unverified against live responses
 
-- **The Sprites exec response body.** Observed for a small echo, and a
-  3 MiB stdin round-trip passed in the second pilot's probe. A review's
-  upload and unpack have not yet been seen to succeed.
+- **The Sprites exec response body.** Observed for a small echo, a 3 MiB
+  stdin round-trip, and (third probe) a review's upload and unpack. Whether
+  output streams before the command exits, and what the
+  `stdin=true`-with-empty-body shape and the new wrapper do live, are not
+  yet observed.
 - **The GitHub and OpenRouter response shapes.** The pilot's draft held a
   check run, job, log and workflow run, so those list shapes parsed (inferred
   from the owner's report, not a recorded response). Not yet seen live: a

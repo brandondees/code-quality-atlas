@@ -38,6 +38,9 @@ same command. Useful flags:
   characters each model call may carry.
 - `--events FILE` writes lifecycle telemetry as JSONL (see Lifecycle
   telemetry). A dry run writes none without it.
+- `--first-frame-seconds N` (default 30, also on `probe-runner`) fails any
+  exec that sends no input if no output byte arrives within N seconds (see
+  One exec shape).
 
 Tests: `python -m pytest atlas_reviewer/tests -q --cov=atlas_reviewer`.
 
@@ -257,10 +260,42 @@ before any sink sees it.
 
 `Telemetry.span` re-raises a failure with its phase and step, how long the
 step ran, and how far into the run it failed, for example
-`exec / tool check failed after 60.0s (61.2s into the run): POST
-https://api.sprites.dev/v1/sprites/NAME/exec failed: The read operation timed
-out`. The innermost step labels the error, so nothing surfaces as a bare
-timeout.
+`exec / python-compileall version failed after 30.0s (32.2s into the run):
+tool python-compileall stage, python-compileall version: silent -- no output
+frame for a command that sends no input, not even the start marker (POST
+https://api.sprites.dev/v1/sprites/NAME/exec: no response byte within 30s)`.
+The innermost step labels the error, so nothing surfaces as a bare timeout.
+Exec events also carry their `stage` and `first_frame_s`, and the tool
+check's event records where each binary resolved (`path_python3`, for
+example `/usr/bin/python3 -> /usr/bin/python3.13`).
+
+## One exec shape
+
+Every exec goes through one builder on each side. `sprites_api.exec_request`
+always sends `cmd` (repeated) and `stdin=true` with an octet-stream body that
+is exactly the stdin bytes, possibly none, with an explicit `Content-Length`.
+`env`, `dir`, `path` and `tty` are never sent (OpenAPI 0.1.12 has no `tty`
+parameter; the HTTP exec is non-TTY only). `runner.exec_argv` wraps every
+script the same way:
+
+```sh
+sh -c 'echo __ATLAS_START__; head -c N | { SCRIPT
+}; echo __ATLAS_EXIT__=$?'     # N bytes of input
+sh -c 'echo __ATLAS_START__; { SCRIPT
+} </dev/null; echo __ATLAS_EXIT__=$?'     # no input
+```
+
+So every command reads exactly the bytes sent and then EOF, and none can wait
+on the exec channel's own stdin, whose EOF behaviour is undocumented. The
+response is read as it streams (`http.UrllibStreamingTransport`, which uses
+`http.client` and so ignores proxy variables). A command that sends no input
+must produce a first byte within `--first-frame-seconds`, and the start
+marker makes that immediate for any command that actually started. A stall
+after some output keeps those bytes, and the error names how many arrived,
+the frames seen, and the last output. Until a live run shows whether the HTTP
+exec streams output or buffers it until exit, a long tool that prints nothing
+could trip the window; its error says "silent", and raising the flag tells
+the two apart.
 
 ## Module layout
 
@@ -282,7 +317,7 @@ timeout.
 | `instrumented.py` | `GitHubReader` wrapper that records every read as an event | via `GitHubReader` |
 | `lenses.py` | choose lenses from changed paths and PR text, load and budget their bodies | reads the bundle |
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`) | no |
-| `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → upload → unpack → tools → destroy), `probe_runner` | via `SpritesApi` |
+| `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → upload → unpack → tools → destroy), `probe_runner`, the one exec wrapper (`exec_argv`) | via `SpritesApi` |
 | `gather.py` | head-SHA CI evidence: lists, job logs, artifact contents, omissions | via `GitHubReader` |
 | `controller.py` | one event in, one draft out | via ports |
 | `harness.py` | skill-bundle harness: loads `collapsed/skills/reviewing-a-change/SKILL.md` | reads the bundle |
@@ -310,8 +345,8 @@ timeout.
   binary) runs before the source is uploaded, so PR code cannot answer it.
   A binary it does not report present is never executed and its tool is
   UNKNOWN. Source goes in as the head-SHA tarball over exec stdin
-  (`head -c N > /tmp/atlas-source.tar.gz`, so nothing waits for a stdin
-  EOF) with a 300-second budget, and the runner reports the bytes it wrote,
+  (fed through `head -c N` into `/tmp/atlas-source.tar.gz`, so nothing
+  waits for a stdin EOF) with a 300-second budget, and the runner reports the bytes it wrote,
   which must equal the bytes sent. A second exec unpacks it into `/work`
   with a 120-second budget. The tool check has 60 seconds and each tool
   exec its timeout plus 15. Every budget is capped by the remaining review
@@ -402,3 +437,38 @@ since then: every exec error now names its purpose, timeout, duration and
 time into the run; upload and unpack are separate execs; telemetry records
 every step; `probe-runner --sequence review` reproduces the exec sequence
 without a model; and the diff is reviewed in risk-ordered parts.
+
+## Third live probe (owner-reported, 2026-11-07, head `fd56ca0`)
+
+Owner-reported; nothing here was observed from this repo's sessions or CI.
+`probe-runner --sequence review --tools review` got through create, egress,
+the tool check, the upload (3,062,571 bytes in 0.25 s) and the unpack
+(0.33 s). Then `exec / python-compileall version` (`python3 --version`, no
+stdin) timed out at its 135-second budget.
+
+What the code shows: all three no-input execs (tool check, unpack, version)
+were built the same way: the same `SpritesClient.exec` call, method, headers,
+no body (urllib sends `Content-Length: 0`), the same query keys (three `cmd`,
+no `stdin`), and the same blocking `read()` to end of stream. They differed
+only in the third `cmd` value and the timeout. So no request-shape difference
+explains the hang. The real differences:
+
+- **The command.** It was the first exec to run a binary the tool check had
+  only resolved with `command -v`. The docs list Python among many runtimes
+  preinstalled in the image. How `python3` is provided there (a plain binary
+  or a version-manager shim that does work before starting the interpreter,
+  which deny-all egress could block) is not known. `python3 --version`
+  prints before Python imports anything, so the unpacked PR files cannot
+  have affected it.
+- **The evidence.** The old transport read the whole body with one blocking
+  `read`, so a timeout discarded any bytes that had arrived. "No frames" was
+  not measured: the command may have printed and then the stream not closed.
+- **Stdin.** No-input execs relied on whatever the server attaches to stdin
+  when `stdin` is false, which the spec does not document. `python3 --version`
+  does not read stdin, so this is not the likely cause, but it was the one
+  stdin difference between the execs, and it is now gone.
+
+The next probe tells these apart. The tool check now reports where `python3`
+resolves and what that links to. Silence fails within 30 seconds, labelled.
+A stall keeps the bytes that arrived, and the start marker shows whether the
+shell started at all.
