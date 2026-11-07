@@ -432,6 +432,9 @@ jobs:
         # no credentials and no network calls beyond a loopback HTTP server.
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: python -m pytest atlas_reviewer/tests -q --cov=atlas_reviewer
+      - name: reviewer service dry run (offline fixture PR event)
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        run: python -m atlas_reviewer --state-dir "$RUNNER_TEMP/atlas-reviewer-state" review --event atlas_reviewer/fixtures/sample-pr/event.json --dry-run
       - name: eval structure (all skills)
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: python -m tooling.cli eval
