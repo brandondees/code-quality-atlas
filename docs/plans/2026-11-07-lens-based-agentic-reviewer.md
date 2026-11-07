@@ -117,23 +117,36 @@ All of this runs on the controller unless it is marked *(Sprite)*.
      the same way, and the finding is labelled "removed lines". A quote
      that matches neither the head range nor a removed line fails.
 7. **Merge.** One model call with `synthesis.md` as its instructions, over
-   the checked findings, the coverage ledger and the tool-evidence
-   coverage line. It produces the verdict, ranked sections, tensions,
-   coverage and process notes in `synthesis.md`'s output format.
-   - **Reconciling the merge.** The merge is model output, so the
-     controller checks it against the checked findings before the draft
-     uses it. Every checked finding at or above the floor must appear in
-     the ranked sections or be named as merged into one that does.
+   the checked findings (each carrying the ID from step 6), the coverage
+   ledger and the tool-evidence coverage line. It produces the verdict,
+   ranked sections, tensions, coverage and process notes in
+   `synthesis.md`'s output format, plus the ID citations below.
+   - **Finding IDs.** `synthesis.md`'s format has no finding identifiers,
+     and this design does not change that file. After the checks in step
+     6, the controller mints an ID for each checked finding,
+     `L<lens>-F<n>` (for example `L3-F2`): the lens's index in the run,
+     then the finding's index within that lens. The model does not choose
+     IDs. Unverified findings are numbered the same way and stay off the
+     merge input. The merge call gets a controller addendum: every ranked
+     entry and every permitted exclusion cites the source IDs it comes
+     from, `merged: L1-F4, L3-F2` when several were deduped and one ID
+     when not.
+   - **Reconciling the merge.** The controller matches on those IDs and
+     on severity, not on the prose. Every checked finding at or above the
+     floor must be cited, on its own or inside a `merged:` list.
      `synthesis.md`'s permitted exclusions (below-floor findings sent to
      *Non-blocking*, and pre-existing or improvement findings that don't
-     set the verdict) count as present. No finding may appear that no lens
-     reported, and no severity may rise (`synthesis.md` forbids inflation).
-     The verdict must follow `synthesis.md`'s rule from the highest
-     surviving verdict-setting severity: one Blocker means block.
+     set the verdict) count as present only when their ID is cited there.
+     A reply that cites an unknown ID, omits a known at-or-above-floor ID,
+     or raises a severity above every cited source is a mismatch. That
+     unknown-ID check is what rejects a finding no lens reported.
+     `synthesis.md` forbids raising a severity. The verdict must follow
+     `synthesis.md`'s rule from the highest surviving verdict-setting
+     severity: one Blocker means block.
    - **Merge mismatch.** On any mismatch the merged text is kept as
      untrusted output, marked "merge inconsistent", and has no verdict
-     line. The draft lists every checked finding unmerged and ranked by
-     severity, as when the merge fails.
+     line. The draft lists every checked finding unmerged, with its ID,
+     ranked by severity, as when the merge fails.
 8. **Write the draft and destroy the Sprite.** The draft keeps today's
    controller-generated sections (runner proof, budget, telemetry,
    omissions, lens coverage). The merged review sits under the existing
@@ -171,7 +184,8 @@ All of this runs on the controller unless it is marked *(Sprite)*.
   clean and matches `synthesis.md`'s collect-then-merge model.
 - **Picker and merge are single calls.** Neither one gets tools. The
   picker sees PR text and paths, as in D32. The merge sees only
-  controller-checked findings and the coverage ledger.
+  controller-checked findings, each with its minted ID, and the coverage
+  ledger.
 - **Prompt caching.** The system prompt and first user turn are stable
   for each lens, so a provider prompt cache could cut input cost a lot.
   Whether caching is allowed under the pinned zero-data-retention routing
@@ -254,14 +268,27 @@ Two options, both keeping the controller free of a working tree:
   limit. A shallow fetch won't do: per git-bundle(1), a bundle can list
   prerequisite commits that the receiving repository must already have,
   and the Sprite's empty repository has none, so the offline clone would
-  fail. The full-history fetch is bounded by a byte cap (proposal: the
-  existing 9 MiB upload cap). Over the cap, staging falls back to
-  Option B, and the draft says history-dependent tools are limited. The
-  controller writes a bundle and uploads it through the existing stdin
-  path. The Sprite clones from the file with no network. The bundle carries objects
-  and refs only, never a remote URL or a token. The cost is git on the
-  controller and a fetch of PR-controlled objects onto the trusted host.
-  Those objects are never checked out or executed there.
+  fail. `git fetch` has no byte cap: the pack can be measured only after
+  it has arrived, so a check on the finished bundle does not bound what
+  was written on the trusted host. The 9 MiB figure is the existing upload
+  cap, and it bounds the fetch only through the process around it. The
+  fetch is not started when the repository's `size` from
+  `GET /repos/{owner}/{repo}` is already over 9 MiB. That field is an
+  approximate whole-repo disk size, calculated hourly and 0 on a new
+  repository (the REST schema does not state the unit; public reports,
+  including GitHub support, say kilobytes, and fork networks undercount
+  because objects are shared). It is an early-out, not the cap. The fetch
+  that does start runs under a wall-clock timeout, and a watchdog kills it
+  once the temp directory passes 9 MiB. A write already in flight can land
+  past that line; the process is then killed and the directory deleted.
+  Either stop chooses Option B and uploads no bundle. A bundle that is
+  still over 9 MiB is discarded the same way. The draft says
+  history-dependent tools are limited. The controller writes a bundle and
+  uploads it through the existing stdin path. The Sprite clones from the
+  file with no network. The bundle carries objects and refs only, never a
+  remote URL or a token. The cost is git on the controller and a fetch of
+  PR-controlled objects onto the trusted host, bounded as above. Those
+  objects are never checked out or executed there.
 - **Option B — two tarballs.** The controller fetches the merge-base and
   head tarballs, as it already fetches head. The Sprite builds a
   two-commit repo from them. Diff, list, read and grep work fully.
@@ -343,8 +370,8 @@ through the existing redactor.
 - **Merging and deduplication with lens attribution.** `synthesis.md`,
   unchanged, as one merge call. The controller checks the finding
   contract and the quote-the-line gate that `synthesis.md` already
-  requires. It then reconciles the merge output against the checked
-  findings (step 7).
+  requires, mints an ID per checked finding, and reconciles the merge
+  output on those IDs (step 7).
 - **Coverage.** `synthesis.md`'s *Coverage & limitations* and
   `tool-evidence.md`'s coverage line, filled from the controller's
   per-lens ledger. The ledger records what each lens actually read:
@@ -403,7 +430,7 @@ limit, so this design can't change it. See open question 1.
 | Review budget or call cap reached | Remaining lenses are "selected, not run" (`synthesis.md` coverage wording). |
 | Picker fails | Critical tier, as D32 does now. |
 | Merge call fails or doesn't parse | The draft lists each lens's checked findings unmerged, ranked by severity, under "not synthesized". There is no verdict line. |
-| Merge drops or changes a checked finding, adds one, or gives a verdict its findings don't support | "Merge inconsistent": the same unmerged listing and no verdict line, with the merged text kept as untrusted output (see step 7). |
+| Merge cites an unknown finding ID, omits an at-or-above-floor ID, raises a severity, or gives a verdict its findings don't support | "Merge inconsistent": the same unmerged listing, with IDs, and no verdict line. The merged text is kept as untrusted output (see step 7). |
 | Deadline passes | The same as the Sprite dying: what finished is reported and the rest is not run. |
 | Model returns another model's response | Rejected, as D25 requires. |
 
