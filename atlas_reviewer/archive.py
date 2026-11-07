@@ -124,16 +124,20 @@ def _read_entries(zf: zipfile.ZipFile, limits: ArchiveLimits) -> ArchiveRead:
 def _entry(
     zf: zipfile.ZipFile, info: zipfile.ZipInfo, limits: ArchiveLimits, budget: _Budget
 ) -> ArchiveMember | str:
+    """The declared size is charged before decompressing, so an entry that
+    fails mid-read (a bad CRC is only detected at its end) still spends the
+    budget its decompression cost."""
     refusal = _refuse_header(info, limits) or _refuse_budget(info, budget)
     if refusal:
         return refusal
+    cap = min(limits.max_entry_bytes, budget.left)
+    budget.left -= info.file_size
     try:
-        data = _bounded_read(zf, info, min(limits.max_entry_bytes, budget.left))
+        data = _bounded_read(zf, info, cap)
     except _READ_ERRORS as exc:
         return f"unreadable entry ({type(exc).__name__})"
     if data is None:  # pragma: no cover -- zipfile stops at the declared size
         return "decompresses past the per-entry or total size cap"
-    budget.left -= len(data)
     if b"\x00" in data:
         return "binary content"
     return ArchiveMember(info.filename, data.decode("utf-8", errors="replace"))

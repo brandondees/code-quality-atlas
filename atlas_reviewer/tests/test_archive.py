@@ -158,3 +158,40 @@ def test_header_that_under_declares_its_size_is_unreadable_not_overread():
 def test_unprintable_entry_names_are_neutralised_in_reasons():
     read = read_zip(make_zip(("evil\x1b[2J.sh", "x")))
     assert read.skipped == ("evil?[2J.sh: file type not on the text allowlist",)
+
+
+def corrupt_central_crcs(data):
+    """Flip every central-directory CRC: `zipfile` checks it only after
+    decompressing the whole entry, so each read fails at its end."""
+    data = bytearray(data)
+    at = data.find(b"PK\x01\x02")
+    while at != -1:
+        data[at + 16 : at + 20] = bytes(b ^ 0xFF for b in data[at + 16 : at + 20])
+        at = data.find(b"PK\x01\x02", at + 4)
+    return bytes(data)
+
+
+def test_entries_that_fail_mid_read_still_spend_the_total_budget():
+    """Pilot 3, archive finding: a failed read was never charged, so bad-CRC
+    entries could force decompression far past the total budget."""
+    mib = 1024 * 1024
+    entries = [(f"part-{i}.txt", "x" * mib) for i in range(6)]
+    data = corrupt_central_crcs(make_zip(*entries))
+    limits = ArchiveLimits(max_total_uncompressed_bytes=3 * mib, max_ratio=10_000)
+    read = read_zip(data, limits)
+    reasons = list(skipped(read).values())
+    assert (
+        reasons
+        == ["unreadable entry (BadZipFile)"] * 3
+        + ["total uncompressed budget spent"] * 3
+    )
+    assert read.members == ()
+
+
+def test_a_successful_read_charges_its_declared_size_once():
+    mib = 1024 * 1024
+    entries = [(f"part-{i}.txt", "x" * mib) for i in range(4)]
+    limits = ArchiveLimits(max_total_uncompressed_bytes=3 * mib, max_ratio=10_000)
+    read = read_zip(make_zip(*entries), limits)
+    assert [m.name for m in read.members] == ["part-0.txt", "part-1.txt", "part-2.txt"]
+    assert skipped(read) == {"part-3.txt": "total uncompressed budget spent"}
