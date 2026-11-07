@@ -127,7 +127,7 @@ class GitHubClient:
 
     def list_workflow_runs(self, repo: str, branch: str) -> Listing:
         return self._list(
-            f"/repos/{repo}/actions/runs?event=pull_request&per_page={_PER_PAGE}"
+            f"/repos/{repo}/actions/runs?per_page={_PER_PAGE}"
             f"&branch={quote(branch, safe='')}",
             "workflow_runs",
         )

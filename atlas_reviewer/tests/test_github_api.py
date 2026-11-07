@@ -53,6 +53,7 @@ def test_github_client_only_ever_sends_get():
     assert t.requests[0][2]["Authorization"] == f"Bearer {TOKEN}"
     assert t.requests[1][2]["Accept"] == "application/vnd.github.diff"
     assert "branch=feat%2Fa%20b" in t.requests[3][1]
+    assert "event=" not in t.requests[3][1]
     assert t.requests[4][1] == f"{API}/repos/o/r/actions/runs/5/jobs?per_page=100"
     assert (t.requests[6][1], t.requests[6][5]) == (
         f"{API}/repos/o/r/actions/jobs/7/logs",
