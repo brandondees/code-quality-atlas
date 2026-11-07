@@ -38,9 +38,11 @@ review draft to stdout or a file.
 point (`python -m atlas_reviewer`), its own tests (`atlas_reviewer/tests/`),
 its own CI steps (a separate pytest + coverage run and an offline dry run),
 and its own README. Nothing under `skills/`, `collapsed/`, `tooling/`, or
-`commands/` imports it. It reads exactly one thing from the rest of the
-repo: the generated `collapsed/skills/reviewing-a-change/SKILL.md`, which
-is the skill bundle it runs, read as data.
+`commands/` imports it. It reads three things from the rest of the repo,
+all as data: the generated `collapsed/skills/reviewing-a-change/SKILL.md`
+(the skill bundle it runs), `skills/choosing-review-lenses/SKILL.md` (the
+lens picker's instructions), and the lens bodies under
+`collapsed/skills/reviewing-a-change/reference/lenses/<name>/body.md`.
 
 - **Not a conflict with the decision log.** No `D`-entry rules out code
   beyond the skill pipeline in this repo. D1 frames the project as a skill
