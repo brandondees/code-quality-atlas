@@ -93,6 +93,11 @@ def test_only_matched_evidence_has_a_verdict(conclusion, expected):
     )
 
 
+def test_missing_evidence_is_unknown():
+    missing = Missing(SourceKey(SourceKind.CHECK_RUN, "gate"), "absent")
+    assert outcome(missing) is Outcome.UNKNOWN
+
+
 def test_every_kind_of_evidence_has_a_key():
     key = SourceKey(SourceKind.CHECK_RUN, "gate")
     assert evidence_key(Matched(item(), HEAD)) == key
