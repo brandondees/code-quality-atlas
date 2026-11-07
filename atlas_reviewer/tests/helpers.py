@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -11,6 +12,7 @@ from atlas_reviewer.domain import (
     SourceKind,
     ToolInfo,
 )
+from atlas_reviewer.http import HttpResponse
 from atlas_reviewer.redact import redact
 
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "sample-pr"
@@ -66,3 +68,26 @@ class CallbackRule:
 def fake_token(prefix: str, length: int = 36) -> str:
     """Token-shaped strings are built at runtime so no literal one is committed."""
     return prefix + ("Ab1" * length)[:length]
+
+
+class Recorder:
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.requests = []
+
+    def request(self, method, url, headers, body, timeout_s, max_bytes=None):
+        self.requests.append((method, url, dict(headers), body, timeout_s, max_bytes))
+        return self.responses.pop(0)
+
+    def stream(self, method, url, headers, body, window, max_bytes=None):
+        self.requests.append((method, url, dict(headers), body, window, max_bytes))
+        return self.responses.pop(0)
+
+
+def ok(payload=None, status=200, body=None, headers=None):
+    raw = (
+        body
+        if body is not None
+        else json.dumps(payload if payload is not None else {}).encode()
+    )
+    return HttpResponse(status, headers or {}, raw)
