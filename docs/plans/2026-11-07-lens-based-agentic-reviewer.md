@@ -87,6 +87,9 @@ All of this runs on the controller unless it is marked *(Sprite)*.
    the operator's depth. Triage skips the call and runs the critical tier.
 4. **Run the repo's configured checks** once, per `tool-evidence.md`, through
    the bridge's closed check set. The results become the evidence block.
+   A configured check outside that set (for example ruff or pytest, when
+   no head-SHA CI evidence covers it) is not run. It is listed as an
+   unrun check in the coverage line, never as passing.
 5. **Run lens subagents** up to the parallelism limit. Each one:
    - **System prompt:** the controller's agent instructions, then that
      lens's `body.md`, then the *Finding contract* section of
@@ -158,7 +161,10 @@ All of this runs on the controller unless it is marked *(Sprite)*.
   - the Sprite becomes unavailable.
 
   In every case except the first, the lens is reported as **partial**
-  with what it read. It is never reported as clean.
+  with what it read. It is never reported as clean. The first case counts
+  as complete only if the ledger shows the lens read the change: at least
+  one `diff_file` page, or a `read_file` of a changed file. An empty list
+  with no such read is partial, "no source read".
 - **Scheduling.** The controller runs subagents with a bounded worker pool
   (proposal: 2 at once, at most 4). Each subagent owns its message
   history. No lens sees another lens's history. That keeps attribution
@@ -378,7 +384,7 @@ limit, so this design can't change it. See open question 1.
 | Tool timeout or output cap | A "timed out" or truncation marker goes back. It is a coverage gap in the ledger and the coverage line. |
 | Sprite dies mid-review | Lenses still running end as partial. Finished lenses keep their findings. Destroy and verify run as today, and the ledger and sweep cover a failed destroy. |
 | Lens hits its turn or budget limit | Partial. Its parsed findings so far are kept if they parse, and coverage lists what it read. |
-| Lens output doesn't parse against the finding contract | No findings from that lens. It is listed as "ran, no valid findings". Nothing is fabricated for it. |
+| Lens output doesn't parse against the finding contract | Partial: "output did not parse". No findings from that lens, and nothing is fabricated for it. The merge and the draft get it as a coverage gap, never as a clean lens. |
 | Quote-the-line gate fails | The finding moves to an "unverified" list in the draft. It never feeds the verdict. |
 | Review budget or call cap reached | Remaining lenses are "selected, not run" (`synthesis.md` coverage wording). |
 | Picker fails | Critical tier, as D32 does now. |
