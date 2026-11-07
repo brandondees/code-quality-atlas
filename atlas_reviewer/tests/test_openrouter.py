@@ -15,7 +15,12 @@ from atlas_reviewer.budget import (
     worst_case_usd,
 )
 from atlas_reviewer.http import HttpResponse
-from atlas_reviewer.openrouter import MODEL_ID, PINNED_PROVIDERS, OpenRouterProvider
+from atlas_reviewer.openrouter import (
+    LISTED_PROVIDER_SLUGS,
+    MODEL_ID,
+    PINNED_PROVIDERS,
+    OpenRouterProvider,
+)
 from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.pricing import (
     PricingUnknownError,
@@ -119,6 +124,28 @@ def test_request_is_pinned_to_one_model_with_no_fallbacks_or_plugins():
         "zdr": True,
         "max_price": {"prompt": 6.0, "completion": 22.5},
     }
+    assert set(PINNED_PROVIDERS) == LISTED_PROVIDER_SLUGS
+    assert "google-vertex" not in sent["provider"]["only"]
+
+
+@pytest.mark.parametrize(
+    "slugs",
+    [
+        ("google-vertex",),
+        ("google-vertex/us-east5",),
+        ("amazon-bedrock/eu-west-1",),
+        ("openai",),
+        ("amazon-bedrock", "not-a-provider"),
+        (),
+    ],
+)
+def test_unknown_or_unlisted_provider_slugs_fail_closed(slugs):
+    fake = OpenRouterFake(reply(completion()))
+    with pytest.raises(
+        BudgetRefusedError, match="unlisted provider slugs|allowlist is empty"
+    ):
+        OpenRouterProvider(fake, KEY, providers=slugs)
+    assert fake.requests == []
 
 
 def test_catalog_is_fetched_without_the_key():

@@ -6,9 +6,21 @@
 - Provider routing is pinned (`provider.only`, `allow_fallbacks: false`,
   `require_parameters`, `zdr`, `data_collection: deny`, and `max_price` at
   the catalog's highest prices) per
-  https://openrouter.ai/docs/guides/routing/provider-selection. The
-  provider slugs are the ZDR endpoints the 2026-11-06 catalog research
-  listed for this model; a slug that no longer serves it fails the call.
+  https://openrouter.ai/docs/guides/routing/provider-selection (fetched
+  2026-11-07). That page's "Base Slug Matching" says a bare provider slug
+  in `only` matches every eligible endpoint of that provider, regions
+  included. A read-only check of the public provider list the same day
+  found no bare `google-vertex` endpoint, only `google-vertex/global`,
+  `google-vertex/us`, and `google-vertex/europe`, and found Amazon Bedrock
+  as the base slug `amazon-bedrock` plus region slugs it did not name.
+  `PINNED_PROVIDERS` is exactly those named slugs. A slug outside
+  `LISTED_PROVIDER_SLUGS` is refused before any request, so a doc example
+  (`google-vertex/us-east5`, `amazon-bedrock/eu-west-1`) or the bare
+  Vertex slug cannot widen routing. Bedrock's unnamed region slugs are
+  not pinned. https://openrouter.ai/docs/guides/features/in-region-routing
+  ("Regional Endpoints on the Global Domain") says a bare
+  `amazon-bedrock` does not pin that provider's regional-surcharge
+  endpoints.
 - `preflight()` must pass before any inference: it reads the key's own
   status (`GET /api/v1/key`) and refuses unless the key has a hard credit
   limit of at most `KEY_LIMIT_MAX_USD`, with credit left.
@@ -23,7 +35,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from decimal import Decimal
 from typing import Any
 
@@ -50,10 +62,40 @@ from atlas_reviewer.prompt import Prompt
 
 API_URL = "https://openrouter.ai/api/v1"
 MODEL_ID = "anthropic/claude-sonnet-5.5"
-PINNED_PROVIDERS = ("amazon-bedrock", "google-vertex")
+# Slugs named by the 2026-11-07 public-list check and the routing docs.
+# Not an inventory of every Bedrock region: those were reported, not named.
+LISTED_PROVIDER_SLUGS = frozenset(
+    {
+        "amazon-bedrock",
+        "google-vertex/europe",
+        "google-vertex/global",
+        "google-vertex/us",
+    }
+)
+PINNED_PROVIDERS = (
+    "amazon-bedrock",
+    "google-vertex/europe",
+    "google-vertex/global",
+    "google-vertex/us",
+)
 KEY_LIMIT_MAX_USD = Decimal("5.00")
 RETRYABLE = frozenset({408, 429, 500, 502, 503, 504})
 _PER_MILLION = Decimal(1_000_000)
+
+
+def _require_listed(slugs: Sequence[str]) -> tuple[str, ...]:
+    """Refuse before any request when a slug is not on the reviewed list.
+
+    An empty allowlist is refused too: `only: []` would drop the pin.
+    """
+    if not slugs:
+        raise BudgetRefusedError("refusing inference: provider allowlist is empty")
+    unknown = [slug for slug in slugs if slug not in LISTED_PROVIDER_SLUGS]
+    if unknown:
+        raise BudgetRefusedError(
+            "refusing unlisted provider slugs: " + ", ".join(unknown)
+        )
+    return tuple(dict.fromkeys(slugs))
 
 
 class OpenRouterProvider:
@@ -68,12 +110,14 @@ class OpenRouterProvider:
         api_url: str = API_URL,
         timeout_s: float = 300.0,
         sleep: Callable[[float], None] = lambda _s: None,
+        providers: Sequence[str] = PINNED_PROVIDERS,
     ) -> None:
         self._transport = transport
         self._key = api_key
         self._api_url = api_url.rstrip("/")
         self._timeout_s = timeout_s
         self._sleep = sleep
+        self._providers = _require_listed(providers)
         self.budget = ReviewBudget(limits or CallLimits())
         self._key_status: KeyStatus | None = None
 
@@ -152,7 +196,7 @@ class OpenRouterProvider:
             "reasoning": {"max_tokens": limits.reasoning_max_tokens, "exclude": True},
             "stream": False,
             "provider": {
-                "only": list(PINNED_PROVIDERS),
+                "only": list(self._providers),
                 "allow_fallbacks": False,
                 "require_parameters": True,
                 "data_collection": "deny",

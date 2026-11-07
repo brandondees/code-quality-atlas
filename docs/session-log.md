@@ -765,3 +765,23 @@ check could never fire, because `zipfile` never yields more than the
 declared size. That check was removed, and the docstring now states the
 real mechanism, which is tested with a header that under-declares its
 size.
+
+## 2026-11-07 (same day) — provider `only` uses the slugs the public list exposes
+
+A read-only check of OpenRouter's public provider list found Vertex
+exposed as `google-vertex/global`, `google-vertex/us`, and
+`google-vertex/europe`, not as bare `google-vertex`. Bedrock is listed as
+the base slug `amazon-bedrock` plus region slugs that check did not name.
+The provider-selection doc's "Base Slug Matching" says a bare slug in
+`only` matches every eligible endpoint of that provider, regions included,
+so the old pin would have widened routing past the endpoints that were
+reviewed. `PINNED_PROVIDERS` is now those four named slugs, with
+`allow_fallbacks` still false. Anything else, including the bare Vertex
+slug and the docs' region examples `google-vertex/us-east5` and
+`amazon-bedrock/eu-west-1`, is refused before a request. The in-region
+routing doc says a bare `amazon-bedrock` does not pin that provider's
+regional-surcharge endpoints, which is why the unnamed Bedrock regions
+stay off the list rather than being guessed.
+
+Still unverified against live responses: the Sprites exec response body,
+the GitHub and OpenRouter response shapes, and the input-token bound.

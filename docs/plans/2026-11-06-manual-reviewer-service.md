@@ -179,28 +179,33 @@ a token into a Sprite.
 
 ## Live-run gaps
 
-Each of these is tested only against fakes:
+Setup still required, all of it tested only against fakes:
 
-1. **Sprites exec response framing.** The request shapes follow the
-   OpenAPI document; the response body does not appear in it. Run
-   `probe-runner` once from a trusted machine and check the raw sample.
-   Also confirm which of `python3`, `ruff` and `shellcheck` the image has.
-   The probe reports them, and a missing one is UNKNOWN either way.
+1. **Sprites probe.** Run `probe-runner` once from a trusted machine and
+   check the raw sample. Also confirm which of `python3`, `ruff` and
+   `shellcheck` the image has. The probe reports them, and a missing one
+   is UNKNOWN either way.
 2. **GitHub App installation.** Set `ATLAS_GITHUB_APP_ID` (App 5648875),
    `ATLAS_GITHUB_APP_PRIVATE_KEY` and `ATLAS_GITHUB_INSTALLATION_ID`. The
-   installation ID is not recorded in this repo. The mint request and the
-   read-only check are tested against a recorded response shape taken from
-   GitHub's docs, not against GitHub.
-3. **OpenRouter.** Set `ATLAS_OPENROUTER_API_KEY` to a key whose hard
-   credit limit is at most $5. Not yet checked live:
-   - the catalog's price fields for this model, and whether
-     `pricing.overrides` appears
-   - whether the pinned provider slugs serve the model
-   - whether `usage.cost` is returned
-   - the input-token bound, which assumes no token encodes less than one
-     UTF-8 byte. That holds for byte-level BPE tokenizers but has not been
-     checked against this model's tokenizer.
+   installation ID is not recorded in this repo.
+3. **OpenRouter key.** Set `ATLAS_OPENROUTER_API_KEY` to a key whose hard
+   credit limit is at most $5.
 4. **A test PR** with finished CI at the event's head SHA.
+
+### Still unverified against live responses
+
+- **The Sprites exec response body.** Request shapes follow the OpenAPI
+  document. The 200 body does not appear in it.
+- **The GitHub and OpenRouter response shapes.** The token mint, jobs,
+  logs, and artifact endpoints, and the catalog pricing, `pricing.overrides`,
+  key status, and `usage.cost`, are taken from the docs. Whether one of
+  the pinned slugs actually serves this model is part of that: it has not
+  been seen in a live completion.
+- **The input-token bound.** It assumes no token encodes less than one
+  UTF-8 byte, plus 64 tokens of message overhead. That holds for
+  byte-level BPE tokenizers generally, and it has not been checked
+  against this model's tokenizer. Reported usage is recorded, so a
+  violated assumption shows up in the draft.
 
 ### Second-slice decisions (D25)
 
@@ -215,6 +220,22 @@ Each of these is tested only against fakes:
   transport errors, with 2 s and then 4 s backoff. Every attempt counts
   toward the three-call cap. A served-model mismatch, an empty review, or
   any other 4xx is not retried.
+- **Provider slugs.** `provider.only` is `amazon-bedrock`,
+  `google-vertex/global`, `google-vertex/us`, and `google-vertex/europe`,
+  with `allow_fallbacks: false`. The provider-selection doc
+  (https://openrouter.ai/docs/guides/routing/provider-selection, "Base
+  Slug Matching", fetched 2026-11-07) says a bare slug matches every
+  eligible endpoint of that provider, regions included. A same-day
+  read-only check of the public provider list found Vertex only as those
+  three region slugs, not as bare `google-vertex`, and found Bedrock as
+  the base slug plus region slugs that check did not name. Those unnamed
+  region slugs are not pinned. The in-region routing doc
+  (https://openrouter.ai/docs/guides/features/in-region-routing, "Regional
+  Endpoints on the Global Domain") says a bare `amazon-bedrock` does not
+  pin that provider's regional-surcharge endpoints. A slug
+  outside this set, including the docs' own examples
+  `google-vertex/us-east5` and `amazon-bedrock/eu-west-1`, is refused
+  before any request.
 
 ## Explicitly out of scope
 

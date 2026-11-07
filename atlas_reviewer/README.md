@@ -89,7 +89,12 @@ caps. The archive as a whole is rejected if it has more than 200 entries.
 **OpenRouter limits** (`openrouter.py`, `budget.py`, `pricing.py`). Model
 `anthropic/claude-sonnet-5.5` only, with no fallback models, no plugins
 and no web search. Provider routing is pinned (`only`, `allow_fallbacks:
-false`, `zdr`, `max_price`). Before any inference, `preflight()` reads
+false`, `zdr`, `max_price`) to the slugs a 2026-11-07 read of the public
+provider list actually exposes: `amazon-bedrock`, `google-vertex/global`,
+`google-vertex/us`, and `google-vertex/europe`. The bare `google-vertex`
+slug is not one of them, and the routing docs say a bare slug matches
+every region of that provider, so any slug outside this list is refused
+before a request. Before any inference, `preflight()` reads
 `GET /api/v1/key` and refuses unless the key has a hard limit of at most
 $5 with credit left. Each call re-reads the model's public catalog entry
 and fails closed if a price or limit is missing or unparseable. It then
@@ -165,7 +170,13 @@ the first live review:
    (the number in the URL) for the account that owns the test PR. The App
    must already be granted at least the read permissions listed above.
 3. **OpenRouter.** Create a key with a hard credit limit of at most $5 and
-   set `ATLAS_OPENROUTER_API_KEY`. Confirm that the pinned provider slugs in
-   `openrouter.py` (`PINNED_PROVIDERS`) still serve the model.
+   set `ATLAS_OPENROUTER_API_KEY`.
 4. **A test PR.** Write an event file (`repo`, `pr_number`, `head_sha`)
    for a PR that has finished CI at that head SHA.
+
+Still unverified against live responses, and listed the same way in the
+plan doc:
+
+- the Sprites exec response body
+- the GitHub and OpenRouter response shapes
+- the input-token bound
