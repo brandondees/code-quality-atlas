@@ -678,6 +678,11 @@ clean.
 
 ## 2026-11-06 — D24: `atlas_reviewer/`, the first manual, draft-only reviewer service
 
+**Where the code is:** the `atlas_reviewer/` package lands through the
+stack split from #598 (steps 2-8, #601-#607). Until step 8 merges, a tree
+without those steps has no `atlas_reviewer/`, and links into it resolve
+only on those branches.
+
 The owner approved one manual review path. An operator-triggered
 controller takes a PR event (repo, PR number, head SHA), gathers CI
 evidence matched to that exact SHA, runs extra tools in a fresh,

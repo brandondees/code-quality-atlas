@@ -12,6 +12,12 @@ trusted machine (below). The third pilot, at `a246625`, ran end to end.
 The fixes made after each run (D26-D30, D32) are tested offline only. What
 a live run still needs is under [Live-run gaps](#live-run-gaps), and what
 is left for later is under [Follow-ups](#follow-ups-not-in-this-slice).
+
+**Where the code is:** the `atlas_reviewer/` package lands through the
+stack split from #598 (steps 2-8, #601-#607). Until step 8 merges, a tree
+without those steps has no `atlas_reviewer/`, and links into it resolve
+only on those branches.
+
 Decision records in [`../open-questions.md`](../open-questions.md): **D24**
 (this service) and **D25** (the live-readiness slice); **D26-D30** (the
 fixes driven by each live run); **D32** (diff fitting and the lens
