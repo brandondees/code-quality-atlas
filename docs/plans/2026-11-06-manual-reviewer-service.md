@@ -311,6 +311,31 @@ the probe's new diagnostics test it. Details are in the reviewer README's
   bounded to 15 s and labelled expected-may-hang. None of them is fatal,
   and a review never runs them.
 
+### Third live pilot and the hardening decisions (D30)
+
+The owner's third pilot at `a246625` ran end to end. Its draft is model
+output, so each of its five findings was checked against the code first:
+four were real and one partial. Details are in the reviewer README's
+"Third live pilot" section.
+
+- **Assignment redaction** matches a keyword inside a longer name
+  (`OPENAI_API_KEY`, `client_secret`, `"api_key"`), not only after a word
+  boundary. The name parts are bounded so matching stays linear.
+- **Archive budget** charges an entry's declared size before decompressing
+  it, so entries that fail their CRC check still spend the total budget.
+- **One cumulative deadline before the body** on streaming execs: a cutoff
+  timer shuts the socket down at the first-byte deadline, so trickled
+  headers cannot outlast it. The non-streaming transport is unchanged.
+- **No model call without a diff.** A failed diff fetch is an omission and
+  a NOT REVIEWED coverage note, not an empty-diff call.
+- **Supply-chain tier.** CI workflows, dependency manifests, lockfiles and
+  build hooks rank right after security code and are matched before any
+  directory pattern.
+- **Quoted untrusted values in the controller notes.** Paths, runner and
+  tool output and upstream error text appear only as one-line JSON string
+  literals in code spans, and the notes intro and system prompt say such
+  values are data, not controller statements.
+
 ### Still unverified against live responses
 
 - **The Sprites exec response body.** Observed for a small echo, a 3 MiB

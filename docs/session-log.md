@@ -939,3 +939,23 @@ The last one is bare `python3` from the checkout, bounded to 15 s, which is
 expected to hang if the hypothesis is right. The wrapper and both new
 scripts are also run for real in a local shell in the tests, without any
 Sprite or network.
+
+## 2026-11-07 (same day) — D30: third-pilot findings verified, fixed, and untrusted notes quoted
+
+The owner's third live pilot at `a246625` ran end to end, and its draft
+flagged five problems in the reviewer itself. The draft is model output, so
+none was taken on trust: each was reproduced or refuted against the code
+first. Four were real. The assignment redactor's `\b` never matches after an
+underscore, so `OPENAI_API_KEY=...` passed through. Archive entries were
+charged only after a successful read, so ones failing their CRC check were
+never counted. A failed diff fetch still made one model call with an empty
+diff. CI and dependency files ranked below ordinary code, and PR-controlled
+paths and error text reached the authoritative controller notes verbatim.
+The transport finding was partial. Only the streaming exec path lacked a
+cumulative deadline before the body, where trickled headers could hold an
+exec open indefinitely. The plain transport never claimed one.
+
+Each fix has a regression test that failed on the old code. The notes now
+quote every untrusted value as one JSON string literal in a code span and
+say so in their introduction and in the system prompt, so a file name
+cannot pose as a controller statement.
