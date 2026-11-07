@@ -69,6 +69,13 @@ def test_transport_caps_response_size(server):
         _transport(max_bytes=10).request("GET", f"{server}/big", {}, None, 5)
 
 
+def test_a_zero_byte_cap_is_a_cap_not_the_default(server, stream_server):
+    with pytest.raises(BoundaryError, match="exceeded 0 bytes"):
+        _transport().request("GET", f"{server}/ok", {}, None, 5, max_bytes=0)
+    with pytest.raises(BoundaryError, match="exceeded 0 bytes"):
+        _stream(f"{stream_server}/stream", StreamWindow(5.0), max_bytes=0)
+
+
 def test_transport_refuses_plain_http_by_default_and_wraps_connection_errors():
     with pytest.raises(BoundaryError, match="scheme"):
         UrllibTransport().request("GET", "http://127.0.0.1:1/x", {}, None, 1)
@@ -123,6 +130,17 @@ class _StreamHandler(BaseHTTPRequestHandler):
                 self.wfile.flush()
                 time.sleep(0.05)
             self.wfile.write(b"\r\n\r\nlate body")
+            return
+        if self.path.startswith("/trickle-chunks"):
+            self.wfile.write(
+                b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+                b"5\r\n\x01part\r\n"
+            )
+            for _ in range(40):
+                self.wfile.write(b"0")
+                self.wfile.flush()
+                time.sleep(0.05)
+            self.wfile.write(b"\r\n\r\n")
             return
         if self.path.startswith("/silent"):
             time.sleep(1.0)
@@ -240,6 +258,16 @@ def test_trickled_headers_cannot_outlast_the_deadline(
     assert time.monotonic() - started < 1.0
     assert info.value.first_byte is first_byte
     assert info.value.received == b""
+
+
+def test_trickled_chunk_framing_cannot_outlast_the_total_deadline(stream_server):
+    """A chunk-size line trickled one byte at a time restarted the socket
+    timeout on every byte inside one `read1`, past the window."""
+    started = time.monotonic()
+    with pytest.raises(StreamTimeoutError, match="within 0.4s") as info:
+        _stream(f"{stream_server}/trickle-chunks", StreamWindow(0.4, 0.2))
+    assert time.monotonic() - started < 1.2
+    assert info.value.received == b"\x01part"
 
 
 def test_a_fast_exchange_is_not_cut_and_leaves_no_timer_running(stream_server):

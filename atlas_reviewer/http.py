@@ -89,7 +89,7 @@ class UrllibTransport:
         req = urllib.request.Request(
             url, data=body, method=method, headers=dict(headers)
         )
-        cap = min(max_bytes, self._max_bytes) if max_bytes else self._max_bytes
+        cap = self._max_bytes if max_bytes is None else min(max_bytes, self._max_bytes)
         try:
             with self._opener.open(req, timeout=timeout_s) as resp:
                 return HttpResponse(
@@ -150,7 +150,7 @@ class UrllibStreamingTransport(UrllibTransport):
         parts = urlsplit(url)
         if parts.scheme not in self._schemes:
             raise BoundaryError(f"refusing non-allowed URL scheme: {safe_url(url)}")
-        cap = min(max_bytes, self._max_bytes) if max_bytes else self._max_bytes
+        cap = self._max_bytes if max_bytes is None else min(max_bytes, self._max_bytes)
         stream = _Stream(method, url, window, time.monotonic())
         before_body = window.wait_s(0.0, got_any=False)
         conn = _connection(parts, before_body)
@@ -163,7 +163,8 @@ class UrllibStreamingTransport(UrllibTransport):
                 resp = conn.getresponse()
             if cutoff.fired.is_set():
                 raise stream.stalled(b"")
-            data = _drain(resp, sock, stream, cap)
+            with _Cutoff(conn, stream.wait_s(got_any=True)) as body_cutoff:
+                data = _drain(resp, sock, stream, cap, body_cutoff.fired)
             return HttpResponse(resp.status, dict(resp.getheaders()), data)
         except StreamTimeoutError:
             raise
@@ -243,8 +244,15 @@ class _Stream:
 
 
 def _drain(
-    resp: http.client.HTTPResponse, sock: socket.socket, stream: _Stream, cap: int
+    resp: http.client.HTTPResponse,
+    sock: socket.socket,
+    stream: _Stream,
+    cap: int,
+    cut: threading.Event,
 ) -> bytes:
+    """`cut` is the total deadline's cutoff: one `read1` can block on many
+    socket reads (a chunk-size line, a trailer), each restarting the
+    socket timeout, so only shutting the socket bounds it."""
     received = bytearray()
     while len(received) <= cap:
         wait = stream.wait_s(got_any=bool(received))
@@ -255,6 +263,12 @@ def _drain(
             chunk = resp.read1(64 * 1024)
         except TimeoutError as exc:
             raise stream.stalled(bytes(received)) from exc
+        except (OSError, http.client.HTTPException) as exc:
+            if cut.is_set():
+                raise stream.stalled(bytes(received)) from exc
+            raise
+        if cut.is_set():
+            raise stream.stalled(bytes(received + chunk))
         if not chunk:
             return bytes(received)
         received += chunk
