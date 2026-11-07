@@ -616,21 +616,28 @@ def _coverage_lines(
     if sel is None:
         return (
             (
-                "Diff coverage: NOT REVIEWED. The diff could not be fetched and no "
-                "model call was made."
+                "Diff coverage: NOT REVIEWED. The diff was not fetched, or could "
+                "not be tied to the event SHA, and no model call was made."
             ),
         )
     reviewed = [p for p in parts if p.reviewed]
     full = sum(1 for p in reviewed for f in p.files if not f.cut)
     cut = sum(1 for p in reviewed for f in p.files if f.cut)
-    complete = sel.complete and len(reviewed) == len(parts)
-    verdict = "complete" if complete else "PARTIAL"
-    line = (
-        f"Diff coverage after the model calls: {verdict}. {len(reviewed)} of "
-        f"{len(parts)} call(s) returned a review, covering {full} of {sel.total_files} "
-        f"file(s) in full and {cut} cut to fit; {len(sel.unseen)} file(s) went to "
-        "no call."
-    )
+    if parts and all(p.simulated for p in reviewed):
+        line = (
+            "Diff coverage: NOT REVIEWED. The offline provider built the prompt(s) "
+            f"for {len(parts)} part(s) without calling a model, so no model "
+            "reviewed the diff."
+        )
+    else:
+        complete = sel.complete and len(reviewed) == len(parts)
+        verdict = "complete" if complete else "PARTIAL"
+        line = (
+            f"Diff coverage after the model calls: {verdict}. {len(reviewed)} of "
+            f"{len(parts)} call(s) returned a review, covering {full} of "
+            f"{sel.total_files} file(s) in full and {cut} cut to fit; "
+            f"{len(sel.unseen)} file(s) went to no call."
+        )
     too_large = (
         "The diff is too large for one review pass: the files cut and the files "
         "never sent are listed in the omissions table, highest risk first."
@@ -642,12 +649,14 @@ def _unreviewed_parts(parts: tuple[PartNarrative, ...]) -> tuple[Omission, ...]:
     return tuple(
         Omission(
             f"pull request diff, part {p.index} of {p.total}",
-            "model call returned no review",
+            "offline provider (no model call)"
+            if p.simulated
+            else "model call returned no review",
             f"{len(p.files)} file(s) sent but not reviewed: "
             f"{describe_by_risk(p.files, MAX_LISTED_PATHS) or 'none'}",
         )
         for p in parts
-        if not p.reviewed
+        if not p.model_reviewed
     )
 
 

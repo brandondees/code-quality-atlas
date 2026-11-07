@@ -23,8 +23,9 @@ python -m atlas_reviewer review --event atlas_reviewer/fixtures/sample-pr/event.
 ```
 
 `--dry-run` wires a fixture directory as GitHub, the in-memory fake as the
-Sprites runner, and the offline provider, which calls no model. CI runs this
-same command. Useful flags:
+Sprites runner, and the offline provider, which calls no model, so the
+draft reports the diff as NOT REVIEWED and its lenses as planned, not run.
+CI runs this same command. Useful flags:
 
 - `--out draft.md` writes the draft to a file.
 - `--expect check_run:NAME` (repeatable) names evidence that must exist. If

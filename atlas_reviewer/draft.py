@@ -28,6 +28,7 @@ from atlas_reviewer.groups import CheckGroup, Link, group_checks
 from atlas_reviewer.lenses import LensUse
 from atlas_reviewer.notes import UNTRUSTED_QUOTING
 from atlas_reviewer.ports import Narrative
+from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.telemetry import SUMMARY_HEADERS, Event, summary_rows
 
 CONTROLLER_NOTES_INTRO = (
@@ -57,6 +58,18 @@ class PartNarrative:
     @property
     def reviewed(self) -> bool:
         return isinstance(self.result, Narrative)
+
+    @property
+    def simulated(self) -> bool:
+        """The offline provider answered: a prompt was built, no model ran."""
+        return (
+            isinstance(self.result, Narrative)
+            and self.result.provider == OfflineProvider.name
+        )
+
+    @property
+    def model_reviewed(self) -> bool:
+        return self.reviewed and not self.simulated
 
 
 @dataclass(frozen=True)
@@ -97,7 +110,7 @@ def render_draft(d: DraftInput) -> str:
         _header(d),
         _summary(d),
         controller_notes_section(d.controller_notes),
-        _lenses(d.lenses),
+        _lenses(d.lenses, any(p.model_reviewed for p in d.narratives)),
         _checks(d.evidence, d.links),
         _at_head(d.evidence),
         _unknowns(d.evidence),
@@ -142,9 +155,15 @@ def controller_notes_section(lines: Iterable[str]) -> str:
     return f"## Controller notes\n\n{CONTROLLER_NOTES_INTRO}\n\n{bullets}"
 
 
-def _lenses(uses: tuple[LensUse, ...]) -> str:
+def _lenses(uses: tuple[LensUse, ...], ran: bool) -> str:
     if not uses:
         return "## Review lenses\n\nNone selected."
+    which = (
+        "Only included or truncated lenses ran; omitted ones did not."
+        if ran
+        else "No model call returned a review, so no lens ran: the table lists "
+        "the lenses planned for the prompt."
+    )
     rows = "\n".join(
         "| "
         + " | ".join(
@@ -163,8 +182,7 @@ def _lenses(uses: tuple[LensUse, ...]) -> str:
         "## Review lenses\n\n"
         "Lenses are chosen by the `choosing-review-lenses` picker (or the critical tier "
         "when it does not run); their bodies are read from the skill bundle and placed "
-        "in the model prompt. Only included or "
-        "truncated lenses ran; omitted ones did not.\n\n"
+        f"in the model prompt. {which}\n\n"
         "| Lens | Status | Characters kept of total | Why |\n| --- | --- | --- | --- |\n"
         + rows
     )

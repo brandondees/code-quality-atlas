@@ -43,7 +43,10 @@ PICKED = (
 
 class PickingProvider(OfflineProvider):
     """Answers lens-picker prompts with `reply` and keeps them apart, so
-    `prompts` holds only review prompts."""
+    `prompts` holds only review prompts. Named apart from `offline`, so the
+    draft treats its replies as a model's."""
+
+    name = "fixture-model"
 
     def __init__(self, reply=None):
         super().__init__()
@@ -59,13 +62,19 @@ class PickingProvider(OfflineProvider):
 
 class Setup:
     def __init__(
-        self, github=None, sprites=None, redactor=None, harness=None, lenses=None
+        self,
+        github=None,
+        sprites=None,
+        redactor=None,
+        harness=None,
+        lenses=None,
+        provider=None,
     ):
         self.github = github or FixtureGitHub(FIXTURE)
         script = json.loads((FIXTURE / "runner-script.json").read_text())
         self.sprites = sprites or FakeSprites.from_script(script)
         self.ledger = MemoryLedger()
-        self.provider = PickingProvider()
+        self.provider = provider or PickingProvider()
         self.redactor = redactor or Redactor()
         self.harness = harness or SkillBundleHarness(
             self.provider,
@@ -417,7 +426,7 @@ def test_a_part_whose_call_fails_is_reported_unreviewed_not_dropped():
             self.seen += 1
             if self.seen == 2:
                 raise BoundaryError("provider HTTP 529")
-            return Narrative("skill-bundle", "offline", Redactor()("ok"))
+            return Narrative("skill-bundle", "fixture-model", Redactor()("ok"))
 
         def prompt_tokens(self, request):
             return 0
@@ -435,6 +444,42 @@ def test_a_part_whose_call_fails_is_reported_unreviewed_not_dropped():
     assert "produced no narrative: model call / diff part 2 of 3 failed after" in draft
     notes = section(draft, "Controller notes")
     assert "PARTIAL. 2 of 3 call(s) returned a review" in notes
+
+
+def test_offline_prompts_are_reported_as_not_reviewed_and_no_lens_ran():
+    s = Setup()
+    s.provider.name = "offline"
+    draft = s.run()
+    notes = section(draft, "Controller notes")
+    assert "Diff coverage: NOT REVIEWED. The offline provider built" in notes
+    assert "returned a review" not in notes
+    row = next(
+        r
+        for r in section(draft, "Omissions and limits hit").splitlines()
+        if "part 1 of 1" in r
+    )
+    assert "offline provider (no model call)" in row
+    lenses = section(draft, "Review lenses")
+    assert "so no lens ran: the table lists the lenses planned" in lenses
+    assert "Only included or truncated lenses ran" not in lenses
+
+
+def test_lenses_are_reported_as_ran_once_a_model_reviews_a_part():
+    lenses = section(Setup().run(), "Review lenses")
+    assert "Only included or truncated lenses ran" in lenses
+
+
+def test_lenses_did_not_run_when_every_review_call_fails():
+    class AlwaysFails(OfflineProvider):
+        name = "fixture-model"
+
+        def complete(self, prompt):
+            if "--- lens picker ---" in prompt.system:
+                return json.dumps({"lenses": list(PICKED)})
+            raise BoundaryError("provider HTTP 529")
+
+    lenses = section(Setup(provider=AlwaysFails()).run(), "Review lenses")
+    assert "so no lens ran" in lenses
 
 
 def openrouter_setup(*chat, **limits):
