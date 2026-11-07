@@ -1,17 +1,23 @@
 # Manual reviewer service — first operator-triggered review path
 
-**Status: implemented; two owner-run live pilots and one live probe on
-2026-11-07, fixes since offline only (first slice 2026-11-06; live-readiness slice and pilot fixes
-2026-11-07).** The service runs end to end offline: fixture GitHub,
-the in-memory Sprites fake, and the offline provider. The second slice adds
-everything a live run needs in code: pagination, head-SHA job-log and
-artifact ingestion, in-process GitHub App tokens, the documented Sprites
-exec protocol with a tool probe, and a capped OpenRouter provider. None of
-it has run live yet. What a live run still needs is under
-[Live-run gaps](#live-run-gaps). Decision records: **D24** and **D25** in
-[`../open-questions.md`](../open-questions.md) (**D26** records the pilot
-fixes, **D27** the second pilot's telemetry and diff-coverage fixes), scoped
-steps under the still-open **Q24**.
+**Status: implemented and frozen as the single-prompt manual reviewer
+(first slice 2026-11-06; live-readiness slice, pilot fixes, diff fitting
+and the lens picker 2026-11-07).** The service runs end to end offline:
+fixture GitHub, the in-memory Sprites fake, and the offline provider. The
+second slice adds everything a live run needs in code: pagination, head-SHA
+job-log and artifact ingestion, in-process GitHub App tokens, the
+documented Sprites exec protocol with a tool probe, and a capped OpenRouter
+provider. The owner ran three live pilots and two live probes from a
+trusted machine (below). The third pilot, at `a246625`, ran end to end.
+The fixes made after each run (D26-D30, D32) are tested offline only. What
+a live run still needs is under [Live-run gaps](#live-run-gaps), and what
+is left for later is under [Follow-ups](#follow-ups-not-in-this-slice).
+Decision records in [`../open-questions.md`](../open-questions.md): **D24**
+(this service) and **D25** (the live-readiness slice); **D26-D30** (the
+fixes driven by each live run); **D32** (diff fitting and the lens
+picker). All are scoped steps under the still-open **Q24**. **D31** is a
+separate, undecided proposal for a lens-based agentic reviewer, and none of
+it is built here.
 
 **Goal.** Produce one Code Quality Atlas review **draft** for one PR commit.
 The run is triggered by an operator and funded by the operator. It never
@@ -138,15 +144,17 @@ Based on the 2026-11-06 live Sprites validation. The order is:
    PR bytes are uploaded. A binary that is not reported present is never
    run, and its tool is UNKNOWN. If the probe itself fails, every tool is
    UNKNOWN.
-6. Upload the head-SHA tarball over exec stdin, capped at 9 MiB against the
+6. Resolve the trusted Python interpreter from an empty directory, before
+   any PR byte is in the Sprite (D29).
+7. Upload the head-SHA tarball over exec stdin, capped at 9 MiB against the
    documented 10 MiB stdin limit, to a file
    (`head -c N > /tmp/atlas-source.tar.gz`, so nothing waits for a stdin
    EOF). The runner reports the bytes it wrote, which must equal N. The
    exec has a 300-second budget.
-7. Unpack the file into `/work` in a second exec (120-second budget), so a
+8. Unpack the file into `/work` in a second exec (120-second budget), so a
    transport stall and a slow extraction fail under different labels.
-8. Run each available tool under `timeout`.
-9. Destroy the Sprite.
+9. Run each available tool under `timeout`.
+10. Destroy the Sprite.
 
 Every exec budget (tool check 60 seconds, upload 300, unpack 120, each tool
 exec its timeout plus 15) is capped by the remaining deadline. Every step
@@ -164,8 +172,8 @@ the result. Only a verified destroy clears the ledger. An unverified one is
 reported in the draft and left for `sweep`.
 
 Exec follows the Sprites OpenAPI 0.1.12 (`POST /v1/sprites/{name}/exec`:
-argv as repeated `cmd` query parameters, `stdin=true` only when a body is
-sent, raw octet-stream body of at most 10 MiB). The document does not
+argv as repeated `cmd` query parameters, `stdin=true` on every exec since
+D28, raw octet-stream body of at most 10 MiB). The document does not
 specify the 200 response body, and the 2026-11-06 live validation saw
 stdout prefixed with the WebSocket framing byte 0x01. So the decoder strips
 bytes 0x00–0x04 and takes the exit code from an in-band marker that each
@@ -246,7 +254,8 @@ tool execs passed theirs through bare. D27 records the fixes.
   on a local tarball or the App-fetched head tarball, with no model.
 - **Risk-ordered diff parts.** The diff is split into files, ranked
   (security, auth, secrets and redaction; runner, sandbox, HTTP and model
-  boundary; other code; config and CI; tests and fixtures; docs) and packed
+  boundary; other code; config and CI; tests and fixtures; docs; D30 later
+  moved CI, dependency and build files up to second) and packed
   first-fit into at most `--max-model-calls` parts of
   `--diff-chars-per-call` characters, one model call each. The three-call
   cap (retries included), the $3 reservation and the preflight are
@@ -367,10 +376,10 @@ Operator-requested in Run #9. Offline only, no live call made here.
 ### Still unverified against live responses
 
 - **The Sprites exec response body.** Observed for a small echo, a 3 MiB
-  stdin round-trip, and (third probe) a review's upload and unpack. Whether
-  output streams before the command exits, and what the
-  `stdin=true`-with-empty-body shape and the new wrapper do live, are not
-  yet observed.
+  stdin round-trip, a review's upload and unpack (third probe), and the
+  third pilot's whole review sequence at `a246625`, which used the D28
+  request shape and the D29 wrapper. Not yet observed: whether output
+  streams before the command exits, and the D30 cutoff timer.
 - **The GitHub and OpenRouter response shapes.** The pilot's draft held a
   check run, job, log and workflow run, so those list shapes parsed (inferred
   from the owner's report, not a recorded response). Not yet seen live: a
@@ -456,3 +465,16 @@ Each item below is left out on purpose rather than deferred:
 - executing or extracting artifact or log content (it is parsed in memory
   as text only)
 - model fallbacks, plugins, web search, or a fourth model call per review
+
+## Follow-ups (not in this slice)
+
+This slice stays the single-prompt manual reviewer. Left for later PRs,
+each needing its own decision:
+
+- **The lens-based agentic loop.** D31, proposal only:
+  [`2026-11-07-lens-based-agentic-reviewer.md`](2026-11-07-lens-based-agentic-reviewer.md).
+- **Deploying the controller** (for example on Fly) instead of running it
+  from an operator's trusted machine.
+- **Omission rows for check summaries, log tails and artifact excerpts.**
+  These are capped today, but the caps are not listed as omissions the way
+  diff, PR-body and issue-body cuts are.
