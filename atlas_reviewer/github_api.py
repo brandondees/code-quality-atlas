@@ -161,7 +161,7 @@ def _object(body: bytes, path: str) -> Json:
     path = path.split("?", 1)[0]
     try:
         data = json.loads(body)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise BoundaryError(f"GitHub returned non-JSON for {path}") from exc
     if not isinstance(data, dict):
         raise BoundaryError(f"GitHub returned a non-object for {path}")

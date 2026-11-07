@@ -241,7 +241,7 @@ class OpenRouterProvider:
 def _json_object(raw: bytes, where: str, error: type[BoundaryError]) -> Json:
     try:
         data = json.loads(raw)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError):
         raise error(f"non-JSON response from {where}") from None
     if not isinstance(data, dict):
         raise error(f"non-object response from {where}")

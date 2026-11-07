@@ -144,7 +144,7 @@ class SpritesClient:
         resp = self._call("GET", f"{self._path(name)}/policy/network")
         try:
             data = json.loads(resp.body)
-        except json.JSONDecodeError as exc:
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise BoundaryError("Sprites network policy read-back is not JSON") from exc
         if not isinstance(data, dict):
             raise BoundaryError("Sprites network policy read-back is not an object")

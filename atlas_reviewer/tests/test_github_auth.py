@@ -145,7 +145,7 @@ def test_mint_failures_are_refused(minter, match):
         tokens(Minter(clock, **minter), clock).token()
 
 
-@pytest.mark.parametrize("raw", [b"<html>", b"[]"])
+@pytest.mark.parametrize("raw", [b"<html>", b"[]", b'{"a": "\xff"}'])
 def test_unparseable_mint_responses_are_refused(raw):
     class Raw:
         def request(self, *args, **kwargs):

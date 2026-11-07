@@ -142,7 +142,7 @@ class AppInstallationTokens:
     def _parse(self, raw: bytes) -> _Cached:
         try:
             data = json.loads(raw)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             raise BoundaryError("GitHub App token mint returned non-JSON") from None
         if not isinstance(data, dict):
             raise BoundaryError("GitHub App token mint returned a non-object")

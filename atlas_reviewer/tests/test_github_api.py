@@ -158,6 +158,7 @@ def test_redirects_are_followed_without_credentials():
         (ok(status=404), NotFoundError),
         (ok(status=403), BoundaryError),
         (ok(body=b"<html>"), BoundaryError),
+        (ok(body=b'{"a": "\xff"}'), BoundaryError),
         (ok(body=b"[1]"), BoundaryError),
         (
             ok(status=302, body=b"", headers={"Location": "http://insecure.example/x"}),

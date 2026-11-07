@@ -112,7 +112,7 @@ def test_sprites_client_refuses_to_touch_sprites_it_did_not_name():
             call("web-terminal")
 
 
-@pytest.mark.parametrize("body", [b"nope", b"[]"])
+@pytest.mark.parametrize("body", [b"nope", b"[]", b'{"a": "\xff"}'])
 def test_sprites_policy_read_back_must_be_an_object(body):
     with pytest.raises(BoundaryError):
         SpritesClient(Recorder(ok(body=body)), "t").get_network_policy(NAME)

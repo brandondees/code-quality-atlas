@@ -303,6 +303,7 @@ def test_limits_reject_nonsense():
     [
         (reply({}, status=404), "HTTP 404"),
         (reply(b"<html>"), "non-JSON"),
+        (reply(b'{"a": "\xff"}'), "non-JSON"),
         (reply([]), "non-object"),
         (reply({"data": "x"}), "no data object"),
         (reply(catalog(prompt="-1")), "unknown"),
@@ -444,8 +445,9 @@ def test_dated_variant_of_the_pinned_model_is_accepted():
     assert provider(fake).complete(SMALL) == "review text"
 
 
-def test_unparseable_completion_is_settled_and_raised():
-    p = provider(OpenRouterFake(reply(b"<html>")))
+@pytest.mark.parametrize("body", [b"<html>", b'{"a": "\xff"}'])
+def test_unparseable_completion_is_settled_and_raised(body):
+    p = provider(OpenRouterFake(reply(body)))
     with pytest.raises(BoundaryError, match="non-JSON"):
         p.complete(SMALL)
     assert "unparseable response" in p.usage_lines()[1]
