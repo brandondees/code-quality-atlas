@@ -785,3 +785,58 @@ stay off the list rather than being guessed.
 
 Still unverified against live responses: the Sprites exec response body,
 the GitHub and OpenRouter response shapes, and the input-token bound.
+
+## 2026-11-07 (same day) — D26: fixes from the first live pilot
+
+The owner ran one live pilot of PR [#598](https://github.com/brandondees/code-quality-atlas/pull/598)
+at head `9ff859b` and reported: the probe passed with the exec framing the
+decoder already handles; the image has `python3` but no `ruff` or
+`shellcheck`; one model call cost $0.17; the source upload of about 3 MiB
+failed with "The read operation timed out", so no in-Sprite tool ran; and the
+model said no lens ran. Everything below is offline-tested only.
+
+**The timeout was not what the report suggested.** The first hypothesis was
+the 30-second client default. The code does not support it: `_exec` already
+gave the upload `min(remaining deadline, ...)`, about 590 seconds, and
+`SpritesClient.exec` passes it to the transport. The new tests pin the number
+sent to the transport (300 seconds, capped by the deadline) at the fake and
+through a real `SpritesClient` with a recording transport. The cause is
+unknown. The upload now extracts with `head -c N | tar` so it does not wait for
+a stdin EOF, which is a guess, labelled as one, and `probe-runner` gained a 3
+MiB stdin round-trip so the next pilot can separate a stdin problem from a
+tarball problem without PR code.
+
+**Lenses are fed, not named.** The model had no way to open `body.md`, so
+naming lenses in the prompt could never run them. `lenses.py` selects from
+changed paths and PR text, and inlines bodies under a character budget. Real
+bodies run 11k to 35k characters each, so a 60,000-character budget fits about
+three; the draft says which were included, truncated or omitted. The selector
+is a digest of the bundle's route table and a test checks every lens it names
+exists. Writing the ranking showed that letting the generic baseline route
+count the same as specific routes buried the specific lens (security ranked
+third, behind two generic lenses, for an auth change), so specific routes now weigh ten times more.
+
+**Grouping.** A check run, its job, its log and its workflow run were four
+passes. Links come from ids (a job's documented `check_run_url`), never names.
+Writing the tests turned up two traps: a run that fails because of one job
+would fail its passing sibling's group if its verdict were shared, so a run is
+context only and carries no verdict into a group; and a run failure no job
+explains must stay an independent failure rather than vanish into a group. A
+cycle in the links could also have erased a failing check, so anything a
+traversal does not reach becomes its own check.
+
+**Controller notes.** One code-generated section replaces the old Notes and
+Disposable runner sections, and the model is handed the same text as
+established fact. The notes can quote runner output (an upload failure
+includes the guest's output tail), so they are fenced as untrusted data like
+everything else.
+
+Smaller items: `ruff` and `shellcheck` left the default tools; truncation of
+the diff, PR body and issue bodies is an omission, computed before the
+evidence block so the model hears about it (the diff entry names the files it
+never saw, from character offsets); `sweep` takes the single-review lock; the
+OpenRouter key counter is documented as able to lag about 90 seconds and is
+never read after inference.
+
+Not changed, and said so: check summaries, log tails and artifact excerpts are
+still capped without an omission row.

@@ -1,15 +1,16 @@
 # Manual reviewer service — first operator-triggered review path
 
-**Status: implemented, offline only (first slice 2026-11-06; live-readiness
-slice 2026-11-07).** The service runs end to end offline: fixture GitHub,
+**Status: implemented; one owner-run live pilot on 2026-11-07, fixes since
+offline only (first slice 2026-11-06; live-readiness slice and pilot fixes
+2026-11-07).** The service runs end to end offline: fixture GitHub,
 the in-memory Sprites fake, and the offline provider. The second slice adds
 everything a live run needs in code: pagination, head-SHA job-log and
 artifact ingestion, in-process GitHub App tokens, the documented Sprites
 exec protocol with a tool probe, and a capped OpenRouter provider. None of
 it has run live yet. What a live run still needs is under
 [Live-run gaps](#live-run-gaps). Decision records: **D24** and **D25** in
-[`../open-questions.md`](../open-questions.md), scoped steps under the
-still-open **Q24**.
+[`../open-questions.md`](../open-questions.md) (**D26** records the pilot
+fixes), scoped steps under the still-open **Q24**.
 
 **Goal.** Produce one Code Quality Atlas review **draft** for one PR commit.
 The run is triggered by an operator and funded by the operator. It never
@@ -137,7 +138,14 @@ Based on the 2026-11-06 live Sprites validation. The order is:
    run, and its tool is UNKNOWN. If the probe itself fails, every tool is
    UNKNOWN.
 6. Upload the head-SHA tarball over exec stdin, capped at 9 MiB against the
-   documented 10 MiB stdin limit.
+   documented 10 MiB stdin limit. The exec has its own 300-second budget,
+   capped by the remaining deadline, and extracts with `head -c N | tar`
+   so it does not wait for a stdin EOF. The first pilot's upload of about
+   3 MiB timed out ("The read operation timed out") although the exec was
+   already given the remaining deadline, not the 30-second client default;
+   the cause is unknown and the no-EOF extraction is an untested
+   hypothesis. `probe-runner` now also sends 3 MiB through that same
+   `head -c` and reports the bytes received.
 7. Run each available tool under `timeout`.
 8. Destroy the Sprite.
 
@@ -181,10 +189,10 @@ a token into a Sprite.
 
 Setup still required, all of it tested only against fakes:
 
-1. **Sprites probe.** Run `probe-runner` once from a trusted machine and
-   check the raw sample. Also confirm which of `python3`, `ruff` and
-   `shellcheck` the image has. The probe reports them, and a missing one
-   is UNKNOWN either way.
+1. **Sprites probe.** Re-run `probe-runner` from a trusted machine and
+   check the stdin round-trip line. The pilot found `python3` but no `ruff`
+   or `shellcheck` in the image, so the default tools are now
+   `python-compileall` only; a tool is added once the image has its binary.
 2. **GitHub App installation.** Set `ATLAS_GITHUB_APP_ID` (App 5648875),
    `ATLAS_GITHUB_APP_PRIVATE_KEY` and `ATLAS_GITHUB_INSTALLATION_ID`. The
    installation ID is not recorded in this repo.
@@ -192,20 +200,62 @@ Setup still required, all of it tested only against fakes:
    credit limit is at most $5.
 4. **A test PR** with finished CI at the event's head SHA.
 
+### First live pilot (owner-reported, 2026-11-07, head `9ff859b`)
+
+The probe passed, with exec framing
+`b'\x01atlas-framing-check\n__ATLAS_EXIT__=0\n\x03\x00'`, which the decoder
+handles. The image has `python3` and neither `ruff` nor `shellcheck`. The
+review made one model call costing $0.17. The source upload (about 3 MiB)
+timed out, so no in-Sprite tool ran, and both Sprites were destroyed. The
+model reported that no lens ran. D26 records the fixes: the upload budget, the
+default tools, lens bodies in the prompt, grouped checks, controller notes,
+recorded truncation, the sweep lock, and the OpenRouter counter-lag note.
+
 ### Still unverified against live responses
 
-- **The Sprites exec response body.** Request shapes follow the OpenAPI
-  document. The 200 body does not appear in it.
-- **The GitHub and OpenRouter response shapes.** The token mint, jobs,
-  logs, and artifact endpoints, and the catalog pricing, `pricing.overrides`,
-  key status, and `usage.cost`, are taken from the docs. Whether one of
-  the pinned slugs actually serves this model is part of that: it has not
-  been seen in a live completion.
+- **The Sprites exec response body.** Observed once, for a small echo. A
+  large stdin upload has failed and not yet succeeded.
+- **The GitHub and OpenRouter response shapes.** The pilot's draft held a
+  check run, job, log and workflow run, so those list shapes parsed (inferred
+  from the owner's report, not a recorded response). Not yet seen live: a
+  job's `check_run_url` (from GitHub's documentation; grouping needs it),
+  artifacts, pagination past one page, and OpenRouter's error and retry
+  responses. The key preflight, catalog read and one chat completion worked.
 - **The input-token bound.** It assumes no token encodes less than one
-  UTF-8 byte, plus 64 tokens of message overhead. That holds for
-  byte-level BPE tokenizers generally, and it has not been checked
-  against this model's tokenizer. Reported usage is recorded, so a
-  violated assumption shows up in the draft.
+  UTF-8 byte, plus 64 tokens of message overhead. It has not been checked
+  against this model's tokenizer, the pilot's token usage was not reported
+  here, and the prompt is now larger because lens bodies are inlined.
+  Reported usage is recorded, so a violated assumption shows up in the draft.
+
+### Pilot-fix decisions (D26)
+
+- **Lenses.** The controller selects lenses from the diff's paths and the PR
+  text (`lenses.py`, a code-side digest of the bundle's route table), reads
+  each `body.md`, and inlines them in the trusted system prompt under a
+  60,000-character budget and a 6-lens cap. The draft lists each lens as
+  included, truncated or omitted. The model has no file tools, so naming
+  lenses never ran them. The selector is a coarse heuristic and the table
+  shows its choices.
+- **Grouped checks.** A check run, its job (via the documented
+  `check_run_url`), the job's log and the workflow run are one independent
+  check. A run is context for its jobs only when a job carries its verdict;
+  an unexplained run failure stays independent, and any failing or UNKNOWN
+  view makes the whole check so. No name matching.
+- **Controller notes.** Runner cleanup proof, exec failures, tool results,
+  omissions and lens coverage are generated by code into one section and
+  given to the model as established facts. They can quote runner output, so
+  they are fenced as untrusted data.
+- **Default tools.** `python-compileall` only: egress is deny-all and a
+  Sprite is never reused, so a binary missing from the image cannot be
+  installed, and CI evidence already covers lint.
+- **Recorded truncation.** A diff, PR body or issue body cut at its cap is an
+  omission, with the files the model never saw. Omissions are built before
+  the evidence block, so the model is told.
+- **Sweep.** It takes the single-review lock, because the ledger lists a live
+  review's runner and sweeping would destroy it mid-run.
+- **OpenRouter counter lag.** The key's usage counter can lag a call by about
+  90 seconds (pilot observation, not checked against the docs). It is read
+  only by the preflight, so a $0 readback after inference is not a mismatch.
 
 ### Second-slice decisions (D25)
 
