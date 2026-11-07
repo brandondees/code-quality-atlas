@@ -416,8 +416,11 @@ def test_cost_is_computed_from_catalog_rates_when_not_reported():
     assert "cost computed at the highest catalog rates" in p.usage_lines()[1]
 
 
-def test_missing_usage_keeps_the_reservation_as_spent():
-    p = provider(OpenRouterFake(reply(completion(usage={}))))
+@pytest.mark.parametrize(
+    "usage", [{}, {"prompt_tokens": -1_000_000, "completion_tokens": 5}]
+)
+def test_missing_usage_keeps_the_reservation_as_spent(usage):
+    p = provider(OpenRouterFake(reply(completion(usage=usage))))
     p.complete(SMALL)
     assert "actual unknown (counted at the reservation)" in p.usage_lines()[1]
 

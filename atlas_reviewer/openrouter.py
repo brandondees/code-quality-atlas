@@ -290,7 +290,9 @@ def _message(data: Json) -> tuple[str, str]:
 
 def _tokens(usage: Json, key: str) -> int | None:
     value = usage.get(key)
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return None
 
 
 def _actual_cost(usage: Json, terms: ModelTerms) -> tuple[Decimal | None, str]:
