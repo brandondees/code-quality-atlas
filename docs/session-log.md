@@ -986,3 +986,22 @@ reuses the picker, depth modes, lens bodies, `tool-evidence.md`,
 what's missing: the controller-run loop, a read-only Sprite tool bridge, the
 security boundaries and the credentials split. Its first open question is the
 call and cost caps a lens loop would need.
+
+## 2026-11-07 (same day) — PR #598 frozen as the single-prompt reviewer; cleanup and a split plan
+
+Brandon marked PR #598 ready for review and froze it as the single-prompt
+manual reviewer, with D31 left as a proposal. The cleanup pass made no
+behaviour change. It removed an unused alias in `fakes.py`, and the draft's
+Review lenses intro no longer says lenses come from changed paths and PR text.
+Test docstrings now cite decision IDs instead of operator run numbers. The
+reviewer README and plan doc no longer say only one pilot ran or that no
+upload had succeeded. The plan's runner steps gained the D29 interpreter
+step, and the plan gained a follow-ups list: the D31 lens loop, a deployed
+controller, and omission rows for check summaries and log tails. The D24-D32
+entries now cross-reference consistently, and Q24 gained a 2026-11-07 update.
+
+A split into a stack of smaller PRs was planned but not done. The branch's
+commits are time-ordered slices that each touch most modules, so the stack
+would be re-sliced by file from the final tree, not cherry-picked. Each
+proposed step's tests were run against only that step's modules as a
+feasibility check, and every step measured 95% or more against the 94% floor.
