@@ -6,6 +6,12 @@ directory, the runner is the in-memory fake, the provider is offline.
 Live mode reads credentials from the environment variables named below and
 hands each one only to the adapter that needs it. Live model inference is
 off unless `--provider openrouter --allow-live-inference` are both given.
+
+Every live command records lifecycle telemetry (`atlas_reviewer.telemetry`)
+to a JSONL file: `--events PATH`, or by default
+`<state dir>/telemetry/<command>-<UTC time>.jsonl`. A dry run writes one
+only when `--events` is given. Event text passes through a redactor holding
+every credential value from the environment first.
 """
 
 from __future__ import annotations
@@ -20,22 +26,50 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
+from atlas_reviewer.budget import CallLimits
 from atlas_reviewer.clock import SystemClock
-from atlas_reviewer.controller import DEFAULT_TOOLS, Deps, ReviewConfig, review
-from atlas_reviewer.domain import InvalidEventError, PrEvent, SourceKey, SourceKind
+from atlas_reviewer.controller import (
+    DEFAULT_DIFF_CHARS_PER_CALL,
+    DEFAULT_TOOLS,
+    MAX_MODEL_CALLS,
+    MAX_TARBALL_BYTES,
+    Deps,
+    ReviewConfig,
+    review,
+)
+from atlas_reviewer.domain import (
+    InvalidEventError,
+    PrEvent,
+    RunnerReport,
+    SourceKey,
+    SourceKind,
+)
+from atlas_reviewer.draft import telemetry_section
 from atlas_reviewer.fakes import FakeSprites, MemoryLedger
 from atlas_reviewer.github_api import GitHubClient
 from atlas_reviewer.github_auth import READ_PERMISSIONS, AppInstallationTokens
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.harness import SkillBundleHarness, load_bundle
 from atlas_reviewer.http import UrllibTransport
+from atlas_reviewer.instrumented import InstrumentedGitHub
 from atlas_reviewer.ledger import FileLedger, ReviewInProgressError, single_review_lock
 from atlas_reviewer.openrouter import OpenRouterProvider
 from atlas_reviewer.ports import BoundaryError, Clock, ModelProvider, SpritesApi
 from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.redact import Redactor
-from atlas_reviewer.runner import probe_runner, runner_name, sweep
+from atlas_reviewer.runner import (
+    TRIVIAL_TOOL,
+    RunnerJob,
+    ToolAbsent,
+    ToolRan,
+    ToolResult,
+    probe_runner,
+    run_disposable,
+    runner_name,
+    sweep,
+)
 from atlas_reviewer.sprites_api import SpritesClient
+from atlas_reviewer.telemetry import JsonlSink, Telemetry
 
 ENV_APP_ID = "ATLAS_GITHUB_APP_ID"
 ENV_APP_KEY = "ATLAS_GITHUB_APP_PRIVATE_KEY"
@@ -45,6 +79,7 @@ ENV_OPENROUTER_KEY = "ATLAS_OPENROUTER_API_KEY"
 ENV_STATE_DIR = "ATLAS_REVIEWER_STATE_DIR"
 DEFAULT_STATE_DIR = Path(".atlas-reviewer-state")
 PROVIDER_CHOICES = ("offline", "openrouter")
+SECRET_ENV = (ENV_APP_KEY, ENV_SPRITES_TOKEN, ENV_OPENROUTER_KEY)
 
 EXIT_OK, EXIT_USAGE, EXIT_BOUNDARY = 0, 2, 3
 
@@ -114,7 +149,8 @@ class _Wiring:
 def _select_provider(
     args: argparse.Namespace,
     env: Mapping[str, str],
-    openrouter: Callable[[str], OpenRouterProvider],
+    openrouter: Callable[[str, CallLimits], OpenRouterProvider],
+    telemetry: Telemetry,
 ) -> ModelProvider:
     if args.provider == "offline":
         return OfflineProvider()
@@ -124,17 +160,51 @@ def _select_provider(
         raise UsageError(
             "live inference is off: pass --allow-live-inference with --provider openrouter"
         )
-    provider = openrouter(_require_env(env, ENV_OPENROUTER_KEY))
-    provider.preflight()
+    provider = openrouter(
+        _require_env(env, ENV_OPENROUTER_KEY),
+        CallLimits(max_calls=args.max_model_calls),
+    )
+    telemetry.span("model preflight", "key status", provider.preflight)
     return provider
 
 
-def _live_openrouter(key: str) -> OpenRouterProvider:
-    return OpenRouterProvider(UrllibTransport(), key, sleep=time.sleep)
+def _live_openrouter(key: str, limits: CallLimits) -> OpenRouterProvider:
+    return OpenRouterProvider(UrllibTransport(), key, limits=limits, sleep=time.sleep)
+
+
+def _env_redactor(env: Mapping[str, str]) -> Redactor:
+    return Redactor(tuple(env.get(name, "") for name in SECRET_ENV if env.get(name)))
+
+
+def _telemetry(
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+    command: str,
+    *,
+    default_file: bool,
+) -> Telemetry:
+    clock = SystemClock()
+    redactor = _env_redactor(env)
+    default = (
+        _state_dir(args, env)
+        / "telemetry"
+        / f"{command}-{clock.now():%Y%m%dT%H%M%SZ}.jsonl"
+    )
+    path = Path(args.events) if args.events else (default if default_file else None)
+    sink = JsonlSink(path) if path else None
+    return Telemetry(clock, sink, scrub=lambda text: redactor(text).text)
+
+
+def _events_path(telemetry: Telemetry) -> str:
+    sink = telemetry.sink
+    return str(sink.path) if isinstance(sink, JsonlSink) else "(not written)"
 
 
 def _dry_run_wiring(
-    args: argparse.Namespace, event_path: Path, provider: ModelProvider
+    args: argparse.Namespace,
+    event_path: Path,
+    provider: ModelProvider,
+    telemetry: Telemetry,
 ) -> _Wiring:
     fixtures = Path(args.fixtures) if args.fixtures else event_path.parent
     script_path = fixtures / "runner-script.json"
@@ -153,9 +223,27 @@ def _dry_run_wiring(
         clock=clock,
         redactor=redactor,
         runner_name=lambda: runner_name(clock),
+        telemetry=telemetry,
     )
     return _Wiring(
         deps, f"dry run (fixtures: {fixtures}; fake runner; provider {provider.name})"
+    )
+
+
+def _app_tokens(
+    env: Mapping[str, str],
+    event: PrEvent,
+    include_issues: bool,
+    transport: UrllibTransport,
+) -> AppInstallationTokens:
+    return AppInstallationTokens(
+        transport,
+        SystemClock(),
+        app_id=_require_env(env, ENV_APP_ID),
+        private_key=_pem(_require_env(env, ENV_APP_KEY)),
+        installation_id=_installation_id(env),
+        permissions=_permissions(include_issues),
+        repositories=(event.repo.split("/", 1)[1],),
     )
 
 
@@ -164,20 +252,13 @@ def _live_wiring(
     env: Mapping[str, str],
     event: PrEvent,
     provider: ModelProvider,
+    telemetry: Telemetry,
 ) -> _Wiring:
     private_key = _pem(_require_env(env, ENV_APP_KEY))
     sprites_token = _require_env(env, ENV_SPRITES_TOKEN)
     clock = SystemClock()
     transport = UrllibTransport()
-    tokens = AppInstallationTokens(
-        transport,
-        clock,
-        app_id=_require_env(env, ENV_APP_ID),
-        private_key=private_key,
-        installation_id=_installation_id(env),
-        permissions=_permissions(args.include_issues),
-        repositories=(event.repo.split("/", 1)[1],),
-    )
+    tokens = _app_tokens(env, event, args.include_issues, transport)
     known = (private_key, sprites_token, env.get(ENV_OPENROUTER_KEY, ""))
     redactor = Redactor(tuple(k for k in known if k), sources=(tokens.secrets,))
     deps = Deps(
@@ -188,6 +269,7 @@ def _live_wiring(
         clock=clock,
         redactor=redactor,
         runner_name=lambda: runner_name(clock),
+        telemetry=telemetry,
     )
     return _Wiring(deps, f"live (GitHub App + Sprites; provider {provider.name})")
 
@@ -197,24 +279,39 @@ def _permissions(include_issues: bool) -> dict[str, str]:
     return {**base, "issues": "read"} if include_issues else base
 
 
+def _review_config(args: argparse.Namespace, mode: str) -> ReviewConfig:
+    try:
+        return ReviewConfig(
+            expected=parse_expected(args.expect),
+            include_issues=args.include_issues,
+            deadline_s=args.deadline_seconds,
+            mode=mode,
+            model_calls=args.max_model_calls,
+            diff_chars_per_call=args.diff_chars_per_call,
+        )
+    except ValueError as exc:
+        raise UsageError(str(exc)) from exc
+
+
 def _cmd_review(args: argparse.Namespace, env: Mapping[str, str], out: TextIO) -> int:
     event_path = Path(args.event)
     event = load_event(event_path)
-    provider = _select_provider(args, env, args.openrouter_factory)
+    _review_config(args, "check")
+    telemetry = _telemetry(args, env, "review", default_file=not args.dry_run)
+    provider = _select_provider(args, env, args.openrouter_factory, telemetry)
     wiring = (
-        _dry_run_wiring(args, event_path, provider)
+        _dry_run_wiring(args, event_path, provider, telemetry)
         if args.dry_run
-        else _live_wiring(args, env, event, provider)
+        else _live_wiring(args, env, event, provider, telemetry)
     )
-    config = ReviewConfig(
-        expected=parse_expected(args.expect),
-        include_issues=args.include_issues,
-        deadline_s=args.deadline_seconds,
-        mode=wiring.mode,
-    )
+    config = _review_config(args, wiring.mode)
     with single_review_lock(_state_dir(args, env) / "review.lock"):
         draft = review(event, wiring.deps, config)
     _emit(draft, args.out, out)
+    if args.out is not None:
+        out.write(
+            f"telemetry: {len(telemetry.events)} event(s), {_events_path(telemetry)}\n"
+        )
     return EXIT_OK
 
 
@@ -242,27 +339,104 @@ def _cmd_sweep(args: argparse.Namespace, env: Mapping[str, str], out: TextIO) ->
 
 
 def _cmd_probe(args: argparse.Namespace, env: Mapping[str, str], out: TextIO) -> int:
-    api = args.sprites_factory(env)
-    clock: Clock = SystemClock()
+    telemetry = _telemetry(args, env, f"probe-{args.sequence}", default_file=True)
+    sequence = _PROBE_SEQUENCES[args.sequence]
     with single_review_lock(_state_dir(args, env) / "review.lock"):
-        outcome = probe_runner(
-            api,
-            FileLedger(_state_dir(args, env) / "runners.ledger"),
-            DEFAULT_TOOLS,
-            name=runner_name(clock),
-            deadline_s=args.deadline_seconds,
-            clock=clock,
-        )
-    r = outcome.report
-    out.write(f"runner: {r.runner_name}\nstatus: {r.status.value}\n")
-    out.write(f"cleanup: {r.cleanup.value}\nnote: {r.note}\n")
+        sequence(args, env, out, telemetry)
+    out.write(f"\n{telemetry_section(telemetry.events)}\n\n")
+    out.write(
+        f"telemetry: {len(telemetry.events)} event(s), {_events_path(telemetry)}\n"
+    )
+    return EXIT_OK
+
+
+def _probe_protocol(
+    args: argparse.Namespace, env: Mapping[str, str], out: TextIO, telemetry: Telemetry
+) -> None:
+    clock: Clock = SystemClock()
+    outcome = probe_runner(
+        args.sprites_factory(env),
+        FileLedger(_state_dir(args, env) / "runners.ledger"),
+        DEFAULT_TOOLS,
+        name=runner_name(clock),
+        deadline_s=args.deadline_seconds,
+        clock=clock,
+        telemetry=telemetry,
+    )
+    _write_report(outcome.report, out)
     out.writelines(
         f"tool {b}: {'present' if ok else 'ABSENT'}\n"
         for b, ok in outcome.available.items()
     )
     out.write(f"raw exec response sample: {outcome.framing_sample[:200]!r}\n")
     out.write(f"stdin round-trip: {outcome.stdin_check}\n")
-    return EXIT_OK
+
+
+def _probe_review_sequence(
+    args: argparse.Namespace, env: Mapping[str, str], out: TextIO, telemetry: Telemetry
+) -> None:
+    """The review's exact exec sequence (tool check, upload, unpack, tools)
+    on a real checkout, with no model call and no evidence gathering."""
+    tarball = _probe_source(args, env, telemetry)
+    if len(tarball) > MAX_TARBALL_BYTES:
+        raise UsageError(f"tarball is {len(tarball)} bytes, over {MAX_TARBALL_BYTES}")
+    clock: Clock = SystemClock()
+    tools = DEFAULT_TOOLS if args.tools == "review" else (TRIVIAL_TOOL,)
+    outcome = run_disposable(
+        args.sprites_factory(env),
+        FileLedger(_state_dir(args, env) / "runners.ledger"),
+        RunnerJob(tarball, tools),
+        name=runner_name(clock),
+        deadline_s=args.deadline_seconds,
+        clock=clock,
+        telemetry=telemetry,
+    )
+    _write_report(outcome.report, out)
+    out.write(f"source tarball: {len(tarball)} bytes\n")
+    out.writelines(f"{_tool_report(r)}\n" for r in outcome.results)
+
+
+def _probe_source(
+    args: argparse.Namespace, env: Mapping[str, str], telemetry: Telemetry
+) -> bytes:
+    if args.tarball:
+        return _read_tarball(Path(args.tarball))
+    if not args.event:
+        raise UsageError("--sequence review needs --tarball FILE or --event FILE")
+    event = load_event(Path(args.event))
+    transport = UrllibTransport()
+    github = InstrumentedGitHub(
+        GitHubClient(transport, _app_tokens(env, event, False, transport)), telemetry
+    )
+    return github.get_tarball(event.repo, event.head_sha)
+
+
+def _read_tarball(path: Path) -> bytes:
+    try:
+        return path.read_bytes()
+    except OSError as exc:
+        raise UsageError(f"cannot read tarball {path}: {exc}") from exc
+
+
+def _write_report(r: RunnerReport, out: TextIO) -> None:
+    out.write(f"runner: {r.runner_name}\nstatus: {r.status.value}\n")
+    out.write(f"cleanup: {r.cleanup.value}\nnote: {r.note}\n")
+
+
+def _tool_report(result: ToolResult) -> str:
+    match result:
+        case ToolRan(tool=tool, version=version, exit_code=code, output=output):
+            return (
+                f"tool {tool.name} ({version}): exit {code}; output: {output[-300:]!r}"
+            )
+        case ToolAbsent(tool=tool, detail=detail):
+            return f"tool {tool.name}: not run -- {detail}"
+    raise TypeError(f"not a tool result: {result!r}")  # pragma: no cover
+
+
+_PROBE_SEQUENCES: dict[
+    str, Callable[[argparse.Namespace, Mapping[str, str], TextIO, Telemetry], None]
+] = {"protocol": _probe_protocol, "review": _probe_review_sequence}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -307,6 +481,19 @@ def build_parser() -> argparse.ArgumentParser:
     rev.add_argument(
         "--deadline-seconds", type=float, default=600.0, help="external runner deadline"
     )
+    rev.add_argument(
+        "--max-model-calls",
+        type=int,
+        default=MAX_MODEL_CALLS,
+        help=f"model calls per review, retries included; also the most diff parts (1-{MAX_MODEL_CALLS})",
+    )
+    rev.add_argument(
+        "--diff-chars-per-call",
+        type=int,
+        default=DEFAULT_DIFF_CHARS_PER_CALL,
+        help="diff characters each model call may carry",
+    )
+    _events_arg(rev)
     rev.add_argument("--provider", choices=PROVIDER_CHOICES, default="offline")
     rev.add_argument(
         "--allow-live-inference",
@@ -320,11 +507,36 @@ def build_parser() -> argparse.ArgumentParser:
     swp.set_defaults(handler=_cmd_sweep)
     probe = sub.add_parser(
         "probe-runner",
-        help="live Sprites protocol check: create, deny-all, probe tools, destroy",
+        help="live Sprites check without a model: protocol, or the review's exec sequence",
     )
     probe.add_argument("--deadline-seconds", type=float, default=120.0)
+    probe.add_argument(
+        "--sequence",
+        choices=tuple(_PROBE_SEQUENCES),
+        default="protocol",
+        help="protocol: tool check, framing, 3 MiB stdin; review: tool check, "
+        "upload, unpack and tools, exactly as a review runs them",
+    )
+    probe.add_argument("--tarball", help="--sequence review: a local .tar.gz checkout")
+    probe.add_argument(
+        "--event",
+        help="--sequence review: fetch the head-SHA tarball via the GitHub App",
+    )
+    probe.add_argument(
+        "--tools",
+        choices=("trivial", "review"),
+        default="trivial",
+        help="--sequence review: a trivial file count, or the review's default tools",
+    )
+    _events_arg(probe)
     probe.set_defaults(handler=_cmd_probe)
     return parser
+
+
+def _events_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--events", help="telemetry JSONL file (default: under <state dir>/telemetry/)"
+    )
 
 
 _ERRORS: tuple[tuple[type[Exception], int], ...] = (
@@ -341,7 +553,7 @@ def main(
     err: TextIO | None = None,
     *,
     sprites_factory: Callable[[Mapping[str, str]], SpritesApi] | None = None,
-    openrouter_factory: Callable[[str], OpenRouterProvider] | None = None,
+    openrouter_factory: Callable[[str, CallLimits], OpenRouterProvider] | None = None,
 ) -> int:
     args = build_parser().parse_args(argv)
     if sprites_factory is not None:

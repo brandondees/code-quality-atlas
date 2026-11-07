@@ -10,15 +10,23 @@ writes to GitHub.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from atlas_reviewer.classify import classify
-from atlas_reviewer.diffs import diff_coverage, diff_paths
+from atlas_reviewer.diffs import (
+    DiffPart,
+    DiffSelection,
+    FileDiff,
+    describe_by_risk,
+    diff_paths,
+    select_diff,
+)
 from atlas_reviewer.domain import (
     CleanupStatus,
     Evidence,
     EvidenceItem,
     Missing,
+    Omission,
     PrEvent,
     RunnerReport,
     RunnerStatus,
@@ -28,18 +36,19 @@ from atlas_reviewer.domain import (
 from atlas_reviewer.draft import (
     DraftInput,
     NarrativeFailure,
+    PartNarrative,
     render_draft,
     render_evidence,
 )
 from atlas_reviewer.evidence import DETAIL_CHARS, PullInfo, parse_pull, tool_evidence
 from atlas_reviewer.gather import Collected, IngestConfig, gather_ci
+from atlas_reviewer.instrumented import InstrumentedGitHub
 from atlas_reviewer.lenses import LensLibrary, LensPlan, plan_lenses, rank_lenses
 from atlas_reviewer.notes import ControllerFacts, controller_notes
 from atlas_reviewer.ports import (
     BoundaryError,
     Clock,
     GitHubReader,
-    Narrative,
     ReviewHarness,
     ReviewRequest,
     RunnerLedger,
@@ -48,8 +57,12 @@ from atlas_reviewer.ports import (
 from atlas_reviewer.prompt import UntrustedBlock
 from atlas_reviewer.redact import RedactedText, Redactor
 from atlas_reviewer.runner import RunnerJob, ToolResult, ToolSpec, run_disposable
+from atlas_reviewer.telemetry import Telemetry
 
-DIFF_CHARS = 60_000
+MAX_MODEL_CALLS = 3
+DEFAULT_DIFF_CHARS_PER_CALL = 60_000
+MIN_DIFF_CHARS_PER_CALL = 1_000
+MAX_LISTED_PATHS = 100
 MAX_TARBALL_BYTES = 9 * 1024 * 1024
 
 DEFAULT_TOOLS = (
@@ -71,6 +84,19 @@ class ReviewConfig:
     max_tarball_bytes: int = MAX_TARBALL_BYTES
     ingest: IngestConfig = field(default_factory=IngestConfig)
     mode: str = "live"
+    model_calls: int = MAX_MODEL_CALLS
+    diff_chars_per_call: int = DEFAULT_DIFF_CHARS_PER_CALL
+
+    def __post_init__(self) -> None:
+        """`model_calls` is also the number of diff parts: each part gets
+        one call, and retries come out of the same cap (the provider's
+        `CallLimits.max_calls`), so a retry can leave a later part unreviewed."""
+        if not 1 <= self.model_calls <= MAX_MODEL_CALLS:
+            raise ValueError(f"model calls must be 1 to {MAX_MODEL_CALLS}")
+        if self.diff_chars_per_call < MIN_DIFF_CHARS_PER_CALL:
+            raise ValueError(
+                f"diff characters per call must be at least {MIN_DIFF_CHARS_PER_CALL}"
+            )
 
 
 @dataclass(frozen=True)
@@ -83,9 +109,14 @@ class Deps:
     redactor: Redactor
     runner_name: Callable[[], str]
     lenses: LensLibrary = field(default_factory=LensLibrary)
+    telemetry: Telemetry | None = None
 
 
 def review(event: PrEvent, deps: Deps, config: ReviewConfig) -> str:
+    telemetry = deps.telemetry or Telemetry(deps.clock)
+    deps = replace(
+        deps, github=InstrumentedGitHub(deps.github, telemetry), telemetry=telemetry
+    )
     pull = parse_pull(deps.github.get_pull(event.repo, event.pr_number), deps.redactor)
     collected = Collected(notes=_head_notes(event, pull))
     gather_ci(
@@ -101,7 +132,7 @@ def review(event: PrEvent, deps: Deps, config: ReviewConfig) -> str:
     evidence = classify(
         event.head_sha, collected.items, config.expected, collected.failures
     )
-    diff, paths = _diff(event, deps, collected)
+    selection, paths, diff_redactions = _diff(event, deps, config, collected)
     _note_truncation(collected, "pull request body", pull.body, DETAIL_CHARS)
     issues = _issue_blocks(event, pull, deps, config, collected)
     plan = plan_lenses(
@@ -117,8 +148,12 @@ def review(event: PrEvent, deps: Deps, config: ReviewConfig) -> str:
             tuple(collected.notes),
         )
     )
-    blocks = _blocks(pull, diff, issues, evidence, notes, deps, collected)
-    narrative = _narrate(event, blocks, plan, deps)
+    shared = _Shared(
+        _pull_block(pull, deps),
+        _evidence_block(evidence, deps, collected),
+        tuple(issues),
+    )
+    parts = _narrate_parts(event, selection, shared, notes, plan, deps, telemetry)
     draft = render_draft(
         DraftInput(
             event=event,
@@ -126,13 +161,14 @@ def review(event: PrEvent, deps: Deps, config: ReviewConfig) -> str:
             title=pull.title.text,
             evidence=evidence,
             links=tuple(collected.links),
-            controller_notes=notes,
+            controller_notes=(*notes, *_coverage_lines(selection, parts)),
             lenses=plan.uses,
-            narrative=narrative,
-            omissions=tuple(collected.omissions),
+            narratives=parts,
+            omissions=(*collected.omissions, *_unreviewed_parts(parts)),
             model_usage=deps.harness.usage_lines(),
-            redactions=_redaction_total(pull, collected.items, blocks),
+            redactions=_redaction_total(pull, collected.items, shared, diff_redactions),
             generated_at=deps.clock.now(),
+            telemetry=telemetry.events,
         )
     )
     # Check names, failure reasons, archive entry names and runner notes are untrusted too.
@@ -185,6 +221,7 @@ def _run_tools(
         name=deps.runner_name(),
         deadline_s=config.deadline_s,
         clock=deps.clock,
+        telemetry=deps.telemetry,
     )
     _record_tool_results(event, deps, config, collected, result.results, result.report)
     return result.report, result.results
@@ -212,71 +249,98 @@ def _record_tool_results(
     )
 
 
-def _blocks(
-    pull: PullInfo,
-    diff: RedactedText,
-    issues: list[UntrustedBlock],
-    evidence: tuple[Evidence, ...],
-    notes: tuple[str, ...],
-    deps: Deps,
-    collected: Collected,
-) -> tuple[UntrustedBlock, ...]:
-    r = deps.redactor
-    evidence_text = render_evidence(
-        evidence, tuple(collected.omissions), tuple(collected.links)
+@dataclass(frozen=True)
+class _Shared:
+    """The untrusted blocks every model call gets, whichever diff part it reviews."""
+
+    pull: UntrustedBlock
+    evidence: UntrustedBlock
+    issues: tuple[UntrustedBlock, ...]
+
+    @property
+    def blocks(self) -> tuple[UntrustedBlock, ...]:
+        return (self.pull, self.evidence, *self.issues)
+
+
+def _pull_block(pull: PullInfo, deps: Deps) -> UntrustedBlock:
+    return UntrustedBlock(
+        "pull-request", deps.redactor(f"Title: {pull.title.text}\n\n{pull.body.text}")
     )
+
+
+def _evidence_block(
+    evidence: tuple[Evidence, ...], deps: Deps, collected: Collected
+) -> UntrustedBlock:
+    text = render_evidence(evidence, tuple(collected.omissions), tuple(collected.links))
+    return UntrustedBlock("ci-and-runner-evidence", deps.redactor(text))
+
+
+def _part_blocks(
+    shared: _Shared, part: DiffPart, notes: tuple[str, ...], deps: Deps
+) -> tuple[UntrustedBlock, ...]:
+    diff = deps.redactor(part.text or "(no diff content in this call)")
+    notes_text = deps.redactor("\n".join(f"- {n}" for n in notes))
     return (
-        UntrustedBlock(
-            "pull-request", r(f"Title: {pull.title.text}\n\n{pull.body.text}")
-        ),
+        shared.pull,
         UntrustedBlock("diff", diff),
-        UntrustedBlock("ci-and-runner-evidence", r(evidence_text)),
-        UntrustedBlock("controller-notes", r("\n".join(f"- {n}" for n in notes))),
-        *issues,
+        shared.evidence,
+        UntrustedBlock("controller-notes", notes_text),
+        *shared.issues,
     )
 
 
 def _diff(
-    event: PrEvent, deps: Deps, collected: Collected
-) -> tuple[RedactedText, tuple[str, ...]]:
-    """The diff as the model gets it, plus every changed path (for lens
-    selection). A cut is recorded as an omission naming the files the model
-    never fully saw."""
+    event: PrEvent, deps: Deps, config: ReviewConfig, collected: Collected
+) -> tuple[DiffSelection, tuple[str, ...], int]:
+    """The diff split into risk-ordered parts, every changed path (for lens
+    selection), and the redaction count of the whole diff. Anything short
+    of complete coverage is recorded as an omission naming the files."""
     try:
         raw = deps.github.get_pull_diff(event.repo, event.pr_number)
     except BoundaryError as exc:
         collected.notes.append(
             f"The PR diff could not be fetched ({exc}); the narrative has no diff."
         )
-        return deps.redactor("(diff unavailable)"), ()
+        return select_diff("", 1, config.diff_chars_per_call), (), 0
     full = deps.redactor(raw)
-    capped = deps.redactor(raw, DIFF_CHARS)
-    if capped.truncated_from is not None:
-        collected.omit(
-            "pull request diff",
-            f"{DIFF_CHARS}-character cap",
-            _diff_cut_detail(full.text, capped.truncated_from),
-        )
-    return capped, diff_paths(full.text)
+    selection = select_diff(full.text, config.model_calls, config.diff_chars_per_call)
+    _note_selection(collected, selection, config)
+    return selection, diff_paths(full.text), full.redaction_count
 
 
-MAX_LISTED_PATHS = 15
+def _note_selection(
+    collected: Collected, sel: DiffSelection, config: ReviewConfig
+) -> None:
+    if sel.complete:
+        return
+    limit = (
+        f"{config.model_calls} model call(s) x {config.diff_chars_per_call} "
+        "characters, risk-ordered"
+    )
+    collected.omit("pull request diff", limit, _selection_detail(sel))
 
 
-def _diff_cut_detail(full_text: str, total_chars: int) -> str:
-    cov = diff_coverage(full_text, DIFF_CHARS)
+def _selection_detail(sel: DiffSelection) -> str:
+    cut = ", ".join(
+        f"{f.path} (kept {f.shown_chars} of {f.full_chars} characters)" for f in sel.cut
+    )
     parts = [
-        f"kept {DIFF_CHARS} of {total_chars} characters",
-        f"{len(cov.seen)} of {cov.total_files} file(s) seen in full",
+        (
+            f"kept {sel.kept_chars} of {sel.total_chars} characters in "
+            f"{len(sel.parts)} part(s), highest risk first"
+        ),
+        f"{len(sel.full)} of {sel.total_files} file(s) sent in full",
+        f"cut to fit one call: {cut}" if cut else "",
+        _unseen_detail(sel.unseen),
     ]
-    if cov.partial is not None:
-        parts.append(f"cut partway through {cov.partial}")
-    if cov.unseen:
-        shown = ", ".join(cov.unseen[:MAX_LISTED_PATHS])
-        more = len(cov.unseen) - MAX_LISTED_PATHS
-        tail = f", and {more} more" if more > 0 else ""
-        parts.append(f"never seen ({len(cov.unseen)}): {shown}{tail}")
-    return "; ".join(parts)
+    return "; ".join(p for p in parts if p)
+
+
+def _unseen_detail(unseen: tuple[FileDiff, ...]) -> str:
+    if not unseen:
+        return ""
+    listed = describe_by_risk(unseen, MAX_LISTED_PATHS)
+    return f"never sent to any model call ({len(unseen)}), highest risk first: {listed}"
 
 
 def _note_truncation(
@@ -318,12 +382,59 @@ def _issue_block(
     return UntrustedBlock(f"issue-{number}", redacted)
 
 
-def _narrate(
+def _narrate_parts(
     event: PrEvent,
+    selection: DiffSelection,
+    shared: _Shared,
+    notes: tuple[str, ...],
+    plan: LensPlan,
+    deps: Deps,
+    telemetry: Telemetry,
+) -> tuple[PartNarrative, ...]:
+    """One model call per part, in risk order. A part whose call fails or is
+    refused (call cap, cost cap) still yields a `PartNarrative`, so its
+    files are reported as unreviewed rather than dropped."""
+    parts = selection.parts or (DiffPart(()),)
+    total = len(parts)
+
+    def blocks(index: int, part: DiffPart) -> tuple[UntrustedBlock, ...]:
+        note = _part_note(index, total, part, selection)
+        return _part_blocks(shared, part, (*notes, note), deps)
+
+    return tuple(
+        _narrate_part(event, i, total, part, blocks(i, part), plan, deps, telemetry)
+        for i, part in enumerate(parts, 1)
+    )
+
+
+def _part_note(index: int, total: int, part: DiffPart, sel: DiffSelection) -> str:
+    files = ", ".join(f"{f.path} (cut)" if f.cut else f.path for f in part.files)
+    others = (
+        f" The other {total - 1} part(s) go to separate model calls; this call cannot see them."
+        if total > 1
+        else ""
+    )
+    unseen = (
+        f" {len(sel.unseen)} file(s) go to no model call (listed in the omissions table)."
+        if sel.unseen
+        else ""
+    )
+    return (
+        f"Diff part {index} of {total} (this model call): {len(part.files)} file(s), "
+        f"{part.chars} characters: {files or 'none'}.{others}{unseen}"
+    )
+
+
+def _narrate_part(
+    event: PrEvent,
+    index: int,
+    total: int,
+    part: DiffPart,
     blocks: tuple[UntrustedBlock, ...],
     plan: LensPlan,
     deps: Deps,
-) -> Narrative | NarrativeFailure:
+    telemetry: Telemetry,
+) -> PartNarrative:
     request = ReviewRequest(
         event.repo,
         event.pr_number,
@@ -333,17 +444,56 @@ def _narrate(
         plan.coverage(),
     )
     try:
-        return deps.harness.review(request)
+        result = telemetry.span(
+            "model call",
+            f"diff part {index} of {total}",
+            lambda: deps.harness.review(request),
+            {"files": len(part.files), "diff_chars": part.chars},
+        )
     except BoundaryError as exc:
-        return NarrativeFailure(deps.harness.name, str(exc))
+        return PartNarrative(
+            index, total, part.files, NarrativeFailure(deps.harness.name, str(exc))
+        )
+    return PartNarrative(index, total, part.files, result)
+
+
+def _coverage_lines(
+    sel: DiffSelection, parts: tuple[PartNarrative, ...]
+) -> tuple[str, ...]:
+    reviewed = [p for p in parts if p.reviewed]
+    full = sum(1 for p in reviewed for f in p.files if not f.cut)
+    cut = sum(1 for p in reviewed for f in p.files if f.cut)
+    complete = sel.complete and len(reviewed) == len(parts)
+    verdict = "complete" if complete else "PARTIAL"
+    line = (
+        f"Diff coverage after the model calls: {verdict}. {len(reviewed)} of "
+        f"{len(parts)} call(s) returned a review, covering {full} of {sel.total_files} "
+        f"file(s) in full and {cut} cut to fit; {len(sel.unseen)} file(s) went to "
+        "no call."
+    )
+    return (line,)
+
+
+def _unreviewed_parts(parts: tuple[PartNarrative, ...]) -> tuple[Omission, ...]:
+    return tuple(
+        Omission(
+            f"pull request diff, part {p.index} of {p.total}",
+            "model call returned no review",
+            f"{len(p.files)} file(s) sent but not reviewed: "
+            f"{describe_by_risk(p.files, MAX_LISTED_PATHS) or 'none'}",
+        )
+        for p in parts
+        if not p.reviewed
+    )
 
 
 def _redaction_total(
-    pull: PullInfo, items: list[EvidenceItem], blocks: tuple[UntrustedBlock, ...]
+    pull: PullInfo, items: list[EvidenceItem], shared: _Shared, diff_redactions: int
 ) -> int:
     inner = pull.title.redaction_count + pull.body.redaction_count
     return (
         inner
+        + diff_redactions
         + sum(i.detail.redaction_count for i in items)
-        + sum(b.content.redaction_count for b in blocks)
+        + sum(b.content.redaction_count for b in shared.blocks)
     )

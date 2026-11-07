@@ -236,7 +236,7 @@ def test_openrouter_needs_the_explicit_flag_and_never_runs_in_dry_run(
         ["--state-dir", str(tmp_path), "review", "--event", EVENT, "--provider", "openrouter", *extra],
         env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"},
         out=io.StringIO(), err=(err := io.StringIO()),
-        openrouter_factory=lambda key: made.append(key) or StubOpenRouter(key),
+        openrouter_factory=lambda key, limits: made.append(key) or StubOpenRouter(key),
     )  # fmt: skip
     assert code == cli.EXIT_USAGE
     assert message in err.getvalue()
@@ -261,7 +261,7 @@ def test_openrouter_preflight_refusal_stops_before_any_review(tmp_path, monkeypa
         ["--state-dir", str(tmp_path), "review", "--event", EVENT,
          "--provider", "openrouter", "--allow-live-inference"],
         env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"}, out=out, err=err,
-        openrouter_factory=lambda key: StubOpenRouter(key, refuse=True),
+        openrouter_factory=lambda key, limits: StubOpenRouter(key, refuse=True),
     )  # fmt: skip
     assert code == cli.EXIT_BOUNDARY
     assert "unlimited" in err.getvalue()
@@ -283,7 +283,7 @@ def test_openrouter_review_reports_model_usage(tmp_path, monkeypatch):
          "--provider", "openrouter", "--allow-live-inference"],
         env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"}, out=out, err=io.StringIO(),
         sprites_factory=scripted_sprites,
-        openrouter_factory=lambda key: made.append(StubOpenRouter(key)) or made[-1],
+        openrouter_factory=lambda key, limits: made.append(StubOpenRouter(key)) or made[-1],
     )  # fmt: skip
     assert code == cli.EXIT_OK
     assert made[0].key == "sk-or-v1-x"
@@ -359,3 +359,202 @@ def test_boundary_errors_exit_nonzero(tmp_path, monkeypatch):
     assert code == cli.EXIT_BOUNDARY
     assert "GitHub 404" in err
     assert HEAD not in err
+
+
+# --- telemetry, call config and the review-sequence probe -------------------
+
+
+def live_github(monkeypatch):
+    monkeypatch.setattr(
+        cli, "AppInstallationTokens",
+        lambda transport, clock, **kw: type("T", (), {"secrets": lambda self: ()})(),
+    )  # fmt: skip
+    monkeypatch.setattr(
+        cli, "GitHubClient", lambda transport, t: FixtureGitHub(FIXTURE)
+    )
+
+
+def jsonl(path):
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def test_a_live_review_writes_secret_free_jsonl_telemetry_by_default(
+    tmp_path, monkeypatch
+):
+    live_github(monkeypatch)
+    draft_path = tmp_path / "draft.md"
+    out = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "review", "--event", EVENT, "--out", str(draft_path)],
+        env=APP_ENV, out=out, err=io.StringIO(), sprites_factory=scripted_sprites,
+    )  # fmt: skip
+    assert code == cli.EXIT_OK
+    (events_file,) = (tmp_path / "telemetry").glob("review-*.jsonl")
+    raw = events_file.read_text()
+    for secret in (APP_ENV[cli.ENV_SPRITES_TOKEN], "not-a-real-key"):
+        assert secret not in raw
+    phases = [e["phase"] for e in jsonl(events_file)]
+    for phase in ("evidence fetch", "create", "egress", "exec", "upload", "unpack",
+                  "tool", "destroy", "verify", "model call"):  # fmt: skip
+        assert phase in phases, phase
+    assert f"telemetry: {len(phases)} event(s), {events_file}" in out.getvalue()
+    assert "## Lifecycle telemetry" in draft_path.read_text()
+
+
+def test_a_dry_run_writes_telemetry_only_when_asked(tmp_path):
+    run_cli("--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run")
+    assert not (tmp_path / "telemetry").exists()
+    target = tmp_path / "events.jsonl"
+    code, _, _ = run_cli(
+        "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run",
+        "--events", str(target),
+    )  # fmt: skip
+    assert code == cli.EXIT_OK
+    assert any(e["phase"] == "model call" for e in jsonl(target))
+
+
+@pytest.mark.parametrize(
+    "flags,message",
+    [
+        (("--max-model-calls", "4"), "model calls must be 1 to 3"),
+        (("--max-model-calls", "0"), "model calls must be 1 to 3"),
+        (("--diff-chars-per-call", "10"), "at least 1000"),
+    ],
+)
+def test_the_call_cap_and_per_call_budget_flags_are_validated(tmp_path, flags, message):
+    code, _, err = run_cli(
+        "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run", *flags
+    )
+    assert code == cli.EXIT_USAGE
+    assert message in err
+
+
+def test_the_provider_gets_the_configured_call_cap_and_preflight_is_timed(
+    tmp_path, monkeypatch
+):
+    live_github(monkeypatch)
+    limits_seen = []
+
+    def factory(key, limits):
+        limits_seen.append(limits)
+        return StubOpenRouter(key)
+
+    events = tmp_path / "e.jsonl"
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "review", "--event", EVENT, "--provider", "openrouter",
+         "--allow-live-inference", "--max-model-calls", "2", "--events", str(events)],
+        env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"}, out=io.StringIO(),
+        err=io.StringIO(), sprites_factory=scripted_sprites, openrouter_factory=factory,
+    )  # fmt: skip
+    assert code == cli.EXIT_OK
+    assert limits_seen[0].max_calls == 2
+    first = jsonl(events)[0]
+    assert (first["phase"], first["step"], first["status"]) == (
+        "model preflight", "key status", "ok",
+    )  # fmt: skip
+
+
+def test_a_preflight_refusal_is_labelled(tmp_path):
+    err = io.StringIO()
+    cli.main(
+        ["--state-dir", str(tmp_path), "review", "--event", EVENT,
+         "--provider", "openrouter", "--allow-live-inference"],
+        env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"}, out=io.StringIO(), err=err,
+        openrouter_factory=lambda key, limits: StubOpenRouter(key, refuse=True),
+    )  # fmt: skip
+    assert "model preflight / key status failed after" in err.getvalue()
+
+
+def test_probe_runner_review_sequence_runs_the_real_exec_order_on_a_tarball(tmp_path):
+    tarball = tmp_path / "checkout.tar.gz"
+    tarball.write_bytes(FixtureGitHub(FIXTURE).get_tarball("o/r", HEAD))
+    api = FakeSprites.from_script(
+        {"exec": [{"match": "tar -xzf", "stdout": "", "exit_code": 0},
+                  {"match": "echo posix-sh", "stdout": "posix-sh", "exit_code": 0},
+                  {"match": "find .", "stdout": "3", "exit_code": 0}]}
+    )  # fmt: skip
+    out = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "probe-runner", "--sequence", "review",
+         "--tarball", str(tarball)],
+        env={}, out=out, err=io.StringIO(), sprites_factory=lambda env: api,
+    )  # fmt: skip
+    assert code == cli.EXIT_OK
+    text = out.getvalue()
+    assert "status: completed" in text
+    assert "cleanup: destroyed (verified absent)" in text
+    assert f"source tarball: {tarball.stat().st_size} bytes" in text
+    assert "tool source-file-count (posix-sh): exit 0; output: '3'" in text
+    assert "## Lifecycle telemetry" in text
+    scripts = [c[2] for c in api.calls if c[0] == "exec"]
+    assert [s.split()[0] for s in scripts] == ["for", "head", "mkdir", "cd", "cd"]
+    (events_file,) = (tmp_path / "telemetry").glob("probe-review-*.jsonl")
+    steps = [(e["phase"], e["step"]) for e in jsonl(events_file)]
+    assert ("upload", f"{tarball.stat().st_size}-byte tarball") in steps
+    assert ("unpack", "tar -xzf") in steps
+    assert "model call" not in {p for p, _ in steps}
+    assert api.live_names() == ()
+
+
+def test_probe_runner_review_sequence_can_fetch_the_tarball_and_run_review_tools(
+    tmp_path, monkeypatch
+):
+    live_github(monkeypatch)
+    api = scripted_sprites({})
+    out = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "probe-runner", "--sequence", "review",
+         "--event", EVENT, "--tools", "review", "--events", str(tmp_path / "e.jsonl")],
+        env=APP_ENV, out=out, err=io.StringIO(), sprites_factory=lambda env: api,
+    )  # fmt: skip
+    assert code == cli.EXIT_OK
+    assert "tool python-compileall (Python 3.13.5): exit 0" in out.getvalue()
+    assert jsonl(tmp_path / "e.jsonl")[0]["phase"] == "source fetch"
+
+
+@pytest.mark.parametrize(
+    "extra,message",
+    [
+        ((), "needs --tarball FILE or --event FILE"),
+        (("--tarball", "/nonexistent/x.tgz"), "cannot read tarball"),
+    ],
+)
+def test_probe_runner_review_sequence_needs_a_readable_source(tmp_path, extra, message):
+    code, _, err = run_cli(
+        "--state-dir", str(tmp_path), "probe-runner", "--sequence", "review", *extra
+    )
+    assert code == cli.EXIT_USAGE
+    assert message in err
+
+
+def test_probe_runner_review_sequence_refuses_an_oversized_tarball(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(cli, "MAX_TARBALL_BYTES", 3)
+    tarball = tmp_path / "big.tgz"
+    tarball.write_bytes(b"0123456789")
+    api = FakeSprites()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "probe-runner", "--sequence", "review",
+         "--tarball", str(tarball)],
+        env={}, out=io.StringIO(), err=(err := io.StringIO()),
+        sprites_factory=lambda env: api,
+    )  # fmt: skip
+    assert code == cli.EXIT_USAGE
+    assert "over 3" in err.getvalue()
+    assert api.calls == []
+
+
+def test_probe_runner_review_sequence_reports_a_missing_tool(tmp_path):
+    tarball = tmp_path / "checkout.tar.gz"
+    tarball.write_bytes(b"not really gzip")
+    api = FakeSprites.from_script(
+        {"installed": [], "exec": [{"match": "tar -xzf", "stdout": "", "exit_code": 0}]}
+    )
+    out = io.StringIO()
+    cli.main(
+        ["--state-dir", str(tmp_path), "probe-runner", "--sequence", "review",
+         "--tarball", str(tarball)],
+        env={}, out=out, err=io.StringIO(), sprites_factory=lambda env: api,
+    )  # fmt: skip
+    assert "tool source-file-count: not run -- `sh` not found" in out.getvalue()

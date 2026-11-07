@@ -1,5 +1,21 @@
 # SPDX-License-Identifier: MIT
-from atlas_reviewer.diffs import diff_coverage, diff_paths
+import pytest
+
+from atlas_reviewer.diffs import (
+    BOUNDARY,
+    CONFIG,
+    CUT_MARKER,
+    DOCS,
+    SECURITY,
+    SOURCE,
+    TESTS,
+    UNPARSED_PATH,
+    describe_by_risk,
+    diff_paths,
+    risk_tier,
+    select_diff,
+    split_files,
+)
 
 
 def file_diff(path: str, body: str = "x" * 20) -> str:
@@ -9,40 +25,118 @@ def file_diff(path: str, body: str = "x" * 20) -> str:
 DIFF = file_diff("a.py") + file_diff("b/c.py") + file_diff("d.md")
 
 
+def paths(files):
+    return [f.path for f in files]
+
+
 def test_paths_are_the_new_side_in_order_including_renames():
     renamed = "diff --git a/old name.py b/new name.py\nsimilarity index 100%\n"
     assert diff_paths(DIFF + renamed) == ("a.py", "b/c.py", "d.md", "new name.py")
 
 
-def test_everything_fits_under_the_cap():
-    cov = diff_coverage(DIFF, len(DIFF))
-    assert (cov.seen, cov.partial, cov.unseen) == (("a.py", "b/c.py", "d.md"), None, ())
+def test_splitting_keeps_every_character_in_diff_order():
+    files = split_files(DIFF)
+    assert paths(files) == ["a.py", "b/c.py", "d.md"]
+    assert "".join(f.text for f in files) == DIFF
 
 
-def test_cap_through_the_middle_of_a_file_marks_it_partial_and_the_rest_unseen():
-    first = len(file_diff("a.py"))
-    cov = diff_coverage(DIFF, first + 10)
-    assert cov.seen == ("a.py",)
-    assert cov.partial == "b/c.py"
-    assert cov.unseen == ("d.md",)
-    assert cov.total_files == 3
+def test_text_before_the_first_header_is_kept_as_a_pseudo_file():
+    files = split_files("stray preamble\n" + DIFF)
+    assert files[0].path == UNPARSED_PATH
+    assert files[0].text == "stray preamble\n"
+    assert split_files("not a diff")[0].text == "not a diff"
+    assert split_files("") == ()
 
 
-def test_cap_exactly_between_files_has_no_partial_file():
-    first = len(file_diff("a.py"))
-    cov = diff_coverage(DIFF, first)
-    assert (cov.seen, cov.partial, cov.unseen) == (
-        ("a.py",),
-        None,
-        ("b/c.py", "d.md"),
+@pytest.mark.parametrize(
+    "path,tier",
+    [
+        ("atlas_reviewer/github_auth.py", SECURITY),
+        ("atlas_reviewer/redact.py", SECURITY),
+        ("src/secrets_store.py", SECURITY),
+        ("atlas_reviewer/runner.py", BOUNDARY),
+        ("atlas_reviewer/http.py", BOUNDARY),
+        ("atlas_reviewer/sprites_api.py", BOUNDARY),
+        ("atlas_reviewer/openrouter.py", BOUNDARY),
+        ("atlas_reviewer/draft.py", SOURCE),
+        (".github/workflows/ci.yml", CONFIG),
+        ("requirements.txt", CONFIG),
+        ("atlas_reviewer/tests/test_redact.py", TESTS),
+        ("atlas_reviewer/fixtures/sample-pr/runner-script.json", TESTS),
+        ("docs/security.md", DOCS),
+        ("skills/reviewing-ai-authored-code/examples.md", DOCS),
+    ],
+)
+def test_risk_tiers_put_tests_and_docs_last_whatever_their_names(path, tier):
+    assert risk_tier(path) is tier
+
+
+def test_selection_puts_the_riskiest_files_first_and_leaves_docs_unseen():
+    diff = (
+        file_diff("README.md", "d" * 300)
+        + file_diff("tests/test_auth.py", "t" * 300)
+        + file_diff("app/auth.py", "a" * 300)
+        + file_diff("app/http.py", "h" * 300)
     )
+    one = len(file_diff("app/auth.py", "a" * 300))
+    sel = select_diff(diff, max_parts=2, part_chars=one)
+    assert [paths(p.files) for p in sel.parts] == [["app/auth.py"], ["app/http.py"]]
+    assert paths(sel.unseen) == ["tests/test_auth.py", "README.md"]
+    assert not sel.complete
 
 
-def test_cap_inside_the_first_file_sees_nothing_in_full():
-    cov = diff_coverage(DIFF, 5)
-    assert (cov.seen, cov.partial, cov.unseen) == ((), "a.py", ("b/c.py", "d.md"))
+def test_first_fit_lets_a_small_file_fill_a_gap_in_an_earlier_part():
+    big, small = "b" * 500, "s" * 10
+    diff = (
+        file_diff("app/auth.py", big)
+        + file_diff("app/x.py", big)
+        + file_diff("z.md", small)
+    )
+    budget = len(file_diff("app/auth.py", big)) + len(file_diff("z.md", small))
+    sel = select_diff(diff, max_parts=2, part_chars=budget)
+    assert [paths(p.files) for p in sel.parts] == [
+        ["app/auth.py", "z.md"],
+        ["app/x.py"],
+    ]
+    assert sel.complete
 
 
-def test_a_diff_without_file_headers_has_no_files():
-    cov = diff_coverage("not a diff", 3)
-    assert cov.total_files == 0
+def test_a_file_larger_than_one_call_is_cut_into_a_part_of_its_own():
+    diff = file_diff("app/runner.py", "line\n" * 400) + file_diff("a.py")
+    sel = select_diff(diff, max_parts=3, part_chars=500)
+    (cut,) = sel.cut
+    assert cut.path == "app/runner.py"
+    assert cut.text.endswith(CUT_MARKER)
+    assert len(cut.text) <= 500
+    assert cut.shown_chars == len(cut.text) - len(CUT_MARKER)
+    assert cut.full_chars > 2_000
+    assert paths(sel.full) == ["a.py"]
+    assert not sel.complete
+
+
+def test_every_file_is_accounted_for_exactly_once():
+    diff = "".join(file_diff(f"f{i}.py", "y" * (50 * i)) for i in range(12))
+    sel = select_diff(diff, max_parts=3, part_chars=400)
+    accounted = paths(sel.full) + paths(sel.cut) + paths(sel.unseen)
+    assert sorted(accounted) == sorted(diff_paths(diff))
+    assert len(sel.parts) <= 3
+    assert all(p.chars <= 400 for p in sel.parts)
+    assert sel.total_files == 12 and sel.total_chars == len(diff)
+
+
+def test_an_empty_diff_has_no_parts_and_is_complete():
+    sel = select_diff("", 3, 1_000)
+    assert sel.parts == () and sel.complete
+
+
+def test_unseen_files_are_described_grouped_by_risk_with_a_count_of_the_rest():
+    files = split_files(
+        file_diff("docs/a.md") + file_diff("app/auth.py") + file_diff("tests/test_x.py")
+    )
+    assert describe_by_risk(files, 10) == (
+        "[security, auth, secrets and redaction] app/auth.py; "
+        "[tests and fixtures] tests/test_x.py; [docs] docs/a.md"
+    )
+    assert describe_by_risk(files, 1) == (
+        "[security, auth, secrets and redaction] app/auth.py; and 2 more"
+    )
