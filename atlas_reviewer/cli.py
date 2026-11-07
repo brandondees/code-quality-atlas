@@ -55,6 +55,7 @@ from atlas_reviewer.instrumented import InstrumentedGitHub
 from atlas_reviewer.interpreter import TrustedPython
 from atlas_reviewer.ledger import FileLedger, ReviewInProgressError, single_review_lock
 from atlas_reviewer.openrouter import OpenRouterProvider
+from atlas_reviewer.picker import Depth
 from atlas_reviewer.ports import BoundaryError, Clock, ModelProvider, SpritesApi
 from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.redact import Redactor
@@ -292,6 +293,7 @@ def _review_config(args: argparse.Namespace, mode: str) -> ReviewConfig:
             model_calls=args.max_model_calls,
             diff_chars_per_call=args.diff_chars_per_call,
             first_frame_s=args.first_frame_seconds,
+            depth=Depth(args.depth),
         )
     except ValueError as exc:
         raise UsageError(str(exc)) from exc
@@ -508,13 +510,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-model-calls",
         type=int,
         default=MAX_MODEL_CALLS,
-        help=f"model calls per review, retries included; also the most diff parts (1-{MAX_MODEL_CALLS})",
+        help=(
+            "model calls per review, retries included: one for the lens picker "
+            f"(except at triage depth), the rest for diff parts (1-{MAX_MODEL_CALLS})"
+        ),
     )
     rev.add_argument(
         "--diff-chars-per-call",
         type=int,
         default=DEFAULT_DIFF_CHARS_PER_CALL,
-        help="diff characters each model call may carry",
+        help=(
+            "most diff characters a model call may carry; each review shrinks "
+            "parts further to fit its measured prompt under the token bound"
+        ),
+    )
+    rev.add_argument(
+        "--depth",
+        choices=[d.value for d in Depth],
+        default=Depth.REVIEW.value,
+        help="the atlas depth mode: triage runs the critical tier with no picker call",
     )
     _events_arg(rev)
     rev.add_argument("--provider", choices=PROVIDER_CHOICES, default="offline")

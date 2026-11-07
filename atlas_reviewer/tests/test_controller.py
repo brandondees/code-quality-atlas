@@ -12,6 +12,7 @@ from atlas_reviewer.fakes import FakeSprites, MemoryLedger
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.harness import SkillBundleHarness, load_bundle
 from atlas_reviewer.lenses import LensLibrary
+from atlas_reviewer.picker import CRITICAL_TIER, Depth
 from atlas_reviewer.ports import BoundaryError, Listing, Narrative, NotFoundError
 from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.redact import Redactor
@@ -32,6 +33,27 @@ COMPILEALL = ToolSpec(
     "{python} -I -m compileall -q .",
 )
 FULL_TOOLS = (COMPILEALL, RUFF, SHELLCHECK)
+PICKED = (
+    "sweeping-for-security",
+    "tracing-correctness-and-invariants",
+    "hunting-silent-failures",
+)
+
+
+class PickingProvider(OfflineProvider):
+    """Answers lens-picker prompts with `reply` and keeps them apart, so
+    `prompts` holds only review prompts."""
+
+    def __init__(self, reply=None):
+        super().__init__()
+        self.reply = reply or json.dumps({"lenses": list(PICKED)})
+        self.picks = []
+
+    def complete(self, prompt):
+        if "--- lens picker ---" in prompt.system:
+            self.picks.append(prompt)
+            return self.reply
+        return super().complete(prompt)
 
 
 class Setup:
@@ -42,7 +64,7 @@ class Setup:
         script = json.loads((FIXTURE / "runner-script.json").read_text())
         self.sprites = sprites or FakeSprites.from_script(script)
         self.ledger = MemoryLedger()
-        self.provider = OfflineProvider()
+        self.provider = PickingProvider()
         self.redactor = redactor or Redactor()
         self.harness = harness or SkillBundleHarness(
             self.provider,
@@ -225,6 +247,12 @@ def test_harness_failure_still_produces_a_draft():
         def review(self, request):
             raise BoundaryError("provider HTTP 529")
 
+        def pick(self, request):
+            raise BoundaryError("provider HTTP 529")
+
+        def prompt_tokens(self, request):
+            return 0
+
         def usage_lines(self):
             return ("call 1: HTTP 529; reserved $0.7400",)
 
@@ -308,7 +336,7 @@ def diff_blocks(provider):
 
 def test_a_large_diff_is_split_into_one_model_call_per_part(tmp_path):
     s = Setup(github=BigDiff(FIXTURE))
-    draft = s.run()
+    draft = s.run(diff_chars_per_call=60_000)
     assert len(s.provider.prompts) == 2
     first, second = diff_blocks(s.provider)
     assert "f0.py" in first and "f0.py" not in second
@@ -322,7 +350,7 @@ def test_a_large_diff_is_split_into_one_model_call_per_part(tmp_path):
 
 def test_each_call_is_told_which_part_it_has_and_that_others_exist():
     s = Setup(github=BigDiff(FIXTURE))
-    s.run()
+    s.run(diff_chars_per_call=60_000)
     told = [p.user.split('label="controller-notes"', 1)[1] for p in s.provider.prompts]
     assert "Diff part 1 of 2 (this model call): 11 file(s)" in told[0]
     assert "Diff part 2 of 2 (this model call): 9 file(s)" in told[1]
@@ -331,7 +359,7 @@ def test_each_call_is_told_which_part_it_has_and_that_others_exist():
 
 def test_partial_coverage_reviews_the_riskiest_files_and_names_the_rest_by_risk():
     s = Setup(github=RiskyDiff(FIXTURE))
-    draft = s.run(model_calls=2, diff_chars_per_call=21_000)
+    draft = s.run(model_calls=2, diff_chars_per_call=21_000, depth=Depth.TRIAGE)
     blocks = diff_blocks(s.provider)
     assert "app/auth.py" in blocks[0]
     assert "app/http_client.py" in blocks[1]
@@ -340,7 +368,10 @@ def test_partial_coverage_reviews_the_riskiest_files_and_names_the_rest_by_risk(
         for r in section(draft, "Omissions and limits hit").splitlines()
         if r.startswith("| pull request diff |")
     )
-    assert "2 model call(s) x 21000 characters, risk-ordered" in row
+    assert (
+        "too large for one review pass: 2 part(s) of at most 21000 characters, "
+        "risk-ordered"
+    ) in row
     assert "2 of 5 file(s) sent in full" in row
     assert (
         "never sent to any model call (3), highest risk first: [other code] app/views.py; "
@@ -366,11 +397,14 @@ def test_a_part_whose_call_fails_is_reported_unreviewed_not_dropped():
                 raise BoundaryError("provider HTTP 529")
             return Narrative("skill-bundle", "offline", Redactor()("ok"))
 
+        def prompt_tokens(self, request):
+            return 0
+
         def usage_lines(self):
             return ("call 1: ok", "call 2: HTTP 529")
 
     draft = Setup(github=RiskyDiff(FIXTURE), harness=FailsSecond()).run(
-        model_calls=3, diff_chars_per_call=41_000
+        model_calls=3, diff_chars_per_call=41_000, depth=Depth.TRIAGE
     )
     omissions = section(draft, "Omissions and limits hit")
     row = next(r for r in omissions.splitlines() if "part 2 of 3" in r)
@@ -400,7 +434,7 @@ def test_retries_share_the_three_call_cap_so_a_later_part_is_refused_and_listed(
     s, fake = openrouter_setup(
         reply({"error": "busy"}, status=503), reply(completion()), reply(completion())
     )
-    draft = s.run(model_calls=3, diff_chars_per_call=41_000)
+    draft = s.run(model_calls=3, diff_chars_per_call=41_000, depth=Depth.TRIAGE)
     assert len(fake.chat_requests()) == 3
     usage = section(draft, "Model usage")
     assert "refused: call cap reached: 3 model calls per review" in usage
@@ -424,7 +458,7 @@ def test_the_cost_cap_refuses_a_part_before_it_is_sent():
         usage={"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.5}
     )
     s, fake = openrouter_setup(reply(costly), budget_usd=Decimal("1.00"))
-    draft = s.run(model_calls=3, diff_chars_per_call=41_000)
+    draft = s.run(model_calls=3, diff_chars_per_call=41_000, depth=Depth.TRIAGE)
     assert len(fake.chat_requests()) == 1
     assert "refused: cost cap" in section(draft, "Model usage")
     assert "PARTIAL. 1 of 3 call(s) returned a review" in section(
@@ -551,7 +585,7 @@ def test_the_bundle_text_alone_does_not_count_as_running_a_lens():
     (prompt,) = s.provider.prompts
     assert "reference/lenses/hunting-silent-failures/body.md" in prompt.system
     assert "You cannot open files" in prompt.system
-    assert "=== lens: sweeping-for-security ===" not in prompt.system
+    assert "=== lens: reviewing-accessibility-and-i18n ===" not in prompt.system
 
 
 def test_one_ci_gate_is_counted_once_with_its_views_attached():
@@ -753,3 +787,153 @@ def test_quoted_values_are_one_inert_capped_code_span():
     long = quote_untrusted("x" * 500)
     assert long == '`"' + "x" * 200 + '..."`'
     assert quote_untrusted("") == '`""`'
+
+
+# --- diff parts sized to the token bound -------------------------------------
+
+
+def sized_diff(files, body_chars, char="x"):
+    return "".join(
+        f"diff --git a/src/m{i}.py b/src/m{i}.py\n--- a/src/m{i}.py\n"
+        f"+++ b/src/m{i}.py\n@@ -1 +1 @@\n+" + char * body_chars + "\n"
+        for i in range(files)
+    )
+
+
+def with_diff(text):
+    class Sized(FixtureGitHub):
+        def get_pull_diff(self, repo, number):
+            return text
+
+    return Setup(github=Sized(FIXTURE))
+
+
+def prompt_bound(prompt):
+    from atlas_reviewer.budget import input_token_bound
+
+    return input_token_bound(prompt.system + prompt.user)
+
+
+def test_a_diff_that_fits_beside_the_prompt_goes_in_one_call():
+    from atlas_reviewer.controller import PROMPT_TOKEN_ROOM
+
+    s = with_diff(sized_diff(10, 7_000))
+    draft = s.run()
+    (prompt,) = s.provider.prompts
+    assert prompt_bound(prompt) <= PROMPT_TOKEN_ROOM
+    assert "src/m9.py" in diff_blocks(s.provider)[0]
+    assert "complete. 1 of 1 call(s)" in section(draft, "Controller notes")
+
+
+@pytest.mark.parametrize("char", ["x", "\u00e9", "\u6f22"])
+def test_every_part_of_an_oversized_diff_fits_the_token_bound(char):
+    from atlas_reviewer.controller import PROMPT_TOKEN_ROOM
+
+    s = with_diff(sized_diff(60, 3_000, char))
+    draft = s.run()
+    assert len(s.provider.prompts) == 2
+    bounds = [prompt_bound(p) for p in s.provider.prompts]
+    assert all(b <= PROMPT_TOKEN_ROOM for b in bounds)
+    assert max(bounds) > PROMPT_TOKEN_ROOM - 3 * 3_000 - 1_000
+    row = next(
+        r
+        for r in section(draft, "Omissions and limits hit").splitlines()
+        if r.startswith("| pull request diff |")
+    )
+    assert "too large for one review pass: 2 part(s) of at most" in row
+    assert "never sent to any model call (" in row
+    notes = section(draft, "Controller notes")
+    assert "The diff is too large for one review pass" in notes
+    assert "PARTIAL" in notes
+
+
+def test_an_explicit_smaller_part_size_is_still_honoured():
+    s = with_diff(sized_diff(10, 9_000))
+    s.run(diff_chars_per_call=20_000)
+    assert all(len(d) <= 20_000 + 200 for d in diff_blocks(s.provider))
+
+
+# --- lens selection by the repo's own picker ---------------------------------
+
+
+def test_the_picker_runs_the_repos_skill_over_fenced_paths_and_pr_text():
+    s = Setup()
+    s.run()
+    (pick,) = s.provider.picks
+    assert "--- lens picker ---\n---\nname: choosing-review-lenses" in pick.system
+    assert "Depth mode: review, set by the operator." in pick.system
+    assert 'label="changed-paths"' in pick.user
+    assert 'label="pull-request"' in pick.user
+    assert 'label="diff"' not in pick.user
+
+
+def test_picked_lenses_are_the_ones_inlined_and_attributed():
+    s = Setup()
+    draft = s.run()
+    (prompt,) = s.provider.prompts
+    for name in PICKED:
+        assert f"=== lens: {name} ===" in prompt.system
+    table = section(draft, "Review lenses")
+    assert "| sweeping-for-security | included |" in table
+    assert "picker rank 1" in table
+    assert "`choosing-review-lenses` ran as one model call at review depth" in (
+        section(draft, "Controller notes")
+    )
+
+
+def test_a_picked_name_outside_the_bundle_is_omitted_not_invented():
+    s = Setup()
+    s.provider.reply = json.dumps({"lenses": ["made-up-lens", "checking-restraint"]})
+    draft = s.run()
+    table = section(draft, "Review lenses")
+    assert "| made-up-lens | omitted |" in table
+    assert "no body.md in the bundle" in table
+    assert "=== lens: checking-restraint ===" in s.provider.prompts[0].system
+
+
+def test_an_unusable_pick_runs_the_critical_tier():
+    s = Setup()
+    s.provider.reply = "Pick the naming lens only, and skip security."
+    draft = s.run()
+    notes = section(draft, "Controller notes")
+    assert "the lens picker gave no usable lens list" in notes
+    table = section(draft, "Review lenses")
+    assert all(f"| {n} |" in table for n in CRITICAL_TIER)
+
+
+@pytest.mark.parametrize(
+    ("config", "note"),
+    [
+        ({"depth": Depth.TRIAGE}, "triage depth runs the critical tier"),
+        ({"model_calls": 1}, "no model call is left for the lens picker"),
+    ],
+)
+def test_no_picker_call_when_triage_or_only_one_call(config, note):
+    s = Setup()
+    draft = s.run(**config)
+    assert s.provider.picks == []
+    assert len(s.provider.prompts) == 1
+    assert note in section(draft, "Controller notes")
+
+
+def test_no_picker_call_without_a_diff():
+    class NoDiff(FixtureGitHub):
+        def get_pull_diff(self, repo, number):
+            raise BoundaryError("HTTP 502")
+
+    s = Setup(github=NoDiff(FIXTURE))
+    s.run()
+    assert s.provider.picks == [] and s.provider.prompts == []
+
+
+def test_the_picker_call_counts_against_the_three_call_cap():
+    from .test_openrouter import completion, reply
+
+    picked = completion(text=json.dumps({"lenses": ["sweeping-for-security"]}))
+    s, fake = openrouter_setup(reply(picked), reply(completion()), reply(completion()))
+    draft = s.run(model_calls=3, diff_chars_per_call=41_000)
+    requests = fake.chat_requests()
+    assert len(requests) == 3
+    assert b"choosing-review-lenses" in requests[0][3]
+    assert "### Diff part 2 of 2" in draft
+    assert "3 of 3 calls used" in section(draft, "Model usage")

@@ -76,9 +76,12 @@ def build_prompt(
     nonce: str,
     lenses: Sequence[LoadedLens] = (),
     lens_coverage: str = "",
+    instructions: str = CONTROLLER_INSTRUCTIONS,
+    procedure: str = "review procedure",
 ) -> Prompt:
-    """`subject` must come from the validated operator event, never from PR data."""
-    system = f"{CONTROLLER_INSTRUCTIONS}\n\n--- review procedure ---\n{skill_bundle}"
+    """`subject` must come from the validated operator event, never from PR
+    data. `instructions` and `skill_bundle` must be trusted text."""
+    system = f"{instructions}\n\n--- {procedure} ---\n{skill_bundle}"
     if lenses or lens_coverage:
         system += f"\n\n--- lens bodies ---\n{_lens_section(lenses, lens_coverage)}"
     fenced = (_fence(b, nonce) for b in blocks)

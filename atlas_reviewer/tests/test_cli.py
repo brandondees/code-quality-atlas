@@ -31,6 +31,22 @@ def test_dry_run_needs_no_credentials_and_prints_a_draft(tmp_path):
     assert "Mode | dry run" in out
 
 
+@pytest.mark.parametrize(
+    ("depth", "expected"),
+    [
+        ("triage", "triage depth runs the critical tier"),
+        ("review", "the lens picker gave no usable lens list"),
+    ],
+)
+def test_depth_reaches_lens_selection(tmp_path, depth, expected):
+    code, out, _ = run_cli(
+        "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run",
+        "--depth", depth,
+    )  # fmt: skip
+    assert code == cli.EXIT_OK
+    assert expected in out
+
+
 def test_dry_run_can_write_the_draft_to_a_file(tmp_path):
     target = tmp_path / "draft.md"
     code, out, _ = run_cli(

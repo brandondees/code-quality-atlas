@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
+from atlas_reviewer.budget import CallLimits, prompt_token_room
 from atlas_reviewer.classify import classify
 from atlas_reviewer.diffs import (
     DiffPart,
@@ -19,7 +20,7 @@ from atlas_reviewer.diffs import (
     FileDiff,
     describe_by_risk,
     diff_paths,
-    select_diff,
+    fit_diff,
 )
 from atlas_reviewer.domain import (
     CleanupStatus,
@@ -42,13 +43,21 @@ from atlas_reviewer.draft import (
 )
 from atlas_reviewer.evidence import DETAIL_CHARS, PullInfo, parse_pull, tool_evidence
 from atlas_reviewer.gather import Collected, IngestConfig, gather_ci
+from atlas_reviewer.groups import Link
 from atlas_reviewer.instrumented import InstrumentedGitHub
-from atlas_reviewer.lenses import LensLibrary, LensPlan, plan_lenses, rank_lenses
+from atlas_reviewer.lenses import LensLibrary, plan_lenses
 from atlas_reviewer.notes import ControllerFacts, controller_notes, quote_untrusted
+from atlas_reviewer.picker import (
+    Depth,
+    LensSelection,
+    picker_instructions,
+    select_lenses,
+)
 from atlas_reviewer.ports import (
     BoundaryError,
     Clock,
     GitHubReader,
+    PickRequest,
     ReviewHarness,
     ReviewRequest,
     RunnerLedger,
@@ -66,9 +75,14 @@ from atlas_reviewer.runner import (
 from atlas_reviewer.telemetry import Telemetry
 
 MAX_MODEL_CALLS = 3
-DEFAULT_DIFF_CHARS_PER_CALL = 60_000
+PROMPT_TOKEN_ROOM = prompt_token_room(CallLimits())
+# A part can never hold more than the whole prompt room: the token bound
+# counts at least one token per UTF-8 byte. Each review then shrinks parts
+# to what fits beside its measured prompt (`_fit`).
+DEFAULT_DIFF_CHARS_PER_CALL = PROMPT_TOKEN_ROOM
 MIN_DIFF_CHARS_PER_CALL = 1_000
 MAX_LISTED_PATHS = 100
+MAX_PICKER_PATHS = 500
 MAX_TARBALL_BYTES = 9 * 1024 * 1024
 
 DEFAULT_TOOLS = (
@@ -93,10 +107,13 @@ class ReviewConfig:
     model_calls: int = MAX_MODEL_CALLS
     diff_chars_per_call: int = DEFAULT_DIFF_CHARS_PER_CALL
     first_frame_s: float = FIRST_FRAME_BUDGET_S
+    depth: Depth = Depth.REVIEW
+    prompt_tokens: int = PROMPT_TOKEN_ROOM
 
     def __post_init__(self) -> None:
-        """`model_calls` is also the number of diff parts: each part gets
-        one call, and retries come out of the same cap (the provider's
+        """`model_calls` covers the lens picker's call (unless the depth is
+        triage or only one call is allowed) and one call per diff part, and
+        retries come out of the same cap (the provider's
         `CallLimits.max_calls`), so a retry can leave a later part unreviewed."""
         if not 1 <= self.model_calls <= MAX_MODEL_CALLS:
             raise ValueError(f"model calls must be 1 to {MAX_MODEL_CALLS}")
@@ -141,41 +158,51 @@ def review(event: PrEvent, deps: Deps, config: ReviewConfig) -> str:
     evidence = classify(
         event.head_sha, collected.items, config.expected, collected.failures
     )
-    selection, paths, diff_redactions = _diff(event, deps, config, collected)
+    diff = _fetch_diff(event, deps, collected)
     _note_truncation(collected, "pull request body", pull.body, DETAIL_CHARS)
     issues = _issue_blocks(event, pull, deps, config, collected)
-    plan = plan_lenses(
-        deps.lenses, rank_lenses(paths, f"{pull.title.text}\n{pull.body.text}")
-    )
-    notes = controller_notes(
+    lenses = _select_lenses(event, pull, diff, deps, config, telemetry)
+    collected.notes.extend(n for n in (lenses.note,) if n)
+    base = _Base(
+        event,
+        _pull_block(pull, deps),
+        tuple(issues),
+        evidence,
         ControllerFacts(
             runner,
             tuple(t.name for t in config.tools),
             tool_results,
             tuple(collected.omissions),
-            plan,
+            plan_lenses(deps.lenses, lenses.choices, config.depth.limit),
             tuple(collected.notes),
-        )
+        ),
+        tuple(collected.links),
+        deps.redactor,
     )
-    shared = _Shared(
-        _pull_block(pull, deps),
-        _evidence_block(evidence, deps, collected),
-        tuple(issues),
-    )
-    parts = _narrate_parts(event, selection, shared, notes, plan, deps, telemetry)
+    calls = config.model_calls - int(lenses.used_call)
+    selection = None if diff is None else _fit(diff.text, calls, base, deps, config)
+    parts = _narrate_parts(base, selection, deps, telemetry)
     draft = render_draft(
         DraftInput(
             event=event,
             mode=config.mode,
             title=pull.title.text,
             evidence=evidence,
-            links=tuple(collected.links),
-            controller_notes=(*notes, *_coverage_lines(selection, parts)),
-            lenses=plan.uses,
+            links=base.links,
+            controller_notes=(
+                *_notes(base, selection),
+                *_coverage_lines(selection, parts),
+            ),
+            lenses=base.facts.lenses.uses,
             narratives=parts,
-            omissions=(*collected.omissions, *_unreviewed_parts(parts)),
+            omissions=(*_omissions(base, selection), *_unreviewed_parts(parts)),
             model_usage=deps.harness.usage_lines(),
-            redactions=_redaction_total(pull, collected.items, shared, diff_redactions),
+            redactions=_redaction_total(
+                pull,
+                collected.items,
+                _shared(base, selection),
+                0 if diff is None else diff.redactions,
+            ),
             generated_at=deps.clock.now(),
             telemetry=telemetry.events,
         )
@@ -272,24 +299,53 @@ class _Shared:
         return (self.pull, self.evidence, *self.issues)
 
 
+@dataclass(frozen=True)
+class _Fetched:
+    text: str
+    redactions: int
+
+
+@dataclass(frozen=True)
+class _Base:
+    """Everything a model call's prompt is built from except the diff
+    selection, which adds its own omission row to the evidence block and the
+    controller notes. Prompts are rebuilt from this, so the size measured
+    while fitting the diff is the size sent."""
+
+    event: PrEvent
+    pull: UntrustedBlock
+    issues: tuple[UntrustedBlock, ...]
+    evidence: tuple[Evidence, ...]
+    facts: ControllerFacts
+    links: tuple[Link, ...]
+    redactor: Redactor
+
+
 def _pull_block(pull: PullInfo, deps: Deps) -> UntrustedBlock:
     return UntrustedBlock(
         "pull-request", deps.redactor(f"Title: {pull.title.text}\n\n{pull.body.text}")
     )
 
 
-def _evidence_block(
-    evidence: tuple[Evidence, ...], deps: Deps, collected: Collected
-) -> UntrustedBlock:
-    text = render_evidence(evidence, tuple(collected.omissions), tuple(collected.links))
-    return UntrustedBlock("ci-and-runner-evidence", deps.redactor(text))
+def _omissions(base: _Base, sel: DiffSelection | None) -> tuple[Omission, ...]:
+    return (*base.facts.omissions, *_selection_omission(sel))
+
+
+def _notes(base: _Base, sel: DiffSelection | None) -> tuple[str, ...]:
+    return controller_notes(replace(base.facts, omissions=_omissions(base, sel)))
+
+
+def _shared(base: _Base, sel: DiffSelection | None) -> _Shared:
+    text = render_evidence(base.evidence, _omissions(base, sel), base.links)
+    evidence = UntrustedBlock("ci-and-runner-evidence", base.redactor(text))
+    return _Shared(base.pull, evidence, base.issues)
 
 
 def _part_blocks(
-    shared: _Shared, part: DiffPart, notes: tuple[str, ...], deps: Deps
+    shared: _Shared, part: DiffPart, notes: tuple[str, ...], redactor: Redactor
 ) -> tuple[UntrustedBlock, ...]:
-    diff = deps.redactor(part.text or "(no diff content in this call)")
-    notes_text = deps.redactor("\n".join(f"- {n}" for n in notes))
+    diff = redactor(part.text or "(no diff content in this call)")
+    notes_text = redactor("\n".join(f"- {n}" for n in notes))
     return (
         shared.pull,
         UntrustedBlock("diff", diff),
@@ -299,13 +355,31 @@ def _part_blocks(
     )
 
 
-def _diff(
-    event: PrEvent, deps: Deps, config: ReviewConfig, collected: Collected
-) -> tuple[DiffSelection | None, tuple[str, ...], int]:
-    """The diff split into risk-ordered parts, every changed path (for lens
-    selection), and the redaction count of the whole diff. Anything short
-    of complete coverage is recorded as an omission naming the files. The
-    selection is None when the diff could not be fetched: then no model
+def _requests(
+    base: _Base, sel: DiffSelection
+) -> tuple[tuple[DiffPart, ReviewRequest], ...]:
+    """One request per part, in risk order. An empty but fetched diff still
+    gets one call."""
+    shared, notes = _shared(base, sel), _notes(base, sel)
+    parts = sel.parts or (DiffPart(()),)
+    plan = base.facts.lenses
+
+    def request(index: int, part: DiffPart) -> ReviewRequest:
+        note = _part_note(index, len(parts), part, sel)
+        return ReviewRequest(
+            base.event.repo,
+            base.event.pr_number,
+            base.event.head_sha,
+            _part_blocks(shared, part, (*notes, note), base.redactor),
+            plan.loaded,
+            plan.coverage(),
+        )
+
+    return tuple((p, request(i, p)) for i, p in enumerate(parts, 1))
+
+
+def _fetch_diff(event: PrEvent, deps: Deps, collected: Collected) -> _Fetched | None:
+    """The redacted diff, or None when it could not be fetched: then no model
     call is made, because a review of an empty diff reads as a clean one."""
     try:
         raw = deps.github.get_pull_diff(event.repo, event.pr_number)
@@ -317,23 +391,72 @@ def _diff(
         collected.omit(
             "pull request diff", "fetch failed", "not fetched; nothing was reviewed"
         )
-        return None, (), 0
+        return None
     full = deps.redactor(raw)
-    selection = select_diff(full.text, config.model_calls, config.diff_chars_per_call)
-    _note_selection(collected, selection, config)
-    return selection, diff_paths(full.text), full.redaction_count
+    return _Fetched(full.text, full.redaction_count)
 
 
-def _note_selection(
-    collected: Collected, sel: DiffSelection, config: ReviewConfig
-) -> None:
-    if sel.complete:
-        return
-    limit = (
-        f"{config.model_calls} model call(s) x {config.diff_chars_per_call} "
-        "characters, risk-ordered"
+def _select_lenses(
+    event: PrEvent,
+    pull: PullInfo,
+    diff: _Fetched | None,
+    deps: Deps,
+    config: ReviewConfig,
+    telemetry: Telemetry,
+) -> LensSelection:
+    """The picker gets a call only when one is left for at least one diff part."""
+    if diff is None:
+        return LensSelection((), "", used_call=False)
+    if config.model_calls < 2:
+        return select_lenses(config.depth, None)
+    paths = diff_paths(diff.text)
+    request = PickRequest(
+        event.repo,
+        event.pr_number,
+        event.head_sha,
+        picker_instructions(config.depth),
+        (_pull_block(pull, deps), _paths_block(paths, deps)),
     )
-    collected.omit("pull request diff", limit, _selection_detail(sel))
+    return select_lenses(
+        config.depth,
+        lambda: telemetry.span(
+            "model call",
+            "lens picker",
+            lambda: deps.harness.pick(request),
+            {"paths": len(paths)},
+        ),
+    )
+
+
+def _paths_block(paths: tuple[str, ...], deps: Deps) -> UntrustedBlock:
+    shown = "\n".join(paths[:MAX_PICKER_PATHS])
+    more = len(paths) - MAX_PICKER_PATHS
+    tail = f"\n(and {more} more changed paths)" if more > 0 else ""
+    return UntrustedBlock(
+        "changed-paths", deps.redactor(shown + tail or "(no changed paths)")
+    )
+
+
+def _fit(
+    text: str, calls: int, base: _Base, deps: Deps, config: ReviewConfig
+) -> DiffSelection:
+    def overflow(sel: DiffSelection) -> int:
+        biggest = max(deps.harness.prompt_tokens(r) for _, r in _requests(base, sel))
+        return biggest - config.prompt_tokens
+
+    return fit_diff(
+        text, calls, config.diff_chars_per_call, overflow, MIN_DIFF_CHARS_PER_CALL
+    )
+
+
+def _selection_omission(sel: DiffSelection | None) -> tuple[Omission, ...]:
+    if sel is None or sel.complete:
+        return ()
+    limit = (
+        f"too large for one review pass: {len(sel.parts)} part(s) of at most "
+        f"{sel.part_chars} characters, risk-ordered"
+    )
+    return (Omission("pull request diff", limit, _selection_detail(sel)),)
 
 
 def _selection_detail(sel: DiffSelection) -> str:
@@ -402,29 +525,22 @@ def _issue_block(
 
 
 def _narrate_parts(
-    event: PrEvent,
+    base: _Base,
     selection: DiffSelection | None,
-    shared: _Shared,
-    notes: tuple[str, ...],
-    plan: LensPlan,
     deps: Deps,
     telemetry: Telemetry,
 ) -> tuple[PartNarrative, ...]:
     """One model call per part, in risk order. A part whose call fails or is
-    refused (call cap, cost cap) still yields a `PartNarrative`, so its
-    files are reported as unreviewed rather than dropped. No diff, no call."""
+    refused (call cap, cost cap, token bound) still yields a `PartNarrative`,
+    so its files are reported as unreviewed rather than dropped. No diff, no
+    call."""
     if selection is None:
         return ()
-    parts = selection.parts or (DiffPart(()),)
-    total = len(parts)
-
-    def blocks(index: int, part: DiffPart) -> tuple[UntrustedBlock, ...]:
-        note = _part_note(index, total, part, selection)
-        return _part_blocks(shared, part, (*notes, note), deps)
-
+    requests = _requests(base, selection)
+    total = len(requests)
     return tuple(
-        _narrate_part(event, i, total, part, blocks(i, part), plan, deps, telemetry)
-        for i, part in enumerate(parts, 1)
+        _narrate_part(i, total, part, request, deps, telemetry)
+        for i, (part, request) in enumerate(requests, 1)
     )
 
 
@@ -451,23 +567,13 @@ def _part_note(index: int, total: int, part: DiffPart, sel: DiffSelection) -> st
 
 
 def _narrate_part(
-    event: PrEvent,
     index: int,
     total: int,
     part: DiffPart,
-    blocks: tuple[UntrustedBlock, ...],
-    plan: LensPlan,
+    request: ReviewRequest,
     deps: Deps,
     telemetry: Telemetry,
 ) -> PartNarrative:
-    request = ReviewRequest(
-        event.repo,
-        event.pr_number,
-        event.head_sha,
-        blocks,
-        plan.loaded,
-        plan.coverage(),
-    )
     try:
         result = telemetry.span(
             "model call",
@@ -503,7 +609,11 @@ def _coverage_lines(
         f"file(s) in full and {cut} cut to fit; {len(sel.unseen)} file(s) went to "
         "no call."
     )
-    return (line,)
+    too_large = (
+        "The diff is too large for one review pass: the files cut and the files "
+        "never sent are listed in the omissions table, highest risk first."
+    )
+    return (line,) if sel.complete else (line, too_large)
 
 
 def _unreviewed_parts(parts: tuple[PartNarrative, ...]) -> tuple[Omission, ...]:

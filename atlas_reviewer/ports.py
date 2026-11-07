@@ -154,6 +154,18 @@ class ReviewRequest:
 
 
 @dataclass(frozen=True)
+class PickRequest:
+    """One lens-picker call: `instructions` is trusted controller text, and
+    `blocks` carry the PR's paths and text as untrusted data."""
+
+    repo: str
+    pr_number: int
+    head_sha: str
+    instructions: str
+    blocks: tuple[UntrustedBlock, ...]
+
+
+@dataclass(frozen=True)
 class Narrative:
     harness: str
     provider: str
@@ -166,5 +178,13 @@ class ReviewHarness(Protocol):
     name: str
 
     def review(self, request: ReviewRequest) -> Narrative: ...
+
+    def pick(self, request: PickRequest) -> str:
+        """The lens picker's raw reply: untrusted model output."""
+        ...
+
+    def prompt_tokens(self, request: ReviewRequest) -> int:
+        """The input-token bound `review` would send for this request."""
+        ...
 
     def usage_lines(self) -> tuple[str, ...]: ...
