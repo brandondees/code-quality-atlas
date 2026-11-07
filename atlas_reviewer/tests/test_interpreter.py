@@ -6,12 +6,14 @@ the image's pyenv shim, which picks its version from the PR's
 import os
 import shutil
 import subprocess
+import time
 
 import pytest
 
 from atlas_reviewer.domain import CleanupStatus, RunnerStatus
 from atlas_reviewer.fakes import PYENV_PYTHON, ExecRule, FakeSprites, MemoryLedger
 from atlas_reviewer.interpreter import (
+    CANDIDATE_BOUND_S,
     NEUTRAL_DIR,
     PYENV_VERSIONS,
     SYSTEM_PYTHON,
@@ -351,6 +353,23 @@ def test_the_wrapper_really_runs_with_only_the_minimal_environment(monkeypatch):
         "HOME",
         "LANG",
     }
+
+
+@needs_posix
+@pytest.mark.skipif(not os.path.exists("/usr/bin/timeout"), reason="no timeout")
+def test_a_hung_candidate_is_bounded_and_later_ones_are_still_found(tmp_path):
+    hung = tmp_path / "hung"
+    hung.write_text("#!/bin/sh\nsleep 30\n")
+    hung.chmod(0o755)
+    script = resolve_script().replace(
+        f"{PYENV_VERSIONS}/*/bin/python3", f"{hung} {PYENV_VERSIONS}/*/bin/python3"
+    )
+    assert f"/usr/bin/timeout -k 2 {CANDIDATE_BOUND_S} " in script
+    started = time.monotonic()
+    out = sh(script)
+    assert time.monotonic() - started < CANDIDATE_BOUND_S + 4
+    if os.path.exists(SYSTEM_PYTHON):
+        assert f"atlas-python:{SYSTEM_PYTHON}:" in out
 
 
 @needs_posix

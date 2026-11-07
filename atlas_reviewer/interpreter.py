@@ -48,6 +48,7 @@ _DIAG_RE = re.compile(re.escape(DIAG_TAG) + r":([a-z_]+):(.*)$", re.MULTILINE)
 _VERSION_NAME_RE = re.compile(r"^[A-Za-z0-9._+-]{1,64}$", re.MULTILINE)
 _PRINTABLE_RE = re.compile(r"[^\x20-\x7e]")
 _DIAG_CHARS = 200
+CANDIDATE_BOUND_S = 5
 
 
 @dataclass(frozen=True)
@@ -61,13 +62,15 @@ class TrustedPython:
 
 
 def resolve_script() -> str:
-    """Runs each candidate's own version query from an empty directory.
-    Nothing from the PR exists yet when this runs."""
+    """Runs each candidate's own version query from an empty directory,
+    each bounded on its own so one hung interpreter cannot stop the rest
+    being found. Nothing from the PR exists yet when this runs."""
     query = "import sys; print('%d.%d.%d' % sys.version_info[:3])"
     return (
         f"mkdir -p {NEUTRAL_DIR} && cd {NEUTRAL_DIR} && "
         f"for p in {PYENV_VERSIONS}/*/bin/python3 {SYSTEM_PYTHON}; do "
-        f'if [ -x "$p" ] && v=$("$p" -I -c "{query}" 2>/dev/null); '
+        f'if [ -x "$p" ] && '
+        f"v=$({bounded(f'"$p" -I -c "{query}"', CANDIDATE_BOUND_S)} 2>/dev/null); "
         f'then echo "{PYTHON_TAG}:$p:$v"; fi; done'
     )
 
