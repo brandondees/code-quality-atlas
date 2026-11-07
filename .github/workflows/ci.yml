@@ -427,8 +427,9 @@ jobs:
         # coverage run against the same [tool.coverage.report] floor
         # (docs/plans/2026-11-06-manual-reviewer-service.md). Fully offline:
         # GitHub is a fixture directory, the Sprites runner is the in-memory
-        # fake, the model provider is the offline one -- no credentials and
-        # no network calls beyond a loopback HTTP server.
+        # fake, the model provider is the offline one (OpenRouter, GitHub
+        # App minting and Sprites are driven only through recorded fakes) --
+        # no credentials and no network calls beyond a loopback HTTP server.
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: python -m pytest atlas_reviewer/tests -q --cov=atlas_reviewer
       - name: reviewer service dry run (offline fixture PR event)

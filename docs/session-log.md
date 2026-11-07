@@ -722,3 +722,46 @@ Repo wiring:
   `CLAUDE.md`/`AGENTS.md` copies were updated together.
 - `ci.yml`'s `python` and `session_log_substantive` path filters gained
   `atlas_reviewer/**`.
+
+## 2026-11-07 — D25: the reviewer service's live-readiness slice
+
+Second slice of `atlas_reviewer/`, still draft-only and still offline in
+tests and CI. It is recorded as **D25**, which amends D24's "stdlib-only"
+and "no live provider" statements. Design and the remaining live setup are
+in [`plans/2026-11-06-manual-reviewer-service.md`](plans/2026-11-06-manual-reviewer-service.md#live-run-gaps).
+
+- **Pagination.** Every GitHub list follows `Link: rel="next"` up to a
+  10-page cap, and refuses a `next` link that leaves the API origin. A
+  list cut off by the cap is an explicit omission in the draft, and what
+  it did not read is UNKNOWN.
+- **Ingestion.** Job logs and artifact ZIPs are fetched only for the
+  matched head SHA and are capped per download and per review. ZIPs are
+  read in memory with per-entry checks (traversal, symlinks, encryption,
+  type allowlist, binary content, size, ratio, total budget). They are
+  never extracted or executed, and are redacted before use. Every limit
+  hit is listed in a new "Omissions and limits hit" table.
+- **GitHub App auth.** Installation tokens are minted in-process (RS256
+  through `PyJWT[crypto]`, the repo's first runtime dependency beyond the
+  stdlib, controller only). They are read-only and scoped to one
+  repository, and cached until five minutes before expiry. Each minted
+  token feeds the redactor.
+- **Sprites.** Exec now follows the published OpenAPI 0.1.12. The response
+  framing is undocumented, so the decoder strips framing bytes and trusts
+  an in-band exit marker. A tool probe runs before any PR bytes are
+  uploaded, and a missing binary is UNKNOWN, never executed. A new
+  `probe-runner` command lets the owner check the protocol live once.
+- **OpenRouter.** OpenRouter replaces the Anthropic suggestion. The
+  provider is pinned to `anthropic/claude-sonnet-5.5` with no fallbacks
+  and is opt-in with `--allow-live-inference`. It runs at most three calls
+  per review, retries included. Each call reserves its worst case against
+  a $3.00 budget at the highest catalog prices, and unknown pricing fails
+  closed. A preflight refuses any key without a hard limit of at most $5.
+  Writing the tests found a gap: retries were checked against the key's
+  remaining credit one call at a time, not in total. The reservation now
+  caps at the lower of the two.
+
+Writing the archive tests also showed that an "actual compression ratio"
+check could never fire, because `zipfile` never yields more than the
+declared size. That check was removed, and the docstring now states the
+real mechanism, which is tested with a header that under-declares its
+size.
