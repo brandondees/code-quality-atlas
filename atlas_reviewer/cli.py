@@ -17,6 +17,7 @@ every credential value from the environment first.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import sys
@@ -370,8 +371,12 @@ def _cmd_sweep(args: argparse.Namespace, env: Mapping[str, str], out: TextIO) ->
 def _cmd_probe(args: argparse.Namespace, env: Mapping[str, str], out: TextIO) -> int:
     telemetry = _telemetry(args, env, f"probe-{args.sequence}", default_file=True)
     sequence = _PROBE_SEQUENCES[args.sequence]
+    report = io.StringIO()
     with single_review_lock(_state_dir(args, env) / "review.lock"):
-        usable = sequence(args, env, out, telemetry)
+        try:
+            usable = sequence(args, env, report, telemetry)
+        finally:
+            out.write(_env_redactor(env)(report.getvalue()).text)
     out.write(f"\n{telemetry_section(telemetry.events)}\n\n")
     out.write(
         f"telemetry: {len(telemetry.events)} event(s), {_events_path(telemetry)}\n"
@@ -429,7 +434,8 @@ def _probe_review_sequence(
     )
     _write_report(outcome.report, out)
     out.write(f"source tarball: {len(tarball)} bytes\n")
-    out.writelines(f"{_tool_report(r)}\n" for r in outcome.results)
+    redactor = _env_redactor(env)
+    out.writelines(f"{_tool_report(r, redactor)}\n" for r in outcome.results)
     out.write(f"{_python_report(outcome.python)}\n")
     out.writelines(f"{_diagnostic_report(d)}\n" for d in outcome.diagnostics)
     return outcome.report.status is RunnerStatus.COMPLETED
@@ -475,12 +481,11 @@ def _write_report(r: RunnerReport, out: TextIO) -> None:
     out.write(f"cleanup: {r.cleanup.value}\nnote: {r.note}\n")
 
 
-def _tool_report(result: ToolResult) -> str:
+def _tool_report(result: ToolResult, redactor: Redactor) -> str:
     match result:
         case ToolRan(tool=tool, version=version, exit_code=code, output=output):
-            return (
-                f"tool {tool.name} ({version}): exit {code}; output: {output[-300:]!r}"
-            )
+            shown = redactor(output).text[-300:]
+            return f"tool {tool.name} ({version}): exit {code}; output: {shown!r}"
         case ToolAbsent(tool=tool, detail=detail):
             return f"tool {tool.name}: not run -- {detail}"
     raise TypeError(f"not a tool result: {result!r}")  # pragma: no cover

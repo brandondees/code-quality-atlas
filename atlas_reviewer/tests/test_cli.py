@@ -600,6 +600,30 @@ def test_probe_runner_review_sequence_runs_the_real_exec_order_on_a_tarball(tmp_
     assert api.live_names() == ()
 
 
+def test_probe_runner_redacts_its_report(tmp_path):
+    tarball = tmp_path / "checkout.tar.gz"
+    tarball.write_bytes(FixtureGitHub(FIXTURE).get_tarball("o/r", HEAD))
+    credential = "sprites-token-value-0123456789"
+    leak = f"3 {credential} AKIAIOSFODNN7EXAMPLE"
+    api = FakeSprites.from_script(
+        {"exec": [{"match": "tar -xzf", "stdout": "", "exit_code": 0},
+                  {"match": "echo posix-sh", "stdout": "posix-sh", "exit_code": 0},
+                  {"match": "find .", "stdout": leak, "exit_code": 0}]}
+    )  # fmt: skip
+    out = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "probe-runner", "--sequence", "review",
+         "--tarball", str(tarball)],
+        env={cli.ENV_SPRITES_TOKEN: credential}, out=out, err=io.StringIO(),
+        sprites_factory=lambda env: api,
+    )  # fmt: skip
+    assert code == cli.EXIT_OK
+    text = out.getvalue()
+    assert "tool source-file-count (posix-sh): exit 0" in text
+    assert credential not in text
+    assert "AKIAIOSFODNN7EXAMPLE" not in text
+
+
 def test_probe_runner_review_sequence_can_fetch_the_tarball_and_run_review_tools(
     tmp_path, monkeypatch
 ):
