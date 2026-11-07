@@ -115,9 +115,14 @@ def parse_picks(text: str, limit: int) -> tuple[str, ...]:
     return unique[:limit]
 
 
-def select_lenses(depth: Depth, run_picker: Callable[[], str] | None) -> LensSelection:
+def select_lenses(
+    depth: Depth,
+    run_picker: Callable[[], str] | None,
+    has_body: Callable[[str], bool],
+) -> LensSelection:
     """`run_picker` makes the picker's model call; None means no call is
-    available for it."""
+    available for it. A pick none of whose names has a bundle body would
+    run no lens at all, so it falls back to the critical tier too."""
     if depth is Depth.TRIAGE:
         return _critical("Lens selection: triage depth runs the critical tier", False)
     if run_picker is None:
@@ -132,6 +137,12 @@ def select_lenses(depth: Depth, run_picker: Callable[[], str] | None) -> LensSel
         return _critical(
             "Lens selection: the lens picker gave no usable lens list (reason, "
             f"quoted: {quote_untrusted(str(exc))}), so the critical tier ran",
+            True,
+        )
+    if not any(has_body(n) for n in names):
+        return _critical(
+            f"Lens selection: none of the {len(names)} lens name(s) the picker "
+            "ranked has a body in the bundle, so the critical tier ran",
             True,
         )
     choices = tuple(LensChoice(n, f"picker rank {i}") for i, n in enumerate(names, 1))

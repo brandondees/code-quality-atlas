@@ -19,6 +19,10 @@ from atlas_reviewer.picker import (
 from atlas_reviewer.ports import BoundaryError
 
 
+def has_body(name):
+    return LensLibrary().body(name) is not None
+
+
 def picks(*names):
     return json.dumps({"lenses": list(names)})
 
@@ -79,14 +83,14 @@ def test_triage_runs_the_critical_tier_without_a_call():
     def never():
         raise AssertionError("triage must not call the picker")
 
-    chosen = select_lenses(Depth.TRIAGE, never)
+    chosen = select_lenses(Depth.TRIAGE, never, has_body)
     assert [c.name for c in chosen.choices] == list(CRITICAL_TIER)
     assert not chosen.used_call
     assert chosen.note.startswith("Lens selection: triage depth runs the critical tier")
 
 
 def test_no_call_left_falls_back_to_the_critical_tier():
-    chosen = select_lenses(Depth.REVIEW, None)
+    chosen = select_lenses(Depth.REVIEW, None, has_body)
     assert [c.name for c in chosen.choices] == list(CRITICAL_TIER)
     assert not chosen.used_call
     assert "no model call is left for the lens picker" in chosen.note
@@ -97,7 +101,7 @@ def test_no_call_left_falls_back_to_the_critical_tier():
     [lambda: "not json", lambda: (_ for _ in ()).throw(BoundaryError("HTTP 529"))],
 )
 def test_a_failed_or_unusable_pick_runs_the_critical_tier_and_says_why(outcome):
-    chosen = select_lenses(Depth.REVIEW, outcome)
+    chosen = select_lenses(Depth.REVIEW, outcome, has_body)
     assert [c.name for c in chosen.choices] == list(CRITICAL_TIER)
     assert chosen.used_call
     assert 'gave no usable lens list (reason, quoted: `"' in chosen.note
@@ -106,7 +110,9 @@ def test_a_failed_or_unusable_pick_runs_the_critical_tier_and_says_why(outcome):
 
 def test_a_good_pick_is_ranked_and_attributed_to_the_picker():
     chosen = select_lenses(
-        Depth.REVIEW, lambda: picks("checking-restraint", "sweeping-for-security")
+        Depth.REVIEW,
+        lambda: picks("checking-restraint", "sweeping-for-security"),
+        has_body,
     )
     assert [(c.name, c.why) for c in chosen.choices] == [
         ("checking-restraint", "picker rank 1"),
@@ -116,6 +122,13 @@ def test_a_good_pick_is_ranked_and_attributed_to_the_picker():
     assert "`choosing-review-lenses` ran as one model call at review depth" in (
         chosen.note
     )
+
+
+def test_a_pick_with_no_loadable_lens_runs_the_critical_tier():
+    chosen = select_lenses(Depth.REVIEW, lambda: picks("no-such-lens"), has_body)
+    assert [c.name for c in chosen.choices] == list(CRITICAL_TIER)
+    assert chosen.used_call
+    assert "none of the 1 lens name(s) the picker ranked has a body" in chosen.note
 
 
 def test_the_critical_tier_lenses_all_exist_in_the_bundle():

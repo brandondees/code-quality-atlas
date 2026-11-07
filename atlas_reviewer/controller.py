@@ -399,8 +399,12 @@ def _select_lenses(
     """The picker gets a call only when one is left for at least one diff part."""
     if diff is None:
         return LensSelection((), "", used_call=False)
+
+    def has_body(name: str) -> bool:
+        return deps.lenses.body(name) is not None
+
     if config.model_calls < 2:
-        return select_lenses(config.depth, None)
+        return select_lenses(config.depth, None, has_body)
     paths = diff_paths(diff.text)
     request = PickRequest(
         event.repo,
@@ -417,6 +421,7 @@ def _select_lenses(
             lambda: deps.harness.pick(request),
             {"paths": len(paths)},
         ),
+        has_body,
     )
 
 
