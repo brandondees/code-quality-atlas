@@ -36,13 +36,18 @@ class BudgetRefusedError(BoundaryError):
     token bound the model cannot honour."""
 
 
+# D25's hard ceilings: a caller may tighten them, never loosen them.
+MAX_CALLS_CEILING = 3
+BUDGET_CEILING_USD = Decimal("3.00")
+
+
 @dataclass(frozen=True)
 class CallLimits:
-    max_calls: int = 3
+    max_calls: int = MAX_CALLS_CEILING
     max_input_tokens: int = 200_000
     max_output_tokens: int = 24_000
     reasoning_max_tokens: int = 12_000
-    budget_usd: Decimal = Decimal("3.00")
+    budget_usd: Decimal = BUDGET_CEILING_USD
 
     def __post_init__(self) -> None:
         if min(self.max_calls, self.max_input_tokens, self.reasoning_max_tokens) < 1:
@@ -51,6 +56,10 @@ class CallLimits:
             raise ValueError("max_output_tokens must exceed the reasoning budget")
         if self.budget_usd <= 0:
             raise ValueError("budget must be positive")
+        if self.max_calls > MAX_CALLS_CEILING:
+            raise ValueError(f"at most {MAX_CALLS_CEILING} model calls per review")
+        if self.budget_usd > BUDGET_CEILING_USD:
+            raise ValueError(f"budget is capped at ${BUDGET_CEILING_USD}")
 
 
 def input_token_bound(text: str) -> int:

@@ -288,7 +288,9 @@ def test_token_bounds_are_checked_before_sending(prompt, model, match):
 def test_limits_reject_nonsense():
     for bad in (
         {"max_calls": 0},
+        {"max_calls": 4},
         {"budget_usd": Decimal(0)},
+        {"budget_usd": Decimal("3.01")},
         {"max_output_tokens": 100},
     ):
         with pytest.raises(ValueError):
