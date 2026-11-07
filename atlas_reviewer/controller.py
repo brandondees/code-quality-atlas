@@ -9,6 +9,7 @@ writes to GitHub.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
@@ -113,8 +114,12 @@ class ReviewConfig:
             raise ValueError(
                 f"diff characters per call must be at least {MIN_DIFF_CHARS_PER_CALL}"
             )
-        if self.first_frame_s <= 0:
-            raise ValueError("first-frame seconds must be positive")
+        for label, seconds in (
+            ("deadline", self.deadline_s),
+            ("first-frame", self.first_frame_s),
+        ):
+            if not (math.isfinite(seconds) and seconds > 0):
+                raise ValueError(f"{label} seconds must be a positive finite number")
 
 
 @dataclass(frozen=True)

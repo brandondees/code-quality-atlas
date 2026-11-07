@@ -482,6 +482,13 @@ def test_lenses_did_not_run_when_every_review_call_fails():
     assert "so no lens ran" in lenses
 
 
+@pytest.mark.parametrize("field", ["deadline_s", "first_frame_s"])
+@pytest.mark.parametrize("value", [0, -1, float("nan"), float("inf")])
+def test_runner_timings_must_be_positive_and_finite(field, value):
+    with pytest.raises(ValueError, match="positive finite"):
+        ReviewConfig(**{field: value})
+
+
 def openrouter_setup(*chat, **limits):
     from atlas_reviewer.budget import CallLimits
     from atlas_reviewer.openrouter import OpenRouterProvider
