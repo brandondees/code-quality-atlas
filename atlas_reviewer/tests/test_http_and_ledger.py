@@ -99,6 +99,20 @@ def test_file_ledger_round_trip(tmp_path):
     assert FileLedger(tmp_path / "state" / "runners.ledger").pending() == ("cqa-rev-b",)
 
 
+def test_ledger_writes_and_their_directory_are_synced(tmp_path, monkeypatch):
+    import os
+
+    synced = []
+    real = os.fsync
+    monkeypatch.setattr(os, "fsync", lambda fd: synced.append(fd) or real(fd))
+    ledger = FileLedger(tmp_path / "state" / "runners.ledger")
+    ledger.record("a")
+    assert len(synced) == 2
+    ledger.clear("a")
+    assert len(synced) == 4
+    assert ledger.pending() == ()
+
+
 def test_only_one_review_at_a_time(tmp_path):
     lock = tmp_path / "review.lock"
     with (
