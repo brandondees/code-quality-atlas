@@ -200,8 +200,13 @@ Python, so PR files can't shim it.
 
 **Argument rules.** These apply to every tool before any exec:
 
-- **`BASE` and `HEAD`** are controller-fixed SHAs from the event and the
-  compare API. The model never supplies a revision.
+- **`BASE` and `HEAD`** are controller-fixed revisions: the SHAs from the
+  event and the compare API, or under Option B the synthetic commit IDs
+  that staging recorded for them. The model never supplies a revision.
+- **Audit mode** has no `BASE` and no diff tools. `log` becomes
+  `git log --no-color --format=%H%x09%an%x09%ad%x09%s -n N HEAD -- PATH`,
+  with `n` up to 200 (proposal), so churn and bus-factor lenses see enough
+  history. That needs Option A staging.
 - **Paths and prefixes** must be repo-relative and NUL-free. They may not
   start with `-` or `/`. No segment may be `..`. Each is at most 512
   bytes, and each is passed after `--`.
@@ -244,10 +249,16 @@ content are all PR-controlled data.
 `git diff BASE...HEAD`, `log` and `blame` need git objects in the Sprite.
 Two options, both keeping the controller free of a working tree:
 
-- **Option A — a git bundle.** The controller makes a bare, depth-limited
-  fetch of `BASE` and `HEAD` with the read-only installation token. It
-  writes a bundle and uploads it through the existing stdin path. The
-  Sprite clones from the file with no network. The bundle carries objects
+- **Option A — a git bundle.** The controller makes a bare fetch of
+  `BASE` and `HEAD` with the read-only installation token, with no depth
+  limit. A shallow fetch won't do: per git-bundle(1), a bundle can list
+  prerequisite commits that the receiving repository must already have,
+  and the Sprite's empty repository has none, so the offline clone would
+  fail. The full-history fetch is bounded by a byte cap (proposal: the
+  existing 9 MiB upload cap). Over the cap, staging falls back to
+  Option B, and the draft says history-dependent tools are limited. The
+  controller writes a bundle and uploads it through the existing stdin
+  path. The Sprite clones from the file with no network. The bundle carries objects
   and refs only, never a remote URL or a token. The cost is git on the
   controller and a fetch of PR-controlled objects onto the trusted host.
   Those objects are never checked out or executed there.
@@ -257,7 +268,10 @@ Two options, both keeping the controller free of a working tree:
   `log` and `blame` only see that synthetic history, so PR commit
   metadata comes from the GitHub API as fenced evidence instead. Each
   tarball stays under the existing 9 MiB cap, and both go through the
-  same upload exec.
+  same upload exec. The synthetic commits have their own IDs, which
+  differ from the GitHub SHAs. Staging reports both IDs back, and the
+  controller fills `BASE` and `HEAD` in the bridge templates with them.
+  The GitHub SHAs stay as provenance in the draft and the ledger.
 
 Proposal: build **Option B first**. It reuses the existing fetch and
 upload with no new trusted-host git. Option A comes only when a lens needs
