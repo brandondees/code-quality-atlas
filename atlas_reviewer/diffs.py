@@ -4,7 +4,10 @@ parts that each fit one model call. Pure.
 
 Selection is risk-first, not diff-order-first: when the whole diff cannot
 be reviewed within the call cap, what goes unseen is the lowest-risk
-material (tests, fixtures, docs), and every unseen file is named.
+material (tests, fixtures, docs), and every unseen file is named. CI
+workflows, dependency manifests and lockfiles rank just below security
+code: they are where a change reaches the build, its secrets and its
+supply chain.
 """
 
 from __future__ import annotations
@@ -31,30 +34,38 @@ SECURITY = RiskTier(
     r"secur|auth(?!or)|redact|secret|token|credential|crypt|permission|polic|"
     r"sanitiz|escap|\bkeys?\b|_key",
 )
-BOUNDARY = RiskTier(
+SUPPLY_CHAIN = RiskTier(
     1,
+    "CI workflows, dependency manifests, lockfiles and build hooks",
+    r"(^|/)\.github/(workflows|actions)/|(^|/)action\.ya?ml$|(^|/)\.gitlab-ci\.ya?ml$|"
+    r"(^|/)\.circleci/|(^|/)Jenkinsfile$|(^|/)\.github/dependabot\.ya?ml$|"
+    r"(^|/)requirements[^/]*\.(txt|in)$|(^|/)constraints[^/]*\.txt$|"
+    r"(^|/)(pyproject\.toml|setup\.py|setup\.cfg|Pipfile|package\.json|go\.mod|"
+    r"go\.sum|Cargo\.toml|Gemfile|composer\.json|pom\.xml|build\.gradle(\.kts)?)$|"
+    r"\.gemspec$|\.lock(file)?$|(^|/)(package-lock|npm-shrinkwrap)\.json$|"
+    r"(^|/)pnpm-lock\.ya?ml$|(^|/)(Dockerfile|Makefile)[^/]*$|(^|/)conftest\.py$",
+)
+BOUNDARY = RiskTier(
+    2,
     "runner, sandbox, HTTP and model boundary",
     r"runner|sandbox|sprite|exec|http|transport|client|_api\b|api\.|network|"
     r"request|fetch|download|upload|webhook|ledger|openrouter|provider|prompt|llm",
 )
-SOURCE = RiskTier(2, "other code", r"")
-CONFIG = RiskTier(
-    3,
-    "config, CI and build",
-    r"(^|/)\.github/|\.ya?ml$|\.toml$|\.cfg$|\.ini$|requirements[^/]*$|"
-    r"(^|/)Dockerfile|(^|/)Makefile$|\.lock$",
-)
+SOURCE = RiskTier(3, "other code", r"")
+CONFIG = RiskTier(4, "other config", r"(^|/)\.github/|\.ya?ml$|\.toml$|\.cfg$|\.ini$")
 TESTS = RiskTier(
-    4,
+    5,
     "tests and fixtures",
     r"(^|/)(tests?|spec|__tests__|fixtures?)/|(^|/)test_[^/]*$|_test\.[a-z]+$|"
-    r"\.(test|spec)\.[a-z]+$|(^|/)conftest\.py$",
+    r"\.(test|spec)\.[a-z]+$",
 )
-DOCS = RiskTier(5, "docs", r"\.(md|rst|txt|adoc)$|(^|/)docs?/|(^|/)(LICENSE|NOTICE)")
-RISK_TIERS = (SECURITY, BOUNDARY, SOURCE, CONFIG, TESTS, DOCS)
+DOCS = RiskTier(6, "docs", r"\.(md|rst|txt|adoc)$|(^|/)docs?/|(^|/)(LICENSE|NOTICE)")
+RISK_TIERS = (SECURITY, SUPPLY_CHAIN, BOUNDARY, SOURCE, CONFIG, TESTS, DOCS)
 # Precedence differs from rank: tests/test_redact.py is a test, and
-# docs/security.md is a doc, whatever their names suggest.
-_MATCH_ORDER = (TESTS, CONFIG, DOCS, SECURITY, BOUNDARY)
+# docs/security.md is a doc, whatever their names suggest. CI, dependency
+# and build files are matched first, so no directory a PR author picks
+# (`tests/`, `docs/`, `fixtures/`) can demote them.
+_MATCH_ORDER = (SUPPLY_CHAIN, TESTS, CONFIG, DOCS, SECURITY, BOUNDARY)
 
 
 def risk_tier(path: str) -> RiskTier:

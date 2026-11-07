@@ -8,6 +8,7 @@ from atlas_reviewer.diffs import (
     DOCS,
     SECURITY,
     SOURCE,
+    SUPPLY_CHAIN,
     TESTS,
     UNPARSED_PATH,
     describe_by_risk,
@@ -59,8 +60,11 @@ def test_text_before_the_first_header_is_kept_as_a_pseudo_file():
         ("atlas_reviewer/sprites_api.py", BOUNDARY),
         ("atlas_reviewer/openrouter.py", BOUNDARY),
         ("atlas_reviewer/draft.py", SOURCE),
-        (".github/workflows/ci.yml", CONFIG),
-        ("requirements.txt", CONFIG),
+        (".github/workflows/ci.yml", SUPPLY_CHAIN),
+        ("requirements.txt", SUPPLY_CHAIN),
+        ("pyproject.toml", SUPPLY_CHAIN),
+        (".github/ISSUE_TEMPLATE/bug.yml", CONFIG),
+        ("config/settings.yaml", CONFIG),
         ("atlas_reviewer/tests/test_redact.py", TESTS),
         ("atlas_reviewer/fixtures/sample-pr/runner-script.json", TESTS),
         ("docs/security.md", DOCS),
@@ -140,3 +144,56 @@ def test_unseen_files_are_described_grouped_by_risk_with_a_count_of_the_rest():
     assert describe_by_risk(files, 1) == (
         "[security, auth, secrets and redaction] app/auth.py; and 2 more"
     )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".github/workflows/release.yml",
+        ".github/actions/setup/action.yml",
+        "tools/action.yaml",
+        ".gitlab-ci.yml",
+        ".circleci/config.yml",
+        ".github/dependabot.yml",
+        "requirements.txt",
+        "requirements-dev.in",
+        "docs/requirements.txt",
+        "tests/requirements.txt",
+        "constraints.txt",
+        "pyproject.toml",
+        "setup.py",
+        "Pipfile.lock",
+        "poetry.lock",
+        "uv.lock",
+        "package.json",
+        "web/package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "go.mod",
+        "go.sum",
+        "Cargo.lock",
+        "Gemfile",
+        "fixtures/app.gemspec",
+        "Dockerfile",
+        "docker/Dockerfile.ci",
+        "Makefile",
+        "tests/conftest.py",
+    ],
+)
+def test_ci_dependency_and_build_files_rank_high_whatever_their_directory(path):
+    """Pilot 3, ranking finding: workflows and lockfiles ranked below
+    ordinary code, and a `tests/` or `docs/` directory demoted them."""
+    tier = risk_tier(path)
+    assert tier is SUPPLY_CHAIN
+    assert tier.rank < BOUNDARY.rank < SOURCE.rank
+
+
+def test_ci_and_lockfiles_are_reviewed_before_ordinary_code_when_budget_is_short():
+    diff = (
+        file_diff("app/views.py", "v" * 500)
+        + file_diff("uv.lock", "l" * 300)
+        + file_diff(".github/workflows/ci.yml", "w" * 300)
+    )
+    sel = select_diff(diff, 1, 900)
+    assert paths(sel.parts[0].files) == ["uv.lock", ".github/workflows/ci.yml"]
+    assert paths(sel.unseen) == ["app/views.py"]
