@@ -5,9 +5,7 @@ own skill bundle.
 The model has no file tools, so naming a lens in a prompt is not running it:
 the controller reads each chosen lens's `body.md` and inlines as much as the
 size budget allows. Which lenses were included, truncated or omitted is
-reported in the draft. Choosing them is `picker.py`'s job, which runs this
-repo's own `choosing-review-lenses` skill rather than a code-side digest of
-its route table.
+reported in the draft. Choosing them is `picker.py`'s job.
 """
 
 from __future__ import annotations

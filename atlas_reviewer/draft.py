@@ -161,8 +161,9 @@ def _lenses(uses: tuple[LensUse, ...]) -> str:
     )
     return (
         "## Review lenses\n\n"
-        "Lens bodies are chosen by the controller from the changed paths and the PR text, "
-        "read from the skill bundle and placed in the model prompt. Only included or "
+        "Lenses are chosen by the `choosing-review-lenses` picker (or the critical tier "
+        "when it does not run); their bodies are read from the skill bundle and placed "
+        "in the model prompt. Only included or "
         "truncated lenses ran; omitted ones did not.\n\n"
         "| Lens | Status | Characters kept of total | Why |\n| --- | --- | --- | --- |\n"
         + rows

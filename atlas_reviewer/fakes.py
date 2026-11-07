@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 import threading
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -21,7 +21,6 @@ from atlas_reviewer.interpreter import PYENV_VERSIONS, PYTHON_TAG
 from atlas_reviewer.ports import BoundaryError, Json, NotFoundError
 from atlas_reviewer.runner import EXIT_MARKER, EXIT_NOT_FOUND, PROBE_TAG, START_MARKER
 
-ExecHandler = Callable[[str, bytes], tuple[str, int]]
 _HANG_LIMIT_S = 10.0
 _FEED_RE = re.compile(r"head -c (\d+) \| ")
 PYENV_PYTHON = f"{PYENV_VERSIONS}/3.13.7/bin/python3"
