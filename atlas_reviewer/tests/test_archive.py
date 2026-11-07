@@ -99,6 +99,16 @@ def test_encrypted_entries_are_skipped():
     assert skipped(read) == {"secret.txt": "encrypted entry"}
 
 
+@pytest.mark.parametrize("method", [zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA])
+def test_unbounded_compression_methods_are_skipped(method):
+    read = read_zip(make_zip(("a.txt", "x"), ("b.txt", "y"), compression=method))
+    assert read.members == ()
+    assert skipped(read) == {
+        "a.txt": "compression method not STORED or DEFLATED",
+        "b.txt": "compression method not STORED or DEFLATED",
+    }
+
+
 def test_compression_bomb_ratio_is_refused_before_decompressing():
     read = read_zip(make_zip(("bomb.txt", "0" * 2_000_000)))
     assert read.members == ()

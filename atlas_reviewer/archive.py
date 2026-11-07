@@ -143,11 +143,20 @@ def _entry(
     return ArchiveMember(info.filename, data.decode("utf-8", errors="replace"))
 
 
+# zipfile bounds DEFLATE output by max_length; BZIP2 and LZMA can expand a
+# whole chunk before trimming to the declared size.
+_BOUNDED_METHODS = (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+
+
 def _refuse_header(info: zipfile.ZipInfo, limits: ArchiveLimits) -> str | None:
     checks = (
         (_unsafe_path(info.filename), "unsafe path (absolute, drive or `..`)"),
         (not _regular_file(info), "not a regular file (symlink or special file)"),
         (bool(info.flag_bits & _ENCRYPTED_FLAG), "encrypted entry"),
+        (
+            info.compress_type not in _BOUNDED_METHODS,
+            "compression method not STORED or DEFLATED",
+        ),
         (
             PurePosixPath(info.filename).suffix.lower() not in TEXT_SUFFIXES,
             "file type not on the text allowlist",
