@@ -114,7 +114,8 @@ UNKNOWN. Logs and artifacts are fetched only for jobs and runs at the head
 SHA. Artifact ZIPs are read in memory with stdlib `zipfile` and never
 extracted to disk. An entry is skipped if it has an unsafe path
 (absolute, drive, `..`), is a symlink or special file, is encrypted, is
-not on the text-type allowlist, is binary, or exceeds the size or ratio
+compressed with anything but STORED or DEFLATED, is not on the text-type
+allowlist, is binary, or exceeds the size or ratio
 caps. The archive as a whole is rejected if it has more than 200 entries.
 
 **OpenRouter limits** (`openrouter.py`, `budget.py`, `pricing.py`). Model
