@@ -126,7 +126,7 @@ class FakeSprites:
     def _answer(self, script: str, stdin: bytes) -> tuple[str, int]:
         if PROBE_TAG in script:
             return self._probe(script), 0
-        if script.startswith("head -c ") and "| wc -c" in script:
+        if script.startswith("head -c ") and "wc -c" in script:
             wanted = int(script.split()[2])
             return str(len(stdin[:wanted])), 0
         for rule in self.rules:

@@ -12,8 +12,11 @@ from atlas_reviewer.fakes import ExecRule, FakeSprites, MemoryLedger
 from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.runner import (
     DENY_ALL,
+    PROBE_BUDGET_S,
     PROBE_TAG,
     STDIN_CHECK_BYTES,
+    TRIVIAL_TOOL,
+    UNPACK_BUDGET_S,
     UPLOAD_BUDGET_S,
     RunnerJob,
     ToolAbsent,
@@ -21,6 +24,7 @@ from atlas_reviewer.runner import (
     ToolSpec,
     decode_exec_output,
     destroy_runner,
+    frames_seen,
     parse_exit,
     parse_probe,
     probe_runner,
@@ -29,6 +33,7 @@ from atlas_reviewer.runner import (
     runner_name,
     sweep,
 )
+from atlas_reviewer.telemetry import Telemetry
 
 from .helpers import CallbackRule, FakeClock
 
@@ -194,7 +199,8 @@ def test_upload_failure_is_a_failed_run():
     api = FakeSprites(rules=(ExecRule("tar -xzf", "tar: invalid", 2),))
     outcome = run(api)
     assert outcome.report.status is RunnerStatus.FAILED
-    assert "source upload failed" in outcome.report.note
+    assert "unpack / tar -xzf failed after" in outcome.report.note
+    assert "source unpack failed (exit 2): tar: invalid" in outcome.report.note
 
 
 def test_nothing_credential_like_is_passed_into_the_runner():
@@ -261,7 +267,8 @@ def test_probe_runs_after_deny_all_and_before_the_source_upload():
     run(api)
     scripts = [c[2] for c in api.calls if c[0] == "exec"]
     assert PROBE_TAG in scripts[0]
-    assert "tar -xzf" in scripts[1]
+    assert scripts[1].startswith("head -c ")
+    assert "tar -xzf" in scripts[2]
 
 
 def test_binary_missing_from_probe_is_absent_and_never_executed():
@@ -345,7 +352,7 @@ def exec_timeouts(api):
 def test_upload_exec_gets_the_dedicated_upload_budget_not_the_client_default():
     api = FakeSprites(rules=OK_RULES)
     run(api, deadline_s=600.0)
-    (timeout,) = [t for s, t in exec_timeouts(api).items() if "tar -xzf" in s]
+    (timeout,) = [t for s, t in exec_timeouts(api).items() if s.startswith("head -c")]
     assert timeout == UPLOAD_BUDGET_S
     assert timeout > 30.0
 
@@ -353,28 +360,30 @@ def test_upload_exec_gets_the_dedicated_upload_budget_not_the_client_default():
 def test_upload_exec_is_capped_by_the_remaining_review_deadline():
     api = FakeSprites(rules=OK_RULES)
     run(api, deadline_s=90.0)
-    (timeout,) = [t for s, t in exec_timeouts(api).items() if "tar -xzf" in s]
+    (timeout,) = [t for s, t in exec_timeouts(api).items() if s.startswith("head -c")]
     assert 60.0 < timeout <= 90.0
 
 
 def test_upload_does_not_wait_for_a_stdin_eof():
     api = FakeSprites(rules=OK_RULES)
     run(api)
-    (script,) = [s for s in exec_timeouts(api) if "tar -xzf" in s]
-    assert f"head -c {len(b'tarball-bytes')} |" in script
+    (script,) = [s for s in exec_timeouts(api) if s.startswith("head -c")]
+    assert script.startswith(f"head -c {len(b'tarball-bytes')} > ")
 
 
 def test_upload_transport_failure_names_the_size_and_still_destroys():
     class UploadTimesOut(FakeSprites):
         def exec(self, name, argv, stdin, timeout_s):
-            if "tar -xzf" in argv[-1]:
+            if stdin:
                 raise BoundaryError("The read operation timed out")
             return super().exec(name, argv, stdin, timeout_s)
 
     api = UploadTimesOut(rules=OK_RULES)
     outcome = run(api)
     assert outcome.report.status is RunnerStatus.FAILED
-    assert "source upload of 13 bytes did not complete" in outcome.report.note
+    assert outcome.report.note.startswith(
+        "exec / source upload failed after 0.0s (0.0s into the run): "
+    )
     assert "read operation timed out" in outcome.report.note
     assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
 
@@ -419,3 +428,172 @@ def test_default_tools_are_limited_to_what_the_runner_image_is_known_to_have():
     from atlas_reviewer.controller import DEFAULT_TOOLS
 
     assert [t.binary for t in DEFAULT_TOOLS] == ["python3"]
+
+
+# --- lifecycle telemetry ----------------------------------------------------
+
+
+def run_traced(api, clock=None, deadline_s=600.0, tools=TOOLS):
+    telemetry = Telemetry(clock or FakeClock())
+    outcome = run_disposable(
+        api, MemoryLedger(), RunnerJob(b"tarball-bytes", tools), name=NAME,
+        deadline_s=deadline_s, clock=clock or FakeClock(), telemetry=telemetry,
+    )  # fmt: skip
+    return outcome, telemetry.events
+
+
+def test_every_lifecycle_phase_is_recorded_in_order():
+    _, events = run_traced(FakeSprites(rules=OK_RULES))
+    assert [(e.phase, e.step) for e in events] == [
+        ("ledger", "record runner name"),
+        ("create", "create sprite"),
+        ("egress", "set deny-all"),
+        ("egress", "read back"),
+        ("resources", "memory limit"),
+        ("exec", "tool check"),
+        ("tool check", "availability"),
+        ("exec", "source upload"),
+        ("upload", "13-byte tarball"),
+        ("exec", "source unpack"),
+        ("unpack", "tar -xzf"),
+        ("exec", "ruff version"),
+        ("exec", "ruff run"),
+        ("tool", "ruff"),
+        ("exec", "shellcheck version"),
+        ("tool", "shellcheck"),
+        ("destroy", "delete attempt 1"),
+        ("verify", "existence check"),
+        ("destroy", "outcome"),
+    ]
+    assert all(e.status == "ok" for e in events)
+    by_step = {(e.phase, e.step): e.fields for e in events}
+    assert by_step[("egress", "read back")] == {"deny_all": True}
+    assert by_step[("upload", "13-byte tarball")] == {
+        "bytes": 13,
+        "runner_received": 13,
+    }
+    assert by_step[("tool", "ruff")]["exit_status"] == 1
+    assert by_step[("verify", "existence check")] == {"present": False}
+    assert by_step[("destroy", "outcome")] == {"cleanup": "destroyed (verified absent)"}
+
+
+def test_each_exec_records_purpose_timeouts_bytes_frames_and_exit():
+    _, events = run_traced(FakeSprites(rules=OK_RULES))
+    execs = {e.step: e.fields for e in events if e.phase == "exec"}
+    upload = execs["source upload"]
+    assert upload["purpose"] == "source upload"
+    assert upload["timeout_s"] == UPLOAD_BUDGET_S
+    assert upload["bytes_sent"] == 13
+    assert upload["bytes_received"] > 0
+    assert upload["frames_seen"] == "0x01:1"
+    assert upload["exit_status"] == 0
+    assert execs["tool check"]["timeout_s"] == PROBE_BUDGET_S
+    assert execs["source unpack"]["timeout_s"] == UNPACK_BUDGET_S
+    assert execs["source unpack"]["bytes_sent"] == 0
+    assert execs["ruff run"]["exit_status"] == 1
+
+
+def test_a_timed_out_tool_check_names_its_step_and_timing_not_a_bare_timeout():
+    """The second pilot's unwrapped 'The read operation timed out'."""
+    clock = FakeClock()
+
+    class ProbeTimesOut(FakeSprites):
+        def exec(self, name, argv, stdin, timeout_s):
+            if PROBE_TAG in argv[-1]:
+                clock.advance(timeout_s)
+                raise BoundaryError(
+                    f"POST https://api.sprites.dev/v1/sprites/{name}/exec failed: "
+                    "The read operation timed out"
+                )
+            return super().exec(name, argv, stdin, timeout_s)
+
+    outcome, events = run_traced(ProbeTimesOut(rules=OK_RULES), clock=clock)
+    assert outcome.report.status is RunnerStatus.FAILED
+    assert outcome.report.note.startswith(
+        "exec / tool check failed after 60.0s (60.0s into the run): POST "
+    )
+    (failed,) = [e for e in events if e.status == "error"]
+    assert (failed.phase, failed.step, failed.duration_s) == (
+        "exec",
+        "tool check",
+        60.0,
+    )
+    assert failed.fields["timeout_s"] == PROBE_BUDGET_S
+    assert "upload" not in {e.phase for e in events}
+    assert events[-1].fields == {"cleanup": "destroyed (verified absent)"}
+
+
+def test_every_error_event_carries_its_label_and_elapsed_time():
+    api = FakeSprites(rules=OK_RULES, fail_on={"create": BoundaryError("HTTP 503")})
+    outcome, events = run_traced(api)
+    errors = [e for e in events if e.status == "error"]
+    assert errors and all("failed after" in e.error for e in errors)
+    assert outcome.report.note == (
+        "create / create sprite failed after 0.0s (0.0s into the run): HTTP 503"
+    )
+
+
+def test_a_short_upload_is_a_labelled_failure_naming_the_byte_counts():
+    class ShortWrite(FakeSprites):
+        def _answer(self, script, stdin):
+            if script.startswith("head -c"):
+                return "5", 0
+            return super()._answer(script, stdin)
+
+    outcome, _ = run_traced(ShortWrite(rules=OK_RULES))
+    assert outcome.report.status is RunnerStatus.FAILED
+    assert "upload / 13-byte tarball failed after" in outcome.report.note
+    assert "runner wrote 5 of 13 bytes (exit 0)" in outcome.report.note
+    assert "tar -xzf" not in " ".join(c[-1] for c in ShortWrite().calls)
+
+
+def test_destroy_attempts_and_verification_are_recorded_when_delete_fails():
+    api = FakeSprites(rules=OK_RULES, fail_on={"delete": BoundaryError("HTTP 500")})
+    _, events = run_traced(api)
+    tail = [(e.phase, e.step, e.status) for e in events[-3:]]
+    assert tail == [
+        ("destroy", "delete attempt 1", "error"),
+        ("destroy", "delete attempt 2", "error"),
+        ("destroy", "outcome", "ok"),
+    ]
+    assert events[-1].fields == {"cleanup": "destroy NOT verified -- run `sweep`"}
+
+
+def test_a_deadline_stop_is_recorded():
+    clock = FakeClock()
+    api = FakeSprites(rules=(CallbackRule("tar -xzf", lambda: clock.advance(100)),))
+    outcome, events = run_traced(api, clock=clock, deadline_s=50.0, tools=TOOLS)
+    assert outcome.report.status is RunnerStatus.DEADLINE_EXCEEDED
+    assert ("deadline", "exceeded", "error") in [
+        (e.phase, e.step, e.status) for e in events
+    ]
+
+
+def test_frames_seen_counts_stream_id_bytes():
+    assert frames_seen(b"\x01hello\n\x03\x00") == "0x00:1,0x01:1,0x03:1"
+    assert frames_seen(b"plain") == "none"
+
+
+def test_the_trivial_tool_runs_through_the_review_sequence():
+    api = FakeSprites(rules=(ExecRule("tar -xzf", "", 0), ExecRule("echo posix-sh", "posix-sh", 0), ExecRule("find .", "12", 0)))  # fmt: skip
+    outcome, events = run_traced(api, tools=(TRIVIAL_TOOL,))
+    (result,) = outcome.results
+    assert isinstance(result, ToolRan)
+    assert (result.version, result.exit_code, result.output) == ("posix-sh", 0, "12")
+    assert [e.step for e in events if e.phase == "exec"] == [
+        "tool check", "source upload", "source unpack",
+        "source-file-count version", "source-file-count run",
+    ]  # fmt: skip
+
+
+def test_stdin_roundtrip_reports_a_nonzero_exit_as_a_failure():
+    class WcFails(FakeSprites):
+        def _answer(self, script, stdin):
+            if "| wc -c" in script:
+                return "wc: broken", 1
+            return super()._answer(script, stdin)
+
+    outcome = probe_runner(
+        WcFails(), MemoryLedger(), TOOLS, name=NAME, deadline_s=60, clock=FakeClock()
+    )
+    assert outcome.stdin_check.startswith("FAILED sending 3145728 bytes: exit 1")

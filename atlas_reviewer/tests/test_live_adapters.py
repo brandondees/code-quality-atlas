@@ -284,7 +284,12 @@ def test_a_review_sends_the_upload_timeout_to_the_transport_not_the_30s_default(
     from atlas_reviewer.clock import SystemClock
     from atlas_reviewer.domain import CleanupStatus, RunnerStatus
     from atlas_reviewer.fakes import MemoryLedger
-    from atlas_reviewer.runner import UPLOAD_BUDGET_S, RunnerJob, run_disposable
+    from atlas_reviewer.runner import (
+        UNPACK_BUDGET_S,
+        UPLOAD_BUDGET_S,
+        RunnerJob,
+        run_disposable,
+    )
 
     base = f"https://api.sprites.dev/v1/sprites/{NAME}"
     deleted = []
@@ -304,7 +309,8 @@ def test_a_review_sends_the_upload_timeout_to_the_transport_not_the_30s_default(
             if method == "GET":
                 return ok({"rules": list(DENY_ALL)})
             if path.endswith("/exec"):
-                return ok(body=b"\x01\n__ATLAS_EXIT__=0\n\x03\x00")
+                count = str(len(body or b"")).encode()
+                return ok(body=b"\x01" + count + b"\n__ATLAS_EXIT__=0\n\x03\x00")
             return ok(status=204)
 
     transport = Transport()
@@ -318,8 +324,10 @@ def test_a_review_sends_the_upload_timeout_to_the_transport_not_the_30s_default(
     )
     assert outcome.report.status is RunnerStatus.COMPLETED
     assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
-    (upload,) = [r for r in transport.requests if r[1].endswith("/exec")]
+    upload, unpack = [r for r in transport.requests if r[1].endswith("/exec")]
     assert upload[2] == UPLOAD_BUDGET_S
     assert upload[3] == b"tarball"
+    assert unpack[2] == UNPACK_BUDGET_S
+    assert unpack[3] is None
     non_exec = {r[2] for r in transport.requests if not r[1].endswith("/exec")}
     assert non_exec == {30.0}
