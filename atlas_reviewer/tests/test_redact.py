@@ -1,7 +1,13 @@
 # SPDX-License-Identifier: MIT
 import pytest
 
-from atlas_reviewer.redact import TRUNCATION_MARKER, RedactedText, Redactor, redact
+from atlas_reviewer.redact import (
+    TRUNCATION_MARKER,
+    RedactedText,
+    Redactor,
+    redact,
+    tail,
+)
 
 from .helpers import fake_token
 
@@ -129,3 +135,12 @@ def test_each_private_key_block_ends_at_its_own_end_marker():
     out = redact(f"{PRIVATE_KEY}\nkeep me\n{PRIVATE_KEY}")
     assert out.text == "[REDACTED:private-key]\nkeep me\n[REDACTED:private-key]"
     assert out.redaction_count == 2
+
+
+def test_tail_keeps_whole_lines_and_records_the_full_length():
+    full = redact("first line\nsecond line\nthird")
+    assert tail(full, 100) is full
+    cut = tail(full, 14)
+    assert cut.text == "third"
+    assert cut.truncated_from == len(full.text)
+    assert cut.redaction_count == full.redaction_count
