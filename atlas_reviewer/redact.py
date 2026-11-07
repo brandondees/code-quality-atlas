@@ -18,14 +18,9 @@ _MINT = object()
 _MIN_KNOWN_SECRET_LEN = 8
 TRUNCATION_MARKER = "\n[... truncated by atlas_reviewer ...]\n"
 
+_KEY_BEGIN = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
+_KEY_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    (
-        "private-key",
-        re.compile(
-            r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
-            re.DOTALL,
-        ),
-    ),
     ("github-token", re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b")),
     ("github-pat", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{22,}\b")),
     ("model-key", re.compile(r"\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}")),
@@ -71,6 +66,8 @@ def redact(
     max_chars: int | None = None,
 ) -> RedactedText:
     text, count = _scrub_known(raw, known_secrets)
+    text, hits = _private_keys(text)
+    count += hits
     for label, pattern in _PATTERNS:
         text, hits = pattern.subn(f"[REDACTED:{label}]", text)
         count += hits
@@ -106,6 +103,22 @@ def _scrub_known(raw: str, known_secrets: Sequence[str]) -> tuple[str, int]:
         count += text.count(secret)
         text = text.replace(secret, "[REDACTED:controller-credential]")
     return text, count
+
+
+def _private_keys(text: str) -> tuple[str, int]:
+    """Each BEGIN through the next END. One pass: once a BEGIN has no END
+    after it, no later BEGIN can have one either."""
+    kept: list[str] = []
+    count = pos = 0
+    while (begin := _KEY_BEGIN.search(text, pos)) is not None:
+        end = _KEY_END.search(text, begin.end())
+        if end is None:
+            break
+        kept += [text[pos : begin.start()], "[REDACTED:private-key]"]
+        pos = end.end()
+        count += 1
+    kept.append(text[pos:])
+    return "".join(kept), count
 
 
 def _truncate(text: str, max_chars: int | None) -> str:

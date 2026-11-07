@@ -97,3 +97,19 @@ def test_assignment_matching_stays_linear_on_adversarial_input():
     for text in ("a_" * 200_000, "x-" * 200_000 + "password", "a" * 400_000):
         redact(text)
     assert time.monotonic() - start < 2.0
+
+
+def test_private_key_redaction_stays_linear_without_end_markers():
+    import time
+
+    begin = "-----BEGIN PRIVATE KEY-----\n"
+    start = time.monotonic()
+    out = redact(begin * 20_000 + "no end marker")
+    assert time.monotonic() - start < 2.0
+    assert out.redaction_count == 0
+
+
+def test_each_private_key_block_ends_at_its_own_end_marker():
+    out = redact(f"{PRIVATE_KEY}\nkeep me\n{PRIVATE_KEY}")
+    assert out.text == "[REDACTED:private-key]\nkeep me\n[REDACTED:private-key]"
+    assert out.redaction_count == 2
