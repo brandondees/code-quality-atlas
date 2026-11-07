@@ -1,0 +1,159 @@
+# SPDX-License-Identifier: MIT
+"""Per-review model-call budget. Pure.
+
+Every attempt -- first call or retry -- must `reserve` its worst-case cost
+before it is sent. A reservation is refused if it would be call number
+`max_calls + 1`, or if it would push committed spend (settled actuals,
+reserved worst cases where the actual is unknown, plus this reservation)
+past `budget_usd`. A failed or unparseable attempt keeps its full
+reservation as spent, since it may still have been billed.
+
+Worst case of one call = input tokens x highest input rate (cache write
+included) + max output tokens x highest completion rate + reasoning budget
+x any separate reasoning rate + any per-request fee. OpenRouter bills
+reasoning tokens as output and counts them against `max_tokens`
+(https://openrouter.ai/docs/guides/best-practices/reasoning-tokens), so
+the output term already covers them; the separate reasoning term only
+matters for models priced with an `internal_reasoning` rate.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from decimal import Decimal
+
+from atlas_reviewer.ports import BoundaryError
+from atlas_reviewer.pricing import ModelTerms
+
+MESSAGE_OVERHEAD_TOKENS = 64
+
+
+class BudgetRefusedError(BoundaryError):
+    """A model call was refused before sending: call cap, cost cap, or a
+    token bound the model cannot honour."""
+
+
+@dataclass(frozen=True)
+class CallLimits:
+    max_calls: int = 3
+    max_input_tokens: int = 200_000
+    max_output_tokens: int = 24_000
+    reasoning_max_tokens: int = 12_000
+    budget_usd: Decimal = Decimal("3.00")
+
+    def __post_init__(self) -> None:
+        if min(self.max_calls, self.max_input_tokens, self.reasoning_max_tokens) < 1:
+            raise ValueError("call limits must be positive")
+        if self.max_output_tokens <= self.reasoning_max_tokens:
+            raise ValueError("max_output_tokens must exceed the reasoning budget")
+        if self.budget_usd <= 0:
+            raise ValueError("budget must be positive")
+
+
+def input_token_bound(text: str) -> int:
+    """Upper bound on prompt tokens, assuming no token encodes less than one
+    UTF-8 byte (true of byte-level BPE tokenizers; not verified against the
+    model's own tokenizer). The response's reported usage is recorded so a
+    violated assumption is visible."""
+    return len(text.encode("utf-8")) + MESSAGE_OVERHEAD_TOKENS
+
+
+def check_tokens(input_tokens: int, terms: ModelTerms, limits: CallLimits) -> None:
+    if input_tokens > limits.max_input_tokens:
+        raise BudgetRefusedError(
+            f"prompt bound {input_tokens} tokens exceeds the "
+            f"{limits.max_input_tokens}-token input cap"
+        )
+    if limits.max_output_tokens > terms.max_completion_tokens:
+        raise BudgetRefusedError(
+            f"max output {limits.max_output_tokens} exceeds the model's "
+            f"{terms.max_completion_tokens}-token completion limit"
+        )
+    if input_tokens + limits.max_output_tokens > terms.context_length:
+        raise BudgetRefusedError(
+            f"prompt bound plus max output exceeds the {terms.context_length}-token context"
+        )
+
+
+def worst_case_usd(input_tokens: int, terms: ModelTerms, limits: CallLimits) -> Decimal:
+    return (
+        input_tokens * terms.input_rate
+        + limits.max_output_tokens * terms.completion_rate
+        + limits.reasoning_max_tokens * terms.reasoning_rate
+        + terms.request_fee
+    )
+
+
+@dataclass
+class CallRecord:
+    reserved_usd: Decimal
+    actual_usd: Decimal | None = None
+    outcome: str = "in flight"
+    usage: str = ""
+
+    @property
+    def committed_usd(self) -> Decimal:
+        return self.reserved_usd if self.actual_usd is None else self.actual_usd
+
+
+@dataclass
+class ReviewBudget:
+    limits: CallLimits = field(default_factory=CallLimits)
+    calls: list[CallRecord] = field(default_factory=list)
+    refusals: list[str] = field(default_factory=list)
+
+    def committed_usd(self) -> Decimal:
+        return sum((c.committed_usd for c in self.calls), Decimal(0))
+
+    def reserve(
+        self, worst_case: Decimal, ceiling_usd: Decimal | None = None
+    ) -> CallRecord:
+        """`ceiling_usd` lowers the cap for this reservation (e.g. to the
+        key's remaining credit); it never raises it."""
+        refusal = self._refusal(worst_case, ceiling_usd)
+        if refusal:
+            self.refusals.append(refusal)
+            raise BudgetRefusedError(refusal)
+        record = CallRecord(worst_case)
+        self.calls.append(record)
+        return record
+
+    def _refusal(self, worst_case: Decimal, ceiling_usd: Decimal | None) -> str | None:
+        if len(self.calls) >= self.limits.max_calls:
+            return f"call cap reached: {self.limits.max_calls} model calls per review, retries included"
+        cap = (
+            self.limits.budget_usd
+            if ceiling_usd is None
+            else min(ceiling_usd, self.limits.budget_usd)
+        )
+        projected = self.committed_usd() + worst_case
+        if projected > cap:
+            return (
+                f"cost cap: worst case ${worst_case:.4f} would bring this review to "
+                f"${projected:.4f}, over ${cap:.2f}"
+            )
+        return None
+
+    @staticmethod
+    def settle(
+        record: CallRecord, outcome: str, actual: Decimal | None = None, usage: str = ""
+    ) -> None:
+        record.outcome, record.actual_usd, record.usage = outcome, actual, usage
+
+    def report(self) -> tuple[str, ...]:
+        lines = [
+            f"call {i}: {c.outcome}; reserved ${c.reserved_usd:.4f}; "
+            + (
+                f"actual ${c.actual_usd:.4f}"
+                if c.actual_usd is not None
+                else "actual unknown (counted at the reservation)"
+            )
+            + (f"; {c.usage}" if c.usage else "")
+            for i, c in enumerate(self.calls, 1)
+        ]
+        lines.extend(f"refused: {r}" for r in self.refusals)
+        lines.append(
+            f"committed ${self.committed_usd():.4f} of ${self.limits.budget_usd:.2f}; "
+            f"{len(self.calls)} of {self.limits.max_calls} calls used"
+        )
+        return tuple(lines)

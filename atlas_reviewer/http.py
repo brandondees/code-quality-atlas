@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Protocol
 from urllib.parse import urlsplit
 
-from atlas_reviewer.ports import BoundaryError
+from atlas_reviewer.ports import BoundaryError, ResponseTooLargeError
 
 DEFAULT_MAX_BYTES = 50 * 1024 * 1024
 REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
@@ -41,6 +41,7 @@ class Transport(Protocol):
         headers: Mapping[str, str],
         body: bytes | None,
         timeout_s: float,
+        max_bytes: int | None = None,
     ) -> HttpResponse: ...
 
 
@@ -72,23 +73,30 @@ class UrllibTransport:
         headers: Mapping[str, str],
         body: bytes | None,
         timeout_s: float,
+        max_bytes: int | None = None,
     ) -> HttpResponse:
         if urlsplit(url).scheme not in self._schemes:
             raise BoundaryError(f"refusing non-allowed URL scheme: {safe_url(url)}")
         req = urllib.request.Request(
             url, data=body, method=method, headers=dict(headers)
         )
+        cap = min(max_bytes, self._max_bytes) if max_bytes else self._max_bytes
         try:
             with self._opener.open(req, timeout=timeout_s) as resp:
-                return HttpResponse(resp.status, dict(resp.headers), self._read(resp))
+                return HttpResponse(
+                    resp.status, dict(resp.headers), _read(resp, cap, url)
+                )
         except urllib.error.HTTPError as exc:
-            return HttpResponse(exc.code, dict(exc.headers or {}), self._read(exc))
+            return HttpResponse(exc.code, dict(exc.headers or {}), _read(exc, cap, url))
         except (urllib.error.URLError, OSError) as exc:
             raise BoundaryError(f"{method} {safe_url(url)} failed: {exc}") from exc
 
-    def _read(self, stream: object) -> bytes:
-        read = getattr(stream, "read")  # noqa: B009
-        data: bytes = read(self._max_bytes + 1)
-        if len(data) > self._max_bytes:
-            raise BoundaryError(f"response exceeded {self._max_bytes} bytes")
-        return data
+
+def _read(stream: object, cap: int, url: str) -> bytes:
+    read = getattr(stream, "read")  # noqa: B009
+    data: bytes = read(cap + 1)
+    if len(data) > cap:
+        raise ResponseTooLargeError(
+            f"response from {safe_url(url)} exceeded {cap} bytes"
+        )
+    return data

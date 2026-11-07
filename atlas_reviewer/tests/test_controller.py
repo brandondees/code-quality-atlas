@@ -11,7 +11,7 @@ from atlas_reviewer.domain import PrEvent, SourceKey, SourceKind
 from atlas_reviewer.fakes import FakeSprites, MemoryLedger
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.harness import SkillBundleHarness, load_bundle
-from atlas_reviewer.ports import BoundaryError, NotFoundError
+from atlas_reviewer.ports import BoundaryError, Listing, NotFoundError
 from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.redact import Redactor
 
@@ -145,7 +145,7 @@ def test_github_listing_failures_become_unknown_evidence():
         def list_check_runs(self, repo, sha):
             raise BoundaryError("GitHub HTTP 502")
 
-        def get_run_logs(self, repo, run_id):
+        def get_job_logs(self, repo, job_id, max_bytes):
             raise BoundaryError("GitHub HTTP 410")
 
         def get_pull_diff(self, repo, number):
@@ -156,7 +156,10 @@ def test_github_listing_failures_become_unknown_evidence():
         "| missing | check_run | (all check runs) | could not fetch: GitHub HTTP 502 |"
         in draft
     )
-    assert "| missing | workflow_log | ci | could not fetch: GitHub HTTP 410 |" in draft
+    assert (
+        "| missing | workflow_log | ci / test | could not fetch: GitHub HTTP 410 |"
+        in draft
+    )
     assert "PASS | check_run" not in draft
     assert "The PR diff could not be fetched" in draft
 
@@ -201,8 +204,12 @@ def test_harness_failure_still_produces_a_draft():
         def review(self, request):
             raise BoundaryError("provider HTTP 529")
 
+        def usage_lines(self):
+            return ("call 1: HTTP 529; reserved $0.7400",)
+
     draft = Setup(harness=DownHarness()).run()
     assert "Harness `skill-bundle` produced no narrative: provider HTTP 529" in draft
+    assert "- call 1: HTTP 529; reserved $0.7400" in draft
     assert "| PASS | check_run | gate |" in draft
 
 
@@ -222,7 +229,7 @@ def test_untrusted_text_outside_the_prompt_is_redacted_in_the_draft_too():
 
     class LeakyName(FixtureGitHub):
         def list_check_runs(self, repo, sha):
-            return checks
+            return Listing(tuple(checks["check_runs"]), False, 1)
 
     draft = Setup(github=LeakyName(FIXTURE)).run()
     assert token not in draft

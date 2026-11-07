@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from atlas_reviewer.domain import (
@@ -24,7 +24,7 @@ class FakeClock:
         self.t = start
 
     def now(self) -> datetime:
-        return NOW
+        return NOW + timedelta(seconds=self.t)
 
     def monotonic(self) -> float:
         return self.t

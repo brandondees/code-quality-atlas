@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""Model providers. Only the offline provider ships; see the README for
-the first live adapter to wire and what it needs."""
+"""The offline model provider: the default, and the only one tests and
+`--dry-run` use. The live adapter is `openrouter.OpenRouterProvider`."""
 
 from __future__ import annotations
 
@@ -28,4 +28,9 @@ class OfflineProvider:
             f"A live provider would have received {len(labels)} untrusted block(s) "
             f"({', '.join(labels) or 'none'}), a {len(prompt.system)}-character system prompt, "
             f"and a {len(prompt.user)}-character user prompt."
+        )
+
+    def usage_lines(self) -> tuple[str, ...]:
+        return (
+            f"offline provider: {len(self.prompts)} prompt(s) seen, no model calls, $0.00",
         )

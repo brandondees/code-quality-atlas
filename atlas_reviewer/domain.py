@@ -46,6 +46,7 @@ class PrEvent:
 class SourceKind(Enum):
     CHECK_RUN = "check_run"
     WORKFLOW_RUN = "workflow_run"
+    JOB = "job"
     WORKFLOW_LOG = "workflow_log"
     ARTIFACT = "artifact"
     RUNNER_TOOL = "runner_tool"
@@ -142,6 +143,17 @@ class Missing:
 
 
 Evidence = Matched | Stale | Missing
+
+
+@dataclass(frozen=True)
+class Omission:
+    """Something the controller deliberately did not read in full: a page
+    cap, a size or archive limit, a per-review count cap. Every omission is
+    listed in the draft; whatever it left unread is never counted as passing."""
+
+    source: str
+    limit: str
+    detail: str
 
 
 def outcome(evidence: Evidence) -> Outcome:

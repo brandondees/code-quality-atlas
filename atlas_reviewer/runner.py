@@ -8,13 +8,24 @@ Lifecycle, in order, every step deadline-checked:
    and create Tasks, so a used Sprite is contaminated
 3. set deny-all egress from the outside API, then read it back; nothing
    executes unless the read-back is exactly deny-all
-4. cap memory, upload the head-SHA tarball over exec stdin, run each tool
+4. cap memory, probe which tool binaries exist, upload the head-SHA
+   tarball over exec stdin, run each available tool
 5. destroy -- in `finally`, and from a watchdog timer at the deadline.
    Destroy is idempotent and is verified by a follow-up existence check;
    only a verified destroy clears the ledger entry.
 
 Exec-session kill is untested against the live API, so it is never relied
 on: destroying the Sprite is the only cleanup primitive used.
+
+Exec output: the HTTP exec endpoint (`POST /v1/sprites/{name}/exec`,
+Sprites API OpenAPI 0.1.12, https://docs.fly.io/sprites/api/exec/execute-command)
+documents its request but not its 200 response body. Live validation on
+2026-11-06 saw `application/octet-stream` with SOH-prefixed stdout, which
+matches the stream-id prefixes the WebSocket exec spec documents
+(0x00 stdin, 0x01 stdout, 0x02 stderr, 0x03 exit code, 0x04 stdin EOF;
+https://docs.fly.io/sprites/api/websockets/execute-command). Because HTTP
+framing is undocumented, those prefix bytes are stripped rather than
+parsed, and the exit code comes from an in-band marker each script prints.
 """
 
 from __future__ import annotations
@@ -40,9 +51,13 @@ MEMORY_LIMIT_MB = 1024
 WORKDIR = "/work"
 EXIT_MARKER = "__ATLAS_EXIT__="
 EXIT_NOT_FOUND = 127
+PROBE_TAG = "atlas-probe"
+FRAMING_CHECK = "atlas-framing-check"
 _EXIT_RE = re.compile(re.escape(EXIT_MARKER) + r"(\d+)")
+_PROBE_RE = re.compile(re.escape(PROBE_TAG) + r":(present|absent):([A-Za-z0-9._+-]+)")
+_BINARY_RE = re.compile(r"[A-Za-z0-9._+-]+")
 _EXEC_SLACK_S = 15.0
-_FRAMING_BYTES = dict.fromkeys(range(0x04))
+_FRAMING_BYTES = dict.fromkeys(range(0x05))
 
 
 class DeadlineExceededError(RuntimeError):
@@ -59,9 +74,16 @@ class ToolSpec:
     configuration; the code they run over is not."""
 
     name: str
+    binary: str
     version_cmd: str
     run_cmd: str
     timeout_s: int = 120
+
+    def __post_init__(self) -> None:
+        if not _BINARY_RE.fullmatch(self.binary):
+            raise ValueError(
+                f"tool binary must be a bare command name: {self.binary!r}"
+            )
 
 
 @dataclass(frozen=True)
@@ -93,6 +115,13 @@ class RunnerOutcome:
     results: tuple[ToolResult, ...]
 
 
+@dataclass(frozen=True)
+class ProbeOutcome:
+    report: RunnerReport
+    available: dict[str, bool]
+    framing_sample: bytes
+
+
 @dataclass
 class Deadline:
     clock: Clock
@@ -121,8 +150,6 @@ def runner_name(
 
 
 def decode_exec_output(raw: bytes) -> str:
-    """Exec stdout came back SOH-framed in live validation (exact framing
-    unverified); strip low control bytes rather than parse frames."""
     return raw.decode("utf-8", errors="replace").translate(_FRAMING_BYTES)
 
 
@@ -132,6 +159,21 @@ def parse_exit(text: str) -> tuple[int | None, str]:
         return None, text
     last = hits[-1]
     return int(last.group(1)), text[: last.start()].rstrip("\n")
+
+
+def probe_script(binaries: tuple[str, ...]) -> str:
+    names = " ".join(dict.fromkeys(binaries))
+    return (
+        f'for b in {names}; do if command -v "$b" >/dev/null 2>&1; '
+        f'then echo "{PROBE_TAG}:present:$b"; else echo "{PROBE_TAG}:absent:$b"; fi; done'
+    )
+
+
+def parse_probe(text: str, binaries: tuple[str, ...]) -> dict[str, bool]:
+    """Unreported binaries count as absent: the guest is untrusted, and a
+    missing answer must become UNKNOWN, not an assumed install."""
+    seen = {name: state == "present" for state, name in _PROBE_RE.findall(text)}
+    return {b: seen.get(b, False) for b in binaries}
 
 
 def _sh(script: str) -> tuple[str, ...]:
@@ -180,6 +222,47 @@ def destroy_runner(api: SpritesApi, ledger: RunnerLedger, name: str) -> CleanupS
     return _Destroyer(api, ledger, name).destroy()
 
 
+Body = Callable[[SpritesApi, str, Deadline], str]
+
+
+def _disposable(
+    api: SpritesApi,
+    ledger: RunnerLedger,
+    body: Body,
+    *,
+    name: str,
+    deadline_s: float,
+    clock: Clock,
+) -> RunnerReport:
+    """Run `body` on a fresh, policy-verified Sprite; always destroy it."""
+    deadline = Deadline(clock, deadline_s)
+    destroyer = _Destroyer(api, ledger, name)
+    ledger.record(name)
+    watchdog = threading.Timer(max(deadline_s, 0.0), destroyer.destroy)
+    watchdog.daemon = True
+    watchdog.start()
+    try:
+        status, note = _guarded(api, name, deadline, body)
+    finally:
+        watchdog.cancel()
+        cleanup = destroyer.destroy()
+    return RunnerReport(status, cleanup, name, note)
+
+
+def _guarded(
+    api: SpritesApi, name: str, deadline: Deadline, body: Body
+) -> tuple[RunnerStatus, str]:
+    try:
+        _provision(api, name, deadline)
+        return RunnerStatus.COMPLETED, body(api, name, deadline)
+    except DeadlineExceededError as exc:
+        return RunnerStatus.DEADLINE_EXCEEDED, str(exc)
+    except BoundaryError as exc:
+        if deadline.remaining() <= 0:
+            return RunnerStatus.DEADLINE_EXCEEDED, f"deadline reached: {exc}"
+        return RunnerStatus.FAILED, str(exc)
+
+
 def run_disposable(
     api: SpritesApi,
     ledger: RunnerLedger,
@@ -189,39 +272,45 @@ def run_disposable(
     deadline_s: float,
     clock: Clock,
 ) -> RunnerOutcome:
-    deadline = Deadline(clock, deadline_s)
-    destroyer = _Destroyer(api, ledger, name)
-    ledger.record(name)
-    watchdog = threading.Timer(max(deadline_s, 0.0), destroyer.destroy)
-    watchdog.daemon = True
-    watchdog.start()
     results: list[ToolResult] = []
-    try:
-        status, note = _execute(api, name, job, deadline, results)
-    finally:
-        watchdog.cancel()
-        cleanup = destroyer.destroy()
-    return RunnerOutcome(RunnerReport(status, cleanup, name, note), tuple(results))
 
-
-def _execute(
-    api: SpritesApi,
-    name: str,
-    job: RunnerJob,
-    deadline: Deadline,
-    results: list[ToolResult],
-) -> tuple[RunnerStatus, str]:
-    try:
-        _provision(api, name, deadline)
+    def body(api: SpritesApi, name: str, deadline: Deadline) -> str:
+        available = _probe(api, name, job.tools, deadline)
         _upload(api, name, job.source_tarball, deadline)
-        results.extend(_run_tool(api, name, tool, deadline) for tool in job.tools)
-    except DeadlineExceededError as exc:
-        return RunnerStatus.DEADLINE_EXCEEDED, str(exc)
-    except BoundaryError as exc:
-        if deadline.remaining() <= 0:
-            return RunnerStatus.DEADLINE_EXCEEDED, f"deadline reached: {exc}"
-        return RunnerStatus.FAILED, str(exc)
-    return RunnerStatus.COMPLETED, f"{len(results)} tool(s) attempted"
+        for tool in job.tools:
+            results.append(_run_if_available(api, name, tool, available, deadline))
+        return f"{len(results)} tool(s) attempted"
+
+    report = _disposable(
+        api, ledger, body, name=name, deadline_s=deadline_s, clock=clock
+    )
+    return RunnerOutcome(report, tuple(results))
+
+
+def probe_runner(
+    api: SpritesApi,
+    ledger: RunnerLedger,
+    tools: tuple[ToolSpec, ...],
+    *,
+    name: str,
+    deadline_s: float,
+    clock: Clock,
+) -> ProbeOutcome:
+    """The live-protocol check: provision, probe tools, capture one raw exec
+    response for framing, destroy. Uploads and runs nothing from a PR."""
+    found: dict[str, bool] = {}
+    sample: list[bytes] = []
+
+    def body(api: SpritesApi, name: str, deadline: Deadline) -> str:
+        found.update(_probe(api, name, tools, deadline))
+        timeout = deadline.check("framing check")
+        sample.append(api.exec(name, _sh(f"echo {FRAMING_CHECK}"), b"", timeout))
+        return f"probed {len(found)} binar{'y' if len(found) == 1 else 'ies'}"
+
+    report = _disposable(
+        api, ledger, body, name=name, deadline_s=deadline_s, clock=clock
+    )
+    return ProbeOutcome(report, found, b"".join(sample))
 
 
 def _provision(api: SpritesApi, name: str, deadline: Deadline) -> None:
@@ -259,11 +348,37 @@ def _exec(
     return parse_exit(decode_exec_output(raw))
 
 
+def _probe(
+    api: SpritesApi, name: str, tools: tuple[ToolSpec, ...], deadline: Deadline
+) -> dict[str, bool]:
+    binaries = tuple(t.binary for t in tools)
+    if not binaries:
+        return {}
+    code, text = _exec(
+        api, name, probe_script(binaries), deadline, "tool probe", budget_s=60.0
+    )
+    if code != 0:
+        return dict.fromkeys(binaries, False)
+    return parse_probe(text, binaries)
+
+
 def _upload(api: SpritesApi, name: str, tarball: bytes, deadline: Deadline) -> None:
     script = f"mkdir -p {WORKDIR} && tar -xzf - -C {WORKDIR} --strip-components=1"
     code, text = _exec(api, name, script, deadline, "source upload", stdin=tarball)
     if code != 0:
         raise BoundaryError(f"source upload failed (exit {code}): {text[-500:]}")
+
+
+def _run_if_available(
+    api: SpritesApi,
+    name: str,
+    tool: ToolSpec,
+    available: dict[str, bool],
+    deadline: Deadline,
+) -> ToolResult:
+    if not available.get(tool.binary, False):
+        return ToolAbsent(tool, f"`{tool.binary}` not found by the availability probe")
+    return _run_tool(api, name, tool, deadline)
 
 
 def _run_tool(

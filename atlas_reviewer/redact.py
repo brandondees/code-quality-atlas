@@ -11,7 +11,7 @@ controller also scrubs the exact values of its own credentials.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 _MINT = object()
@@ -71,12 +71,15 @@ def redact(
 
 @dataclass(frozen=True)
 class Redactor:
-    """`redact` bound to the controller's own credential values."""
+    """`redact` bound to the controller's own credential values. `sources`
+    are read on every call, so a token minted mid-review is scrubbed too."""
 
     known_secrets: tuple[str, ...] = ()
+    sources: tuple[Callable[[], Sequence[str]], ...] = ()
 
     def __call__(self, raw: str, max_chars: int | None = None) -> RedactedText:
-        return redact(raw, self.known_secrets, max_chars)
+        dynamic = tuple(s for source in self.sources for s in source())
+        return redact(raw, (*self.known_secrets, *dynamic), max_chars)
 
 
 def _scrub_known(raw: str, known_secrets: Sequence[str]) -> tuple[str, int]:

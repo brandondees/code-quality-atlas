@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: MIT
-import io
-import zipfile
-
 import pytest
 
-from atlas_reviewer.domain import Conclusion, Missing, SourceKind
+from atlas_reviewer.archive import ArchiveMember, ArchiveRead
+from atlas_reviewer.domain import Conclusion, Missing, SourceKey, SourceKind
 from atlas_reviewer.evidence import (
     LOG_TAIL_CHARS,
+    artifact_contents_item,
     issue_refs,
-    log_item,
+    job_log_item,
     parse_artifacts,
     parse_check_runs,
+    parse_jobs,
     parse_pull,
     parse_workflow_runs,
     tool_evidence,
@@ -32,47 +32,31 @@ RUN = {
 }
 
 
-def _zip(text: str) -> bytes:
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        zf.writestr("job/1.txt", text)
-        zf.writestr("job/", "")
-    return buf.getvalue()
-
-
 @pytest.mark.parametrize(
-    "data",
+    "items",
     [
-        {},
-        {"check_runs": "nope"},
-        {"check_runs": [1]},
-        {
-            "check_runs": [
-                {"name": "x", "head_sha": HEAD, "status": "completed", "id": True}
-            ]
-        },
-        {"check_runs": [{"name": 3, "head_sha": HEAD, "status": "completed", "id": 1}]},
+        [1],
+        [{"name": "x", "head_sha": HEAD, "status": "completed", "id": True}],
+        [{"name": 3, "head_sha": HEAD, "status": "completed", "id": 1}],
     ],
 )
-def test_malformed_github_shapes_are_boundary_errors(data):
+def test_malformed_github_shapes_are_boundary_errors(items):
     with pytest.raises(BoundaryError):
-        parse_check_runs(data, NOW, R)
+        parse_check_runs(items, NOW, R)
 
 
 def test_check_run_records_provenance_tool_and_pending_state():
-    data = {
-        "check_runs": [
-            {
-                "id": 9,
-                "name": "gate",
-                "head_sha": HEAD,
-                "status": "queued",
-                "app": "?",
-                "output": None,
-            }
-        ]
-    }
-    (item,) = parse_check_runs(data, NOW, R)
+    items = [
+        {
+            "id": 9,
+            "name": "gate",
+            "head_sha": HEAD,
+            "status": "queued",
+            "app": "?",
+            "output": None,
+        }
+    ]
+    (item,) = parse_check_runs(items, NOW, R)
     assert item.provenance.source_id == "check_run:9"
     assert item.tool.name == "unknown-app"
     assert item.conclusion is Conclusion.PENDING
@@ -81,7 +65,7 @@ def test_check_run_records_provenance_tool_and_pending_state():
 
 def test_unrecognised_conclusion_is_unreported():
     run = {**RUN, "conclusion": "something-new"}
-    (wf,) = parse_workflow_runs({"workflow_runs": [run]}, NOW, R)
+    (wf,) = parse_workflow_runs([run], NOW, R)
     assert wf.item.conclusion is Conclusion.UNREPORTED
     assert wf.item.tool.version == f"ci.yml@{HEAD[:12]}"
 
@@ -91,26 +75,59 @@ def test_expired_artifact_has_no_verdict():
         "id": 1,
         "name": "cov",
         "expired": True,
+        "size_in_bytes": True,
         "workflow_run": {"id": 5, "head_sha": HEAD},
     }
-    (item,) = parse_artifacts({"artifacts": [art]}, NOW, R)
-    assert item.conclusion is Conclusion.UNREPORTED
-    assert item.provenance.key.kind is SourceKind.ARTIFACT
+    (ref,) = parse_artifacts([art], NOW, R)
+    assert ref.item.conclusion is Conclusion.UNREPORTED
+    assert ref.item.provenance.key.kind is SourceKind.ARTIFACT
+    assert ref.expired is True
+    assert ref.size_in_bytes is None
 
 
-def test_log_tail_keeps_the_end_and_is_redacted():
-    (wf,) = parse_workflow_runs({"workflow_runs": [RUN]}, NOW, R)
+def _job(**overrides):
+    (wf,) = parse_workflow_runs([RUN], NOW, R)
+    job = {
+        "id": 77,
+        "name": "test",
+        "head_sha": HEAD,
+        "status": "completed",
+        "conclusion": "failure",
+        **overrides,
+    }
+    return parse_jobs([job], wf, NOW, R)[0]
+
+
+def test_job_carries_its_run_name_sha_and_provenance():
+    job = _job()
+    assert job.item.provenance.key == SourceKey(SourceKind.JOB, "ci / test")
+    assert job.item.provenance.source_id == "job:77"
+    assert job.item.conclusion is Conclusion.FAILURE
+    with pytest.raises(BoundaryError):
+        _job(head_sha=None)
+
+
+def test_job_log_tail_keeps_the_end_and_is_redacted():
     text = "x" * (LOG_TAIL_CHARS * 2) + "\npassword=supersecretvalue\nFAILED test_a"
-    item = log_item(wf, _zip(text), NOW, R)
+    item = job_log_item(_job(), text.encode(), NOW, R)
     assert item.detail.text.endswith("FAILED test_a")
     assert "supersecretvalue" not in item.detail.text
-    assert item.provenance.source_id == "workflow_log:5"
+    assert item.provenance.source_id == "job_log:77"
+    assert item.provenance.key.kind is SourceKind.WORKFLOW_LOG
+    assert job_log_item(_job(), b"short", NOW, R).detail.text == "short"
 
 
-def test_corrupt_log_archive_is_a_boundary_error():
-    (wf,) = parse_workflow_runs({"workflow_runs": [RUN]}, NOW, R)
-    with pytest.raises(BoundaryError):
-        log_item(wf, b"not a zip", NOW, R)
+def test_artifact_contents_are_redacted_excerpts_with_provenance():
+    art = {"id": 4, "name": "cov", "workflow_run": {"id": 5, "head_sha": HEAD}}
+    (ref,) = parse_artifacts([art], NOW, R)
+    read = ArchiveRead((ArchiveMember("a.txt", "token=abcdefghijkl"),))
+    item = artifact_contents_item(ref, read, NOW, R)
+    assert item.provenance.key.name == "cov (contents)"
+    assert item.provenance.source_id == "artifact:4:zip"
+    assert item.head_sha == HEAD
+    assert "abcdefghijkl" not in item.detail.text
+    empty = artifact_contents_item(ref, ArchiveRead(), NOW, R)
+    assert empty.detail.text == "(no readable text entries)"
 
 
 def test_pull_parsing_extracts_closing_issue_refs_only():
@@ -129,7 +146,7 @@ def test_pull_parsing_extracts_closing_issue_refs_only():
     ],
 )
 def test_tool_exit_codes_map_to_conclusions(exit_code, conclusion):
-    spec = ToolSpec("ruff", "v", "r")
+    spec = ToolSpec("ruff", "ruff", "v", "r")
     item = tool_evidence(
         ToolRan(spec, "ruff 1", exit_code, "out"), HEAD, "cqa-rev-x", NOW, R
     )
@@ -139,7 +156,11 @@ def test_tool_exit_codes_map_to_conclusions(exit_code, conclusion):
 
 def test_absent_tool_is_missing():
     result = tool_evidence(
-        ToolAbsent(ToolSpec("ruff", "v", "r"), "exit 127"), HEAD, "cqa-rev-x", NOW, R
+        ToolAbsent(ToolSpec("ruff", "ruff", "v", "r"), "exit 127"),
+        HEAD,
+        "cqa-rev-x",
+        NOW,
+        R,
     )
     assert isinstance(result, Missing)
     assert "exit 127" in result.reason

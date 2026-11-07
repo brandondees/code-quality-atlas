@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: MIT
-"""In-memory stand-ins for the Sprites API and the runner ledger.
+"""In-memory stand-ins for the Sprites API, the runner ledger, and a
+GitHub token source.
 
-Used by the test suite and by `--dry-run`; neither ever touches the real
-Sprites API. `FakeSprites` records every control-plane call in order so a
-caller can assert on lifecycle (policy before exec, destroy always).
+Used by the test suite and by `--dry-run`; none ever touches a real API.
+`FakeSprites` records every control-plane call in order so a caller can
+assert on lifecycle (policy before exec, destroy always), and answers the
+runner's tool-availability probe from its `installed` set.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from atlas_reviewer.ports import BoundaryError, Json, NotFoundError
-from atlas_reviewer.runner import EXIT_MARKER, EXIT_NOT_FOUND
+from atlas_reviewer.runner import EXIT_MARKER, EXIT_NOT_FOUND, PROBE_TAG
 
 ExecHandler = Callable[[str, bytes], tuple[str, int]]
 _HANG_LIMIT_S = 10.0
@@ -41,7 +43,10 @@ class _Sprite:
 
 @dataclass
 class FakeSprites:
+    """`installed=None` reports every probed binary present."""
+
     rules: Sequence[ExecRule] = ()
+    installed: frozenset[str] | None = None
     fail_on: Mapping[str, BoundaryError] = field(default_factory=dict)
     policy_read_back: Json | None = None
     hang_on: str | None = None
@@ -52,11 +57,15 @@ class FakeSprites:
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     @classmethod
-    def from_script(cls, entries: Sequence[Mapping[str, Any]]) -> FakeSprites:
+    def from_script(cls, script: Mapping[str, Any]) -> FakeSprites:
+        """`{"installed": [...], "exec": [{"match", "stdout", "exit_code"}]}`"""
+        installed = script.get("installed")
         return cls(
             rules=tuple(
-                ExecRule(e["match"], e["stdout"], int(e["exit_code"])) for e in entries
-            )
+                ExecRule(e["match"], e["stdout"], int(e["exit_code"]))
+                for e in script.get("exec", ())
+            ),
+            installed=None if installed is None else frozenset(installed),
         )
 
     def live_names(self) -> tuple[str, ...]:
@@ -113,10 +122,21 @@ class FakeSprites:
         return b"\x01" + f"{stdout}\n{EXIT_MARKER}{code}\n".encode()
 
     def _answer(self, script: str, stdin: bytes) -> tuple[str, int]:
+        if PROBE_TAG in script:
+            return self._probe(script), 0
         for rule in self.rules:
             if rule.match in script:
                 return rule.handler(script, stdin)
         return "sh: command not found", EXIT_NOT_FOUND
+
+    def _probe(self, script: str) -> str:
+        names = script.split("for b in ", 1)[1].split(";", 1)[0].split()
+        return "\n".join(
+            f"{PROBE_TAG}:{'present' if self._has(n) else 'absent'}:{n}" for n in names
+        )
+
+    def _has(self, binary: str) -> bool:
+        return self.installed is None or binary in self.installed
 
     def delete(self, name: str) -> None:
         self._record("delete", name)
@@ -144,3 +164,14 @@ class MemoryLedger:
 
     def pending(self) -> tuple[str, ...]:
         return tuple(sorted(self.names))
+
+
+@dataclass(frozen=True)
+class StaticToken:
+    """A pre-minted GitHub token. Tests only: live mode always mints App
+    installation tokens (`github_auth.AppInstallationTokens`)."""
+
+    value: str
+
+    def token(self) -> str:
+        return self.value

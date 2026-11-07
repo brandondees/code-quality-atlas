@@ -27,10 +27,31 @@ class NotFoundError(BoundaryError):
     """The external resource does not exist (HTTP 404)."""
 
 
+class ResponseTooLargeError(BoundaryError):
+    """A download exceeded the byte cap the caller set for it."""
+
+
 class Clock(Protocol):
     def now(self) -> datetime: ...
 
     def monotonic(self) -> float: ...
+
+
+class TokenSource(Protocol):
+    """Hands out a GitHub token. The live source mints short-lived App
+    installation tokens; a fixed token exists only in `fakes`, for tests."""
+
+    def token(self) -> str: ...
+
+
+@dataclass(frozen=True)
+class Listing:
+    """Every entry of one paginated GitHub list, up to the page cap.
+    `truncated` means a further page existed and was not read."""
+
+    items: tuple[Json, ...]
+    truncated: bool
+    pages_read: int
 
 
 class GitHubReader(Protocol):
@@ -40,13 +61,19 @@ class GitHubReader(Protocol):
 
     def get_pull_diff(self, repo: str, number: int) -> str: ...
 
-    def list_check_runs(self, repo: str, sha: str) -> Json: ...
+    def list_check_runs(self, repo: str, sha: str) -> Listing: ...
 
-    def list_workflow_runs(self, repo: str, branch: str) -> Json: ...
+    def list_workflow_runs(self, repo: str, branch: str) -> Listing: ...
 
-    def list_run_artifacts(self, repo: str, run_id: int) -> Json: ...
+    def list_run_jobs(self, repo: str, run_id: int) -> Listing: ...
 
-    def get_run_logs(self, repo: str, run_id: int) -> bytes: ...
+    def list_run_artifacts(self, repo: str, run_id: int) -> Listing: ...
+
+    def get_job_logs(self, repo: str, job_id: int, max_bytes: int) -> bytes: ...
+
+    def download_artifact(
+        self, repo: str, artifact_id: int, max_bytes: int
+    ) -> bytes: ...
 
     def get_tarball(self, repo: str, sha: str) -> bytes: ...
 
@@ -90,6 +117,10 @@ class ModelProvider(Protocol):
 
     def complete(self, prompt: Prompt) -> str: ...
 
+    def usage_lines(self) -> tuple[str, ...]:
+        """One line per model call made (or refused), with cost."""
+        ...
+
 
 @dataclass(frozen=True)
 class ReviewRequest:
@@ -112,3 +143,5 @@ class ReviewHarness(Protocol):
     name: str
 
     def review(self, request: ReviewRequest) -> Narrative: ...
+
+    def usage_lines(self) -> tuple[str, ...]: ...

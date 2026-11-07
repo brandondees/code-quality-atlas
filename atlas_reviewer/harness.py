@@ -45,3 +45,6 @@ class SkillBundleHarness:
         return Narrative(
             self.name, self._provider.name, self._redactor(text, NARRATIVE_CHARS)
         )
+
+    def usage_lines(self) -> tuple[str, ...]:
+        return self._provider.usage_lines()

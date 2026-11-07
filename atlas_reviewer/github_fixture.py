@@ -2,9 +2,12 @@
 """Offline `GitHubReader` backed by a fixture directory (for `--dry-run`).
 
 Layout: `pull.json`, `pull.diff`, `check-runs.json`, `workflow-runs.json`,
-`artifacts-<run_id>.json`, `logs-<run_id>.txt` (zipped on read, as GitHub
-serves logs), `issue-<n>.json`, and a `source/` tree served as the head-SHA
-tarball. A file that is absent behaves like a GitHub 404.
+`jobs-<run_id>.json`, `job-log-<job_id>.txt`, `artifacts-<run_id>.json`,
+`artifact-<id>/` (a directory zipped on read, as GitHub serves artifacts),
+`issue-<n>.json`, and a `source/` tree served as the head-SHA tarball.
+Each list file is one page (`truncated` is never set). A file that is
+absent behaves like a GitHub 404; a download over its byte cap raises
+`ResponseTooLargeError`, as the live client does.
 """
 
 from __future__ import annotations
@@ -15,7 +18,13 @@ import tarfile
 import zipfile
 from pathlib import Path
 
-from atlas_reviewer.ports import BoundaryError, Json, NotFoundError
+from atlas_reviewer.ports import (
+    BoundaryError,
+    Json,
+    Listing,
+    NotFoundError,
+    ResponseTooLargeError,
+)
 
 
 class FixtureGitHub:
@@ -38,6 +47,18 @@ class FixtureGitHub:
             raise BoundaryError(f"fixture {name} is not an object")
         return data
 
+    def _list(self, name: str, key: str) -> Listing:
+        entries = self._json(name).get(key)
+        if not isinstance(entries, list):
+            raise BoundaryError(f"fixture {name} has no {key!r} array")
+        return Listing(tuple(entries), truncated=False, pages_read=1)
+
+    @staticmethod
+    def _capped(data: bytes, max_bytes: int, what: str) -> bytes:
+        if len(data) > max_bytes:
+            raise ResponseTooLargeError(f"fixture {what} exceeded {max_bytes} bytes")
+        return data
+
     def get_pull(self, repo: str, number: int) -> Json:
         self.calls.append(("get_pull", repo, str(number)))
         return self._json("pull.json")
@@ -46,25 +67,37 @@ class FixtureGitHub:
         self.calls.append(("get_pull_diff", repo, str(number)))
         return self._file("pull.diff").read_text(encoding="utf-8")
 
-    def list_check_runs(self, repo: str, sha: str) -> Json:
+    def list_check_runs(self, repo: str, sha: str) -> Listing:
         self.calls.append(("list_check_runs", repo, sha))
-        return self._json("check-runs.json")
+        return self._list("check-runs.json", "check_runs")
 
-    def list_workflow_runs(self, repo: str, branch: str) -> Json:
+    def list_workflow_runs(self, repo: str, branch: str) -> Listing:
         self.calls.append(("list_workflow_runs", repo, branch))
-        return self._json("workflow-runs.json")
+        return self._list("workflow-runs.json", "workflow_runs")
 
-    def list_run_artifacts(self, repo: str, run_id: int) -> Json:
+    def list_run_jobs(self, repo: str, run_id: int) -> Listing:
+        self.calls.append(("list_run_jobs", repo, str(run_id)))
+        return self._list(f"jobs-{run_id}.json", "jobs")
+
+    def list_run_artifacts(self, repo: str, run_id: int) -> Listing:
         self.calls.append(("list_run_artifacts", repo, str(run_id)))
-        return self._json(f"artifacts-{run_id}.json")
+        return self._list(f"artifacts-{run_id}.json", "artifacts")
 
-    def get_run_logs(self, repo: str, run_id: int) -> bytes:
-        self.calls.append(("get_run_logs", repo, str(run_id)))
-        text = self._file(f"logs-{run_id}.txt").read_text(encoding="utf-8")
+    def get_job_logs(self, repo: str, job_id: int, max_bytes: int) -> bytes:
+        self.calls.append(("get_job_logs", repo, str(job_id)))
+        data = self._file(f"job-log-{job_id}.txt").read_bytes()
+        return self._capped(data, max_bytes, f"job log {job_id}")
+
+    def download_artifact(self, repo: str, artifact_id: int, max_bytes: int) -> bytes:
+        self.calls.append(("download_artifact", repo, str(artifact_id)))
+        folder = self._root / f"artifact-{artifact_id}"
+        if not folder.is_dir():
+            raise NotFoundError(f"fixture artifact-{artifact_id}/ not found")
         buf = io.BytesIO()
-        with zipfile.ZipFile(buf, "w") as zf:
-            zf.writestr("job/1_run.txt", text)
-        return buf.getvalue()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for path in sorted(p for p in folder.rglob("*") if p.is_file()):
+                zf.write(path, path.relative_to(folder).as_posix())
+        return self._capped(buf.getvalue(), max_bytes, f"artifact {artifact_id}")
 
     def get_tarball(self, repo: str, sha: str) -> bytes:
         self.calls.append(("get_tarball", repo, sha))

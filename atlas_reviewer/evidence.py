@@ -1,22 +1,22 @@
 # SPDX-License-Identifier: MIT
-"""Map raw GitHub JSON and runner results into `EvidenceItem`s. Pure.
+"""Map raw GitHub JSON, downloaded bytes and runner results into
+`EvidenceItem`s. Pure.
 
 This is the validation boundary for GitHub response shapes: a field that is
 missing or mistyped raises `BoundaryError` here instead of leaking a
-`KeyError` into the controller. Every free-text field is redacted on the
-way in.
+`KeyError` into the controller. Every free-text field, log line and
+artifact excerpt is redacted on the way in.
 """
 
 from __future__ import annotations
 
-import io
 import re
-import zipfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from atlas_reviewer.archive import ArchiveRead
 from atlas_reviewer.domain import (
     UNREPORTED_VERSION,
     Conclusion,
@@ -33,7 +33,7 @@ from atlas_reviewer.runner import ToolAbsent, ToolResult
 
 DETAIL_CHARS = 2_000
 LOG_TAIL_CHARS = 6_000
-_LOG_MEMBER_CAP = 2_000_000
+ARTIFACT_EXCERPT_CHARS = 4_000
 _TIMEOUT_EXITS = frozenset({124, 137})
 _CLOSING_REF = re.compile(r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b")
 _MAX_ISSUE_REFS = 3
@@ -53,10 +53,9 @@ def _optional_str(data: Json, key: str) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _list(data: Any, key: str) -> list[Json]:
-    items = _field(data, key, list)
+def _objects(items: Sequence[Any], what: str) -> Sequence[Json]:
     if not all(isinstance(i, Mapping) for i in items):
-        raise BoundaryError(f"GitHub response field {key!r} holds a non-object entry")
+        raise BoundaryError(f"GitHub {what} list holds a non-object entry")
     return items
 
 
@@ -96,9 +95,11 @@ def issue_refs(body: str) -> tuple[int, ...]:
 
 
 def parse_check_runs(
-    data: Json, fetched_at: datetime, redactor: Redactor
+    items: Sequence[Any], fetched_at: datetime, redactor: Redactor
 ) -> tuple[EvidenceItem, ...]:
-    return tuple(_check_run(r, fetched_at, redactor) for r in _list(data, "check_runs"))
+    return tuple(
+        _check_run(r, fetched_at, redactor) for r in _objects(items, "check run")
+    )
 
 
 def _check_run(run: Json, fetched_at: datetime, redactor: Redactor) -> EvidenceItem:
@@ -133,10 +134,10 @@ class WorkflowRun:
 
 
 def parse_workflow_runs(
-    data: Json, fetched_at: datetime, redactor: Redactor
+    items: Sequence[Any], fetched_at: datetime, redactor: Redactor
 ) -> tuple[WorkflowRun, ...]:
     return tuple(
-        _workflow_run(r, fetched_at, redactor) for r in _list(data, "workflow_runs")
+        _workflow_run(r, fetched_at, redactor) for r in _objects(items, "workflow run")
     )
 
 
@@ -167,18 +168,89 @@ def _workflow_run(run: Json, fetched_at: datetime, redactor: Redactor) -> Workfl
     return WorkflowRun(run_id, item)
 
 
+@dataclass(frozen=True)
+class Job:
+    job_id: int
+    item: EvidenceItem
+
+
+def parse_jobs(
+    items: Sequence[Any], run: WorkflowRun, fetched_at: datetime, redactor: Redactor
+) -> tuple[Job, ...]:
+    return tuple(_job(j, run, fetched_at, redactor) for j in _objects(items, "job"))
+
+
+def _job(job: Json, run: WorkflowRun, fetched_at: datetime, redactor: Redactor) -> Job:
+    job_id = _field(job, "id", int)
+    run_name = run.item.provenance.key.name
+    item = EvidenceItem(
+        head_sha=_field(job, "head_sha", str),
+        provenance=Provenance(
+            SourceKey(SourceKind.JOB, f"{run_name} / {_field(job, 'name', str)}"),
+            f"job:{job_id}",
+        ),
+        tool=run.item.tool,
+        fetched_at=fetched_at,
+        conclusion=_conclusion(
+            _field(job, "status", str), _optional_str(job, "conclusion")
+        ),
+        detail=redactor(f"workflow_run={run.run_id}", DETAIL_CHARS),
+    )
+    return Job(job_id, item)
+
+
+def job_log_item(
+    job: Job, raw: bytes, fetched_at: datetime, redactor: Redactor
+) -> EvidenceItem:
+    source = job.item
+    return EvidenceItem(
+        head_sha=source.head_sha,
+        provenance=Provenance(
+            SourceKey(SourceKind.WORKFLOW_LOG, source.provenance.key.name),
+            f"job_log:{job.job_id}",
+        ),
+        tool=source.tool,
+        fetched_at=fetched_at,
+        conclusion=source.conclusion,
+        detail=redactor(_tail(raw.decode("utf-8", errors="replace"))),
+    )
+
+
+def _tail(text: str) -> str:
+    if len(text) <= LOG_TAIL_CHARS:
+        return text
+    tail = text[-LOG_TAIL_CHARS:]
+    return tail[tail.find("\n") + 1 :]
+
+
+@dataclass(frozen=True)
+class ArtifactRef:
+    artifact_id: int
+    size_in_bytes: int | None
+    expired: bool
+    item: EvidenceItem
+
+
 def parse_artifacts(
-    data: Json, fetched_at: datetime, redactor: Redactor
-) -> tuple[EvidenceItem, ...]:
-    return tuple(_artifact(a, fetched_at, redactor) for a in _list(data, "artifacts"))
+    items: Sequence[Any], fetched_at: datetime, redactor: Redactor
+) -> tuple[ArtifactRef, ...]:
+    return tuple(
+        _artifact(a, fetched_at, redactor) for a in _objects(items, "artifact")
+    )
 
 
-def _artifact(artifact: Json, fetched_at: datetime, redactor: Redactor) -> EvidenceItem:
+def _artifact(artifact: Json, fetched_at: datetime, redactor: Redactor) -> ArtifactRef:
     run = _field(artifact, "workflow_run", dict)
     artifact_id = _field(artifact, "id", int)
     expired = artifact.get("expired") is True
-    detail = f"size_in_bytes={artifact.get('size_in_bytes', '?')} expired={expired} workflow_run={run.get('id', '?')}"
-    return EvidenceItem(
+    raw_size = artifact.get("size_in_bytes")
+    size = (
+        raw_size
+        if isinstance(raw_size, int) and not isinstance(raw_size, bool)
+        else None
+    )
+    detail = f"size_in_bytes={size if size is not None else '?'} expired={expired} workflow_run={run.get('id', '?')}"
+    item = EvidenceItem(
         head_sha=_field(run, "head_sha", str),
         provenance=Provenance(
             SourceKey(SourceKind.ARTIFACT, _field(artifact, "name", str)),
@@ -189,40 +261,27 @@ def _artifact(artifact: Json, fetched_at: datetime, redactor: Redactor) -> Evide
         conclusion=Conclusion.UNREPORTED if expired else Conclusion.PRESENT,
         detail=redactor(detail, DETAIL_CHARS),
     )
+    return ArtifactRef(artifact_id, size, expired, item)
 
 
-def log_item(
-    run: WorkflowRun, archive: bytes, fetched_at: datetime, redactor: Redactor
+def contents_key(ref: ArtifactRef) -> SourceKey:
+    return SourceKey(SourceKind.ARTIFACT, f"{ref.item.provenance.key.name} (contents)")
+
+
+def artifact_contents_item(
+    ref: ArtifactRef, read: ArchiveRead, fetched_at: datetime, redactor: Redactor
 ) -> EvidenceItem:
-    source = run.item
+    excerpt = "\n".join(f"--- {m.name} ---\n{m.text}" for m in read.members)
     return EvidenceItem(
-        head_sha=source.head_sha,
-        provenance=Provenance(
-            SourceKey(SourceKind.WORKFLOW_LOG, source.provenance.key.name),
-            f"workflow_log:{run.run_id}",
-        ),
-        tool=source.tool,
+        head_sha=ref.item.head_sha,
+        provenance=Provenance(contents_key(ref), f"artifact:{ref.artifact_id}:zip"),
+        tool=ref.item.tool,
         fetched_at=fetched_at,
-        conclusion=source.conclusion,
-        detail=redactor(_log_tail(archive)),
+        conclusion=Conclusion.PRESENT,
+        detail=redactor(
+            excerpt or "(no readable text entries)", ARTIFACT_EXCERPT_CHARS
+        ),
     )
-
-
-def _log_tail(archive: bytes) -> str:
-    try:
-        with zipfile.ZipFile(io.BytesIO(archive)) as zf:
-            parts = [_member(zf, info) for info in zf.infolist() if not info.is_dir()]
-    except zipfile.BadZipFile as exc:
-        raise BoundaryError(f"workflow log archive is not a zip: {exc}") from exc
-    text = "\n".join(parts)
-    tail = text[-LOG_TAIL_CHARS:]
-    return tail[tail.find("\n") + 1 :] if len(text) > LOG_TAIL_CHARS else tail
-
-
-def _member(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> str:
-    with zf.open(info) as fh:
-        data = fh.read(_LOG_MEMBER_CAP)
-    return f"--- {info.filename} ---\n" + data.decode("utf-8", errors="replace")
 
 
 def _tool_conclusion(exit_code: int | None) -> Conclusion:

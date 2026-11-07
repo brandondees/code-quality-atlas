@@ -12,6 +12,7 @@ from atlas_reviewer.fakes import ExecRule, FakeSprites, MemoryLedger
 from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.runner import (
     DENY_ALL,
+    PROBE_TAG,
     RunnerJob,
     ToolAbsent,
     ToolRan,
@@ -19,6 +20,9 @@ from atlas_reviewer.runner import (
     decode_exec_output,
     destroy_runner,
     parse_exit,
+    parse_probe,
+    probe_runner,
+    probe_script,
     run_disposable,
     runner_name,
     sweep,
@@ -28,8 +32,8 @@ from .helpers import CallbackRule, FakeClock
 
 NAME = "cqa-rev-20261106-230000-abc123"
 TOOLS = (
-    ToolSpec("ruff", "ruff --version", "ruff check ."),
-    ToolSpec("shellcheck", "shellcheck --version", "shellcheck x.sh"),
+    ToolSpec("ruff", "ruff", "ruff --version", "ruff check ."),
+    ToolSpec("shellcheck", "shellcheck", "shellcheck --version", "shellcheck x.sh"),
 )
 OK_RULES = (
     ExecRule("tar -xzf", "", 0),
@@ -196,8 +200,7 @@ def test_nothing_credential_like_is_passed_into_the_runner():
     run(api)
     scripts = [c[2] for c in api.calls if c[0] == "exec"]
     assert all("TOKEN" not in s and "Authorization" not in s for s in scripts)
-    assert api.stdin_seen[0] == b"tarball-bytes"
-    assert set(api.stdin_seen[1:]) == {b""}
+    assert [s for s in api.stdin_seen if s] == [b"tarball-bytes"]
 
 
 def test_network_policy_sent_is_deny_all():
@@ -249,6 +252,77 @@ def test_empty_version_output_is_unknown_version():
     ruff = run(api, tools=TOOLS[:1]).results[0]
     assert isinstance(ruff, ToolRan)
     assert ruff.version == "unknown"
+
+
+def test_probe_runs_after_deny_all_and_before_the_source_upload():
+    api = FakeSprites(rules=OK_RULES)
+    run(api)
+    scripts = [c[2] for c in api.calls if c[0] == "exec"]
+    assert PROBE_TAG in scripts[0]
+    assert "tar -xzf" in scripts[1]
+
+
+def test_binary_missing_from_probe_is_absent_and_never_executed():
+    api = FakeSprites(rules=OK_RULES, installed=frozenset({"ruff"}))
+    outcome = run(api)
+    ruff, shellcheck = outcome.results
+    assert isinstance(ruff, ToolRan)
+    assert shellcheck == ToolAbsent(
+        TOOLS[1], "`shellcheck` not found by the availability probe"
+    )
+    tool_scripts = [c[2] for c in api.calls if c[0] == "exec" and PROBE_TAG not in c[2]]
+    assert not any("shellcheck" in s for s in tool_scripts)
+
+
+def test_failed_probe_marks_every_tool_absent():
+    class BrokenProbe(FakeSprites):
+        def _answer(self, script, stdin):
+            if PROBE_TAG in script:
+                return "sh: syntax error", 2
+            return super()._answer(script, stdin)
+
+    outcome = run(BrokenProbe(rules=OK_RULES))
+    assert outcome.report.status is RunnerStatus.COMPLETED
+    assert all(isinstance(r, ToolAbsent) for r in outcome.results)
+
+
+def test_probe_parsing_treats_unreported_binaries_as_absent():
+    text = "atlas-probe:present:ruff\nnoise atlas-probe:present:evil;rm\n"
+    assert parse_probe(text, ("ruff", "shellcheck")) == {
+        "ruff": True,
+        "shellcheck": False,
+    }
+    assert "for b in ruff shellcheck;" in probe_script(("ruff", "shellcheck", "ruff"))
+
+
+def test_tool_binary_must_be_a_bare_command_name():
+    with pytest.raises(ValueError, match="bare command"):
+        ToolSpec("x", "ruff; curl evil", "v", "r")
+
+
+def test_probe_runner_reports_tools_and_raw_framing_then_destroys():
+    api, ledger = FakeSprites(installed=frozenset({"ruff"})), MemoryLedger()
+    outcome = probe_runner(
+        api, ledger, TOOLS, name=NAME, deadline_s=60, clock=FakeClock()
+    )
+    assert outcome.available == {"ruff": True, "shellcheck": False}
+    assert outcome.framing_sample.startswith(b"\x01")
+    assert outcome.report.status is RunnerStatus.COMPLETED
+    assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
+    assert ledger.pending() == ()
+    assert api.stdin_seen == [b"", b""]
+    assert ops(api)[:3] == ["create", "set_network_policy", "get_network_policy"]
+
+
+def test_probe_runner_still_destroys_when_the_policy_is_wrong():
+    api = FakeSprites(policy_read_back={"rules": []})
+    outcome = probe_runner(
+        api, MemoryLedger(), TOOLS, name=NAME, deadline_s=60, clock=FakeClock()
+    )
+    assert outcome.report.status is RunnerStatus.FAILED
+    assert outcome.available == {}
+    assert "exec" not in ops(api)
+    assert api.live_names() == ()
 
 
 def test_runner_names_are_prefixed_and_unique():

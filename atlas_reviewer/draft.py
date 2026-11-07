@@ -16,6 +16,7 @@ from atlas_reviewer.domain import (
     Evidence,
     Matched,
     Missing,
+    Omission,
     Outcome,
     PrEvent,
     RunnerReport,
@@ -43,6 +44,8 @@ class DraftInput:
     runner: RunnerReport
     narrative: Narrative | NarrativeFailure
     notes: tuple[str, ...]
+    omissions: tuple[Omission, ...]
+    model_usage: tuple[str, ...]
     redactions: int
     generated_at: datetime
 
@@ -70,7 +73,9 @@ def render_draft(d: DraftInput) -> str:
         _notes(d.notes),
         _at_head(d.evidence),
         _unknowns(d.evidence),
+        _omissions(d.omissions),
         _runner(d.runner),
+        _usage(d.model_usage),
         _narrative(d.narrative),
         f"---\n\n{d.redactions} secret-like string(s) were redacted from untrusted input before any model call.",
     )
@@ -178,14 +183,38 @@ def _unknown_reason(e: Evidence) -> tuple[str, str]:
     raise TypeError(f"not evidence: {e!r}")  # pragma: no cover
 
 
-def render_evidence(evidence: tuple[Evidence, ...]) -> str:
-    """The evidence tables plus each head-SHA item's (redacted) detail text."""
+def _omissions(omissions: tuple[Omission, ...]) -> str:
+    if not omissions:
+        return "## Omissions and limits hit\n\nNone."
+    rows = "\n".join(
+        "| " + " | ".join(_cell(c) for c in (o.source, o.limit, o.detail)) + " |"
+        for o in omissions
+    )
+    return (
+        "## Omissions and limits hit\n\n"
+        "Not read in full; nothing here is counted as passing.\n\n"
+        "| Source | Limit | Detail |\n| --- | --- | --- |\n" + rows
+    )
+
+
+def _usage(lines: tuple[str, ...]) -> str:
+    return "## Model usage\n\n" + "\n".join(f"- {_cell(line)}" for line in lines)
+
+
+def render_evidence(
+    evidence: tuple[Evidence, ...], omissions: tuple[Omission, ...] = ()
+) -> str:
+    """The evidence tables, omissions, and each head-SHA item's (redacted)
+    detail text."""
     details = "\n\n".join(
         f"### {m.item.provenance.source_id}\n{m.item.detail.text}"
         for m in sorted((e for e in evidence if isinstance(e, Matched)), key=_sort_key)
         if m.item.detail.text
     )
-    return f"{_at_head(evidence)}\n\n{_unknowns(evidence)}\n\n## Details\n\n{details or 'None.'}"
+    return (
+        f"{_at_head(evidence)}\n\n{_unknowns(evidence)}\n\n{_omissions(omissions)}"
+        f"\n\n## Details\n\n{details or 'None.'}"
+    )
 
 
 def _runner(r: RunnerReport) -> str:
