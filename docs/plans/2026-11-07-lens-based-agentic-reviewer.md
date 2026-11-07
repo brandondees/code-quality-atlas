@@ -104,10 +104,33 @@ All of this runs on the controller unless it is marked *(Sprite)*.
    `synthesis.md`'s own quote-the-line gate. For a `file:line` finding, the
    quoted `evidence` must appear in that range of the head blob. A finding
    that fails is moved to an "unverified" list, never dropped silently.
+   - **Redacted quotes.** Lenses only ever see redacted text, so the
+     controller runs the same `Redactor` over the head range before
+     comparing. A quote holding a mask then matches the masked line. The
+     raw secret never leaves the controller, and a quote with text that
+     isn't in the range still fails.
+   - **Removed lines.** A quote of deleted code isn't in the head blob. It
+     is checked against the `-` lines of that file's diff hunks, redacted
+     the same way, and the finding is labelled "removed lines". A quote
+     that matches neither the head range nor a removed line fails.
 7. **Merge.** One model call with `synthesis.md` as its instructions, over
    the checked findings, the coverage ledger and the tool-evidence
    coverage line. It produces the verdict, ranked sections, tensions,
    coverage and process notes in `synthesis.md`'s output format.
+   - **Reconciling the merge.** The merge is model output, so the
+     controller checks it against the checked findings before the draft
+     uses it. Every checked finding at or above the floor must appear in
+     the ranked sections or be named as merged into one that does.
+     `synthesis.md`'s permitted exclusions (below-floor findings sent to
+     *Non-blocking*, and pre-existing or improvement findings that don't
+     set the verdict) count as present. No finding may appear that no lens
+     reported, and no severity may rise (`synthesis.md` forbids inflation).
+     The verdict must follow `synthesis.md`'s rule from the highest
+     surviving verdict-setting severity: one Blocker means block.
+   - **Merge mismatch.** On any mismatch the merged text is kept as
+     untrusted output, marked "merge inconsistent", and has no verdict
+     line. The draft lists every checked finding unmerged and ranked by
+     severity, as when the merge fails.
 8. **Write the draft and destroy the Sprite.** The draft keeps today's
    controller-generated sections (runner proof, budget, telemetry,
    omissions, lens coverage). The merged review sits under the existing
@@ -298,9 +321,10 @@ through the existing redactor.
   bounded evidence block, and its `body.md` decides what is its own.
   Mechanized routing is a gap, not proposed.
 - **Merging and deduplication with lens attribution.** `synthesis.md`,
-  unchanged, as one merge call. The controller only checks the finding
+  unchanged, as one merge call. The controller checks the finding
   contract and the quote-the-line gate that `synthesis.md` already
-  requires.
+  requires. It then reconciles the merge output against the checked
+  findings (step 7).
 - **Coverage.** `synthesis.md`'s *Coverage & limitations* and
   `tool-evidence.md`'s coverage line, filled from the controller's
   per-lens ledger. The ledger records what each lens actually read:
@@ -359,6 +383,7 @@ limit, so this design can't change it. See open question 1.
 | Review budget or call cap reached | Remaining lenses are "selected, not run" (`synthesis.md` coverage wording). |
 | Picker fails | Critical tier, as D32 does now. |
 | Merge call fails or doesn't parse | The draft lists each lens's checked findings unmerged, ranked by severity, under "not synthesized". There is no verdict line. |
+| Merge drops or changes a checked finding, adds one, or gives a verdict its findings don't support | "Merge inconsistent": the same unmerged listing and no verdict line, with the merged text kept as untrusted output (see step 7). |
 | Deadline passes | The same as the Sprite dying: what finished is reported and the rest is not run. |
 | Model returns another model's response | Rejected, as D25 requires. |
 
