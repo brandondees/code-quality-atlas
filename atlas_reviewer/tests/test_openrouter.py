@@ -430,6 +430,8 @@ def test_missing_usage_keeps_the_reservation_as_spent(usage):
     [
         (completion(model="openai/gpt-5"), "served 'openai/gpt-5'"),
         (completion(model=None), "served None"),
+        (completion(model=f"{MODEL_ID}-turbo"), "-turbo'"),
+        (completion(model=f"{MODEL_ID}-20261001x"), "20261001x'"),
         (completion(text="  "), "no review text"),
         ({"model": MODEL_ID, "choices": []}, "no review text"),
     ],

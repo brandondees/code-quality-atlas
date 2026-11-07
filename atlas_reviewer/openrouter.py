@@ -41,6 +41,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Sequence
 from decimal import Decimal
 from typing import Any
@@ -275,8 +276,11 @@ def _completion(resp: HttpResponse, terms: ModelTerms, record: CallRecord) -> st
     return text
 
 
+_DATED_REVISION = re.compile(re.escape(MODEL_ID) + r"-\d{8}")
+
+
 def _is_pinned_model(served: str) -> bool:
-    return served == MODEL_ID or served.startswith(f"{MODEL_ID}-")
+    return served == MODEL_ID or _DATED_REVISION.fullmatch(served) is not None
 
 
 def _message(data: Json) -> tuple[str, str]:
