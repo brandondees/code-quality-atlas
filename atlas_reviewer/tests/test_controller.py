@@ -177,8 +177,29 @@ def test_moved_pr_head_is_called_out():
         def get_pull(self, repo, number):
             return pull
 
-    draft = Setup(github=Moved(FIXTURE)).run()
+    s = Setup(github=Moved(FIXTURE))
+    draft = s.run()
     assert "The PR head is now `111111111111`" in draft
+    assert "the PR head is no longer the event SHA" in draft
+    assert not any(c[0] == "get_pull_diff" for c in s.github.calls)
+    assert s.provider.prompts == []
+    omissions = section(draft, "Omissions and limits hit")
+    assert "| pull request diff | head SHA mismatch |" in omissions
+
+
+def test_a_head_that_moves_during_the_diff_fetch_leaves_the_diff_unreviewed():
+    moved = json.loads((FIXTURE / "pull.json").read_text())
+    moved["head"]["sha"] = "1" * 40
+
+    class MovesMidway(FixtureGitHub):
+        def get_pull(self, repo, number):
+            seen = any(c[0] == "get_pull_diff" for c in self.calls)
+            return moved if seen else super().get_pull(repo, number)
+
+    s = Setup(github=MovesMidway(FIXTURE))
+    draft = s.run()
+    assert "the PR head moved while the diff was fetched" in draft
+    assert s.provider.prompts == []
 
 
 def test_github_listing_failures_become_unknown_evidence():

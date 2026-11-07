@@ -99,7 +99,9 @@ does no I/O. All I/O sits behind the ports in `ports.py`.
   absent from the runner image, or one the runner never reached. None of
   these is ever a pass.
 - When the PR head has moved past the event SHA, the draft says so. It
-  still only counts evidence for the event SHA.
+  still only counts evidence for the event SHA. The diff endpoint serves
+  the current head, so the diff goes to no model call unless the head
+  equals the event SHA both before and after it is fetched.
 - Issue text is off by default (`--include-issues` turns it on). It needs
   the extra `issues: read` permission.
 - Every limit that stops a read is an **omission**: a page cap on a GitHub

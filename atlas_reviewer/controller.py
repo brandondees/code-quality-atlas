@@ -150,7 +150,7 @@ def review(event: PrEvent, deps: Deps, config: ReviewConfig) -> str:
     evidence = classify(
         event.head_sha, collected.items, config.expected, collected.failures
     )
-    diff = _fetch_diff(event, deps, collected)
+    diff = _fetch_diff(event, pull, deps, collected)
     _note_truncation(collected, "pull request body", pull.body, DETAIL_CHARS)
     issues = _issue_blocks(event, pull, deps, config, collected)
     lenses = _select_lenses(event, pull, diff, deps, config, telemetry)
@@ -370,11 +370,21 @@ def _requests(
     return tuple((p, request(i, p)) for i, p in enumerate(parts, 1))
 
 
-def _fetch_diff(event: PrEvent, deps: Deps, collected: Collected) -> _Fetched | None:
-    """The redacted diff, or None when it could not be fetched: then no model
-    call is made, because a review of an empty diff reads as a clean one."""
+def _fetch_diff(
+    event: PrEvent, pull: PullInfo, deps: Deps, collected: Collected
+) -> _Fetched | None:
+    """The redacted diff, or None when it could not be fetched or cannot be
+    tied to the event SHA: then no model call is made, because a review of
+    an empty diff reads as a clean one. The diff endpoint serves the PR's
+    current head, so the head is checked before and after the fetch."""
+    if pull.head_sha != event.head_sha:
+        _no_diff(collected, "the PR head is no longer the event SHA")
+        return None
     try:
         raw = deps.github.get_pull_diff(event.repo, event.pr_number)
+        after = parse_pull(
+            deps.github.get_pull(event.repo, event.pr_number), deps.redactor
+        )
     except BoundaryError as exc:
         collected.notes.append(
             f"The PR diff could not be fetched, so no model call was made "
@@ -384,8 +394,23 @@ def _fetch_diff(event: PrEvent, deps: Deps, collected: Collected) -> _Fetched | 
             "pull request diff", "fetch failed", "not fetched; nothing was reviewed"
         )
         return None
+    if after.head_sha != event.head_sha:
+        _no_diff(collected, "the PR head moved while the diff was fetched")
+        return None
     full = deps.redactor(raw)
     return _Fetched(full.text, full.redaction_count)
+
+
+def _no_diff(collected: Collected, reason: str) -> None:
+    collected.notes.append(
+        f"The diff was not reviewed: {reason}, so it may not be the diff at "
+        f"that SHA. No model call was made."
+    )
+    collected.omit(
+        "pull request diff",
+        "head SHA mismatch",
+        "not tied to the event SHA; not reviewed",
+    )
 
 
 def _select_lenses(
