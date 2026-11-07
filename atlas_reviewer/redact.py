@@ -79,6 +79,19 @@ def redact(
     )
 
 
+def tail(redacted: RedactedText, max_chars: int) -> RedactedText:
+    """The last `max_chars` of already-redacted text, from the first whole
+    line. Cutting after redaction keeps a block that straddles the cut (a
+    private key) recognisable while it is scrubbed."""
+    text = redacted.text
+    if len(text) <= max_chars:
+        return redacted
+    cut = text[-max_chars:]
+    return RedactedText(
+        cut[cut.find("\n") + 1 :], redacted.redaction_count, len(text), _MINT
+    )
+
+
 @dataclass(frozen=True)
 class Redactor:
     """`redact` bound to the controller's own credential values. `sources`

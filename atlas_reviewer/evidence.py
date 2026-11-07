@@ -28,7 +28,7 @@ from atlas_reviewer.domain import (
     ToolInfo,
 )
 from atlas_reviewer.ports import BoundaryError, Json
-from atlas_reviewer.redact import RedactedText, Redactor
+from atlas_reviewer.redact import RedactedText, Redactor, tail
 from atlas_reviewer.runner import ToolAbsent, ToolResult
 
 DETAIL_CHARS = 2_000
@@ -224,15 +224,8 @@ def job_log_item(
         tool=source.tool,
         fetched_at=fetched_at,
         conclusion=source.conclusion,
-        detail=redactor(_tail(raw.decode("utf-8", errors="replace"))),
+        detail=tail(redactor(raw.decode("utf-8", errors="replace")), LOG_TAIL_CHARS),
     )
-
-
-def _tail(text: str) -> str:
-    if len(text) <= LOG_TAIL_CHARS:
-        return text
-    tail = text[-LOG_TAIL_CHARS:]
-    return tail[tail.find("\n") + 1 :]
 
 
 @dataclass(frozen=True)

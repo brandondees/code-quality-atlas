@@ -135,6 +135,16 @@ def test_job_log_tail_keeps_the_end_and_is_redacted():
     assert job_log_item(_job(), b"short", NOW, R).detail.text == "short"
 
 
+def test_a_private_key_straddling_the_log_tail_cut_is_still_redacted():
+    body = "\n".join(["K" * 63] * (LOG_TAIL_CHARS // 64))
+    key = f"-----BEGIN PRIVATE KEY-----\n{body}\n-----END PRIVATE KEY-----"
+    text = "x" * LOG_TAIL_CHARS + "\n" + key + "\nFAILED test_a"
+    item = job_log_item(_job(), text.encode(), NOW, R)
+    assert "KKKK" not in item.detail.text
+    assert item.detail.text.endswith("[REDACTED:private-key]\nFAILED test_a")
+    assert item.detail.truncated_from is not None
+
+
 def test_artifact_contents_are_redacted_excerpts_with_provenance():
     art = {"id": 4, "name": "cov", "workflow_run": {"id": 5, "head_sha": HEAD}}
     (ref,) = parse_artifacts([art], NOW, R)
