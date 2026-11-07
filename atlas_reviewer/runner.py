@@ -1,0 +1,867 @@
+# SPDX-License-Identifier: MIT
+"""One disposable, credential-free runner per review.
+
+Lifecycle, in order, every step deadline-checked and recorded as a
+telemetry event (`atlas_reviewer.telemetry`):
+
+1. record the runner name in the ledger (before anything exists remotely)
+2. create a fresh Sprite -- never reuse one: guests can restore checkpoints
+   and create Tasks, so a used Sprite is contaminated
+3. set deny-all egress from the outside API, then read it back; nothing
+   executes unless the read-back is exactly deny-all
+4. cap memory; probe which tool binaries exist (tool check); upload the
+   head-SHA tarball over exec stdin to a file, confirming the byte count
+   the runner received; unpack it in a second exec; run each available tool
+5. destroy -- in `finally`, and from a watchdog timer at the deadline.
+   Destroy is idempotent and is verified by a follow-up existence check;
+   only a verified destroy clears the ledger entry.
+
+Upload and unpack are separate execs so a transport stall and a slow or
+stuck extraction fail with different labels. Every exec error names its
+stage, its purpose, its timeout, how long it ran and how far into the run
+it failed.
+
+Every exec has one shape (`exec_argv` here, `sprites_api.exec_request` for
+the HTTP request): `/usr/bin/env -i` with `MINIMAL_ENV` runs `/bin/sh -c`,
+which prints a start marker, runs the script with a stdin of exactly the
+bytes sent and then EOF (`head -c N` with input, `/dev/null` without, so no
+command waits on the exec channel's stdin), and prints the exit marker. The
+minimal environment keeps the image's pyenv shims (`/.sprite/bin`) and any
+`PYENV_*` setting off the PATH; Python tools run the interpreter the
+controller resolved by absolute path before unpack (`interpreter.py`), so
+nothing in the PR can choose an interpreter or a tool binary. Only the
+probe's labelled diagnostics run in the Sprite's default environment. A command that sends no input must produce its
+first output byte within `first_frame_s`; the start marker makes that
+immediate for any command that actually started.
+
+Exec-session kill is untested against the live API, so it is never relied
+on: destroying the Sprite is the only cleanup primitive used.
+
+Exec output: the HTTP exec endpoint (`POST /v1/sprites/{name}/exec`,
+Sprites API OpenAPI 0.1.12, https://docs.fly.io/sprites/api/exec/execute-command)
+documents its request but not its 200 response body. Live validation on
+2026-11-06 saw `application/octet-stream` with SOH-prefixed stdout, which
+matches the stream-id prefixes the WebSocket exec spec documents
+(0x00 stdin, 0x01 stdout, 0x02 stderr, 0x03 exit code, 0x04 stdin EOF;
+https://docs.fly.io/sprites/api/websockets/execute-command). Because HTTP
+framing is undocumented, those prefix bytes are stripped rather than
+parsed (telemetry counts them as `frames_seen`), and the exit code comes
+from an in-band marker each script prints.
+"""
+
+from __future__ import annotations
+
+import re
+import secrets
+import threading
+from collections import Counter
+from collections.abc import Callable
+from dataclasses import dataclass, field
+
+from atlas_reviewer.clock import SystemClock
+from atlas_reviewer.domain import CleanupStatus, RunnerReport, RunnerStatus
+from atlas_reviewer.interpreter import (
+    PYTHON_PLACEHOLDER,
+    DiagnosticSpec,
+    TrustedPython,
+    choose_python,
+    diagnostics_after_unpack,
+    diagnostics_before_unpack,
+    resolve_script,
+    summarize,
+    with_python,
+)
+from atlas_reviewer.ports import (
+    BoundaryError,
+    Clock,
+    Json,
+    NotFoundError,
+    RunnerLedger,
+    SpritesApi,
+    StreamTimeoutError,
+)
+from atlas_reviewer.telemetry import ERROR, Fields, Telemetry
+
+DENY_ALL: tuple[Json, ...] = ({"action": "deny", "domain": "*"},)
+MEMORY_LIMIT_MB = 1024
+WORKDIR = "/work"
+SOURCE_ARCHIVE = "/tmp/atlas-source.tar.gz"
+EXIT_MARKER = "__ATLAS_EXIT__="
+START_MARKER = "__ATLAS_START__"
+EXIT_NOT_FOUND = 127
+PROBE_TAG = "atlas-probe"
+FRAMING_CHECK = "atlas-framing-check"
+_EXIT_RE = re.compile(re.escape(EXIT_MARKER) + r"(\d+)")
+_PROBE_RE = re.compile(re.escape(PROBE_TAG) + r":(present|absent):([A-Za-z0-9._+-]+)")
+_PATH_RE = re.compile(
+    re.escape(PROBE_TAG)
+    + r":present:([A-Za-z0-9._+-]+):([A-Za-z0-9._/+-]{0,200}):([A-Za-z0-9._/+-]{0,200})"
+)
+_BINARY_RE = re.compile(r"[A-Za-z0-9._+-]+")
+_NOT_ISOLATED_RE = re.compile(
+    re.escape(PYTHON_PLACEHOLDER) + r"(?! -I[A-Za-z]*(?:\s|$))"
+)
+_INT_RE = re.compile(r"\d+")
+_EXEC_SLACK_S = 15.0
+PROBE_BUDGET_S = 60.0
+UPLOAD_BUDGET_S = 300.0
+UNPACK_BUDGET_S = 120.0
+FIRST_FRAME_BUDGET_S = 30.0
+DIAGNOSTIC_BOUND_S = 15
+PYTHON_BINARY = "python3"
+MINIMAL_ENV = ("PATH=/usr/bin:/bin", "HOME=/tmp", "LANG=C.UTF-8")
+STDIN_CHECK_BYTES = 3 * 1024 * 1024
+_FRAMING_BYTES = dict.fromkeys(range(0x05))
+
+
+class DeadlineExceededError(RuntimeError):
+    pass
+
+
+class PolicyNotEnforcedError(BoundaryError):
+    pass
+
+
+@dataclass(frozen=True)
+class ToolSpec:
+    """A review tool run inside the runner. Commands are trusted controller
+    configuration; the code they run over is not."""
+
+    name: str
+    binary: str
+    version_cmd: str
+    run_cmd: str
+    timeout_s: int = 120
+
+    def __post_init__(self) -> None:
+        """A `python3` tool must name the interpreter as `{python} -I` in
+        both commands, so it can only ever run the resolved absolute path,
+        isolated from modules in the checkout."""
+        if not _BINARY_RE.fullmatch(self.binary):
+            raise ValueError(
+                f"tool binary must be a bare command name: {self.binary!r}"
+            )
+        placeholders = [
+            PYTHON_PLACEHOLDER in c for c in (self.version_cmd, self.run_cmd)
+        ]
+        if self.needs_python != all(placeholders) or any(placeholders) != all(
+            placeholders
+        ):
+            raise ValueError(
+                f"a {PYTHON_BINARY} tool must use {PYTHON_PLACEHOLDER} in both "
+                "commands, and only a python3 tool may use it"
+            )
+        if any(_NOT_ISOLATED_RE.search(c) for c in (self.version_cmd, self.run_cmd)):
+            raise ValueError(
+                f"every {PYTHON_PLACEHOLDER} must be followed by -I, so a PR file "
+                "cannot shadow the module a tool runs"
+            )
+
+    @property
+    def needs_python(self) -> bool:
+        return self.binary == PYTHON_BINARY
+
+
+TRIVIAL_TOOL = ToolSpec(
+    "source-file-count", "sh", "echo posix-sh", "find . -type f | wc -l", timeout_s=30
+)
+
+DEFAULT_TOOLS = (
+    ToolSpec(
+        "python-compileall",
+        "python3",
+        "{python} -I --version",
+        "{python} -I -m compileall -q .",
+    ),
+)
+
+
+@dataclass(frozen=True)
+class RunnerJob:
+    """`diagnose` adds the probe-only Python diagnostics; a review never
+    sets it."""
+
+    source_tarball: bytes
+    tools: tuple[ToolSpec, ...]
+    diagnose: bool = False
+
+
+@dataclass(frozen=True)
+class ToolRan:
+    tool: ToolSpec
+    version: str
+    exit_code: int | None
+    output: str
+
+
+@dataclass(frozen=True)
+class ToolAbsent:
+    tool: ToolSpec
+    detail: str
+
+
+ToolResult = ToolRan | ToolAbsent
+
+
+@dataclass(frozen=True)
+class Diagnostic:
+    name: str
+    expectation: str
+    exit_code: int | None
+    detail: str
+
+
+@dataclass(frozen=True)
+class RunnerOutcome:
+    report: RunnerReport
+    results: tuple[ToolResult, ...]
+    python: TrustedPython | None = None
+    diagnostics: tuple[Diagnostic, ...] = ()
+
+
+@dataclass(frozen=True)
+class ProbeOutcome:
+    report: RunnerReport
+    available: dict[str, bool]
+    framing_sample: bytes
+    stdin_check: str
+
+
+@dataclass
+class Deadline:
+    clock: Clock
+    seconds: float
+    _start: float = field(init=False)
+
+    def __post_init__(self) -> None:
+        self._start = self.clock.monotonic()
+
+    def remaining(self) -> float:
+        return self.seconds - (self.clock.monotonic() - self._start)
+
+    def check(self, step: str) -> float:
+        left = self.remaining()
+        if left <= 0:
+            raise DeadlineExceededError(
+                f"deadline of {self.seconds:g}s reached before {step}"
+            )
+        return left
+
+
+@dataclass(frozen=True)
+class _Run:
+    api: SpritesApi
+    name: str
+    deadline: Deadline
+    telemetry: Telemetry
+    first_frame_s: float = FIRST_FRAME_BUDGET_S
+
+
+@dataclass(frozen=True)
+class _Exec:
+    """One exec: the lifecycle stage it belongs to, what it is for (its
+    telemetry step), the script, the stdin bytes, and its own budget."""
+
+    stage: str
+    purpose: str
+    script: str
+    stdin: bytes = b""
+    budget_s: float | None = None
+    sprite_env: bool = False
+
+
+def runner_name(
+    clock: Clock, token_hex: Callable[[int], str] = secrets.token_hex
+) -> str:
+    return f"cqa-rev-{clock.now():%Y%m%d-%H%M%S}-{token_hex(3)}"
+
+
+def decode_exec_output(raw: bytes) -> str:
+    return raw.decode("utf-8", errors="replace").translate(_FRAMING_BYTES)
+
+
+def frames_seen(raw: bytes) -> str:
+    """Counts of each stream-id byte (0x00-0x04) in a raw exec response,
+    e.g. `0x01:1,0x03:1`. Output bytes can collide with these values, so
+    this is a diagnostic, not a parse."""
+    counts = Counter(b for b in raw if b in _FRAMING_BYTES)
+    return ",".join(f"0x{b:02x}:{n}" for b, n in sorted(counts.items())) or "none"
+
+
+def parse_exit(text: str) -> tuple[int | None, str]:
+    hits = list(_EXIT_RE.finditer(text))
+    if not hits:
+        return None, text
+    last = hits[-1]
+    return int(last.group(1)), text[: last.start()].rstrip("\n")
+
+
+def probe_script(binaries: tuple[str, ...]) -> str:
+    """Resolves each binary without executing it, reporting where it
+    resolved to and what that path finally links to."""
+    names = " ".join(dict.fromkeys(binaries))
+    return (
+        f'for b in {names}; do if p=$(command -v "$b" 2>/dev/null); '
+        f'then echo "{PROBE_TAG}:present:$b:$p:$(readlink -f "$p" 2>/dev/null)"; '
+        f'else echo "{PROBE_TAG}:absent:$b"; fi; done'
+    )
+
+
+def parse_probe(text: str, binaries: tuple[str, ...]) -> dict[str, bool]:
+    """Unreported binaries count as absent: the guest is untrusted, and a
+    missing answer must become UNKNOWN, not an assumed install."""
+    seen = {name: state == "present" for state, name in _PROBE_RE.findall(text)}
+    return {b: seen.get(b, False) for b in binaries}
+
+
+def parse_paths(text: str) -> dict[str, str]:
+    """`binary -> resolved path -> link target`, as the untrusted guest
+    reported them; a diagnostic only."""
+    return {b: f"{p} -> {real}" for b, p, real in _PATH_RE.findall(text)}
+
+
+def exec_argv(script: str, stdin_len: int, sprite_env: bool = False) -> tuple[str, ...]:
+    """`sprite_env` drops the `env -i` prefix and so runs in the Sprite's
+    default environment; only probe diagnostics ask for it."""
+    feed, redirect = (
+        (f"head -c {stdin_len} | ", "") if stdin_len else ("", " </dev/null")
+    )
+    env = () if sprite_env else ("/usr/bin/env", "-i", *MINIMAL_ENV)
+    return (
+        *env,
+        "/bin/sh",
+        "-c",
+        f"echo {START_MARKER}; {feed}{{ {script}\n}}{redirect}; echo {EXIT_MARKER}$?",
+    )
+
+
+def strip_start(text: str) -> str:
+    _, found, rest = text.partition(f"{START_MARKER}\n")
+    return rest if found else text
+
+
+def _last_int(text: str) -> int | None:
+    found = _INT_RE.findall(text)
+    return int(found[-1]) if found else None
+
+
+class _Destroyer:
+    """Idempotent, thread-safe destroy shared by `finally` and the watchdog."""
+
+    def __init__(
+        self, api: SpritesApi, ledger: RunnerLedger, name: str, telemetry: Telemetry
+    ) -> None:
+        self._api, self._ledger, self._name = api, ledger, name
+        self._telemetry = telemetry
+        self._lock = threading.Lock()
+        self._status: CleanupStatus | None = None
+
+    def destroy(self, *, final: bool = False) -> CleanupStatus:
+        """`final` destroys again even after the watchdog did: a create
+        still in flight when the watchdog fired can add the Sprite after
+        the watchdog verified it absent. A telemetry write failure must not
+        stop cleanup, so cleanup is redone untraced and the error re-raised."""
+        with self._lock:
+            if self._status is None or final:
+                try:
+                    self._status = self._destroy(self._telemetry)
+                except OSError:
+                    self._status = self._destroy(_quiet())
+                    raise
+            return self._status
+
+    def _destroy(self, telemetry: Telemetry) -> CleanupStatus:
+        deleted = any(self._attempt_delete(telemetry, n) for n in (1, 2))
+        status = (
+            self._verified_status(telemetry)
+            if deleted
+            else CleanupStatus.DESTROY_UNVERIFIED
+        )
+        telemetry.record("destroy", "outcome", {"cleanup": status.value})
+        return status
+
+    def _verified_status(self, telemetry: Telemetry) -> CleanupStatus:
+        if not self._verified_absent(telemetry):
+            return CleanupStatus.DESTROY_UNVERIFIED
+        self._ledger.clear(self._name)
+        return CleanupStatus.DESTROYED_VERIFIED
+
+    def _attempt_delete(self, telemetry: Telemetry, attempt: int) -> bool:
+        try:
+            telemetry.span(
+                "destroy",
+                f"delete attempt {attempt}",
+                lambda: self._api.delete(self._name),
+            )
+        except NotFoundError:
+            return True
+        except BoundaryError:
+            return False
+        return True
+
+    def _verified_absent(self, telemetry: Telemetry) -> bool:
+        try:
+            present = telemetry.span(
+                "verify",
+                "existence check",
+                lambda: self._api.exists(self._name),
+                after=lambda found: {"present": found},
+            )
+        except BoundaryError:
+            return False
+        return not present
+
+
+def destroy_runner(
+    api: SpritesApi,
+    ledger: RunnerLedger,
+    name: str,
+    telemetry: Telemetry | None = None,
+) -> CleanupStatus:
+    return _Destroyer(api, ledger, name, telemetry or _quiet()).destroy()
+
+
+def _quiet() -> Telemetry:
+    return Telemetry(SystemClock())
+
+
+Body = Callable[[_Run], str]
+
+
+def _disposable(
+    api: SpritesApi,
+    ledger: RunnerLedger,
+    body: Body,
+    *,
+    name: str,
+    deadline_s: float,
+    clock: Clock,
+    telemetry: Telemetry,
+    first_frame_s: float,
+) -> RunnerReport:
+    """Run `body` on a fresh, policy-verified Sprite; always destroy it."""
+    run = _Run(api, name, Deadline(clock, deadline_s), telemetry, first_frame_s)
+    destroyer = _Destroyer(api, ledger, name, telemetry)
+    ledger.record(name)
+    telemetry.record("ledger", "record runner name", {"runner": name})
+    watchdog = threading.Timer(max(deadline_s, 0.0), destroyer.destroy)
+    watchdog.daemon = True
+    watchdog.start()
+    try:
+        status, note = _guarded(run, body)
+    finally:
+        watchdog.cancel()
+        cleanup = destroyer.destroy(final=True)
+    return RunnerReport(status, cleanup, name, note)
+
+
+def _guarded(run: _Run, body: Body) -> tuple[RunnerStatus, str]:
+    try:
+        _provision(run)
+        return RunnerStatus.COMPLETED, body(run)
+    except DeadlineExceededError as exc:
+        run.telemetry.record("deadline", "exceeded", status=ERROR, error=str(exc))
+        return RunnerStatus.DEADLINE_EXCEEDED, str(exc)
+    except BoundaryError as exc:
+        if run.deadline.remaining() <= 0:
+            return RunnerStatus.DEADLINE_EXCEEDED, f"deadline reached: {exc}"
+        return RunnerStatus.FAILED, str(exc)
+
+
+def run_disposable(
+    api: SpritesApi,
+    ledger: RunnerLedger,
+    job: RunnerJob,
+    *,
+    name: str,
+    deadline_s: float,
+    clock: Clock,
+    telemetry: Telemetry | None = None,
+    first_frame_s: float = FIRST_FRAME_BUDGET_S,
+) -> RunnerOutcome:
+    """The review's exec sequence: tool check, upload, unpack, then each
+    available tool. `probe-runner --sequence review` calls this too."""
+    results: list[ToolResult] = []
+    pythons: list[TrustedPython | None] = []
+    diagnostics: list[Diagnostic] = []
+
+    def body(run: _Run) -> str:
+        found = _Found(_probe(run, job.tools), _python_for(run, job))
+        pythons.append(found.python)
+        diagnostics.extend(_diagnose(run, diagnostics_before_unpack(), job.diagnose))
+        _upload(run, job.source_tarball)
+        _unpack(run)
+        results.extend(_tool(run, tool, found) for tool in job.tools)
+        after = diagnostics_after_unpack(found.python, WORKDIR, DIAGNOSTIC_BOUND_S)
+        diagnostics.extend(_diagnose(run, after, job.diagnose))
+        return f"{len(results)} tool(s) attempted"
+
+    report = _disposable(
+        api, ledger, body, name=name, deadline_s=deadline_s, clock=clock,
+        telemetry=telemetry or Telemetry(clock), first_frame_s=first_frame_s,
+    )  # fmt: skip
+    return RunnerOutcome(
+        report, tuple(results), next(iter(pythons), None), tuple(diagnostics)
+    )
+
+
+def probe_runner(
+    api: SpritesApi,
+    ledger: RunnerLedger,
+    tools: tuple[ToolSpec, ...],
+    *,
+    name: str,
+    deadline_s: float,
+    clock: Clock,
+    telemetry: Telemetry | None = None,
+    first_frame_s: float = FIRST_FRAME_BUDGET_S,
+) -> ProbeOutcome:
+    """The live-protocol check: provision, probe tools, capture one raw exec
+    response for framing, round-trip stdin, destroy. Uploads and runs
+    nothing from a PR."""
+    found: dict[str, bool] = {}
+    sample: list[bytes] = []
+    stdin_check: list[str] = []
+
+    def body(run: _Run) -> str:
+        found.update(_probe(run, tools))
+        sample.append(
+            _raw_exec(run, _Exec("probe", "framing check", f"echo {FRAMING_CHECK}"))
+        )
+        stdin_check.append(_stdin_roundtrip(run))
+        return f"probed {len(found)} binar{'y' if len(found) == 1 else 'ies'}"
+
+    report = _disposable(
+        api, ledger, body, name=name, deadline_s=deadline_s, clock=clock,
+        telemetry=telemetry or Telemetry(clock), first_frame_s=first_frame_s,
+    )  # fmt: skip
+    return ProbeOutcome(
+        report, found, b"".join(sample), stdin_check[0] if stdin_check else "not run"
+    )
+
+
+def _stdin_roundtrip(run: _Run) -> str:
+    """Send the size of a real upload through the upload's own `head -c`
+    mechanism and read back how many bytes the runner saw."""
+    sent = STDIN_CHECK_BYTES
+    try:
+        code, text = _exec(
+            run,
+            _Exec("probe", "stdin round-trip", "wc -c", bytes(sent), UPLOAD_BUDGET_S),
+        )
+    except BoundaryError as exc:
+        return f"FAILED sending {sent} bytes: {exc}"
+    got = _last_int(text)
+    if code != 0 or got is None:
+        return f"FAILED sending {sent} bytes: exit {code}: {text[-200:]!r}"
+    verdict = "ok" if got == sent else "MISMATCH"
+    return f"{verdict}: sent {sent} bytes, runner received {got}"
+
+
+def _provision(run: _Run) -> None:
+    api, name, t = run.api, run.name, run.telemetry
+    run.deadline.check("create")
+    t.span("create", "create sprite", lambda: api.create(name))
+    run.deadline.check("network policy")
+    t.span(
+        "egress", "set deny-all",
+        lambda: api.set_network_policy(name, DENY_ALL), {"rules": len(DENY_ALL)},
+    )  # fmt: skip
+    t.span(
+        "egress", "read back",
+        lambda: _require_deny_all(api.get_network_policy(name)),
+        after=lambda _: {"deny_all": True},
+    )  # fmt: skip
+    run.deadline.check("resource policy")
+    t.span(
+        "resources", "memory limit",
+        lambda: api.set_memory_limit(name, MEMORY_LIMIT_MB),
+        {"memory_mb": MEMORY_LIMIT_MB},
+    )  # fmt: skip
+
+
+def _require_deny_all(policy: Json) -> None:
+    rules = policy.get("rules")
+    if rules != list(DENY_ALL):
+        raise PolicyNotEnforcedError(
+            f"network policy read-back is not deny-all: {rules!r}"
+        )
+
+
+def _raw_exec(run: _Run, step: _Exec) -> bytes:
+    left = run.deadline.check(step.purpose)
+    timeout = left if step.budget_s is None else min(left, step.budget_s)
+    first = None if step.stdin else min(run.first_frame_s, timeout)
+    fields: Fields = {
+        "stage": step.stage,
+        "purpose": step.purpose,
+        "timeout_s": round(timeout, 1),
+        "first_frame_s": None if first is None else round(first, 1),
+        "bytes_sent": len(step.stdin),
+        "env": "sprite default" if step.sprite_env else "minimal",
+    }
+    return run.telemetry.span(
+        "exec",
+        step.purpose,
+        lambda: _send(run, step, timeout, first),
+        fields,
+        _exec_fields,
+    )
+
+
+def _send(run: _Run, step: _Exec, timeout: float, first: float | None) -> bytes:
+    argv = exec_argv(step.script, len(step.stdin), step.sprite_env)
+    try:
+        return run.api.exec(run.name, argv, step.stdin, timeout, first)
+    except StreamTimeoutError as exc:
+        raise StreamTimeoutError(
+            _timeout_text(step, exc), exc.received, first_byte=exc.first_byte
+        ) from exc
+
+
+def _timeout_text(step: _Exec, exc: StreamTimeoutError) -> str:
+    if exc.first_byte:
+        return (
+            f"{step.stage} stage, {step.purpose}: silent -- no output frame for "
+            f"a command that sends no input, not even the start marker ({exc})"
+        )
+    got = exc.received
+    return (
+        f"{step.stage} stage, {step.purpose}: output stopped before the exit "
+        f"marker after {len(got)} byte(s) (frames {frames_seen(got)}), last "
+        f"output {decode_exec_output(got)[-120:]!r} ({exc})"
+    )
+
+
+def _exec_fields(raw: bytes) -> Fields:
+    code, _ = parse_exit(decode_exec_output(raw))
+    return {
+        "bytes_received": len(raw),
+        "frames_seen": frames_seen(raw),
+        "exit_status": code,
+    }
+
+
+def _exec(run: _Run, step: _Exec) -> tuple[int | None, str]:
+    return parse_exit(strip_start(decode_exec_output(_raw_exec(run, step))))
+
+
+def _probe(run: _Run, tools: tuple[ToolSpec, ...]) -> dict[str, bool]:
+    binaries = tuple(t.binary for t in tools)
+    if not binaries:
+        return {}
+    code, text = _exec(
+        run,
+        _Exec(
+            "tool check", "tool check", probe_script(binaries), budget_s=PROBE_BUDGET_S
+        ),
+    )
+    found = parse_probe(text, binaries) if code == 0 else dict.fromkeys(binaries, False)
+    paths = parse_paths(text) if code == 0 else {}
+    run.telemetry.record(
+        "tool check",
+        "availability",
+        {
+            **{f"has_{b}": ok for b, ok in found.items()},
+            **{f"path_{b}": where for b, where in paths.items()},
+        },
+    )
+    return found
+
+
+@dataclass(frozen=True)
+class _Found:
+    available: dict[str, bool]
+    python: TrustedPython | None
+
+
+def _python_for(run: _Run, job: RunnerJob) -> TrustedPython | None:
+    if not (job.diagnose or any(t.needs_python for t in job.tools)):
+        return None
+    return run.telemetry.span(
+        "interpreter",
+        "resolve trusted python",
+        lambda: _resolve_python(run),
+        after=_python_fields,
+    )
+
+
+def _resolve_python(run: _Run) -> TrustedPython | None:
+    code, text = _exec(
+        run,
+        _Exec(
+            "interpreter", "resolve python", resolve_script(), budget_s=PROBE_BUDGET_S
+        ),
+    )
+    return choose_python(text) if code == 0 else None
+
+
+def _python_fields(python: TrustedPython | None) -> Fields:
+    if python is None:
+        return {"python": "none found"}
+    return {"python": python.path, "python_version": python.version}
+
+
+def _diagnose(
+    run: _Run, specs: tuple[DiagnosticSpec, ...], enabled: bool
+) -> list[Diagnostic]:
+    return [_diagnostic(run, spec) for spec in specs] if enabled else []
+
+
+def _diagnostic(run: _Run, spec: DiagnosticSpec) -> Diagnostic:
+    """Never fatal: a diagnostic that fails or hangs is itself the result."""
+    budget = PROBE_BUDGET_S if spec.bound_s is None else spec.bound_s + 10.0
+    step = _Exec(
+        "diagnostic",
+        spec.name,
+        spec.script,
+        budget_s=budget,
+        sprite_env=spec.sprite_env,
+    )
+    try:
+        code, text = _exec(run, step)
+    except BoundaryError as exc:
+        return _recorded(
+            run, Diagnostic(spec.name, spec.expectation, None, f"exec failed: {exc}")
+        )
+    return _recorded(
+        run, Diagnostic(spec.name, spec.expectation, code, summarize(text))
+    )
+
+
+def _recorded(run: _Run, result: Diagnostic) -> Diagnostic:
+    run.telemetry.record(
+        "diagnostic",
+        result.name,
+        {
+            "expectation": result.expectation,
+            "exit_status": result.exit_code,
+            "detail": result.detail,
+        },
+    )
+    return result
+
+
+def _upload(run: _Run, tarball: bytes) -> None:
+    """`exec_argv` feeds exactly the bytes sent through `head -c`, so the
+    upload does not depend on the exec channel delivering a stdin EOF; the
+    runner reports back how many bytes it wrote."""
+    size = len(tarball)
+    script = f"cat > {SOURCE_ARCHIVE} && wc -c < {SOURCE_ARCHIVE}"
+    run.telemetry.span(
+        "upload",
+        f"{size}-byte tarball",
+        lambda: _confirm_upload(
+            _exec(
+                run, _Exec("upload", "source upload", script, tarball, UPLOAD_BUDGET_S)
+            ),
+            size,
+        ),
+        {"bytes": size},
+        lambda got: {"runner_received": got},
+    )
+
+
+def _confirm_upload(result: tuple[int | None, str], size: int) -> int:
+    code, text = result
+    got = _last_int(text)
+    if code != 0 or got != size:
+        raise BoundaryError(
+            f"source upload: runner wrote {got} of {size} bytes "
+            f"(exit {code}): {text[-300:]}"
+        )
+    return got
+
+
+def _unpack(run: _Run) -> None:
+    script = (
+        f"mkdir -p {WORKDIR} && tar -xzf {SOURCE_ARCHIVE} -C {WORKDIR} "
+        f"--strip-components=1 && rm -f {SOURCE_ARCHIVE}"
+    )
+    run.telemetry.span(
+        "unpack",
+        "tar -xzf",
+        lambda: _confirm_unpack(
+            _exec(
+                run, _Exec("unpack", "source unpack", script, budget_s=UNPACK_BUDGET_S)
+            )
+        ),
+        after=lambda code: {"exit_status": code},
+    )
+
+
+def _confirm_unpack(result: tuple[int | None, str]) -> int:
+    code, text = result
+    if code != 0:
+        raise BoundaryError(f"source unpack failed (exit {code}): {text[-500:]}")
+    return code
+
+
+def _tool(run: _Run, tool: ToolSpec, found: _Found) -> ToolResult:
+    return run.telemetry.span(
+        "tool",
+        tool.name,
+        lambda: _run_if_available(run, tool, found),
+        after=_tool_fields,
+    )
+
+
+def _tool_fields(result: ToolResult) -> Fields:
+    match result:
+        case ToolRan(version=version, exit_code=code):
+            return {"result": "ran", "version": version, "exit_status": code}
+        case ToolAbsent():
+            return {"result": "not run"}
+    raise TypeError(f"not a tool result: {result!r}")  # pragma: no cover
+
+
+def _run_if_available(run: _Run, tool: ToolSpec, found: _Found) -> ToolResult:
+    missing = _missing(tool, found)
+    if missing:
+        return ToolAbsent(tool, missing)
+    return _run_tool(run, tool, found.python)
+
+
+def _missing(tool: ToolSpec, found: _Found) -> str:
+    if tool.needs_python:
+        return "" if found.python else "no trusted Python interpreter was resolved"
+    if found.available.get(tool.binary, False):
+        return ""
+    return f"`{tool.binary}` not found by the availability probe"
+
+
+def _run_tool(run: _Run, tool: ToolSpec, python: TrustedPython | None) -> ToolResult:
+    version_cmd, run_cmd = (
+        (tool.version_cmd, tool.run_cmd)
+        if python is None
+        else (with_python(tool.version_cmd, python), with_python(tool.run_cmd, python))
+    )
+    budget = tool.timeout_s + _EXEC_SLACK_S
+    stage = f"tool {tool.name}"
+    v_code, v_text = _exec(
+        run,
+        _Exec(
+            stage,
+            f"{tool.name} version",
+            f"cd {WORKDIR} && {version_cmd}",
+            budget_s=budget,
+        ),
+    )
+    if v_code != 0:
+        return ToolAbsent(tool, f"version probe exited {v_code}: {v_text[-300:]}")
+    script = f"cd {WORKDIR} && timeout --kill-after=5 {tool.timeout_s} {run_cmd}"
+    code, text = _exec(run, _Exec(stage, f"{tool.name} run", script, budget_s=budget))
+    return ToolRan(tool, _first_line(v_text), code, text)
+
+
+def _first_line(text: str) -> str:
+    stripped = text.strip()
+    return stripped.splitlines()[0] if stripped else "unknown"
+
+
+def sweep(
+    api: SpritesApi, ledger: RunnerLedger, telemetry: Telemetry | None = None
+) -> dict[str, CleanupStatus]:
+    """Destroy every runner a previous (possibly crashed) review left behind."""
+    t = telemetry or _quiet()
+    return {name: destroy_runner(api, ledger, name, t) for name in ledger.pending()}
