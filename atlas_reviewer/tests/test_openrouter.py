@@ -57,10 +57,10 @@ def key_status(limit=5, remaining=5, usage=0):
     return {"data": {"limit": limit, "limit_remaining": remaining, "usage": usage}}
 
 
-def completion(text="review text", model=MODEL_ID, usage=None):
+def completion(text="review text", model=MODEL_ID, usage=None, finish="stop"):
     return {
         "model": model,
-        "choices": [{"message": {"content": text}, "finish_reason": "stop"}],
+        "choices": [{"message": {"content": text}, "finish_reason": finish}],
         "usage": usage if usage is not None else {"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.0123},
     }  # fmt: skip
 
@@ -438,6 +438,17 @@ def test_substituted_models_and_empty_reviews_are_rejected_without_retry(
     with pytest.raises(BoundaryError, match=match):
         provider(fake).complete(SMALL)
     assert len(fake.chat_requests()) == 1
+
+
+def test_a_review_cut_at_the_output_limit_is_settled_and_rejected():
+    fake = OpenRouterFake(reply(completion(finish="length")), reply(completion()))
+    p = provider(fake)
+    with pytest.raises(BoundaryError, match="output-token limit"):
+        p.complete(SMALL)
+    assert len(fake.chat_requests()) == 1
+    line = p.usage_lines()[1]
+    assert "incomplete review (finish_reason=length)" in line
+    assert "actual $0.0123" in line
 
 
 def test_dated_variant_of_the_pinned_model_is_accepted():

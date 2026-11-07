@@ -266,6 +266,11 @@ def _completion(resp: HttpResponse, terms: ModelTerms, record: CallRecord) -> st
             record, f"empty review (finish_reason={finish})", actual, summary
         )
         raise BoundaryError(f"model returned no review text (finish_reason={finish})")
+    if finish == "length":
+        ReviewBudget.settle(
+            record, "incomplete review (finish_reason=length)", actual, summary
+        )
+        raise BoundaryError("model review stopped at the output-token limit")
     ReviewBudget.settle(record, f"ok (finish_reason={finish})", actual, summary)
     return text
 
