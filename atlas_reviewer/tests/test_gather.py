@@ -229,3 +229,52 @@ def test_a_malformed_entry_is_unknown_and_the_rest_are_still_ingested():
         e for e in evidence if isinstance(e, Missing) and "entry 0" in e.key.name
     )
     assert outcome(bad) is Outcome.UNKNOWN
+
+
+def test_count_caps_are_shared_across_runs_and_what_they_skip_is_unknown():
+    class TwoRuns(FixtureGitHub):
+        def list_workflow_runs(self, repo, branch):
+            (run, *rest) = super().list_workflow_runs(repo, branch).items
+            return Listing((run, {**run, "id": 5002}, *rest), False, 1)
+
+        def list_run_jobs(self, repo, run_id):
+            return super().list_run_jobs(repo, "5001")
+
+        def list_run_artifacts(self, repo, run_id):
+            return super().list_run_artifacts(repo, "5001")
+
+    gh = TwoRuns(FIXTURE)
+    out = gather(gh, max_job_logs=3, max_artifacts=1)
+    assert len(calls(gh, "get_job_logs")) == 3
+    assert len(calls(gh, "download_artifact")) == 1
+    skipped = [f for f in out.failures if "per-review cap" in f.reason]
+    assert {f.key.kind.value for f in skipped} == {"workflow_log", "artifact"}
+
+
+def test_a_run_past_the_run_cap_leaves_its_jobs_unknown():
+    class TwoRuns(FixtureGitHub):
+        def list_workflow_runs(self, repo, branch):
+            (run, *rest) = super().list_workflow_runs(repo, branch).items
+            return Listing((run, {**run, "id": 5002, "name": "other"}, *rest), False, 1)
+
+    out = gather(TwoRuns(FIXTURE), max_runs=1)
+    assert missing_reasons(out)["(jobs of other)"] == "not read: per-review cap of 1"
+
+
+def test_skipped_archive_entries_are_unknown_and_an_all_skipped_one_is_not_present():
+    out = gather(FixtureGitHub(FIXTURE))
+    assert missing_reasons(out)["coverage-report (skipped entry 0)"].startswith(
+        "not read: archive entry skipped -- upload.sh"
+    )
+
+    class OnlyScripts(FixtureGitHub):
+        def download_artifact(self, repo, artifact_id, max_bytes):
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as zf:
+                zf.writestr("run.sh", "echo")
+            return buf.getvalue()
+
+    out = gather(OnlyScripts(FIXTURE))
+    assert not any(i.provenance.source_id.endswith(":zip") for i in out.items)
+    reason = missing_reasons(out)["coverage-report (contents)"]
+    assert reason == "not read: every archive entry skipped"

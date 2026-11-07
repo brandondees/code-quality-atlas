@@ -77,6 +77,14 @@ class Collected:
             self.failures.append(Missing(key, f"not read: {limit} -- {detail}"))
 
 
+@dataclass
+class _Left:
+    """Per-review download counts still unspent, shared by every run."""
+
+    job_logs: int
+    artifacts: int
+
+
 @dataclass(frozen=True)
 class _Ctx:
     event: PrEvent
@@ -85,6 +93,7 @@ class _Ctx:
     redactor: Redactor
     config: IngestConfig
     out: Collected
+    left: _Left
 
 
 def gather_ci(
@@ -96,7 +105,8 @@ def gather_ci(
     config: IngestConfig,
     out: Collected,
 ) -> None:
-    ctx = _Ctx(event, github, now, redactor, config, out)
+    left = _Left(config.max_job_logs, config.max_artifacts)
+    ctx = _Ctx(event, github, now, redactor, config, out, left)
     repo, sha = event.repo, event.head_sha
     checks = _listing(
         ctx,
@@ -127,8 +137,14 @@ def gather_ci(
     )
     out.items.extend(r.item for r in runs)
     at_head = [r for r in runs if r.item.head_sha == sha]
-    _cap_note(ctx, "workflow runs at the head SHA", at_head, config.max_runs)
-    for run in at_head[: config.max_runs]:
+    for run in _capped(
+        ctx,
+        "workflow runs at the head SHA",
+        at_head,
+        config.max_runs,
+        config.max_runs,
+        lambda r: SourceKey(SourceKind.JOB, f"(jobs of {r.item.provenance.key.name})"),
+    ):
         _gather_run(ctx, run)
 
 
@@ -175,13 +191,21 @@ def _parse_each[T](
     return tuple(parsed)
 
 
-def _cap_note[T](ctx: _Ctx, what: str, found: Sequence[T], cap: int) -> None:
-    if len(found) > cap:
-        ctx.out.omit(
-            what,
-            f"per-review cap of {cap}",
-            f"{len(found) - cap} of {len(found)} not ingested",
-        )
+def _capped[T](
+    ctx: _Ctx,
+    what: str,
+    found: Sequence[T],
+    left: int,
+    cap: int,
+    key: Callable[[T], SourceKey],
+) -> Sequence[T]:
+    """The first `left` of `found`; each one past it is UNKNOWN."""
+    skipped = found[max(left, 0) :]
+    if skipped:
+        limit = f"per-review cap of {cap}"
+        ctx.out.omit(what, limit, f"{len(skipped)} of {len(found)} not ingested")
+        ctx.out.failures.extend(Missing(key(s), f"not read: {limit}") for s in skipped)
+    return found[: max(left, 0)]
 
 
 def _gather_run(ctx: _Ctx, run: WorkflowRun) -> None:
@@ -230,14 +254,20 @@ def _job_links(run: WorkflowRun, jobs: tuple[Job, ...]) -> list[Link]:
 
 def _gather_job_logs(ctx: _Ctx, jobs: list[Job]) -> None:
     ordered = sorted(jobs, key=lambda j: j.item.conclusion not in _FAILING)
-    cap = ctx.config.max_job_logs
-    _cap_note(ctx, "job logs", ordered, cap)
-    for job in ordered[:cap]:
+    taken = _capped(
+        ctx, "job logs", ordered, ctx.left.job_logs, ctx.config.max_job_logs, _log_key
+    )
+    ctx.left.job_logs -= len(taken)
+    for job in taken:
         _gather_job_log(ctx, job)
 
 
+def _log_key(job: Job) -> SourceKey:
+    return SourceKey(SourceKind.WORKFLOW_LOG, job.item.provenance.key.name)
+
+
 def _gather_job_log(ctx: _Ctx, job: Job) -> None:
-    key = SourceKey(SourceKind.WORKFLOW_LOG, job.item.provenance.key.name)
+    key = _log_key(job)
     limit = ctx.config.max_log_bytes
     try:
         raw = ctx.github.get_job_logs(ctx.event.repo, job.job_id, limit)
@@ -261,9 +291,16 @@ def _gather_artifacts(ctx: _Ctx, artifacts: tuple[ArtifactRef, ...]) -> None:
     live = [
         a for a in artifacts if a.item.head_sha == ctx.event.head_sha and not a.expired
     ]
-    cap = ctx.config.max_artifacts
-    _cap_note(ctx, "artifact downloads", live, cap)
-    for ref in live[:cap]:
+    taken = _capped(
+        ctx,
+        "artifact downloads",
+        live,
+        ctx.left.artifacts,
+        ctx.config.max_artifacts,
+        contents_key,
+    )
+    ctx.left.artifacts -= len(taken)
+    for ref in taken:
         _gather_artifact(ctx, ref)
 
 
@@ -288,8 +325,13 @@ def _gather_artifact(ctx: _Ctx, ref: ArtifactRef) -> None:
     if read.rejected is not None:
         ctx.out.omit(source, "archive rejected", read.rejected, key)
         return
-    for skipped in read.skipped:
-        ctx.out.omit(source, "archive entry skipped", skipped)
+    name = ref.item.provenance.key.name
+    for i, skipped in enumerate(read.skipped):
+        entry = SourceKey(SourceKind.ARTIFACT, f"{name} (skipped entry {i})")
+        ctx.out.omit(source, "archive entry skipped", skipped, entry)
+    if not read.members and read.skipped:
+        ctx.out.failures.append(Missing(key, "not read: every archive entry skipped"))
+        return
     contents = artifact_contents_item(ref, read, ctx.now(), ctx.redactor)
     ctx.out.items.append(contents)
     ctx.out.links.append(Link(contents.provenance.source_id, source))
