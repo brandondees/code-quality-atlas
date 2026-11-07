@@ -10,7 +10,9 @@ It never writes to GitHub. No reviews, comments, check runs, labels, or
 issues. It has no webhook receiver and no queue, and runs one review at a
 time. Design and decision record:
 [`docs/plans/2026-11-06-manual-reviewer-service.md`](../docs/plans/2026-11-06-manual-reviewer-service.md)
-(D24 in [`docs/open-questions.md`](../docs/open-questions.md)).
+(D24-D30 and D32 in [`docs/open-questions.md`](../docs/open-questions.md)).
+Planned follow-ups, none built here, are listed in that plan's
+"Follow-ups" section.
 
 ## Run it offline (no credentials)
 
@@ -185,7 +187,7 @@ subsection per diff part when the diff was split.
 The model has no file tools, so a prompt that only names lenses does not run
 them (the first pilot's model said so). Lenses are chosen by the repo's own
 lens picker, `skills/choosing-review-lenses/SKILL.md`, run as one model call
-(`picker.py`, D32). There is no code-side route table any more. The picker
+(`picker.py`, D32). The picker
 call gets that skill as its instructions, the PR metadata and the changed
 paths (at most 500) as untrusted fenced blocks, and the operator's depth.
 It must reply with only `{"lenses": [...]}`, at most 8 names at review depth
@@ -423,8 +425,8 @@ interpreter is chosen before they exist. Every other binary comes from
 
 ## Trust boundaries
 
-- **Trusted:** the operator's event file, this repo's skill bundle, the
-  controller's own code and `ToolSpec` commands.
+- **Trusted:** the operator's event file, this repo's skill bundle and lens
+  picker skill, the controller's own code and `ToolSpec` commands.
 - **Untrusted:** everything from the PR. That means the diff, title and body,
   check names and summaries, job logs, artifact metadata and contents,
   runner tool output, issue text, and the model's own output. Lens bodies and
@@ -454,8 +456,10 @@ interpreter is chosen before they exist. Every other binary comes from
 
 ## What a live run still needs
 
-Everything above is tested offline only, against fakes and fixtures, except
-for the one pilot below. Before another live review:
+Everything above is tested offline, against fakes and fixtures. The owner
+has run three live pilots and two live probes from a trusted machine (the
+sections below, oldest first). The fixes made after each run are tested
+offline only. Before another live review:
 
 1. **Sprites protocol check.** With only `ATLAS_SPRITES_TOKEN` set, run
    `python -m atlas_reviewer probe-runner` from a trusted machine. It
@@ -476,10 +480,30 @@ for the one pilot below. Before another live review:
 4. **A test PR.** Write an event file (`repo`, `pr_number`, `head_sha`)
    for a PR that has finished CI at that head SHA.
 
+Still unverified against live responses:
+
+- **The Sprites exec response body.** Observed for a small echo, a 3 MiB
+  stdin round-trip, a review's upload and unpack (third probe), and the
+  third pilot's whole review sequence at `a246625`, which used the D28
+  request shape and the D29 wrapper. Not yet observed: whether output
+  streams before the command exits, and the D30 cutoff timer.
+- **The GitHub and OpenRouter response shapes.** The pilots' drafts held a
+  check run, job, log and workflow run, so those list shapes parsed; this is
+  inferred from the owner's reports, not a recorded response. Not yet seen
+  live: a job's `check_run_url` (taken from GitHub's documentation; without
+  it the controller simply does not group that job), artifacts, pagination
+  past one page, and OpenRouter's error and retry responses. The OpenRouter
+  key preflight, catalog read and single chat completions worked.
+- **The input-token bound.** It assumes no token encodes less than one UTF-8
+  byte, plus 64 tokens of message overhead. It has not been checked against
+  this model's tokenizer, and no pilot's token usage was reported to this
+  repo. Reported usage is recorded in the draft, so a violated assumption
+  shows up there.
+
 ## First live pilot (owner-reported, 2026-11-07, head `9ff859b`)
 
-One pilot ran from a trusted machine. These are the owner's observations; no
-live call has been made from this repo's sessions or CI.
+The owner's observations; no live call has been made from this repo's
+sessions or CI.
 
 - The probe passed. One small exec returned
   `b'\x01atlas-framing-check\n__ATLAS_EXIT__=0\n\x03\x00'`, which
@@ -497,23 +521,8 @@ code reads. The root cause is not known. The upload now has an explicit
 300-second budget and does not depend on the exec channel delivering a stdin
 EOF; the second is a hypothesis, not a confirmed cause. If it fails again, the
 error names the byte count, and `probe-runner`'s stdin round-trip separates a
-stdin problem from a PR-tarball problem.
-
-Still unverified against live responses:
-
-- **The Sprites exec response body.** The framing is observed for a small
-  echo, and a 3 MiB stdin round-trip passed in the second pilot's probe. A
-  review's tarball upload and unpack have not yet been seen to succeed.
-- **The GitHub and OpenRouter response shapes.** From the pilot's draft
-  (which held a check run, job, log and workflow run) the list shapes parsed;
-  this is inferred from the owner's report and is not a recorded response. Not
-  yet seen live: a job's `check_run_url` (taken from GitHub's documentation;
-  without it the controller simply does not group that job), artifacts,
-  pagination past one page, and OpenRouter's error and retry responses. The
-  OpenRouter key preflight, catalog read and one chat completion worked.
-- **The input-token bound.** It assumes no token encodes less than one UTF-8
-  byte. The pilot's token usage was not reported to this repo, and the
-  prompt is now larger because lens bodies are inlined.
+stdin problem from a PR-tarball problem. (The third probe's upload and unpack
+later passed.)
 
 ## Second live pilot (owner-reported, 2026-11-07, head `d63f087`)
 
