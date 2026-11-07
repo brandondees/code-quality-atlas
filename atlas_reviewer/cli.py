@@ -135,7 +135,7 @@ def _pem(raw: str) -> str:
 
 def _installation_id(env: Mapping[str, str]) -> int:
     raw = _require_env(env, ENV_INSTALLATION_ID)
-    if not raw.isdigit():
+    if not (raw.isascii() and raw.isdigit() and int(raw) > 0):
         raise UsageError(f"{ENV_INSTALLATION_ID} must be a positive integer")
     return int(raw)
 

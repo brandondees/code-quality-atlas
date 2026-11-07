@@ -151,8 +151,9 @@ def test_live_mode_names_the_missing_credential(tmp_path, dropped):
     assert dropped in err
 
 
-def test_installation_id_must_be_numeric(tmp_path):
-    env = {**APP_ENV, cli.ENV_INSTALLATION_ID: "12a"}
+@pytest.mark.parametrize("raw", ["12a", "0", "000", "\u00b2", "-5"])
+def test_installation_id_must_be_numeric(tmp_path, raw):
+    env = {**APP_ENV, cli.ENV_INSTALLATION_ID: raw}
     code, _, err = run_cli(
         "--state-dir", str(tmp_path), "review", "--event", EVENT, env=env
     )
