@@ -912,3 +912,30 @@ gives each read a wall-clock budget, so a silent no-input exec fails at
 reports where each binary resolves. One trade-off is stated rather than
 hidden: until a live run shows whether HTTP exec output streams, a long
 tool that prints nothing could trip the window.
+
+## 2026-11-07 (same day) — D29: a controller-chosen interpreter, never the pyenv shim
+
+The owner's next probe, at `9805cfc`, showed the D28 wrapper doing its job.
+The start marker arrived after the unpack, so the shell was running, and
+then `python3 --version` sent nothing more for 135 s. The tool check had
+already said where `python3` lived: `/.sprite/bin/python3`, resolving to
+itself, so it is a script rather than a link. The owner matched that to the
+Sprites docs (pyenv shims in `/.sprite/bin`, default 3.13.x) and to this
+repo's `.python-version` of `3.12`. The suspected cause is the reviewed PR's
+own pin, read by the shim from the checkout. Run #6's write-up had said the
+PR's files could not affect `python3 --version` because it prints before
+Python imports anything. That holds for a real interpreter but not for a
+shim, and the README now says so where it made the claim.
+
+The fix does not wait on the hypothesis. Every exec now gets a minimal
+environment from the shared wrapper (`env -i`, `PATH=/usr/bin:/bin`). Before
+any PR byte is uploaded, one exec from an empty directory lists the real
+interpreters, and the controller accepts only two exact path shapes.
+Python tools can name the chosen interpreter only through a `{python}`
+placeholder and run it with `-I`, so a PR can steer neither the version nor
+the module search path. To confirm or refute the hypothesis,
+`probe-runner --sequence review` gains labelled, never-fatal diagnostics.
+The last one is bare `python3` from the checkout, bounded to 15 s, which is
+expected to hang if the hypothesis is right. The wrapper and both new
+scripts are also run for real in a local shell in the tests, without any
+Sprite or network.

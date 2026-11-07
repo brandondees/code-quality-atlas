@@ -281,6 +281,36 @@ hypotheses are in the reviewer README's "Third live probe" section.
 - **Resolution, not execution, in the tool check.** It now also reports
   each binary's `command -v` path and `readlink -f` target.
 
+### Fourth live probe and the trusted-interpreter decisions (D29)
+
+The owner's probe at `9805cfc` got the start marker after the unpack, then
+`python3 --version` hung to 135 seconds. The tool check had resolved
+`python3` to `/.sprite/bin/python3`, a pyenv shim that picks its version
+from `.python-version` in the working directory, and this repo pins `3.12`
+while the image's default is 3.13.x. The hypothesis is that the PR's pin
+makes the shim pick an uninstalled version and hang. It is not confirmed;
+the probe's new diagnostics test it. Details are in the reviewer README's
+"Fourth live probe" section.
+
+- **Minimal environment on every exec.** `exec_argv` prefixes
+  `/usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C.UTF-8 /bin/sh -c`.
+  This uses the wrapper rather than the API's `env`/`dir` parameters, so the
+  request shape stays the one D28 tested, and the spec does not say whether
+  `env` merges or replaces.
+- **The controller chooses the interpreter, before the PR exists in the
+  Sprite.** One exec between the tool check and the upload, from an empty
+  directory, reports each pyenv `versions/*/bin/python3` and
+  `/usr/bin/python3` that runs. Only those two path shapes are accepted;
+  the newest pyenv version wins, else the system one.
+- **Python tools name it only as `{python}`** and run it with `-I`.
+  `ToolSpec` refuses a `python3` tool without the placeholder. No resolved
+  interpreter makes a Python tool UNKNOWN.
+- **Probe-only diagnostics.** These read the shim as text and list the
+  installed versions. They then run the trusted interpreter from the
+  checkout, the shim with `PYENV_VERSION`, and finally a bare `python3`
+  bounded to 15 s and labelled expected-may-hang. None of them is fatal,
+  and a review never runs them.
+
 ### Still unverified against live responses
 
 - **The Sprites exec response body.** Observed for a small echo, a 3 MiB

@@ -192,7 +192,8 @@ it is refused, not trimmed. `reference/synthesis.md` and
 
 ## Runner tools
 
-The default tools are `python-compileall` only (`python3 -m compileall`). The
+The default tools are `python-compileall` only (`{python} -I -m compileall`,
+see "One interpreter, chosen by the controller" below). The
 pilot found `python3` but neither `ruff` nor `shellcheck` in the Sprite image.
 They are dropped from the defaults because egress is deny-all and a Sprite
 is never reused, so nothing can be installed into a runner, and a binary the
@@ -201,7 +202,9 @@ reports lint, so the CI evidence covers it. To add a tool once the image
 ships its binary, append a `ToolSpec(name, binary, version_cmd, run_cmd)` to
 `DEFAULT_TOOLS` in `controller.py`; `probe-runner` shows which binaries the
 image has, and a configured tool whose binary is missing is still reported
-UNKNOWN and never executed.
+UNKNOWN and never executed. A `python3` tool must write the interpreter as
+`{python}` in both commands (`ToolSpec` refuses it otherwise); a non-Python
+tool runs its bare binary name under the minimal `PATH=/usr/bin:/bin`.
 
 ## Diff coverage
 
@@ -276,14 +279,23 @@ always sends `cmd` (repeated) and `stdin=true` with an octet-stream body that
 is exactly the stdin bytes, possibly none, with an explicit `Content-Length`.
 `env`, `dir`, `path` and `tty` are never sent (OpenAPI 0.1.12 has no `tty`
 parameter; the HTTP exec is non-TTY only). `runner.exec_argv` wraps every
-script the same way:
+script the same way, and the environment is set by that wrapper, not by the
+API's `env` parameter, whose merge-or-replace behaviour the spec does not
+state:
 
 ```sh
-sh -c 'echo __ATLAS_START__; head -c N | { SCRIPT
+/usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C.UTF-8 \
+  /bin/sh -c 'echo __ATLAS_START__; head -c N | { SCRIPT
 }; echo __ATLAS_EXIT__=$?'     # N bytes of input
-sh -c 'echo __ATLAS_START__; { SCRIPT
+/usr/bin/env -i PATH=/usr/bin:/bin HOME=/tmp LANG=C.UTF-8 \
+  /bin/sh -c 'echo __ATLAS_START__; { SCRIPT
 } </dev/null; echo __ATLAS_EXIT__=$?'     # no input
 ```
+
+`env -i` drops everything the Sprite would otherwise pass, including
+`/.sprite/bin` on `PATH` and any `PYENV_*` variable. Only the probe's
+labelled diagnostics (below) run in the Sprite's default environment, and an
+exec event's `env` field says which one each exec used.
 
 So every command reads exactly the bytes sent and then EOF, and none can wait
 on the exec channel's own stdin, whose EOF behaviour is undocumented. The
@@ -296,6 +308,34 @@ the frames seen, and the last output. Until a live run shows whether the HTTP
 exec streams output or buffers it until exit, a long tool that prints nothing
 could trip the window; its error says "silent", and raising the flag tells
 the two apart.
+
+## One interpreter, chosen by the controller
+
+The image's `python3` on its default `PATH` is a pyenv shim in
+`/.sprite/bin`, and pyenv picks the version from a `.python-version` file in
+the working directory or any parent (the Sprites Python docs and pyenv's
+README, as the owner cited them). Inside the unpacked checkout that file
+belongs to the PR. So no tool runs a shim or a bare `python3`:
+
+1. After the tool check and **before the upload** (no PR byte is in the
+   Sprite yet), one exec in an empty directory (`/tmp/atlas-neutral`) runs
+   each `/.sprite/languages/python/pyenv/versions/*/bin/python3`, then
+   `/usr/bin/python3`, with `-I -c` to print its own version.
+2. The controller accepts only answers whose path is exactly one of those
+   two shapes (a version-directory name must start with a letter or digit,
+   so `..` is refused) with a strict `x.y.z` version, and picks the newest
+   pyenv version, else the system one (`interpreter.choose_python`). The
+   choice is an `interpreter` telemetry event with its path and version.
+3. Python tools substitute that path, shell-quoted, for `{python}`, and run
+   it with `-I`: isolated mode ignores `PYTHON*` variables and the user site
+   and keeps the working directory off `sys.path`, so a PR file such as
+   `compileall.py` cannot shadow the stdlib module. If nothing was resolved,
+   a Python tool is UNKNOWN (`no trusted Python interpreter was resolved`)
+   and never run.
+
+The PR's files cannot choose the interpreter or a tool binary. The
+interpreter is chosen before they exist. Every other binary comes from
+`PATH=/usr/bin:/bin`, which the unpacked tree in `/work` is not on.
 
 ## Module layout
 
@@ -317,7 +357,8 @@ the two apart.
 | `instrumented.py` | `GitHubReader` wrapper that records every read as an event | via `GitHubReader` |
 | `lenses.py` | choose lenses from changed paths and PR text, load and budget their bodies | reads the bundle |
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`) | no |
-| `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → upload → unpack → tools → destroy), `probe_runner`, the one exec wrapper (`exec_argv`) | via `SpritesApi` |
+| `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → resolve interpreter → upload → unpack → tools → destroy), `probe_runner`, the one exec wrapper (`exec_argv`, minimal `env -i` environment) | via `SpritesApi` |
+| `interpreter.py` | the resolve script, `choose_python` (accepts only the pyenv-versions and `/usr/bin/python3` path shapes), `{python}` substitution, the probe-only diagnostic scripts and output summary | no |
 | `gather.py` | head-SHA CI evidence: lists, job logs, artifact contents, omissions | via `GitHubReader` |
 | `controller.py` | one event in, one draft out | via ports |
 | `harness.py` | skill-bundle harness: loads `collapsed/skills/reviewing-a-change/SKILL.md` | reads the bundle |
@@ -459,7 +500,9 @@ explains the hang. The real differences:
   or a version-manager shim that does work before starting the interpreter,
   which deny-all egress could block) is not known. `python3 --version`
   prints before Python imports anything, so the unpacked PR files cannot
-  have affected it.
+  have affected it. (The fourth probe showed this last point wrong for a
+  shim: pyenv reads `.python-version` from the checkout before any Python
+  starts. See below.)
 - **The evidence.** The old transport read the whole body with one blocking
   `read`, so a timeout discarded any bytes that had arrived. "No frames" was
   not measured: the command may have printed and then the stream not closed.
@@ -472,3 +515,39 @@ The next probe tells these apart. The tool check now reports where `python3`
 resolves and what that links to. Silence fails within 30 seconds, labelled.
 A stall keeps the bytes that arrived, and the start marker shows whether the
 shell started at all.
+
+## Fourth live probe (owner-reported, 2026-11-07, head `9805cfc`)
+
+Owner-reported; nothing here was observed from this repo's sessions or CI.
+The start marker arrived after the unpack, then `python3 --version` sent
+nothing more until its 135-second budget (17 bytes, frames `0x01:1`). So
+the shell started and the command itself hung. The tool check before the
+unpack reported `path_python3 = /.sprite/bin/python3`, resolving to
+itself: a script, not a link. The Sprites docs say `/.sprite/bin` holds
+pyenv shims over `/.sprite/languages/python/pyenv` (default 3.13.x), and
+this repo's `.python-version` is `3.12`.
+
+**Hypothesis, not yet confirmed:** run from inside the checkout, the shim
+selects the PR's pinned 3.12, which is not installed, and hangs rather than
+failing. The interpreter fix above does not depend on it being right: tools
+no longer go through the shim at all.
+
+`probe-runner --sequence review` now tests it, with diagnostics that never
+fail the probe and each carry the outcome they expect:
+
+| Diagnostic | When | Environment | Records |
+| --- | --- | --- | --- |
+| `shim` | before upload | minimal | `readlink -f` target, size, shebang and first `exec` line, read as text (the shim is never run) |
+| `pyenv versions` | before upload | minimal | `ls -1` of the pyenv versions directory |
+| `trusted python after unpack` | after the tools | minimal | the resolved interpreter's `-I --version`, run from `/work` |
+| `shim with PYENV_VERSION` | after the tools | Sprite default | the shim from `/work` with `PYENV_VERSION` set to the resolved version, bounded to 15 s |
+| `bare python3 in the checkout` | last | Sprite default | bare `python3 --version` from `/work`, bounded to 15 s by `/usr/bin/timeout`, labelled expected-may-hang |
+
+The version before unpack is the `interpreter` event. Read together: exit
+124 on the last row, a quick answer from the `PYENV_VERSION` row, and no
+`3.12` in `pyenv versions` confirm the hypothesis. A quick answer on the
+last row refutes it. Each bounded exec also has a 25-second stream budget,
+so a hang the in-guest bound cannot end is recorded as an exec failure and
+the Sprite is still destroyed. Guest output is cut to one printable line of
+at most 200 characters before it reaches telemetry. Reviews never run these
+diagnostics.
