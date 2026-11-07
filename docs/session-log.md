@@ -1005,8 +1005,17 @@ step, and the plan gained a follow-ups list: the D31 lens loop, a deployed
 controller, and omission rows for check summaries and log tails. The D24-D32
 entries now cross-reference consistently, and Q24 gained a 2026-11-07 update.
 
-A split into a stack of smaller PRs was planned but not done. The branch's
-commits are time-ordered slices that each touch most modules, so the stack
-would be re-sliced by file from the final tree, not cherry-picked. Each
+A split into a stack of smaller PRs was planned from this branch. The
+branch's commits are time-ordered slices that each touch most modules, so
+the plan was to re-slice by file from the final tree, not cherry-pick. Each
 proposed step's tests were run against only that step's modules as a
 feasibility check, and every step measured 95% or more against the 94% floor.
+The split was carried out later the same day; the next entry records it.
+
+## 2026-11-07 (same day) — the manual reviewer split into #599-#607
+
+The split planned above was carried out, re-sliced by file from #598's
+final tree. #599 is the D31 proposal doc and is merged. #600 is this
+stack's docs step (D24-D32, the service plan, the session log). #601-#607
+are the draft code steps, based on each other. #598 stayed open and was
+not merged.
