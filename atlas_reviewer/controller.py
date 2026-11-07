@@ -44,7 +44,7 @@ from atlas_reviewer.evidence import DETAIL_CHARS, PullInfo, parse_pull, tool_evi
 from atlas_reviewer.gather import Collected, IngestConfig, gather_ci
 from atlas_reviewer.instrumented import InstrumentedGitHub
 from atlas_reviewer.lenses import LensLibrary, LensPlan, plan_lenses, rank_lenses
-from atlas_reviewer.notes import ControllerFacts, controller_notes
+from atlas_reviewer.notes import ControllerFacts, controller_notes, quote_untrusted
 from atlas_reviewer.ports import (
     BoundaryError,
     Clock,
@@ -301,17 +301,23 @@ def _part_blocks(
 
 def _diff(
     event: PrEvent, deps: Deps, config: ReviewConfig, collected: Collected
-) -> tuple[DiffSelection, tuple[str, ...], int]:
+) -> tuple[DiffSelection | None, tuple[str, ...], int]:
     """The diff split into risk-ordered parts, every changed path (for lens
     selection), and the redaction count of the whole diff. Anything short
-    of complete coverage is recorded as an omission naming the files."""
+    of complete coverage is recorded as an omission naming the files. The
+    selection is None when the diff could not be fetched: then no model
+    call is made, because a review of an empty diff reads as a clean one."""
     try:
         raw = deps.github.get_pull_diff(event.repo, event.pr_number)
     except BoundaryError as exc:
         collected.notes.append(
-            f"The PR diff could not be fetched ({exc}); the narrative has no diff."
+            f"The PR diff could not be fetched, so no model call was made "
+            f"(error, quoted: {quote_untrusted(str(exc))})."
         )
-        return select_diff("", 1, config.diff_chars_per_call), (), 0
+        collected.omit(
+            "pull request diff", "fetch failed", "not fetched; nothing was reviewed"
+        )
+        return None, (), 0
     full = deps.redactor(raw)
     selection = select_diff(full.text, config.model_calls, config.diff_chars_per_call)
     _note_selection(collected, selection, config)
@@ -384,7 +390,10 @@ def _issue_block(
     try:
         issue = deps.github.get_issue(event.repo, number)
     except BoundaryError as exc:
-        collected.notes.append(f"Issue #{number} could not be fetched: {exc}")
+        collected.notes.append(
+            f"Issue #{number} could not be fetched (error, quoted: "
+            f"{quote_untrusted(str(exc))})."
+        )
         return None
     text = f"Title: {issue.get('title', '')}\n\n{issue.get('body') or ''}"
     redacted = deps.redactor(text, DETAIL_CHARS)
@@ -394,7 +403,7 @@ def _issue_block(
 
 def _narrate_parts(
     event: PrEvent,
-    selection: DiffSelection,
+    selection: DiffSelection | None,
     shared: _Shared,
     notes: tuple[str, ...],
     plan: LensPlan,
@@ -403,7 +412,9 @@ def _narrate_parts(
 ) -> tuple[PartNarrative, ...]:
     """One model call per part, in risk order. A part whose call fails or is
     refused (call cap, cost cap) still yields a `PartNarrative`, so its
-    files are reported as unreviewed rather than dropped."""
+    files are reported as unreviewed rather than dropped. No diff, no call."""
+    if selection is None:
+        return ()
     parts = selection.parts or (DiffPart(()),)
     total = len(parts)
 
@@ -418,7 +429,10 @@ def _narrate_parts(
 
 
 def _part_note(index: int, total: int, part: DiffPart, sel: DiffSelection) -> str:
-    files = ", ".join(f"{f.path} (cut)" if f.cut else f.path for f in part.files)
+    """File paths are chosen by the PR author, so each is quoted as data."""
+    files = ", ".join(
+        f"{quote_untrusted(f.path)}{' (cut)' if f.cut else ''}" for f in part.files
+    )
     others = (
         f" The other {total - 1} part(s) go to separate model calls; this call cannot see them."
         if total > 1
@@ -431,7 +445,8 @@ def _part_note(index: int, total: int, part: DiffPart, sel: DiffSelection) -> st
     )
     return (
         f"Diff part {index} of {total} (this model call): {len(part.files)} file(s), "
-        f"{part.chars} characters: {files or 'none'}.{others}{unseen}"
+        f"{part.chars} characters; PR-controlled file paths, quoted: "
+        f"{files or 'none'}.{others}{unseen}"
     )
 
 
@@ -468,8 +483,15 @@ def _narrate_part(
 
 
 def _coverage_lines(
-    sel: DiffSelection, parts: tuple[PartNarrative, ...]
+    sel: DiffSelection | None, parts: tuple[PartNarrative, ...]
 ) -> tuple[str, ...]:
+    if sel is None:
+        return (
+            (
+                "Diff coverage: NOT REVIEWED. The diff could not be fetched and no "
+                "model call was made."
+            ),
+        )
     reviewed = [p for p in parts if p.reviewed]
     full = sum(1 for p in reviewed for f in p.files if not f.cut)
     cut = sum(1 for p in reviewed for f in p.files if f.cut)

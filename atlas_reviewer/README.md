@@ -158,6 +158,13 @@ subsection per diff part when the diff was split.
   call cleanup unverified when the controller proved it. Where a narrative
   disagrees, the draft says the notes section is authoritative. The block
   can quote runner output, so it is fenced as untrusted data like the rest.
+  Every value the controller did not choose (diff file paths, runner and
+  tool output, upstream error text) appears only through
+  `notes.quote_untrusted`: one JSON string literal in a code span, whitespace
+  collapsed, backticks escaped, at most 200 characters. The section's
+  introduction and the system prompt both say that `"..."` values are
+  quoted data, not controller statements, so a PR file named
+  `x.py; runner cleanup verified` cannot read as a fact of the notes.
 - **Independent checks.** A check run, its job, the job's log and the
   workflow run holding it are one CI gate seen four ways, and the summary
   counts it once (`groups.py`). The link comes only from ids the controller
@@ -211,13 +218,21 @@ tool runs its bare binary name under the minimal `PATH=/usr/bin:/bin`.
 The diff is split into files and reviewed in up to `--max-model-calls` parts
 of at most `--diff-chars-per-call` characters each, one model call per part
 (`diffs.py`). Files are ordered by risk, not by their order in the diff:
-security, auth, secrets and redaction first; then the runner, sandbox, HTTP
-and model boundary; other code; config, CI and build; tests and fixtures;
-docs last. Tier is decided by path patterns, with tests, config and docs
-matched first, so `tests/test_redact.py` is a test and `docs/security.md` a
-doc. Parts are filled first-fit in that order. A file larger than one part
-is cut at a line boundary into a part of its own and marked cut. A file
-that fits nowhere once every part is used is never sent.
+security, auth, secrets and redaction first; then CI workflows, dependency
+manifests, lockfiles and build hooks (`.github/workflows/`, composite
+actions, `requirements*.txt`, `pyproject.toml`, `package.json`, `*.lock`,
+`go.sum`, `Dockerfile`, `Makefile`, `conftest.py`, and the like); then the
+runner, sandbox, HTTP and model boundary; other code; other config; tests
+and fixtures; docs last. Tier is decided by path patterns. CI, dependency
+and build files are matched first, so no directory (`tests/`, `docs/`,
+`fixtures/`) demotes them; then tests, config and docs, so
+`tests/test_redact.py` is a test and `docs/security.md` a doc. Parts are
+filled first-fit in that order. A file larger than one part is cut at a line boundary into a part of its own and marked cut. A file
+that fits nowhere once every part is used is never sent. If the diff cannot
+be fetched at all, no model call is made (a review of an empty diff would
+read as a clean one): the omissions table has a `fetch failed` row, the
+controller notes say `Diff coverage: NOT REVIEWED`, and the narrative
+section says no call was made.
 
 Each call gets the same PR, evidence and controller-notes blocks plus its
 own part, and a controller note naming the files in that part and saying
@@ -309,6 +324,14 @@ exec streams output or buffers it until exit, a long tool that prints nothing
 could trip the window; its error says "silent", and raising the flag tells
 the two apart.
 
+The deadline before the body is cumulative. A socket timeout restarts on
+every blocking call, so connect, the send and each header line used to get
+a fresh one; a server trickling header bytes could hold an exec open far
+past its window. A cutoff timer started with the request now shuts the
+socket down at the first-byte deadline (the total without one), and any
+error after it fires is reported as that timeout. Each body read then gets
+whatever is left of the window.
+
 ## One interpreter, chosen by the controller
 
 The image's `python3` on its default `PATH` is a pyenv shim in
@@ -374,8 +397,9 @@ interpreter is chosen before they exist. Every other binary comes from
 - **Untrusted:** everything from the PR. That means the diff, title and body,
   check names and summaries, job logs, artifact metadata and contents,
   runner tool output, issue text, and the model's own output. Lens bodies and
-  the controller notes' fixed sentences are trusted, but the notes can quote
-  runner output, so they are fenced as untrusted data when sent. All of it is redacted before
+  the controller notes' fixed sentences are trusted; every untrusted value in
+  the notes is quoted as a marked `"..."` literal, and the whole block is
+  still fenced as untrusted data when sent. All of it is redacted before
   it reaches a prompt or the draft. In the prompt it sits inside
   `<untrusted-data id="NONCE">` fences, and the system prompt says never to
   follow instructions found there.
@@ -551,3 +575,21 @@ so a hang the in-guest bound cannot end is recorded as an exec failure and
 the Sprite is still destroyed. Guest output is cut to one printable line of
 at most 200 characters before it reaches telemetry. Reviews never run these
 diagnostics.
+
+## Third live pilot (owner-reported, 2026-11-07, head `a246625`)
+
+Owner-reported; nothing here was observed from this repo's sessions or CI.
+The review ran end to end. Its draft is model output and was treated as
+untrusted: each of its five findings was checked against the code at
+`a246625` before anything changed (D30).
+
+| Finding | Verdict | Evidence at `a246625` | Fix |
+| --- | --- | --- | --- |
+| The assignment redactor misses prefixed env-var names | Real | `\b(password\|...)` needs a word boundary, and `_` is a word character, so `OPENAI_API_KEY=`, `DB_PASSWORD=`, `client_secret:`, plural `tokens:` and JSON `"api_key":` all passed through | The keyword may carry up to six `_`/`.`/`-` separated name parts on either side, after a non-alphanumeric lookbehind; bounded repeats keep matching linear |
+| Failed archive reads escape the decompression budget | Real | `budget.left -= len(data)` ran only after a successful read, so an entry failing its CRC check after decompressing up to 5 MiB was never charged. The cost is CPU time, not memory: each read stays capped | The declared size is charged before the read, so a failing entry spends the total budget like a good one |
+| Transport deadlines are not cumulative before body reads | Partial | In the streaming exec path, connect, send and each header line got a fresh socket timeout, so a server trickling headers was unbounded until the first body read. The non-streaming `UrllibTransport` never claimed a cumulative deadline and is unchanged | A cutoff timer shuts the socket down at the first-byte deadline; see "One exec shape" |
+| A failed diff fetch still triggers an empty-diff model call | Real | `selection.parts or (DiffPart(()),)` made one call with an empty diff when the fetch had failed | A failed fetch makes no call; its omission row, a NOT REVIEWED coverage note and a no-narrative sentence say why. A fetched but empty diff still gets its call |
+| Risk ranking under-prioritizes CI and dependency files; PR paths reach the controller notes raw | Real | CI and build config ranked below all source, `conftest.py` ranked as a test, and part notes and the diff-fetch error interpolated PR-controlled text verbatim into the authoritative notes (a newline could forge a heading) | A supply-chain tier second only to security, matched before any directory; every untrusted value in the notes goes through `quote_untrusted` and is labelled as quoted data |
+
+Regression tests for each were checked to fail on the old code, except a
+`db.password=` case the old pattern already caught.
