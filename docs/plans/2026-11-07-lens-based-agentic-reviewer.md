@@ -87,6 +87,9 @@ All of this runs on the controller unless it is marked *(Sprite)*.
    the operator's depth. Triage skips the call and runs the critical tier.
 4. **Run the repo's configured checks** once, per `tool-evidence.md`, through
    the bridge's closed check set. The results become the evidence block.
+   A configured check outside that set (for example ruff or pytest, when
+   no head-SHA CI evidence covers it) is not run. It is listed as an
+   unrun check in the coverage line, never as passing.
 5. **Run lens subagents** up to the parallelism limit. Each one:
    - **System prompt:** the controller's agent instructions, then that
      lens's `body.md`, then the *Finding contract* section of
@@ -104,10 +107,33 @@ All of this runs on the controller unless it is marked *(Sprite)*.
    `synthesis.md`'s own quote-the-line gate. For a `file:line` finding, the
    quoted `evidence` must appear in that range of the head blob. A finding
    that fails is moved to an "unverified" list, never dropped silently.
+   - **Redacted quotes.** Lenses only ever see redacted text, so the
+     controller runs the same `Redactor` over the head range before
+     comparing. A quote holding a mask then matches the masked line. The
+     raw secret never leaves the controller, and a quote with text that
+     isn't in the range still fails.
+   - **Removed lines.** A quote of deleted code isn't in the head blob. It
+     is checked against the `-` lines of that file's diff hunks, redacted
+     the same way, and the finding is labelled "removed lines". A quote
+     that matches neither the head range nor a removed line fails.
 7. **Merge.** One model call with `synthesis.md` as its instructions, over
    the checked findings, the coverage ledger and the tool-evidence
    coverage line. It produces the verdict, ranked sections, tensions,
    coverage and process notes in `synthesis.md`'s output format.
+   - **Reconciling the merge.** The merge is model output, so the
+     controller checks it against the checked findings before the draft
+     uses it. Every checked finding at or above the floor must appear in
+     the ranked sections or be named as merged into one that does.
+     `synthesis.md`'s permitted exclusions (below-floor findings sent to
+     *Non-blocking*, and pre-existing or improvement findings that don't
+     set the verdict) count as present. No finding may appear that no lens
+     reported, and no severity may rise (`synthesis.md` forbids inflation).
+     The verdict must follow `synthesis.md`'s rule from the highest
+     surviving verdict-setting severity: one Blocker means block.
+   - **Merge mismatch.** On any mismatch the merged text is kept as
+     untrusted output, marked "merge inconsistent", and has no verdict
+     line. The draft lists every checked finding unmerged and ranked by
+     severity, as when the merge fails.
 8. **Write the draft and destroy the Sprite.** The draft keeps today's
    controller-generated sections (runner proof, budget, telemetry,
    omissions, lens coverage). The merged review sits under the existing
@@ -135,7 +161,10 @@ All of this runs on the controller unless it is marked *(Sprite)*.
   - the Sprite becomes unavailable.
 
   In every case except the first, the lens is reported as **partial**
-  with what it read. It is never reported as clean.
+  with what it read. It is never reported as clean. The first case counts
+  as complete only if the ledger shows the lens read the change: at least
+  one `diff_file` page, or a `read_file` of a changed file. An empty list
+  with no such read is partial, "no source read".
 - **Scheduling.** The controller runs subagents with a bounded worker pool
   (proposal: 2 at once, at most 4). Each subagent owns its message
   history. No lens sees another lens's history. That keeps attribution
@@ -171,8 +200,13 @@ Python, so PR files can't shim it.
 
 **Argument rules.** These apply to every tool before any exec:
 
-- **`BASE` and `HEAD`** are controller-fixed SHAs from the event and the
-  compare API. The model never supplies a revision.
+- **`BASE` and `HEAD`** are controller-fixed revisions: the SHAs from the
+  event and the compare API, or under Option B the synthetic commit IDs
+  that staging recorded for them. The model never supplies a revision.
+- **Audit mode** has no `BASE` and no diff tools. `log` becomes
+  `git log --no-color --format=%H%x09%an%x09%ad%x09%s -n N HEAD -- PATH`,
+  with `n` up to 200 (proposal), so churn and bus-factor lenses see enough
+  history. That needs Option A staging.
 - **Paths and prefixes** must be repo-relative and NUL-free. They may not
   start with `-` or `/`. No segment may be `..`. Each is at most 512
   bytes, and each is passed after `--`.
@@ -215,10 +249,16 @@ content are all PR-controlled data.
 `git diff BASE...HEAD`, `log` and `blame` need git objects in the Sprite.
 Two options, both keeping the controller free of a working tree:
 
-- **Option A — a git bundle.** The controller makes a bare, depth-limited
-  fetch of `BASE` and `HEAD` with the read-only installation token. It
-  writes a bundle and uploads it through the existing stdin path. The
-  Sprite clones from the file with no network. The bundle carries objects
+- **Option A — a git bundle.** The controller makes a bare fetch of
+  `BASE` and `HEAD` with the read-only installation token, with no depth
+  limit. A shallow fetch won't do: per git-bundle(1), a bundle can list
+  prerequisite commits that the receiving repository must already have,
+  and the Sprite's empty repository has none, so the offline clone would
+  fail. The full-history fetch is bounded by a byte cap (proposal: the
+  existing 9 MiB upload cap). Over the cap, staging falls back to
+  Option B, and the draft says history-dependent tools are limited. The
+  controller writes a bundle and uploads it through the existing stdin
+  path. The Sprite clones from the file with no network. The bundle carries objects
   and refs only, never a remote URL or a token. The cost is git on the
   controller and a fetch of PR-controlled objects onto the trusted host.
   Those objects are never checked out or executed there.
@@ -228,7 +268,10 @@ Two options, both keeping the controller free of a working tree:
   `log` and `blame` only see that synthetic history, so PR commit
   metadata comes from the GitHub API as fenced evidence instead. Each
   tarball stays under the existing 9 MiB cap, and both go through the
-  same upload exec.
+  same upload exec. The synthetic commits have their own IDs, which
+  differ from the GitHub SHAs. Staging reports both IDs back, and the
+  controller fills `BASE` and `HEAD` in the bridge templates with them.
+  The GitHub SHAs stay as provenance in the draft and the ledger.
 
 Proposal: build **Option B first**. It reuses the existing fetch and
 upload with no new trusted-host git. Option A comes only when a lens needs
@@ -298,9 +341,10 @@ through the existing redactor.
   bounded evidence block, and its `body.md` decides what is its own.
   Mechanized routing is a gap, not proposed.
 - **Merging and deduplication with lens attribution.** `synthesis.md`,
-  unchanged, as one merge call. The controller only checks the finding
+  unchanged, as one merge call. The controller checks the finding
   contract and the quote-the-line gate that `synthesis.md` already
-  requires.
+  requires. It then reconciles the merge output against the checked
+  findings (step 7).
 - **Coverage.** `synthesis.md`'s *Coverage & limitations* and
   `tool-evidence.md`'s coverage line, filled from the controller's
   per-lens ledger. The ledger records what each lens actually read:
@@ -354,11 +398,12 @@ limit, so this design can't change it. See open question 1.
 | Tool timeout or output cap | A "timed out" or truncation marker goes back. It is a coverage gap in the ledger and the coverage line. |
 | Sprite dies mid-review | Lenses still running end as partial. Finished lenses keep their findings. Destroy and verify run as today, and the ledger and sweep cover a failed destroy. |
 | Lens hits its turn or budget limit | Partial. Its parsed findings so far are kept if they parse, and coverage lists what it read. |
-| Lens output doesn't parse against the finding contract | No findings from that lens. It is listed as "ran, no valid findings". Nothing is fabricated for it. |
+| Lens output doesn't parse against the finding contract | Partial: "output did not parse". No findings from that lens, and nothing is fabricated for it. The merge and the draft get it as a coverage gap, never as a clean lens. |
 | Quote-the-line gate fails | The finding moves to an "unverified" list in the draft. It never feeds the verdict. |
 | Review budget or call cap reached | Remaining lenses are "selected, not run" (`synthesis.md` coverage wording). |
 | Picker fails | Critical tier, as D32 does now. |
 | Merge call fails or doesn't parse | The draft lists each lens's checked findings unmerged, ranked by severity, under "not synthesized". There is no verdict line. |
+| Merge drops or changes a checked finding, adds one, or gives a verdict its findings don't support | "Merge inconsistent": the same unmerged listing and no verdict line, with the merged text kept as untrusted output (see step 7). |
 | Deadline passes | The same as the Sprite dying: what finished is reported and the rest is not run. |
 | Model returns another model's response | Rejected, as D25 requires. |
 
