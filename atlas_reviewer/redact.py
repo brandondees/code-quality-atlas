@@ -87,10 +87,11 @@ def tail(redacted: RedactedText, max_chars: int) -> RedactedText:
     text = redacted.text
     if len(text) <= max_chars:
         return redacted
-    cut = text[-max_chars:]
-    return RedactedText(
-        cut[cut.find("\n") + 1 :], redacted.redaction_count, len(text), _MINT
-    )
+    start = len(text) - max(max_chars, 0)
+    cut = text[start:]
+    if text[start - 1] != "\n":
+        cut = cut[cut.find("\n") + 1 :]
+    return RedactedText(cut, redacted.redaction_count, len(text), _MINT)
 
 
 @dataclass(frozen=True)

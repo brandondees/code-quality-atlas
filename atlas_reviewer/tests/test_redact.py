@@ -165,3 +165,18 @@ def test_tail_keeps_whole_lines_and_records_the_full_length():
     assert cut.text == "third"
     assert cut.truncated_from == len(full.text)
     assert cut.redaction_count == full.redaction_count
+
+
+def test_tail_keeps_a_first_line_that_starts_exactly_at_the_cut():
+    assert tail(redact("one\ntwo\nthree"), 9).text == "two\nthree"
+    assert tail(redact("one\ntwo\nthree"), 8).text == "three"
+
+
+def test_tail_with_a_zero_budget_is_empty():
+    cut = tail(redact("a single nonempty line"), 0)
+    assert cut.text == ""
+    assert cut.truncated_from == len("a single nonempty line")
+
+
+def test_tail_of_one_long_line_keeps_its_end():
+    assert tail(redact("x" * 10 + "end"), 5).text == "x" * 2 + "end"
