@@ -331,11 +331,13 @@ class _SpritesServer:
 
     def stream(self, method, url, headers, body, window, max_bytes=None):
         self.streams.append((method, url, dict(headers), body, window))
-        script = parse_qsl(urlsplit(url).query)[2][1]
+        script = [v for k, v in parse_qsl(urlsplit(url).query) if k == "cmd"][-1]
         out = (
             "atlas-probe:present:python3:/usr/bin/python3:/usr/bin/python3.13\n"
             "atlas-probe:present:sh:/usr/bin/sh:/usr/bin/dash"
             if "atlas-probe" in script
+            else "atlas-python:/usr/bin/python3:3.12.3"
+            if "atlas-python" in script
             else str(len(body))
         )
         return ok(
@@ -363,31 +365,49 @@ def _review_over_http(tools):
 def test_every_exec_in_a_review_is_built_the_same_way():
     """Run #6: the tool check and unpack worked live and the tool version
     exec hung. Every exec, whatever its stage, must leave the client in
-    one shape: same query keys, headers, `sh -c` wrapper and EOF rule."""
+    one shape: same query keys, headers, minimal `env -i` + `sh -c` wrapper
+    and EOF rule. Run #7: no `dir`/`env` query parameter either; the
+    wrapper alone sets the environment."""
     from atlas_reviewer.controller import DEFAULT_TOOLS
-    from atlas_reviewer.runner import START_MARKER, TRIVIAL_TOOL
+    from atlas_reviewer.runner import MINIMAL_ENV, START_MARKER, TRIVIAL_TOOL
 
     server, outcome = _review_over_http((*DEFAULT_TOOLS, TRIVIAL_TOOL))
     assert outcome.report.status.value == "completed"
-    assert len(server.streams) == 7
+    assert len(server.streams) == 8
     for method, url, headers, body, window in server.streams:
         query = parse_qsl(urlsplit(url).query)
         argv = [v for k, v in query if k == "cmd"]
         assert method == "POST"
-        assert [k for k, _ in query] == ["cmd", "cmd", "cmd", "stdin"]
+        assert [k for k, _ in query] == ["cmd"] * 8 + ["stdin"]
         assert dict(query)["stdin"] == "true"
         assert set(headers) == {
             "Authorization", "User-Agent", "Content-Type", "Content-Length", "Connection",
         }  # fmt: skip
         assert headers["Content-Type"] == "application/octet-stream"
         assert headers["Content-Length"] == str(len(body))
-        assert argv[:2] == ["sh", "-c"]
-        assert argv[2].startswith(f"echo {START_MARKER}; ")
-        assert argv[2].endswith("; echo __ATLAS_EXIT__=$?")
+        assert argv[:7] == ["/usr/bin/env", "-i", *MINIMAL_ENV, "/bin/sh", "-c"]
+        assert argv[7].startswith(f"echo {START_MARKER}; ")
+        assert argv[7].endswith("; echo __ATLAS_EXIT__=$?")
         feed = f"head -c {len(body)} | {{ " if body else "{ "
-        assert argv[2].startswith(f"echo {START_MARKER}; {feed}")
-        assert argv[2].count("</dev/null") == (0 if body else 1)
+        assert argv[7].startswith(f"echo {START_MARKER}; {feed}")
+        assert argv[7].count("</dev/null") == (0 if body else 1)
         assert (window.first_byte_s is None) == bool(body)
+
+
+def test_a_review_runs_python_tools_only_by_the_resolved_absolute_path():
+    from atlas_reviewer.controller import DEFAULT_TOOLS
+
+    server, outcome = _review_over_http(DEFAULT_TOOLS)
+    scripts = [
+        [v for k, v in parse_qsl(urlsplit(s[1]).query) if k == "cmd"][-1]
+        for s in server.streams
+    ]
+    tool_scripts = [s for s in scripts if "compileall" in s or "--version" in s]
+    assert len(tool_scripts) == 2
+    assert all("/usr/bin/python3 -I " in s for s in tool_scripts)
+    assert not any(" python3 " in s or "/.sprite/bin" in s for s in tool_scripts)
+    assert outcome.python is not None
+    assert outcome.python.path == "/usr/bin/python3"
 
 
 def test_a_review_sends_each_exec_its_own_budget_not_the_30s_default():
@@ -399,16 +419,19 @@ def test_a_review_sends_each_exec_its_own_budget_not_the_30s_default():
         ToolSpec,
     )
 
-    tool = ToolSpec("t", "python3", "python3 --version", "true", timeout_s=120)
+    tool = ToolSpec(
+        "t", "python3", "{python} --version", "{python} -c pass", timeout_s=120
+    )
     server, outcome = _review_over_http((tool,))
     assert outcome.report.cleanup.value == "destroyed (verified absent)"
     windows = [s[4] for s in server.streams]
     assert windows == [
+        StreamWindow(PROBE_BUDGET_S, FIRST_FRAME_BUDGET_S),
         StreamWindow(PROBE_BUDGET_S, FIRST_FRAME_BUDGET_S),
         StreamWindow(UPLOAD_BUDGET_S, None),
         StreamWindow(UNPACK_BUDGET_S, FIRST_FRAME_BUDGET_S),
         StreamWindow(135.0, FIRST_FRAME_BUDGET_S),
         StreamWindow(135.0, FIRST_FRAME_BUDGET_S),
     ]
-    assert [s[3] for s in server.streams][:2] == [b"", b"tarball"]
+    assert [s[3] for s in server.streams][:3] == [b"", b"", b"tarball"]
     assert {r[2] for r in server.requests} == {30.0}

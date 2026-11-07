@@ -22,10 +22,15 @@ stage, its purpose, its timeout, how long it ran and how far into the run
 it failed.
 
 Every exec has one shape (`exec_argv` here, `sprites_api.exec_request` for
-the HTTP request): `sh -c` prints a start marker, runs the script with a
-stdin of exactly the bytes sent and then EOF (`head -c N` with input,
-`/dev/null` without, so no command waits on the exec channel's stdin), and
-prints the exit marker. A command that sends no input must produce its
+the HTTP request): `/usr/bin/env -i` with `MINIMAL_ENV` runs `/bin/sh -c`,
+which prints a start marker, runs the script with a stdin of exactly the
+bytes sent and then EOF (`head -c N` with input, `/dev/null` without, so no
+command waits on the exec channel's stdin), and prints the exit marker. The
+minimal environment keeps the image's pyenv shims (`/.sprite/bin`) and any
+`PYENV_*` setting off the PATH; Python tools run the interpreter the
+controller resolved by absolute path before unpack (`interpreter.py`), so
+nothing in the PR can choose an interpreter or a tool binary. Only the
+probe's labelled diagnostics run in the Sprite's default environment. A command that sends no input must produce its
 first output byte within `first_frame_s`; the start marker makes that
 immediate for any command that actually started.
 
@@ -55,6 +60,17 @@ from dataclasses import dataclass, field
 
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import CleanupStatus, RunnerReport, RunnerStatus
+from atlas_reviewer.interpreter import (
+    PYTHON_PLACEHOLDER,
+    DiagnosticSpec,
+    TrustedPython,
+    choose_python,
+    diagnostics_after_unpack,
+    diagnostics_before_unpack,
+    resolve_script,
+    summarize,
+    with_python,
+)
 from atlas_reviewer.ports import (
     BoundaryError,
     Clock,
@@ -88,6 +104,9 @@ PROBE_BUDGET_S = 60.0
 UPLOAD_BUDGET_S = 300.0
 UNPACK_BUDGET_S = 120.0
 FIRST_FRAME_BUDGET_S = 30.0
+DIAGNOSTIC_BOUND_S = 15
+PYTHON_BINARY = "python3"
+MINIMAL_ENV = ("PATH=/usr/bin:/bin", "HOME=/tmp", "LANG=C.UTF-8")
 STDIN_CHECK_BYTES = 3 * 1024 * 1024
 _FRAMING_BYTES = dict.fromkeys(range(0x05))
 
@@ -112,10 +131,26 @@ class ToolSpec:
     timeout_s: int = 120
 
     def __post_init__(self) -> None:
+        """A `python3` tool must name the interpreter as `{python}` in both
+        commands, so it can only ever run the resolved absolute path."""
         if not _BINARY_RE.fullmatch(self.binary):
             raise ValueError(
                 f"tool binary must be a bare command name: {self.binary!r}"
             )
+        placeholders = [
+            PYTHON_PLACEHOLDER in c for c in (self.version_cmd, self.run_cmd)
+        ]
+        if self.needs_python != all(placeholders) or any(placeholders) != all(
+            placeholders
+        ):
+            raise ValueError(
+                f"a {PYTHON_BINARY} tool must use {PYTHON_PLACEHOLDER} in both "
+                "commands, and only a python3 tool may use it"
+            )
+
+    @property
+    def needs_python(self) -> bool:
+        return self.binary == PYTHON_BINARY
 
 
 TRIVIAL_TOOL = ToolSpec(
@@ -125,8 +160,12 @@ TRIVIAL_TOOL = ToolSpec(
 
 @dataclass(frozen=True)
 class RunnerJob:
+    """`diagnose` adds the probe-only Python diagnostics; a review never
+    sets it."""
+
     source_tarball: bytes
     tools: tuple[ToolSpec, ...]
+    diagnose: bool = False
 
 
 @dataclass(frozen=True)
@@ -147,9 +186,19 @@ ToolResult = ToolRan | ToolAbsent
 
 
 @dataclass(frozen=True)
+class Diagnostic:
+    name: str
+    expectation: str
+    exit_code: int | None
+    detail: str
+
+
+@dataclass(frozen=True)
 class RunnerOutcome:
     report: RunnerReport
     results: tuple[ToolResult, ...]
+    python: TrustedPython | None = None
+    diagnostics: tuple[Diagnostic, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -200,6 +249,7 @@ class _Exec:
     script: str
     stdin: bytes = b""
     budget_s: float | None = None
+    sprite_env: bool = False
 
 
 def runner_name(
@@ -252,12 +302,16 @@ def parse_paths(text: str) -> dict[str, str]:
     return {b: f"{p} -> {real}" for b, p, real in _PATH_RE.findall(text)}
 
 
-def exec_argv(script: str, stdin_len: int) -> tuple[str, ...]:
+def exec_argv(script: str, stdin_len: int, sprite_env: bool = False) -> tuple[str, ...]:
+    """`sprite_env` drops the `env -i` prefix and so runs in the Sprite's
+    default environment; only probe diagnostics ask for it."""
     feed, redirect = (
         (f"head -c {stdin_len} | ", "") if stdin_len else ("", " </dev/null")
     )
+    env = () if sprite_env else ("/usr/bin/env", "-i", *MINIMAL_ENV)
     return (
-        "sh",
+        *env,
+        "/bin/sh",
         "-c",
         f"echo {START_MARKER}; {feed}{{ {script}\n}}{redirect}; echo {EXIT_MARKER}$?",
     )
@@ -400,19 +454,27 @@ def run_disposable(
     """The review's exec sequence: tool check, upload, unpack, then each
     available tool. `probe-runner --sequence review` calls this too."""
     results: list[ToolResult] = []
+    pythons: list[TrustedPython | None] = []
+    diagnostics: list[Diagnostic] = []
 
     def body(run: _Run) -> str:
-        available = _probe(run, job.tools)
+        found = _Found(_probe(run, job.tools), _python_for(run, job))
+        pythons.append(found.python)
+        diagnostics.extend(_diagnose(run, diagnostics_before_unpack(), job.diagnose))
         _upload(run, job.source_tarball)
         _unpack(run)
-        results.extend(_tool(run, tool, available) for tool in job.tools)
+        results.extend(_tool(run, tool, found) for tool in job.tools)
+        after = diagnostics_after_unpack(found.python, WORKDIR, DIAGNOSTIC_BOUND_S)
+        diagnostics.extend(_diagnose(run, after, job.diagnose))
         return f"{len(results)} tool(s) attempted"
 
     report = _disposable(
         api, ledger, body, name=name, deadline_s=deadline_s, clock=clock,
         telemetry=telemetry or Telemetry(clock), first_frame_s=first_frame_s,
     )  # fmt: skip
-    return RunnerOutcome(report, tuple(results))
+    return RunnerOutcome(
+        report, tuple(results), next(iter(pythons), None), tuple(diagnostics)
+    )
 
 
 def probe_runner(
@@ -510,6 +572,7 @@ def _raw_exec(run: _Run, step: _Exec) -> bytes:
         "timeout_s": round(timeout, 1),
         "first_frame_s": None if first is None else round(first, 1),
         "bytes_sent": len(step.stdin),
+        "env": "sprite default" if step.sprite_env else "minimal",
     }
     return run.telemetry.span(
         "exec",
@@ -521,7 +584,7 @@ def _raw_exec(run: _Run, step: _Exec) -> bytes:
 
 
 def _send(run: _Run, step: _Exec, timeout: float, first: float | None) -> bytes:
-    argv = exec_argv(step.script, len(step.stdin))
+    argv = exec_argv(step.script, len(step.stdin), step.sprite_env)
     try:
         return run.api.exec(run.name, argv, step.stdin, timeout, first)
     except StreamTimeoutError as exc:
@@ -580,6 +643,79 @@ def _probe(run: _Run, tools: tuple[ToolSpec, ...]) -> dict[str, bool]:
     return found
 
 
+@dataclass(frozen=True)
+class _Found:
+    available: dict[str, bool]
+    python: TrustedPython | None
+
+
+def _python_for(run: _Run, job: RunnerJob) -> TrustedPython | None:
+    if not (job.diagnose or any(t.needs_python for t in job.tools)):
+        return None
+    return run.telemetry.span(
+        "interpreter",
+        "resolve trusted python",
+        lambda: _resolve_python(run),
+        after=_python_fields,
+    )
+
+
+def _resolve_python(run: _Run) -> TrustedPython | None:
+    code, text = _exec(
+        run,
+        _Exec(
+            "interpreter", "resolve python", resolve_script(), budget_s=PROBE_BUDGET_S
+        ),
+    )
+    return choose_python(text) if code == 0 else None
+
+
+def _python_fields(python: TrustedPython | None) -> Fields:
+    if python is None:
+        return {"python": "none found"}
+    return {"python": python.path, "python_version": python.version}
+
+
+def _diagnose(
+    run: _Run, specs: tuple[DiagnosticSpec, ...], enabled: bool
+) -> list[Diagnostic]:
+    return [_diagnostic(run, spec) for spec in specs] if enabled else []
+
+
+def _diagnostic(run: _Run, spec: DiagnosticSpec) -> Diagnostic:
+    """Never fatal: a diagnostic that fails or hangs is itself the result."""
+    budget = PROBE_BUDGET_S if spec.bound_s is None else spec.bound_s + 10.0
+    step = _Exec(
+        "diagnostic",
+        spec.name,
+        spec.script,
+        budget_s=budget,
+        sprite_env=spec.sprite_env,
+    )
+    try:
+        code, text = _exec(run, step)
+    except BoundaryError as exc:
+        return _recorded(
+            run, Diagnostic(spec.name, spec.expectation, None, f"exec failed: {exc}")
+        )
+    return _recorded(
+        run, Diagnostic(spec.name, spec.expectation, code, summarize(text))
+    )
+
+
+def _recorded(run: _Run, result: Diagnostic) -> Diagnostic:
+    run.telemetry.record(
+        "diagnostic",
+        result.name,
+        {
+            "expectation": result.expectation,
+            "exit_status": result.exit_code,
+            "detail": result.detail,
+        },
+    )
+    return result
+
+
 def _upload(run: _Run, tarball: bytes) -> None:
     """`exec_argv` feeds exactly the bytes sent through `head -c`, so the
     upload does not depend on the exec channel delivering a stdin EOF; the
@@ -635,11 +771,11 @@ def _confirm_unpack(result: tuple[int | None, str]) -> int:
     return code
 
 
-def _tool(run: _Run, tool: ToolSpec, available: dict[str, bool]) -> ToolResult:
+def _tool(run: _Run, tool: ToolSpec, found: _Found) -> ToolResult:
     return run.telemetry.span(
         "tool",
         tool.name,
-        lambda: _run_if_available(run, tool, available),
+        lambda: _run_if_available(run, tool, found),
         after=_tool_fields,
     )
 
@@ -653,15 +789,27 @@ def _tool_fields(result: ToolResult) -> Fields:
     raise TypeError(f"not a tool result: {result!r}")  # pragma: no cover
 
 
-def _run_if_available(
-    run: _Run, tool: ToolSpec, available: dict[str, bool]
-) -> ToolResult:
-    if not available.get(tool.binary, False):
-        return ToolAbsent(tool, f"`{tool.binary}` not found by the availability probe")
-    return _run_tool(run, tool)
+def _run_if_available(run: _Run, tool: ToolSpec, found: _Found) -> ToolResult:
+    missing = _missing(tool, found)
+    if missing:
+        return ToolAbsent(tool, missing)
+    return _run_tool(run, tool, found.python)
 
 
-def _run_tool(run: _Run, tool: ToolSpec) -> ToolResult:
+def _missing(tool: ToolSpec, found: _Found) -> str:
+    if tool.needs_python:
+        return "" if found.python else "no trusted Python interpreter was resolved"
+    if found.available.get(tool.binary, False):
+        return ""
+    return f"`{tool.binary}` not found by the availability probe"
+
+
+def _run_tool(run: _Run, tool: ToolSpec, python: TrustedPython | None) -> ToolResult:
+    version_cmd, run_cmd = (
+        (tool.version_cmd, tool.run_cmd)
+        if python is None
+        else (with_python(tool.version_cmd, python), with_python(tool.run_cmd, python))
+    )
     budget = tool.timeout_s + _EXEC_SLACK_S
     stage = f"tool {tool.name}"
     v_code, v_text = _exec(
@@ -669,13 +817,13 @@ def _run_tool(run: _Run, tool: ToolSpec) -> ToolResult:
         _Exec(
             stage,
             f"{tool.name} version",
-            f"cd {WORKDIR} && {tool.version_cmd}",
+            f"cd {WORKDIR} && {version_cmd}",
             budget_s=budget,
         ),
     )
     if v_code != 0:
         return ToolAbsent(tool, f"version probe exited {v_code}: {v_text[-300:]}")
-    script = f"cd {WORKDIR} && timeout --kill-after=5 {tool.timeout_s} {tool.run_cmd}"
+    script = f"cd {WORKDIR} && timeout --kill-after=5 {tool.timeout_s} {run_cmd}"
     code, text = _exec(run, _Exec(stage, f"{tool.name} run", script, budget_s=budget))
     return ToolRan(tool, _first_line(v_text), code, text)
 

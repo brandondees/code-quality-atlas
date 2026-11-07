@@ -485,10 +485,22 @@ def test_probe_runner_review_sequence_runs_the_real_exec_order_on_a_tarball(tmp_
     assert "cleanup: destroyed (verified absent)" in text
     assert f"source tarball: {tarball.stat().st_size} bytes" in text
     assert "tool source-file-count (posix-sh): exit 0; output: '3'" in text
+    assert (
+        "trusted python: /.sprite/languages/python/pyenv/versions/3.13.7/bin/python3 "
+        "(3.13.7)" in text
+    )
+    assert "diagnostic bare python3 in the checkout: exit " in text
+    assert "[expected: expected-may-hang: exit 124 after 15s" in text
     assert "## Lifecycle telemetry" in text
     scripts = [c[2] for c in api.calls if c[0] == "exec"]
-    steps = ["for b in", "head -c", "tar -xzf", "echo posix-sh", "find ."]
-    assert [step in s for step, s in zip(steps, scripts, strict=True)] == [True] * 5
+    steps = [
+        "for b in", "atlas-python:", "readlink -f", "ls -1", "head -c", "tar -xzf",
+        "echo posix-sh", "find .", "-I --version", "PYENV_VERSION=3.13.7",
+        "timeout -k 2 15 python3 --version",
+    ]  # fmt: skip
+    assert [step in s for step, s in zip(steps, scripts, strict=True)] == [True] * 11
+    sprite_env = [a[0] == "/bin/sh" for a in api.argv_seen]
+    assert sprite_env == [False] * 9 + [True] * 2
     (events_file,) = (tmp_path / "telemetry").glob("probe-review-*.jsonl")
     steps = [(e["phase"], e["step"]) for e in jsonl(events_file)]
     assert ("upload", f"{tarball.stat().st_size}-byte tarball") in steps
@@ -575,7 +587,7 @@ def test_the_first_frame_window_flag_reaches_every_exec_without_input(tmp_path):
         env={}, out=io.StringIO(), err=io.StringIO(), sprites_factory=lambda env: api,
     )  # fmt: skip
     assert code == cli.EXIT_OK
-    assert api.first_bytes_seen == [7.0, None, 7.0, 7.0, 7.0]
+    assert api.first_bytes_seen == [7.0] * 4 + [None] + [7.0] * 6
 
 
 @pytest.mark.parametrize("value", ["0", "-1"])

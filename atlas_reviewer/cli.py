@@ -52,6 +52,7 @@ from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.harness import SkillBundleHarness, load_bundle
 from atlas_reviewer.http import UrllibStreamingTransport, UrllibTransport
 from atlas_reviewer.instrumented import InstrumentedGitHub
+from atlas_reviewer.interpreter import TrustedPython
 from atlas_reviewer.ledger import FileLedger, ReviewInProgressError, single_review_lock
 from atlas_reviewer.openrouter import OpenRouterProvider
 from atlas_reviewer.ports import BoundaryError, Clock, ModelProvider, SpritesApi
@@ -60,6 +61,7 @@ from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import (
     FIRST_FRAME_BUDGET_S,
     TRIVIAL_TOOL,
+    Diagnostic,
     RunnerJob,
     ToolAbsent,
     ToolRan,
@@ -390,7 +392,7 @@ def _probe_review_sequence(
     outcome = run_disposable(
         args.sprites_factory(env),
         FileLedger(_state_dir(args, env) / "runners.ledger"),
-        RunnerJob(tarball, tools),
+        RunnerJob(tarball, tools, diagnose=True),
         name=runner_name(clock),
         deadline_s=args.deadline_seconds,
         clock=clock,
@@ -400,6 +402,21 @@ def _probe_review_sequence(
     _write_report(outcome.report, out)
     out.write(f"source tarball: {len(tarball)} bytes\n")
     out.writelines(f"{_tool_report(r)}\n" for r in outcome.results)
+    out.write(f"{_python_report(outcome.python)}\n")
+    out.writelines(f"{_diagnostic_report(d)}\n" for d in outcome.diagnostics)
+
+
+def _python_report(python: TrustedPython | None) -> str:
+    if python is None:
+        return "trusted python: none resolved"
+    return f"trusted python: {python.path} ({python.version})"
+
+
+def _diagnostic_report(result: Diagnostic) -> str:
+    return (
+        f"diagnostic {result.name}: exit {result.exit_code}: {result.detail} "
+        f"[expected: {result.expectation}]"
+    )
 
 
 def _probe_source(

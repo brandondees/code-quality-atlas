@@ -607,26 +607,33 @@ def test_stdin_roundtrip_reports_a_nonzero_exit_as_a_failure():
 # --- one exec shape, and failing fast on silence (run #6) ------------------
 
 COMPILEALL = ToolSpec(
-    "python-compileall", "python3", "python3 --version", "python3 -m compileall -q ."
+    "python-compileall",
+    "python3",
+    "{python} -I --version",
+    "{python} -I -m compileall -q .",
 )
 PY_RULES = (
     ExecRule("tar -xzf", "", 0),
-    ExecRule("python3 --version", "Python 3.13.7", 0),
+    ExecRule("-I --version", "Python 3.13.7", 0),
     ExecRule("compileall", "", 0),
 )
 
 
 def test_exec_argv_gives_every_command_exactly_its_stdin_then_eof():
+    env = ("/usr/bin/env", "-i", "PATH=/usr/bin:/bin", "HOME=/tmp", "LANG=C.UTF-8")
     assert exec_argv("tar -xzf a", 0) == (
-        "sh",
+        *env,
+        "/bin/sh",
         "-c",
         f"echo {START_MARKER}; {{ tar -xzf a\n}} </dev/null; echo __ATLAS_EXIT__=$?",
     )
     assert exec_argv("cat > f", 7) == (
-        "sh",
+        *env,
+        "/bin/sh",
         "-c",
         f"echo {START_MARKER}; head -c 7 | {{ cat > f\n}}; echo __ATLAS_EXIT__=$?",
     )
+    assert exec_argv("true", 0, sprite_env=True)[:2] == ("/bin/sh", "-c")
     assert strip_start(f"{START_MARKER}\nout\n") == "out\n"
     assert strip_start("no marker") == "no marker"
 
@@ -641,9 +648,9 @@ def test_every_exec_of_a_review_uses_the_one_wrapper():
     )
     outcome = run(api, tools=(COMPILEALL, TRIVIAL_TOOL))
     assert outcome.report.status is RunnerStatus.COMPLETED
-    assert len(api.argv_seen) == 7
+    assert len(api.argv_seen) == 8
     for argv, stdin in zip(api.argv_seen, api.stdin_seen, strict=True):
-        assert argv == exec_argv(_inner(argv[2]), len(stdin))
+        assert argv == exec_argv(_inner(argv[-1]), len(stdin))
 
 
 def _inner(script):
@@ -657,7 +664,7 @@ def test_only_commands_without_input_get_the_first_frame_window():
         api, MemoryLedger(), RunnerJob(b"tarball-bytes", (COMPILEALL,)), name=NAME,
         deadline_s=600.0, clock=FakeClock(), first_frame_s=5.0,
     )  # fmt: skip
-    assert api.first_bytes_seen == [5.0, None, 5.0, 5.0, 5.0]
+    assert api.first_bytes_seen == [5.0, 5.0, None, 5.0, 5.0, 5.0]
     run(api := FakeSprites(rules=PY_RULES), tools=(COMPILEALL,), deadline_s=600.0)
     assert set(api.first_bytes_seen) - {None} == {FIRST_FRAME_BUDGET_S}
 
@@ -676,7 +683,7 @@ class _SilentVersion(FakeSprites):
         self.clock = clock
 
     def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
-        if "python3 --version" in argv[-1] and first_byte_s is not None:
+        if "-I --version" in argv[-1] and first_byte_s is not None:
             super().exec(name, argv, stdin, timeout_s, first_byte_s)
             self.clock.advance(first_byte_s)
             raise StreamTimeoutError(

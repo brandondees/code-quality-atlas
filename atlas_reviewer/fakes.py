@@ -5,7 +5,8 @@ GitHub token source.
 Used by the test suite and by `--dry-run`; none ever touches a real API.
 `FakeSprites` records every control-plane call in order so a caller can
 assert on lifecycle (policy before exec, destroy always), and answers the
-runner's tool-availability probe from its `installed` set.
+runner's tool-availability probe from its `installed` set and its
+interpreter resolution from `pythons`.
 """
 
 from __future__ import annotations
@@ -16,12 +17,14 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from atlas_reviewer.interpreter import PYENV_VERSIONS, PYTHON_TAG
 from atlas_reviewer.ports import BoundaryError, Json, NotFoundError
 from atlas_reviewer.runner import EXIT_MARKER, EXIT_NOT_FOUND, PROBE_TAG, START_MARKER
 
 ExecHandler = Callable[[str, bytes], tuple[str, int]]
 _HANG_LIMIT_S = 10.0
 _FEED_RE = re.compile(r"head -c (\d+) \| ")
+PYENV_PYTHON = f"{PYENV_VERSIONS}/3.13.7/bin/python3"
 
 
 @dataclass(frozen=True)
@@ -45,10 +48,13 @@ class _Sprite:
 
 @dataclass
 class FakeSprites:
-    """`installed=None` reports every probed binary present."""
+    """`installed=None` reports every probed binary present; `pythons` are
+    the `(path, version)` pairs the interpreter resolution reports, verbatim
+    (so a test can report a path the runner must refuse)."""
 
     rules: Sequence[ExecRule] = ()
     installed: frozenset[str] | None = None
+    pythons: tuple[tuple[str, str], ...] = ((PYENV_PYTHON, "3.13.7"),)
     fail_on: Mapping[str, BoundaryError] = field(default_factory=dict)
     policy_read_back: Json | None = None
     hang_on: str | None = None
@@ -138,6 +144,8 @@ class FakeSprites:
     def _answer(self, script: str, stdin: bytes) -> tuple[str, int]:
         if PROBE_TAG in script:
             return self._probe(script), 0
+        if PYTHON_TAG in script:
+            return "\n".join(f"{PYTHON_TAG}:{p}:{v}" for p, v in self.pythons), 0
         if "wc -c" in script and _FEED_RE.search(script):
             return str(len(stdin)), 0
         for rule in self.rules:

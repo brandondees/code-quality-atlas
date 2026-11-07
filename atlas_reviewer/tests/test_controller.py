@@ -26,7 +26,10 @@ SHELLCHECK = ToolSpec(
     "shellcheck", "shellcheck", "shellcheck --version", "shellcheck x.sh"
 )
 COMPILEALL = ToolSpec(
-    "python-compileall", "python3", "python3 --version", "python3 -m compileall -q ."
+    "python-compileall",
+    "python3",
+    "{python} -I --version",
+    "{python} -I -m compileall -q .",
 )
 FULL_TOOLS = (COMPILEALL, RUFF, SHELLCHECK)
 
