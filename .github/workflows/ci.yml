@@ -520,10 +520,17 @@ jobs:
         # obligation on this repo's own license. mypy itself (MIT-licensed,
         # widely adopted) ships the identical dependency for the same
         # reason.
+        #
+        # "Apache-2.0 OR BSD-3-Clause" (`cryptography`) and "MIT-0" (`cffi`)
+        # added for `PyJWT[crypto]`, the GitHub App token signer in
+        # `atlas_reviewer/` (D25). The first is an OR of two terms this list
+        # already allows on their own. MIT-0 is MIT without the attribution
+        # clause, strictly more permissive than MIT. Neither is vendored;
+        # both are runtime dependencies of the controller only.
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: |
           pip install pip-licenses==5.5.5
-          pip-licenses --allow-only="MIT License;MIT;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;Apache 2.0;Apache-2.0 OR BSD-2-Clause;Python Software Foundation License;PSF-2.0;ISC License (ISCL);The Unlicense (Unlicense);Mozilla Public License 2.0 (MPL 2.0)"
+          pip-licenses --allow-only="MIT License;MIT;MIT-0;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;Apache 2.0;Apache-2.0 OR BSD-2-Clause;Apache-2.0 OR BSD-3-Clause;Python Software Foundation License;PSF-2.0;ISC License (ISCL);The Unlicense (Unlicense);Mozilla Public License 2.0 (MPL 2.0)"
       # requirements.txt-is-in-sync and dependency-vulnerability-audit run
       # last among the python-filtered steps, deliberately (#378): both
       # `pip install` an unpinned tool (pip-tools/pip-audit) straight into
