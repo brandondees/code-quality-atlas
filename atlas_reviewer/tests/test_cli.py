@@ -93,6 +93,10 @@ def test_module_entry_point_runs_offline(tmp_path):
             json.dumps({"repo": "o/r", "pr_number": 1, "head_sha": "short"}),
             "invalid event",
         ),
+        (
+            json.dumps({"repo": None, "pr_number": 1, "head_sha": [1]}),
+            "invalid event",
+        ),
     ],
 )
 def test_bad_event_files_are_usage_errors(tmp_path, payload, message):

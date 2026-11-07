@@ -33,13 +33,13 @@ class PrEvent:
     head_sha: str
 
     def __post_init__(self) -> None:
-        if not _REPO.fullmatch(self.repo):
+        if not isinstance(self.repo, str) or not _REPO.fullmatch(self.repo):
             raise InvalidEventError(f"repo must be owner/name, got {self.repo!r}")
         if isinstance(self.pr_number, bool) or not isinstance(self.pr_number, int):
             raise InvalidEventError("pr_number must be an integer")
         if self.pr_number < 1:
             raise InvalidEventError("pr_number must be positive")
-        if not _SHA.fullmatch(self.head_sha):
+        if not isinstance(self.head_sha, str) or not _SHA.fullmatch(self.head_sha):
             raise InvalidEventError("head_sha must be a full 40-hex commit SHA")
 
 
