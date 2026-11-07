@@ -169,7 +169,41 @@ def test_watchdog_destroys_a_hung_exec_at_the_deadline():
     assert outcome.report.status is RunnerStatus.DEADLINE_EXCEEDED
     assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
     assert api.live_names() == ()
-    assert ops(api).count("delete") == 1
+    assert ops(api).count("delete") == 2
+
+
+def test_a_sprite_created_after_the_watchdog_fired_is_still_destroyed():
+    class SlowCreate(FakeSprites):
+        def create(self, name):
+            time.sleep(0.4)
+            super().create(name)
+
+    api, ledger = SlowCreate(rules=OK_RULES), MemoryLedger()
+    outcome = run(api, ledger, clock=SystemClock(), deadline_s=0.1)
+    assert api.live_names() == ()
+    assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
+    assert ops(api).index("create") < len(ops(api)) - ops(api)[::-1].index("delete")
+
+
+def test_a_telemetry_write_failure_does_not_stop_cleanup():
+    class FailingSink:
+        def emit(self, event):
+            if event.phase == "destroy":
+                raise OSError("disk full")
+
+    api, ledger = FakeSprites(rules=OK_RULES), MemoryLedger()
+    with pytest.raises(OSError, match="disk full"):
+        run_disposable(
+            api,
+            ledger,
+            RunnerJob(b"tarball-bytes", TOOLS),
+            name=NAME,
+            deadline_s=60.0,
+            clock=FakeClock(),
+            telemetry=Telemetry(FakeClock(), FailingSink()),
+        )
+    assert api.live_names() == ()
+    assert ledger.pending() == ()
 
 
 def test_destroy_that_does_not_take_effect_is_reported_and_kept_in_ledger():

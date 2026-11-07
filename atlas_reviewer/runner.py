@@ -98,7 +98,9 @@ _PATH_RE = re.compile(
     + r":present:([A-Za-z0-9._+-]+):([A-Za-z0-9._/+-]{0,200}):([A-Za-z0-9._/+-]{0,200})"
 )
 _BINARY_RE = re.compile(r"[A-Za-z0-9._+-]+")
-_NOT_ISOLATED_RE = re.compile(re.escape(PYTHON_PLACEHOLDER) + r"(?! -I[A-Za-z]*(?:\s|$))")
+_NOT_ISOLATED_RE = re.compile(
+    re.escape(PYTHON_PLACEHOLDER) + r"(?! -I[A-Za-z]*(?:\s|$))"
+)
 _INT_RE = re.compile(r"\d+")
 _EXEC_SLACK_S = 15.0
 PROBE_BUDGET_S = 60.0
@@ -354,29 +356,39 @@ class _Destroyer:
         self._lock = threading.Lock()
         self._status: CleanupStatus | None = None
 
-    def destroy(self) -> CleanupStatus:
+    def destroy(self, *, final: bool = False) -> CleanupStatus:
+        """`final` destroys again even after the watchdog did: a create
+        still in flight when the watchdog fired can add the Sprite after
+        the watchdog verified it absent. A telemetry write failure must not
+        stop cleanup, so cleanup is redone untraced and the error re-raised."""
         with self._lock:
-            if self._status is None:
-                self._status = self._destroy()
+            if self._status is None or final:
+                try:
+                    self._status = self._destroy(self._telemetry)
+                except OSError:
+                    self._status = self._destroy(_quiet())
+                    raise
             return self._status
 
-    def _destroy(self) -> CleanupStatus:
-        deleted = any(self._attempt_delete(n) for n in (1, 2))
+    def _destroy(self, telemetry: Telemetry) -> CleanupStatus:
+        deleted = any(self._attempt_delete(telemetry, n) for n in (1, 2))
         status = (
-            self._verified_status() if deleted else CleanupStatus.DESTROY_UNVERIFIED
+            self._verified_status(telemetry)
+            if deleted
+            else CleanupStatus.DESTROY_UNVERIFIED
         )
-        self._telemetry.record("destroy", "outcome", {"cleanup": status.value})
+        telemetry.record("destroy", "outcome", {"cleanup": status.value})
         return status
 
-    def _verified_status(self) -> CleanupStatus:
-        if not self._verified_absent():
+    def _verified_status(self, telemetry: Telemetry) -> CleanupStatus:
+        if not self._verified_absent(telemetry):
             return CleanupStatus.DESTROY_UNVERIFIED
         self._ledger.clear(self._name)
         return CleanupStatus.DESTROYED_VERIFIED
 
-    def _attempt_delete(self, attempt: int) -> bool:
+    def _attempt_delete(self, telemetry: Telemetry, attempt: int) -> bool:
         try:
-            self._telemetry.span(
+            telemetry.span(
                 "destroy",
                 f"delete attempt {attempt}",
                 lambda: self._api.delete(self._name),
@@ -387,9 +399,9 @@ class _Destroyer:
             return False
         return True
 
-    def _verified_absent(self) -> bool:
+    def _verified_absent(self, telemetry: Telemetry) -> bool:
         try:
-            present = self._telemetry.span(
+            present = telemetry.span(
                 "verify",
                 "existence check",
                 lambda: self._api.exists(self._name),
@@ -439,7 +451,7 @@ def _disposable(
         status, note = _guarded(run, body)
     finally:
         watchdog.cancel()
-        cleanup = destroyer.destroy()
+        cleanup = destroyer.destroy(final=True)
     return RunnerReport(status, cleanup, name, note)
 
 
