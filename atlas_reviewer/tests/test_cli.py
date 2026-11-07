@@ -705,12 +705,22 @@ def test_the_first_frame_window_flag_reaches_every_exec_without_input(tmp_path):
     assert api.first_bytes_seen == [7.0] * 4 + [None] + [7.0] * 6
 
 
-@pytest.mark.parametrize("value", ["0", "-1"])
-def test_the_first_frame_window_must_be_positive(tmp_path, value, capsys):
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf"])
+@pytest.mark.parametrize(
+    "command,flag",
+    [
+        (("review", "--event", EVENT, "--dry-run"), "--first-frame-seconds"),
+        (("review", "--event", EVENT, "--dry-run"), "--deadline-seconds"),
+        (("probe-runner",), "--first-frame-seconds"),
+        (("probe-runner",), "--deadline-seconds"),
+    ],
+)
+def test_runner_timings_must_be_positive_and_finite(
+    tmp_path, value, command, flag, capsys
+):
     with pytest.raises(SystemExit) as info:
         cli.main(
-            ["--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run",
-             "--first-frame-seconds", value],
+            ["--state-dir", str(tmp_path), *command, flag, value],
             env={}, out=io.StringIO(), err=io.StringIO(),
         )  # fmt: skip
     assert info.value.code == 2

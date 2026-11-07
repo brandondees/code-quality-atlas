@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import math
 import os
 import sys
 import time
@@ -536,7 +537,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="opt in to fetching issues the PR closes",
     )
     rev.add_argument(
-        "--deadline-seconds", type=float, default=600.0, help="external runner deadline"
+        "--deadline-seconds",
+        type=_positive_seconds,
+        default=600.0,
+        help="external runner deadline",
     )
     rev.add_argument(
         "--max-model-calls",
@@ -579,7 +583,7 @@ def build_parser() -> argparse.ArgumentParser:
         "probe-runner",
         help="live Sprites check without a model: protocol, or the review's exec sequence",
     )
-    probe.add_argument("--deadline-seconds", type=float, default=120.0)
+    probe.add_argument("--deadline-seconds", type=_positive_seconds, default=120.0)
     probe.add_argument(
         "--sequence",
         choices=tuple(_PROBE_SEQUENCES),
@@ -615,7 +619,7 @@ def _first_frame_arg(parser: argparse.ArgumentParser) -> None:
 
 def _positive_seconds(text: str) -> float:
     value = float(text)
-    if value <= 0:
+    if not (math.isfinite(value) and value > 0):
         raise argparse.ArgumentTypeError("must be a positive number of seconds")
     return value
 
