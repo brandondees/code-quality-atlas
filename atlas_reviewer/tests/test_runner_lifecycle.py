@@ -91,10 +91,18 @@ def test_deny_all_is_set_and_read_back_before_any_exec():
     assert sequence[-2:] == ["delete", "exists"]
 
 
-def test_policy_read_back_that_is_not_deny_all_blocks_execution():
-    api = FakeSprites(
-        rules=OK_RULES, policy_read_back={"rules": [{"include": "defaults"}]}
-    )
+@pytest.mark.parametrize(
+    "read_back",
+    [
+        {"rules": [{"include": "defaults"}]},
+        {"rules": [None]},
+        {"rules": [["action", "deny"]]},
+        {"rules": "deny"},
+        {},
+    ],
+)
+def test_policy_read_back_that_is_not_deny_all_blocks_execution(read_back):
+    api = FakeSprites(rules=OK_RULES, policy_read_back=read_back)
     outcome = run(api)
     assert outcome.report.status is RunnerStatus.FAILED
     assert "not deny-all" in outcome.report.note

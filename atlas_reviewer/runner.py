@@ -563,9 +563,7 @@ def _provision(run: _Run) -> None:
 
 def _require_deny_all(policy: Json) -> None:
     rules = policy.get("rules")
-    if not isinstance(rules, list) or [dict(r) for r in rules] != [
-        dict(r) for r in DENY_ALL
-    ]:
+    if rules != list(DENY_ALL):
         raise PolicyNotEnforcedError(
             f"network policy read-back is not deny-all: {rules!r}"
         )

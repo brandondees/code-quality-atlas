@@ -110,7 +110,9 @@ class FakeSprites:
     def get_network_policy(self, name: str) -> Json:
         self._record("get_network_policy", name)
         sprite = self._get(name)
-        return self.policy_read_back or {"rules": list(sprite.network_rules)}
+        if self.policy_read_back is not None:
+            return self.policy_read_back
+        return {"rules": list(sprite.network_rules)}
 
     def set_memory_limit(self, name: str, limit_mb: int) -> None:
         self._record("set_memory_limit", name)
