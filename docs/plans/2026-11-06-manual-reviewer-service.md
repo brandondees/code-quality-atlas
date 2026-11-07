@@ -1,6 +1,6 @@
 # Manual reviewer service — first operator-triggered review path
 
-**Status: implemented; one owner-run live pilot on 2026-11-07, fixes since
+**Status: implemented; two owner-run live pilots on 2026-11-07, fixes since
 offline only (first slice 2026-11-06; live-readiness slice and pilot fixes
 2026-11-07).** The service runs end to end offline: fixture GitHub,
 the in-memory Sprites fake, and the offline provider. The second slice adds
@@ -10,7 +10,8 @@ exec protocol with a tool probe, and a capped OpenRouter provider. None of
 it has run live yet. What a live run still needs is under
 [Live-run gaps](#live-run-gaps). Decision records: **D24** and **D25** in
 [`../open-questions.md`](../open-questions.md) (**D26** records the pilot
-fixes), scoped steps under the still-open **Q24**.
+fixes, **D27** the second pilot's telemetry and diff-coverage fixes), scoped
+steps under the still-open **Q24**.
 
 **Goal.** Produce one Code Quality Atlas review **draft** for one PR commit.
 The run is triggered by an operator and funded by the operator. It never
@@ -138,16 +139,19 @@ Based on the 2026-11-06 live Sprites validation. The order is:
    run, and its tool is UNKNOWN. If the probe itself fails, every tool is
    UNKNOWN.
 6. Upload the head-SHA tarball over exec stdin, capped at 9 MiB against the
-   documented 10 MiB stdin limit. The exec has its own 300-second budget,
-   capped by the remaining deadline, and extracts with `head -c N | tar`
-   so it does not wait for a stdin EOF. The first pilot's upload of about
-   3 MiB timed out ("The read operation timed out") although the exec was
-   already given the remaining deadline, not the 30-second client default;
-   the cause is unknown and the no-EOF extraction is an untested
-   hypothesis. `probe-runner` now also sends 3 MiB through that same
-   `head -c` and reports the bytes received.
-7. Run each available tool under `timeout`.
-8. Destroy the Sprite.
+   documented 10 MiB stdin limit, to a file
+   (`head -c N > /tmp/atlas-source.tar.gz`, so nothing waits for a stdin
+   EOF). The runner reports the bytes it wrote, which must equal N. The
+   exec has a 300-second budget.
+7. Unpack the file into `/work` in a second exec (120-second budget), so a
+   transport stall and a slow extraction fail under different labels.
+8. Run each available tool under `timeout`.
+9. Destroy the Sprite.
+
+Every exec budget (tool check 60 seconds, upload 300, unpack 120, each tool
+exec its timeout plus 15) is capped by the remaining deadline. Every step
+is a telemetry event (D27), and every failure is re-raised with its phase,
+step, duration and time into the run.
 
 Every step checks an external deadline. A watchdog timer destroys the
 Sprite at the deadline even while an exec is hung. `finally` destroys it on
@@ -190,7 +194,9 @@ a token into a Sprite.
 Setup still required, all of it tested only against fakes:
 
 1. **Sprites probe.** Re-run `probe-runner` from a trusted machine and
-   check the stdin round-trip line. The pilot found `python3` but no `ruff`
+   check the stdin round-trip line, then `probe-runner --sequence review`,
+   which runs a review's exact exec sequence on a real checkout without a
+   model and prints the telemetry table. The pilot found `python3` but no `ruff`
    or `shellcheck` in the image, so the default tools are now
    `python-compileall` only; a tool is added once the image has its binary.
 2. **GitHub App installation.** Set `ATLAS_GITHUB_APP_ID` (App 5648875),
@@ -211,10 +217,49 @@ model reported that no lens ran. D26 records the fixes: the upload budget, the
 default tools, lens bodies in the prompt, grouped checks, controller notes,
 recorded truncation, the sweep lock, and the OpenRouter counter-lag note.
 
+### Second live pilot (owner-reported, 2026-11-07, head `d63f087`)
+
+The 3 MiB stdin probe passed in about 2 seconds. The review then failed
+with `POST …/exec failed: The read operation timed out`, without the
+upload's label, so no in-Sprite tool ran; cleanup was verified. One model
+call ($0.195) saw 13 of 77 files (60,000 of 412,078 diff characters), and
+missed the runner, auth, redaction and HTTP modules. Which exec timed out
+is not known: only upload errors were labelled, and the tool check and the
+tool execs passed theirs through bare. D27 records the fixes.
+
+### Pilot-fix decisions (D27)
+
+- **Telemetry.** One `EventSink` (JSONL file, plus the summary table in the
+  draft and `probe-runner` output) receives an event for every step:
+  evidence and tarball fetches, model preflight, ledger record, create,
+  deny-all set and read-back, memory limit, every exec (purpose, timeout,
+  bytes sent and received, stream-id bytes seen, exit status, duration),
+  tool check, upload (bytes the runner wrote), unpack, each tool, each
+  model call, each delete attempt, the existence check, and the cleanup
+  outcome. Free text is redacted first. `Telemetry.span` re-raises any
+  boundary error with its phase, step, duration and time into the run, so
+  none is left as a bare timeout.
+- **Upload and unpack are separate execs**, and the upload's byte count is
+  confirmed, so a transport stall and a slow extraction are told apart.
+- **`probe-runner --sequence review`** runs `run_disposable` itself (tool
+  check, upload, unpack, then a trivial file count or the review's tools)
+  on a local tarball or the App-fetched head tarball, with no model.
+- **Risk-ordered diff parts.** The diff is split into files, ranked
+  (security, auth, secrets and redaction; runner, sandbox, HTTP and model
+  boundary; other code; config and CI; tests and fixtures; docs) and packed
+  first-fit into at most `--max-model-calls` parts of
+  `--diff-chars-per-call` characters, one model call each. The three-call
+  cap (retries included), the $3 reservation and the preflight are
+  unchanged and shared by all parts, so a retry can leave a later part
+  refused. Incomplete coverage is an omission listing every unsent file by
+  tier; a part whose call fails lists its files as unreviewed; a controller
+  note says complete or PARTIAL after the calls.
+
 ### Still unverified against live responses
 
-- **The Sprites exec response body.** Observed once, for a small echo. A
-  large stdin upload has failed and not yet succeeded.
+- **The Sprites exec response body.** Observed for a small echo, and a
+  3 MiB stdin round-trip passed in the second pilot's probe. A review's
+  upload and unpack have not yet been seen to succeed.
 - **The GitHub and OpenRouter response shapes.** The pilot's draft held a
   check run, job, log and workflow run, so those list shapes parsed (inferred
   from the owner's report, not a recorded response). Not yet seen live: a

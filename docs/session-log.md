@@ -840,3 +840,43 @@ never read after inference.
 
 Not changed, and said so: check summaries, log tails and artifact excerpts are
 still capped without an omission row.
+
+## 2026-11-07 (same day) — D27: lifecycle telemetry and risk-ordered diff coverage
+
+The second owner-run pilot at `d63f087` failed the same way the first did,
+with `POST …/exec failed: The read operation timed out`, after a 3 MiB stdin
+probe at the same head had passed in about 2 seconds. The message had no
+upload label. Reading the runner confirmed the owner's inference: only the
+upload wrapped its errors, so the tool check (60-second budget) and both tool
+execs (135 seconds) could each have produced that bare text, and nothing
+recorded which one did. Its model call also saw only 13 of 77 files, cut in
+diff order, so the auth, redaction, runner and HTTP modules went unread.
+
+**Telemetry.** One `EventSink` (`telemetry.py`) with a JSONL implementation
+and an in-memory record the draft and `probe-runner` render as a table. Every
+phase is one event, and an exec event carries its purpose, timeout, bytes
+each way, the stream-id bytes seen, exit status and duration. `span` re-raises
+a boundary error as the same type with its phase, step, duration and time
+into the run. The innermost span labels it, so nested spans (an exec inside
+the upload) do not stack prefixes. GitHub reads are timed by a wrapper
+(`instrumented.py`) instead of threading telemetry through `gather.py`. Step
+labels use only ids, never branch names. Error text is redacted with the
+environment's credential values before any sink sees it.
+
+**Runner.** Upload and unpack are now two execs, and the upload must report
+writing exactly the bytes sent, so a transport stall, a short write and a slow
+extraction fail differently. `probe-runner --sequence review` calls
+`run_disposable` itself, on a local tarball or the App-fetched head tarball,
+with no model. It reproduces the exact exec order rather than an approximation
+of it.
+
+**Diff coverage.** The single 60,000-character cut became risk-ordered,
+first-fit packing into at most three parts, one model call each. The parts
+share the existing three-call cap (retries included), the $3 reservation and
+the preflight, now exposed as `--max-model-calls` and `--diff-chars-per-call`.
+Writing the end-to-end test against the real `OpenRouterProvider` and its
+budget showed the trade-off plainly: one retry on part 1 leaves part 3
+refused. That part gets its own omissions row listing its files, and the
+post-call controller note says PARTIAL. With the defaults, a diff the size of
+this PR's (412,078 characters) still cannot be fully reviewed, and the draft
+says so, naming the docs and tests that went unsent.
