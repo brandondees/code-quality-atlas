@@ -105,12 +105,23 @@ def test_ledger_writes_and_their_directory_are_synced(tmp_path, monkeypatch):
     synced = []
     real = os.fsync
     monkeypatch.setattr(os, "fsync", lambda fd: synced.append(fd) or real(fd))
-    ledger = FileLedger(tmp_path / "state" / "runners.ledger")
+    ledger = FileLedger(tmp_path / "state" / "nested" / "runners.ledger")
     ledger.record("a")
-    assert len(synced) == 2
+    assert len(synced) == 4  # the file, its directory, and both new dirs' parents
+    ledger.record("b")
+    assert len(synced) == 6
     ledger.clear("a")
-    assert len(synced) == 4
-    assert ledger.pending() == ()
+    assert len(synced) == 8
+    assert ledger.pending() == ("b",)
+
+
+def test_a_ledger_named_like_its_temp_file_still_clears(tmp_path):
+    ledger = FileLedger(tmp_path / "runners.tmp")
+    ledger.record("a")
+    ledger.record("b")
+    ledger.clear("a")
+    assert ledger.pending() == ("b",)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["runners.tmp"]
 
 
 def test_only_one_review_at_a_time(tmp_path):

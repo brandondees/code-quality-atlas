@@ -24,13 +24,13 @@ class FileLedger:
         self._path = path
 
     def record(self, name: str) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
+        _make_dirs_synced(self._path.parent)
         _write_synced(self._path, "a", name + "\n")
         _sync_dir(self._path.parent)
 
     def clear(self, name: str) -> None:
         remaining = [n for n in self.pending() if n != name]
-        tmp = self._path.with_suffix(".tmp")
+        tmp = self._path.with_name(self._path.name + ".clearing")
         _write_synced(tmp, "w", "".join(n + "\n" for n in remaining))
         tmp.replace(self._path)
         _sync_dir(self._path.parent)
@@ -47,6 +47,18 @@ def _write_synced(path: Path, mode: str, text: str) -> None:
         fh.write(text)
         fh.flush()
         os.fsync(fh.fileno())
+
+
+def _make_dirs_synced(path: Path) -> None:
+    """A new directory's entry lives in its parent, so each one created here
+    is synced there too, or a crash could lose the ledger's directory."""
+    missing = []
+    while not path.exists():
+        missing.append(path)
+        path = path.parent
+    for created in reversed(missing):
+        created.mkdir(exist_ok=True)
+        _sync_dir(created.parent)
 
 
 def _sync_dir(path: Path) -> None:
