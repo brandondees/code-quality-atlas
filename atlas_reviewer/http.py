@@ -9,14 +9,16 @@ expect a redirect follow it themselves, without credentials.
 
 from __future__ import annotations
 
+import contextlib
 import http.client
 import socket
+import threading
 import time
 import urllib.error
 import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, Self
 from urllib.parse import SplitResult, urlsplit
 
 from atlas_reviewer.ports import (
@@ -103,7 +105,9 @@ class UrllibTransport:
 class StreamWindow:
     """Wall-clock limits for one streamed response, both measured from when
     the request starts: `total_s` for the whole exchange, `first_byte_s`
-    (if set) for the first response body byte."""
+    (if set) for the first response body byte. Connect, send and the
+    response headers share one cutoff at the first-byte deadline (or the
+    total, without one); each body read then gets what is left."""
 
     total_s: float
     first_byte_s: float | None = None
@@ -147,23 +151,57 @@ class UrllibStreamingTransport(UrllibTransport):
         if parts.scheme not in self._schemes:
             raise BoundaryError(f"refusing non-allowed URL scheme: {safe_url(url)}")
         cap = min(max_bytes, self._max_bytes) if max_bytes else self._max_bytes
-        started = time.monotonic()
-        conn = _connection(parts, window.wait_s(0.0, got_any=False))
+        stream = _Stream(method, url, window, time.monotonic())
+        before_body = window.wait_s(0.0, got_any=False)
+        conn = _connection(parts, before_body)
+        cutoff = _Cutoff(conn, before_body)
         try:
-            conn.connect()
-            sock = conn.sock
-            conn.request(method, _target(parts), body=body, headers=dict(headers))
-            resp = conn.getresponse()
-            data = _drain(resp, sock, _Stream(method, url, window, started), cap)
+            with cutoff:
+                conn.connect()
+                sock = conn.sock
+                conn.request(method, _target(parts), body=body, headers=dict(headers))
+                resp = conn.getresponse()
+            if cutoff.fired.is_set():
+                raise stream.stalled(b"")
+            data = _drain(resp, sock, stream, cap)
             return HttpResponse(resp.status, dict(resp.getheaders()), data)
         except StreamTimeoutError:
             raise
         except TimeoutError as exc:
-            raise _Stream(method, url, window, started).stalled(b"") from exc
+            raise stream.stalled(b"") from exc
         except (OSError, http.client.HTTPException) as exc:
+            if cutoff.fired.is_set():
+                raise stream.stalled(b"") from exc
             raise BoundaryError(f"{method} {safe_url(url)} failed: {exc}") from exc
         finally:
             conn.close()
+
+
+class _Cutoff:
+    """Shuts the connection's socket down once `after_s` has passed. A
+    socket timeout restarts on every blocking call, so on its own it lets a
+    server that trickles header bytes hold the exchange open indefinitely;
+    this makes connect, send and the headers share one deadline."""
+
+    def __init__(self, conn: http.client.HTTPConnection, after_s: float) -> None:
+        self._conn = conn
+        self.fired = threading.Event()
+        self._timer = threading.Timer(max(after_s, 0.0), self._cut)
+        self._timer.daemon = True
+
+    def __enter__(self) -> Self:
+        self._timer.start()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self._timer.cancel()
+
+    def _cut(self) -> None:
+        self.fired.set()
+        sock = self._conn.sock
+        if sock is not None:
+            with contextlib.suppress(OSError):  # already closed by the caller
+                sock.shutdown(socket.SHUT_RDWR)
 
 
 def _connection(parts: SplitResult, timeout_s: float) -> http.client.HTTPConnection:

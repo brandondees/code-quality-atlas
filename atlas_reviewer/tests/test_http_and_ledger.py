@@ -116,6 +116,14 @@ class _StreamHandler(BaseHTTPRequestHandler):
             pass
 
     def _route(self, body):
+        if self.path.startswith("/trickle-headers"):
+            self.wfile.write(b"HTTP/1.0 200 OK\r\nX-Slow: ")
+            for _ in range(40):
+                self.wfile.write(b"a")
+                self.wfile.flush()
+                time.sleep(0.05)
+            self.wfile.write(b"\r\n\r\nlate body")
+            return
         if self.path.startswith("/silent"):
             time.sleep(1.0)
             return
@@ -215,3 +223,39 @@ def test_stream_window_waits_are_measured_from_the_request_start():
     assert window.wait_s(1.0, got_any=False) == 2.0
     assert window.wait_s(1.0, got_any=True) == 9.0
     assert StreamWindow(10.0).wait_s(4.0, got_any=False) == 6.0
+
+
+@pytest.mark.parametrize(
+    ("window", "first_byte"),
+    [(StreamWindow(5.0, 0.3), True), (StreamWindow(0.3), False)],
+)
+def test_trickled_headers_cannot_outlast_the_deadline(
+    stream_server, window, first_byte
+):
+    """Pilot 3, transport finding: every header byte restarted the socket
+    timeout, so headers trickled over 2 s passed a 0.3 s window."""
+    started = time.monotonic()
+    with pytest.raises(StreamTimeoutError, match="within 0.3s") as info:
+        _stream(f"{stream_server}/trickle-headers", window)
+    assert time.monotonic() - started < 1.0
+    assert info.value.first_byte is first_byte
+    assert info.value.received == b""
+
+
+def test_a_fast_exchange_is_not_cut_and_leaves_no_timer_running(stream_server):
+    before = threading.active_count()
+    for _ in range(5):
+        assert _stream(f"{stream_server}/stream", StreamWindow(5.0, 1.0)).status == 200
+    time.sleep(0.05)
+    assert threading.active_count() <= before
+
+
+def test_the_cutoff_marks_itself_fired_even_before_a_socket_exists():
+    import http.client
+
+    from atlas_reviewer.http import _Cutoff
+
+    conn = http.client.HTTPConnection("127.0.0.1", 1)
+    with _Cutoff(conn, 0.0) as cutoff:
+        assert cutoff.fired.wait(1.0)
+    assert conn.sock is None
