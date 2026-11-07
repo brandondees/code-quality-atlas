@@ -37,6 +37,21 @@ def test_paths_are_the_new_side_in_order_including_renames():
     assert diff_paths(DIFF + renamed) == ("a.py", "b/c.py", "d.md", "new name.py")
 
 
+QUOTED = (
+    'diff --git "a/tab\\there.py" "b/tab\\there.py"\n+x\n'
+    'diff --git "a/caf\\303\\251.md" "b/caf\\303\\251.md"\n+y\n'
+    'diff --git a/old.py "b/say \\"hi\\" \\\\ back.py"\n+z\n'
+)
+
+
+def test_quoted_git_headers_are_parsed_and_unescaped():
+    expected = ("tab\there.py", "caf\u00e9.md", 'say "hi" \\ back.py')
+    assert diff_paths(QUOTED) == expected
+    files = split_files(QUOTED)
+    assert tuple(paths(files)) == expected
+    assert "".join(f.text for f in files) == QUOTED
+
+
 def test_splitting_keeps_every_character_in_diff_order():
     files = split_files(DIFF)
     assert paths(files) == ["a.py", "b/c.py", "d.md"]

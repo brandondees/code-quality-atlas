@@ -18,7 +18,17 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from functools import reduce
 
-_HEADER = re.compile(r"^diff --git a/(?P<old>.+?) b/(?P<new>.+)$", re.MULTILINE)
+_QUOTED = r'"{side}/(?P<q{name}>(?:[^"\\\n]|\\.)*)"'
+_HEADER = re.compile(
+    r"^diff --git (?:"
+    + _QUOTED.format(side="a", name="old")
+    + r"|a/(?P<old>.+?)) (?:"
+    + _QUOTED.format(side="b", name="new")
+    + r"|b/(?P<new>.+))$",
+    re.MULTILINE,
+)
+_C_ESCAPE = re.compile(r"\\([0-7]{3}|.)")
+_C_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13}
 UNPARSED_PATH = "(diff text without file headers)"
 MAX_FIT_ROUNDS = 8
 CUT_MARKER = "\n[... file diff cut by atlas_reviewer to fit one model call ...]\n"
@@ -137,7 +147,27 @@ class DiffSelection:
 
 def diff_paths(diff: str) -> tuple[str, ...]:
     """New-side path of every file in the diff, in order."""
-    return tuple(m.group("new") for m in _HEADER.finditer(diff))
+    return tuple(_new_path(m) for m in _HEADER.finditer(diff))
+
+
+def _new_path(header: re.Match[str]) -> str:
+    """Git C-quotes a path holding a tab, newline, quote, backslash or (by
+    default) a non-ASCII byte; octal escapes are UTF-8 bytes."""
+    quoted = header.group("qnew")
+    if quoted is None:
+        return header.group("new")
+    raw = bytearray()
+    pos = 0
+    for esc in _C_ESCAPE.finditer(quoted):
+        raw += quoted[pos : esc.start()].encode()
+        code = esc.group(1)
+        if len(code) == 3:
+            raw.append(int(code, 8) & 0xFF)
+        else:
+            raw += bytes([_C_ESCAPES[code]]) if code in _C_ESCAPES else code.encode()
+        pos = esc.end()
+    raw += quoted[pos:].encode()
+    return raw.decode("utf-8", errors="replace")
 
 
 def split_files(diff: str) -> tuple[FileDiff, ...]:
@@ -148,7 +178,7 @@ def split_files(diff: str) -> tuple[FileDiff, ...]:
     starts = [h.start() for h in headers]
     bounds = zip(starts, [*starts[1:], len(diff)][: len(starts)], strict=True)
     files = [
-        _file(h.group("new"), diff[a:b])
+        _file(_new_path(h), diff[a:b])
         for h, (a, b) in zip(headers, bounds, strict=True)
     ]
     preamble = diff[: starts[0]] if starts else diff
