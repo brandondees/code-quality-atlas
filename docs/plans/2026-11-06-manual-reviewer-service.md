@@ -107,9 +107,26 @@ does no I/O. All I/O sits behind the ports in `ports.py`.
   absent from the runner image, or one the runner never reached. None of
   these is ever a pass.
 - When the PR head has moved past the event SHA, the draft says so. It
-  still only counts evidence for the event SHA. The diff endpoint serves
-  the current head, so the diff goes to no model call unless the head
-  equals the event SHA both before and after it is fetched.
+  still only counts evidence for the event SHA. The diff must be fetched
+  by SHA, not by pull number: `GET /repos/{owner}/{repo}/compare/{base_sha}...{event_sha}`
+  with `Accept: application/vnd.github.diff`
+  ([Compare two commits](https://docs.github.com/en/rest/commits/commits#compare-two-commits)).
+  `base_sha` is the pull's `base.sha` read with the pull, and the head end
+  is the event SHA. The path uses three dots, which is the form that
+  endpoint accepts, and the JSON names a `merge_base_commit`. A branch
+  name is not used, because a branch moves. Both ends are commit SHAs, so
+  a force-push from the event SHA away and back during the request cannot
+  substitute another commit's diff. The before-and-after read of the
+  pull's head stays only as the "head has moved" note. The compare docs
+  describe the commit list as `git log BASE..HEAD` (two-dot) while the
+  URL is three-dot, so this doc does not claim the diff bytes match the
+  pull-number diff; that still needs a check against a pull whose base
+  has moved. What the SHA form does establish is which two commits the
+  diff is for. The code in this stack does not do this yet:
+  `GitHubClient.get_pull_diff` requests `/repos/{repo}/pulls/{number}`
+  with the diff media type, and the controller skips the model call unless
+  the pull's head SHA equals the event SHA before and after that request.
+  Switching the fetch is a follow-up below.
 - Issue text is off by default (`--include-issues` turns it on). It needs
   the extra `issues: read` permission.
 - Every limit that stops a read is an **omission**: a page cap on a GitHub
@@ -488,3 +505,6 @@ each needing its own decision:
 - **Omission rows for check summaries, log tails and artifact excerpts.**
   These are capped today, but the caps are not listed as omissions the way
   diff, PR-body and issue-body cuts are.
+- **SHA-addressed diff fetch.** Specified under Evidence rules. The stack
+  still fetches the diff by pull number and gates it with a before-and-after
+  head-SHA check, which an away-and-back force-push can pass.
