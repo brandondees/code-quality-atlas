@@ -632,6 +632,27 @@ def test_upload_exec_is_capped_by_the_remaining_review_deadline():
     assert 60.0 < timeout <= 90.0
 
 
+def test_an_archive_over_the_exec_stdin_limit_is_refused_before_any_sprite_exists():
+    api, ledger = FakeSprites(rules=OK_RULES), MemoryLedger()
+    too_big = b"x" * (10 * 1024 * 1024 + 1)
+    telemetry = Telemetry(FakeClock())
+    outcome = run_disposable(
+        api, ledger, RunnerJob(too_big, TOOLS), name=NAME, deadline_s=60.0,
+        clock=FakeClock(), telemetry=telemetry,
+    )  # fmt: skip
+    assert outcome.report.status is RunnerStatus.FAILED
+    assert outcome.report.cleanup is CleanupStatus.NOT_CREATED
+    assert outcome.report.note == (
+        "source archive is 10485761 bytes, over the 10485760-byte limit of the "
+        "exec stdin it is uploaded through; no runner was created"
+    )
+    assert outcome.results == ()
+    assert api.calls == []
+    assert ledger.pending() == ()
+    events = [(e.phase, e.step, e.status) for e in telemetry.events]
+    assert events == [("upload", "size check", "error")]
+
+
 def test_upload_does_not_wait_for_a_stdin_eof():
     api = FakeSprites(rules=OK_RULES)
     run(api)

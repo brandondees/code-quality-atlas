@@ -85,6 +85,7 @@ from atlas_reviewer.ports import (
     SpritesApi,
     StreamTimeoutError,
 )
+from atlas_reviewer.sprites_api import EXEC_STDIN_MAX_BYTES
 from atlas_reviewer.telemetry import ERROR, Fields, Telemetry
 
 DENY_ALL: tuple[Json, ...] = ({"action": "deny", "domain": "*"},)
@@ -561,7 +562,23 @@ def run_disposable(
     first_frame_s: float = FIRST_FRAME_BUDGET_S,
 ) -> RunnerOutcome:
     """The review's exec sequence: tool check, upload, unpack, then each
-    available tool. `probe-runner --sequence review` calls this too."""
+    available tool. An archive the one-exec upload cannot carry is refused
+    before anything is created or recorded in the ledger."""
+    telemetry = telemetry or Telemetry(clock)
+    size = len(job.source_tarball)
+    if size > EXEC_STDIN_MAX_BYTES:
+        note = (
+            f"source archive is {size} bytes, over the {EXEC_STDIN_MAX_BYTES}-byte "
+            "limit of the exec stdin it is uploaded through; no runner was created"
+        )
+        telemetry.record(
+            "upload", "size check", {"bytes": size, "limit": EXEC_STDIN_MAX_BYTES},
+            status=ERROR, error=note,
+        )  # fmt: skip
+        return RunnerOutcome(
+            RunnerReport(RunnerStatus.FAILED, CleanupStatus.NOT_CREATED, name, note),
+            (),
+        )
     results: list[ToolResult] = []
     pythons: list[TrustedPython | None] = []
     diagnostics: list[Diagnostic] = []
@@ -581,7 +598,7 @@ def run_disposable(
 
     report = _disposable(
         api, ledger, body, name=name, deadline_s=deadline_s, clock=clock,
-        telemetry=telemetry or Telemetry(clock), first_frame_s=first_frame_s,
+        telemetry=telemetry, first_frame_s=first_frame_s,
     )  # fmt: skip
     return RunnerOutcome(
         report, tuple(results), next(iter(pythons), None), tuple(diagnostics)
