@@ -44,6 +44,10 @@ def test_an_event_field_of_the_wrong_type_is_an_invalid_event(
     "repo,number,sha",
     [
         ("not-a-repo", 1, HEAD),
+        ("../..", 1, HEAD),
+        ("./r", 1, HEAD),
+        ("o/..", 1, HEAD),
+        ("o/.", 1, HEAD),
         ("o/r", 0, HEAD),
         ("o/r", True, HEAD),
         ("o/r", "1", HEAD),
@@ -54,6 +58,11 @@ def test_an_event_field_of_the_wrong_type_is_an_invalid_event(
 def test_event_must_name_one_exact_commit(repo, number, sha):
     with pytest.raises(InvalidEventError):
         PrEvent(repo, number, sha)
+
+
+def test_dotted_repo_names_that_are_not_traversal_are_accepted():
+    for repo in ("o/.github", "my.org/r..s", "o/r.js"):
+        assert PrEvent(repo, 1, HEAD).repo == repo
 
 
 def test_matched_and_stale_cannot_lie_about_their_sha():

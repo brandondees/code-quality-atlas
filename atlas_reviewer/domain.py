@@ -17,7 +17,8 @@ from enum import Enum
 from atlas_reviewer.redact import RedactedText
 
 _SHA = re.compile(r"[0-9a-f]{40}")
-_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+# `.` and `..` would be path traversal once the name is put into an API path.
+_REPO = re.compile(r"(?!\.\.?/)[A-Za-z0-9_.-]+/(?!\.\.?$)[A-Za-z0-9_.-]+")
 
 UNREPORTED_VERSION = "unreported"
 
