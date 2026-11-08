@@ -101,6 +101,10 @@ def test_file_ledger_round_trip(tmp_path):
     assert FileLedger(tmp_path / "state" / "runners.ledger").pending() == ("cqa-rev-b",)
 
 
+@pytest.mark.skipif(
+    not Path("/proc/self/fd").is_dir(),
+    reason="/proc/self/fd is how this test maps an fsynced fd to a path",
+)
 def test_ledger_writes_and_their_directory_are_synced(tmp_path, monkeypatch):
     import os
 
@@ -144,16 +148,22 @@ def test_only_one_review_at_a_time(tmp_path):
         pass
 
 
-# Slow routes take _SLOW_S on their own; a cutoff test passes only if the
-# client gave up well before, with room for a loaded CI runner.
+# A slow route sleeps _SLOW_S (or trickles about that long) and only then
+# sets `slow_finished`. A cutoff test passes when the client has already
+# returned with that still unset, so the assertion is not a wall-clock bound.
 _SLOW_S = 3.0
 _TRICKLE_BYTES = int(_SLOW_S / 0.05)
-_CUT_BOUND_S = 2.0
 
 
 class _StreamHandler(BaseHTTPRequestHandler):
     """HTTP/1.0, close-delimited bodies, so each write reaches the client
-    as it happens."""
+    as it happens. `slow_finished` is set only once a slow route has run
+    its full delay."""
+
+    def _finish_slow(self) -> None:
+        done = getattr(self.server, "slow_finished", None)
+        if done is not None:
+            done.set()
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
@@ -170,6 +180,7 @@ class _StreamHandler(BaseHTTPRequestHandler):
                 self.wfile.flush()
                 time.sleep(0.05)
             self.wfile.write(b"\r\n\r\nlate body")
+            self._finish_slow()
             return
         if self.path.startswith("/trickle-first-chunk"):
             self.wfile.write(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
@@ -178,6 +189,7 @@ class _StreamHandler(BaseHTTPRequestHandler):
                 self.wfile.flush()
                 time.sleep(0.05)
             self.wfile.write(b"5\r\n\x01late\r\n0\r\n\r\n")
+            self._finish_slow()
             return
         if self.path.startswith("/trickle-chunks"):
             close = b"Connection: close\r\n" if "close" in self.path else b""
@@ -190,9 +202,11 @@ class _StreamHandler(BaseHTTPRequestHandler):
                 self.wfile.flush()
                 time.sleep(0.05)
             self.wfile.write(b"\r\n\r\n")
+            self._finish_slow()
             return
         if self.path.startswith("/silent"):
             time.sleep(_SLOW_S)
+            self._finish_slow()
             return
         status = 500 if self.path.startswith("/error") else 200
         self.send_response(status)
@@ -212,17 +226,31 @@ class _StreamHandler(BaseHTTPRequestHandler):
             time.sleep(0.05)
         if self.path.split("?")[0] in {"/headers-only", "/stall"}:
             time.sleep(_SLOW_S)
+            self._finish_slow()
 
     def log_message(self, *args):
         pass
 
 
+class _Running:
+    """The URL, plus the server's own finished-event, so one test's still
+    trickling handler cannot set the next test's."""
+
+    def __init__(self, url: str, slow_finished: threading.Event) -> None:
+        self.url = url
+        self.slow_finished = slow_finished
+
+    def __str__(self) -> str:
+        return self.url
+
+
 @pytest.fixture
 def stream_server():
     srv = ThreadingHTTPServer(("127.0.0.1", 0), _StreamHandler)
+    srv.slow_finished = threading.Event()  # type: ignore[attr-defined]
     thread = threading.Thread(target=srv.serve_forever, daemon=True)
     thread.start()
-    yield f"http://127.0.0.1:{srv.server_address[1]}"
+    yield _Running(f"http://127.0.0.1:{srv.server_address[1]}", srv.slow_finished)
     srv.shutdown()
     srv.server_close()
 
@@ -248,12 +276,11 @@ def test_stream_sends_the_body_with_its_length(stream_server):
 
 @pytest.mark.parametrize("path", ["/silent", "/headers-only"])
 def test_a_silent_response_fails_at_the_first_byte_deadline(stream_server, path):
-    started = time.monotonic()
     with pytest.raises(
         StreamTimeoutError, match="no response byte within 0.2s"
     ) as info:
         _stream(f"{stream_server}{path}", StreamWindow(5.0, 0.2))
-    assert time.monotonic() - started < _CUT_BOUND_S
+    assert not stream_server.slow_finished.is_set()
     assert info.value.first_byte is True
     assert info.value.received == b""
 
@@ -301,10 +328,9 @@ def test_trickled_headers_cannot_outlast_the_deadline(
 ):
     """Pilot 3, transport finding: every header byte restarted the socket
     timeout, so headers trickled over 2 s passed a 0.3 s window."""
-    started = time.monotonic()
     with pytest.raises(StreamTimeoutError, match="within 0.3s") as info:
         _stream(f"{stream_server}/trickle-headers", window)
-    assert time.monotonic() - started < _CUT_BOUND_S
+    assert not stream_server.slow_finished.is_set()
     assert info.value.first_byte is first_byte
     assert info.value.received == b""
 
@@ -315,10 +341,9 @@ def test_trickled_chunk_framing_cannot_outlast_the_total_deadline(stream_server,
     timeout on every byte inside one `read1`, past the window. With
     `Connection: close`, getresponse() clears `conn.sock`, so the cutoff
     must hold the socket itself."""
-    started = time.monotonic()
     with pytest.raises(StreamTimeoutError, match="within 0.4s") as info:
         _stream(f"{stream_server}{path}", StreamWindow(0.4, 0.2))
-    assert time.monotonic() - started < _CUT_BOUND_S
+    assert not stream_server.slow_finished.is_set()
     assert info.value.received == b"\x01part"
 
 
@@ -328,12 +353,11 @@ def test_a_trickled_first_chunk_line_fails_at_the_first_byte_deadline(
     """Headers on time, then the first chunk-size line trickled: the body's
     first byte must still arrive within the first-byte window, not the
     total."""
-    started = time.monotonic()
     with pytest.raises(
         StreamTimeoutError, match="no response byte within 0.2s"
     ) as info:
         _stream(f"{stream_server}/trickle-first-chunk", StreamWindow(5.0, 0.2))
-    assert time.monotonic() - started < _CUT_BOUND_S
+    assert not stream_server.slow_finished.is_set()
     assert info.value.first_byte is True
     assert info.value.received == b""
 
@@ -349,11 +373,20 @@ def test_a_per_request_limit_below_the_transport_cap_is_enforced(stream_server):
 
 
 def test_a_fast_exchange_is_not_cut_and_leaves_no_timer_running(stream_server):
-    before = threading.active_count()
+    """No sleep. A cancelled timer has `finished` set while its thread is
+    still unwinding, so the check is the armed ones, not a thread count
+    taken after a fixed pause."""
+    baseline = {t for t in threading.enumerate() if isinstance(t, threading.Timer)}
     for _ in range(5):
         assert _stream(f"{stream_server}/stream", StreamWindow(5.0, 1.0)).status == 200
-    time.sleep(0.05)
-    assert threading.active_count() <= before
+    armed = [
+        t
+        for t in threading.enumerate()
+        if isinstance(t, threading.Timer)
+        and t not in baseline
+        and not t.finished.is_set()
+    ]
+    assert armed == []
 
 
 def test_the_cutoff_marks_itself_fired_even_before_a_socket_exists():
