@@ -41,6 +41,22 @@ PICKED = (
 )
 
 
+class Echoing(OfflineProvider):
+    """A model that repeats `values` in every review it writes, as a model
+    might quote a secret it saw in the diff."""
+
+    name = "fixture-model"
+
+    def __init__(self, values):
+        super().__init__()
+        self.values = values
+
+    def complete(self, prompt):
+        if "--- lens picker ---" in prompt.system:
+            return json.dumps({"lenses": list(PICKED)})
+        return super().complete(prompt) + "\nFound: " + ", ".join(self.values)
+
+
 class PickingProvider(OfflineProvider):
     """Answers lens-picker prompts with `reply` and keeps them apart, so
     `prompts` holds only review prompts. Named apart from `offline`, so the
@@ -131,7 +147,7 @@ def test_runner_is_destroyed_and_ledger_is_clean_after_review():
     assert s.ledger.pending() == ()
 
 
-def test_secrets_and_controller_credentials_never_reach_the_model():
+def test_runtime_secrets_and_controller_credentials_never_reach_the_model():
     credential = fake_token("ghs_")
     s = Setup(redactor=Redactor((credential, "org/1/sprites-secret-value")))
     pull = json.loads((FIXTURE / "pull.json").read_text())
@@ -144,17 +160,32 @@ def test_secrets_and_controller_credentials_never_reach_the_model():
     s = Setup(github=Leaky(FIXTURE), redactor=s.redactor)
     draft = s.run()
     prompt = s.user_prompt()
-    for secret in (
-        credential,
-        "sprites-secret-value",
-        "AKIAIOSFODNN7EXAMPLE",
-        "correct-horse",
-        "abcdefghijklmnop",
-    ):
+    for secret in (credential, "sprites-secret-value", "abcdefghijklmnop"):
         assert secret not in prompt
         assert secret not in draft
     assert "<untrusted-data" in prompt
     assert "ignore your instructions" in prompt.split("ci-and-runner-evidence", 1)[1]
+
+
+def test_the_diff_reaches_the_model_unredacted_and_its_secrets_are_flagged_not_echoed():
+    s = Setup(
+        provider=Echoing(("AKIAIOSFODNN7EXAMPLE", "correct-horse-battery-staple"))
+    )
+    draft = s.run()
+    (diff,) = diff_blocks(s.provider)
+    assert "+aws_key_id = AKIAIOSFODNN7EXAMPLE" in diff
+    assert "+password = correct-horse-battery-staple" in diff
+    assert "[REDACTED" not in diff
+    found = section(draft, "Possible committed secrets")
+    assert (
+        "| HIGH | settings.ini | 2 (added) | aws-key-id | "
+        "possible committed secret in settings.ini; rotate if real |" in found
+    )
+    assert "| HIGH | settings.ini | 3 (added) | assignment |" in found
+    assert "AKIAIOSFODNN7EXAMPLE" not in draft
+    assert "correct-horse" not in draft
+    assert "[REDACTED:possible-committed-secret]" in section(draft, "Review narrative")
+    assert "2 possible committed secret(s)" in section(draft, "Controller notes")
 
 
 def test_issues_are_not_fetched_unless_opted_in():
@@ -584,44 +615,98 @@ def test_an_untruncated_diff_records_no_diff_omission():
     assert "pull request diff" not in section(draft, "Omissions and limits hit")
 
 
-def test_files_removed_by_redaction_are_omissions_and_coverage_is_partial():
-    """Atlas review of #601: redaction ran on the whole diff and removed
-    files, and coverage was then counted from what was left ("19 of 19
-    file(s) ... complete" for a 23-file PR). A key BEGIN in one file and an
-    END in a later one still remove every header between them."""
+def one_file(path, *lines):
+    added = "".join(f"+{line}\n" for line in lines)
+    return (
+        f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n"
+        f"@@ -0,0 +1,{len(lines)} @@\n{added}"
+    )
 
-    def file(path, line):
-        return f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n+{line}\n"
 
-    class SpanningKey(FixtureGitHub):
-        def get_pull_diff(self, repo, number):
-            return (
-                file("a.py", 'BEGIN = "-----BEGIN RSA PRIVATE KEY-----"')
-                + file("b.py", "x = 1")
-                + file("c.py", 'END = "-----END RSA PRIVATE KEY-----"')
-                + file("d.py", "y = 2")
-            )
+class DiffOf(FixtureGitHub):
+    def __init__(self, root, diff):
+        super().__init__(root)
+        self.diff = diff
 
-    s = Setup(github=SpanningKey(FIXTURE))
+    def get_pull_diff(self, repo, number):
+        return self.diff
+
+
+def test_an_unterminated_key_begin_reaches_the_model_intact_and_is_flagged():
+    """On #601 a BEGIN line with no END after it, in a test file, made
+    diff redaction swallow every later file (D33)."""
+    material = "".join(chr(65 + (i * 7) % 26) for i in range(64))
+    begin = "-----BEGIN " + "RSA PRIVATE KEY-----"
+    files = (
+        one_file("tests/test_keys.py", f'BEGIN = "{begin}"', material),
+        one_file("pyproject.toml", "[project]"),
+        one_file("requirements.txt", "ruff==0.6.0"),
+    )
+    diff = "".join(files)
+    s = Setup(github=DiffOf(FIXTURE, diff), provider=Echoing((material,)))
+    draft = s.run()
+    sent = "".join(diff_blocks(s.provider))
+    assert all(f.strip("\n") in sent for f in files)
+    found = section(draft, "Possible committed secrets")
+    assert "| HIGH | tests/test_keys.py | 1 (added) | private-key |" in found
+    assert material not in draft
+    assert "dropped before the model calls" not in draft
+    assert "Diff coverage after the model calls: PARTIAL." not in draft
+
+
+def test_an_annotated_token_assignment_reaches_the_model_intact_and_is_flagged():
+    value = "".join(chr(97 + i) for i in range(16))
+    diff = one_file("app/config.py", "import os", f'token: str = "{value}"')
+    s = Setup(github=DiffOf(FIXTURE, diff), provider=Echoing((value,)))
+    draft = s.run()
+    (sent,) = diff_blocks(s.provider)
+    assert sent.strip("\n") == diff.strip("\n")
+    assert (
+        "| HIGH | app/config.py | 2 (added) | assignment | "
+        "possible committed secret in app/config.py; rotate if real |"
+        in section(draft, "Possible committed secrets")
+    )
+    assert value not in draft
+
+
+def test_a_diff_with_no_secrets_says_none_found():
+    draft = Setup(github=RiskyDiff(FIXTURE)).run()
+    assert "None found." in section(draft, "Possible committed secrets")
+    assert "dropped before the model calls" not in draft
+
+
+def test_an_unfetched_diff_has_no_secret_scan_section():
+    draft = Setup(github=NoDiff(FIXTURE)).run()
+    assert "## Possible committed secrets" not in draft
+
+
+def test_files_dropped_before_the_model_calls_are_omissions_and_coverage_is_partial(
+    monkeypatch,
+):
+    """Nothing drops files today; if a step between the fetch and the
+    selection ever does, as redaction once did, every one is listed."""
+    from atlas_reviewer import controller
+
+    fit = controller._fit
+
+    def losing(text, *args):
+        return fit(text.split("diff --git a/b.py", 1)[0], *args)
+
+    monkeypatch.setattr(controller, "_fit", losing)
+    diff = one_file("a.py", "x = 1") + one_file("b.py", "y = 2") + one_file("c.py", "z")
+    s = Setup(github=DiffOf(FIXTURE, diff))
     draft = s.run()
     row = next(
         r
         for r in section(draft, "Omissions and limits hit").splitlines()
-        if "removed by secret redaction" in r
+        if "dropped before the model calls" in r
     )
-    assert "2 file(s) removed before any model call, not reviewed: b.py, c.py" in row
+    assert "2 file(s) dropped before any model call, not reviewed: b.py, c.py" in row
     notes = section(draft, "Controller notes")
     assert "Diff coverage after the model calls: PARTIAL." in notes
-    assert "of 4 file(s) in full" in notes
+    assert "of 3 file(s) in full" in notes
     assert "2 file(s) went to no call" in notes
-    assert "Secret redaction removed 2 file(s) from the diff" in notes
-    evidence = s.provider.prompts[-1].user.split('label="ci-and-runner-evidence"', 1)[1]
-    assert "removed by secret redaction" in evidence
-
-
-def test_a_diff_redaction_that_keeps_every_file_records_no_loss():
-    draft = Setup(github=RiskyDiff(FIXTURE)).run()
-    assert "removed by secret redaction" not in draft
+    assert "2 file(s) were dropped from the diff before any model call" in notes
 
 
 def test_a_long_pr_body_and_issue_body_are_recorded_as_omissions():

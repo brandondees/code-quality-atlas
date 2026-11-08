@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, replace
 
 from atlas_reviewer.budget import CallLimits, prompt_token_room
 from atlas_reviewer.classify import classify
+from atlas_reviewer.committed_secrets import DiffSecrets, scan_diff
 from atlas_reviewer.diffs import (
     DiffPart,
     DiffSelection,
@@ -64,7 +65,7 @@ from atlas_reviewer.ports import (
     RunnerLedger,
     SpritesApi,
 )
-from atlas_reviewer.prompt import UntrustedBlock
+from atlas_reviewer.prompt import RepoText, UntrustedBlock
 from atlas_reviewer.redact import RedactedText, Redactor
 from atlas_reviewer.runner import (
     DEFAULT_TOOLS,
@@ -175,10 +176,12 @@ def review(event: PrEvent, deps: Deps, config: ReviewConfig) -> str:
         ),
         tuple(collected.links),
         deps.redactor,
+        () if diff is None else diff.paths,
     )
     calls = config.model_calls - int(lenses.used_call)
     selection = None if diff is None else _fit(diff.text, calls, base, deps, config)
     parts = _narrate_parts(base, selection, deps, telemetry)
+    secrets = None if diff is None else diff.secrets
     draft = render_draft(
         DraftInput(
             event=event,
@@ -188,8 +191,10 @@ def review(event: PrEvent, deps: Deps, config: ReviewConfig) -> str:
             links=base.links,
             controller_notes=(
                 *_notes(base, selection),
-                *_coverage_lines(selection, parts, () if diff is None else diff.lost),
+                *_coverage_lines(selection, parts, _dropped(base, selection)),
+                *_secret_note(secrets),
             ),
+            secrets=None if secrets is None else secrets.findings,
             lenses=base.facts.lenses.uses,
             narratives=parts,
             omissions=(*_omissions(base, selection), *_unreviewed_parts(parts)),
@@ -198,14 +203,16 @@ def review(event: PrEvent, deps: Deps, config: ReviewConfig) -> str:
                 pull,
                 collected.items,
                 _shared(base, selection),
-                0 if diff is None else diff.redactions,
             ),
             generated_at=deps.clock.now(),
             telemetry=telemetry.events,
         )
     )
-    # Check names, failure reasons, archive entry names and runner notes are untrusted too.
-    return deps.redactor(draft).text
+    # Check names, failure reasons, archive entry names and runner notes are
+    # untrusted too, and the model saw the diff unredacted, so a value the
+    # secret scan found is scrubbed wherever the narrative repeats it.
+    flagged = () if secrets is None else secrets.values
+    return replace(deps.redactor, flagged=flagged)(draft).text
 
 
 def _head_notes(event: PrEvent, pull: PullInfo) -> list[str]:
@@ -298,9 +305,12 @@ class _Shared:
 
 @dataclass(frozen=True)
 class _Fetched:
+    """The diff as GitHub served it (D33: not redacted), every file path its
+    headers name, and what the secret scan found in it."""
+
     text: str
-    redactions: int
-    lost: tuple[str, ...] = ()
+    paths: tuple[str, ...]
+    secrets: DiffSecrets
 
 
 @dataclass(frozen=True)
@@ -317,6 +327,7 @@ class _Base:
     facts: ControllerFacts
     links: tuple[Link, ...]
     redactor: Redactor
+    diff_paths: tuple[str, ...] = ()
 
 
 def _pull_block(pull: PullInfo, deps: Deps) -> UntrustedBlock:
@@ -326,7 +337,32 @@ def _pull_block(pull: PullInfo, deps: Deps) -> UntrustedBlock:
 
 
 def _omissions(base: _Base, sel: DiffSelection | None) -> tuple[Omission, ...]:
-    return (*base.facts.omissions, *_selection_omission(sel))
+    return (
+        *base.facts.omissions,
+        *_selection_omission(sel),
+        *_dropped_omission(_dropped(base, sel)),
+    )
+
+
+def _dropped(base: _Base, sel: DiffSelection | None) -> tuple[str, ...]:
+    """Files the diff's headers name that the selection does not account for
+    (sent in full, cut, or listed as unsent). Nothing between the fetch and
+    the selection removes files today; this keeps the count honest if
+    something ever does, as redaction once did (4 of #601's 23 files)."""
+    if sel is None:
+        return ()
+    seen = {f.path for f in (*sel.full, *sel.cut, *sel.unseen)}
+    return tuple(p for p in base.diff_paths if p not in seen)
+
+
+def _dropped_omission(dropped: tuple[str, ...]) -> tuple[Omission, ...]:
+    if not dropped:
+        return ()
+    detail = (
+        f"{len(dropped)} file(s) dropped before any model call, not reviewed: "
+        f"{_listed(dropped)}"
+    )
+    return (Omission("pull request diff", "dropped before the model calls", detail),)
 
 
 def _notes(base: _Base, sel: DiffSelection | None) -> tuple[str, ...]:
@@ -342,7 +378,7 @@ def _shared(base: _Base, sel: DiffSelection | None) -> _Shared:
 def _part_blocks(
     shared: _Shared, part: DiffPart, notes: tuple[str, ...], redactor: Redactor
 ) -> tuple[UntrustedBlock, ...]:
-    diff = redactor(part.text or "(no diff content in this call)")
+    diff = RepoText(part.text or "(no diff content in this call)")
     notes_text = redactor("\n".join(f"- {n}" for n in notes))
     return (
         shared.pull,
@@ -403,25 +439,7 @@ def _fetch_diff(
     if after.head_sha != event.head_sha:
         _no_diff(collected, "the PR head moved while the diff was fetched")
         return None
-    full = deps.redactor(raw)
-    lost = _lost_in_redaction(raw, full.text)
-    if lost:
-        collected.omit(
-            "pull request diff",
-            "removed by secret redaction",
-            f"{len(lost)} file(s) removed before any model call, not reviewed: "
-            f"{_listed(lost)}",
-        )
-    return _Fetched(full.text, full.redaction_count, lost)
-
-
-def _lost_in_redaction(raw: str, redacted: str) -> tuple[str, ...]:
-    """Files whose `diff --git` header did not survive redaction. The diff
-    is redacted whole, so a pattern that spans files (a private-key BEGIN in
-    one file, an END in a later one) removes the files between, and every
-    later count -- parts, coverage -- starts from what is left."""
-    kept = set(diff_paths(redacted))
-    return tuple(p for p in diff_paths(raw) if p not in kept)
+    return _Fetched(raw, diff_paths(raw), scan_diff(raw))
 
 
 def _listed(paths: tuple[str, ...]) -> str:
@@ -465,7 +483,7 @@ def _select_lenses(
         event.pr_number,
         event.head_sha,
         picker_instructions(config.depth),
-        (_pull_block(pull, deps), _paths_block(paths, deps)),
+        (_pull_block(pull, deps), _paths_block(paths)),
     )
     return select_lenses(
         config.depth,
@@ -479,12 +497,12 @@ def _select_lenses(
     )
 
 
-def _paths_block(paths: tuple[str, ...], deps: Deps) -> UntrustedBlock:
+def _paths_block(paths: tuple[str, ...]) -> UntrustedBlock:
     shown = "\n".join(paths[:MAX_PICKER_PATHS])
     more = len(paths) - MAX_PICKER_PATHS
     tail = f"\n(and {more} more changed paths)" if more > 0 else ""
     return UntrustedBlock(
-        "changed-paths", deps.redactor(shown + tail or "(no changed paths)")
+        "changed-paths", RepoText(shown + tail or "(no changed paths)")
     )
 
 
@@ -642,7 +660,7 @@ def _narrate_part(
 def _coverage_lines(
     sel: DiffSelection | None,
     parts: tuple[PartNarrative, ...],
-    lost: tuple[str, ...] = (),
+    dropped: tuple[str, ...] = (),
 ) -> tuple[str, ...]:
     if sel is None:
         return (
@@ -661,26 +679,26 @@ def _coverage_lines(
             "reviewed the diff."
         )
     else:
-        complete = sel.complete and not lost and len(reviewed) == len(parts)
+        complete = sel.complete and not dropped and len(reviewed) == len(parts)
         verdict = "complete" if complete else "PARTIAL"
         line = (
             f"Diff coverage after the model calls: {verdict}. {len(reviewed)} of "
             f"{len(parts)} call(s) returned a review, covering {full} of "
-            f"{sel.total_files + len(lost)} file(s) in full and {cut} cut to fit; "
-            f"{len(sel.unseen) + len(lost)} file(s) went to no call."
+            f"{sel.total_files + len(dropped)} file(s) in full and {cut} cut to fit; "
+            f"{len(sel.unseen) + len(dropped)} file(s) went to no call."
         )
     too_large = (
         "The diff is too large for one review pass: the files cut and the files "
         "never sent are listed in the omissions table, highest risk first."
     )
     removed = (
-        f"Secret redaction removed {len(lost)} file(s) from the diff before any "
-        "model call; they are listed in the omissions table and were not reviewed."
+        f"{len(dropped)} file(s) were dropped from the diff before any model "
+        "call; they are listed in the omissions table and were not reviewed."
     )
     return (
         line,
         *(() if sel.complete else (too_large,)),
-        *((removed,) if lost else ()),
+        *((removed,) if dropped else ()),
     )
 
 
@@ -699,13 +717,26 @@ def _unreviewed_parts(parts: tuple[PartNarrative, ...]) -> tuple[Omission, ...]:
     )
 
 
-def _redaction_total(
-    pull: PullInfo, items: list[EvidenceItem], shared: _Shared, diff_redactions: int
-) -> int:
+def _redaction_total(pull: PullInfo, items: list[EvidenceItem], shared: _Shared) -> int:
     inner = pull.title.redaction_count + pull.body.redaction_count
     return (
         inner
-        + diff_redactions
         + sum(i.detail.redaction_count for i in items)
-        + sum(b.content.redaction_count for b in shared.blocks)
+        + sum(
+            b.content.redaction_count
+            for b in shared.blocks
+            if isinstance(b.content, RedactedText)
+        )
+    )
+
+
+def _secret_note(secrets: DiffSecrets | None) -> tuple[str, ...]:
+    if secrets is None:
+        return ()
+    return (
+        (
+            "Secret scan of the diff, which is sent to the model unredacted: "
+            f"{len(secrets.findings)} possible committed secret(s), listed by file "
+            "and line under Possible committed secrets. Values are never shown."
+        ),
     )

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from atlas_reviewer.classify import tally
+from atlas_reviewer.committed_secrets import CommittedSecret
 from atlas_reviewer.diffs import FileDiff
 from atlas_reviewer.domain import (
     Evidence,
@@ -87,6 +88,7 @@ class DraftInput:
     redactions: int
     generated_at: datetime
     telemetry: tuple[Event, ...] = ()
+    secrets: tuple[CommittedSecret, ...] | None = None
 
 
 def _cell(text: str) -> str:
@@ -110,6 +112,7 @@ def render_draft(d: DraftInput) -> str:
         _header(d),
         _summary(d),
         controller_notes_section(d.controller_notes),
+        _secrets(d.secrets),
         _lenses(d.lenses, any(p.model_reviewed for p in d.narratives)),
         _checks(d.evidence, d.links),
         _at_head(d.evidence),
@@ -118,7 +121,11 @@ def render_draft(d: DraftInput) -> str:
         _usage(d.model_usage),
         telemetry_section(d.telemetry),
         _narratives(d.narratives),
-        f"---\n\n{d.redactions} secret-like string(s) were redacted from untrusted input before any model call.",
+        (
+            f"---\n\n{d.redactions} secret-like string(s) were redacted from CI, runner, "
+            "PR and issue text before any model call. The diff is not redacted; it is "
+            "scanned for possible committed secrets instead."
+        ),
     )
     return "\n\n".join(s for s in sections if s) + "\n"
 
@@ -287,6 +294,40 @@ def _unknown_reason(e: Evidence) -> tuple[str, str]:
                 f"conclusion `{item.conclusion.value}` at the head SHA",
             )
     raise TypeError(f"not evidence: {e!r}")  # pragma: no cover
+
+
+def _secrets(found: tuple[CommittedSecret, ...] | None) -> str:
+    """Controller findings, not model output. `None` means the diff was not
+    fetched, so there was nothing to scan."""
+    if found is None:
+        return ""
+    head = (
+        "## Possible committed secrets\n\n"
+        "Found by the controller's pattern scan of the diff, not by the model. "
+        "Values are never shown. A committed secret is already exposed in the "
+        "repository's history: if one is real, rotate it, then remove it."
+    )
+    if not found:
+        return f"{head}\n\nNone found."
+    rows = "\n".join(
+        "| "
+        + " | ".join(
+            _cell(c)
+            for c in (
+                "HIGH",
+                s.path,
+                "-" if s.line is None else f"{s.line} ({s.side})",
+                s.label,
+                f"possible committed secret in {s.path}; rotate if real",
+            )
+        )
+        + " |"
+        for s in found
+    )
+    return (
+        f"{head}\n\n| Severity | File | Line | Pattern | Finding |\n"
+        "| --- | --- | --- | --- | --- |\n" + rows
+    )
 
 
 def _omissions(omissions: tuple[Omission, ...]) -> str:
