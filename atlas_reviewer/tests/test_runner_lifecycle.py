@@ -12,6 +12,7 @@ import pytest
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import CleanupStatus, RunnerStatus
 from atlas_reviewer.fakes import ExecRule, FakeSprites, MemoryLedger
+from atlas_reviewer.interpreter import PYTHON_TAG
 from atlas_reviewer.ports import BoundaryError, StreamTimeoutError
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import (
@@ -1395,3 +1396,97 @@ def test_resolved_paths_are_parsed_only_from_well_formed_probe_lines():
     assert parse_paths(text) == {
         "python3": "/home/sprite/.shims/python3 -> /usr/bin/mise"
     }
+
+
+_CREDENTIAL = "opaque-credential-" + fake_token("", 24)
+
+
+def _scrubbers():
+    """The default (secret patterns) and a controller-bound redactor whose
+    credential matches no pattern; a returned field must pass both."""
+    return [
+        pytest.param(fake_token("sk-ant-"), None, id="default patterns"),
+        pytest.param(
+            _CREDENTIAL,
+            lambda text: Redactor((_CREDENTIAL,))(text).text,
+            id="controller credential",
+        ),
+    ]
+
+
+def _leaky_review(secret, scrub, rules=(), failed_checks=()):
+    class Leaky(FakeSprites):
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
+            if "PYENV_VERSION" in argv[-1]:
+                raise BoundaryError(f"exec closed after {secret}")
+            return super().exec(name, argv, stdin, timeout_s, first_byte_s)
+
+        def _answer(self, script, stdin):
+            if any(tag in script for tag in failed_checks):
+                return f"broken {secret}", 2
+            return super()._answer(script, stdin)
+
+    clock = FakeClock()
+    return run_disposable(
+        Leaky(rules=rules), MemoryLedger(),
+        RunnerJob(b"tarball-bytes", (*TOOLS, COMPILEALL), diagnose=True),
+        name=NAME, deadline_s=60.0, clock=clock,
+        telemetry=None if scrub is None else Telemetry(clock, scrub=scrub),
+    )  # fmt: skip
+
+
+@pytest.mark.parametrize("secret,scrub", _scrubbers())
+def test_returned_tool_and_diagnostic_text_is_scrubbed(secret, scrub):
+    outcome = _leaky_review(
+        secret,
+        scrub,
+        rules=(
+            ExecRule("tar -xzf", "", 0),
+            ExecRule("ruff --version", f"ruff 0.17.3 {secret}", 0),
+            ExecRule("ruff check", f"a.py:1:1: F401 leaked {secret}\nmore", 1),
+            ExecRule("shellcheck --version", f"denied {secret}", 2),
+            ExecRule("-I --version", "Python 3.13.7", 0),
+            ExecRule("compileall", "", 0),
+            ExecRule("ls -1", f"3.13.7 {secret}", 0),
+        ),
+    )
+    ruff, shellcheck, _ = outcome.results
+    assert isinstance(ruff, ToolRan) and isinstance(shellcheck, ToolAbsent)
+    returned = [
+        ruff.version, ruff.output, shellcheck.detail,
+        *(d.detail for d in outcome.diagnostics),
+    ]  # fmt: skip
+    assert all(secret not in text for text in returned), returned
+    assert "[REDACTED" in ruff.output and ruff.output.endswith("\nmore")
+    assert all("[REDACTED" in text for text in (ruff.version, shellcheck.detail))
+    assert any("[REDACTED" in d.detail for d in outcome.diagnostics)
+
+
+@pytest.mark.parametrize("secret,scrub", _scrubbers())
+def test_a_failed_check_detail_returned_on_a_tool_is_scrubbed(secret, scrub):
+    outcome = _leaky_review(
+        secret,
+        scrub,
+        rules=(ExecRule("tar -xzf", "", 0),),
+        failed_checks=(PROBE_TAG, PYTHON_TAG),
+    )
+    details = [r.detail for r in outcome.results if isinstance(r, ToolAbsent)]
+    assert len(details) == 3
+    assert all(secret not in d and "[REDACTED" in d for d in details), details
+
+
+@pytest.mark.parametrize("secret,scrub", _scrubbers())
+def test_returned_probe_checks_are_scrubbed(secret, scrub):
+    class Leaky(FakeSprites):
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
+            if stdin or "atlas-egress" in argv[-1]:
+                raise BoundaryError(f"exec closed after {secret}")
+            return super().exec(name, argv, stdin, timeout_s, first_byte_s)
+
+    clock = FakeClock()
+    outcome = probe_runner(
+        Leaky(), MemoryLedger(), TOOLS, name=NAME, deadline_s=60, clock=clock,
+        telemetry=None if scrub is None else Telemetry(clock, scrub=scrub),
+    )  # fmt: skip
+    for text in (outcome.stdin_check, outcome.egress_check):
+        assert secret not in text and "[REDACTED" in text, text

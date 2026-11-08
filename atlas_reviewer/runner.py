@@ -60,7 +60,7 @@ import secrets
 import threading
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal
 
 from atlas_reviewer.clock import SystemClock
@@ -250,6 +250,12 @@ class Diagnostic:
 
 @dataclass(frozen=True)
 class RunnerOutcome:
+    """Every text field (the report's note, each tool's version, output or
+    detail, each diagnostic's detail) has been through the run's
+    `Telemetry.scrub`, the same credential-aware redactor as its events.
+    Tool output keeps its lines; it is otherwise bounded only by the exec
+    response cap."""
+
     report: RunnerReport
     results: tuple[ToolResult, ...]
     python: TrustedPython | None = None
@@ -258,6 +264,11 @@ class RunnerOutcome:
 
 @dataclass(frozen=True)
 class ProbeOutcome:
+    """`stdin_check`, `egress_check` and the report's note have been through
+    `Telemetry.scrub`. `framing_sample` is the raw response to a fixed
+    `echo`, kept byte-exact for the framing it shows, so whoever prints it
+    scrubs it."""
+
     report: RunnerReport
     available: dict[str, bool]
     framing_sample: bytes
@@ -657,9 +668,22 @@ def run_disposable(
         api, ledger, body, name=name, deadline_s=deadline_s, clock=clock,
         telemetry=telemetry, first_frame_s=first_frame_s,
     )  # fmt: skip
+    scrub = telemetry.scrub
     return RunnerOutcome(
-        report, tuple(results), next(iter(pythons), None), tuple(diagnostics)
+        report,
+        tuple(_scrubbed(result, scrub) for result in results),
+        next(iter(pythons), None),
+        tuple(replace(d, detail=scrub(d.detail)) for d in diagnostics),
     )
+
+
+def _scrubbed(result: ToolResult, scrub: Callable[[str], str]) -> ToolResult:
+    match result:
+        case ToolRan(version=version, output=output):
+            return replace(result, version=scrub(version), output=scrub(output))
+        case ToolAbsent(detail=detail):
+            return replace(result, detail=scrub(detail))
+    raise TypeError(f"not a tool result: {result!r}")  # pragma: no cover
 
 
 def probe_runner(
@@ -693,16 +717,17 @@ def probe_runner(
         found.update(probed)
         return f"probed {len(found)} binar{'y' if len(found) == 1 else 'ies'}"
 
+    telemetry = telemetry or Telemetry(clock)
     report = _disposable(
         api, ledger, body, name=name, deadline_s=deadline_s, clock=clock,
-        telemetry=telemetry or Telemetry(clock), first_frame_s=first_frame_s,
+        telemetry=telemetry, first_frame_s=first_frame_s,
     )  # fmt: skip
     return ProbeOutcome(
         report,
         found,
         b"".join(sample),
-        stdin_check[0] if stdin_check else "not run",
-        egress_check[0] if egress_check else "not run",
+        telemetry.scrub(stdin_check[0]) if stdin_check else "not run",
+        telemetry.scrub(egress_check[0]) if egress_check else "not run",
     )
 
 
