@@ -1081,6 +1081,12 @@ def _first_line(text: str) -> str:
 def sweep(
     api: SpritesApi, ledger: RunnerLedger, telemetry: Telemetry | None = None
 ) -> dict[str, CleanupStatus]:
-    """Destroy every runner a previous (possibly crashed) review left behind."""
+    """Destroy every runner a previous (possibly crashed) review left behind.
+
+    Precondition: no review is running against this ledger. It records
+    names only, not an owner or a deadline, so a sweep cannot tell a
+    crashed review's runner from a live one and would destroy a live
+    one. The caller holds `ledger.single_review_lock` for the sweep, as
+    for a review; that lock, not this function, keeps the two apart."""
     t = telemetry or _quiet()
     return {name: destroy_runner(api, ledger, name, t) for name in ledger.pending()}
