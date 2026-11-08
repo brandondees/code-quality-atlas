@@ -15,7 +15,7 @@ from atlas_reviewer.ports import BoundaryError, NotFoundError
 from atlas_reviewer.runner import DENY_ALL
 from atlas_reviewer.sprites_api import EXEC_STDIN_MAX_BYTES, SpritesClient, exec_request
 
-from .helpers import Recorder, ok
+from .helpers import Recorder, fake_token, ok
 
 API_S = "https://api.sprites.dev"
 NAME = "cqa-rev-20261106-230000-abcdef"
@@ -183,12 +183,14 @@ class _SpritesServer:
 
     def __init__(self):
         self.requests = []
+        self.control_headers = []
         self.streams = []
         self.deleted = False
         self.base = f"{API_S}/v1/sprites/{NAME}"
 
-    def _control(self, method, path, window, body):
+    def _control(self, method, path, window, body, headers=None):
         self.requests.append((method, path, window, body))
+        self.control_headers.append(dict(headers or {}))
         if method == "DELETE":
             self.deleted = True
             return ok(status=204)
@@ -201,7 +203,7 @@ class _SpritesServer:
     def stream(self, method, url, headers, body, window, max_bytes=None):
         path = url.split("?")[0]
         if not path.endswith("/exec"):
-            return self._control(method, path, window, body)
+            return self._control(method, path, window, body, headers)
         self.streams.append((method, url, dict(headers), body, window))
         script = [v for k, v in parse_qsl(urlsplit(url).query) if k == "cmd"][-1]
         out = (
@@ -217,14 +219,14 @@ class _SpritesServer:
         )
 
 
-def _review_over_http(tools):
+def _review_over_http(tools, token="org/1/secret"):
     from atlas_reviewer.clock import SystemClock
     from atlas_reviewer.fakes import MemoryLedger
     from atlas_reviewer.runner import RunnerJob, run_disposable
 
     server = _SpritesServer()
     outcome = run_disposable(
-        SpritesClient(server, "org/1/secret"),
+        SpritesClient(server, token),
         MemoryLedger(),
         RunnerJob(b"tarball", tools),
         name=NAME,
@@ -311,3 +313,26 @@ def test_a_review_sends_each_exec_its_own_budget_not_the_30s_default():
     ]
     assert [s[3] for s in server.streams][:3] == [b"", b"", b"tarball"]
     assert {r[2] for r in server.requests} == {StreamWindow(30.0)}
+
+
+def test_the_token_goes_only_in_the_authorization_header():
+    """The credential boundary at the wire: across a whole review, the
+    token is never in an exec's URL (its argv), stdin, or any other
+    header, nor in a control-plane path or body."""
+    from atlas_reviewer.runner import DEFAULT_TOOLS, TRIVIAL_TOOL
+
+    token = fake_token("sprites_")
+    server, outcome = _review_over_http((*DEFAULT_TOOLS, TRIVIAL_TOOL), token)
+    assert outcome.report.status.value == "completed"
+    exec_headers = [s[2] for s in server.streams]
+    for headers in (*exec_headers, *server.control_headers):
+        assert headers["Authorization"] == f"Bearer {token}"
+        assert token not in json.dumps(
+            {k: v for k, v in headers.items() if k != "Authorization"}
+        )
+    for _, url, _, body, _ in server.streams:
+        assert token not in url
+        assert token.encode() not in body
+    for _, path, _, body in server.requests:
+        assert token not in path
+        assert body is None or token.encode() not in body
