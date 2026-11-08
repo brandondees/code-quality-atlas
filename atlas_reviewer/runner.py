@@ -336,6 +336,18 @@ def frames_seen(raw: bytes) -> str:
 
 
 def parse_exit(text: str) -> tuple[int | None, str]:
+    """The status on the last `__ATLAS_EXIT__=<n>` line the wrapper prints,
+    and the output before it; None when there is no marker.
+
+    The marker is in-band and reported by the guest, so it is evidence,
+    not proof: code in the runner that prints its own marker and then
+    stops the wrapper before the real one (by killing its shell, say)
+    supplies the last one seen. A per-run nonce would not prevent that,
+    since the guest can read the wrapper's argv, nonce included, under
+    /proc. No tool here executes PR code (compileall only compiles), and
+    a forged status could only change what a human-read draft reports.
+    An authoritative status needs the exec API's own exit frame, which
+    is not documented well enough to rely on (see `frames_seen`)."""
     hits = list(_EXIT_RE.finditer(text))
     if not hits:
         return None, text
