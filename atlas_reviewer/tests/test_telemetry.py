@@ -179,3 +179,48 @@ def test_summary_rows_show_errors_loudly_with_their_detail():
     assert rows[0] == ("1", "upload", "13-byte tarball", "ok", "0.0", "0.0", "bytes=13")
     assert rows[1][3] == "ERROR"
     assert rows[1][6] == "timed out"
+
+
+def _raise(exc):
+    def fail():
+        raise exc
+
+    return fail
+
+
+def test_one_exception_raised_in_two_spans_carries_each_spans_label():
+    """A fake or caching adapter can raise the same object twice; each
+    raise is labelled by the span it failed in, once, not by the first."""
+    exc = StreamTimeoutError("HTTP 500", b"partial", first_byte=True)
+    t = Telemetry(FakeClock())
+    for n in (1, 2):
+        with pytest.raises(StreamTimeoutError) as caught:
+            t.span("destroy", f"delete attempt {n}", _raise(exc))
+        assert caught.value is exc
+        assert str(exc).startswith(f"destroy / delete attempt {n} failed after")
+        assert str(exc).endswith("): HTTP 500")
+        assert str(exc).count("failed after") == 1
+    assert (exc.received, exc.first_byte) == (b"partial", True)
+    assert [e.error.split(" failed")[0] for e in t.events] == [
+        "destroy / delete attempt 1",
+        "destroy / delete attempt 2",
+    ]
+
+
+def test_a_reused_exception_keeps_the_innermost_label_of_its_latest_raise():
+    exc = BoundaryError("HTTP 500")
+    t = Telemetry(FakeClock())
+
+    def retries_then_gives_up():
+        with pytest.raises(BoundaryError):
+            t.span("destroy", "delete attempt 1", _raise(exc))
+        t.span("destroy", "delete attempt 2", _raise(exc))
+
+    with pytest.raises(BoundaryError):
+        t.span("destroy", "all attempts", retries_then_gives_up)
+    labels = [e.error.split(" failed")[0] for e in t.events]
+    assert labels == [
+        "destroy / delete attempt 1",
+        "destroy / delete attempt 2",
+        "destroy / delete attempt 2",
+    ]

@@ -1490,3 +1490,14 @@ def test_returned_probe_checks_are_scrubbed(secret, scrub):
     )  # fmt: skip
     for text in (outcome.stdin_check, outcome.egress_check):
         assert secret not in text and "[REDACTED" in text, text
+
+
+def test_each_failed_delete_attempt_is_labelled_with_its_own_attempt():
+    api = FakeSprites(rules=OK_RULES, fail_on={"delete": BoundaryError("HTTP 500")})
+    outcome, events = run_traced(api)
+    assert outcome.report.cleanup is CleanupStatus.DESTROY_UNVERIFIED
+    deletes = [e for e in events if e.step.startswith("delete attempt")]
+    assert [e.error.split(" failed")[0] for e in deletes] == [
+        f"destroy / {e.step}" for e in deletes
+    ]
+    assert {e.step for e in deletes} == {"delete attempt 1", "delete attempt 2"}

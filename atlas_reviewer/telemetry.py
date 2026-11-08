@@ -12,12 +12,15 @@ sink cannot be attached without one.
 `span` times one step. A `BoundaryError` raised inside it is re-raised as
 the same object, its message prefixed with the phase, the step, how long
 the step took and how far into the run it failed, so no failure surfaces
-as a bare "The read operation timed out". The innermost span labels the error; any
-enclosing span records its own event but keeps that label.
+as a bare "The read operation timed out". The innermost span labels the
+error; any enclosing span records its own event but keeps that label.
+Raising the same object again later labels it afresh, never stacking
+labels.
 """
 
 from __future__ import annotations
 
+import itertools
 import json
 import threading
 from collections.abc import Callable, Mapping
@@ -31,7 +34,9 @@ from atlas_reviewer.redact import redact
 FieldValue = str | int | float | bool | None
 Fields = Mapping[str, FieldValue]
 OK, ERROR = "ok", "error"
-_LABELLED = "atlas_step_label"
+_LABELLED_AT = "atlas_step_labelled_at"
+_UNLABELLED = "atlas_step_unlabelled"
+_SPAN_SEQUENCE = itertools.count()
 
 
 @dataclass(frozen=True)
@@ -166,11 +171,11 @@ class Telemetry:
         fields: Fields | None = None,
         after: Callable[[T], Fields] = _no_fields,
     ) -> T:
-        start = self.elapsed()
+        start, opened = self.elapsed(), next(_SPAN_SEQUENCE)
         try:
             result = fn()
         except BoundaryError as exc:
-            _label(exc, phase, step, start, self.elapsed())
+            _label(exc, phase, step, start, self.elapsed(), opened)
             self.record(
                 phase, step, fields, status=ERROR, start_s=start, error=str(exc)
             )
@@ -188,17 +193,27 @@ class Telemetry:
         return self._scrub(value) if isinstance(value, str) else value
 
 
-def _label(exc: BoundaryError, phase: str, step: str, start: float, now: float) -> None:
+def _label(
+    exc: BoundaryError, phase: str, step: str, start: float, now: float, opened: int
+) -> None:
     """Relabels `exc` itself rather than building a copy: a copy loses the
     attributes a subclass promises (`StreamTimeoutError.received`) and
-    cannot be built at all when its constructor needs more arguments."""
-    if getattr(exc, _LABELLED, False):
+    cannot be built at all when its constructor needs more arguments.
+
+    A label added after this span opened came from a span nested in it, so
+    the innermost label stands. One added before it opened is from an
+    earlier raise of the same object (a fake or caching adapter), so this
+    span relabels it, from the message as first raised."""
+    labelled_at = getattr(exc, _LABELLED_AT, None)
+    if labelled_at is not None and labelled_at > opened:
         return
+    if labelled_at is None:
+        setattr(exc, _UNLABELLED, str(exc))
     prefix = (
         f"{phase} / {step} failed after {now - start:.1f}s ({now:.1f}s into the run): "
     )
-    exc.args = (f"{prefix}{exc}",)
-    setattr(exc, _LABELLED, True)
+    exc.args = (f"{prefix}{getattr(exc, _UNLABELLED)}",)
+    setattr(exc, _LABELLED_AT, next(_SPAN_SEQUENCE))
 
 
 SUMMARY_HEADERS = (
