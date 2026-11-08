@@ -101,7 +101,7 @@ def redact(
     for label, pattern in _PATTERNS:
         text, hits = pattern.subn(f"[REDACTED:{label}]", text)
         count += hits
-    text, hits = _ASSIGNMENT.subn(_assignment, text)
+    text, hits = _assignments(text)
     count += hits
     cut = max_chars is not None and len(text) > max_chars
     return RedactedText(
@@ -119,8 +119,14 @@ def tail(redacted: RedactedText, max_chars: int) -> RedactedText:
         return redacted
     start = len(text) - max(max_chars, 0)
     cut = text[start:]
-    if text[start - 1] != "\n":
-        cut = cut[cut.find("\n") + 1 :]
+    if start > 0 and text[start - 1] != "\n":
+        newline = cut.find("\n")
+        # Drop the partial line only when a whole line remains after it.
+        # The last line of a log is usually the failure, so when that line
+        # (with its trailing newline) is itself longer than the budget, keep
+        # its truncated end rather than discarding it.
+        if newline != -1 and newline < len(cut) - 1:
+            cut = cut[newline + 1 :]
     return RedactedText(cut, redacted.redaction_count, len(text), _MINT)
 
 
@@ -162,8 +168,13 @@ def detect_secrets(text: str) -> SecretScan:
     a high-severity finding, so assignments are held to a stricter bar than
     redaction: a quoted literal that is not a template or prose, or an
     unquoted value that mixes letters and digits with no code punctuation
-    (so `token = get_token()` is not a hit). A private-key marker with no
-    key material after it is reported under its own label."""
+    (so `token = get_token()` is not a hit). A quoted value with whitespace
+    is prose here (`secret = "please enter your secret"`) and is not
+    reported, while `redact` still removes it: redaction covers runtime
+    logs, where a passphrase with spaces must not survive and
+    over-redaction is safe, and detection raises a finding, so it does
+    not. A private-key marker with no key material after it is reported
+    under its own label."""
     starts = [0, *(m.end() for m in re.finditer("\n", text))]
     found: dict[SecretHit, None] = {}
     values: list[str] = []
@@ -208,12 +219,28 @@ def _scrub_known(
     return text, count
 
 
+def _assignments(text: str) -> tuple[str, int]:
+    """Assignment redactions and how many values changed. A match whose
+    value is already a `[REDACTED:...]` placeholder (an earlier pattern
+    pass) or a type annotation is left as it is and not counted."""
+    count = 0
+
+    def replace(m: re.Match[str]) -> str:
+        nonlocal count
+        replaced = _assignment(m)
+        if replaced != m.group(0):
+            count += 1
+        return replaced
+
+    return _ASSIGNMENT.sub(replace, text), count
+
+
 def _assignment(m: re.Match[str]) -> str:
     """A quoted value is replaced through the matching closing quote, so
     spaces, the other quote and backslash-escaped quotes stay inside it; an
     unquoted one up to the first space or quote."""
     name, sep, quote, open_quote, value = _assignment_parts(m)
-    if value is None:
+    if value is None or value.startswith("[REDACTED:"):
         return m.group(0)
     if quote:
         return f"{name}{sep}{quote}[REDACTED:assignment]{quote}"

@@ -263,6 +263,17 @@ def test_tail_of_one_long_line_keeps_its_end():
     assert tail(redact("x" * 10 + "end"), 5).text == "x" * 2 + "end"
 
 
+def test_tail_keeps_the_truncated_end_of_an_overlong_last_line():
+    """A log's last line carries the failure. When that line, including its
+    trailing newline, is longer than the budget, trimming to the next whole
+    line would leave nothing."""
+    cut = tail(redact("x" * 100 + "\n"), 10)
+    assert cut.text == "x" * 9 + "\n"
+    assert cut.truncated_from == 101
+    longer = "short\n" + "y" * 100 + "\n"
+    assert tail(redact(longer), 10).text == "y" * 9 + "\n"
+
+
 def test_detection_reports_label_and_line_never_the_value():
     text = 'x = 1\ntoken: str = "abcdefghijklmnop"\n'
     scan = detect_secrets(text)
@@ -334,6 +345,24 @@ def test_detection_never_changes_the_text():
     before = str(text)
     detect_secrets(text)
     assert text == before
+
+
+def test_an_already_redacted_value_keeps_its_label_and_is_counted_once():
+    token = fake_token("ghp_")
+    out = redact(f"token: {token}")
+    assert out.text == "token: [REDACTED:github-token]"
+    assert out.redaction_count == 1
+    quoted = redact(f'password = "{token}"')
+    assert quoted.text == 'password = "[REDACTED:github-token]"'
+    assert quoted.redaction_count == 1
+
+
+def test_a_quoted_passphrase_with_spaces_is_redacted_but_not_reported():
+    """Redaction scrubs it (a runtime log must not keep it). Detection does
+    not report it: a sentence in source would be a false finding."""
+    text = 'password = "correct horse battery staple"'
+    assert redact(text).text == 'password = "[REDACTED:assignment]"'
+    assert detect_secrets(text).hits == ()
 
 
 def test_flagged_values_are_scrubbed_under_their_own_label():
