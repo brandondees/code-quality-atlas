@@ -1,5 +1,12 @@
 # SPDX-License-Identifier: MIT
-"""Secret redaction for untrusted text. Pure: no I/O.
+"""Secret redaction for untrusted text, and secret detection for
+repository content. Pure: no I/O.
+
+Redaction applies to text that can carry runtime secrets the repository
+does not hold: CI logs, artifacts, runner output, PR and issue text, and
+anything quoted into the published draft. The PR diff is not redacted
+(D33): what it holds is already committed, so `detect_secrets` reports
+possible secrets in it by pattern and line, and never removes text.
 
 `RedactedText`'s constructor rejects callers other than `redact()` and
 `tail()`, so a field typed `RedactedText` (every untrusted input a prompt
@@ -13,7 +20,8 @@ the controller also scrubs the exact values of its own credentials.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Sequence
+from bisect import bisect_right
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 
 _MINT = object()
@@ -25,6 +33,13 @@ _KEY_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")
 _KEY_BASE64 = re.compile(r"[A-Za-z0-9+/]+={0,2}")
 _KEY_HEADER = re.compile(r"\b(?:Proc-Type|DEK-Info|Comment):")
 _KEY_LINE_MIN = 16
+_KEY_RUN = re.compile(r"[A-Za-z0-9+/]{16,}={0,2}")
+_TEMPLATE = re.compile(r"[{}$<>\s]|%s|\.\.\.|\[REDACTED")
+# An unquoted value that cannot be an identifier: a digit or punctuation
+# such as the hyphens of a passphrase, so `token = token_source` is code.
+_LOOSE_VALUE = re.compile(
+    r"(?=[^\s\"']*[0-9+/=~!@#%^&*-])(?=[^\s\"']*[A-Za-z])[A-Za-z0-9_+/=~!@#%^&*-]{8,}"
+)
 _QUOTING = re.compile(r"^[\"'`(]+|(?:\\n|[\"'`,;)\\])+$")
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("github-token", re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b")),
@@ -74,8 +89,13 @@ def redact(
     raw: str,
     known_secrets: Sequence[str] = (),
     max_chars: int | None = None,
+    flagged: Sequence[str] = (),
 ) -> RedactedText:
+    """`flagged` are values `detect_secrets` found in repository content,
+    scrubbed under their own label so published output never echoes them."""
     text, count = _scrub_known(raw, known_secrets)
+    text, hits = _scrub_known(text, flagged, "possible-committed-secret")
+    count += hits
     text, hits = _private_keys(text)
     count += hits
     for label, pattern in _PATTERNS:
@@ -106,18 +126,76 @@ def tail(redacted: RedactedText, max_chars: int) -> RedactedText:
 
 @dataclass(frozen=True)
 class Redactor:
-    """`redact` bound to the controller's own credential values. `sources`
-    are read on every call, so a token minted mid-review is scrubbed too."""
+    """`redact` bound to the controller's own credential values and to the
+    values detected in the diff (`flagged`). `sources` are read on every
+    call, so a token minted mid-review is scrubbed too."""
 
     known_secrets: tuple[str, ...] = ()
     sources: tuple[Callable[[], Sequence[str]], ...] = ()
+    flagged: tuple[str, ...] = ()
 
     def __call__(self, raw: str, max_chars: int | None = None) -> RedactedText:
         dynamic = tuple(s for source in self.sources for s in source())
-        return redact(raw, (*self.known_secrets, *dynamic), max_chars)
+        return redact(raw, (*self.known_secrets, *dynamic), max_chars, self.flagged)
 
 
-def _scrub_known(raw: str, known_secrets: Sequence[str]) -> tuple[str, int]:
+@dataclass(frozen=True)
+class SecretHit:
+    """A possible secret: the pattern that matched and its 1-based line in
+    the scanned text. Never the value."""
+
+    label: str
+    line: int
+
+
+@dataclass(frozen=True)
+class SecretScan:
+    """`values` exist only to scrub published output (`Redactor.flagged`);
+    they are never rendered, and are left out of `repr`."""
+
+    hits: tuple[SecretHit, ...]
+    values: tuple[str, ...] = field(default=(), repr=False)
+
+
+def detect_secrets(text: str) -> SecretScan:
+    """Possible secrets in `text`, which is left unchanged. Each hit becomes
+    a high-severity finding, so assignments are held to a stricter bar than
+    redaction: a quoted literal that is not a template or prose, or an
+    unquoted value that mixes letters and digits with no code punctuation
+    (so `token = get_token()` is not a hit). A private-key marker with no
+    key material after it is reported under its own label."""
+    starts = [0, *(m.end() for m in re.finditer("\n", text))]
+    found: dict[SecretHit, None] = {}
+    values: list[str] = []
+
+    def hit(label: str, pos: int, matched: Sequence[str]) -> None:
+        found.setdefault(SecretHit(label, bisect_right(starts, pos)), None)
+        values.extend(matched)
+
+    for start, end, _ in _key_spans(text):
+        material = _KEY_RUN.findall(text, start, end)
+        # A diff's `+`/`-` line marker reads as base64, so keep the run
+        # without it too: a model quoting the key will not include it.
+        bare = [r.lstrip("+-") for r in material]
+        hit(
+            "private-key" if material else "private-key-marker",
+            start,
+            [*material, *(b for b in bare if len(b) >= _KEY_LINE_MIN)],
+        )
+    for label, pattern in _PATTERNS:
+        for m in pattern.finditer(text):
+            hit(label, m.start(), (m.group(0),))
+    for m in _ASSIGNMENT.finditer(text):
+        value = _committed_value(m)
+        if value is not None:
+            hit("assignment", m.start(), (value,))
+    hits = sorted(found, key=lambda h: (h.line, h.label))
+    return SecretScan(tuple(hits), tuple(dict.fromkeys(values)))
+
+
+def _scrub_known(
+    raw: str, known_secrets: Sequence[str], label: str = "controller-credential"
+) -> tuple[str, int]:
     usable = sorted(
         (s for s in known_secrets if len(s) >= _MIN_KNOWN_SECRET_LEN),
         key=len,
@@ -126,7 +204,7 @@ def _scrub_known(raw: str, known_secrets: Sequence[str]) -> tuple[str, int]:
     text, count = raw, 0
     for secret in usable:
         count += text.count(secret)
-        text = text.replace(secret, "[REDACTED:controller-credential]")
+        text = text.replace(secret, f"[REDACTED:{label}]")
     return text, count
 
 
@@ -134,39 +212,72 @@ def _assignment(m: re.Match[str]) -> str:
     """A quoted value is replaced through the matching closing quote, so
     spaces, the other quote and backslash-escaped quotes stay inside it; an
     unquoted one up to the first space or quote."""
-    name, sep, double, single, open_quote = m.group(1, 2, 3, 4, 5)
-    quote = double or single
+    name, sep, quote, open_quote, value = _assignment_parts(m)
+    if value is None:
+        return m.group(0)
     if quote:
         return f"{name}{sep}{quote}[REDACTED:assignment]{quote}"
-    value = m.group(0)[len(name) + len(sep) :]
-    if "=" not in sep and _ANNOTATION.fullmatch(value):
-        return m.group(0)
     return f"{name}{sep}{open_quote}[REDACTED:assignment]"
+
+
+def _assignment_parts(m: re.Match[str]) -> tuple[str, str, str, str, str | None]:
+    """Name, separator, closing quote (if quoted), opening quote of an
+    unquoted value, and the value itself: None for a type annotation."""
+    name, sep, double, single, open_quote = m.group(1, 2, 3, 4, 5)
+    quote = double or single or ""
+    rest = m.group(0)[len(name) + len(sep) :]
+    if quote:
+        return name, sep, quote, "", rest[1:-1]
+    if "=" not in sep and _ANNOTATION.fullmatch(rest):
+        return name, sep, "", open_quote, None
+    return name, sep, "", open_quote, rest[len(open_quote) :]
+
+
+def _committed_value(m: re.Match[str]) -> str | None:
+    _, _, quote, _, value = _assignment_parts(m)
+    if value is None:
+        return None
+    if quote:
+        return None if _TEMPLATE.search(value) else value
+    return value if _LOOSE_VALUE.fullmatch(value) else None
 
 
 def _private_keys(text: str) -> tuple[str, int]:
     """Each BEGIN through the next END. A BEGIN with no END after it (a log
     cut before the key's END line, or code that only mentions the marker)
     is removed with the key material that follows it, not through the end
-    of the text: a diff is redacted whole, and swallowing to the end hid
-    every later file. Linear: once no END follows a BEGIN, none follows
-    any later BEGIN either, so the END search is not repeated."""
+    of the text, which would hide everything logged after it. Linear: once
+    no END follows a BEGIN, none follows any later BEGIN either, so the END
+    search is not repeated."""
     kept: list[str] = []
     count = pos = 0
+    for start, end, terminated in _key_spans(text):
+        kept.append(text[pos:start])
+        count += 1
+        kept.append(
+            "[REDACTED:private-key]"
+            if terminated
+            else "[REDACTED:private-key-unterminated]"
+        )
+        pos = end
+    kept.append(text[pos:])
+    return "".join(kept), count
+
+
+def _key_spans(text: str) -> Iterator[tuple[int, int, bool]]:
+    """(start, end, terminated) of each private-key block, as
+    `_private_keys` removes them."""
+    pos = 0
     ends_left = True
     while (begin := _KEY_BEGIN.search(text, pos)) is not None:
-        kept.append(text[pos : begin.start()])
-        count += 1
         end = _KEY_END.search(text, begin.end()) if ends_left else None
         if end is None:
             ends_left = False
-            kept.append("[REDACTED:private-key-unterminated]")
             pos = _key_material_end(text, begin.end())
-            continue
-        kept.append("[REDACTED:private-key]")
-        pos = end.end()
-    kept.append(text[pos:])
-    return "".join(kept), count
+            yield begin.start(), pos, False
+        else:
+            pos = end.end()
+            yield begin.start(), pos, True
 
 
 def _key_material_end(text: str, pos: int) -> int:

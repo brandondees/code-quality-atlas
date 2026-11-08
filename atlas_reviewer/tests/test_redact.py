@@ -5,6 +5,8 @@ from atlas_reviewer.redact import (
     TRUNCATION_MARKER,
     RedactedText,
     Redactor,
+    SecretHit,
+    detect_secrets,
     redact,
     tail,
 )
@@ -259,3 +261,82 @@ def test_tail_with_a_zero_budget_is_empty():
 
 def test_tail_of_one_long_line_keeps_its_end():
     assert tail(redact("x" * 10 + "end"), 5).text == "x" * 2 + "end"
+
+
+def test_detection_reports_label_and_line_never_the_value():
+    text = 'x = 1\ntoken: str = "abcdefghijklmnop"\n'
+    scan = detect_secrets(text)
+    assert scan.hits == (SecretHit("assignment", 2),)
+    assert "abcdefghijklmnop" not in repr(scan)
+    assert scan.values == ("abcdefghijklmnop",)
+
+
+def test_an_unterminated_key_and_a_bare_marker_are_both_reported():
+    text = (
+        f"-----BEGIN RSA PRIVATE KEY-----\n{PAYLOAD}\nkept()\n"
+        'begin = "-----BEGIN PRIVATE KEY-----"\n'
+    )
+    scan = detect_secrets(text)
+    assert scan.hits == (
+        SecretHit("private-key", 1),
+        SecretHit("private-key-marker", 4),
+    )
+    assert scan.values == (PAYLOAD,)
+
+
+def test_a_terminated_key_and_known_token_formats_are_reported():
+    token = fake_token("ghp_")
+    text = f"{PRIVATE_KEY.replace('MIIfake', PAYLOAD)}\nauth = {token}\n"
+    labels = [(h.label, h.line) for h in detect_secrets(text).hits]
+    assert labels == [("private-key", 1), ("github-token", 4)]
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "token = get_token()",
+        "api_key = settings.API_KEY",
+        'password = f"{user}:{pw}"',
+        'secret = "please enter your secret"',
+        "known_secrets: tuple[str, ...] = ()",
+        "token = token_source",
+        "password = user_password_hash",
+        'password = "[REDACTED:assignment]"',
+    ],
+)
+def test_code_that_only_names_a_secret_is_not_reported(code):
+    assert detect_secrets(code).hits == ()
+
+
+def test_unquoted_config_values_and_one_hit_per_line_and_label():
+    scan = detect_secrets(
+        "password: hunter2hunter2\nsecret=abc123def456 token=xyz789uvw012\n"
+        "password = correct-horse-battery-staple"
+    )
+    assert scan.hits == tuple(SecretHit("assignment", n) for n in (1, 2, 3))
+    assert scan.values == (
+        "hunter2hunter2",
+        "abc123def456",
+        "xyz789uvw012",
+        "correct-horse-battery-staple",
+    )
+
+
+def test_key_material_on_diff_lines_is_also_kept_without_the_line_marker():
+    line = "+" + PAYLOAD.splitlines()[0]
+    scan = detect_secrets(f"+-----BEGIN PRIVATE KEY-----\n{line}\n")
+    assert scan.hits == (SecretHit("private-key", 1),)
+    assert line in scan.values and line[1:] in scan.values
+
+
+def test_detection_never_changes_the_text():
+    text = f'-----BEGIN PRIVATE KEY-----\n{PAYLOAD}\ntoken: str = "abcdefghijklmnop"'
+    before = str(text)
+    detect_secrets(text)
+    assert text == before
+
+
+def test_flagged_values_are_scrubbed_under_their_own_label():
+    out = Redactor(flagged=("abcdefghijklmnop",))("the model quoted abcdefghijklmnop")
+    assert out.text == "the model quoted [REDACTED:possible-committed-secret]"
+    assert out.redaction_count == 1
