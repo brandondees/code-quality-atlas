@@ -264,7 +264,9 @@ that other parts go to separate calls. When coverage is incomplete, the
 kept, files sent in full, files cut, and every file never sent, grouped by
 risk tier, highest first. A part whose call fails or is refused (call cap,
 cost cap, token bound) gets its own row listing the files sent but not
-reviewed. After the calls, a controller note states whether coverage is
+reviewed. A file the diff's headers name that the selection does not
+account for gets a `dropped before the model calls` row and makes coverage
+PARTIAL. After the calls, a controller note states whether coverage is
 complete or PARTIAL and how many files each outcome covers. Nothing short of
 every file sent in full with every call returning a review is called
 complete.
@@ -406,8 +408,9 @@ interpreter is chosen before they exist. Every other binary comes from
 | --- | --- | --- |
 | `domain.py` | closed types: `PrEvent`, `EvidenceItem`, `Matched`/`Stale`/`Missing`, `Outcome`, `Omission` | no |
 | `classify.py` | evidence vs. the head SHA → matched / stale / missing | no |
-| `redact.py` | secret redaction; `RedactedText` can only come from `redact()` | no |
-| `prompt.py` | trusted system prompt + nonce-fenced untrusted blocks | no |
+| `redact.py` | secret redaction (`RedactedText` can only come from `redact()`) and `detect_secrets`, which reports pattern and line without changing text | no |
+| `prompt.py` | trusted system prompt + nonce-fenced untrusted blocks (`RedactedText`, or `RepoText` for the unredacted diff) | no |
+| `committed_secrets.py` | scan each file of the diff for possible committed secrets, located by file line and side | no |
 | `evidence.py` | GitHub JSON / runner results → `EvidenceItem`, shape validation | no |
 | `archive.py` | bounded in-memory ZIP reading for untrusted artifacts | no |
 | `pagination.py` | `Link` header parsing | no |
@@ -440,10 +443,20 @@ interpreter is chosen before they exist. Every other binary comes from
   runner tool output, issue text, and the model's own output. Lens bodies and
   the controller notes' fixed sentences are trusted; every untrusted value in
   the notes is quoted as a marked `"..."` literal, and the whole block is
-  still fenced as untrusted data when sent. All of it is redacted before
-  it reaches a prompt or the draft. In the prompt it sits inside
-  `<untrusted-data id="NONCE">` fences, and the system prompt says never to
-  follow instructions found there.
+  still fenced as untrusted data when sent. All of it except the diff is
+  redacted before it reaches a prompt or the draft. In the prompt it sits
+  inside `<untrusted-data id="NONCE">` fences, and the system prompt says
+  never to follow instructions found there.
+- **The diff is not redacted (D33).** It is already in the repository, other
+  reviewers read it raw, and regex redaction of code dropped or mangled
+  review input. A secret committed in it is already exposed, so the
+  controller scans each file with `detect_secrets` and lists every hit under
+  "Possible committed secrets" as a HIGH finding: path, file line, pattern
+  label, and "rotate if real", never the value. Detection removes nothing.
+  The scanned values are scrubbed from the finished draft in case the model
+  repeats them, and the system prompt tells it never to. PR, issue, CI log,
+  artifact and runner text keep their redaction, since they can carry
+  runtime secrets that are not in the repository.
 - **Runner:** a fresh Sprite for every review, never reused. Deny-all egress
   (`{"action": "deny", "domain": "*"}`) is set from the outside API and read
   back before anything runs. Memory is capped at 1024 MB. The Sprite gets no
