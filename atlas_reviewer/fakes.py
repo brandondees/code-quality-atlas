@@ -63,6 +63,7 @@ class FakeSprites:
     timeouts_seen: list[float] = field(default_factory=list)
     first_bytes_seen: list[float | None] = field(default_factory=list)
     argv_seen: list[tuple[str, ...]] = field(default_factory=list)
+    policies_sent: list[tuple[str, list[Json]]] = field(default_factory=list)
     _sprites: dict[str, _Sprite] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -105,7 +106,9 @@ class FakeSprites:
 
     def set_network_policy(self, name: str, rules: Sequence[Json]) -> None:
         self._record("set_network_policy", name)
-        self._get(name).network_rules = [dict(r) for r in rules]
+        sent: list[Json] = [dict(r) for r in rules]
+        self.policies_sent.append((name, sent))
+        self._get(name).network_rules = sent
 
     def get_network_policy(self, name: str) -> Json:
         self._record("get_network_policy", name)

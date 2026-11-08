@@ -15,7 +15,6 @@ from atlas_reviewer.fakes import ExecRule, FakeSprites, MemoryLedger
 from atlas_reviewer.ports import BoundaryError, StreamTimeoutError
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import (
-    DENY_ALL,
     FIRST_FRAME_BUDGET_S,
     PROBE_BUDGET_S,
     PROBE_TAG,
@@ -113,9 +112,30 @@ def test_deny_all_is_set_and_read_back_before_any_exec():
         {"rules": [["action", "deny"]]},
         {"rules": "deny"},
         {},
+        {
+            "rules": [
+                {"action": "deny", "domain": "*"},
+                {"action": "allow", "domain": "example.com"},
+            ]
+        },
+        {
+            "rules": [
+                {"action": "allow", "domain": "example.com"},
+                {"action": "deny", "domain": "*"},
+            ]
+        },
+        {"rules": [{"action": "deny", "domain": "*", "except": ["example.com"]}]},
+        {
+            "rules": [
+                {"action": "deny", "domain": "*"},
+                {"action": "deny", "domain": "*"},
+            ]
+        },
     ],
 )
 def test_policy_read_back_that_is_not_deny_all_blocks_execution(read_back):
+    """Exact match: deny-all plus anything else, even a duplicate, is not
+    the policy that was set."""
     api = FakeSprites(rules=OK_RULES, policy_read_back=read_back)
     outcome = run(api)
     assert outcome.report.status is RunnerStatus.FAILED
@@ -427,18 +447,22 @@ def test_a_tool_version_is_printable_guest_text():
     assert ruff.version == "ruff 0.17.3"
 
 
-def test_nothing_credential_like_is_passed_into_the_runner():
+def test_the_only_input_the_runner_gets_is_the_tarball():
+    """The credential boundary itself is pinned elsewhere: the token only
+    in the control-plane Authorization header
+    (test_sprites_api.test_the_token_goes_only_in_the_authorization_header)
+    and every exec under `env -i` with the minimal environment
+    (test_exec_argv_gives_every_command_exactly_its_stdin_then_eof,
+    test_the_wrapper_really_runs_with_only_the_minimal_environment)."""
     api = FakeSprites(rules=OK_RULES)
     run(api)
-    scripts = [c[2] for c in api.calls if c[0] == "exec"]
-    assert all("TOKEN" not in s and "Authorization" not in s for s in scripts)
     assert [s for s in api.stdin_seen if s] == [b"tarball-bytes"]
 
 
 def test_network_policy_sent_is_deny_all():
     api = FakeSprites(rules=OK_RULES)
     run(api)
-    assert list(DENY_ALL) == [{"action": "deny", "domain": "*"}]
+    assert api.policies_sent == [(NAME, [{"action": "deny", "domain": "*"}])]
 
 
 def test_destroy_is_idempotent_and_sweep_clears_leftovers():
@@ -461,7 +485,7 @@ def test_exec_output_decoding_and_exit_marker():
     assert parse_exit("no marker") == (None, "no marker")
 
 
-def test_tool_without_exit_marker_reports_no_exit_code():
+def test_an_upload_without_exit_marker_is_a_failed_run():
     class NoMarker(FakeSprites):
         def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
             super().exec(name, argv, stdin, timeout_s, first_byte_s)
@@ -471,6 +495,25 @@ def test_tool_without_exit_marker_reports_no_exit_code():
     outcome = run(api, tools=())
     assert outcome.report.status is RunnerStatus.FAILED
     assert "exit None" in outcome.report.note
+
+
+def test_a_tool_run_without_exit_marker_reports_no_exit_code():
+    """Only the tool's run exec loses its marker, so a missing marker
+    cannot be read as exit 0."""
+
+    class RunLosesMarker(FakeSprites):
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
+            raw = super().exec(name, argv, stdin, timeout_s, first_byte_s)
+            if "ruff check" in argv[-1]:
+                return raw.split(b"__ATLAS_EXIT__=")[0]
+            return raw
+
+    outcome = run(RunLosesMarker(rules=OK_RULES), tools=TOOLS[:1])
+    assert outcome.report.status is RunnerStatus.COMPLETED
+    (ruff,) = outcome.results
+    assert isinstance(ruff, ToolRan)
+    assert ruff.exit_code is None
+    assert ruff.output.strip() == "a.py:1:1: F401 unused import"
 
 
 def test_empty_version_output_is_unknown_version():
