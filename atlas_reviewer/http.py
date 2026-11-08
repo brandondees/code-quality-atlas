@@ -43,6 +43,11 @@ class HttpResponse:
 
 
 class Transport(Protocol):
+    """`request`'s `timeout_s` bounds each socket operation, not the
+    exchange: a server that keeps sending a few bytes at a time can hold a
+    request open past it. Only `StreamingTransport.stream` has a
+    wall-clock deadline."""
+
     def request(
         self,
         method: str,

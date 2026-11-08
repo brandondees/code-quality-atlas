@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: MIT
 """Secret redaction for untrusted text. Pure: no I/O.
 
-`RedactedText` can only be minted by `redact()`, so any field typed
-`RedactedText` (every untrusted input a prompt accepts) has been through
-this module. The patterns are best-effort, not a guarantee: a secret in a
-format listed nowhere below still passes through, which is why the
-controller also scrubs the exact values of its own credentials.
+`RedactedText`'s constructor rejects callers other than `redact()` and
+`tail()`, so a field typed `RedactedText` (every untrusted input a prompt
+accepts) is not filled by accident. That guards against mistakes, not
+deliberate bypass: `dataclasses.replace`, `copy` and the module's private
+token all get past it. The patterns are best-effort, not a guarantee: a
+secret in a format listed nowhere below still passes through, which is why
+the controller also scrubs the exact values of its own credentials.
 """
 
 from __future__ import annotations
@@ -89,8 +91,9 @@ def redact(
 
 def tail(redacted: RedactedText, max_chars: int) -> RedactedText:
     """The last `max_chars` of already-redacted text, from the first whole
-    line. Cutting after redaction keeps a block that straddles the cut (a
-    private key) recognisable while it is scrubbed."""
+    line, or the end of a single line longer than the budget. Cutting after
+    redaction keeps a block that straddles the cut (a private key)
+    recognisable while it is scrubbed."""
     text = redacted.text
     if len(text) <= max_chars:
         return redacted

@@ -1,5 +1,8 @@
 # SPDX-License-Identifier: MIT
-"""File-backed runner ledger and single-review lock (controller-local state)."""
+"""File-backed runner ledger and single-review lock (controller-local state).
+
+POSIX only: the lock is `fcntl.flock`, and directory fsync is not portable.
+"""
 
 from __future__ import annotations
 
