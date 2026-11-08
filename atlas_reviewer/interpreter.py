@@ -146,7 +146,7 @@ def diagnostics_before_unpack() -> tuple[DiagnosticSpec, ...]:
         ),
         DiagnosticSpec(
             "pyenv versions",
-            "the installed versions; the PR pins 3.12",
+            "the installed versions, to compare with any .python-version the PR has",
             versions_script(),
         ),
     )
@@ -172,7 +172,7 @@ def diagnostics_after_unpack(
         else (
             DiagnosticSpec(
                 "shim with PYENV_VERSION",
-                "answers quickly if the PR's .python-version pin is the cause",
+                "answers quickly when the checkout's .python-version is why bare python3 hangs",
                 f"cd {workdir} && PYENV_VERSION={shlex.quote(_pyenv_name(python))} "
                 + bounded(f"{SHIM_PATH} --version", bound_s),
                 sprite_env=True,
@@ -182,7 +182,8 @@ def diagnostics_after_unpack(
     )
     bare = DiagnosticSpec(
         "bare python3 in the checkout",
-        f"expected-may-hang: exit 124 after {bound_s}s confirms the pin hypothesis",
+        f"expected-may-hang: exit 124 after {bound_s}s, while the PYENV_VERSION run "
+        "answers, points at the checkout's .python-version",
         f"cd {workdir} && " + bounded("python3 --version", bound_s),
         sprite_env=True,
         bound_s=bound_s,
