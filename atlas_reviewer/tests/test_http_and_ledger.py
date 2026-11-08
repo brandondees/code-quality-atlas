@@ -2,6 +2,7 @@
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -103,17 +104,23 @@ def test_file_ledger_round_trip(tmp_path):
 def test_ledger_writes_and_their_directory_are_synced(tmp_path, monkeypatch):
     import os
 
-    synced = []
+    synced: set[Path] = set()
     real = os.fsync
-    monkeypatch.setattr(os, "fsync", lambda fd: synced.append(fd) or real(fd))
-    ledger = FileLedger(tmp_path / "state" / "nested" / "runners.ledger")
+
+    def fsync(fd):
+        synced.add(Path(os.readlink(f"/proc/self/fd/{fd}")))
+        real(fd)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    state = tmp_path / "state"
+    path = state / "nested" / "runners.ledger"
+    ledger = FileLedger(path)
     ledger.record("a")
-    assert len(synced) == 4  # the file, its directory, and both new dirs' parents
-    ledger.record("b")
-    assert len(synced) == 6
+    assert synced == {tmp_path, state, state / "nested", path}
+    synced.clear()
     ledger.clear("a")
-    assert len(synced) == 8
-    assert ledger.pending() == ("b",)
+    assert synced == {state / "nested", state / "nested" / "runners.ledger.clearing"}
+    assert ledger.pending() == ()
 
 
 def test_a_ledger_named_like_its_temp_file_still_clears(tmp_path):
@@ -137,6 +144,13 @@ def test_only_one_review_at_a_time(tmp_path):
         pass
 
 
+# Slow routes take _SLOW_S on their own; a cutoff test passes only if the
+# client gave up well before, with room for a loaded CI runner.
+_SLOW_S = 3.0
+_TRICKLE_BYTES = int(_SLOW_S / 0.05)
+_CUT_BOUND_S = 2.0
+
+
 class _StreamHandler(BaseHTTPRequestHandler):
     """HTTP/1.0, close-delimited bodies, so each write reaches the client
     as it happens."""
@@ -151,7 +165,7 @@ class _StreamHandler(BaseHTTPRequestHandler):
     def _route(self, body):
         if self.path.startswith("/trickle-headers"):
             self.wfile.write(b"HTTP/1.0 200 OK\r\nX-Slow: ")
-            for _ in range(40):
+            for _ in range(_TRICKLE_BYTES):
                 self.wfile.write(b"a")
                 self.wfile.flush()
                 time.sleep(0.05)
@@ -159,7 +173,7 @@ class _StreamHandler(BaseHTTPRequestHandler):
             return
         if self.path.startswith("/trickle-first-chunk"):
             self.wfile.write(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
-            for _ in range(40):
+            for _ in range(_TRICKLE_BYTES):
                 self.wfile.write(b"0")
                 self.wfile.flush()
                 time.sleep(0.05)
@@ -171,14 +185,14 @@ class _StreamHandler(BaseHTTPRequestHandler):
                 b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n" + close + b"\r\n"
                 b"5\r\n\x01part\r\n"
             )
-            for _ in range(40):
+            for _ in range(_TRICKLE_BYTES):
                 self.wfile.write(b"0")
                 self.wfile.flush()
                 time.sleep(0.05)
             self.wfile.write(b"\r\n\r\n")
             return
         if self.path.startswith("/silent"):
-            time.sleep(1.0)
+            time.sleep(_SLOW_S)
             return
         status = 500 if self.path.startswith("/error") else 200
         self.send_response(status)
@@ -197,7 +211,7 @@ class _StreamHandler(BaseHTTPRequestHandler):
             self.wfile.flush()
             time.sleep(0.05)
         if self.path.split("?")[0] in {"/headers-only", "/stall"}:
-            time.sleep(1.0)
+            time.sleep(_SLOW_S)
 
     def log_message(self, *args):
         pass
@@ -239,7 +253,7 @@ def test_a_silent_response_fails_at_the_first_byte_deadline(stream_server, path)
         StreamTimeoutError, match="no response byte within 0.2s"
     ) as info:
         _stream(f"{stream_server}{path}", StreamWindow(5.0, 0.2))
-    assert time.monotonic() - started < 0.9
+    assert time.monotonic() - started < _CUT_BOUND_S
     assert info.value.first_byte is True
     assert info.value.received == b""
 
@@ -253,7 +267,7 @@ def test_a_stalled_response_keeps_the_bytes_that_arrived(stream_server):
 
 def test_without_a_first_byte_window_only_the_total_applies(stream_server):
     with pytest.raises(
-        StreamTimeoutError, match="no response byte|within 0.3s"
+        StreamTimeoutError, match=r"response incomplete after 0 byte\(s\) within 0.3s"
     ) as info:
         _stream(f"{stream_server}/silent", StreamWindow(0.3))
     assert info.value.first_byte is False
@@ -290,7 +304,7 @@ def test_trickled_headers_cannot_outlast_the_deadline(
     started = time.monotonic()
     with pytest.raises(StreamTimeoutError, match="within 0.3s") as info:
         _stream(f"{stream_server}/trickle-headers", window)
-    assert time.monotonic() - started < 1.0
+    assert time.monotonic() - started < _CUT_BOUND_S
     assert info.value.first_byte is first_byte
     assert info.value.received == b""
 
@@ -304,7 +318,7 @@ def test_trickled_chunk_framing_cannot_outlast_the_total_deadline(stream_server,
     started = time.monotonic()
     with pytest.raises(StreamTimeoutError, match="within 0.4s") as info:
         _stream(f"{stream_server}{path}", StreamWindow(0.4, 0.2))
-    assert time.monotonic() - started < 1.2
+    assert time.monotonic() - started < _CUT_BOUND_S
     assert info.value.received == b"\x01part"
 
 
@@ -319,7 +333,7 @@ def test_a_trickled_first_chunk_line_fails_at_the_first_byte_deadline(
         StreamTimeoutError, match="no response byte within 0.2s"
     ) as info:
         _stream(f"{stream_server}/trickle-first-chunk", StreamWindow(5.0, 0.2))
-    assert time.monotonic() - started < 1.0
+    assert time.monotonic() - started < _CUT_BOUND_S
     assert info.value.first_byte is True
     assert info.value.received == b""
 
