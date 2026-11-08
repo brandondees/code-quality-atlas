@@ -2,6 +2,10 @@
 
 **Status: proposal, not decided (D31 in
 [`../open-questions.md`](../open-questions.md)).** Nothing here is built.
+D34 (2026-11-08) accepted the direction and the phased plan in
+[`../agentic-reviewer.md`](../agentic-reviewer.md). This doc stays the
+detailed design for the loop, the bridge and the finding checks. Its
+budget figures remain estimates until the owner sets agentic numbers.
 It extends the manual reviewer service
 ([`2026-11-06-manual-reviewer-service.md`](2026-11-06-manual-reviewer-service.md),
 D24-D30, D32-D33) from one prompt per diff part to one model loop per review
