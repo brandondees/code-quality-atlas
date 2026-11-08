@@ -14,7 +14,8 @@ telemetry event (`atlas_reviewer.telemetry`):
    the runner received; unpack it in a second exec; run each available tool
 5. destroy -- in `finally`, and from a watchdog timer at the deadline.
    Destroy is idempotent and is verified by a follow-up existence check;
-   only a verified destroy clears the ledger entry.
+   only the final verified destroy clears the ledger entry, never the
+   watchdog's, which can run while `create` is still in flight.
 
 Upload and unpack are separate execs so a transport stall and a slow or
 stuck extraction fail with different labels. Every exec error names its
@@ -357,33 +358,37 @@ class _Destroyer:
         self._status: CleanupStatus | None = None
 
     def destroy(self, *, final: bool = False) -> CleanupStatus:
-        """`final` destroys again even after the watchdog did: a create
-        still in flight when the watchdog fired can add the Sprite after
-        the watchdog verified it absent. A telemetry write failure must not
-        stop cleanup, so cleanup is redone untraced and the error re-raised."""
+        """`final` means no `create` can still be in flight: it destroys
+        again even after the watchdog did, because a create in flight when
+        the watchdog fired can add the Sprite after the watchdog verified
+        it absent. For the same reason only a final destroy clears the
+        ledger entry; the watchdog's verified absence can be overtaken.
+        A telemetry write failure must not stop cleanup, so cleanup is
+        redone untraced and the error re-raised."""
         with self._lock:
             if self._status is None or final:
                 try:
-                    self._status = self._destroy(self._telemetry)
+                    self._status = self._destroy(self._telemetry, final)
                 except OSError:
-                    self._status = self._destroy(_quiet())
+                    self._status = self._destroy(_quiet(), final)
                     raise
             return self._status
 
-    def _destroy(self, telemetry: Telemetry) -> CleanupStatus:
+    def _destroy(self, telemetry: Telemetry, final: bool) -> CleanupStatus:
         deleted = any(self._attempt_delete(telemetry, n) for n in (1, 2))
         status = (
-            self._verified_status(telemetry)
+            self._verified_status(telemetry, final)
             if deleted
             else CleanupStatus.DESTROY_UNVERIFIED
         )
         telemetry.record("destroy", "outcome", {"cleanup": status.value})
         return status
 
-    def _verified_status(self, telemetry: Telemetry) -> CleanupStatus:
+    def _verified_status(self, telemetry: Telemetry, final: bool) -> CleanupStatus:
         if not self._verified_absent(telemetry):
             return CleanupStatus.DESTROY_UNVERIFIED
-        self._ledger.clear(self._name)
+        if final:
+            self._ledger.clear(self._name)
         return CleanupStatus.DESTROYED_VERIFIED
 
     def _attempt_delete(self, telemetry: Telemetry, attempt: int) -> bool:
@@ -418,7 +423,8 @@ def destroy_runner(
     name: str,
     telemetry: Telemetry | None = None,
 ) -> CleanupStatus:
-    return _Destroyer(api, ledger, name, telemetry or _quiet()).destroy()
+    """For a runner no live review is creating (a sweep)."""
+    return _Destroyer(api, ledger, name, telemetry or _quiet()).destroy(final=True)
 
 
 def _quiet() -> Telemetry:

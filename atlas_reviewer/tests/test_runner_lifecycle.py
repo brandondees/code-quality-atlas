@@ -2,6 +2,7 @@
 """The runner must be destroyed on every path, and nothing may execute
 inside it before deny-all egress is set and read back from outside."""
 
+import threading
 import time
 
 import pytest
@@ -52,6 +53,13 @@ OK_RULES = (
     ExecRule("ruff --version", "ruff 0.17.3", 0),
     ExecRule("ruff check", "a.py:1:1: F401 unused import", 1),
 )
+# Only bounds a wait for an event another thread sets; no assertion
+# depends on how long anything took.
+_SYNC_WAIT_S = 10.0
+
+
+def _no_secrets(text):
+    return text
 
 
 def run(api, ledger=None, clock=None, deadline_s=60.0, tools=TOOLS):
@@ -172,17 +180,52 @@ def test_watchdog_destroys_a_hung_exec_at_the_deadline():
     assert ops(api).count("delete") == 2
 
 
-def test_a_sprite_created_after_the_watchdog_fired_is_still_destroyed():
-    class SlowCreate(FakeSprites):
-        def create(self, name):
-            time.sleep(0.4)
-            super().create(name)
+class _WatchdogDone:
+    """A sink that signals once the first destroy (the watchdog's) has
+    recorded its outcome, so a test can order itself after it without
+    sleeping."""
 
-    api, ledger = SlowCreate(rules=OK_RULES), MemoryLedger()
-    outcome = run(api, ledger, clock=SystemClock(), deadline_s=0.1)
-    assert api.live_names() == ()
+    def __init__(self):
+        self.done = threading.Event()
+
+    def emit(self, event):
+        if (event.phase, event.step) == ("destroy", "outcome"):
+            self.done.set()
+
+
+def _run_with_create_held_past_the_watchdog(on_created=None):
+    """The run's own deadline uses a clock that never moves, so only the
+    wall-clock watchdog fires. `create` blocks until the watchdog's destroy
+    has finished, then lands -- the late create the watchdog cannot see."""
+    signal = _WatchdogDone()
+    seen = {}
+
+    class CreateOutlivesWatchdog(FakeSprites):
+        def create(self, name):
+            assert signal.done.wait(_SYNC_WAIT_S), "the watchdog never finished"
+            super().create(name)
+            seen["live"] = self.live_names()
+            seen["pending"] = ledger.pending()
+            if on_created:
+                on_created(self)
+
+    api, ledger = CreateOutlivesWatchdog(rules=OK_RULES), MemoryLedger()
+    telemetry = Telemetry(SystemClock(), signal, scrub=_no_secrets)
+    outcome = run_disposable(
+        api, ledger, RunnerJob(b"tarball-bytes", TOOLS), name=NAME,
+        deadline_s=0.01, clock=FakeClock(), telemetry=telemetry,
+    )  # fmt: skip
+    return api, ledger, outcome, seen, telemetry.events
+
+
+def test_the_ledger_keeps_a_runner_whose_create_lands_after_the_watchdog():
+    """A controller killed between the late create and the final destroy
+    must still leave the name for `sweep` to find."""
+    api, ledger, outcome, seen, _ = _run_with_create_held_past_the_watchdog()
+    assert seen == {"live": (NAME,), "pending": (NAME,)}
     assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
-    assert ops(api).index("create") < len(ops(api)) - ops(api)[::-1].index("delete")
+    assert api.live_names() == ()
+    assert ledger.pending() == ()
 
 
 def test_a_telemetry_write_failure_does_not_stop_cleanup():
