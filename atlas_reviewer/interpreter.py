@@ -16,6 +16,16 @@ it with `-I` (isolated mode: no `PYTHON*` variables, no user site, and the
 working directory is not put on `sys.path`, so PR files cannot shadow a
 module the tool imports).
 
+The probe-only diagnostics are the exception, on purpose: "bare python3
+in the checkout" runs the shim from inside the unpacked PR, so there the
+PR's `.python-version` does pick the interpreter. Current pyenv only
+resolves that name under `$(pyenv root)/versions`, but pyenv 1.2.24 to
+2.3.2 accepted a relative path in it (CVE-2022-35861, fixed in 2.3.3),
+which lets the file name a binary in the checkout to run. Which pyenv
+the image ships is not checked here. A review never sets `diagnose`, and
+a probe runs in the same disposable, deny-all runner with no
+credentials as everything else.
+
 Sources: https://env-docs-bkmto.sprites.app/languages/python (shims in
 `/.sprite/bin`, pyenv root `/.sprite/languages/python/pyenv`) and pyenv's
 README (version selection by `.python-version`; shims bypassed by the
@@ -180,6 +190,8 @@ def diagnostics_after_unpack(
             ),
         )
     )
+    # Runs whatever the PR's .python-version selects; see the module
+    # docstring for why that is confined to probes.
     bare = DiagnosticSpec(
         "bare python3 in the checkout",
         f"expected-may-hang: exit 124 after {bound_s}s, while the PYENV_VERSION run "
