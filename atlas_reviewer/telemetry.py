@@ -3,7 +3,7 @@
 
 Every event goes to one `EventSink` (a JSONL file in live use, nothing in
 tests) and is also kept in memory for the summary table that the draft and
-`probe-runner` print. Field values are numbers, booleans or labels the
+`probe-runner` (both later in this stack) print. Field values are numbers, booleans or labels the
 controller chose. Free text (error messages, which can quote URLs or runner
 output) goes through `scrub`, the controller's redactor, before any sink
 sees it, so no event carries a credential; a sink cannot be attached

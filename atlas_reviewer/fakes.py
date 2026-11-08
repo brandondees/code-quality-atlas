@@ -2,7 +2,8 @@
 """In-memory stand-ins for the Sprites API, the runner ledger, and a
 GitHub token source.
 
-Used by the test suite and by `--dry-run`; none ever touches a real API.
+Used by the test suite and, from a later step of this stack, the CLI's
+`--dry-run`; none ever touches a real API.
 `FakeSprites` records every control-plane call in order so a caller can
 assert on lifecycle (policy before exec, destroy always), and answers the
 runner's tool-availability probe from its `installed` set and its
@@ -201,7 +202,8 @@ class MemoryLedger:
 @dataclass(frozen=True)
 class StaticToken:
     """A pre-minted GitHub token. Tests only: live mode always mints App
-    installation tokens (`github_auth.AppInstallationTokens`)."""
+    installation tokens (`github_auth.AppInstallationTokens`, added later
+    in this stack)."""
 
     value: str
 
