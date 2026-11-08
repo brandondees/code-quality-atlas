@@ -20,6 +20,10 @@ TRUNCATION_MARKER = "\n[... truncated by atlas_reviewer ...]\n"
 
 _KEY_BEGIN = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
 _KEY_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")
+_KEY_BASE64 = re.compile(r"[A-Za-z0-9+/]+={0,2}")
+_KEY_HEADER = re.compile(r"\b(?:Proc-Type|DEK-Info|Comment):")
+_KEY_LINE_MIN = 16
+_QUOTING = re.compile(r"^[\"'`(]+|(?:\\n|[\"'`,;)\\])+$")
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("github-token", re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b")),
     ("github-pat", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{22,}\b")),
@@ -133,22 +137,67 @@ def _assignment(m: re.Match[str]) -> str:
 
 def _private_keys(text: str) -> tuple[str, int]:
     """Each BEGIN through the next END. A BEGIN with no END after it (a log
-    cut before the key's END line) is removed through the end of the text,
-    since what follows it may be key material. One pass: once a BEGIN has
-    no END after it, no later BEGIN can have one either."""
+    cut before the key's END line, or code that only mentions the marker)
+    is removed with the key material that follows it, not through the end
+    of the text: a diff is redacted whole, and swallowing to the end hid
+    every later file. Linear: once no END follows a BEGIN, none follows
+    any later BEGIN either, so the END search is not repeated."""
     kept: list[str] = []
     count = pos = 0
+    ends_left = True
     while (begin := _KEY_BEGIN.search(text, pos)) is not None:
         kept.append(text[pos : begin.start()])
         count += 1
-        end = _KEY_END.search(text, begin.end())
+        end = _KEY_END.search(text, begin.end()) if ends_left else None
         if end is None:
+            ends_left = False
             kept.append("[REDACTED:private-key-unterminated]")
-            return "".join(kept), count
+            pos = _key_material_end(text, begin.end())
+            continue
         kept.append("[REDACTED:private-key]")
         pos = end.end()
     kept.append(text[pos:])
     return "".join(kept), count
+
+
+def _key_material_end(text: str, pos: int) -> int:
+    """Where an unterminated key's material ends: the rest of the BEGIN
+    line, then every following line that is a PEM header or ends in a
+    base64 run (whatever precedes it: a diff marker, a log timestamp,
+    indentation, quoting), across blank lines between them. A short base64
+    line counts only straight after a full one (a key's last line) or as
+    the text's final line (a log cut mid-key), and only when padded or
+    alone on its line (so `<timestamp> next step` is kept)."""
+    line_end = text.find("\n", pos)
+    if line_end == -1:
+        return len(text)
+    swallowed, last_was_full = line_end, False
+    while line_end < len(text):
+        nxt = text.find("\n", line_end + 1)
+        end = len(text) if nxt == -1 else nxt
+        line = text[line_end + 1 : end]
+        tokens = line.split()
+        if not tokens:
+            last_was_full = False
+        else:
+            token = _QUOTING.sub("", tokens[-1])
+            is_base64 = bool(token) and _KEY_BASE64.fullmatch(token) is not None
+            if _KEY_HEADER.search(line) or (is_base64 and len(token) >= _KEY_LINE_MIN):
+                swallowed, last_was_full = end, True
+            elif (
+                is_base64
+                and (last_was_full or nxt == -1)
+                and _alone_or_padded(token, tokens)
+            ):
+                swallowed, last_was_full = end, False
+            else:
+                break
+        line_end = end
+    return swallowed
+
+
+def _alone_or_padded(token: str, tokens: list[str]) -> bool:
+    return token.endswith("=") or sum(t not in ("+", "-") for t in tokens) == 1
 
 
 def _truncate(text: str, max_chars: int | None) -> str:

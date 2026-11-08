@@ -131,17 +131,63 @@ def test_private_key_redaction_stays_linear_without_end_markers():
     start = time.monotonic()
     out = redact(begin * 20_000 + "no end marker")
     assert time.monotonic() - start < 2.0
-    assert out.text == "[REDACTED:private-key-unterminated]"
-    assert out.redaction_count == 1
+    marker = "[REDACTED:private-key-unterminated]\n"
+    assert out.text == marker * 20_000 + "no end marker"
+    assert out.redaction_count == 20_000
 
 
-def test_a_private_key_with_no_end_marker_is_removed_through_the_end():
-    payload = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQ"
-    text = f"log line\n-----BEGIN RSA PRIVATE KEY-----\n{payload}\n{payload}"
+PAYLOAD = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQ"
+
+
+def test_a_private_key_with_no_end_marker_is_removed_with_its_material():
+    text = f"log line\n-----BEGIN RSA PRIVATE KEY-----\n{PAYLOAD}\n{PAYLOAD}"
     out = redact(text)
     assert out.text == "log line\n[REDACTED:private-key-unterminated]"
-    assert payload not in out.text
+    assert PAYLOAD not in out.text
     assert out.redaction_count == 1
+
+
+def test_code_after_an_unterminated_marker_survives():
+    """A diff is redacted whole: swallowing to the end of the text hid every
+    file after a test that only mentions the BEGIN marker."""
+    text = (
+        '+    begin = "-----BEGIN PRIVATE KEY-----\\n"\n'
+        "+    start = time.monotonic()\n"
+        "diff --git a/pyproject.toml b/pyproject.toml\n"
+    )
+    out = redact(text)
+    assert out.text == (
+        '+    begin = "[REDACTED:private-key-unterminated]\n'
+        "+    start = time.monotonic()\n"
+        "diff --git a/pyproject.toml b/pyproject.toml\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "material",
+    [
+        f"{PAYLOAD}\n{PAYLOAD}\nAB==",
+        f"Proc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,0123ABCD\n\n{PAYLOAD}\nAB==",
+        f'+    "{PAYLOAD}\\n"\n+    "{PAYLOAD}\\n",',
+        f"2026-11-07T23:49:41.2Z {PAYLOAD}\n2026-11-07T23:49:41.3Z {PAYLOAD}",
+    ],
+    ids=["bare", "pem-headers", "quoted-in-a-diff", "timestamped-log"],
+)
+def test_unterminated_key_material_is_removed_in_any_line_framing(material):
+    text = f"-----BEGIN RSA PRIVATE KEY-----\n{material}\nkept()\n"
+    out = redact(text)
+    assert out.text == "[REDACTED:private-key-unterminated]\nkept()\n"
+    assert PAYLOAD not in out.text
+
+
+def test_a_key_flattened_onto_its_begin_line_is_removed_with_that_line():
+    out = redact(f"env KEY=-----BEGIN PRIVATE KEY----- {PAYLOAD}")
+    assert out.text == "env KEY=[REDACTED:private-key-unterminated]"
+
+
+def test_a_short_line_after_key_material_is_kept_unless_it_looks_like_its_end():
+    log = f"-----BEGIN EC PRIVATE KEY-----\nT1 {PAYLOAD}\nT2 next step\n"
+    assert redact(log).text == "[REDACTED:private-key-unterminated]\nT2 next step\n"
 
 
 def test_a_terminated_key_before_an_unterminated_one_is_still_counted():
