@@ -67,8 +67,10 @@ from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import CleanupStatus, RunnerReport, RunnerStatus
 from atlas_reviewer.interpreter import (
     PYTHON_PLACEHOLDER,
+    SYSTEM_PYTHON,
     DiagnosticSpec,
     TrustedPython,
+    bounded,
     choose_python,
     diagnostics_after_unpack,
     diagnostics_before_unpack,
@@ -111,6 +113,20 @@ _INT_RE = re.compile(r"\d+")
 _ANSI_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|.)")
 _UNPRINTABLE_RE = re.compile(r"[^\x21-\x7e]+")
 GUEST_TAIL_CHARS = 300
+EGRESS_TAG = "atlas-egress"
+EGRESS_TARGETS = ("1.1.1.1:443", "example.com:443")
+EGRESS_BOUND_S = 8
+_EGRESS_RE = re.compile(
+    re.escape(EGRESS_TAG) + r":([A-Za-z0-9.-]+:\d+):(connected|refused|untested)"
+    r"(?::(\d+))?\s*$",
+    re.MULTILINE,
+)
+_EGRESS_WORDS = {
+    "connected": "CONNECTED",
+    "refused": "no connection",
+    "untested": "untested (no system Python)",
+    "unreported": "not reported",
+}
 VERSION_CHARS = 120
 _EXEC_SLACK_S = 15.0
 PROBE_BUDGET_S = 60.0
@@ -250,6 +266,7 @@ class ProbeOutcome:
     available: dict[str, bool]
     framing_sample: bytes
     stdin_check: str
+    egress_check: str = "not run"
 
 
 @dataclass
@@ -617,11 +634,12 @@ def probe_runner(
     first_frame_s: float = FIRST_FRAME_BUDGET_S,
 ) -> ProbeOutcome:
     """The live-protocol check: provision, probe tools, capture one raw exec
-    response for framing, round-trip stdin, destroy. Uploads and runs
-    nothing from a PR."""
+    response for framing, round-trip stdin, try to connect out, destroy.
+    Uploads and runs nothing from a PR."""
     found: dict[str, bool] = {}
     sample: list[bytes] = []
     stdin_check: list[str] = []
+    egress_check: list[str] = []
 
     def body(run: _Run) -> str:
         probed = _probe(run, tools)
@@ -629,6 +647,7 @@ def probe_runner(
             _raw_exec(run, _Exec("probe", "framing check", f"echo {FRAMING_CHECK}"))
         )
         stdin_check.append(_stdin_roundtrip(run))
+        egress_check.append(_egress_check(run))
         if isinstance(probed, ExecFailed):
             return probed.detail
         found.update(probed)
@@ -639,8 +658,69 @@ def probe_runner(
         telemetry=telemetry or Telemetry(clock), first_frame_s=first_frame_s,
     )  # fmt: skip
     return ProbeOutcome(
-        report, found, b"".join(sample), stdin_check[0] if stdin_check else "not run"
+        report,
+        found,
+        b"".join(sample),
+        stdin_check[0] if stdin_check else "not run",
+        egress_check[0] if egress_check else "not run",
     )
+
+
+def egress_script(targets: tuple[str, ...] = EGRESS_TARGETS) -> str:
+    """One outbound TCP connect per `host:port` target with the system
+    Python, each bounded on its own. A failed connect's exit status is
+    reported, not interpreted: refused, unresolvable and timed out (124)
+    all mean no connection was made."""
+    connect = (
+        "import socket,sys; h,p=sys.argv[1].rsplit(':',1); "
+        "socket.create_connection((h,int(p)),4).close()"
+    )
+    attempt = bounded(f'{SYSTEM_PYTHON} -I -c "{connect}" "$t"', EGRESS_BOUND_S)
+    return (
+        f"for t in {' '.join(targets)}; do "
+        f'if [ ! -x {SYSTEM_PYTHON} ]; then echo "{EGRESS_TAG}:$t:untested"; '
+        f"elif {attempt} >/dev/null 2>&1; "
+        f'then echo "{EGRESS_TAG}:$t:connected"; '
+        f'else echo "{EGRESS_TAG}:$t:refused:$?"; fi; done'
+    )
+
+
+def egress_verdict(code: int | None, text: str, targets: tuple[str, ...]) -> str:
+    """`OPEN` if any target connected, `no outbound connection` only if
+    every target was tried and failed, else `UNVERIFIED`, which is also
+    what a target the guest did not report makes it."""
+    if code != 0:
+        return (
+            f"UNVERIFIED: the egress check exited {code}: "
+            f"{guest_text(text, GUEST_TAIL_CHARS)}"
+        )
+    seen = {
+        t: (state, exit_status) for t, state, exit_status in _EGRESS_RE.findall(text)
+    }
+    states = [seen.get(t, ("unreported", "")) for t in targets]
+    detail = "; ".join(
+        f"{t} {_EGRESS_WORDS[state]}" + (f" (exit {ex})" if ex else "")
+        for t, (state, ex) in zip(targets, states, strict=True)
+    )
+    if any(state == "connected" for state, _ in states):
+        return f"OPEN: {detail}"
+    if all(state == "refused" for state, _ in states):
+        return f"no outbound connection: {detail}"
+    return f"UNVERIFIED: {detail}"
+
+
+def _egress_check(run: _Run) -> str:
+    """Behavioural evidence for deny-all, next to the policy read-back:
+    the read-back shows what the control plane stored, this shows whether
+    the guest could connect out to an IP literal and a hostname."""
+    try:
+        code, text = _exec(
+            run,
+            _Exec("probe", "egress check", egress_script(), budget_s=PROBE_BUDGET_S),
+        )
+    except BoundaryError as exc:
+        return f"UNVERIFIED: the egress check failed: {exc}"
+    return egress_verdict(code, text, EGRESS_TARGETS)
 
 
 def _stdin_roundtrip(run: _Run) -> str:

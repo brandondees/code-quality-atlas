@@ -2,6 +2,9 @@
 """The runner must be destroyed on every path, and nothing may execute
 inside it before deny-all egress is set and read back from outside."""
 
+import os
+import socket
+import subprocess
 import threading
 
 import pytest
@@ -27,6 +30,8 @@ from atlas_reviewer.runner import (
     ToolSpec,
     decode_exec_output,
     destroy_runner,
+    egress_script,
+    egress_verdict,
     exec_argv,
     frames_seen,
     guest_text,
@@ -588,11 +593,111 @@ def test_probe_runner_reports_tools_and_raw_framing_then_destroys():
     assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
     assert ledger.pending() == ()
     assert api.stdin_seen[:2] == [b"", b""]
-    assert [len(x) for x in api.stdin_seen[2:]] == [STDIN_CHECK_BYTES]
+    assert len(api.stdin_seen[2]) == STDIN_CHECK_BYTES
     assert outcome.stdin_check == (
         f"ok: sent {STDIN_CHECK_BYTES} bytes, runner received {STDIN_CHECK_BYTES}"
     )
     assert ops(api)[:3] == ["create", "set_network_policy", "get_network_policy"]
+
+
+def _egress_answer(*lines, exit_code=0):
+    return ExecRule("atlas-egress", "\n".join(lines), exit_code)
+
+
+def _probe_with(*rules, api_cls=FakeSprites):
+    api = api_cls(rules=rules)
+    return probe_runner(
+        api, MemoryLedger(), TOOLS, name=NAME, deadline_s=60, clock=FakeClock()
+    )
+
+
+def test_the_probe_reports_no_outbound_connection_only_when_every_target_failed():
+    outcome = _probe_with(
+        _egress_answer(
+            "atlas-egress:1.1.1.1:443:refused:1",
+            "atlas-egress:example.com:443:refused:124",
+        )
+    )
+    assert outcome.egress_check == (
+        "no outbound connection: 1.1.1.1:443 no connection (exit 1); "
+        "example.com:443 no connection (exit 124)"
+    )
+
+
+@pytest.mark.parametrize(
+    "rule,expected",
+    [
+        (
+            _egress_answer(
+                "atlas-egress:1.1.1.1:443:connected",
+                "atlas-egress:example.com:443:refused:1",
+            ),
+            "OPEN: 1.1.1.1:443 CONNECTED; example.com:443 no connection (exit 1)",
+        ),
+        (
+            _egress_answer("atlas-egress:1.1.1.1:443:refused:1"),
+            (
+                "UNVERIFIED: 1.1.1.1:443 no connection (exit 1); "
+                "example.com:443 not reported"
+            ),
+        ),
+        (
+            _egress_answer(
+                "atlas-egress:1.1.1.1:443:untested",
+                "atlas-egress:example.com:443:untested",
+            ),
+            (
+                "UNVERIFIED: 1.1.1.1:443 untested (no system Python); "
+                "example.com:443 untested (no system Python)"
+            ),
+        ),
+        (
+            _egress_answer("sh: \x1b[31mbroken", exit_code=2),
+            "UNVERIFIED: the egress check exited 2: sh: broken",
+        ),
+    ],
+)
+def test_the_probe_never_reports_egress_blocked_without_evidence(rule, expected):
+    assert _probe_with(rule).egress_check == expected
+
+
+def test_an_egress_check_transport_failure_is_unverified_not_fatal():
+    class EgressTimesOut(FakeSprites):
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
+            if "atlas-egress" in argv[-1]:
+                raise BoundaryError("exec connection closed")
+            return super().exec(name, argv, stdin, timeout_s, first_byte_s)
+
+    outcome = _probe_with(api_cls=EgressTimesOut)
+    assert outcome.egress_check.startswith("UNVERIFIED: the egress check failed: ")
+    assert outcome.report.status is RunnerStatus.COMPLETED
+    assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
+
+
+@pytest.mark.skipif(
+    not (os.path.exists("/usr/bin/python3") and os.path.exists("/usr/bin/timeout"))
+    or not os.path.exists("/bin/sh"),
+    reason="needs /bin/sh, /usr/bin/python3 and /usr/bin/timeout",
+)
+def test_the_egress_script_really_tells_a_connection_from_a_refusal():
+    """Locally, against 127.0.0.1 only: the script's own shell and Python
+    logic, not whether any Sprite blocks egress."""
+    with socket.socket() as listening, socket.socket() as unused:
+        listening.bind(("127.0.0.1", 0))
+        listening.listen()
+        unused.bind(("127.0.0.1", 0))
+        closed = unused.getsockname()[1]
+        unused.close()
+        targets = (f"127.0.0.1:{listening.getsockname()[1]}", f"127.0.0.1:{closed}")
+        done = subprocess.run(
+            list(exec_argv(egress_script(targets), 0)),
+            capture_output=True, timeout=30, check=True,
+        )  # fmt: skip
+    code, text = parse_exit(strip_start(done.stdout.decode()))
+    verdict = egress_verdict(code, text, targets)
+    assert verdict.startswith(
+        f"OPEN: {targets[0]} CONNECTED; {targets[1]} no connection"
+    )
 
 
 def test_probe_runner_still_destroys_when_the_policy_is_wrong():
