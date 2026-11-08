@@ -60,9 +60,10 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def safe_url(url: str) -> str:
-    """URL without query string, for error messages."""
+    """URL without userinfo or query string, for error messages."""
     parts = urlsplit(url)
-    return f"{parts.scheme}://{parts.netloc}{parts.path}"
+    host = parts.netloc.rpartition("@")[2]
+    return f"{parts.scheme}://{host}{parts.path}"
 
 
 class UrllibTransport:

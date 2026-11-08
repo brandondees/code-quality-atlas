@@ -85,6 +85,7 @@ def test_transport_refuses_plain_http_by_default_and_wraps_connection_errors():
 
 def test_safe_url_drops_query_and_header_lookup_is_case_insensitive():
     assert safe_url("https://h/p?token=1") == "https://h/p"
+    assert safe_url("https://user:pa%40ss@h:8443/p") == "https://h:8443/p"
     assert HttpResponse(200, {"Content-Type": "a"}, b"").header("content-type") == "a"
 
 
