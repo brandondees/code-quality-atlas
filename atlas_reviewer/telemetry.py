@@ -3,16 +3,16 @@
 
 Every event goes to one `EventSink` (a JSONL file in live use, nothing in
 tests) and is also kept in memory for the summary table that the draft and
-`probe-runner` (both later in this stack) print. Field values are numbers, booleans or labels the
-controller chose. Free text (error messages, which can quote URLs or runner
-output) goes through `scrub`, the controller's redactor, before any sink
-sees it, so no event carries a credential; a sink cannot be attached
-without one.
+`probe-runner` (both later in this stack) print. Field values are numbers,
+booleans or labels the controller chose. Free text (error messages, which
+can quote URLs or runner output) goes through `scrub`, the controller's
+redactor, before any sink sees it, so no event carries a credential; a
+sink cannot be attached without one.
 
 `span` times one step. A `BoundaryError` raised inside it is re-raised as
 the same object, its message prefixed with the phase, the step, how long
-the step took and how far into the run it failed, so no failure surfaces as a bare
-"The read operation timed out". The innermost span labels the error; any
+the step took and how far into the run it failed, so no failure surfaces
+as a bare "The read operation timed out". The innermost span labels the error; any
 enclosing span records its own event but keeps that label.
 """
 
