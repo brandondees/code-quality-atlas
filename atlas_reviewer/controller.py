@@ -137,7 +137,9 @@ class Deps:
 
 
 def review(event: PrEvent, deps: Deps, config: ReviewConfig) -> str:
-    telemetry = deps.telemetry or Telemetry(deps.clock)
+    telemetry = deps.telemetry or Telemetry(
+        deps.clock, scrub=lambda text: deps.redactor(text).text
+    )
     deps = replace(
         deps, github=InstrumentedGitHub(deps.github, telemetry), telemetry=telemetry
     )
