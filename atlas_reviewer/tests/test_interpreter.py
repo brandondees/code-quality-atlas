@@ -374,7 +374,10 @@ def test_a_hung_candidate_is_bounded_and_later_ones_are_still_found(tmp_path):
 
 @needs_posix
 @pytest.mark.skipif(not os.path.exists(SYSTEM_PYTHON), reason="no /usr/bin/python3")
+@pytest.mark.skipif(not os.path.exists("/usr/bin/timeout"), reason="no timeout")
 def test_the_resolve_script_really_finds_the_system_python():
+    """Every candidate query runs under /usr/bin/timeout; without it each
+    one fails and nothing is found."""
     out = sh(resolve_script())
     python = choose_python(out)
     assert python is not None
