@@ -1033,3 +1033,17 @@ committed secret as a HIGH finding by file, line and pattern, never the
 value. It also lists any file the fitted selection drops as an omission.
 Step 8 (#607) updates the README. Redaction stays for PR, issue, CI,
 artifact and runner text and for the published draft.
+
+## 2026-11-08 — D34: agentic reviewer direction accepted
+
+Brandon accepted the recommendations in a research note on making Atlas an
+agentic reviewer: "I can roll with recommendations as proposed for now."
+D34 records them, and [`agentic-reviewer.md`](agentic-reviewer.md) holds the
+design and phased plan. The one-shot stack (#601-#607) stays the fallback.
+Each selected lens runs its own tool loop over a Sprite checkout, and a
+lens counts as run only when its body was loaded. The reviewer gets the
+full PR conversation and branch-wide CI labelled by SHA, all keys stay on
+the controller, and free tools are baked into the image. Agentic mode
+starts triage-only, on a small controller loop of our own, and is scored by
+issue-hit precision and recall plus coverage honesty. Every agentic budget
+is pending Brandon. Nothing was built and no live run was made.
