@@ -584,6 +584,46 @@ def test_an_untruncated_diff_records_no_diff_omission():
     assert "pull request diff" not in section(draft, "Omissions and limits hit")
 
 
+def test_files_removed_by_redaction_are_omissions_and_coverage_is_partial():
+    """Atlas review of #601: redaction ran on the whole diff and removed
+    files, and coverage was then counted from what was left ("19 of 19
+    file(s) ... complete" for a 23-file PR). A key BEGIN in one file and an
+    END in a later one still remove every header between them."""
+
+    def file(path, line):
+        return f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n+{line}\n"
+
+    class SpanningKey(FixtureGitHub):
+        def get_pull_diff(self, repo, number):
+            return (
+                file("a.py", 'BEGIN = "-----BEGIN RSA PRIVATE KEY-----"')
+                + file("b.py", "x = 1")
+                + file("c.py", 'END = "-----END RSA PRIVATE KEY-----"')
+                + file("d.py", "y = 2")
+            )
+
+    s = Setup(github=SpanningKey(FIXTURE))
+    draft = s.run()
+    row = next(
+        r
+        for r in section(draft, "Omissions and limits hit").splitlines()
+        if "removed by secret redaction" in r
+    )
+    assert "2 file(s) removed before any model call, not reviewed: b.py, c.py" in row
+    notes = section(draft, "Controller notes")
+    assert "Diff coverage after the model calls: PARTIAL." in notes
+    assert "of 4 file(s) in full" in notes
+    assert "2 file(s) went to no call" in notes
+    assert "Secret redaction removed 2 file(s) from the diff" in notes
+    evidence = s.provider.prompts[-1].user.split('label="ci-and-runner-evidence"', 1)[1]
+    assert "removed by secret redaction" in evidence
+
+
+def test_a_diff_redaction_that_keeps_every_file_records_no_loss():
+    draft = Setup(github=RiskyDiff(FIXTURE)).run()
+    assert "removed by secret redaction" not in draft
+
+
 def test_a_long_pr_body_and_issue_body_are_recorded_as_omissions():
     pull = json.loads((FIXTURE / "pull.json").read_text())
     pull["body"] = "Fixes #7\n\n" + "word " * 1_000

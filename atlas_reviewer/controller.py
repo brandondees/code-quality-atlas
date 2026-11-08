@@ -188,7 +188,7 @@ def review(event: PrEvent, deps: Deps, config: ReviewConfig) -> str:
             links=base.links,
             controller_notes=(
                 *_notes(base, selection),
-                *_coverage_lines(selection, parts),
+                *_coverage_lines(selection, parts, () if diff is None else diff.lost),
             ),
             lenses=base.facts.lenses.uses,
             narratives=parts,
@@ -300,6 +300,7 @@ class _Shared:
 class _Fetched:
     text: str
     redactions: int
+    lost: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -403,7 +404,30 @@ def _fetch_diff(
         _no_diff(collected, "the PR head moved while the diff was fetched")
         return None
     full = deps.redactor(raw)
-    return _Fetched(full.text, full.redaction_count)
+    lost = _lost_in_redaction(raw, full.text)
+    if lost:
+        collected.omit(
+            "pull request diff",
+            "removed by secret redaction",
+            f"{len(lost)} file(s) removed before any model call, not reviewed: "
+            f"{_listed(lost)}",
+        )
+    return _Fetched(full.text, full.redaction_count, lost)
+
+
+def _lost_in_redaction(raw: str, redacted: str) -> tuple[str, ...]:
+    """Files whose `diff --git` header did not survive redaction. The diff
+    is redacted whole, so a pattern that spans files (a private-key BEGIN in
+    one file, an END in a later one) removes the files between, and every
+    later count -- parts, coverage -- starts from what is left."""
+    kept = set(diff_paths(redacted))
+    return tuple(p for p in diff_paths(raw) if p not in kept)
+
+
+def _listed(paths: tuple[str, ...]) -> str:
+    more = len(paths) - MAX_LISTED_PATHS
+    shown = ", ".join(paths[:MAX_LISTED_PATHS])
+    return f"{shown} and {more} more" if more > 0 else shown
 
 
 def _no_diff(collected: Collected, reason: str) -> None:
@@ -616,7 +640,9 @@ def _narrate_part(
 
 
 def _coverage_lines(
-    sel: DiffSelection | None, parts: tuple[PartNarrative, ...]
+    sel: DiffSelection | None,
+    parts: tuple[PartNarrative, ...],
+    lost: tuple[str, ...] = (),
 ) -> tuple[str, ...]:
     if sel is None:
         return (
@@ -635,19 +661,27 @@ def _coverage_lines(
             "reviewed the diff."
         )
     else:
-        complete = sel.complete and len(reviewed) == len(parts)
+        complete = sel.complete and not lost and len(reviewed) == len(parts)
         verdict = "complete" if complete else "PARTIAL"
         line = (
             f"Diff coverage after the model calls: {verdict}. {len(reviewed)} of "
             f"{len(parts)} call(s) returned a review, covering {full} of "
-            f"{sel.total_files} file(s) in full and {cut} cut to fit; "
-            f"{len(sel.unseen)} file(s) went to no call."
+            f"{sel.total_files + len(lost)} file(s) in full and {cut} cut to fit; "
+            f"{len(sel.unseen) + len(lost)} file(s) went to no call."
         )
     too_large = (
         "The diff is too large for one review pass: the files cut and the files "
         "never sent are listed in the omissions table, highest risk first."
     )
-    return (line,) if sel.complete else (line, too_large)
+    removed = (
+        f"Secret redaction removed {len(lost)} file(s) from the diff before any "
+        "model call; they are listed in the omissions table and were not reviewed."
+    )
+    return (
+        line,
+        *(() if sel.complete else (too_large,)),
+        *((removed,) if lost else ()),
+    )
 
 
 def _unreviewed_parts(parts: tuple[PartNarrative, ...]) -> tuple[Omission, ...]:
