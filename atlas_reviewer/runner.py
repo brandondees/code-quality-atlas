@@ -117,16 +117,12 @@ EGRESS_TAG = "atlas-egress"
 EGRESS_TARGETS = ("1.1.1.1:443", "example.com:443")
 EGRESS_BOUND_S = 8
 _EGRESS_RE = re.compile(
-    re.escape(EGRESS_TAG) + r":([A-Za-z0-9.-]+:\d+):(connected|refused|untested)"
-    r"(?::(\d+))?\s*$",
+    re.escape(EGRESS_TAG)
+    + r":([A-Za-z0-9.-]+:\d+):(?:untested|tried:([a-z0-9-]*):(\d+))"
+    r"\s*$",
     re.MULTILINE,
 )
-_EGRESS_WORDS = {
-    "connected": "CONNECTED",
-    "refused": "no connection",
-    "untested": "untested (no system Python)",
-    "unreported": "not reported",
-}
+_EGRESS_TIMED_OUT = 124
 VERSION_CHARS = 120
 _EXEC_SLACK_S = 15.0
 PROBE_BUDGET_S = 60.0
@@ -678,45 +674,100 @@ def probe_runner(
     )
 
 
+_EGRESS_CONNECT = """import socket,sys
+h,p=sys.argv[1].rsplit(':',1)
+try:
+ socket.create_connection((h,int(p)),4).close();r='connected'
+except socket.gaierror:r='unresolved'
+except ConnectionRefusedError:r='refused'
+except (TimeoutError,socket.timeout):r='timeout'
+except OSError as e:r='oserror-%s'%e.errno
+print(r)"""
+
+
 def egress_script(targets: tuple[str, ...] = EGRESS_TARGETS) -> str:
     """One outbound TCP connect per `host:port` target with the system
-    Python, each bounded on its own. A failed connect's exit status is
-    reported, not interpreted: refused, unresolvable and timed out (124)
-    all mean no connection was made."""
-    connect = (
-        "import socket,sys; h,p=sys.argv[1].rsplit(':',1); "
-        "socket.create_connection((h,int(p)),4).close()"
-    )
-    attempt = bounded(f'{SYSTEM_PYTHON} -I -c "{connect}" "$t"', EGRESS_BOUND_S)
+    Python, each bounded on its own. Python names its own outcome, so an
+    attempt that never started (a missing `timeout`, an interpreter that
+    cannot run: exit 126/127 with no outcome) is not read as a refusal.
+    Reports `<target>:tried:<outcome>:<exit status>`, or `untested`."""
+    attempt = bounded(f'{SYSTEM_PYTHON} -I -c "{_EGRESS_CONNECT}" "$t"', EGRESS_BOUND_S)
     return (
         f"for t in {' '.join(targets)}; do "
         f'if [ ! -x {SYSTEM_PYTHON} ]; then echo "{EGRESS_TAG}:$t:untested"; '
-        f"elif {attempt} >/dev/null 2>&1; "
-        f'then echo "{EGRESS_TAG}:$t:connected"; '
-        f'else echo "{EGRESS_TAG}:$t:refused:$?"; fi; done'
+        f"else r=$({attempt} 2>/dev/null); s=$?; "
+        f'echo "{EGRESS_TAG}:$t:tried:$r:$s"; fi; done'
     )
+
+
+@dataclass(frozen=True)
+class _EgressResult:
+    """One target's line from `egress_script`, read conservatively: a
+    `connected` outcome is a connection whatever the exit status, and only
+    an outcome Python named after trying, or the bound's own timeout status
+    with no outcome, counts as no connection. `outcome` None: not tried."""
+
+    outcome: str | None
+    exit_status: int | None
+
+    @property
+    def connected(self) -> bool:
+        return self.outcome == "connected"
+
+    @property
+    def no_connection(self) -> bool:
+        if self.exit_status == 0:
+            return self.outcome in _NO_CONNECTION or (
+                self.outcome is not None and self.outcome.startswith("oserror-")
+            )
+        return self.outcome == "" and self.exit_status == _EGRESS_TIMED_OUT
+
+    def words(self) -> str:
+        if self.outcome is None:
+            return "untested (no system Python)"
+        if self.connected:
+            return "CONNECTED"
+        if self.no_connection:
+            return _NO_CONNECTION.get(
+                self.outcome or "timeout", f"no connection ({self.outcome})"
+            ) + (f" (exit {self.exit_status})" if self.exit_status else "")
+        return (
+            f"did not report an attempt (outcome {self.outcome or 'none'!r}, "
+            f"exit {self.exit_status})"
+        )
+
+
+_NO_CONNECTION = {
+    "refused": "no connection (refused)",
+    "timeout": "no connection (timed out)",
+    "unresolved": "name not resolved",
+}
 
 
 def egress_verdict(code: int | None, text: str, targets: tuple[str, ...]) -> str:
     """`OPEN` if any target connected, `no outbound connection` only if
-    every target was tried and failed, else `UNVERIFIED`, which is also
-    what a target the guest did not report makes it."""
+    every target was tried and failed to connect, else `UNVERIFIED`: a
+    target that was not reported, not tried, or whose attempt never
+    started. A name that did not resolve made no connection, but shows
+    nothing about a firewall; the IP-literal target is the one that tests
+    the policy without DNS."""
     if code != 0:
         return (
             f"UNVERIFIED: the egress check exited {code}: "
             f"{guest_text(text, GUEST_TAIL_CHARS)}"
         )
     seen = {
-        t: (state, exit_status) for t, state, exit_status in _EGRESS_RE.findall(text)
+        t: _EgressResult(outcome, int(status)) if status else _EgressResult(None, None)
+        for t, outcome, status in _EGRESS_RE.findall(text)
     }
-    states = [seen.get(t, ("unreported", "")) for t in targets]
+    results = [seen.get(t) for t in targets]
     detail = "; ".join(
-        f"{t} {_EGRESS_WORDS[state]}" + (f" (exit {ex})" if ex else "")
-        for t, (state, ex) in zip(targets, states, strict=True)
+        f"{t} {r.words() if r else 'not reported'}"
+        for t, r in zip(targets, results, strict=True)
     )
-    if any(state == "connected" for state, _ in states):
+    if any(r and r.connected for r in results):
         return f"OPEN: {detail}"
-    if all(state == "refused" for state, _ in states):
+    if all(r and r.no_connection for r in results):
         return f"no outbound connection: {detail}"
     return f"UNVERIFIED: {detail}"
 

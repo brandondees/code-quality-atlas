@@ -657,14 +657,40 @@ def _probe_with(*rules, api_cls=FakeSprites):
 def test_the_probe_reports_no_outbound_connection_only_when_every_target_failed():
     outcome = _probe_with(
         _egress_answer(
-            "atlas-egress:1.1.1.1:443:refused:1",
-            "atlas-egress:example.com:443:refused:124",
+            "atlas-egress:1.1.1.1:443:tried:refused:0",
+            "atlas-egress:example.com:443:tried::124",
         )
     )
     assert outcome.egress_check == (
-        "no outbound connection: 1.1.1.1:443 no connection (exit 1); "
-        "example.com:443 no connection (exit 124)"
+        "no outbound connection: 1.1.1.1:443 no connection (refused); "
+        "example.com:443 no connection (timed out) (exit 124)"
     )
+
+
+@pytest.mark.parametrize(
+    "lines,expected",
+    [
+        (
+            ("1.1.1.1:443:tried:timeout:0", "example.com:443:tried:unresolved:0"),
+            (
+                "no outbound connection: 1.1.1.1:443 no connection (timed out); "
+                "example.com:443 name not resolved"
+            ),
+        ),
+        (
+            ("1.1.1.1:443:tried:oserror-101:0", "example.com:443:tried:refused:0"),
+            (
+                "no outbound connection: 1.1.1.1:443 no connection (oserror-101); "
+                "example.com:443 no connection (refused)"
+            ),
+        ),
+    ],
+)
+def test_every_outcome_python_names_after_trying_counts_as_no_connection(
+    lines, expected
+):
+    rule = _egress_answer(*(f"atlas-egress:{line}" for line in lines))
+    assert _probe_with(rule).egress_check == expected
 
 
 @pytest.mark.parametrize(
@@ -672,17 +698,52 @@ def test_the_probe_reports_no_outbound_connection_only_when_every_target_failed(
     [
         (
             _egress_answer(
-                "atlas-egress:1.1.1.1:443:connected",
-                "atlas-egress:example.com:443:refused:1",
+                "atlas-egress:1.1.1.1:443:tried:connected:0",
+                "atlas-egress:example.com:443:tried:refused:0",
             ),
-            "OPEN: 1.1.1.1:443 CONNECTED; example.com:443 no connection (exit 1)",
+            "OPEN: 1.1.1.1:443 CONNECTED; example.com:443 no connection (refused)",
         ),
         (
-            _egress_answer("atlas-egress:1.1.1.1:443:refused:1"),
+            _egress_answer(
+                "atlas-egress:1.1.1.1:443:tried:connected:124",
+                "atlas-egress:example.com:443:tried:refused:0",
+            ),
+            "OPEN: 1.1.1.1:443 CONNECTED; example.com:443 no connection (refused)",
+        ),
+        (
+            _egress_answer("atlas-egress:1.1.1.1:443:tried:refused:0"),
             (
-                "UNVERIFIED: 1.1.1.1:443 no connection (exit 1); "
+                "UNVERIFIED: 1.1.1.1:443 no connection (refused); "
                 "example.com:443 not reported"
             ),
+        ),
+        (
+            _egress_answer(
+                "atlas-egress:1.1.1.1:443:tried::127",
+                "atlas-egress:example.com:443:tried:refused:0",
+            ),
+            (
+                "UNVERIFIED: 1.1.1.1:443 did not report an attempt "
+                "(outcome 'none', exit 127); example.com:443 no connection (refused)"
+            ),
+        ),
+        (
+            _egress_answer(
+                "atlas-egress:1.1.1.1:443:tried:refused:1",
+                "atlas-egress:example.com:443:tried:bogus:0",
+            ),
+            (
+                "UNVERIFIED: 1.1.1.1:443 did not report an attempt "
+                "(outcome 'refused', exit 1); example.com:443 did not report an "
+                "attempt (outcome 'bogus', exit 0)"
+            ),
+        ),
+        (
+            _egress_answer(
+                "atlas-egress:1.1.1.1:443:refused:1",
+                "atlas-egress:example.com:443:connected",
+            ),
+            "UNVERIFIED: 1.1.1.1:443 not reported; example.com:443 not reported",
         ),
         (
             _egress_answer(
@@ -741,6 +802,52 @@ def test_the_egress_script_really_tells_a_connection_from_a_refusal():
     assert verdict.startswith(
         f"OPEN: {targets[0]} CONNECTED; {targets[1]} no connection"
     )
+
+
+def _run_egress_script(targets):
+    done = subprocess.run(
+        list(exec_argv(egress_script(targets), 0)),
+        capture_output=True, timeout=30, check=True,
+    )  # fmt: skip
+    code, text = parse_exit(strip_start(done.stdout.decode()))
+    return egress_verdict(code, text, targets)
+
+
+def _not_executable(tmp_path):
+    path = tmp_path / "python3"
+    path.write_text("#!/bin/sh\nexit 126\n")
+    path.chmod(0o755)
+    return str(path)
+
+
+@pytest.mark.skipif(
+    not (os.path.exists("/usr/bin/python3") and os.path.exists("/usr/bin/timeout"))
+    or not os.path.exists("/bin/sh"),
+    reason="needs /bin/sh, /usr/bin/python3 and /usr/bin/timeout",
+)
+@pytest.mark.parametrize("broken", ["no timeout binary", "interpreter cannot run"])
+def test_an_attempt_that_never_ran_is_not_reported_as_no_connection(
+    broken, tmp_path, monkeypatch
+):
+    """Locally, against a listening 127.0.0.1 port: when the connect
+    attempt itself cannot start, nothing shows the port is unreachable."""
+    import atlas_reviewer.runner as runner_module
+
+    if broken == "no timeout binary":
+        monkeypatch.setattr(
+            runner_module,
+            "bounded",
+            lambda command, seconds: f"/nonexistent/timeout {seconds} {command}",
+        )
+    else:
+        monkeypatch.setattr(runner_module, "SYSTEM_PYTHON", _not_executable(tmp_path))
+    with socket.socket() as listening:
+        listening.bind(("127.0.0.1", 0))
+        listening.listen()
+        target = f"127.0.0.1:{listening.getsockname()[1]}"
+        verdict = _run_egress_script((target,))
+    assert verdict.startswith("UNVERIFIED: ")
+    assert "no connection" not in verdict
 
 
 def test_probe_runner_still_destroys_when_the_policy_is_wrong():
