@@ -3,6 +3,7 @@ from atlas_reviewer.prompt import (
     CONTROLLER_INSTRUCTIONS,
     LoadedLens,
     Prompt,
+    RepoText,
     UntrustedBlock,
     build_prompt,
 )
@@ -99,3 +100,11 @@ def test_offline_usage_counts_prompts_and_costs_nothing():
     assert provider.usage_lines() == (
         "offline provider: 1 prompt(s) seen, no model calls, $0.00",
     )
+
+
+def test_repository_text_is_fenced_verbatim_and_values_are_not_to_be_repeated():
+    line = 'token: str = "abcdefghijklmnop"\n-----BEGIN RSA PRIVATE KEY-----'
+    block = UntrustedBlock("diff", RepoText(line))
+    prompt = build_prompt("o/r #1", "B", [block], NONCE)
+    assert f'<untrusted-data id="{NONCE}" label="diff">\n{line}\n' in prompt.user
+    assert "never\nrepeat the value" in prompt.system
