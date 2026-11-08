@@ -3,7 +3,6 @@
 inside it before deny-all egress is set and read back from outside."""
 
 import threading
-import time
 
 import pytest
 
@@ -170,14 +169,90 @@ def test_deadline_before_create_creates_nothing():
 
 
 def test_watchdog_destroys_a_hung_exec_at_the_deadline():
+    """The fake's hung exec ends only when the Sprite is destroyed (or at
+    its own hang limit, with a different error), so the note tells which
+    one ended it without timing anything."""
     api = FakeSprites(rules=OK_RULES, hang_on="ruff check")
-    started = time.monotonic()
-    outcome = run(api, clock=SystemClock(), deadline_s=0.3)
-    assert time.monotonic() - started < 5
+    outcome, events = run_traced(api, deadline_s=0.05)
     assert outcome.report.status is RunnerStatus.DEADLINE_EXCEEDED
+    assert "exec connection closed" in outcome.report.note
     assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
     assert api.live_names() == ()
-    assert ops(api).count("delete") == 2
+    steps = [(e.phase, e.step, e.status) for e in events]
+    assert ("watchdog", "fired", "ok") in steps
+    assert ("deadline", "exceeded", "error") in steps
+
+
+def test_watchdog_and_final_destroys_are_told_apart_and_a_404_is_not_an_error():
+    api = FakeSprites(rules=OK_RULES, hang_on="ruff check")
+    _, events = run_traced(api, deadline_s=0.05)
+    destroys = [e for e in events if e.phase in {"destroy", "verify"}]
+    by_trigger = {
+        trigger: [(e.step, e.status, e.fields.get("result")) for e in destroys
+                  if e.fields["trigger"] == trigger]
+        for trigger in ("watchdog", "final")
+    }  # fmt: skip
+    assert by_trigger == {
+        "watchdog": [
+            ("delete attempt 1", "ok", "deleted"),
+            ("existence check", "ok", None),
+            ("outcome", "ok", None),
+        ],
+        "final": [
+            ("delete attempt 1", "ok", "already absent"),
+            ("existence check", "ok", None),
+            ("outcome", "ok", None),
+        ],
+    }
+
+
+def test_a_late_create_after_the_watchdog_is_never_reported_completed():
+    api, _, outcome, _, events = _run_with_create_held_past_the_watchdog()
+    assert outcome.report.status is RunnerStatus.DEADLINE_EXCEEDED
+    assert outcome.results == ()
+    assert "exec" not in ops(api)
+    assert ("watchdog", "fired") in [(e.phase, e.step) for e in events]
+
+
+def test_a_diagnostic_that_swallows_the_deadline_does_not_make_the_run_complete():
+    """Diagnostics are never fatal, so one that fails at the deadline
+    returns normally; the run must still say the deadline was reached."""
+    clock = FakeClock()
+
+    class LastDiagnosticOverruns(FakeSprites):
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
+            if argv[0] == "/bin/sh" and "python3 --version" in argv[-1]:
+                clock.advance(1000)
+                raise BoundaryError("exec connection closed")
+            return super().exec(name, argv, stdin, timeout_s, first_byte_s)
+
+    telemetry = Telemetry(clock)
+    outcome = run_disposable(
+        LastDiagnosticOverruns(rules=PY_RULES), MemoryLedger(),
+        RunnerJob(b"tarball-bytes", (COMPILEALL,), diagnose=True),
+        name=NAME, deadline_s=60.0, clock=clock, telemetry=telemetry,
+    )  # fmt: skip
+    assert outcome.report.status is RunnerStatus.DEADLINE_EXCEEDED
+    assert ("deadline", "exceeded") in [(e.phase, e.step) for e in telemetry.events]
+    (compileall,) = outcome.results
+    assert isinstance(compileall, ToolRan)
+
+
+def test_a_stdin_check_that_swallows_the_deadline_does_not_make_the_probe_complete():
+    clock = FakeClock()
+
+    class StdinOverruns(FakeSprites):
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
+            if stdin:
+                clock.advance(timeout_s + 1)
+                raise BoundaryError("exec connection closed")
+            return super().exec(name, argv, stdin, timeout_s, first_byte_s)
+
+    outcome = probe_runner(
+        StdinOverruns(), MemoryLedger(), TOOLS, name=NAME, deadline_s=60, clock=clock
+    )
+    assert outcome.report.status is RunnerStatus.DEADLINE_EXCEEDED
+    assert outcome.stdin_check.startswith("FAILED sending")
 
 
 class _WatchdogDone:
@@ -563,8 +638,14 @@ def test_every_lifecycle_phase_is_recorded_in_order():
         "runner_received": 13,
     }
     assert by_step[("tool", "ruff")]["exit_status"] == 1
-    assert by_step[("verify", "existence check")] == {"present": False}
-    assert by_step[("destroy", "outcome")] == {"cleanup": "destroyed (verified absent)"}
+    assert by_step[("verify", "existence check")] == {
+        "trigger": "final",
+        "present": False,
+    }
+    assert by_step[("destroy", "outcome")] == {
+        "trigger": "final",
+        "cleanup": "destroyed (verified absent)",
+    }
 
 
 def test_each_exec_records_purpose_timeouts_bytes_frames_and_exit():
@@ -610,7 +691,7 @@ def test_a_timed_out_tool_check_names_its_step_and_timing_not_a_bare_timeout():
     )
     assert failed.fields["timeout_s"] == PROBE_BUDGET_S
     assert "upload" not in {e.phase for e in events}
-    assert events[-1].fields == {"cleanup": "destroyed (verified absent)"}
+    assert events[-1].fields["cleanup"] == "destroyed (verified absent)"
 
 
 def test_every_error_event_carries_its_label_and_elapsed_time():
@@ -647,7 +728,10 @@ def test_destroy_attempts_and_verification_are_recorded_when_delete_fails():
         ("destroy", "delete attempt 2", "error"),
         ("destroy", "outcome", "ok"),
     ]
-    assert events[-1].fields == {"cleanup": "destroy NOT verified -- run `sweep`"}
+    assert events[-1].fields == {
+        "trigger": "final",
+        "cleanup": "destroy NOT verified -- run `sweep`",
+    }
 
 
 def test_a_deadline_stop_is_recorded():

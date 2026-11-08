@@ -58,6 +58,7 @@ import threading
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Literal
 
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import CleanupStatus, RunnerReport, RunnerStatus
@@ -230,15 +231,20 @@ class ProbeOutcome:
 
 @dataclass
 class Deadline:
+    """Measured on the injected clock. `expired` is set by the wall-clock
+    watchdog when it fires, and ends the run whatever the clock says."""
+
     clock: Clock
     seconds: float
+    expired: threading.Event = field(default_factory=threading.Event)
     _start: float = field(init=False)
 
     def __post_init__(self) -> None:
         self._start = self.clock.monotonic()
 
     def remaining(self) -> float:
-        return self.seconds - (self.clock.monotonic() - self._start)
+        left = self.seconds - (self.clock.monotonic() - self._start)
+        return min(left, 0.0) if self.expired.is_set() else left
 
     def check(self, step: str) -> float:
         left = self.remaining()
@@ -346,8 +352,12 @@ def _last_int(text: str) -> int | None:
     return int(found[-1]) if found else None
 
 
+Trigger = Literal["watchdog", "final", "sweep"]
+
+
 class _Destroyer:
-    """Idempotent, thread-safe destroy shared by `finally` and the watchdog."""
+    """Idempotent, thread-safe destroy shared by `finally` and the watchdog.
+    Every event it records carries the trigger that caused it."""
 
     def __init__(
         self, api: SpritesApi, ledger: RunnerLedger, name: str, telemetry: Telemetry
@@ -357,60 +367,74 @@ class _Destroyer:
         self._lock = threading.Lock()
         self._status: CleanupStatus | None = None
 
-    def destroy(self, *, final: bool = False) -> CleanupStatus:
-        """`final` means no `create` can still be in flight: it destroys
-        again even after the watchdog did, because a create in flight when
-        the watchdog fired can add the Sprite after the watchdog verified
-        it absent. For the same reason only a final destroy clears the
-        ledger entry; the watchdog's verified absence can be overtaken.
-        A telemetry write failure must not stop cleanup, so cleanup is
-        redone untraced and the error re-raised."""
+    def destroy(self, trigger: Trigger) -> CleanupStatus:
+        """Only the watchdog can run while `create` is still in flight.
+        Any other trigger destroys again even after the watchdog did,
+        because a create in flight when the watchdog fired can add the
+        Sprite after the watchdog verified it absent; for the same reason
+        the watchdog never clears the ledger entry. A telemetry write
+        failure must not stop cleanup, so cleanup is redone untraced and
+        the error re-raised."""
         with self._lock:
-            if self._status is None or final:
+            if self._status is None or trigger != "watchdog":
                 try:
-                    self._status = self._destroy(self._telemetry, final)
+                    self._status = self._destroy(self._telemetry, trigger)
                 except OSError:
-                    self._status = self._destroy(_quiet(), final)
+                    self._status = self._destroy(_quiet(), trigger)
                     raise
             return self._status
 
-    def _destroy(self, telemetry: Telemetry, final: bool) -> CleanupStatus:
-        deleted = any(self._attempt_delete(telemetry, n) for n in (1, 2))
+    def _destroy(self, telemetry: Telemetry, trigger: Trigger) -> CleanupStatus:
+        if trigger == "watchdog":
+            telemetry.record("watchdog", "fired", {"runner": self._name})
+        deleted = any(self._attempt_delete(telemetry, trigger, n) for n in (1, 2))
         status = (
-            self._verified_status(telemetry, final)
+            self._verified_status(telemetry, trigger)
             if deleted
             else CleanupStatus.DESTROY_UNVERIFIED
         )
-        telemetry.record("destroy", "outcome", {"cleanup": status.value})
+        telemetry.record(
+            "destroy", "outcome", {"trigger": trigger, "cleanup": status.value}
+        )
         return status
 
-    def _verified_status(self, telemetry: Telemetry, final: bool) -> CleanupStatus:
-        if not self._verified_absent(telemetry):
+    def _verified_status(self, telemetry: Telemetry, trigger: Trigger) -> CleanupStatus:
+        if not self._verified_absent(telemetry, trigger):
             return CleanupStatus.DESTROY_UNVERIFIED
-        if final:
+        if trigger != "watchdog":
             self._ledger.clear(self._name)
         return CleanupStatus.DESTROYED_VERIFIED
 
-    def _attempt_delete(self, telemetry: Telemetry, attempt: int) -> bool:
+    def _attempt_delete(self, telemetry: Telemetry, trigger: Trigger, n: int) -> bool:
         try:
             telemetry.span(
                 "destroy",
-                f"delete attempt {attempt}",
-                lambda: self._api.delete(self._name),
+                f"delete attempt {n}",
+                self._delete,
+                {"trigger": trigger},
+                lambda result: {"result": result},
             )
-        except NotFoundError:
-            return True
         except BoundaryError:
             return False
         return True
 
-    def _verified_absent(self, telemetry: Telemetry) -> bool:
+    def _delete(self) -> str:
+        """A 404 is the outcome cleanup wants (the watchdog got there
+        first, or create never landed), so it is not an error."""
+        try:
+            self._api.delete(self._name)
+        except NotFoundError:
+            return "already absent"
+        return "deleted"
+
+    def _verified_absent(self, telemetry: Telemetry, trigger: Trigger) -> bool:
         try:
             present = telemetry.span(
                 "verify",
                 "existence check",
                 lambda: self._api.exists(self._name),
-                after=lambda found: {"present": found},
+                {"trigger": trigger},
+                lambda found: {"present": found},
             )
         except BoundaryError:
             return False
@@ -424,7 +448,7 @@ def destroy_runner(
     telemetry: Telemetry | None = None,
 ) -> CleanupStatus:
     """For a runner no live review is creating (a sweep)."""
-    return _Destroyer(api, ledger, name, telemetry or _quiet()).destroy(final=True)
+    return _Destroyer(api, ledger, name, telemetry or _quiet()).destroy("sweep")
 
 
 def _quiet() -> Telemetry:
@@ -446,32 +470,48 @@ def _disposable(
     first_frame_s: float,
 ) -> RunnerReport:
     """Run `body` on a fresh, policy-verified Sprite; always destroy it."""
-    run = _Run(api, name, Deadline(clock, deadline_s), telemetry, first_frame_s)
+    deadline = Deadline(clock, deadline_s)
+    run = _Run(api, name, deadline, telemetry, first_frame_s)
     destroyer = _Destroyer(api, ledger, name, telemetry)
     ledger.record(name)
     telemetry.record("ledger", "record runner name", {"runner": name})
-    watchdog = threading.Timer(max(deadline_s, 0.0), destroyer.destroy)
+
+    def on_deadline() -> None:
+        deadline.expired.set()
+        destroyer.destroy("watchdog")
+
+    watchdog = threading.Timer(max(deadline_s, 0.0), on_deadline)
     watchdog.daemon = True
     watchdog.start()
     try:
         status, note = _guarded(run, body)
     finally:
         watchdog.cancel()
-        cleanup = destroyer.destroy(final=True)
+        cleanup = destroyer.destroy("final")
     return RunnerReport(status, cleanup, name, note)
 
 
 def _guarded(run: _Run, body: Body) -> tuple[RunnerStatus, str]:
+    """Steps that are never fatal (diagnostics, the stdin check) swallow
+    their own errors, so a body can return normally after the deadline
+    passed; that run is not complete either."""
     try:
         _provision(run)
-        return RunnerStatus.COMPLETED, body(run)
+        note = body(run)
     except DeadlineExceededError as exc:
-        run.telemetry.record("deadline", "exceeded", status=ERROR, error=str(exc))
-        return RunnerStatus.DEADLINE_EXCEEDED, str(exc)
+        return _deadline_reached(run, str(exc))
     except BoundaryError as exc:
         if run.deadline.remaining() <= 0:
-            return RunnerStatus.DEADLINE_EXCEEDED, f"deadline reached: {exc}"
+            return _deadline_reached(run, f"deadline reached: {exc}")
         return RunnerStatus.FAILED, str(exc)
+    if run.deadline.remaining() <= 0:
+        return _deadline_reached(run, f"deadline reached by the last step ({note})")
+    return RunnerStatus.COMPLETED, note
+
+
+def _deadline_reached(run: _Run, note: str) -> tuple[RunnerStatus, str]:
+    run.telemetry.record("deadline", "exceeded", status=ERROR, error=note)
+    return RunnerStatus.DEADLINE_EXCEEDED, note
 
 
 def run_disposable(

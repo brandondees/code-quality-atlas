@@ -136,7 +136,8 @@ class FakeSprites:
         if self.hang_on is not None and self.hang_on in script:
             # Ignores timeout_s on purpose: models a stuck exec that only
             # destroying the Sprite can end.
-            sprite.destroyed.wait(_HANG_LIMIT_S)
+            if not sprite.destroyed.wait(_HANG_LIMIT_S):
+                raise BoundaryError("fake hang limit reached; nothing destroyed it")
             raise BoundaryError("exec connection closed")
         stdout, code = self._answer(script, _fed(script, stdin))
         start = f"{START_MARKER}\n" if START_MARKER in script else ""
