@@ -4,7 +4,7 @@
 [`../open-questions.md`](../open-questions.md)).** Nothing here is built.
 It extends the manual reviewer service
 ([`2026-11-06-manual-reviewer-service.md`](2026-11-06-manual-reviewer-service.md),
-D24-D30, D32) from one prompt per diff part to one model loop per review
+D24-D30, D32-D33) from one prompt per diff part to one model loop per review
 lens. Every number below is an estimate or a proposal. Nothing in this doc
 was run live.
 
@@ -314,7 +314,7 @@ mode.
 | Model → controller | Tool calls | Closed tool set, typed and validated arguments, fixed argv templates, fixed revisions. Nothing the model writes becomes a command, a URL, a file write, a GitHub call or a network destination. |
 | Controller → Sprite | Exec requests (D28 shape), the source upload | No credentials, no `env`/`dir` API parameters, a minimal environment. Egress is denied before the first exec and read back from outside. |
 | Sprite → controller | Exec output | Untrusted. Byte- and time-capped per tool, streamed with the D28 first-frame and stall cutoffs, fenced before any model sees it, and redacted unless it is repository content (amended by D33). |
-| Controller → model | Prompts | Only fenced data, redacted except for repository content (amended by D33). The model is the only outbound destination for repo content, and it already is today. |
+| Controller → model | Prompts | Only fenced data, redacted except for repository content (amended by D33). Repository content leaves the controller for two outside services, as it already does today: the model provider, through these prompts, and the Sprites service, through the source upload to the Sprite. |
 | Model → draft | Findings and merged review | Untrusted model output. Parsed against the finding contract and quote-checked. It goes only into the draft file or stdout. Nothing is posted (draft-only, D24). |
 | Lens ↔ lens | Nothing | Separate histories. One lens's tool output can't steer another lens except through findings, and the merge treats those as data. |
 

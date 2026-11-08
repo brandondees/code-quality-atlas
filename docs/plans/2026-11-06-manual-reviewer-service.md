@@ -9,7 +9,8 @@ job-log and artifact ingestion, in-process GitHub App tokens, the
 documented Sprites exec protocol with a tool probe, and a capped OpenRouter
 provider. The owner ran three live pilots and two live probes from a
 trusted machine (below). The third pilot, at `a246625`, ran end to end.
-The fixes made after each run (D26-D30, D32) are tested offline only. What
+The fixes made after each run (D26-D30, D32), and the unredacted diff
+with committed secrets flagged (D33), are tested offline only. What
 a live run still needs is under [Live-run gaps](#live-run-gaps), and what
 is left for later is under [Follow-ups](#follow-ups-not-in-this-slice).
 
@@ -21,7 +22,8 @@ only on those branches.
 Decision records in [`../open-questions.md`](../open-questions.md): **D24**
 (this service) and **D25** (the live-readiness slice); **D26-D30** (the
 fixes driven by each live run); **D32** (diff fitting and the lens
-picker). All are scoped steps under the still-open **Q24**. **D31** is a
+picker); **D33** (the diff goes to the model unredacted, and possible
+committed secrets are flagged by file and line). All are scoped steps under the still-open **Q24**. **D31** is a
 separate, undecided proposal for a lens-based agentic reviewer, and none of
 it is built here.
 

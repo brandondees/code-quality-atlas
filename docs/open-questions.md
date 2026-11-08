@@ -146,7 +146,7 @@ on the 7-8B tier with no over-flagging regression — full record in
 
 **Update (2026-11-06) — D24.** The owner approved one scoped, manual, draft-only review path on a substrate with direct lifecycle control: the `atlas_reviewer/` controller plus a disposable Sprite per review. It is evidence toward this question's "what would more control actually buy?" sub-question, not a disposition. The routines/hosted review pipeline is unchanged and Q24 stays open.
 
-**Update (2026-11-07) — D25-D33.** That path gained a live-readiness slice (D25), fixes after three owner-run pilots and two probes (D26-D30; the third pilot ran end to end), diff fitting plus the repo's own lens picker (D32), and an unredacted diff with committed secrets flagged rather than hidden (D33). It stays a manual, draft-only, single-prompt reviewer. D31 proposes a lens-based agentic reviewer on the same substrate and is undecided. Q24 stays open.
+**Update (2026-11-07) — D25-D33.** That path gained a live-readiness slice (D25), fixes after three owner-run pilots and two probes (D26-D30; the third pilot ran end to end), diff fitting plus the repo's own lens picker (D32), and an unredacted diff with committed secrets flagged rather than hidden (D33). It stays a manual, draft-only reviewer with one review prompt per fitted diff part, not a tool loop. The lens picker, when it runs, uses one of the 3 calls, and a diff over capacity leaves files unsent, listed as omissions. D31 proposes a lens-based agentic reviewer on the same substrate and is undecided. Q24 stays open.
 
 ### Q23 — Does a repo-committed, non-plugin hook fire in a Claude Code cloud/routine session?  → RESOLVED — yes, it fires *(new, 2026-09-01)*
 
