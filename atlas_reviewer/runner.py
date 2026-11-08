@@ -432,7 +432,8 @@ def guest_text(text: str, max_chars: int) -> str:
     """Untrusted runner output made fit for a one-line note or telemetry
     field: ANSI escape sequences dropped, every run of whitespace or other
     unprintable characters (newlines, carriage returns, control bytes,
-    non-ASCII) collapsed to one space, and only the last `max_chars` kept, where a failure usually is."""
+    non-ASCII) collapsed to one space, and only the last `max_chars` kept,
+    where a failure usually is."""
     flat = _UNPRINTABLE_RE.sub(" ", _ANSI_RE.sub("", text)).strip()
     return flat[-max_chars:] if max_chars > 0 else ""
 
