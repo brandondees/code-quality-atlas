@@ -1019,3 +1019,17 @@ final tree. #599 is the D31 proposal doc and is merged. #600 is this
 stack's docs step (D24-D32, the service plan, the session log). #601-#607
 are the draft code steps, based on each other. #598 stayed open and was
 not merged.
+
+## 2026-11-07 (same day) — D33: the diff goes to the model unredacted, committed secrets are flagged
+
+Brandon decided to stop redacting PR diffs. On #601's live run, an
+unterminated private-key BEGIN in `test_redact.py` made diff redaction
+swallow the four files after it, and the assignment redactor mangled type
+annotations and missed `token: str = "..."`. D33 records the decision and
+marks D24, D30, D31 and D32 and the two plans as amended. The code is on
+the stack. Step 2 (#601) adds `detect_secrets` and the fenced, unredacted
+`RepoText`. Step 7 (#606) sends the diff unredacted and lists each possible
+committed secret as a HIGH finding by file, line and pattern, never the
+value. It also lists any file the fitted selection drops as an omission.
+Step 8 (#607) updates the README. Redaction stays for PR, issue, CI,
+artifact and runner text and for the published draft.

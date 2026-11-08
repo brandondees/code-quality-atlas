@@ -89,7 +89,10 @@ carries `head_sha`, `provenance` (kind, name, and a source id such as
 
 Untrusted text is typed. `RedactedText` can only be minted by `redact()`,
 and `UntrustedBlock`, the only way PR data enters a `Prompt`, accepts only
-`RedactedText`.
+`RedactedText`. (Amended by D33: it also accepts `RepoText`, the diff and
+changed paths, which are repository content and fenced unredacted; the
+controller scans them for committed secrets and reports file and line,
+never the value.)
 
 The per-module table is in [`atlas_reviewer/README.md`](../../atlas_reviewer/README.md#module-layout).
 The pure core (`domain`, `classify`, `redact`, `prompt`, `evidence`, `draft`)
@@ -354,7 +357,8 @@ output, so each of its five findings was checked against the code first:
 four were real and one partial. Details are in the reviewer README's
 "Third live pilot" section.
 
-- **Assignment redaction** matches a keyword inside a longer name
+- **Assignment redaction** (amended by D33: no longer applied to the diff)
+  matches a keyword inside a longer name
   (`OPENAI_API_KEY`, `client_secret`, `"api_key"`), not only after a word
   boundary. The name parts are bounded so matching stays linear.
 - **Archive budget** charges an entry's declared size before decompressing

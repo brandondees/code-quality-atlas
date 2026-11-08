@@ -64,7 +64,7 @@ column says where it plugs in.
 | Running cited checks | [`docs/executing-cited-checks.md`](../executing-cited-checks.md) | A lens that needs a check run asks for one of the bridge's closed checks. It never gets a free-form command. |
 | Cost and call caps | [`atlas_reviewer/budget.py`](../../atlas_reviewer/budget.py) `ReviewBudget`, `CallLimits`, `check_tokens`, `worst_case_usd`; [`pricing.py`](../../atlas_reviewer/pricing.py); [`openrouter.py`](../../atlas_reviewer/openrouter.py) preflight | The same worst-case-reservation scheme. See [Budgets](#budgets) for how lens slices are just more `ReviewBudget` instances. |
 | Sprite lifecycle and exec | [`atlas_reviewer/runner.py`](../../atlas_reviewer/runner.py) (fresh Sprite, deny-all egress set and read back from outside, deadline, destroy on every path), [`sprites_api.py`](../../atlas_reviewer/sprites_api.py) `exec_request`, `runner.exec_argv` (D28/D29 wrapper), [`interpreter.py`](../../atlas_reviewer/interpreter.py), [`ledger.py`](../../atlas_reviewer/ledger.py) | Unchanged. Bridge tools are more execs of the same shape. |
-| Redaction and untrusted fences | [`atlas_reviewer/redact.py`](../../atlas_reviewer/redact.py), [`prompt.py`](../../atlas_reviewer/prompt.py) fences with a per-prompt nonce, [`notes.py`](../../atlas_reviewer/notes.py) `quote_untrusted` | Every tool result passes through both. |
+| Redaction and untrusted fences | [`atlas_reviewer/redact.py`](../../atlas_reviewer/redact.py), [`prompt.py`](../../atlas_reviewer/prompt.py) fences with a per-prompt nonce, [`notes.py`](../../atlas_reviewer/notes.py) `quote_untrusted` | Every tool result is fenced. Results that are runtime output are also redacted; repository content is not, and is scanned for committed secrets (amended by D33). |
 | Telemetry and draft | [`atlas_reviewer/telemetry.py`](../../atlas_reviewer/telemetry.py), [`instrumented.py`](../../atlas_reviewer/instrumented.py), [`draft.py`](../../atlas_reviewer/draft.py) | Every tool call is one more event. The draft keeps its sections. Model output in it stays untrusted. |
 
 Reusing the skill files also means **no copy of lens content lives in
@@ -99,7 +99,7 @@ All of this runs on the controller unless it is marked *(Sprite)*.
      changed-file list from [`atlas_reviewer/diffs.py`](../../atlas_reviewer/diffs.py).
    - **Loop:** the model calls bridge tools. The controller validates each
      call, runs it in the Sprite, redacts the result and fences it as
-     untrusted. The loop ends when the model returns findings or hits its
+     untrusted (amended by D33: repository content is fenced, not redacted). The loop ends when the model returns findings or hits its
      budget.
 6. **Check findings mechanically.** The controller parses each lens's
    findings against the *Finding contract*: the closed severity, valence,
@@ -107,14 +107,15 @@ All of this runs on the controller unless it is marked *(Sprite)*.
    `synthesis.md`'s own quote-the-line gate. For a `file:line` finding, the
    quoted `evidence` must appear in that range of the head blob. A finding
    that fails is moved to an "unverified" list, never dropped silently.
-   - **Redacted quotes.** Lenses only ever see redacted text, so the
-     controller runs the same `Redactor` over the head range before
-     comparing. A quote holding a mask then matches the masked line. The
-     raw secret never leaves the controller, and a quote with text that
-     isn't in the range still fails.
+   - **Redacted quotes** (superseded by D33). As first proposed, lenses
+     saw only redacted text, so the controller would run the same
+     `Redactor` over the head range before comparing. Under D33, lenses see
+     repository content unredacted, so a quote is compared with the head
+     range as is, and a quote with text that isn't in the range still
+     fails.
    - **Removed lines.** A quote of deleted code isn't in the head blob. It
-     is checked against the `-` lines of that file's diff hunks, redacted
-     the same way, and the finding is labelled "removed lines". A quote
+     is checked against the `-` lines of that file's diff hunks, and the
+     finding is labelled "removed lines". A quote
      that matches neither the head range nor a removed line fails.
 7. **Merge.** One model call with `synthesis.md` as its instructions, over
    the checked findings (each carrying the ID from step 6), the coverage
@@ -249,7 +250,8 @@ sees it:
 
 - capped at its byte bound, with an explicit truncation marker and the
   size that was cut;
-- redacted with the shared `Redactor`;
+- redacted with the shared `Redactor` (amended by D33: runtime output only;
+  repository content is scanned for committed secrets instead);
 - fenced as untrusted with the per-prompt nonce;
 - recorded in the per-lens coverage ledger: the tool, its arguments, the
   bytes returned, whether it was truncated, and how long it took.
@@ -311,8 +313,8 @@ mode.
 |---|---|---|
 | Model → controller | Tool calls | Closed tool set, typed and validated arguments, fixed argv templates, fixed revisions. Nothing the model writes becomes a command, a URL, a file write, a GitHub call or a network destination. |
 | Controller → Sprite | Exec requests (D28 shape), the source upload | No credentials, no `env`/`dir` API parameters, a minimal environment. Egress is denied before the first exec and read back from outside. |
-| Sprite → controller | Exec output | Untrusted. Byte- and time-capped per tool, streamed with the D28 first-frame and stall cutoffs, redacted and fenced before any model sees it. |
-| Controller → model | Prompts | Only redacted, fenced data. The model is the only outbound destination for repo content, and it already is today. |
+| Sprite → controller | Exec output | Untrusted. Byte- and time-capped per tool, streamed with the D28 first-frame and stall cutoffs, fenced before any model sees it, and redacted unless it is repository content (amended by D33). |
+| Controller → model | Prompts | Only fenced data, redacted except for repository content (amended by D33). The model is the only outbound destination for repo content, and it already is today. |
 | Model → draft | Findings and merged review | Untrusted model output. Parsed against the finding contract and quote-checked. It goes only into the draft file or stdout. Nothing is posted (draft-only, D24). |
 | Lens ↔ lens | Nothing | Separate histories. One lens's tool output can't steer another lens except through findings, and the merge treats those as data. |
 
