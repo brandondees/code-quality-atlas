@@ -14,7 +14,8 @@ It does not replace that proposal. D31's controller-run loop, closed
 read-only tool bridge, security boundaries and credentials split stand as
 written. That plan stays the detailed design for the loop, the bridge tools
 and the finding checks. This doc records what the owner accepted on top of
-it: phase 0, lens-body attestation, full PR context, branch-wide CI, a baked
+it: phase 0, lens-body attestation, full PR context, branch-wide CI, one
+secret rule for everything the model reads (extending D33), a baked
 toolchain, starting scope and scoring.
 
 The source is a research note prepared for the owner on 2026-11-07, "How
@@ -23,7 +24,10 @@ hosted and open-source reviewers, a reading of the review-evaluation
 literature, and a gap analysis against the reviewer service on
 the #601-#607 stack. Product and pricing details in that note were checked on
 2026-11-07 and will drift. They are summarized here only where they
-motivate a decision, and are not re-verified.
+motivate a decision, and are not re-verified. The paper findings under
+[Why change the runtime](#why-change-the-runtime) are also the note's
+summaries. They were not checked against the papers for this doc and are
+marked `(verify)`; D34 does not depend on their exact figures.
 
 ## Why change the runtime
 
@@ -53,22 +57,23 @@ lenses, the picker (`choosing-review-lenses`), depth modes
   reservation per review (D25). D31 estimated about $1.1 per lens
   uncached at 12 turns.
 
-The research supports three design rules:
+The research note draws three design rules from the literature. Each
+paper claim below is as the note reports it, not checked here:
 
 - **Give the reviewer the project, not the hunk.** SWR-Bench (Zeng et al.,
   2025, [arXiv 2509.01494](https://arxiv.org/html/2509.01494v1)) rebuilds
   review evaluation on real pull requests with a full project snapshot,
   and reports precision as the main weakness of current automated
-  reviewers.
+  reviewers (verify).
 - **Run tools, then select and explain the hits.** Stuffing raw analyzer
   reports into the prompt did badly on SWR-Bench (its Hybrid-Review
-  baseline). Jaoua, Sghaier and Sahraoui (MSR 2025,
+  baseline) (verify). Jaoua, Sghaier and Sahraoui (MSR 2025,
   [arXiv 2502.06633](https://arxiv.org/html/2502.06633)) found that
   retrieving the relevant static-analysis results helped, where naive
-  concatenation did not help accuracy much. This is what
+  concatenation did not help accuracy much (verify). This is what
   `grounding-review-in-tool-output` already says.
 - **Split by concern, not by free-form agents.** SWR-Bench's two-agent
-  debate setup underperformed single-pass prompting. Splitting by lens
+  debate setup underperformed single-pass prompting (verify). Splitting by lens
   gives each loop a typed concern with its own skill file, which is how
   the suite's picker and merger already work. Verification belongs in the
   controller, where the model cannot argue past a failed check.
@@ -92,8 +97,14 @@ Sprite. The checkout holds the PR head and base, plus the repository
 default branch when a lens needs to tell new problems from pre-existing
 ones. BASE, HEAD and DEFAULT are SHAs the controller fixes; the model
 never supplies a revision. Staging follows D31's Option B first (two
-tarballs into a synthetic two-commit repository). Option A, a real git
-bundle with history, comes when lenses need blame and log.
+tarballs into a synthetic two-commit repository). When the PR's base is
+not the default branch and a lens needs it, the controller stages a third
+tarball of the default branch at its pinned DEFAULT SHA, as a separate
+read-only commit beside the other two. The bridge's revision argument is
+then the closed set BASE, HEAD and DEFAULT, and DEFAULT reads get the
+same byte, time and path limits as the others. When the base is the
+default branch, DEFAULT is BASE and nothing extra is staged. Option A, a
+real git bundle with history, comes when lenses need blame and log.
 
 A lens counts as run only when its loop started with that lens's
 `body.md` injected by the controller. A review that names a lens without
@@ -126,8 +137,31 @@ a pass for head. Missing evidence stays UNKNOWN, so D24's fail-closed rule
 is unchanged.
 
 All of this text is untrusted. It is fenced with the per-prompt nonce and
-redacted as D33 specifies for PR, issue and CI text. Repository content in
-the checkout is fenced but not redacted, as D33 decided for the diff.
+redacted, as D33 keeps for PR, issue and CI text. Repository content
+follows the secret rule below.
+
+### Secret rule for everything the model reads
+
+One rule, extending D33 from the diff to every bridge result, replaces
+D31's "every bridge result is redacted":
+
+- **Repository content is not redacted.** That covers the diff and every
+  bridge result that returns file content at BASE, HEAD or DEFAULT,
+  changed or unchanged: reads, grep matches and `git diff` output. It is
+  already in the repository. The controller scans each result with
+  `detect_secrets` before sending it. Each hit becomes a controller
+  finding (HIGH, "possible committed secret in `<path>`; rotate if real")
+  with the path, line and pattern label, never the value. A hit in an
+  unchanged file is reported as pre-existing, not as introduced by the PR.
+  Detection removes no text.
+- **Flagged values are scrubbed from the output.** Every value the scan
+  found is scrubbed from the model's findings, the merge and the draft.
+  The system prompt tells each lens never to repeat a value.
+- **Runtime text stays redacted.** That covers tool and test output, CI
+  logs (redacted before the tail is kept), artifacts, PR and issue text,
+  and anything quoted into the published draft. These can carry runtime
+  secrets that are not in the repository. A secret scanner's hit, such as
+  Gitleaks, reaches a lens as path, line and rule only, with no excerpt.
 
 ### 4. Keys stay on the controller; the Sprite is deny-all and credential-free
 
@@ -145,7 +179,15 @@ from the PR or the network. The first set is the existing `compileall`
 probe, `ruff`, `mypy`, `shellcheck`, Semgrep Community Edition (or
 Opengrep), Bandit, `pip-audit`, Gitleaks, a complexity tool (`radon` or
 `lizard`), and a license lister such as `pip-licenses`. `pytest` follows
-for repositories that already lock their test dependencies. `pip-audit`
+for repositories that already lock their test dependencies. A tool that
+runs PR code (`pytest`, or `mypy` when the repository configures plugins)
+could change the review's own Git state, for example by writing
+replacement refs that redirect later reads, or change files lenses read.
+So code-executing tools run in a second disposable Sprite that holds only
+a copy of the head tree, without `.git`, and never in the Sprite the bridge
+reads. Only their capped, redacted output comes back. As defence in depth,
+bridge Git commands run with replacement refs disabled
+(`GIT_NO_REPLACE_OBJECTS=1`) and read objects by the controller's SHAs. `pip-audit`
 needs a vulnerability database, and the Sprite has no network, so that
 database has to be baked in or the tool reports UNKNOWN (verify before
 building). The shared toolchain runs once per review. Lenses get
@@ -189,7 +231,7 @@ owner at every phase.
 | 0 | Land #601-#607 as the one-shot reviewer and fallback, with the D33 note (#608). No agentic scope in those PRs. | none |
 | 1 | Full PR conversation (about 64 KiB, omissions named) and branch-wide CI labelled by SHA, in the shared evidence code. Fixture-tested. | stack merged |
 | 2 | The tool bridge, offline: closed git tools (diff, list, read range, grep) against `FakeSprites` and a fixture repo, with argument rejection, byte and time caps, and git hardening. Option B staging. | phase 1 merged |
-| 3 | The controller loop and one attested lens, offline first: body injection, the attestation ledger, quote checks, retry and escalate. Then one owner-approved live run, compared with the one-shot draft on the same head. | agentic budget numbers set |
+| 3 | The controller loop and one attested lens, offline first: body injection, the attestation ledger, quote checks, retry and escalate. Then one owner-approved live run, compared with the one-shot draft on the same head. | offline work: none. Live run: a provisional budget Brandon approves |
 | 4 | Triage mode: the four critical lenses, pool size 1, ID-reconciled merge, coverage never claimed complete unless the ledger shows it. | phase 3 measured |
 | 5 | The baked toolchain: the first tool set in the Sprite image, with summarized hits routed to lenses. | image build approved |
 | 6 | Measured pilots on owner-labelled PRs, scored for precision, recall and coverage honesty. Then review and comprehensive depths, a concurrency probe before any pool size above 1, Option A history staging, and the decision on retiring the one-shot path. | phases 4-5 done |
@@ -201,7 +243,7 @@ does not run live.
 
 | Decision | Current state | Note |
 |---|---|---|
-| Agentic per-review dollar reservation | none; one-shot stays $3.00 | D31 estimated about $1.1 per lens uncached at 12 turns, or about $0.3-0.4 with prompt caching if the pinned routing allows it. Recommendation: set it after one measured run. |
+| Agentic per-review dollar reservation | none; one-shot stays $3.00 | D31 estimated about $1.1 per lens uncached at 12 turns, or about $0.3-0.4 with prompt caching if the pinned routing allows it. Brandon sets a provisional reservation, with the call, turn and wall-clock caps below, before phase 3's first live run. That run's measured cost then sets the reservation for later runs. |
 | OpenRouter key hard limit for agentic runs | the one-shot preflight requires at most $5 | Must cover the agentic reservation. |
 | Agentic per-review model-call cap | none; one-shot stays 3 | Includes the picker, each lens's turns and the merge. |
 | Per-lens turn cap | none | D31 suggested 12. |

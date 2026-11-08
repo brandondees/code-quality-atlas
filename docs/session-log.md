@@ -1047,4 +1047,3 @@ the controller, and free tools are baked into the image. Agentic mode
 starts triage-only, on a small controller loop of our own, and is scored by
 issue-hit precision and recall plus coverage honesty. Every agentic budget
 is pending Brandon. Nothing was built and no live run was made.
-
