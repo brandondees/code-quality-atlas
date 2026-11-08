@@ -455,9 +455,58 @@ def test_failed_probe_marks_every_tool_absent():
                 return "sh: syntax error", 2
             return super()._answer(script, stdin)
 
-    outcome = run(BrokenProbe(rules=OK_RULES))
+    outcome, events = run_traced(BrokenProbe(rules=OK_RULES))
     assert outcome.report.status is RunnerStatus.COMPLETED
-    assert all(isinstance(r, ToolAbsent) for r in outcome.results)
+    assert [r.detail for r in outcome.results if isinstance(r, ToolAbsent)] == [
+        "not checked: the availability probe failed (exit 2): sh: syntax error",
+    ] * 2
+    availability = next(e for e in events if e.step == "availability")
+    assert (availability.status, availability.fields["exit_status"]) == ("error", 2)
+
+
+def test_a_failed_interpreter_resolution_is_not_reported_as_no_interpreter():
+    class BrokenResolver(FakeSprites):
+        def _answer(self, script, stdin):
+            if "atlas-python" in script:
+                return "mkdir: /tmp/atlas-neutral: Read-only file system", 1
+            return super()._answer(script, stdin)
+
+    (result,) = run(BrokenResolver(rules=PY_RULES), tools=(COMPILEALL,)).results
+    assert result == ToolAbsent(
+        COMPILEALL,
+        "no trusted Python interpreter: the interpreter resolution failed (exit 1): "
+        "mkdir: /tmp/atlas-neutral: Read-only file system",
+    )
+
+
+def test_a_resolution_that_finds_no_acceptable_interpreter_says_so():
+    (result,) = run(
+        FakeSprites(rules=PY_RULES, pythons=()), tools=(COMPILEALL,)
+    ).results
+    assert result == ToolAbsent(
+        COMPILEALL, "no trusted Python interpreter was resolved"
+    )
+
+
+def test_a_failed_probe_is_reported_by_the_probe_runner_not_as_absent_tools():
+    class BrokenProbe(FakeSprites):
+        def _answer(self, script, stdin):
+            if PROBE_TAG in script:
+                return "sh: syntax error", 2
+            return super()._answer(script, stdin)
+
+    outcome = probe_runner(
+        BrokenProbe(),
+        MemoryLedger(),
+        TOOLS,
+        name=NAME,
+        deadline_s=60,
+        clock=FakeClock(),
+    )
+    assert outcome.available == {}
+    assert outcome.report.note.startswith(
+        "the availability probe failed (exit 2): sh: syntax error"
+    )
 
 
 def test_probe_parsing_treats_unreported_binaries_as_absent():

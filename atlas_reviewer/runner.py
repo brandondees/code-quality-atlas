@@ -104,6 +104,9 @@ _NOT_ISOLATED_RE = re.compile(
     re.escape(PYTHON_PLACEHOLDER) + r"(?! -I[A-Za-z]*(?:\s|$))"
 )
 _INT_RE = re.compile(r"\d+")
+_ANSI_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|.)")
+_UNPRINTABLE_RE = re.compile(r"[^\x20-\x7e]+")
+GUEST_TAIL_CHARS = 300
 _EXEC_SLACK_S = 15.0
 PROBE_BUDGET_S = 60.0
 UPLOAD_BUDGET_S = 300.0
@@ -203,6 +206,21 @@ class ToolAbsent:
 
 
 ToolResult = ToolRan | ToolAbsent
+
+
+@dataclass(frozen=True)
+class ExecFailed:
+    """A check-style exec (the availability probe, interpreter resolution)
+    that did not answer. Its tools are not run, and the reason names the
+    failure instead of claiming the tool or interpreter is absent."""
+
+    what: str
+    exit_code: int | None
+    tail: str
+
+    @property
+    def detail(self) -> str:
+        return f"the {self.what} failed (exit {self.exit_code}): {self.tail}"
 
 
 @dataclass(frozen=True)
@@ -345,6 +363,15 @@ def exec_argv(script: str, stdin_len: int, sprite_env: bool = False) -> tuple[st
 def strip_start(text: str) -> str:
     _, found, rest = text.partition(f"{START_MARKER}\n")
     return rest if found else text
+
+
+def guest_text(text: str, max_chars: int) -> str:
+    """Untrusted runner output made fit for a one-line note or telemetry
+    field: ANSI escape sequences dropped, every other unprintable run
+    (newlines, carriage returns, control bytes, non-ASCII) collapsed to one
+    space, and only the last `max_chars` kept, where a failure usually is."""
+    flat = _UNPRINTABLE_RE.sub(" ", _ANSI_RE.sub("", text)).strip()
+    return flat[-max_chars:] if max_chars > 0 else ""
 
 
 def _last_int(text: str) -> int | None:
@@ -533,12 +560,14 @@ def run_disposable(
 
     def body(run: _Run) -> str:
         found = _Found(_probe(run, job.tools), _python_for(run, job))
-        pythons.append(found.python)
+        pythons.append(found.trusted_python)
         diagnostics.extend(_diagnose(run, diagnostics_before_unpack(), job.diagnose))
         _upload(run, job.source_tarball)
         _unpack(run)
         results.extend(_tool(run, tool, found) for tool in job.tools)
-        after = diagnostics_after_unpack(found.python, WORKDIR, DIAGNOSTIC_BOUND_S)
+        after = diagnostics_after_unpack(
+            found.trusted_python, WORKDIR, DIAGNOSTIC_BOUND_S
+        )
         diagnostics.extend(_diagnose(run, after, job.diagnose))
         return f"{len(results)} tool(s) attempted"
 
@@ -570,11 +599,14 @@ def probe_runner(
     stdin_check: list[str] = []
 
     def body(run: _Run) -> str:
-        found.update(_probe(run, tools))
+        probed = _probe(run, tools)
         sample.append(
             _raw_exec(run, _Exec("probe", "framing check", f"echo {FRAMING_CHECK}"))
         )
         stdin_check.append(_stdin_roundtrip(run))
+        if isinstance(probed, ExecFailed):
+            return probed.detail
+        found.update(probed)
         return f"probed {len(found)} binar{'y' if len(found) == 1 else 'ies'}"
 
     report = _disposable(
@@ -691,7 +723,11 @@ def _exec(run: _Run, step: _Exec) -> tuple[int | None, str]:
     return parse_exit(strip_start(decode_exec_output(_raw_exec(run, step))))
 
 
-def _probe(run: _Run, tools: tuple[ToolSpec, ...]) -> dict[str, bool]:
+Availability = dict[str, bool] | ExecFailed
+Resolved = TrustedPython | ExecFailed | None
+
+
+def _probe(run: _Run, tools: tuple[ToolSpec, ...]) -> Availability:
     binaries = tuple(t.binary for t in tools)
     if not binaries:
         return {}
@@ -701,8 +737,17 @@ def _probe(run: _Run, tools: tuple[ToolSpec, ...]) -> dict[str, bool]:
             "tool check", "tool check", probe_script(binaries), budget_s=PROBE_BUDGET_S
         ),
     )
-    found = parse_probe(text, binaries) if code == 0 else dict.fromkeys(binaries, False)
-    paths = parse_paths(text) if code == 0 else {}
+    if code != 0:
+        failed = ExecFailed(
+            "availability probe", code, guest_text(text, GUEST_TAIL_CHARS)
+        )
+        run.telemetry.record(
+            "tool check", "availability", {"exit_status": code},
+            status=ERROR, error=failed.detail,
+        )  # fmt: skip
+        return failed
+    found = parse_probe(text, binaries)
+    paths = parse_paths(text)
     run.telemetry.record(
         "tool check",
         "availability",
@@ -716,11 +761,15 @@ def _probe(run: _Run, tools: tuple[ToolSpec, ...]) -> dict[str, bool]:
 
 @dataclass(frozen=True)
 class _Found:
-    available: dict[str, bool]
-    python: TrustedPython | None
+    available: Availability
+    python: Resolved
+
+    @property
+    def trusted_python(self) -> TrustedPython | None:
+        return self.python if isinstance(self.python, TrustedPython) else None
 
 
-def _python_for(run: _Run, job: RunnerJob) -> TrustedPython | None:
+def _python_for(run: _Run, job: RunnerJob) -> Resolved:
     if not (job.diagnose or any(t.needs_python for t in job.tools)):
         return None
     return run.telemetry.span(
@@ -731,20 +780,27 @@ def _python_for(run: _Run, job: RunnerJob) -> TrustedPython | None:
     )
 
 
-def _resolve_python(run: _Run) -> TrustedPython | None:
+def _resolve_python(run: _Run) -> Resolved:
     code, text = _exec(
         run,
         _Exec(
             "interpreter", "resolve python", resolve_script(), budget_s=PROBE_BUDGET_S
         ),
     )
-    return choose_python(text) if code == 0 else None
+    if code != 0:
+        return ExecFailed(
+            "interpreter resolution", code, guest_text(text, GUEST_TAIL_CHARS)
+        )
+    return choose_python(text)
 
 
-def _python_fields(python: TrustedPython | None) -> Fields:
-    if python is None:
-        return {"python": "none found"}
-    return {"python": python.path, "python_version": python.version}
+def _python_fields(python: Resolved) -> Fields:
+    match python:
+        case TrustedPython(path=path, version=version):
+            return {"python": path, "python_version": version}
+        case ExecFailed(exit_code=code):
+            return {"python": "resolution failed", "exit_status": code}
+    return {"python": "none found"}
 
 
 def _diagnose(
@@ -864,14 +920,22 @@ def _run_if_available(run: _Run, tool: ToolSpec, found: _Found) -> ToolResult:
     missing = _missing(tool, found)
     if missing:
         return ToolAbsent(tool, missing)
-    return _run_tool(run, tool, found.python)
+    return _run_tool(run, tool, found.trusted_python)
 
 
 def _missing(tool: ToolSpec, found: _Found) -> str:
     if tool.needs_python:
-        return "" if found.python else "no trusted Python interpreter was resolved"
-    if found.available.get(tool.binary, False):
-        return ""
+        match found.python:
+            case TrustedPython():
+                return ""
+            case ExecFailed(detail=detail):
+                return f"no trusted Python interpreter: {detail}"
+        return "no trusted Python interpreter was resolved"
+    match found.available:
+        case ExecFailed(detail=detail):
+            return f"not checked: {detail}"
+        case available if available.get(tool.binary, False):
+            return ""
     return f"`{tool.binary}` not found by the availability probe"
 
 
