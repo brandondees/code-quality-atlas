@@ -10,6 +10,7 @@ from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import CleanupStatus, RunnerStatus
 from atlas_reviewer.fakes import ExecRule, FakeSprites, MemoryLedger
 from atlas_reviewer.ports import BoundaryError, StreamTimeoutError
+from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import (
     DENY_ALL,
     FIRST_FRAME_BUDGET_S,
@@ -28,6 +29,7 @@ from atlas_reviewer.runner import (
     destroy_runner,
     exec_argv,
     frames_seen,
+    guest_text,
     parse_exit,
     parse_paths,
     parse_probe,
@@ -40,7 +42,7 @@ from atlas_reviewer.runner import (
 )
 from atlas_reviewer.telemetry import Telemetry
 
-from .helpers import CallbackRule, FakeClock
+from .helpers import CallbackRule, FakeClock, fake_token
 
 NAME = "cqa-rev-20261106-230000-abc123"
 TOOLS = (
@@ -318,7 +320,7 @@ def test_a_telemetry_write_failure_does_not_stop_cleanup():
             name=NAME,
             deadline_s=60.0,
             clock=FakeClock(),
-            telemetry=Telemetry(FakeClock(), FailingSink()),
+            telemetry=Telemetry(FakeClock(), FailingSink(), scrub=_no_secrets),
         )
     assert api.live_names() == ()
     assert ledger.pending() == ()
@@ -366,6 +368,52 @@ def test_upload_failure_is_a_failed_run():
     assert outcome.report.status is RunnerStatus.FAILED
     assert "unpack / tar -xzf failed after" in outcome.report.note
     assert "source unpack failed (exit 2): tar: invalid" in outcome.report.note
+
+
+def test_guest_text_is_one_printable_bounded_line_from_the_end():
+    raw = "\x1b[31mtar: \x1b]0;title\x07bad\r\nentry\x00 caf\u00e9\x1bc\n" + "x" * 50
+    assert guest_text(raw, 1000) == "tar: bad entry caf " + "x" * 50
+    assert guest_text(raw, 10) == "x" * 10
+    assert guest_text("\n\t", 10) == ""
+    assert guest_text("abc", 0) == ""
+
+
+def test_guest_output_in_a_failure_note_is_bounded_and_printable():
+    hostile = "\x1b[2J\x1b[Hfake: all checks passed\r\n" + "y" * 2000 + "\x1b[0m"
+    api = FakeSprites(rules=(ExecRule("tar -xzf", hostile, 2),))
+    note = run(api).report.note
+    assert not any(c in note for c in "\x1b\r\n")
+    assert note.endswith("y" * 100)
+    assert len(note) < 600
+
+
+def test_a_failure_note_is_scrubbed_like_the_telemetry_it_came_from():
+    secret = fake_token("sk-or-v1-")
+
+    class LeakyCreate(FakeSprites):
+        def create(self, name):
+            raise BoundaryError(f"POST https://api.example failed: echo {secret}")
+
+    outcome = run_disposable(
+        LeakyCreate(), MemoryLedger(), RunnerJob(b"tarball-bytes", TOOLS), name=NAME,
+        deadline_s=60.0, clock=FakeClock(),
+        telemetry=Telemetry(FakeClock(), scrub=lambda text: Redactor((secret,))(text).text),
+    )  # fmt: skip
+    assert secret not in outcome.report.note
+    assert "[REDACTED" in outcome.report.note
+
+
+def test_a_tool_version_is_printable_guest_text():
+    api = FakeSprites(
+        rules=(
+            ExecRule("tar -xzf", "", 0),
+            ExecRule("ruff --version", "\x1b[1mruff\x1b[0m 0.17.3\x07", 0),
+            ExecRule("ruff check", "", 0),
+        )
+    )
+    (ruff,) = run(api, tools=TOOLS[:1]).results
+    assert isinstance(ruff, ToolRan)
+    assert ruff.version == "ruff 0.17.3"
 
 
 def test_nothing_credential_like_is_passed_into_the_runner():
@@ -948,7 +996,7 @@ def test_a_stalled_exec_reports_the_bytes_and_frames_that_did_arrive():
     assert outcome.report.note.startswith(
         "exec / source unpack failed after 0.0s (0.0s into the run): unpack stage, "
         "source unpack: output stopped before the exit marker after 22 byte(s) "
-        "(frames 0x01:1), last output '__ATLAS_START__\\ntar: ' (POST x: "
+        "(frames 0x01:1), last output '__ATLAS_START__ tar:' (POST x: "
     )
 
 

@@ -156,6 +156,21 @@ def test_events_are_scrubbed_before_any_sink_and_written_as_jsonl(tmp_path):
     assert len(sink.path.read_text().splitlines()) == 3
 
 
+def test_a_sink_without_a_credential_aware_scrub_is_refused(tmp_path):
+    with pytest.raises(TypeError, match="scrub"):
+        Telemetry(FakeClock(), JsonlSink(tmp_path / "events.jsonl"))
+
+
+def test_without_a_scrub_token_shaped_values_are_still_redacted():
+    token = fake_token("ghp_")
+    t = Telemetry(FakeClock())
+    t.record("tool", "ruff", {"version": f"ruff {token}"}, error=f"saw {token}")
+    (event,) = t.events
+    assert token not in f"{event.fields} {event.error}"
+    assert "[REDACTED:" in str(event.fields["version"])
+    assert t.scrub(f"note {token}") == event.error.replace("saw", "note")
+
+
 def test_summary_rows_show_errors_loudly_with_their_detail():
     t = Telemetry(FakeClock())
     t.record("upload", "13-byte tarball", {"bytes": 13})

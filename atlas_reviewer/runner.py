@@ -105,8 +105,9 @@ _NOT_ISOLATED_RE = re.compile(
 )
 _INT_RE = re.compile(r"\d+")
 _ANSI_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|.)")
-_UNPRINTABLE_RE = re.compile(r"[^\x20-\x7e]+")
+_UNPRINTABLE_RE = re.compile(r"[^\x21-\x7e]+")
 GUEST_TAIL_CHARS = 300
+VERSION_CHARS = 120
 _EXEC_SLACK_S = 15.0
 PROBE_BUDGET_S = 60.0
 UPLOAD_BUDGET_S = 300.0
@@ -367,9 +368,9 @@ def strip_start(text: str) -> str:
 
 def guest_text(text: str, max_chars: int) -> str:
     """Untrusted runner output made fit for a one-line note or telemetry
-    field: ANSI escape sequences dropped, every other unprintable run
-    (newlines, carriage returns, control bytes, non-ASCII) collapsed to one
-    space, and only the last `max_chars` kept, where a failure usually is."""
+    field: ANSI escape sequences dropped, every run of whitespace or other
+    unprintable characters (newlines, carriage returns, control bytes,
+    non-ASCII) collapsed to one space, and only the last `max_chars` kept, where a failure usually is."""
     flat = _UNPRINTABLE_RE.sub(" ", _ANSI_RE.sub("", text)).strip()
     return flat[-max_chars:] if max_chars > 0 else ""
 
@@ -530,15 +531,15 @@ def _guarded(run: _Run, body: Body) -> tuple[RunnerStatus, str]:
     except BoundaryError as exc:
         if run.deadline.remaining() <= 0:
             return _deadline_reached(run, f"deadline reached: {exc}")
-        return RunnerStatus.FAILED, str(exc)
+        return RunnerStatus.FAILED, run.telemetry.scrub(str(exc))
     if run.deadline.remaining() <= 0:
         return _deadline_reached(run, f"deadline reached by the last step ({note})")
-    return RunnerStatus.COMPLETED, note
+    return RunnerStatus.COMPLETED, run.telemetry.scrub(note)
 
 
 def _deadline_reached(run: _Run, note: str) -> tuple[RunnerStatus, str]:
     run.telemetry.record("deadline", "exceeded", status=ERROR, error=note)
-    return RunnerStatus.DEADLINE_EXCEEDED, note
+    return RunnerStatus.DEADLINE_EXCEEDED, run.telemetry.scrub(note)
 
 
 def run_disposable(
@@ -631,7 +632,7 @@ def _stdin_roundtrip(run: _Run) -> str:
         return f"FAILED sending {sent} bytes: {exc}"
     got = _last_int(text)
     if code != 0 or got is None:
-        return f"FAILED sending {sent} bytes: exit {code}: {text[-200:]!r}"
+        return f"FAILED sending {sent} bytes: exit {code}: {guest_text(text, 200)}"
     verdict = "ok" if got == sent else "MISMATCH"
     return f"{verdict}: sent {sent} bytes, runner received {got}"
 
@@ -706,7 +707,7 @@ def _timeout_text(step: _Exec, exc: StreamTimeoutError) -> str:
     return (
         f"{step.stage} stage, {step.purpose}: output stopped before the exit "
         f"marker after {len(got)} byte(s) (frames {frames_seen(got)}), last "
-        f"output {decode_exec_output(got)[-120:]!r} ({exc})"
+        f"output {guest_text(decode_exec_output(got), 120)!r} ({exc})"
     )
 
 
@@ -869,7 +870,7 @@ def _confirm_upload(result: tuple[int | None, str], size: int) -> int:
     if code != 0 or got != size:
         raise BoundaryError(
             f"source upload: runner wrote {got} of {size} bytes "
-            f"(exit {code}): {text[-300:]}"
+            f"(exit {code}): {guest_text(text, GUEST_TAIL_CHARS)}"
         )
     return got
 
@@ -894,7 +895,9 @@ def _unpack(run: _Run) -> None:
 def _confirm_unpack(result: tuple[int | None, str]) -> int:
     code, text = result
     if code != 0:
-        raise BoundaryError(f"source unpack failed (exit {code}): {text[-500:]}")
+        raise BoundaryError(
+            f"source unpack failed (exit {code}): {guest_text(text, GUEST_TAIL_CHARS)}"
+        )
     return code
 
 
@@ -957,15 +960,18 @@ def _run_tool(run: _Run, tool: ToolSpec, python: TrustedPython | None) -> ToolRe
         ),
     )
     if v_code != 0:
-        return ToolAbsent(tool, f"version probe exited {v_code}: {v_text[-300:]}")
+        return ToolAbsent(
+            tool,
+            f"version probe exited {v_code}: {guest_text(v_text, GUEST_TAIL_CHARS)}",
+        )
     script = f"cd {WORKDIR} && timeout --kill-after=5 {tool.timeout_s} {run_cmd}"
     code, text = _exec(run, _Exec(stage, f"{tool.name} run", script, budget_s=budget))
     return ToolRan(tool, _first_line(v_text), code, text)
 
 
 def _first_line(text: str) -> str:
-    stripped = text.strip()
-    return stripped.splitlines()[0] if stripped else "unknown"
+    lines = text.strip().splitlines()
+    return (guest_text(lines[0], VERSION_CHARS) if lines else "") or "unknown"
 
 
 def sweep(

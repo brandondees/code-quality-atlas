@@ -6,7 +6,8 @@ tests) and is also kept in memory for the summary table that the draft and
 `probe-runner` print. Field values are numbers, booleans or labels the
 controller chose. Free text (error messages, which can quote URLs or runner
 output) goes through `scrub`, the controller's redactor, before any sink
-sees it, so no event carries a credential.
+sees it, so no event carries a credential; a sink cannot be attached
+without one.
 
 `span` times one step. A `BoundaryError` raised inside it is re-raised as
 the same object, its message prefixed with the phase, the step, how long
@@ -25,6 +26,7 @@ from pathlib import Path
 from typing import Protocol
 
 from atlas_reviewer.ports import BoundaryError, Clock
+from atlas_reviewer.redact import redact
 
 FieldValue = str | int | float | bool | None
 Fields = Mapping[str, FieldValue]
@@ -78,8 +80,8 @@ class JsonlSink:
             out.write(json.dumps(event.as_json()) + "\n")
 
 
-def _identity(text: str) -> str:
-    return text
+def _redact_shapes(text: str) -> str:
+    return redact(text).text
 
 
 def _no_fields(_result: object) -> Fields:
@@ -87,17 +89,26 @@ def _no_fields(_result: object) -> Fields:
 
 
 class Telemetry:
-    """Thread-safe: the runner watchdog destroys from its own thread."""
+    """Thread-safe: the runner watchdog destroys from its own thread.
+
+    Writing events anywhere needs `scrub`, the controller's redactor bound
+    to its own credentials. Without a sink, events stay in memory and are
+    still scrubbed of secret-shaped values by pattern."""
 
     def __init__(
         self,
         clock: Clock,
         sink: EventSink | None = None,
-        scrub: Callable[[str], str] = _identity,
+        scrub: Callable[[str], str] | None = None,
     ) -> None:
+        if sink is not None and scrub is None:
+            raise TypeError(
+                "a telemetry sink needs scrub, the controller's redactor bound "
+                "to its credentials"
+            )
         self._clock = clock
         self._sink = sink or NullSink()
-        self._scrub = scrub
+        self._scrub = scrub or _redact_shapes
         self._start = clock.monotonic()
         self._events: list[Event] = []
         self._lock = threading.Lock()
@@ -113,6 +124,11 @@ class Telemetry:
 
     def elapsed(self) -> float:
         return self._clock.monotonic() - self._start
+
+    def scrub(self, text: str) -> str:
+        """The same redaction events get, for text leaving by another way
+        (a runner report's note)."""
+        return self._scrub(text)
 
     def record(
         self,
