@@ -190,6 +190,39 @@ def test_a_short_line_after_key_material_is_kept_unless_it_looks_like_its_end():
     assert redact(log).text == "[REDACTED:private-key-unterminated]\nT2 next step\n"
 
 
+@pytest.mark.parametrize(
+    "annotation",
+    [
+        "known_secrets: tuple[str, ...] = ()",
+        "secret_sources: tuple[Callable[[], Sequence[str]], ...] = ()",
+        "tokens: Sequence[str]",
+        "def f(api_key: Mapping[str, str]) -> None:",
+    ],
+)
+def test_type_annotations_are_not_redacted_as_values(annotation):
+    assert redact(annotation).text == annotation
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ('token: str = "abcdefghijklmnop"', 'token: str = "[REDACTED:assignment]"'),
+        (
+            "api_key: Final[str] = 'abcdefghijkl'",
+            "api_key: Final[str] = '[REDACTED:assignment]'",
+        ),
+        (
+            "password: str | None = abcdefghij",
+            "password: str | None = [REDACTED:assignment]",
+        ),
+        ("password: Xk9[f$2abcdef", "password: [REDACTED:assignment]"),
+        ("token: [abcdefghij]", "token: [REDACTED:assignment]"),
+    ],
+)
+def test_annotated_assignments_and_bracketed_values_are_still_redacted(raw, expected):
+    assert redact(raw).text == expected
+
+
 def test_a_terminated_key_before_an_unterminated_one_is_still_counted():
     out = redact(f"{PRIVATE_KEY}\nkept\n-----BEGIN EC PRIVATE KEY-----\nMIIfake")
     assert out.text == (

@@ -48,9 +48,12 @@ _ASSIGNMENT = re.compile(
     r"(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|"
     r"private[_-]?key|credentials?)s?"
     r"(?:[_.-][A-Za-z0-9]{1,40}){0,6}[\"']?)"
-    r"(\s*[:=]\s*)"
+    r"(\s*(?::\s*[A-Za-z_][\w.\[\]|, ]{0,200}?(?==))?[:=]\s*)"
     r"(?:(\")(?:[^\"\\\n]|\\.){8,}\"|(')(?:[^'\\\n]|\\.){8,}'|([\"']?)[^\s\"']{8,})"
 )
+# `known_secrets: tuple[str, ...]` is a type annotation, not a value; a
+# value shaped like a subscripted type is left alone after a bare `:`.
+_ANNOTATION = re.compile(r"[A-Za-z_][\w.]*\[[\w.\[\],|]*\]*,?")
 
 
 @dataclass(frozen=True)
@@ -132,6 +135,9 @@ def _assignment(m: re.Match[str]) -> str:
     quote = double or single
     if quote:
         return f"{name}{sep}{quote}[REDACTED:assignment]{quote}"
+    value = m.group(0)[len(name) + len(sep) :]
+    if "=" not in sep and _ANNOTATION.fullmatch(value):
+        return m.group(0)
     return f"{name}{sep}{open_quote}[REDACTED:assignment]"
 
 
