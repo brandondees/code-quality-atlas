@@ -620,9 +620,8 @@ def _send(run: _Run, step: _Exec, timeout: float, first: float | None) -> bytes:
     try:
         return run.api.exec(run.name, argv, step.stdin, timeout, first)
     except StreamTimeoutError as exc:
-        raise StreamTimeoutError(
-            _timeout_text(step, exc), exc.received, first_byte=exc.first_byte
-        ) from exc
+        exc.args = (_timeout_text(step, exc),)
+        raise
 
 
 def _timeout_text(step: _Exec, exc: StreamTimeoutError) -> str:

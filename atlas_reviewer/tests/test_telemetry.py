@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from atlas_reviewer.ports import BoundaryError, NotFoundError
+from atlas_reviewer.ports import BoundaryError, NotFoundError, StreamTimeoutError
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.telemetry import JsonlSink, Telemetry, summary_rows
 
@@ -44,9 +44,11 @@ def test_a_boundary_error_is_relabelled_with_phase_step_and_timing_and_keeps_its
     t = Telemetry(clock)
     clock.advance(10.0)
 
+    original = NotFoundError("The read operation timed out")
+
     def times_out():
         clock.advance(60.0)
-        raise NotFoundError("The read operation timed out")
+        raise original
 
     with pytest.raises(NotFoundError) as caught:
         t.span("exec", "tool check", times_out)
@@ -54,10 +56,47 @@ def test_a_boundary_error_is_relabelled_with_phase_step_and_timing_and_keeps_its
         "exec / tool check failed after 60.0s (70.0s into the run): "
         "The read operation timed out"
     )
-    assert isinstance(caught.value.__cause__, NotFoundError)
+    assert caught.value is original
     (event,) = t.events
     assert event.status == "error"
     assert event.error == str(caught.value)
+
+
+@pytest.mark.parametrize("first_byte", [False, True])
+def test_a_relabelled_stream_timeout_keeps_its_bytes_and_first_byte_flag(first_byte):
+    t = Telemetry(FakeClock())
+    original = StreamTimeoutError("stalled", b"partial-bytes", first_byte=first_byte)
+
+    def stalls():
+        raise original
+
+    with pytest.raises(StreamTimeoutError) as caught:
+        t.span("exec", "source unpack", stalls)
+    assert type(caught.value) is StreamTimeoutError
+    assert (caught.value.received, caught.value.first_byte) == (
+        b"partial-bytes",
+        first_byte,
+    )
+    assert str(caught.value) == (
+        "exec / source unpack failed after 0.0s (0.0s into the run): stalled"
+    )
+
+
+def test_a_boundary_error_whose_constructor_needs_more_arguments_is_still_labelled():
+    class Rejected(BoundaryError):
+        def __init__(self, message, status):
+            super().__init__(message)
+            self.status = status
+
+    t = Telemetry(FakeClock())
+
+    def rejects():
+        raise Rejected("HTTP 409", 409)
+
+    with pytest.raises(Rejected) as caught:
+        t.span("create", "create sprite", rejects)
+    assert caught.value.status == 409
+    assert str(caught.value).endswith("into the run): HTTP 409")
 
 
 def test_nested_spans_label_once_at_the_innermost_step_but_both_record():

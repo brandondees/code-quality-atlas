@@ -9,8 +9,8 @@ output) goes through `scrub`, the controller's redactor, before any sink
 sees it, so no event carries a credential.
 
 `span` times one step. A `BoundaryError` raised inside it is re-raised as
-the same type, prefixed with the phase, the step, how long the step took
-and how far into the run it failed, so no failure surfaces as a bare
+the same object, its message prefixed with the phase, the step, how long
+the step took and how far into the run it failed, so no failure surfaces as a bare
 "The read operation timed out". The innermost span labels the error; any
 enclosing span records its own event but keeps that label.
 """
@@ -154,11 +154,11 @@ class Telemetry:
         try:
             result = fn()
         except BoundaryError as exc:
-            labelled = _label(exc, phase, step, start, self.elapsed())
+            _label(exc, phase, step, start, self.elapsed())
             self.record(
-                phase, step, fields, status=ERROR, start_s=start, error=str(labelled)
+                phase, step, fields, status=ERROR, start_s=start, error=str(exc)
             )
-            raise labelled from exc
+            raise
         except Exception as exc:
             self.record(
                 phase, step, fields, status=ERROR, start_s=start,
@@ -172,16 +172,17 @@ class Telemetry:
         return self._scrub(value) if isinstance(value, str) else value
 
 
-def _label(
-    exc: BoundaryError, phase: str, step: str, start: float, now: float
-) -> BoundaryError:
+def _label(exc: BoundaryError, phase: str, step: str, start: float, now: float) -> None:
+    """Relabels `exc` itself rather than building a copy: a copy loses the
+    attributes a subclass promises (`StreamTimeoutError.received`) and
+    cannot be built at all when its constructor needs more arguments."""
+    if getattr(exc, _LABELLED, False):
+        return
     prefix = (
         f"{phase} / {step} failed after {now - start:.1f}s ({now:.1f}s into the run): "
     )
-    already = getattr(exc, _LABELLED, False)
-    labelled = type(exc)(str(exc) if already else f"{prefix}{exc}")
-    setattr(labelled, _LABELLED, True)
-    return labelled
+    exc.args = (f"{prefix}{exc}",)
+    setattr(exc, _LABELLED, True)
 
 
 SUMMARY_HEADERS = (
