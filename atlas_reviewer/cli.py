@@ -408,8 +408,11 @@ def _probe_protocol(
     )
     out.write(f"raw exec response sample: {outcome.framing_sample[:200]!r}\n")
     out.write(f"stdin round-trip: {outcome.stdin_check}\n")
-    return outcome.report.status is RunnerStatus.COMPLETED and (
-        outcome.stdin_check.startswith("ok:")
+    out.write(f"outbound connection: {outcome.egress_check}\n")
+    return (
+        outcome.report.status is RunnerStatus.COMPLETED
+        and outcome.stdin_check.startswith("ok:")
+        and not outcome.egress_check.startswith("OPEN")
     )
 
 

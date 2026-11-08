@@ -72,8 +72,12 @@ fetched with the GitHub App (`--event`, needing the three `ATLAS_GITHUB_*`
 variables). Both are held to the review's 9 MiB tarball cap.
 
 `probe-runner` exits 3 when the runner did not complete or, for the
-protocol probe, the stdin round-trip did not come back `ok`, so a script
-cannot take an unusable runner for a ready one. Its report is redacted with
+protocol probe, the stdin round-trip did not come back `ok` or the
+outbound-connection check got out (`OPEN`), so a script cannot take an
+unusable runner for a ready one. That check tries a bounded TCP connect to
+an IP literal and to a hostname; `no outbound connection` means both were
+tried and failed, and `UNVERIFIED` that it could not tell (no system
+Python, say). Only a live probe shows whether a real Sprite blocks egress. Its report is redacted with
 the controller's own credential values and the usual secret patterns before
 it is printed.
 

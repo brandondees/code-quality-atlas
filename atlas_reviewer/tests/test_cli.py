@@ -11,6 +11,7 @@ from atlas_reviewer import cli
 from atlas_reviewer.fakes import FakeSprites
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.ports import BoundaryError, NotFoundError
+from atlas_reviewer.runner import EGRESS_TAG
 
 from .helpers import FIXTURE, HEAD, fake_token
 
@@ -368,6 +369,26 @@ def test_probe_runner_reports_tool_availability_and_destroys(tmp_path):
     assert "tool python3: present" in text
     assert "raw exec response sample:" in text
     assert f"stdin round-trip: ok: sent {3 * 1024 * 1024} bytes" in text
+    assert "outbound connection: UNVERIFIED" in text
+    assert api.live_names() == ()
+
+
+def test_probe_runner_exits_nonzero_when_the_runner_can_connect_out(tmp_path):
+    class OpenEgress(FakeSprites):
+        def _answer(self, script, stdin):
+            if EGRESS_TAG in script:
+                return f"{EGRESS_TAG}:1.1.1.1:443:tried:connected:0", 0
+            return super()._answer(script, stdin)
+
+    api = OpenEgress()
+    out = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "probe-runner"],
+        env={}, out=out, err=io.StringIO(), sprites_factory=lambda env: api,
+    )  # fmt: skip
+    assert code == cli.EXIT_BOUNDARY
+    assert "outbound connection: OPEN: 1.1.1.1:443 CONNECTED" in out.getvalue()
+    assert "probe: FAILED" in out.getvalue()
     assert api.live_names() == ()
 
 
