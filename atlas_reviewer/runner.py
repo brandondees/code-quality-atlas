@@ -402,13 +402,17 @@ class _Destroyer:
         Sprite after the watchdog verified it absent; for the same reason
         the watchdog never clears the ledger entry. A telemetry write
         failure must not stop cleanup, so cleanup is redone untraced and
-        the error re-raised."""
+        the error re-raised, carrying the cleanup result as a note."""
         with self._lock:
             if self._status is None or trigger != "watchdog":
                 try:
                     self._status = self._destroy(self._telemetry, trigger)
-                except OSError:
+                except OSError as exc:
                     self._status = self._destroy(_quiet(), trigger)
+                    exc.add_note(
+                        f"runner {self._name} cleanup after the telemetry write "
+                        f"failure: {self._status.value}"
+                    )
                     raise
             return self._status
 

@@ -312,7 +312,7 @@ def test_a_telemetry_write_failure_does_not_stop_cleanup():
                 raise OSError("disk full")
 
     api, ledger = FakeSprites(rules=OK_RULES), MemoryLedger()
-    with pytest.raises(OSError, match="disk full"):
+    with pytest.raises(OSError, match="disk full") as caught:
         run_disposable(
             api,
             ledger,
@@ -324,6 +324,12 @@ def test_a_telemetry_write_failure_does_not_stop_cleanup():
         )
     assert api.live_names() == ()
     assert ledger.pending() == ()
+    assert caught.value.__notes__ == [
+        (
+            f"runner {NAME} cleanup after the telemetry write failure: "
+            "destroyed (verified absent)"
+        )
+    ]
 
 
 def test_destroy_that_does_not_take_effect_is_reported_and_kept_in_ledger():
