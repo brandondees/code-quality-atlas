@@ -4,8 +4,9 @@
 Lifecycle, in order, every step checked against the deadline before it
 starts and recorded as a telemetry event (`atlas_reviewer.telemetry`).
 Execs get the remaining deadline as their window; a control-plane call is
-bounded only by the client's own window (`sprites_api`), so cleanup after
-the deadline can overrun it by a few of those:
+bounded by the client's own window (`sprites_api`, 30s by default), and
+all of a runner's cleanup by `CLEANUP_BUDGET_S` from its first destroy, so
+cleanup ends at most that plus one call window after it starts:
 
 1. record the runner name in the ledger (before anything exists remotely)
 2. create a fresh Sprite -- never reuse one: guests can restore checkpoints
@@ -18,7 +19,9 @@ the deadline can overrun it by a few of those:
 5. destroy -- in `finally`, and from a watchdog timer at the deadline.
    Destroy is idempotent and is verified by a follow-up existence check;
    only the final verified destroy clears the ledger entry, never the
-   watchdog's, which can run while `create` is still in flight.
+   watchdog's, which can run while `create` is still in flight, and not
+   after a create whose outcome is unknown or once the cleanup budget is
+   spent: those report DESTROY_UNVERIFIED and leave the entry for `sweep`.
 
 Upload and unpack are separate execs so a transport stall and a slow or
 stuck extraction fail with different labels. Every exec error names its
@@ -34,9 +37,10 @@ minimal environment keeps the image's pyenv shims (`/.sprite/bin`) and any
 `PYENV_*` setting off the PATH; Python tools run the interpreter the
 controller resolved by absolute path before unpack (`interpreter.py`), so
 nothing in the PR can choose an interpreter or a tool binary. Only the
-probe's labelled diagnostics run in the Sprite's default environment. A command that sends no input must produce its
-first output byte within `first_frame_s`; the start marker makes that
-immediate for any command that actually started.
+probe's labelled diagnostics run in the Sprite's default environment. A
+command that sends no input must produce its first output byte within
+`first_frame_s`; the start marker makes that immediate for any command
+that actually started.
 
 Exec-session kill is untested against the live API, so it is never relied
 on: destroying the Sprite is the only cleanup primitive used.
@@ -129,6 +133,10 @@ PROBE_BUDGET_S = 60.0
 UPLOAD_BUDGET_S = 300.0
 UNPACK_BUDGET_S = 120.0
 FIRST_FRAME_BUDGET_S = 30.0
+# From the first destroy of a runner, shared by the watchdog's and the
+# final one: no control-plane call starts after it, so cleanup ends
+# within this plus one call window (`SpritesClient` timeout_s, 30s).
+CLEANUP_BUDGET_S = 60.0
 DIAGNOSTIC_BOUND_S = 15
 PYTHON_BINARY = "python3"
 MINIMAL_ENV = ("PATH=/usr/bin:/bin", "HOME=/tmp", "LANG=C.UTF-8")
@@ -448,11 +456,18 @@ class _Destroyer:
         name: str,
         telemetry: Telemetry,
         create: _Create,
+        clock: Clock,
     ) -> None:
         self._api, self._ledger, self._name = api, ledger, name
-        self._telemetry, self._create = telemetry, create
+        self._telemetry, self._create, self._clock = telemetry, create, clock
         self._lock = threading.Lock()
         self._status: CleanupStatus | None = None
+        self._budget_start: float | None = None
+
+    def _budget_left(self) -> float:
+        if self._budget_start is None:
+            self._budget_start = self._clock.monotonic()
+        return CLEANUP_BUDGET_S - (self._clock.monotonic() - self._budget_start)
 
     def destroy(self, trigger: Trigger) -> CleanupStatus:
         """Only the watchdog can run while `create` is still in flight.
@@ -464,8 +479,15 @@ class _Destroyer:
         momentary, so the entry stays for a later `sweep` and the result is
         DESTROY_UNVERIFIED. A telemetry write
         failure must not stop cleanup, so cleanup is redone untraced and
-        the error re-raised, carrying the cleanup result as a note."""
-        with self._lock:
+        the error re-raised, carrying the cleanup result as a note.
+
+        Cleanup has `CLEANUP_BUDGET_S` from the first destroy: a destroy
+        waits for another one only that long, and starts no call once it
+        is spent. Cut short, it reports DESTROY_UNVERIFIED and leaves the
+        ledger entry for a sweep."""
+        if not self._lock.acquire(timeout=max(self._budget_left(), 0.0)):
+            return self._budget_spent(self._telemetry, trigger, "waiting for a destroy")
+        try:
             if self._status is None or trigger != "watchdog":
                 try:
                     self._status = self._destroy(self._telemetry, trigger)
@@ -477,16 +499,38 @@ class _Destroyer:
                     )
                     raise
             return self._status
+        finally:
+            self._lock.release()
+
+    def _budget_spent(
+        self, telemetry: Telemetry, trigger: Trigger, during: str
+    ) -> CleanupStatus:
+        telemetry.record(
+            "destroy", "cleanup budget spent", {"trigger": trigger},
+            status=ERROR,
+            error=f"cleanup budget of {CLEANUP_BUDGET_S:g}s spent {during}",
+        )  # fmt: skip
+        return self._outcome(telemetry, trigger, CleanupStatus.DESTROY_UNVERIFIED)
 
     def _destroy(self, telemetry: Telemetry, trigger: Trigger) -> CleanupStatus:
         if trigger == "watchdog":
             telemetry.record("watchdog", "fired", {"runner": self._name})
-        deleted = any(self._attempt_delete(telemetry, trigger, n) for n in (1, 2))
-        status = (
-            self._verified_status(telemetry, trigger)
-            if deleted
-            else CleanupStatus.DESTROY_UNVERIFIED
+        for n in (1, 2):
+            if self._budget_left() <= 0:
+                return self._budget_spent(telemetry, trigger, "before a delete")
+            if self._attempt_delete(telemetry, trigger, n):
+                break
+        else:
+            return self._outcome(telemetry, trigger, CleanupStatus.DESTROY_UNVERIFIED)
+        if self._budget_left() <= 0:
+            return self._budget_spent(telemetry, trigger, "before the existence check")
+        return self._outcome(
+            telemetry, trigger, self._verified_status(telemetry, trigger)
         )
+
+    def _outcome(
+        self, telemetry: Telemetry, trigger: Trigger, status: CleanupStatus
+    ) -> CleanupStatus:
         telemetry.record(
             "destroy", "outcome", {"trigger": trigger, "cleanup": status.value}
         )
@@ -551,7 +595,7 @@ def destroy_runner(
     """For a runner no live review is creating (a sweep): whatever create
     the review that recorded it made is taken to have settled by now."""
     return _Destroyer(
-        api, ledger, name, telemetry or _quiet(), _Create("settled")
+        api, ledger, name, telemetry or _quiet(), _Create("settled"), SystemClock()
     ).destroy("sweep")
 
 
@@ -576,7 +620,7 @@ def _disposable(
     """Run `body` on a fresh, policy-verified Sprite; always destroy it."""
     deadline = Deadline(clock, deadline_s)
     run = _Run(api, name, deadline, telemetry, first_frame_s)
-    destroyer = _Destroyer(api, ledger, name, telemetry, run.create)
+    destroyer = _Destroyer(api, ledger, name, telemetry, run.create, clock)
     ledger.record(name)
     telemetry.record("ledger", "record runner name", {"runner": name})
 

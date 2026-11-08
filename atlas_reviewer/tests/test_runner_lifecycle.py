@@ -16,6 +16,7 @@ from atlas_reviewer.interpreter import PYTHON_TAG
 from atlas_reviewer.ports import BoundaryError, StreamTimeoutError
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import (
+    CLEANUP_BUDGET_S,
     FIRST_FRAME_BUDGET_S,
     PROBE_BUDGET_S,
     PROBE_TAG,
@@ -1501,3 +1502,77 @@ def test_each_failed_delete_attempt_is_labelled_with_its_own_attempt():
         f"destroy / {e.step}" for e in deletes
     ]
     assert {e.step for e in deletes} == {"delete attempt 1", "delete attempt 2"}
+
+
+class _SlowDeletes(FakeSprites):
+    """Each delete takes 70 fake seconds; records when each cleanup call
+    started on the run's clock."""
+
+    def __init__(self, clock, fails, **kwargs):
+        super().__init__(**kwargs)
+        self.clock, self.fails, self.cleanup_starts = clock, fails, []
+
+    def delete(self, name):
+        self.cleanup_starts.append(self.clock.monotonic())
+        self.clock.advance(70)
+        if self.fails:
+            raise BoundaryError("HTTP 500")
+        super().delete(name)
+
+    def exists(self, name):
+        self.cleanup_starts.append(self.clock.monotonic())
+        return super().exists(name)
+
+
+@pytest.mark.parametrize("fails", [True, False], ids=["failing", "succeeding"])
+def test_no_cleanup_call_starts_after_the_cleanup_budget(fails):
+    clock = FakeClock()
+    api = _SlowDeletes(clock, fails, rules=OK_RULES)
+    ledger = MemoryLedger()
+    telemetry = Telemetry(clock)
+    outcome = run_disposable(
+        api, ledger, RunnerJob(b"tarball-bytes", TOOLS), name=NAME,
+        deadline_s=60.0, clock=clock, telemetry=telemetry,
+    )  # fmt: skip
+    first = api.cleanup_starts[0]
+    assert all(s - first < CLEANUP_BUDGET_S for s in api.cleanup_starts)
+    assert outcome.report.cleanup is CleanupStatus.DESTROY_UNVERIFIED
+    assert ledger.pending() == (NAME,)
+    assert ("destroy", "cleanup budget spent") in [
+        (e.phase, e.step) for e in telemetry.events
+    ]
+
+
+def test_the_final_destroy_stops_waiting_for_a_hung_watchdog_destroy():
+    """The watchdog's delete hangs past the cleanup budget while holding
+    the destroy lock; the final destroy gives up instead of waiting it
+    out, reports unverified, and the entry is left for a sweep."""
+    clock = FakeClock()
+    in_delete, release = threading.Event(), threading.Event()
+
+    class HungDelete(FakeSprites):
+        def create(self, name):
+            assert in_delete.wait(_SYNC_WAIT_S)
+            super().create(name)
+
+        def delete(self, name):
+            if not in_delete.is_set():
+                clock.advance(1000)
+                in_delete.set()
+                release.wait(_SYNC_WAIT_S)
+            super().delete(name)
+
+    api, ledger = HungDelete(rules=OK_RULES), MemoryLedger()
+    try:
+        outcome = run_disposable(
+            api, ledger, RunnerJob(b"tarball-bytes", TOOLS), name=NAME,
+            deadline_s=0.01, clock=clock,
+        )  # fmt: skip
+        assert not release.is_set()
+    finally:
+        release.set()
+    assert outcome.report.status is RunnerStatus.DEADLINE_EXCEEDED
+    assert outcome.report.cleanup is CleanupStatus.DESTROY_UNVERIFIED
+    assert ledger.pending() == (NAME,)
+    assert sweep(api, ledger) == {NAME: CleanupStatus.DESTROYED_VERIFIED}
+    assert api.live_names() == ()

@@ -28,8 +28,8 @@ wall-clock window of `timeout_s` each, because a plain socket timeout
 restarts on every byte: a trickled DELETE or existence check could
 otherwise hold cleanup (and the lock the watchdog and the final destroy
 share) open indefinitely. Each call is bounded on its own, not by the
-review's remaining deadline, so cleanup after the deadline can still take
-up to a few such windows.
+review's remaining deadline; `runner.CLEANUP_BUDGET_S` bounds a runner's
+cleanup as a whole, so it ends within that budget plus one such window.
 
 The token is sent only to the control plane; no method here can pass an
 environment, a file, or a connector into a Sprite.
