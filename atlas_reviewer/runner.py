@@ -291,6 +291,19 @@ class Deadline:
         return left
 
 
+CreateOutcome = Literal["not started", "unknown", "settled"]
+
+
+@dataclass
+class _Create:
+    """Whether the runner's `create` settled. `unknown` while it is in
+    flight and after it raised: a client-side failure (a timeout, a 5xx a
+    proxy sent after forwarding) does not show the server never made the
+    Sprite, and nothing here bounds when it might still land."""
+
+    outcome: CreateOutcome = "not started"
+
+
 @dataclass(frozen=True)
 class _Run:
     api: SpritesApi
@@ -298,6 +311,7 @@ class _Run:
     deadline: Deadline
     telemetry: Telemetry
     first_frame_s: float = FIRST_FRAME_BUDGET_S
+    create: _Create = field(default_factory=_Create)
 
 
 @dataclass(frozen=True)
@@ -417,10 +431,15 @@ class _Destroyer:
     Every event it records carries the trigger that caused it."""
 
     def __init__(
-        self, api: SpritesApi, ledger: RunnerLedger, name: str, telemetry: Telemetry
+        self,
+        api: SpritesApi,
+        ledger: RunnerLedger,
+        name: str,
+        telemetry: Telemetry,
+        create: _Create,
     ) -> None:
         self._api, self._ledger, self._name = api, ledger, name
-        self._telemetry = telemetry
+        self._telemetry, self._create = telemetry, create
         self._lock = threading.Lock()
         self._status: CleanupStatus | None = None
 
@@ -429,7 +448,10 @@ class _Destroyer:
         Any other trigger destroys again even after the watchdog did,
         because a create in flight when the watchdog fired can add the
         Sprite after the watchdog verified it absent; for the same reason
-        the watchdog never clears the ledger entry. A telemetry write
+        the watchdog never clears the ledger entry, and neither does any
+        destroy while the create's outcome is unknown: absence then is only
+        momentary, so the entry stays for a later `sweep` and the result is
+        DESTROY_UNVERIFIED. A telemetry write
         failure must not stop cleanup, so cleanup is redone untraced and
         the error re-raised, carrying the cleanup result as a note."""
         with self._lock:
@@ -462,8 +484,15 @@ class _Destroyer:
     def _verified_status(self, telemetry: Telemetry, trigger: Trigger) -> CleanupStatus:
         if not self._verified_absent(telemetry, trigger):
             return CleanupStatus.DESTROY_UNVERIFIED
-        if trigger != "watchdog":
-            self._ledger.clear(self._name)
+        if trigger == "watchdog":
+            return CleanupStatus.DESTROYED_VERIFIED
+        if self._create.outcome == "unknown":
+            telemetry.record(
+                "ledger", "keep runner name",
+                {"runner": self._name, "trigger": trigger, "create": "unknown"},
+            )  # fmt: skip
+            return CleanupStatus.DESTROY_UNVERIFIED
+        self._ledger.clear(self._name)
         return CleanupStatus.DESTROYED_VERIFIED
 
     def _attempt_delete(self, telemetry: Telemetry, trigger: Trigger, n: int) -> bool:
@@ -508,8 +537,11 @@ def destroy_runner(
     name: str,
     telemetry: Telemetry | None = None,
 ) -> CleanupStatus:
-    """For a runner no live review is creating (a sweep)."""
-    return _Destroyer(api, ledger, name, telemetry or _quiet()).destroy("sweep")
+    """For a runner no live review is creating (a sweep): whatever create
+    the review that recorded it made is taken to have settled by now."""
+    return _Destroyer(
+        api, ledger, name, telemetry or _quiet(), _Create("settled")
+    ).destroy("sweep")
 
 
 def _quiet() -> Telemetry:
@@ -533,7 +565,7 @@ def _disposable(
     """Run `body` on a fresh, policy-verified Sprite; always destroy it."""
     deadline = Deadline(clock, deadline_s)
     run = _Run(api, name, deadline, telemetry, first_frame_s)
-    destroyer = _Destroyer(api, ledger, name, telemetry)
+    destroyer = _Destroyer(api, ledger, name, telemetry, run.create)
     ledger.record(name)
     telemetry.record("ledger", "record runner name", {"runner": name})
 
@@ -807,7 +839,9 @@ def _stdin_roundtrip(run: _Run) -> str:
 def _provision(run: _Run) -> None:
     api, name, t = run.api, run.name, run.telemetry
     run.deadline.check("create")
+    run.create.outcome = "unknown"
     t.span("create", "create sprite", lambda: api.create(name))
+    run.create.outcome = "settled"
     run.deadline.check("network policy")
     t.span(
         "egress", "set deny-all",

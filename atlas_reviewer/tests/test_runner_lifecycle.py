@@ -152,13 +152,53 @@ def test_exec_failure_still_destroys():
     assert api.live_names() == ()
 
 
-def test_create_failure_still_attempts_destroy():
+def test_create_failure_still_attempts_destroy_but_cannot_certify_it():
+    """A 503 does not show the server never made the Sprite, so a
+    momentary 404 is not verified cleanup."""
     api = FakeSprites(fail_on={"create": BoundaryError("create 503")})
     ledger = MemoryLedger()
     outcome = run(api, ledger)
     assert outcome.report.status is RunnerStatus.FAILED
     assert "delete" in ops(api)
+    assert outcome.report.cleanup is CleanupStatus.DESTROY_UNVERIFIED
+    assert ledger.pending() == (NAME,)
+
+
+def test_a_run_stopped_before_create_is_verified_and_leaves_no_entry():
+    clock = FakeClock()
+    ledger = MemoryLedger()
+    outcome = run_disposable(
+        FakeSprites(rules=OK_RULES), ledger, RunnerJob(b"tarball-bytes", TOOLS),
+        name=NAME, deadline_s=0.0, clock=clock,
+    )  # fmt: skip
+    assert outcome.report.status is RunnerStatus.DEADLINE_EXCEEDED
     assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
+    assert ledger.pending() == ()
+
+
+class _CreateLandsLater(FakeSprites):
+    """The client gives up on `create` (its window ran out) while the
+    server goes on to finish it; `land` is that server-side completion."""
+
+    def create(self, name):
+        self._record("create", name)
+        raise StreamTimeoutError("create: no response within 30s")
+
+    def land(self, name):
+        FakeSprites.create(self, name)
+
+
+def test_a_create_whose_outcome_is_unknown_stays_in_the_ledger_for_a_sweep():
+    api = _CreateLandsLater(rules=OK_RULES)
+    ledger = MemoryLedger()
+    outcome = run(api, ledger)
+    assert outcome.report.status is RunnerStatus.FAILED
+    assert outcome.report.cleanup is CleanupStatus.DESTROY_UNVERIFIED
+    assert ledger.pending() == (NAME,)
+
+    api.land(NAME)
+    assert sweep(api, ledger) == {NAME: CleanupStatus.DESTROYED_VERIFIED}
+    assert api.live_names() == ()
     assert ledger.pending() == ()
 
 
