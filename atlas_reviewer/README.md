@@ -77,9 +77,10 @@ outbound-connection check got out (`OPEN`), so a script cannot take an
 unusable runner for a ready one. That check tries a bounded TCP connect to
 an IP literal and to a hostname; `no outbound connection` means both were
 tried and failed, and `UNVERIFIED` that it could not tell (no system
-Python, say). Only a live probe shows whether a real Sprite blocks egress. Its report is redacted with
-the controller's own credential values and the usual secret patterns before
-it is printed.
+Python, or an attempt that never started, such as a missing `timeout`).
+Only a live probe shows whether a real Sprite blocks egress. Its report is
+redacted with the controller's own credential values and the usual secret
+patterns before it is printed.
 
 `sweep` takes the same single-review lock as `review` and `probe-runner`.
 The ledger lists a live review's runner too, so sweeping during a review
