@@ -23,6 +23,14 @@ fetched 2026-11-07), and matches the 2026-11-06 live validation:
   (`http.StreamingTransport`), so a silent command fails at its
   first-byte deadline and a stall keeps the bytes that did arrive.
 
+Control-plane calls go through the same streaming path as exec, with one
+wall-clock window of `timeout_s` each, because a plain socket timeout
+restarts on every byte: a trickled DELETE or existence check could
+otherwise hold cleanup (and the lock the watchdog and the final destroy
+share) open indefinitely. Each call is bounded on its own, not by the
+review's remaining deadline, so cleanup after the deadline can still take
+up to a few such windows.
+
 The token is sent only to the control plane; no method here can pass an
 environment, a file, or a connector into a Sprite.
 """
@@ -112,7 +120,9 @@ class SpritesClient:
             headers["Content-Type"] = "application/json"
             body = json.dumps(payload).encode()
         url = f"{self._api_url}{path}"
-        resp = self._transport.request(method, url, headers, body, self._timeout_s)
+        resp = self._transport.stream(
+            method, url, headers, body, StreamWindow(self._timeout_s)
+        )
         return _checked(method, url, resp)
 
     def _headers(self) -> dict[str, str]:

@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: MIT
 """One disposable, credential-free runner per review.
 
-Lifecycle, in order, every step deadline-checked and recorded as a
-telemetry event (`atlas_reviewer.telemetry`):
+Lifecycle, in order, every step checked against the deadline before it
+starts and recorded as a telemetry event (`atlas_reviewer.telemetry`).
+Execs get the remaining deadline as their window; a control-plane call is
+bounded only by the client's own window (`sprites_api`), so cleanup after
+the deadline can overrun it by a few of those:
 
 1. record the runner name in the ledger (before anything exists remotely)
 2. create a fresh Sprite -- never reuse one: guests can restore checkpoints

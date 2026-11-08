@@ -3,11 +3,14 @@
 No test here touches the network."""
 
 import json
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qsl, urlsplit
 
 import pytest
 
-from atlas_reviewer.http import StreamWindow
+from atlas_reviewer.http import StreamWindow, UrllibStreamingTransport
 from atlas_reviewer.ports import BoundaryError, NotFoundError
 from atlas_reviewer.runner import DENY_ALL
 from atlas_reviewer.sprites_api import EXEC_STDIN_MAX_BYTES, SpritesClient, exec_request
@@ -44,6 +47,8 @@ def test_sprites_client_request_shapes():
         "rules": [{"action": "deny", "domain": "*"}]
     }
     assert json.loads(t.requests[3][3]) == {"memory": {"limit_mb": 1024}}
+    assert [r[4] for r in t.requests[:4]] == [StreamWindow(30.0)] * 4
+    assert t.requests[2][3] is None
     exec_request = t.requests[4]
     assert exec_request[1].endswith("/exec?cmd=sh&cmd=-c&cmd=echo+hi&stdin=true")
     assert exec_request[2]["Content-Type"] == "application/octet-stream"
@@ -98,7 +103,7 @@ def test_sprites_delete_and_exists():
     t = Recorder(ok(status=204), ok(status=404), ok(), ok(status=500))
     sc = SpritesClient(t, "org/1/secret")
     sc.delete(NAME)
-    assert t.requests[0][0] == "DELETE"
+    assert (t.requests[0][0], t.requests[0][3]) == ("DELETE", None)
     assert sc.exists(NAME) is False
     assert sc.exists(NAME) is True
     with pytest.raises(BoundaryError):
@@ -118,6 +123,60 @@ def test_sprites_policy_read_back_must_be_an_object(body):
         SpritesClient(Recorder(ok(body=body)), "t").get_network_policy(NAME)
 
 
+# The handler trickles a response for _TRICKLE_S and only then sets
+# `finished`; a bounded call returns with it still unset, so no assertion
+# here is a wall-clock bound.
+_TRICKLE_S = 3.0
+
+
+class _TrickleHandler(BaseHTTPRequestHandler):
+    def _trickle(self):
+        try:
+            self.wfile.write(b"HTTP/1.0 204 No Content\r\nX-Slow: ")
+            for _ in range(int(_TRICKLE_S / 0.05)):
+                self.wfile.write(b"a")
+                self.wfile.flush()
+                time.sleep(0.05)
+            self.wfile.write(b"\r\n\r\n")
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        self.server.finished.set()  # type: ignore[attr-defined]
+
+    do_DELETE = do_GET = _trickle
+
+    def log_message(self, *args):
+        pass
+
+
+@pytest.fixture
+def trickling_sprites():
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _TrickleHandler)
+    srv.finished = threading.Event()  # type: ignore[attr-defined]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    client = SpritesClient(
+        UrllibStreamingTransport(allowed_schemes=frozenset({"http"})),
+        "t",
+        api_url=f"http://127.0.0.1:{srv.server_address[1]}",
+        timeout_s=0.3,
+    )
+    yield client, srv.finished
+    srv.shutdown()
+    srv.server_close()
+
+
+@pytest.mark.parametrize("call", ["delete", "exists"])
+def test_a_trickled_control_plane_response_cannot_outlast_the_client_timeout(
+    trickling_sprites, call
+):
+    """A socket timeout restarts on every byte, so a DELETE or existence
+    check trickled a byte at a time could hold cleanup -- and the lock
+    the watchdog and final destroy share -- open indefinitely."""
+    client, finished = trickling_sprites
+    with pytest.raises(BoundaryError, match="within 0.3s"):
+        getattr(client, call)(NAME)
+    assert not finished.is_set()
+
+
 class _SpritesServer:
     """Answers a whole review over the real `SpritesClient`, recording every
     request the client builds."""
@@ -128,9 +187,8 @@ class _SpritesServer:
         self.deleted = False
         self.base = f"{API_S}/v1/sprites/{NAME}"
 
-    def request(self, method, url, headers, body, timeout_s, max_bytes=None):
-        self.requests.append((method, url.split("?")[0], timeout_s, body))
-        path = url.split("?")[0]
+    def _control(self, method, path, window, body):
+        self.requests.append((method, path, window, body))
         if method == "DELETE":
             self.deleted = True
             return ok(status=204)
@@ -141,6 +199,9 @@ class _SpritesServer:
         return ok(status=204)
 
     def stream(self, method, url, headers, body, window, max_bytes=None):
+        path = url.split("?")[0]
+        if not path.endswith("/exec"):
+            return self._control(method, path, window, body)
         self.streams.append((method, url, dict(headers), body, window))
         script = [v for k, v in parse_qsl(urlsplit(url).query) if k == "cmd"][-1]
         out = (
@@ -249,4 +310,4 @@ def test_a_review_sends_each_exec_its_own_budget_not_the_30s_default():
         StreamWindow(135.0, FIRST_FRAME_BUDGET_S),
     ]
     assert [s[3] for s in server.streams][:3] == [b"", b"", b"tarball"]
-    assert {r[2] for r in server.requests} == {30.0}
+    assert {r[2] for r in server.requests} == {StreamWindow(30.0)}
