@@ -202,8 +202,7 @@ class MemoryLedger:
 @dataclass(frozen=True)
 class StaticToken:
     """A pre-minted GitHub token. Tests only: live mode always mints App
-    installation tokens (`github_auth.AppInstallationTokens`, added later
-    in this stack)."""
+    installation tokens (`github_auth.AppInstallationTokens`)."""
 
     value: str
 
