@@ -131,7 +131,7 @@ class StreamingTransport(Transport, Protocol):
         method: str,
         url: str,
         headers: Mapping[str, str],
-        body: bytes,
+        body: bytes | None,
         window: StreamWindow,
         max_bytes: int | None = None,
     ) -> HttpResponse: ...
@@ -142,14 +142,15 @@ class UrllibStreamingTransport(UrllibTransport):
     the bytes that did arrive and a silent response fails at its
     first-byte deadline instead of the per-read socket timeout. It uses
     `http.client` directly (no proxy support) because urllib exposes no
-    way to change the socket timeout between reads."""
+    way to change the socket timeout between reads. A `None` body sends no
+    body and no `Content-Length` (a GET or DELETE)."""
 
     def stream(
         self,
         method: str,
         url: str,
         headers: Mapping[str, str],
-        body: bytes,
+        body: bytes | None,
         window: StreamWindow,
         max_bytes: int | None = None,
     ) -> HttpResponse:

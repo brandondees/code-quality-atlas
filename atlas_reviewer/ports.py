@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 """The small interfaces every adapter implements. No I/O here.
 
-Each port has one fake/offline implementation (used by tests and
-`--dry-run`) and at most one live one.
+Each port has one fake/offline implementation (used by tests and, later
+in this stack, `--dry-run`) and at most one live one.
 """
 
 from __future__ import annotations
