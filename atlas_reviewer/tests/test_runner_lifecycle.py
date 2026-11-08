@@ -282,6 +282,59 @@ def test_a_stdin_check_that_swallows_the_deadline_does_not_make_the_probe_comple
     assert outcome.stdin_check.startswith("FAILED sending")
 
 
+def _overrun(clock, fails):
+    clock.advance(1000)
+    if fails:
+        raise BoundaryError("exec connection closed")
+
+
+@pytest.mark.parametrize("fails", [True, False], ids=["swallowed", "returned"])
+def test_a_last_diagnostic_past_the_deadline_does_not_make_the_run_complete(fails):
+    """Only the very last exec overruns, so no later step's deadline check
+    can catch it: the post-body check is the only guard."""
+    clock = FakeClock()
+
+    class BareDiagnosticOverruns(FakeSprites):
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
+            raw = super().exec(name, argv, stdin, timeout_s, first_byte_s)
+            script = argv[-1]
+            if "python3 --version" in script and "PYENV_VERSION" not in script:
+                _overrun(clock, fails)
+            return raw
+
+    api = BareDiagnosticOverruns(rules=PY_RULES)
+    outcome = run_disposable(
+        api, MemoryLedger(), RunnerJob(b"tarball-bytes", (COMPILEALL,), diagnose=True),
+        name=NAME, deadline_s=60.0, clock=clock,
+    )  # fmt: skip
+    assert outcome.diagnostics[-1].name == "bare python3 in the checkout"
+    assert outcome.report.status is RunnerStatus.DEADLINE_EXCEEDED
+    assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
+    assert api.live_names() == ()
+
+
+@pytest.mark.parametrize("fails", [True, False], ids=["swallowed", "returned"])
+def test_a_last_egress_check_past_the_deadline_does_not_make_the_probe_complete(
+    fails,
+):
+    clock = FakeClock()
+
+    class EgressOverruns(FakeSprites):
+        def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
+            raw = super().exec(name, argv, stdin, timeout_s, first_byte_s)
+            if "atlas-egress" in argv[-1]:
+                _overrun(clock, fails)
+            return raw
+
+    api = EgressOverruns()
+    outcome = probe_runner(
+        api, MemoryLedger(), TOOLS, name=NAME, deadline_s=60, clock=clock
+    )
+    assert outcome.report.status is RunnerStatus.DEADLINE_EXCEEDED
+    assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
+    assert api.live_names() == ()
+
+
 class _WatchdogDone:
     """A sink that signals once the first destroy (the watchdog's) has
     recorded its outcome, so a test can order itself after it without
