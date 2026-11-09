@@ -11,10 +11,15 @@ allowlist; binary content; a declared or actual compression ratio over
 the cap; an entry over the per-entry size cap. Once the total uncompressed
 budget is spent, every remaining entry is skipped.
 
-The entry cap is checked on the raw central directory, walking its fixed
-headers without building anything per entry, before `zipfile` parses it
-(which builds one `ZipInfo` per entry); an end record that under-states
-the count does not get past it.
+The entry cap is checked on the raw central directory before `zipfile`
+parses it (which builds one `ZipInfo` per entry): the end record, and a
+ZIP64 record wherever its locator is present, are found where CPython
+3.12's `zipfile` looks for them, and the same directory bytes are walked
+header by header without building anything. A count the end record
+under-states is caught by that walk. An archive whose records cannot be
+located is left to `zipfile`, which rejects it, and the cap is checked
+again on what `zipfile` builds, in case another version locates them
+differently.
 
 Declared sizes are checked before decompressing anything. They also bound
 what is decompressed: CPython's `zipfile` never yields more than an entry's
@@ -125,35 +130,51 @@ def read_zip(data: bytes, limits: ArchiveLimits = DEFAULT_LIMITS) -> ArchiveRead
 
 
 def _over_entry_cap(data: bytes, cap: int) -> str | None:
-    """Why the central directory holds more than `cap` entries, or None.
-    Anything it cannot locate is left for `zipfile` to accept or reject."""
-    end = data.rfind(_END, max(0, len(data) - _END_SIZE - _MAX_COMMENT))
-    if end < 0 or end + _END_SIZE > len(data):
+    """Why the central directory holds more than `cap` entries, or None."""
+    found = _central_directory(data)
+    if found is None:
         return None
-    claimed: int | None
-    claimed, size = struct.unpack_from("<HI", data, end + 10)
-    start = end - size
-    if claimed == 0xFFFF or size == 0xFFFFFFFF:
-        end64 = end - 20 - _END64_SIZE
-        if end64 >= 0 and (
-            data.startswith(_END64_LOCATOR, end - 20) and data.startswith(_END64, end64)
-        ):
-            claimed, size = struct.unpack_from("<QQ", data, end64 + 32)
-            start = end64 - size
-        else:
-            claimed = None  # a marker, not a count; `zipfile` falls back too
+    claimed, start, size = found
     if claimed is not None and claimed > cap:
         return f"{claimed} entries"
-    count, pos = 0, start
-    while (
-        0 <= pos and pos + _CENTRAL_SIZE <= len(data) and data.startswith(_CENTRAL, pos)
-    ):
+    count, pos, stop = 0, start, min(start + size, len(data))
+    while pos + _CENTRAL_SIZE <= stop and data.startswith(_CENTRAL, pos):
         count += 1
         if count > cap:
             return f"more than {cap} entries in the central directory"
         name, extra, comment = struct.unpack_from("<HHH", data, pos + 28)
         pos += _CENTRAL_SIZE + name + extra + comment
     return None
+
+
+def _central_directory(data: bytes) -> tuple[int | None, int, int] | None:
+    """(claimed entries, start, size) of the central directory that
+    CPython's `zipfile` will parse, located as its `_EndRecData` and
+    `_EndRecData64` locate it, or None where `zipfile` finds none and fails.
+    The claimed count is None when it is only the ZIP64 marker."""
+    end = len(data) - _END_SIZE
+    if not (end >= 0 and data.startswith(_END, end) and data.endswith(b"\0\0")):
+        end = data.rfind(_END, max(0, len(data) - _END_SIZE - _MAX_COMMENT - 1))
+        if end < 0 or end + _END_SIZE > len(data):
+            return None
+    claimed: int | None
+    claimed, size = struct.unpack_from("<HI", data, end + 10)
+    location = end
+    locator = end - 20
+    if locator >= 0 and data.startswith(_END64_LOCATOR, locator):
+        (reloff,) = struct.unpack_from("<Q", data, locator + 8)
+        fixed = locator - _END64_SIZE
+        if reloff > fixed:
+            return None
+        at = reloff if data.startswith(_END64, reloff) or reloff == fixed else fixed
+        if not data.startswith(_END64, at):
+            return None
+        claimed, size = struct.unpack_from("<QQ", data, at + 32)
+        location = at
+    elif claimed == 0xFFFF:
+        claimed = None
+    start = location - size
+    return None if start < 0 else (claimed, start, size)
 
 
 def _read_entries(zf: zipfile.ZipFile, limits: ArchiveLimits) -> ArchiveRead:

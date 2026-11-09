@@ -230,17 +230,32 @@ class _CountingZipFile:
         return self.real(*args, **kwargs)
 
 
-@pytest.mark.parametrize("claimed", [None, 1], ids=["counted", "end record lies"])
+def _end_counts(data, this_disk, total):
+    end = len(data) - 22
+    return data[: end + 8] + struct.pack("<HH", this_disk, total) + data[end + 12 :]
+
+
+_OVER_CAP = {
+    "counted": lambda d: d,
+    "end record lies": lambda d: _end_counts(d, 1, 1),
+    # The two counts read "PK\x05\x06", so the last signature in the file
+    # lies inside the real end record; zipfile looks at offset -22 first.
+    "end record holds its own signature": lambda d: _end_counts(d, 0x4B50, 0x0605),
+    # zipfile honours a ZIP64 record whenever its locator is present, with
+    # or without the 0xFFFF markers in the classic record.
+    "zip64 record without markers": lambda d: as_zip64(d, markers=False),
+    "archive comment": lambda d: d[:-2] + struct.pack("<H", 4) + b"note",
+}
+
+
+@pytest.mark.parametrize("shape", list(_OVER_CAP))
 def test_an_archive_over_the_entry_cap_is_refused_before_it_is_parsed(
-    claimed, monkeypatch
+    shape, monkeypatch
 ):
     """Parsing builds one object per central-directory entry, so the cap
-    is checked on the raw central directory first; an end record that
-    under-states the count does not get past it."""
-    many = make_zip(*((f"{i}.txt", "x") for i in range(5)))
-    if claimed is not None:
-        end = many.rindex(b"PK\x05\x06")
-        many = many[: end + 8] + struct.pack("<HH", claimed, claimed) + many[end + 12 :]
+    is checked on the raw central directory, found where `zipfile` will
+    look for it, before anything is parsed."""
+    many = _OVER_CAP[shape](make_zip(*((f"{i}.txt", "x") for i in range(5))))
     one = make_zip(("a.txt", "x"))
     spy = _CountingZipFile(zipfile.ZipFile)
     monkeypatch.setattr(archive.zipfile, "ZipFile", spy)
@@ -251,9 +266,26 @@ def test_an_archive_over_the_entry_cap_is_refused_before_it_is_parsed(
     assert spy.built == 1
 
 
-def as_zip64(data, claimed=None):
+def test_entries_zipfile_finds_beyond_the_raw_count_still_meet_the_cap(monkeypatch):
+    """The cap holds on what `zipfile` builds too, should it ever find
+    entries the raw walk did not."""
+
+    class Wider(zipfile.ZipFile):
+        def infolist(self):
+            return super().infolist() * 2
+
+    monkeypatch.setattr(archive.zipfile, "ZipFile", Wider)
+    read = read_zip(
+        make_zip(("a.txt", "x"), ("b.txt", "y")), ArchiveLimits(max_entries=3)
+    )
+    assert read.rejected == "4 entries, over the 3-entry cap"
+    assert not read.members
+
+
+def as_zip64(data, claimed=None, markers=True):
     """`data` with a ZIP64 end record carrying the counts, the classic end
-    record holding only the ZIP64 markers, as large archives are written."""
+    record holding only the ZIP64 markers, as large archives are written
+    (or, without `markers`, claiming a single entry)."""
     end = data.rindex(b"PK\x05\x06")
     count, size, offset = struct.unpack_from("<HII", data, end + 10)
     count = count if claimed is None else claimed
@@ -261,7 +293,8 @@ def as_zip64(data, claimed=None):
         "<4sQHHIIQQQQ", b"PK\x06\x06", 44, 45, 45, 0, 0, count, count, size, offset
     )
     locator = struct.pack("<4sIQI", b"PK\x06\x07", 0, end, 1)
-    classic = data[end : end + 8] + struct.pack("<HHII", 0xFFFF, 0xFFFF, size, offset)
+    counts = (0xFFFF, 0xFFFF) if markers else (1, 1)
+    classic = data[end : end + 8] + struct.pack("<HHII", *counts, size, offset)
     return data[:end] + end64 + locator + classic + data[end + 20 :]
 
 
@@ -298,3 +331,16 @@ def test_zip64_count_markers_without_a_zip64_end_record_still_meet_the_cap(
     result = read_zip(marked, ArchiveLimits(max_entries=3))
     assert (result.rejected is None) is read
     assert len(result.members) == (entries if read else 0)
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    [
+        lambda d: d[:-34] + struct.pack("<Q", len(d)) + d[-26:],
+        lambda d: d.replace(b"PK\x06\x06", b"PK\x06\x00"),
+    ],
+    ids=["locator points past itself", "no zip64 record at the locator"],
+)
+def test_a_zip64_locator_zipfile_cannot_follow_is_left_to_it_to_reject(corrupt):
+    data = corrupt(as_zip64(make_zip(("a.txt", "ok"))))
+    assert read_zip(data).rejected == "not a readable ZIP (BadZipFile)"
