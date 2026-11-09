@@ -51,7 +51,7 @@ import math
 import re
 from collections.abc import Callable, Sequence
 from decimal import Decimal
-from typing import Any
+from typing import Any, NoReturn
 
 from atlas_reviewer.budget import (
     BudgetRefusedError,
@@ -155,12 +155,25 @@ class OpenRouterProvider:
 
     def complete(self, prompt: Prompt) -> str:
         if self._key_status is None:
-            raise BudgetRefusedError("refusing inference: key preflight has not passed")
-        terms = parse_model_terms(self._get_json(f"/model/{MODEL_ID}"), MODEL_ID)
+            self._refused(
+                BudgetRefusedError("refusing inference: key preflight has not passed")
+            )
+        try:
+            terms = parse_model_terms(self._get_json(f"/model/{MODEL_ID}"), MODEL_ID)
+        except PricingUnknownError as exc:
+            self._refused(exc)
         tokens = input_token_bound(prompt.system + prompt.user)
-        check_tokens(tokens, terms, self.budget.limits)
+        try:
+            check_tokens(tokens, terms, self.budget.limits)
+        except BudgetRefusedError as exc:
+            self._refused(exc)
         worst = worst_case_usd(tokens, terms, self.budget.limits)
         return self._attempts(self._body(prompt, terms), terms, worst)
+
+    def _refused(self, exc: BoundaryError) -> NoReturn:
+        """Record a refusal that spent nothing and was not sent, then raise it."""
+        self.budget.refusals.append(str(exc))
+        raise exc
 
     def _attempts(self, body: bytes, terms: ModelTerms, worst: Decimal) -> str:
         remaining = self._key_status.limit_remaining if self._key_status else Decimal(0)
@@ -351,9 +364,13 @@ def _actual_cost(usage: Json, terms: ModelTerms) -> tuple[Decimal | None, str]:
     except (KeyError, PricingUnknownError):
         if prompt_t is None or completion_t is None:
             return None, summary
+        if terms.reasoning_rate > 0 and reasoning_t is None:
+            return None, summary
+        reasoning = (reasoning_t or 0) * terms.reasoning_rate
         base = (
             prompt_t * terms.input_rate
             + completion_t * terms.completion_rate
+            + reasoning
             + terms.request_fee
         )
         summary = f"{summary} (cost computed at the highest catalog rates)"

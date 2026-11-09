@@ -522,6 +522,68 @@ def test_actual_cost_and_usage_are_recorded():
     assert "tokens in=120 out=40 reasoning=7" in line
 
 
+def test_fallback_cost_includes_a_separate_reasoning_charge():
+    usage = {
+        "prompt_tokens": 1000,
+        "completion_tokens": 100,
+        "completion_tokens_details": {"reasoning_tokens": 40},
+    }
+    fake = OpenRouterFake(
+        reply(completion(usage=usage)),
+        model=reply(catalog(internal_reasoning="0.00005")),
+    )
+    p = provider(fake)
+    p.complete(SMALL)
+    # 1000 x 0.000006 + 100 x 0.0000225 + 40 x 0.00005
+    assert p.budget.committed_usd() == Decimal("0.01025")
+    assert "cost computed at the highest catalog rates" in p.usage_lines()[1]
+
+
+def test_priced_reasoning_without_a_token_count_keeps_the_reservation():
+    usage = {"prompt_tokens": 1000, "completion_tokens": 100}
+    fake = OpenRouterFake(
+        reply(completion(usage=usage)),
+        model=reply(catalog(internal_reasoning="0.00005")),
+    )
+    p = provider(fake)
+    p.complete(SMALL)
+    assert "actual unknown (counted at the reservation)" in p.usage_lines()[1]
+
+
+def test_refusals_before_a_call_are_reported_and_not_counted_as_calls():
+    bare = OpenRouterProvider(OpenRouterFake(reply(completion())), KEY)
+    with pytest.raises(BudgetRefusedError, match="preflight has not passed"):
+        bare.complete(SMALL)
+    assert bare.usage_lines()[-1].endswith("0 of 3 calls used")
+    assert any(
+        "refused: " in line and "preflight" in line for line in bare.usage_lines()
+    )
+
+    unpriced = provider(
+        OpenRouterFake(reply(completion()), model=reply(catalog(prompt=None)))
+    )
+    with pytest.raises(PricingUnknownError, match="pricing.prompt is missing"):
+        unpriced.complete(SMALL)
+    assert unpriced.usage_lines()[-1].endswith("0 of 3 calls used")
+    assert any(
+        "refused: pricing.prompt is missing" in line for line in unpriced.usage_lines()
+    )
+
+    bounded = provider(
+        OpenRouterFake(
+            reply(completion()),
+            model=reply({"data": {**catalog()["data"], "context_length": 20_000}}),
+        )
+    )
+    with pytest.raises(BudgetRefusedError, match="context"):
+        bounded.complete(SMALL)
+    assert bounded.usage_lines()[-1].endswith("0 of 3 calls used")
+    assert any(
+        line.startswith("refused:") and "context" in line
+        for line in bounded.usage_lines()
+    )
+
+
 def test_cost_is_computed_from_catalog_rates_when_not_reported():
     usage = {"prompt_tokens": 1000, "completion_tokens": 100}
     p = provider(OpenRouterFake(reply(completion(usage=usage))))
