@@ -11,6 +11,11 @@ allowlist; binary content; a declared or actual compression ratio over
 the cap; an entry over the per-entry size cap. Once the total uncompressed
 budget is spent, every remaining entry is skipped.
 
+The entry cap is checked on the raw central directory, walking its fixed
+headers without building anything per entry, before `zipfile` parses it
+(which builds one `ZipInfo` per entry); an end record that under-states
+the count does not get past it.
+
 Declared sizes are checked before decompressing anything. They also bound
 what is decompressed: CPython's `zipfile` never yields more than an entry's
 declared size and verifies its CRC-32 at the end, so an entry whose header
@@ -23,6 +28,7 @@ from __future__ import annotations
 import io
 import re
 import stat
+import struct
 import zipfile
 import zlib
 from dataclasses import dataclass
@@ -46,6 +52,14 @@ TEXT_SUFFIXES = frozenset(
 )
 _DRIVE = re.compile(r"^[A-Za-z]:")
 _ENCRYPTED_FLAG = 0x1
+_END = b"PK\x05\x06"
+_END_SIZE = 22
+_END64_LOCATOR = b"PK\x06\x07"
+_END64 = b"PK\x06\x06"
+_END64_SIZE = 56
+_CENTRAL = b"PK\x01\x02"
+_CENTRAL_SIZE = 46
+_MAX_COMMENT = 0xFFFF
 _READ_ERRORS = (
     zipfile.BadZipFile,
     NotImplementedError,
@@ -96,11 +110,46 @@ def read_zip(data: bytes, limits: ArchiveLimits = DEFAULT_LIMITS) -> ArchiveRead
             rejected=f"archive is {len(data)} bytes, over the "
             f"{limits.max_compressed_bytes}-byte compressed cap"
         )
+    over = _over_entry_cap(data, limits.max_entries)
+    if over:
+        return ArchiveRead(rejected=f"{over}, over the {limits.max_entries}-entry cap")
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             return _read_entries(zf, limits)
     except _READ_ERRORS as exc:
         return ArchiveRead(rejected=f"not a readable ZIP ({type(exc).__name__})")
+
+
+def _over_entry_cap(data: bytes, cap: int) -> str | None:
+    """Why the central directory holds more than `cap` entries, or None.
+    Anything it cannot locate is left for `zipfile` to accept or reject."""
+    end = data.rfind(_END, max(0, len(data) - _END_SIZE - _MAX_COMMENT))
+    if end < 0 or end + _END_SIZE > len(data):
+        return None
+    claimed: int | None
+    claimed, size = struct.unpack_from("<HI", data, end + 10)
+    start = end - size
+    if claimed == 0xFFFF or size == 0xFFFFFFFF:
+        end64 = end - 20 - _END64_SIZE
+        if end64 >= 0 and (
+            data.startswith(_END64_LOCATOR, end - 20) and data.startswith(_END64, end64)
+        ):
+            claimed, size = struct.unpack_from("<QQ", data, end64 + 32)
+            start = end64 - size
+        else:
+            claimed = None  # a marker, not a count; `zipfile` falls back too
+    if claimed is not None and claimed > cap:
+        return f"{claimed} entries"
+    count, pos = 0, start
+    while (
+        0 <= pos and pos + _CENTRAL_SIZE <= len(data) and data.startswith(_CENTRAL, pos)
+    ):
+        count += 1
+        if count > cap:
+            return f"more than {cap} entries in the central directory"
+        name, extra, comment = struct.unpack_from("<HHH", data, pos + 28)
+        pos += _CENTRAL_SIZE + name + extra + comment
+    return None
 
 
 def _read_entries(zf: zipfile.ZipFile, limits: ArchiveLimits) -> ArchiveRead:

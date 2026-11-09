@@ -9,6 +9,7 @@ import zipfile
 
 import pytest
 
+from atlas_reviewer import archive
 from atlas_reviewer.archive import ArchiveLimits, read_zip
 
 
@@ -205,3 +206,82 @@ def test_a_successful_read_charges_its_declared_size_once():
     read = read_zip(make_zip(*entries), limits)
     assert [m.name for m in read.members] == ["part-0.txt", "part-1.txt", "part-2.txt"]
     assert skipped(read) == {"part-3.txt": "total uncompressed budget spent"}
+
+
+class _CountingZipFile:
+    def __init__(self, real):
+        self.real, self.built = real, 0
+
+    def __call__(self, *args, **kwargs):
+        self.built += 1
+        return self.real(*args, **kwargs)
+
+
+@pytest.mark.parametrize("claimed", [None, 1], ids=["counted", "end record lies"])
+def test_an_archive_over_the_entry_cap_is_refused_before_it_is_parsed(
+    claimed, monkeypatch
+):
+    """Parsing builds one object per central-directory entry, so the cap
+    is checked on the raw central directory first; an end record that
+    under-states the count does not get past it."""
+    many = make_zip(*((f"{i}.txt", "x") for i in range(5)))
+    if claimed is not None:
+        end = many.rindex(b"PK\x05\x06")
+        many = many[: end + 8] + struct.pack("<HH", claimed, claimed) + many[end + 12 :]
+    one = make_zip(("a.txt", "x"))
+    spy = _CountingZipFile(zipfile.ZipFile)
+    monkeypatch.setattr(archive.zipfile, "ZipFile", spy)
+    read = read_zip(many, ArchiveLimits(max_entries=3))
+    assert read.rejected is not None and "over the 3-entry cap" in read.rejected
+    assert spy.built == 0
+    assert read_zip(one, ArchiveLimits(max_entries=3)).members
+    assert spy.built == 1
+
+
+def as_zip64(data, claimed=None):
+    """`data` with a ZIP64 end record carrying the counts, the classic end
+    record holding only the ZIP64 markers, as large archives are written."""
+    end = data.rindex(b"PK\x05\x06")
+    count, size, offset = struct.unpack_from("<HII", data, end + 10)
+    count = count if claimed is None else claimed
+    end64 = struct.pack(
+        "<4sQHHIIQQQQ", b"PK\x06\x06", 44, 45, 45, 0, 0, count, count, size, offset
+    )
+    locator = struct.pack("<4sIQI", b"PK\x06\x07", 0, end, 1)
+    classic = data[end : end + 8] + struct.pack("<HHII", 0xFFFF, 0xFFFF, size, offset)
+    return data[:end] + end64 + locator + classic + data[end + 20 :]
+
+
+@pytest.mark.parametrize(
+    "claimed,reason",
+    [
+        (None, "5 entries, over the 3-entry cap"),
+        (1, "more than 3 entries in the central directory, over the 3-entry cap"),
+    ],
+)
+def test_a_zip64_archive_over_the_entry_cap_is_refused(claimed, reason):
+    many = as_zip64(make_zip(*((f"{i}.txt", "x") for i in range(5))), claimed)
+    assert read_zip(many, ArchiveLimits(max_entries=3)).rejected == reason
+
+
+def test_a_zip64_archive_within_the_cap_is_read():
+    data = as_zip64(make_zip(("a.txt", "ok"), ("b.txt", "fine")))
+    read = read_zip(data, ArchiveLimits(max_entries=3))
+    assert [(m.name, m.text) for m in read.members] == [
+        ("a.txt", "ok"),
+        ("b.txt", "fine"),
+    ]
+
+
+@pytest.mark.parametrize("entries,read", [(5, False), (2, True)])
+def test_zip64_count_markers_without_a_zip64_end_record_still_meet_the_cap(
+    entries, read
+):
+    """`zipfile` falls back to the classic end record; so does the cap,
+    counting the central directory instead of trusting the marker."""
+    data = make_zip(*((f"{i}.txt", "x") for i in range(entries)))
+    end = data.rindex(b"PK\x05\x06")
+    marked = data[: end + 8] + struct.pack("<HH", 0xFFFF, 0xFFFF) + data[end + 12 :]
+    result = read_zip(marked, ArchiveLimits(max_entries=3))
+    assert (result.rejected is None) is read
+    assert len(result.members) == (entries if read else 0)
