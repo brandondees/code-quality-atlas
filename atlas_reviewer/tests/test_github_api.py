@@ -148,6 +148,19 @@ def test_max_pages_must_be_positive():
         (f"<{API}/a?page=2>; REL=next", f"{API}/a?page=2"),
         (f'<{API}/a?page=2>; rel="next last"', f"{API}/a?page=2"),
         ("garbage", None),
+        (f'<{API}/a?page=2>; title="a, b"; rel="next"', f"{API}/a?page=2"),
+        (
+            (
+                f'<{API}/a?page=1>; title="x, <{API}/evil>; rel=next", '
+                f'<{API}/a?page=3>; rel="next"'
+            ),
+            f"{API}/a?page=3",
+        ),
+        (f'<{API}/a?page=2>; title="say \\"hi\\", ok"; rel=next', f"{API}/a?page=2"),
+        (f'<{API}/a?page=2>; rel="NEXT"', f"{API}/a?page=2"),
+        (f'<{API}/a?page=2>; rel="prev"; rel="next"', None),
+        (f'<{API}/a?q=a,b&page=2>; rel="next"', f"{API}/a?q=a,b&page=2"),
+        (f'junk, <{API}/a?page=2>; rel="next"', f"{API}/a?page=2"),
     ],
 )
 def test_next_link_parsing(header, expected):
