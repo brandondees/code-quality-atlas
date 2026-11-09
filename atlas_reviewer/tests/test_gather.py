@@ -181,11 +181,45 @@ def test_fetch_failures_become_missing_not_fatal():
     assert reasons["coverage-report (contents)"] == "could not fetch: GitHub HTTP 410"
 
 
+def _one_text_entry(text):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("summary.txt", text)
+    return buf.getvalue()
+
+
 def test_secrets_in_logs_and_artifacts_are_redacted():
     out = gather(FixtureGitHub(FIXTURE))
     log = next(i for i in out.items if i.provenance.source_id == "job_log:7001")
     assert "abcdefghijklmnopqrstuvwxyz0123456789" not in log.detail.text
     assert log.detail.redaction_count >= 1
+
+
+def test_an_artifact_excerpt_cut_at_its_cap_is_an_omission_and_the_rest_unknown():
+    class Long(FixtureGitHub):
+        def download_artifact(self, repo, artifact_id, max_bytes):
+            return _one_text_entry("line\n" * 2_000)
+
+    out = gather(Long(FIXTURE))
+    contents = next(
+        i for i in out.items if i.provenance.source_id == "artifact:9001:zip"
+    )
+    assert outcome(classify(HEAD, [contents])[0]) is Outcome.INFO
+    cut = next(o for o in out.omissions if o.limit.startswith("excerpt cap"))
+    assert cut.source == "artifact:9001:zip"
+    assert cut.detail.startswith(f"{contents.detail.truncated_from} characters")
+    evidence = classify(HEAD, out.items, failures=out.failures)
+    rest = next(
+        e for e in evidence
+        if isinstance(e, Missing) and e.key.name.startswith("coverage-report (contents")
+    )  # fmt: skip
+    assert rest.key.name == "coverage-report (contents past the excerpt cap)"
+    assert outcome(rest) is Outcome.UNKNOWN
+
+
+def test_an_artifact_excerpt_within_its_cap_records_no_cut():
+    out = gather(FixtureGitHub(FIXTURE))
+    assert not [o for o in out.omissions if o.limit.startswith("excerpt cap")]
 
 
 def test_gather_records_the_links_between_views_of_one_check():

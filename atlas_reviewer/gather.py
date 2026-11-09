@@ -34,6 +34,7 @@ from atlas_reviewer.domain import (
     SourceKind,
 )
 from atlas_reviewer.evidence import (
+    ARTIFACT_EXCERPT_CHARS,
     DETAIL_CHARS,
     ArtifactRef,
     Job,
@@ -396,3 +397,10 @@ def _gather_artifact(ctx: _Ctx, ref: ArtifactRef) -> None:
     contents = artifact_contents_item(ref, read, ctx.now(), ctx.redactor)
     ctx.out.items.append(contents)
     ctx.out.links.append(Link(contents.provenance.source_id, source))
+    if (full := contents.detail.truncated_from) is not None:
+        ctx.out.omit(
+            contents.provenance.source_id,
+            f"excerpt cap of {ARTIFACT_EXCERPT_CHARS} characters",
+            f"{full} characters, {full - ARTIFACT_EXCERPT_CHARS} not read",
+            SourceKey(SourceKind.ARTIFACT, f"{name} (contents past the excerpt cap)"),
+        )

@@ -165,7 +165,8 @@ has more than 200 entries. An entry is skipped, and the skip listed, if:
 CPython's `zipfile` never yields more than an entry's declared size and
 checks its CRC-32 at the end, so a header that under-declares its size
 fails as unreadable (tested). Every text is redacted before use, and an
-artifact's excerpt is capped at 4,000 characters. Nothing is executed.
+artifact's excerpt is capped at 4,000 characters; a cut excerpt is an
+omission, and the unread rest is UNKNOWN. Nothing is executed.
 
 ## Runner lifecycle
 
@@ -513,9 +514,9 @@ each needing its own decision:
   [`2026-11-07-lens-based-agentic-reviewer.md`](2026-11-07-lens-based-agentic-reviewer.md).
 - **Deploying the controller** (for example on Fly) instead of running it
   from an operator's trusted machine.
-- **Omission rows for check summaries, log tails and artifact excerpts.**
-  These are capped today, but the caps are not listed as omissions the way
-  diff, PR-body and issue-body cuts are.
+- **Omission rows for check summaries and log tails.** These are capped
+  today, but the caps are not listed as omissions the way diff, PR-body,
+  issue-body and artifact-excerpt cuts are.
 - **SHA-addressed diff fetch.** Specified under Evidence rules. The stack
   still fetches the diff by pull number and gates it with a before-and-after
   head-SHA check, which an away-and-back force-push can pass.
