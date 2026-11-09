@@ -447,6 +447,18 @@ def test_substituted_models_and_empty_reviews_are_rejected_without_retry(
     assert len(fake.chat_requests()) == 1
 
 
+@pytest.mark.parametrize("finish", ["error", "content_filter", None, "tool_calls"])
+def test_only_a_stop_finish_is_accepted(finish):
+    fake = OpenRouterFake(reply(completion(finish=finish)), reply(completion()))
+    p = provider(fake)
+    with pytest.raises(BoundaryError, match="did not finish"):
+        p.complete(SMALL)
+    assert len(fake.chat_requests()) == 1
+    shown = "None" if finish is None else finish
+    assert f"incomplete review (finish_reason={shown})" in p.usage_lines()[1]
+    assert "actual $0.0123" in p.usage_lines()[1]
+
+
 def test_a_review_cut_at_the_output_limit_is_settled_and_rejected():
     fake = OpenRouterFake(reply(completion(finish="length")), reply(completion()))
     p = provider(fake)
