@@ -1,0 +1,12 @@
+{
+  "total_count": 1,
+  "artifacts": [
+    {
+      "id": 9001,
+      "name": "coverage-report",
+      "size_in_bytes": 48213,
+      "expired": false,
+      "workflow_run": {"id": 5001, "head_sha": "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4"}
+    }
+  ]
+}

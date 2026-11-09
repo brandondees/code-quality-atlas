@@ -108,6 +108,11 @@ does no I/O. All I/O sits behind the ports in `ports.py`.
 - A source is **expected** at the head SHA when the operator named it
   (`--expect`), or when it was observed on another commit of the same PR.
   An expected source with no head-SHA item is **Missing** (UNKNOWN).
+  "The same PR" means the PR's own commit list (GitHub lists at most 250).
+  Runs listed under the head branch's name at any other commit belong to
+  whatever else shares that name, so they are set aside and only counted
+  in a note. Head-SHA runs are also listed by `head_sha`, so a busy branch
+  cannot push them past the page cap.
 - A failed fetch is Missing with the error as its reason. So is a tool
   absent from the runner image, or one the runner never reached. None of
   these is ever a pass.
@@ -137,7 +142,9 @@ does no I/O. All I/O sits behind the ports in `ports.py`.
 - Every limit that stops a read is an **omission**: a page cap on a GitHub
   list, a per-review count cap, an oversized log or artifact, a rejected
   archive, or a skipped archive entry. The draft lists each omission, and
-  whatever it left unread is Missing (UNKNOWN). Job logs and artifact
+  whatever it left unread is Missing (UNKNOWN). A list that failed, was cut
+  off or was skipped is Missing as a `listing`, which the tally counts as
+  unread, not as a check without a result. Job logs and artifact
   contents are fetched only for jobs and runs whose `head_sha` matches.
 
 ## Untrusted bytes (second slice)
@@ -160,7 +167,8 @@ has more than 200 entries. An entry is skipped, and the skip listed, if:
 CPython's `zipfile` never yields more than an entry's declared size and
 checks its CRC-32 at the end, so a header that under-declares its size
 fails as unreadable (tested). Every text is redacted before use, and an
-artifact's excerpt is capped at 4,000 characters. Nothing is executed.
+artifact's excerpt is capped at 4,000 characters; a cut excerpt is an
+omission, and the unread rest is UNKNOWN. Nothing is executed.
 
 ## Runner lifecycle
 
@@ -508,9 +516,9 @@ each needing its own decision:
   [`2026-11-07-lens-based-agentic-reviewer.md`](2026-11-07-lens-based-agentic-reviewer.md).
 - **Deploying the controller** (for example on Fly) instead of running it
   from an operator's trusted machine.
-- **Omission rows for check summaries, log tails and artifact excerpts.**
-  These are capped today, but the caps are not listed as omissions the way
-  diff, PR-body and issue-body cuts are.
+- **Omission rows for check summaries and log tails.** These are capped
+  today, but the caps are not listed as omissions the way diff, PR-body,
+  issue-body and artifact-excerpt cuts are.
 - **SHA-addressed diff fetch.** Specified under Evidence rules. The stack
   still fetches the diff by pull number and gates it with a before-and-after
   head-SHA check, which an away-and-back force-push can pass.
