@@ -34,6 +34,7 @@ from atlas_reviewer.domain import (
     SourceKind,
 )
 from atlas_reviewer.evidence import (
+    DETAIL_CHARS,
     ArtifactRef,
     Job,
     WorkflowRun,
@@ -387,7 +388,8 @@ def _gather_artifact(ctx: _Ctx, ref: ArtifactRef) -> None:
     name = ref.item.provenance.key.name
     for i, skipped in enumerate(read.skipped):
         entry = SourceKey(SourceKind.ARTIFACT, f"{name} (skipped entry {i})")
-        ctx.out.omit(source, "archive entry skipped", skipped, entry)
+        reason = ctx.redactor(skipped, DETAIL_CHARS).text
+        ctx.out.omit(source, "archive entry skipped", reason, entry)
     if not read.members and read.skipped:
         ctx.out.failures.append(Missing(key, "not read: every archive entry skipped"))
         return

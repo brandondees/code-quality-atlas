@@ -19,7 +19,7 @@ from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import ToolAbsent, ToolRan, ToolSpec
 
-from .helpers import HEAD, NOW
+from .helpers import HEAD, NOW, fake_token
 
 R = Redactor()
 RUN = {
@@ -197,3 +197,19 @@ def test_absent_tool_is_missing():
     )
     assert isinstance(result, Missing)
     assert "exit 127" in result.reason
+
+
+def test_tool_reported_versions_and_absence_details_are_redacted():
+    secret = "opaque-" + fake_token("", 24)
+    spec = ToolSpec("ruff", "ruff", "v", "r")
+    redactor = Redactor((secret,))
+    ran = tool_evidence(
+        ToolRan(spec, f"ruff 1 {secret}", 0, ""), HEAD, "cqa-rev-x", NOW, redactor
+    )
+    absent = tool_evidence(
+        ToolAbsent(spec, f"exit 127 {secret}"), HEAD, "cqa-rev-x", NOW, redactor
+    )
+    assert ran.tool.version.startswith("ruff 1 [REDACTED")
+    assert isinstance(absent, Missing)
+    assert secret not in absent.reason
+    assert "exit 127 [REDACTED" in absent.reason

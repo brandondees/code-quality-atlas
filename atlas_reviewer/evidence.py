@@ -5,7 +5,9 @@
 This is the validation boundary for GitHub response shapes: a field that is
 missing or mistyped raises `BoundaryError` here instead of leaking a
 `KeyError` into the controller. Every free-text field, log line and
-artifact excerpt is redacted on the way in.
+artifact excerpt is redacted on the way in: names, app slugs, workflow
+paths and tool versions too, since a PR can choose them. Ids, SHAs and
+statuses are kept as GitHub sent them.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ from atlas_reviewer.redact import RedactedText, Redactor, tail
 from atlas_reviewer.runner import ToolAbsent, ToolResult
 
 DETAIL_CHARS = 2_000
+NAME_CHARS = 300
 LOG_TAIL_CHARS = 6_000
 ARTIFACT_EXCERPT_CHARS = 4_000
 _TIMEOUT_EXITS = frozenset({124, 137})
@@ -48,6 +51,10 @@ def _field[T](data: Any, key: str, kind: type[T]) -> T:
             f"GitHub response field {key!r} missing or not {kind.__name__}"
         )
     return value
+
+
+def _text(redactor: Redactor, raw: str) -> str:
+    return redactor(raw, NAME_CHARS).text
 
 
 def _optional_str(data: Json, key: str) -> str:
@@ -85,7 +92,7 @@ def parse_pull(data: Json, redactor: Redactor) -> PullInfo:
     return PullInfo(
         head_sha=_field(head, "sha", str),
         head_ref=_field(head, "ref", str),
-        title=redactor(_field(data, "title", str), 300),
+        title=redactor(_field(data, "title", str), NAME_CHARS),
         body=redactor(body, DETAIL_CHARS),
         issue_refs=issue_refs(body),
     )
@@ -119,11 +126,12 @@ def _check_run(run: Json, fetched_at: datetime, redactor: Redactor) -> EvidenceI
     return EvidenceItem(
         head_sha=_field(run, "head_sha", str),
         provenance=Provenance(
-            SourceKey(SourceKind.CHECK_RUN, _field(run, "name", str)),
+            SourceKey(SourceKind.CHECK_RUN, _text(redactor, _field(run, "name", str))),
             f"check_run:{_field(run, 'id', int)}",
         ),
         tool=ToolInfo(
-            slug if isinstance(slug, str) else "unknown-app", UNREPORTED_VERSION
+            _text(redactor, slug) if isinstance(slug, str) else "unknown-app",
+            UNREPORTED_VERSION,
         ),
         fetched_at=fetched_at,
         conclusion=_conclusion(
@@ -151,8 +159,8 @@ def parse_workflow_runs(
     )
 
 
-def _workflow_tool(run: Json, head_sha: str) -> ToolInfo:
-    path = _optional_str(run, "path") or "unknown-workflow"
+def _workflow_tool(run: Json, head_sha: str, redactor: Redactor) -> ToolInfo:
+    path = _text(redactor, _optional_str(run, "path")) or "unknown-workflow"
     return ToolInfo("github-actions", f"{path}@{head_sha[:12]}")
 
 
@@ -165,10 +173,12 @@ def _workflow_run(run: Json, fetched_at: datetime, redactor: Redactor) -> Workfl
     item = EvidenceItem(
         head_sha=head_sha,
         provenance=Provenance(
-            SourceKey(SourceKind.WORKFLOW_RUN, _field(run, "name", str)),
+            SourceKey(
+                SourceKind.WORKFLOW_RUN, _text(redactor, _field(run, "name", str))
+            ),
             f"workflow_run:{run_id}",
         ),
-        tool=_workflow_tool(run, head_sha),
+        tool=_workflow_tool(run, head_sha, redactor),
         fetched_at=fetched_at,
         conclusion=_conclusion(
             _field(run, "status", str), _optional_str(run, "conclusion")
@@ -197,10 +207,11 @@ def parse_jobs(
 def _job(job: Json, run: WorkflowRun, fetched_at: datetime, redactor: Redactor) -> Job:
     job_id = _field(job, "id", int)
     run_name = run.item.provenance.key.name
+    name = _text(redactor, _field(job, "name", str))
     item = EvidenceItem(
         head_sha=_field(job, "head_sha", str),
         provenance=Provenance(
-            SourceKey(SourceKind.JOB, f"{run_name} / {_field(job, 'name', str)}"),
+            SourceKey(SourceKind.JOB, f"{run_name} / {name}"),
             f"job:{job_id}",
         ),
         tool=run.item.tool,
@@ -268,7 +279,9 @@ def _artifact(artifact: Json, fetched_at: datetime, redactor: Redactor) -> Artif
     item = EvidenceItem(
         head_sha=_field(run, "head_sha", str),
         provenance=Provenance(
-            SourceKey(SourceKind.ARTIFACT, _field(artifact, "name", str)),
+            SourceKey(
+                SourceKind.ARTIFACT, _text(redactor, _field(artifact, "name", str))
+            ),
             f"artifact:{artifact_id}",
         ),
         tool=ToolInfo("github-actions-artifact", UNREPORTED_VERSION),
@@ -316,11 +329,12 @@ def tool_evidence(
 ) -> EvidenceItem | Missing:
     key = SourceKey(SourceKind.RUNNER_TOOL, result.tool.name)
     if isinstance(result, ToolAbsent):
-        return Missing(key, f"not available in the runner image ({result.detail})")
+        detail = _text(redactor, result.detail)
+        return Missing(key, f"not available in the runner image ({detail})")
     return EvidenceItem(
         head_sha=head_sha,
         provenance=Provenance(key, f"runner:{runner_name}:{result.tool.name}"),
-        tool=ToolInfo(result.tool.name, result.version),
+        tool=ToolInfo(result.tool.name, _text(redactor, result.version)),
         fetched_at=fetched_at,
         conclusion=_tool_conclusion(result.exit_code),
         detail=redactor(f"exit={result.exit_code}\n{result.output}", DETAIL_CHARS),

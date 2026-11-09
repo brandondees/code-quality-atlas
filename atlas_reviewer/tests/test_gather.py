@@ -13,7 +13,7 @@ from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.ports import BoundaryError, Listing, ResponseTooLargeError
 from atlas_reviewer.redact import Redactor
 
-from .helpers import FIXTURE, HEAD, NOW, OLD
+from .helpers import FIXTURE, HEAD, NOW, OLD, fake_token
 
 EVENT = PrEvent("example-org/example-app", 42, HEAD)
 
@@ -334,3 +334,74 @@ def test_a_head_sha_run_the_branch_listing_did_not_reach_is_still_gathered():
     ids = {i.provenance.source_id for i in out.items}
     assert {"workflow_run:5001", "job_log:7001", "workflow_run:4001"} <= ids
     assert "(workflow runs beyond page 10)" in missing_reasons(out)
+
+
+OPAQUE = "opaque-credential-" + fake_token("", 24)
+
+
+class _SecretNames(FixtureGitHub):
+    """Every free-text name GitHub reports carries a configured credential
+    that no secret pattern would match."""
+
+    @staticmethod
+    def _named(listing, **fields):
+        return Listing(
+            tuple(
+                {**e, **{k: f"{e.get(k, '')}-{OPAQUE}" for k in fields}}
+                for e in listing.items
+            ),
+            listing.truncated,
+            listing.pages_read,
+        )
+
+    def list_check_runs(self, repo, sha):
+        listed = super().list_check_runs(repo, sha)
+        named = self._named(listed, name=1)
+        return Listing(
+            tuple({**e, "app": {"slug": f"app-{OPAQUE}"}} for e in named.items),
+            False,
+            1,
+        )
+
+    def list_workflow_runs(self, repo, branch):
+        return self._named(super().list_workflow_runs(repo, branch), name=1, path=1)
+
+    def list_workflow_runs_at(self, repo, sha):
+        return self._named(super().list_workflow_runs_at(repo, sha), name=1, path=1)
+
+    def list_run_jobs(self, repo, run_id):
+        return self._named(super().list_run_jobs(repo, run_id), name=1)
+
+    def list_run_artifacts(self, repo, run_id):
+        return self._named(super().list_run_artifacts(repo, run_id), name=1)
+
+    def download_artifact(self, repo, artifact_id, max_bytes):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("summary.txt", "ok")
+            zf.writestr(f"dump-{OPAQUE}.bin", "x")
+        return buf.getvalue()
+
+
+def _retained_text(out):
+    for i in out.items:
+        yield from (i.provenance.key.name, i.tool.name, i.tool.version, i.detail.text)
+    for f in out.failures:
+        yield from (f.key.name, f.reason)
+    for o in out.omissions:
+        yield from (o.source, o.limit, o.detail)
+    yield from out.notes
+
+
+def test_free_text_github_metadata_is_redacted_before_it_is_retained():
+    out = Collected()
+    gather_ci(
+        EVENT, "feature", _SecretNames(FIXTURE), lambda: NOW,
+        Redactor((OPAQUE,)), IngestConfig(), out,
+    )  # fmt: skip
+    retained = list(_retained_text(out))
+    assert not [t for t in retained if OPAQUE in t]
+    names = {i.provenance.key.name for i in out.items}
+    assert any(n.startswith("ci-[REDACTED") for n in names)
+    assert {i.provenance.source_id for i in out.items} >= {"job:7001", "job_log:7001"}
+    assert any("dump-[REDACTED" in o.detail for o in out.omissions)
