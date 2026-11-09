@@ -12,6 +12,7 @@ from atlas_reviewer.budget import (
     CallLimits,
     ReviewBudget,
     input_token_bound,
+    prompt_token_room,
     worst_case_usd,
 )
 from atlas_reviewer.http import HttpResponse
@@ -324,6 +325,17 @@ def test_token_bounds_are_checked_before_sending(prompt, model, match):
     with pytest.raises(BudgetRefusedError, match=match):
         provider(fake).complete(prompt)
     assert fake.chat_requests() == []
+
+
+def test_prompt_token_room_is_what_still_fits_in_the_context():
+    """The room a later step sizes a diff part against. The input cap wins
+    when it is the tighter of the two bounds."""
+    assert prompt_token_room(CallLimits()) == 176_000
+    assert prompt_token_room(CallLimits(), context_tokens=100_000) == 76_000
+    tight = CallLimits(
+        max_input_tokens=50_000, max_output_tokens=30_000, reasoning_max_tokens=1_000
+    )
+    assert prompt_token_room(tight) == 50_000
 
 
 def test_limits_reject_nonsense():
