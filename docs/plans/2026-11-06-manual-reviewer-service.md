@@ -142,7 +142,9 @@ does no I/O. All I/O sits behind the ports in `ports.py`.
 - Every limit that stops a read is an **omission**: a page cap on a GitHub
   list, a per-review count cap, an oversized log or artifact, a rejected
   archive, or a skipped archive entry. The draft lists each omission, and
-  whatever it left unread is Missing (UNKNOWN). Job logs and artifact
+  whatever it left unread is Missing (UNKNOWN). A list that failed, was cut
+  off or was skipped is Missing as a `listing`, which the tally counts as
+  unread, not as a check without a result. Job logs and artifact
   contents are fetched only for jobs and runs whose `head_sha` matches.
 
 ## Untrusted bytes (second slice)

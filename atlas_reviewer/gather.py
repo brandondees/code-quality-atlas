@@ -119,12 +119,7 @@ def gather_ci(
     left = _Left(config.max_job_logs, config.max_artifacts)
     ctx = _Ctx(event, github, now, redactor, config, out, left)
     repo, sha = event.repo, event.head_sha
-    checks = _listing(
-        ctx,
-        SourceKind.CHECK_RUN,
-        "check runs",
-        lambda: github.list_check_runs(repo, sha),
-    )
+    checks = _listing(ctx, "check runs", lambda: github.list_check_runs(repo, sha))
     out.items.extend(
         _parse_each(
             ctx,
@@ -143,7 +138,9 @@ def gather_ci(
         at_head,
         config.max_runs,
         config.max_runs,
-        lambda r: SourceKey(SourceKind.JOB, f"(jobs of {r.item.provenance.key.name})"),
+        lambda r: SourceKey(
+            SourceKind.LISTING, f"(jobs of {r.item.provenance.key.name})"
+        ),
     ):
         _gather_run(ctx, run)
 
@@ -155,7 +152,7 @@ def _runs(
         ctx,
         SourceKind.WORKFLOW_RUN,
         what,
-        _listing(ctx, SourceKind.WORKFLOW_RUN, what, fetch),
+        _listing(ctx, what, fetch),
         lambda e: parse_workflow_runs(e, ctx.now(), ctx.redactor),
     )
 
@@ -193,11 +190,10 @@ def _pr_commits(ctx: _Ctx) -> tuple[str, ...]:
         s
         for shas in _parse_each(
             ctx,
-            SourceKind.WORKFLOW_RUN,
+            SourceKind.LISTING,
             what,
             _listing(
                 ctx,
-                SourceKind.WORKFLOW_RUN,
                 what,
                 lambda: ctx.github.list_pull_commits(
                     ctx.event.repo, ctx.event.pr_number
@@ -217,10 +213,8 @@ def _attempt[T](out: Collected, key: SourceKey, fetch: Callable[[], T]) -> T | N
         return None
 
 
-def _listing(
-    ctx: _Ctx, kind: SourceKind, what: str, fetch: Callable[[], Listing]
-) -> tuple[Json, ...]:
-    listing = _attempt(ctx.out, SourceKey(kind, f"(all {what})"), fetch)
+def _listing(ctx: _Ctx, what: str, fetch: Callable[[], Listing]) -> tuple[Json, ...]:
+    listing = _attempt(ctx.out, SourceKey(SourceKind.LISTING, f"(all {what})"), fetch)
     if listing is None:
         return ()
     if listing.truncated:
@@ -228,7 +222,7 @@ def _listing(
             what,
             f"page cap ({listing.pages_read} pages)",
             "further pages exist and were not read",
-            SourceKey(kind, f"({what} beyond page {listing.pages_read})"),
+            SourceKey(SourceKind.LISTING, f"({what} beyond page {listing.pages_read})"),
         )
     return listing.items
 
@@ -277,7 +271,6 @@ def _gather_run(ctx: _Ctx, run: WorkflowRun) -> None:
         f"jobs of {name}",
         _listing(
             ctx,
-            SourceKind.JOB,
             f"jobs of {name}",
             lambda: ctx.github.list_run_jobs(repo, run.run_id),
         ),
@@ -292,7 +285,6 @@ def _gather_run(ctx: _Ctx, run: WorkflowRun) -> None:
         f"artifacts of {name}",
         _listing(
             ctx,
-            SourceKind.ARTIFACT,
             f"artifacts of {name}",
             lambda: ctx.github.list_run_artifacts(repo, run.run_id),
         ),

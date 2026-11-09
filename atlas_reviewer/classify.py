@@ -25,7 +25,9 @@ from atlas_reviewer.domain import (
 )
 from atlas_reviewer.groups import Link, group_checks
 
-_VIEW_KINDS = frozenset({SourceKind.WORKFLOW_LOG, SourceKind.ARTIFACT})
+_UNREAD_KINDS = frozenset(
+    {SourceKind.WORKFLOW_LOG, SourceKind.ARTIFACT, SourceKind.LISTING}
+)
 REASON_ONLY_OTHER_SHAS = (
     "observed only on other commits of this PR, not on the reviewed head SHA"
 )
@@ -67,9 +69,10 @@ class Tally:
     job's log and the workflow run holding it count once (`supporting` says
     how many further views were folded in). `unknown` counts checks with no
     usable result (missing, or present but inconclusive); `unread` counts
-    views of a check or artifact that are Missing (a log that could not be
-    fetched, an artifact or archive entry not read), which are UNKNOWN too but
-    are not checks; `stale` counts items from other commits, which are UNKNOWN
+    what is Missing but is not a check: a log that could not be fetched, an
+    artifact or archive entry not read, or a GitHub list that failed, was cut
+    at its page cap or was skipped, which stand for no particular check.
+    These are UNKNOWN too; `stale` counts items from other commits, which are UNKNOWN
     too but say nothing about the head SHA."""
 
     passed: int
@@ -86,7 +89,7 @@ def tally(evidence: Iterable[Evidence], links: Iterable[Link] = ()) -> Tally:
     groups = group_checks(evidence, links)
     counts = Counter(g.outcome for g in groups)
     missing = [e.key.kind for e in evidence if isinstance(e, Missing)]
-    unread = sum(kind in _VIEW_KINDS for kind in missing)
+    unread = sum(kind in _UNREAD_KINDS for kind in missing)
     folded = {
         m.item.provenance.source_id for g in groups for m in (*g.supporting, *g.context)
     }

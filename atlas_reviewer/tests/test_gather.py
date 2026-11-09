@@ -5,6 +5,8 @@ each become an explicit omission, and whatever they left unread is UNKNOWN."""
 import io
 import zipfile
 
+import pytest
+
 from atlas_reviewer.archive import ArchiveLimits
 from atlas_reviewer.classify import REASON_ONLY_OTHER_SHAS, classify, tally
 from atlas_reviewer.domain import Missing, Outcome, PrEvent, SourceKind, outcome
@@ -479,3 +481,56 @@ def test_free_text_github_metadata_is_redacted_before_it_is_retained():
     assert any(n.startswith("ci-[REDACTED") for n in names)
     assert {i.provenance.source_id for i in out.items} >= {"job:7001", "job_log:7001"}
     assert any("dump-[REDACTED" in o.detail for o in out.omissions)
+
+
+class _NoCommits(FixtureGitHub):
+    def list_pull_commits(self, repo, number):
+        raise BoundaryError("GitHub HTTP 403")
+
+
+class _RunsCut(FixtureGitHub):
+    def list_workflow_runs(self, repo, branch):
+        return Listing(super().list_workflow_runs(repo, branch).items, True, 10)
+
+
+class _ChecksCut(FixtureGitHub):
+    def list_check_runs(self, repo, sha):
+        return Listing(super().list_check_runs(repo, sha).items, True, 10)
+
+
+class _BadCommit(FixtureGitHub):
+    def list_pull_commits(self, repo, number):
+        listed = super().list_pull_commits(repo, number)
+        return Listing((*listed.items, {"sha": 7}), False, 1)
+
+
+class _TwoHeadRuns(FixtureGitHub):
+    def list_workflow_runs_at(self, repo, sha):
+        (run,) = super().list_workflow_runs_at(repo, sha).items
+        return Listing((run, {**run, "id": 5002, "name": "ci-again"}), False, 1)
+
+
+@pytest.mark.parametrize(
+    "github,config,name",
+    [
+        (_NoCommits, {}, "(all commits of this PR)"),
+        (_RunsCut, {}, "(workflow runs beyond page 10)"),
+        (_ChecksCut, {}, "(check runs beyond page 10)"),
+        (_BadCommit, {}, "(commits of this PR entry 2)"),
+        (_TwoHeadRuns, {"max_runs": 1}, "(jobs of ci-again)"),
+    ],
+)
+def test_a_list_not_read_is_unknown_but_not_counted_as_a_check(github, config, name):
+    """Tally.unknown counts checks without a result. A listing that failed,
+    was cut off or skipped stands for no particular check, so it counts as
+    unread, and it stays visible as UNKNOWN."""
+    out = gather(github(FIXTURE), **config)
+    evidence = classify(HEAD, out.items, failures=out.failures)
+    (gap,) = [e for e in evidence if isinstance(e, Missing) and e.key.name == name]
+    assert outcome(gap) is Outcome.UNKNOWN
+    with_gap = tally(evidence, out.links)
+    without = tally([e for e in evidence if e is not gap], out.links)
+    assert (with_gap.unknown - without.unknown, with_gap.unread - without.unread) == (
+        0,
+        1,
+    )

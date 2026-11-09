@@ -51,6 +51,9 @@ class SourceKind(Enum):
     WORKFLOW_LOG = "workflow_log"
     ARTIFACT = "artifact"
     RUNNER_TOOL = "runner_tool"
+    # A GitHub list, or part of one, that was not read: it stands for no
+    # particular check, so it is only ever Missing.
+    LISTING = "listing"
 
 
 @dataclass(frozen=True)
