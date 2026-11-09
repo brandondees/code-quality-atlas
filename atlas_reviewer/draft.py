@@ -150,7 +150,7 @@ def _summary(d: DraftInput) -> str:
         "its log and the workflow run holding it are one check, not four.\n\n"
         f"- Pass: {t.passed}\n- Fail: {t.failed}\n"
         f"- UNKNOWN at the head SHA (missing or inconclusive): {t.unknown}\n"
-        f"- Not read (logs, artifacts or archive entries; UNKNOWN): {t.unread}\n"
+        f"- Not read (logs, artifacts, archive entries or GitHub lists; UNKNOWN): {t.unread}\n"
         f"- Stale (other commits; UNKNOWN for this SHA): {t.stale}\n"
         f"- Present, no verdict (artifacts): {t.present}\n"
         f"- Supporting evidence folded into the checks above (jobs, logs, workflow runs): {t.supporting}\n\n"

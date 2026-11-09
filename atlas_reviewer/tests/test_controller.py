@@ -255,7 +255,7 @@ def test_github_listing_failures_become_unknown_evidence():
 
     draft = Setup(github=Broken(FIXTURE)).run()
     assert (
-        "| missing | check_run | (all check runs) | could not fetch: evidence fetch / "
+        "| missing | listing | (all check runs) | could not fetch: evidence fetch / "
         "check runs failed after 0.0s (0.0s into the run): GitHub HTTP 502 |"
     ) in draft
     assert (
@@ -793,7 +793,10 @@ def test_one_ci_gate_is_counted_once_with_its_views_attached():
     assert "- Pass: 2\n" in summary
     assert "- Fail: 1\n" in summary
     assert "- UNKNOWN at the head SHA (missing or inconclusive): 2\n" in summary
-    assert "- Not read (logs, artifacts or archive entries; UNKNOWN): 1\n" in summary
+    assert (
+        "- Not read (logs, artifacts, archive entries or GitHub lists; UNKNOWN): 1\n"
+        in summary
+    )
     checks = section(draft, "Independent checks at the reviewed head SHA")
     gate = next(r for r in checks.splitlines() if "| check_run | gate |" in r)
     assert gate.startswith("| PASS |")
