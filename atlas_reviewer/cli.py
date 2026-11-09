@@ -113,7 +113,7 @@ def load_event(path: Path) -> PrEvent:
 
 
 def parse_expected(values: Sequence[str]) -> tuple[SourceKey, ...]:
-    kinds = {k.value: k for k in SourceKind}
+    kinds = {k.value: k for k in SourceKind if k is not SourceKind.LISTING}
     keys = []
     for value in values:
         kind, sep, name = value.partition(":")

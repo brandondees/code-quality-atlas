@@ -754,3 +754,13 @@ def test_review_config_refuses_a_non_positive_first_frame_window():
 
     with pytest.raises(ValueError, match="first-frame"):
         ReviewConfig(first_frame_s=0)
+
+
+def test_a_github_list_cannot_be_named_as_expected_evidence(tmp_path):
+    code, _, err = run_cli(
+        "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run",
+        "--expect", "listing:(all check runs)",
+    )  # fmt: skip
+    assert code == cli.EXIT_USAGE
+    assert "--expect must be KIND:NAME" in err
+    assert "'listing'" not in err.split("KIND in", 1)[1]
