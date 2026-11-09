@@ -220,6 +220,18 @@ def test_call_whose_worst_case_could_pass_three_dollars_is_refused():
     )
 
 
+def test_a_separate_reasoning_price_is_reserved():
+    terms = parse_model_terms(catalog(internal_reasoning="0.00002"), MODEL_ID)
+    plain = parse_model_terms(catalog(), MODEL_ID)
+    limits = CallLimits()
+    extra = limits.reasoning_max_tokens * terms.reasoning_rate
+    assert extra == Decimal("0.24")
+    assert (
+        worst_case_usd(1000, terms, limits)
+        == worst_case_usd(1000, plain, limits) + extra
+    )
+
+
 def test_reservation_uses_the_highest_price_tier_and_cache_writes():
     terms = parse_model_terms(catalog(input_cache_write="0.00001"), MODEL_ID)
     assert terms.input_rate == Decimal("0.00001")
