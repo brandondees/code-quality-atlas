@@ -57,10 +57,24 @@ class InstrumentedGitHub:
             "check runs", lambda: self._inner.list_check_runs(repo, sha), _listing
         )
 
+    def list_pull_commits(self, repo: str, number: int) -> Listing:
+        return self._read(
+            f"commits of #{number}",
+            lambda: self._inner.list_pull_commits(repo, number),
+            _listing,
+        )
+
     def list_workflow_runs(self, repo: str, branch: str) -> Listing:
         return self._read(
             "workflow runs",
             lambda: self._inner.list_workflow_runs(repo, branch),
+            _listing,
+        )
+
+    def list_workflow_runs_at(self, repo: str, sha: str) -> Listing:
+        return self._read(
+            f"workflow runs at {sha[:12]}",
+            lambda: self._inner.list_workflow_runs_at(repo, sha),
             _listing,
         )
 

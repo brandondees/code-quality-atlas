@@ -108,6 +108,11 @@ does no I/O. All I/O sits behind the ports in `ports.py`.
 - A source is **expected** at the head SHA when the operator named it
   (`--expect`), or when it was observed on another commit of the same PR.
   An expected source with no head-SHA item is **Missing** (UNKNOWN).
+  "The same PR" means the PR's own commit list (GitHub lists at most 250).
+  Runs listed under the head branch's name at any other commit belong to
+  whatever else shares that name, so they are set aside and only counted
+  in a note. Head-SHA runs are also listed by `head_sha`, so a busy branch
+  cannot push them past the page cap.
 - A failed fetch is Missing with the error as its reason. So is a tool
   absent from the runner image, or one the runner never reached. None of
   these is ever a pass.

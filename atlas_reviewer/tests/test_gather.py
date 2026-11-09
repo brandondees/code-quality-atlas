@@ -6,7 +6,7 @@ import io
 import zipfile
 
 from atlas_reviewer.archive import ArchiveLimits
-from atlas_reviewer.classify import classify
+from atlas_reviewer.classify import REASON_ONLY_OTHER_SHAS, classify
 from atlas_reviewer.domain import Missing, Outcome, PrEvent, outcome
 from atlas_reviewer.gather import Collected, IngestConfig, gather_ci
 from atlas_reviewer.github_fixture import FixtureGitHub
@@ -278,3 +278,59 @@ def test_skipped_archive_entries_are_unknown_and_an_all_skipped_one_is_not_prese
     assert not any(i.provenance.source_id.endswith(":zip") for i in out.items)
     reason = missing_reasons(out)["coverage-report (contents)"]
     assert reason == "not read: every archive entry skipped"
+
+
+UNRELATED = "0123456789abcdef0123456789abcdef01234567"
+
+
+class _SameNameBranch(FixtureGitHub):
+    """The head branch's name is shared: the branch listing also returns
+    another PR's (or the base repo's push) runs at commits not in this PR."""
+
+    def list_workflow_runs(self, repo, branch):
+        listed = super().list_workflow_runs(repo, branch)
+        (run, *_) = listed.items
+        foreign = (
+            {**run, "id": 8001, "name": "deploy", "head_sha": UNRELATED},
+            {**run, "id": 8002, "name": "nightly", "head_sha": UNRELATED},
+        )
+        return Listing((*listed.items, *foreign), False, 1)
+
+
+def test_same_name_runs_outside_the_pr_are_not_reported_as_this_prs_commits():
+    out = gather(_SameNameBranch(FIXTURE))
+    evidence = classify(HEAD, out.items, failures=out.failures)
+    reasons = {e.key.name: e.reason for e in evidence if isinstance(e, Missing)}
+    assert "deploy" not in reasons and "nightly" not in reasons
+    assert UNRELATED not in {i.head_sha for i in out.items}
+    assert reasons["docs-lint"] == REASON_ONLY_OTHER_SHAS
+    stale = {
+        (i.provenance.key.name, i.head_sha) for i in out.items if i.head_sha == OLD
+    }
+    assert stale == {("ci", OLD), ("docs-lint", OLD)}
+    assert any("2 workflow run(s)" in n for n in out.notes)
+
+
+def test_without_the_prs_commits_only_head_sha_runs_are_used():
+    class NoCommits(FixtureGitHub):
+        def list_pull_commits(self, repo, number):
+            raise BoundaryError("HTTP 502")
+
+    out = gather(NoCommits(FIXTURE))
+    assert {i.head_sha for i in out.items} == {HEAD}
+    assert missing_reasons(out)["(all commits of this PR)"] == (
+        "could not fetch: HTTP 502"
+    )
+    assert "job:7001" in {i.provenance.source_id for i in out.items}
+
+
+def test_a_head_sha_run_the_branch_listing_did_not_reach_is_still_gathered():
+    class BusyBranch(FixtureGitHub):
+        def list_workflow_runs(self, repo, branch):
+            listed = super().list_workflow_runs(repo, branch).items
+            return Listing(tuple(r for r in listed if r["head_sha"] != HEAD), True, 10)
+
+    out = gather(BusyBranch(FIXTURE))
+    ids = {i.provenance.source_id for i in out.items}
+    assert {"workflow_run:5001", "job_log:7001", "workflow_run:4001"} <= ids
+    assert "(workflow runs beyond page 10)" in missing_reasons(out)

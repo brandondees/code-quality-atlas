@@ -133,6 +133,10 @@ def _check_run(run: Json, fetched_at: datetime, redactor: Redactor) -> EvidenceI
     )
 
 
+def parse_commit_shas(items: Sequence[Any]) -> tuple[str, ...]:
+    return tuple(_field(c, "sha", str) for c in _objects(items, "commit"))
+
+
 @dataclass(frozen=True)
 class WorkflowRun:
     run_id: int

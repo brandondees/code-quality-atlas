@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: MIT
 """Offline `GitHubReader` backed by a fixture directory (for `--dry-run`).
 
-Layout: `pull.json`, `pull.diff`, `check-runs.json`, `workflow-runs.json`,
+Layout: `pull.json`, `pull.diff`, `pull-commits.json` (an array, as GitHub
+serves it), `check-runs.json`, `workflow-runs.json` (every run listed under
+the head branch's name; `list_workflow_runs_at` serves those at one SHA),
 `jobs-<run_id>.json`, `job-log-<job_id>.txt`, `artifacts-<run_id>.json`,
 `artifact-<id>/` (a directory zipped on read, as GitHub serves artifacts),
 `issue-<n>.json`, and a `source/` tree served as the head-SHA tarball.
@@ -71,9 +73,25 @@ class FixtureGitHub:
         self.calls.append(("list_check_runs", repo, sha))
         return self._list("check-runs.json", "check_runs")
 
+    def list_pull_commits(self, repo: str, number: int) -> Listing:
+        self.calls.append(("list_pull_commits", repo, str(number)))
+        try:
+            data = json.loads(self._file("pull-commits.json").read_text("utf-8"))
+        except json.JSONDecodeError as exc:
+            raise BoundaryError("fixture pull-commits.json is not JSON") from exc
+        if not isinstance(data, list):
+            raise BoundaryError("fixture pull-commits.json is not an array")
+        return Listing(tuple(data), truncated=False, pages_read=1)
+
     def list_workflow_runs(self, repo: str, branch: str) -> Listing:
         self.calls.append(("list_workflow_runs", repo, branch))
         return self._list("workflow-runs.json", "workflow_runs")
+
+    def list_workflow_runs_at(self, repo: str, sha: str) -> Listing:
+        self.calls.append(("list_workflow_runs_at", repo, sha))
+        runs = self._list("workflow-runs.json", "workflow_runs").items
+        at = tuple(r for r in runs if isinstance(r, dict) and r.get("head_sha") == sha)
+        return Listing(at, truncated=False, pages_read=1)
 
     def list_run_jobs(self, repo: str, run_id: int) -> Listing:
         self.calls.append(("list_run_jobs", repo, str(run_id)))

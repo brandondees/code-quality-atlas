@@ -2,6 +2,14 @@
 """Gather CI evidence for one head SHA: check runs, workflow runs, jobs,
 job logs and artifact contents. Controller-side; every byte is untrusted.
 
+Workflow runs come from two listings: those at the head SHA, and those
+under the head branch's name, of which only runs at one of this PR's own
+commits are kept. A branch name is shared (a fork's `main`, a reused name,
+the base repository's own pushes), so a run at any other commit is not
+this PR's evidence; how many were set aside is noted. Runs at earlier
+commits of the PR stay, labelled by their SHA, and only head-SHA evidence
+can count as a current result (`classify`).
+
 Downloads (job logs, artifact ZIPs) happen only for runs, jobs and
 artifacts at the reviewed head SHA, each under a byte cap, within
 per-review count caps. Anything a cap or a page limit leaves unread is
@@ -34,6 +42,7 @@ from atlas_reviewer.evidence import (
     job_log_item,
     parse_artifacts,
     parse_check_runs,
+    parse_commit_shas,
     parse_jobs,
     parse_workflow_runs,
 )
@@ -123,18 +132,7 @@ def gather_ci(
             lambda e: parse_check_runs(e, now(), redactor),
         )
     )
-    runs = _parse_each(
-        ctx,
-        SourceKind.WORKFLOW_RUN,
-        "workflow runs",
-        _listing(
-            ctx,
-            SourceKind.WORKFLOW_RUN,
-            "workflow runs",
-            lambda: github.list_workflow_runs(repo, head_ref),
-        ),
-        lambda e: parse_workflow_runs(e, now(), redactor),
-    )
+    runs = _pr_runs(ctx, head_ref)
     out.items.extend(r.item for r in runs)
     at_head = [r for r in runs if r.item.head_sha == sha]
     for run in _capped(
@@ -146,6 +144,67 @@ def gather_ci(
         lambda r: SourceKey(SourceKind.JOB, f"(jobs of {r.item.provenance.key.name})"),
     ):
         _gather_run(ctx, run)
+
+
+def _runs(
+    ctx: _Ctx, what: str, fetch: Callable[[], Listing]
+) -> tuple[WorkflowRun, ...]:
+    return _parse_each(
+        ctx,
+        SourceKind.WORKFLOW_RUN,
+        what,
+        _listing(ctx, SourceKind.WORKFLOW_RUN, what, fetch),
+        lambda e: parse_workflow_runs(e, ctx.now(), ctx.redactor),
+    )
+
+
+def _pr_runs(ctx: _Ctx, head_ref: str) -> list[WorkflowRun]:
+    repo, sha = ctx.event.repo, ctx.event.head_sha
+    at_head = _runs(
+        ctx,
+        "head-SHA workflow runs",
+        lambda: ctx.github.list_workflow_runs_at(repo, sha),
+    )
+    commits = {sha, *_pr_commits(ctx)}
+    on_branch = _runs(
+        ctx, "workflow runs", lambda: ctx.github.list_workflow_runs(repo, head_ref)
+    )
+    outside = [r for r in on_branch if r.item.head_sha not in commits]
+    if outside:
+        ctx.out.notes.append(
+            f"{len(outside)} workflow run(s) listed under this PR's head branch "
+            "name were at commits that are not in this PR and were not used."
+        )
+    runs: dict[int, WorkflowRun] = {}
+    for run in (*at_head, *on_branch):
+        if run.item.head_sha in commits:
+            runs.setdefault(run.run_id, run)
+    return list(runs.values())
+
+
+def _pr_commits(ctx: _Ctx) -> tuple[str, ...]:
+    """This PR's commit SHAs. A failed or cut-off listing leaves out the
+    runs at commits it did not return, which only drops evidence from
+    other commits; the failure itself is recorded."""
+    what = "commits of this PR"
+    return tuple(
+        s
+        for shas in _parse_each(
+            ctx,
+            SourceKind.WORKFLOW_RUN,
+            what,
+            _listing(
+                ctx,
+                SourceKind.WORKFLOW_RUN,
+                what,
+                lambda: ctx.github.list_pull_commits(
+                    ctx.event.repo, ctx.event.pr_number
+                ),
+            ),
+            lambda e: (parse_commit_shas(e),),
+        )
+        for s in shas
+    )
 
 
 def _attempt[T](out: Collected, key: SourceKey, fetch: Callable[[], T]) -> T | None:

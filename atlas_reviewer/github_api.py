@@ -90,13 +90,19 @@ class GitHubClient:
     def _json(self, path: str) -> Json:
         return _object(self._get(path), path)
 
-    def _list(self, path: str, key: str) -> Listing:
+    def _list(self, path: str, key: str | None) -> Listing:
+        """`key` names the array inside each page's object; None means the
+        page is the array itself (as for a pull request's commits)."""
         url: str | None = f"{self._api_url}{path}"
         items: list[Json] = []
         pages = 0
         while url is not None and pages < self._max_pages:
             resp = self._fetch(url)
-            entries = _object(resp.body, path).get(key)
+            entries = (
+                _array(resp.body, path)
+                if key is None
+                else _object(resp.body, path).get(key)
+            )
             if not isinstance(entries, list):
                 raise BoundaryError(
                     f"GitHub list {path.split('?', 1)[0]} has no {key!r} array"
@@ -125,10 +131,23 @@ class GitHubClient:
             "check_runs",
         )
 
+    def list_pull_commits(self, repo: str, number: int) -> Listing:
+        """GitHub lists at most 250 commits of a pull request."""
+        return self._list(
+            f"/repos/{repo}/pulls/{number}/commits?per_page={_PER_PAGE}", None
+        )
+
     def list_workflow_runs(self, repo: str, branch: str) -> Listing:
         return self._list(
             f"/repos/{repo}/actions/runs?per_page={_PER_PAGE}"
             f"&branch={quote(branch, safe='')}",
+            "workflow_runs",
+        )
+
+    def list_workflow_runs_at(self, repo: str, sha: str) -> Listing:
+        return self._list(
+            f"/repos/{repo}/actions/runs?per_page={_PER_PAGE}"
+            f"&head_sha={quote(sha, safe='')}",
             "workflow_runs",
         )
 
@@ -168,6 +187,17 @@ def _object(body: bytes, path: str) -> Json:
         raise BoundaryError(f"GitHub returned non-JSON for {path}") from exc
     if not isinstance(data, dict):
         raise BoundaryError(f"GitHub returned a non-object for {path}")
+    return data
+
+
+def _array(body: bytes, path: str) -> list[Json]:
+    path = path.split("?", 1)[0]
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise BoundaryError(f"GitHub returned non-JSON for {path}") from exc
+    if not isinstance(data, list):
+        raise BoundaryError(f"GitHub returned a non-array for {path}")
     return data
 
 

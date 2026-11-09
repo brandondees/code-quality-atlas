@@ -70,6 +70,7 @@ def test_github_client_only_ever_sends_get():
     [
         ("list_check_runs", "check_runs"),
         ("list_workflow_runs", "workflow_runs"),
+        ("list_workflow_runs_at", "workflow_runs"),
         ("list_run_jobs", "jobs"),
         ("list_run_artifacts", "artifacts"),
     ],
@@ -88,6 +89,27 @@ def test_every_list_follows_link_headers_to_the_last_page(method, key):
         f"{API}/next?page=3",
     ]
     assert all(r[2]["Authorization"] == f"Bearer {TOKEN}" for r in t.requests)
+
+
+def test_workflow_runs_at_a_sha_are_filtered_by_head_sha_server_side():
+    t = Recorder(page("workflow_runs", []))
+    github(t).list_workflow_runs_at("o/r", HEAD)
+    assert t.requests[0][1] == (
+        f"{API}/repos/o/r/actions/runs?per_page=100&head_sha={HEAD}"
+    )
+
+
+def test_pull_commits_are_a_paginated_array():
+    link = {"Link": f'<{API}/next?page=2>; rel="next"'}
+    t = Recorder(ok([{"sha": "a"}], headers=link), ok([{"sha": "b"}]))
+    listing = github(t).list_pull_commits("o/r", 42)
+    assert [c["sha"] for c in listing.items] == ["a", "b"]
+    assert t.requests[0][1] == f"{API}/repos/o/r/pulls/42/commits?per_page=100"
+
+
+def test_pull_commits_that_are_not_an_array_are_refused():
+    with pytest.raises(BoundaryError, match="non-array"):
+        github(Recorder(ok({"sha": "a"}))).list_pull_commits("o/r", 42)
 
 
 def test_page_cap_stops_and_reports_truncation():
