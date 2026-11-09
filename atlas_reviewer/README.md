@@ -117,8 +117,11 @@ repository. A response that grants any non-read permission is refused.
 The token is cached until five minutes before its `expires_at`.
 
 **CI evidence ingestion** (`gather.py`, `archive.py`). Every GitHub list
-(check runs, workflow runs, jobs, artifacts) follows `Link: rel="next"`
-up to 10 pages. A list cut off there, a per-review count cap (5 runs, 10
+(check runs, workflow runs, the PR's commits, jobs, artifacts) follows
+`Link: rel="next"` up to 10 pages. Workflow runs listed by branch name are
+kept only at the PR's own commits (GitHub lists at most 250), so a
+same-named branch elsewhere adds nothing; head-SHA runs are listed by SHA
+too. A list cut off there, a per-review count cap (5 runs, 10
 job logs, 5 artifacts), an oversized download (5 MiB per log, 10 MiB per
 artifact ZIP), or a rejected or partly skipped archive each appear in the
 draft's **Omissions and limits hit** table. Whatever they left unread is
@@ -299,9 +302,10 @@ tiers.
 
 The PR body and each issue body are cut at 2,000 characters, and each cut is
 an omissions row too. Omissions are computed before the evidence block is
-built, so the model is told what it did not see. Check summaries, log tails
-(the end of the log is kept by design) and artifact excerpts are capped too,
-but those caps are not listed as omissions.
+built, so the model is told what it did not see. An artifact excerpt cut at
+4,000 characters is an omissions row, and its unread rest is UNKNOWN. Check
+summaries and log tails (the end of the log is kept by design) are capped
+too, but those caps are not listed as omissions.
 
 ## Lifecycle telemetry
 
