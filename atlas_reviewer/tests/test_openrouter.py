@@ -53,8 +53,10 @@ def catalog(**pricing_changes):
     }
 
 
-def key_status(limit=5, remaining=5, usage=0):
-    return {"data": {"limit": limit, "limit_remaining": remaining, "usage": usage}}
+def key_status(limit=5, remaining=5, usage=0, **extra):
+    return {
+        "data": {"limit": limit, "limit_remaining": remaining, "usage": usage, **extra}
+    }
 
 
 def completion(text="review text", model=MODEL_ID, usage=None, finish="stop"):
@@ -348,6 +350,8 @@ def test_unknown_or_unparseable_pricing_refuses_before_any_call(model, match):
         (reply(key_status(limit=100, remaining=100)), "pilot ceiling"),
         (reply(key_status(remaining=0)), "no credit remaining"),
         (reply(key_status(remaining=None)), "limit_remaining"),
+        (reply(key_status(include_byok_in_limit=False)), "BYOK spend"),
+        (reply(key_status(include_byok_in_limit=None)), "BYOK spend"),
         (reply({}, status=401), "HTTP 401"),
         (reply(b"nope"), "non-JSON"),
         (reply({"data": None}), "no data object"),
@@ -398,6 +402,63 @@ def test_no_inference_without_a_passed_preflight():
 
 
 # --- responses -----------------------------------------------------------------
+
+
+def test_byok_upstream_cost_counts_toward_the_review_ceiling():
+    """usage.cost on a BYOK call is OpenRouter's fee. The upstream charge
+    is what the $3 ceiling has to see."""
+    usage = {
+        "prompt_tokens": 150_000,
+        "completion_tokens": 100,
+        "cost": "0.05",
+        "is_byok": True,
+        "cost_details": {"upstream_inference_cost": "1.26"},
+    }
+    fake = OpenRouterFake(*[reply(completion(usage=usage)) for _ in range(3)])
+    p = provider(fake)
+    assert p.complete(SMALL) == "review text"
+    assert p.complete(SMALL) == "review text"
+    with pytest.raises(BudgetRefusedError, match="over \\$3.00"):
+        p.complete(SMALL)
+    assert len(fake.chat_requests()) == 2
+    assert p.budget.committed_usd() == Decimal("2.62")
+
+
+def test_a_byok_call_without_an_upstream_cost_keeps_its_reservation():
+    usage = {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "cost": "0.05",
+        "is_byok": True,
+    }
+    p = provider(OpenRouterFake(reply(completion(usage=usage))))
+    p.complete(SMALL)
+    assert "actual unknown (counted at the reservation)" in p.usage_lines()[1]
+    assert "BYOK upstream cost not reported" in p.usage_lines()[1]
+
+
+def test_an_unreadable_upstream_cost_keeps_the_reservation():
+    usage = {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "cost": "0.05",
+        "cost_details": {"upstream_inference_cost": "nope"},
+    }
+    p = provider(OpenRouterFake(reply(completion(usage=usage))))
+    p.complete(SMALL)
+    assert "actual unknown (counted at the reservation)" in p.usage_lines()[1]
+
+
+def test_an_upstream_cost_is_added_when_the_call_is_not_marked_byok():
+    usage = {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "cost": "0.05",
+        "cost_details": {"upstream_inference_cost": "1.26"},
+    }
+    p = provider(OpenRouterFake(reply(completion(usage=usage))))
+    p.complete(SMALL)
+    assert p.budget.committed_usd() == Decimal("1.31")
 
 
 def test_actual_cost_and_usage_are_recorded():

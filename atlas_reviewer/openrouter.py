@@ -35,7 +35,13 @@
   seconds (one owner-reported pilot observation, not checked against
   OpenRouter's documentation), so a $0 readback right after a call is
   expected and is not a mismatch with the per-response cost recorded here.
-  Spend is reconciled from `usage.cost`, never from that counter.
+  Spend is reconciled from the response, never from that counter:
+  `usage.cost`, plus `cost_details.upstream_inference_cost` when an
+  upstream charge is reported (on a BYOK call `usage.cost` is only
+  OpenRouter's fee). A BYOK call that omits the upstream charge, or an
+  upstream charge that cannot be read, keeps its full reservation. A key
+  whose `include_byok_in_limit` is not true is refused at preflight: its
+  credit limit would not cover that upstream charge.
 """
 
 from __future__ import annotations
@@ -312,13 +318,33 @@ def _actual_cost(usage: Json, terms: ModelTerms) -> tuple[Decimal | None, str]:
     )
     summary = f"tokens in={prompt_t} out={completion_t} reasoning={reasoning_t}"
     try:
-        return money(usage["cost"], "usage.cost"), summary
-    except (KeyError, PricingUnknownError):
-        pass
-    if prompt_t is None or completion_t is None:
+        upstream = _upstream_cost(usage)
+    except PricingUnknownError:
         return None, summary
-    estimate = prompt_t * terms.input_rate + completion_t * terms.completion_rate
-    return (
-        estimate + terms.request_fee,
-        f"{summary} (cost computed at the highest catalog rates)",
+    if usage.get("is_byok") is True and upstream is None:
+        return None, f"{summary} (BYOK upstream cost not reported)"
+    try:
+        base = money(usage["cost"], "usage.cost")
+    except (KeyError, PricingUnknownError):
+        if prompt_t is None or completion_t is None:
+            return None, summary
+        base = (
+            prompt_t * terms.input_rate
+            + completion_t * terms.completion_rate
+            + terms.request_fee
+        )
+        summary = f"{summary} (cost computed at the highest catalog rates)"
+    if upstream is not None:
+        base += upstream
+    return base, summary
+
+
+def _upstream_cost(usage: Json) -> Decimal | None:
+    """The provider's own charge, reported beside OpenRouter's fee."""
+    details = usage.get("cost_details")
+    if not isinstance(details, dict) or "upstream_inference_cost" not in details:
+        return None
+    return money(
+        details["upstream_inference_cost"],
+        "usage.cost_details.upstream_inference_cost",
     )
