@@ -47,6 +47,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Callable, Sequence
 from decimal import Decimal
@@ -94,6 +95,9 @@ PINNED_PROVIDERS = (
 KEY_LIMIT_MAX_USD = Decimal("5.00")
 RETRYABLE = frozenset({408, 429, 500, 502, 503, 504})
 _PER_MILLION = Decimal(1_000_000)
+# A numeric Retry-After above this waits this long; the 3-call cap still bounds
+# how many waits a review can make.
+_MAX_RETRY_WAIT = 8.0
 
 
 def _require_listed(slugs: Sequence[str]) -> tuple[str, ...]:
@@ -161,9 +165,10 @@ class OpenRouterProvider:
     def _attempts(self, body: bytes, terms: ModelTerms, worst: Decimal) -> str:
         remaining = self._key_status.limit_remaining if self._key_status else Decimal(0)
         last: BoundaryError | None = None
+        retry_after: str | None = None
         for attempt in range(self.budget.limits.max_calls):
             if attempt:
-                self._sleep(2.0**attempt)
+                self._sleep(_retry_wait(retry_after, attempt))
             try:
                 record = self.budget.reserve(worst, ceiling_usd=remaining)
             except BudgetRefusedError as refusal:
@@ -171,12 +176,12 @@ class OpenRouterProvider:
             result = self._send(body, terms, record)
             if isinstance(result, str):
                 return result
-            last = result
+            last, retry_after = result
         raise last or BoundaryError("no model call was made")
 
     def _send(
         self, body: bytes, terms: ModelTerms, record: CallRecord
-    ) -> str | BoundaryError:
+    ) -> str | tuple[BoundaryError, str | None]:
         url = f"{self._api_url}/chat/completions"
         try:
             resp = self._transport.request(
@@ -188,10 +193,13 @@ class OpenRouterProvider:
             )
         except BoundaryError as exc:
             ReviewBudget.settle(record, f"transport error: {exc}")
-            return exc
+            return exc, None
         if resp.status in RETRYABLE:
             ReviewBudget.settle(record, f"HTTP {resp.status} (retryable)")
-            return BoundaryError(f"OpenRouter HTTP {resp.status} for {safe_url(url)}")
+            return (
+                BoundaryError(f"OpenRouter HTTP {resp.status} for {safe_url(url)}"),
+                resp.header("Retry-After"),
+            )
         if resp.status != 200:
             ReviewBudget.settle(record, f"HTTP {resp.status}")
             raise BoundaryError(f"OpenRouter HTTP {resp.status} for {safe_url(url)}")
@@ -243,6 +251,21 @@ class OpenRouterProvider:
                 f"OpenRouter HTTP {resp.status} for {safe_url(url)}"
             )
         return _json_object(resp.body, safe_url(url), PricingUnknownError)
+
+
+def _retry_wait(header: str | None, attempt: int) -> float:
+    """Seconds before the next attempt: a numeric Retry-After, capped, else
+    exponential backoff. An HTTP-date or a negative value is not numeric."""
+    backoff = 2.0**attempt
+    if header is None:
+        return backoff
+    try:
+        seconds = float(header.strip())
+    except ValueError:
+        return backoff
+    if seconds < 0 or not math.isfinite(seconds):
+        return backoff
+    return min(seconds, _MAX_RETRY_WAIT)
 
 
 def _json_object(raw: bytes, where: str, error: type[BoundaryError]) -> Json:

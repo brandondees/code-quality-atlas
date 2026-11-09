@@ -67,9 +67,9 @@ def completion(text="review text", model=MODEL_ID, usage=None, finish="stop"):
     }  # fmt: skip
 
 
-def reply(payload, status=200):
+def reply(payload, status=200, headers=None):
     raw = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
-    return HttpResponse(status, {}, raw)
+    return HttpResponse(status, headers or {}, raw)
 
 
 class OpenRouterFake:
@@ -180,6 +180,33 @@ def test_cap_spans_every_completion_in_the_review():
     with pytest.raises(BudgetRefusedError, match="call cap reached: 3 model calls"):
         p.complete(SMALL)
     assert len(fake.chat_requests()) == 3
+
+
+def test_a_numeric_retry_after_is_honoured_and_capped():
+    sleeps = []
+    fake = OpenRouterFake(
+        reply({}, status=503, headers={"Retry-After": "1"}),
+        reply({}, status=429, headers={"Retry-After": "120"}),
+        reply(completion()),
+    )
+    p = OpenRouterProvider(fake, KEY, sleep=sleeps.append)
+    p.preflight()
+    assert p.complete(SMALL) == "review text"
+    assert sleeps == [1.0, 8.0]
+    assert len(fake.chat_requests()) == 3
+
+
+def test_a_non_numeric_retry_after_falls_back_to_backoff():
+    sleeps = []
+    fake = OpenRouterFake(
+        reply({}, status=503, headers={"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"}),
+        reply({}, status=429, headers={"Retry-After": "-5"}),
+        reply(completion()),
+    )
+    p = OpenRouterProvider(fake, KEY, sleep=sleeps.append)
+    p.preflight()
+    assert p.complete(SMALL) == "review text"
+    assert sleeps == [2.0, 4.0]
 
 
 def test_transport_errors_are_retried_within_the_cap():
