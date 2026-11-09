@@ -208,6 +208,19 @@ def test_a_successful_read_charges_its_declared_size_once():
     assert skipped(read) == {"part-3.txt": "total uncompressed budget spent"}
 
 
+def test_an_entry_that_decompresses_short_of_its_declared_size_is_skipped():
+    """A STORED entry whose header over-declares its size, with the CRC of
+    what it actually holds, reads back short without any library error.
+    It is not read as text, and the budget is charged what it produced."""
+    data = make_zip(
+        ("a.txt", "short"), ("b.txt", "x" * 40), compression=zipfile.ZIP_STORED
+    )
+    lying = patch_headers(data, (24, 22), struct.pack("<I", 50))
+    read = read_zip(lying, ArchiveLimits(max_total_uncompressed_bytes=60))
+    assert skipped(read) == {"a.txt": "decompressed to 5 bytes, not the declared 50"}
+    assert [m.name for m in read.members] == ["b.txt"]
+
+
 class _CountingZipFile:
     def __init__(self, real):
         self.real, self.built = real, 0

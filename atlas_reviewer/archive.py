@@ -20,7 +20,11 @@ Declared sizes are checked before decompressing anything. They also bound
 what is decompressed: CPython's `zipfile` never yields more than an entry's
 declared size and verifies its CRC-32 at the end, so an entry whose header
 under-declares its size fails as unreadable. Each read is capped at the
-limit regardless, in case that library behaviour ever changes.
+limit and at the declared size regardless, in case that library behaviour
+ever changes, and an entry that produces fewer bytes than it declared (a
+STORED entry over-declaring its size, with the CRC of what it holds,
+raises nothing) is skipped. The total budget is charged what each entry
+actually produced, or its declared size when the read failed part-way.
 """
 
 from __future__ import annotations
@@ -179,14 +183,17 @@ def _entry(
     refusal = _refuse_header(info, limits) or _refuse_budget(info, budget)
     if refusal:
         return refusal
-    cap = min(limits.max_entry_bytes, budget.left)
+    cap = min(limits.max_entry_bytes, budget.left, info.file_size)
     budget.left -= info.file_size
     try:
         data = _bounded_read(zf, info, cap)
     except _READ_ERRORS as exc:
         return f"unreadable entry ({type(exc).__name__})"
     if data is None:  # pragma: no cover -- zipfile stops at the declared size
-        return "decompresses past the per-entry or total size cap"
+        return "decompresses past its declared size or the size caps"
+    budget.left += info.file_size - len(data)
+    if len(data) != info.file_size:
+        return f"decompressed to {len(data)} bytes, not the declared {info.file_size}"
     if b"\x00" in data:
         return "binary content"
     return ArchiveMember(info.filename, data.decode("utf-8", errors="replace"))
