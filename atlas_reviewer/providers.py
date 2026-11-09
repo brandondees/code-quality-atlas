@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """The offline model provider: the default, and the only one tests and
-`--dry-run` use. The live adapter, `openrouter.OpenRouterProvider`, and
-`--dry-run` arrive later in this stack."""
+`--dry-run` use (`--dry-run` arrives later in this stack). The live
+adapter is `openrouter.OpenRouterProvider`."""
 
 from __future__ import annotations
 
