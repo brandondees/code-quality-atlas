@@ -792,7 +792,8 @@ def test_one_ci_gate_is_counted_once_with_its_views_attached():
     summary = section(draft, "Evidence summary")
     assert "- Pass: 2\n" in summary
     assert "- Fail: 1\n" in summary
-    assert "- UNKNOWN at the head SHA (missing or inconclusive): 3\n" in summary
+    assert "- UNKNOWN at the head SHA (missing or inconclusive): 2\n" in summary
+    assert "- Not read (logs, artifacts or archive entries; UNKNOWN): 1\n" in summary
     checks = section(draft, "Independent checks at the reviewed head SHA")
     gate = next(r for r in checks.splitlines() if "| check_run | gate |" in r)
     assert gate.startswith("| PASS |")
