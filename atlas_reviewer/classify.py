@@ -20,10 +20,12 @@ from atlas_reviewer.domain import (
     Missing,
     Outcome,
     SourceKey,
+    SourceKind,
     Stale,
 )
 from atlas_reviewer.groups import Link, group_checks
 
+_VIEW_KINDS = frozenset({SourceKind.WORKFLOW_LOG, SourceKind.ARTIFACT})
 REASON_ONLY_OTHER_SHAS = (
     "observed only on other commits of this PR, not on the reviewed head SHA"
 )
@@ -64,9 +66,11 @@ class Tally:
     """Counts independent checks at the head SHA: a check run, its job, the
     job's log and the workflow run holding it count once (`supporting` says
     how many further views were folded in). `unknown` counts checks with no
-    usable result (missing, or present but inconclusive); `stale` counts items
-    from other commits, which are UNKNOWN too but say nothing about the head
-    SHA."""
+    usable result (missing, or present but inconclusive); `unread` counts
+    views of a check or artifact that are Missing (a log that could not be
+    fetched, an artifact or archive entry not read), which are UNKNOWN too but
+    are not checks; `stale` counts items from other commits, which are UNKNOWN
+    too but say nothing about the head SHA."""
 
     passed: int
     failed: int
@@ -74,20 +78,24 @@ class Tally:
     stale: int
     present: int
     supporting: int = 0
+    unread: int = 0
 
 
 def tally(evidence: Iterable[Evidence], links: Iterable[Link] = ()) -> Tally:
     evidence = tuple(evidence)
     groups = group_checks(evidence, links)
     counts = Counter(g.outcome for g in groups)
+    missing = [e.key.kind for e in evidence if isinstance(e, Missing)]
+    unread = sum(kind in _VIEW_KINDS for kind in missing)
     folded = {
         m.item.provenance.source_id for g in groups for m in (*g.supporting, *g.context)
     }
     return Tally(
         passed=counts[Outcome.PASS],
         failed=counts[Outcome.FAIL],
-        unknown=counts[Outcome.UNKNOWN] + sum(isinstance(e, Missing) for e in evidence),
+        unknown=counts[Outcome.UNKNOWN] + len(missing) - unread,
         stale=sum(isinstance(e, Stale) for e in evidence),
         present=counts[Outcome.INFO],
         supporting=len(folded),
+        unread=unread,
     )

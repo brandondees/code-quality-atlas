@@ -6,7 +6,7 @@ import io
 import zipfile
 
 from atlas_reviewer.archive import ArchiveLimits
-from atlas_reviewer.classify import REASON_ONLY_OTHER_SHAS, classify
+from atlas_reviewer.classify import REASON_ONLY_OTHER_SHAS, classify, tally
 from atlas_reviewer.domain import Missing, Outcome, PrEvent, SourceKind, outcome
 from atlas_reviewer.gather import Collected, IngestConfig, gather_ci
 from atlas_reviewer.github_fixture import FixtureGitHub
@@ -54,6 +54,8 @@ def test_fixture_ingests_jobs_logs_and_artifact_text_at_the_head_sha():
         ("artifact:9001", "archive entry skipped")
     ]
     assert "upload.sh: file type not on the text allowlist" in out.omissions[0].detail
+    evidence = classify(HEAD, out.items, failures=out.failures)
+    assert tally(evidence, out.links).unread == 1
     assert calls(gh, "list_run_jobs") == [("list_run_jobs", EVENT.repo, "5001")]
 
 

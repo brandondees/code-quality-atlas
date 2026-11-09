@@ -82,3 +82,13 @@ def test_tally_separates_head_unknowns_from_stale():
     )
     t = tally(evidence)
     assert (t.passed, t.failed, t.unknown, t.stale, t.present) == (1, 1, 2, 1, 1)
+
+
+def test_tally_counts_unread_views_apart_from_checks_without_a_result():
+    failures = [
+        Missing(SourceKey(SourceKind.ARTIFACT, "coverage (skipped entry 0)"), "x"),
+        Missing(SourceKey(SourceKind.WORKFLOW_LOG, "ci / test"), "could not fetch"),
+        Missing(SourceKey(SourceKind.CHECK_RUN, "lint"), "could not fetch"),
+    ]
+    t = tally(classify(HEAD, [item("a")], failures=failures))
+    assert (t.passed, t.unknown, t.unread) == (1, 1, 2)
