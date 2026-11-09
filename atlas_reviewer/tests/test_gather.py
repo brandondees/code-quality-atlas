@@ -7,7 +7,7 @@ import zipfile
 
 from atlas_reviewer.archive import ArchiveLimits
 from atlas_reviewer.classify import REASON_ONLY_OTHER_SHAS, classify
-from atlas_reviewer.domain import Missing, Outcome, PrEvent, outcome
+from atlas_reviewer.domain import Missing, Outcome, PrEvent, SourceKind, outcome
 from atlas_reviewer.gather import Collected, IngestConfig, gather_ci
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.ports import BoundaryError, Listing, ResponseTooLargeError
@@ -189,10 +189,25 @@ def _one_text_entry(text):
 
 
 def test_secrets_in_logs_and_artifacts_are_redacted():
-    out = gather(FixtureGitHub(FIXTURE))
+    secret = "opaque-" + fake_token("", 24)
+
+    class Leaky(FixtureGitHub):
+        def download_artifact(self, repo, artifact_id, max_bytes):
+            return _one_text_entry(f"token used: {secret}\n")
+
+    out = Collected()
+    gather_ci(
+        EVENT, "feature", Leaky(FIXTURE), lambda: NOW,
+        Redactor((secret,)), IngestConfig(), out,
+    )  # fmt: skip
     log = next(i for i in out.items if i.provenance.source_id == "job_log:7001")
     assert "abcdefghijklmnopqrstuvwxyz0123456789" not in log.detail.text
     assert log.detail.redaction_count >= 1
+    contents = next(
+        i for i in out.items if i.provenance.source_id == "artifact:9001:zip"
+    )
+    assert "token used: [REDACTED" in contents.detail.text
+    assert secret not in contents.detail.text
 
 
 def test_an_artifact_excerpt_cut_at_its_cap_is_an_omission_and_the_rest_unknown():
@@ -220,6 +235,29 @@ def test_an_artifact_excerpt_cut_at_its_cap_is_an_omission_and_the_rest_unknown(
 def test_an_artifact_excerpt_within_its_cap_records_no_cut():
     out = gather(FixtureGitHub(FIXTURE))
     assert not [o for o in out.omissions if o.limit.startswith("excerpt cap")]
+
+
+def test_a_job_log_that_cannot_be_fetched_is_unknown():
+    class NoLogs(FixtureGitHub):
+        def get_job_logs(self, repo, job_id, max_bytes):
+            raise BoundaryError("GitHub HTTP 500")
+
+    out = gather(NoLogs(FIXTURE))
+    logs = {
+        f.key.name: f.reason
+        for f in out.failures
+        if f.key.kind is SourceKind.WORKFLOW_LOG
+    }
+    assert logs == {
+        name: "could not fetch: GitHub HTTP 500" for name in ("ci / test", "ci / gate")
+    }
+    assert not any(i.provenance.source_id.startswith("job_log:") for i in out.items)
+    evidence = classify(HEAD, out.items, failures=out.failures)
+    assert all(
+        outcome(e) is Outcome.UNKNOWN
+        for e in evidence
+        if isinstance(e, Missing) and e.key.kind is SourceKind.WORKFLOW_LOG
+    )
 
 
 def test_gather_records_the_links_between_views_of_one_check():
