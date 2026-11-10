@@ -722,10 +722,19 @@ def _fit(
     )
 
 
+def _named(sel: DiffSelection, files: tuple[FileDiff, ...]) -> tuple[FileDiff, ...]:
+    """The `files` the notes count: parsed headers, not a preamble before the
+    first one. A header-less diff is only the preamble, so then it counts."""
+    every = (*sel.full, *sel.cut, *sel.unseen)
+    if all(f.path == UNPARSED_PATH for f in every):
+        return files
+    return tuple(f for f in files if f.path != UNPARSED_PATH)
+
+
 def _selection_omission(
     sel: DiffSelection | None, *, scrub: Callable[[str], str]
 ) -> tuple[Omission, ...]:
-    if sel is None or sel.complete:
+    if sel is None or not (_named(sel, sel.cut) or _named(sel, sel.unseen)):
         return ()
     limit = (
         f"too large for one review pass: {len(sel.parts)} part(s) of at most "
@@ -736,16 +745,19 @@ def _selection_omission(
 
 def _selection_detail(sel: DiffSelection, *, scrub: Callable[[str], str]) -> str:
     cut = ", ".join(
-        f"{f.path} (kept {f.shown_chars} of {f.full_chars} characters)" for f in sel.cut
+        f"{f.path} (kept {f.shown_chars} of {f.full_chars} characters)"
+        for f in _named(sel, sel.cut)
     )
+    every = (*sel.full, *sel.cut, *sel.unseen)
+    files = sel.total_files - (len(every) - len(_named(sel, every)))
     parts = [
         (
             f"kept {sel.kept_chars} of {sel.total_chars} characters in "
             f"{len(sel.parts)} part(s), highest risk first"
         ),
-        f"{len(sel.full)} of {sel.total_files} file(s) sent in full",
+        f"{len(_named(sel, sel.full))} of {files} file(s) sent in full",
         f"cut to fit one call: {cut}" if cut else "",
-        _unseen_detail(sel.unseen, scrub=scrub),
+        _unseen_detail(_named(sel, sel.unseen), scrub=scrub),
     ]
     return "; ".join(p for p in parts if p)
 
@@ -875,10 +887,8 @@ def _narrate_part(
 
 
 def _counted_files(sel: DiffSelection, dropped: tuple[str, ...]) -> int:
-    """Changed files the notes count: parsed headers, not a preamble."""
-    in_parts = sum(1 for p in sel.parts for f in p.files if f.path != UNPARSED_PATH)
-    unseen = sum(1 for f in sel.unseen if f.path != UNPARSED_PATH)
-    return in_parts + unseen + len(dropped)
+    in_parts = tuple(f for p in sel.parts for f in p.files)
+    return len(_named(sel, in_parts)) + len(_named(sel, sel.unseen)) + len(dropped)
 
 
 def _coverage_lines(
@@ -895,13 +905,12 @@ def _coverage_lines(
             ),
         )
     reviewed = [p for p in parts if p.reviewed]
-    full = sum(
-        1 for p in reviewed for f in p.files if not f.cut and f.path != UNPARSED_PATH
-    )
-    cut = sum(1 for p in reviewed for f in p.files if f.cut and f.path != UNPARSED_PATH)
+    sent = _named(sel, tuple(f for p in reviewed for f in p.files))
+    full = sum(1 for f in sent if not f.cut)
+    cut = sum(1 for f in sent if f.cut)
     changed_files = _counted_files(sel, dropped)
-    real_cut = tuple(f for f in sel.cut if f.path != UNPARSED_PATH)
-    real_unseen = tuple(f for f in sel.unseen if f.path != UNPARSED_PATH)
+    real_cut = _named(sel, sel.cut)
+    real_unseen = _named(sel, sel.unseen)
     unseen = len(real_unseen) + len(dropped)
     files_complete = not real_unseen and not real_cut and not dropped
     if reviewed and all(p.simulated for p in reviewed):

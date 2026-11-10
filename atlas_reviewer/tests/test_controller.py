@@ -1478,6 +1478,30 @@ def test_a_diff_preamble_does_not_add_a_phantom_changed_file():
     assert "(diff text without file headers)" not in draft
 
 
+def test_the_too_large_omission_does_not_count_a_preamble():
+    s = with_diff("stray preamble\n" + sized_diff(10, 9_000))
+    draft = s.run(diff_chars_per_call=20_000)
+    row = next(
+        r
+        for r in section(draft, "Omissions and limits hit").splitlines()
+        if r.startswith("| pull request diff |")
+    )
+    assert " of 10 file(s) sent in full" in row
+    assert "of 11 file(s)" not in row
+    assert "never sent to any model call (" in row
+    assert "(diff text without file headers)" not in row
+
+
+def test_header_less_notes_count_the_text_that_was_sent():
+    draft = approving(
+        github=with_diff("Service Unavailable\n", changed_files=2).github
+    ).run()
+    notes = section(draft, "Controller notes")
+    assert "covering 1 of 1 file(s) in full" in notes
+    assert "of 0 file(s)" not in notes
+    assert "the fetched diff names no file" in notes
+
+
 def test_a_preamble_is_not_an_unreviewed_file_when_the_review_fails():
     body = "stray preamble\n" + sized_diff(2, 40)
     draft = Setup(provider=OfflineProvider(), github=with_diff(body).github).run()
