@@ -17,6 +17,7 @@ from atlas_reviewer.budget import CallLimits, prompt_token_room
 from atlas_reviewer.classify import classify
 from atlas_reviewer.committed_secrets import DiffSecrets, scan_diff
 from atlas_reviewer.diffs import (
+    UNPARSED_PATH,
     DiffPart,
     DiffSelection,
     FileDiff,
@@ -220,6 +221,7 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
             dropped,
             listed=len(base.diff_paths),
             changed=None if diff is None else diff.changed_files,
+            prior=None if diff is None else diff.prior_changed_files,
         ),
     )
     # The model saw the diff unredacted. The same values are scrubbed from
@@ -276,14 +278,18 @@ def _file_coverage(
     *,
     listed: int,
     changed: int | None,
+    prior: int | None,
 ) -> FileCoverage:
     """Every changed file a model call did not review in full (D36). A file
     the selection planned into a part with no recorded narrative counts as
     unreviewed too, so a gap in the bookkeeping cannot read as coverage.
     `listed` counts the diff's file headers and `changed` is GitHub's count
-    on the pull read after the diff fetch: an empty or header-less body, or
-    a count that disagrees, leaves coverage unknown, since an absent file
-    cannot be named as unreviewed."""
+    on the pull read after the diff fetch. `prior` is the count from the
+    read before that fetch. An empty or header-less body, or a count that
+    disagrees, leaves coverage unknown, since an absent file cannot be
+    named as unreviewed. A preamble before the first header is not a
+    changed file, so it is left out of the unreviewed list whenever the
+    diff does name files."""
     if sel is None:
         return FileCoverage(
             None,
@@ -294,7 +300,7 @@ def _file_coverage(
     elif changed is None:
         gap = "GitHub reported no changed-file count to check the diff against"
     elif listed != changed:
-        gap = f"the diff names {listed} file(s) but GitHub reports {changed} changed"
+        gap = _count_gap(listed, changed, prior)
     else:
         gap = ""
     narrated = [f for p in parts for f in p.files]
@@ -329,11 +335,6 @@ def _file_coverage(
             for path in dropped
         ),
     ]
-    if not gap:
-        # `listed` is the parsed file headers. It already includes a header
-        # the selection dropped, and it does not include a preamble before
-        # the first header, which is not a changed file.
-        return FileCoverage(listed, tuple(unreviewed))
     if not listed:
         unreviewed += [
             Unreviewed(f.path, "the diff had no file headers", f.tier.rank)
@@ -341,7 +342,34 @@ def _file_coverage(
             for f in part.files
             if not any(f.path == u.path for u in unreviewed)
         ]
-    return FileCoverage(changed, tuple(unreviewed), unknown=gap)
+    named = _without_preamble(unreviewed, listed)
+    if not gap:
+        # `listed` is the parsed file headers. It already includes a header
+        # the selection dropped, and it does not include a preamble before
+        # the first header, which is not a changed file.
+        return FileCoverage(listed, named)
+    return FileCoverage(changed, named, unknown=gap)
+
+
+def _count_gap(listed: int, changed: int, prior: int | None) -> str:
+    """A count that changes between the two pull reads is not the same fact
+    as both reads agreeing on a count the diff does not have."""
+    if prior == changed:
+        return f"the diff names {listed} file(s) but GitHub reports {changed} changed"
+    earlier = "no count" if prior is None else str(prior)
+    return (
+        f"GitHub's changed-file count moved from {earlier} to {changed} between "
+        f"the two pull reads while the head SHA stayed the same; the diff names "
+        f"{listed} file(s)"
+    )
+
+
+def _without_preamble(
+    unreviewed: list[Unreviewed], listed: int
+) -> tuple[Unreviewed, ...]:
+    if not listed:
+        return tuple(unreviewed)
+    return tuple(u for u in unreviewed if u.path != UNPARSED_PATH)
 
 
 def _part_gap(p: PartNarrative) -> str:
@@ -447,8 +475,11 @@ class _Fetched:
     paths: tuple[str, ...]
     secrets: DiffSecrets
     changed_files: int | None
-    """GitHub's count on the pull read after the diff fetch. The earlier
-    read can go stale while the head SHA stays the same."""
+    """GitHub's count on the pull read after the diff fetch."""
+
+    prior_changed_files: int | None
+    """GitHub's count on the pull read before the diff fetch. The two can
+    differ while the head SHA stays the same."""
 
 
 @dataclass(frozen=True)
@@ -475,7 +506,7 @@ def _pull_block(pull: PullInfo, deps: Deps) -> UntrustedBlock:
 
 
 def _omissions(
-    base: _Base, sel: DiffSelection | None, *, scrub: Callable[[str], str] = str
+    base: _Base, sel: DiffSelection | None, *, scrub: Callable[[str], str]
 ) -> tuple[Omission, ...]:
     return (
         *base.facts.omissions,
@@ -506,7 +537,7 @@ def _dropped_omission(dropped: tuple[str, ...]) -> tuple[Omission, ...]:
 
 
 def _notes(
-    base: _Base, sel: DiffSelection | None, *, scrub: Callable[[str], str] = str
+    base: _Base, sel: DiffSelection | None, *, scrub: Callable[[str], str]
 ) -> tuple[str, ...]:
     return controller_notes(
         replace(base.facts, omissions=_omissions(base, sel, scrub=scrub)), scrub=scrub
@@ -514,7 +545,9 @@ def _notes(
 
 
 def _shared(base: _Base, sel: DiffSelection | None) -> _Shared:
-    text = render_evidence(base.evidence, _omissions(base, sel), base.links)
+    # The prompt's copy is not flag-scrubbed: the model is shown the diff
+    # unredacted (D33). The draft passes the flagged scrub instead.
+    text = render_evidence(base.evidence, _omissions(base, sel, scrub=str), base.links)
     evidence = UntrustedBlock("ci-and-runner-evidence", base.redactor(text))
     return _Shared(base.pull, evidence, base.issues)
 
@@ -538,7 +571,7 @@ def _requests(
 ) -> tuple[tuple[DiffPart, ReviewRequest], ...]:
     """One request per part, in risk order. An empty but fetched diff still
     gets one call."""
-    shared, notes = _shared(base, sel), _notes(base, sel)
+    shared, notes = _shared(base, sel), _notes(base, sel, scrub=str)
     parts = sel.parts or (DiffPart(()),)
     plan = base.facts.lenses
 
@@ -573,9 +606,10 @@ def _fetch_diff(
             deps.github.get_pull(event.repo, event.pr_number), deps.redactor
         )
     except BoundaryError as exc:
+        redact = lambda text: deps.redactor(text).text
         collected.notes.append(
-            f"The PR diff could not be fetched, so no model call was made "
-            f"(error, quoted: {quote_untrusted(str(exc))})."
+            "The PR diff could not be fetched, so no model call was made "
+            f"(error, quoted: {quote_untrusted(str(exc), scrub=redact)})."
         )
         collected.omit(
             "pull request diff", "fetch failed", "not fetched; nothing was reviewed"
@@ -584,7 +618,13 @@ def _fetch_diff(
     if after.head_sha != event.head_sha:
         _no_diff(collected, "the PR head moved while the diff was fetched")
         return None
-    return _Fetched(raw, diff_paths(raw), scan_diff(raw), after.changed_files)
+    return _Fetched(
+        raw,
+        diff_paths(raw),
+        scan_diff(raw),
+        after.changed_files,
+        pull.changed_files,
+    )
 
 
 def _listed(paths: tuple[str, ...]) -> str:
@@ -613,7 +653,7 @@ def _select_lenses(
     config: ReviewConfig,
     telemetry: Telemetry,
     *,
-    scrub: Callable[[str], str] = str,
+    scrub: Callable[[str], str],
 ) -> LensSelection:
     """The picker gets a call only when one is left for at least one diff part,
     and `select_lenses` skips it when no picked lens could fit; an unspent
@@ -634,7 +674,7 @@ def _pick_lenses(
     config: ReviewConfig,
     telemetry: Telemetry,
     *,
-    scrub: Callable[[str], str] = str,
+    scrub: Callable[[str], str],
 ) -> LensSelection:
     if diff is None:
         return LensSelection((), "", used_call=False, skipped="no diff to pick for")
@@ -683,7 +723,7 @@ def _fit(
 
 
 def _selection_omission(
-    sel: DiffSelection | None, *, scrub: Callable[[str], str] = str
+    sel: DiffSelection | None, *, scrub: Callable[[str], str]
 ) -> tuple[Omission, ...]:
     if sel is None or sel.complete:
         return ()
@@ -694,7 +734,7 @@ def _selection_omission(
     return (Omission("pull request diff", limit, _selection_detail(sel, scrub=scrub)),)
 
 
-def _selection_detail(sel: DiffSelection, *, scrub: Callable[[str], str] = str) -> str:
+def _selection_detail(sel: DiffSelection, *, scrub: Callable[[str], str]) -> str:
     cut = ", ".join(
         f"{f.path} (kept {f.shown_chars} of {f.full_chars} characters)" for f in sel.cut
     )
@@ -710,9 +750,7 @@ def _selection_detail(sel: DiffSelection, *, scrub: Callable[[str], str] = str) 
     return "; ".join(p for p in parts if p)
 
 
-def _unseen_detail(
-    unseen: tuple[FileDiff, ...], *, scrub: Callable[[str], str] = str
-) -> str:
+def _unseen_detail(unseen: tuple[FileDiff, ...], *, scrub: Callable[[str], str]) -> str:
     if not unseen:
         return ""
     listed = describe_by_risk(unseen, MAX_LISTED_PATHS, scrub=scrub)
@@ -737,7 +775,7 @@ def _issue_blocks(
     config: ReviewConfig,
     collected: Collected,
     *,
-    scrub: Callable[[str], str] = str,
+    scrub: Callable[[str], str],
 ) -> list[UntrustedBlock]:
     if not config.include_issues:
         collected.notes.append("Issue context: off (opt in with `--include-issues`).")
@@ -754,7 +792,7 @@ def _issue_block(
     deps: Deps,
     collected: Collected,
     *,
-    scrub: Callable[[str], str] = str,
+    scrub: Callable[[str], str],
 ) -> UntrustedBlock | None:
     try:
         issue = deps.github.get_issue(event.repo, number)
@@ -792,8 +830,10 @@ def _narrate_parts(
 
 def _part_note(index: int, total: int, part: DiffPart, sel: DiffSelection) -> str:
     """File paths are chosen by the PR author, so each is quoted as data."""
+    # Prompt text, not the draft: the model still sees the path (D33).
     files = ", ".join(
-        f"{quote_untrusted(f.path)}{' (cut)' if f.cut else ''}" for f in part.files
+        f"{quote_untrusted(f.path, scrub=str)}{' (cut)' if f.cut else ''}"
+        for f in part.files
     )
     others = (
         f" The other {total - 1} part(s) go to separate model calls; this call cannot see them."
@@ -834,6 +874,13 @@ def _narrate_part(
     return PartNarrative(index, total, part.files, result)
 
 
+def _counted_files(sel: DiffSelection, dropped: tuple[str, ...]) -> int:
+    """Changed files the notes count: parsed headers, not a preamble."""
+    in_parts = sum(1 for p in sel.parts for f in p.files if f.path != UNPARSED_PATH)
+    unseen = sum(1 for f in sel.unseen if f.path != UNPARSED_PATH)
+    return in_parts + unseen + len(dropped)
+
+
 def _coverage_lines(
     sel: DiffSelection | None,
     parts: tuple[PartNarrative, ...],
@@ -847,16 +894,16 @@ def _coverage_lines(
                 "not be tied to the event SHA, and no model call was made."
             ),
         )
-    if coverage is not None and coverage.unknown:
-        return (
-            (
-                "Diff coverage: NOT REVIEWED. File coverage could not be determined "
-                f"({coverage.unknown}), so it counts as incomplete."
-            ),
-        )
     reviewed = [p for p in parts if p.reviewed]
-    full = sum(1 for p in reviewed for f in p.files if not f.cut)
-    cut = sum(1 for p in reviewed for f in p.files if f.cut)
+    full = sum(
+        1 for p in reviewed for f in p.files if not f.cut and f.path != UNPARSED_PATH
+    )
+    cut = sum(1 for p in reviewed for f in p.files if f.cut and f.path != UNPARSED_PATH)
+    changed_files = _counted_files(sel, dropped)
+    real_cut = tuple(f for f in sel.cut if f.path != UNPARSED_PATH)
+    real_unseen = tuple(f for f in sel.unseen if f.path != UNPARSED_PATH)
+    unseen = len(real_unseen) + len(dropped)
+    files_complete = not real_unseen and not real_cut and not dropped
     if reviewed and all(p.simulated for p in reviewed):
         line = (
             "Diff coverage: NOT REVIEWED. The offline provider built the prompt(s) "
@@ -864,13 +911,18 @@ def _coverage_lines(
             "reviewed the diff."
         )
     else:
-        complete = sel.complete and not dropped and len(reviewed) == len(parts)
+        complete = files_complete and len(reviewed) == len(parts)
         verdict = "complete" if complete else "PARTIAL"
         line = (
             f"Diff coverage after the model calls: {verdict}. {len(reviewed)} of "
             f"{len(parts)} call(s) returned a review, covering {full} of "
-            f"{sel.total_files + len(dropped)} file(s) in full and {cut} cut to fit; "
-            f"{len(sel.unseen) + len(dropped)} file(s) went to no call."
+            f"{changed_files} file(s) in full and {cut} cut to fit; "
+            f"{unseen} file(s) went to no call."
+        )
+    if coverage is not None and coverage.unknown:
+        line += (
+            " File coverage could not be determined "
+            f"({coverage.unknown}), so it counts as incomplete."
         )
     too_large = (
         "The diff is too large for one review pass: the files cut and the files "
@@ -882,26 +934,37 @@ def _coverage_lines(
     )
     return (
         line,
-        *(() if sel.complete else (too_large,)),
+        *(() if files_complete else (too_large,)),
         *((removed,) if dropped else ()),
     )
 
 
+def _sent_files(part: PartNarrative) -> tuple[FileDiff, ...]:
+    """Files the omission counts. A preamble is not one when the part also
+    holds real files; a header-less diff is only the preamble, so it stays."""
+    real = tuple(f for f in part.files if f.path != UNPARSED_PATH)
+    return real or part.files
+
+
 def _unreviewed_parts(
-    parts: tuple[PartNarrative, ...], *, scrub: Callable[[str], str] = str
+    parts: tuple[PartNarrative, ...], *, scrub: Callable[[str], str]
 ) -> tuple[Omission, ...]:
-    return tuple(
-        Omission(
-            f"pull request diff, part {p.index} of {p.total}",
-            "offline provider (no model call)"
-            if p.simulated
-            else "model call returned no review",
-            f"{len(p.files)} file(s) sent but not reviewed: "
-            f"{describe_by_risk(p.files, MAX_LISTED_PATHS, scrub=scrub) or 'none'}",
+    rows = []
+    for p in parts:
+        if p.model_reviewed:
+            continue
+        files = _sent_files(p)
+        rows.append(
+            Omission(
+                f"pull request diff, part {p.index} of {p.total}",
+                "offline provider (no model call)"
+                if p.simulated
+                else "model call returned no review",
+                f"{len(files)} file(s) sent but not reviewed: "
+                f"{describe_by_risk(files, MAX_LISTED_PATHS, scrub=scrub) or 'none'}",
+            )
         )
-        for p in parts
-        if not p.model_reviewed
-    )
+    return tuple(rows)
 
 
 def _redaction_total(pull: PullInfo, items: list[EvidenceItem], shared: _Shared) -> int:

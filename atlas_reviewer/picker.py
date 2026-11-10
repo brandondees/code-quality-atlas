@@ -133,7 +133,7 @@ def select_lenses(
     library: LensLibrary,
     budget_chars: int = LENS_BUDGET_CHARS,
     *,
-    scrub: Callable[[str], str] = str,
+    scrub: Callable[[str], str],
 ) -> LensSelection:
     """`run_picker` makes the picker's model call; None means no call is
     available for it. The call is also skipped when no lens outside the

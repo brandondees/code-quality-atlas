@@ -329,7 +329,7 @@ def _place(acc: _Packing, f: FileDiff, max_parts: int, budget: int) -> _Packing:
 
 
 def describe_by_risk(
-    files: tuple[FileDiff, ...], limit: int, *, scrub: Callable[[str], str] = str
+    files: tuple[FileDiff, ...], limit: int, *, scrub: Callable[[str], str]
 ) -> str:
     """`[tier] "path", "path"; [tier] "path"` for the first `limit` files in
     risk order, then a count of the rest. Paths are chosen by the PR author,

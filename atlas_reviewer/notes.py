@@ -55,7 +55,7 @@ class ControllerFacts:
 
 
 def controller_notes(
-    facts: ControllerFacts, *, scrub: Callable[[str], str] = str
+    facts: ControllerFacts, *, scrub: Callable[[str], str]
 ) -> tuple[str, ...]:
     return (
         *_runner_lines(facts.runner, scrub=scrub),
@@ -66,7 +66,7 @@ def controller_notes(
     )
 
 
-def _runner_lines(r: RunnerReport, *, scrub: Callable[[str], str] = str) -> list[str]:
+def _runner_lines(r: RunnerReport, *, scrub: Callable[[str], str]) -> list[str]:
     name = f"`{r.runner_name}`" if r.runner_name else "(none)"
     lines = [f"Runner {name}: status {r.status.value}; {CLEANUP_SENTENCE[r.cleanup]}."]
     if r.status is not RunnerStatus.COMPLETED:
@@ -77,9 +77,7 @@ def _runner_lines(r: RunnerReport, *, scrub: Callable[[str], str] = str) -> list
     return lines
 
 
-def _tool_lines(
-    facts: ControllerFacts, *, scrub: Callable[[str], str] = str
-) -> list[str]:
+def _tool_lines(facts: ControllerFacts, *, scrub: Callable[[str], str]) -> list[str]:
     attempted = {r.tool.name for r in facts.tool_results}
     lines = [_tool_line(r, scrub=scrub) for r in facts.tool_results]
     lines += [
@@ -90,7 +88,7 @@ def _tool_lines(
     return lines or ["No review tools were configured."]
 
 
-def _tool_line(result: ToolResult, *, scrub: Callable[[str], str] = str) -> str:
+def _tool_line(result: ToolResult, *, scrub: Callable[[str], str]) -> str:
     match result:
         case ToolRan(tool=tool, version=version, exit_code=code):
             exit_text = "no exit code reported" if code is None else f"exit {code}"
@@ -107,7 +105,7 @@ def _tool_line(result: ToolResult, *, scrub: Callable[[str], str] = str) -> str:
 
 
 def _omission_line(
-    omissions: Sequence[Omission], *, scrub: Callable[[str], str] = str
+    omissions: Sequence[Omission], *, scrub: Callable[[str], str]
 ) -> str:
     if not omissions:
         return "Omissions and limits hit: none."
@@ -130,7 +128,7 @@ MARKUP_OPEN = re.compile(r"<(?=[!?/A-Za-z])")
 
 
 def quote_untrusted(
-    text: str, limit: int = MAX_QUOTED_CHARS, *, scrub: Callable[[str], str] = str
+    text: str, limit: int = MAX_QUOTED_CHARS, *, scrub: Callable[[str], str]
 ) -> str:
     """`text` as one inert code span: scrubbed, whitespace collapsed, cut
     to `limit` characters, JSON-escaped (no control characters or bare

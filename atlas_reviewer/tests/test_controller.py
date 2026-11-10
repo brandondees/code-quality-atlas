@@ -1038,12 +1038,12 @@ def test_quoted_values_are_one_inert_capped_code_span():
     from atlas_reviewer.notes import quote_untrusted
 
     assert (
-        quote_untrusted('a\n\tb "c" `d` \x1b')
+        quote_untrusted('a\n\tb "c" `d` \x1b', scrub=str)
         == '`"a b \\"c\\" \\u0060d\\u0060 \\u001b"`'
     )
-    long = quote_untrusted("x" * 500)
+    long = quote_untrusted("x" * 500, scrub=str)
     assert long == '`"' + "x" * 200 + '..."`'
-    assert quote_untrusted("") == '`""`'
+    assert quote_untrusted("", scrub=str) == '`""`'
 
 
 # --- diff parts sized to the token bound -------------------------------------
@@ -1445,18 +1445,24 @@ def test_a_changed_file_count_that_moves_during_the_fetch_blocks_approval():
     assert len(set(github.shas)) == 1
     status = status_of(draft)
     assert (status["review_event"], status["coverage_complete"]) == ("COMMENT", False)
-    assert "the diff names 2 file(s) but GitHub reports 3 changed" in top_of(draft)
+    assert (
+        "GitHub's changed-file count moved from 2 to 3 between the two pull reads "
+        "while the head SHA stayed the same; the diff names 2 file(s)"
+    ) in top_of(draft)
+    assert "the diff names 2 file(s) but GitHub reports 3 changed" not in draft
     assert "head moved" not in draft
 
 
-def test_unknown_coverage_is_never_called_complete_in_the_notes():
+def test_unknown_coverage_keeps_the_call_stats_and_its_label():
     draft = approving(github=with_diff(sized_diff(2, 40), changed_files=3).github).run()
     notes = section(draft, "Controller notes")
-    assert "Diff coverage after the model calls: complete" not in notes
     assert (
-        "Diff coverage: NOT REVIEWED. File coverage could not be determined "
-        "(the diff names 2 file(s) but GitHub reports 3 changed)"
+        "Diff coverage after the model calls: complete. 1 of 1 call(s) returned "
+        "a review, covering 2 of 2 file(s) in full and 0 cut to fit; 0 file(s) "
+        "went to no call. File coverage could not be determined (the diff names "
+        "2 file(s) but GitHub reports 3 changed), so it counts as incomplete."
     ) in notes
+    assert "Diff coverage: NOT REVIEWED" not in notes
 
 
 def test_a_diff_preamble_does_not_add_a_phantom_changed_file():
@@ -1466,6 +1472,19 @@ def test_a_diff_preamble_does_not_add_a_phantom_changed_file():
     assert status["changed_files"] == 2
     assert status["unreviewed_files"] == 0
     assert (status["review_event"], status["coverage_complete"]) == ("APPROVE", True)
+    notes = section(draft, "Controller notes")
+    assert "covering 2 of 2 file(s) in full" in notes
+    assert "of 3 file(s)" not in notes
+    assert "(diff text without file headers)" not in draft
+
+
+def test_a_preamble_is_not_an_unreviewed_file_when_the_review_fails():
+    body = "stray preamble\n" + sized_diff(2, 40)
+    draft = Setup(provider=OfflineProvider(), github=with_diff(body).github).run()
+    top = top_of(draft)
+    assert "2 of 2 changed file(s)" in top
+    assert "3 of 2" not in top
+    assert "(diff text without file headers)" not in draft
 
 
 def test_a_missing_github_file_count_blocks_approval():
@@ -1594,8 +1613,8 @@ def test_a_planned_part_with_no_narrative_counts_as_unreviewed():
     from atlas_reviewer.controller import _file_coverage
 
     sel, parts = two_parts()
-    assert _file_coverage(sel, parts, (), listed=2, changed=2).complete
-    coverage = _file_coverage(sel, parts[:1], (), listed=2, changed=2)
+    assert _file_coverage(sel, parts, (), listed=2, changed=2, prior=2).complete
+    coverage = _file_coverage(sel, parts[:1], (), listed=2, changed=2, prior=2)
     assert not coverage.complete
     assert gaps(coverage) == [("src/m1.py", "its diff part was never sent")]
 
@@ -1604,7 +1623,9 @@ def test_a_file_dropped_before_the_calls_counts_as_unreviewed():
     from atlas_reviewer.controller import _file_coverage
 
     sel, parts = two_parts()
-    coverage = _file_coverage(sel, parts, ("src/gone.py",), listed=3, changed=3)
+    coverage = _file_coverage(
+        sel, parts, ("src/gone.py",), listed=3, changed=3, prior=3
+    )
     assert (coverage.changed, coverage.complete) == (3, False)
     assert gaps(coverage) == [("src/gone.py", "dropped before any model call")]
 
@@ -1637,6 +1658,100 @@ def test_a_flagged_value_is_scrubbed_before_it_is_encoded(value):
     assert "[REDACTED:possible-committed-secret]" in section(
         draft, "Omissions and limits hit"
     )
+
+
+MARKUP_VALUES = ("sek|retAA", "sek\\retAA", "sek`retAA")
+
+
+def _exact_scrub(value):
+    def scrub(text):
+        return text.replace(value, "[REDACTED:possible-committed-secret]")
+
+    return scrub
+
+
+def _assert_quoted_scrub(text, value):
+    assert value not in text
+    assert value.replace("\\", "\\\\").replace("|", "\\|") not in text
+    assert value.replace("`", "\\u0060") not in text
+    assert "[REDACTED:possible-committed-secret]" in text
+
+
+@pytest.mark.parametrize("value", MARKUP_VALUES)
+def test_an_issue_fetch_error_is_scrubbed_before_it_is_quoted(value):
+    from dataclasses import replace
+
+    from atlas_reviewer.controller import _issue_block
+    from atlas_reviewer.gather import Collected
+
+    class Broken(FixtureGitHub):
+        def get_issue(self, repo, number):
+            raise BoundaryError(value)
+
+    collected = Collected()
+    block = _issue_block(
+        EVENT,
+        7,
+        replace(Setup().deps, github=Broken(FIXTURE)),
+        collected,
+        scrub=_exact_scrub(value),
+    )
+    assert block is None
+    _assert_quoted_scrub("\n".join(collected.notes), value)
+
+
+@pytest.mark.parametrize("value", MARKUP_VALUES)
+def test_a_lens_selection_error_is_scrubbed_before_it_is_quoted(value):
+    from dataclasses import replace
+
+    from atlas_reviewer.committed_secrets import scan_diff
+    from atlas_reviewer.controller import _Fetched, _select_lenses
+    from atlas_reviewer.evidence import PullInfo
+    from atlas_reviewer.redact import redact
+    from atlas_reviewer.telemetry import Telemetry
+
+    class Boom:
+        def pick(self, request):
+            raise BoundaryError(value)
+
+    deps = replace(Setup(lenses=ROOMY).deps, harness=Boom())
+    pull = PullInfo(HEAD, "ref", redact("title"), redact(""), ())
+    diff = _Fetched("diff --git a/a.py b/a.py\n", ("a.py",), scan_diff(""), 1, 1)
+    chosen = _select_lenses(
+        EVENT,
+        pull,
+        diff,
+        deps,
+        ReviewConfig(model_calls=2),
+        Telemetry(FakeClock()),
+        scrub=_exact_scrub(value),
+    )
+    _assert_quoted_scrub(chosen.note, value)
+
+
+@pytest.mark.parametrize("value", MARKUP_VALUES)
+def test_a_diff_fetch_error_is_scrubbed_before_it_is_quoted(value, monkeypatch):
+    from atlas_reviewer import controller as controller_mod
+
+    seen = {}
+    real = controller_mod.render_draft
+
+    def capture(draft, scrub):
+        seen["notes"] = draft.controller_notes
+        return real(draft, scrub)
+
+    monkeypatch.setattr(controller_mod, "render_draft", capture)
+
+    class SecretError(FixtureGitHub):
+        def get_pull_diff(self, repo, number):
+            raise BoundaryError(f'password = "{value}"')
+
+    Setup(github=SecretError(FIXTURE)).run()
+    notes = "\n".join(seen["notes"])
+    assert value not in notes
+    assert value.replace("\\", "\\\\").replace("|", "\\|") not in notes
+    assert value.replace("`", "\\u0060") not in notes
+    assert "[REDACTED:assignment]" in notes
 
 
 def test_the_offline_provider_never_approves():

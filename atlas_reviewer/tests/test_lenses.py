@@ -87,7 +87,7 @@ def test_nothing_selected_says_so():
 def _bundle_plan(depth, reply=None):
     library = LensLibrary()
     run = None if reply is None else (lambda: json.dumps({"lenses": reply}))
-    chosen = select_lenses(depth, run, library)
+    chosen = select_lenses(depth, run, library, scrub=str)
     return plan_lenses(library, chosen.choices, depth.limit)
 
 

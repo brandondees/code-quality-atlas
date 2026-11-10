@@ -100,8 +100,11 @@ MAX_WARNED_PATHS = 100
 # Set for the duration of render_draft. Encoding reads it so a flagged
 # value is removed before `_cell` or a narrative line rewrites the
 # characters a later exact-text scrub would look for.
+# No identity default: a cell encoded outside render_draft has no scrub to
+# apply, and publishing the value unchanged is the failure this exists to
+# prevent. render_draft sets the scrub for the duration of the render.
 _scrubber: contextvars.ContextVar[Callable[[str], str]] = contextvars.ContextVar(
-    "draft_scrub", default=str
+    "draft_scrub"
 )
 
 
@@ -400,17 +403,25 @@ def render_evidence(
     links: tuple[Link, ...] = (),
 ) -> str:
     """The grouped checks, evidence tables, omissions, and each head-SHA
-    item's (redacted) detail text."""
-    details = "\n\n".join(
-        f"### {m.item.provenance.source_id}\n{m.item.detail.text}"
-        for m in sorted((e for e in evidence if isinstance(e, Matched)), key=_sort_key)
-        if m.item.detail.text
-    )
-    return (
-        f"{_checks(evidence, links)}\n\n"
-        f"{_at_head(evidence)}\n\n{_unknowns(evidence)}\n\n{_omissions(omissions)}"
-        f"\n\n## Details\n\n{details or 'None.'}"
-    )
+    item's (redacted) detail text. This is the prompt's copy, which is not
+    flag-scrubbed (D33), so the encoding scrub here is the identity. The
+    draft sets its own scrub in render_draft."""
+    token = _scrubber.set(str)
+    try:
+        details = "\n\n".join(
+            f"### {m.item.provenance.source_id}\n{m.item.detail.text}"
+            for m in sorted(
+                (e for e in evidence if isinstance(e, Matched)), key=_sort_key
+            )
+            if m.item.detail.text
+        )
+        return (
+            f"{_checks(evidence, links)}\n\n"
+            f"{_at_head(evidence)}\n\n{_unknowns(evidence)}\n\n{_omissions(omissions)}"
+            f"\n\n## Details\n\n{details or 'None.'}"
+        )
+    finally:
+        _scrubber.reset(token)
 
 
 def telemetry_section(events: tuple[Event, ...]) -> str:
