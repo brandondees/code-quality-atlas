@@ -25,7 +25,10 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 from atlas_reviewer.bridge_args import Rev
-from atlas_reviewer.guest_unpack import unpack_refusal, unpack_script
+from atlas_reviewer.guest_unpack import (
+    unpack_refusal,
+    unpack_script,
+)
 from atlas_reviewer.ports import BoundaryError, GitHubReader, Json
 from atlas_reviewer.runner import (
     GUEST_TAIL_CHARS,
@@ -42,8 +45,6 @@ BRIDGE_ROOT = "/work/bridge"
 GIT_PATHS = ("/usr/bin/git", "/bin/git")
 GIT_TAG = "atlas-git"
 STAGED_TAG = "atlas-staged"
-EXTRACT_TIMEOUT_S = 60
-KILL_AFTER_S = 2
 _SHA = re.compile(r"[0-9a-f]{40}")
 
 # Fixed git options: no hooks, no fsmonitor, no pager, no transport, no
@@ -226,7 +227,6 @@ def _commit_steps(root: str, g: str, rev: Rev, unpack: UnpackLimits) -> tuple[st
             f"{root}/trees/{name}",
             "--strip-components=1 --no-same-owner --no-same-permissions",
             unpack,
-            timeout=f"timeout -k {KILL_AFTER_S} {EXTRACT_TIMEOUT_S} ",
         ),
         f"rm -f {name}.tar.gz",
         f"(cd {tree} && {index} {g} --work-tree=. add -A -f .)",

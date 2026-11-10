@@ -42,7 +42,6 @@ from atlas_reviewer.bridge_staging import (
     BRIDGE_ROOT,
     GIT_ENV,
     GIT_OPTIONS,
-    KILL_AFTER_S,
     SourceTrees,
     Staged,
     check_sizes,
@@ -50,6 +49,7 @@ from atlas_reviewer.bridge_staging import (
     stage,
 )
 from atlas_reviewer.domain import CleanupStatus, RunnerReport, RunnerStatus
+from atlas_reviewer.guest_unpack import KILL_AFTER_S
 from atlas_reviewer.ports import (
     BoundaryError,
     Clock,
