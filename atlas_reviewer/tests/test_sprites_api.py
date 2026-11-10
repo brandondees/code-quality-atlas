@@ -15,7 +15,7 @@ from atlas_reviewer.ports import BoundaryError, NotFoundError
 from atlas_reviewer.runner import DENY_ALL
 from atlas_reviewer.sprites_api import EXEC_STDIN_MAX_BYTES, SpritesClient, exec_request
 
-from .helpers import Recorder, fake_token, ok
+from .helpers import SOURCE_TARBALL, Recorder, fake_token, ok
 
 API_S = "https://api.sprites.dev"
 NAME = "cqa-rev-20261106-230000-abcdef"
@@ -228,7 +228,7 @@ def _review_over_http(tools, token="org/1/secret"):
     outcome = run_disposable(
         SpritesClient(server, token),
         MemoryLedger(),
-        RunnerJob(b"tarball", tools),
+        RunnerJob(SOURCE_TARBALL, tools),
         name=NAME,
         deadline_s=600.0,
         clock=SystemClock(),
@@ -311,7 +311,7 @@ def test_a_review_sends_each_exec_its_own_budget_not_the_30s_default():
         StreamWindow(135.0, FIRST_FRAME_BUDGET_S),
         StreamWindow(135.0, FIRST_FRAME_BUDGET_S),
     ]
-    assert [s[3] for s in server.streams][:3] == [b"", b"", b"tarball"]
+    assert [s[3] for s in server.streams][:3] == [b"", b"", SOURCE_TARBALL]
     assert {r[2] for r in server.requests} == {StreamWindow(30.0)}
 
 

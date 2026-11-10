@@ -39,7 +39,7 @@ from atlas_reviewer.runner import (
 )
 from atlas_reviewer.telemetry import Telemetry
 
-from .helpers import FakeClock
+from .helpers import SOURCE_TARBALL, FakeClock
 
 NAME = "cqa-rev-20261107-120000-abc123"
 RULES = (
@@ -54,7 +54,7 @@ RULES = (
 def review(api, tools=DEFAULT_TOOLS, diagnose=False):
     telemetry = Telemetry(FakeClock())
     outcome = run_disposable(
-        api, MemoryLedger(), RunnerJob(b"tarball", tools, diagnose=diagnose),
+        api, MemoryLedger(), RunnerJob(SOURCE_TARBALL, tools, diagnose=diagnose),
         name=NAME, deadline_s=600.0, clock=FakeClock(), telemetry=telemetry,
     )  # fmt: skip
     return outcome, telemetry.events

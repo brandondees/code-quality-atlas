@@ -5,6 +5,7 @@ staging script, the git hardening and the output caps are exercised
 against a fixture repository built here. No Sprite or GitHub call is made."""
 
 import base64
+import gzip
 import io
 import json
 import subprocess
@@ -34,6 +35,7 @@ from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.ports import BoundaryError, StreamTimeoutError
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import MAX_TARBALL_BYTES
+from atlas_reviewer.source_archive import MAX_UNPACKED_BYTES
 from atlas_reviewer.telemetry import Telemetry
 
 from .helpers import FIXTURE, HEAD, OLD, FakeClock, fake_token
@@ -568,6 +570,19 @@ def test_an_oversized_tree_is_refused_before_a_runner_exists(tmp_path):
     assert "BASE is" in report.note
     assert sprites.calls == []
     assert any(e.step == "size check" for e in telemetry.events)
+
+
+def test_a_tree_that_would_unpack_past_the_cap_is_refused_before_a_runner(tmp_path):
+    bomb = tarfile.TarInfo("top/big")
+    bomb.size = MAX_UNPACKED_BYTES + 1
+    source = SourceTrees(tarball(BASE_FILES), gzip.compress(bomb.tobuf()), OLD, HEAD)
+    report, sprites, _ = bridge_run(tmp_path, lambda b: "unreached", source=source)
+    assert (report.status, report.cleanup) == (
+        RunnerStatus.FAILED,
+        CleanupStatus.NOT_CREATED,
+    )
+    assert "HEAD is refused: source archive unpacks to over" in report.note
+    assert sprites.calls == []
 
 
 def test_limits_must_be_positive_integers():

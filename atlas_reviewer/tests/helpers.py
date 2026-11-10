@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
+import io
 import json
+import tarfile
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -20,6 +22,20 @@ FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "sample-pr"
 HEAD = "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4"
 OLD = "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a291807"
 NOW = datetime(2026, 11, 6, 23, 0, tzinfo=UTC)
+
+
+def source_tarball(files: dict[str, bytes] | None = None, top: str = "src") -> bytes:
+    """A real gzip tar with one top-level directory, as GitHub serves."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for path, data in (files or {"app.py": b"print('ok')\n"}).items():
+            info = tarfile.TarInfo(f"{top}/{path}")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
+SOURCE_TARBALL = source_tarball()
 
 
 class FakeClock:

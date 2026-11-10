@@ -8,6 +8,8 @@ bounded by the client's own window (`sprites_api`, 30s by default), and
 all of a runner's cleanup by `CLEANUP_BUDGET_S` from its first destroy, so
 cleanup ends at most that plus one call window after it starts:
 
+0. refuse a source archive the exec stdin cannot carry, or one that is
+   unreadable or unpacks past its size or member cap (`source_archive`)
 1. record the runner name in the ledger (before anything exists remotely)
 2. create a fresh Sprite -- never reuse one: guests can restore checkpoints
    and create Tasks, so a used Sprite is contaminated
@@ -91,6 +93,7 @@ from atlas_reviewer.ports import (
     SpritesApi,
     StreamTimeoutError,
 )
+from atlas_reviewer.source_archive import DEFAULT_UNPACK, UnpackLimits, measure
 from atlas_reviewer.sprites_api import EXEC_STDIN_MAX_BYTES
 from atlas_reviewer.telemetry import ERROR, Fields, Telemetry
 
@@ -216,6 +219,23 @@ class RunnerJob:
     source_tarball: bytes
     tools: tuple[ToolSpec, ...]
     diagnose: bool = False
+    unpack: UnpackLimits = DEFAULT_UNPACK
+
+
+def refused_archive(data: bytes, limits: UnpackLimits = DEFAULT_UNPACK) -> str | None:
+    """Why a source archive may not go to a runner, or None: over the exec
+    stdin it is uploaded through, unreadable, or past an unpack cap
+    (`source_archive.measure`)."""
+    if len(data) > EXEC_STDIN_MAX_BYTES:
+        return (
+            f"source archive is {len(data)} bytes, over the {EXEC_STDIN_MAX_BYTES}-byte "
+            "limit of the exec stdin it is uploaded through"
+        )
+    try:
+        measure(data, limits)
+    except BoundaryError as exc:
+        return str(exc)
+    return None
 
 
 @dataclass(frozen=True)
@@ -728,15 +748,14 @@ def run_disposable(
     first_frame_s: float = FIRST_FRAME_BUDGET_S,
 ) -> RunnerOutcome:
     """The review's exec sequence: tool check, upload, unpack, then each
-    available tool. An archive the one-exec upload cannot carry is refused
-    before anything is created or recorded in the ledger."""
+    available tool. An archive the one-exec upload cannot carry, or one
+    that is unreadable or unpacks past `job.unpack`, is refused before
+    anything is created or recorded in the ledger."""
     telemetry = telemetry or Telemetry(clock)
     size = len(job.source_tarball)
-    if size > EXEC_STDIN_MAX_BYTES:
-        note = (
-            f"source archive is {size} bytes, over the {EXEC_STDIN_MAX_BYTES}-byte "
-            "limit of the exec stdin it is uploaded through; no runner was created"
-        )
+    refused = refused_archive(job.source_tarball, job.unpack)
+    if refused is not None:
+        note = f"{refused}; no runner was created"
         telemetry.record(
             "upload", "size check", {"bytes": size, "limit": EXEC_STDIN_MAX_BYTES},
             status=ERROR, error=note,

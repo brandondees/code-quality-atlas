@@ -33,7 +33,9 @@ from atlas_reviewer.runner import (
     VERSION_CHARS,
     Session,
     guest_text,
+    refused_archive,
 )
+from atlas_reviewer.source_archive import DEFAULT_UNPACK, UnpackLimits
 
 BRIDGE_ROOT = "/work/bridge"
 GIT_PATHS = ("/usr/bin/git", "/bin/git")
@@ -138,16 +140,27 @@ def parse_merge_base(data: Json) -> str:
     return sha
 
 
-def check_sizes(trees: SourceTrees, max_bytes: int = MAX_TARBALL_BYTES) -> None:
-    over = [
-        f"{rev} is {len(data)} bytes"
+def check_sizes(
+    trees: SourceTrees,
+    max_bytes: int = MAX_TARBALL_BYTES,
+    unpack: UnpackLimits = DEFAULT_UNPACK,
+) -> None:
+    """Every tree within the upload cap, readable and within the unpack
+    caps (`source_archive`), or `BoundaryError` naming each that is not."""
+    refused = [
+        f"{rev} {reason}"
         for rev, data in trees.staged()
-        if len(data) > max_bytes
+        if (reason := _refusal(data, max_bytes, unpack)) is not None
     ]
-    if over:
-        raise BoundaryError(
-            f"source tree over the {max_bytes}-byte upload cap: {'; '.join(over)}"
-        )
+    if refused:
+        raise BoundaryError(f"source tree refused: {'; '.join(refused)}")
+
+
+def _refusal(data: bytes, max_bytes: int, unpack: UnpackLimits) -> str | None:
+    if len(data) > max_bytes:
+        return f"is {len(data)} bytes, over the {max_bytes}-byte upload cap"
+    reason = refused_archive(data, unpack)
+    return None if reason is None else f"is refused: {reason}"
 
 
 def quote(value: str) -> str:

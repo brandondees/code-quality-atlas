@@ -15,7 +15,7 @@ from atlas_reviewer.interpreter import PYENV_VERSIONS, PYTHON_TAG
 from atlas_reviewer.ports import BoundaryError, NotFoundError
 from atlas_reviewer.runner import EGRESS_TAG
 
-from .helpers import FIXTURE, HEAD, FakeClock, fake_token
+from .helpers import FIXTURE, HEAD, SOURCE_TARBALL, FakeClock, fake_token
 
 EVENT = str(FIXTURE / "event.json")
 
@@ -886,7 +886,7 @@ def test_probe_runner_review_sequence_refuses_an_oversized_tarball(
 
 def test_probe_runner_review_sequence_reports_a_missing_tool(tmp_path):
     tarball = tmp_path / "checkout.tar.gz"
-    tarball.write_bytes(b"not really gzip")
+    tarball.write_bytes(SOURCE_TARBALL)
     api = FakeSprites.from_script(
         {"installed": [], "exec": [{"match": "tar -xzf", "stdout": "", "exit_code": 0}]}
     )
