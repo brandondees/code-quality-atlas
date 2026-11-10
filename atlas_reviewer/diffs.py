@@ -152,16 +152,28 @@ class DiffSelection:
 
 def diff_paths(diff: str) -> tuple[str, ...]:
     """New-side path of every file in the diff, in order."""
-    return tuple(path for path, _ in _sections(diff))
+    return tuple(f.path for f in _sections(diff))
 
 
-def _sections(diff: str) -> list[tuple[str, str]]:
+def _sections(diff: str) -> list[FileDiff]:
     headers = list(_HEADER.finditer(diff))
     ends = [h.start() for h in headers[1:]] + [len(diff)] * bool(headers)
     return [
-        (_section_path(h, diff[h.start() : end]), diff[h.start() : end])
+        _file(_section_path(h, text), text, _source_path(text))
         for h, end in zip(headers, ends, strict=True)
+        for text in (diff[h.start() : end],)
     ]
+
+
+def _meta_lines(text: str) -> list[str]:
+    """The extended header lines: after `diff --git`, before the first hunk."""
+    hunk = _HUNK_START.search(text)
+    return text[: hunk.start() if hunk else len(text)].split("\n")[1:]
+
+
+def _source_path(text: str) -> str | None:
+    """The old path of a rename, which is ranked as well as the new one."""
+    return _field(_meta_lines(text), "rename from ")
 
 
 def _section_path(header: re.Match[str], text: str) -> str:
@@ -170,8 +182,7 @@ def _section_path(header: re.Match[str], text: str) -> str:
     whose two sides are equal (always so for a deletion, whose `+++` line is
     /dev/null), and only then from splitting the header. Only lines before
     the first hunk are read."""
-    hunk = _HUNK_START.search(text)
-    lines = text[: hunk.start() if hunk else len(text)].split("\n")[1:]
+    lines = _meta_lines(text)
     new = _field(lines, "+++ ")
     if new is not None and new != "/dev/null":
         return new.removeprefix("b/")
@@ -218,13 +229,16 @@ def split_files(diff: str) -> tuple[FileDiff, ...]:
     diff with no headers at all) becomes one pseudo-file, so no input
     character is silently dropped."""
     first = _HEADER.search(diff)
-    files = [_file(path, text) for path, text in _sections(diff)]
+    files = _sections(diff)
     preamble = diff[: first.start()] if first else diff
     return tuple([_file(UNPARSED_PATH, preamble)] * bool(preamble.strip()) + files)
 
 
-def _file(path: str, text: str) -> FileDiff:
-    return FileDiff(path, text, len(text), risk_tier(path))
+def _file(path: str, text: str, source: str | None = None) -> FileDiff:
+    """A rename is as risky as the riskier of its two paths: moving
+    src/auth.py to docs/changelog.md still changes auth code."""
+    tiers = [risk_tier(p) for p in (path, source) if p is not None]
+    return FileDiff(path, text, len(text), min(tiers, key=lambda t: t.rank))
 
 
 def by_risk(files: tuple[FileDiff, ...]) -> tuple[FileDiff, ...]:

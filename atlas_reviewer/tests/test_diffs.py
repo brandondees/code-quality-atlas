@@ -71,6 +71,23 @@ def test_a_rename_takes_the_path_from_rename_to():
     assert diff_paths(edited) == (SPACED_B,)
 
 
+def test_a_rename_ranks_as_the_riskier_of_its_two_paths():
+    def renamed(old, new):
+        diff = (
+            f"diff --git a/{old} b/{new}\nsimilarity index 100%\n"
+            f"rename from {old}\nrename to {new}\n"
+        )
+        (f,) = split_files(diff)
+        return f.path, f.tier
+
+    assert renamed("src/auth.py", "docs/changelog.md") == (
+        "docs/changelog.md",
+        SECURITY,
+    )
+    assert renamed("docs/changelog.md", "src/auth.py") == ("src/auth.py", SECURITY)
+    assert renamed("docs/a.md", "docs/b.md") == ("docs/b.md", DOCS)
+
+
 def test_a_deleted_file_is_named_by_its_old_path():
     diff = (
         f"diff --git a/{SPACED_B} b/{SPACED_B}\ndeleted file mode 100644\n"
