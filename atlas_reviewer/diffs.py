@@ -328,13 +328,15 @@ def _place(acc: _Packing, f: FileDiff, max_parts: int, budget: int) -> _Packing:
     return replace(acc, parts=(*acc.parts, DiffPart((_fit(f, budget),))))
 
 
-def describe_by_risk(files: tuple[FileDiff, ...], limit: int) -> str:
+def describe_by_risk(
+    files: tuple[FileDiff, ...], limit: int, *, scrub: Callable[[str], str]
+) -> str:
     """`[tier] "path", "path"; [tier] "path"` for the first `limit` files in
     risk order, then a count of the rest. Paths are chosen by the PR author,
     so each is quoted as data."""
     shown = by_risk(files)[:limit]
     groups = (
-        (tier, [quote_untrusted(f.path) for f in shown if f.tier is tier])
+        (tier, [quote_untrusted(f.path, scrub=scrub) for f in shown if f.tier is tier])
         for tier in RISK_TIERS
     )
     listed = "; ".join(

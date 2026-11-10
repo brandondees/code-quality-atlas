@@ -84,14 +84,14 @@ def test_triage_runs_the_critical_tier_without_a_call():
     def never():
         raise AssertionError("triage must not call the picker")
 
-    chosen = select_lenses(Depth.TRIAGE, never, REAL)
+    chosen = select_lenses(Depth.TRIAGE, never, REAL, scrub=str)
     assert [c.name for c in chosen.choices] == list(CRITICAL_TIER)
     assert not chosen.used_call
     assert chosen.note.startswith("Lens selection: triage depth makes no picker call")
 
 
 def test_no_call_left_falls_back_to_the_critical_tier():
-    chosen = select_lenses(Depth.REVIEW, None, REAL)
+    chosen = select_lenses(Depth.REVIEW, None, REAL, scrub=str)
     assert [c.name for c in chosen.choices] == list(CRITICAL_TIER)
     assert not chosen.used_call
     assert "no model call is left for the lens picker" in chosen.note
@@ -102,7 +102,9 @@ def test_no_call_left_falls_back_to_the_critical_tier():
     [lambda: "not json", lambda: (_ for _ in ()).throw(BoundaryError("HTTP 529"))],
 )
 def test_a_failed_or_unusable_pick_runs_the_critical_tier_and_says_why(outcome):
-    chosen = select_lenses(Depth.REVIEW, outcome, small_bundle("checking-restraint"))
+    chosen = select_lenses(
+        Depth.REVIEW, outcome, small_bundle("checking-restraint"), scrub=str
+    )
     assert [c.name for c in chosen.choices] == list(CRITICAL_TIER)
     assert chosen.used_call
     assert 'gave no usable lens list (reason, quoted: `"' in chosen.note
@@ -114,6 +116,7 @@ def test_a_good_pick_runs_after_the_critical_tier_and_is_attributed():
         Depth.REVIEW,
         lambda: picks("checking-restraint", "sweeping-for-security"),
         small_bundle("checking-restraint"),
+        scrub=str,
     )
     assert [(c.name, c.why) for c in chosen.choices] == [
         ("tracing-correctness-and-invariants", "critical tier"),
@@ -133,7 +136,9 @@ def test_a_thin_pick_cannot_drop_the_critical_tier():
     """A valid but thin reply, e.g. one steered by injected PR text, adds
     lenses but never displaces the critical tier."""
     library = small_bundle("checking-restraint")
-    chosen = select_lenses(Depth.REVIEW, lambda: picks("checking-restraint"), library)
+    chosen = select_lenses(
+        Depth.REVIEW, lambda: picks("checking-restraint"), library, scrub=str
+    )
     names = [c.name for c in chosen.choices]
     assert names == [*CRITICAL_TIER, "checking-restraint"]
     plan = plan_lenses(library, chosen.choices, Depth.REVIEW.limit)
@@ -143,7 +148,9 @@ def test_a_thin_pick_cannot_drop_the_critical_tier():
 def test_names_past_the_breadth_are_not_run_and_body_less_names_take_no_slot():
     extras = [f"lens-{i}" for i in range(MAX_LENSES)]
     library = small_bundle(*extras)
-    chosen = select_lenses(Depth.REVIEW, lambda: picks("ghost", *extras), library)
+    chosen = select_lenses(
+        Depth.REVIEW, lambda: picks("ghost", *extras), library, scrub=str
+    )
     plan = plan_lenses(library, chosen.choices, Depth.REVIEW.limit)
     by = {u.name: u for u in plan.uses}
     room = MAX_LENSES - len(CRITICAL_TIER)
@@ -161,7 +168,10 @@ def test_names_past_the_breadth_are_not_run_and_body_less_names_take_no_slot():
 
 def test_a_pick_with_no_loadable_lens_runs_the_critical_tier():
     chosen = select_lenses(
-        Depth.REVIEW, lambda: picks("no-such-lens"), small_bundle("checking-restraint")
+        Depth.REVIEW,
+        lambda: picks("no-such-lens"),
+        small_bundle("checking-restraint"),
+        scrub=str,
     )
     assert [c.name for c in chosen.choices] == list(CRITICAL_TIER)
     assert chosen.used_call
@@ -180,7 +190,7 @@ def test_the_picker_is_not_called_when_no_other_real_lens_can_fit_whole():
     """With the real bundle the critical tier leaves less room than the
     smallest other lens needs, so a pick could not change what runs."""
     for depth in (Depth.REVIEW, Depth.COMPREHENSIVE):
-        chosen = select_lenses(depth, never, REAL)
+        chosen = select_lenses(depth, never, REAL, scrub=str)
         assert not chosen.used_call
         assert [c.name for c in chosen.choices] == list(CRITICAL_TIER)
         assert re.search(
@@ -198,21 +208,25 @@ def _sized(other_chars):
 
 def test_the_picker_is_called_when_another_lens_fits_exactly_in_what_is_left():
     chosen = select_lenses(
-        Depth.REVIEW, lambda: picks("checking-restraint"), _sized(200), 1_000
+        Depth.REVIEW,
+        lambda: picks("checking-restraint"),
+        _sized(200),
+        1_000,
+        scrub=str,
     )
     assert chosen.used_call
     assert [c.name for c in chosen.choices][-1] == "checking-restraint"
 
 
 def test_the_picker_is_skipped_when_every_other_lens_is_one_character_too_big():
-    chosen = select_lenses(Depth.REVIEW, never, _sized(201), 1_000)
+    chosen = select_lenses(Depth.REVIEW, never, _sized(201), 1_000, scrub=str)
     assert not chosen.used_call
     assert "leaves 200 of the 1000-character lens budget" in chosen.note
     assert "the smallest other lens is 201 characters" in chosen.note
 
 
 def test_the_picker_is_skipped_when_the_bundle_has_no_other_lens():
-    chosen = select_lenses(Depth.REVIEW, never, small_bundle())
+    chosen = select_lenses(Depth.REVIEW, never, small_bundle(), scrub=str)
     assert not chosen.used_call
     assert "the bundle has no other lens" in chosen.note
 
@@ -238,7 +252,7 @@ OVERCLAIM = re.compile(r"critical tier (ran|runs|always runs)|ran first|runs fir
 def test_no_selection_note_claims_the_critical_tier_ran(depth, run, library):
     """Half the real critical tier is NOT RUN, so a note may say it was
     considered first and point at the Lenses line, never that it ran."""
-    note = select_lenses(depth, run, library).note
+    note = select_lenses(depth, run, library, scrub=str).note
     assert not OVERCLAIM.search(note), note
     assert "considered" in note
     assert "the lenses line says which" in note.lower()
@@ -250,8 +264,36 @@ def test_deeply_nested_json_falls_back_to_the_critical_tier():
     pick and the critical tier, not an error escaping select_lenses."""
     nested = "[" * 10_000 + "]" * 10_000
     chosen = select_lenses(
-        Depth.REVIEW, lambda: nested, small_bundle("checking-restraint")
+        Depth.REVIEW,
+        lambda: nested,
+        small_bundle("checking-restraint"),
+        scrub=str,
     )
     assert [c.name for c in chosen.choices] == list(CRITICAL_TIER)
     assert chosen.used_call
     assert "gave no usable lens list" in chosen.note
+
+
+MARKUP_VALUES = ("sek|retAA", "sek\\retAA", "sek`retAA")
+
+
+def _scrub(value):
+    def scrub(text):
+        return text.replace(value, "[REDACTED:possible-committed-secret]")
+
+    return scrub
+
+
+@pytest.mark.parametrize("value", MARKUP_VALUES)
+def test_a_picker_error_is_scrubbed_before_it_is_quoted(value):
+    def fail():
+        raise BoundaryError(value)
+
+    chosen = select_lenses(
+        Depth.REVIEW, fail, small_bundle("checking-restraint"), scrub=_scrub(value)
+    )
+    note = chosen.note
+    assert value not in note
+    assert value.replace("\\", "\\\\").replace("|", "\\|") not in note
+    assert value.replace("`", "\\u0060") not in note
+    assert "[REDACTED:possible-committed-secret]" in note

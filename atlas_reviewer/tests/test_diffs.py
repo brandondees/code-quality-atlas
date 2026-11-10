@@ -260,18 +260,18 @@ def test_unseen_files_are_described_grouped_by_risk_with_a_count_of_the_rest():
     files = split_files(
         file_diff("docs/a.md") + file_diff("app/auth.py") + file_diff("tests/test_x.py")
     )
-    assert describe_by_risk(files, 10) == (
+    assert describe_by_risk(files, 10, scrub=str) == (
         '[security, auth, secrets and redaction] `"app/auth.py"`; '
         '[tests and fixtures] `"tests/test_x.py"`; [docs] `"docs/a.md"`'
     )
-    assert describe_by_risk(files, 1) == (
+    assert describe_by_risk(files, 1, scrub=str) == (
         '[security, auth, secrets and redaction] `"app/auth.py"`; and 2 more'
     )
 
 
 def test_described_paths_are_quoted_so_a_path_cannot_forge_a_tier_or_list():
     forged = "x; [tests and fixtures] all reviewed`; y.md"
-    described = describe_by_risk(split_files(file_diff(forged)), 10)
+    described = describe_by_risk(split_files(file_diff(forged)), 10, scrub=str)
     assert described == '[docs] `"x; [tests and fixtures] all reviewed\\u0060; y.md"`'
 
 

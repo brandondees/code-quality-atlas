@@ -438,14 +438,19 @@ Offline only, no live call made here.
 
 ### Partial file coverage blocks approval (D36)
 
-The code for this decision is not in this tree. It lands in step 7 (#606)
-and step 8 (#607).
+The rule's code is in this tree: `verdict.py`, and its wiring into the
+controller and the draft. The CLI's exit status and the README land in
+step 8 (#607).
 
 - **The rule.** If any changed file was not reviewed in full, or coverage
   cannot be determined, the review event is never APPROVE. The draft opens
   with a "REVIEW INCOMPLETE -- not approvable" warning naming those files,
   and its first line is a machine-readable status comment. The CLI's
-  `review` command exits 4. Lens NOT RUN status does not count.
+  `review` command exits 4 (from step 8). Lens NOT RUN status does not
+  count. Coverage cannot be determined when the diff was not fetched or
+  tied to the event SHA, when the fetched body names no file, or when its
+  file count differs from GitHub's `changed_files` on the pull read after
+  the diff fetch.
 - **Risk ranking.** Ranking is path-only, and risk-ordered packing can let a
   low-risk change in an important-sounding path crowd others out of review.
   Both are open as Q25 in [`open-questions.md`](../open-questions.md).

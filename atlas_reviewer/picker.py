@@ -95,6 +95,8 @@ class LensSelection:
     choices: tuple[LensChoice, ...]
     note: str
     used_call: bool
+    skipped: str = ""
+    """Why the picker was not called, when it was not."""
 
 
 def load_picker(path: Path = PICKER_PATH) -> str:
@@ -130,6 +132,8 @@ def select_lenses(
     run_picker: Callable[[], str] | None,
     library: LensLibrary,
     budget_chars: int = LENS_BUDGET_CHARS,
+    *,
+    scrub: Callable[[str], str],
 ) -> LensSelection:
     """`run_picker` makes the picker's model call; None means no call is
     available for it. The call is also skipped when no lens outside the
@@ -156,7 +160,7 @@ def select_lenses(
     except BoundaryError as exc:
         return _critical(
             "Lens selection: the lens picker gave no usable lens list (reason, "
-            f"quoted: {quote_untrusted(str(exc))})",
+            f"quoted: {quote_untrusted(str(exc), scrub=scrub)})",
             True,
         )
     if not any(has_body(n) for n in names):
@@ -222,4 +226,5 @@ def _critical(reason: str, used_call: bool) -> LensSelection:
         f"{', '.join(CRITICAL_TIER)}. The Lenses line says which of them ran "
         "whole and which are NOT RUN, and why."
     )
-    return LensSelection(choices, note, used_call)
+    skipped = "" if used_call else reason.removeprefix("Lens selection: ")
+    return LensSelection(choices, note, used_call, skipped)
