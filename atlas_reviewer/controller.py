@@ -989,9 +989,12 @@ def _coverage_lines(
         )
     else:
         complete = files_complete and len(reviewed) == len(parts)
-        verdict = "complete" if complete else "PARTIAL"
+        # Coverage that could not be determined is never called complete;
+        # the reason follows the call stats instead of a label.
+        unknown = coverage is not None and bool(coverage.unknown)
+        label = "PARTIAL. " if not complete else ("" if unknown else "complete. ")
         line = (
-            f"Diff coverage after the model calls: {verdict}. {len(reviewed)} of "
+            f"Diff coverage after the model calls: {label}{len(reviewed)} of "
             f"{len(parts)} call(s) returned a review, covering {full} of "
             f"{changed_files} file(s) in full and {cut} cut to fit; "
             f"{unseen} file(s) went to no call."

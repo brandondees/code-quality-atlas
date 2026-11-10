@@ -1456,11 +1456,12 @@ def test_a_changed_file_count_that_moves_during_the_fetch_blocks_approval():
     assert "head moved" not in draft
 
 
-def test_unknown_coverage_keeps_the_call_stats_and_its_label():
+def test_unknown_coverage_keeps_the_call_stats_and_is_never_called_complete():
     draft = approving(github=with_diff(sized_diff(2, 40), changed_files=3).github).run()
     notes = section(draft, "Controller notes")
+    assert "calls: complete" not in notes
     assert (
-        "Diff coverage after the model calls: complete. 1 of 1 call(s) returned "
+        "Diff coverage after the model calls: 1 of 1 call(s) returned "
         "a review, covering 2 of 2 file(s) in full and 0 cut to fit; 0 file(s) "
         "went to no call. File coverage could not be determined (the diff names "
         "2 file(s) but GitHub reports 3 changed), so it counts as incomplete."

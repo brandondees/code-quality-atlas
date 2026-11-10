@@ -420,7 +420,8 @@ account for gets a `dropped before the model calls` row and makes coverage
 PARTIAL. After the calls, a controller note states whether coverage is
 complete or PARTIAL and how many files each outcome covers. Nothing short of
 every file sent in full with every call returning a review is called
-complete.
+complete, and neither is coverage that could not be determined: that note
+gives the call stats and the reason, with no label.
 
 **Part size (D32).** The default part size is the whole prompt room under
 the token check, 176,000 characters: `min(200,000 input, 200,000 assumed
