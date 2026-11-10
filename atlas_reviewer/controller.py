@@ -535,9 +535,10 @@ def _requests(
 def _fetch_diff(
     event: PrEvent, pull: PullInfo, deps: Deps, collected: Collected
 ) -> _Fetched | None:
-    """The redacted diff, or None when it could not be fetched or cannot be
-    tied to the event SHA: then no model call is made, because a review of
-    an empty diff reads as a clean one. The diff endpoint serves the PR's
+    """The raw diff, unredacted (D33) and scanned for committed secrets, or
+    None when it could not be fetched or cannot be tied to the event SHA:
+    then no model call is made, because a review of an empty diff reads as
+    a clean one. The diff endpoint serves the PR's
     current head, so the head is checked before and after the fetch."""
     if pull.head_sha != event.head_sha:
         _no_diff(collected, "the PR head is no longer the event SHA")
