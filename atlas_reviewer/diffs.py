@@ -78,8 +78,9 @@ RISK_TIERS = (SECURITY, SUPPLY_CHAIN, BOUNDARY, SOURCE, CONFIG, TESTS, DOCS)
 # Precedence differs from rank: tests/test_redact.py is a test, and
 # docs/security.md is a doc, whatever their names suggest. CI, dependency
 # and build files are matched first, so no directory a PR author picks
-# (`tests/`, `docs/`, `fixtures/`) can demote them.
-_MATCH_ORDER = (SUPPLY_CHAIN, TESTS, CONFIG, DOCS, SECURITY, BOUNDARY)
+# (`tests/`, `docs/`, `fixtures/`) can demote them. Security is matched
+# before config, so config/secrets.yaml is not ranked as other config.
+_MATCH_ORDER = (SUPPLY_CHAIN, TESTS, DOCS, SECURITY, CONFIG, BOUNDARY)
 
 
 def risk_tier(path: str) -> RiskTier:

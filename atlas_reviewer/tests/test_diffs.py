@@ -139,6 +139,10 @@ def test_text_before_the_first_header_is_kept_as_a_pseudo_file():
         ("pyproject.toml", SUPPLY_CHAIN),
         (".github/ISSUE_TEMPLATE/bug.yml", CONFIG),
         ("config/settings.yaml", CONFIG),
+        ("config/secrets.yaml", SECURITY),
+        (".github/CODEOWNERS_auth.yml", SECURITY),
+        ("tests/fixtures/secrets.yaml", TESTS),
+        ("docs/auth.yml", DOCS),
         ("atlas_reviewer/tests/test_redact.py", TESTS),
         ("atlas_reviewer/fixtures/sample-pr/runner-script.json", TESTS),
         ("docs/security.md", DOCS),
@@ -270,6 +274,15 @@ def test_ci_and_lockfiles_are_reviewed_before_ordinary_code_when_budget_is_short
     )
     sel = select_diff(diff, 1, 900)
     assert paths(sel.parts[0].files) == ["uv.lock", ".github/workflows/ci.yml"]
+    assert paths(sel.unseen) == ["app/views.py"]
+
+
+def test_a_secrets_config_file_is_reviewed_before_ordinary_code():
+    diff = file_diff("app/views.py", "v" * 300) + file_diff(
+        "config/secrets.yaml", "s" * 300
+    )
+    sel = select_diff(diff, 1, len(file_diff("config/secrets.yaml", "s" * 300)))
+    assert paths(sel.parts[0].files) == ["config/secrets.yaml"]
     assert paths(sel.unseen) == ["app/views.py"]
 
 
