@@ -253,6 +253,65 @@ def test_list_files_reads_a_revision_under_a_prefix(tmp_path):
     assert "src/we:ird.txt" in head.content.text
 
 
+def test_every_name_list_files_shows_plainly_reads_back_and_the_rest_are_marked(
+    tmp_path,
+):
+    files = {
+        "odd/é.txt": b"accented\n",
+        "odd/a\nb.txt": b"newline\n",
+        "odd/-dash": b"dash\n",
+        "odd/tab\there": b"tab\n",
+        "odd/we:ird.txt": b"colon\n",
+    }
+    source = SourceTrees(tarball(BASE_FILES), tarball(files), OLD, HEAD)
+    listing = one(tmp_path, "list_files", {"prefix": "odd"}, source=source)
+    lines = listing.content.text.split("\n")
+    assert sorted(lines) == sorted(
+        [
+            "odd/é.txt",
+            "odd/we:ird.txt",
+            (
+                '"odd/a\\nb.txt" (not readable by read_file: path contains a control '
+                "character)"
+            ),
+            (
+                '"odd/tab\\there" (not readable by read_file: path contains a control '
+                "character)"
+            ),
+            "odd/-dash",
+        ]
+    )
+    plain = [line for line in lines if "(not readable" not in line]
+    reads, *_ = calls(
+        tmp_path / "r",
+        *(("read_file", {"path": p}) for p in plain),
+        source=source,
+    )
+    assert [r.content.text for r in reads] == [files[p].decode() for p in plain]
+
+
+def test_a_top_level_dash_name_is_listed_as_not_readable(tmp_path):
+    listing = one(tmp_path, "list_files")
+    assert (
+        "\"-n\" (not readable by read_file: path may not start with '-' or '/')"
+        in listing.content.text.split("\n")
+    )
+
+
+def test_a_name_that_is_not_utf8_is_marked_not_readable(tmp_path):
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz", encoding="utf-8",
+                      errors="surrogateescape") as tf:  # fmt: skip
+        info = tarfile.TarInfo("top/odd/\udcff.txt")
+        info.size = 2
+        tf.addfile(info, io.BytesIO(b"x\n"))
+    source = SourceTrees(tarball(BASE_FILES), buf.getvalue(), OLD, HEAD)
+    listing = one(tmp_path, "list_files", {"prefix": "odd"}, source=source)
+    assert listing.content.text == (
+        '"odd/\\ufffd.txt" (not readable by read_file: path is not valid UTF-8)'
+    )
+
+
 def test_list_files_past_its_line_cap_is_cut_and_says_so(tmp_path):
     limits = {**DEFAULT_LIMITS, "list_files": ToolLimits(32 * 1024, 10, 10)}
     result = one(tmp_path, "list_files", {"prefix": "many"}, limits=limits)

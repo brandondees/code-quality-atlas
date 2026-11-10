@@ -34,6 +34,7 @@ from atlas_reviewer.bridge_args import (
     Call,
     RejectedError,
     Rev,
+    path_problem,
     validate,
 )
 from atlas_reviewer.bridge_staging import (
@@ -138,6 +139,7 @@ class _Plan:
 
     argv: tuple[str, ...]
     view: str = 'cat "$1"'
+    nul_records: bool = False
 
 
 def _plan(call: Call, staged: Staged, paths: tuple[str, ...]) -> _Plan:
@@ -156,7 +158,8 @@ def _plan(call: Call, staged: Staged, paths: tuple[str, ...]) -> _Plan:
             view = f'tail -c +{call.get("offset") + 1} "$1"'
             return _Plan((*_DIFF, span, "--", *paths), view)
         case "list_files":
-            return _Plan(("ls-tree", "-r", "--name-only", str(rev), *pathspec))
+            ls_tree = ("ls-tree", "-r", "-z", "--name-only", str(rev), *pathspec)
+            return _Plan(ls_tree, nul_records=True)
         case "read_file":
             view = f"sed -n '{call.get('start')},{call.get('end')}p' \"$1\""
             return _Plan(("cat-file", "blob", f"{rev}:{call.get('path')}"), view)
@@ -181,7 +184,9 @@ def call_script(
     plan = _plan(call, staged, paths)
     git = " ".join((quote(staged.git), "--git-dir=repo.git", *GIT_OPTIONS))
     argv = " ".join(quote(a) for a in plan.argv)
-    lines = f"head -n {limits.max_lines} view | " if limits.max_lines else ""
+    z = " -z" if plan.nul_records else ""
+    lines = f"head{z} -n {limits.max_lines} view | " if limits.max_lines else ""
+    count = "tr -dc '\\000' < view | wc -c" if plan.nul_records else "wc -l < view"
     return "; ".join(
         (
             f"cd {quote(staged.root)}",
@@ -195,7 +200,7 @@ def call_script(
             "view out > view",
             "v=$?",
             f"{lines}head -c {limits.max_bytes} {'' if lines else 'view'} > shown",
-            f'echo "{HEADER} $s $v $(wc -c < view) $(wc -l < view) $(wc -c < shown)"',
+            f'echo "{HEADER} $s $v $(wc -c < view) $({count}) $(wc -c < shown)"',
             "base64 -w0 < shown; echo",
             f"head -c {STDERR_BYTES} err | base64 -w0; echo",
             "rm -f out err view shown",
@@ -366,9 +371,28 @@ def _view(
             )
         case "grep":
             return _grep_view(text, commit, call.get("rev"), preexisting)
+        case "list_files":
+            return _list_view(raw)
         case "diff_file":
             return _View(text, _diff_places(text.split("\n"), paths[0], paths[-1]))
     return _View(text, [])
+
+
+def _list_view(raw: bytes) -> _View:
+    """One name per line, exactly as `read_file` takes it back. A name it
+    would refuse (a control character, a leading `-`, not UTF-8, ...) is
+    shown as a JSON string and marked; a name cut short by the cap is
+    dropped."""
+    *names, last = raw.split(b"\0")
+    return _View("\n".join(map(_listed, names)), [], last == b"")
+
+
+def _listed(name: bytes) -> str:
+    text = name.decode("utf-8", errors="replace")
+    problem = path_problem(text) if text.encode() == name else "is not valid UTF-8"
+    if problem is None:
+        return text
+    return f"{json.dumps(text)} (not readable by read_file: path {problem})"
 
 
 def _grep_records(text: str, commit: str) -> tuple[list[tuple[str, str, str]], bool]:

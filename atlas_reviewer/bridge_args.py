@@ -94,6 +94,15 @@ def _path(value: Any, _revs: frozenset[Rev]) -> str:
     return text
 
 
+def path_problem(text: str) -> str | None:
+    """Why `read_file` would refuse `text` as its path, or None."""
+    try:
+        _path(text, frozenset())
+    except RejectedError as exc:
+        return exc.detail
+    return None
+
+
 def _prefix(value: Any, revs: frozenset[Rev]) -> str:
     return "" if value == "" else _path(value, revs)
 
