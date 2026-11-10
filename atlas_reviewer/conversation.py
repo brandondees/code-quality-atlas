@@ -6,8 +6,10 @@ and head branches, draft flag, labels, requested reviewers and teams, the
 body, every commit subject, and every review, review comment and
 conversation comment, each labelled with its id, author, time and the
 commit it was made at. It is all PR-written text, so it is redacted and
-fenced as untrusted like the rest, and every free-text body is quoted with
-`> ` so a body cannot forge another remark's heading.
+fenced as untrusted like the rest. Every one-line field (title, names,
+branches, labels, commit subjects) is a JSON string and every free-text body
+is quoted with `> ` line by line, so no PR-written text can begin an
+unquoted line and forge a remark's heading.
 
 Nothing is cut silently. The body, each commit subject and each remark have
 their own cap, commit subjects and remarks keep the newest that fit their
@@ -18,6 +20,7 @@ told about.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from itertools import accumulate
@@ -159,14 +162,11 @@ def build_conversation(
     budget: ConversationBudget,
 ) -> Conversation:
     """`pull.body` must have been parsed with `budget.body_chars`."""
-    header = _header(pull)
-    body = _body(pull.body)
     subjects = _commit_section(commits, head_sha, redactor, budget.commit_chars)
-    room = budget.total_chars - sum(len(s) + 2 for s in (header, body, subjects.text))
-    shown = _remark_section(remarks, redactor, budget, room)
-    text = redactor(
-        "\n\n".join((header, body, subjects.text, *shown.blocks)), budget.total_chars
-    )
+    fixed = "\n\n".join((_header(pull), _body(pull.body), subjects.text))
+    prepared = _prepare_remarks(remarks, redactor, budget.remark_chars)
+    text, keep = _fit(fixed, prepared.blocks, redactor, budget.total_chars)
+    shown = _remark_section(prepared, keep, budget)
     omissions = (
         *_body_omission(pull.body, budget.body_chars),
         *subjects.omissions,
@@ -182,6 +182,24 @@ def build_conversation(
     )
 
 
+def _fit(
+    fixed: str, blocks: Sequence[str], redactor: Redactor, total: int
+) -> tuple[RedactedText, int]:
+    """The block with the most of the newest remarks whose final redacted
+    text fits `total`. Sizes before the final pass only pick where to start,
+    since that pass can lengthen the text; when even no remark fits, the
+    fixed part is cut to `total` (a named omission)."""
+    start = _newest_that_fit(
+        [len(b) + 2 for b in reversed(blocks)], max(total - len(fixed), 0)
+    )
+    candidates = (
+        (redactor("\n\n".join((fixed, *blocks[len(blocks) - keep :]))), keep)
+        for keep in range(start, -1, -1)
+    )
+    fitting = next((c for c in candidates if len(c[0].text) <= total), None)
+    return fitting or (redactor(fixed, total), 0)
+
+
 @dataclass(frozen=True)
 class _Section:
     blocks: tuple[str, ...]
@@ -193,17 +211,24 @@ class _Section:
         return "\n".join(self.blocks)
 
 
+def _value(text: str) -> str:
+    """A one-line PR-written field as a JSON string: every line terminator
+    (`\\r`, U+2028, ...) and every non-ASCII character is escaped, so the
+    field cannot start a line of its own."""
+    return json.dumps(text, ensure_ascii=True)
+
+
 def _header(pull: PullInfo) -> str:
     def names(values: tuple[str, ...]) -> str:
-        return ", ".join(values) or "none"
+        return ", ".join(map(_value, values)) or "none"
 
     return "\n".join(
         (
-            f"Title: {pull.title.text}",
-            f"Author: {pull.author}",
+            f"Title: {_value(pull.title.text)}",
+            f"Author: {_value(pull.author)}",
             (
-                f"Base branch: {pull.base_ref}; head branch: {pull.head_ref}; "
-                f"draft: {'yes' if pull.draft else 'no'}"
+                f"Base branch: {_value(pull.base_ref)}; head branch: "
+                f"{_value(pull.head_ref)}; draft: {'yes' if pull.draft else 'no'}"
             ),
             f"Labels: {names(pull.labels)}",
             (
@@ -215,6 +240,8 @@ def _header(pull: PullInfo) -> str:
 
 
 def _quote_lines(text: str) -> str:
+    """`splitlines` breaks on every terminator a reader may render as one
+    (`\\r`, `\\r\\n`, U+2028, U+2029, ...), so none survives unquoted."""
     return "\n".join(f"> {line}" if line else ">" for line in text.splitlines())
 
 
@@ -244,12 +271,13 @@ def _commit_section(
     redacted = [redactor(c.subject) for c in commits]
     clipped = [_clip(r.text, SUBJECT_CHARS) for r in redacted]
     lines = [
-        f"- `{c.sha[:12]}`{' (reviewed head)' if c.sha == head_sha else ''} {subject}"
+        f"- `{c.sha[:12]}`{' (reviewed head)' if c.sha == head_sha else ''} "
+        f"{_value(subject)}"
         for c, (subject, _) in zip(commits, clipped, strict=True)
     ]
     keep = _newest_that_fit([len(line) + 1 for line in reversed(lines)], budget)
     shown = lines[len(lines) - keep :]
-    title = f"Commits ({len(commits)}, in the order GitHub lists them):"
+    title = f"Commits ({len(commits)}, oldest first by parents and commit date):"
     cut = sum(was_cut for _, was_cut in clipped[len(lines) - keep :])
     omissions = (
         *_count_omission(
@@ -278,28 +306,42 @@ def _count_omission(
     return (Omission(source, limit, f"{count} {what}"),) if count else ()
 
 
+@dataclass(frozen=True)
+class _Prepared:
+    """Remarks oldest first, each with its redacted, capped body and block."""
+
+    ordered: tuple[Remark, ...]
+    bodies: tuple[RedactedText, ...]
+    blocks: tuple[str, ...]
+
+
+def _prepare_remarks(
+    remarks: Sequence[Remark], redactor: Redactor, cap: int
+) -> _Prepared:
+    """A pending review has no time yet; it is the newest remark there is."""
+    ordered = tuple(sorted(remarks, key=lambda r: (r.at == "", r.at, r.source_id)))
+    bodies = tuple(redactor(r.body, cap) for r in ordered)
+    blocks = tuple(_remark(r, b) for r, b in zip(ordered, bodies, strict=True))
+    return _Prepared(ordered, bodies, blocks)
+
+
 def _remark_section(
-    remarks: Sequence[Remark],
-    redactor: Redactor,
-    budget: ConversationBudget,
-    room: int,
+    prepared: _Prepared, keep: int, budget: ConversationBudget
 ) -> _Section:
-    ordered = sorted(remarks, key=lambda r: (r.at, r.source_id))
-    bodies = [redactor(r.body, budget.remark_chars) for r in ordered]
-    blocks = [_remark(r, b) for r, b in zip(ordered, bodies, strict=True)]
-    keep = _newest_that_fit([len(b) + 2 for b in reversed(blocks)], max(room, 0))
-    dropped = ordered[: len(ordered) - keep]
-    cut = [
-        (r, b) for r, b in zip(ordered[len(dropped) :], bodies[len(dropped) :], strict=True)
-        if b.truncated_from is not None
-    ]  # fmt: skip
+    first = len(prepared.ordered) - keep
+    kept = tuple(zip(prepared.ordered[first:], prepared.bodies[first:], strict=True))
     return _Section(
-        tuple(blocks[len(dropped) :]),
+        prepared.blocks[first:],
         (
-            *_dropped_omission(dropped, len(ordered), budget.total_chars),
-            *_cut_omission(cut, budget.remark_chars),
+            *_dropped_omission(
+                prepared.ordered[:first], len(prepared.ordered), budget.total_chars
+            ),
+            *_cut_omission(
+                [(r, b) for r, b in kept if b.truncated_from is not None],
+                budget.remark_chars,
+            ),
         ),
-        sum(b.redaction_count for b in bodies[len(dropped) :]),
+        sum(b.redaction_count for _, b in kept),
     )
 
 

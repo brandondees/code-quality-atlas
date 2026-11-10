@@ -37,8 +37,9 @@ the reviewed head.
 The pull-request block is the PR conversation. Each review and comment
 opens with an unquoted `### <id> by <author> at <time>` line and a line
 naming its kind and commit, both written by the controller; its text
-follows with every line quoted by `> `. A heading inside quoted text is
-part of that comment, not a separate review. A review or comment made at
+follows with every line quoted by `> `. The title, names, branches, labels
+and commit subjects are written as `"..."` strings. A heading inside quoted
+text is part of that comment, not a separate review. A review or comment made at
 an earlier commit may be about code that has since changed.
 
 You cannot open files. The review procedure refers to

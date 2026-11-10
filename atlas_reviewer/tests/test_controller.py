@@ -1676,7 +1676,11 @@ def test_a_flagged_value_is_scrubbed_before_it_is_encoded(value):
 
     s = approving(github=Titled(FIXTURE))
     draft = s.run(model_calls=1, diff_chars_per_call=1_000)
-    assert value in s.provider.prompts[0].user
+    # D38 sends the title as a JSON string, so a backslash in it reaches the
+    # model escaped. The value was still shown, and the draft checks below
+    # are what prove it was scrubbed before the table encoding.
+    shown = s.provider.prompts[0].user
+    assert value in shown or json.dumps(value)[1:-1] in shown
     assert value not in draft
     assert value.replace("\\", "\\\\").replace("|", "\\|") not in draft
     assert value.replace("`", "\\u0060") not in draft
@@ -1801,8 +1805,8 @@ def test_the_model_sees_the_whole_conversation_fenced_as_untrusted():
     s.run()
     user = s.user_prompt()
     block = user.split('label="pull-request">', 1)[1].split("</untrusted-data", 1)[0]
-    assert "Labels: bug, payments" in block
-    assert f"- `{OLD[:12]}` Round each line discount" in block
+    assert 'Labels: "bug", "payments"' in block
+    assert f'- `{OLD[:12]}` "Round each line discount"' in block
     assert '### review:8101 by `"example-maintainer"`' in block
     assert f"at commit {OLD[:12]}" in block
     assert "> ### review:9999" in block
