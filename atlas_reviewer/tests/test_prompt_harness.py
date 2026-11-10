@@ -50,7 +50,7 @@ def test_the_harness_forwards_lenses_to_the_provider():
             HEAD,
             (UntrustedBlock("diff", redact("x")),),
             (LoadedLens("a-lens", "CHECKLIST A"),),
-            "included: a-lens",
+            "run whole: a-lens",
         )
     )
     (prompt,) = provider.prompts
@@ -105,6 +105,28 @@ def test_the_default_nonce_is_fresh_hex_of_the_measured_length():
     nonces = [re.search(r'id="([^"]*)"', p.user).group(1) for p in provider.prompts]
     assert all(re.fullmatch(f"[0-9a-f]{{{NONCE_CHARS}}}", n) for n in nonces)
     assert nonces[0] != nonces[1]
+
+
+def test_the_prompt_holds_each_run_lens_whole_and_nothing_of_a_skipped_one():
+    from atlas_reviewer.lenses import LensChoice, plan_lenses
+
+    from .test_lenses import StubLibrary
+
+    big = "BIG-HEAD\n" + "big line\n" * 2_000 + "BIG-TAIL\n"
+    lib = StubLibrary({"small-a": "SMALL A\n", "big": big, "small-b": "SMALL B\n"})
+    ranked = [LensChoice(n, "picker rank 1") for n in ("small-a", "big", "small-b")]
+    plan = plan_lenses(lib, ranked, budget_chars=1_000)
+    provider = OfflineProvider()
+    harness = SkillBundleHarness(provider, "B", Redactor(), nonce=lambda: NONCE)
+    harness.review(ReviewRequest("o/r", 1, HEAD, (), plan.loaded, plan.coverage()))
+    (prompt,) = provider.prompts
+    assert "=== lens: small-a ===\nSMALL A\n" in prompt.system
+    assert "=== lens: small-b ===\nSMALL B\n" in prompt.system
+    assert "BIG-HEAD" not in prompt.system and "big line" not in prompt.system
+    assert "=== lens: big ===" not in prompt.system
+    assert "NOT RUN: big (did not fit the 1000-character lens budget whole" in (
+        prompt.system
+    )
 
 
 def _sent_tokens(nonce: str, diff: str) -> tuple[int, int]:
