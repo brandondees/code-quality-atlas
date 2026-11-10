@@ -51,6 +51,7 @@ def test_every_part_must_approve_and_any_request_changes_wins(proposals, event):
         ONE_UNSEEN,
         FileCoverage(None, unknown="the diff was not fetched"),
         FileCoverage(None),
+        FileCoverage(3, unknown="the diff names 2 file(s) but GitHub reports 3"),
     ],
 )
 def test_incomplete_or_unknown_coverage_never_approves(coverage):

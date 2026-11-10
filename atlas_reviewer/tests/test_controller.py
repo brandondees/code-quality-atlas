@@ -1471,6 +1471,44 @@ def test_a_cut_file_blocks_approval():
     assert 'cut to fit one call, reviewed only in part: `"src/m0.py"`' in top_of(draft)
 
 
+def two_parts():
+    from atlas_reviewer.diffs import select_diff
+    from atlas_reviewer.draft import PartNarrative
+
+    sel = select_diff(sized_diff(2, 50), 2, 150)
+    reply = Redactor()("Fine.\n\nReview event: APPROVE")
+    parts = tuple(
+        PartNarrative(
+            i, 2, part.files, Narrative("skill-bundle", "fixture-model", reply)
+        )
+        for i, part in enumerate(sel.parts, 1)
+    )
+    return sel, parts
+
+
+def gaps(coverage):
+    return [(u.path, u.why) for u in coverage.unreviewed]
+
+
+def test_a_planned_part_with_no_narrative_counts_as_unreviewed():
+    from atlas_reviewer.controller import _file_coverage
+
+    sel, parts = two_parts()
+    assert _file_coverage(sel, parts, (), 2, 2).complete
+    coverage = _file_coverage(sel, parts[:1], (), 2, 2)
+    assert not coverage.complete
+    assert gaps(coverage) == [("src/m1.py", "its diff part was never sent")]
+
+
+def test_a_file_dropped_before_the_calls_counts_as_unreviewed():
+    from atlas_reviewer.controller import _file_coverage
+
+    sel, parts = two_parts()
+    coverage = _file_coverage(sel, parts, ("src/gone.py",), 3, 3)
+    assert (coverage.changed, coverage.complete) == (3, False)
+    assert gaps(coverage) == [("src/gone.py", "dropped before any model call")]
+
+
 def test_the_offline_provider_never_approves():
     s = Setup(provider=OfflineProvider())
     draft = s.run()
