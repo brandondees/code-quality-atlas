@@ -260,7 +260,7 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
             narratives=parts,
             omissions=(
                 *_omissions(base, selection, scrub=scrub),
-                *_unreviewed_parts(parts, scrub=scrub),
+                *_unreviewed_parts(selection, parts, scrub=scrub),
             ),
             model_usage=deps.harness.usage_lines(),
             redactions=_redaction_total(
@@ -988,7 +988,11 @@ def _coverage_lines(
             "reviewed the diff."
         )
     else:
-        complete = files_complete and len(reviewed) == len(parts)
+        # A part holding only a preamble names no changed file, so, as in
+        # `_file_coverage`, its failed call leaves coverage complete.
+        complete = files_complete and all(
+            p.reviewed for p in parts if _named(sel, p.files)
+        )
         # Coverage that could not be determined is never called complete;
         # the reason follows the call stats instead of a label.
         unknown = coverage is not None and bool(coverage.unknown)
@@ -1019,29 +1023,31 @@ def _coverage_lines(
     )
 
 
-def _sent_files(part: PartNarrative) -> tuple[FileDiff, ...]:
-    """Files the omission counts. A preamble is not one when the part also
-    holds real files; a header-less diff is only the preamble, so it stays."""
-    real = tuple(f for f in part.files if f.path != UNPARSED_PATH)
-    return real or part.files
-
-
 def _unreviewed_parts(
-    parts: tuple[PartNarrative, ...], *, scrub: Callable[[str], str]
+    sel: DiffSelection | None,
+    parts: tuple[PartNarrative, ...],
+    *,
+    scrub: Callable[[str], str],
 ) -> tuple[Omission, ...]:
+    """One row per part no model reviewed. Its files are counted as the notes
+    count them (`_named`), so a part that held only a preamble lists no
+    changed file."""
     rows = []
     for p in parts:
-        if p.model_reviewed:
+        if p.model_reviewed or sel is None:
             continue
-        files = _sent_files(p)
+        files = _named(sel, p.files)
+        listed = describe_by_risk(files, MAX_LISTED_PATHS, scrub=scrub)
         rows.append(
             Omission(
                 f"pull request diff, part {p.index} of {p.total}",
                 "offline provider (no model call)"
                 if p.simulated
                 else "model call returned no review",
-                f"{len(files)} file(s) sent but not reviewed: "
-                f"{describe_by_risk(files, MAX_LISTED_PATHS, scrub=scrub) or 'none'}",
+                f"{len(files)} file(s) sent but not reviewed: {listed}"
+                if files
+                else "no changed file: only diff text before the first file "
+                "header was sent, and it was not reviewed",
             )
         )
     return tuple(rows)

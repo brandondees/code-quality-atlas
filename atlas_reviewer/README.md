@@ -423,7 +423,8 @@ kept, files sent in full, files cut, and the files never sent, grouped by
 risk tier, highest first, each path quoted as data; past 100 the rest are
 counted. A part whose call fails or is refused (call cap,
 cost cap, token bound) gets its own row listing the files sent but not
-reviewed. A file the diff's headers name that the selection does not
+reviewed. A part that held only the text before the first file header
+lists no file: that row says so, since the preamble is not a changed file. A file the diff's headers name that the selection does not
 account for gets a `dropped before the model calls` row and makes coverage
 PARTIAL. After the calls, a controller note states whether coverage is
 complete or PARTIAL and how many files each outcome covers. Nothing short of
