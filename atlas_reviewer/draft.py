@@ -7,6 +7,7 @@ to read; nothing in it is posted anywhere.
 
 from __future__ import annotations
 
+import contextvars
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
@@ -96,10 +97,19 @@ class DraftInput:
 MAX_WARNED_PATHS = 100
 
 
+# Set for the duration of render_draft. Encoding reads it so a flagged
+# value is removed before `_cell` or a narrative line rewrites the
+# characters a later exact-text scrub would look for.
+_scrubber: contextvars.ContextVar[Callable[[str], str]] = contextvars.ContextVar(
+    "draft_scrub", default=str
+)
+
+
 def _inert(text: str) -> str:
     """`text` with no HTML: an untrusted `<!--` could otherwise hide the
-    rest of the review, or forge a second status comment."""
-    return text.replace("<", "&lt;")
+    rest of the review, or forge a second status comment. The active scrub
+    runs first, so a value it removes cannot be rewritten first."""
+    return _scrubber.get()(text).replace("<", "&lt;")
 
 
 def _cell(text: str) -> str:
@@ -119,12 +129,21 @@ def _sort_key(e: Evidence) -> tuple[str, str]:
     return key.kind.value, key.name
 
 
-def render_draft(d: DraftInput, scrub: Callable[[str], str] = str) -> str:
+def render_draft(d: DraftInput, scrub: Callable[[str], str]) -> str:
     """The first line is the machine-readable review status; the review
-    event and any incomplete-coverage warning lead the body. `scrub` runs
-    over every section built from untrusted text, and over each path the
-    warning names, but never over the status line or the warning's own
-    words, so a scrubbed value cannot rewrite the verdict."""
+    event and any incomplete-coverage warning lead the body. `scrub` is
+    required. It runs on each untrusted string before that string is
+    encoded, and again over each finished body section. It never runs over
+    the status line or the warning's own words, so a scrubbed value cannot
+    rewrite the verdict."""
+    token = _scrubber.set(scrub)
+    try:
+        return _rendered(d, scrub)
+    finally:
+        _scrubber.reset(token)
+
+
+def _rendered(d: DraftInput, scrub: Callable[[str], str]) -> str:
     body = (
         _header(d),
         _summary(d),

@@ -132,6 +132,8 @@ def select_lenses(
     run_picker: Callable[[], str] | None,
     library: LensLibrary,
     budget_chars: int = LENS_BUDGET_CHARS,
+    *,
+    scrub: Callable[[str], str] = str,
 ) -> LensSelection:
     """`run_picker` makes the picker's model call; None means no call is
     available for it. The call is also skipped when no lens outside the
@@ -158,7 +160,7 @@ def select_lenses(
     except BoundaryError as exc:
         return _critical(
             "Lens selection: the lens picker gave no usable lens list (reason, "
-            f"quoted: {quote_untrusted(str(exc))})",
+            f"quoted: {quote_untrusted(str(exc), scrub=scrub)})",
             True,
         )
     if not any(has_body(n) for n in names):

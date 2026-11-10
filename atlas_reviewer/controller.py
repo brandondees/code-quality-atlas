@@ -180,9 +180,15 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
         event.head_sha, collected.items, config.expected, collected.failures
     )
     diff = _fetch_diff(event, pull, deps, collected)
+    # Flagged before the notes are quoted: quote_untrusted and the draft's
+    # table cells encode `|`, `\` and backticks, and a scrub after that
+    # encoding cannot find the value.
+    flagged = () if diff is None else diff.secrets.values
+    scrubber = replace(deps.redactor, flagged=flagged)
+    scrub = lambda text: scrubber(text).text
     _note_truncation(collected, "pull request body", pull.body, DETAIL_CHARS)
-    issues = _issue_blocks(event, pull, deps, config, collected)
-    lenses = _select_lenses(event, pull, diff, deps, config, telemetry)
+    issues = _issue_blocks(event, pull, deps, config, collected, scrub=scrub)
+    lenses = _select_lenses(event, pull, diff, deps, config, telemetry, scrub=scrub)
     collected.notes.extend(n for n in (lenses.note,) if n)
     base = _Base(
         event,
@@ -216,11 +222,8 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
             changed=None if diff is None else diff.changed_files,
         ),
     )
-    # Check names, failure reasons, archive entry names and runner notes are
-    # untrusted too, and the model saw the diff unredacted, so a value the
-    # secret scan found is scrubbed wherever the narrative repeats it.
-    flagged = () if secrets is None else secrets.values
-    scrubber = replace(deps.redactor, flagged=flagged)
+    # The model saw the diff unredacted. The same values are scrubbed from
+    # the draft, each untrusted string before it is encoded.
     draft = render_draft(
         DraftInput(
             event=event,
@@ -229,14 +232,17 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
             evidence=evidence,
             links=base.links,
             controller_notes=(
-                *_notes(base, selection),
+                *_notes(base, selection, scrub=scrub),
                 *_coverage_lines(selection, parts, dropped),
                 *_secret_note(secrets),
             ),
             secrets=None if secrets is None else secrets.findings,
             lenses=base.facts.lenses.uses,
             narratives=parts,
-            omissions=(*_omissions(base, selection), *_unreviewed_parts(parts)),
+            omissions=(
+                *_omissions(base, selection, scrub=scrub),
+                *_unreviewed_parts(parts, scrub=scrub),
+            ),
             model_usage=deps.harness.usage_lines(),
             redactions=_redaction_total(
                 pull,
@@ -247,7 +253,7 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
             telemetry=telemetry.events,
             verdict=verdict,
         ),
-        lambda text: scrubber(text).text,
+        scrub,
     )
     return ReviewOutcome(draft, verdict)
 
@@ -465,10 +471,12 @@ def _pull_block(pull: PullInfo, deps: Deps) -> UntrustedBlock:
     )
 
 
-def _omissions(base: _Base, sel: DiffSelection | None) -> tuple[Omission, ...]:
+def _omissions(
+    base: _Base, sel: DiffSelection | None, *, scrub: Callable[[str], str] = str
+) -> tuple[Omission, ...]:
     return (
         *base.facts.omissions,
-        *_selection_omission(sel),
+        *_selection_omission(sel, scrub=scrub),
         *_dropped_omission(_dropped(base, sel)),
     )
 
@@ -494,8 +502,12 @@ def _dropped_omission(dropped: tuple[str, ...]) -> tuple[Omission, ...]:
     return (Omission("pull request diff", "dropped before the model calls", detail),)
 
 
-def _notes(base: _Base, sel: DiffSelection | None) -> tuple[str, ...]:
-    return controller_notes(replace(base.facts, omissions=_omissions(base, sel)))
+def _notes(
+    base: _Base, sel: DiffSelection | None, *, scrub: Callable[[str], str] = str
+) -> tuple[str, ...]:
+    return controller_notes(
+        replace(base.facts, omissions=_omissions(base, sel, scrub=scrub)), scrub=scrub
+    )
 
 
 def _shared(base: _Base, sel: DiffSelection | None) -> _Shared:
@@ -597,11 +609,13 @@ def _select_lenses(
     deps: Deps,
     config: ReviewConfig,
     telemetry: Telemetry,
+    *,
+    scrub: Callable[[str], str] = str,
 ) -> LensSelection:
     """The picker gets a call only when one is left for at least one diff part,
     and `select_lenses` skips it when no picked lens could fit; an unspent
     call goes to diff review. A skip is recorded with its reason."""
-    picked = _pick_lenses(event, pull, diff, deps, config, telemetry)
+    picked = _pick_lenses(event, pull, diff, deps, config, telemetry, scrub=scrub)
     if picked.skipped:
         telemetry.record(
             "model call", "lens picker skipped", {"reason": picked.skipped}
@@ -616,11 +630,13 @@ def _pick_lenses(
     deps: Deps,
     config: ReviewConfig,
     telemetry: Telemetry,
+    *,
+    scrub: Callable[[str], str] = str,
 ) -> LensSelection:
     if diff is None:
         return LensSelection((), "", used_call=False, skipped="no diff to pick for")
     if config.model_calls < 2:
-        return select_lenses(config.depth, None, deps.lenses)
+        return select_lenses(config.depth, None, deps.lenses, scrub=scrub)
     paths = diff_paths(diff.text)
     request = PickRequest(
         event.repo,
@@ -638,6 +654,7 @@ def _pick_lenses(
             {"paths": len(paths)},
         ),
         deps.lenses,
+        scrub=scrub,
     )
 
 
@@ -662,17 +679,19 @@ def _fit(
     )
 
 
-def _selection_omission(sel: DiffSelection | None) -> tuple[Omission, ...]:
+def _selection_omission(
+    sel: DiffSelection | None, *, scrub: Callable[[str], str] = str
+) -> tuple[Omission, ...]:
     if sel is None or sel.complete:
         return ()
     limit = (
         f"too large for one review pass: {len(sel.parts)} part(s) of at most "
         f"{sel.part_chars} characters, risk-ordered"
     )
-    return (Omission("pull request diff", limit, _selection_detail(sel)),)
+    return (Omission("pull request diff", limit, _selection_detail(sel, scrub=scrub)),)
 
 
-def _selection_detail(sel: DiffSelection) -> str:
+def _selection_detail(sel: DiffSelection, *, scrub: Callable[[str], str] = str) -> str:
     cut = ", ".join(
         f"{f.path} (kept {f.shown_chars} of {f.full_chars} characters)" for f in sel.cut
     )
@@ -683,15 +702,17 @@ def _selection_detail(sel: DiffSelection) -> str:
         ),
         f"{len(sel.full)} of {sel.total_files} file(s) sent in full",
         f"cut to fit one call: {cut}" if cut else "",
-        _unseen_detail(sel.unseen),
+        _unseen_detail(sel.unseen, scrub=scrub),
     ]
     return "; ".join(p for p in parts if p)
 
 
-def _unseen_detail(unseen: tuple[FileDiff, ...]) -> str:
+def _unseen_detail(
+    unseen: tuple[FileDiff, ...], *, scrub: Callable[[str], str] = str
+) -> str:
     if not unseen:
         return ""
-    listed = describe_by_risk(unseen, MAX_LISTED_PATHS)
+    listed = describe_by_risk(unseen, MAX_LISTED_PATHS, scrub=scrub)
     return f"never sent to any model call ({len(unseen)}), highest risk first: {listed}"
 
 
@@ -712,23 +733,32 @@ def _issue_blocks(
     deps: Deps,
     config: ReviewConfig,
     collected: Collected,
+    *,
+    scrub: Callable[[str], str] = str,
 ) -> list[UntrustedBlock]:
     if not config.include_issues:
         collected.notes.append("Issue context: off (opt in with `--include-issues`).")
         return []
-    blocks = [_issue_block(event, n, deps, collected) for n in pull.issue_refs]
+    blocks = [
+        _issue_block(event, n, deps, collected, scrub=scrub) for n in pull.issue_refs
+    ]
     return [b for b in blocks if b is not None]
 
 
 def _issue_block(
-    event: PrEvent, number: int, deps: Deps, collected: Collected
+    event: PrEvent,
+    number: int,
+    deps: Deps,
+    collected: Collected,
+    *,
+    scrub: Callable[[str], str] = str,
 ) -> UntrustedBlock | None:
     try:
         issue = deps.github.get_issue(event.repo, number)
     except BoundaryError as exc:
         collected.notes.append(
             f"Issue #{number} could not be fetched (error, quoted: "
-            f"{quote_untrusted(str(exc))})."
+            f"{quote_untrusted(str(exc), scrub=scrub)})."
         )
         return None
     text = f"Title: {issue.get('title', '')}\n\n{issue.get('body') or ''}"
@@ -846,7 +876,9 @@ def _coverage_lines(
     )
 
 
-def _unreviewed_parts(parts: tuple[PartNarrative, ...]) -> tuple[Omission, ...]:
+def _unreviewed_parts(
+    parts: tuple[PartNarrative, ...], *, scrub: Callable[[str], str] = str
+) -> tuple[Omission, ...]:
     return tuple(
         Omission(
             f"pull request diff, part {p.index} of {p.total}",
@@ -854,7 +886,7 @@ def _unreviewed_parts(parts: tuple[PartNarrative, ...]) -> tuple[Omission, ...]:
             if p.simulated
             else "model call returned no review",
             f"{len(p.files)} file(s) sent but not reviewed: "
-            f"{describe_by_risk(p.files, MAX_LISTED_PATHS) or 'none'}",
+            f"{describe_by_risk(p.files, MAX_LISTED_PATHS, scrub=scrub) or 'none'}",
         )
         for p in parts
         if not p.model_reviewed

@@ -1575,6 +1575,36 @@ def test_a_file_dropped_before_the_calls_counts_as_unreviewed():
     assert gaps(coverage) == [("src/gone.py", "dropped before any model call")]
 
 
+@pytest.mark.parametrize("value", ["sek|retAA", "sek\\retAA", "sek`retAA"])
+def test_a_flagged_value_is_scrubbed_before_it_is_encoded(value):
+    path = f"dir/{value}.py"
+    diff = (
+        "diff --git a/src/kept.py b/src/kept.py\n--- a/src/kept.py\n+++ b/src/kept.py\n"
+        "@@ -1 +1 @@\n+x\n"
+        f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n"
+        f'@@ -1 +1,2 @@\n x\n+password = "{value}"\n+' + "y" * 2_000 + "\n"
+    )
+
+    class Titled(FixtureGitHub):
+        def get_pull(self, repo, number):
+            pull = super().get_pull(repo, number)
+            return {**pull, "title": f"about {value}", "changed_files": 2}
+
+        def get_pull_diff(self, repo, number):
+            return diff
+
+    s = approving(github=Titled(FIXTURE))
+    draft = s.run(model_calls=1, diff_chars_per_call=1_000)
+    assert value in s.provider.prompts[0].user
+    assert value not in draft
+    assert value.replace("\\", "\\\\").replace("|", "\\|") not in draft
+    assert value.replace("`", "\\u0060") not in draft
+    assert "[REDACTED:possible-committed-secret]" in top_of(draft)
+    assert "[REDACTED:possible-committed-secret]" in section(
+        draft, "Omissions and limits hit"
+    )
+
+
 def test_the_offline_provider_never_approves():
     s = Setup(provider=OfflineProvider())
     draft = s.run()

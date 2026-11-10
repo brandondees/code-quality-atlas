@@ -16,7 +16,7 @@ of the notes.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from atlas_reviewer.domain import CleanupStatus, Omission, RunnerReport, RunnerStatus
@@ -53,30 +53,34 @@ class ControllerFacts:
     notes: tuple[str, ...]
 
 
-def controller_notes(facts: ControllerFacts) -> tuple[str, ...]:
+def controller_notes(
+    facts: ControllerFacts, *, scrub: Callable[[str], str] = str
+) -> tuple[str, ...]:
     return (
-        *_runner_lines(facts.runner),
-        *_tool_lines(facts),
-        _omission_line(facts.omissions),
+        *_runner_lines(facts.runner, scrub=scrub),
+        *_tool_lines(facts, scrub=scrub),
+        _omission_line(facts.omissions, scrub=scrub),
         f"Lenses {facts.lenses.coverage()}.",
         *facts.notes,
     )
 
 
-def _runner_lines(r: RunnerReport) -> list[str]:
+def _runner_lines(r: RunnerReport, *, scrub: Callable[[str], str] = str) -> list[str]:
     name = f"`{r.runner_name}`" if r.runner_name else "(none)"
     lines = [f"Runner {name}: status {r.status.value}; {CLEANUP_SENTENCE[r.cleanup]}."]
     if r.status is not RunnerStatus.COMPLETED:
         lines.append(
             f"Runner did not complete ({r.status.value}). Text reported by the "
-            f"runner or controller, quoted: {quote_untrusted(r.note)}"
+            f"runner or controller, quoted: {quote_untrusted(r.note, scrub=scrub)}"
         )
     return lines
 
 
-def _tool_lines(facts: ControllerFacts) -> list[str]:
+def _tool_lines(
+    facts: ControllerFacts, *, scrub: Callable[[str], str] = str
+) -> list[str]:
     attempted = {r.tool.name for r in facts.tool_results}
-    lines = [_tool_line(r) for r in facts.tool_results]
+    lines = [_tool_line(r, scrub=scrub) for r in facts.tool_results]
     lines += [
         f"Tool `{name}`: did not run (the runner did not reach it)."
         for name in facts.configured_tools
@@ -85,26 +89,29 @@ def _tool_lines(facts: ControllerFacts) -> list[str]:
     return lines or ["No review tools were configured."]
 
 
-def _tool_line(result: ToolResult) -> str:
+def _tool_line(result: ToolResult, *, scrub: Callable[[str], str] = str) -> str:
     match result:
         case ToolRan(tool=tool, version=version, exit_code=code):
             exit_text = "no exit code reported" if code is None else f"exit {code}"
             return (
                 f"Tool `{tool.name}` (version output, quoted: "
-                f"{quote_untrusted(version)}): ran, {exit_text}."
+                f"{quote_untrusted(version, scrub=scrub)}): ran, {exit_text}."
             )
         case ToolAbsent(tool=tool, detail=detail):
             return (
-                f"Tool `{tool.name}`: not run, quoted reason: {quote_untrusted(detail)}"
+                f"Tool `{tool.name}`: not run, quoted reason: "
+                f"{quote_untrusted(detail, scrub=scrub)}"
             )
     raise TypeError(f"not a tool result: {result!r}")  # pragma: no cover
 
 
-def _omission_line(omissions: Sequence[Omission]) -> str:
+def _omission_line(
+    omissions: Sequence[Omission], *, scrub: Callable[[str], str] = str
+) -> str:
     if not omissions:
         return "Omissions and limits hit: none."
     shown = [
-        f"{quote_untrusted(o.source)} ({quote_untrusted(o.limit)})"
+        f"{quote_untrusted(o.source, scrub=scrub)} ({quote_untrusted(o.limit, scrub=scrub)})"
         for o in omissions[:MAX_LISTED_OMISSIONS]
     ]
     extra = len(omissions) - len(shown)
@@ -115,12 +122,15 @@ def _omission_line(omissions: Sequence[Omission]) -> str:
     )
 
 
-def quote_untrusted(text: str, limit: int = MAX_QUOTED_CHARS) -> str:
-    """`text` as one inert code span: whitespace collapsed, cut to `limit`
-    characters, JSON-escaped (no control characters or bare quotes) and
-    with backticks and `<` escaped, so nothing inside can close the span
-    or open HTML."""
-    flat = " ".join(text.split())
+def quote_untrusted(
+    text: str, limit: int = MAX_QUOTED_CHARS, *, scrub: Callable[[str], str] = str
+) -> str:
+    """`text` as one inert code span: scrubbed, whitespace collapsed, cut
+    to `limit` characters, JSON-escaped (no control characters or bare
+    quotes) and with backticks and `<` escaped, so nothing inside can
+    close the span or open HTML. `scrub` runs before that encoding, so a
+    value it removes is not rewritten into a form a later scrub misses."""
+    flat = " ".join(scrub(text).split())
     cut = flat if len(flat) <= limit else f"{flat[:limit]}..."
     literal = (
         json.dumps(cut, ensure_ascii=True)

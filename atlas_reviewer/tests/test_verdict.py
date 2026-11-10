@@ -58,7 +58,9 @@ def test_incomplete_or_unknown_coverage_never_approves(coverage):
     verdict = decide(A, coverage)
     assert verdict.event is C and verdict.proposed is A
     assert not verdict.coverage_complete
-    assert warning(verdict, 10).startswith("> **REVIEW INCOMPLETE -- not approvable.**")
+    assert warning(verdict, 10, str).startswith(
+        "> **REVIEW INCOMPLETE -- not approvable.**"
+    )
 
 
 def test_complete_coverage_keeps_the_proposal():
@@ -84,7 +86,7 @@ def test_the_warning_lists_paths_quoted_riskiest_first_up_to_the_limit():
     files = tuple(
         Unreviewed(f"docs/{i}.md", "never sent to any model call", 6) for i in range(3)
     ) + (Unreviewed("src/auth.py", "never sent to any model call", 0),)
-    text = warning(decide(A, FileCoverage(9, files)), 2)
+    text = warning(decide(A, FileCoverage(9, files)), 2, str)
     assert "4 of 9 changed file(s)" in text
     assert (
         'never sent to any model call: `"src/auth.py"`, `"docs/0.md"`; and 2 more'
@@ -120,7 +122,8 @@ def test_a_draft_without_a_verdict_renders_as_undetermined():
         DraftInput(
             PrEvent("o/r", 1, "a" * 40), "dry-run", "t", (), (), (), (), (), (), (), 0,
             datetime(2026, 1, 1, tzinfo=UTC),
-        )
+        ),
+        str,
     )  # fmt: skip
     assert UNDETERMINED.event is C
     assert parse_status(draft)["coverage_complete"] is False

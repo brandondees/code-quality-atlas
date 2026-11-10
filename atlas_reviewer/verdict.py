@@ -117,7 +117,7 @@ def parse_status(draft: str) -> dict[str, object] | None:
     return value if isinstance(value, dict) else None
 
 
-def warning(v: Verdict, limit: int, scrub: Callable[[str], str] = str) -> str:
+def warning(v: Verdict, limit: int, scrub: Callable[[str], str]) -> str:
     """The block at the top of the review body. Paths are chosen by the PR
     author, so each is scrubbed and quoted as data; at most `limit` are
     listed."""
@@ -158,7 +158,7 @@ def _listed(
     shown = sorted(files, key=lambda f: f.rank)[:limit]
     groups = (
         f"{why}: "
-        + ", ".join(quote_untrusted(scrub(f.path)) for f in shown if f.why == why)
+        + ", ".join(quote_untrusted(f.path, scrub=scrub) for f in shown if f.why == why)
         for why in dict.fromkeys(f.why for f in shown)
     )
     more = len(files) - len(shown)
