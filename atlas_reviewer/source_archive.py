@@ -3,24 +3,31 @@
 
 The upload cap bounds the compressed bytes only, and gzip packs a run of
 one byte about 1,000 to 1: a 9 MiB archive can unpack to about 9 GiB.
-`measure` walks the tar headers in memory, counting members and summing
-their declared sizes, and refuses the archive at the first header over a
-cap. The stream reads one 10 KiB record at a time, so up to that much of a
-member is decompressed with its header; the rest is not, once a cap is
-exceeded. `GzipFile` decompresses every gzip member, which tarfile's own
-`r|gz` does not.
+`measure` walks the tar stream in memory, counting members and summing
+their sizes, and refuses the archive at the first header over a cap,
+before that member's data is decompressed. `GzipFile` decompresses every
+gzip member, not only the first.
 
 The walk fails closed. Python's tarfile and the runner's GNU tar disagree
-on damaged input: tarfile ends the archive at a header it cannot parse
-while GNU tar skips it and keeps extracting, so anything measure does not
-fully understand is refused rather than read the lenient way. It accepts
-only the member types `git archive` writes (regular files, directories,
-symlinks, hardlinks) plus pax and GNU long-name metadata, each metadata
-entry under a size cap and checked before it is read; headers whose
-fields all parse, with non-negative sizes and no sparse-file pax keys;
-and an archive that ends at a zero block followed only by zero padding.
-Any other outcome, including an exception from the reader, is a refusal.
-Nothing is written to disk.
+on input either reads leniently: a header one rejects and the other
+accepts, or a pax key one applies and the other ignores, lets the runner
+see members and sizes measure did not count. So measure reads the blocks
+itself and accepts only what `git archive` writes, in a form both readers
+read the same way:
+
+- ustar headers whose checksum matches and whose numeric fields are plain
+  octal;
+- regular files, directories, symlinks and hardlinks, only files carrying
+  data;
+- pax global headers holding only `comment`, and pax extended headers
+  holding only `path`, `linkpath` and `mtime`, each key once, so no pax
+  record changes a size; and GNU long names and links;
+- metadata under a per-entry cap, checked before the entry is read;
+- a zero block ending the archive, followed only by zero padding.
+
+It skips exactly the data bytes it counts and keeps only counters, never
+the members or the pax keys. Anything else, including an exception from
+the reader, is a refusal. Nothing is written to disk.
 """
 
 from __future__ import annotations
@@ -28,9 +35,8 @@ from __future__ import annotations
 import gzip
 import io
 import re
-import tarfile
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import IO, Self, cast
 
 from atlas_reviewer.ports import BoundaryError
 
@@ -41,31 +47,36 @@ MAX_METADATA_BYTES = 1024 * 1024
 # GNU tar and `git archive` pad the end to a 10 KiB record; zero padding up
 # to this is accepted after the end block, and anything else is refused.
 MAX_TRAILING_ZERO_BYTES = 1024 * 1024
-# A pax global header, then a pax or GNU long-name header, then the member:
-# deeper nesting is not something `git archive` writes.
-MAX_METADATA_DEPTH = 3
 
 _BLOCK = 512
 _ZERO_BLOCK = b"\0" * _BLOCK
-_MEMBER_TYPES = frozenset(
-    (
-        tarfile.REGTYPE,
-        tarfile.AREGTYPE,
-        tarfile.DIRTYPE,
-        tarfile.SYMTYPE,
-        tarfile.LNKTYPE,
-    )
-)
-_METADATA_TYPES = frozenset(
-    (
-        tarfile.XHDTYPE,
-        tarfile.XGLTYPE,
-        tarfile.GNUTYPE_LONGNAME,
-        tarfile.GNUTYPE_LONGLINK,
-    )
-)
-_PAX_SIZE = re.compile(r"[0-9]+")
 _READ_CHUNK = 64 * 1024
+_MAGICS = frozenset((b"ustar\x0000", b"ustar  \0"))
+_NUMERIC_FIELDS = (
+    (100, 108),  # mode
+    (108, 116),  # uid
+    (116, 124),  # gid
+    (124, 136),  # size
+    (136, 148),  # mtime
+)
+# Python's tarfile leaves these empty on a non-device member, which both
+# readers take as 0; `git archive` writes zeros.
+_DEVICE_FIELDS = ((329, 337), (337, 345))
+_SIZE_FIELD = (124, 136)
+_CHECKSUM_FIELD = (148, 156)
+_OCTAL = re.compile(rb" *([0-7]+)[ \0]*")
+_OCTAL_OR_EMPTY = re.compile(rb" *[0-7]*[ \0]*")
+_FILE_TYPES = frozenset((b"0", b"\0"))
+_LINK_AND_DIR_TYPES = frozenset((b"1", b"2", b"5"))
+# A pax global header may hold only what `git archive` writes there, so the
+# global keys both readers carry to later members hold at most this one.
+_GLOBAL_KEYS = frozenset((b"comment",))
+# Per-member keys whose meaning both readers share; none of them is a size.
+_MEMBER_KEYS = frozenset((b"path", b"linkpath", b"mtime"))
+_PAX_KEYS = {b"g": _GLOBAL_KEYS, b"x": _MEMBER_KEYS}
+_NAME_TYPES = frozenset((b"L", b"K"))
+_PAX_LENGTH = re.compile(rb"([1-9][0-9]*) ")
+_PAX_MTIME = re.compile(rb"[0-9]+(?:\.[0-9]+)?")
 
 
 @dataclass(frozen=True)
@@ -75,7 +86,11 @@ class UnpackLimits:
     max_metadata_bytes: int = MAX_METADATA_BYTES
 
     def __post_init__(self) -> None:
-        sizes = (self.max_bytes, self.max_members, self.max_metadata_bytes)
+        sizes = (
+            self.max_bytes,
+            self.max_members,
+            self.max_metadata_bytes,
+        )
         if any(isinstance(n, bool) or not isinstance(n, int) or n < 1 for n in sizes):
             raise ValueError("unpack limits must be positive integers")
 
@@ -95,8 +110,12 @@ def _refusal(reason: str) -> BoundaryError:
 
 @dataclass
 class _Walk:
+    """Counters only: the walk never keeps a member, a name or a pax key."""
+
     limits: UnpackLimits
-    depth: int = 0
+    members: int = 0
+    total: int = 0
+    pending: frozenset[bytes] = frozenset()
 
 
 def measure(data: bytes, limits: UnpackLimits = DEFAULT_UNPACK) -> Unpacked:
@@ -104,151 +123,171 @@ def measure(data: bytes, limits: UnpackLimits = DEFAULT_UNPACK) -> Unpacked:
     tar as described above, has more than `max_members` members, or declares
     more than `max_bytes` in all."""
     try:
-        with (
-            gzip.GzipFile(fileobj=io.BytesIO(data)) as stream,
-            tarfile.open(
-                fileobj=stream, mode="r|", tarinfo=_reader(_Walk(limits))
-            ) as tar,
-        ):
-            counted = _counted(tar, limits)
-            _only_zero_padding(tar)
-            return counted
+        with gzip.GzipFile(fileobj=io.BytesIO(data)) as stream:
+            walk = _Walk(limits)
+            for block in _headers(stream):
+                _entry(block, stream, walk)
+            _ended(walk)
+            _only_zero_padding(stream)
+            return Unpacked(walk.members, walk.total)
     except BoundaryError:
         raise
     except Exception as exc:  # noqa: BLE001 - any reader failure is a refusal
         raise _refusal(type(exc).__name__) from None
 
 
-def _counted(tar: tarfile.TarFile, limits: UnpackLimits) -> Unpacked:
-    members = total = 0
-    for member in tar:
-        members, total = members + 1, total + member.size
-        _within(members, total, limits)
-    if members == 0:
-        raise _refusal("it holds no members")
-    return Unpacked(members, total)
+def _headers(stream: io.BufferedIOBase) -> Iterator[bytes]:
+    """Each header block up to the first zero block, which ends the archive."""
+    while (block := stream.read(_BLOCK)) != _ZERO_BLOCK:
+        if len(block) != _BLOCK:
+            raise _refusal("it ends without an end-of-archive block")
+        if _checksum_failed(block):
+            raise _refusal("header checksum failed")
+        if block[257:265] not in _MAGICS:
+            raise _refusal("a header is not a ustar header")
+        yield block
 
 
-def _only_zero_padding(tar: tarfile.TarFile) -> None:
-    """After the end block, GNU tar stops reading. Anything there other than
-    zero padding is content measure did not count, so it is refused."""
-    fileobj = _stream(tar)
-    seen = 0
-    while chunk := fileobj.read(_READ_CHUNK):
-        seen += len(chunk)
-        if chunk.strip(b"\0") or seen > MAX_TRAILING_ZERO_BYTES:
-            raise _refusal("data follows the end-of-archive block")
+def _entry(block: bytes, stream: io.BufferedIOBase, walk: _Walk) -> None:
+    _check_numeric_fields(block)
+    start, stop = _SIZE_FIELD
+    size = _octal(block[start:stop])
+    kind = block[156:157]
+    if kind in _PAX_KEYS or kind in _NAME_TYPES:
+        _metadata(kind, _read_metadata(size, stream, walk), walk)
+    else:
+        _member(kind, size, stream, walk)
 
 
-def _reader(walk: _Walk) -> type[tarfile.TarInfo]:
-    """A `TarInfo` whose header reads go through `_header`. tarfile calls
-    `fromtarfile` for each member and `_fromtarfile` for the header after a
-    pax or long-name entry, so both are routed."""
-
-    class _Checked(tarfile.TarInfo):
-        @classmethod
-        def fromtarfile(cls, tar: tarfile.TarFile) -> Self:
-            return cast(Self, _header(cls, tar, walk))
-
-        @classmethod
-        def _fromtarfile(cls, tar: tarfile.TarFile, **_: object) -> Self:
-            return cast(Self, _header(cls, tar, walk))
-
-    return _Checked
+def _check_numeric_fields(block: bytes) -> None:
+    """Python's `int(field, 8)` accepts `1_000` and `0o1000`, which GNU tar
+    rejects, reading the header's data as more headers. Only plain octal is
+    accepted; base-256 numbers, which `git archive` never writes, are not."""
+    fields = [(_OCTAL, field) for field in _NUMERIC_FIELDS]
+    fields += [(_OCTAL_OR_EMPTY, field) for field in _DEVICE_FIELDS]
+    if any(not form.fullmatch(block[start:stop]) for form, (start, stop) in fields):
+        raise _refusal("a numeric header field does not parse as plain octal")
 
 
-def _header(
-    cls: type[tarfile.TarInfo], tar: tarfile.TarFile, walk: _Walk
-) -> tarfile.TarInfo:
-    """One header and, for metadata, the member it describes. Only a zero
-    block reaches tarfile as an end of archive; every other problem is a
-    refusal, which tarfile cannot mistake for the end."""
-    fileobj = _stream(tar)
-    buf = fileobj.read(_BLOCK)
-    if buf == _ZERO_BLOCK:
-        raise tarfile.EOFHeaderError("end of archive")  # type: ignore[attr-defined]
-    if len(buf) != _BLOCK:
-        raise _refusal("it ends without an end-of-archive block")
-    if _checksum_failed(buf):
-        raise _refusal("header checksum failed")
-    info = _parsed(cls, buf, tar)
-    _check_header(info, walk.limits)
-    info.offset = fileobj.tell() - _BLOCK
-    member = _processed(info, tar, walk)
-    _check_member(member)
-    return member
+def _octal(field: bytes) -> int:
+    match = _OCTAL.fullmatch(field)
+    if match is None:
+        raise ValueError("not plain octal")
+    return int(match.group(1), 8)
 
 
-def _stream(tar: tarfile.TarFile) -> IO[bytes]:
-    if tar.fileobj is None:
-        raise tarfile.StreamError("source stream is closed")
-    return cast(IO[bytes], tar.fileobj)
-
-
-def _checksum_failed(buf: bytes) -> bool:
-    """The stored checksum matches neither the unsigned nor the signed sum
-    of the header with its checksum field read as spaces."""
+def _checksum_failed(block: bytes) -> bool:
+    """The stored checksum is not plain octal, or matches neither the
+    unsigned nor the signed sum of the header with its checksum field read
+    as spaces."""
+    start, stop = _CHECKSUM_FIELD
     try:
-        stored = int(buf[148:156].strip(b"\0 ") or b"0", 8)
+        stored = _octal(block[start:stop])
     except ValueError:
         return True
-    body = buf[:148] + b" " * 8 + buf[156:]
+    body = block[:start] + b" " * (stop - start) + block[stop:]
     unsigned = sum(body)
     signed = sum(b if b < 128 else b - 256 for b in body)
     return stored not in (unsigned, signed)
 
 
-def _parsed(
-    cls: type[tarfile.TarInfo], buf: bytes, tar: tarfile.TarFile
-) -> tarfile.TarInfo:
-    try:
-        return cls.frombuf(buf, tar.encoding, tar.errors)
-    except tarfile.HeaderError:
-        raise _refusal("a header field does not parse") from None
-
-
-def _check_header(info: tarfile.TarInfo, limits: UnpackLimits) -> None:
-    if info.size < 0:
-        raise _refusal("a header declares a negative size")
-    if info.type in _METADATA_TYPES:
-        if info.size > limits.max_metadata_bytes:
-            raise _refusal(
-                f"a metadata entry declares {info.size} bytes, over the "
-                f"{limits.max_metadata_bytes}-byte cap; not read"
-            )
-    elif info.type not in _MEMBER_TYPES:
-        raise _refusal(f"member type {info.type!r} is not accepted")
-
-
-def _processed(
-    info: tarfile.TarInfo, tar: tarfile.TarFile, walk: _Walk
-) -> tarfile.TarInfo:
-    """tarfile's own processing: data offset for a member, payload and the
-    following header for metadata. Nesting is bounded so a chain of
-    metadata entries cannot pile up in memory."""
-    nested = info.type in _METADATA_TYPES
-    walk.depth += nested
-    try:
-        if walk.depth > MAX_METADATA_DEPTH:
-            raise _refusal("metadata entries are nested too deep")
-        return info._proc_member(tar)  # type: ignore[attr-defined]
-    except tarfile.HeaderError:
+def _read_metadata(size: int, stream: io.BufferedIOBase, walk: _Walk) -> bytes:
+    """The entry's payload, read only once the metadata cap allows it."""
+    limits = walk.limits
+    if size > limits.max_metadata_bytes:
         raise _refusal(
-            "a metadata entry does not parse or has no member after it"
-        ) from None
-    finally:
-        walk.depth -= nested
+            f"a metadata entry declares {size} bytes, over the "
+            f"{limits.max_metadata_bytes}-byte cap; not read"
+        )
+    payload = _read_exactly(stream, _padded(size))
+    return payload[:size]
 
 
-def _check_member(member: tarfile.TarInfo) -> None:
-    """The member as GNU tar will see it, pax fields applied."""
-    pax = member.pax_headers
-    if any(key.startswith("GNU.sparse") for key in pax):
-        raise _refusal("sparse files are not accepted")
-    if "size" in pax and not _PAX_SIZE.fullmatch(pax["size"]):
-        raise _refusal("a pax size field does not parse")
-    if member.size and not member.isreg():
+def _metadata(kind: bytes, payload: bytes, walk: _Walk) -> None:
+    if kind in walk.pending:
+        raise _refusal("a metadata entry repeats before its member")
+    if kind in _PAX_KEYS:
+        _check_pax(payload, _PAX_KEYS[kind])
+    walk.pending |= {kind}
+
+
+def _check_pax(payload: bytes, allowed: frozenset[bytes]) -> None:
+    """Each record is `<length> <key>=<value>\\n`, its key allowed and not
+    repeated, so an entry holds at most as many records as keys it may."""
+    seen: set[bytes] = set()
+    for key, value in _pax_records(payload):
+        if key not in allowed:
+            raise _refusal(f"pax key {key.decode(errors='replace')!r} is not accepted")
+        if key in seen:
+            raise _refusal("a pax key repeats")
+        if key == b"mtime" and not _PAX_MTIME.fullmatch(value):
+            raise _refusal("a pax mtime does not parse")
+        seen.add(key)
+
+
+def _pax_records(payload: bytes) -> Iterator[tuple[bytes, bytes]]:
+    pos = 0
+    while pos < len(payload):
+        key, value, pos = _pax_record(payload, pos)
+        yield key, value
+
+
+def _pax_record(payload: bytes, pos: int) -> tuple[bytes, bytes, int]:
+    """The record at `pos`, whose length counts the whole record, and the
+    position after it. Every byte of the payload must belong to a record."""
+    length = _PAX_LENGTH.match(payload, pos)
+    if length is None:
+        raise _refusal("a pax record does not parse")
+    end = pos + int(length.group(1))
+    key, equals, value = payload[length.end() : end].partition(b"=")
+    if end > len(payload) or not (key and equals and value.endswith(b"\n")):
+        raise _refusal("a pax record does not parse")
+    return key, value[:-1], end
+
+
+def _member(kind: bytes, size: int, stream: io.BufferedIOBase, walk: _Walk) -> None:
+    if kind not in _FILE_TYPES and kind not in _LINK_AND_DIR_TYPES:
+        raise _refusal(f"member type {kind!r} is not accepted")
+    if size and kind not in _FILE_TYPES:
         raise _refusal("a non-file member declares data")
+    walk.members += 1
+    walk.total += size
+    walk.pending = frozenset()
+    _within(walk.members, walk.total, walk.limits)
+    _skip(stream, _padded(size))
+
+
+def _ended(walk: _Walk) -> None:
+    if walk.pending:
+        raise _refusal("a metadata entry has no member after it")
+    if walk.members == 0:
+        raise _refusal("it holds no members")
+
+
+def _padded(size: int) -> int:
+    return size + -size % _BLOCK
+
+
+def _read_exactly(stream: io.BufferedIOBase, size: int) -> bytes:
+    data = stream.read(size)
+    if len(data) != size:
+        raise _refusal("it ends inside an entry's data")
+    return data
+
+
+def _skip(stream: io.BufferedIOBase, size: int) -> None:
+    while size:
+        size -= len(_read_exactly(stream, min(size, _READ_CHUNK)))
+
+
+def _only_zero_padding(stream: io.BufferedIOBase) -> None:
+    """After the end block, GNU tar stops reading. Anything there other than
+    zero padding is content measure did not count, so it is refused."""
+    seen = 0
+    while chunk := stream.read(_READ_CHUNK):
+        seen += len(chunk)
+        if chunk.strip(b"\0") or seen > MAX_TRAILING_ZERO_BYTES:
+            raise _refusal("data follows the end-of-archive block")
 
 
 def _within(members: int, total: int, limits: UnpackLimits) -> None:

@@ -377,9 +377,11 @@ def test_a_top_level_dash_name_is_listed_as_not_readable(tmp_path):
 
 
 def test_a_name_that_is_not_utf8_is_marked_not_readable(tmp_path):
+    """The raw byte goes in the ustar name, as `git archive` writes it; pax
+    would add `hdrcharset`, which the source archive check refuses."""
     buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz", encoding="utf-8",
-                      errors="surrogateescape") as tf:  # fmt: skip
+    with tarfile.open(fileobj=buf, mode="w:gz", format=tarfile.USTAR_FORMAT,
+                      encoding="utf-8", errors="surrogateescape") as tf:  # fmt: skip
         info = tarfile.TarInfo("top/odd/\udcff.txt")
         info.size = 2
         tf.addfile(info, io.BytesIO(b"x\n"))
