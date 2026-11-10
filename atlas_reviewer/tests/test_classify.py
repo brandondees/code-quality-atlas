@@ -95,6 +95,23 @@ def test_tally_counts_unread_views_apart_from_checks_without_a_result():
     assert (t.passed, t.unknown, t.unread) == (1, 1, 2)
 
 
+@pytest.mark.parametrize(
+    "conclusion",
+    [Conclusion.FAILURE, Conclusion.TIMED_OUT, Conclusion.ACTION_REQUIRED],
+)
+def test_each_failing_conclusion_at_another_commit_counts_as_not_rerun(conclusion):
+    evidence = classify(HEAD, [item("tests", OLD, conclusion=conclusion)])
+    assert [e.item.conclusion for e in not_rerun_failures(evidence)] == [conclusion]
+
+
+@pytest.mark.parametrize(
+    "conclusion", [Conclusion.SUCCESS, Conclusion.CANCELLED, Conclusion.SKIPPED]
+)
+def test_a_non_failing_conclusion_at_another_commit_is_not_called_out(conclusion):
+    evidence = classify(HEAD, [item("tests", OLD, conclusion=conclusion)])
+    assert not_rerun_failures(evidence) == ()
+
+
 def test_a_failure_at_another_commit_without_a_head_result_is_singled_out():
     evidence = classify(
         HEAD,
