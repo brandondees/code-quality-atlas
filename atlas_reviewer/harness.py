@@ -12,7 +12,7 @@ from pathlib import Path
 from atlas_reviewer.budget import input_token_bound
 from atlas_reviewer.picker import load_picker
 from atlas_reviewer.ports import ModelProvider, Narrative, PickRequest, ReviewRequest
-from atlas_reviewer.prompt import Prompt, build_prompt
+from atlas_reviewer.prompt import Prompt, UntrustedBlock, build_prompt
 from atlas_reviewer.redact import Redactor
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -61,9 +61,13 @@ class SkillBundleHarness:
         return self._redactor(self._provider.complete(prompt), PICK_REPLY_CHARS).text
 
     def prompt_tokens(self, request: ReviewRequest) -> int:
-        """Measured with a placeholder nonce of the real one's length; the
-        nonce is the only part of the prompt that differs per call."""
-        prompt = self._review_prompt(request, "0" * NONCE_CHARS)
+        """An upper bound for any nonce of `NONCE_CHARS` ASCII characters,
+        the only part of the prompt that differs per call. Each copy of the
+        nonce inside a block is swapped for a shorter marker, so the longest
+        prompt is one whose nonce occurs in no block: it is measured with a
+        placeholder of the same UTF-8 length made of a character no block
+        contains."""
+        prompt = self._review_prompt(request, _absent_placeholder(request.blocks))
         return input_token_bound(prompt.system + prompt.user)
 
     def _review_prompt(self, request: ReviewRequest, nonce: str) -> Prompt:
@@ -78,6 +82,14 @@ class SkillBundleHarness:
 
     def usage_lines(self) -> tuple[str, ...]:
         return self._provider.usage_lines()
+
+
+def _absent_placeholder(blocks: tuple[UntrustedBlock, ...]) -> str:
+    """`NONCE_CHARS` UTF-8 bytes of one four-byte character absent from every
+    block; a prompt within any token bound cannot hold all ~1M of them."""
+    present = set().union(*(b.content.text for b in blocks))
+    char = next(chr(c) for c in range(0x10000, 0x110000) if chr(c) not in present)
+    return char * (NONCE_CHARS // 4)
 
 
 def _subject(repo: str, pr_number: int, head_sha: str) -> str:
