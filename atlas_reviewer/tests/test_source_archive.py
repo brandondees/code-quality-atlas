@@ -13,6 +13,7 @@ from atlas_reviewer.source_archive import (
     MAX_UNPACKED_BYTES,
     Unpacked,
     UnpackLimits,
+    _ChecksumChecked,
     measure,
 )
 
@@ -95,6 +96,37 @@ def test_a_file_in_a_later_gzip_member_is_still_counted():
 def test_members_in_every_gzip_member_are_counted():
     data = two_members(512, 512)
     assert measure(data) == Unpacked(2, 1024)
+
+
+def _bad_checksum(name: str) -> bytes:
+    """A 512-byte header whose checksum field no longer matches."""
+    block = bytearray(tarfile.TarInfo(name).tobuf())
+    block[0] ^= 0x01
+    return bytes(block)
+
+
+def test_a_header_check_without_a_stream_is_an_error():
+    closed = tarfile.TarFile.__new__(tarfile.TarFile)
+    closed.fileobj = None
+    with pytest.raises(tarfile.StreamError, match="closed"):
+        _ChecksumChecked.fromtarfile(closed)
+
+
+def test_a_bad_checksum_in_the_middle_cannot_hide_a_later_member():
+    """GNU tar skips a bad-checksum header and extracts what follows (exit 2).
+    tarfile stops at that header and reports success, so the later member's
+    declared size must still refuse the archive."""
+    small = tarfile.TarInfo("src/small")
+    small.size = 3
+    big = tarfile.TarInfo("src/big")
+    big.size = MAX_UNPACKED_BYTES + 1
+    payload = (
+        small.tobuf() + b"abc" + b"\0" * 509 + _bad_checksum("src/gap") + big.tobuf()
+    )
+    data = gzip.compress(payload)
+    assert len(data) < 4096
+    with pytest.raises(BoundaryError, match="header checksum failed"):
+        measure(data)
 
 
 def test_a_header_in_a_later_member_is_refused_before_its_data_is_read():
