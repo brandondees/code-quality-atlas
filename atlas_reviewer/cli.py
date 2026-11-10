@@ -30,7 +30,7 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TextIO
+from typing import TextIO
 
 from atlas_reviewer.budget import CallLimits
 from atlas_reviewer.clock import SystemClock
@@ -210,7 +210,12 @@ class _Credentials:
 def _review_lock(
     args: argparse.Namespace, env: Mapping[str, str]
 ) -> AbstractContextManager[None]:
-    return single_review_lock(_state_dir(args, env) / "review.lock")
+    state_dir = _state_dir(args, env)
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise UsageError(f"--state-dir {state_dir}: cannot be created ({exc})") from exc
+    return single_review_lock(state_dir / "review.lock")
 
 
 def _telemetry(
@@ -226,7 +231,10 @@ def _telemetry(
     stamp = f"{clock.now():%Y%m%dT%H%M%S.%fZ}-{secrets.token_hex(4)}"
     default = _state_dir(args, env) / "telemetry" / f"{command}-{stamp}.jsonl"
     path = Path(args.events) if args.events else (default if default_file else None)
-    sink = JsonlSink(path) if path else None
+    try:
+        sink = JsonlSink(path) if path else None
+    except OSError as exc:
+        raise UsageError(f"telemetry file {path}: {exc}") from exc
     return Telemetry(clock, sink, scrub=args.credentials.scrub)
 
 
@@ -242,17 +250,13 @@ def _dry_run_wiring(
     telemetry: Telemetry,
 ) -> _Wiring:
     fixtures = Path(args.fixtures) if args.fixtures else event_path.parent
-    script_path = fixtures / "runner-script.json"
-    script: dict[str, Any] = (
-        json.loads(script_path.read_text(encoding="utf-8"))
-        if script_path.is_file()
-        else {}
-    )
+    if not fixtures.is_dir():
+        raise UsageError(f"fixture directory {fixtures} does not exist")
     redactor = Redactor()
     clock = SystemClock()
     deps = Deps(
         github=FixtureGitHub(fixtures),
-        sprites=FakeSprites.from_script(script),
+        sprites=_scripted_runner(fixtures / "runner-script.json"),
         ledger=MemoryLedger(),
         harness=SkillBundleHarness(provider, load_bundle(), redactor),
         clock=clock,
@@ -263,6 +267,21 @@ def _dry_run_wiring(
     return _Wiring(
         deps, f"dry run (fixtures: {fixtures}; fake runner; provider {provider.name})"
     )
+
+
+def _scripted_runner(path: Path) -> FakeSprites:
+    if not path.is_file():
+        return FakeSprites.from_script({})
+    try:
+        script = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise UsageError(f"cannot read runner script {path}: {exc}") from exc
+    if not isinstance(script, dict):
+        raise UsageError(f"runner script {path} must hold a JSON object")
+    try:
+        return FakeSprites.from_script(script)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise UsageError(f"invalid runner script {path}: {exc!r}") from exc
 
 
 def _app_tokens(
@@ -365,6 +384,8 @@ def _check_out_path(out_path: str | None) -> None:
         return
     path = Path(out_path)
     parent = path.parent
+    if path.is_symlink() and not path.exists():
+        raise UsageError(f"--out {out_path}: a symlink to a missing target")
     if path.is_dir() or not parent.is_dir():
         raise UsageError(f"--out {out_path}: not a file in an existing directory")
     target = path if path.exists() else parent

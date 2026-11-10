@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 import io
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -116,6 +117,74 @@ def test_without_out_the_summary_goes_to_stderr_and_stdout_is_only_the_draft(tmp
     assert "review event:" not in out and "telemetry:" not in out
     assert "telemetry: " in err and "(not written)" in err
     assert "review event: COMMENT; coverage_complete=false" in err
+
+
+@pytest.mark.parametrize(
+    "script,message",
+    [
+        ("{not json", "cannot read runner script"),
+        ("[1, 2]", "must hold a JSON object"),
+        ('{"exec": [{"match": "x"}]}', "invalid runner script"),
+    ],
+)
+def test_a_bad_runner_script_is_a_usage_error(tmp_path, script, message):
+    fixtures = tmp_path / "fixtures"
+    shutil.copytree(FIXTURE, fixtures)
+    (fixtures / "runner-script.json").write_text(script)
+    code, out, err = run_cli(
+        "--state-dir", str(tmp_path / "state"), "review", "--event", EVENT,
+        "--dry-run", "--fixtures", str(fixtures),
+    )  # fmt: skip
+    assert code == cli.EXIT_USAGE
+    assert message in err
+    assert "Traceback" not in err
+    assert out == ""
+
+
+def test_a_missing_fixture_directory_is_a_usage_error(tmp_path):
+    code, _, err = run_cli(
+        "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run",
+        "--fixtures", str(tmp_path / "nowhere"),
+    )  # fmt: skip
+    assert code == cli.EXIT_USAGE
+    assert "fixture directory" in err
+
+
+@pytest.mark.parametrize(
+    "command", [("review", "--event", EVENT, "--dry-run"), ("sweep",)]
+)
+def test_a_state_dir_under_a_file_is_a_usage_error(tmp_path, command):
+    blocker = tmp_path / "blocker"
+    blocker.write_text("")
+    code, _, err = run_cli(
+        "--state-dir", str(blocker / "state"), *command,
+        env={cli.ENV_SPRITES_TOKEN: "org/1/sprites-secret"},
+    )  # fmt: skip
+    assert code == cli.EXIT_USAGE
+    assert "--state-dir" in err and "cannot be created" in err
+
+
+def test_an_events_file_under_a_file_is_a_usage_error(tmp_path):
+    blocker = tmp_path / "blocker"
+    blocker.write_text("")
+    code, _, err = run_cli(
+        "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run",
+        "--events", str(blocker / "e.jsonl"),
+    )  # fmt: skip
+    assert code == cli.EXIT_USAGE
+    assert "telemetry file" in err
+
+
+def test_a_dangling_out_symlink_is_refused_before_the_review(tmp_path):
+    link = tmp_path / "draft.md"
+    link.symlink_to(tmp_path / "missing" / "target.md")
+    code, out, err = run_cli(
+        "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run",
+        "--out", str(link),
+    )  # fmt: skip
+    assert code == cli.EXIT_USAGE
+    assert "symlink to a missing target" in err
+    assert out == ""
 
 
 def test_module_entry_point_runs_offline(tmp_path):
