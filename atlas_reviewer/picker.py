@@ -6,8 +6,8 @@ reading that file.
 The picker ranks lenses against its route table and the depth mode; this
 module adds no routing of its own. The model's reply is untrusted output:
 only a JSON list of lens-shaped names is accepted, the critical tier always
-runs ahead of it within the depth's breadth, and `lenses.plan_lenses` then
-loads only names that exist in the bundle. Triage runs the critical tier
+goes ahead of it, and `lenses.plan_lenses` then runs whole bodies in that
+order up to the depth's breadth and reports every other name NOT RUN. Triage runs the critical tier
 without a call. If the picker cannot
 run or its reply is unusable, the critical tier runs instead and the
 controller notes say why, so a failed pick never means an empty review.
@@ -104,7 +104,9 @@ def picker_instructions(depth: Depth) -> str:
     return PICKER_INSTRUCTIONS.format(depth=depth.value, limit=depth.limit)
 
 
-def parse_picks(text: str, limit: int) -> tuple[str, ...]:
+def parse_picks(text: str) -> tuple[str, ...]:
+    """Every distinct name in rank order. Nothing is dropped here: names
+    past the depth's breadth are reported NOT RUN by `plan_lenses`."""
     body = text.strip()
     fenced = _FENCE.match(body)
     try:
@@ -119,7 +121,7 @@ def parse_picks(text: str, limit: int) -> tuple[str, ...]:
         raise PickerOutputError("the reply named no lens")
     if not all(_NAME.fullmatch(n) and len(n) <= 80 for n in unique):
         raise PickerOutputError("the reply names something that is not a lens name")
-    return unique[:limit]
+    return unique
 
 
 def select_lenses(
@@ -150,7 +152,7 @@ def select_lenses(
     if no_room:
         return _critical(no_room, False)
     try:
-        names = parse_picks(run_picker(), depth.limit)
+        names = parse_picks(run_picker())
     except BoundaryError as exc:
         return _critical(
             "Lens selection: the lens picker gave no usable lens list (reason, "
@@ -163,20 +165,22 @@ def select_lenses(
             "ranked has a body in the bundle, so the critical tier ran",
             True,
         )
+    with_body = sum(has_body(n) for n in names)
     note = (
         f"Lens selection: `choosing-review-lenses` ran as one model call at "
         f"{depth.value} depth over the PR's paths and text (untrusted input), "
-        f"and ranked {len(names)} lens name(s); the critical tier always runs "
-        "first, and only names with a body in the bundle are loaded."
+        f"and ranked {len(names)} lens name(s), {with_body} with a body in the "
+        f"bundle; at most {depth.limit} lenses run, the critical tier always "
+        "runs first, and every other name is listed as NOT RUN with its reason."
     )
-    return LensSelection(_with_critical(names, depth.limit), note, True)
+    return LensSelection(_with_critical(names), note, True)
 
 
-def _with_critical(names: tuple[str, ...], limit: int) -> tuple[LensChoice, ...]:
-    """The critical tier first, then the picker's other names in rank order
-    up to `limit` in all. `plan_lenses` caps by position and spends its size
-    budget in order, so a thin or steered pick can add lenses but never
-    displace a critical one."""
+def _with_critical(names: tuple[str, ...]) -> tuple[LensChoice, ...]:
+    """The critical tier first, then every other picked name in rank order.
+    `plan_lenses` spends its size budget and its lens cap in this order, so
+    a thin or steered pick can add lenses but never displace a critical one,
+    and it reports each name it does not run."""
     rank = {n: i for i, n in enumerate(names, 1)}
     critical = tuple(
         LensChoice(n, f"critical tier; picker rank {rank[n]}")
@@ -186,7 +190,7 @@ def _with_critical(names: tuple[str, ...], limit: int) -> tuple[LensChoice, ...]
     )
     extras = (n for n in names if n not in CRITICAL_TIER)
     rest = tuple(LensChoice(n, f"picker rank {rank[n]}") for n in extras)
-    return (critical + rest)[:limit]
+    return critical + rest
 
 
 def _no_room_for_a_pick(library: LensLibrary, depth: Depth, budget_chars: int) -> str:

@@ -95,14 +95,15 @@ def plan_lenses(
     budget_chars: int = LENS_BUDGET_CHARS,
 ) -> LensPlan:
     """Walk `ranked` in order, inlining each whole body that fits what is
-    left of `budget_chars`; any other lens is NOT RUN with its reason."""
+    left of `budget_chars` until `max_lenses` have run; any other lens is NOT
+    RUN with its reason. A name with no body takes no slot."""
     uses: list[LensUse] = []
     loaded: list[LoadedLens] = []
     left = budget_chars
-    for position, choice in enumerate(ranked):
+    for choice in ranked:
         body = library.body(choice.name)
         skip = _skip_reason(
-            body, position >= max_lenses, left, max_lenses, budget_chars
+            body, len(loaded) >= max_lenses, left, max_lenses, budget_chars
         )
         if body is not None and skip is None:
             uses.append(LensUse(choice.name, LensStatus.RUN, len(body), choice.why))

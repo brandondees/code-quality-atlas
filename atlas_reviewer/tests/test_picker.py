@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from atlas_reviewer.lenses import MAX_LENSES, LensLibrary, plan_lenses
+from atlas_reviewer.lenses import MAX_LENSES, LensLibrary, LensStatus, plan_lenses
 from atlas_reviewer.picker import (
     COMPREHENSIVE_LIMIT,
     CRITICAL_TIER,
@@ -49,17 +49,17 @@ def test_a_ranked_list_is_kept_in_order_without_duplicates():
     reply = picks(
         "sweeping-for-security", "checking-restraint", "sweeping-for-security"
     )
-    assert parse_picks(reply, 8) == ("sweeping-for-security", "checking-restraint")
+    assert parse_picks(reply) == ("sweeping-for-security", "checking-restraint")
 
 
 def test_a_fenced_json_reply_is_accepted():
     reply = f"```json\n{picks('checking-restraint')}\n```"
-    assert parse_picks(reply, 8) == ("checking-restraint",)
+    assert parse_picks(reply) == ("checking-restraint",)
 
 
-def test_the_list_is_cut_at_the_breadth():
+def test_no_name_is_dropped_at_the_breadth():
     names = [f"lens-{i}" for i in range(12)]
-    assert parse_picks(picks(*names), 8) == tuple(names[:8])
+    assert parse_picks(picks(*names)) == tuple(names)
 
 
 @pytest.mark.parametrize(
@@ -77,7 +77,7 @@ def test_the_list_is_cut_at_the_breadth():
 )
 def test_anything_but_a_list_of_lens_shaped_names_is_refused(reply):
     with pytest.raises(PickerOutputError):
-        parse_picks(reply, 8)
+        parse_picks(reply)
 
 
 def test_triage_runs_the_critical_tier_without_a_call():
@@ -140,12 +140,23 @@ def test_a_thin_pick_cannot_drop_the_critical_tier():
     assert [u.name for u in plan.uses[: len(CRITICAL_TIER)]] == list(CRITICAL_TIER)
 
 
-def test_the_merged_pick_stays_within_the_depth_breadth():
+def test_names_past_the_breadth_are_not_run_and_body_less_names_take_no_slot():
     extras = [f"lens-{i}" for i in range(MAX_LENSES)]
-    chosen = select_lenses(Depth.REVIEW, lambda: picks(*extras), small_bundle(*extras))
-    names = [c.name for c in chosen.choices]
-    assert len(names) == MAX_LENSES
-    assert names == [*CRITICAL_TIER, *extras[: MAX_LENSES - len(CRITICAL_TIER)]]
+    library = small_bundle(*extras)
+    chosen = select_lenses(Depth.REVIEW, lambda: picks("ghost", *extras), library)
+    plan = plan_lenses(library, chosen.choices, Depth.REVIEW.limit)
+    by = {u.name: u for u in plan.uses}
+    room = MAX_LENSES - len(CRITICAL_TIER)
+    ran = [u.name for u in plan.uses if u.status is LensStatus.RUN]
+    assert ran == [*CRITICAL_TIER, *extras[:room]]
+    assert by["ghost"].reason == "no body.md in the bundle"
+    for name in extras[room:]:
+        assert by[name].status is LensStatus.NOT_RUN
+        assert by[name].reason.startswith(f"below the cap of {MAX_LENSES} lenses")
+        assert f"{name} (below the cap" in plan.coverage()
+    assert (
+        f"ranked {MAX_LENSES + 1} lens name(s), {MAX_LENSES} with a body" in chosen.note
+    )
 
 
 def test_a_pick_with_no_loadable_lens_runs_the_critical_tier():
