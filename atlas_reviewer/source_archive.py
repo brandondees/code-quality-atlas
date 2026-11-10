@@ -22,7 +22,8 @@ read the same way:
 - pax global headers holding only `comment`, and pax extended headers
   holding only `path`, `linkpath` and `mtime`, each key once, so no pax
   record changes a size; and GNU long names and links;
-- metadata under a per-entry cap, checked before the entry is read;
+- metadata under a per-entry cap, checked before the entry is read, and
+  under an archive-wide total;
 - a zero block ending the archive, followed only by zero padding.
 
 It skips exactly the data bytes it counts and keeps only counters, never
@@ -44,6 +45,8 @@ from atlas_reviewer.ports import BoundaryError
 MAX_UNPACKED_BYTES = 256 * 1024 * 1024
 MAX_MEMBERS = 50_000
 MAX_METADATA_BYTES = 1024 * 1024
+# 50,000 members each carrying a pax path of about 300 bytes.
+MAX_METADATA_TOTAL_BYTES = 16 * 1024 * 1024
 # GNU tar and `git archive` pad the end to a 10 KiB record; zero padding up
 # to this is accepted after the end block, and anything else is refused.
 MAX_TRAILING_ZERO_BYTES = 1024 * 1024
@@ -84,12 +87,14 @@ class UnpackLimits:
     max_bytes: int = MAX_UNPACKED_BYTES
     max_members: int = MAX_MEMBERS
     max_metadata_bytes: int = MAX_METADATA_BYTES
+    max_metadata_total_bytes: int = MAX_METADATA_TOTAL_BYTES
 
     def __post_init__(self) -> None:
         sizes = (
             self.max_bytes,
             self.max_members,
             self.max_metadata_bytes,
+            self.max_metadata_total_bytes,
         )
         if any(isinstance(n, bool) or not isinstance(n, int) or n < 1 for n in sizes):
             raise ValueError("unpack limits must be positive integers")
@@ -115,6 +120,7 @@ class _Walk:
     limits: UnpackLimits
     members: int = 0
     total: int = 0
+    metadata: int = 0
     pending: frozenset[bytes] = frozenset()
 
 
@@ -192,12 +198,18 @@ def _checksum_failed(block: bytes) -> bool:
 
 
 def _read_metadata(size: int, stream: io.BufferedIOBase, walk: _Walk) -> bytes:
-    """The entry's payload, read only once the metadata cap allows it."""
+    """The entry's payload, read only once both metadata caps allow it."""
     limits = walk.limits
     if size > limits.max_metadata_bytes:
         raise _refusal(
             f"a metadata entry declares {size} bytes, over the "
             f"{limits.max_metadata_bytes}-byte cap; not read"
+        )
+    walk.metadata += size
+    if walk.metadata > limits.max_metadata_total_bytes:
+        raise _refusal(
+            f"metadata entries declare over {limits.max_metadata_total_bytes} "
+            "bytes in all; not read"
         )
     payload = _read_exactly(stream, _padded(size))
     return payload[:size]

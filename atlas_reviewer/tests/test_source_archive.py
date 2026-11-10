@@ -7,6 +7,7 @@ import io
 import subprocess
 import tarfile
 import time
+import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.source_archive import (
     MAX_MEMBERS,
     MAX_METADATA_BYTES,
+    MAX_METADATA_TOTAL_BYTES,
     MAX_TRAILING_ZERO_BYTES,
     MAX_UNPACKED_BYTES,
     Unpacked,
@@ -80,6 +82,7 @@ def test_an_unreadable_archive_is_refused(data):
         {"max_members": -1},
         {"max_bytes": True},
         {"max_metadata_bytes": 0},
+        {"max_metadata_total_bytes": 0},
     ],
 )
 def test_limits_must_be_positive_integers(limits):
@@ -377,6 +380,35 @@ def many_long_names(count, size=MIB):
     """`count` members, each named by a long-name entry of `size` bytes."""
     entry = long_name(size) + header("src/a")
     return gzip.compress(entry * count + END)
+
+
+def test_metadata_past_the_archive_wide_total_is_refused_before_it_is_read():
+    data = many_long_names(MAX_METADATA_TOTAL_BYTES // MIB + 1)
+    assert len(data) < 64 * 1024
+    with pytest.raises(BoundaryError, match="over 16777216 bytes in all; not read"):
+        measure(data)
+    assert MAX_METADATA_TOTAL_BYTES == 16 * MIB
+
+
+def test_the_metadata_total_is_a_limit():
+    with pytest.raises(BoundaryError, match="over 4096 bytes in all"):
+        measure(many_long_names(5, 1024), UnpackLimits(max_metadata_total_bytes=4096))
+    assert measure(
+        many_long_names(4, 1024), UnpackLimits(max_metadata_total_bytes=4096)
+    )
+
+
+def test_metadata_under_the_total_is_read_one_entry_at_a_time():
+    """Fifteen 1 MiB names are accepted while holding about one in memory:
+    nothing is kept per member, as tarfile's member list would."""
+    data = many_long_names(15)
+    tracemalloc.start()
+    try:
+        assert measure(data) == Unpacked(15, 0)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 6 * MIB
 
 
 def test_many_global_keys_are_refused_at_the_first_one_not_allowed():
