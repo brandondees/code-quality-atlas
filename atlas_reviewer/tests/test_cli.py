@@ -618,7 +618,7 @@ from atlas_reviewer import cli
 from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.stops import held, install_interrupts
 
-def boom(args, env, out, err):
+def boom(args, run):
     with held():
         os.kill(os.getpid(), signal.SIGTERM)
     if os.environ["STOP_ERROR"] == "boundary":

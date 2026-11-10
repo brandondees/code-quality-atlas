@@ -214,6 +214,17 @@ class _Credentials:
         return tuple(s for source in self._sources for s in source())
 
 
+@dataclass
+class _Run:
+    """One invocation's state that is not a command-line option."""
+
+    env: Mapping[str, str]
+    out: TextIO
+    err: TextIO
+    credentials: _Credentials
+    telemetry: Telemetry | None = None
+
+
 def _review_lock(
     args: argparse.Namespace, env: Mapping[str, str]
 ) -> AbstractContextManager[None]:
@@ -227,7 +238,7 @@ def _review_lock(
 
 def _telemetry(
     args: argparse.Namespace,
-    env: Mapping[str, str],
+    run: _Run,
     command: str,
     *,
     default_file: bool,
@@ -236,13 +247,13 @@ def _telemetry(
     not have created, let alone written, a telemetry file."""
     clock = SystemClock()
     stamp = f"{clock.now():%Y%m%dT%H%M%S.%fZ}-{secrets.token_hex(4)}"
-    default = _state_dir(args, env) / "telemetry" / f"{command}-{stamp}.jsonl"
+    default = _state_dir(args, run.env) / "telemetry" / f"{command}-{stamp}.jsonl"
     path = Path(args.events) if args.events else (default if default_file else None)
     try:
         sink = JsonlSink(path) if path else None
     except OSError as exc:
         raise UsageError(f"telemetry file {path}: {exc}") from exc
-    return Telemetry(clock, sink, scrub=args.credentials.scrub)
+    return Telemetry(clock, sink, scrub=run.credentials.scrub)
 
 
 def _events_path(telemetry: Telemetry) -> str:
@@ -315,14 +326,15 @@ def _live_wiring(
     provider: ModelProvider,
     telemetry: Telemetry,
     runner: str,
+    credentials: _Credentials,
 ) -> _Wiring:
     _require_env(env, ENV_APP_KEY)
     _require_env(env, ENV_SPRITES_TOKEN)
     clock = SystemClock()
     transport = UrllibTransport()
     tokens = _app_tokens(env, event, args.include_issues, transport)
-    args.credentials.register(tokens.secrets)
-    redactor = args.credentials.redactor
+    credentials.register(tokens.secrets)
+    redactor = credentials.redactor
     sprites = args.sprites_factory(env)
     _require_runner_absent(sprites, runner)
     deps = Deps(
@@ -371,22 +383,24 @@ def _review_config(args: argparse.Namespace, mode: str) -> ReviewConfig:
         raise UsageError(str(exc)) from exc
 
 
-def _cmd_review(
-    args: argparse.Namespace, env: Mapping[str, str], out: TextIO, err: TextIO
-) -> int:
+def _cmd_review(args: argparse.Namespace, run: _Run) -> int:
+    env, out, err = run.env, run.out, run.err
     event_path = Path(args.event)
     event = load_event(event_path)
     _review_config(args, "check")
     _check_out_path(args.out)
     with _review_lock(args, env):
-        telemetry = _telemetry(args, env, "review", default_file=not args.dry_run)
+        telemetry = _telemetry(args, run, "review", default_file=not args.dry_run)
+        run.telemetry = telemetry
         provider = _select_provider(args, env, args.openrouter_factory, telemetry)
         if args.dry_run:
             wiring = _dry_run_wiring(args, event_path, provider, telemetry)
         else:
             runner = event_runner_name(event)
             err.write(f"atlas_reviewer: runner Sprite for this review: {runner}\n")
-            wiring = _live_wiring(args, env, event, provider, telemetry, runner)
+            wiring = _live_wiring(
+                args, env, event, provider, telemetry, runner, run.credentials
+            )
         outcome = run_review(event, wiring.deps, _review_config(args, wiring.mode))
     written = _emit(outcome.draft, args.out, out, err)
     verdict = outcome.verdict
@@ -453,9 +467,8 @@ def _live_sprites(env: Mapping[str, str]) -> SpritesApi:
     )
 
 
-def _cmd_sweep(
-    args: argparse.Namespace, env: Mapping[str, str], out: TextIO, err: TextIO
-) -> int:
+def _cmd_sweep(args: argparse.Namespace, run: _Run) -> int:
+    env, out = run.env, run.out
     named = _named_runners(args)
     api = args.sprites_factory(env)
     # The ledger lists a live review's runner too; sweeping during a review
@@ -517,17 +530,17 @@ def _require_force_live(args: argparse.Namespace, pending: Sequence[str]) -> Non
         )
 
 
-def _cmd_probe(
-    args: argparse.Namespace, env: Mapping[str, str], out: TextIO, err: TextIO
-) -> int:
+def _cmd_probe(args: argparse.Namespace, run: _Run) -> int:
+    env, out = run.env, run.out
     sequence = _PROBE_SEQUENCES[args.sequence]
     report = io.StringIO()
     with _review_lock(args, env):
-        telemetry = _telemetry(args, env, f"probe-{args.sequence}", default_file=True)
+        telemetry = _telemetry(args, run, f"probe-{args.sequence}", default_file=True)
+        run.telemetry = telemetry
         try:
-            usable = sequence(args, env, report, telemetry)
+            usable = sequence(args, run, report, telemetry)
         finally:
-            out.write(args.credentials.scrub(report.getvalue()))
+            out.write(run.credentials.scrub(report.getvalue()))
     out.write(f"\n{telemetry_section(telemetry.events)}\n\n")
     out.write(
         f"telemetry: {len(telemetry.events)} event(s), {_events_path(telemetry)}\n"
@@ -538,8 +551,9 @@ def _cmd_probe(
 
 
 def _probe_protocol(
-    args: argparse.Namespace, env: Mapping[str, str], out: TextIO, telemetry: Telemetry
+    args: argparse.Namespace, run: _Run, out: TextIO, telemetry: Telemetry
 ) -> bool:
+    env = run.env
     clock: Clock = SystemClock()
     outcome = probe_runner(
         args.sprites_factory(env),
@@ -567,11 +581,12 @@ def _probe_protocol(
 
 
 def _probe_review_sequence(
-    args: argparse.Namespace, env: Mapping[str, str], out: TextIO, telemetry: Telemetry
+    args: argparse.Namespace, run: _Run, out: TextIO, telemetry: Telemetry
 ) -> bool:
     """The review's exact exec sequence (tool check, upload, unpack, tools)
     on a real checkout, with no model call and no evidence gathering."""
-    tarball = _probe_source(args, env, telemetry)
+    env, credentials = run.env, run.credentials
+    tarball = _probe_source(args, env, telemetry, credentials)
     if len(tarball) > MAX_TARBALL_BYTES:
         raise UsageError(f"tarball is {len(tarball)} bytes, over {MAX_TARBALL_BYTES}")
     clock: Clock = SystemClock()
@@ -588,7 +603,7 @@ def _probe_review_sequence(
     )
     _write_report(outcome.report, out)
     out.write(f"source tarball: {len(tarball)} bytes\n")
-    redactor = args.credentials.redactor
+    redactor = credentials.redactor
     out.writelines(f"{_tool_report(r, redactor)}\n" for r in outcome.results)
     out.write(f"{_python_report(outcome.python)}\n")
     out.writelines(f"{_diagnostic_report(d)}\n" for d in outcome.diagnostics)
@@ -609,7 +624,10 @@ def _diagnostic_report(result: Diagnostic) -> str:
 
 
 def _probe_source(
-    args: argparse.Namespace, env: Mapping[str, str], telemetry: Telemetry
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+    telemetry: Telemetry,
+    credentials: _Credentials,
 ) -> bytes:
     if args.tarball:
         return _read_tarball(Path(args.tarball))
@@ -618,7 +636,7 @@ def _probe_source(
     event = load_event(Path(args.event))
     transport = UrllibTransport()
     tokens = _app_tokens(env, event, False, transport)
-    args.credentials.register(tokens.secrets)
+    credentials.register(tokens.secrets)
     github = InstrumentedGitHub(GitHubClient(transport, tokens), telemetry)
     return github.get_tarball(event.repo, event.head_sha)
 
@@ -646,7 +664,8 @@ def _tool_report(result: ToolResult, redactor: Redactor) -> str:
 
 
 _PROBE_SEQUENCES: dict[
-    str, Callable[[argparse.Namespace, Mapping[str, str], TextIO, Telemetry], bool]
+    str,
+    Callable[[argparse.Namespace, _Run, TextIO, Telemetry], bool],
 ] = {"protocol": _probe_protocol, "review": _probe_review_sequence}
 
 
@@ -822,15 +841,12 @@ def main(
     if openrouter_factory is not None:
         args.openrouter_factory = openrouter_factory
     env = os.environ if env is None else env
-    args.credentials = _Credentials(env)
-    handler: Callable[[argparse.Namespace, Mapping[str, str], TextIO, TextIO], int] = (
-        args.handler
-    )
-    err = err or sys.stderr
+    run = _Run(env, out or sys.stdout, err or sys.stderr, _Credentials(env))
+    handler: Callable[[argparse.Namespace, _Run], int] = args.handler
     try:
-        code = handler(args, env, out or sys.stdout, err)
+        code = handler(args, run)
     except tuple(e for e, _ in _ERRORS) as exc:
-        err.write(f"atlas_reviewer: {args.credentials.scrub(str(exc))}\n")
+        run.err.write(f"atlas_reviewer: {run.credentials.scrub(str(exc))}\n")
         code = next(mapped for kind, mapped in _ERRORS if isinstance(exc, kind))
     finally:
         # The review raises a held stop right after its runner phase.
