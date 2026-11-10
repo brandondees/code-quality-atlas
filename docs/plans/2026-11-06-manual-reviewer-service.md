@@ -449,7 +449,8 @@ step 8 (#607).
   `review` command exits 4 (from step 8). Lens NOT RUN status does not
   count. Coverage cannot be determined when the diff was not fetched or
   tied to the event SHA, when the fetched body names no file, or when its
-  file count differs from GitHub's `changed_files`.
+  file count differs from GitHub's `changed_files` on the pull read after
+  the diff fetch.
 - **Risk ranking.** Ranking is path-only, and risk-ordered packing can let a
   low-risk change in an important-sounding path crowd others out of review.
   Both are open as Q25 in [`open-questions.md`](../open-questions.md).

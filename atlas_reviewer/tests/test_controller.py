@@ -1412,6 +1412,28 @@ def test_a_diff_that_disagrees_with_githubs_file_count_blocks_approval():
     assert "(the diff names 2 file(s) but GitHub reports 3 changed)" in top_of(draft)
 
 
+def test_a_changed_file_count_that_moves_during_the_fetch_blocks_approval():
+    class Recounted(FixtureGitHub):
+        def __init__(self, root):
+            super().__init__(root)
+            self.shas = []
+
+        def get_pull(self, repo, number):
+            pull = dict(super().get_pull(repo, number))
+            pull["changed_files"] = 2 if not self.shas else 3
+            self.shas.append(pull["head"]["sha"])
+            return pull
+
+    github = Recounted(FIXTURE)
+    draft = approving(github=github).run()
+    assert len(github.shas) >= 2
+    assert len(set(github.shas)) == 1
+    status = status_of(draft)
+    assert (status["review_event"], status["coverage_complete"]) == ("COMMENT", False)
+    assert "the diff names 2 file(s) but GitHub reports 3 changed" in top_of(draft)
+    assert "head moved" not in draft
+
+
 def test_a_missing_github_file_count_blocks_approval():
     class Uncounted(FixtureGitHub):
         def get_pull(self, repo, number):
@@ -1538,8 +1560,8 @@ def test_a_planned_part_with_no_narrative_counts_as_unreviewed():
     from atlas_reviewer.controller import _file_coverage
 
     sel, parts = two_parts()
-    assert _file_coverage(sel, parts, (), 2, 2).complete
-    coverage = _file_coverage(sel, parts[:1], (), 2, 2)
+    assert _file_coverage(sel, parts, (), listed=2, changed=2).complete
+    coverage = _file_coverage(sel, parts[:1], (), listed=2, changed=2)
     assert not coverage.complete
     assert gaps(coverage) == [("src/m1.py", "its diff part was never sent")]
 
@@ -1548,7 +1570,7 @@ def test_a_file_dropped_before_the_calls_counts_as_unreviewed():
     from atlas_reviewer.controller import _file_coverage
 
     sel, parts = two_parts()
-    coverage = _file_coverage(sel, parts, ("src/gone.py",), 3, 3)
+    coverage = _file_coverage(sel, parts, ("src/gone.py",), listed=3, changed=3)
     assert (coverage.changed, coverage.complete) == (3, False)
     assert gaps(coverage) == [("src/gone.py", "dropped before any model call")]
 

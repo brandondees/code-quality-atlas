@@ -209,7 +209,11 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
     verdict = decide(
         _proposed(parts),
         _file_coverage(
-            selection, parts, dropped, len(base.diff_paths), pull.changed_files
+            selection,
+            parts,
+            dropped,
+            listed=len(base.diff_paths),
+            changed=None if diff is None else diff.changed_files,
         ),
     )
     # Check names, failure reasons, archive entry names and runner notes are
@@ -263,15 +267,17 @@ def _file_coverage(
     sel: DiffSelection | None,
     parts: tuple[PartNarrative, ...],
     dropped: tuple[str, ...],
+    *,
     listed: int,
     changed: int | None,
 ) -> FileCoverage:
     """Every changed file a model call did not review in full (D36). A file
     the selection planned into a part with no recorded narrative counts as
     unreviewed too, so a gap in the bookkeeping cannot read as coverage.
-    `listed` counts the diff's file headers and `changed` is GitHub's own
-    count: an empty or header-less body, or a count that disagrees, leaves
-    coverage unknown, since an absent file cannot be named as unreviewed."""
+    `listed` counts the diff's file headers and `changed` is GitHub's count
+    on the pull read after the diff fetch: an empty or header-less body, or
+    a count that disagrees, leaves coverage unknown, since an absent file
+    cannot be named as unreviewed."""
     if sel is None:
         return FileCoverage(
             None,
@@ -431,6 +437,9 @@ class _Fetched:
     text: str
     paths: tuple[str, ...]
     secrets: DiffSecrets
+    changed_files: int | None
+    """GitHub's count on the pull read after the diff fetch. The earlier
+    read can go stale while the head SHA stays the same."""
 
 
 @dataclass(frozen=True)
@@ -560,7 +569,7 @@ def _fetch_diff(
     if after.head_sha != event.head_sha:
         _no_diff(collected, "the PR head moved while the diff was fetched")
         return None
-    return _Fetched(raw, diff_paths(raw), scan_diff(raw))
+    return _Fetched(raw, diff_paths(raw), scan_diff(raw), after.changed_files)
 
 
 def _listed(paths: tuple[str, ...]) -> str:
