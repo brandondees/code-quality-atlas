@@ -435,6 +435,12 @@ Offline only, no live call made here.
 - **Known limitation.** The inlined skill text points at `reference/*.md`
   files the model cannot open. It is left whole and unedited.
 - **Next.** Per-lens fan-out, one call per lens, is the next PR after #607.
+- **Partial coverage blocks approval (D36).** If any changed file was not
+  reviewed in full, or coverage cannot be determined, the review event is
+  never APPROVE. The draft opens with a "REVIEW INCOMPLETE -- not
+  approvable" warning naming those files, and its first line is a
+  machine-readable status comment. The CLI's `review` command exits 4.
+  Lens NOT RUN status does not count.
 - **Risk ranking.** Ranking is path-only, and risk-ordered packing can let a
   low-risk change in an important-sounding path crowd others out of review.
   Both are open as
