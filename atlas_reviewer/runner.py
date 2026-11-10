@@ -96,6 +96,8 @@ from atlas_reviewer.telemetry import ERROR, Fields, Telemetry
 
 DENY_ALL: tuple[Json, ...] = ({"action": "deny", "domain": "*"},)
 MEMORY_LIMIT_MB = 1024
+# Under the exec stdin limit, so one upload exec always carries a tarball.
+MAX_TARBALL_BYTES = 9 * 1024 * 1024
 WORKDIR = "/work"
 SOURCE_ARCHIVE = "/tmp/atlas-source.tar.gz"
 EXIT_MARKER = "__ATLAS_EXIT__="
@@ -664,6 +666,56 @@ def _deadline_reached(run: _Run, note: str) -> tuple[RunnerStatus, str]:
     return RunnerStatus.DEADLINE_EXCEEDED, run.telemetry.scrub(note)
 
 
+@dataclass(frozen=True)
+class Session:
+    """One live, policy-verified runner handed to a `run_session` body.
+    Every exec goes through the one exec wrapper (`exec_argv`) under the
+    run's deadline and is recorded in its telemetry; scripts are
+    controller-built and their output is untrusted."""
+
+    _run: _Run
+
+    def exec(
+        self,
+        purpose: str,
+        script: str,
+        *,
+        stage: str = "session",
+        budget_s: float | None = None,
+    ) -> tuple[int | None, str]:
+        """The script's exit status (None with no marker) and its output,
+        from `parse_exit`. Raises `BoundaryError` (a `StreamTimeoutError`
+        when output stopped) and `DeadlineExceededError`."""
+        return _exec(self._run, _Exec(stage, purpose, script, budget_s=budget_s))
+
+    def upload(self, data: bytes, path: str, purpose: str) -> None:
+        """Writes `data` to the controller-chosen `path` through the same
+        exec shape as the source upload; raises unless every byte landed."""
+        _upload(self._run, data, path, purpose)
+
+
+def run_session(
+    api: SpritesApi,
+    ledger: RunnerLedger,
+    body: Callable[[Session], str],
+    *,
+    name: str,
+    deadline_s: float,
+    clock: Clock,
+    telemetry: Telemetry | None = None,
+    first_frame_s: float = FIRST_FRAME_BUDGET_S,
+) -> RunnerReport:
+    """`body` on a fresh disposable runner with the same lifecycle as a
+    review: recorded in the ledger, provisioned deny-all and verified,
+    bounded by the deadline and its watchdog, always destroyed. The body's
+    return value is the report's note."""
+    return _disposable(
+        api, ledger, lambda run: body(Session(run)), name=name,
+        deadline_s=deadline_s, clock=clock,
+        telemetry=telemetry or Telemetry(clock), first_frame_s=first_frame_s,
+    )  # fmt: skip
+
+
 def run_disposable(
     api: SpritesApi,
     ledger: RunnerLedger,
@@ -1121,19 +1173,23 @@ def _recorded(run: _Run, result: Diagnostic) -> Diagnostic:
     return result
 
 
-def _upload(run: _Run, tarball: bytes) -> None:
+def _upload(
+    run: _Run,
+    tarball: bytes,
+    path: str = SOURCE_ARCHIVE,
+    purpose: str = "source upload",
+) -> None:
     """`exec_argv` feeds exactly the bytes sent through `head -c`, so the
     upload does not depend on the exec channel delivering a stdin EOF; the
-    runner reports back how many bytes it wrote."""
+    runner reports back how many bytes it wrote. `path` is controller-chosen
+    and inserted as is."""
     size = len(tarball)
-    script = f"cat > {SOURCE_ARCHIVE} && wc -c < {SOURCE_ARCHIVE}"
+    script = f"cat > {path} && wc -c < {path}"
     run.telemetry.span(
         "upload",
         f"{size}-byte tarball",
         lambda: _confirm_upload(
-            _exec(
-                run, _Exec("upload", "source upload", script, tarball, UPLOAD_BUDGET_S)
-            ),
+            _exec(run, _Exec("upload", purpose, script, tarball, UPLOAD_BUDGET_S)),
             size,
         ),
         {"bytes": size},

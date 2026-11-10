@@ -178,6 +178,12 @@ class GitHubClient:
     def get_issue(self, repo: str, number: int) -> Json:
         return self._json(f"/repos/{repo}/issues/{number}")
 
+    def get_compare(self, repo: str, base: str, head: str) -> Json:
+        """`GET /repos/{repo}/compare/{base}...{head}`; `base` may be a
+        branch name, so both ends are percent-encoded."""
+        ends = f"{quote(base, safe='')}...{quote(head, safe='')}"
+        return self._json(f"/repos/{repo}/compare/{ends}")
+
     def list_issue_comments(self, repo: str, number: int) -> Listing:
         """A pull request's conversation comments; its issue number is its
         PR number."""

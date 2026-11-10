@@ -102,6 +102,8 @@ class GitHubReader(Protocol):
 
     def list_reviews(self, repo: str, number: int) -> Listing: ...
 
+    def get_compare(self, repo: str, base: str, head: str) -> Json: ...
+
 
 class SpritesApi(Protocol):
     """The outside (control-plane) Sprites API. Only the controller holds
