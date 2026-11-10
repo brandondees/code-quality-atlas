@@ -24,7 +24,7 @@ import codecs
 import json
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
@@ -97,6 +97,7 @@ class Status(StrEnum):
     TIMED_OUT = "timed out"
     TOO_LARGE = "output over the raw limit"
     REJECTED = "rejected"
+    OVER_SESSION_LIMIT = "session limit reached"
     UNAVAILABLE = "unavailable"
 
 
@@ -115,6 +116,25 @@ class ToolLimits:
         if any(isinstance(n, bool) or not isinstance(n, int) or n < 1 for n in sizes):
             raise ValueError("tool limits must be positive integers")
 
+
+@dataclass(frozen=True)
+class SessionLimits:
+    """Bounds across every call one bridge serves: calls made (rejected
+    ones too) and output bytes shown. A call is never shown more than the
+    output left; once either is spent, calls are refused without running."""
+
+    max_calls: int = 64
+    max_output_bytes: int = 1024 * 1024
+
+    def __post_init__(self) -> None:
+        sizes = (self.max_calls, self.max_output_bytes)
+        if any(isinstance(n, bool) or not isinstance(n, int) or n < 1 for n in sizes):
+            raise ValueError("session limits must be positive integers")
+
+
+# Working defaults pending the owner (D39): D31's 12 turns per lens at a
+# few calls each, and its about 10k characters of tool output per turn.
+DEFAULT_SESSION = SessionLimits()
 
 # The controller's own listing of the PR's renames, for `diff_file`.
 RENAME_LIMITS = ToolLimits(1024 * 1024, 10)
@@ -520,6 +540,7 @@ class Bridge:
     clock: Clock
     changed: frozenset[str] = frozenset()
     limits: Mapping[str, ToolLimits] = DEFAULT_LIMITS
+    session_limits: SessionLimits = DEFAULT_SESSION
     calls: list[CallRecord] = field(default_factory=list)
     _flagged: list[str] = field(default_factory=list, repr=False)
     _renames: Mapping[str, tuple[str, str]] | None = field(default=None, repr=False)
@@ -529,22 +550,43 @@ class Bridge:
         return tuple(self._flagged)
 
     def call(self, tool: Any, args: Any) -> BridgeResult:
+        spent = self._spent()
+        if spent is not None:
+            return self._logged(self._refused(tool, Status.OVER_SESSION_LIMIT, spent))
         try:
             checked = validate(tool, args, self.staged.revs)
         except RejectedError as exc:
-            return self._logged(self._rejected(tool, exc))
+            return self._logged(self._refused(tool, Status.REJECTED, str(exc)))
         return self._logged(self._run(checked))
 
-    def _rejected(self, tool: Any, exc: RejectedError) -> BridgeResult:
+    def _spent(self) -> str | None:
+        limits = self.session_limits
+        if len(self.calls) >= limits.max_calls:
+            return f"session-limit: all {limits.max_calls} calls of this session made"
+        if self._output_left() <= 0:
+            return (
+                f"session-limit: all {limits.max_output_bytes} output bytes of this "
+                "session shown"
+            )
+        return None
+
+    def _output_left(self) -> int:
+        used = sum(c.shown_bytes for c in self.calls)
+        return self.session_limits.max_output_bytes - used
+
+    def _refused(self, tool: Any, status: Status, reason: str) -> BridgeResult:
         """Names a known tool, or `UNKNOWN_TOOL`; the arguments are not shown."""
         name = tool if isinstance(tool, str) and tool in TOOLS else UNKNOWN_TOOL
         return BridgeResult(
-            name, "", Status.REJECTED, RepoText(""),
-            self.redactor(str(exc), STDERR_CHARS), 0, 0, 0, False, 0.0,
+            name, "", status, RepoText(""),
+            self.redactor(reason, STDERR_CHARS), 0, 0, 0, False, 0.0,
         )  # fmt: skip
 
     def _run(self, call: Call) -> BridgeResult:
-        limits = self.limits[call.tool]
+        tool_limits = self.limits[call.tool]
+        limits = replace(
+            tool_limits, max_bytes=min(tool_limits.max_bytes, self._output_left())
+        )
         started = self.clock.monotonic()
         try:
             paths = self._diff_paths(call)
@@ -690,6 +732,7 @@ def run_bridge(
     clock: Clock,
     telemetry: Telemetry | None = None,
     limits: Mapping[str, ToolLimits] = DEFAULT_LIMITS,
+    session_limits: SessionLimits = DEFAULT_SESSION,
     root: str = BRIDGE_ROOT,
     first_frame_s: float = FIRST_FRAME_BUDGET_S,
 ) -> RunnerReport:
@@ -711,7 +754,9 @@ def run_bridge(
             "bridge staging", "staged",
             {"revisions": len(staged.commits), "git": staged.git, "git_version": staged.git_version},
         )  # fmt: skip
-        return body(Bridge(session, staged, redactor, clock, changed, limits))
+        return body(
+            Bridge(session, staged, redactor, clock, changed, limits, session_limits)
+        )
 
     return run_session(
         api, ledger, session_body, name=name, deadline_s=deadline_s, clock=clock,

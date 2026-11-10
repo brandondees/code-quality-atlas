@@ -15,6 +15,7 @@ import pytest
 
 from atlas_reviewer.bridge import (
     DEFAULT_LIMITS,
+    SessionLimits,
     Status,
     ToolLimits,
     call_script,
@@ -825,3 +826,54 @@ def test_a_compare_reply_without_a_full_merge_base_is_refused(reply):
 def test_fetched_sources_over_the_cap_are_refused():
     with pytest.raises(BoundaryError, match="upload cap"):
         fetch_sources(FixtureGitHub(FIXTURE), "o/r", "main", HEAD, max_bytes=10)
+
+
+def test_a_session_refuses_calls_past_its_call_limit_without_running_them(tmp_path):
+    results, bridge, sprites, _ = calls(
+        tmp_path,
+        ("diff_stat", {}),
+        ("shell", {}),
+        ("diff_stat", {}),
+        session_limits=SessionLimits(max_calls=2),
+    )
+    assert [r.status for r in results] == [
+        Status.OK,
+        Status.REJECTED,
+        Status.OVER_SESSION_LIMIT,
+    ]
+    assert render(results[2]) == (
+        "diff_stat: session limit reached\n"
+        "error: session-limit: all 2 calls of this session made\n"
+    )
+    bridge_execs = [
+        s for s in sprites.calls if s[0] == "exec" and "__ATLAS_BRIDGE__" in s[2]
+    ]
+    assert len(bridge_execs) == 1
+    assert len(bridge.calls) == 3
+
+
+def test_a_session_shows_no_more_output_than_it_has_left(tmp_path):
+    size = len(HEAD_FILES["calc.py"])
+    results, bridge, _, _ = calls(
+        tmp_path,
+        ("read_file", {"path": "calc.py"}),
+        ("read_file", {"path": "calc.py"}),
+        ("read_file", {"path": "calc.py"}),
+        session_limits=SessionLimits(max_output_bytes=size + 10),
+    )
+    first, second, third = results
+    assert (first.shown_bytes, first.truncated) == (size, False)
+    assert (second.shown_bytes, second.truncated) == (10, True)
+    assert third.status is Status.OVER_SESSION_LIMIT
+    assert f"all {size + 10} output bytes of this session shown" in third.error.text
+    assert sum(c.shown_bytes for c in bridge.calls) == size + 10
+
+
+@pytest.mark.parametrize("limits", [{"max_calls": 0}, {"max_output_bytes": True}])
+def test_session_limits_must_be_positive_integers(limits):
+    with pytest.raises(ValueError, match="positive integers"):
+        SessionLimits(**limits)
+
+
+def test_the_session_defaults_are_64_calls_and_1_mib_of_output():
+    assert SessionLimits() == SessionLimits(64, 1024 * 1024)
