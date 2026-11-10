@@ -9,10 +9,11 @@ off unless `--provider openrouter --allow-live-inference` are both given.
 
 Every live command records lifecycle telemetry (`atlas_reviewer.telemetry`)
 to a JSONL file: `--events PATH`, or by default
-`<state dir>/telemetry/<command>-<UTC time>.jsonl`. A dry run writes one
-only when `--events` is given. Event text, the probe report and stderr pass
-through a redactor holding every credential value from the environment and
-every installation token minted during the run.
+`<state dir>/telemetry/<command>-<UTC time to the microsecond>-<random>.jsonl`,
+named only once the review lock is held. A dry run writes one only when
+`--events` is given. Event text, the probe report and stderr pass through
+a redactor holding every credential value from the environment and every
+installation token minted during the run.
 """
 
 from __future__ import annotations
@@ -22,9 +23,11 @@ import io
 import json
 import math
 import os
+import secrets
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
@@ -204,6 +207,12 @@ class _Credentials:
         return tuple(s for source in self._sources for s in source())
 
 
+def _review_lock(
+    args: argparse.Namespace, env: Mapping[str, str]
+) -> AbstractContextManager[None]:
+    return single_review_lock(_state_dir(args, env) / "review.lock")
+
+
 def _telemetry(
     args: argparse.Namespace,
     env: Mapping[str, str],
@@ -211,12 +220,11 @@ def _telemetry(
     *,
     default_file: bool,
 ) -> Telemetry:
+    """Call with the review lock held: a contender that loses the lock must
+    not have created, let alone written, a telemetry file."""
     clock = SystemClock()
-    default = (
-        _state_dir(args, env)
-        / "telemetry"
-        / f"{command}-{clock.now():%Y%m%dT%H%M%SZ}.jsonl"
-    )
+    stamp = f"{clock.now():%Y%m%dT%H%M%S.%fZ}-{secrets.token_hex(4)}"
+    default = _state_dir(args, env) / "telemetry" / f"{command}-{stamp}.jsonl"
     path = Path(args.events) if args.events else (default if default_file else None)
     sink = JsonlSink(path) if path else None
     return Telemetry(clock, sink, scrub=args.credentials.scrub)
@@ -322,30 +330,32 @@ def _review_config(args: argparse.Namespace, mode: str) -> ReviewConfig:
         raise UsageError(str(exc)) from exc
 
 
-def _cmd_review(args: argparse.Namespace, env: Mapping[str, str], out: TextIO) -> int:
+def _cmd_review(
+    args: argparse.Namespace, env: Mapping[str, str], out: TextIO, err: TextIO
+) -> int:
     event_path = Path(args.event)
     event = load_event(event_path)
     _review_config(args, "check")
     _check_out_path(args.out)
-    telemetry = _telemetry(args, env, "review", default_file=not args.dry_run)
-    provider = _select_provider(args, env, args.openrouter_factory, telemetry)
-    wiring = (
-        _dry_run_wiring(args, event_path, provider, telemetry)
-        if args.dry_run
-        else _live_wiring(args, env, event, provider, telemetry)
-    )
-    config = _review_config(args, wiring.mode)
-    with single_review_lock(_state_dir(args, env) / "review.lock"):
-        outcome = run_review(event, wiring.deps, config)
-    _emit(outcome.draft, args.out, out)
-    verdict = outcome.verdict
-    if args.out is not None:
-        out.write(
-            f"telemetry: {len(telemetry.events)} event(s), {_events_path(telemetry)}\n"
-            f"review event: {verdict.event.value}; coverage_complete="
-            f"{str(verdict.coverage_complete).lower()}; unreviewed_files="
-            f"{len(verdict.coverage.unreviewed)}\n"
+    with _review_lock(args, env):
+        telemetry = _telemetry(args, env, "review", default_file=not args.dry_run)
+        provider = _select_provider(args, env, args.openrouter_factory, telemetry)
+        wiring = (
+            _dry_run_wiring(args, event_path, provider, telemetry)
+            if args.dry_run
+            else _live_wiring(args, env, event, provider, telemetry)
         )
+        outcome = run_review(event, wiring.deps, _review_config(args, wiring.mode))
+    written = _emit(outcome.draft, args.out, out, err)
+    verdict = outcome.verdict
+    # Stdout carries the draft unless it went to a file; the summary must
+    # not be appended to a draft someone pipes on.
+    (out if written else err).write(
+        f"telemetry: {len(telemetry.events)} event(s), {_events_path(telemetry)}\n"
+        f"review event: {verdict.event.value}; coverage_complete="
+        f"{str(verdict.coverage_complete).lower()}; unreviewed_files="
+        f"{len(verdict.coverage.unreviewed)}\n"
+    )
     return EXIT_OK if verdict.coverage_complete else EXIT_INCOMPLETE
 
 
@@ -362,18 +372,24 @@ def _check_out_path(out_path: str | None) -> None:
         raise UsageError(f"--out {out_path}: not writable")
 
 
-def _emit(draft: str, out_path: str | None, out: TextIO) -> None:
+def _emit(draft: str, out_path: str | None, out: TextIO, err: TextIO) -> bool:
+    """True if the draft went to `out_path`. A failed write still delivers
+    the draft on stdout and leaves the exit code to the review's result:
+    the review finished, so a retry would only repeat it."""
     if out_path is None:
         out.write(draft)
-        return
+        return False
     try:
         Path(out_path).write_text(draft, encoding="utf-8")
     except OSError as exc:
         out.write(draft)
-        raise UsageError(
-            f"could not write --out {out_path} ({exc}); the draft went to stdout"
-        ) from exc
+        err.write(
+            f"atlas_reviewer: could not write --out {out_path} ({exc}); "
+            "the draft went to stdout\n"
+        )
+        return False
     out.write(f"review draft written to {out_path}\n")
+    return True
 
 
 def _live_sprites(env: Mapping[str, str]) -> SpritesApi:
@@ -382,22 +398,26 @@ def _live_sprites(env: Mapping[str, str]) -> SpritesApi:
     )
 
 
-def _cmd_sweep(args: argparse.Namespace, env: Mapping[str, str], out: TextIO) -> int:
+def _cmd_sweep(
+    args: argparse.Namespace, env: Mapping[str, str], out: TextIO, err: TextIO
+) -> int:
     api = args.sprites_factory(env)
     # The ledger lists a live review's runner too; sweeping during a review
     # would destroy it mid-run, so sweep waits its turn like review does.
-    with single_review_lock(_state_dir(args, env) / "review.lock"):
+    with _review_lock(args, env):
         results = sweep(api, FileLedger(_state_dir(args, env) / "runners.ledger"))
     out.writelines(f"{name}: {status.value}\n" for name, status in results.items())
     out.write(f"{len(results)} runner(s) in the ledger\n")
     return EXIT_OK
 
 
-def _cmd_probe(args: argparse.Namespace, env: Mapping[str, str], out: TextIO) -> int:
-    telemetry = _telemetry(args, env, f"probe-{args.sequence}", default_file=True)
+def _cmd_probe(
+    args: argparse.Namespace, env: Mapping[str, str], out: TextIO, err: TextIO
+) -> int:
     sequence = _PROBE_SEQUENCES[args.sequence]
     report = io.StringIO()
-    with single_review_lock(_state_dir(args, env) / "review.lock"):
+    with _review_lock(args, env):
+        telemetry = _telemetry(args, env, f"probe-{args.sequence}", default_file=True)
         try:
             usable = sequence(args, env, report, telemetry)
         finally:
@@ -679,15 +699,14 @@ def main(
         args.sprites_factory = sprites_factory
     if openrouter_factory is not None:
         args.openrouter_factory = openrouter_factory
-    handler: Callable[[argparse.Namespace, Mapping[str, str], TextIO], int] = (
-        args.handler
-    )
     env = os.environ if env is None else env
     args.credentials = _Credentials(env)
+    handler: Callable[[argparse.Namespace, Mapping[str, str], TextIO, TextIO], int] = (
+        args.handler
+    )
+    err = err or sys.stderr
     try:
-        return handler(args, env, out or sys.stdout)
+        return handler(args, env, out or sys.stdout, err)
     except tuple(e for e, _ in _ERRORS) as exc:
-        (err or sys.stderr).write(
-            f"atlas_reviewer: {args.credentials.scrub(str(exc))}\n"
-        )
+        err.write(f"atlas_reviewer: {args.credentials.scrub(str(exc))}\n")
         return next(code for kind, code in _ERRORS if isinstance(exc, kind))

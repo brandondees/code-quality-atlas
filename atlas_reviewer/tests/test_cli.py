@@ -14,7 +14,7 @@ from atlas_reviewer.interpreter import PYENV_VERSIONS, PYTHON_TAG
 from atlas_reviewer.ports import BoundaryError, NotFoundError
 from atlas_reviewer.runner import EGRESS_TAG
 
-from .helpers import FIXTURE, HEAD, fake_token
+from .helpers import FIXTURE, HEAD, FakeClock, fake_token
 
 EVENT = str(FIXTURE / "event.json")
 
@@ -99,10 +99,23 @@ def test_a_failed_draft_write_still_prints_the_draft(tmp_path, monkeypatch):
     code, out, err = run_cli(
         "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run", "--out", str(target),
     )  # fmt: skip
-    assert code == cli.EXIT_USAGE
+    assert code == cli.EXIT_INCOMPLETE
     assert "\n# Code Quality Atlas review -- DRAFT\n" in out
+    assert "review event:" not in out
     assert "disk full" in err
     assert "the draft went to stdout" in err
+    assert "review event: COMMENT; coverage_complete=false; unreviewed_files=2" in err
+
+
+def test_without_out_the_summary_goes_to_stderr_and_stdout_is_only_the_draft(tmp_path):
+    code, out, err = run_cli(
+        "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run"
+    )
+    assert code == cli.EXIT_INCOMPLETE
+    assert out.startswith("<!-- atlas-review-status: {")
+    assert "review event:" not in out and "telemetry:" not in out
+    assert "telemetry: " in err and "(not written)" in err
+    assert "review event: COMMENT; coverage_complete=false" in err
 
 
 def test_module_entry_point_runs_offline(tmp_path):
@@ -526,6 +539,34 @@ def minting_github(monkeypatch, minted, github=FixtureGitHub):
         lambda transport, clock, **kw: type("T", (), {"secrets": lambda self: (minted,)})(),
     )  # fmt: skip
     monkeypatch.setattr(cli, "GitHubClient", lambda transport, t: github(FIXTURE))
+
+
+def test_review_telemetry_files_never_collide_and_a_lock_loser_writes_none(
+    tmp_path, monkeypatch
+):
+    from atlas_reviewer.ledger import single_review_lock
+
+    live_github(monkeypatch)
+    monkeypatch.setattr(cli, "SystemClock", FakeClock)
+    argv = ["--state-dir", str(tmp_path), "review", "--event", EVENT]
+    kw = {"env": APP_ENV, "out": io.StringIO(), "sprites_factory": scripted_sprites}
+    with single_review_lock(tmp_path / "review.lock"):
+        err = io.StringIO()
+        assert cli.main(argv, err=err, **kw) == cli.EXIT_USAGE
+    assert "another review holds" in err.getvalue()
+    assert not (tmp_path / "telemetry").exists()
+    errs = [io.StringIO(), io.StringIO()]
+    for e in errs:
+        cli.main(argv, err=e, **kw)
+    files = set((tmp_path / "telemetry").glob("review-*.jsonl"))
+    assert len(files) == 2
+    printed = {
+        Path(line.rsplit(", ", 1)[1])
+        for e in errs
+        for line in e.getvalue().splitlines()
+        if line.startswith("telemetry: ")
+    }
+    assert printed == files
 
 
 # Minted values here are deliberately not token-shaped: only the credential
