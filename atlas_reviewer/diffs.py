@@ -4,7 +4,8 @@ parts that each fit one model call. Pure.
 
 Selection is risk-first, not diff-order-first: when the whole diff cannot
 be reviewed within the call cap, what goes unseen is the lowest-risk
-material (tests, fixtures, docs), and every unseen file is named. CI
+material (tests, fixtures, docs); unseen files are named in risk order up
+to the caller's limit, and the rest are counted. CI
 workflows, dependency manifests and lockfiles rank just below security
 code: they are where a change reaches the build, its secrets and its
 supply chain.
@@ -17,6 +18,8 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from functools import reduce
+
+from atlas_reviewer.notes import quote_untrusted
 
 _QUOTED = r'"{side}/(?P<q{name}>(?:[^"\\\n]|\\.)*)"'
 _HEADER = re.compile(
@@ -239,7 +242,12 @@ def select_diff(diff: str, max_parts: int, part_chars: int) -> DiffSelection:
     """First-fit packing in risk order into at most `max_parts` parts of at
     most `part_chars` characters. A file larger than one part is cut to fit
     a part of its own; a file that fits nowhere once every part is in use
-    is unseen."""
+    is unseen. A part must hold more than `CUT_MARKER`, or a cut file
+    would carry none of its own text."""
+    if part_chars <= len(CUT_MARKER):
+        raise ValueError(
+            f"part_chars must exceed the {len(CUT_MARKER)}-character cut marker"
+        )
     files = split_files(diff)
 
     def place(acc: _Packing, f: FileDiff) -> _Packing:
@@ -260,8 +268,13 @@ def fit_diff(
     how far the largest part's whole prompt exceeds its token bound in UTF-8
     bytes, is not positive. Each round shrinks from the byte-largest part's
     actual size by the overflow converted to its characters. After
-    `MAX_FIT_ROUNDS`, or at `min_chars`, the last selection is returned and
-    the per-call token check refuses any part still too big."""
+    `MAX_FIT_ROUNDS`, or once a selection at `min_chars` has been measured,
+    the last selection is returned and the per-call token check refuses any
+    part still too big."""
+    if min_chars <= len(CUT_MARKER):
+        raise ValueError(
+            f"min_chars must exceed the {len(CUT_MARKER)}-character cut marker"
+        )
     selection = select_diff(diff, max_parts, part_chars)
     for _ in range(MAX_FIT_ROUNDS):
         over = overflow(selection)
@@ -293,10 +306,14 @@ def _place(acc: _Packing, f: FileDiff, max_parts: int, budget: int) -> _Packing:
 
 
 def describe_by_risk(files: tuple[FileDiff, ...], limit: int) -> str:
-    """`[tier] path, path; [tier] path` for the first `limit` files in risk
-    order, then a count of the rest."""
+    """`[tier] "path", "path"; [tier] "path"` for the first `limit` files in
+    risk order, then a count of the rest. Paths are chosen by the PR author,
+    so each is quoted as data."""
     shown = by_risk(files)[:limit]
-    groups = ((tier, [f.path for f in shown if f.tier is tier]) for tier in RISK_TIERS)
+    groups = (
+        (tier, [quote_untrusted(f.path) for f in shown if f.tier is tier])
+        for tier in RISK_TIERS
+    )
     listed = "; ".join(
         f"[{t.label}] {', '.join(paths)}" for t, paths in groups if paths
     )
