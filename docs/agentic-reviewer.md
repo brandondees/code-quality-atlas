@@ -4,7 +4,7 @@
 [`open-questions.md`](open-questions.md), 2026-11-08); nothing is built.**
 The owner accepted the recommendations below as proposed ("I can roll with
 recommendations as proposed for now"). Phase 1 (full PR conversation and
-branch-wide CI) is built offline on a draft PR stacked on #607, D37; the
+branch-wide CI) is built offline on a draft PR stacked on #607, D38; the
 rest is not built. Every budget number is still pending his decision; see [Open numeric decisions](#open-numeric-decisions-pending-brandon).
 This doc carries no live-run approval. No model call, Sprite run, merge or
 deploy was made to write it.
@@ -230,7 +230,7 @@ owner at every phase.
 | Phase | Scope | Gate to start |
 |---|---|---|
 | 0 | Land #601-#607 as the one-shot reviewer and fallback, with the D33 note (#608). No agentic scope in those PRs. | none |
-| 1 | Full PR conversation (about 64 KiB, omissions named) and branch-wide CI labelled by SHA, in the shared evidence code. Fixture-tested. Built offline (D37), stacked on #607 with the owner's go-ahead rather than after the stack merged. | stack merged |
+| 1 | Full PR conversation (about 64 KiB, omissions named) and branch-wide CI labelled by SHA, in the shared evidence code. Fixture-tested. Built offline (D38), stacked on #607 with the owner's go-ahead rather than after the stack merged. | stack merged |
 | 2 | The tool bridge, offline: closed git tools (diff, list, read range, grep) against `FakeSprites` and a fixture repo, with argument rejection, byte and time caps, and git hardening. Option B staging. | phase 1 merged |
 | 3 | The controller loop and one attested lens, offline first: body injection, the attestation ledger, quote checks, retry and escalate. Then one owner-approved live run, compared with the one-shot draft on the same head. | offline work: none. Live run: a provisional budget Brandon approves |
 | 4 | Triage mode: the four critical lenses, pool size 1, ID-reconciled merge, coverage never claimed complete unless the ledger shows it. | phase 3 measured |

@@ -4,7 +4,7 @@ workflow runs, jobs, job logs and artifact contents. Controller-side; every
 byte is untrusted.
 
 Check runs are listed at the head SHA and at the PR's other commits, newest
-first, up to `max_ci_commits` of them (D37), so a failure at an earlier
+first, up to `max_ci_commits` of them (D38), so a failure at an earlier
 commit that was never re-run stays visible. Each item keeps the SHA GitHub
 gave it; `classify` makes anything not at the head SHA stale, and stale
 evidence is never a result for the head.

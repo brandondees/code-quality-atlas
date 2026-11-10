@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The PR conversation block (D37): everything the PR says, held to a
+"""The PR conversation block (D38): everything the PR says, held to a
 budget, with every cut and every dropped remark named as an omission."""
 
 import json

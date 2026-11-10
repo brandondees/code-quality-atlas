@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The pull request's conversation as one bounded block for the model (D34, D37).
+"""The pull request's conversation as one bounded block for the model (D34, D38).
 
 The block replaces the old 2,000-character PR body: the title, author, base
 and head branches, draft flag, labels, requested reviewers and teams, the
@@ -47,7 +47,7 @@ SOURCE = "pull request conversation"
 
 @dataclass(frozen=True)
 class ConversationBudget:
-    """Characters, not bytes. Working defaults pending the owner (D37):
+    """Characters, not bytes. Working defaults pending the owner (D38):
     about 64 KiB in all, at most 16 KiB of it body and 8 KiB commit
     subjects, the rest for remarks."""
 

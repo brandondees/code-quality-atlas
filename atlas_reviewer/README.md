@@ -130,7 +130,7 @@ The token is cached until five minutes before its `expires_at`.
 kept only at the PR's own commits (GitHub lists at most 250), so a
 same-named branch elsewhere adds nothing; head-SHA runs are listed by SHA
 too. Check runs are listed at the head SHA and at up to 20 other commits
-of the PR, newest first (D37), each item keeping the SHA GitHub reported, so
+of the PR, newest first (D38), each item keeping the SHA GitHub reported, so
 a failure at an earlier commit that was never re-run stays visible as
 stale. A list cut off there, a per-review count cap (5 runs, 20 other
 commits, 10 job logs, 5 artifacts), an oversized download (5 MiB per log, 10 MiB per
@@ -356,7 +356,7 @@ diff would still be PARTIAL, with the unseen files being the lowest-risk
 tiers.
 
 The model gets the PR conversation as one `pull-request` block of at most
-65,536 characters (`conversation.py`, D37): title, author, branches, draft
+65,536 characters (`conversation.py`, D38): title, author, branches, draft
 flag, labels, requested reviewers and teams, the body (up to 16,384
 characters), every commit subject (200 each, 8,192 in all), and every
 review, review comment and conversation comment (4,000 each), each labelled
