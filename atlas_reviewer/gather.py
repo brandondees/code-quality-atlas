@@ -49,10 +49,11 @@ from atlas_reviewer.evidence import (
     WorkflowRun,
     artifact_contents_item,
     contents_key,
+    in_history_order,
     job_log_item,
     parse_artifacts,
     parse_check_runs,
-    parse_commits,
+    parse_commit_entries,
     parse_jobs,
     parse_workflow_runs,
 )
@@ -200,16 +201,20 @@ def _pr_commits(ctx: _Ctx) -> tuple[str, ...]:
     runs at commits it did not return, which only drops evidence from
     other commits; the failure itself is recorded."""
     what = "commits of this PR"
-    commits = _parse_each(
-        ctx,
-        SourceKind.LISTING,
-        what,
-        _listing(
+    commits = in_history_order(
+        _parse_each(
             ctx,
+            SourceKind.LISTING,
             what,
-            lambda: ctx.github.list_pull_commits(ctx.event.repo, ctx.event.pr_number),
-        ),
-        parse_commits,
+            _listing(
+                ctx,
+                what,
+                lambda: ctx.github.list_pull_commits(
+                    ctx.event.repo, ctx.event.pr_number
+                ),
+            ),
+            parse_commit_entries,
+        )
     )
     ctx.out.commits.extend(commits)
     if len(commits) >= GITHUB_PR_COMMIT_LIMIT:
@@ -223,7 +228,7 @@ def _pr_commits(ctx: _Ctx) -> tuple[str, ...]:
 
 def _other_commit_checks(ctx: _Ctx) -> None:
     """Check runs at the PR's other commits, newest first in history order
-    (`parse_commits` orders them by parents and committer date, not by how
+    (`_pr_commits` orders them by parents and committer date, not by how
     GitHub lists them). Commits past the cap are omissions, and their check
     runs are UNKNOWN, not read."""
     others = [c.sha for c in reversed(ctx.out.commits) if c.sha != ctx.event.head_sha]

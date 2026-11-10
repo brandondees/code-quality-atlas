@@ -209,7 +209,14 @@ class PrCommit:
 
 def parse_commits(items: Sequence[Any]) -> tuple[PrCommit, ...]:
     """Oldest first in history, whatever order GitHub lists them in."""
-    return in_history_order(tuple(_commit(c) for c in _objects(items, "commit")))
+    return in_history_order(parse_commit_entries(items))
+
+
+def parse_commit_entries(items: Sequence[Any]) -> tuple[PrCommit, ...]:
+    """The commits as listed, unordered: order only means something over the
+    whole listing, so callers that parse entry by entry order once at the end
+    with `in_history_order`."""
+    return tuple(_commit(c) for c in _objects(items, "commit"))
 
 
 def _commit(data: Json) -> PrCommit:

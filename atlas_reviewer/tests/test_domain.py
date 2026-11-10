@@ -40,6 +40,12 @@ def test_an_event_field_of_the_wrong_type_is_an_invalid_event(
         PrEvent(repo, pr_number, head_sha)
 
 
+@pytest.mark.parametrize("sha", [HEAD[:39], HEAD + "a", HEAD.upper(), HEAD[:7]])
+def test_a_head_sha_that_is_not_a_full_lowercase_40_hex_id_is_invalid(sha):
+    with pytest.raises(InvalidEventError, match="head_sha must be a full 40-hex"):
+        PrEvent("o/r", 1, sha)
+
+
 @pytest.mark.parametrize(
     "repo,number,sha",
     [

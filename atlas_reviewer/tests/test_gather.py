@@ -588,6 +588,34 @@ def test_other_commits_past_the_cap_are_omissions_and_unknown_newest_first():
     assert skipped == {f"(check runs at {s[:12]})" for s in _ManyCommits.SHAS[:3]}
 
 
+class _NewestFirst(_ManyCommits):
+    """GitHub's listing order is not trusted: this one lists newest first,
+    the order that would send the cap at the wrong commits."""
+
+    def list_pull_commits(self, repo, number):
+        chain = (*self.SHAS, HEAD)
+        entries = tuple(
+            {
+                "sha": sha,
+                "parents": [{"sha": chain[i - 1]}] if i else [],
+                "commit": {
+                    "message": sha[:4],
+                    "committer": {"date": f"2026-01-0{i + 1}"},
+                },
+            }
+            for i, sha in enumerate(chain)
+        )
+        return Listing(entries[::-1], False, 1)
+
+
+def test_a_newest_first_listing_is_ordered_before_the_cap_picks_commits():
+    gh = _NewestFirst(FIXTURE)
+    out = gather(gh, max_ci_commits=2)
+    assert [c.sha for c in out.commits] == [*_ManyCommits.SHAS, HEAD]
+    newest, second = _ManyCommits.SHAS[-1], _ManyCommits.SHAS[-2]
+    assert [c[2] for c in calls(gh, "list_check_runs")] == [HEAD, newest, second]
+
+
 def test_a_check_run_listed_at_two_commits_is_kept_once():
     class Same(FixtureGitHub):
         def list_check_runs(self, repo, sha):
