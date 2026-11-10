@@ -108,3 +108,22 @@ def test_a_thin_pick_cannot_drop_a_critical_lens_except_by_it_not_fitting():
             assert use.reason.startswith("did not fit the 60000-character")
             assert f"{name} (did not fit" in plan.coverage()
     assert [u.name for u in plan.uses[: len(CRITICAL_TIER)]] == list(CRITICAL_TIER)
+
+
+def test_the_real_bundle_runs_exactly_two_critical_lenses_whole():
+    """With today's bodies and the 60,000-character budget; a change to a
+    critical lens's size shows up here as a change in coverage."""
+    for depth in (Depth.TRIAGE, Depth.REVIEW):
+        plan = _bundle_plan(depth)
+        ran = {u.name for u in plan.uses if u.status is LensStatus.RUN}
+        assert ran == {"tracing-correctness-and-invariants", "sweeping-for-security"}
+        by = {u.name: u for u in plan.uses}
+        for name in (
+            "reviewing-migration-and-data-safety",
+            "reviewing-concurrency-and-async",
+        ):
+            assert by[name].status is LensStatus.NOT_RUN
+            assert by[name].reason.startswith(
+                "did not fit the 60000-character lens budget whole ("
+            )
+            assert f"{name} (did not fit the 60000-character" in plan.coverage()
