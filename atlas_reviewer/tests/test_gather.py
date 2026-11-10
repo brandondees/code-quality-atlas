@@ -381,7 +381,9 @@ def test_same_name_runs_outside_the_pr_are_not_reported_as_this_prs_commits():
     assert UNRELATED not in {i.head_sha for i in out.items}
     assert reasons["docs-lint"] == REASON_ONLY_OTHER_SHAS
     stale = {
-        (i.provenance.key.name, i.head_sha) for i in out.items if i.head_sha == OLD
+        (i.provenance.key.name, i.head_sha)
+        for i in out.items
+        if i.head_sha == OLD and i.provenance.key.kind is SourceKind.WORKFLOW_RUN
     }
     assert stale == {("ci", OLD), ("docs-lint", OLD)}
     assert any("2 workflow run(s)" in n for n in out.notes)
@@ -534,3 +536,77 @@ def test_a_list_not_read_is_unknown_but_not_counted_as_a_check(github, config, n
         0,
         1,
     )
+
+
+def test_check_runs_at_earlier_commits_are_kept_with_their_own_sha():
+    gh = FixtureGitHub(FIXTURE)
+    out = gather(gh)
+    lint = next(i for i in out.items if i.provenance.source_id == "check_run:6001")
+    assert (lint.head_sha, lint.conclusion.value) == (OLD, "failure")
+    assert [c[2] for c in calls(gh, "list_check_runs")] == [HEAD, OLD]
+    assert [c.sha for c in out.commits] == [OLD, HEAD]
+
+
+class _ManyCommits(FixtureGitHub):
+    SHAS = tuple(f"{n:x}" * 40 for n in range(1, 6))
+
+    def list_pull_commits(self, repo, number):
+        return Listing(
+            tuple({"sha": s, "commit": {"message": s[:4]}} for s in (*self.SHAS, HEAD)),
+            False,
+            1,
+        )
+
+    def list_check_runs(self, repo, sha):
+        super().list_check_runs(repo, sha)
+        run = {
+            "id": int(sha[:6], 16) if sha != HEAD else 1,
+            "name": "lint",
+            "head_sha": sha,
+            "status": "completed",
+            "conclusion": "failure",
+            "app": {"slug": "github-actions"},
+        }
+        return Listing((run,), False, 1)
+
+
+def test_other_commits_past_the_cap_are_omissions_and_unknown_newest_first():
+    gh = _ManyCommits(FIXTURE)
+    out = gather(gh, max_ci_commits=2)
+    newest, second = _ManyCommits.SHAS[-1], _ManyCommits.SHAS[-2]
+    assert [c[2] for c in calls(gh, "list_check_runs")] == [HEAD, newest, second]
+    (omission,) = [
+        o for o in out.omissions if o.source == "check runs at other commits"
+    ]
+    assert (omission.limit, omission.detail) == (
+        "per-review cap of 2",
+        "3 of 5 not ingested",
+    )
+    skipped = {
+        f.key.name for f in out.failures if f.key.name.startswith("(check runs at")
+    }
+    assert skipped == {f"(check runs at {s[:12]})" for s in _ManyCommits.SHAS[:3]}
+
+
+def test_a_check_run_listed_at_two_commits_is_kept_once():
+    class Same(FixtureGitHub):
+        def list_check_runs(self, repo, sha):
+            return super().list_check_runs(repo, HEAD)
+
+    out = gather(Same(FIXTURE))
+    ids = [
+        i.provenance.source_id
+        for i in out.items
+        if i.provenance.key.kind is SourceKind.CHECK_RUN
+    ]
+    assert len(ids) == len(set(ids))
+
+
+def test_a_pr_at_githubs_commit_limit_is_noted():
+    class Full(FixtureGitHub):
+        def list_pull_commits(self, repo, number):
+            shas = [f"{n:040x}" for n in range(249)] + [HEAD]
+            return Listing(tuple({"sha": s, "commit": {}} for s in shas), False, 3)
+
+    out = gather(Full(FIXTURE), max_ci_commits=1)
+    assert any("at most 250 commits" in n for n in out.notes)

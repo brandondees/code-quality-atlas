@@ -107,6 +107,23 @@ def test_pull_commits_are_a_paginated_array():
     assert t.requests[0][1] == f"{API}/repos/o/r/pulls/42/commits?per_page=100"
 
 
+@pytest.mark.parametrize(
+    "method,path",
+    [
+        ("list_issue_comments", "issues/42/comments"),
+        ("list_review_comments", "pulls/42/comments"),
+        ("list_reviews", "pulls/42/reviews"),
+    ],
+)
+def test_conversation_lists_are_paginated_arrays(method, path):
+    link = {"Link": f'<{API}/next?page=2>; rel="next"'}
+    t = Recorder(ok([{"id": 1}], headers=link), ok([{"id": 2}]))
+    listing = getattr(github(t), method)("o/r", 42)
+    assert [c["id"] for c in listing.items] == [1, 2]
+    assert t.requests[0][1] == f"{API}/repos/o/r/{path}?per_page=100"
+    assert {r[0] for r in t.requests} == {"GET"}
+
+
 def test_pull_commits_that_are_not_an_array_are_refused():
     with pytest.raises(BoundaryError, match="non-array"):
         github(Recorder(ok({"sha": "a"}))).list_pull_commits("o/r", 42)

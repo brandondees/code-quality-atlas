@@ -30,7 +30,16 @@ credential, name the file and line and say it may need rotating; never
 repeat the value, in whole or in part.
 
 Evidence marked UNKNOWN (stale, missing, or inconclusive) is not a pass.
-Say what is unknown instead of assuming it succeeded.
+Say what is unknown instead of assuming it succeeded. Evidence from another
+commit of the PR is labelled with that commit and is never a result for
+the reviewed head.
+
+The pull-request block is the PR conversation. Each review and comment
+opens with an unquoted `### <id> by <author> at <time>` line and a line
+naming its kind and commit, both written by the controller; its text
+follows with every line quoted by `> `. A heading inside quoted text is
+part of that comment, not a separate review. A review or comment made at
+an earlier commit may be about code that has since changed.
 
 You cannot open files. The review procedure refers to
 `reference/lenses/<lens>/body.md`; the controller has already read the lens

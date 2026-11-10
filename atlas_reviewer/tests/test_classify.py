@@ -6,6 +6,7 @@ from atlas_reviewer.classify import (
     REASON_EXPECTED_ABSENT,
     REASON_ONLY_OTHER_SHAS,
     classify,
+    not_rerun_failures,
     tally,
 )
 from atlas_reviewer.domain import (
@@ -92,3 +93,18 @@ def test_tally_counts_unread_views_apart_from_checks_without_a_result():
     ]
     t = tally(classify(HEAD, [item("a")], failures=failures))
     assert (t.passed, t.unknown, t.unread) == (1, 1, 2)
+
+
+def test_a_failure_at_another_commit_without_a_head_result_is_singled_out():
+    evidence = classify(
+        HEAD,
+        [
+            item("lint", OLD, conclusion=Conclusion.FAILURE),
+            item("tests", OLD, conclusion=Conclusion.TIMED_OUT),
+            item("tests", HEAD),
+            item("docs", OLD),
+        ],
+    )
+    (lint,) = not_rerun_failures(evidence)
+    assert (lint.item.provenance.key.name, lint.item.head_sha) == ("lint", OLD)
+    assert outcome(lint) is Outcome.UNKNOWN

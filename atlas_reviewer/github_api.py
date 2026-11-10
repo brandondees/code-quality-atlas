@@ -178,6 +178,23 @@ class GitHubClient:
     def get_issue(self, repo: str, number: int) -> Json:
         return self._json(f"/repos/{repo}/issues/{number}")
 
+    def list_issue_comments(self, repo: str, number: int) -> Listing:
+        """A pull request's conversation comments; its issue number is its
+        PR number."""
+        return self._list(
+            f"/repos/{repo}/issues/{number}/comments?per_page={_PER_PAGE}", None
+        )
+
+    def list_review_comments(self, repo: str, number: int) -> Listing:
+        return self._list(
+            f"/repos/{repo}/pulls/{number}/comments?per_page={_PER_PAGE}", None
+        )
+
+    def list_reviews(self, repo: str, number: int) -> Listing:
+        return self._list(
+            f"/repos/{repo}/pulls/{number}/reviews?per_page={_PER_PAGE}", None
+        )
+
 
 def _object(body: bytes, path: str) -> Json:
     path = path.split("?", 1)[0]

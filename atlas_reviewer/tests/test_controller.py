@@ -8,6 +8,7 @@ from decimal import Decimal
 import pytest
 
 from atlas_reviewer.controller import Deps, ReviewConfig, review
+from atlas_reviewer.conversation import ConversationBudget
 from atlas_reviewer.domain import PrEvent, SourceKey, SourceKind
 from atlas_reviewer.fakes import FakeSprites, MemoryLedger
 from atlas_reviewer.github_fixture import FixtureGitHub
@@ -19,7 +20,7 @@ from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import ToolSpec
 
-from .helpers import FIXTURE, HEAD, FakeClock, StubLibrary, fake_token
+from .helpers import FIXTURE, HEAD, OLD, FakeClock, StubLibrary, fake_token
 
 EVENT = PrEvent("example-org/example-app", 42, HEAD)
 RUNNER = "cqa-rev-20261106-230000-abcdef"
@@ -268,7 +269,8 @@ def test_github_listing_failures_become_unknown_evidence():
     draft = Setup(github=Broken(FIXTURE)).run()
     assert (
         "| missing | listing | (all check runs) | could not fetch: evidence fetch / "
-        "check runs failed after 0.0s (0.0s into the run): GitHub HTTP 502 |"
+        f"check runs at {HEAD[:12]} failed after 0.0s (0.0s into the run): "
+        "GitHub HTTP 502 |"
     ) in draft
     assert (
         "| missing | workflow_log | ci / test | could not fetch: evidence fetch / "
@@ -638,9 +640,9 @@ def test_a_failed_fetch_is_an_error_row_with_its_label():
             raise BoundaryError("GitHub HTTP 502")
 
     table = section(Setup(github=Broken(FIXTURE)).run(), "Lifecycle telemetry")
-    row = next(r for r in table.splitlines() if "| check runs |" in r)
+    row = next(r for r in table.splitlines() if f"| check runs at {HEAD[:12]} |" in r)
     assert "| ERROR |" in row
-    assert "evidence fetch / check runs failed after" in row
+    assert f"evidence fetch / check runs at {HEAD[:12]} failed after" in row
 
 
 def test_an_untruncated_diff_records_no_diff_omission():
@@ -750,7 +752,7 @@ def test_files_dropped_before_the_model_calls_are_omissions_and_coverage_is_part
 
 def test_a_long_pr_body_and_issue_body_are_recorded_as_omissions():
     pull = json.loads((FIXTURE / "pull.json").read_text())
-    pull["body"] = "Fixes #7\n\n" + "word " * 1_000
+    pull["body"] = "Fixes #7\n\n" + "word " * 4_000
 
     class LongBodies(FixtureGitHub):
         def get_pull(self, repo, number):
@@ -762,7 +764,7 @@ def test_a_long_pr_body_and_issue_body_are_recorded_as_omissions():
     draft = Setup(github=LongBodies(FIXTURE)).run(include_issues=True)
     omissions = section(draft, "Omissions and limits hit")
     assert (
-        f"| pull request body | 2000-character cap | kept 2000 of {len(pull['body'])} characters |"
+        f"| pull request body | 16384-character cap | kept 16384 of {len(pull['body'])} characters |"
         in omissions
     )
     assert "| issue #7 | 2000-character cap | kept 2000 of " in omissions
@@ -843,7 +845,7 @@ def test_one_ci_gate_is_counted_once_with_its_views_attached():
     summary = section(draft, "Evidence summary")
     assert "- Pass: 2\n" in summary
     assert "- Fail: 1\n" in summary
-    assert "- UNKNOWN at the head SHA (missing or inconclusive): 2\n" in summary
+    assert "- UNKNOWN at the head SHA (missing or inconclusive): 3\n" in summary
     assert (
         "- Not read (logs, artifacts, archive entries or GitHub lists; UNKNOWN): 1\n"
         in summary
@@ -1792,3 +1794,81 @@ def test_the_model_is_asked_for_a_review_event_it_only_proposes():
     (prompt,) = s.provider.prompts
     assert "`Review event: APPROVE`" in prompt.system
     assert "It is only a proposal." in prompt.system
+
+
+def test_the_model_sees_the_whole_conversation_fenced_as_untrusted():
+    s = Setup()
+    s.run()
+    user = s.user_prompt()
+    block = user.split('label="pull-request">', 1)[1].split("</untrusted-data", 1)[0]
+    assert "Labels: bug, payments" in block
+    assert f"- `{OLD[:12]}` Round each line discount" in block
+    assert '### review:8101 by `"example-maintainer"`' in block
+    assert f"at commit {OLD[:12]}" in block
+    assert "> ### review:9999" in block
+    assert "\n### review:9999" not in block
+
+
+def test_a_secret_in_a_comment_is_redacted_and_counted():
+    token = fake_token("ghp_")
+
+    class Leaky(FixtureGitHub):
+        def list_issue_comments(self, repo, number):
+            full = super().list_issue_comments(repo, number)
+            (c,) = full.items
+            return Listing(({**c, "body": f"key {token}"},), False, 1)
+
+    s = Setup(github=Leaky(FIXTURE))
+    draft = s.run()
+    assert token not in s.user_prompt()
+    assert token not in draft
+
+
+def test_a_tight_conversation_budget_names_what_it_dropped():
+    draft = Setup().run(conversation=ConversationBudget(total_chars=1_200))
+    omissions = section(draft, "Omissions and limits hit")
+    assert "| pull request conversation | 1200-character budget |" in omissions
+    assert "review:8101" in omissions
+
+
+def test_a_failure_at_an_earlier_commit_is_shown_stale_and_called_out():
+    draft = Setup().run()
+    stale = section(draft, "Evidence at other commits of this PR (stale)")
+    assert (
+        f"| `{OLD[:12]}` (1 of 2) | failure | check_run | lint | check_run:6001 |"
+        in stale
+    )
+    summary = section(draft, "Evidence summary")
+    assert (
+        "- Failed at another commit, with no result at the head SHA (UNKNOWN): 1\n"
+        in summary
+    )
+    notes = section(draft, "Controller notes")
+    assert (
+        f'check_run `"lint"` concluded `failure` at commit `{OLD[:12]}` and has no '
+        "result at the reviewed head SHA"
+    ) in notes
+    assert "| PASS | check_run | lint |" not in draft
+
+
+def test_a_rerun_that_passed_at_the_head_is_not_called_out():
+    class Rerun(FixtureGitHub):
+        def list_check_runs(self, repo, sha):
+            full = super().list_check_runs(repo, sha)
+            if sha != HEAD:
+                return full
+            lint = {
+                "id": 6002,
+                "name": "lint",
+                "head_sha": HEAD,
+                "status": "completed",
+                "conclusion": "success",
+                "app": {"slug": "github-actions"},
+            }
+            return Listing((*full.items, lint), False, 1)
+
+    draft = Setup(github=Rerun(FIXTURE)).run()
+    assert "concluded `failure` at commit" not in draft
+    assert "| PASS | check_run | lint |" in draft
+    summary = section(draft, "Evidence summary")
+    assert "(UNKNOWN): 0\n" in summary
