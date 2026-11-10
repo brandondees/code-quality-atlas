@@ -363,9 +363,13 @@ review, review comment and conversation comment (4,000 each), each labelled
 with its id, author, time and the commit it was made at. Commit subjects
 and remarks keep the newest that fit; every older one dropped, every cut,
 and every list that failed, hit the page cap or held an entry that did not
-parse is an omissions row, with dropped remark ids listed. Every PR-written
-line is quoted with a leading `>`, so a comment cannot forge another remark's
-heading. The lens picker still sees only the title and body. Each issue
+parse is an omissions row, with dropped remark ids listed; the fit is
+checked after the final redaction pass, and a pending review counts as the
+newest remark. Commits are ordered by their parents and committer date, not
+by GitHub's listing order. Every one-line PR-written field (title, names,
+branches, labels, commit subjects) is a JSON string and every body line is
+quoted with a leading `>`, split at every line terminator, so no PR text can
+forge another remark's heading. The lens picker still sees only the title and body. Each issue
 body is cut at 2,000 characters, and each cut is an omissions row too. Omissions are computed before the evidence block is
 built, so the model is told what it did not see. An artifact excerpt cut at
 4,000 characters is an omissions row, and its unread rest is UNKNOWN. Check

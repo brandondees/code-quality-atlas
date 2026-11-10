@@ -1,11 +1,12 @@
 # Agentic reviewer — direction and phased plan
 
 **Status: direction accepted (D34 in
-[`open-questions.md`](open-questions.md), 2026-11-08); nothing is built.**
+[`open-questions.md`](open-questions.md), 2026-11-08); phase 1 is built
+offline (D38), the rest is not built.**
 The owner accepted the recommendations below as proposed ("I can roll with
 recommendations as proposed for now"). Phase 1 (full PR conversation and
-branch-wide CI) is built offline on a draft PR stacked on #607, D38; the
-rest is not built. Every budget number is still pending his decision; see [Open numeric decisions](#open-numeric-decisions-pending-brandon).
+branch-wide CI) is on a draft PR stacked on #607, tested against fixtures
+only. Every budget number is still pending his decision; see [Open numeric decisions](#open-numeric-decisions-pending-brandon).
 This doc carries no live-run approval. No model call, Sprite run, merge or
 deploy was made to write it.
 
@@ -37,7 +38,8 @@ lenses, the picker (`choosing-review-lenses`), depth modes
 ([`review-depth-modes.md`](review-depth-modes.md)), the finding merger
 (`synthesizing-review-findings`), and tool grounding
 (`grounding-review-in-tool-output`). The reviewer service on the stack
-(D24-D33) is a careful substrate but a one-shot one:
+(D24-D33) is a careful substrate but a one-shot one. Before D38 it had
+these gaps (D38 closes the second and third):
 
 - **The model sees a parcel, not a checkout.** It gets a fetched diff,
   split into parts by size, and cannot open a file or compare branches.
@@ -138,8 +140,13 @@ a pass for head. Missing evidence stays UNKNOWN, so D24's fail-closed rule
 is unchanged.
 
 All of this text is untrusted. It is fenced with the per-prompt nonce and
-redacted, as D33 keeps for PR, issue and CI text. Repository content
-follows the secret rule below.
+redacted, as D33 keeps for PR, issue and CI text. Inside the conversation
+block (D38), every one-line field a person wrote (title, names, branches,
+labels, commit subjects) is a JSON string, and every body is split at
+every line terminator with each line starting `>`, so nothing PR-written
+can begin an unquoted, controller-looking line. Commits are ordered by
+their parents and committer date, not by how GitHub lists them.
+Repository content follows the secret rule below.
 
 ### Secret rule for everything the model reads
 
