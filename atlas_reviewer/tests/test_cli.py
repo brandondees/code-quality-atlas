@@ -10,6 +10,7 @@ import pytest
 from atlas_reviewer import cli
 from atlas_reviewer.fakes import FakeSprites
 from atlas_reviewer.github_fixture import FixtureGitHub
+from atlas_reviewer.interpreter import PYENV_VERSIONS, PYTHON_TAG
 from atlas_reviewer.ports import BoundaryError, NotFoundError
 from atlas_reviewer.runner import EGRESS_TAG
 
@@ -517,6 +518,79 @@ def test_a_live_review_writes_secret_free_jsonl_telemetry_by_default(
         assert phase in phases, phase
     assert f"telemetry: {len(phases)} event(s), {events_file}" in out.getvalue()
     assert "## Lifecycle telemetry" in draft_path.read_text()
+
+
+def minting_github(monkeypatch, minted, github=FixtureGitHub):
+    monkeypatch.setattr(
+        cli, "AppInstallationTokens",
+        lambda transport, clock, **kw: type("T", (), {"secrets": lambda self: (minted,)})(),
+    )  # fmt: skip
+    monkeypatch.setattr(cli, "GitHubClient", lambda transport, t: github(FIXTURE))
+
+
+# Minted values here are deliberately not token-shaped: only the credential
+# registry, not a pattern, can catch them.
+MINTED = "minted-installation-value-0123456789"
+
+
+def test_minted_installation_tokens_are_scrubbed_from_stderr_and_telemetry(
+    tmp_path, monkeypatch
+):
+    minted = MINTED
+
+    class LeakyPull(FixtureGitHub):
+        def get_pull(self, repo, number):
+            raise NotFoundError(
+                f"GitHub 404 for {minted} and {APP_ENV[cli.ENV_SPRITES_TOKEN]}"
+            )
+
+    minting_github(monkeypatch, minted, LeakyPull)
+    events = tmp_path / "e.jsonl"
+    err = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "review", "--event", EVENT, "--events", str(events)],
+        env=APP_ENV, out=io.StringIO(), err=err, sprites_factory=scripted_sprites,
+    )  # fmt: skip
+    assert code == cli.EXIT_BOUNDARY
+    assert "GitHub 404 for" in err.getvalue()
+    for leaked in (err.getvalue(), events.read_text()):
+        assert minted not in leaked
+        assert APP_ENV[cli.ENV_SPRITES_TOKEN] not in leaked
+
+
+def test_the_probe_report_scrubs_minted_tokens_and_environment_credentials(
+    tmp_path, monkeypatch
+):
+    minted = MINTED
+    leak = f"Python 3.13.7 {APP_ENV[cli.ENV_SPRITES_TOKEN]}"
+    # A pyenv version directory may be named anything of this shape, and the
+    # trusted-python line prints it unscrubbed until the report scrub.
+    resolved = f"{PYTHON_TAG}:{PYENV_VERSIONS}/{minted}/bin/python3:3.13.7"
+
+    class Leaky(FakeSprites):
+        def _answer(self, script, stdin):
+            if "timeout -k 2 15 python3" in script:
+                return leak, 0
+            if f'echo "{PYTHON_TAG}:' in script:
+                return resolved, 0
+            return super()._answer(script, stdin)
+
+    minting_github(monkeypatch, minted)
+    api = Leaky.from_script(json.loads((FIXTURE / "runner-script.json").read_text()))
+    events = tmp_path / "e.jsonl"
+    out = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "probe-runner", "--sequence", "review",
+         "--event", EVENT, "--events", str(events)],
+        env=APP_ENV, out=out, err=io.StringIO(), sprites_factory=lambda env: api,
+    )  # fmt: skip
+    assert code == cli.EXIT_OK
+    text = out.getvalue()
+    assert "diagnostic bare python3 in the checkout: exit 0: Python 3.13.7 " in text
+    assert "trusted python: /" in text and "(3.13.7)" in text
+    for leaked in (text, events.read_text()):
+        assert minted not in leaked
+        assert APP_ENV[cli.ENV_SPRITES_TOKEN] not in leaked
 
 
 def test_a_dry_run_writes_telemetry_only_when_asked(tmp_path):

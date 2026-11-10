@@ -10,8 +10,9 @@ off unless `--provider openrouter --allow-live-inference` are both given.
 Every live command records lifecycle telemetry (`atlas_reviewer.telemetry`)
 to a JSONL file: `--events PATH`, or by default
 `<state dir>/telemetry/<command>-<UTC time>.jsonl`. A dry run writes one
-only when `--events` is given. Event text passes through a redactor holding
-every credential value from the environment first.
+only when `--events` is given. Event text, the probe report and stderr pass
+through a redactor holding every credential value from the environment and
+every installation token minted during the run.
 """
 
 from __future__ import annotations
@@ -179,8 +180,28 @@ def _live_openrouter(key: str, limits: CallLimits) -> OpenRouterProvider:
     return OpenRouterProvider(UrllibTransport(), key, limits=limits, sleep=time.sleep)
 
 
-def _env_redactor(env: Mapping[str, str]) -> Redactor:
-    return Redactor(tuple(env.get(name, "") for name in SECRET_ENV if env.get(name)))
+class _Credentials:
+    """Every credential value one invocation holds: the environment's, and
+    each installation token minted since. `redactor` reads the minted ones
+    on every call, so telemetry, the probe report and stderr written after
+    a mint all lose the token."""
+
+    def __init__(self, env: Mapping[str, str]) -> None:
+        values = [env.get(name, "") for name in SECRET_ENV]
+        values.append(_pem(env.get(ENV_APP_KEY, "")))
+        self._sources: list[Callable[[], Sequence[str]]] = []
+        self.redactor = Redactor(
+            tuple(dict.fromkeys(v for v in values if v)), sources=(self._minted,)
+        )
+
+    def register(self, source: Callable[[], Sequence[str]]) -> None:
+        self._sources.append(source)
+
+    def scrub(self, text: str) -> str:
+        return self.redactor(text).text
+
+    def _minted(self) -> tuple[str, ...]:
+        return tuple(s for source in self._sources for s in source())
 
 
 def _telemetry(
@@ -191,7 +212,6 @@ def _telemetry(
     default_file: bool,
 ) -> Telemetry:
     clock = SystemClock()
-    redactor = _env_redactor(env)
     default = (
         _state_dir(args, env)
         / "telemetry"
@@ -199,7 +219,7 @@ def _telemetry(
     )
     path = Path(args.events) if args.events else (default if default_file else None)
     sink = JsonlSink(path) if path else None
-    return Telemetry(clock, sink, scrub=lambda text: redactor(text).text)
+    return Telemetry(clock, sink, scrub=args.credentials.scrub)
 
 
 def _events_path(telemetry: Telemetry) -> str:
@@ -261,13 +281,13 @@ def _live_wiring(
     provider: ModelProvider,
     telemetry: Telemetry,
 ) -> _Wiring:
-    private_key = _pem(_require_env(env, ENV_APP_KEY))
-    sprites_token = _require_env(env, ENV_SPRITES_TOKEN)
+    _require_env(env, ENV_APP_KEY)
+    _require_env(env, ENV_SPRITES_TOKEN)
     clock = SystemClock()
     transport = UrllibTransport()
     tokens = _app_tokens(env, event, args.include_issues, transport)
-    known = (private_key, sprites_token, env.get(ENV_OPENROUTER_KEY, ""))
-    redactor = Redactor(tuple(k for k in known if k), sources=(tokens.secrets,))
+    args.credentials.register(tokens.secrets)
+    redactor = args.credentials.redactor
     deps = Deps(
         github=GitHubClient(transport, tokens),
         sprites=args.sprites_factory(env),
@@ -381,7 +401,7 @@ def _cmd_probe(args: argparse.Namespace, env: Mapping[str, str], out: TextIO) ->
         try:
             usable = sequence(args, env, report, telemetry)
         finally:
-            out.write(_env_redactor(env)(report.getvalue()).text)
+            out.write(args.credentials.scrub(report.getvalue()))
     out.write(f"\n{telemetry_section(telemetry.events)}\n\n")
     out.write(
         f"telemetry: {len(telemetry.events)} event(s), {_events_path(telemetry)}\n"
@@ -442,7 +462,7 @@ def _probe_review_sequence(
     )
     _write_report(outcome.report, out)
     out.write(f"source tarball: {len(tarball)} bytes\n")
-    redactor = _env_redactor(env)
+    redactor = args.credentials.redactor
     out.writelines(f"{_tool_report(r, redactor)}\n" for r in outcome.results)
     out.write(f"{_python_report(outcome.python)}\n")
     out.writelines(f"{_diagnostic_report(d)}\n" for d in outcome.diagnostics)
@@ -471,9 +491,9 @@ def _probe_source(
         raise UsageError("--sequence review needs --tarball FILE or --event FILE")
     event = load_event(Path(args.event))
     transport = UrllibTransport()
-    github = InstrumentedGitHub(
-        GitHubClient(transport, _app_tokens(env, event, False, transport)), telemetry
-    )
+    tokens = _app_tokens(env, event, False, transport)
+    args.credentials.register(tokens.secrets)
+    github = InstrumentedGitHub(GitHubClient(transport, tokens), telemetry)
     return github.get_tarball(event.repo, event.head_sha)
 
 
@@ -662,8 +682,12 @@ def main(
     handler: Callable[[argparse.Namespace, Mapping[str, str], TextIO], int] = (
         args.handler
     )
+    env = os.environ if env is None else env
+    args.credentials = _Credentials(env)
     try:
-        return handler(args, os.environ if env is None else env, out or sys.stdout)
+        return handler(args, env, out or sys.stdout)
     except tuple(e for e, _ in _ERRORS) as exc:
-        (err or sys.stderr).write(f"atlas_reviewer: {exc}\n")
+        (err or sys.stderr).write(
+            f"atlas_reviewer: {args.credentials.scrub(str(exc))}\n"
+        )
         return next(code for kind, code in _ERRORS if isinstance(exc, kind))
