@@ -191,6 +191,54 @@ def test_diff_file_pages_by_byte_offset_until_the_whole_diff_is_read(tmp_path):
     assert "+    return sum(round(x, 2) for x in xs)" in whole
 
 
+RENAMED_BASE = {"old/name.py": b"".join(b"line %d\n" % i for i in range(20))}
+RENAMED_HEAD = {
+    "new/name.py": RENAMED_BASE["old/name.py"] + f"key = {NEW_TOKEN}\n".encode()
+}
+
+
+@pytest.mark.parametrize("path", ["new/name.py", "old/name.py"])
+def test_a_renamed_file_diffs_as_a_rename_from_either_side(tmp_path, path):
+    source = SourceTrees(tarball(RENAMED_BASE), tarball(RENAMED_HEAD), OLD, HEAD)
+    result = one(tmp_path, "diff_file", {"path": path}, source=source)
+    assert result.status is Status.OK
+    assert "rename from old/name.py\nrename to new/name.py\n" in result.content.text
+    assert "new file mode" not in result.content.text
+    assert "deleted file mode" not in result.content.text
+    assert {(s.path, s.line) for s in result.secrets} == {("new/name.py", 21)}
+
+
+def test_renames_are_listed_once_per_bridge(tmp_path):
+    source = SourceTrees(tarball(RENAMED_BASE), tarball(RENAMED_HEAD), OLD, HEAD)
+    _, _, sprites, _ = calls(
+        tmp_path,
+        ("diff_file", {"path": "new/name.py"}),
+        ("diff_file", {"path": "old/name.py"}),
+        source=source,
+    )
+    listings = [
+        s for s in sprites.calls if s[0] == "exec" and "--diff-filter=R" in s[2]
+    ]
+    assert len(listings) == 1
+
+
+def test_a_rename_listing_that_fails_makes_diff_file_unavailable(tmp_path):
+    sprites = _answer("__ATLAS_BRIDGE__ 128 0 0 0 0\n\n")
+    (diff, stat), *_ = calls(
+        tmp_path, ("diff_file", {"path": "a"}), ("diff_stat", {}), sprites=sprites
+    )
+    assert diff.status is Status.UNAVAILABLE
+    assert "renames could not be listed in full (exit 128)" in diff.error.text
+    assert stat.status is Status.FAILED
+
+
+def test_a_cut_rename_listing_makes_diff_file_unavailable(tmp_path):
+    sprites = _answer("__ATLAS_BRIDGE__ 0 0 9 0 0\n\n")
+    (diff,), *_ = calls(tmp_path, ("diff_file", {"path": "a"}), sprites=sprites)
+    assert diff.status is Status.UNAVAILABLE
+    assert "renames could not be listed in full" in diff.error.text
+
+
 def test_list_files_reads_a_revision_under_a_prefix(tmp_path):
     head, base, docs = calls(
         tmp_path,

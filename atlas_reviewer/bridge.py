@@ -113,6 +113,9 @@ class ToolLimits:
             raise ValueError("tool limits must be positive integers")
 
 
+# The controller's own listing of the PR's renames, for `diff_file`.
+RENAME_LIMITS = ToolLimits(1024 * 1024, 10)
+
 # D31's proposed bounds, working defaults pending the owner (D34).
 DEFAULT_LIMITS: Mapping[str, ToolLimits] = MappingProxyType(
     {
@@ -137,7 +140,9 @@ class _Plan:
     view: str = 'cat "$1"'
 
 
-def _plan(call: Call, staged: Staged) -> _Plan:
+def _plan(call: Call, staged: Staged, paths: tuple[str, ...]) -> _Plan:
+    """`paths` are what `diff_file` diffs: its path, and the other side of
+    a rename it is part of."""
     commit = staged.commits
     span = f"{commit[Rev.BASE]}...{commit[Rev.HEAD]}"
     rev = commit.get(call.get("rev")) if "rev" in dict(call.args) else None
@@ -145,9 +150,11 @@ def _plan(call: Call, staged: Staged) -> _Plan:
     match call.tool:
         case "diff_stat":
             return _Plan((*_DIFF, "--stat=200", span))
+        case "renames":
+            return _Plan((*_DIFF, "-z", "--name-status", "--diff-filter=R", span))
         case "diff_file":
             view = f'tail -c +{call.get("offset") + 1} "$1"'
-            return _Plan((*_DIFF, span, "--", call.get("path")), view)
+            return _Plan((*_DIFF, span, "--", *paths), view)
         case "list_files":
             return _Plan(("ls-tree", "-r", "--name-only", str(rev), *pathspec))
         case "read_file":
@@ -162,14 +169,16 @@ def _pathspec(prefix: str) -> tuple[str, ...]:
     return ("--", prefix) if prefix else ()
 
 
-def call_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
+def call_script(
+    staged: Staged, call: Call, limits: ToolLimits, paths: tuple[str, ...] = ()
+) -> str:
     """Runs one tool into files under the bridge root, then prints a
     header (git's exit status, the view's, the bytes and lines of the
     view, and the bytes of its capped part) and that capped part and
     stderr, each base64-encoded on its own line. The controller checks
     the decoded part against its byte count, so a failed encoding is an
     error, not an empty result."""
-    plan = _plan(call, staged)
+    plan = _plan(call, staged, paths)
     git = " ".join((quote(staged.git), "--git-dir=repo.git", *GIT_OPTIONS))
     argv = " ".join(quote(a) for a in plan.argv)
     lines = f"head -n {limits.max_lines} view | " if limits.max_lines else ""
@@ -192,6 +201,29 @@ def call_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
             "rm -f out err view shown",
         )
     )
+
+
+class _LostOutputError(BoundaryError):
+    """The tool ran, but its output did not arrive intact."""
+
+
+def _rename_pairs(reply: _Reply) -> Mapping[str, tuple[str, str]]:
+    """`R<score>\0<old>\0<new>\0` per rename (`--name-status -z`), keyed
+    by both sides. A listing that failed or was cut raises, since a
+    `diff_file` without it could show a rename as an add or a delete."""
+    if reply.code != 0 or reply.shown_bytes < reply.total_bytes:
+        raise BoundaryError(
+            f"the PR's renames could not be listed in full (exit {reply.code})"
+        )
+    fields = reply.content.decode("utf-8", errors="replace").split("\0")
+    pairs = [
+        (old, new)
+        for status, old, new in zip(
+            fields[0::3], fields[1::3], fields[2::3], strict=False
+        )
+        if status.startswith("R")
+    ]
+    return MappingProxyType({path: pair for pair in pairs for path in pair})
 
 
 @dataclass(frozen=True)
@@ -315,7 +347,11 @@ class _View:
 
 
 def _view(
-    call: Call, raw: bytes, commit: str, preexisting: Callable[[Rev, str], bool]
+    call: Call,
+    raw: bytes,
+    commit: str,
+    preexisting: Callable[[Rev, str], bool],
+    paths: tuple[str, ...] = (),
 ) -> _View:
     text = raw.decode("utf-8", errors="replace")
     match call.tool:
@@ -331,7 +367,7 @@ def _view(
         case "grep":
             return _grep_view(text, commit, call.get("rev"), preexisting)
         case "diff_file":
-            return _View(text, _diff_places(text.split("\n"), call.get("path")))
+            return _View(text, _diff_places(text.split("\n"), paths[0], paths[-1]))
     return _View(text, [])
 
 
@@ -370,31 +406,37 @@ def _shown_path(path: str) -> str:
     return path if _PLAIN_PATH.fullmatch(path) and ":" not in path else json.dumps(path)
 
 
-def _diff_places(lines: Iterable[str], path: str) -> list[_Where]:
-    """Head-side lines of added and context lines, base-side of removed
-    ones; added lines are new in the PR, the rest pre-existing. Lines
-    before the page's first hunk header are not located."""
+def _diff_places(lines: Iterable[str], base_path: str, path: str) -> list[_Where]:
+    """Head-side lines (in `path`) of added and context lines, base-side
+    (in `base_path`, which differs for a rename) of removed ones; added
+    lines are new in the PR, the rest pre-existing. Lines before the
+    page's first hunk header are not located."""
     places: list[_Where] = []
     base = head = None
     for line in lines:
         hunk = _HUNK.match(line)
         if hunk:
             base, head = int(hunk.group(1)), int(hunk.group(2))
-        place, base, head = _diff_line(line, path, base, head, bool(hunk))
+        place, base, head = _diff_line(line, (base_path, path), base, head, bool(hunk))
         places.append(place)
     return places
 
 
 def _diff_line(
-    line: str, path: str, base: int | None, head: int | None, is_hunk: bool
+    line: str,
+    sides: tuple[str, str],
+    base: int | None,
+    head: int | None,
+    is_hunk: bool,
 ) -> tuple[_Where, int | None, int | None]:
+    base_path, path = sides
     if is_hunk or base is None or head is None:
         return _Where(path, None, False), base, head
     kind = line[:1]
     if kind == "+":
         return _Where(path, head, False), base, head + 1
     if kind == "-":
-        return _Where(path, base, True), base + 1, head
+        return _Where(base_path, base, True), base + 1, head
     if kind == " ":
         return _Where(path, head, True), base + 1, head + 1
     return _Where(path, None, False), base, head
@@ -429,6 +471,7 @@ class Bridge:
     limits: Mapping[str, ToolLimits] = DEFAULT_LIMITS
     calls: list[CallRecord] = field(default_factory=list)
     _flagged: list[str] = field(default_factory=list, repr=False)
+    _renames: Mapping[str, tuple[str, str]] | None = field(default=None, repr=False)
 
     def flagged(self) -> tuple[str, ...]:
         """Every secret value found so far, for `Redactor.sources`."""
@@ -453,26 +496,50 @@ class Bridge:
         limits = self.limits[call.tool]
         started = self.clock.monotonic()
         try:
-            code, text = self.session.exec(
-                f"bridge {call.tool}",
-                call_script(self.staged, call, limits),
-                stage="bridge",
-                budget_s=limits.timeout_s + EXEC_SLACK_S,
-            )
+            paths = self._diff_paths(call)
+            reply = self._exec(call, limits, paths)
         except StreamTimeoutError as exc:
             return self._failed(call, Status.TIMED_OUT, str(exc), started)
+        except _LostOutputError as exc:
+            return self._failed(call, Status.FAILED, str(exc), started)
         except BoundaryError as exc:
             return self._failed(call, Status.UNAVAILABLE, str(exc), started)
+        return self._result(call, reply, paths, self.clock.monotonic() - started)
+
+    def _exec(
+        self, call: Call, limits: ToolLimits, paths: tuple[str, ...] = ()
+    ) -> _Reply:
+        code, text = self.session.exec(
+            f"bridge {call.tool}",
+            call_script(self.staged, call, limits, paths),
+            stage="bridge",
+            budget_s=limits.timeout_s + EXEC_SLACK_S,
+        )
         reply = parse_reply(text) if code == 0 else None
         if reply is None:
-            detail = (
+            raise BoundaryError(
                 f"no bridge reply (exit {code}): {guest_text(text, GUEST_TAIL_CHARS)}"
             )
-            return self._failed(call, Status.UNAVAILABLE, detail, started)
         problem = reply.problem()
         if problem is not None:
-            return self._failed(call, Status.FAILED, problem, started)
-        return self._result(call, reply, self.clock.monotonic() - started)
+            raise _LostOutputError(problem)
+        return reply
+
+    def _diff_paths(self, call: Call) -> tuple[str, ...]:
+        """What `diff_file` diffs: its path, or both sides of the rename it
+        is part of, so git pairs them instead of showing an add or a delete."""
+        if call.tool != "diff_file":
+            return ()
+        path = call.get("path")
+        return self._rename_map().get(path, (path,))
+
+    def _rename_map(self) -> Mapping[str, tuple[str, str]]:
+        """The PR's renames, listed once per bridge."""
+        if self._renames is None:
+            self._renames = _rename_pairs(
+                self._exec(Call("renames", ()), RENAME_LIMITS)
+            )
+        return self._renames
 
     def _failed(
         self, call: Call, status: Status, detail: str, started: float
@@ -483,11 +550,13 @@ class Bridge:
             self.clock.monotonic() - started,
         )  # fmt: skip
 
-    def _result(self, call: Call, reply: _Reply, seconds: float) -> BridgeResult:
+    def _result(
+        self, call: Call, reply: _Reply, paths: tuple[str, ...], seconds: float
+    ) -> BridgeResult:
         limits = self.limits[call.tool]
         status = _status(call.tool, reply.code)
         commit = self.staged.commits[call.get("rev")] if call.tool == "grep" else ""
-        view = _view(call, reply.content, commit, self._preexisting)
+        view = _view(call, reply.content, commit, self._preexisting, paths)
         scan = detect_secrets(view.text)
         shown = len(reply.content)
         cut = (
