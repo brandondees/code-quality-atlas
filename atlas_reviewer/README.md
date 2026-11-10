@@ -25,7 +25,8 @@ python -m atlas_reviewer review --event atlas_reviewer/fixtures/sample-pr/event.
 `--dry-run` wires a fixture directory as GitHub, the in-memory fake as the
 Sprites runner, and the offline provider, which calls no model, so the
 draft reports the diff as NOT REVIEWED and its lenses as planned, not run.
-CI runs this same command. Useful flags:
+No model reviewed any file, so a dry run always exits 4, review incomplete
+(see Review event and the coverage gate). CI runs this same command. Useful flags:
 
 - `--out draft.md` writes the draft to a file.
 - `--expect check_run:NAME` (repeatable) names evidence that must exist. If
@@ -35,8 +36,9 @@ CI runs this same command. Useful flags:
   Off by default.
 - `--deadline-seconds N` sets the external runner deadline (default 600).
 - `--max-model-calls N` (1 to 3, default 3) caps model calls per review,
-  retries included. One goes to the lens picker (except at triage depth, or
-  with only one call), the rest to diff parts (see Lenses and Diff coverage).
+  retries included. One goes to the lens picker (except at triage depth,
+  with only one call, or when no picked lens could fit), the rest to diff
+  parts (see Lenses and Diff coverage).
 - `--diff-chars-per-call N` (default 176000, at least 1000) is the most diff
   characters a model call may carry. Each review shrinks it further until
   every planned prompt fits the token bound (see Diff coverage).
@@ -208,7 +210,8 @@ call gets that skill as its instructions, the PR metadata and the changed
 paths (at most 500) as untrusted fenced blocks, and the operator's depth.
 It must reply with only `{"lenses": [...]}`, at most 8 names at review depth
 (the top of review mode's 3-8 breadth) or 40 at comprehensive. The reply is
-parsed strictly, and a name with no body in the bundle is listed as NOT RUN.
+parsed strictly, and a name with no body in the bundle is listed as NOT RUN
+and takes no slot.
 With no diff there is no model call at all (see Diff coverage). At
 **triage** depth or with `--max-model-calls 1`, no picker call is made and
 the critical tier is chosen (`tracing-correctness-and-invariants`,
@@ -216,7 +219,7 @@ the critical tier is chosen (`tracing-correctness-and-invariants`,
 `reviewing-concurrency-and-async`, from `docs/review-depth-modes.md`). An
 unusable reply also falls back to the critical tier, and the controller
 notes quote the reason. A usable reply never replaces the critical tier:
-the critical tier always comes first, and the picker's other names follow
+the critical tier is always considered first, and the picker's other names follow
 in rank order up to the depth's breadth, so a thin or steered pick can add
 lenses but not drop a critical one. The picker call counts toward the
 3-call cap.
@@ -226,7 +229,8 @@ and inlines it into the trusted system prompt, in priority order, under a
 **60,000-character budget** and a cap of **8 lenses**. A lens is never cut:
 a lens runs only if its whole body fits what is left of the budget, and
 otherwise it is **NOT RUN** and the next one is tried, so a smaller later
-lens can still fit. The draft's **Review lenses** table and the controller
+lens can still fit. A lens past the cap is NOT RUN too, with its size. The
+draft's **Review lenses** table and the controller
 notes list every lens as run whole or NOT RUN, with its size, its tier or
 picker rank, and why it did not run, and the prompt tells the model that
 only inlined lenses ran.
@@ -235,10 +239,13 @@ With today's bodies the critical tier alone does not fit:
 `tracing-correctness-and-invariants` (34,750 characters) and
 `sweeping-for-security` (15,000) run whole, leaving 10,250, so
 `reviewing-migration-and-data-safety` (22,656) and
-`reviewing-concurrency-and-async` (10,984) are NOT RUN. The smallest lens
-in the bundle is 10,984 characters, so at review depth no picker-only lens
-fits either; triage and review depth run the same two lenses. PR text can
-steer the pick, but only within the closed set of lens names in the bundle.
+`reviewing-concurrency-and-async` (10,984) are NOT RUN. The smallest other
+lens, `reviewing-test-quality`, is 11,015 characters, so no picked lens could
+fit either. When that is so, `select_lenses` makes no picker call, the
+controller notes say why, and the call goes to diff review instead (D35).
+Every depth runs the same two lenses today. When the picker does run, PR
+text can steer the pick, but only within the closed set of lens names in the
+bundle.
 
 No instruction text is ever cut: the controller's instructions, the
 `reviewing-a-change` review procedure, the `choosing-review-lenses` picker
@@ -279,9 +286,13 @@ and build files are matched first, so no directory (`tests/`, `docs/`,
 `fixtures/`) demotes them; then tests and docs, so
 `tests/test_redact.py` is a test and `docs/security.md` a doc; then
 security before config, so `config/secrets.yaml` ranks as security. A
-file's path is read from its `+++` line (or `rename to`), not split out of
-the `diff --git` header, which is ambiguous for a path holding a space
-followed by `b/`. Parts are
+rename or copy is ranked by the riskier of its old and new paths, so moving
+`src/auth.py` to `docs/changelog.md` still ranks as security. A file's
+path is read from its `+++` line (or `rename to` / `copy to`), not split out
+of the `diff --git` header, which is ambiguous for a path holding a space
+followed by `b/`. A combined diff (`diff --cc`, as for a merge commit) is
+not split out: its text stays with the preceding file, so it is still sent,
+under that file's name and tier. Parts are
 filled first-fit in that order. A file larger than one part is cut at a line boundary into a part of its own and marked cut. A file
 that fits nowhere once every part is used is never sent. If the diff cannot
 be fetched at all, no model call is made (a review of an empty diff would
@@ -318,8 +329,9 @@ $22.5/M, about $1.60, under the $3.00 reservation. Two unsettled worst cases
 would not fit, so a second call is reserved only after the first settles to
 its actual cost.
 
-With the picker call, review depth sends at most 2 parts; triage sends up to
-3. A diff over that capacity is PARTIAL: the omissions row says "too large
+When the picker is called, review depth sends at most 2 parts. Triage, and
+any depth where the picker call is skipped (review depth with today's
+bundle), sends up to 3. A diff over that capacity is PARTIAL: the omissions row says "too large
 for one review pass", and the coverage note says the cut and unsent files
 are listed there, highest risk first. The second pilot's 412,078-character
 diff would still be PARTIAL, with the unseen files being the lowest-risk
@@ -331,6 +343,37 @@ built, so the model is told what it did not see. An artifact excerpt cut at
 4,000 characters is an omissions row, and its unread rest is UNKNOWN. Check
 summaries and log tails (the end of the log is kept by design) are capped
 too, but those caps are not listed as omissions.
+
+## Review event and the coverage gate
+
+Each diff part's review ends with a proposed GitHub review event,
+`Review event: APPROVE`, `COMMENT` or `REQUEST_CHANGES`, parsed strictly
+from the reply's last line (`verdict.py`, D36). The controller decides:
+APPROVE needs every part to propose it, and any REQUEST_CHANGES wins.
+Nothing is posted, so the event is what the draft recommends.
+
+Partial file coverage blocks approval by default. If any changed file was
+not reviewed in full, the event is never APPROVE: it becomes COMMENT,
+marked review incomplete. That covers a file never sent for lack of room; a
+file in a part whose call failed, was refused by the call or cost cap, or
+was used up by a retry; a file answered by the offline provider; a file cut
+to fit; and a file dropped before the calls. Coverage that cannot be
+determined, such as when no diff could be tied to the event SHA, counts as
+incomplete. Lens NOT RUN status does not trigger this rule: it is about files
+only.
+
+- The draft's first line is a machine-readable HTML comment, for example
+  `<!-- atlas-review-status: {"review_event": "COMMENT", "proposed_event":
+  "APPROVE", "coverage_complete": false, "changed_files": 40,
+  "unreviewed_files": 3} -->`. It holds no paths.
+- The body opens with the review event. When coverage is incomplete, it
+  opens with a **REVIEW INCOMPLETE -- not approvable** warning instead,
+  giving the count and naming the unreviewed files by reason, highest risk
+  first, each quoted as data, with at most 100 listed.
+- `review` exits **4** when file coverage is incomplete, and 0 when it is
+  complete. With `--out`, it also prints `review event: ...;
+  coverage_complete=...; unreviewed_files=N`. A pipeline with no human
+  reading the draft can gate on the exit status alone.
 
 ## Lifecycle telemetry
 
@@ -453,15 +496,16 @@ interpreter is chosen before they exist. Every other binary comes from
 | `groups.py` | one CI gate seen as check run + job + log + workflow run → one independent check | no |
 | `notes.py` | the code-generated Controller notes | no |
 | `diffs.py` | split a diff into files, rank them by risk, pack them into per-call parts, fit the part size to the measured prompt | no |
-| `picker.py` | run `choosing-review-lenses` as one model call, parse its reply strictly, fall back to the critical tier | reads the bundle |
+| `picker.py` | run `choosing-review-lenses` as one model call, parse its reply strictly, fall back to the critical tier, skip the call when no picked lens could fit | reads the bundle |
+| `verdict.py` | the proposed review event, the file-coverage gate on approval, the machine-readable status line and the incomplete-coverage warning | no |
 | `telemetry.py` | lifecycle events, the `EventSink` (JSONL), labelled timed spans, the summary rows | writes the JSONL file |
 | `instrumented.py` | `GitHubReader` wrapper that records every read as an event | via `GitHubReader` |
-| `lenses.py` | load and budget the chosen lenses' bodies | reads the bundle |
+| `lenses.py` | load the chosen lenses' bodies whole under the budget and cap, or mark them NOT RUN with a reason | reads the bundle |
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`) | no |
 | `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → resolve interpreter → upload → unpack → tools → destroy), `probe_runner`, the one exec wrapper (`exec_argv`, minimal `env -i` environment) | via `SpritesApi` |
 | `interpreter.py` | the resolve script, `choose_python` (accepts only the pyenv-versions and `/usr/bin/python3` path shapes), `{python}` substitution, the probe-only diagnostic scripts and output summary | no |
 | `gather.py` | head-SHA CI evidence: lists, job logs, artifact contents, omissions | via `GitHubReader` |
-| `controller.py` | one event in, one draft out | via ports |
+| `controller.py` | one event in, one draft and its review verdict out | via ports |
 | `harness.py` | skill-bundle harness: loads `collapsed/skills/reviewing-a-change/SKILL.md` | reads the bundle |
 | `providers.py` | `OfflineProvider` (the default) | no |
 | `github_api.py`, `github_auth.py`, `sprites_api.py`, `openrouter.py`, `http.py` | live adapters | network |
