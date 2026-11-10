@@ -40,7 +40,15 @@ from atlas_reviewer.runner import MAX_TARBALL_BYTES
 from atlas_reviewer.source_archive import MAX_UNPACKED_BYTES
 from atlas_reviewer.telemetry import Telemetry
 
-from .helpers import FIXTURE, HEAD, OLD, FakeClock, LocalSprites, fake_token
+from .helpers import (
+    FIXTURE,
+    HEAD,
+    OLD,
+    FakeClock,
+    LocalSprites,
+    fake_token,
+    source_tarball,
+)
 
 OLD_TOKEN = fake_token("ghp_")
 NEW_TOKEN = fake_token("ghs_")
@@ -64,13 +72,7 @@ HEAD_FILES = {
 
 
 def tarball(files, top="example-org-example-app-abc1234"):
-    buf = io.BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
-        for path, data in files.items():
-            info = tarfile.TarInfo(f"{top}/{path}")
-            info.size = len(data)
-            tf.addfile(info, io.BytesIO(data))
-    return buf.getvalue()
+    return source_tarball(files, top)
 
 
 def trees(default=None):
@@ -367,6 +369,10 @@ def test_a_name_that_is_not_utf8_is_marked_not_readable(tmp_path):
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz", format=tarfile.USTAR_FORMAT,
                       encoding="utf-8", errors="surrogateescape") as tf:  # fmt: skip
+        for directory in ("top", "top/odd"):
+            info = tarfile.TarInfo(directory)
+            info.type, info.mode = tarfile.DIRTYPE, 0o755
+            tf.addfile(info)
         info = tarfile.TarInfo("top/odd/\udcff.txt")
         info.size = 2
         tf.addfile(info, io.BytesIO(b"x\n"))

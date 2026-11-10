@@ -5,7 +5,7 @@ import subprocess
 import tarfile
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from atlas_reviewer.domain import (
     Conclusion,
@@ -27,11 +27,20 @@ NOW = datetime(2026, 11, 6, 23, 0, tzinfo=UTC)
 
 
 def source_tarball(files: dict[str, bytes] | None = None, top: str = "src") -> bytes:
-    """A real gzip tar with one top-level directory, as GitHub serves."""
+    """A real gzip tar with one top-level directory, as GitHub serves: every
+    directory is an entry, listed before what is in it."""
     buf = io.BytesIO()
+    made: set[str] = set()
     with tarfile.open(fileobj=buf, mode="w:gz") as tf:
         for path, data in (files or {"app.py": b"print('ok')\n"}).items():
-            info = tarfile.TarInfo(f"{top}/{path}")
+            full = f"{top}/{path}"
+            for parent in reversed(list(PurePosixPath(full).parents)[:-1]):
+                if str(parent) not in made:
+                    made.add(str(parent))
+                    info = tarfile.TarInfo(str(parent))
+                    info.type, info.mode = tarfile.DIRTYPE, 0o755
+                    tf.addfile(info)
+            info = tarfile.TarInfo(full)
             info.size = len(data)
             tf.addfile(info, io.BytesIO(data))
     return buf.getvalue()

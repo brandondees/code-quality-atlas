@@ -18,6 +18,9 @@ from atlas_reviewer.source_archive import (
     MAX_MEMBERS,
     MAX_METADATA_BYTES,
     MAX_METADATA_TOTAL_BYTES,
+    MAX_PATH_BYTES,
+    MAX_PATH_COMPONENTS,
+    MAX_PATH_DEPTH,
     MAX_TRAILING_ZERO_BYTES,
     MAX_UNPACKED_BYTES,
     Unpacked,
@@ -28,7 +31,7 @@ from atlas_reviewer.source_archive import (
 from .helpers import source_tarball
 
 
-def declared_only(size, name="src/big"):
+def declared_only(size, name="big"):
     """A gzip tar whose one header declares `size` bytes it never carries."""
     info = tarfile.TarInfo(name)
     info.size = size
@@ -37,7 +40,7 @@ def declared_only(size, name="src/big"):
 
 def test_members_and_declared_bytes_are_counted():
     data = source_tarball({"a.py": b"x" * 10, "b/c.py": b"y" * 5})
-    assert measure(data) == Unpacked(2, 15)
+    assert measure(data) == Unpacked(4, 15)
 
 
 def test_the_working_defaults_are_256_mib_and_50000_members():
@@ -83,6 +86,9 @@ def test_an_unreadable_archive_is_refused(data):
         {"max_bytes": True},
         {"max_metadata_bytes": 0},
         {"max_metadata_total_bytes": 0},
+        {"max_path_bytes": 0},
+        {"max_path_depth": 0},
+        {"max_path_components": 0},
     ],
 )
 def test_limits_must_be_positive_integers(limits):
@@ -119,20 +125,20 @@ def with_field(block, start, stop, value):
     return with_checksum(block)
 
 
-SMALL = header("src/small", 3) + padded(b"abc")
+SMALL = header("small", 3) + padded(b"abc")
 
 
 def hiding(middle):
     """A small file, then `middle`, then a header declaring 300 MiB. GNU tar
     reads past a `middle` that tarfile would take as the end of the archive."""
-    return gzip.compress(SMALL + middle + header("src/big", BIG) + END)
+    return gzip.compress(SMALL + middle + header("big", BIG) + END)
 
 
 def two_members(first_size, second_size):
     """One tar stream split across two gzip members, as `cat a.gz b.gz`
     makes: a small file, then a big one carrying its data."""
-    first = header("src/small", first_size) + padded(b"\0" * first_size)
-    second = header("src/big", second_size) + padded(b"\0" * second_size) + END
+    first = header("small", first_size) + padded(b"\0" * first_size)
+    second = header("big", second_size) + padded(b"\0" * second_size) + END
     return gzip.compress(first) + gzip.compress(second)
 
 
@@ -186,16 +192,16 @@ def global_header(fields):
 @pytest.mark.parametrize(
     ("middle", "reason"),
     [
-        (with_field(header("src/gap"), 124, 136, b"zzzzzzzzzzz"), "plain octal"),
-        (with_field(header("src/gap"), 136, 148, b"zzzzzzzzzzz"), "plain octal"),
-        (_pax("src/gap", {"size": "-1"}), "pax key 'size' is not accepted"),
-        (with_field(header("src/gap"), 124, 136, b"\xff" * 12), "plain octal"),
+        (with_field(header("gap"), 124, 136, b"zzzzzzzzzzz"), "plain octal"),
+        (with_field(header("gap"), 136, 148, b"zzzzzzzzzzz"), "plain octal"),
+        (_pax("gap", {"size": "-1"}), "pax key 'size' is not accepted"),
+        (with_field(header("gap"), 124, 136, b"\xff" * 12), "plain octal"),
         (header("././@LongLink", 512 * 1024 * 1024, tarfile.GNUTYPE_LONGNAME),
          "metadata entry declares 536870912 bytes"),
-        (with_field(header("src/gap"), 148, 156, b"zzzzzz\0 ")[:148]
-         + b"zzzzzz\0 " + with_field(header("src/gap"), 148, 156, b"")[156:],
+        (with_field(header("gap"), 148, 156, b"zzzzzz\0 ")[:148]
+         + b"zzzzzz\0 " + with_field(header("gap"), 148, 156, b"")[156:],
          "header checksum failed"),
-        (bytes(b ^ 1 if i == 0 else b for i, b in enumerate(header("src/gap"))),
+        (bytes(b ^ 1 if i == 0 else b for i, b in enumerate(header("gap"))),
          "header checksum failed"),
     ],
 )  # fmt: skip
@@ -221,16 +227,16 @@ def test_a_header_gnu_tar_reads_past_cannot_hide_what_follows(middle, reason):
 )
 def test_a_number_gnu_tar_rejects_is_refused(start, stop, value):
     """GNU tar rejects `1_000` as a size and reads the cover's data block as
-    the next header, extracting `src/hidden`; Python's `int` reads 512."""
-    cover = with_field(header("src/cover", 512), start, stop, value)
-    data = gzip.compress(cover + header("src/hidden") + END)
+    the next header, extracting `hidden`; Python's `int` reads 512."""
+    cover = with_field(header("cover", 512), start, stop, value)
+    data = gzip.compress(cover + header("hidden") + END)
     with pytest.raises(BoundaryError, match="does not parse as plain octal"):
         measure(data)
 
 
 def test_plain_octal_with_leading_spaces_or_no_terminator_is_accepted():
-    spaced = with_field(header("src/a", 3), 124, 136, b" 3 ")
-    full = with_field(header("src/b", 3), 124, 136, b"%012o" % 3)
+    spaced = with_field(header("a", 3), 124, 136, b" 3 ")
+    full = with_field(header("b", 3), 124, 136, b"%012o" % 3)
     data = gzip.compress(spaced + padded(b"abc") + full + padded(b"abc") + END)
     assert measure(data) == Unpacked(2, 6)
 
@@ -239,9 +245,9 @@ def cover_hiding_a_member(fields):
     """The reviewer's bypass: tarfile skips the cover's data by its header
     size and then reports the global `size`; GNU tar skips by the global
     size and extracts the pax-sized member hidden in the cover's data."""
-    hidden = _pax("src/big", {"size": str(4096)}) + padded(b"\0" * 4096)
+    hidden = _pax("big", {"size": str(4096)}) + padded(b"\0" * 4096)
     return gzip.compress(
-        global_header(fields) + header("src/cover", len(hidden)) + hidden + END
+        global_header(fields) + header("cover", len(hidden)) + hidden + END
     )
 
 
@@ -271,17 +277,17 @@ def test_a_member_pax_key_outside_the_shared_set_is_refused(key):
 
 def test_a_pax_size_that_agrees_with_the_header_is_still_refused():
     with pytest.raises(BoundaryError, match="pax key 'size' is not accepted"):
-        measure(gzip.compress(_pax("src/a", {"size": "3"}, 3) + padded(b"abc") + END))
+        measure(gzip.compress(_pax("a", {"size": "3"}, 3) + padded(b"abc") + END))
 
 
 @pytest.mark.parametrize(
     "fields",
     [
-        {"path": "src/" + "p" * 300},
-        {"linkpath": "src/" + "t" * 300},
+        {"path": "p" * 300},
+        {"linkpath": "t" * 300},
         {"mtime": "1700000000"},
         {"mtime": "1700000000.25"},
-        {"path": "src/caf\u00e9"},
+        {"path": "caf\u00e9"},
     ],
 )
 def test_the_pax_keys_both_readers_share_are_accepted(fields):
@@ -322,11 +328,11 @@ def test_a_pax_entry_must_be_well_formed_records(payload, reason):
 )
 def test_sparse_pax_keys_are_refused_malformed_or_not(fields):
     with pytest.raises(BoundaryError, match="pax key 'GNU.sparse"):
-        measure(gzip.compress(SMALL + _pax("src/s", fields) + END))
+        measure(gzip.compress(SMALL + _pax("s", fields) + END))
 
 
 def test_a_header_summed_as_signed_bytes_is_accepted():
-    block = bytearray(header("src/caf\xe9"))
+    block = bytearray(header("caf\xe9"))
     block[148:156] = b" " * 8
     signed = sum(b if b < 128 else b - 256 for b in block)
     assert signed != sum(block)
@@ -335,7 +341,7 @@ def test_a_header_summed_as_signed_bytes_is_accepted():
 
 
 def test_a_header_without_ustar_magic_is_refused():
-    v7 = with_field(header("src/old"), 257, 265, b"")
+    v7 = with_field(header("old"), 257, 265, b"")
     with pytest.raises(BoundaryError, match="not a ustar header"):
         measure(gzip.compress(v7 + END))
 
@@ -347,25 +353,29 @@ def test_a_header_without_ustar_magic_is_refused():
 )  # fmt: skip
 def test_a_member_type_git_archive_does_not_write_is_refused(kind):
     with pytest.raises(BoundaryError, match="member type .* is not accepted"):
-        measure(gzip.compress(SMALL + header("src/odd", 0, kind) + END))
+        measure(gzip.compress(SMALL + header("odd", 0, kind) + END))
 
 
 @pytest.mark.parametrize("kind", [tarfile.DIRTYPE, tarfile.SYMTYPE, tarfile.LNKTYPE])
 def test_a_non_file_member_that_declares_data_is_refused(kind):
-    member = header("src/x", 512, kind) + b"\0" * 512
+    member = header("x", 512, kind) + b"\0" * 512
     with pytest.raises(BoundaryError, match="non-file member declares data"):
         measure(gzip.compress(SMALL + member + END))
 
 
-def long_name(size, name=b"n"):
-    entry = header("././@LongLink", size, tarfile.GNUTYPE_LONGNAME)
+def long_name(size, name=b"n", kind=tarfile.GNUTYPE_LONGNAME):
+    entry = header("././@LongLink", size, kind)
     return entry + padded(name * (size - 1) + b"\0")
+
+
+def long_link(size):
+    return long_name(size, kind=tarfile.GNUTYPE_LONGLINK)
 
 
 def test_a_metadata_entry_over_the_cap_is_refused_before_it_is_read():
     with pytest.raises(BoundaryError, match="over the 1024-byte cap; not read"):
         measure(
-            gzip.compress(long_name(2048) + header("src/a") + END),
+            gzip.compress(long_name(2048) + header("a") + END),
             UnpackLimits(max_metadata_bytes=1024),
         )
     assert MAX_METADATA_BYTES == 1024 * 1024
@@ -377,8 +387,9 @@ def test_a_long_name_under_the_cap_is_read_and_counted_once():
 
 
 def many_long_names(count, size=MIB):
-    """`count` members, each named by a long-name entry of `size` bytes."""
-    entry = long_name(size) + header("src/a")
+    """`count` members, each preceded by a long-link entry of `size` bytes:
+    metadata a path cap does not bound."""
+    entry = long_link(size) + header("a")
     return gzip.compress(entry * count + END)
 
 
@@ -438,18 +449,18 @@ def test_a_pax_entry_of_tiny_records_is_refused_at_its_second_record():
 
 def test_metadata_of_one_kind_repeated_before_a_member_is_refused():
     with pytest.raises(BoundaryError, match="repeats before its member"):
-        measure(gzip.compress(long_name(2) * 2 + header("src/a") + END))
+        measure(gzip.compress(long_name(2) * 2 + header("a") + END))
 
 
 def test_one_metadata_entry_of_each_kind_before_a_member_is_accepted():
     entries = (
         global_header({"comment": "c"})
-        + pax_entry(records((b"path", b"src/p")))
+        + pax_entry(records((b"mtime", b"1")))
         + long_name(4)
         + header("././@LongLink", 3, tarfile.GNUTYPE_LONGLINK)
         + padded(b"to\0")
     )
-    assert measure(gzip.compress(entries + header("src/a") + END)) == Unpacked(1, 0)
+    assert measure(gzip.compress(entries + header("a") + END)) == Unpacked(1, 0)
 
 
 def test_a_metadata_entry_with_no_member_after_it_is_refused():
@@ -461,14 +472,14 @@ def test_a_metadata_entry_with_no_member_after_it_is_refused():
     ("tail", "reason"),
     [
         (b"", "without an end-of-archive block"),
-        (b"\0" * 512 + header("src/big", BIG) + END, "data follows the end-of-archive"),
+        (b"\0" * 512 + header("big", BIG) + END, "data follows the end-of-archive"),
         (END + b"x", "data follows the end-of-archive"),
         (
             END + b"\0" * (MAX_TRAILING_ZERO_BYTES + 1),
             "data follows the end-of-archive",
         ),
         (b"\0" * 100, "without an end-of-archive block"),
-        (header("src/short", 4096) + b"\0" * 512, "ends inside an entry's data"),
+        (header("short", 4096) + b"\0" * 512, "ends inside an entry's data"),
         (long_name(2048)[:1024], "ends inside an entry's data"),
     ],
 )
@@ -500,7 +511,7 @@ def test_any_reader_failure_is_a_refusal(monkeypatch, error):
 
 def test_pax_names_as_pythons_tarfile_writes_them_are_accepted():
     data = source_tarball({"caf\u00e9.py": b"x", "d/" + "n" * 200 + ".py": b"yz"})
-    assert measure(data) == Unpacked(2, 3)
+    assert measure(data) == Unpacked(4, 3)
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -551,3 +562,186 @@ def test_git_archive_of_ordinary_repository_features_is_accepted(tmp_path):
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         expected = len(tar.getmembers())
     assert measure(archive).members == expected
+
+
+# --- paths: unpacking must not create a directory the walk did not count ---
+
+DIR = tarfile.DIRTYPE
+
+
+def tree(*entries, limits=None):
+    """measure of an archive of `(name, kind)` entries, or bare file names."""
+    blocks = b"".join(
+        header(*entry) if isinstance(entry, tuple) else header(entry)
+        for entry in entries
+    )
+    return measure(gzip.compress(blocks + END), limits or UnpackLimits())
+
+
+def dirs(*names):
+    return [(name, 0, DIR) for name in names]
+
+
+def deep_bomb(members, depth):
+    """`members` files at their own `depth`-segment paths and no directory
+    entries: unpacking creates `depth - 1` directories for each."""
+    out = io.BytesIO()
+    with tarfile.open(fileobj=out, mode="w:gz", format=tarfile.PAX_FORMAT) as tf:
+        for i in range(members):
+            path = "/".join(f"{i:x}-{j}" for j in range(depth))
+            tf.addfile(tarfile.TarInfo(path))
+    return out.getvalue()
+
+
+def test_the_path_working_defaults():
+    assert (MAX_PATH_BYTES, MAX_PATH_DEPTH, MAX_PATH_COMPONENTS) == (
+        4096,
+        64,
+        1_000_000,
+    )
+
+
+def test_deep_paths_with_no_directory_entries_are_refused():
+    """Round 6: a 1,310-byte archive made 100,101 directories and 410 MB, and
+    the plain ustar prefix reaches about 6 million for 0.34 MiB."""
+    data = deep_bomb(1_000, 64)
+    assert len(data) < 256 * 1024
+    with pytest.raises(BoundaryError, match="parent directory is not an earlier entry"):
+        measure(data)
+
+
+def test_a_ustar_prefix_path_with_no_directory_entries_is_refused():
+    one = "a" * 60 + "/" + "b" * 60 + "/f"
+    block = tarfile.TarInfo(one).tobuf(tarfile.USTAR_FORMAT)
+    assert block[345:500].strip(b"\0")  # the long part went into the prefix
+    with pytest.raises(BoundaryError, match="parent directory is not an earlier entry"):
+        measure(gzip.compress(block + END))
+
+
+def test_a_ustar_prefix_path_whose_directories_are_listed_is_accepted():
+    top, mid = "a" * 60, "b" * 60
+    out = io.BytesIO()
+    with tarfile.open(fileobj=out, mode="w:gz", format=tarfile.USTAR_FORMAT) as tf:
+        for path in (top, f"{top}/{mid}"):
+            info = tarfile.TarInfo(path)
+            info.type = DIR
+            tf.addfile(info)
+        tf.addfile(tarfile.TarInfo(f"{top}/{mid}/f"))
+    assert measure(out.getvalue()) == Unpacked(3, 0)
+
+
+def test_a_member_whose_directory_comes_after_it_is_refused():
+    with pytest.raises(BoundaryError, match="not an earlier entry"):
+        tree("a/f", ("a", 0, DIR))
+
+
+def test_members_under_listed_directories_are_accepted():
+    entries = [*dirs("top", "top/a", "top/a/b"), "top/a/b/f", "top/g", "h"]
+    assert tree(*entries) == Unpacked(6, 0)
+
+
+def test_a_trailing_slash_on_a_directory_name_is_accepted():
+    assert tree(*dirs("top/", "top/a/"), "top/a/f").members == 3
+
+
+@pytest.mark.parametrize("kind", [tarfile.REGTYPE, tarfile.SYMTYPE, tarfile.LNKTYPE])
+def test_a_file_or_link_is_not_a_parent_directory(kind):
+    with pytest.raises(BoundaryError, match="not an earlier entry"):
+        tree(("a", 0, kind), "a/f")
+
+
+@pytest.mark.parametrize("name", ["a//b", "./a", "a/./b", "a/../b", "../a", "/abs"])
+def test_a_path_with_an_empty_dot_or_dotdot_segment_is_refused(name):
+    with pytest.raises(BoundaryError, match="empty, '.' or '..' segment"):
+        tree(*dirs("a", "a/b"), name)
+
+
+def test_a_file_named_with_a_trailing_slash_is_refused():
+    with pytest.raises(BoundaryError, match="ends in a slash"):
+        tree("a/")
+
+
+def test_a_path_over_the_byte_cap_is_refused_before_its_parents_are_looked_up():
+    name = "a" * (MAX_PATH_BYTES + 1)
+    with pytest.raises(BoundaryError, match="empty or over 4096 bytes"):
+        tree(name)
+    assert tree("a" * MAX_PATH_BYTES) == Unpacked(1, 0)
+
+
+def test_a_pax_path_over_the_byte_cap_is_refused():
+    entry = pax_entry(records((b"path", b"a" * (MAX_PATH_BYTES + 1))))
+    with pytest.raises(BoundaryError, match="empty or over 4096 bytes"):
+        measure(gzip.compress(entry + header("x") + END))
+
+
+def test_the_depth_cap_is_a_limit():
+    limits = UnpackLimits(max_path_depth=3)
+    ok = [*dirs("a", "a/b"), "a/b/c"]
+    assert tree(*ok, limits=limits).members == 3
+    with pytest.raises(BoundaryError, match="over 3 segments deep"):
+        tree(*dirs("a", "a/b", "a/b/c"), "a/b/c/d", limits=limits)
+
+
+def test_the_total_component_cap_is_a_limit():
+    limits = UnpackLimits(max_path_components=8)
+    assert tree(*dirs("a", "a/b"), "a/b/c", "x", limits=limits).members == 4
+    with pytest.raises(BoundaryError, match="over 8 segments in all"):
+        tree(*dirs("a", "a/b"), "a/b/c", "a/b/d", "a/b/e", limits=limits)
+
+
+def test_a_pax_path_names_the_member_not_its_header():
+    """GNU tar and Python both take the pax `path` over the header's name."""
+    decoy = header("top/x/y/z") + b""
+    top = tree(*dirs("top"))  # the walk accepts a listed parent
+    assert top.members == 1
+    entry = pax_entry(records((b"path", b"top/f")))
+    data = gzip.compress(header("top", 0, DIR) + entry + decoy + END)
+    assert measure(data) == Unpacked(2, 0)
+    bad = pax_entry(records((b"path", b"top/x/y/z")))
+    with pytest.raises(BoundaryError, match="not an earlier entry"):
+        measure(gzip.compress(header("top", 0, DIR) + bad + header("top/f") + END))
+
+
+def test_a_gnu_long_name_names_the_member():
+    long = "d" * 120
+    entries = header(long, 0, DIR) + header(f"{long}/f")
+    assert measure(gzip.compress(entries + END)) == Unpacked(2, 0)
+    with pytest.raises(BoundaryError, match="not an earlier entry"):
+        measure(gzip.compress(header(long) + header(f"{long}/x/f") + END))
+
+
+def test_a_member_named_by_two_metadata_entries_is_refused():
+    entries = (
+        header("top", 0, DIR)
+        + pax_entry(records((b"path", b"top/a")))
+        + long_name(8, b"top/b")
+        + header("top/c")
+    )
+    with pytest.raises(BoundaryError, match="more than one metadata entry"):
+        measure(gzip.compress(entries + END))
+
+
+def test_a_pax_path_that_does_not_name_a_member_is_forgotten_after_it():
+    entries = header("top", 0, DIR) + pax_entry(records((b"path", b"top/a")))
+    entries += header("top/a") + header("top/b")
+    assert measure(gzip.compress(entries + END)) == Unpacked(3, 0)
+
+
+def test_an_old_gnu_header_with_a_prefix_is_refused():
+    block = with_field(header("f"), 345, 500, b"pre")
+    with pytest.raises(BoundaryError, match="old GNU header carries a prefix"):
+        measure(gzip.compress(block + END))
+
+
+def test_directory_entries_are_kept_as_digests_not_names():
+    names = [f"{'d' * 90}{i:05d}" for i in range(5_000)]
+    data = gzip.compress(
+        b"".join(header(n, 0, DIR) + header(f"{n}/f") for n in names) + END
+    )
+    tracemalloc.start()
+    try:
+        assert measure(data).members == 10_000
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert peak < 2 * MIB

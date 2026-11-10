@@ -24,20 +24,26 @@ read the same way:
   record changes a size; and GNU long names and links;
 - metadata under a per-entry cap, checked before the entry is read, and
   under an archive-wide total;
+- paths of plain segments (none empty, `.` or `..`) within a depth, length
+  and total-component cap, whose parent directory appeared earlier as a
+  directory entry, so unpacking never creates a directory the walk did not
+  count (`git archive` lists every directory before what is in it);
 - a zero block ending the archive, followed only by zero padding.
 
-It skips exactly the data bytes it counts and keeps only counters, never
-the members or the pax keys. Anything else, including an exception from
-the reader, is a refusal. Nothing is written to disk.
+It skips exactly the data bytes it counts and keeps only counters and one
+16-byte digest per directory entry, never the members or the pax keys.
+Anything else, including an exception from the reader, is a refusal.
+Nothing is written to disk.
 """
 
 from __future__ import annotations
 
 import gzip
+import hashlib
 import io
 import re
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from atlas_reviewer.ports import BoundaryError
 
@@ -47,6 +53,14 @@ MAX_MEMBERS = 50_000
 MAX_METADATA_BYTES = 1024 * 1024
 # 50,000 members each carrying a pax path of about 300 bytes.
 MAX_METADATA_TOTAL_BYTES = 16 * 1024 * 1024
+# PATH_MAX; a longer name is never a source path.
+MAX_PATH_BYTES = 4096
+# Segments in one path. The deepest path in this repo is 8; vendored
+# dependency trees reach the 30s.
+MAX_PATH_DEPTH = 64
+# Segments over all members: 50,000 members at an average depth of 20,
+# where this repo's 1,281-member archive averages 5.
+MAX_PATH_COMPONENTS = 1_000_000
 # GNU tar and `git archive` pad the end to a 10 KiB record; zero padding up
 # to this is accepted after the end block, and anything else is refused.
 MAX_TRAILING_ZERO_BYTES = 1024 * 1024
@@ -54,7 +68,9 @@ MAX_TRAILING_ZERO_BYTES = 1024 * 1024
 _BLOCK = 512
 _ZERO_BLOCK = b"\0" * _BLOCK
 _READ_CHUNK = 64 * 1024
-_MAGICS = frozenset((b"ustar\x0000", b"ustar  \0"))
+_POSIX_MAGIC = b"ustar\x0000"
+_MAGICS = frozenset((_POSIX_MAGIC, b"ustar  \0"))
+_BAD_SEGMENTS = frozenset((b"", b".", b".."))
 _NUMERIC_FIELDS = (
     (100, 108),  # mode
     (108, 116),  # uid
@@ -88,6 +104,9 @@ class UnpackLimits:
     max_members: int = MAX_MEMBERS
     max_metadata_bytes: int = MAX_METADATA_BYTES
     max_metadata_total_bytes: int = MAX_METADATA_TOTAL_BYTES
+    max_path_bytes: int = MAX_PATH_BYTES
+    max_path_depth: int = MAX_PATH_DEPTH
+    max_path_components: int = MAX_PATH_COMPONENTS
 
     def __post_init__(self) -> None:
         sizes = (
@@ -95,6 +114,9 @@ class UnpackLimits:
             self.max_members,
             self.max_metadata_bytes,
             self.max_metadata_total_bytes,
+            self.max_path_bytes,
+            self.max_path_depth,
+            self.max_path_components,
         )
         if any(isinstance(n, bool) or not isinstance(n, int) or n < 1 for n in sizes):
             raise ValueError("unpack limits must be positive integers")
@@ -115,13 +137,17 @@ def _refusal(reason: str) -> BoundaryError:
 
 @dataclass
 class _Walk:
-    """Counters only: the walk never keeps a member, a name or a pax key."""
+    """Counters, the name a pending long-name or pax header gave, and a
+    digest per directory entry; never a member, a path or a pax key."""
 
     limits: UnpackLimits
     members: int = 0
     total: int = 0
     metadata: int = 0
+    components: int = 0
     pending: frozenset[bytes] = frozenset()
+    name: bytes | None = None
+    directories: set[bytes] = field(default_factory=set)
 
 
 def measure(data: bytes, limits: UnpackLimits = DEFAULT_UNPACK) -> Unpacked:
@@ -162,7 +188,7 @@ def _entry(block: bytes, stream: io.BufferedIOBase, walk: _Walk) -> None:
     if kind in _PAX_KEYS or kind in _NAME_TYPES:
         _metadata(kind, _read_metadata(size, stream, walk), walk)
     else:
-        _member(kind, size, stream, walk)
+        _member(block, size, stream, walk)
 
 
 def _check_numeric_fields(block: bytes) -> None:
@@ -218,15 +244,28 @@ def _read_metadata(size: int, stream: io.BufferedIOBase, walk: _Walk) -> bytes:
 def _metadata(kind: bytes, payload: bytes, walk: _Walk) -> None:
     if kind in walk.pending:
         raise _refusal("a metadata entry repeats before its member")
-    if kind in _PAX_KEYS:
-        _check_pax(payload, _PAX_KEYS[kind])
     walk.pending |= {kind}
+    if kind in _PAX_KEYS:
+        _name_member(walk, _check_pax(payload, _PAX_KEYS[kind]))
+    elif kind == b"L":
+        _name_member(walk, payload.partition(b"\0")[0])
 
 
-def _check_pax(payload: bytes, allowed: frozenset[bytes]) -> None:
+def _name_member(walk: _Walk, name: bytes | None) -> None:
+    """Record the name a pax `path` or a GNU long-name header gave the next
+    member. Two of them would leave the two readers to pick one."""
+    if name is None:
+        return
+    if walk.name is not None:
+        raise _refusal("a member is named by more than one metadata entry")
+    walk.name = name
+
+
+def _check_pax(payload: bytes, allowed: frozenset[bytes]) -> bytes | None:
     """Each record is `<length> <key>=<value>\\n`, its key allowed and not
-    repeated, so an entry holds at most as many records as keys it may."""
-    seen: set[bytes] = set()
+    repeated, so an entry holds at most as many records as keys it may.
+    Returns the `path` value, if any."""
+    seen: dict[bytes, bytes] = {}
     for key, value in _pax_records(payload):
         if key not in allowed:
             raise _refusal(f"pax key {key.decode(errors='replace')!r} is not accepted")
@@ -234,7 +273,8 @@ def _check_pax(payload: bytes, allowed: frozenset[bytes]) -> None:
             raise _refusal("a pax key repeats")
         if key == b"mtime" and not _PAX_MTIME.fullmatch(value):
             raise _refusal("a pax mtime does not parse")
-        seen.add(key)
+        seen[key] = value
+    return seen.get(b"path")
 
 
 def _pax_records(payload: bytes) -> Iterator[tuple[bytes, bytes]]:
@@ -257,16 +297,66 @@ def _pax_record(payload: bytes, pos: int) -> tuple[bytes, bytes, int]:
     return key, value[:-1], end
 
 
-def _member(kind: bytes, size: int, stream: io.BufferedIOBase, walk: _Walk) -> None:
+def _member(block: bytes, size: int, stream: io.BufferedIOBase, walk: _Walk) -> None:
+    kind = block[156:157]
     if kind not in _FILE_TYPES and kind not in _LINK_AND_DIR_TYPES:
         raise _refusal(f"member type {kind!r} is not accepted")
     if size and kind not in _FILE_TYPES:
         raise _refusal("a non-file member declares data")
     walk.members += 1
     walk.total += size
-    walk.pending = frozenset()
     _within(walk.members, walk.total, walk.limits)
+    _place(_path(block, walk), kind == b"5", walk)
+    walk.pending = frozenset()
+    walk.name = None
     _skip(stream, _padded(size))
+
+
+def _path(block: bytes, walk: _Walk) -> bytes:
+    """The member's name as GNU tar reads it: a pax `path` or GNU long name,
+    else the header's `prefix/name` (ustar) or `name` (old GNU, whose prefix
+    bytes hold other fields, so a nonzero prefix there is refused)."""
+    if walk.name is not None:
+        return walk.name
+    name = block[0:100].partition(b"\0")[0]
+    prefix = block[345:500].partition(b"\0")[0]
+    if prefix and block[257:265] != _POSIX_MAGIC:
+        raise _refusal("an old GNU header carries a prefix")
+    return prefix + b"/" + name if prefix else name
+
+
+def _place(path: bytes, is_directory: bool, walk: _Walk) -> None:
+    """Refuse a name unpacking would read differently, or whose parent is not
+    a directory entry already seen. Unpacking then creates only directories
+    the walk counted as members, however deep the paths."""
+    limits = walk.limits
+    if not path or len(path) > limits.max_path_bytes:
+        raise _refusal(f"a path is empty or over {limits.max_path_bytes} bytes")
+    trimmed = path.removesuffix(b"/")
+    if trimmed != path and not is_directory:
+        raise _refusal("a non-directory member's name ends in a slash")
+    segments = trimmed.split(b"/")
+    if any(segment in _BAD_SEGMENTS for segment in segments):
+        raise _refusal("a path has an empty, '.' or '..' segment")
+    _count_components(len(segments), walk)
+    parent = trimmed.rpartition(b"/")[0]
+    if parent and _digest(parent) not in walk.directories:
+        raise _refusal("a member's parent directory is not an earlier entry")
+    if is_directory:
+        walk.directories.add(_digest(trimmed))
+
+
+def _count_components(depth: int, walk: _Walk) -> None:
+    limits = walk.limits
+    walk.components += depth
+    if depth > limits.max_path_depth:
+        raise _refusal(f"a path is over {limits.max_path_depth} segments deep")
+    if walk.components > limits.max_path_components:
+        raise _refusal(f"paths hold over {limits.max_path_components} segments in all")
+
+
+def _digest(path: bytes) -> bytes:
+    return hashlib.blake2b(path, digest_size=16).digest()
 
 
 def _ended(walk: _Walk) -> None:
