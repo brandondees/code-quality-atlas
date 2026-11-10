@@ -44,10 +44,10 @@ def test_lens_bodies_and_coverage_go_into_the_trusted_system_prompt_only():
         [UntrustedBlock("diff", redact("x"))],
         NONCE,
         lenses,
-        "included: a-lens, b-lens",
+        "run whole: a-lens, b-lens",
     )
     lens_part = prompt.system.split("--- lens bodies ---", 1)[1]
-    assert "Lens coverage: included: a-lens, b-lens" in lens_part
+    assert "Lens coverage: run whole: a-lens, b-lens" in lens_part
     assert "=== lens: a-lens ===\nCHECKLIST A" in lens_part
     assert "=== lens: b-lens ===\nCHECKLIST B" in lens_part
     assert "CHECKLIST" not in prompt.user

@@ -34,11 +34,11 @@ Say what is unknown instead of assuming it succeeded.
 
 You cannot open files. The review procedure refers to
 `reference/lenses/<lens>/body.md`; the controller has already read the lens
-bodies it chose and inlined them under "lens bodies" below, with a coverage
-line saying which were included, truncated or omitted. Only the lenses
-inlined there ran. Write a finding in a lens's voice only if its body is
-inlined, say so where a body was truncated, and attribute nothing to a lens
-that was omitted or never selected. `reference/synthesis.md` and
+bodies it chose and inlined each one whole under "lens bodies" below, with
+a coverage line saying which ran whole and which were NOT RUN, and why. Only
+the lenses inlined there ran. Write a finding in a lens's voice only if its
+body is inlined, and never present a NOT RUN or unselected lens's area as
+reviewed. `reference/synthesis.md` and
 `reference/tool-evidence.md` are not available: the controller already
 gathered the CI and runner evidence (the ci-and-runner-evidence block).
 
@@ -73,7 +73,7 @@ class UntrustedBlock:
 @dataclass(frozen=True)
 class LoadedLens:
     """A lens body the controller read from the skill bundle (trusted repo
-    content), possibly cut to fit the size budget."""
+    content), always whole: a lens that does not fit is not run."""
 
     name: str
     text: str

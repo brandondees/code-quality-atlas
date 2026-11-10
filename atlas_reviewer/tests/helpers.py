@@ -13,6 +13,7 @@ from atlas_reviewer.domain import (
     ToolInfo,
 )
 from atlas_reviewer.http import HttpResponse
+from atlas_reviewer.lenses import LensLibrary
 from atlas_reviewer.redact import redact
 
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "sample-pr"
@@ -91,3 +92,24 @@ def ok(payload=None, status=200, body=None, headers=None):
         else json.dumps(payload if payload is not None else {}).encode()
     )
     return HttpResponse(status, headers or {}, raw)
+
+
+class StubLibrary(LensLibrary):
+    """A lens bundle held in memory: lens name to body."""
+
+    def __init__(self, bodies: dict[str, str]) -> None:
+        self._bodies = bodies
+
+    def names(self) -> frozenset[str]:
+        return frozenset(self._bodies)
+
+    def body(self, name: str) -> str | None:
+        return self._bodies.get(name)
+
+
+def small_bundle(*extra: str, chars: int = 100) -> StubLibrary:
+    """Every critical-tier lens and each of `extra`, `chars` characters each,
+    so the picker always has room to add a lens."""
+    from atlas_reviewer.picker import CRITICAL_TIER
+
+    return StubLibrary({n: n[0] * chars for n in (*CRITICAL_TIER, *extra)})
