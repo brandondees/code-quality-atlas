@@ -1,14 +1,30 @@
 [
   {
     "sha": "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a291807",
+    "parents": [
+      {
+        "sha": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"
+      }
+    ],
     "commit": {
-      "message": "Round each line discount\n\nFirst pass."
+      "message": "Round each line discount\n\nFirst pass.",
+      "committer": {
+        "date": "2026-11-05T09:00:00Z"
+      }
     }
   },
   {
     "sha": "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4",
+    "parents": [
+      {
+        "sha": "9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3a291807"
+      }
+    ],
     "commit": {
-      "message": "Sum rounded line totals"
+      "message": "Sum rounded line totals",
+      "committer": {
+        "date": "2026-11-05T10:00:00Z"
+      }
     }
   }
 ]

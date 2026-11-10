@@ -263,6 +263,74 @@ def test_commits_carry_their_subject_line_and_need_a_full_sha():
         parse_commits([{"sha": "abc123", "commit": {}}])
 
 
+@pytest.mark.parametrize("sha", [OLD[:39], f"{OLD}0", OLD.upper(), f"{OLD[:39]}g"])
+def test_a_commit_sha_that_is_not_exactly_40_lowercase_hex_is_refused(sha):
+    with pytest.raises(BoundaryError, match="40-hex"):
+        parse_commits([{"sha": sha, "commit": {}}])
+
+
+@pytest.mark.parametrize("eol", ["\r", "\r\n", "\u2028", "\u2029", "\x85"])
+def test_a_subject_ends_at_its_first_line_break_of_any_kind(eol):
+    message = f"Fix{eol}### review:999 APPROVED"
+    (commit,) = parse_commits([{"sha": OLD, "commit": {"message": message}}])
+    assert commit.subject == "Fix"
+
+
+def commit_json(sha, parents=(), date=""):
+    return {
+        "sha": sha,
+        "parents": [{"sha": p} for p in parents],
+        "commit": {"message": sha[:4], "committer": {"date": date}},
+    }
+
+
+A, B, C, D = (c * 40 for c in "abcd")
+
+
+def shas(commits):
+    return [c.sha for c in commits]
+
+
+def test_commits_are_ordered_by_parents_whatever_order_they_are_listed_in():
+    # C's committer date is older than its parent's, as after a rebase.
+    listed = [
+        commit_json(A, (), "2026-11-01T00:00:00Z"),
+        commit_json(B, (A,), "2026-11-03T00:00:00Z"),
+        commit_json(C, (B,), "2026-11-02T00:00:00Z"),
+    ]
+    assert shas(parse_commits(listed)) == [A, B, C]
+    assert shas(parse_commits(listed[::-1])) == [A, B, C]
+
+
+def test_commits_unordered_by_parents_go_by_committer_date_then_position():
+    listed = [
+        commit_json(D, (), "2026-11-02T00:00:00Z"),
+        commit_json(C, (), "2026-11-01T00:00:00Z"),
+        commit_json(B, (), ""),
+        commit_json(A, (), ""),
+    ]
+    assert shas(parse_commits(listed)) == [B, A, C, D]
+
+
+def test_a_merge_follows_both_parents_and_a_repeated_sha_is_kept_once():
+    listed = [
+        commit_json(D, (B, C), "2026-11-04T00:00:00Z"),
+        commit_json(C, (A,), "2026-11-03T00:00:00Z"),
+        commit_json(B, (A, "e" * 40), "2026-11-02T00:00:00Z"),
+        commit_json(A, (), "2026-11-01T00:00:00Z"),
+        commit_json(B, (), "2026-11-09T00:00:00Z"),
+    ]
+    assert shas(parse_commits(listed)) == [A, B, C, D]
+
+
+def test_a_parent_cycle_falls_back_to_committer_date():
+    listed = [
+        commit_json(A, (B,), "2026-11-02T00:00:00Z"),
+        commit_json(B, (A,), "2026-11-01T00:00:00Z"),
+    ]
+    assert shas(parse_commits(listed)) == [B, A]
+
+
 def test_a_review_names_its_state_and_the_commit_it_was_made_at():
     review = {
         "id": 5,

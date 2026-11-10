@@ -215,16 +215,16 @@ def _pr_commits(ctx: _Ctx) -> tuple[str, ...]:
     if len(commits) >= GITHUB_PR_COMMIT_LIMIT:
         ctx.out.notes.append(
             f"GitHub lists at most {GITHUB_PR_COMMIT_LIMIT} commits of a pull "
-            "request, and this one listed that many: later commits, and their CI "
+            "request, and this one listed that many: other commits, and their CI "
             "evidence, may be missing."
         )
     return tuple(c.sha for c in commits)
 
 
 def _other_commit_checks(ctx: _Ctx) -> None:
-    """Check runs at the PR's other commits, last-listed first, on the
-    reading that GitHub lists a PR's commits oldest first (unverified against
-    a live response). Commits past the cap are omissions, and their check
+    """Check runs at the PR's other commits, newest first in history order
+    (`parse_commits` orders them by parents and committer date, not by how
+    GitHub lists them). Commits past the cap are omissions, and their check
     runs are UNKNOWN, not read."""
     others = [c.sha for c in reversed(ctx.out.commits) if c.sha != ctx.event.head_sha]
     cap = ctx.config.max_ci_commits

@@ -17,6 +17,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from graphlib import CycleError, TopologicalSorter
 from typing import Any
 
 from atlas_reviewer.archive import ArchiveRead
@@ -195,22 +196,70 @@ def _check_run(run: Json, fetched_at: datetime, redactor: Redactor) -> EvidenceI
 @dataclass(frozen=True)
 class PrCommit:
     """One commit of the PR: its SHA, checked as a full 40-hex id because it
-    labels evidence and telemetry, and its subject line (raw, PR-written)."""
+    labels evidence and telemetry, and its subject line (raw, PR-written):
+    the message up to its first line terminator of any kind, since git keeps
+    a bare `\\r` or U+2028 inside a subject. `parents` and `committed_at`
+    (committer date as GitHub sends it, or empty) order the commits."""
 
     sha: str
     subject: str
+    parents: tuple[str, ...] = ()
+    committed_at: str = ""
 
 
 def parse_commits(items: Sequence[Any]) -> tuple[PrCommit, ...]:
-    return tuple(_commit(c) for c in _objects(items, "commit"))
+    """Oldest first in history, whatever order GitHub lists them in."""
+    return in_history_order(tuple(_commit(c) for c in _objects(items, "commit")))
 
 
 def _commit(data: Json) -> PrCommit:
     sha = _field(data, "sha", str)
     if not _SHA.fullmatch(sha):
         raise BoundaryError("GitHub commit sha is not a full 40-hex id")
-    message = _optional_str(_mapping(data, "commit"), "message")
-    return PrCommit(sha, message.split("\n", 1)[0])
+    commit = _mapping(data, "commit")
+    lines = _optional_str(commit, "message").splitlines()
+    return PrCommit(
+        sha,
+        lines[0] if lines else "",
+        _parent_shas(data),
+        _optional_str(_mapping(commit, "committer"), "date"),
+    )
+
+
+def _parent_shas(data: Json) -> tuple[str, ...]:
+    parents = data.get("parents")
+    shas = (
+        p.get("sha") for p in (parents if isinstance(parents, list) else ())
+        if isinstance(p, Mapping)
+    )  # fmt: skip
+    return tuple(s for s in shas if isinstance(s, str))
+
+
+def in_history_order(commits: Sequence[PrCommit]) -> tuple[PrCommit, ...]:
+    """Each commit after every parent listed with it; commits with no such
+    order between them by committer date, then by listed position. A
+    repeated SHA is kept once; a parent cycle, which git cannot produce,
+    falls back to date order."""
+    rank = {c.sha: (c.committed_at, i) for i, c in reversed(list(enumerate(commits)))}
+    by_sha = {c.sha: c for c in reversed(commits)}
+    graph = {sha: [p for p in c.parents if p in rank] for sha, c in by_sha.items()}
+    try:
+        order = _layered(TopologicalSorter(graph), rank)
+    except CycleError:
+        order = sorted(rank, key=rank.__getitem__)
+    return tuple(by_sha[sha] for sha in order)
+
+
+def _layered(
+    sorter: TopologicalSorter[str], rank: Mapping[str, tuple[str, int]]
+) -> list[str]:
+    sorter.prepare()
+    order: list[str] = []
+    while sorter.is_active():
+        ready = sorted(sorter.get_ready(), key=rank.__getitem__)
+        order.extend(ready)
+        sorter.done(*ready)
+    return order
 
 
 @dataclass(frozen=True)
