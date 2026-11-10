@@ -377,6 +377,9 @@ def multi_file_diff(files, body_chars):
 
 
 class BigDiff(FixtureGitHub):
+    def get_pull(self, repo, number):
+        return {**super().get_pull(repo, number), "changed_files": 20}
+
     def get_pull_diff(self, repo, number):
         return multi_file_diff(20, 5_000)
 
@@ -397,6 +400,9 @@ def risky_diff():
 
 
 class RiskyDiff(FixtureGitHub):
+    def get_pull(self, repo, number):
+        return {**super().get_pull(repo, number), "changed_files": 5}
+
     def get_pull_diff(self, repo, number):
         return risky_diff()
 
@@ -654,6 +660,12 @@ class DiffOf(FixtureGitHub):
     def __init__(self, root, diff):
         super().__init__(root)
         self.diff = diff
+
+    def get_pull(self, repo, number):
+        from atlas_reviewer.diffs import diff_paths
+
+        pull = super().get_pull(repo, number)
+        return {**pull, "changed_files": len(diff_paths(self.diff))}
 
     def get_pull_diff(self, repo, number):
         return self.diff
@@ -934,6 +946,9 @@ def test_the_model_is_given_the_controller_notes_and_told_they_are_facts():
 
 def test_a_file_too_big_for_one_call_is_reported_cut_not_complete():
     class OneHugeFile(FixtureGitHub):
+        def get_pull(self, repo, number):
+            return {**super().get_pull(repo, number), "changed_files": 1}
+
         def get_pull_diff(self, repo, number):
             return "diff --git a/app/auth.py b/app/auth.py\n" + "+line\n" * 2_000
 
@@ -1432,6 +1447,16 @@ def test_a_changed_file_count_that_moves_during_the_fetch_blocks_approval():
     assert (status["review_event"], status["coverage_complete"]) == ("COMMENT", False)
     assert "the diff names 2 file(s) but GitHub reports 3 changed" in top_of(draft)
     assert "head moved" not in draft
+
+
+def test_unknown_coverage_is_never_called_complete_in_the_notes():
+    draft = approving(github=with_diff(sized_diff(2, 40), changed_files=3).github).run()
+    notes = section(draft, "Controller notes")
+    assert "Diff coverage after the model calls: complete" not in notes
+    assert (
+        "Diff coverage: NOT REVIEWED. File coverage could not be determined "
+        "(the diff names 2 file(s) but GitHub reports 3 changed)"
+    ) in notes
 
 
 def test_a_missing_github_file_count_blocks_approval():

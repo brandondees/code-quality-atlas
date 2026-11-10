@@ -233,7 +233,7 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
             links=base.links,
             controller_notes=(
                 *_notes(base, selection, scrub=scrub),
-                *_coverage_lines(selection, parts, dropped),
+                *_coverage_lines(selection, parts, dropped, verdict.coverage),
                 *_secret_note(secrets),
             ),
             secrets=None if secrets is None else secrets.findings,
@@ -835,12 +835,20 @@ def _coverage_lines(
     sel: DiffSelection | None,
     parts: tuple[PartNarrative, ...],
     dropped: tuple[str, ...] = (),
+    coverage: FileCoverage | None = None,
 ) -> tuple[str, ...]:
     if sel is None:
         return (
             (
                 "Diff coverage: NOT REVIEWED. The diff was not fetched, or could "
                 "not be tied to the event SHA, and no model call was made."
+            ),
+        )
+    if coverage is not None and coverage.unknown:
+        return (
+            (
+                "Diff coverage: NOT REVIEWED. File coverage could not be determined "
+                f"({coverage.unknown}), so it counts as incomplete."
             ),
         )
     reviewed = [p for p in parts if p.reviewed]
