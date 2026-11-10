@@ -242,3 +242,16 @@ def test_no_selection_note_claims_the_critical_tier_ran(depth, run, library):
     assert not OVERCLAIM.search(note), note
     assert "considered" in note
     assert "the lenses line says which" in note.lower()
+
+
+def test_deeply_nested_json_falls_back_to_the_critical_tier():
+    """json.loads raises RecursionError, not ValueError, on nesting past the
+    C stack (9,998 arrays here, 19,996 characters). That must be an unusable
+    pick and the critical tier, not an error escaping select_lenses."""
+    nested = "[" * 10_000 + "]" * 10_000
+    chosen = select_lenses(
+        Depth.REVIEW, lambda: nested, small_bundle("checking-restraint")
+    )
+    assert [c.name for c in chosen.choices] == list(CRITICAL_TIER)
+    assert chosen.used_call
+    assert "gave no usable lens list" in chosen.note

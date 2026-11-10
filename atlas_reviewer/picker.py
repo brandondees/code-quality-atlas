@@ -112,7 +112,7 @@ def parse_picks(text: str) -> tuple[str, ...]:
     fenced = _FENCE.match(body)
     try:
         data = json.loads(fenced.group(1) if fenced else body)
-    except ValueError:
+    except (ValueError, RecursionError):
         raise PickerOutputError("the reply is not one JSON object") from None
     names = data.get("lenses") if isinstance(data, dict) else None
     if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
