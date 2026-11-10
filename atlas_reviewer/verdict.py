@@ -133,9 +133,15 @@ def warning(v: Verdict, limit: int) -> str:
         f"Review event: {v.event.value}{proposed}."
     )
     if v.coverage.unknown:
+        named = (
+            f" Not reviewed, highest risk first: {_listed(v.coverage.unreviewed, limit)}."
+            if v.coverage.unreviewed
+            else ""
+        )
         return (
             f"{head} File coverage could not be determined "
-            f"({v.coverage.unknown}), so it counts as incomplete."
+            f"({v.coverage.unknown}), so no changed file counts as reviewed "
+            f"in full.{named}"
         )
     count = len(v.coverage.unreviewed)
     return (

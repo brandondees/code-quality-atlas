@@ -84,17 +84,26 @@ class PullInfo:
     title: RedactedText
     body: RedactedText
     issue_refs: tuple[int, ...]
+    changed_files: int | None = None
+    """GitHub's own count, to check the fetched diff against; None when the
+    payload has no usable count, which leaves file coverage unknown."""
 
 
 def parse_pull(data: Json, redactor: Redactor) -> PullInfo:
     head = _field(data, "head", dict)
     body = _optional_str(data, "body")
+    changed = data.get("changed_files")
     return PullInfo(
         head_sha=_field(head, "sha", str),
         head_ref=_field(head, "ref", str),
         title=redactor(_field(data, "title", str), NAME_CHARS),
         body=redactor(body, DETAIL_CHARS),
         issue_refs=issue_refs(body),
+        changed_files=(
+            changed
+            if isinstance(changed, int) and not isinstance(changed, bool) and changed >= 0
+            else None
+        ),
     )
 
 

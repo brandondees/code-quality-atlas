@@ -206,7 +206,12 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
     parts = _narrate_parts(base, selection, deps, telemetry)
     secrets = None if diff is None else diff.secrets
     dropped = _dropped(base, selection)
-    verdict = decide(_proposed(parts), _file_coverage(selection, parts, dropped))
+    verdict = decide(
+        _proposed(parts),
+        _file_coverage(
+            selection, parts, dropped, len(base.diff_paths), pull.changed_files
+        ),
+    )
     draft = render_draft(
         DraftInput(
             event=event,
@@ -256,15 +261,28 @@ def _file_coverage(
     sel: DiffSelection | None,
     parts: tuple[PartNarrative, ...],
     dropped: tuple[str, ...],
+    listed: int,
+    changed: int | None,
 ) -> FileCoverage:
     """Every changed file a model call did not review in full (D36). A file
     the selection planned into a part with no recorded narrative counts as
-    unreviewed too, so a gap in the bookkeeping cannot read as coverage."""
+    unreviewed too, so a gap in the bookkeeping cannot read as coverage.
+    `listed` counts the diff's file headers and `changed` is GitHub's own
+    count: an empty or header-less body, or a count that disagrees, leaves
+    coverage unknown, since an absent file cannot be named as unreviewed."""
     if sel is None:
         return FileCoverage(
             None,
             unknown="the diff was not fetched, or could not be tied to the event SHA",
         )
+    if not listed:
+        gap = "the fetched diff names no file: it is empty or not a diff"
+    elif changed is None:
+        gap = "GitHub reported no changed-file count to check the diff against"
+    elif listed != changed:
+        gap = f"the diff names {listed} file(s) but GitHub reports {changed} changed"
+    else:
+        gap = ""
     narrated = [f for p in parts for f in p.files]
     unreviewed = [
         *(
@@ -297,7 +315,16 @@ def _file_coverage(
             for path in dropped
         ),
     ]
-    return FileCoverage(sel.total_files + len(dropped), tuple(unreviewed))
+    if not gap:
+        return FileCoverage(sel.total_files + len(dropped), tuple(unreviewed))
+    if not listed:
+        unreviewed += [
+            Unreviewed(f.path, "the diff had no file headers", f.tier.rank)
+            for part in sel.parts
+            for f in part.files
+            if not any(f.path == u.path for u in unreviewed)
+        ]
+    return FileCoverage(changed, tuple(unreviewed), unknown=gap)
 
 
 def _part_gap(p: PartNarrative) -> str:

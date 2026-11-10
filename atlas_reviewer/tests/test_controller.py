@@ -1029,8 +1029,14 @@ def sized_diff(files, body_chars, char="x"):
     )
 
 
-def with_diff(text, lenses=None):
+def with_diff(text, lenses=None, changed_files=None):
+    from atlas_reviewer.diffs import diff_paths
+
     class Sized(FixtureGitHub):
+        def get_pull(self, repo, number):
+            count = len(diff_paths(text)) if changed_files is None else changed_files
+            return {**super().get_pull(repo, number), "changed_files": count}
+
         def get_pull_diff(self, repo, number):
             return text
 
@@ -1331,6 +1337,47 @@ def test_unknown_file_coverage_blocks_approval():
     assert "File coverage could not be determined (the diff was not fetched" in (
         top_of(draft)
     )
+
+
+@pytest.mark.parametrize(
+    "body", ["", "Service Unavailable\n", "<html>rate limited</html>\n"]
+)
+def test_an_empty_or_header_less_diff_body_blocks_approval(body):
+    s = approving(github=with_diff(body, changed_files=2).github)
+    draft = s.run()
+    status = status_of(draft)
+    assert (status["review_event"], status["coverage_complete"]) == ("COMMENT", False)
+    assert status["changed_files"] == 2
+    top = top_of(draft)
+    assert (
+        "File coverage could not be determined (the fetched diff names no file: "
+        "it is empty or not a diff), so no changed file counts as reviewed in full."
+    ) in top
+    if body:
+        assert "the diff had no file headers: " in top
+
+
+def test_a_diff_that_disagrees_with_githubs_file_count_blocks_approval():
+    s = approving(github=with_diff(sized_diff(2, 50), changed_files=3).github)
+    draft = s.run()
+    assert len(s.provider.prompts) == 1
+    status = status_of(draft)
+    assert (status["review_event"], status["coverage_complete"]) == ("COMMENT", False)
+    assert status["changed_files"] == 3
+    assert "(the diff names 2 file(s) but GitHub reports 3 changed)" in top_of(draft)
+
+
+def test_a_missing_github_file_count_blocks_approval():
+    class Uncounted(FixtureGitHub):
+        def get_pull(self, repo, number):
+            pull = dict(super().get_pull(repo, number))
+            del pull["changed_files"]
+            return pull
+
+    draft = approving(github=Uncounted(FIXTURE)).run()
+    status = status_of(draft)
+    assert (status["review_event"], status["changed_files"]) == ("COMMENT", None)
+    assert "GitHub reported no changed-file count" in top_of(draft)
 
 
 def test_a_cut_file_blocks_approval():

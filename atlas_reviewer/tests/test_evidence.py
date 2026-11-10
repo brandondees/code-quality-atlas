@@ -164,6 +164,16 @@ def test_pull_parsing_extracts_closing_issue_refs_only():
     assert issue_refs("Fixes #7, closes #8 and mentions #9; resolved #7 #1") == (7, 8)
 
 
+@pytest.mark.parametrize(
+    ("value", "parsed"), [(3, 3), (0, 0), (-1, None), (True, None), ("3", None)]
+)
+def test_pull_parsing_keeps_only_a_usable_changed_file_count(value, parsed):
+    pull = {"title": "t", "head": {"sha": HEAD, "ref": "b"}, "changed_files": value}
+    assert parse_pull(pull, R).changed_files == parsed
+    del pull["changed_files"]
+    assert parse_pull(pull, R).changed_files is None
+
+
 def test_an_oversized_issue_ref_is_skipped_and_parsing_stops_at_three():
     assert issue_refs("Fixes #" + "9" * 5000 + " fixes #4") == (4,)
     assert issue_refs("fixes #1 fixes #1 fixes #2 fixes #3 fixes #4") == (1, 2, 3)
