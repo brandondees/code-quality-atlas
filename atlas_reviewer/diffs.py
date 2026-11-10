@@ -27,6 +27,7 @@ _HEADER = re.compile(
     + r"|b/(?P<new>.+))$",
     re.MULTILINE,
 )
+_HUNK_START = re.compile(r"^(?:@@ |Binary files |GIT binary patch)", re.MULTILINE)
 _C_ESCAPE = re.compile(r"\\([0-7]{3}|.)")
 _C_ESCAPES = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13}
 UNPARSED_PATH = "(diff text without file headers)"
@@ -147,15 +148,53 @@ class DiffSelection:
 
 def diff_paths(diff: str) -> tuple[str, ...]:
     """New-side path of every file in the diff, in order."""
-    return tuple(_new_path(m) for m in _HEADER.finditer(diff))
+    return tuple(path for path, _ in _sections(diff))
 
 
-def _new_path(header: re.Match[str]) -> str:
+def _sections(diff: str) -> list[tuple[str, str]]:
+    headers = list(_HEADER.finditer(diff))
+    ends = [h.start() for h in headers[1:]] + [len(diff)] * bool(headers)
+    return [
+        (_section_path(h, diff[h.start() : end]), diff[h.start() : end])
+        for h, end in zip(headers, ends, strict=True)
+    ]
+
+
+def _section_path(header: re.Match[str], text: str) -> str:
+    """The `diff --git` line is ambiguous when an unquoted path holds " b/",
+    so the path comes from the `+++` line, else `rename to`, else a header
+    whose two sides are equal (always so for a deletion, whose `+++` line is
+    /dev/null), and only then from splitting the header. Only lines before
+    the first hunk are read."""
+    hunk = _HUNK_START.search(text)
+    lines = text[: hunk.start() if hunk else len(text)].split("\n")[1:]
+    new = _field(lines, "+++ ")
+    if new is not None and new != "/dev/null":
+        return new.removeprefix("b/")
+    renamed = _field(lines, "rename to ")
+    if renamed is not None:
+        return renamed
+    sides = header.group(0).removeprefix("diff --git ")
+    half = (len(sides) - 5) // 2
+    if sides == f"a/{sides[2 : 2 + half]} b/{sides[2 : 2 + half]}":
+        return sides[2 : 2 + half]
+    quoted = header.group("qnew")
+    return header.group("new") if quoted is None else _unquote(quoted)
+
+
+def _field(lines: list[str], key: str) -> str | None:
+    """git appends a tab to a `---`/`+++` name holding a space."""
+    value = next((s[len(key) :] for s in lines if s.startswith(key)), None)
+    if value is None:
+        return None
+    value = value.removesuffix("\t")
+    quoted = len(value) >= 2 and value[0] == value[-1] == '"'
+    return _unquote(value[1:-1]) if quoted else value
+
+
+def _unquote(quoted: str) -> str:
     """Git C-quotes a path holding a tab, newline, quote, backslash or (by
     default) a non-ASCII byte; octal escapes are UTF-8 bytes."""
-    quoted = header.group("qnew")
-    if quoted is None:
-        return header.group("new")
     raw = bytearray()
     pos = 0
     for esc in _C_ESCAPE.finditer(quoted):
@@ -174,14 +213,9 @@ def split_files(diff: str) -> tuple[FileDiff, ...]:
     """Every file section in diff order. Text before the first header (or a
     diff with no headers at all) becomes one pseudo-file, so no input
     character is silently dropped."""
-    headers = list(_HEADER.finditer(diff))
-    starts = [h.start() for h in headers]
-    bounds = zip(starts, [*starts[1:], len(diff)][: len(starts)], strict=True)
-    files = [
-        _file(_new_path(h), diff[a:b])
-        for h, (a, b) in zip(headers, bounds, strict=True)
-    ]
-    preamble = diff[: starts[0]] if starts else diff
+    first = _HEADER.search(diff)
+    files = [_file(path, text) for path, text in _sections(diff)]
+    preamble = diff[: first.start()] if first else diff
     return tuple([_file(UNPARSED_PATH, preamble)] * bool(preamble.strip()) + files)
 
 

@@ -37,6 +37,63 @@ def test_paths_are_the_new_side_in_order_including_renames():
     assert diff_paths(DIFF + renamed) == ("a.py", "b/c.py", "d.md", "new name.py")
 
 
+def test_a_plain_path_comes_from_the_new_file_line():
+    assert diff_paths(file_diff("src/app.py")) == ("src/app.py",)
+
+
+SPACED_B = "src/auth b/x.md"
+
+
+def test_an_unquoted_path_holding_space_b_slash_is_not_split_at_it():
+    # git appends a tab to ---/+++ names that contain a space.
+    diff = (
+        f"diff --git a/{SPACED_B} b/{SPACED_B}\n"
+        f"--- a/{SPACED_B}\t\n+++ b/{SPACED_B}\t\n@@ -1 +1 @@\n+x\n"
+    )
+    assert diff_paths(diff) == (SPACED_B,)
+    assert paths(split_files(diff)) == [SPACED_B]
+
+
+def test_a_header_only_section_with_space_b_slash_uses_its_equal_sides():
+    diff = f"diff --git a/{SPACED_B} b/{SPACED_B}\nold mode 100644\nnew mode 100755\n"
+    assert diff_paths(diff) == (SPACED_B,)
+
+
+def test_a_rename_takes_the_path_from_rename_to():
+    diff = (
+        f"diff --git a/old b/y.py b/{SPACED_B}\nsimilarity index 100%\n"
+        f"rename from old b/y.py\nrename to {SPACED_B}\n"
+    )
+    assert diff_paths(diff) == (SPACED_B,)
+    edited = diff.replace("100%", "90%") + (
+        f"--- a/old b/y.py\n+++ b/{SPACED_B}\n@@ -1 +1 @@\n+x\n"
+    )
+    assert diff_paths(edited) == (SPACED_B,)
+
+
+def test_a_deleted_file_is_named_by_its_old_path():
+    diff = (
+        f"diff --git a/{SPACED_B} b/{SPACED_B}\ndeleted file mode 100644\n"
+        f"--- a/{SPACED_B}\t\n+++ /dev/null\n@@ -1 +0,0 @@\n-x\n"
+    )
+    assert diff_paths(diff) == (SPACED_B,)
+
+
+def test_quoted_new_file_and_rename_lines_are_unescaped():
+    diff = (
+        'diff --git "a/t\\tb/x.py" "b/t\\tb/x.py"\n'
+        '--- "a/t\\tb/x.py"\n+++ "b/t\\tb/x.py"\n@@ -1 +1 @@\n+x\n'
+        'diff --git a/o.py "b/caf\\303\\251.md"\n'
+        'rename from o.py\nrename to "caf\\303\\251.md"\n'
+    )
+    assert diff_paths(diff) == ("t\tb/x.py", "caf\u00e9.md")
+
+
+def test_hunk_lines_that_look_like_file_lines_are_not_read_as_paths():
+    diff = "diff --git a/m.py b/m.py\n@@ -1 +1 @@\n+++ b/forged.py\n"
+    assert diff_paths(diff) == ("m.py",)
+
+
 QUOTED = (
     'diff --git "a/tab\\there.py" "b/tab\\there.py"\n+x\n'
     'diff --git "a/caf\\303\\251.md" "b/caf\\303\\251.md"\n+y\n'
