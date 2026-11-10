@@ -266,7 +266,8 @@ and build files are matched first, so no directory (`tests/`, `docs/`,
 `tests/test_redact.py` is a test and `docs/security.md` a doc; then
 security before config, so `config/secrets.yaml` ranks as security. A
 file's path is read from its `+++` line (or `rename to`), not split out of
-the `diff --git` header, which is ambiguous for a path holding ` b/`. Parts are
+the `diff --git` header, which is ambiguous for a path holding a space
+followed by `b/`. Parts are
 filled first-fit in that order. A file larger than one part is cut at a line boundary into a part of its own and marked cut. A file
 that fits nowhere once every part is used is never sent. If the diff cannot
 be fetched at all, no model call is made (a review of an empty diff would
