@@ -632,7 +632,47 @@ def test_every_git_call_is_hardened_and_quoted(tmp_path):
     assert "timeout -k 2 15" in script
     assert "ulimit -f" in script
     attributes = (tmp_path / "bridge" / "repo.git" / "info" / "attributes").read_text()
-    assert attributes == f"{ATTRIBUTES}\n"
+    assert attributes == REVIEWED_ATTRIBUTES + "\n"
+
+
+# Written out, not imported: a test that compares against the constants it
+# checks cannot notice one of them dropped.
+REVIEWED_ATTRIBUTES = "* -text !eol -filter -ident !diff !working-tree-encoding"
+REVIEWED_ENV = (
+    "GIT_CONFIG_NOSYSTEM=1",
+    "GIT_CONFIG_GLOBAL=/dev/null",
+    "GIT_NO_REPLACE_OBJECTS=1",
+    "GIT_LITERAL_PATHSPECS=1",
+    "GIT_ATTR_NOSYSTEM=1",
+    "GIT_TERMINAL_PROMPT=0",
+    "GIT_OPTIONAL_LOCKS=0",
+    "GIT_PAGER=cat",
+)
+REVIEWED_OPTIONS = (
+    "core.hooksPath=/dev/null",
+    "core.fsmonitor=",
+    "core.pager=cat",
+    "protocol.allow=never",
+    "color.ui=never",
+    "core.quotePath=true",
+    "core.autocrlf=false",
+    "core.safecrlf=false",
+)
+
+
+def test_the_hardening_is_exactly_the_reviewed_set():
+    assert ATTRIBUTES == REVIEWED_ATTRIBUTES
+    assert GIT_ENV == REVIEWED_ENV
+    assert GIT_OPTIONS == tuple(x for o in REVIEWED_OPTIONS for x in ("-c", o))
+
+
+def test_staging_and_every_tool_run_with_the_reviewed_hardening(tmp_path):
+    _, _, sprites, _ = calls(tmp_path, ("diff_stat", {}))
+    scripts = [s[2] for s in sprites.calls if s[0] == "exec" and "repo.git" in s[2]]
+    assert len(scripts) >= 2
+    for script in scripts:
+        assert f"export {' '.join(REVIEWED_ENV)}" in script
+        assert all(f"-c {o}" in script for o in REVIEWED_OPTIONS)
 
 
 def test_a_shell_metacharacter_pattern_is_searched_for_not_run(tmp_path):
