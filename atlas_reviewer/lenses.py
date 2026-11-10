@@ -84,8 +84,14 @@ class LensLibrary:
         return frozenset(p.name for p in self._lenses.iterdir() if p.is_dir())
 
     def body(self, name: str) -> str | None:
-        path = self._lenses / name / "body.md"
-        return path.read_text(encoding="utf-8") if path.is_file() else None
+        """None for a name with no body, including one that would resolve
+        outside the bundle's lens directory (`../x`), whatever the caller
+        validated."""
+        root = self._lenses.resolve()
+        path = (root / name / "body.md").resolve()
+        if not path.is_relative_to(root) or not path.is_file():
+            return None
+        return path.read_text(encoding="utf-8")
 
 
 def plan_lenses(
@@ -123,7 +129,7 @@ def _skip_reason(
     if body is None:
         return "no body.md in the bundle"
     if past_cap:
-        return f"below the cap of {max_lenses} lenses"
+        return f"below the cap of {max_lenses} lenses ({len(body)} characters)"
     if len(body) > left:
         return (
             f"did not fit the {budget_chars}-character lens budget whole "

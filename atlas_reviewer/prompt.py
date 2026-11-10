@@ -73,7 +73,7 @@ class UntrustedBlock:
 @dataclass(frozen=True)
 class LoadedLens:
     """A lens body the controller read from the skill bundle (trusted repo
-    content), possibly cut to fit the size budget."""
+    content), always whole: a lens that does not fit is not run."""
 
     name: str
     text: str

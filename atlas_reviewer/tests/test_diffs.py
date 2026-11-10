@@ -143,6 +143,23 @@ def test_splitting_keeps_every_character_in_diff_order():
     assert "".join(f.text for f in files) == DIFF
 
 
+COMBINED = (
+    "diff --cc merged.py\nindex 1,2..3\n--- a/merged.py\n+++ b/merged.py\n"
+    "@@@ -1,1 -1,1 +1,1 @@@\n- a\n -b\n++c\n"
+)
+
+
+def test_combined_diff_text_is_kept_though_it_is_not_split_out():
+    alone = split_files(COMBINED)
+    assert [f.path for f in alone] == [UNPARSED_PATH]
+    assert alone[0].text == COMBINED
+    mixed = file_diff("a.py") + COMBINED + file_diff("b.py")
+    files = split_files(mixed)
+    assert paths(files) == ["a.py", "b.py"]
+    assert "".join(f.text for f in files) == mixed
+    assert COMBINED in files[0].text
+
+
 def test_text_before_the_first_header_is_kept_as_a_pseudo_file():
     files = split_files("stray preamble\n" + DIFF)
     assert files[0].path == UNPARSED_PATH

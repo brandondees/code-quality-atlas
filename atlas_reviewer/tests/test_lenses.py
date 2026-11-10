@@ -66,7 +66,10 @@ def test_lenses_past_the_cap_are_not_run_even_when_budget_remains():
     plan = plan_lenses(lib, [choice(f"l{i}") for i in range(MAX_LENSES + 2)])
     assert len(plan.loaded) == MAX_LENSES
     assert all(u.status is LensStatus.NOT_RUN for u in plan.uses[MAX_LENSES:])
-    assert all("below the cap of 8 lenses" == u.reason for u in plan.uses[MAX_LENSES:])
+    assert all(
+        u.reason == "below the cap of 8 lenses (10 characters)"
+        for u in plan.uses[MAX_LENSES:]
+    )
 
 
 def test_a_lens_with_no_body_is_not_run_not_invented():
@@ -127,3 +130,16 @@ def test_the_real_bundle_runs_exactly_two_critical_lenses_whole():
                 "did not fit the 60000-character lens budget whole ("
             )
             assert f"{name} (did not fit the 60000-character" in plan.coverage()
+
+
+def test_a_lens_name_cannot_reach_outside_the_bundle(tmp_path):
+    lenses = tmp_path / "reference" / "lenses"
+    (lenses / "ok").mkdir(parents=True)
+    (lenses / "ok" / "body.md").write_text("OK", encoding="utf-8")
+    (tmp_path / "reference" / "secret").mkdir()
+    (tmp_path / "reference" / "secret" / "body.md").write_text("S", encoding="utf-8")
+    library = LensLibrary(tmp_path)
+    assert library.body("ok") == "OK"
+    assert library.body("../secret") is None
+    assert library.body("../../reference/secret") is None
+    assert library.body("missing") is None

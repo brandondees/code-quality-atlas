@@ -9,6 +9,12 @@ to the caller's limit, and the rest are counted. CI
 workflows, dependency manifests and lockfiles rank just below security
 code: they are where a change reaches the build, its secrets and its
 supply chain.
+
+Only `diff --git` sections are split out. A combined diff (`diff --cc` or
+`diff --combined`, as git prints for a merge commit) is not parsed: its
+text stays in the preceding file's section, or in the unparsed pseudo-file
+when it comes first, so it is still sent and counted, but under that name
+and tier rather than its own.
 """
 
 from __future__ import annotations
