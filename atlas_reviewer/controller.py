@@ -330,7 +330,10 @@ def _file_coverage(
         ),
     ]
     if not gap:
-        return FileCoverage(sel.total_files + len(dropped), tuple(unreviewed))
+        # `listed` is the parsed file headers. It already includes a header
+        # the selection dropped, and it does not include a preamble before
+        # the first header, which is not a changed file.
+        return FileCoverage(listed, tuple(unreviewed))
     if not listed:
         unreviewed += [
             Unreviewed(f.path, "the diff had no file headers", f.tier.rank)

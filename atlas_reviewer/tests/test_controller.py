@@ -1459,6 +1459,15 @@ def test_unknown_coverage_is_never_called_complete_in_the_notes():
     ) in notes
 
 
+def test_a_diff_preamble_does_not_add_a_phantom_changed_file():
+    body = "stray preamble\n" + sized_diff(2, 40)
+    draft = approving(github=with_diff(body).github).run()
+    status = status_of(draft)
+    assert status["changed_files"] == 2
+    assert status["unreviewed_files"] == 0
+    assert (status["review_event"], status["coverage_complete"]) == ("APPROVE", True)
+
+
 def test_a_missing_github_file_count_blocks_approval():
     class Uncounted(FixtureGitHub):
         def get_pull(self, repo, number):
