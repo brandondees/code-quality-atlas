@@ -436,8 +436,9 @@ def test_partial_coverage_reviews_the_riskiest_files_and_names_the_rest_by_risk(
     ) in row
     assert "2 of 5 file(s) sent in full" in row
     assert (
-        "never sent to any model call (3), highest risk first: [other code] app/views.py; "
-        "[tests and fixtures] tests/test_auth.py; [docs] docs/guide.md"
+        "never sent to any model call (3), highest risk first: "
+        '[other code] `"app/views.py"`; [tests and fixtures] `"tests/test_auth.py"`; '
+        '[docs] `"docs/guide.md"`'
     ) in row
     notes = section(draft, "Controller notes")
     assert "Diff coverage after the model calls: PARTIAL." in notes
@@ -548,7 +549,7 @@ def test_retries_share_the_three_call_cap_so_a_later_part_is_refused_and_listed(
         r for r in section(draft, "Omissions and limits hit").splitlines()
         if "part 3 of 3" in r
     )  # fmt: skip
-    assert "[docs] docs/guide.md" in row
+    assert '[docs] `"docs/guide.md"`' in row
     assert "PARTIAL. 2 of 3 call(s) returned a review" in section(
         draft, "Controller notes"
     )
@@ -1105,15 +1106,21 @@ def test_the_picker_runs_the_repos_skill_over_fenced_paths_and_pr_text():
     assert 'label="diff"' not in pick.user
 
 
-def test_picked_lenses_are_the_ones_inlined_and_attributed():
+def test_picked_lenses_follow_the_critical_tier_and_are_attributed():
     s = Setup()
     draft = s.run()
     (prompt,) = s.provider.prompts
-    for name in PICKED:
-        assert f"=== lens: {name} ===" in prompt.system
+    system = prompt.system
+    assert system.index("=== lens: tracing-correctness-and-invariants ===") < (
+        system.index("=== lens: sweeping-for-security ===")
+    )
     table = section(draft, "Review lenses")
     assert "| sweeping-for-security | included |" in table
-    assert "picker rank 1" in table
+    assert "critical tier; picker rank 1 |" in table
+    # The critical tier's bodies alone exceed the lens size budget, so a
+    # lens only the picker named is listed but has no room left.
+    assert "| hunting-silent-failures | omitted |" in table
+    assert "size budget of 60000 characters spent (picker rank 3)" in table
     assert "`choosing-review-lenses` ran as one model call at review depth" in (
         section(draft, "Controller notes")
     )
@@ -1126,7 +1133,9 @@ def test_a_picked_name_outside_the_bundle_is_omitted_not_invented():
     table = section(draft, "Review lenses")
     assert "| made-up-lens | omitted |" in table
     assert "no body.md in the bundle" in table
-    assert "=== lens: checking-restraint ===" in s.provider.prompts[0].system
+    assert "=== lens: made-up-lens ===" not in s.provider.prompts[0].system
+    assert "(picker rank 2) |" in table.split("| checking-restraint |", 1)[1]
+    assert all(f"| {n} |" in table for n in CRITICAL_TIER)
 
 
 def test_an_unusable_pick_runs_the_critical_tier():
