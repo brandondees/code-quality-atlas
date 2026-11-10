@@ -28,7 +28,7 @@ from atlas_reviewer.domain import (
 )
 from atlas_reviewer.groups import CheckGroup, Link, group_checks
 from atlas_reviewer.lenses import LensStatus, LensUse
-from atlas_reviewer.notes import UNTRUSTED_QUOTING
+from atlas_reviewer.notes import MARKUP_OPEN, UNTRUSTED_QUOTING
 from atlas_reviewer.ports import Narrative
 from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.telemetry import SUMMARY_HEADERS, Event, summary_rows
@@ -106,10 +106,11 @@ _scrubber: contextvars.ContextVar[Callable[[str], str]] = contextvars.ContextVar
 
 
 def _inert(text: str) -> str:
-    """`text` with no HTML: an untrusted `<!--` could otherwise hide the
-    rest of the review, or forge a second status comment. The active scrub
+    """`text` with no HTML markup: `<` before `!`, `?`, `/` or a letter
+    could open a comment, a processing instruction or a tag and hide the
+    rest of the review or forge a second status comment. The active scrub
     runs first, so a value it removes cannot be rewritten first."""
-    return _scrubber.get()(text).replace("<", "&lt;")
+    return MARKUP_OPEN.sub("&lt;", _scrubber.get()(text))
 
 
 def _cell(text: str) -> str:

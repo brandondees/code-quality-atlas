@@ -138,4 +138,6 @@ def test_untrusted_text_carries_no_html_into_the_draft():
     notes = controller_notes_section(("runner said <!-- hide",))
     assert "- runner said &lt;!-- hide" in notes
     assert _cell("a <b> | c") == "a &lt;b> \\| c"
+    assert _cell("a < b and c </d> <?x <!--") == "a < b and c &lt;/d> &lt;?x &lt;!--"
     assert quote_untrusted("<!-- x`") == '`"\\u003c!-- x\\u0060"`'
+    assert quote_untrusted("a < b") == '`"a < b"`'

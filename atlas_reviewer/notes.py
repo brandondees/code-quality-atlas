@@ -16,6 +16,7 @@ of the notes.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -122,19 +123,25 @@ def _omission_line(
     )
 
 
+# `<` before `!`, `?`, `/` or a letter can open a comment, a processing
+# instruction or a tag. A bare comparison (`a < b`) cannot, and escaping
+# it makes quoted code lie about what it says.
+MARKUP_OPEN = re.compile(r"<(?=[!?/A-Za-z])")
+
+
 def quote_untrusted(
     text: str, limit: int = MAX_QUOTED_CHARS, *, scrub: Callable[[str], str] = str
 ) -> str:
     """`text` as one inert code span: scrubbed, whitespace collapsed, cut
     to `limit` characters, JSON-escaped (no control characters or bare
-    quotes) and with backticks and `<` escaped, so nothing inside can
-    close the span or open HTML. `scrub` runs before that encoding, so a
-    value it removes is not rewritten into a form a later scrub misses."""
+    quotes), with backticks escaped and with `<` before `!`, `?`, `/` or a
+    letter escaped, so nothing inside can close the span or open HTML.
+    `scrub` runs before that encoding, so a value it removes is not
+    rewritten into a form a later scrub misses."""
     flat = " ".join(scrub(text).split())
     cut = flat if len(flat) <= limit else f"{flat[:limit]}..."
-    literal = (
-        json.dumps(cut, ensure_ascii=True)
-        .replace("`", "\\u0060")
-        .replace("<", "\\u003c")
+    literal = MARKUP_OPEN.sub(
+        r"\\u003c",
+        json.dumps(cut, ensure_ascii=True).replace("`", "\\u0060"),
     )
     return f"`{literal}`"
