@@ -157,7 +157,8 @@ def _listed(
 ) -> str:
     shown = sorted(files, key=lambda f: f.rank)[:limit]
     groups = (
-        f"{why}: " + ", ".join(quote_untrusted(scrub(f.path)) for f in shown if f.why == why)
+        f"{why}: "
+        + ", ".join(quote_untrusted(scrub(f.path)) for f in shown if f.why == why)
         for why in dict.fromkeys(f.why for f in shown)
     )
     more = len(files) - len(shown)

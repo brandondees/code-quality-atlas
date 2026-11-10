@@ -101,7 +101,9 @@ def parse_pull(data: Json, redactor: Redactor) -> PullInfo:
         issue_refs=issue_refs(body),
         changed_files=(
             changed
-            if isinstance(changed, int) and not isinstance(changed, bool) and changed >= 0
+            if isinstance(changed, int)
+            and not isinstance(changed, bool)
+            and changed >= 0
             else None
         ),
     )
