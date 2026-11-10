@@ -87,7 +87,7 @@ def test_triage_runs_the_critical_tier_without_a_call():
     chosen = select_lenses(Depth.TRIAGE, never, REAL)
     assert [c.name for c in chosen.choices] == list(CRITICAL_TIER)
     assert not chosen.used_call
-    assert chosen.note.startswith("Lens selection: triage depth runs the critical tier")
+    assert chosen.note.startswith("Lens selection: triage depth makes no picker call")
 
 
 def test_no_call_left_falls_back_to_the_critical_tier():
@@ -126,7 +126,7 @@ def test_a_good_pick_runs_after_the_critical_tier_and_is_attributed():
     assert "`choosing-review-lenses` ran as one model call at review depth" in (
         chosen.note
     )
-    assert "the critical tier always runs first" in chosen.note
+    assert "The critical tier is considered first" in chosen.note
 
 
 def test_a_thin_pick_cannot_drop_the_critical_tier():
@@ -215,3 +215,30 @@ def test_the_picker_is_skipped_when_the_bundle_has_no_other_lens():
     chosen = select_lenses(Depth.REVIEW, never, small_bundle())
     assert not chosen.used_call
     assert "the bundle has no other lens" in chosen.note
+
+
+OVERCLAIM = re.compile(r"critical tier (ran|runs|always runs)|ran first|runs first")
+
+
+@pytest.mark.parametrize(
+    ("depth", "run", "library"),
+    [
+        (Depth.TRIAGE, never, REAL),
+        (Depth.REVIEW, None, REAL),
+        (Depth.REVIEW, never, REAL),
+        (Depth.REVIEW, lambda: "not json", small_bundle("checking-restraint")),
+        (Depth.REVIEW, lambda: picks("ghost"), small_bundle("checking-restraint")),
+        (
+            Depth.REVIEW,
+            lambda: picks("checking-restraint"),
+            small_bundle("checking-restraint"),
+        ),
+    ],
+)
+def test_no_selection_note_claims_the_critical_tier_ran(depth, run, library):
+    """Half the real critical tier is NOT RUN, so a note may say it was
+    considered first and point at the Lenses line, never that it ran."""
+    note = select_lenses(depth, run, library).note
+    assert not OVERCLAIM.search(note), note
+    assert "considered" in note
+    assert "the lenses line says which" in note.lower()

@@ -5,11 +5,12 @@ reading that file.
 
 The picker ranks lenses against its route table and the depth mode; this
 module adds no routing of its own. The model's reply is untrusted output:
-only a JSON list of lens-shaped names is accepted, the critical tier always
-goes ahead of it, and `lenses.plan_lenses` then runs whole bodies in that
-order up to the depth's breadth and reports every other name NOT RUN. Triage runs the critical tier
-without a call. If the picker cannot
-run or its reply is unusable, the critical tier runs instead and the
+only a JSON list of lens-shaped names is accepted, the critical tier is
+always considered ahead of it, and `lenses.plan_lenses` then runs whole
+bodies in that order up to the depth's breadth and reports every other name
+NOT RUN. Triage considers only the critical tier, without a call, and so
+does a review where no other lens could fit whole. If the picker cannot run
+or its reply is unusable, only the critical tier is considered and the
 controller notes say why, so a failed pick never means an empty review.
 """
 
@@ -141,11 +142,10 @@ def select_lenses(
         return library.body(name) is not None
 
     if depth is Depth.TRIAGE:
-        return _critical("Lens selection: triage depth runs the critical tier", False)
+        return _critical("Lens selection: triage depth makes no picker call", False)
     if run_picker is None:
         return _critical(
-            "Lens selection: no model call is left for the lens picker, so the "
-            "critical tier ran",
+            "Lens selection: no model call is left for the lens picker",
             False,
         )
     no_room = _no_room_for_a_pick(library, depth, budget_chars)
@@ -156,13 +156,13 @@ def select_lenses(
     except BoundaryError as exc:
         return _critical(
             "Lens selection: the lens picker gave no usable lens list (reason, "
-            f"quoted: {quote_untrusted(str(exc))}), so the critical tier ran",
+            f"quoted: {quote_untrusted(str(exc))})",
             True,
         )
     if not any(has_body(n) for n in names):
         return _critical(
             f"Lens selection: none of the {len(names)} lens name(s) the picker "
-            "ranked has a body in the bundle, so the critical tier ran",
+            "ranked has a body in the bundle",
             True,
         )
     with_body = sum(has_body(n) for n in names)
@@ -170,8 +170,9 @@ def select_lenses(
         f"Lens selection: `choosing-review-lenses` ran as one model call at "
         f"{depth.value} depth over the PR's paths and text (untrusted input), "
         f"and ranked {len(names)} lens name(s), {with_body} with a body in the "
-        f"bundle; at most {depth.limit} lenses run, the critical tier always "
-        "runs first, and every other name is listed as NOT RUN with its reason."
+        f"bundle. The critical tier is considered first, then the picked names "
+        f"in rank order, and at most {depth.limit} lenses run: the Lenses line "
+        "says which ran whole and which are NOT RUN, and why."
     )
     return LensSelection(_with_critical(names), note, True)
 
@@ -216,4 +217,9 @@ def _no_room_for_a_pick(library: LensLibrary, depth: Depth, budget_chars: int) -
 
 def _critical(reason: str, used_call: bool) -> LensSelection:
     choices = tuple(LensChoice(n, "critical tier") for n in CRITICAL_TIER)
-    return LensSelection(choices, f"{reason}: {', '.join(CRITICAL_TIER)}.", used_call)
+    note = (
+        f"{reason}, so only the critical tier was considered, in this order: "
+        f"{', '.join(CRITICAL_TIER)}. The Lenses line says which of them ran "
+        "whole and which are NOT RUN, and why."
+    )
+    return LensSelection(choices, note, used_call)
