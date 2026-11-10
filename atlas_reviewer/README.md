@@ -78,9 +78,12 @@ variables). Both are held to the review's caps: 9 MiB compressed, and
 256 MiB or 50,000 members unpacked, counted from the tar headers across
 every gzip member before any runner exists (`source_archive.py`); an
 archive past them, or not a gzip tar, is refused. The header walk fails
-closed: it accepts only member types `git archive` writes, metadata
-entries of at most 1 MiB, and zero padding after the end block, and
-refuses any header it cannot fully read (D39).
+closed: it reads the blocks itself and accepts only what `git archive`
+writes, in a form GNU tar reads the same way. That means plain-octal
+header numbers; member types `git archive` writes; a pax global `comment`
+and per-member `path`, `linkpath` and `mtime`, each at most once; metadata
+entries of at most 1 MiB and 16 MiB in all; and zero padding after the
+end block. Every other header is refused (D39).
 
 `probe-runner` exits 3 when the runner did not complete or, for the
 protocol probe, the stdin round-trip did not come back `ok` or the
