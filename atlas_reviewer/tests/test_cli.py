@@ -28,7 +28,7 @@ def test_dry_run_needs_no_credentials_and_prints_a_draft(tmp_path):
     code, out, _ = run_cli(
         "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run"
     )
-    assert code == cli.EXIT_OK
+    assert code == cli.EXIT_INCOMPLETE
     assert out.startswith("<!-- atlas-review-status: {")
     assert "\n# Code Quality Atlas review -- DRAFT\n" in out
     assert "Mode | dry run" in out
@@ -46,7 +46,7 @@ def test_depth_reaches_lens_selection(tmp_path, depth, expected):
         "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run",
         "--depth", depth,
     )  # fmt: skip
-    assert code == cli.EXIT_OK
+    assert code == cli.EXIT_INCOMPLETE
     assert expected in out
 
 
@@ -56,8 +56,9 @@ def test_dry_run_can_write_the_draft_to_a_file(tmp_path):
         "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run", "--out", str(target),
         "--expect", "check_run:security-scan", "--include-issues",
     )  # fmt: skip
-    assert code == cli.EXIT_OK
+    assert code == cli.EXIT_INCOMPLETE
     assert "written to" in out
+    assert "review event: COMMENT; coverage_complete=false; unreviewed_files=2" in out
     text = target.read_text()
     assert "security-scan" in text
     assert "Issue context: off" not in text
@@ -122,7 +123,7 @@ def test_module_entry_point_runs_offline(tmp_path):
         env={"PATH": ""},
         cwd=FIXTURE.parent.parent.parent,
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == cli.EXIT_INCOMPLETE, result.stderr
     assert "DRAFT" in result.stdout
 
 
@@ -233,7 +234,8 @@ def test_live_wiring_mints_scoped_read_only_tokens_and_scrubs_credentials(
         ["review", "--event", EVENT, "--include-issues"],
         env=env, out=out, err=err, sprites_factory=scripted_sprites,
     )  # fmt: skip
-    assert code == cli.EXIT_OK, err.getvalue()
+    # No model ran (offline provider), so file coverage is incomplete.
+    assert code == cli.EXIT_INCOMPLETE, err.getvalue()
     assert seen["app_id"] == "5648875"
     assert seen["installation_id"] == 12345
     assert seen["private_key"].count("\n") == 2
@@ -268,8 +270,9 @@ def test_issues_permission_is_only_requested_when_opted_in(tmp_path, monkeypatch
 class StubOpenRouter:
     name = "openrouter:anthropic/claude-sonnet-5.5"
 
-    def __init__(self, key, refuse=False):
+    def __init__(self, key, refuse=False, reply="narrative from the stub"):
         self.key, self.refuse, self.preflighted = key, refuse, False
+        self.reply = reply
 
     def preflight(self):
         if self.refuse:
@@ -278,7 +281,9 @@ class StubOpenRouter:
 
     def complete(self, prompt):
         assert self.preflighted
-        return "narrative from the stub"
+        if isinstance(self.reply, Exception):
+            raise self.reply
+        return self.reply
 
     def usage_lines(self):
         return ("call 1: ok; $0.0100",)
@@ -501,7 +506,7 @@ def test_a_live_review_writes_secret_free_jsonl_telemetry_by_default(
         ["--state-dir", str(tmp_path), "review", "--event", EVENT, "--out", str(draft_path)],
         env=APP_ENV, out=out, err=io.StringIO(), sprites_factory=scripted_sprites,
     )  # fmt: skip
-    assert code == cli.EXIT_OK
+    assert code == cli.EXIT_INCOMPLETE
     (events_file,) = (tmp_path / "telemetry").glob("review-*.jsonl")
     raw = events_file.read_text()
     for secret in (APP_ENV[cli.ENV_SPRITES_TOKEN], "not-a-real-key"):
@@ -522,7 +527,7 @@ def test_a_dry_run_writes_telemetry_only_when_asked(tmp_path):
         "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run",
         "--events", str(target),
     )  # fmt: skip
-    assert code == cli.EXIT_OK
+    assert code == cli.EXIT_INCOMPLETE
     assert any(e["phase"] == "model call" for e in jsonl(target))
 
 
@@ -764,3 +769,50 @@ def test_a_github_list_cannot_be_named_as_expected_evidence(tmp_path):
     assert code == cli.EXIT_USAGE
     assert "--expect must be KIND:NAME" in err
     assert "'listing'" not in err.split("KIND in", 1)[1]
+
+
+def openrouter_review(tmp_path, monkeypatch, reply, *extra):
+    monkeypatch.setattr(
+        cli, "AppInstallationTokens",
+        lambda transport, clock, **kw: type("T", (), {"secrets": lambda self: ()})(),
+    )  # fmt: skip
+    monkeypatch.setattr(
+        cli, "GitHubClient", lambda transport, t: FixtureGitHub(FIXTURE)
+    )
+    out = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "review", "--event", EVENT,
+         "--provider", "openrouter", "--allow-live-inference", *extra],
+        env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"}, out=out, err=io.StringIO(),
+        sprites_factory=scripted_sprites,
+        openrouter_factory=lambda key, limits: StubOpenRouter(key, reply=reply),
+    )  # fmt: skip
+    return code, out.getvalue()
+
+
+def test_a_complete_approving_review_exits_ok_and_reports_its_event(
+    tmp_path, monkeypatch
+):
+    draft_path = tmp_path / "draft.md"
+    code, out = openrouter_review(
+        tmp_path, monkeypatch, "Fine.\n\nReview event: APPROVE",
+        "--out", str(draft_path),
+    )  # fmt: skip
+    assert code == cli.EXIT_OK
+    assert "review event: APPROVE; coverage_complete=true; unreviewed_files=0" in out
+    first = draft_path.read_text().split("\n", 1)[0]
+    assert '"review_event": "APPROVE"' in first
+    assert '"coverage_complete": true' in first
+
+
+def test_a_review_whose_model_call_failed_exits_incomplete_and_never_approves(
+    tmp_path, monkeypatch
+):
+    code, out = openrouter_review(
+        tmp_path, monkeypatch, BoundaryError("HTTP 503 after retries")
+    )
+    assert code == cli.EXIT_INCOMPLETE
+    first = out.split("\n", 1)[0]
+    assert '"review_event": "COMMENT"' in first
+    assert '"coverage_complete": false' in first
+    assert "> **REVIEW INCOMPLETE -- not approvable.**" in out

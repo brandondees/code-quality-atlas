@@ -36,7 +36,7 @@ from atlas_reviewer.controller import (
     MAX_TARBALL_BYTES,
     Deps,
     ReviewConfig,
-    review,
+    run_review,
 )
 from atlas_reviewer.domain import (
     InvalidEventError,
@@ -88,7 +88,7 @@ DEFAULT_STATE_DIR = Path(".atlas-reviewer-state")
 PROVIDER_CHOICES = ("offline", "openrouter")
 SECRET_ENV = (ENV_APP_KEY, ENV_SPRITES_TOKEN, ENV_OPENROUTER_KEY)
 
-EXIT_OK, EXIT_USAGE, EXIT_BOUNDARY = 0, 2, 3
+EXIT_OK, EXIT_USAGE, EXIT_BOUNDARY, EXIT_INCOMPLETE = 0, 2, 3, 4
 
 
 class UsageError(Exception):
@@ -316,13 +316,17 @@ def _cmd_review(args: argparse.Namespace, env: Mapping[str, str], out: TextIO) -
     )
     config = _review_config(args, wiring.mode)
     with single_review_lock(_state_dir(args, env) / "review.lock"):
-        draft = review(event, wiring.deps, config)
-    _emit(draft, args.out, out)
+        outcome = run_review(event, wiring.deps, config)
+    _emit(outcome.draft, args.out, out)
+    verdict = outcome.verdict
     if args.out is not None:
         out.write(
             f"telemetry: {len(telemetry.events)} event(s), {_events_path(telemetry)}\n"
+            f"review event: {verdict.event.value}; coverage_complete="
+            f"{str(verdict.coverage_complete).lower()}; unreviewed_files="
+            f"{len(verdict.coverage.unreviewed)}\n"
         )
-    return EXIT_OK
+    return EXIT_OK if verdict.coverage_complete else EXIT_INCOMPLETE
 
 
 def _check_out_path(out_path: str | None) -> None:
@@ -551,7 +555,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=MAX_MODEL_CALLS,
         help=(
             "model calls per review, retries included: one for the lens picker "
-            f"(except at triage depth), the rest for diff parts (1-{MAX_MODEL_CALLS})"
+            "(except at triage depth, or when no picked lens could fit), the rest "
+            f"for diff parts (1-{MAX_MODEL_CALLS})"
         ),
     )
     rev.add_argument(
