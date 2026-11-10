@@ -191,6 +191,49 @@ def test_diff_file_pages_by_byte_offset_until_the_whole_diff_is_read(tmp_path):
     assert "+    return sum(round(x, 2) for x in xs)" in whole
 
 
+@pytest.mark.parametrize("cap", [37, 38, 39, 40])
+def test_diff_pages_split_only_between_whole_utf8_characters(tmp_path, cap):
+    text = "naïve café — 日本語 🙂 " * 4
+    head = {**HEAD_FILES, "docs/notes.md": f"{text}\n".encode()}
+    source = SourceTrees(tarball(BASE_FILES), tarball(head), OLD, HEAD)
+    limits = {**DEFAULT_LIMITS, "diff_file": ToolLimits(cap, 10)}
+    pages, offset = [], 0
+    while offset is not None:
+        page = one(
+            tmp_path / str(offset), "diff_file",
+            {"path": "docs/notes.md", "offset": offset}, source=source, limits=limits,
+        )  # fmt: skip
+        assert "\ufffd" not in page.content.text
+        assert page.shown_bytes <= cap
+        pages.append(page.content.text)
+        offset = page.next_offset
+    assert f"+{text}" in "".join(pages)
+
+
+def test_a_page_asked_for_mid_character_starts_at_the_next_whole_one(tmp_path):
+    head = {**HEAD_FILES, "docs/notes.md": "日本\n".encode()}
+    source = SourceTrees(tarball(BASE_FILES), tarball(head), OLD, HEAD)
+    whole = one(tmp_path / "w", "diff_file", {"path": "docs/notes.md"}, source=source)
+    at = whole.content.text.encode().index("日".encode()) + 1
+    page = one(
+        tmp_path / "p", "diff_file", {"path": "docs/notes.md", "offset": at},
+        source=source,
+    )  # fmt: skip
+    assert page.content.text.startswith("本\n")
+
+
+def test_a_byte_cap_inside_a_character_keeps_only_whole_ones(tmp_path):
+    limits = {**DEFAULT_LIMITS, "read_file": ToolLimits(4, 10, 400)}
+    head = {**HEAD_FILES, "u.txt": "aé日\n".encode()}
+    source = SourceTrees(tarball(BASE_FILES), tarball(head), OLD, HEAD)
+    result = one(tmp_path, "read_file", {"path": "u.txt"}, source=source, limits=limits)
+    assert (result.content.text, result.shown_bytes, result.truncated) == (
+        "aé",
+        3,
+        True,
+    )
+
+
 RENAMED_BASE = {"old/name.py": b"".join(b"line %d\n" % i for i in range(20))}
 RENAMED_HEAD = {
     "new/name.py": RENAMED_BASE["old/name.py"] + f"key = {NEW_TOKEN}\n".encode()

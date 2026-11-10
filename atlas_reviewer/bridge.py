@@ -20,6 +20,7 @@ did not change is pre-existing. Runtime text (git's stderr) is redacted.
 from __future__ import annotations
 
 import base64
+import codecs
 import json
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -85,6 +86,7 @@ _REPLY = re.compile(
 )
 _HUNK = re.compile(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 _PLAIN_PATH = re.compile(r"[\x21-\x7e]+")
+_CONTINUATION = bytes(range(0x80, 0xC0))
 
 _DIFF = ("diff", "--no-ext-diff", "--no-textconv", "--no-color", "--find-renames")
 
@@ -206,6 +208,31 @@ def call_script(
             "rm -f out err view shown",
         )
     )
+
+
+def _page(call: Call, reply: _Reply) -> tuple[int, bytes]:
+    """The shown bytes without a UTF-8 character split by the cut: an
+    incomplete one at the end when the output was cut there, and the rest
+    of one at the start of a `diff_file` page past offset 0 (it belongs to
+    the page before). Returns how many leading bytes were dropped."""
+    data = reply.content
+    offset = call.get("offset") if call.tool == "diff_file" else 0
+    skipped = _continuation_bytes(data) if offset else 0
+    cut_end = len(data) < reply.total_bytes
+    end = len(data) - (_incomplete_tail(data) if cut_end else 0)
+    return skipped, data[skipped : max(end, skipped)]
+
+
+def _continuation_bytes(data: bytes) -> int:
+    head = data[:3]
+    return len(head) - len(head.lstrip(_CONTINUATION))
+
+
+def _incomplete_tail(data: bytes) -> int:
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    decoder.decode(data, final=False)
+    pending, _ = decoder.getstate()
+    return len(pending)
 
 
 class _LostOutputError(BoundaryError):
@@ -580,9 +607,10 @@ class Bridge:
         limits = self.limits[call.tool]
         status = _status(call.tool, reply.code)
         commit = self.staged.commits[call.get("rev")] if call.tool == "grep" else ""
-        view = _view(call, reply.content, commit, self._preexisting, paths)
+        skipped, content = _page(call, reply)
+        view = _view(call, content, commit, self._preexisting, paths)
         scan = detect_secrets(view.text)
-        shown = len(reply.content)
+        shown = len(content)
         cut = (
             shown < reply.total_bytes
             or (limits.max_lines is not None and reply.total_lines > limits.max_lines)
@@ -602,7 +630,11 @@ class Bridge:
             cut,
             seconds,
             _secrets(scan, view.places),
-            call.get("offset") + shown if cut and call.tool == "diff_file" else None,
+            (
+                call.get("offset") + skipped + shown
+                if cut and call.tool == "diff_file"
+                else None
+            ),
             scan.values,
         )
 
