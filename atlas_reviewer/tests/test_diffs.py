@@ -88,6 +88,17 @@ def test_a_rename_ranks_as_the_riskier_of_its_two_paths():
     assert renamed("docs/a.md", "docs/b.md") == ("docs/b.md", DOCS)
 
 
+def test_a_pure_copy_is_named_by_copy_to_and_ranked_by_its_source_too():
+    source = "src/auth b/x.py"
+    diff = (
+        f"diff --git a/{source} b/notes.md\nsimilarity index 100%\n"
+        f"copy from {source}\ncopy to notes.md\n"
+    )
+    (f,) = split_files(diff)
+    assert (f.path, f.tier) == ("notes.md", SECURITY)
+    assert diff_paths(diff) == ("notes.md",)
+
+
 def test_a_deleted_file_is_named_by_its_old_path():
     diff = (
         f"diff --git a/{SPACED_B} b/{SPACED_B}\ndeleted file mode 100644\n"

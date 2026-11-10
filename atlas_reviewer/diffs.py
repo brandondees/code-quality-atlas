@@ -172,23 +172,26 @@ def _meta_lines(text: str) -> list[str]:
 
 
 def _source_path(text: str) -> str | None:
-    """The old path of a rename, which is ranked as well as the new one."""
-    return _field(_meta_lines(text), "rename from ")
+    """The old path of a rename or copy, which is ranked as well as the new one."""
+    lines = _meta_lines(text)
+    renamed = _field(lines, "rename from ")
+    return _field(lines, "copy from ") if renamed is None else renamed
 
 
 def _section_path(header: re.Match[str], text: str) -> str:
     """The `diff --git` line is ambiguous when an unquoted path holds " b/",
-    so the path comes from the `+++` line, else `rename to`, else a header
-    whose two sides are equal (always so for a deletion, whose `+++` line is
-    /dev/null), and only then from splitting the header. Only lines before
-    the first hunk are read."""
+    so the path comes from the `+++` line, else `rename to` or `copy to`,
+    else a header whose two sides are equal (always so for a deletion, whose
+    `+++` line is /dev/null), and only then from splitting the header. Only
+    lines before the first hunk are read."""
     lines = _meta_lines(text)
     new = _field(lines, "+++ ")
     if new is not None and new != "/dev/null":
         return new.removeprefix("b/")
-    renamed = _field(lines, "rename to ")
-    if renamed is not None:
-        return renamed
+    moved = _field(lines, "rename to ")
+    moved = _field(lines, "copy to ") if moved is None else moved
+    if moved is not None:
+        return moved
     sides = header.group(0).removeprefix("diff --git ")
     half = (len(sides) - 5) // 2
     if sides == f"a/{sides[2 : 2 + half]} b/{sides[2 : 2 + half]}":
@@ -235,7 +238,7 @@ def split_files(diff: str) -> tuple[FileDiff, ...]:
 
 
 def _file(path: str, text: str, source: str | None = None) -> FileDiff:
-    """A rename is as risky as the riskier of its two paths: moving
+    """A rename or copy is as risky as the riskier of its two paths: moving
     src/auth.py to docs/changelog.md still changes auth code."""
     tiers = [risk_tier(p) for p in (path, source) if p is not None]
     return FileDiff(path, text, len(text), min(tiers, key=lambda t: t.rank))
