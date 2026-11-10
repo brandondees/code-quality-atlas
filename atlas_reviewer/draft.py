@@ -26,7 +26,7 @@ from atlas_reviewer.domain import (
     outcome,
 )
 from atlas_reviewer.groups import CheckGroup, Link, group_checks
-from atlas_reviewer.lenses import LensUse
+from atlas_reviewer.lenses import LensStatus, LensUse
 from atlas_reviewer.notes import UNTRUSTED_QUOTING
 from atlas_reviewer.ports import Narrative
 from atlas_reviewer.providers import OfflineProvider
@@ -167,10 +167,11 @@ def _lenses(uses: tuple[LensUse, ...], ran: bool) -> str:
     if not uses:
         return "## Review lenses\n\nNone selected."
     which = (
-        "Only included or truncated lenses ran; omitted ones did not."
+        "A lens ran only if its whole body was in the prompt; a NOT RUN lens's "
+        "area was not reviewed."
         if ran
-        else "No model call returned a review, so no lens ran: the table lists "
-        "the lenses planned for the prompt."
+        else "No model call returned a review, so no lens ran: every lens is NOT "
+        "RUN, and the table lists what was planned for the prompt."
     )
     rows = "\n".join(
         "| "
@@ -178,9 +179,10 @@ def _lenses(uses: tuple[LensUse, ...], ran: bool) -> str:
             _cell(c)
             for c in (
                 u.name,
-                u.status.value,
-                f"{u.kept_chars} of {u.total_chars}",
+                u.status.value if ran else LensStatus.NOT_RUN.value,
+                str(u.chars),
                 u.why,
+                u.reason or ("" if ran else "no model call returned a review"),
             )
         )
         + " |"
@@ -189,10 +191,11 @@ def _lenses(uses: tuple[LensUse, ...], ran: bool) -> str:
     return (
         "## Review lenses\n\n"
         "Lenses are chosen by the `choosing-review-lenses` picker (or the critical tier "
-        "when it does not run); their bodies are read from the skill bundle and placed "
-        f"in the model prompt. {which}\n\n"
-        "| Lens | Status | Characters kept of total | Why |\n| --- | --- | --- | --- |\n"
-        + rows
+        "when it does not run), critical tier first; each body is read from the skill "
+        "bundle and placed in the model prompt whole, or not at all. "
+        f"{which}\n\n"
+        "| Lens | Status | Characters | Chosen as | Why not run |\n"
+        "| --- | --- | --- | --- | --- |\n" + rows
     )
 
 

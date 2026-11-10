@@ -492,13 +492,15 @@ def test_offline_prompts_are_reported_as_not_reviewed_and_no_lens_ran():
     )
     assert "offline provider (no model call)" in row
     lenses = section(draft, "Review lenses")
-    assert "so no lens ran: the table lists the lenses planned" in lenses
-    assert "Only included or truncated lenses ran" not in lenses
+    assert "so no lens ran: every lens is NOT RUN" in lenses
+    assert "| run whole |" not in lenses
+    assert "| no model call returned a review |" in lenses
 
 
 def test_lenses_are_reported_as_ran_once_a_model_reviews_a_part():
     lenses = section(Setup().run(), "Review lenses")
-    assert "Only included or truncated lenses ran" in lenses
+    assert "A lens ran only if its whole body was in the prompt" in lenses
+    assert "| sweeping-for-security | run whole |" in lenses
 
 
 def test_lenses_did_not_run_when_every_review_call_fails():
@@ -739,23 +741,24 @@ def test_lens_bodies_from_the_skill_bundle_reach_the_prompt():
     included = [
         line.split("|")[1].strip()
         for line in table.splitlines()
-        if "| included |" in line
+        if "| run whole |" in line
     ]
     assert included, table
     for name in included:
         assert library.body(name) in prompt.system, name
-    assert "Lens coverage: included: " in prompt.system
+    assert "Lens coverage: run whole: " in prompt.system
     assert "=== lens: tracing-correctness-and-invariants ===" in prompt.system
 
 
-def test_the_draft_reports_included_truncated_and_omitted_lenses_accurately():
-    class BigLenses(LensLibrary):
-        def __init__(self):
-            super().__init__()
+def test_a_lens_too_big_for_the_budget_left_is_not_run_and_a_smaller_one_still_is():
+    small = "reviewing-concurrency-and-async"
 
+    class BigLenses(LensLibrary):
         def body(self, name):
             real = super().body(name)
-            return None if real is None else f"LENS-{name}\n" + ("rule\n" * 8_000)
+            if real is None:
+                return None
+            return f"LENS-{name}\n" + ("rule\n" * (10 if name == small else 8_000))
 
     s = Setup(lenses=BigLenses())
     draft = s.run()
@@ -765,18 +768,28 @@ def test_the_draft_reports_included_truncated_and_omitted_lenses_accurately():
         for line in section(draft, "Review lenses").splitlines()
         if line.startswith("| ") and "---" not in line and "Lens |" not in line
     }
-    assert list(rows.values()).count("included") == 1
-    assert list(rows.values()).count("truncated") == 1
-    assert "omitted" in rows.values()
-    omitted = [n for n, status in rows.items() if status == "omitted"]
-    truncated = next(n for n, status in rows.items() if status == "truncated")
-    for name in omitted:
-        assert f"LENS-{name}" not in prompt.system
+    assert rows == {
+        "tracing-correctness-and-invariants": "run whole",
+        "sweeping-for-security": "NOT RUN",
+        "reviewing-migration-and-data-safety": "NOT RUN",
+        small: "run whole",
+        "hunting-silent-failures": "NOT RUN",
+    }
+    library = BigLenses()
+    for name, status in rows.items():
+        body = library.body(name)
+        if status == "run whole":
+            assert f"=== lens: {name} ===\n{body}" in prompt.system
+        else:
+            assert f"LENS-{name}" not in prompt.system
+    assert "truncated" not in prompt.system
+    notes = section(draft, "Controller notes")
     assert (
-        "lens body truncated by atlas_reviewer"
-        in prompt.system.split(f"=== lens: {truncated} ===", 1)[1]
-    )
-    assert f"truncated: {truncated} (" in section(draft, "Controller notes")
+        "Lenses run whole: tracing-correctness-and-invariants, "
+        f"{small}; NOT RUN: sweeping-for-security (did not fit the "
+        "60000-character lens budget whole ("
+    ) in notes
+    assert "left); critical tier; picker rank 1), reviewing-migration" in notes
 
 
 def test_the_bundle_text_alone_does_not_count_as_running_a_lens():
@@ -1068,7 +1081,7 @@ def test_a_diff_that_fits_beside_the_prompt_goes_in_one_call():
 def test_every_part_of_an_oversized_diff_fits_the_token_bound(char):
     from atlas_reviewer.controller import PROMPT_TOKEN_ROOM
 
-    s = with_diff(sized_diff(60, 3_000, char))
+    s = with_diff(sized_diff(80, 3_000, char))
     draft = s.run()
     assert len(s.provider.prompts) == 2
     bounds = [prompt_bound(p) for p in s.provider.prompts]
@@ -1115,12 +1128,15 @@ def test_picked_lenses_follow_the_critical_tier_and_are_attributed():
         system.index("=== lens: sweeping-for-security ===")
     )
     table = section(draft, "Review lenses")
-    assert "| sweeping-for-security | included |" in table
+    assert "| sweeping-for-security | run whole |" in table
     assert "critical tier; picker rank 1 |" in table
-    # The critical tier's bodies alone exceed the lens size budget, so a
-    # lens only the picker named is listed but has no room left.
-    assert "| hunting-silent-failures | omitted |" in table
-    assert "size budget of 60000 characters spent (picker rank 3)" in table
+    # Two critical lenses fill the budget so far that no other lens fits whole.
+
+    assert "| hunting-silent-failures | NOT RUN |" in table
+    assert (
+        "| picker rank 3 | did not fit the 60000-character lens budget whole "
+        "(15482 characters, 10250 left) |"
+    ) in table
     assert "`choosing-review-lenses` ran as one model call at review depth" in (
         section(draft, "Controller notes")
     )
@@ -1131,10 +1147,12 @@ def test_a_picked_name_outside_the_bundle_is_omitted_not_invented():
     s.provider.reply = json.dumps({"lenses": ["made-up-lens", "checking-restraint"]})
     draft = s.run()
     table = section(draft, "Review lenses")
-    assert "| made-up-lens | omitted |" in table
+    assert "| made-up-lens | NOT RUN |" in table
     assert "no body.md in the bundle" in table
     assert "=== lens: made-up-lens ===" not in s.provider.prompts[0].system
-    assert "(picker rank 2) |" in table.split("| checking-restraint |", 1)[1]
+    assert (
+        "| picker rank 2 | did not fit" in table.split("| checking-restraint |", 1)[1]
+    )
     assert all(f"| {n} |" in table for n in CRITICAL_TIER)
 
 
