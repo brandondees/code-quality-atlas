@@ -338,6 +338,25 @@ def test_the_runner_pass_counts_a_member_cap_over_the_listing(tmp_path):
     assert unpack_refusal(done.stdout, limits).endswith("it lists over 2 members")
 
 
+def test_a_listing_pass_that_does_not_print_ok_extracts_nothing(tmp_path):
+    """tar lists the archive and exits 0, and awk exits 0 having printed
+    nothing. The `members`/`dirs` case does not match, so only the check
+    that the listing pass answered `ok` stops the unpack."""
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    for name in ("tar", "gzip", "head", "wc", "cat", "rm", "mkdir", "timeout"):
+        os.symlink(shutil.which(name), tools / name)
+    awk = tools / "awk"
+    awk.write_text("#!/bin/sh\ncat >/dev/null\n")
+    awk.chmod(0o755)
+    done = run_script(tmp_path, LIMITS, "a", env={"PATH": f"{tools}:/usr/bin:/bin"})
+    assert done.returncode == 2
+    assert unpack_refusal(done.stdout) == (
+        f"{REFUSED}tar could not read or list the archive"
+    )
+    assert not (tmp_path / "out").exists()
+
+
 def test_a_runner_without_awk_cannot_check_the_listing_and_extracts_nothing(tmp_path):
     tools = tmp_path / "tools"
     tools.mkdir()

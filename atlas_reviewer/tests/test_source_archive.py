@@ -618,6 +618,18 @@ def test_a_ustar_prefix_path_with_no_directory_entries_is_refused():
         measure(gzip.compress(block + END))
 
 
+def test_the_ustar_prefix_is_joined_to_the_name_with_a_slash():
+    """The path is `prefix/name`. The listed parent matches only that join:
+    `aaa` + `bbb/ccc` without the slash is `aaabbb/ccc`, whose parent was
+    not listed. The directories themselves carry no prefix, so the join
+    under test is the file's."""
+    top = header("aaa", 0, DIR)
+    parent = header("aaa/bbb", 0, DIR)
+    block = with_field(header("bbb/ccc"), 257, 265, b"ustar\x0000")
+    block = with_field(block, 345, 500, b"aaa")
+    assert measure(gzip.compress(top + parent + block + END)) == Unpacked(3, 0)
+
+
 def test_a_ustar_prefix_path_whose_directories_are_listed_is_accepted():
     top, mid = "a" * 60, "b" * 60
     out = io.BytesIO()
