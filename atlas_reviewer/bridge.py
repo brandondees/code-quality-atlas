@@ -283,51 +283,70 @@ class _Where:
 _NOWHERE = _Where(None, None, False)
 
 
-def _shown_text(call: Call, raw: bytes) -> str:
-    text = raw.decode("utf-8", errors="replace")
-    return _grep_text(text) if call.tool == "grep" else text
+@dataclass(frozen=True)
+class _View:
+    """The shown text, where each of its lines comes from, and whether all
+    of the output could be shown (False when some of it did not parse)."""
+
+    text: str
+    places: list[_Where]
+    complete: bool = True
 
 
-def _grep_records(text: str) -> list[tuple[str, str, str]]:
-    """`<commit>:<path>\\0<line>\\0<text>` per match (`git grep -z -n`); a
-    record cut short by the cap is dropped."""
-    records = []
-    for record in text.split("\n"):
-        parts = record.split("\0")
-        if len(parts) == 3 and parts[1].isdigit():
-            records.append((parts[0].partition(":")[2], parts[1], parts[2]))
-    return records
-
-
-def _shown_path(path: str) -> str:
-    return path if _PLAIN_PATH.fullmatch(path) and ":" not in path else json.dumps(path)
-
-
-def _grep_text(text: str) -> str:
-    return "\n".join(f"{_shown_path(p)}:{n}:{t}" for p, n, t in _grep_records(text))
-
-
-def _places(
-    call: Call, raw: bytes, preexisting: Callable[[Rev, str], bool]
-) -> list[_Where]:
-    """Where each line of the shown text comes from, for locating hits."""
+def _view(
+    call: Call, raw: bytes, commit: str, preexisting: Callable[[Rev, str], bool]
+) -> _View:
     text = raw.decode("utf-8", errors="replace")
     match call.tool:
         case "read_file":
             rev, path, start = call.get("rev"), call.get("path"), call.get("start")
-            return [
-                _Where(path, start + i, preexisting(rev, path))
-                for i in range(text.count("\n") + 1)
-            ]
+            return _View(
+                text,
+                [
+                    _Where(path, start + i, preexisting(rev, path))
+                    for i in range(text.count("\n") + 1)
+                ],
+            )
         case "grep":
-            rev = call.get("rev")
-            return [
-                _Where(p, int(n), preexisting(rev, p))
-                for p, n, _ in _grep_records(text)
-            ]
+            return _grep_view(text, commit, call.get("rev"), preexisting)
         case "diff_file":
-            return _diff_places(text.split("\n"), call.get("path"))
-    return []
+            return _View(text, _diff_places(text.split("\n"), call.get("path")))
+    return _View(text, [])
+
+
+def _grep_records(text: str, commit: str) -> tuple[list[tuple[str, str, str]], bool]:
+    """`<commit>:<path>\\0<line>\\0<text>\\n` per match (`git grep -z -n`).
+    The fields are split on NUL first: a path may hold a newline but a
+    matched line cannot, so each line's text ends at its first newline and
+    the next record's `<commit>:<path>` follows it. A record that is cut
+    short or out of step (a NUL inside a matched line) ends the parse;
+    the flag says whether every byte was accounted for."""
+    fields = text.split("\0")
+    prefix = f"{commit}:"
+    head = fields[0]
+    records: list[tuple[str, str, str]] = []
+    for line, rest in zip(fields[1::2], fields[2::2], strict=False):
+        match, newline, after = rest.partition("\n")
+        if not (head.startswith(prefix) and line.isdigit() and newline):
+            return records, False
+        records.append((head[len(prefix) :], line, match))
+        head = after
+    return records, head == "" and len(fields) % 2 == 1
+
+
+def _grep_view(
+    text: str, commit: str, rev: Rev, preexisting: Callable[[Rev, str], bool]
+) -> _View:
+    records, complete = _grep_records(text, commit)
+    return _View(
+        "\n".join(f"{_shown_path(p)}:{n}:{t}" for p, n, t in records),
+        [_Where(p, int(n), preexisting(rev, p)) for p, n, _ in records],
+        complete,
+    )
+
+
+def _shown_path(path: str) -> str:
+    return path if _PLAIN_PATH.fullmatch(path) and ":" not in path else json.dumps(path)
 
 
 def _diff_places(lines: Iterable[str], path: str) -> list[_Where]:
@@ -442,11 +461,14 @@ class Bridge:
     def _result(self, call: Call, reply: _Reply, seconds: float) -> BridgeResult:
         limits = self.limits[call.tool]
         status = _status(call.tool, reply.code)
-        text = _shown_text(call, reply.content)
-        scan = detect_secrets(text)
+        commit = self.staged.commits[call.get("rev")] if call.tool == "grep" else ""
+        view = _view(call, reply.content, commit, self._preexisting)
+        scan = detect_secrets(view.text)
         shown = len(reply.content)
-        cut = shown < reply.total_bytes or (
-            limits.max_lines is not None and reply.total_lines > limits.max_lines
+        cut = (
+            shown < reply.total_bytes
+            or (limits.max_lines is not None and reply.total_lines > limits.max_lines)
+            or not view.complete
         )
         stderr = reply.stderr.decode("utf-8", errors="replace")
         self._flagged.extend(scan.values)
@@ -454,14 +476,14 @@ class Bridge:
             call.tool,
             call.args_json,
             status,
-            RepoText(text),
+            RepoText(view.text),
             self.redactor(stderr, STDERR_CHARS) if stderr else None,
             shown,
             reply.total_bytes,
             reply.total_lines,
             cut,
             seconds,
-            _secrets(scan, _places(call, reply.content, self._preexisting)),
+            _secrets(scan, view.places),
             call.get("offset") + shown if cut and call.tool == "diff_file" else None,
             scan.values,
         )

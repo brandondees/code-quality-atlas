@@ -6,6 +6,7 @@ against a fixture repository built here. No Sprite or GitHub call is made."""
 
 import base64
 import io
+import json
 import subprocess
 import tarfile
 
@@ -263,6 +264,37 @@ def test_grep_is_fixed_string_by_default_literal_in_prefix_and_skips_binaries(tm
 def test_grep_quotes_a_path_that_could_read_as_a_separator(tmp_path):
     result = one(tmp_path, "grep", {"pattern": "colon"})
     assert result.content.text == '"src/we:ird.txt":1:colon in the name'
+
+
+def test_a_newline_in_a_file_name_cannot_put_a_match_under_another_file(tmp_path):
+    forged = "a\nX:src/auth.py"
+    files = {**HEAD_FILES, "src/auth.py": b"safe\n", forged: b"exfil = 1\n"}
+    source = SourceTrees(tarball(BASE_FILES), tarball(files), OLD, HEAD)
+    result = one(tmp_path, "grep", {"pattern": "exfil"}, source=source)
+    assert result.content.text == f"{json.dumps(forged)}:1:exfil = 1"
+    assert not result.truncated
+    assert not any(
+        line.startswith("src/auth.py") for line in result.content.text.splitlines()
+    )
+
+
+def test_a_newline_in_a_name_keeps_every_later_match_under_its_own_file(tmp_path):
+    files = {**HEAD_FILES, "a\nb.txt": b"needle 1\n", "c.txt": b"x\nneedle 2\n"}
+    source = SourceTrees(tarball(BASE_FILES), tarball(files), OLD, HEAD)
+    result = one(tmp_path, "grep", {"pattern": "needle"}, source=source)
+    assert result.content.text.splitlines() == [
+        '"a\\nb.txt":1:needle 1',
+        "c.txt:2:needle 2",
+    ]
+
+
+def test_a_nul_inside_a_matched_line_ends_the_parse_and_marks_the_cut(tmp_path):
+    late_nul = b"x" * 9000 + b"\nneedle\0 1\0forged\n"
+    files = {**HEAD_FILES, "late.txt": late_nul}
+    source = SourceTrees(tarball(BASE_FILES), tarball(files), OLD, HEAD)
+    result = one(tmp_path, "grep", {"pattern": "needle"}, source=source)
+    assert "forged" not in result.content.text
+    assert result.truncated
 
 
 def test_grep_past_its_match_cap_is_cut(tmp_path):
