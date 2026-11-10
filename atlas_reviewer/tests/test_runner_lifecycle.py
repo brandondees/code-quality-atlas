@@ -738,6 +738,21 @@ def test_probe_runner_reports_tools_and_raw_framing_then_destroys():
     assert ops(api)[:3] == ["create", "set_network_policy", "get_network_policy"]
 
 
+def test_the_probe_scrubs_its_raw_framing_sample_and_keeps_the_framing():
+    secret = fake_token("ghs_")
+    api = FakeSprites(rules=(ExecRule("echo", f"framed {secret}", 0),))
+    telemetry = Telemetry(
+        FakeClock(), scrub=lambda text: Redactor((secret,))(text).text
+    )
+    outcome = probe_runner(
+        api, MemoryLedger(), TOOLS, name=NAME, deadline_s=60, clock=FakeClock(),
+        telemetry=telemetry,
+    )  # fmt: skip
+    assert outcome.framing_sample.startswith(b"\x01")
+    assert secret.encode() not in outcome.framing_sample
+    assert b"[REDACTED" in outcome.framing_sample
+
+
 def _egress_answer(*lines, exit_code=0):
     return ExecRule("atlas-egress", "\n".join(lines), exit_code)
 

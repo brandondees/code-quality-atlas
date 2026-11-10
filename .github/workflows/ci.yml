@@ -432,6 +432,20 @@ jobs:
         # no credentials and no network calls beyond a loopback HTTP server.
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: python -m pytest atlas_reviewer/tests -q --cov=atlas_reviewer
+      - name: reviewer service dry run (offline fixture PR event)
+        # The offline provider reviews no file, so the dry run must report
+        # incomplete coverage: exit 4 and a non-approving status line (D36).
+        # Any other exit, an APPROVE, or complete coverage fails the step.
+        if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
+        run: |
+          draft="$RUNNER_TEMP/atlas-reviewer-draft.md"
+          code=0
+          python -m atlas_reviewer --state-dir "$RUNNER_TEMP/atlas-reviewer-state" review --event atlas_reviewer/fixtures/sample-pr/event.json --dry-run > "$draft" || code=$?
+          status="$(head -n 1 "$draft")"
+          echo "exit $code; $status"
+          test "$code" -eq 4
+          grep -q '"coverage_complete": false' <<<"$status"
+          ! grep -q '"review_event": "APPROVE"' <<<"$status"
       - name: eval structure (all skills)
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: python -m tooling.cli eval

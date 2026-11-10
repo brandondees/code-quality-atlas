@@ -154,6 +154,22 @@ def test_the_telemetry_section_renders_outside_a_draft():
     assert "a &lt;b> probe" in text
 
 
+def test_the_telemetry_section_keeps_an_active_draft_scrub():
+    from atlas_reviewer.draft import _scrubber, telemetry_section
+    from atlas_reviewer.telemetry import Event
+
+    secret = "synthetic-draft-secret-0123"
+    token = _scrubber.set(lambda text: text.replace(secret, "[REDACTED]"))
+    try:
+        text = telemetry_section(
+            (Event(1, "runner", f"probe {secret}", "ok", 0.0, 0.1, error=""),)
+        )
+    finally:
+        _scrubber.reset(token)
+    assert "probe [REDACTED]" in text
+    assert secret not in text
+
+
 def test_untrusted_text_carries_no_html_into_the_draft():
     from atlas_reviewer.draft import _cell, _scrubber, controller_notes_section
     from atlas_reviewer.notes import quote_untrusted
