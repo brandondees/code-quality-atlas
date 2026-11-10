@@ -101,15 +101,21 @@ _SOURCES: tuple[tuple[str, Fetch, Parse], ...] = (
 
 
 def fetch_remarks(
-    event: PrEvent, github: GitHubReader, out: Collected
+    event: PrEvent,
+    github: GitHubReader,
+    out: Collected,
+    *,
+    scrub: Callable[[str], str],
 ) -> tuple[Remark, ...]:
     """Every review, review comment and conversation comment GitHub lists,
     up to the client's page cap. A failed or cut-off list, and each entry
-    that does not parse, is an omission; the rest are kept."""
+    that does not parse, is an omission; the rest are kept. A failed list's
+    error is quoted into a draft note, so `scrub` must be the draft's: a
+    value already JSON-quoted cannot be found by a later scrub."""
     return tuple(
         remark
         for what, fetch, parse in _SOURCES
-        for remark in _read(what, fetch, parse, github, event, out)
+        for remark in _read(what, fetch, parse, github, event, out, scrub)
     )
 
 
@@ -120,6 +126,7 @@ def _read(
     github: GitHubReader,
     event: PrEvent,
     out: Collected,
+    scrub: Callable[[str], str],
 ) -> tuple[Remark, ...]:
     source = f"pull request {what}"
     try:
@@ -127,7 +134,7 @@ def _read(
     except BoundaryError as exc:
         out.notes.append(
             f"The pull request's {what} could not be fetched (error, quoted: "
-            f"{quote_untrusted(str(exc), scrub=str)})."
+            f"{quote_untrusted(str(exc), scrub=scrub)})."
         )
         out.omit(source, "fetch failed", "not read; the conversation block lacks them")
         return ()

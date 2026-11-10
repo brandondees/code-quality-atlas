@@ -246,7 +246,7 @@ def test_budgets_must_be_positive_integers(budget):
 
 def test_fixture_remarks_are_read_from_all_three_lists():
     gh = FixtureGitHub(FIXTURE)
-    remarks = fetch_remarks(EVENT, gh, Collected())
+    remarks = fetch_remarks(EVENT, gh, Collected(), scrub=str)
     assert [r.source_id for r in remarks] == [
         "review:8101",
         "review_comment:8201",
@@ -261,7 +261,7 @@ def test_a_failed_list_is_a_quoted_note_and_an_omission():
             raise BoundaryError("GitHub HTTP 502 `x`")
 
     out = Collected()
-    remarks = fetch_remarks(EVENT, Broken(FIXTURE), out)
+    remarks = fetch_remarks(EVENT, Broken(FIXTURE), out, scrub=str)
     assert "review:8101" not in [r.source_id for r in remarks]
     assert out.notes == [
         (
@@ -274,6 +274,20 @@ def test_a_failed_list_is_a_quoted_note_and_an_omission():
     ]
 
 
+@pytest.mark.parametrize("value", ["sek\\retAA", "sek`retAA"])
+def test_a_failed_list_is_scrubbed_before_it_is_quoted(value):
+    class Broken(FixtureGitHub):
+        def list_reviews(self, repo, number):
+            raise BoundaryError(f"GitHub HTTP 502 {value}")
+
+    out = Collected()
+    fetch_remarks(
+        EVENT, Broken(FIXTURE), out, scrub=lambda text: text.replace(value, "[X]")
+    )
+    (note,) = out.notes
+    assert '`"GitHub HTTP 502 [X]"`' in note
+
+
 def test_a_page_capped_list_says_the_newest_are_missing():
     class Capped(FixtureGitHub):
         def list_issue_comments(self, repo, number):
@@ -281,7 +295,7 @@ def test_a_page_capped_list_says_the_newest_are_missing():
             return Listing(full.items, truncated=True, pages_read=10)
 
     out = Collected()
-    fetch_remarks(EVENT, Capped(FIXTURE), out)
+    fetch_remarks(EVENT, Capped(FIXTURE), out, scrub=str)
     (omission,) = out.omissions
     assert (omission.source, omission.limit) == (
         "pull request conversation comments",
@@ -297,7 +311,7 @@ def test_a_malformed_entry_is_skipped_by_index_and_the_rest_kept():
             return Listing(({"id": "nope"}, *full.items), False, 1)
 
     out = Collected()
-    remarks = fetch_remarks(EVENT, Odd(FIXTURE), out)
+    remarks = fetch_remarks(EVENT, Odd(FIXTURE), out, scrub=str)
     assert "review_comment:8202" in [r.source_id for r in remarks]
     (omission,) = out.omissions
     assert (omission.source, omission.limit) == (

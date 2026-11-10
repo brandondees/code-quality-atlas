@@ -1784,6 +1784,53 @@ def test_a_diff_fetch_error_is_scrubbed_before_it_is_quoted(value, monkeypatch):
     assert "[REDACTED:assignment]" in notes
 
 
+def _flagging(value):
+    """A fixture whose diff commits `value`, so the draft's scrub flags it."""
+    diff = (
+        "diff --git a/src/k.py b/src/k.py\n--- a/src/k.py\n+++ b/src/k.py\n"
+        f'@@ -1 +1,2 @@\n x\n+password = "{value}"\n'
+    )
+
+    class Flagging(FixtureGitHub):
+        def get_pull(self, repo, number):
+            return {**super().get_pull(repo, number), "changed_files": 1}
+
+        def get_pull_diff(self, repo, number):
+            return diff
+
+    return Flagging
+
+
+def _note_with(draft, marker):
+    (line,) = [n for n in section(draft, "Controller notes").split("\n") if marker in n]
+    return line
+
+
+@pytest.mark.parametrize("value", MARKUP_VALUES)
+def test_a_flagged_check_name_is_scrubbed_in_the_not_rerun_note(value):
+    class Renamed(_flagging(value)):
+        def list_check_runs(self, repo, sha):
+            full = super().list_check_runs(repo, sha)
+            runs = tuple(
+                {**r, "name": f"lint {value}"} if r.get("id") == 6001 else r
+                for r in full.items
+            )
+            return Listing(runs, full.truncated, full.pages_read)
+
+    draft = Setup(github=Renamed(FIXTURE)).run()
+    _assert_quoted_scrub(_note_with(draft, "has no result at the reviewed head"), value)
+
+
+@pytest.mark.parametrize("value", MARKUP_VALUES)
+def test_a_flagged_remark_fetch_error_is_scrubbed_in_its_note(value):
+    class Broken(_flagging(value)):
+        def list_reviews(self, repo, number):
+            raise BoundaryError(f"GitHub HTTP 502 {value}")
+
+    draft = Setup(github=Broken(FIXTURE)).run()
+    _assert_quoted_scrub(_note_with(draft, "reviews could not be fetched"), value)
+
+
 def test_the_offline_provider_never_approves():
     s = Setup(provider=OfflineProvider())
     draft = s.run()

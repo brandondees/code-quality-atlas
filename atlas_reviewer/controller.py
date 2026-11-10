@@ -187,12 +187,10 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
         config.ingest,
         collected,
     )
-    conversation = _conversation(event, pull, deps, config, collected)
     runner, tool_results = _run_tools(event, deps, config, collected)
     evidence = classify(
         event.head_sha, collected.items, config.expected, collected.failures
     )
-    collected.notes.extend(_not_rerun_notes(evidence))
     diff = _fetch_diff(event, pull, deps, collected)
     # Flagged before the notes are quoted: quote_untrusted and the draft's
     # table cells encode `|`, `\` and backticks, and a scrub after that
@@ -200,6 +198,8 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
     flagged = () if diff is None else diff.secrets.values
     scrubber = replace(deps.redactor, flagged=flagged)
     scrub = lambda text: scrubber(text).text
+    conversation = _conversation(event, pull, deps, config, collected, scrub=scrub)
+    collected.notes.extend(_not_rerun_notes(evidence, scrub=scrub))
     issues = _issue_blocks(event, pull, deps, config, collected, scrub=scrub)
     lenses = _select_lenses(event, pull, diff, deps, config, telemetry, scrub=scrub)
     collected.notes.extend(n for n in (lenses.note,) if n)
@@ -521,8 +521,10 @@ def _conversation(
     deps: Deps,
     config: ReviewConfig,
     collected: Collected,
+    *,
+    scrub: Callable[[str], str],
 ) -> Conversation:
-    remarks = fetch_remarks(event, deps.github, collected)
+    remarks = fetch_remarks(event, deps.github, collected, scrub=scrub)
     conversation = build_conversation(
         pull,
         collected.commits,
@@ -538,10 +540,12 @@ def _conversation(
 MAX_NOTED_FAILURES = 10
 
 
-def _not_rerun_notes(evidence: tuple[Evidence, ...]) -> list[str]:
+def _not_rerun_notes(
+    evidence: tuple[Evidence, ...], *, scrub: Callable[[str], str]
+) -> list[str]:
     failures = not_rerun_failures(evidence)
     lines = [
-        f"{e.item.provenance.key.kind.value} {quote_untrusted(e.item.provenance.key.name, scrub=str)} "
+        f"{e.item.provenance.key.kind.value} {quote_untrusted(e.item.provenance.key.name, scrub=scrub)} "
         f"concluded `{e.item.conclusion.value}` at commit `{e.item.head_sha[:12]}` and "
         "has no result at the reviewed head SHA, so the head may still carry that "
         "failure (UNKNOWN, not a pass)."
