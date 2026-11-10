@@ -18,6 +18,7 @@ from atlas_reviewer.bridge import (
     SessionLimits,
     Status,
     ToolLimits,
+    _grep_records,
     call_script,
     render,
     run_bridge,
@@ -221,6 +222,39 @@ def test_a_page_asked_for_mid_character_starts_at_the_next_whole_one(tmp_path):
         source=source,
     )  # fmt: skip
     assert page.content.text.startswith("本\n")
+
+
+def test_next_offset_counts_the_bytes_skipped_to_a_character_boundary(tmp_path):
+    limits = {**DEFAULT_LIMITS, "diff_file": ToolLimits(5, 10)}
+    head = {**HEAD_FILES, "docs/notes.md": "日本語\n".encode()}
+    source = SourceTrees(tarball(BASE_FILES), tarball(head), OLD, HEAD)
+    whole = one(tmp_path / "w", "diff_file", {"path": "docs/notes.md"}, source=source)
+    raw = whole.content.text.encode()
+    at = raw.index("日".encode()) + 1
+    args = {"path": "docs/notes.md", "offset": at}
+    page = one(tmp_path / "p", "diff_file", args, source=source, limits=limits)
+    assert (page.content.text, page.next_offset) == ("本", at + 2 + 3)
+    assert raw[page.next_offset :].startswith("語".encode())
+
+
+COMMIT = "c" * 40
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"{'d' * 40}:a.py\x001\x00hit\n",
+        "a.py\x001\x00hit\n",
+        f"{COMMIT}a.py\x001\x00hit\n",
+    ],
+)
+def test_a_grep_record_not_prefixed_with_the_staged_commit_is_not_taken(text):
+    assert _grep_records(text, COMMIT) == ([], False)
+
+
+def test_a_grep_record_prefixed_with_the_staged_commit_is_taken():
+    text = f"{COMMIT}:a.py\x001\x00hit\n"
+    assert _grep_records(text, COMMIT) == ([("a.py", "1", "hit")], True)
 
 
 def test_a_byte_cap_inside_a_character_keeps_only_whole_ones(tmp_path):
