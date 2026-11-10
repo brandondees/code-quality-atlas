@@ -1018,7 +1018,7 @@ def test_upload_exec_is_capped_by_the_remaining_review_deadline():
             b"tarball-bytes",
             UnpackLimits(),
             (
-                "source archive is not a readable gzip tar: ReadError; "
+                "source archive is not a readable gzip tar: BadGzipFile; "
                 "no runner was created"
             ),
         ),

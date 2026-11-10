@@ -6,12 +6,17 @@ one byte about 1,000 to 1: a 9 MiB archive can unpack to about 9 GiB.
 `measure` walks the tar headers in memory, counting members and summing
 their declared sizes, and refuses the archive at the first header over a
 cap, so the controller never decompresses more than the cap to find out.
+`GzipFile` decompresses every gzip member, which tarfile's own `r|gz` does
+not: it stops at the first member's end, so a second member could hide the
+big file. tarfile still reads the decompressed stream without seeking, so a
+header is seen, and refused, before its data is read.
 Nothing is written to disk. The runner's `tar` reads the same headers
 (Python's `tarfile` and GNU tar agreeing on them is (verify)).
 """
 
 from __future__ import annotations
 
+import gzip
 import io
 import tarfile
 import zlib
@@ -50,7 +55,10 @@ def measure(data: bytes, limits: UnpackLimits = DEFAULT_UNPACK) -> Unpacked:
     `max_bytes` in all."""
     members = total = 0
     try:
-        with tarfile.open(fileobj=io.BytesIO(data), mode="r|gz") as tar:
+        with (
+            gzip.GzipFile(fileobj=io.BytesIO(data)) as stream,
+            tarfile.open(fileobj=stream, mode="r|") as tar,
+        ):
             for member in tar:
                 members, total = members + 1, total + member.size
                 _within(members, total, limits)

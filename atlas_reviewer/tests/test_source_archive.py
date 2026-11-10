@@ -72,3 +72,35 @@ def test_an_unreadable_archive_is_refused(data):
 def test_limits_must_be_positive_integers(limits):
     with pytest.raises(ValueError, match="positive integers"):
         UnpackLimits(**limits)
+
+
+def two_members(first_size, second_size):
+    """One tar stream split across two gzip members, as `cat a.gz b.gz`
+    makes: a small file, then a big one carrying its data."""
+    small = tarfile.TarInfo("src/small")
+    small.size = first_size
+    big = tarfile.TarInfo("src/big")
+    big.size = second_size
+    first = small.tobuf() + b"\0" * first_size
+    return gzip.compress(first) + gzip.compress(big.tobuf() + b"\0" * second_size)
+
+
+def test_a_file_in_a_later_gzip_member_is_still_counted():
+    data = two_members(512, 4 * 1024 * 1024)
+    assert len(data) < 16 * 1024
+    with pytest.raises(BoundaryError, match="at least 4194816"):
+        measure(data, UnpackLimits(max_bytes=1024 * 1024))
+
+
+def test_members_in_every_gzip_member_are_counted():
+    data = two_members(512, 512)
+    assert measure(data) == Unpacked(2, 1024)
+
+
+def test_a_header_in_a_later_member_is_refused_before_its_data_is_read():
+    first = tarfile.TarInfo("a")
+    big = tarfile.TarInfo("b")
+    big.size = MAX_UNPACKED_BYTES + 1
+    data = gzip.compress(first.tobuf()) + gzip.compress(big.tobuf())
+    with pytest.raises(BoundaryError, match="unpacks to over 268435456 bytes"):
+        measure(data)
