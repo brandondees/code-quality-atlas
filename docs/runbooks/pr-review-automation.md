@@ -6,8 +6,10 @@ review session, and it isn't budget/rate-limited the way the CodeRabbit/Copilot
 PR integrations are. Two supported architectures, not one — pick per repo:
 
 - **Model A — event-driven** (§1/§1a/§2): a `Pull request opened`-triggered
-  reviewer posts findings and re-reviews each push (on its own self-nudge
-  timer, not only a PR-activity subscription — see §1), and a scheduled poller
+  reviewer posts findings and re-reviews each push that changes the layer
+  diff on its own self-nudge timer, not only a PR-activity subscription —
+  see §1. A restack-only head change posts the one-line summary in
+  `atlas-review-pr.md` step 2 instead of a lens round. A scheduled poller
   covers both the merge-conflict gap webhooks don't deliver and a reviewer
   watch that's gone quiet, escalating the latter by re-requesting review. Near-
   instant on a push; needs two GitHub-event routines set up by hand in the
@@ -84,7 +86,9 @@ build+autofix ──────────────────────
    opened`. Fires within seconds of a PR opening, spins up one session that follows
    the `atlas-review-pr` command (inlined in the routine prompt — slash commands
    don't resolve in routine sessions, see [Setup](#setup)), then **stays resident and
-   watches the PR**, re-reviewing each push in the same session. A routine can carry only **one GitHub event** (see
+   watches the PR**, re-reviewing each push in the same session. A restack
+   whose layer diff is unchanged posts step 2's one-line summary instead of
+   a lens round. A routine can carry only **one GitHub event** (see
    [Setup §1](#1-reviewer-routine-model-a--event-driven-no-cron-lag)), so `synchronize` can't
    be a second trigger here — a self-nudge timer plus a best-effort PR-activity
    subscription cover re-review instead (§1's watch block treats the timer as
@@ -284,7 +288,9 @@ In the Claude Code web app → **Routines** → **New routine**:
   change pushed after you approved still gets reviewed. After an approval, only
   speak again if a later push introduces a NEW finding at or above the floor —
   stay silent on quiet pushes rather than re-posting APPROVE or re-dumping the
-  advisory list. Stop watching only when the PR is merged or closed, or the hard
+  advisory list. A restack-only head change is not that silence. Follow
+  `atlas-review-pr.md` step 2: post its one-line summary, run no lenses, and
+  do not count the round toward the cap. Stop watching only when the PR is merged or closed, or the hard
   round cap (default 10) is reached. When you see it merged with findings still
   open, apply REVIEW.md's `unresolved_findings` setting to them first (default
   `note`: one final comment naming each; see atlas-review-pr.md step 5).
@@ -310,7 +316,9 @@ In the Claude Code web app → **Routines** → **New routine**:
   same as above), falling back to the `<!-- atlas-review round:N -->`
   markers only where a heading is absent (GitHub is the source of truth, not
   memory — see the note above about `/compact`; the same `unknown` handling
-  applies here too), run the review logic, then re-arm.
+  applies here too). A restack-only head change follows `atlas-review-pr.md`
+  step 2 before any lenses: one-line summary, no cap count. Otherwise run
+  the review logic, then re-arm.
 
   **Don't oversell this to yourself.** `send_later` is a self-bind scheduled
   Routine, not an in-process timer, and its documented contract is that delivery
@@ -446,14 +454,27 @@ unbounded).
 
   1. For each named repo, list its open PRs (mcp__github__list_pull_requests);
      read each PR's mergeable state (mcp__github__pull_request_read).
-  2. "behind" + no conflicts → bring up to date with
-     mcp__github__update_pull_request_branch (no comment; emits a synchronize event).
+  2. "behind" + no conflicts → first check stack membership, per
+     commands/atlas-rebase-stale.md §2 (a non-null `stack`; if the tool omits
+     it, a non-default base, or another open PR based on this head, means
+     stacked). Never call
+     mcp__github__update_pull_request_branch on a stacked PR: it writes a
+     merge commit, and stacks need linear history. GitHub restacks when the
+     bottom PR merges; otherwise post the one-time restack poke (same
+     <!-- atlas-rebase-poke --> marker) and count it as stack-restack poked.
+     Only a non-stacked PR is brought up to date with
+     mcp__github__update_pull_request_branch (no comment; emits a synchronize
+     event).
      "dirty" → do NOT resolve; post the poke as an INLINE REVIEW COMMENT
      (read the diff, anchor to a line on the RIGHT side, submit as a COMMENT review)
      so the author's auto-fix subscription — which reads review threads, not issue
      comments — sees it; body = a whole-PR conflict notice asking them to rebase onto
-     base and resolve, only if no unaddressed <!-- atlas-rebase-poke --> review thread
-     from you exists. Clean/up-to-date/draft → skip silently.
+     base and resolve. For a stacked PR, the body says the stack needs
+     restacking: gh stack rebase from the lowest changed layer, resolve
+     conflicts, --continue, then gh stack push, or the Rebase stack button.
+     It must not merge the base in. Same <!-- atlas-rebase-poke --> marker,
+     only if no unaddressed poke from you exists. Clean/up-to-date/draft →
+     skip silently.
   3. RECOVER A STUCK ACK LOCK FIRST, once per sweep, before anything else in
      this step -- SAFELY, NOT BLINDLY (issue #360 follow-up; refined after
      PR #402's round-2 review found the first version of this recovery
@@ -685,7 +706,10 @@ a review.
      PR** (`head.repo.full_name != base.repo.full_name`) — `update_pull_
      request_branch` writes a merge commit onto the PR's branch, which for a
      fork PR belongs to the contributor's own repo, not this one; note the
-     skip in the final report instead (issue #387).
+     skip in the final report instead (issue #387). Stacked PRs are
+     excluded from the update-branch call because they need a cascading
+     restack rather than a merge commit; see `commands/atlas-rebase-stale.md`
+     §2.
   3. **The review itself.** For each PR needing round 1 or a re-review, the
      top-level session first acquires the ack lock itself:
      `mcp__github__pull_request_review_write`, method `create`, no `event`,
@@ -752,7 +776,8 @@ The brakes live in `REVIEW.md` and are enforced by `/atlas-review-pr`:
   Blocker-only. A Major-only stream is already low-noise, so each further round is
   cheap, and a real regression introduced by a late fix still gets surfaced however
   many rounds in. Findings below the floor aren't dropped silently: they're carried
-  as a **non-blocking advisory list** in the review summary (and in the cap notice),
+  as a **non-blocking advisory list** in the review summary (and in the cap notice
+  and a restack-only summary),
   so suppressed nits stay visible for optional tidy-up without re-driving the loop.
 - **Only new findings earn a comment** — a push earns inline comments only for
   findings new that round (not ones a standing thread already records). This, not an
@@ -761,12 +786,15 @@ The brakes live in `REVIEW.md` and are enforced by `/atlas-review-pr`:
 - **Approve-on-clean** — the first round with nothing new above its floor posts a
   single `APPROVE` (with the advisory list, if any). The build session then has no
   actionable inline comments and goes quiet. Subsequent quiet pushes stay silent —
-  no repeated APPROVE. This is the real terminal state.
+  no repeated APPROVE. A restack-only head change still posts its one-line
+  summary (`atlas-review-pr.md` step 2). This is the real terminal state.
 - **Hard round cap** — a backstop (default 10) that hands a still-churning PR to a
   human rather than burning another machine round. The cap notice carries the
   outstanding advisory findings forward so the human inherits the open list. The cap
   is enforced by the instructions, not the platform — the reviewer decides each
-  round whether a push warrants a new round, so it won't burn a round on a no-op event.
+  round whether a push warrants a new round, so it won't burn a round on a no-op
+  event, including a restack whose layer diff is unchanged
+  (`atlas-review-pr.md` step 2).
 
 ## Usage and run limits
 
@@ -812,7 +840,9 @@ you own, and resets daily.
   feedback; resolving it is left to that session. Residual caveat: actually
   *resolving* a merge conflict may exceed what an auto-fix session does for a routine
   lint/CI fix — if it can't, the unresolved poke thread stays as a human-visible flag.
-  (`behind` PRs are still auto-rebased with no comment.)
+  (Non-stacked `behind` PRs are still auto-rebased with no comment.) Stacked
+  PRs are excluded from the update-branch call because they need a cascading
+  restack rather than a merge commit; see `commands/atlas-rebase-stale.md` §2.
 - **CI *success* and bare pushes** aren't reliably delivered to a PR-activity
   subscription, and the resident `opened`-triggered session isn't an
   indefinitely-lived process either — cloud sessions get reclaimed after a
@@ -836,7 +866,8 @@ you own, and resets daily.
   fresh session inherits nothing from whatever died — it re-derives round state
   from GitHub the same way any reviewer session does. If closing the gap faster
   than the poller's cadence matters more than the per-push run cost, swap the
-  reviewer's trigger to **`Pull request synchronize`** (one fresh run per push)
+  reviewer's trigger to **`Pull request synchronize`** (one fresh run per push;
+  the run itself may be the restack-only summary rather than a lens round)
   instead of relying on a long-lived `opened` watch at all — still the simplest
   fix if you'd rather not run §1a/§2 together.
 - **Confirmed available GitHub trigger events (as of this revision):** `Pull
@@ -885,6 +916,9 @@ rather than assumed.
   and PR reviews (including an `APPROVE`-shaped body — see *Match the
   approval in the review body*), re-request review, and — §2/§4 only —
   fast-forward a PR branch onto its base via `update_pull_request_branch`.
+  Stacked PRs are excluded from the update-branch call because they need a
+  cascading restack rather than a merge commit; see
+  `commands/atlas-rebase-stale.md` §2.
   It never merges a PR, never edits branch protection or repo settings, and
   never pushes a commit from its own working tree (the branch-update call is
   a GitHub API merge, not a local `git push`). **Leave "Allow unrestricted
@@ -913,8 +947,8 @@ rather than assumed.
   triggered it. Issue #387 closed part of this for §4: `atlas-poll-and-
   review.md` now requires an explicit repo (or comma-separated repo list) in
   `$ARGUMENTS` rather than defaulting to every attached repo, skips
-  `update_pull_request_branch` on fork PRs, and caps total review-subagent
-  spawns at 20 per tick. Issue #440 closed the remaining gap for §2:
+  `update_pull_request_branch` on fork PRs and on stacked PRs, and caps total
+  review-subagent spawns at 20 per tick. Issue #440 closed the remaining gap for §2:
   `atlas-rebase-stale.md` now requires that same explicit repo scope (a
   per-tick action cap doesn't apply there, since it never spawns review
   subagents itself). Neither poller relies on repo attachment at all

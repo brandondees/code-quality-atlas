@@ -51,13 +51,29 @@ to each). For each PR, read its mergeable state via
 ## 2. Classify each PR
 
 - **Behind but auto-mergeable** (`mergeable_state` = `behind`, no conflicts):
-  **first check whether the PR is from a fork**
+  **first check stack membership** on the PR object from §1's
+  `pull_request_read`. The PR resource's `stack` object is non-null
+  for a stack member. If the tool doesn't return it, a base ref other than
+  the default branch means "possibly stacked", so treat the PR as stacked.
+  That base-ref test misses a stack's bottom PR, whose base is the trunk, so
+  also treat the PR as stacked when another open PR's base ref is this PR's
+  head ref. Never call `update_pull_request_branch` on a stacked PR: it
+  writes a merge commit, and stacks need linear history. GitHub restacks
+  automatically when the bottom PR merges. Otherwise a stack that's behind
+  needs a cascading rebase (the Rebase stack button, or `gh stack rebase`
+  then `gh stack push`), which this API-only sweep can't do. Post the
+  one-time poke instead, using the same inline review comment and
+  `<!-- atlas-rebase-poke -->` marker as the conflicted case. The body asks
+  for that cascading rebase. It must not merge the base in. Count it as
+  "stack-restack poked". **Then, for a PR that is not stacked, check whether
+  it is from a fork**
   (`head.repo.full_name != base.repo.full_name`) — a fork PR's branch belongs
   to the contributor's own repo, not this one, and `update_pull_request_branch`
   writes a merge commit onto it, which is more write power than this sweep
   should exercise on someone else's fork without their say-so (issue #387).
   **Skip fork PRs here** and note the skip in the final report. For same-repo
-  PRs, bring it up to date with `mcp__github__update_pull_request_branch`. This
+  PRs that are not stacked, bring it up to date with
+  `mcp__github__update_pull_request_branch`. This
   emits a `synchronize` event, which re-triggers the reviewer and any auto-fix
   session naturally — no comment needed.
 - **Conflicted** (`mergeable_state` = `dirty`): do **not** try to
@@ -71,7 +87,13 @@ to each). For each PR, read its mergeable state via
   submit it as a `COMMENT` review (`mcp__github__pull_request_review_write`,
   method `submit_pending`, `event: COMMENT`). Make the body unambiguous that it is
   a **whole-PR conflict notice, not a line-level issue**: the PR conflicts with its
-  base branch — rebase onto the base, resolve the conflicts, and push. Leave *how* to
+  base branch — rebase onto the base, resolve the conflicts, and push. For a
+  stacked PR, the poke body says the stack needs restacking, in place of that
+  rebase-onto-base line. It runs
+  `gh stack rebase` from the lowest changed layer, resolves conflicts, runs
+  `--continue`, then `gh stack push`, or the owner uses the Rebase stack
+  button. It must not merge the base in. Keep the same
+  `<!-- atlas-rebase-poke -->` marker. Leave *how* to
   resolve to the owning session. Post only if there isn't already an unaddressed poke
   from you (see the marker below).
 - **Clean / up to date / draft**: skip silently.
@@ -213,11 +235,13 @@ established baseline, not a missing or still-in-flight one.
 
 ## 4. Stay idempotent
 
-Mark every conflict poke with `<!-- atlas-rebase-poke -->` (review-comment body)
+Mark every conflict poke and every stack-restack poke (§2) with
+`<!-- atlas-rebase-poke -->` (review-comment body)
 and every coverage poke with `<!-- atlas-coverage-poke -->` (issue-comment body).
-Before posting either, list the PR's existing review threads / issue comments and
+Before posting any of them, list the PR's existing review threads / issue comments and
 skip if an **outstanding** poke of that kind from you is already there — this
-command runs often and must never spam. For the conflict-poke, "outstanding"
+command runs often and must never spam. For a poke carrying
+`<!-- atlas-rebase-poke -->`, "outstanding"
 means the review thread isn't resolved (GitHub's own `isResolved`). For the
 coverage-poke, use §3's precise definition (a later round review clears it) —
 never a bare presence check, which would silently and permanently disable the
@@ -228,7 +252,8 @@ skipped).
 ## 5. Report
 
 End with a one-line summary: how many PRs were updated, conflict-poked,
-coverage-poked, skipped, and fork-PR branch-updates skipped (step 2), plus
+coverage-poked, skipped, fork-PR branch-updates skipped (step 2), and
+stacked PRs skipped for branch update or poked to restack (step 2), plus
 any stuck ACK locks cleared or flagged (step 3). Post nothing to GitHub
 beyond the pokes above, the coverage escalation's review re-requests (§3),
 and any `delete_pending` calls.
