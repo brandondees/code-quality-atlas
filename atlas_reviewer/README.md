@@ -82,8 +82,11 @@ closed: it reads the blocks itself and accepts only what `git archive`
 writes, in a form GNU tar reads the same way. That means plain-octal
 header numbers; member types `git archive` writes; a pax global `comment`
 and per-member `path`, `linkpath` and `mtime`, each at most once; metadata
-entries of at most 1 MiB and 16 MiB in all; and zero padding after the
-end block. Every other header is refused (D39).
+entries of at most 1 MiB and 16 MiB in all; paths of plain segments, within
+4,096 bytes, 64 deep and 1,000,000 segments in all, each member's parent
+directory listed as an entry before it (so unpacking creates no directory
+the walk did not count); and zero padding after the end block. Every other
+header is refused (D39).
 
 `probe-runner` exits 3 when the runner did not complete or, for the
 protocol probe, the stdin round-trip did not come back `ok` or the
@@ -553,16 +556,19 @@ a `Bridge` to the caller.
   gzip member, refusing any header it cannot fully read), and any
   other is refused before a runner exists. The one-shot reviewer's source
   upload and `probe-runner` are checked the same way, so they now also
-  refuse a non-gzip archive and a repository of over 50,000 members
-  (files, directories and links), which can fit well under 9 MiB. Each is
+  refuse a non-gzip archive, a repository of over 50,000 members
+  (files, directories and links), which can fit well under 9 MiB, and one
+  with a member whose parent directory is not an earlier entry. Each is
   uploaded through the source-upload exec shape, then all are committed in
   one exec into a bare repository with a fixed identity and date. That
   exec has 120 seconds (`runner.UNPACK_BUDGET_S`), and each tree's
   `tar -xzf` inside it is also stopped by the guest's `timeout` at 60
   seconds (`EXTRACT_TIMEOUT_S`). The runner holds the unpack caps again
-  by its own tar before writing, and under `ulimit -f` while writing
-  (`guest_unpack.py`). A tree past them is refused, with its partial
-  extraction removed. HEAD's
+  by its own tar before writing, counting the directories member paths
+  imply, and under `ulimit -f` while writing (`guest_unpack.py`). A tree
+  past them is refused, and a failed extraction that the script survives
+  has its partial tree removed (a killed script cannot clean up: the
+  runner is destroyed). HEAD's
   parent is BASE; DEFAULT is its own root commit. Tools use only the
   synthetic ids staging reports. The merge base comes from GitHub's
   compare endpoint (`fetch_sources`).
@@ -623,7 +629,7 @@ tarball, and the controller loop that calls the bridge (phase 3).
 | `bridge.py` | the read-only git tool bridge: per-call scripts, capped base64 replies, result statuses, secret locations, the call ledger, `run_bridge` | via `SpritesApi` |
 | `bridge_args.py` | the closed tool set and its argument rules (`validate`) | no |
 | `source_archive.py` | the unpacked-size and member caps a source tarball must pass before upload (`measure`) | no |
-| `guest_unpack.py` | the same caps held again in the runner: its tar measures before extracting, then `ulimit -f` while extracting | no |
+| `guest_unpack.py` | the same caps held again in the runner: its tar measures bytes, members and implied directories before extracting, then `ulimit -f` while extracting, every tar run under `timeout` | no |
 | `bridge_staging.py` | Option B staging: trusted git, the hardened git options, tarballs committed into a bare repository, `fetch_sources` | via `SpritesApi`, `GitHubReader` |
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`) | no |
 | `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → resolve interpreter → upload → unpack → tools → destroy), `probe_runner`, `run_session` (a `Session` on the same lifecycle), the one exec wrapper (`exec_argv`, minimal `env -i` environment) | via `SpritesApi` |
@@ -679,8 +685,10 @@ tarball, and the controller loop that calls the bridge (phase 3).
   with a 120-second budget. Before writing anything, the runner's own tar
   checks the archive against the same unpacked-size and member caps
   (`guest_unpack.py`), and extraction runs under `ulimit -f` sized to the
-  byte cap. An archive past either cap is refused, and a failed unpack
-  removes its partial tree (D39; the shell's block size is (verify)). The tool check has 60 seconds and each tool
+  byte cap, and every tar run is under a 60-second `timeout`. An archive
+  past a cap, or a tar that stalls, is refused with a named reason, and a
+  failed unpack the script survives removes its partial tree (D39; the
+  shell's block size is (verify)). The tool check has 60 seconds and each tool
   exec its timeout plus 15. Every budget is capped by the remaining review
   deadline. The controller fetches the tarball with its own token. An external
   deadline is enforced by a watchdog timer. Destroy runs in `finally` and
