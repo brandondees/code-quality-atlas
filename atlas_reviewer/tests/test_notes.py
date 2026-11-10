@@ -114,3 +114,18 @@ def test_omissions_beyond_ten_are_counted_not_listed():
     assert line.startswith("Omissions and limits hit: 13 (full detail")
     assert '`"src9"` (`"cap"`); and 3 more.' in line
     assert "src10" not in line
+
+
+def test_the_notes_carry_the_lens_plans_coverage_line():
+    from atlas_reviewer.lenses import LensChoice, plan_lenses
+
+    from .helpers import StubLibrary
+
+    library = StubLibrary({"small": "s" * 10, "big": "b" * 100})
+    ranked = [LensChoice("big", "critical tier"), LensChoice("small", "picker rank 1")]
+    plan = plan_lenses(library, ranked, budget_chars=50)
+    lines = controller_notes(ControllerFacts(DONE, (), (), (), plan, ()))
+    assert f"Lenses {plan.coverage()}." in lines
+    assert "NOT RUN: big (did not fit the 50-character lens budget whole" in (
+        plan.coverage()
+    )
