@@ -77,7 +77,10 @@ fetched with the GitHub App (`--event`, needing the three `ATLAS_GITHUB_*`
 variables). Both are held to the review's caps: 9 MiB compressed, and
 256 MiB or 50,000 members unpacked, counted from the tar headers across
 every gzip member before any runner exists (`source_archive.py`); an
-archive past them, or not a gzip tar, is refused.
+archive past them, or not a gzip tar, is refused. The header walk fails
+closed: it accepts only member types `git archive` writes, metadata
+entries of at most 1 MiB, and zero padding after the end block, and
+refuses any header it cannot fully read (D39).
 
 `probe-runner` exits 3 when the runner did not complete or, for the
 protocol probe, the stdin round-trip did not come back `ok` or the
@@ -543,13 +546,17 @@ a `Bridge` to the caller.
   `/usr/bin/git` or `/bin/git` before anything is uploaded. The merge-base
   and head tarballs, plus an optional default-branch tarball, are each at
   most 9 MiB compressed and 256 MiB or 50,000 members unpacked
-  (`source_archive.py`, counted from the tar headers in memory across every gzip member), and any
+  (`source_archive.py`, counted from the tar headers in memory across every
+  gzip member, refusing any header it cannot fully read), and any
   other is refused before a runner exists. The one-shot reviewer's source
   upload and `probe-runner` are checked the same way, so they now also
   refuse a non-gzip archive and a repository of over 50,000 members
   (files, directories and links), which can fit well under 9 MiB. Each is
   uploaded through the source-upload exec shape, then all are committed in
-  one exec into a bare repository with a fixed identity and date. HEAD's
+  one exec into a bare repository with a fixed identity and date. That
+  exec has 120 seconds (`runner.UNPACK_BUDGET_S`), and each tree's
+  `tar -xzf` inside it is also stopped by the guest's `timeout` at 60
+  seconds (`EXTRACT_TIMEOUT_S`). HEAD's
   parent is BASE; DEFAULT is its own root commit. Tools use only the
   synthetic ids staging reports. The merge base comes from GitHub's
   compare endpoint (`fetch_sources`).
