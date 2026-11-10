@@ -23,6 +23,7 @@ from atlas_reviewer.diffs import (
     describe_by_risk,
     diff_paths,
     fit_diff,
+    risk_tier,
 )
 from atlas_reviewer.domain import (
     CleanupStatus,
@@ -59,6 +60,7 @@ from atlas_reviewer.ports import (
     BoundaryError,
     Clock,
     GitHubReader,
+    Narrative,
     PickRequest,
     ReviewHarness,
     ReviewRequest,
@@ -76,6 +78,15 @@ from atlas_reviewer.runner import (
     run_disposable,
 )
 from atlas_reviewer.telemetry import Telemetry
+from atlas_reviewer.verdict import (
+    FileCoverage,
+    ReviewEvent,
+    Unreviewed,
+    Verdict,
+    combine,
+    decide,
+    proposed_event,
+)
 
 MAX_MODEL_CALLS = 3
 PROMPT_TOKEN_ROOM = prompt_token_room(CallLimits())
@@ -136,7 +147,17 @@ class Deps:
     telemetry: Telemetry | None = None
 
 
+@dataclass(frozen=True)
+class ReviewOutcome:
+    draft: str
+    verdict: Verdict
+
+
 def review(event: PrEvent, deps: Deps, config: ReviewConfig) -> str:
+    return run_review(event, deps, config).draft
+
+
+def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcome:
     telemetry = deps.telemetry or Telemetry(
         deps.clock, scrub=lambda text: deps.redactor(text).text
     )
@@ -184,6 +205,8 @@ def review(event: PrEvent, deps: Deps, config: ReviewConfig) -> str:
     selection = None if diff is None else _fit(diff.text, calls, base, deps, config)
     parts = _narrate_parts(base, selection, deps, telemetry)
     secrets = None if diff is None else diff.secrets
+    dropped = _dropped(base, selection)
+    verdict = decide(_proposed(parts), _file_coverage(selection, parts, dropped))
     draft = render_draft(
         DraftInput(
             event=event,
@@ -193,7 +216,7 @@ def review(event: PrEvent, deps: Deps, config: ReviewConfig) -> str:
             links=base.links,
             controller_notes=(
                 *_notes(base, selection),
-                *_coverage_lines(selection, parts, _dropped(base, selection)),
+                *_coverage_lines(selection, parts, dropped),
                 *_secret_note(secrets),
             ),
             secrets=None if secrets is None else secrets.findings,
@@ -208,13 +231,79 @@ def review(event: PrEvent, deps: Deps, config: ReviewConfig) -> str:
             ),
             generated_at=deps.clock.now(),
             telemetry=telemetry.events,
+            verdict=verdict,
         )
     )
     # Check names, failure reasons, archive entry names and runner notes are
     # untrusted too, and the model saw the diff unredacted, so a value the
     # secret scan found is scrubbed wherever the narrative repeats it.
     flagged = () if secrets is None else secrets.values
-    return replace(deps.redactor, flagged=flagged)(draft).text
+    return ReviewOutcome(replace(deps.redactor, flagged=flagged)(draft).text, verdict)
+
+
+def _proposed(parts: tuple[PartNarrative, ...]) -> ReviewEvent:
+    return combine(
+        [
+            proposed_event(p.result.text.text)
+            if p.model_reviewed and isinstance(p.result, Narrative)
+            else None
+            for p in parts
+        ]
+    )
+
+
+def _file_coverage(
+    sel: DiffSelection | None,
+    parts: tuple[PartNarrative, ...],
+    dropped: tuple[str, ...],
+) -> FileCoverage:
+    """Every changed file a model call did not review in full (D36). A file
+    the selection planned into a part with no recorded narrative counts as
+    unreviewed too, so a gap in the bookkeeping cannot read as coverage."""
+    if sel is None:
+        return FileCoverage(
+            None,
+            unknown="the diff was not fetched, or could not be tied to the event SHA",
+        )
+    narrated = [f for p in parts for f in p.files]
+    unreviewed = [
+        *(
+            Unreviewed(f.path, _part_gap(p), f.tier.rank)
+            for p in parts
+            if not p.model_reviewed
+            for f in p.files
+        ),
+        *(
+            Unreviewed(
+                f.path, "cut to fit one call, reviewed only in part", f.tier.rank
+            )
+            for p in parts
+            if p.model_reviewed
+            for f in p.files
+            if f.cut
+        ),
+        *(
+            Unreviewed(f.path, "its diff part was never sent", f.tier.rank)
+            for part in sel.parts
+            for f in part.files
+            if not any(f is n for n in narrated)
+        ),
+        *(
+            Unreviewed(f.path, "never sent to any model call", f.tier.rank)
+            for f in sel.unseen
+        ),
+        *(
+            Unreviewed(path, "dropped before any model call", risk_tier(path).rank)
+            for path in dropped
+        ),
+    ]
+    return FileCoverage(sel.total_files + len(dropped), tuple(unreviewed))
+
+
+def _part_gap(p: PartNarrative) -> str:
+    if p.simulated:
+        return "offline provider, no model call"
+    return "its diff part's model call returned no review"
 
 
 def _head_notes(event: PrEvent, pull: PullInfo) -> list[str]:

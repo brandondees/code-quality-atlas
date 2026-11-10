@@ -131,7 +131,9 @@ def test_draft_is_labelled_as_unposted_and_lists_every_state():
     draft = s.run(
         expected=(SourceKey(SourceKind.CHECK_RUN, "security-scan"),), tools=FULL_TOOLS
     )
-    assert draft.startswith("# Code Quality Atlas review -- DRAFT")
+    status, blank, heading = draft.split("\n", 3)[:3]
+    assert status.startswith("<!-- atlas-review-status: {")
+    assert (blank, heading) == ("", "# Code Quality Atlas review -- DRAFT")
     assert "Nothing was sent to GitHub" in draft
     assert "| PASS | check_run | gate |" in draft
     assert "| FAIL | workflow_run | ci |" in draft
@@ -1228,3 +1230,128 @@ def test_the_picker_call_counts_against_the_three_call_cap():
     assert b"choosing-review-lenses" in requests[0][3]
     assert "### Diff part 2 of 2" in draft
     assert "3 of 3 calls used" in section(draft, "Model usage")
+
+
+# --- the review event and the file-coverage gate (D36) -----------------------
+
+
+class Approving(PickingProvider):
+    """A model that proposes APPROVE for every diff part it reviews."""
+
+    def complete(self, prompt):
+        if "--- lens picker ---" in prompt.system:
+            return super().complete(prompt)
+        self.prompts.append(prompt)
+        return "No findings.\n\nReview event: APPROVE"
+
+
+def approving(github=None, lenses=None):
+    provider = Approving()
+    return Setup(github=github, lenses=lenses, provider=provider)
+
+
+def status_of(draft):
+    from atlas_reviewer.verdict import parse_status
+
+    status = parse_status(draft)
+    assert status is not None, draft.split("\n", 1)[0]
+    return status
+
+
+def top_of(draft):
+    return draft.split("## Evidence summary", 1)[0]
+
+
+def test_a_review_that_saw_every_file_can_approve():
+    from atlas_reviewer.controller import run_review
+
+    s = approving()
+    outcome = run_review(EVENT, s.deps, ReviewConfig())
+    draft = outcome.draft
+    assert outcome.verdict.event.value == "APPROVE"
+    assert status_of(draft) == {
+        "review_event": "APPROVE",
+        "proposed_event": "APPROVE",
+        "coverage_complete": True,
+        "changed_files": status_of(draft)["changed_files"],
+        "unreviewed_files": 0,
+    }
+    assert status_of(draft)["changed_files"] > 0
+    assert "**Review event: APPROVE.** Every changed file" in top_of(draft)
+    assert "REVIEW INCOMPLETE" not in draft
+    # Lens NOT RUN status (2 of the 4 critical lenses today) does not block.
+    assert "| NOT RUN |" in section(draft, "Review lenses")
+
+
+def test_one_unseen_file_blocks_approval_and_is_named_at_the_top():
+    s = approving(github=with_diff(sized_diff(2, 600)).github)
+    draft = s.run(model_calls=1, diff_chars_per_call=1_000)
+    assert len(s.provider.prompts) == 1
+    status = status_of(draft)
+    assert status["review_event"] == "COMMENT"
+    assert status["proposed_event"] == "APPROVE"
+    assert status["coverage_complete"] is False
+    assert (status["changed_files"], status["unreviewed_files"]) == (2, 1)
+    top = top_of(draft)
+    assert "> **REVIEW INCOMPLETE -- not approvable.** Review event: COMMENT " in top
+    assert "(the model proposed APPROVE)" in top
+    assert "1 of 2 changed file(s) were not reviewed in full" in top
+    assert 'never sent to any model call: `"src/m1.py"`' in top
+    assert "src/m0.py" not in top
+
+
+def test_a_diff_part_the_call_cap_skipped_blocks_approval():
+    from .test_openrouter import completion, reply
+
+    approve = completion(text="Fine.\n\nReview event: APPROVE")
+    s, fake = openrouter_setup(
+        reply({"error": "busy"}, status=503), reply(approve), reply(approve)
+    )
+    draft = s.run(model_calls=3, diff_chars_per_call=41_000, depth=Depth.TRIAGE)
+    assert len(fake.chat_requests()) == 3
+    status = status_of(draft)
+    assert status["review_event"] == "COMMENT"
+    assert status["coverage_complete"] is False
+    top = top_of(draft)
+    assert "its diff part's model call returned no review: " in top
+    assert '`"docs/guide.md"`' in top
+
+
+def test_unknown_file_coverage_blocks_approval():
+    class NoDiff(FixtureGitHub):
+        def get_pull_diff(self, repo, number):
+            raise BoundaryError("HTTP 502")
+
+    s = approving(github=NoDiff(FIXTURE))
+    draft = s.run()
+    status = status_of(draft)
+    assert status["coverage_complete"] is False
+    assert status["changed_files"] is None
+    assert status["review_event"] == "COMMENT"
+    assert "File coverage could not be determined (the diff was not fetched" in (
+        top_of(draft)
+    )
+
+
+def test_a_cut_file_blocks_approval():
+    s = approving(github=with_diff(sized_diff(1, 3_000)).github)
+    draft = s.run(model_calls=1, diff_chars_per_call=1_000)
+    status = status_of(draft)
+    assert (status["review_event"], status["unreviewed_files"]) == ("COMMENT", 1)
+    assert 'cut to fit one call, reviewed only in part: `"src/m0.py"`' in top_of(draft)
+
+
+def test_the_offline_provider_never_approves():
+    s = Setup(provider=OfflineProvider())
+    draft = s.run()
+    status = status_of(draft)
+    assert status["coverage_complete"] is False
+    assert "offline provider, no model call: " in top_of(draft)
+
+
+def test_the_model_is_asked_for_a_review_event_it_only_proposes():
+    s = approving()
+    s.run()
+    (prompt,) = s.provider.prompts
+    assert "`Review event: APPROVE`" in prompt.system
+    assert "It is only a proposal." in prompt.system
