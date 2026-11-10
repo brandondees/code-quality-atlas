@@ -100,9 +100,11 @@ MAX_WARNED_PATHS = 100
 # Set for the duration of render_draft. Encoding reads it so a flagged
 # value is removed before `_cell` or a narrative line rewrites the
 # characters a later exact-text scrub would look for.
-# No identity default: a cell encoded outside render_draft has no scrub to
+# No identity default: a cell encoded with no scrub in scope has nothing to
 # apply, and publishing the value unchanged is the failure this exists to
-# prevent. render_draft sets the scrub for the duration of the render.
+# prevent. render_draft sets the flagged scrub. render_evidence sets the
+# identity scrub for the prompt. telemetry_section, which the CLI prints
+# outside a draft, sets the identity scrub only when none is active.
 _scrubber: contextvars.ContextVar[Callable[[str], str]] = contextvars.ContextVar(
     "draft_scrub"
 )
@@ -425,8 +427,22 @@ def render_evidence(
 
 
 def telemetry_section(events: tuple[Event, ...]) -> str:
+    """The CLI prints this outside a draft. Encoding then uses the identity
+    scrub. Inside render_draft the draft's scrub is already set and stays."""
     if not events:
         return ""
+    try:
+        _scrubber.get()
+    except LookupError:
+        token = _scrubber.set(str)
+        try:
+            return _telemetry_table(events)
+        finally:
+            _scrubber.reset(token)
+    return _telemetry_table(events)
+
+
+def _telemetry_table(events: tuple[Event, ...]) -> str:
     header = "| " + " | ".join(SUMMARY_HEADERS) + " |"
     rule = "| " + " | ".join("---" for _ in SUMMARY_HEADERS) + " |"
     rows = "\n".join(

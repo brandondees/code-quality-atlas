@@ -136,6 +136,24 @@ def test_the_notes_carry_the_lens_plans_coverage_line():
     )
 
 
+def test_a_cell_outside_a_render_has_no_scrub():
+    from atlas_reviewer.draft import _cell
+
+    with pytest.raises(LookupError):
+        _cell("sek|retAA")
+
+
+def test_the_telemetry_section_renders_outside_a_draft():
+    from atlas_reviewer.draft import telemetry_section
+    from atlas_reviewer.telemetry import Event
+
+    text = telemetry_section(
+        (Event(1, "runner", "a <b> probe", "ok", 0.0, 0.1, error=""),)
+    )
+    assert "## Lifecycle telemetry" in text
+    assert "a &lt;b> probe" in text
+
+
 def test_untrusted_text_carries_no_html_into_the_draft():
     from atlas_reviewer.draft import _cell, _scrubber, controller_notes_section
     from atlas_reviewer.notes import quote_untrusted
