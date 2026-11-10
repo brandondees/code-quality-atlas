@@ -446,14 +446,27 @@ unbounded).
 
   1. For each named repo, list its open PRs (mcp__github__list_pull_requests);
      read each PR's mergeable state (mcp__github__pull_request_read).
-  2. "behind" + no conflicts → bring up to date with
-     mcp__github__update_pull_request_branch (no comment; emits a synchronize event).
+  2. "behind" + no conflicts → first check stack membership, per
+     commands/atlas-rebase-stale.md §2 (a non-null `stack`; if the tool omits
+     it, a non-default base, or another open PR based on this head, means
+     stacked). Never call
+     mcp__github__update_pull_request_branch on a stacked PR: it writes a
+     merge commit, and stacks need linear history. GitHub restacks when the
+     bottom PR merges; otherwise post the one-time restack poke (same
+     <!-- atlas-rebase-poke --> marker) and count it as stack-restack poked.
+     Only a non-stacked PR is brought up to date with
+     mcp__github__update_pull_request_branch (no comment; emits a synchronize
+     event).
      "dirty" → do NOT resolve; post the poke as an INLINE REVIEW COMMENT
      (read the diff, anchor to a line on the RIGHT side, submit as a COMMENT review)
      so the author's auto-fix subscription — which reads review threads, not issue
      comments — sees it; body = a whole-PR conflict notice asking them to rebase onto
-     base and resolve, only if no unaddressed <!-- atlas-rebase-poke --> review thread
-     from you exists. Clean/up-to-date/draft → skip silently.
+     base and resolve. For a stacked PR, the body says the stack needs
+     restacking: gh stack rebase from the lowest changed layer, resolve
+     conflicts, --continue, then gh stack push, or the Rebase stack button.
+     It must not merge the base in. Same <!-- atlas-rebase-poke --> marker,
+     only if no unaddressed poke from you exists. Clean/up-to-date/draft →
+     skip silently.
   3. RECOVER A STUCK ACK LOCK FIRST, once per sweep, before anything else in
      this step -- SAFELY, NOT BLINDLY (issue #360 follow-up; refined after
      PR #402's round-2 review found the first version of this recovery
@@ -685,7 +698,10 @@ a review.
      PR** (`head.repo.full_name != base.repo.full_name`) — `update_pull_
      request_branch` writes a merge commit onto the PR's branch, which for a
      fork PR belongs to the contributor's own repo, not this one; note the
-     skip in the final report instead (issue #387).
+     skip in the final report instead (issue #387). Stacked PRs are
+     excluded from the update-branch call because they need a cascading
+     restack rather than a merge commit; see `commands/atlas-rebase-stale.md`
+     §2.
   3. **The review itself.** For each PR needing round 1 or a re-review, the
      top-level session first acquires the ack lock itself:
      `mcp__github__pull_request_review_write`, method `create`, no `event`,
@@ -812,7 +828,9 @@ you own, and resets daily.
   feedback; resolving it is left to that session. Residual caveat: actually
   *resolving* a merge conflict may exceed what an auto-fix session does for a routine
   lint/CI fix — if it can't, the unresolved poke thread stays as a human-visible flag.
-  (`behind` PRs are still auto-rebased with no comment.)
+  (Non-stacked `behind` PRs are still auto-rebased with no comment.) Stacked
+  PRs are excluded from the update-branch call because they need a cascading
+  restack rather than a merge commit; see `commands/atlas-rebase-stale.md` §2.
 - **CI *success* and bare pushes** aren't reliably delivered to a PR-activity
   subscription, and the resident `opened`-triggered session isn't an
   indefinitely-lived process either — cloud sessions get reclaimed after a
@@ -885,6 +903,9 @@ rather than assumed.
   and PR reviews (including an `APPROVE`-shaped body — see *Match the
   approval in the review body*), re-request review, and — §2/§4 only —
   fast-forward a PR branch onto its base via `update_pull_request_branch`.
+  Stacked PRs are excluded from the update-branch call because they need a
+  cascading restack rather than a merge commit; see
+  `commands/atlas-rebase-stale.md` §2.
   It never merges a PR, never edits branch protection or repo settings, and
   never pushes a commit from its own working tree (the branch-update call is
   a GitHub API merge, not a local `git push`). **Leave "Allow unrestricted
@@ -913,8 +934,8 @@ rather than assumed.
   triggered it. Issue #387 closed part of this for §4: `atlas-poll-and-
   review.md` now requires an explicit repo (or comma-separated repo list) in
   `$ARGUMENTS` rather than defaulting to every attached repo, skips
-  `update_pull_request_branch` on fork PRs, and caps total review-subagent
-  spawns at 20 per tick. Issue #440 closed the remaining gap for §2:
+  `update_pull_request_branch` on fork PRs and on stacked PRs, and caps total
+  review-subagent spawns at 20 per tick. Issue #440 closed the remaining gap for §2:
   `atlas-rebase-stale.md` now requires that same explicit repo scope (a
   per-tick action cap doesn't apply there, since it never spawns review
   subagents itself). Neither poller relies on repo attachment at all

@@ -1047,3 +1047,16 @@ the controller, and free tools are baked into the image. Agentic mode
 starts triage-only, on a small controller loop of our own, and is scored by
 issue-hit precision and recall plus coverage honesty. Every agentic budget
 is pending Brandon. Nothing was built and no live run was made.
+
+## 2026-11-10 — agent docs and the stale-PR sweep learn native stacked PRs
+
+GitHub stacked pull requests went GA on 2026-10-06 and are in use here. The
+open reviewer stack is #606 → #607 → #613. #612 → #614 is a second stack
+whose trunk is #607's branch. `AGENTS.md` and `CLAUDE.md` now say how to
+push a fix onto the layer that owns it, restack upward with `gh stack`, and
+leave merges to the owner. `update_pull_request_branch` writes a merge
+commit, which breaks the linear history a stack requires, so
+`atlas-rebase-stale.md` and `atlas-poll-and-review.md` skip that call on a
+stack member and post the one-time restack poke instead. The poller runbook
+says the same wherever it used to treat every behind PR as auto-rebased. A
+restack-only review round in `atlas-review-pr.md` is still undecided.

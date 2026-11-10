@@ -58,6 +58,35 @@ reports success. The mirror image is a tracking ref left stale when a merged bra
 is deleted server-side, which makes tooling report phantom unpushed commits —
 `git merge-base --is-ancestor HEAD origin/main` distinguishes the two.
 
+**Stacked PRs.** Reviewer PRs here are linked as native GitHub stacks. Check a
+PR's stack with `gh api repos/brandondees/code-quality-atlas/pulls/<n> --jq
+.stack`, and list a stack with `gh api
+"repos/brandondees/code-quality-atlas/stacks?pull_request=<n>"`. A stack is
+linear. A PR with parallel siblings on one parent lives in its own stack,
+whose trunk is the parent PR's branch. Today the reviewer stack is #606 → #607
+→ #613, and #612 → #614 is a second stack rooted on #607's branch.
+
+- Push fixes to the layer that owns them, as a normal fast-forward. Never
+  merge `main` or a lower branch into a stacked branch, and never use Update
+  branch on one.
+- After pushing to a lower layer, restack the layers above once: `gh extension
+  install github/gh-stack`, then `gh stack checkout <n>` on the layer you just
+  pushed (`checkout` takes a pull request number), then `gh stack rebase
+  --upstack`, then `gh stack push`. Then restack any child stack rooted on a
+  branch you moved: `gh stack checkout <child-pr>`, then `gh stack rebase`,
+  then `gh stack push`. Don't hand-rebase each branch with
+  `--force-with-lease`.
+- When the bottom PR merges, GitHub restacks its own stack by itself, so fetch
+  that stack before editing it, instead of rebasing it yourself. It does not
+  restack a child stack, so while the child's trunk branch still exists run
+  `gh stack rebase` then `gh stack push` on the child. When the parent's branch
+  is deleted, the child stack is only retargeted, so run `gh stack sync` on it.
+- On a conflict, `gh stack rebase` exits with code 3. Resolve the conflict,
+  `git add` the files, and run `gh stack rebase --continue`. If the fix isn't
+  mechanical, run `--abort` and report.
+- Merges belong to the owner. PRs land bottom-up, and merging a PR lands every
+  unmerged PR below it.
+
 ## Development setup
 
 Python **3.12+** (`pyproject.toml`'s `requires-python`, matching ruff's

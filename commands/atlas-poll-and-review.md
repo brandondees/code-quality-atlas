@@ -95,6 +95,8 @@ in that one repo (`mcp__github__list_pull_requests`, paginate fully, applying
 back: PR number, `draft` (true/false), whether it's a fork PR
 (`head.repo.full_name != base.repo.full_name` — both fields are already on
 the PR object `list_pull_requests` returns, no extra call needed),
+`base.ref`, `head.ref`, and `stack` (null or omitted when the tool doesn't
+return it — step 2's fallback needs the refs either way),
 `mergeable_state`, HEAD commit SHA, whether an ack **authored by the given
 login** exists — either an `<!-- atlas-review-ack -->` issue comment or the
 visible text "👀 atlas reviewer engaged" (`pull_request_read` has been observed
@@ -115,15 +117,31 @@ acting, so keep it structured and compact.
 
 From the triage report, for each non-draft PR:
 
-- **`mergeable_state` = `behind`, no conflicts**: **first check whether the PR
-  is from a fork** (`head.repo.full_name != base.repo.full_name`, from step
+- **`mergeable_state` = `behind`, no conflicts**: **first check stack
+  membership.** The PR resource's `stack` object is non-null for a stack
+  member. If the tool doesn't return it, a base ref other than the default
+  branch means "possibly stacked", so treat the PR as stacked. That base-ref
+  test misses a stack's bottom PR, whose base is the trunk, so also treat
+  the PR as stacked when another open PR's base ref is this PR's head ref.
+  Read `stack`, `base.ref`, and `head.ref` from step 1's PR data, or a fresh
+  `pull_request_read` when that report doesn't carry them. Never call
+  `update_pull_request_branch` on a stacked PR: it writes a merge commit,
+  and stacks need linear history. GitHub restacks automatically when the
+  bottom PR merges. Otherwise a stack that's behind needs a cascading rebase
+  (the Rebase stack button, or `gh stack rebase` then `gh stack push`),
+  which this API-only sweep can't do. Post the one-time poke instead, using
+  the same inline review comment and `<!-- atlas-rebase-poke -->` marker as
+  the dirty case below. The body asks for that cascading rebase. It must not
+  merge the base in. Count it as "stack-restack poked". **Then, for a PR that
+  is not stacked, check whether it is from a fork**
+  (`head.repo.full_name != base.repo.full_name`, from step
   1's PR data or a fresh `pull_request_read` if not already reported) — a
   fork PR's branch belongs to the contributor's own repo, not this one, and
   `update_pull_request_branch` writes a merge commit onto it, which is more
   write power than this sweep should exercise on someone else's fork without
   their say-so (issue #387). **Skip fork PRs here** — note the skip in step
   5's report — and only call `mcp__github__update_pull_request_branch` for
-  same-repo PRs (no comment — this is silent and routine).
+  same-repo PRs that are not stacked (no comment — this is silent and routine).
 - **`mergeable_state` = `dirty`**: if no unresolved `<!-- atlas-rebase-poke -->`
   review thread already exists, post one — read the diff
   (`mcp__github__pull_request_read`, `get_files` method), open a pending review
@@ -134,7 +152,11 @@ From the triage report, for each non-draft PR:
   `event: COMMENT`) whose body is unambiguous that this
   is a **whole-PR conflict notice**, not a line-level issue: rebase onto base
   and resolve, don't attempt the resolution yourself — that's a code judgment
-  this step never makes.
+  this step never makes. For a stacked PR, the poke body says the stack needs
+  restacking, in place of the rebase-onto-base line. It runs `gh stack rebase`
+  from the lowest changed layer, resolves conflicts, runs `--continue`, then
+  `gh stack push`, or the owner uses the Rebase stack button. It must not
+  merge the base in. Keep the same `<!-- atlas-rebase-poke -->` marker.
 - **Clean / up to date**: nothing.
 
 **Draft PRs never reach this step or step 3** — leave them alone entirely
@@ -282,13 +304,15 @@ silently dropped.
 Never spawn two review subagents for the same PR in one sweep. Never post a
 second ack for a PR that already has one — re-check immediately before
 posting, per step 3. Conflict-poke idempotency: skip while an unresolved
-`<!-- atlas-rebase-poke -->` thread already exists. Branch updates are
-naturally idempotent.
+`<!-- atlas-rebase-poke -->` thread already exists. The stack-restack poke
+(§2) uses that same marker, so the same check keeps it one-time. Branch
+updates are naturally idempotent.
 
 ## 5. Report
 
 End with one line per repo swept: counts of updated (rebased), conflict-poked,
 round-1-reviewed, re-reviewed, skipped, fork-PR branch-updates skipped (step
-2), reviews deferred past the per-tick cap (step 3), and any stuck ACK locks
+2), stacked PRs skipped for branch update or poked to restack (step 2),
+reviews deferred past the per-tick cap (step 3), and any stuck ACK locks
 cleared or flagged (step 3). Nothing else goes to GitHub beyond the actions
 above and any `delete_pending` calls.
