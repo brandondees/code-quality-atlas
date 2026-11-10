@@ -1224,6 +1224,38 @@ def test_no_picker_call_without_a_diff():
     assert s.provider.picks == [] and s.provider.prompts == []
 
 
+def picker_skips(draft):
+    table = section(draft, "Lifecycle telemetry")
+    return [r for r in table.splitlines() if "| lens picker skipped |" in r]
+
+
+class Unfetched(FixtureGitHub):
+    def get_pull_diff(self, repo, number):
+        raise BoundaryError("HTTP 502")
+
+
+@pytest.mark.parametrize(
+    ("setup", "config", "reason"),
+    [
+        ({"lenses": ROOMY}, {"depth": Depth.TRIAGE}, "triage depth makes no picker"),
+        ({"lenses": ROOMY}, {"model_calls": 1}, "no model call is left for the"),
+        ({}, {}, "so no pick could add a lens and the lens picker was not called"),
+        ({"github": Unfetched(FIXTURE)}, {}, "no diff to pick for"),
+    ],
+)
+def test_a_skipped_picker_is_a_telemetry_event_with_its_reason(setup, config, reason):
+    (row,) = picker_skips(Setup(**setup).run(**config))
+    assert "| model call | lens picker skipped | ok |" in row
+    assert reason in row.split("| reason=", 1)[1]
+
+
+def test_a_picker_that_ran_records_no_skip():
+    s = Setup(lenses=ROOMY)
+    draft = s.run()
+    assert len(s.provider.picks) == 1
+    assert picker_skips(draft) == []
+
+
 def test_the_picker_call_counts_against_the_three_call_cap():
     from .test_openrouter import completion, reply
 

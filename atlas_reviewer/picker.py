@@ -95,6 +95,8 @@ class LensSelection:
     choices: tuple[LensChoice, ...]
     note: str
     used_call: bool
+    skipped: str = ""
+    """Why the picker was not called, when it was not."""
 
 
 def load_picker(path: Path = PICKER_PATH) -> str:
@@ -222,4 +224,5 @@ def _critical(reason: str, used_call: bool) -> LensSelection:
         f"{', '.join(CRITICAL_TIER)}. The Lenses line says which of them ran "
         "whole and which are NOT RUN, and why."
     )
-    return LensSelection(choices, note, used_call)
+    skipped = "" if used_call else reason.removeprefix("Lens selection: ")
+    return LensSelection(choices, note, used_call, skipped)

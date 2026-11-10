@@ -590,9 +590,25 @@ def _select_lenses(
 ) -> LensSelection:
     """The picker gets a call only when one is left for at least one diff part,
     and `select_lenses` skips it when no picked lens could fit; an unspent
-    call goes to diff review."""
+    call goes to diff review. A skip is recorded with its reason."""
+    picked = _pick_lenses(event, pull, diff, deps, config, telemetry)
+    if picked.skipped:
+        telemetry.record(
+            "model call", "lens picker skipped", {"reason": picked.skipped}
+        )
+    return picked
+
+
+def _pick_lenses(
+    event: PrEvent,
+    pull: PullInfo,
+    diff: _Fetched | None,
+    deps: Deps,
+    config: ReviewConfig,
+    telemetry: Telemetry,
+) -> LensSelection:
     if diff is None:
-        return LensSelection((), "", used_call=False)
+        return LensSelection((), "", used_call=False, skipped="no diff to pick for")
     if config.model_calls < 2:
         return select_lenses(config.depth, None, deps.lenses)
     paths = diff_paths(diff.text)
