@@ -215,7 +215,11 @@ the critical tier runs (`tracing-correctness-and-invariants`,
 `sweeping-for-security`, `reviewing-migration-and-data-safety`,
 `reviewing-concurrency-and-async`, from `docs/review-depth-modes.md`). An
 unusable reply also falls back to the critical tier, and the controller
-notes quote the reason. The picker call counts toward the 3-call cap.
+notes quote the reason. A usable reply never replaces the critical tier:
+the critical tier always comes first, and the picker's other names follow
+in rank order up to the depth's breadth, so a thin or steered pick can add
+lenses but not drop a critical one. The picker call counts toward the
+3-call cap.
 
 `lenses.py` then reads each chosen lens's `reference/lenses/<lens>/body.md`
 and inlines the bodies into the trusted system prompt, in pick order, under a
@@ -224,8 +228,10 @@ fit is cut at a line boundary and marked truncated, or omitted when under
 4,000 characters of budget remain. The draft's **Review lenses** table and the
 controller notes say which lenses were included, truncated or omitted, with
 character counts and the picker rank, and the prompt tells the model that
-only inlined lenses ran. PR text can steer the pick, but only within the
-closed set of lens names in the bundle. `reference/synthesis.md` and
+only inlined lenses ran. The critical tier's four bodies alone exceed the
+60,000-character budget, so today the fourth is omitted and a lens only the
+picker named is listed with its rank but not inlined. PR text can steer the
+pick, but only within the closed set of lens names in the bundle. `reference/synthesis.md` and
 `reference/tool-evidence.md` are not inlined.
 
 ## Runner tools
@@ -256,8 +262,11 @@ actions, `requirements*.txt`, `pyproject.toml`, `package.json`, `*.lock`,
 runner, sandbox, HTTP and model boundary; other code; other config; tests
 and fixtures; docs last. Tier is decided by path patterns. CI, dependency
 and build files are matched first, so no directory (`tests/`, `docs/`,
-`fixtures/`) demotes them; then tests, config and docs, so
-`tests/test_redact.py` is a test and `docs/security.md` a doc. Parts are
+`fixtures/`) demotes them; then tests and docs, so
+`tests/test_redact.py` is a test and `docs/security.md` a doc; then
+security before config, so `config/secrets.yaml` ranks as security. A
+file's path is read from its `+++` line (or `rename to`), not split out of
+the `diff --git` header, which is ambiguous for a path holding ` b/`. Parts are
 filled first-fit in that order. A file larger than one part is cut at a line boundary into a part of its own and marked cut. A file
 that fits nowhere once every part is used is never sent. If the diff cannot
 be fetched at all, no model call is made (a review of an empty diff would
@@ -269,8 +278,9 @@ Each call gets the same PR, evidence and controller-notes blocks plus its
 own part, and a controller note naming the files in that part and saying
 that other parts go to separate calls. When coverage is incomplete, the
 **Omissions and limits hit** table has a `pull request diff` row: characters
-kept, files sent in full, files cut, and every file never sent, grouped by
-risk tier, highest first. A part whose call fails or is refused (call cap,
+kept, files sent in full, files cut, and the files never sent, grouped by
+risk tier, highest first, each path quoted as data; past 100 the rest are
+counted. A part whose call fails or is refused (call cap,
 cost cap, token bound) gets its own row listing the files sent but not
 reviewed. A file the diff's headers name that the selection does not
 account for gets a `dropped before the model calls` row and makes coverage
