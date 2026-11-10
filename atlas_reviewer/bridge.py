@@ -30,6 +30,7 @@ from typing import Any
 
 from atlas_reviewer.bridge_args import (
     MAX_READ_LINES,
+    TOOLS,
     Call,
     RejectedError,
     Rev,
@@ -66,6 +67,7 @@ from atlas_reviewer.runner import (
 from atlas_reviewer.telemetry import ERROR, Telemetry
 
 HEADER = "__ATLAS_BRIDGE__"
+UNKNOWN_TOOL = "(unknown tool)"
 STDERR_BYTES = 2_000
 STDERR_CHARS = 1_000
 # 512-byte blocks under dash (8 MiB); a shell counting 1 KiB blocks allows 16.
@@ -417,14 +419,15 @@ class Bridge:
         try:
             checked = validate(tool, args, self.staged.revs)
         except RejectedError as exc:
-            return self._logged(self._rejected(tool, args, str(exc)))
+            return self._logged(self._rejected(tool, exc))
         return self._logged(self._run(checked))
 
-    def _rejected(self, tool: Any, args: Any, reason: str) -> BridgeResult:
-        given = json.dumps(args, sort_keys=True, ensure_ascii=True, default=str)
+    def _rejected(self, tool: Any, exc: RejectedError) -> BridgeResult:
+        """Names a known tool, or `UNKNOWN_TOOL`; the arguments are not shown."""
+        name = tool if isinstance(tool, str) and tool in TOOLS else UNKNOWN_TOOL
         return BridgeResult(
-            str(tool), given, Status.REJECTED, RepoText(""),
-            self.redactor(reason, STDERR_CHARS), 0, 0, 0, False, 0.0,
+            name, "", Status.REJECTED, RepoText(""),
+            self.redactor(str(exc), STDERR_CHARS), 0, 0, 0, False, 0.0,
         )  # fmt: skip
 
     def _run(self, call: Call) -> BridgeResult:
@@ -509,8 +512,11 @@ class Bridge:
 
 def render(result: BridgeResult) -> str:
     """The result as the model reads it: one controller-written line, then
-    the content. The arguments are the model's own, shown as JSON."""
-    head = f"{result.tool} {result.args}: {result.status.value}"
+    the content. The arguments are the validated ones, shown as JSON; a
+    rejected call shows none, only its code and reason."""
+    head = (
+        f"{' '.join(filter(None, (result.tool, result.args)))}: {result.status.value}"
+    )
     if result.truncated:
         head += (
             f"; output cut: {result.shown_bytes} of {result.total_bytes} bytes shown"

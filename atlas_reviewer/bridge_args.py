@@ -6,8 +6,9 @@ into a `Call` or raises `RejectedError` before anything runs. Paths and
 prefixes are repo-relative, NUL- and control-free, never start with `-`
 or `/`, have no empty, `.` or `..` segment and are at most 512 bytes;
 patterns are at most 256 bytes on one line; integers are range-checked;
-the revision is one of the staged BASE, HEAD and DEFAULT. Values the
-model sent are quoted as data in every message.
+the revision is one of the staged BASE, HEAD and DEFAULT. A rejection
+carries a fixed code and never echoes the tool name or a value the model
+sent.
 """
 
 from __future__ import annotations
@@ -34,7 +35,18 @@ class Rev(StrEnum):
 
 
 class RejectedError(ValueError):
-    """An invalid call: never run, and answered with this message."""
+    """An invalid call: never run, and answered with a fixed `code` and a
+    controller-written `detail` that quotes nothing the model sent beyond
+    argument names, each through `quote_untrusted` and `QUOTED_CHARS`."""
+
+    def __init__(self, code: str, detail: str) -> None:
+        super().__init__(f"{code}: {detail}")
+        self.code = code
+        self.detail = detail
+
+
+INVALID = "invalid-argument"
+QUOTED_CHARS = 64
 
 
 @dataclass(frozen=True)
@@ -65,20 +77,20 @@ class _Arg:
 
 def _string(value: Any) -> str:
     if not isinstance(value, str):
-        raise RejectedError("must be a string")
+        raise RejectedError(INVALID, "must be a string")
     return value
 
 
 def _path(value: Any, _revs: frozenset[Rev]) -> str:
     text = _string(value)
     if len(text.encode("utf-8")) > MAX_PATH_BYTES:
-        raise RejectedError(f"is over {MAX_PATH_BYTES} bytes")
+        raise RejectedError(INVALID, f"is over {MAX_PATH_BYTES} bytes")
     if any(ord(c) < 0x20 or ord(c) == 0x7F for c in text):
-        raise RejectedError("contains a control character")
+        raise RejectedError(INVALID, "contains a control character")
     if text.startswith(("-", "/")):
-        raise RejectedError("may not start with '-' or '/'")
+        raise RejectedError(INVALID, "may not start with '-' or '/'")
     if any(part in ("", ".", "..") for part in text.split("/")):
-        raise RejectedError("has an empty, '.' or '..' segment")
+        raise RejectedError(INVALID, "has an empty, '.' or '..' segment")
     return text
 
 
@@ -89,18 +101,18 @@ def _prefix(value: Any, revs: frozenset[Rev]) -> str:
 def _pattern(value: Any, _revs: frozenset[Rev]) -> str:
     text = _string(value)
     if not text or len(text.encode("utf-8")) > MAX_PATTERN_BYTES:
-        raise RejectedError(f"must be 1 to {MAX_PATTERN_BYTES} bytes")
+        raise RejectedError(INVALID, f"must be 1 to {MAX_PATTERN_BYTES} bytes")
     if any(c in text for c in "\n\r\0"):
-        raise RejectedError("may not contain a newline or NUL")
+        raise RejectedError(INVALID, "may not contain a newline or NUL")
     return text
 
 
 def _int_in(low: int, high: int) -> Check:
     def check(value: Any, _revs: frozenset[Rev]) -> int:
         if isinstance(value, bool) or not isinstance(value, int):
-            raise RejectedError("must be an integer")
+            raise RejectedError(INVALID, "must be an integer")
         if not low <= value <= high:
-            raise RejectedError(f"must be from {low} to {high}")
+            raise RejectedError(INVALID, f"must be from {low} to {high}")
         return value
 
     return check
@@ -108,14 +120,14 @@ def _int_in(low: int, high: int) -> Check:
 
 def _flag(value: Any, _revs: frozenset[Rev]) -> bool:
     if not isinstance(value, bool):
-        raise RejectedError("must be true or false")
+        raise RejectedError(INVALID, "must be true or false")
     return value
 
 
 def _rev(value: Any, revs: frozenset[Rev]) -> Rev:
     if not isinstance(value, str) or value not in {r.value for r in revs}:
         names = ", ".join(sorted(r.value for r in revs))
-        raise RejectedError(f"must be one of the staged revisions: {names}")
+        raise RejectedError(INVALID, f"must be one of the staged revisions: {names}")
     return Rev(value)
 
 
@@ -142,17 +154,19 @@ TOOLS: Mapping[str, tuple[_Arg, ...]] = MappingProxyType(
 
 
 def validate(tool: Any, args: Any, revs: frozenset[Rev]) -> Call:
-    """Raises `RejectedError` naming the first problem; values the model
-    sent are quoted as data in the message."""
+    """Raises `RejectedError` with a fixed code for the first problem. The
+    tool name and argument values the model sent are never echoed; unknown
+    argument names are, quoted and cut to `QUOTED_CHARS`."""
     spec = TOOLS.get(tool) if isinstance(tool, str) else None
     if spec is None:
-        raise RejectedError(f"unknown tool {quote_untrusted(str(tool), scrub=str)}")
+        raise RejectedError("unknown-tool", f"the tools are {', '.join(TOOLS)}")
     if not isinstance(args, Mapping):
-        raise RejectedError("arguments must be an object")
+        raise RejectedError("bad-arguments", "arguments must be an object")
     unknown = sorted(str(k) for k in args if k not in {a.name for a in spec})
     if unknown:
         raise RejectedError(
-            f"unknown argument(s): {quote_untrusted(', '.join(unknown), scrub=str)}"
+            "unknown-argument",
+            quote_untrusted(", ".join(unknown), QUOTED_CHARS, scrub=str),
         )
     values = tuple((a.name, _value(a, args, revs)) for a in spec)
     return (
@@ -162,13 +176,13 @@ def validate(tool: Any, args: Any, revs: frozenset[Rev]) -> Call:
 
 def _value(arg: _Arg, args: Mapping[str, Any], revs: frozenset[Rev]) -> Any:
     if arg.name not in args and arg.default is _REQUIRED:
-        raise RejectedError(f"missing argument {arg.name}")
+        raise RejectedError("missing-argument", arg.name)
     if arg.name not in args and arg.default is None:
         return None
     try:
         return arg.check(args.get(arg.name, arg.default), revs)
     except RejectedError as exc:
-        raise RejectedError(f"{arg.name}: {exc}") from None
+        raise RejectedError(exc.code, f"{arg.name} {exc.detail}") from None
 
 
 def _read_range(call: Call) -> Call:
@@ -176,7 +190,8 @@ def _read_range(call: Call) -> Call:
     end = call.get("end") or start + MAX_READ_LINES - 1
     if end < start or end - start >= MAX_READ_LINES:
         raise RejectedError(
+            INVALID,
             f"end must be from start to start + {MAX_READ_LINES - 1} "
-            f"({MAX_READ_LINES} lines at most)"
+            f"({MAX_READ_LINES} lines at most)",
         )
     return Call(call.tool, tuple((k, end if k == "end" else v) for k, v in call.args))
