@@ -3,17 +3,20 @@
 inside it before deny-all egress is set and read back from outside."""
 
 import os
+import re
 import socket
 import subprocess
+import sys
 import threading
+from pathlib import Path
 
 import pytest
 
 from atlas_reviewer.clock import SystemClock
-from atlas_reviewer.domain import CleanupStatus, RunnerStatus
+from atlas_reviewer.domain import CleanupStatus, PrEvent, RunnerStatus
 from atlas_reviewer.fakes import ExecRule, FakeSprites, MemoryLedger
 from atlas_reviewer.interpreter import PYTHON_TAG
-from atlas_reviewer.ports import BoundaryError, StreamTimeoutError
+from atlas_reviewer.ports import BoundaryError, RefusedError, StreamTimeoutError
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import (
     CLEANUP_BUDGET_S,
@@ -25,7 +28,9 @@ from atlas_reviewer.runner import (
     TRIVIAL_TOOL,
     UNPACK_BUDGET_S,
     UPLOAD_BUDGET_S,
+    CreateRefusedError,
     RunnerJob,
+    Swept,
     ToolAbsent,
     ToolRan,
     ToolSpec,
@@ -33,6 +38,7 @@ from atlas_reviewer.runner import (
     destroy_runner,
     egress_script,
     egress_verdict,
+    event_runner_name,
     exec_argv,
     frames_seen,
     guest_text,
@@ -42,6 +48,7 @@ from atlas_reviewer.runner import (
     probe_runner,
     probe_script,
     run_disposable,
+    run_session,
     runner_name,
     strip_start,
     sweep,
@@ -155,27 +162,139 @@ def test_exec_failure_still_destroys():
     assert api.live_names() == ()
 
 
-def test_create_failure_still_attempts_destroy_but_cannot_certify_it():
-    """A 503 does not show the server never made the Sprite, so a
-    momentary 404 is not verified cleanup."""
+def test_a_create_of_unknown_outcome_is_not_deleted_and_stays_for_a_sweep():
+    """A 503 does not show the server never made the Sprite, nor that a
+    Sprite by that name is this run's, so nothing is deleted."""
     api = FakeSprites(fail_on={"create": BoundaryError("create 503")})
     ledger = MemoryLedger()
     outcome = run(api, ledger)
     assert outcome.report.status is RunnerStatus.FAILED
-    assert "delete" in ops(api)
+    assert ops(api) == ["create"]
     assert outcome.report.cleanup is CleanupStatus.DESTROY_UNVERIFIED
     assert ledger.pending() == (NAME,)
 
 
-def test_a_run_stopped_before_create_is_verified_and_leaves_no_entry():
+def test_a_losing_create_cannot_delete_the_winners_sprite():
+    """Two reviews of one commit share a runner name. The loser's create
+    is refused; it deletes nothing, leaves no ledger entry, and stops."""
+    api = FakeSprites(rules=OK_RULES)
+    loser_ledger = MemoryLedger()
+
+    def winner(session):
+        with pytest.raises(
+            CreateRefusedError, match=f"refused to create runner {NAME}"
+        ):
+            run(api, loser_ledger)
+        assert api.live_names() == (NAME,)
+        assert "delete" not in ops(api)
+        return "the winner outlived the loser"
+
+    report = run_session(
+        api, MemoryLedger(), winner, name=NAME, deadline_s=60.0, clock=FakeClock()
+    )
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    assert ops(api).count("create") == 2
+    assert ops(api).count("delete") == 1
+    assert loser_ledger.pending() == ()
+
+
+_STOP_MID_DELETE = """\
+import os, signal
+from atlas_reviewer.clock import SystemClock
+from atlas_reviewer.fakes import FakeSprites, MemoryLedger
+from atlas_reviewer.runner import run_session
+from atlas_reviewer.stops import install_interrupts, raise_if_stopped
+
+class StopMidDelete(FakeSprites):
+    def delete(self, name):
+        os.kill(os.getpid(), signal.SIGTERM)
+        super().delete(name)
+
+install_interrupts()
+api = StopMidDelete()
+report = run_session(api, MemoryLedger(), lambda s: "done", name="cqa-rev-stop-mid-delete",
+            deadline_s=60, clock=SystemClock())
+print(f"report {report.status.value} {report.note}; live: {api.live_names()}", flush=True)
+try:
+    raise_if_stopped()
+except KeyboardInterrupt:
+    print("interrupted", flush=True)
+"""
+
+
+def test_the_first_stop_during_the_final_delete_waits_for_the_delete():
+    """The delete finishes and the report comes back; the stop is still
+    pending afterwards, so the caller can keep that result and then end
+    on the interrupt."""
+    proc = subprocess.run(
+        [sys.executable, "-c", _STOP_MID_DELETE],
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2])},
+        capture_output=True, text=True, timeout=30, check=False,
+    )  # fmt: skip
+    assert proc.stdout == "report completed done; live: ()\ninterrupted\n", proc.stderr
+
+
+_STOP_REFUSED = """\
+import os, signal
+from atlas_reviewer.clock import SystemClock
+from atlas_reviewer.fakes import FakeSprites, MemoryLedger
+from atlas_reviewer.ports import RefusedError
+from atlas_reviewer.runner import CreateRefusedError, run_session
+from atlas_reviewer.stops import install_interrupts, raise_if_stopped
+
+class StopOnClear(MemoryLedger):
+    def clear(self, name):
+        os.kill(os.getpid(), signal.SIGTERM)
+        super().clear(name)
+
+install_interrupts()
+api = FakeSprites(fail_on={"create": RefusedError("Sprites HTTP 400")})
+try:
+    run_session(api, StopOnClear(), lambda s: "nope", name="cqa-rev-refused-stop",
+                deadline_s=60, clock=SystemClock())
+except CreateRefusedError:
+    raise_if_stopped()
+    raise
+"""
+
+
+def test_a_stop_during_a_refused_creates_destroy_does_not_replace_the_refusal():
+    """The final destroy of a refused create still runs, and a stop there
+    must leave CreateRefusedError as the exception that exits.
+    `raise_if_stopped` afterwards must not turn it into KeyboardInterrupt;
+    that is the `sys.exc_info` guard, which drops the stop while the
+    refusal is already unwinding."""
+    proc = subprocess.run(
+        [sys.executable, "-c", _STOP_REFUSED],
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2])},
+        capture_output=True, text=True, timeout=30, check=False,
+    )  # fmt: skip
+    assert proc.returncode == 1, proc.stderr
+    last = proc.stderr.rstrip().splitlines()[-1]
+    assert last.startswith("atlas_reviewer.runner.CreateRefusedError:"), proc.stderr
+    assert "created and deletes nothing" in last
+
+
+def test_a_refused_create_stops_with_nothing_to_clean_up():
+    api = FakeSprites(fail_on={"create": RefusedError("Sprites HTTP 400")})
+    ledger = MemoryLedger()
+    with pytest.raises(CreateRefusedError, match="Sprites HTTP 400"):
+        run(api, ledger)
+    assert ops(api) == ["create"]
+    assert ledger.pending() == ()
+
+
+def test_a_run_stopped_before_create_deletes_nothing_and_leaves_no_entry():
     clock = FakeClock()
     ledger = MemoryLedger()
+    api = FakeSprites(rules=OK_RULES)
     outcome = run_disposable(
-        FakeSprites(rules=OK_RULES), ledger, RunnerJob(SOURCE_TARBALL, TOOLS),
+        api, ledger, RunnerJob(SOURCE_TARBALL, TOOLS),
         name=NAME, deadline_s=0.0, clock=clock,
     )  # fmt: skip
     assert outcome.report.status is RunnerStatus.DEADLINE_EXCEEDED
-    assert outcome.report.cleanup is CleanupStatus.DESTROYED_VERIFIED
+    assert outcome.report.cleanup is CleanupStatus.NOT_CREATED
+    assert ops(api) == []
     assert ledger.pending() == ()
 
 
@@ -200,7 +319,7 @@ def test_a_create_whose_outcome_is_unknown_stays_in_the_ledger_for_a_sweep():
     assert ledger.pending() == (NAME,)
 
     api.land(NAME)
-    assert sweep(api, ledger) == {NAME: CleanupStatus.DESTROYED_VERIFIED}
+    assert sweep(api, ledger) == {NAME: Swept(CleanupStatus.DESTROYED_VERIFIED, True)}
     assert api.live_names() == ()
     assert ledger.pending() == ()
 
@@ -426,6 +545,18 @@ def test_the_ledger_keeps_a_runner_whose_create_lands_after_the_watchdog():
     assert ledger.pending() == ()
 
 
+def test_a_watchdog_firing_while_create_is_in_flight_deletes_nothing():
+    """Until create settles the name may be another review's; the final
+    destroy deletes once this run's create has landed."""
+    api, _, _, _, events = _run_with_create_held_past_the_watchdog()
+    watchdog = [
+        (e.step, e.fields.get("create")) for e in events
+        if e.phase == "destroy" and e.fields.get("trigger") == "watchdog"
+    ]  # fmt: skip
+    assert watchdog == [("no delete", "unknown"), ("outcome", None)]
+    assert ops(api).count("delete") == 1
+
+
 def test_a_telemetry_write_failure_does_not_stop_cleanup():
     class FailingSink:
         def emit(self, event):
@@ -567,7 +698,10 @@ def test_destroy_is_idempotent_and_sweep_clears_leftovers():
     ledger.record(NAME)
     ledger.record("cqa-rev-already-gone")
     results = sweep(api, ledger)
-    assert set(results.values()) == {CleanupStatus.DESTROYED_VERIFIED}
+    assert results == {
+        NAME: Swept(CleanupStatus.DESTROYED_VERIFIED, deleted=True),
+        "cqa-rev-already-gone": Swept(CleanupStatus.DESTROYED_VERIFIED, deleted=False),
+    }
     assert ledger.pending() == ()
     assert destroy_runner(api, ledger, NAME) is CleanupStatus.DESTROYED_VERIFIED
 
@@ -978,6 +1112,21 @@ def test_runner_names_are_prefixed_and_unique():
     assert runner_name(clock) != runner_name(clock)
 
 
+def test_an_event_runner_name_is_the_same_for_one_commit_and_differs_otherwise():
+    sha = "3f6c1e9b2a7d4c8e0f1a2b3c4d5e6f708192a3b4"
+    event = PrEvent("example-org/example-app", 42, sha)
+    name = event_runner_name(event)
+    assert re.fullmatch(r"cqa-rev-pr42-3f6c1e9b2a7d-[0-9a-f]{8}", name)
+    assert event_runner_name(PrEvent("example-org/example-app", 42, sha)) == name
+    others = {
+        event_runner_name(PrEvent("example-org/fork-app", 42, sha)),
+        event_runner_name(PrEvent("example-org/example-app", 43, sha)),
+        event_runner_name(PrEvent("example-org/example-app", 42, "0" * 40)),
+    }
+    assert name not in others
+    assert len(others) == 3
+
+
 def exec_timeouts(api):
     execs = [c for c in api.calls if c[0] == "exec"]
     return dict(zip((c[2] for c in execs), api.timeouts_seen, strict=True))
@@ -1268,7 +1417,11 @@ def test_destroy_attempts_and_verification_are_recorded_when_delete_fails():
     ]
     assert events[-1].fields == {
         "trigger": "final",
-        "cleanup": "destroy NOT verified -- run `sweep`",
+        "cleanup": (
+            "destroy NOT verified -- recover it by name with "
+            "`sweep --event EVENT_FILE --force-live` or "
+            "`sweep --runner NAME --force-live`"
+        ),
     }
 
 
@@ -1615,9 +1768,9 @@ def test_the_final_destroy_stops_waiting_for_a_hung_watchdog_destroy():
     in_delete, release = threading.Event(), threading.Event()
 
     class HungDelete(FakeSprites):
-        def create(self, name):
+        def set_network_policy(self, name, rules):
             assert in_delete.wait(_SYNC_WAIT_S)
-            super().create(name)
+            super().set_network_policy(name, rules)
 
         def delete(self, name):
             if not in_delete.is_set():
@@ -1638,5 +1791,5 @@ def test_the_final_destroy_stops_waiting_for_a_hung_watchdog_destroy():
     assert outcome.report.status is RunnerStatus.DEADLINE_EXCEEDED
     assert outcome.report.cleanup is CleanupStatus.DESTROY_UNVERIFIED
     assert ledger.pending() == (NAME,)
-    assert sweep(api, ledger) == {NAME: CleanupStatus.DESTROYED_VERIFIED}
+    assert sweep(api, ledger) == {NAME: Swept(CleanupStatus.DESTROYED_VERIFIED, True)}
     assert api.live_names() == ()

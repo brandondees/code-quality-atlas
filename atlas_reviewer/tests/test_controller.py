@@ -924,7 +924,8 @@ def test_controller_notes_report_unverified_cleanup_and_the_model_is_told():
     draft = s.run()
     notes = section(draft, "Controller notes")
     assert "destroy was NOT verified" in notes
-    assert "`sweep`" in notes
+    assert "`sweep --event EVENT_FILE --force-live`" in notes
+    assert "on Fly that ledger goes with the review Machine" in notes
     told = s.user_prompt().split('label="controller-notes"', 1)[1]
     assert "destroy was NOT verified" in told
 

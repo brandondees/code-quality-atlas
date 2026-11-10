@@ -186,7 +186,11 @@ class RunnerStatus(Enum):
 
 class CleanupStatus(Enum):
     DESTROYED_VERIFIED = "destroyed (verified absent)"
-    DESTROY_UNVERIFIED = "destroy NOT verified -- run `sweep`"
+    DESTROY_UNVERIFIED = (
+        "destroy NOT verified -- recover it by name with "
+        "`sweep --event EVENT_FILE --force-live` or "
+        "`sweep --runner NAME --force-live`"
+    )
     NOT_CREATED = "no runner was created"
 
 

@@ -37,3 +37,10 @@ dist/
 # atlas_reviewer controller-local state (runner ledger, single-review lock);
 # default location when ATLAS_REVIEWER_STATE_DIR is unset
 .atlas-reviewer-state/
+
+# Secrets files and keys: atlas_reviewer/deploy-fly.md keeps them outside
+# the checkout, and these catch one saved here by mistake
+.env
+*.env
+secrets.env
+*.pem

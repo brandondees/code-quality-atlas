@@ -10,9 +10,27 @@ It never writes to GitHub. No reviews, comments, check runs, labels, or
 issues. It has no webhook receiver and no queue, and runs one review at a
 time. Design and decision record:
 [`docs/plans/2026-11-06-manual-reviewer-service.md`](../docs/plans/2026-11-06-manual-reviewer-service.md)
-(D24-D30 and D32 in [`docs/open-questions.md`](../docs/open-questions.md)).
-Planned follow-ups, none built here, are listed in that plan's
+(D24-D30, D32, D33, D35 and D36 in
+[`docs/open-questions.md`](../docs/open-questions.md)).
+D37 is the Fly one-off deploy. Other follow-ups are in that plan's
 "Follow-ups" section.
+
+## Deploy on Fly
+
+The controller can run as one Fly Machine per review: no public service,
+no standing Machine, no webhook, and no queue. The image is
+`python:3.12.16-slim-bookworm` pinned by digest, installed from
+`requirements.txt` with `--require-hashes`, and run as uid 10001. Fly
+secrets supply `ATLAS_GITHUB_APP_ID`, `ATLAS_GITHUB_APP_PRIVATE_KEY`,
+`ATLAS_GITHUB_INSTALLATION_ID`, `ATLAS_SPRITES_TOKEN`, and
+`ATLAS_OPENROUTER_API_KEY`. Every Fly command runs with a token scoped
+to the Fly org `personal` and names the app or org. A review Machine
+writes the draft and telemetry to its own disk and is held after the
+review exits. The operator copies both off with `fly ssh sftp` and then
+destroys the Machine. `fly apps destroy` does not remove Sprites; a
+runner left behind is destroyed by name with `sweep --event --force-live`. The exact
+commands are in [`deploy-fly.md`](deploy-fly.md). No app has been
+created from this repo.
 
 ## Run it offline (no credentials)
 
@@ -64,8 +82,33 @@ python -m atlas_reviewer review --event event.json \
 python -m atlas_reviewer probe-runner                # Sprites protocol, tool and stdin check, nothing from a PR
 python -m atlas_reviewer probe-runner --sequence review --tarball checkout.tar.gz
                                                      # the review's exact exec sequence on a real checkout, no model
-python -m atlas_reviewer sweep                       # destroy runners a crashed review left behind
+python -m atlas_reviewer sweep --force-live          # destroy runners a crashed review left behind
+python -m atlas_reviewer sweep --event event.json --force-live
+                                                     # also destroy that event's runner, by name
+python -m atlas_reviewer sweep --runner NAME --force-live
+                                                     # also destroy this runner, by name
 ```
+
+A live review names its runner Sprite after the event:
+`cqa-rev-pr<PR>-<first 12 of the head SHA>-<8 hex of a SHA-256 over repo,
+PR, and SHA>`. It prints `atlas_reviewer: runner Sprite for this review:
+<name>` to stderr before creating it, and exits 3 without creating
+anything when a Sprite already has that name. That check is only a hint:
+the create is the claim. When two reviews of one commit race, Sprites
+refuses the second create and that review exits 3. A review deletes only
+a runner its own create made, so the loser never touches the winner's
+Sprite. A create whose outcome is unknown (a timeout or a 5xx) is not
+deleted either; its name stays in the ledger and the review reports
+cleanup not verified. That name may now be the runner of a review of the
+same commit on another machine. `sweep --event` and `sweep --runner`
+record those names in this state directory's ledger and then sweep it, so
+a runner recorded only on another machine's disk can still be destroyed
+by name. Any sweep that would delete something, by name or from a
+non-empty ledger, refuses to run (exit 2) without `--force-live`, which
+says you checked that no review that could be using the runner is still
+running. `--runner`
+accepts only `cqa-rev-` names of lowercase letters, digits, and hyphens.
+`--dry-run` keeps the time-stamped random names.
 
 `probe-runner --sequence review` runs the same `run_disposable` exec order a
 review uses: tool check, tarball upload, unpack, then a trivial tool
@@ -104,7 +147,24 @@ probe captures it.
 `sweep` takes the same single-review lock as `review` and `probe-runner`.
 The ledger lists a live review's runner too, so sweeping during a review
 would destroy that runner mid-run. While a review holds the lock, `sweep`
-exits with the usage error (2) and destroys nothing.
+exits with the usage error (2) and destroys nothing. The lock is per state
+directory, so it does not stop `sweep --runner` on another machine from
+destroying a runner a review there is still using, nor a ledger sweep
+here from deleting a name another machine's review now owns; that is why
+a sweep with anything to delete needs `--force-live`. `sweep` prints one
+line per runner, `already absent, nothing deleted (verified absent)` for
+one that was gone before the sweep, and exits 3 when any runner's cleanup
+could not be verified (its name stays in the ledger for another sweep).
+
+`python -m atlas_reviewer` turns the first SIGINT or SIGTERM into
+`KeyboardInterrupt`, even when it was started with SIGINT ignored, so the
+`finally` that destroys the runner still runs when the process is stopped.
+It ignores later SIGINTs and SIGTERMs, so a second stop cannot cut that
+cleanup short. A stop during the final delete waits until the delete is
+done. If that delete is already unwinding another error, the error stays
+the result. Otherwise the stop ends the review right then, before any
+further GitHub or model work. The cleanup budget bounds the delete, and
+SIGKILL still ends the process.
 
 `--state-dir DIR` is a top-level option, so it goes before the subcommand.
 Live inference is off by default. `--provider openrouter` is refused
@@ -693,8 +753,13 @@ tarball, and the controller loop that calls the bridge (phase 3).
   deadline. The controller fetches the tarball with its own token. An external
   deadline is enforced by a watchdog timer. Destroy runs in `finally` and
   from the watchdog. It is idempotent and is verified by a follow-up
-  existence check. The runner name is written to the ledger before create,
-  so `sweep` can clean up after a crashed controller.
+  existence check. It deletes only after this process's create succeeded:
+  a refused create stops the run with nothing to delete, and a create
+  whose outcome is unknown leaves the name for `sweep --force-live`. The
+  runner name is written to the ledger before create, so `sweep --force-live`
+  can clean up after a crashed controller. A live runner's name
+  comes from the event, so `sweep --event` can find it from another
+  machine.
 
 ## What a live run still needs
 

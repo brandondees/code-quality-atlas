@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from atlas_reviewer.interpreter import PYENV_VERSIONS, PYTHON_TAG
-from atlas_reviewer.ports import BoundaryError, Json, NotFoundError
+from atlas_reviewer.ports import BoundaryError, Json, NotFoundError, RefusedError
 from atlas_reviewer.runner import EXIT_MARKER, EXIT_NOT_FOUND, PROBE_TAG, START_MARKER
 
 _HANG_LIMIT_S = 10.0
@@ -101,7 +101,7 @@ class FakeSprites:
         self._record("create", name)
         with self._lock:
             if name in self._sprites:
-                raise BoundaryError(f"sprite {name} already exists")
+                raise RefusedError(f"Sprites HTTP 409: sprite {name} already exists")
             self._sprites[name] = _Sprite()
 
     def set_network_policy(self, name: str, rules: Sequence[Json]) -> None:

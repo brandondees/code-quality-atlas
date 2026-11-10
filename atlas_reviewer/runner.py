@@ -23,7 +23,8 @@ cleanup ends at most that plus one call window after it starts:
    only the final verified destroy clears the ledger entry, never the
    watchdog's, which can run while `create` is still in flight, and not
    after a create whose outcome is unknown or once the cleanup budget is
-   spent: those report DESTROY_UNVERIFIED and leave the entry for `sweep`.
+   spent: those report DESTROY_UNVERIFIED and leave the entry for
+   `sweep --force-live`.
 
 Upload and unpack are separate execs so a transport stall and a slow or
 stuck extraction fail with different labels. Every exec error names its
@@ -61,6 +62,7 @@ from an in-band marker each script prints.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import secrets
 import threading
@@ -70,7 +72,7 @@ from dataclasses import dataclass, field, replace
 from typing import Literal
 
 from atlas_reviewer.clock import SystemClock
-from atlas_reviewer.domain import CleanupStatus, RunnerReport, RunnerStatus
+from atlas_reviewer.domain import CleanupStatus, PrEvent, RunnerReport, RunnerStatus
 from atlas_reviewer.guest_unpack import unpack_refusal, unpack_script
 from atlas_reviewer.interpreter import (
     PYTHON_PLACEHOLDER,
@@ -90,12 +92,14 @@ from atlas_reviewer.ports import (
     Clock,
     Json,
     NotFoundError,
+    RefusedError,
     RunnerLedger,
     SpritesApi,
     StreamTimeoutError,
 )
 from atlas_reviewer.source_archive import DEFAULT_UNPACK, UnpackLimits, measure
 from atlas_reviewer.sprites_api import EXEC_STDIN_MAX_BYTES
+from atlas_reviewer.stops import held
 from atlas_reviewer.telemetry import ERROR, Fields, Telemetry
 
 DENY_ALL: tuple[Json, ...] = ({"action": "deny", "domain": "*"},)
@@ -156,6 +160,12 @@ class DeadlineExceededError(RuntimeError):
 
 class PolicyNotEnforcedError(BoundaryError):
     pass
+
+
+class CreateRefusedError(BoundaryError):
+    """Sprites refused to create the runner, so this run made nothing and
+    deletes nothing. Not a failed run but a run that cannot start: it
+    propagates instead of becoming a FAILED report."""
 
 
 @dataclass(frozen=True)
@@ -334,15 +344,19 @@ class Deadline:
         return left
 
 
-CreateOutcome = Literal["not started", "unknown", "settled"]
+CreateOutcome = Literal["not started", "unknown", "refused", "settled"]
 
 
 @dataclass
 class _Create:
-    """Whether the runner's `create` settled. `unknown` while it is in
-    flight and after it raised: a client-side failure (a timeout, a 5xx a
-    proxy sent after forwarding) does not show the server never made the
-    Sprite, and nothing here bounds when it might still land."""
+    """Whether this process's `create` made the runner. Only `settled`
+    shows it did, so only then may cleanup delete the name: another
+    review of the same commit uses the same name. `refused` is a 4xx
+    answer (nothing was made, or the name is someone else's). `unknown`
+    while it is in flight and after it raised otherwise: a client-side
+    failure (a timeout, a 5xx a proxy sent after forwarding) does not show
+    the server never made the Sprite, nor that the Sprite is this
+    process's."""
 
     outcome: CreateOutcome = "not started"
 
@@ -374,6 +388,15 @@ def runner_name(
     clock: Clock, token_hex: Callable[[int], str] = secrets.token_hex
 ) -> str:
     return f"cqa-rev-{clock.now():%Y%m%d-%H%M%S}-{token_hex(3)}"
+
+
+def event_runner_name(event: PrEvent) -> str:
+    """One name per PR commit, so a runner that outlived its controller can
+    be found and deleted from the event alone. The digest keeps two repos
+    with the same PR number and commit apart."""
+    key = f"{event.repo}\n{event.pr_number}\n{event.head_sha}".encode()
+    digest = hashlib.sha256(key).hexdigest()[:8]
+    return f"cqa-rev-pr{event.pr_number}-{event.head_sha[:12]}-{digest}"
 
 
 def decode_exec_output(raw: bytes) -> str:
@@ -487,6 +510,7 @@ class _Destroyer:
         self._telemetry, self._create, self._clock = telemetry, create, clock
         self._lock = threading.Lock()
         self._status: CleanupStatus | None = None
+        self.deleted = False
         self._budget_start: float | None = None
 
     def _budget_left(self) -> float:
@@ -497,19 +521,20 @@ class _Destroyer:
     def destroy(self, trigger: Trigger) -> CleanupStatus:
         """Only the watchdog can run while `create` is still in flight.
         Any other trigger destroys again even after the watchdog did,
-        because a create in flight when the watchdog fired can add the
-        Sprite after the watchdog verified it absent; for the same reason
-        the watchdog never clears the ledger entry, and neither does any
-        destroy while the create's outcome is unknown: absence then is only
-        momentary, so the entry stays for a later `sweep` and the result is
-        DESTROY_UNVERIFIED. A telemetry write
+        because a create in flight when the watchdog fired can settle
+        after it; for the same reason the watchdog never clears the ledger
+        entry. No trigger deletes unless this process's create settled:
+        with the create refused or never started nothing was made here, so
+        the result is NOT_CREATED; with its outcome unknown the Sprite may
+        be another review's, so the entry stays for a `sweep --force-live`
+        the operator runs and the result is DESTROY_UNVERIFIED. A telemetry write
         failure must not stop cleanup, so cleanup is redone untraced and
         the error re-raised, carrying the cleanup result as a note.
 
         Cleanup has `CLEANUP_BUDGET_S` from the first destroy: a destroy
         waits for another one only that long, and starts no call once it
         is spent. Cut short, it reports DESTROY_UNVERIFIED and leaves the
-        ledger entry for a sweep."""
+        ledger entry for `sweep --force-live`."""
         if not self._lock.acquire(timeout=max(self._budget_left(), 0.0)):
             return self._budget_spent(self._telemetry, trigger, "waiting for a destroy")
         try:
@@ -540,6 +565,8 @@ class _Destroyer:
     def _destroy(self, telemetry: Telemetry, trigger: Trigger) -> CleanupStatus:
         if trigger == "watchdog":
             telemetry.record("watchdog", "fired", {"runner": self._name})
+        if self._create.outcome != "settled":
+            return self._without_delete(telemetry, trigger)
         for n in (1, 2):
             if self._budget_left() <= 0:
                 return self._budget_spent(telemetry, trigger, "before a delete")
@@ -561,18 +588,23 @@ class _Destroyer:
         )
         return status
 
+    def _without_delete(self, telemetry: Telemetry, trigger: Trigger) -> CleanupStatus:
+        create = self._create.outcome
+        telemetry.record(
+            "destroy", "no delete",
+            {"runner": self._name, "trigger": trigger, "create": create},
+        )  # fmt: skip
+        if create == "unknown":
+            return self._outcome(telemetry, trigger, CleanupStatus.DESTROY_UNVERIFIED)
+        if trigger != "watchdog":
+            self._ledger.clear(self._name)
+        return self._outcome(telemetry, trigger, CleanupStatus.NOT_CREATED)
+
     def _verified_status(self, telemetry: Telemetry, trigger: Trigger) -> CleanupStatus:
         if not self._verified_absent(telemetry, trigger):
             return CleanupStatus.DESTROY_UNVERIFIED
-        if trigger == "watchdog":
-            return CleanupStatus.DESTROYED_VERIFIED
-        if self._create.outcome == "unknown":
-            telemetry.record(
-                "ledger", "keep runner name",
-                {"runner": self._name, "trigger": trigger, "create": "unknown"},
-            )  # fmt: skip
-            return CleanupStatus.DESTROY_UNVERIFIED
-        self._ledger.clear(self._name)
+        if trigger != "watchdog":
+            self._ledger.clear(self._name)
         return CleanupStatus.DESTROYED_VERIFIED
 
     def _attempt_delete(self, telemetry: Telemetry, trigger: Trigger, n: int) -> bool:
@@ -595,6 +627,7 @@ class _Destroyer:
             self._api.delete(self._name)
         except NotFoundError:
             return "already absent"
+        self.deleted = True
         return "deleted"
 
     def _verified_absent(self, telemetry: Telemetry, trigger: Trigger) -> bool:
@@ -619,9 +652,24 @@ def destroy_runner(
 ) -> CleanupStatus:
     """For a runner no live review is creating (a sweep): whatever create
     the review that recorded it made is taken to have settled by now."""
-    return _Destroyer(
-        api, ledger, name, telemetry or _quiet(), _Create("settled"), SystemClock()
-    ).destroy("sweep")
+    return _sweep_one(api, ledger, name, telemetry or _quiet()).cleanup
+
+
+@dataclass(frozen=True)
+class Swept:
+    """`deleted` is False when the runner was already absent."""
+
+    cleanup: CleanupStatus
+    deleted: bool
+
+
+def _sweep_one(
+    api: SpritesApi, ledger: RunnerLedger, name: str, telemetry: Telemetry
+) -> Swept:
+    destroyer = _Destroyer(
+        api, ledger, name, telemetry, _Create("settled"), SystemClock()
+    )
+    return Swept(destroyer.destroy("sweep"), destroyer.deleted)
 
 
 def _quiet() -> Telemetry:
@@ -660,7 +708,8 @@ def _disposable(
         status, note = _guarded(run, body)
     finally:
         watchdog.cancel()
-        cleanup = destroyer.destroy("final")
+        with held():
+            cleanup = destroyer.destroy("final")
     return RunnerReport(status, cleanup, name, note)
 
 
@@ -673,6 +722,8 @@ def _guarded(run: _Run, body: Body) -> tuple[RunnerStatus, str]:
         note = body(run)
     except DeadlineExceededError as exc:
         return _deadline_reached(run, str(exc))
+    except CreateRefusedError:
+        raise
     except BoundaryError as exc:
         if run.deadline.remaining() <= 0:
             return _deadline_reached(run, f"deadline reached: {exc}")
@@ -988,7 +1039,15 @@ def _provision(run: _Run) -> None:
     api, name, t = run.api, run.name, run.telemetry
     run.deadline.check("create")
     run.create.outcome = "unknown"
-    t.span("create", "create sprite", lambda: api.create(name))
+    try:
+        t.span("create", "create sprite", lambda: api.create(name))
+    except (RefusedError, NotFoundError) as exc:
+        run.create.outcome = "refused"
+        raise CreateRefusedError(
+            f"Sprites refused to create runner {name} ({exc}); this review "
+            "created and deletes nothing. If a Sprite by that name exists, "
+            "another review of this commit may be using it."
+        ) from exc
     run.create.outcome = "settled"
     run.deadline.check("network policy")
     t.span(
@@ -1334,7 +1393,7 @@ def _first_line(text: str) -> str:
 
 def sweep(
     api: SpritesApi, ledger: RunnerLedger, telemetry: Telemetry | None = None
-) -> dict[str, CleanupStatus]:
+) -> dict[str, Swept]:
     """Destroy every runner a previous (possibly crashed) review left behind.
 
     Precondition: no review is running against this ledger. It records
@@ -1343,4 +1402,4 @@ def sweep(
     one. The caller holds `ledger.single_review_lock` for the sweep, as
     for a review; that lock, not this function, keeps the two apart."""
     t = telemetry or _quiet()
-    return {name: destroy_runner(api, ledger, name, t) for name in ledger.pending()}
+    return {name: _sweep_one(api, ledger, name, t) for name in ledger.pending()}
