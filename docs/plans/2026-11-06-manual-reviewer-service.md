@@ -414,6 +414,28 @@ Operator-requested in Run #9. Offline only, no live call made here.
 - **Next step, proposed only:** a lens-based agentic reviewer (D31,
   [`2026-11-07-lens-based-agentic-reviewer.md`](2026-11-07-lens-based-agentic-reviewer.md)).
 
+### Whole lenses and the picker skip (D35)
+
+Offline only, no live call made here.
+
+- **Whole or NOT RUN.** No lens body or instruction text is cut. The
+  critical tier is considered first, then the picker's names in rank order.
+  A lens that does not fit the rest of the 60,000-character budget whole,
+  or comes past the depth's cap (triage 4, review 8, comprehensive 40), is
+  NOT RUN with the reason and its size. A name with no `body.md` is NOT RUN
+  and takes no slot.
+- **Current coverage.** Tracing (34,750 characters) and security (15,000)
+  run. Migration (22,656) and concurrency (10,984) are NOT RUN. The 10,250
+  characters left are fewer than the smallest other lens
+  (`reviewing-test-quality`, 11,015). So every depth runs 2 of the 4
+  critical lenses and no picked lens.
+- **Picker skip.** When no non-critical lens could fit after the critical
+  tier, `select_lenses` makes no picker call, and the notes say why. The
+  controller gives that call to diff review.
+- **Known limitation.** The inlined skill text points at `reference/*.md`
+  files the model cannot open. It is left whole and unedited.
+- **Next.** Per-lens fan-out, one call per lens, is the next PR after #607.
+
 ### Still unverified against live responses
 
 - **The Sprites exec response body.** Observed for a small echo, a 3 MiB
@@ -442,7 +464,8 @@ Operator-requested in Run #9. Offline only, no live call made here.
   included, truncated or omitted. The model has no file tools, so naming
   lenses never ran them. The selector is a coarse heuristic and the table
   shows its choices. (D32 replaced this selector with the repo's own lens
-  picker and raised the cap to 8.)
+  picker and raised the cap to 8. D35 then ended truncation: a lens runs
+  whole or is NOT RUN, with a reason.)
 - **Grouped checks.** A check run, its job (via the documented
   `check_run_url`), the job's log and the workflow run are one independent
   check. A run is context for its jobs only when a job carries its verdict;
