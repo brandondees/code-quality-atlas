@@ -212,6 +212,11 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
             selection, parts, dropped, len(base.diff_paths), pull.changed_files
         ),
     )
+    # Check names, failure reasons, archive entry names and runner notes are
+    # untrusted too, and the model saw the diff unredacted, so a value the
+    # secret scan found is scrubbed wherever the narrative repeats it.
+    flagged = () if secrets is None else secrets.values
+    scrubber = replace(deps.redactor, flagged=flagged)
     draft = render_draft(
         DraftInput(
             event=event,
@@ -237,13 +242,10 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
             generated_at=deps.clock.now(),
             telemetry=telemetry.events,
             verdict=verdict,
-        )
+        ),
+        lambda text: scrubber(text).text,
     )
-    # Check names, failure reasons, archive entry names and runner notes are
-    # untrusted too, and the model saw the diff unredacted, so a value the
-    # secret scan found is scrubbed wherever the narrative repeats it.
-    flagged = () if secrets is None else secrets.values
-    return ReviewOutcome(replace(deps.redactor, flagged=flagged)(draft).text, verdict)
+    return ReviewOutcome(draft, verdict)
 
 
 def _proposed(parts: tuple[PartNarrative, ...]) -> ReviewEvent:

@@ -7,7 +7,7 @@ to read; nothing in it is posted anywhere.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -112,13 +112,14 @@ def _sort_key(e: Evidence) -> tuple[str, str]:
     return key.kind.value, key.name
 
 
-def render_draft(d: DraftInput) -> str:
+def render_draft(d: DraftInput, scrub: Callable[[str], str] = str) -> str:
     """The first line is the machine-readable review status; the review
-    event and any incomplete-coverage warning lead the body."""
-    sections = (
-        status_line(d.verdict),
+    event and any incomplete-coverage warning lead the body. `scrub` runs
+    over every section built from untrusted text, and over each path the
+    warning names, but never over the status line or the warning's own
+    words, so a scrubbed value cannot rewrite the verdict."""
+    body = (
         _header(d),
-        warning(d.verdict, MAX_WARNED_PATHS),
         _summary(d),
         controller_notes_section(d.controller_notes),
         _secrets(d.secrets),
@@ -135,6 +136,12 @@ def render_draft(d: DraftInput) -> str:
             "PR and issue text before any model call. The diff is not redacted; it is "
             "scanned for possible committed secrets instead."
         ),
+    )
+    sections = (
+        status_line(d.verdict),
+        scrub(body[0]),
+        warning(d.verdict, MAX_WARNED_PATHS, scrub),
+        *(scrub(s) for s in body[1:]),
     )
     return "\n\n".join(s for s in sections if s) + "\n"
 

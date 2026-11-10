@@ -1380,6 +1380,55 @@ def test_a_missing_github_file_count_blocks_approval():
     assert "GitHub reported no changed-file count" in top_of(draft)
 
 
+def secret_valued(value):
+    return (
+        "diff --git a/app.ini b/app.ini\n--- a/app.ini\n+++ b/app.ini\n"
+        f'@@ -1 +1,2 @@\n x\n+password = "{value}"\n'
+    )
+
+
+class Requesting(Approving):
+    def complete(self, prompt):
+        reply = super().complete(prompt)
+        if "--- lens picker ---" in prompt.system:
+            return reply
+        return "Bad config.\n\nReview event: REQUEST_CHANGES"
+
+
+def test_a_committed_secret_equal_to_the_review_event_leaves_the_verdict_intact():
+    github = with_diff(secret_valued("REQUEST_CHANGES")).github
+    s = Setup(github=github, provider=Requesting())
+    draft = s.run()
+    status = status_of(draft)
+    assert (status["review_event"], status["proposed_event"]) == (
+        "REQUEST_CHANGES",
+        "REQUEST_CHANGES",
+    )
+    assert "**Review event: REQUEST_CHANGES.**" in top_of(draft)
+    narrative = section(draft, "Review narrative")
+    assert "Review event: [REDACTED:possible-committed-secret]" in narrative
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "review_event",
+        "proposed_event",
+        "coverage_complete",
+        "changed_files",
+        "unreviewed_files",
+    ],
+)
+def test_a_committed_secret_equal_to_a_status_field_name_leaves_the_status_intact(
+    field,
+):
+    s = approving(github=with_diff(secret_valued(field)).github)
+    draft = s.run()
+    status = status_of(draft)
+    assert field in status
+    assert (status["review_event"], status["coverage_complete"]) == ("APPROVE", True)
+
+
 def test_a_cut_file_blocks_approval():
     s = approving(github=with_diff(sized_diff(1, 3_000)).github)
     draft = s.run(model_calls=1, diff_chars_per_call=1_000)

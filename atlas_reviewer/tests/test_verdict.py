@@ -91,6 +91,23 @@ def test_the_warning_lists_paths_quoted_riskiest_first_up_to_the_limit():
     )
 
 
+@pytest.mark.parametrize(
+    "coverage",
+    [
+        FileCoverage(2, (Unreviewed("k-SECRET.py", "never sent to any model call", 0),)),
+        FileCoverage(
+            2,
+            (Unreviewed("k-SECRET.py", "the diff had no file headers", 0),),
+            unknown="the fetched diff names no file",
+        ),
+    ],
+)
+def test_the_warning_scrubs_the_paths_it_names_but_not_its_own_words(coverage):
+    text = warning(decide(A, coverage), 5, lambda s: s.replace("SECRET", "[gone]"))
+    assert '`"k-[gone].py"`' in text
+    assert "Review event: COMMENT (the model proposed APPROVE)." in text
+
+
 def test_a_draft_without_a_verdict_renders_as_undetermined():
     from datetime import UTC, datetime
 

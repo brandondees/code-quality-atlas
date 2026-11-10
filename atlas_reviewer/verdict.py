@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -117,9 +117,10 @@ def parse_status(draft: str) -> dict[str, object] | None:
     return value if isinstance(value, dict) else None
 
 
-def warning(v: Verdict, limit: int) -> str:
+def warning(v: Verdict, limit: int, scrub: Callable[[str], str] = str) -> str:
     """The block at the top of the review body. Paths are chosen by the PR
-    author, so each is quoted as data; at most `limit` are listed."""
+    author, so each is scrubbed and quoted as data; at most `limit` are
+    listed."""
     if v.coverage_complete:
         return (
             f"**Review event: {v.event.value}.** Every changed file "
@@ -134,7 +135,7 @@ def warning(v: Verdict, limit: int) -> str:
     )
     if v.coverage.unknown:
         named = (
-            f" Not reviewed, highest risk first: {_listed(v.coverage.unreviewed, limit)}."
+            f" Not reviewed, highest risk first: {_listed(v.coverage.unreviewed, limit, scrub)}."
             if v.coverage.unreviewed
             else ""
         )
@@ -147,14 +148,16 @@ def warning(v: Verdict, limit: int) -> str:
     return (
         f"{head} {count} of {v.coverage.changed} changed file(s) were not "
         f"reviewed in full, so this review cannot approve. Not reviewed, "
-        f"highest risk first: {_listed(v.coverage.unreviewed, limit)}."
+        f"highest risk first: {_listed(v.coverage.unreviewed, limit, scrub)}."
     )
 
 
-def _listed(files: tuple[Unreviewed, ...], limit: int) -> str:
+def _listed(
+    files: tuple[Unreviewed, ...], limit: int, scrub: Callable[[str], str]
+) -> str:
     shown = sorted(files, key=lambda f: f.rank)[:limit]
     groups = (
-        f"{why}: " + ", ".join(quote_untrusted(f.path) for f in shown if f.why == why)
+        f"{why}: " + ", ".join(quote_untrusted(scrub(f.path)) for f in shown if f.why == why)
         for why in dict.fromkeys(f.why for f in shown)
     )
     more = len(files) - len(shown)
