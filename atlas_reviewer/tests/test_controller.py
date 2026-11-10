@@ -548,6 +548,18 @@ def openrouter_setup(*chat, lenses=None, **limits):
     return Setup(github=RiskyDiff(FIXTURE), harness=harness, lenses=lenses), fake
 
 
+def test_when_every_model_call_fails_the_notes_do_not_blame_the_offline_provider():
+    from .test_openrouter import reply
+
+    busy = reply({"error": "busy"}, status=503)
+    s, fake = openrouter_setup(busy, busy, busy)
+    draft = s.run(model_calls=3, diff_chars_per_call=41_000, depth=Depth.TRIAGE)
+    assert len(fake.chat_requests()) == 3
+    notes = section(draft, "Controller notes")
+    assert "offline provider" not in notes
+    assert "Diff coverage after the model calls: PARTIAL. 0 of " in notes
+
+
 def test_retries_share_the_three_call_cap_so_a_later_part_is_refused_and_listed():
     from .test_openrouter import completion, reply
 

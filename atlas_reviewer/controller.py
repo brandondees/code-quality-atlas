@@ -806,7 +806,7 @@ def _coverage_lines(
     reviewed = [p for p in parts if p.reviewed]
     full = sum(1 for p in reviewed for f in p.files if not f.cut)
     cut = sum(1 for p in reviewed for f in p.files if f.cut)
-    if parts and all(p.simulated for p in reviewed):
+    if reviewed and all(p.simulated for p in reviewed):
         line = (
             "Diff coverage: NOT REVIEWED. The offline provider built the prompt(s) "
             f"for {len(parts)} part(s) without calling a model, so no model "
