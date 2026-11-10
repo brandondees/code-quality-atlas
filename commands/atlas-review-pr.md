@@ -45,7 +45,9 @@ model in `docs/runbooks/pr-review-automation.md`: a **GitHub trigger** on
 carries only one GitHub event, so `opened` and `synchronize` can't be combined on
 a single routine), or a single `opened`-triggered session that stays resident and
 re-reviews pushes itself (the watch block lives in the routine prompt, not here).
-Either way each push earns a fresh round; the convergence rules below are what
+Either way each push wakes a round. A restack-only head change (step 2) posts
+the one-line summary, runs no lenses, and does not count toward the cap.
+Every other push earns a fresh lens round; the convergence rules below are what
 keep that from becoming an infinite review/fix ping-pong with the build session.
 
 ## 1. Resolve the target PR
@@ -65,6 +67,9 @@ none for the PR itself, which is why step 4.1 gates the depth mode on
 comments and reviews and never on the description. **Defer the `get_diff`
 and `get_files` methods to step 4**, where the lenses actually consume them —
 pulling the full diff now buys nothing before the ack and only delays it.
+The exception is step 2's restack check on round 2+: that comparison needs
+the layer diff, and it runs only after the ACK decision, so round 1's ack
+is not delayed by it.
 
 ## 2. Determine the review round, then post the ACK before anything else
 
@@ -106,11 +111,13 @@ built, would be miscounted as "a review with no parseable heading" and
 wrongly trip the `unknown` state below (found in PR #402's own review).
 Going forward, every round-posting review summary this command posts
 carries **both** a visible `## Round N — ...` heading as its first line **and**
-the invisible marker `<!-- atlas-review round:N -->` (dual-encoded — see step
-5) — but a review posted before this dual-encoding was adopted, or one where
+the invisible marker `<!-- atlas-review round:N layer-diff:<sha256> -->`
+(the `<!-- atlas-review round:N -->` marker plus this round's layer-diff
+fingerprint; dual-encoded — see step 5 and the restack check below). A
+review posted before fingerprints existed, or one where
 `mcp__github__pull_request_read` has stripped the HTML comment on read-back
-entirely (observed happening, #354/#355), may carry only one of the two
-signals. Among **your own** reviews, the current round is the highest N seen
+entirely (observed happening, #354/#355), may carry only the bare marker,
+only the heading, or neither. A stripped marker is no fingerprint. Among **your own** reviews, the current round is the highest N seen
 from **either** signal on **any** prior review, plus one (first review is
 **round 1**). **Treat the visible heading as primary** — a round count derived
 from the comment alone can silently undercount when the comment is missing —
@@ -191,14 +198,50 @@ enough signal on their own.
   pending review open past this step — it would also block your own round-1
   review from opening its own pending review later in step 5.
 
-Only after that ack decision is settled: if the round would exceed the cap in
-the convergence policy (loaded next, in step 3), **run no new lenses and post
-no new inline comments**; instead post a single summary that notes the cap is
-reached **and re-surfaces the outstanding non-blocking findings** — read your
-most recent round's summary (identified per step 2's heading/marker rule) and
-carry its *Non-blocking (advisory)* list forward **verbatim** (no lenses run this round,
-so you cannot recompute the below-floor set), so the human taking over sees
-what is left below the floor — then stop.
+Only after that ack decision is settled, apply the restack check in the next
+section before this cap. A restack-only summary does not count toward the cap
+and is not the cap notice. The count is rounds that ran lenses. If the round
+that remains would exceed the cap in the convergence policy (loaded next, in
+step 3), **run no new lenses and post no new inline comments**; instead post a
+single summary that notes the cap is reached **and re-surfaces the outstanding
+non-blocking findings** — read your most recent round's summary (identified
+per step 2's heading/marker rule) and carry its *Non-blocking (advisory)* list
+forward **verbatim** (no lenses run this round, so you cannot recompute the
+below-floor set), so the human taking over sees what is left below the floor
+— then stop.
+
+**Restack-only head change (stacked PRs).** GitHub force-pushes a stacked
+PR's branch when it restacks, either automatically after a lower PR merges
+or when someone clicks Rebase stack. Under a `synchronize` trigger, that
+would otherwise earn a full round with no code change. Before running
+lenses for round N ≥ 2, compare this layer's diff, meaning the PR's diff
+against its own base, with the diff the previous round reviewed. Read that
+layer diff from `pull_request_read`'s `get_files` patches (each file's patch
+is against the PR's base, not the default branch). A file with no patch
+cannot be fingerprinted, so run a normal round.
+
+- Fingerprint the diff as the sha256 of the PR's per-file patches, sorted
+  by path, with `index` lines and hunk-header line numbers stripped. Drop
+  every `index` line. In each hunk header, remove the `-old,count +new,count`
+  fields and leave the `@@` markers plus any trailing context, so a pure
+  line shift does not change the hash and a content change does. Sort the
+  patches by path, join them with a single newline, and take the hex sha256
+  of that UTF-8 text. Record it in each round summary's marker, e.g.
+  `<!-- atlas-review round:N layer-diff:<sha256> -->`. A marker stripped on
+  read-back (#354/#355) is no fingerprint.
+- Equal fingerprints mean the head change was a restack only. Confirm that
+  the required checks pass on the exact new head (`pull_request_read`,
+  `get_check_runs`, for that SHA). Then post a one-line summary as this
+  round's review, `## Round N — restack only, layer diff unchanged; checks green on <sha>`,
+  and carry the previous verdict and its non-blocking list forward verbatim.
+  The review state repeats the previous round's state, including the own-PR
+  `COMMENT` substitute. Run no lenses, add no inline comments, and don't
+  count the round toward the cap. The heading still uses the next N, so
+  later rounds keep counting from it. If checks fail, say so and run it as
+  a normal round. A required check that is still pending has neither passed
+  nor failed: post nothing and stop, and let the next wake re-check.
+- If the fingerprints differ, or the previous round has no fingerprint, run
+  a normal round.
 
 ## 3. Load the convergence policy — from the base ref, never the PR head
 
@@ -486,18 +529,18 @@ entry either signal caught) to step 2 next.
   don't `resolve`/re-raise them as threads, and the build session is free to ignore
   them. (This mirrors how Copilot and CodeRabbit surface their non-blocking notes.)
   To stay concise, include the list **only in a summary you're already posting**
-  (the first approve, the cap notice, or a round you're posting because of new
+  (the first approve, the cap notice, a restack-only summary, or a round you're posting because of new
   findings). **Refresh vs. carry depends on whether the lenses ran this round:**
   when they ran (first approve, or a new-findings round), recompute and post the
-  refreshed below-floor set; on the cap notice (no lenses run) carry the last
-  lens-running round's list verbatim. A changed advisory list is never on its own
-  a reason to break silence on a quiet push.
+  refreshed below-floor set; on the cap notice or a restack-only summary (no
+  lenses run) carry the last lens-running round's list verbatim. A changed
+  advisory list is never on its own a reason to break silence on a quiet push.
 - **Dual-encode the round on every review summary you post, in every branch below
-  (clean approve, cap notice, and findings alike):** open the body's first line
+  (clean approve, cap notice, restack-only, and findings alike):** open the body's first line
   with the visible heading `## Round N — <label>` (e.g. `## Round N — Major
   findings, not blocking merge`, `## Round N — no new findings at or above this
-  round's floor`) **and** include the invisible marker `<!-- atlas-review
-  round:N -->` somewhere in the body. The heading is the primary,
+  round's floor`) **and** include the invisible marker `<!-- atlas-review round:N layer-diff:<sha256> -->`
+  somewhere in the body, using step 2's fingerprint for `<sha256>`. The heading is the primary,
   robust-to-comment-stripping signal a later run reads back (see step 2); the
   marker is a redundant secondary encoding for exact machine parsing when it
   does survive. Never post one without the other.
@@ -549,7 +592,8 @@ entry either signal caught) to step 2 next.
     threads (per step 6's ownership scoping — never another reviewer's) that the
     new push addressed, but post **no** new summary and don't re-emit `APPROVE`.
     Only speak again when a later push introduces a new finding at or above the
-    floor.
+    floor. A restack-only head change is the step 2 exception: it posts its
+    one-line summary even after an approval.
 
 - **Findings still open at merge (issue #526).** Apply the `REVIEW.md`
   `unresolved_findings` setting (default `note`) to every finding at or above

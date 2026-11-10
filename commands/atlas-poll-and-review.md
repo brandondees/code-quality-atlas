@@ -276,7 +276,8 @@ one per PR): tell it to read and follow
 `commands/atlas-review-pr.md` exactly for that specific PR, and — critically —
 to **re-derive the round and ack status itself from GitHub**, not trust
 anything the calling session reports, since the triage pass may be stale by
-the time it runs. It runs the lenses, posts that round's review, and stops —
+the time it runs. It follows that command, including the restack-only
+short-circuit, posts that round's review, and stops —
 no resident watch, no subscription, no self-nudge chain to arm. The next
 scheduled sweep is what picks up the next push, by design.
 

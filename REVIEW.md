@@ -17,8 +17,9 @@ session react to each other, and a `synchronize`-triggered reviewer re-runs on
 every push. The brakes that keep that mutual reaction from ping-ponging forever
 are: a severity floor that rises once and then **plateaus at Major** (so later
 rounds are low-noise but still catch real problems), a rule that **only
-genuinely-new findings earn a comment** (quiet pushes stay quiet), and a hard
-round cap as a backstop.
+genuinely-new findings earn a comment** (quiet pushes stay quiet), a restack
+whose layer diff is unchanged posts one line and does not count toward the cap,
+and a hard round cap as a backstop.
 
 ## Reviewer ACK (start-of-review notice)
 
@@ -98,7 +99,8 @@ review summary on every push:
   concise terminal note — an `APPROVE` (see
   [Approve-on-clean](#approve-on-clean-the-terminal-state)) carrying the round
   state (a visible `## Round N — ...` heading is the primary signal, dual-encoded
-  with the redundant `<!-- atlas-review round:N -->` marker — see
+  with the redundant `<!-- atlas-review round:N -->` marker plus this round's
+  layer-diff fingerprint (`<!-- atlas-review round:N layer-diff:<sha256> -->`) — see
   `commands/atlas-review-pr.md` step 5 for the full heading-first/marker-fallback
   derivation rule, #354/#355) and, if any exist, the advisory list.
 - **Subsequent quiet pushes** (still nothing new at/above the floor): stay
@@ -107,6 +109,11 @@ review summary on every push:
   that the new push addressed, but post **no** new summary — there is no news.
   Don't re-emit `APPROVE`, and don't re-dump the advisory list verbatim each
   push.
+- **A restack-only head change** (the layer diff is unchanged;
+  `commands/atlas-review-pr.md` step 2) is not this silence. Post that step's
+  one-line restack summary, carry the previous verdict and its non-blocking
+  list forward verbatim, run no lenses, and do not count the round toward
+  the cap below.
 - **A push that does bring new at/above-floor findings** re-opens the loop: post
   those inline as usual. Speak again after a quiet spell only when there's
   genuinely something new.
@@ -124,13 +131,14 @@ re-raised thread-to-thread. They are informational: the build / auto-fix session
 **not** count as actionable for convergence, and do **not** on their own earn a new
 round. Keep each to one line — *severity · location · one-clause description*. To stay
 concise, include the list **only in a summary you're already posting** — the first
-approve, the cap notice, or a round you're posting because of new at/above-floor
+approve, the cap notice, a restack-only summary, or a round you're posting because of new at/above-floor
 findings — and within those, refresh it when it has changed rather than re-dumping
 an unchanged list. **Refresh vs. carry is decided by whether the lenses ran this
 round:** when they ran (the first approve, or a new-findings round), recompute the
 below-floor set and post the refreshed list; when they did **not** run (the cap
-notice — see [Round cap](#round-cap)), you cannot recompute it, so carry the last
-lens-running round's advisory list forward **verbatim**. A changed advisory list is
+notice — see [Round cap](#round-cap) — or a restack-only summary), you cannot
+recompute it, so carry the last lens-running round's advisory list forward
+**verbatim**. A changed advisory list is
 **never on its own** a reason to post on an otherwise-quiet push.
 This keeps the actionable surface (inline, at/above floor — "what must change")
 cleanly separate from the advisory surface (summary, below floor — "what could be
@@ -138,7 +146,8 @@ tidied").
 
 ## Round cap
 
-- **Hard cap: 10 rounds.** Beyond it, post no new inline comments and run no new
+- **Hard cap: 10 rounds** that ran lenses. A restack-only summary does not
+  count. Beyond the cap, post no new inline comments and run no new
   round — but the cap note is **not silent**: post a one-line "cap reached" notice
   that also re-surfaces the **outstanding non-blocking findings** (carry forward the
   advisory list from the last round's summary), so the human taking over sees

@@ -1058,5 +1058,9 @@ leave merges to the owner. `update_pull_request_branch` writes a merge
 commit, which breaks the linear history a stack requires, so
 `atlas-rebase-stale.md` and `atlas-poll-and-review.md` skip that call on a
 stack member and post the one-time restack poke instead. The poller runbook
-says the same wherever it used to treat every behind PR as auto-rebased. A
-restack-only review round in `atlas-review-pr.md` is still undecided.
+says the same wherever it used to treat every behind PR as auto-rebased.
+Brandon approved a restack-only review round the same day. Before round 2+,
+`atlas-review-pr.md` fingerprints the layer diff. An equal fingerprint with
+green required checks posts `## Round N — restack only, layer diff unchanged`
+and carries the previous verdict forward, with no lenses and no cap count.
+A different fingerprint, a missing one, or a failed check is a normal round.
