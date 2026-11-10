@@ -539,7 +539,8 @@ or by default to
 named only once the single-review lock is held, so two runs never share a
 file and a run refused the lock creates none. `review` and `probe-runner`
 print the file's path when they finish (`review` on stderr when stdout is
-the draft). Each line is written and closed as it happens, so a killed run
+the draft), and on stderr after the error message when a usage or boundary
+error ends a run whose telemetry had started. Each line is written and closed as it happens, so a killed run
 keeps its events. The draft and `probe-runner` print the same events as a
 summary table. Field values are numbers, booleans or controller-chosen
 labels (step labels never include branch names or other PR text). Error

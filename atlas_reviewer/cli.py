@@ -256,9 +256,14 @@ def _telemetry(
     return Telemetry(clock, sink, scrub=run.credentials.scrub)
 
 
-def _events_path(telemetry: Telemetry) -> str:
+def _telemetry_line(run: _Run, telemetry: Telemetry) -> str:
+    """Scrubbed like any other stderr text: an `--events` path is free text
+    that could hold a credential value."""
     sink = telemetry.sink
-    return str(sink.path) if isinstance(sink, JsonlSink) else "(not written)"
+    path = str(sink.path) if isinstance(sink, JsonlSink) else "(not written)"
+    return (
+        f"telemetry: {len(telemetry.events)} event(s), {run.credentials.scrub(path)}\n"
+    )
 
 
 def _dry_run_wiring(
@@ -407,7 +412,7 @@ def _cmd_review(args: argparse.Namespace, run: _Run) -> int:
     # Stdout carries the draft unless it went to a file; the summary must
     # not be appended to a draft someone pipes on.
     (out if written else err).write(
-        f"telemetry: {len(telemetry.events)} event(s), {_events_path(telemetry)}\n"
+        f"{_telemetry_line(run, telemetry)}"
         f"review event: {verdict.event.value}; coverage_complete="
         f"{str(verdict.coverage_complete).lower()}; unreviewed_files="
         f"{len(verdict.coverage.unreviewed)}\n"
@@ -542,9 +547,7 @@ def _cmd_probe(args: argparse.Namespace, run: _Run) -> int:
         finally:
             out.write(run.credentials.scrub(report.getvalue()))
     out.write(f"\n{telemetry_section(telemetry.events)}\n\n")
-    out.write(
-        f"telemetry: {len(telemetry.events)} event(s), {_events_path(telemetry)}\n"
-    )
+    out.write(_telemetry_line(run, telemetry))
     if not usable:
         out.write("probe: FAILED -- the runner is not usable as probed\n")
     return EXIT_OK if usable else EXIT_BOUNDARY
@@ -847,6 +850,8 @@ def main(
         code = handler(args, run)
     except tuple(e for e, _ in _ERRORS) as exc:
         run.err.write(f"atlas_reviewer: {run.credentials.scrub(str(exc))}\n")
+        if run.telemetry is not None:
+            run.err.write(_telemetry_line(run, run.telemetry))
         code = next(mapped for kind, mapped in _ERRORS if isinstance(exc, kind))
     finally:
         # The review raises a held stop right after its runner phase.

@@ -1017,6 +1017,47 @@ def test_the_probe_report_scrubs_minted_tokens_and_environment_credentials(
         assert APP_ENV[cli.ENV_SPRITES_TOKEN] not in leaked
 
 
+def test_a_boundary_error_still_names_the_telemetry_file(tmp_path, monkeypatch):
+    class NoPull(FixtureGitHub):
+        def get_pull(self, repo, number):
+            raise NotFoundError("GitHub 404")
+
+    minting_github(monkeypatch, MINTED, NoPull)
+    err = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "review", "--event", EVENT],
+        env=APP_ENV, out=io.StringIO(), err=err, sprites_factory=scripted_sprites,
+    )  # fmt: skip
+    assert code == cli.EXIT_BOUNDARY
+    (events_file,) = (tmp_path / "telemetry").glob("review-*.jsonl")
+    count = len(jsonl(events_file))
+    assert count > 0
+    assert f"telemetry: {count} event(s), {events_file}\n" in err.getvalue()
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_the_printed_telemetry_path_is_scrubbed(tmp_path, fails):
+    secret = "sprites-secret-value-0123456789"
+    target = tmp_path / f"run-{secret}" / "events.jsonl"
+    broken = ["--fixtures", str(tmp_path / "missing")] if fails else []
+    code, _, err = run_cli(
+        "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run",
+        "--events", str(target), *broken,
+        env={cli.ENV_SPRITES_TOKEN: secret},
+    )  # fmt: skip
+    assert code == (cli.EXIT_USAGE if fails else cli.EXIT_INCOMPLETE)
+    assert "telemetry: " in err
+    assert secret not in err
+
+
+def test_an_error_before_telemetry_starts_names_no_telemetry_file(tmp_path):
+    _, _, err = run_cli(
+        "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run",
+        "--max-model-calls", "9",
+    )  # fmt: skip
+    assert "telemetry:" not in err
+
+
 def test_a_dry_run_writes_telemetry_only_when_asked(tmp_path):
     run_cli("--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run")
     assert not (tmp_path / "telemetry").exists()
