@@ -435,6 +435,11 @@ Offline only, no live call made here.
 - **Known limitation.** The inlined skill text points at `reference/*.md`
   files the model cannot open. It is left whole and unedited.
 - **Next.** Per-lens fan-out, one call per lens, is the next PR after #607.
+- **Risk ranking.** Ranking is path-only, and risk-ordered packing can let a
+  low-risk change in an important-sounding path crowd others out of review.
+  Both are open as
+  Q25 in
+  [`open-questions.md`](../open-questions.md).
 
 ### Still unverified against live responses
 
@@ -535,6 +540,10 @@ Each item below is left out on purpose rather than deferred:
 This slice stays the single-prompt manual reviewer. Left for later PRs,
 each needing its own decision:
 
+- **Risk ranking and review exclusion.** Open as Q25 in
+  [`open-questions.md`](../open-questions.md): risk assessment for ordering,
+  depth, lens choice and flagging; whether any file may be excluded from
+  review is undecided. A dated research doc comes before any code.
 - **The lens-based agentic loop.** D31, proposal only:
   [`2026-11-07-lens-based-agentic-reviewer.md`](2026-11-07-lens-based-agentic-reviewer.md).
 - **Deploying the controller** (for example on Fly) instead of running it

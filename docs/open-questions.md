@@ -85,6 +85,12 @@ own `### Q<N>` section further down with full context.)*
   on a Sprite-per-review substrate without deciding it — see Q24's own entry.
   **D31** (2026-11-07) proposes a lens-based agentic reviewer on that
   substrate, awaiting the owner's decision on its call and cost caps.
+- **Q25** — the reviewer service's risk ranking: what risk assessment is for
+  (ordering, depth, lens choice, flagging), and whether anything may be
+  *excluded* from review at all, which is undecided. Ranking is path-only
+  today, and a low-risk change in an important-sounding path can crowd
+  others out of review. Next step: a dated research doc, before any code.
+  See Q25's own entry.
 - **Q22** — does the atlas's own review pass *execute* the checks it cites —
   three instances where it named the rule that would have caught a defect and
   cleared it anyway, all three then caught by an external reviewer. Phase 1
@@ -130,6 +136,45 @@ the eval-hardening narrative it was interleaved with.
 cross-model eval re-gate for the research-expansion additions passed cleanly
 on the 7-8B tier with no over-flagging regression — full record in
 [`eval-hardening-campaign-log.md`](eval-hardening-campaign-log.md).
+
+### Q25 — The reviewer service's risk ranking: what is risk assessment for, and may anything be excluded from review?  → OPEN — research first *(new, 2026-11-10)*
+
+**Trigger.** PR [#605](https://github.com/brandondees/code-quality-atlas/pull/605)'s second review round found renames ranked by their new path only (`src/auth.py` → `docs/changelog.md` ranked as docs). The owner then asked for a documented plan for content-based ranking, and for the open question to cover the reverse failure mode below. Docs only; no code behaviour changes with this entry.
+
+**Today's behaviour** (read from the code on the #605-#607 branches, not run live):
+
+- `diffs.risk_tier` ranks a file by its path alone. Regexes are tried in a fixed order (`_MATCH_ORDER`: supply chain, tests, docs, security, config, boundary, else other code) and the first match wins. Nothing in the diff's content is read.
+- A rename or copy is ranked by the riskier of its two paths (#605). Before #605, only the new path was ranked, and a copy was ranked by its header.
+- `diffs.select_diff` packs files in risk order into at most as many parts as there are diff-review calls. A file that fits in no part is *unseen* and goes to no model call.
+- Unseen files are only named. The controller notes' "Diff coverage" line says PARTIAL and counts them. The omissions table names them, highest risk first: the first 100 paths, then a count of the rest. The review still completes, the CLI's `review` command still exits 0, and nothing marks the draft incomplete or not approvable. The service is draft-only and posts nothing, so a person is expected to read that note, but nothing makes sure they do.
+
+**The reverse failure mode: crowd-out.** Because ranking decides what is reviewed first, it also decides what is left out. A large, low-risk change in an important-sounding path ranks high and fills the parts. Examples are a reformat under `auth/`, a regenerated file under `.github/workflows/`, or a bulk lockfile bump. Other changes are pushed into *unseen*. That is a denial of service on review coverage: those changes slip through unreviewed, with only a note line and a table row as warning. In an agentic pipeline with no human at review time, nothing may act on that warning at all. The PR author controls both the paths and the sizes, so crowd-out can be done on purpose. Content-based ranking would change which changes rank high, but not this mechanism.
+
+**The question.** Treat risk assessment as a capability to build in for *ordering, depth, lens choice and flagging*. Do not assume risk ranking is a valid basis for *excluding* files from review. Whether anything may be excluded from review at all, on risk or any other basis, is undecided.
+
+**Candidate directions to research and compare.**
+
+- *Coverage, rather than exclusion:*
+  - review every changed file, by fan-out or by more calls or parts, rather than drop any;
+  - when coverage is partial, hard-fail, or loudly mark the review incomplete and not approvable, instead of a note line;
+  - adversarial crowd-out tests: fixtures where a large low-risk change in a high-ranked path tries to push a risky change out. Each test asserts that the risky change is still reviewed, or that the review is marked incomplete.
+- *Better risk signals, for ordering, depth, lens choice and flagging:*
+  - content signals from the diff itself: touched symbols, imports, calls into auth, crypto, subprocess, network or SQL, and deleted checks or tests;
+  - a cheap deterministic classifier or small decision model;
+  - a small or cheap LLM risk-ranking call;
+  - folding risk ranking into the existing lens-picker call.
+
+**How fan-out changes it.** Per-lens fan-out (D35's next step; D34's lens loops read a checkout through tools) would change ranking's job: from deciding what fits in a packed prompt to deciding what each lens reads first and how deeply. Whether a diff larger than a lens loop's budget still leaves files unread is to be measured, not assumed. Until then, the exclusion question stands.
+
+**Evaluation criteria.**
+
+- A labelled PR set saying which files held the real findings, drawn from the atlas's own benchmark reviews (e.g. the #528 cal.com benchmark) and D34's owner-labelled pilot PRs.
+- Crowd-out resistance on the adversarial tests.
+- Cost and latency per review.
+- The model-call budget: D25's 3-call cap until the owner sets agentic numbers.
+- Prompt-injection resistance. Diff content is PR-author-controlled, so any content signal or LLM ranker reads attacker-chosen text.
+
+**Next step.** A dated research doc under `docs/research/` or `docs/plans/` that compares these directions, before any code.
 
 ### Q24 — Should we restructure routines/triggers, or move to a different agent-orchestration tool, for more control over the review-enforcement environment?  → OPEN — no disposition *(new, 2026-09-01)*
 
