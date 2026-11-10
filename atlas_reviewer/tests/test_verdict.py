@@ -94,7 +94,9 @@ def test_the_warning_lists_paths_quoted_riskiest_first_up_to_the_limit():
 @pytest.mark.parametrize(
     "coverage",
     [
-        FileCoverage(2, (Unreviewed("k-SECRET.py", "never sent to any model call", 0),)),
+        FileCoverage(
+            2, (Unreviewed("k-SECRET.py", "never sent to any model call", 0),)
+        ),
         FileCoverage(
             2,
             (Unreviewed("k-SECRET.py", "the diff had no file headers", 0),),

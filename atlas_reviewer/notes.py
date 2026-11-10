@@ -118,8 +118,13 @@ def _omission_line(omissions: Sequence[Omission]) -> str:
 def quote_untrusted(text: str, limit: int = MAX_QUOTED_CHARS) -> str:
     """`text` as one inert code span: whitespace collapsed, cut to `limit`
     characters, JSON-escaped (no control characters or bare quotes) and
-    with backticks escaped, so nothing inside can close the span."""
+    with backticks and `<` escaped, so nothing inside can close the span
+    or open HTML."""
     flat = " ".join(text.split())
     cut = flat if len(flat) <= limit else f"{flat[:limit]}..."
-    literal = json.dumps(cut, ensure_ascii=True).replace("`", "\\u0060")
+    literal = (
+        json.dumps(cut, ensure_ascii=True)
+        .replace("`", "\\u0060")
+        .replace("<", "\\u003c")
+    )
     return f"`{literal}`"

@@ -129,3 +129,13 @@ def test_the_notes_carry_the_lens_plans_coverage_line():
     assert "NOT RUN: big (did not fit the 50-character lens budget whole" in (
         plan.coverage()
     )
+
+
+def test_untrusted_text_carries_no_html_into_the_draft():
+    from atlas_reviewer.draft import _cell, controller_notes_section
+    from atlas_reviewer.notes import quote_untrusted
+
+    notes = controller_notes_section(("runner said <!-- hide",))
+    assert "- runner said &lt;!-- hide" in notes
+    assert _cell("a <b> | c") == "a &lt;b> \\| c"
+    assert quote_untrusted("<!-- x`") == '`"\\u003c!-- x\\u0060"`'

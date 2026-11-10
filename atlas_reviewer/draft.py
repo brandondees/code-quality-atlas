@@ -96,9 +96,16 @@ class DraftInput:
 MAX_WARNED_PATHS = 100
 
 
+def _inert(text: str) -> str:
+    """`text` with no HTML: an untrusted `<!--` could otherwise hide the
+    rest of the review, or forge a second status comment."""
+    return text.replace("<", "&lt;")
+
+
 def _cell(text: str) -> str:
     return (
-        text.replace("\\", "\\\\")
+        _inert(text)
+        .replace("\\", "\\\\")
         .replace("|", "\\|")
         .replace("\r", " ")
         .replace("\n", " ")
@@ -139,9 +146,8 @@ def render_draft(d: DraftInput, scrub: Callable[[str], str] = str) -> str:
     )
     sections = (
         status_line(d.verdict),
-        scrub(body[0]),
         warning(d.verdict, MAX_WARNED_PATHS, scrub),
-        *(scrub(s) for s in body[1:]),
+        *(scrub(s) for s in body),
     )
     return "\n\n".join(s for s in sections if s) + "\n"
 
@@ -175,7 +181,7 @@ def _summary(d: DraftInput) -> str:
 
 
 def controller_notes_section(lines: Iterable[str]) -> str:
-    bullets = "\n".join(f"- {line}" for line in lines)
+    bullets = "\n".join(f"- {_inert(line)}" for line in lines)
     return f"## Controller notes\n\n{CONTROLLER_NOTES_INTRO}\n\n{bullets}"
 
 
@@ -427,7 +433,7 @@ def _narrative(n: Narrative | NarrativeFailure) -> str:
     if isinstance(n, NarrativeFailure):
         return f"Harness `{n.harness}` produced no narrative: {_cell(n.reason)}"
     quoted = "\n".join(
-        f"> {line}" if line else ">" for line in n.text.text.splitlines()
+        f"> {_inert(line)}" if line else ">" for line in n.text.text.splitlines()
     )
     return (
         f"Harness `{n.harness}`, provider `{n.provider}`. Model output is unverified; "
