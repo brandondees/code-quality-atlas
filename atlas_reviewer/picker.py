@@ -5,9 +5,10 @@ reading that file.
 
 The picker ranks lenses against its route table and the depth mode; this
 module adds no routing of its own. The model's reply is untrusted output:
-only a JSON list of lens-shaped names is accepted, capped at the depth's
-breadth, and `lenses.plan_lenses` then loads only names that exist in the
-bundle. Triage runs the critical tier without a call. If the picker cannot
+only a JSON list of lens-shaped names is accepted, the critical tier always
+runs ahead of it within the depth's breadth, and `lenses.plan_lenses` then
+loads only names that exist in the bundle. Triage runs the critical tier
+without a call. If the picker cannot
 run or its reply is unusable, the critical tier runs instead and the
 controller notes say why, so a failed pick never means an empty review.
 """
@@ -145,14 +146,30 @@ def select_lenses(
             "ranked has a body in the bundle, so the critical tier ran",
             True,
         )
-    choices = tuple(LensChoice(n, f"picker rank {i}") for i, n in enumerate(names, 1))
     note = (
         f"Lens selection: `choosing-review-lenses` ran as one model call at "
         f"{depth.value} depth over the PR's paths and text (untrusted input), "
-        f"and ranked {len(names)} lens name(s); only names with a body in the "
-        "bundle are loaded."
+        f"and ranked {len(names)} lens name(s); the critical tier always runs "
+        "first, and only names with a body in the bundle are loaded."
     )
-    return LensSelection(choices, note, True)
+    return LensSelection(_with_critical(names, depth.limit), note, True)
+
+
+def _with_critical(names: tuple[str, ...], limit: int) -> tuple[LensChoice, ...]:
+    """The critical tier first, then the picker's other names in rank order
+    up to `limit` in all. `plan_lenses` caps by position and spends its size
+    budget in order, so a thin or steered pick can add lenses but never
+    displace a critical one."""
+    rank = {n: i for i, n in enumerate(names, 1)}
+    critical = tuple(
+        LensChoice(n, f"critical tier; picker rank {rank[n]}")
+        if n in rank
+        else LensChoice(n, "critical tier")
+        for n in CRITICAL_TIER
+    )
+    extras = (n for n in names if n not in CRITICAL_TIER)
+    rest = tuple(LensChoice(n, f"picker rank {rank[n]}") for n in extras)
+    return (critical + rest)[:limit]
 
 
 def _critical(reason: str, used_call: bool) -> LensSelection:

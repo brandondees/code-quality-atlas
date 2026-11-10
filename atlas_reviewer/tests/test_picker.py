@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from atlas_reviewer.lenses import MAX_LENSES, LensLibrary
+from atlas_reviewer.lenses import MAX_LENSES, LensLibrary, plan_lenses
 from atlas_reviewer.picker import (
     COMPREHENSIVE_LIMIT,
     CRITICAL_TIER,
@@ -108,20 +108,42 @@ def test_a_failed_or_unusable_pick_runs_the_critical_tier_and_says_why(outcome):
     assert all(c.why == "critical tier" for c in chosen.choices)
 
 
-def test_a_good_pick_is_ranked_and_attributed_to_the_picker():
+def test_a_good_pick_runs_after_the_critical_tier_and_is_attributed():
     chosen = select_lenses(
         Depth.REVIEW,
         lambda: picks("checking-restraint", "sweeping-for-security"),
         has_body,
     )
     assert [(c.name, c.why) for c in chosen.choices] == [
+        ("tracing-correctness-and-invariants", "critical tier"),
+        ("sweeping-for-security", "critical tier; picker rank 2"),
+        ("reviewing-migration-and-data-safety", "critical tier"),
+        ("reviewing-concurrency-and-async", "critical tier"),
         ("checking-restraint", "picker rank 1"),
-        ("sweeping-for-security", "picker rank 2"),
     ]
     assert chosen.used_call
     assert "`choosing-review-lenses` ran as one model call at review depth" in (
         chosen.note
     )
+    assert "the critical tier always runs first" in chosen.note
+
+
+def test_a_thin_pick_cannot_drop_the_critical_tier():
+    """A valid but thin reply, e.g. one steered by injected PR text, adds
+    lenses but never displaces the critical tier."""
+    chosen = select_lenses(Depth.REVIEW, lambda: picks("checking-restraint"), has_body)
+    names = [c.name for c in chosen.choices]
+    assert names == [*CRITICAL_TIER, "checking-restraint"]
+    plan = plan_lenses(LensLibrary(), chosen.choices, Depth.REVIEW.limit)
+    assert [u.name for u in plan.uses[: len(CRITICAL_TIER)]] == list(CRITICAL_TIER)
+
+
+def test_the_merged_pick_stays_within_the_depth_breadth():
+    extras = [f"lens-{i}" for i in range(MAX_LENSES)]
+    chosen = select_lenses(Depth.REVIEW, lambda: picks(*extras), lambda n: True)
+    names = [c.name for c in chosen.choices]
+    assert len(names) == MAX_LENSES
+    assert names == [*CRITICAL_TIER, *extras[: MAX_LENSES - len(CRITICAL_TIER)]]
 
 
 def test_a_pick_with_no_loadable_lens_runs_the_critical_tier():
