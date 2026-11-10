@@ -74,7 +74,9 @@ default tools (`--tools review`). It calls no model and gathers no CI
 evidence. The source is a local `.tar.gz` (`--tarball`, for example from
 `git archive --format=tar.gz --prefix=src/ HEAD`) or the head-SHA tarball
 fetched with the GitHub App (`--event`, needing the three `ATLAS_GITHUB_*`
-variables). Both are held to the review's 9 MiB tarball cap.
+variables). Both are held to the review's caps: 9 MiB compressed, and
+256 MiB or 50,000 members unpacked, counted from the tar headers before
+any runner exists (`source_archive.py`).
 
 `probe-runner` exits 3 when the runner did not complete or, for the
 protocol probe, the stdin round-trip did not come back `ok` or the
@@ -539,7 +541,10 @@ a `Bridge` to the caller.
 - **Staging** (`bridge_staging.py`, D31 Option B). git is found at
   `/usr/bin/git` or `/bin/git` before anything is uploaded. The merge-base
   and head tarballs, plus an optional default-branch tarball, are each at
-  most 9 MiB, and a larger one is refused before a runner exists. Each is
+  most 9 MiB compressed and 256 MiB or 50,000 members unpacked
+  (`source_archive.py`, counted from the tar headers in memory), and any
+  other is refused before a runner exists; the one-shot reviewer's source
+  upload is checked the same way. Each is
   uploaded through the source-upload exec shape, then all are committed in
   one exec into a bare repository with a fixed identity and date. HEAD's
   parent is BASE; DEFAULT is its own root commit. Tools use only the
@@ -549,16 +554,23 @@ a `Bridge` to the caller.
   `diff_stat`, `diff_file` (path, byte offset), `list_files` (rev,
   prefix), `read_file` (rev, path, at most 400 lines) and `grep` (pattern,
   rev, prefix, fixed-string unless `regex`). `rev` is BASE, HEAD or a
-  staged DEFAULT. Anything else is rejected before an exec, with the
-  model's values quoted.
+  staged DEFAULT. Anything else is rejected before an exec, with a fixed
+  code and a controller-written reason that echoes neither the tool name
+  nor any value sent. A session serves at most 64 calls and 1 MiB of
+  output in all, then refuses calls without running them.
 - **Exec.** Each call is a fixed git argv with every value shell-quoted,
   under `env -i`, `timeout` and `ulimit -f`. The `-c` options, environment
   and repository attributes disable config, hooks, pagers, transports,
   diff drivers, filters, pathspec magic and in-tree `.gitattributes`.
   Output returns base64-encoded and is capped at the tool's bound (16 or
-  32 KiB; 2,000 entries, 400 lines or 200 matches), and the cut and the
-  next diff offset are reported. A timeout is a coverage gap, never a
-  finding.
+  32 KiB; 2,000 entries, 400 lines or 200 matches), cut only between
+  whole UTF-8 characters, and the cut and the next diff offset are
+  reported; output lost after git succeeded is an error, not an empty
+  result. A timeout is a coverage gap, never a finding. `grep` and
+  `list_files` read git's NUL-separated output, so a newline in a file
+  name cannot move a match to another file, and every name `list_files`
+  shows plainly reads back through `read_file` (the rest are marked).
+  `diff_file` shows a renamed file as a rename from either path.
 - **Results** are repository content and are not redacted. Each is
   scanned for committed secrets, and every hit is reported by path, line
   and pattern, pre-existing outside HEAD or in a file the PR did not
@@ -594,6 +606,7 @@ tarball, and the controller loop that calls the bridge (phase 3).
 | `lenses.py` | load the chosen lenses' bodies whole under the budget and cap, or mark them NOT RUN with a reason | reads the bundle |
 | `bridge.py` | the read-only git tool bridge: per-call scripts, capped base64 replies, result statuses, secret locations, the call ledger, `run_bridge` | via `SpritesApi` |
 | `bridge_args.py` | the closed tool set and its argument rules (`validate`) | no |
+| `source_archive.py` | the unpacked-size and member caps a source tarball must pass before upload (`measure`) | no |
 | `bridge_staging.py` | Option B staging: trusted git, the hardened git options, tarballs committed into a bare repository, `fetch_sources` | via `SpritesApi`, `GitHubReader` |
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`) | no |
 | `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → resolve interpreter → upload → unpack → tools → destroy), `probe_runner`, `run_session` (a `Session` on the same lifecycle), the one exec wrapper (`exec_argv`, minimal `env -i` environment) | via `SpritesApi` |
