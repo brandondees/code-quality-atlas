@@ -79,7 +79,8 @@ _FILE_TOO_LARGE = 153
 _GREP_NO_MATCH = 1
 _B64 = r"[A-Za-z0-9+/=]*"
 _REPLY = re.compile(
-    rf"{HEADER} (\d+) (\d+) (\d+)(?:\n({_B64}))?(?:\n({_B64}))?", re.ASCII
+    rf"{HEADER} (\d+) (\d+) (\d+) (\d+) (\d+)(?:\n({_B64}))?(?:\n({_B64}))?",
+    re.ASCII,
 )
 _HUNK = re.compile(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 _PLAIN_PATH = re.compile(r"[\x21-\x7e]+")
@@ -163,8 +164,11 @@ def _pathspec(prefix: str) -> tuple[str, ...]:
 
 def call_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
     """Runs one tool into files under the bridge root, then prints a
-    header (exit status, bytes and lines of the view) and the capped view
-    and stderr, each base64-encoded on its own line."""
+    header (git's exit status, the view's, the bytes and lines of the
+    view, and the bytes of its capped part) and that capped part and
+    stderr, each base64-encoded on its own line. The controller checks
+    the decoded part against its byte count, so a failed encoding is an
+    error, not an empty result."""
     plan = _plan(call, staged)
     git = " ".join((quote(staged.git), "--git-dir=repo.git", *GIT_OPTIONS))
     argv = " ".join(quote(a) for a in plan.argv)
@@ -180,10 +184,12 @@ def call_script(staged: Staged, call: Call, limits: ToolLimits) -> str:
             "s=$?",
             f"view() {{ {plan.view}; }}",
             "view out > view",
-            f'echo "{HEADER} $s $(wc -c < view) $(wc -l < view)"',
-            f"{lines}head -c {limits.max_bytes} {'' if lines else 'view'} | base64 -w0; echo",
+            "v=$?",
+            f"{lines}head -c {limits.max_bytes} {'' if lines else 'view'} > shown",
+            f'echo "{HEADER} $s $v $(wc -c < view) $(wc -l < view) $(wc -c < shown)"',
+            "base64 -w0 < shown; echo",
             f"head -c {STDERR_BYTES} err | base64 -w0; echo",
-            "rm -f out err view",
+            "rm -f out err view shown",
         )
     )
 
@@ -239,10 +245,23 @@ class CallRecord:
 @dataclass(frozen=True)
 class _Reply:
     code: int
+    view_code: int
     total_bytes: int
     total_lines: int
+    shown_bytes: int
     content: bytes
     stderr: bytes
+
+    def problem(self) -> str | None:
+        """Why the reply cannot be trusted as the tool's output, if it can't."""
+        if self.view_code != 0:
+            return f"the runner could not cut the output (exit {self.view_code})"
+        if len(self.content) != self.shown_bytes:
+            return (
+                f"the runner's encoded output held {len(self.content)} of "
+                f"{self.shown_bytes} bytes"
+            )
+        return None
 
 
 def parse_reply(text: str) -> _Reply | None:
@@ -252,14 +271,14 @@ def parse_reply(text: str) -> _Reply | None:
     match = _REPLY.fullmatch(f"{HEADER} {rest}") if found else None
     if match is None:
         return None
-    code, total, lines = (int(match.group(i)) for i in (1, 2, 3))
+    code, view_code, total, lines, shown = (int(match.group(i)) for i in range(1, 6))
     try:
         content, stderr = (
-            base64.b64decode(match.group(i) or "", validate=True) for i in (4, 5)
+            base64.b64decode(match.group(i) or "", validate=True) for i in (6, 7)
         )
     except ValueError:
         return None
-    return _Reply(code, total, lines, content, stderr)
+    return _Reply(code, view_code, total, lines, shown, content, stderr)
 
 
 _CODE_STATUS = {
@@ -450,6 +469,9 @@ class Bridge:
                 f"no bridge reply (exit {code}): {guest_text(text, GUEST_TAIL_CHARS)}"
             )
             return self._failed(call, Status.UNAVAILABLE, detail, started)
+        problem = reply.problem()
+        if problem is not None:
+            return self._failed(call, Status.FAILED, problem, started)
         return self._result(call, reply, self.clock.monotonic() - started)
 
     def _failed(

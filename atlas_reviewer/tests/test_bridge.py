@@ -520,7 +520,7 @@ def _answer(stdout, code=0):
 def test_the_in_runner_exit_status_maps_to_a_result_status(
     tmp_path, status_code, status
 ):
-    sprites = _answer(f"__ATLAS_BRIDGE__ {status_code} 0 0\n\n")
+    sprites = _answer(f"__ATLAS_BRIDGE__ {status_code} 0 0 0 0\n\n")
     (result,), *_ = calls(tmp_path, ("diff_stat", {}), sprites=sprites)
     assert result.status is status
 
@@ -546,8 +546,9 @@ def test_a_stalled_exec_is_timed_out_and_a_lost_one_unavailable(tmp_path):
     "stdout",
     [
         "no header at all",
-        "__ATLAS_BRIDGE__ 0 1 1\n!!notbase64!!\n",
-        "__ATLAS_BRIDGE__ 0 1 1\nabc\n",
+        "__ATLAS_BRIDGE__ 0 0 1 1 1\n!!notbase64!!\n",
+        "__ATLAS_BRIDGE__ 0 1 1\n\n",
+        "__ATLAS_BRIDGE__ 0 0 1 1 1\nabc\n",
     ],
 )
 def test_an_unparseable_reply_is_unavailable_not_empty(tmp_path, stdout):
@@ -556,9 +557,32 @@ def test_an_unparseable_reply_is_unavailable_not_empty(tmp_path, stdout):
     assert "no bridge reply" in result.error.text
 
 
+@pytest.mark.parametrize(
+    "stdout,error",
+    [
+        (
+            "__ATLAS_BRIDGE__ 0 0 5 1 5\n\n",
+            "the runner's encoded output held 0 of 5 bytes",
+        ),
+        (
+            f"__ATLAS_BRIDGE__ 0 0 9 1 9\n{base64.b64encode(b'abc').decode()}\n",
+            "the runner's encoded output held 3 of 9 bytes",
+        ),
+        ("__ATLAS_BRIDGE__ 0 2 0 0 0\n\n", "could not cut the output (exit 2)"),
+    ],
+)
+def test_output_lost_after_git_succeeded_is_an_error_not_an_empty_ok(
+    tmp_path, stdout, error
+):
+    (result,), *_ = calls(tmp_path, ("diff_stat", {}), sprites=_answer(stdout))
+    assert result.status is Status.FAILED
+    assert error in result.error.text
+    assert result.content.text == ""
+
+
 def test_stderr_is_redacted_runtime_text(tmp_path):
     err = base64.b64encode(f"fatal: token {OLD_TOKEN}".encode()).decode()
-    sprites = _answer(f"__ATLAS_BRIDGE__ 128 0 0\n\n{err}")
+    sprites = _answer(f"__ATLAS_BRIDGE__ 128 0 0 0 0\n\n{err}")
     (result,), *_ = calls(tmp_path, ("diff_stat", {}), sprites=sprites)
     assert OLD_TOKEN not in result.error.text
     assert "fatal: token" in result.error.text
