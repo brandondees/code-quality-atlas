@@ -272,10 +272,11 @@ class RunnerOutcome:
 
 @dataclass(frozen=True)
 class ProbeOutcome:
-    """`stdin_check`, `egress_check` and the report's note have been through
-    `Telemetry.scrub`. `framing_sample` is the raw response to a fixed
-    `echo`, kept byte-exact for the framing it shows, so whoever prints it
-    scrubs it."""
+    """`stdin_check`, `egress_check`, `framing_sample` and the report's note
+    have been through `Telemetry.scrub`. `framing_sample` is the raw
+    response to a fixed `echo`; it is scrubbed through a surrogate-escape
+    decode, so every byte outside a redacted value keeps the framing it
+    shows."""
 
     report: RunnerReport
     available: dict[str, bool]
@@ -770,10 +771,15 @@ def probe_runner(
     return ProbeOutcome(
         report,
         found,
-        b"".join(sample),
+        _scrub_bytes(b"".join(sample), telemetry.scrub),
         telemetry.scrub(stdin_check[0]) if stdin_check else "not run",
         telemetry.scrub(egress_check[0]) if egress_check else "not run",
     )
+
+
+def _scrub_bytes(raw: bytes, scrub: Callable[[str], str]) -> bytes:
+    text = raw.decode("utf-8", "surrogateescape")
+    return scrub(text).encode("utf-8", "surrogateescape")
 
 
 _EGRESS_CONNECT = """import socket,sys
