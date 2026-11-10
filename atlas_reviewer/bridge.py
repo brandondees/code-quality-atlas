@@ -66,6 +66,7 @@ from atlas_reviewer.runner import (
     guest_text,
     run_session,
 )
+from atlas_reviewer.source_archive import DEFAULT_UNPACK, UnpackLimits
 from atlas_reviewer.telemetry import ERROR, Telemetry
 
 HEADER = "__ATLAS_BRIDGE__"
@@ -735,13 +736,15 @@ def run_bridge(
     session_limits: SessionLimits = DEFAULT_SESSION,
     root: str = BRIDGE_ROOT,
     first_frame_s: float = FIRST_FRAME_BUDGET_S,
+    unpack: UnpackLimits = DEFAULT_UNPACK,
 ) -> RunnerReport:
     """Stage `trees` on a fresh disposable runner and hand `body` the
-    bridge; the runner is always destroyed. Trees over the upload cap are
-    refused before anything is created."""
+    bridge; the runner is always destroyed. Trees over the upload cap or
+    past `unpack` are refused before anything is created, and the runner
+    holds `unpack` again as it extracts them."""
     telemetry = telemetry or Telemetry(clock)
     try:
-        check_sizes(trees)
+        check_sizes(trees, unpack=unpack)
     except BoundaryError as exc:
         telemetry.record("upload", "size check", status=ERROR, error=str(exc))
         return RunnerReport(
@@ -749,7 +752,7 @@ def run_bridge(
         )
 
     def session_body(session: Session) -> str:
-        staged = stage(session, trees, root)
+        staged = stage(session, trees, root, unpack)
         telemetry.record(
             "bridge staging", "staged",
             {"revisions": len(staged.commits), "git": staged.git, "git_version": staged.git_version},

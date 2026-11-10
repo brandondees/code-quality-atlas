@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 from atlas_reviewer.bridge_args import Rev
+from atlas_reviewer.guest_unpack import unpack_refusal, unpack_script
 from atlas_reviewer.ports import BoundaryError, GitHubReader, Json
 from atlas_reviewer.runner import (
     GUEST_TAIL_CHARS,
@@ -196,31 +197,36 @@ def _git_cmd(git: str, root: str) -> str:
     return " ".join((quote(git), f"--git-dir={quote(root)}/repo.git", *GIT_OPTIONS))
 
 
-def stage_script(root: str, git: str, revs: Sequence[Rev]) -> str:
-    """One exec: extract each uploaded tarball, commit its tree into a
-    fresh bare repository, print each commit id. Runs in a `set -e`
-    subshell so the exit marker is still printed on failure."""
+def stage_script(
+    root: str, git: str, revs: Sequence[Rev], unpack: UnpackLimits = DEFAULT_UNPACK
+) -> str:
+    """One exec: extract each uploaded tarball within `unpack`
+    (`guest_unpack`), commit its tree into a fresh bare repository, print
+    each commit id. Runs in a `set -e` subshell so the exit marker is still
+    printed on failure, and the first refused tree stops the rest."""
     g = _git_cmd(git, root)
     steps = [
         f"cd {quote(root)}",
         f"export {' '.join(GIT_ENV)} {' '.join(_IDENTITY)}",
         f"{g} init -q --bare {quote(root)}/repo.git",
         f"printf '%s\\n' {quote(ATTRIBUTES)} > repo.git/info/attributes",
-        *(step for rev in revs for step in _commit_steps(root, g, rev)),
+        *(step for rev in revs for step in _commit_steps(root, g, rev, unpack)),
     ]
     return f"( set -e; {'; '.join(steps)} )"
 
 
-def _commit_steps(root: str, g: str, rev: Rev) -> tuple[str, ...]:
+def _commit_steps(root: str, g: str, rev: Rev, unpack: UnpackLimits) -> tuple[str, ...]:
     name = rev.value.lower()
     tree = f"{quote(root)}/trees/{name}"
     index = f"GIT_INDEX_FILE={quote(root)}/index-{name}"
     parent = ' -p "$c_base"' if rev is Rev.HEAD else ""
     return (
-        f"mkdir -p {tree}",
-        (
-            f"timeout -k {KILL_AFTER_S} {EXTRACT_TIMEOUT_S} tar -xzf {name}.tar.gz -C {tree} "
-            "--strip-components=1 --no-same-owner --no-same-permissions"
+        unpack_script(
+            f"{name}.tar.gz",
+            f"{root}/trees/{name}",
+            "--strip-components=1 --no-same-owner --no-same-permissions",
+            unpack,
+            timeout=f"timeout -k {KILL_AFTER_S} {EXTRACT_TIMEOUT_S} ",
         ),
         f"rm -f {name}.tar.gz",
         f"(cd {tree} && {index} {g} --work-tree=. add -A -f .)",
@@ -230,13 +236,21 @@ def _commit_steps(root: str, g: str, rev: Rev) -> tuple[str, ...]:
     )
 
 
-def parse_staged(code: int | None, text: str, revs: Sequence[Rev]) -> dict[Rev, str]:
+def parse_staged(
+    code: int | None,
+    text: str,
+    revs: Sequence[Rev],
+    unpack: UnpackLimits = DEFAULT_UNPACK,
+) -> dict[Rev, str]:
     found = dict(
         re.findall(
             rf"^{STAGED_TAG}:(base|head|default):([0-9a-f]{{40}})$", text, re.MULTILINE
         )
     )
     commits = {rev: found.get(rev.value.lower(), "") for rev in revs}
+    refused = unpack_refusal(text, unpack) if code != 0 else None
+    if refused is not None:
+        raise BoundaryError(f"bridge staging failed (exit {code}): {refused}")
     if code != 0 or not all(commits.values()):
         raise BoundaryError(
             f"bridge staging failed (exit {code}): {guest_text(text, GUEST_TAIL_CHARS)}"
@@ -244,9 +258,15 @@ def parse_staged(code: int | None, text: str, revs: Sequence[Rev]) -> dict[Rev, 
     return commits
 
 
-def stage(session: Session, trees: SourceTrees, root: str = BRIDGE_ROOT) -> Staged:
+def stage(
+    session: Session,
+    trees: SourceTrees,
+    root: str = BRIDGE_ROOT,
+    unpack: UnpackLimits = DEFAULT_UNPACK,
+) -> Staged:
     """Raises `BoundaryError` when git is missing or untrusted, an upload
-    falls short, or staging does not report every commit."""
+    falls short, the runner refuses a tree past `unpack`, or staging does
+    not report every commit."""
     git, version = choose_git(
         *session.exec("resolve git", git_resolve_script(root), stage="bridge staging")
     )
@@ -259,8 +279,9 @@ def stage(session: Session, trees: SourceTrees, root: str = BRIDGE_ROOT) -> Stag
         )
     code, text = session.exec(
         "stage repository",
-        stage_script(root, git, revs),
+        stage_script(root, git, revs, unpack),
         stage="bridge staging",
         budget_s=UNPACK_BUDGET_S,
     )
-    return Staged(root, git, MappingProxyType(parse_staged(code, text, revs)), version)
+    commits = parse_staged(code, text, revs, unpack)
+    return Staged(root, git, MappingProxyType(commits), version)

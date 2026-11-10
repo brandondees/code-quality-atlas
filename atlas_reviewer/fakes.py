@@ -22,7 +22,7 @@ from atlas_reviewer.ports import BoundaryError, Json, NotFoundError
 from atlas_reviewer.runner import EXIT_MARKER, EXIT_NOT_FOUND, PROBE_TAG, START_MARKER
 
 _HANG_LIMIT_S = 10.0
-_FEED_RE = re.compile(r"head -c (\d+) \| ")
+_FEED_RE = re.compile(r"head -c (\d+) \| \{ ")
 PYENV_PYTHON = f"{PYENV_VERSIONS}/3.13.7/bin/python3"
 
 

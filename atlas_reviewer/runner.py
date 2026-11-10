@@ -71,6 +71,7 @@ from typing import Literal
 
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import CleanupStatus, RunnerReport, RunnerStatus
+from atlas_reviewer.guest_unpack import unpack_refusal, unpack_script
 from atlas_reviewer.interpreter import (
     PYTHON_PLACEHOLDER,
     SYSTEM_PYTHON,
@@ -773,7 +774,7 @@ def run_disposable(
         pythons.append(found.trusted_python)
         diagnostics.extend(_diagnose(run, diagnostics_before_unpack(), job.diagnose))
         _upload(run, job.source_tarball)
-        _unpack(run)
+        _unpack(run, job.unpack)
         results.extend(_tool(run, tool, found) for tool in job.tools)
         after = diagnostics_after_unpack(
             found.trusted_python, WORKDIR, DIAGNOSTIC_BOUND_S
@@ -1227,10 +1228,11 @@ def _confirm_upload(result: tuple[int | None, str], size: int) -> int:
     return got
 
 
-def _unpack(run: _Run) -> None:
+def _unpack(run: _Run, limits: UnpackLimits) -> None:
+    """The runner holds `limits` again by its own tar (`guest_unpack`)."""
     script = (
-        f"mkdir -p {WORKDIR} && tar -xzf {SOURCE_ARCHIVE} -C {WORKDIR} "
-        f"--strip-components=1 && rm -f {SOURCE_ARCHIVE}"
+        f"{unpack_script(SOURCE_ARCHIVE, WORKDIR, '--strip-components=1', limits)}"
+        f" && rm -f {SOURCE_ARCHIVE}"
     )
     run.telemetry.span(
         "unpack",
@@ -1238,14 +1240,18 @@ def _unpack(run: _Run) -> None:
         lambda: _confirm_unpack(
             _exec(
                 run, _Exec("unpack", "source unpack", script, budget_s=UNPACK_BUDGET_S)
-            )
+            ),
+            limits,
         ),
         after=lambda code: {"exit_status": code},
     )
 
 
-def _confirm_unpack(result: tuple[int | None, str]) -> int:
+def _confirm_unpack(result: tuple[int | None, str], limits: UnpackLimits) -> int:
     code, text = result
+    refused = unpack_refusal(text, limits) if code != 0 else None
+    if refused is not None:
+        raise BoundaryError(f"source unpack failed (exit {code}): {refused}")
     if code != 0:
         raise BoundaryError(
             f"source unpack failed (exit {code}): {guest_text(text, GUEST_TAIL_CHARS)}"

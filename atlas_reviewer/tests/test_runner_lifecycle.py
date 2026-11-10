@@ -986,7 +986,7 @@ def exec_timeouts(api):
 def test_upload_exec_gets_the_dedicated_upload_budget_not_the_client_default():
     api = FakeSprites(rules=OK_RULES)
     run(api, deadline_s=600.0)
-    (timeout,) = [t for s, t in exec_timeouts(api).items() if "head -c" in s]
+    (timeout,) = [t for s, t in exec_timeouts(api).items() if "cat > " in s]
     assert timeout == UPLOAD_BUDGET_S
     assert timeout > 30.0
 
@@ -994,7 +994,7 @@ def test_upload_exec_gets_the_dedicated_upload_budget_not_the_client_default():
 def test_upload_exec_is_capped_by_the_remaining_review_deadline():
     api = FakeSprites(rules=OK_RULES)
     run(api, deadline_s=90.0)
-    (timeout,) = [t for s, t in exec_timeouts(api).items() if "head -c" in s]
+    (timeout,) = [t for s, t in exec_timeouts(api).items() if "cat > " in s]
     assert 60.0 < timeout <= 90.0
 
 
@@ -1065,7 +1065,7 @@ def test_an_archive_over_the_exec_stdin_limit_is_refused_before_any_sprite_exist
 def test_upload_does_not_wait_for_a_stdin_eof():
     api = FakeSprites(rules=OK_RULES)
     run(api)
-    (script,) = [s for s in exec_timeouts(api) if "head -c" in s]
+    (script,) = [s for s in exec_timeouts(api) if "cat > " in s]
     assert f"head -c {len(SOURCE_TARBALL)} | {{ cat > " in script
 
 

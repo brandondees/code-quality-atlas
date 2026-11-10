@@ -40,7 +40,7 @@ from atlas_reviewer.runner import MAX_TARBALL_BYTES
 from atlas_reviewer.source_archive import MAX_UNPACKED_BYTES
 from atlas_reviewer.telemetry import Telemetry
 
-from .helpers import FIXTURE, HEAD, OLD, FakeClock, fake_token
+from .helpers import FIXTURE, HEAD, OLD, FakeClock, LocalSprites, fake_token
 
 OLD_TOKEN = fake_token("ghp_")
 NEW_TOKEN = fake_token("ghs_")
@@ -82,21 +82,6 @@ def trees(default=None):
         None if default is None else tarball(default),
         None if default is None else "d" * 40,
     )
-
-
-class LocalSprites(FakeSprites):
-    """Runs the exec wrapper's argv here and answers with its stdout as
-    one stdout frame, the shape the live exec stream has."""
-
-    def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
-        self._record("exec", name, argv[-1])
-        self._get(name)
-        self.argv_seen.append(tuple(argv))
-        self.timeouts_seen.append(timeout_s)
-        done = subprocess.run(
-            list(argv), input=stdin, capture_output=True, timeout=60, check=False
-        )
-        return b"\x01" + done.stdout
 
 
 def bridge_run(tmp_path, body, sprites=None, source=None, **kw):
