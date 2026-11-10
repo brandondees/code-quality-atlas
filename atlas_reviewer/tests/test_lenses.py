@@ -12,6 +12,8 @@ from atlas_reviewer.lenses import (
 )
 from atlas_reviewer.picker import CRITICAL_TIER, Depth, select_lenses
 
+from .helpers import StubLibrary
+
 
 def test_review_breadth_is_the_top_of_the_manifests_3_to_8():
     assert MAX_LENSES == 8
@@ -19,14 +21,6 @@ def test_review_breadth_is_the_top_of_the_manifests_3_to_8():
 
 def test_every_critical_tier_lens_has_a_body_in_the_bundle():
     assert all(LensLibrary().body(n) for n in CRITICAL_TIER)
-
-
-class StubLibrary(LensLibrary):
-    def __init__(self, bodies):
-        self._bodies = bodies
-
-    def body(self, name):
-        return self._bodies.get(name)
 
 
 def choice(name, why="picker rank 1"):
@@ -90,7 +84,7 @@ def test_nothing_selected_says_so():
 def _bundle_plan(depth, reply=None):
     library = LensLibrary()
     run = None if reply is None else (lambda: json.dumps({"lenses": reply}))
-    chosen = select_lenses(depth, run, lambda n: library.body(n) is not None)
+    chosen = select_lenses(depth, run, library)
     return plan_lenses(library, chosen.choices, depth.limit)
 
 

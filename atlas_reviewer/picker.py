@@ -22,7 +22,13 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from atlas_reviewer.lenses import MAX_LENSES, LensChoice
+from atlas_reviewer.lenses import (
+    LENS_BUDGET_CHARS,
+    MAX_LENSES,
+    LensChoice,
+    LensLibrary,
+    plan_lenses,
+)
 from atlas_reviewer.notes import quote_untrusted
 from atlas_reviewer.ports import BoundaryError
 
@@ -119,11 +125,19 @@ def parse_picks(text: str, limit: int) -> tuple[str, ...]:
 def select_lenses(
     depth: Depth,
     run_picker: Callable[[], str] | None,
-    has_body: Callable[[str], bool],
+    library: LensLibrary,
+    budget_chars: int = LENS_BUDGET_CHARS,
 ) -> LensSelection:
     """`run_picker` makes the picker's model call; None means no call is
-    available for it. A pick none of whose names has a bundle body would
-    run no lens at all, so it falls back to the critical tier too."""
+    available for it. The call is also skipped when no lens outside the
+    critical tier could fit whole in the budget the critical tier leaves,
+    since no pick could then change which lenses run. A pick none of whose
+    names has a bundle body would run no lens at all, so it falls back to
+    the critical tier too."""
+
+    def has_body(name: str) -> bool:
+        return library.body(name) is not None
+
     if depth is Depth.TRIAGE:
         return _critical("Lens selection: triage depth runs the critical tier", False)
     if run_picker is None:
@@ -132,6 +146,9 @@ def select_lenses(
             "critical tier ran",
             False,
         )
+    no_room = _no_room_for_a_pick(library, depth, budget_chars)
+    if no_room:
+        return _critical(no_room, False)
     try:
         names = parse_picks(run_picker(), depth.limit)
     except BoundaryError as exc:
@@ -170,6 +187,27 @@ def _with_critical(names: tuple[str, ...], limit: int) -> tuple[LensChoice, ...]
     extras = (n for n in names if n not in CRITICAL_TIER)
     rest = tuple(LensChoice(n, f"picker rank {rank[n]}") for n in extras)
     return (critical + rest)[:limit]
+
+
+def _no_room_for_a_pick(library: LensLibrary, depth: Depth, budget_chars: int) -> str:
+    """Why a pick could not add a lens, or "" when one could fit whole."""
+    critical = [LensChoice(n, "critical tier") for n in CRITICAL_TIER]
+    plan = plan_lenses(library, critical, depth.limit, budget_chars)
+    left = budget_chars - sum(len(lens.text) for lens in plan.loaded)
+    others = [library.body(n) for n in library.names() - set(CRITICAL_TIER)]
+    sizes = [len(b) for b in others if b is not None]
+    if sizes and min(sizes) <= left:
+        return ""
+    smallest = (
+        f"the smallest other lens is {min(sizes)} characters"
+        if sizes
+        else "the bundle has no other lens"
+    )
+    return (
+        f"Lens selection: the critical tier leaves {left} of the {budget_chars}-"
+        f"character lens budget and {smallest}, so no pick could add a lens and "
+        "the lens picker was not called"
+    )
 
 
 def _critical(reason: str, used_call: bool) -> LensSelection:
