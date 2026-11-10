@@ -232,7 +232,11 @@ itself, and a timeout is a coverage gap.
 
 Each phase is its own PR, or set of PRs, off `main` after the stack lands.
 None of them changes the one-shot path's behaviour except phase 1, which
-improves the context both paths share. Live runs need a fresh yes from the
+improves the context both paths share, and phase 2's archive check (D39),
+which the one-shot source upload now also passes: it refuses, before any
+runner is created, an archive that is not a readable gzip tar, that unpacks
+past 256 MiB, or that has more than 50,000 members (files, directories and
+links), which a repository can reach well under the 9 MiB compressed cap. Live runs need a fresh yes from the
 owner at every phase.
 
 | Phase | Scope | Gate to start |

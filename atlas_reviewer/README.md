@@ -75,8 +75,9 @@ evidence. The source is a local `.tar.gz` (`--tarball`, for example from
 `git archive --format=tar.gz --prefix=src/ HEAD`) or the head-SHA tarball
 fetched with the GitHub App (`--event`, needing the three `ATLAS_GITHUB_*`
 variables). Both are held to the review's caps: 9 MiB compressed, and
-256 MiB or 50,000 members unpacked, counted from the tar headers before
-any runner exists (`source_archive.py`).
+256 MiB or 50,000 members unpacked, counted from the tar headers across
+every gzip member before any runner exists (`source_archive.py`); an
+archive past them, or not a gzip tar, is refused.
 
 `probe-runner` exits 3 when the runner did not complete or, for the
 protocol probe, the stdin round-trip did not come back `ok` or the
@@ -542,9 +543,11 @@ a `Bridge` to the caller.
   `/usr/bin/git` or `/bin/git` before anything is uploaded. The merge-base
   and head tarballs, plus an optional default-branch tarball, are each at
   most 9 MiB compressed and 256 MiB or 50,000 members unpacked
-  (`source_archive.py`, counted from the tar headers in memory), and any
-  other is refused before a runner exists; the one-shot reviewer's source
-  upload is checked the same way. Each is
+  (`source_archive.py`, counted from the tar headers in memory across every gzip member), and any
+  other is refused before a runner exists. The one-shot reviewer's source
+  upload and `probe-runner` are checked the same way, so they now also
+  refuse a non-gzip archive and a repository of over 50,000 members
+  (files, directories and links), which can fit well under 9 MiB. Each is
   uploaded through the source-upload exec shape, then all are committed in
   one exec into a bare repository with a fixed identity and date. HEAD's
   parent is BASE; DEFAULT is its own root commit. Tools use only the
