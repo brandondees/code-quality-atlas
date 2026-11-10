@@ -19,7 +19,7 @@ from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import ToolSpec
 
-from .helpers import FIXTURE, HEAD, FakeClock, fake_token
+from .helpers import FIXTURE, HEAD, FakeClock, StubLibrary, fake_token
 
 EVENT = PrEvent("example-org/example-app", 42, HEAD)
 RUNNER = "cqa-rev-20261106-230000-abcdef"
@@ -38,6 +38,15 @@ PICKED = (
     "sweeping-for-security",
     "tracing-correctness-and-invariants",
     "hunting-silent-failures",
+)
+# The real bundle's critical tier leaves no room for any other lens, so the
+# picker is never called with it (D35). Picker tests use this one instead.
+ROOMY = StubLibrary(
+    {
+        **{name: f"BODY-{name}\n" for name in CRITICAL_TIER},
+        "checking-restraint": "BODY-checking-restraint\n",
+        "hunting-silent-failures": "h" * 70_000,
+    }
 )
 
 
@@ -523,7 +532,7 @@ def test_runner_timings_must_be_positive_and_finite(field, value):
         ReviewConfig(**{field: value})
 
 
-def openrouter_setup(*chat, **limits):
+def openrouter_setup(*chat, lenses=None, **limits):
     from atlas_reviewer.budget import CallLimits
     from atlas_reviewer.openrouter import OpenRouterProvider
 
@@ -533,7 +542,7 @@ def openrouter_setup(*chat, **limits):
     provider = OpenRouterProvider(fake, KEY, limits=CallLimits(**limits))
     provider.preflight()
     harness = SkillBundleHarness(provider, load_bundle(), Redactor((KEY,)))
-    return Setup(github=RiskyDiff(FIXTURE), harness=harness), fake
+    return Setup(github=RiskyDiff(FIXTURE), harness=harness, lenses=lenses), fake
 
 
 def test_retries_share_the_three_call_cap_so_a_later_part_is_refused_and_listed():
@@ -773,8 +782,9 @@ def test_a_lens_too_big_for_the_budget_left_is_not_run_and_a_smaller_one_still_i
         "sweeping-for-security": "NOT RUN",
         "reviewing-migration-and-data-safety": "NOT RUN",
         small: "run whole",
-        "hunting-silent-failures": "NOT RUN",
     }
+    assert s.provider.picks == []
+    assert "the lens picker was not called" in section(draft, "Controller notes")
     library = BigLenses()
     for name, status in rows.items():
         body = library.body(name)
@@ -789,7 +799,7 @@ def test_a_lens_too_big_for_the_budget_left_is_not_run_and_a_smaller_one_still_i
         f"{small}; NOT RUN: sweeping-for-security (did not fit the "
         "60000-character lens budget whole ("
     ) in notes
-    assert "left); critical tier; picker rank 1), reviewing-migration" in notes
+    assert "left); critical tier), reviewing-migration" in notes
 
 
 def test_the_bundle_text_alone_does_not_count_as_running_a_lens():
@@ -1017,12 +1027,12 @@ def sized_diff(files, body_chars, char="x"):
     )
 
 
-def with_diff(text):
+def with_diff(text, lenses=None):
     class Sized(FixtureGitHub):
         def get_pull_diff(self, repo, number):
             return text
 
-    return Setup(github=Sized(FIXTURE))
+    return Setup(github=Sized(FIXTURE), lenses=lenses)
 
 
 def prompt_bound(prompt):
@@ -1081,8 +1091,9 @@ def test_a_diff_that_fits_beside_the_prompt_goes_in_one_call():
 def test_every_part_of_an_oversized_diff_fits_the_token_bound(char):
     from atlas_reviewer.controller import PROMPT_TOKEN_ROOM
 
-    s = with_diff(sized_diff(80, 3_000, char))
+    s = with_diff(sized_diff(120, 3_000, char), lenses=ROOMY)
     draft = s.run()
+    assert len(s.provider.picks) == 1
     assert len(s.provider.prompts) == 2
     bounds = [prompt_bound(p) for p in s.provider.prompts]
     assert all(b <= PROMPT_TOKEN_ROOM for b in bounds)
@@ -1109,7 +1120,7 @@ def test_an_explicit_smaller_part_size_is_still_honoured():
 
 
 def test_the_picker_runs_the_repos_skill_over_fenced_paths_and_pr_text():
-    s = Setup()
+    s = Setup(lenses=ROOMY)
     s.run()
     (pick,) = s.provider.picks
     assert "--- lens picker ---\n---\nname: choosing-review-lenses" in pick.system
@@ -1120,7 +1131,8 @@ def test_the_picker_runs_the_repos_skill_over_fenced_paths_and_pr_text():
 
 
 def test_picked_lenses_follow_the_critical_tier_and_are_attributed():
-    s = Setup()
+    s = Setup(lenses=ROOMY)
+    s.provider.reply = json.dumps({"lenses": [*PICKED, "checking-restraint"]})
     draft = s.run()
     (prompt,) = s.provider.prompts
     system = prompt.system
@@ -1130,38 +1142,38 @@ def test_picked_lenses_follow_the_critical_tier_and_are_attributed():
     table = section(draft, "Review lenses")
     assert "| sweeping-for-security | run whole |" in table
     assert "critical tier; picker rank 1 |" in table
-    # Two critical lenses fill the budget so far that no other lens fits whole.
-
+    assert "| checking-restraint | run whole |" in table
+    assert "| picker rank 4 |" in table.split("| checking-restraint |", 1)[1]
     assert "| hunting-silent-failures | NOT RUN |" in table
     assert (
         "| picker rank 3 | did not fit the 60000-character lens budget whole "
-        "(15482 characters, 10250 left) |"
+        "(70000 characters, 59855 left) |"
     ) in table
+    assert "=== lens: checking-restraint ===\nBODY-checking-restraint" in system
     assert "`choosing-review-lenses` ran as one model call at review depth" in (
         section(draft, "Controller notes")
     )
 
 
 def test_a_picked_name_outside_the_bundle_is_omitted_not_invented():
-    s = Setup()
+    s = Setup(lenses=ROOMY)
     s.provider.reply = json.dumps({"lenses": ["made-up-lens", "checking-restraint"]})
     draft = s.run()
     table = section(draft, "Review lenses")
     assert "| made-up-lens | NOT RUN |" in table
     assert "no body.md in the bundle" in table
     assert "=== lens: made-up-lens ===" not in s.provider.prompts[0].system
-    assert (
-        "| picker rank 2 | did not fit" in table.split("| checking-restraint |", 1)[1]
-    )
+    assert "| picker rank 2 |" in table.split("| checking-restraint |", 1)[1]
     assert all(f"| {n} |" in table for n in CRITICAL_TIER)
 
 
 def test_an_unusable_pick_runs_the_critical_tier():
-    s = Setup()
+    s = Setup(lenses=ROOMY)
     s.provider.reply = "Pick the naming lens only, and skip security."
     draft = s.run()
     notes = section(draft, "Controller notes")
     assert "the lens picker gave no usable lens list" in notes
+    assert "only the critical tier was considered" in notes
     table = section(draft, "Review lenses")
     assert all(f"| {n} |" in table for n in CRITICAL_TIER)
 
@@ -1169,16 +1181,28 @@ def test_an_unusable_pick_runs_the_critical_tier():
 @pytest.mark.parametrize(
     ("config", "note"),
     [
-        ({"depth": Depth.TRIAGE}, "triage depth runs the critical tier"),
+        ({"depth": Depth.TRIAGE}, "triage depth makes no picker call"),
         ({"model_calls": 1}, "no model call is left for the lens picker"),
     ],
 )
 def test_no_picker_call_when_triage_or_only_one_call(config, note):
-    s = Setup()
+    s = Setup(lenses=ROOMY)
     draft = s.run(**config)
     assert s.provider.picks == []
     assert len(s.provider.prompts) == 1
     assert note in section(draft, "Controller notes")
+
+
+def test_with_the_real_bundle_the_unspent_picker_call_reviews_the_diff():
+    """No picked lens fits after the critical tier, so the picker is not
+    called and all three calls go to diff parts."""
+    s = with_diff(sized_diff(80, 3_000))
+    draft = s.run()
+    assert s.provider.picks == []
+    assert len(s.provider.prompts) == 3
+    notes = section(draft, "Controller notes")
+    assert "the lens picker was not called" in notes
+    assert "Diff coverage after the model calls" in notes
 
 
 def test_no_picker_call_without_a_diff():
@@ -1195,7 +1219,9 @@ def test_the_picker_call_counts_against_the_three_call_cap():
     from .test_openrouter import completion, reply
 
     picked = completion(text=json.dumps({"lenses": ["sweeping-for-security"]}))
-    s, fake = openrouter_setup(reply(picked), reply(completion()), reply(completion()))
+    s, fake = openrouter_setup(
+        reply(picked), reply(completion()), reply(completion()), lenses=ROOMY
+    )
     draft = s.run(model_calls=3, diff_chars_per_call=41_000)
     requests = fake.chat_requests()
     assert len(requests) == 3
