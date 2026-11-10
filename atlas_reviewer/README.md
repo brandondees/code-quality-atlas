@@ -208,10 +208,10 @@ call gets that skill as its instructions, the PR metadata and the changed
 paths (at most 500) as untrusted fenced blocks, and the operator's depth.
 It must reply with only `{"lenses": [...]}`, at most 8 names at review depth
 (the top of review mode's 3-8 breadth) or 40 at comprehensive. The reply is
-parsed strictly, and a name with no body in the bundle is listed as omitted.
+parsed strictly, and a name with no body in the bundle is listed as NOT RUN.
 With no diff there is no model call at all (see Diff coverage). At
 **triage** depth or with `--max-model-calls 1`, no picker call is made and
-the critical tier runs (`tracing-correctness-and-invariants`,
+the critical tier is chosen (`tracing-correctness-and-invariants`,
 `sweeping-for-security`, `reviewing-migration-and-data-safety`,
 `reviewing-concurrency-and-async`, from `docs/review-depth-modes.md`). An
 unusable reply also falls back to the critical tier, and the controller
@@ -222,17 +222,31 @@ lenses but not drop a critical one. The picker call counts toward the
 3-call cap.
 
 `lenses.py` then reads each chosen lens's `reference/lenses/<lens>/body.md`
-and inlines the bodies into the trusted system prompt, in pick order, under a
-**60,000-character budget** and a cap of **8 lenses**. A lens that does not
-fit is cut at a line boundary and marked truncated, or omitted when under
-4,000 characters of budget remain. The draft's **Review lenses** table and the
-controller notes say which lenses were included, truncated or omitted, with
-character counts and the picker rank, and the prompt tells the model that
-only inlined lenses ran. The critical tier's four bodies alone exceed the
-60,000-character budget, so today the fourth is omitted and a lens only the
-picker named is listed with its rank but not inlined. PR text can steer the
-pick, but only within the closed set of lens names in the bundle. `reference/synthesis.md` and
-`reference/tool-evidence.md` are not inlined.
+and inlines it into the trusted system prompt, in priority order, under a
+**60,000-character budget** and a cap of **8 lenses**. A lens is never cut:
+a lens runs only if its whole body fits what is left of the budget, and
+otherwise it is **NOT RUN** and the next one is tried, so a smaller later
+lens can still fit. The draft's **Review lenses** table and the controller
+notes list every lens as run whole or NOT RUN, with its size, its tier or
+picker rank, and why it did not run, and the prompt tells the model that
+only inlined lenses ran.
+
+With today's bodies the critical tier alone does not fit:
+`tracing-correctness-and-invariants` (34,750 characters) and
+`sweeping-for-security` (15,000) run whole, leaving 10,250, so
+`reviewing-migration-and-data-safety` (22,656) and
+`reviewing-concurrency-and-async` (10,984) are NOT RUN. The smallest lens
+in the bundle is 10,984 characters, so at review depth no picker-only lens
+fits either; triage and review depth run the same two lenses. PR text can
+steer the pick, but only within the closed set of lens names in the bundle.
+
+No instruction text is ever cut: the controller's instructions, the
+`reviewing-a-change` review procedure, the `choosing-review-lenses` picker
+and its instructions go into their prompts whole, and only the diff and
+untrusted data are cut (marked and reported). `reference/synthesis.md` and
+`reference/tool-evidence.md` (the bundle's synthesis and tool-evidence
+steps) are not inlined at all: the controller gathers the CI and runner
+evidence itself, and this one-shot path has no separate synthesis pass.
 
 ## Runner tools
 
