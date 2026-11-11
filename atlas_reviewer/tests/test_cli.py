@@ -1303,6 +1303,55 @@ def test_a_complete_approving_review_exits_ok_and_reports_its_event(
     assert '"coverage_complete": true' in first
 
 
+@pytest.mark.parametrize(
+    ("event", "expected"),
+    [
+        ("APPROVE", cli.EXIT_OK),
+        ("COMMENT", cli.EXIT_OK),
+        ("REQUEST_CHANGES", cli.EXIT_CHANGES_REQUESTED),
+    ],
+)
+def test_a_complete_review_exits_by_its_event(tmp_path, monkeypatch, event, expected):
+    code, out = openrouter_review(
+        tmp_path, monkeypatch, f"Notes.\n\nReview event: {event}",
+        "--out", str(tmp_path / "draft.md"),
+    )  # fmt: skip
+    assert code == expected
+    assert f"review event: {event}; coverage_complete=true" in out
+
+
+def test_requested_changes_with_incomplete_coverage_exit_incomplete():
+    from atlas_reviewer.verdict import FileCoverage, ReviewEvent, decide
+
+    incomplete = FileCoverage(
+        2, unknown="the diff names 1 file(s) but GitHub reports 2"
+    )
+    verdict = decide(ReviewEvent.REQUEST_CHANGES, incomplete)
+    assert cli.review_exit(verdict) == cli.EXIT_INCOMPLETE
+    assert cli.review_exit(decide(ReviewEvent.REQUEST_CHANGES, FileCoverage(1))) == (
+        cli.EXIT_CHANGES_REQUESTED
+    )
+
+
+def test_a_held_review_lock_exits_with_the_usage_code(tmp_path):
+    from atlas_reviewer.ledger import single_review_lock
+
+    with single_review_lock(tmp_path / "review.lock"):
+        code, out, err = run_cli(
+            "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run"
+        )
+    assert code == cli.EXIT_USAGE == 2
+    assert "another review holds" in err
+    assert out == ""
+
+
+def test_the_exit_codes_are_the_documented_numbers():
+    assert (
+        cli.EXIT_OK, cli.EXIT_USAGE, cli.EXIT_BOUNDARY, cli.EXIT_INCOMPLETE,
+        cli.EXIT_CHANGES_REQUESTED,
+    ) == (0, 2, 3, 4, 5)  # fmt: skip
+
+
 def test_a_review_whose_model_call_failed_exits_incomplete_and_never_approves(
     tmp_path, monkeypatch
 ):

@@ -86,6 +86,7 @@ from atlas_reviewer.runner import (
 from atlas_reviewer.sprites_api import RUNNER_PREFIX, SpritesClient
 from atlas_reviewer.stops import raise_if_stopped
 from atlas_reviewer.telemetry import JsonlSink, Telemetry
+from atlas_reviewer.verdict import ReviewEvent, Verdict
 
 ENV_APP_ID = "ATLAS_GITHUB_APP_ID"
 ENV_APP_KEY = "ATLAS_GITHUB_APP_PRIVATE_KEY"
@@ -98,6 +99,7 @@ PROVIDER_CHOICES = ("offline", "openrouter")
 SECRET_ENV = (ENV_APP_KEY, ENV_SPRITES_TOKEN, ENV_OPENROUTER_KEY)
 
 EXIT_OK, EXIT_USAGE, EXIT_BOUNDARY, EXIT_INCOMPLETE = 0, 2, 3, 4
+EXIT_CHANGES_REQUESTED = 5
 
 
 class UsageError(Exception):
@@ -396,7 +398,18 @@ def _cmd_review(
         f"{str(verdict.coverage_complete).lower()}; unreviewed_files="
         f"{len(verdict.coverage.unreviewed)}\n"
     )
-    return EXIT_OK if verdict.coverage_complete else EXIT_INCOMPLETE
+    return review_exit(verdict)
+
+
+def review_exit(verdict: Verdict) -> int:
+    """`review`'s exit code, enough to gate a pipeline on: 4 when file
+    coverage is incomplete (D36), whatever the model proposed; with
+    complete coverage, 5 when the review requests changes, else 0."""
+    if not verdict.coverage_complete:
+        return EXIT_INCOMPLETE
+    if verdict.event is ReviewEvent.REQUEST_CHANGES:
+        return EXIT_CHANGES_REQUESTED
+    return EXIT_OK
 
 
 def _check_out_path(out_path: str | None) -> None:

@@ -497,13 +497,26 @@ this rule: it is about files only.
   incomplete, it opens with a **REVIEW INCOMPLETE -- not approvable**
   warning instead, giving the count and naming the unreviewed files by
   reason, highest risk first, each quoted as data, with at most 100 listed.
-- `review` exits **4** when file coverage is incomplete, and 0 when it is
-  complete. Exit 0 says only that every changed file was reviewed in full,
-  not that the model approved: a complete COMMENT or REQUEST_CHANGES review
-  also exits 0. A pipeline with no human reading the draft must also read
-  the review event, from the status comment's `review_event` or the
-  printed summary, `review event: ...; coverage_complete=...;
-  unreviewed_files=N`. With `--out` the summary goes to stdout; without it,
+- `review`'s exit code is enough for a pipeline with no human reading the
+  draft to gate on (Brandon chose these codes on 2026-11-10, via
+  delegation):
+
+  | Exit | Meaning |
+  | --- | --- |
+  | 0 | file coverage complete, and the review approves or comments |
+  | 5 | file coverage complete, and the review requests changes |
+  | 4 | file coverage incomplete, whatever the model proposed (D36) |
+  | 2 | usage error, or another review holds the lock |
+  | 3 | boundary error (GitHub, Sprites or OpenRouter refused or failed) |
+
+  No other exit is a review result. An uncaught crash exits 1, a
+  malformed command line exits 2 from `argparse` itself, the same code as
+  the usage errors above, and a stop ends the process on SIGINT (130 in a
+  shell).
+
+  Exit 0 does not tell APPROVE from COMMENT; the status comment's
+  `review_event` and the printed summary, `review event: ...;
+  coverage_complete=...; unreviewed_files=N`, do. With `--out` the summary goes to stdout; without it,
   stdout is the draft alone and the summary goes to stderr. A failed
   `--out` write prints the draft to stdout and the error to stderr, and
   keeps the exit code of the review, since the review itself finished.
