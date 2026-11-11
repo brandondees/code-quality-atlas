@@ -368,10 +368,13 @@ def test_only_the_token_mint_and_the_wrapper_call_fly_without_the_org_token():
         "fly tokens create org --org personal --name atlas-reviewer "
         '--expiry 168h > "$SECRETS_DIR/fly-personal.token"'
     )
-    timed = [c for c in bare if c.startswith("fly machine run ")]
-    assert bare == [mint, 'fly "$@"', *timed]
-    assert len(timed) == 3
-    for command in timed:
+    runs = [c for c in bare if c.startswith("fly machine run ")]
+    assert bare == [mint, 'fly "$@"', *runs]
+    detached = [c for c in runs if "--detach" in c]
+    wrapped = [c for c in runs if "--detach" not in c]
+    assert len(detached) == 1 and len(wrapped) == 2
+    assert "--sequence review" in detached[0]
+    for command in runs:
         assert "--rm" in command
         assert "--app atlas-reviewer" in command
     assert "timeout 45 fly machine run" in RUNBOOK
@@ -471,16 +474,23 @@ def test_a_review_writes_to_the_machine_disk_and_is_held_not_removed():
     ):
         assert flag in review
     assert "--port" not in review
-    for one_off in ("-- sweep --event", "-- probe-runner"):
-        blocks = [b for b in shell_blocks(RUNBOOK) if one_off in b]
-        assert blocks
-        for block in blocks:
-            assert "--rm" in block
-            assert "--restart no" in block
-            assert "timeout 45 fly machine run" in block
-            assert "unset FLY_ACCESS_TOKEN" in block
-            assert 'export FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN"' in block
-            assert not re.search(r"(?m)^\s*FLY_API_TOKEN=", block)
+    short = [
+        b
+        for b in shell_blocks(RUNBOOK)
+        if "-- sweep --event" in b or b.rstrip().endswith("-- probe-runner\n)")
+    ]
+    assert len(short) == 2
+    review_seq = block_with("-- probe-runner --sequence review")
+    assert "timeout 45" not in review_seq
+    assert "--detach" in review_seq
+    for block in (*short, review_seq):
+        assert "--rm" in block
+        assert "--restart no" in block
+        assert "unset FLY_ACCESS_TOKEN" in block
+        assert 'export FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN"' in block
+        assert not re.search(r"(?m)^\s*FLY_API_TOKEN=", block)
+    for block in short:
+        assert "timeout 45 fly machine run" in block
     assert 'flyp logs --app atlas-reviewer --machine "$MACHINE_ID" --no-tail' in RUNBOOK
 
 

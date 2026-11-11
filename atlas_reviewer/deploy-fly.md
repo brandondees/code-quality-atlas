@@ -515,8 +515,16 @@ success signal is that Machine's own
 neither line appears for that Machine, run the sweep again. Exit 3
 means the same: the runner was not verified gone.
 
-The probe commands below use the same subshell wrapper and the same
-per-Machine logs read.
+The protocol probe below uses the same `timeout 45` subshell and the
+same per-Machine logs read. `timeout 45` is what stopped the hang on
+the short commands that run showed. A review sequence also creates a
+runner and fetches the head-SHA tarball, so the same 45 seconds can
+stop a run that is still working. That command uses `--detach`
+instead. The machine-run doc says `--detach` returns immediately
+instead of monitoring deployment progress
+([fly machine run](https://fly.io/docs/flyctl/cmd/fly_machine_run/)).
+The 2026-11-11 run did not use `--detach`. Its exit code is still that
+Machine's logs line, read with `--machine` as above.
 
 ```sh
 (
@@ -554,8 +562,11 @@ has already exited, read that Machine's exit with the
 A probe does not call a model, and nothing in the controller checks
 that. App secrets are on every Machine, so the probe Machine also
 receives `ATLAS_OPENROUTER_API_KEY`. That is a current limitation. On
-that probe-runner run the key was there. Before the probe, unstage it.
-`--stage` skips a release, as [Secrets](#secrets) already says for
+that probe-runner run the key was there. That run did not show that
+`fly secrets unset --stage` keeps the key off the next Machine. The
+steps below are the workaround, not something that probe confirmed.
+Before the probe, unstage it. `--stage` skips a release, as
+[Secrets](#secrets) already says for
 `fly secrets set`. `fly secrets list` prints names, not values; the
 OpenRouter name should be absent:
 
@@ -594,12 +605,13 @@ probe-runner run the command was `--sequence review --event
 (
   unset FLY_ACCESS_TOKEN
   export FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN"
-  timeout 45 fly machine run "$IMAGE" \
+  fly machine run "$IMAGE" \
     --app atlas-reviewer \
     --region iad \
     --vm-cpu-kind shared \
     --vm-cpus 1 \
     --vm-memory 1024 \
+    --detach \
     --rm \
     --restart no \
     --entrypoint /usr/local/bin/atlas-reviewer \
