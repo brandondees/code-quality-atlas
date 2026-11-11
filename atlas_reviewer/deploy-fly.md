@@ -342,7 +342,15 @@ offline provider. GitHub and Sprites still run. Do not pass `--dry-run`.
 
 When the CLI exits, the entrypoint writes its exit code to
 `/home/atlas/out/exit-code` and holds the Machine for
-`ATLAS_HOLD_SECONDS`. Poll for that file:
+`ATLAS_HOLD_SECONDS`. Poll for that file.
+
+On 2026-11-11, with flyctl, the first `fly ssh console` on the first
+held Machine failed for about 6 minutes, and later Machines connected
+in about 3 seconds. A likely cause is first-time SSH or WireGuard
+setup; that was not confirmed. The earlier poll discarded stderr, so
+the failure had no visible reason. This poll leaves stderr on the
+terminal. The first connection can be slow. This is what that run
+showed, not a documented Fly behavior.
 
 ```sh
 code=
@@ -350,7 +358,7 @@ deadline=$(( $(date +%s) + 3600 ))
 while [ -z "$code" ] && [ "$(date +%s)" -lt "$deadline" ]; do
   sleep 30
   code=$(flyp ssh console --app atlas-reviewer --machine "$MACHINE_ID" -q \
-    -C 'cat /home/atlas/out/exit-code' 2>/dev/null | tr -dc '0-9')
+    -C 'cat /home/atlas/out/exit-code' | tr -dc '0-9')
 done
 echo "review exit code: ${code:-none after an hour}"
 ```
@@ -437,15 +445,25 @@ flyp machine wait "$MACHINE_ID" --app atlas-reviewer --state stopped
 flyp machine destroy "$MACHINE_ID" --app atlas-reviewer --force
 ```
 
-The entrypoint passes the stop on to the CLI as SIGTERM, because `sh`
-starts the CLI with SIGINT ignored. The CLI turns SIGTERM into
-`KeyboardInterrupt`, so its `finally` blocks delete the runner Sprite
-within its 60-second cleanup budget. The CLI ignores any further stop
-signal, so stopping again does not skip that delete. `--timeout 120`
-is how long Fly waits before SIGKILL. After a signal the entrypoint does
-not hold, so there is nothing to copy. `--force` destroys the Machine in
-any state. A SIGKILL skips `finally`, so after a hard stop check for the
-runner Sprite as below.
+The entrypoint passes a stop it receives on to the CLI as SIGTERM,
+because `sh` starts the CLI with SIGINT ignored. The CLI turns SIGTERM
+into `KeyboardInterrupt`, so its `finally` blocks delete the runner
+Sprite within its 60-second cleanup budget. The CLI ignores any further
+stop signal, so stopping again does not skip that delete. `--timeout 120`
+is how long Fly waits before SIGKILL.
+
+`fly machine stop`, including `--signal SIGINT`, signals the entrypoint.
+The entrypoint then exits without holding, so there is nothing to copy.
+On 2026-11-11, with flyctl, that stop ended the Machine with exit 130
+about 1 second later, and the runner Sprite was gone.
+
+A SIGTERM sent straight to the CLI process does not signal the
+entrypoint. Observed the same day with flyctl, the entrypoint held, and
+`/home/atlas/out/exit-code` was 130. That file can be copied while the
+Machine is held.
+
+`--force` destroys the Machine in any state. A SIGKILL skips `finally`,
+so after a hard stop check for the runner Sprite as below.
 
 ### Recover a runner Sprite by name
 
@@ -462,10 +480,27 @@ flyp machine list --app atlas-reviewer
 ```
 
 Then sweep by name. `--force-live` records that you checked; without it
-the sweep refuses (exit 2):
+the sweep refuses (exit 2).
+
+On 2026-11-11, with flyctl, `fly machine run --rm` hung twice for more
+than 4 minutes at "Attempting to start machine..." after the Machine
+had already exited and been removed. `timeout 45` stopped the hang.
+This is what that run showed, not a documented Fly behavior. `timeout`
+runs a program and cannot call the `flyp` function, so the command
+passes the org token the way `flyp` does. If the wrapper stops a hung
+flyctl, its status is timeout's, not the controller's. The controller's
+exit code is then the logs line `Main child exited normally with code: N`:
 
 ```sh
-flyp machine run "$IMAGE" \
+flyp logs --app atlas-reviewer --no-tail
+```
+
+The probe below uses the same wrapper and the same logs line.
+
+```sh
+timeout 45 env -u FLY_ACCESS_TOKEN \
+  FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN" \
+  fly machine run "$IMAGE" \
   --app atlas-reviewer \
   --region iad \
   --vm-cpu-kind shared \
@@ -487,12 +522,17 @@ sweep exits 3 when it cannot verify the runner is gone; run it again.
 The same command works from a checkout with `ATLAS_SPRITES_TOKEN` set:
 `python -m atlas_reviewer sweep --event event.json --force-live`.
 
-`probe-runner` uses the same image and the same `--rm --restart no`
-flags, with no `ATLAS_EVENT_JSON`. Its output is short and goes to
-`fly logs`:
+`probe-runner` uses the same image, the same `--rm --restart no`
+flags, and the same `timeout 45` wrapper, with no `ATLAS_EVENT_JSON`.
+Its output is short and goes to `fly logs`. If flyctl hangs after the
+Machine has already exited, the exit code is the same logs line,
+`Main child exited normally with code: N`, from
+`flyp logs --app atlas-reviewer --no-tail`.
 
 ```sh
-flyp machine run "$IMAGE" \
+timeout 45 env -u FLY_ACCESS_TOKEN \
+  FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN" \
+  fly machine run "$IMAGE" \
   --app atlas-reviewer \
   --region iad \
   --vm-cpu-kind shared \
