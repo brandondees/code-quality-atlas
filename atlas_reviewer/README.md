@@ -277,10 +277,14 @@ OpenRouter's documentation), so a $0 readback right after a call is expected
 and is not a mismatch. Cost is taken from each response's `usage`, never
 from that counter. When `usage.is_byok` is boolean false, the settled
 amount is `usage.cost` and a reported `cost_details.upstream_inference_cost`
-is not added, and the settlement line records the raw upstream value
-that was left out. OpenRouter's usage-accounting page calls `cost` the total
-charged to the account and `upstream_inference_cost` the upstream
-provider's charge
+is not added, with two over-counts: an upstream amount larger than
+`usage.cost` settles at that amount, and an upstream value that is present,
+not null and unreadable keeps the full reservation. A null or absent
+upstream settles `usage.cost`. The settlement line records the raw upstream
+value on such a call, cut to 200 characters. This is the controller's
+policy, not a confirmed OpenRouter fact. OpenRouter's usage-accounting page
+calls `cost` the total charged to the account and `upstream_inference_cost`
+the upstream provider's charge
 (https://openrouter.ai/docs/cookbook/administration/usage-accounting,
 fetched 2026-11-11); that page does not say whether a non-BYOK `cost`
 already includes the upstream amount (verify). The SDK says that on a
@@ -289,7 +293,9 @@ BYOK request `cost` is the OpenRouter fee only
 fetched 2026-11-11), so `is_byok: true` adds a reported upstream cost,
 and a missing upstream cost keeps the reservation. A missing or
 non-boolean `is_byok` adds a reported upstream cost too, including a
-call refused in no-BYOK mode.
+call refused in no-BYOK mode. An upstream value that cannot be read
+keeps the reservation on any response that is not explicitly non-BYOK
+as well.
 
 ## What the draft contains
 

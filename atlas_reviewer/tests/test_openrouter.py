@@ -598,19 +598,22 @@ def test_an_explicit_non_byok_response_is_accepted_when_the_flag_is_off():
     assert p.budget.committed_usd() == Decimal("0.05")
 
 
-@pytest.mark.parametrize("upstream", ["0.0790", None, "not-a-number", {}])
-def test_a_non_byok_response_settles_usage_cost_whatever_upstream_reports(upstream):
-    """PR #585 settled twice the key charge by adding this field. Boolean
-    false settles usage.cost instead, and the budget line keeps the raw
-    value, including null and unreadable ones."""
-    usage = {
+def _non_byok_usage(upstream):
+    return {
         "prompt_tokens": 36_614,
         "completion_tokens": 576,
         "cost": "0.0790",
         "is_byok": False,
         "cost_details": {"upstream_inference_cost": upstream},
     }
-    p = provider(OpenRouterFake(reply(completion(usage=usage))))
+
+
+@pytest.mark.parametrize("upstream", ["0.0790", "0.0120"])
+def test_a_non_byok_call_settles_usage_cost_when_upstream_is_not_larger(upstream):
+    """PR #585 settled twice the key charge by adding this field. An
+    upstream amount equal to usage.cost (the live case) or below it is not
+    added, and the budget line names the raw value."""
+    p = provider(OpenRouterFake(reply(completion(usage=_non_byok_usage(upstream)))))
     p.complete(SMALL)
     assert p.budget.calls[0].actual_usd == Decimal("0.0790")
     assert (
@@ -619,20 +622,41 @@ def test_a_non_byok_response_settles_usage_cost_whatever_upstream_reports(upstre
     )
 
 
-def test_a_long_skipped_upstream_value_is_cut_in_the_settlement_line():
-    usage = {
-        "prompt_tokens": 10,
-        "completion_tokens": 5,
-        "cost": "0.05",
-        "is_byok": False,
-        "cost_details": {"upstream_inference_cost": "9" * 1000},
-    }
-    p = provider(OpenRouterFake(reply(completion(usage=usage))))
+@pytest.mark.parametrize("upstream", ["0.0791", "0.1580", "1.26"])
+def test_a_non_byok_call_settles_the_larger_upstream_cost(upstream):
+    """If the upstream amount exceeds usage.cost the response is ambiguous,
+    so the call is settled at the larger figure and never below it."""
+    p = provider(OpenRouterFake(reply(completion(usage=_non_byok_usage(upstream)))))
+    p.complete(SMALL)
+    assert p.budget.calls[0].actual_usd == Decimal(upstream)
+    assert f"(upstream {upstream!r} exceeds usage.cost" in p.usage_lines()[1]
+
+
+def test_a_non_byok_call_with_a_null_upstream_settles_usage_cost():
+    p = provider(OpenRouterFake(reply(completion(usage=_non_byok_usage(None)))))
+    p.complete(SMALL)
+    assert p.budget.calls[0].actual_usd == Decimal("0.0790")
+    assert "(upstream None reported, not added" in p.usage_lines()[1]
+
+
+@pytest.mark.parametrize("upstream", ["not-a-number", "-1", -1, {}, [], True])
+def test_a_non_byok_call_with_an_unreadable_upstream_keeps_the_reservation(upstream):
+    """A present, non-null upstream value that cannot be read is ambiguous,
+    so the full reservation stays counted, as it does for any other flag."""
+    p = provider(OpenRouterFake(reply(completion(usage=_non_byok_usage(upstream)))))
+    p.complete(SMALL)
+    assert p.budget.calls[0].actual_usd is None
+    assert "counted at the reservation" in p.usage_lines()[1]
+    assert f"(upstream {upstream!r} unreadable)" in p.usage_lines()[1]
+
+
+def test_a_long_unreadable_upstream_value_is_cut_in_the_settlement_line():
+    p = provider(OpenRouterFake(reply(completion(usage=_non_byok_usage("x" * 1000)))))
     p.complete(SMALL)
     line = p.usage_lines()[1]
-    assert p.budget.calls[0].actual_usd == Decimal("0.05")
-    assert "9" * 150 in line
-    assert "9" * 200 not in line
+    assert p.budget.calls[0].actual_usd is None
+    assert "x" * 150 in line
+    assert "x" * 200 not in line
 
 
 @pytest.mark.parametrize("flag", ["false", 0, None])
