@@ -31,12 +31,15 @@ def test_every_read_is_one_event_with_its_size():
     archive = gh.download_artifact(REPO, 9001, 1_000_000)
     gh.get_tarball(REPO, HEAD)
     gh.get_issue(REPO, 7)
+    gh.list_reviews(REPO, 42)
+    gh.list_review_comments(REPO, 42)
+    gh.list_issue_comments(REPO, 42)
     steps = [(e.phase, e.step) for e in t.events]
     assert steps == [
         ("evidence fetch", "pull #42"),
         ("evidence fetch", "diff of #42"),
         ("evidence fetch", "commits of #42"),
-        ("evidence fetch", "check runs"),
+        ("evidence fetch", f"check runs at {HEAD[:12]}"),
         ("evidence fetch", "workflow runs"),
         ("evidence fetch", f"workflow runs at {HEAD[:12]}"),
         ("evidence fetch", "jobs of run 5001"),
@@ -45,10 +48,14 @@ def test_every_read_is_one_event_with_its_size():
         ("evidence fetch", "artifact 9001"),
         ("source fetch", f"tarball of {HEAD[:12]}"),
         ("evidence fetch", "issue #7"),
+        ("conversation fetch", "reviews of #42"),
+        ("conversation fetch", "review comments of #42"),
+        ("conversation fetch", "issue comments of #42"),
     ]
     assert all("secret-branch-name" not in str(e.as_json()) for e in t.events)
     by_step = {e.step: e.fields for e in t.events}
-    assert set(by_step["check runs"]) == {"items", "pages", "truncated"}
+    assert set(by_step[f"check runs at {HEAD[:12]}"]) == {"items", "pages", "truncated"}
+    assert set(by_step["reviews of #42"]) == {"items", "pages", "truncated"}
     assert "chars" in by_step["diff of #42"]
     assert "bytes" in by_step["log of job 7001"]
     assert log == inner.get_job_logs(REPO, 7001, 1_000_000)
@@ -94,6 +101,9 @@ READS = [
     ("download_artifact", (REPO, 9001, 1_000_000)),
     ("get_tarball", (REPO, HEAD)),
     ("get_issue", (REPO, 7)),
+    ("list_issue_comments", (REPO, 42)),
+    ("list_review_comments", (REPO, 42)),
+    ("list_reviews", (REPO, 42)),
 ]
 
 

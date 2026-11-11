@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: MIT
 """Offline `GitHubReader` backed by a fixture directory (for `--dry-run`).
 
-Layout: `pull.json`, `pull.diff`, `pull-commits.json` (an array, as GitHub
-serves it), `check-runs.json`, `workflow-runs.json` (every run listed under
-the head branch's name; `list_workflow_runs_at` serves those at one SHA),
+Layout: `pull.json`, `pull.diff`, `pull-commits.json`,
+`issue-comments.json`, `review-comments.json` and `reviews.json` (arrays,
+as GitHub serves them), `check-runs.json` (the runs at every commit;
+`list_check_runs` serves those at one SHA), `workflow-runs.json` (every run
+listed under the head branch's name; `list_workflow_runs_at` serves those at one SHA),
 `jobs-<run_id>.json`, `job-log-<job_id>.txt`, `artifacts-<run_id>.json`,
 `artifact-<id>/` (a directory zipped on read, as GitHub serves artifacts),
 `issue-<n>.json`, and a `source/` tree served as the head-SHA tarball.
@@ -69,19 +71,37 @@ class FixtureGitHub:
         self.calls.append(("get_pull_diff", repo, str(number)))
         return self._file("pull.diff").read_text(encoding="utf-8")
 
+    def _array(self, name: str) -> Listing:
+        try:
+            data = json.loads(self._file(name).read_text("utf-8"))
+        except json.JSONDecodeError as exc:
+            raise BoundaryError(f"fixture {name} is not JSON") from exc
+        if not isinstance(data, list):
+            raise BoundaryError(f"fixture {name} is not an array")
+        return Listing(tuple(data), truncated=False, pages_read=1)
+
     def list_check_runs(self, repo: str, sha: str) -> Listing:
+        """The check runs at `sha`, as GitHub lists them for one commit."""
         self.calls.append(("list_check_runs", repo, sha))
-        return self._list("check-runs.json", "check_runs")
+        runs = self._list("check-runs.json", "check_runs").items
+        at = tuple(r for r in runs if isinstance(r, dict) and r.get("head_sha") == sha)
+        return Listing(at, truncated=False, pages_read=1)
 
     def list_pull_commits(self, repo: str, number: int) -> Listing:
         self.calls.append(("list_pull_commits", repo, str(number)))
-        try:
-            data = json.loads(self._file("pull-commits.json").read_text("utf-8"))
-        except json.JSONDecodeError as exc:
-            raise BoundaryError("fixture pull-commits.json is not JSON") from exc
-        if not isinstance(data, list):
-            raise BoundaryError("fixture pull-commits.json is not an array")
-        return Listing(tuple(data), truncated=False, pages_read=1)
+        return self._array("pull-commits.json")
+
+    def list_issue_comments(self, repo: str, number: int) -> Listing:
+        self.calls.append(("list_issue_comments", repo, str(number)))
+        return self._array("issue-comments.json")
+
+    def list_review_comments(self, repo: str, number: int) -> Listing:
+        self.calls.append(("list_review_comments", repo, str(number)))
+        return self._array("review-comments.json")
+
+    def list_reviews(self, repo: str, number: int) -> Listing:
+        self.calls.append(("list_reviews", repo, str(number)))
+        return self._array("reviews.json")
 
     def list_workflow_runs(self, repo: str, branch: str) -> Listing:
         self.calls.append(("list_workflow_runs", repo, branch))

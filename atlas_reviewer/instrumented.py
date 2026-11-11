@@ -13,7 +13,7 @@ from collections.abc import Callable
 from atlas_reviewer.ports import GitHubReader, Json, Listing
 from atlas_reviewer.telemetry import Fields, Telemetry
 
-EVIDENCE, SOURCE = "evidence fetch", "source fetch"
+EVIDENCE, SOURCE, CONVERSATION = "evidence fetch", "source fetch", "conversation fetch"
 
 
 def _listing(result: Listing) -> Fields:
@@ -54,7 +54,9 @@ class InstrumentedGitHub:
 
     def list_check_runs(self, repo: str, sha: str) -> Listing:
         return self._read(
-            "check runs", lambda: self._inner.list_check_runs(repo, sha), _listing
+            f"check runs at {sha[:12]}",
+            lambda: self._inner.list_check_runs(repo, sha),
+            _listing,
         )
 
     def list_pull_commits(self, repo: str, number: int) -> Listing:
@@ -119,4 +121,28 @@ class InstrumentedGitHub:
             f"issue #{number}",
             lambda: self._inner.get_issue(repo, number),
             lambda _: {},
+        )
+
+    def list_issue_comments(self, repo: str, number: int) -> Listing:
+        return self._read(
+            f"issue comments of #{number}",
+            lambda: self._inner.list_issue_comments(repo, number),
+            _listing,
+            CONVERSATION,
+        )
+
+    def list_review_comments(self, repo: str, number: int) -> Listing:
+        return self._read(
+            f"review comments of #{number}",
+            lambda: self._inner.list_review_comments(repo, number),
+            _listing,
+            CONVERSATION,
+        )
+
+    def list_reviews(self, repo: str, number: int) -> Listing:
+        return self._read(
+            f"reviews of #{number}",
+            lambda: self._inner.list_reviews(repo, number),
+            _listing,
+            CONVERSATION,
         )

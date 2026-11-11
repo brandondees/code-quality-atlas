@@ -1,6 +1,13 @@
 # SPDX-License-Identifier: MIT
-"""Gather CI evidence for one head SHA: check runs, workflow runs, jobs,
-job logs and artifact contents. Controller-side; every byte is untrusted.
+"""Gather CI evidence for one PR, labelled by commit SHA: check runs,
+workflow runs, jobs, job logs and artifact contents. Controller-side; every
+byte is untrusted.
+
+Check runs are listed at the head SHA and at the PR's other commits, newest
+first, up to `max_ci_commits` of them (D38), so a failure at an earlier
+commit that was never re-run stays visible. Each item keeps the SHA GitHub
+gave it; `classify` makes anything not at the head SHA stale, and stale
+evidence is never a result for the head.
 
 Workflow runs come from two listings: those at the head SHA, and those
 under the head branch's name, of which only runs at one of this PR's own
@@ -38,13 +45,15 @@ from atlas_reviewer.evidence import (
     DETAIL_CHARS,
     ArtifactRef,
     Job,
+    PrCommit,
     WorkflowRun,
     artifact_contents_item,
     contents_key,
+    in_history_order,
     job_log_item,
     parse_artifacts,
     parse_check_runs,
-    parse_commit_shas,
+    parse_commit_entries,
     parse_jobs,
     parse_workflow_runs,
 )
@@ -58,6 +67,9 @@ from atlas_reviewer.ports import (
 )
 from atlas_reviewer.redact import Redactor
 
+# "Lists a maximum of 250 commits for a pull request" (GitHub REST docs,
+# "List commits on a pull request").
+GITHUB_PR_COMMIT_LIMIT = 250
 _FAILING = frozenset(
     {Conclusion.FAILURE, Conclusion.TIMED_OUT, Conclusion.ACTION_REQUIRED}
 )
@@ -66,6 +78,7 @@ _FAILING = frozenset(
 @dataclass(frozen=True)
 class IngestConfig:
     max_runs: int = 5
+    max_ci_commits: int = 20
     max_job_logs: int = 10
     max_log_bytes: int = 5 * 1024 * 1024
     max_artifacts: int = 5
@@ -79,6 +92,7 @@ class Collected:
     omissions: list[Omission] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     links: list[Link] = field(default_factory=list)
+    commits: list[PrCommit] = field(default_factory=list)
 
     def omit(
         self, source: str, limit: str, detail: str, key: SourceKey | None = None
@@ -131,6 +145,7 @@ def gather_ci(
     )
     runs = _pr_runs(ctx, head_ref)
     out.items.extend(r.item for r in runs)
+    _other_commit_checks(ctx)
     at_head = [r for r in runs if r.item.head_sha == sha]
     for run in _capped(
         ctx,
@@ -186,9 +201,8 @@ def _pr_commits(ctx: _Ctx) -> tuple[str, ...]:
     runs at commits it did not return, which only drops evidence from
     other commits; the failure itself is recorded."""
     what = "commits of this PR"
-    return tuple(
-        s
-        for shas in _parse_each(
+    commits = in_history_order(
+        _parse_each(
             ctx,
             SourceKind.LISTING,
             what,
@@ -199,9 +213,47 @@ def _pr_commits(ctx: _Ctx) -> tuple[str, ...]:
                     ctx.event.repo, ctx.event.pr_number
                 ),
             ),
-            lambda e: (parse_commit_shas(e),),
+            parse_commit_entries,
         )
-        for s in shas
+    )
+    ctx.out.commits.extend(commits)
+    if len(commits) >= GITHUB_PR_COMMIT_LIMIT:
+        ctx.out.notes.append(
+            f"GitHub lists at most {GITHUB_PR_COMMIT_LIMIT} commits of a pull "
+            "request, and this one listed that many: other commits, and their CI "
+            "evidence, may be missing."
+        )
+    return tuple(c.sha for c in commits)
+
+
+def _other_commit_checks(ctx: _Ctx) -> None:
+    """Check runs at the PR's other commits, newest first in history order
+    (`_pr_commits` orders them by parents and committer date, not by how
+    GitHub lists them). Commits past the cap are omissions, and their check
+    runs are UNKNOWN, not read."""
+    others = [c.sha for c in reversed(ctx.out.commits) if c.sha != ctx.event.head_sha]
+    cap = ctx.config.max_ci_commits
+    seen = {i.provenance.source_id for i in ctx.out.items}
+    for sha in _capped(
+        ctx, "check runs at other commits", others, cap, cap, _commit_key
+    ):
+        found = _commit_check_runs(ctx, sha)
+        ctx.out.items.extend(i for i in found if i.provenance.source_id not in seen)
+        seen.update(i.provenance.source_id for i in found)
+
+
+def _commit_key(sha: str) -> SourceKey:
+    return SourceKey(SourceKind.LISTING, f"(check runs at {sha[:12]})")
+
+
+def _commit_check_runs(ctx: _Ctx, sha: str) -> tuple[EvidenceItem, ...]:
+    what = f"check runs at {sha[:12]}"
+    return _parse_each(
+        ctx,
+        SourceKind.CHECK_RUN,
+        what,
+        _listing(ctx, what, lambda: ctx.github.list_check_runs(ctx.event.repo, sha)),
+        lambda e: parse_check_runs(e, ctx.now(), ctx.redactor),
     )
 
 

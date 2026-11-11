@@ -129,8 +129,11 @@ The token is cached until five minutes before its `expires_at`.
 `Link: rel="next"` up to 10 pages. Workflow runs listed by branch name are
 kept only at the PR's own commits (GitHub lists at most 250), so a
 same-named branch elsewhere adds nothing; head-SHA runs are listed by SHA
-too. A list cut off there, a per-review count cap (5 runs, 10
-job logs, 5 artifacts), an oversized download (5 MiB per log, 10 MiB per
+too. Check runs are listed at the head SHA and at up to 20 other commits
+of the PR, newest first (D38), each item keeping the SHA GitHub reported, so
+a failure at an earlier commit that was never re-run stays visible as
+stale. A list cut off there, a per-review count cap (5 runs, 20 other
+commits, 10 job logs, 5 artifacts), an oversized download (5 MiB per log, 10 MiB per
 artifact ZIP), or a rejected or partly skipped archive each appear in the
 draft's **Omissions and limits hit** table. Whatever they left unread is
 UNKNOWN. Logs and artifacts are fetched only for jobs and runs at the head
@@ -175,9 +178,10 @@ from that counter.
 In order: the status comment, the review event (or the REVIEW INCOMPLETE
 warning), the title and header table, the evidence summary, **Controller
 notes**, **Possible committed secrets**, **Review lenses**, the
-independent-checks table, every evidence item, UNKNOWN items, omissions,
-model usage, **Lifecycle telemetry**, and the model's narrative, one
-subsection per diff part when the diff was split.
+independent-checks table, every evidence item at the head SHA, evidence at
+other commits of the PR (stale, labelled by commit, newest first), UNKNOWN
+items, omissions, model usage, **Lifecycle telemetry**, and the model's
+narrative, one subsection per diff part when the diff was split.
 Text from the PR, CI, the runner or the model carries no HTML into the
 draft: a `<` that could open a tag, comment or processing instruction
 (followed by a letter, `/`, `!` or `?`) becomes `&lt;`, so a title holding
@@ -189,7 +193,8 @@ before anything else, as in `a < b`, is left as it is.
   (for example "destroyed and verified absent by an existence check"),
   whether it completed and why not, each tool's result or why it did not run,
   the omissions hit, lens coverage, and operator-relevant notes such as a
-  moved PR head. The model receives the same text in a `controller-notes`
+  moved PR head or a check that failed at an earlier commit and has no
+  result at the head SHA (at most 10 named; the summary counts them all). The model receives the same text in a `controller-notes`
   block and is told to treat it as established fact, so a narrative cannot
   call cleanup unverified when the controller proved it. Where a narrative
   disagrees, the draft says the notes section is authoritative. The block
@@ -350,8 +355,22 @@ are listed there, highest risk first. The second pilot's 412,078-character
 diff would still be PARTIAL, with the unseen files being the lowest-risk
 tiers.
 
-The PR body and each issue body are cut at 2,000 characters, and each cut is
-an omissions row too. Omissions are computed before the evidence block is
+The model gets the PR conversation as one `pull-request` block of at most
+65,536 characters (`conversation.py`, D38): title, author, branches, draft
+flag, labels, requested reviewers and teams, the body (up to 16,384
+characters), every commit subject (200 each, 8,192 in all), and every
+review, review comment and conversation comment (4,000 each), each labelled
+with its id, author, time and the commit it was made at. Commit subjects
+and remarks keep the newest that fit; every older one dropped, every cut,
+and every list that failed, hit the page cap or held an entry that did not
+parse is an omissions row, with dropped remark ids listed; the fit is
+checked after the final redaction pass, and a pending review counts as the
+newest remark. Commits are ordered by their parents and committer date, not
+by GitHub's listing order. Every one-line PR-written field (title, names,
+branches, labels, commit subjects) is a JSON string and every body line is
+quoted with a leading `>`, split at every line terminator, so no PR text can
+forge another remark's heading. The lens picker still sees only the title and body. Each issue
+body is cut at 2,000 characters, and each cut is an omissions row too. Omissions are computed before the evidence block is
 built, so the model is told what it did not see. An artifact excerpt cut at
 4,000 characters is an omissions row, and its unread rest is UNKNOWN. Check
 summaries and log tails (the end of the log is kept by design) are capped
@@ -514,11 +533,12 @@ interpreter is chosen before they exist. Every other binary comes from
 | Module | Job | I/O? |
 | --- | --- | --- |
 | `domain.py` | closed types: `PrEvent`, `EvidenceItem`, `Matched`/`Stale`/`Missing`, `Outcome`, `Omission` | no |
-| `classify.py` | evidence vs. the head SHA → matched / stale / missing | no |
+| `classify.py` | evidence vs. the head SHA → matched / stale / missing; failures at other commits with no head result | no |
 | `redact.py` | secret redaction (`RedactedText` can only come from `redact()`) and `detect_secrets`, which reports pattern and line without changing text | no |
 | `prompt.py` | trusted system prompt + nonce-fenced untrusted blocks (`RedactedText`, or `RepoText` for the unredacted diff) | no |
 | `committed_secrets.py` | scan each file of the diff for possible committed secrets, located by file line and side | no |
-| `evidence.py` | GitHub JSON / runner results → `EvidenceItem`, shape validation | no |
+| `evidence.py` | GitHub JSON / runner results → `EvidenceItem`, PR commits and remarks, shape validation | no |
+| `conversation.py` | the PR conversation block under its budget, every cut and dropped remark an omission | via `GitHubReader` |
 | `archive.py` | bounded in-memory ZIP reading for untrusted artifacts | no |
 | `pagination.py` | `Link` header parsing | no |
 | `pricing.py`, `budget.py` | catalog/key parsing (fail closed); per-review call and cost budget | no |
@@ -534,7 +554,7 @@ interpreter is chosen before they exist. Every other binary comes from
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`) | no |
 | `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → resolve interpreter → upload → unpack → tools → destroy), `probe_runner`, the one exec wrapper (`exec_argv`, minimal `env -i` environment) | via `SpritesApi` |
 | `interpreter.py` | the resolve script, `choose_python` (accepts only the pyenv-versions and `/usr/bin/python3` path shapes), `{python}` substitution, the probe-only diagnostic scripts and output summary | no |
-| `gather.py` | head-SHA CI evidence: lists, job logs, artifact contents, omissions | via `GitHubReader` |
+| `gather.py` | CI evidence labelled by SHA: check runs at the head and other PR commits, workflow runs, head-SHA job logs and artifact contents, omissions | via `GitHubReader` |
 | `controller.py` | one event in, one draft and its review verdict out | via ports |
 | `harness.py` | skill-bundle harness: loads `collapsed/skills/reviewing-a-change/SKILL.md` | reads the bundle |
 | `providers.py` | `OfflineProvider` (the default) | no |

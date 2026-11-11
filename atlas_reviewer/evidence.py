@@ -12,10 +12,12 @@ statuses are kept as GitHub sent them.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from graphlib import CycleError, TopologicalSorter
 from typing import Any
 
 from atlas_reviewer.archive import ArchiveRead
@@ -34,6 +36,7 @@ from atlas_reviewer.redact import RedactedText, Redactor, tail
 from atlas_reviewer.runner import ToolAbsent, ToolResult
 
 DETAIL_CHARS = 2_000
+BODY_CHARS = 16_384
 NAME_CHARS = 300
 LOG_TAIL_CHARS = 6_000
 ARTIFACT_EXCERPT_CHARS = 4_000
@@ -42,6 +45,7 @@ _CLOSING_REF = re.compile(
     r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d{1,9})\b"
 )
 _MAX_ISSUE_REFS = 3
+_SHA = re.compile(r"[0-9a-f]{40}")
 
 
 def _field[T](data: Any, key: str, kind: type[T]) -> T:
@@ -79,6 +83,9 @@ def _conclusion(status: str, conclusion: str) -> Conclusion:
 
 @dataclass(frozen=True)
 class PullInfo:
+    """Names (author, branches, labels, reviewers) are redacted like every
+    other PR-chosen string."""
+
     head_sha: str
     head_ref: str
     title: RedactedText
@@ -87,9 +94,17 @@ class PullInfo:
     changed_files: int | None = None
     """GitHub's own count, to check the fetched diff against; None when the
     payload has no usable count, which leaves file coverage unknown."""
+    author: str = ""
+    base_ref: str = ""
+    labels: tuple[str, ...] = ()
+    reviewers: tuple[str, ...] = ()
+    teams: tuple[str, ...] = ()
+    draft: bool = False
 
 
-def parse_pull(data: Json, redactor: Redactor) -> PullInfo:
+def parse_pull(
+    data: Json, redactor: Redactor, body_chars: int = BODY_CHARS
+) -> PullInfo:
     head = _field(data, "head", dict)
     body = _optional_str(data, "body")
     changed = data.get("changed_files")
@@ -97,7 +112,7 @@ def parse_pull(data: Json, redactor: Redactor) -> PullInfo:
         head_sha=_field(head, "sha", str),
         head_ref=_field(head, "ref", str),
         title=redactor(_field(data, "title", str), NAME_CHARS),
-        body=redactor(body, DETAIL_CHARS),
+        body=redactor(body, body_chars),
         issue_refs=issue_refs(body),
         changed_files=(
             changed
@@ -106,7 +121,33 @@ def parse_pull(data: Json, redactor: Redactor) -> PullInfo:
             and changed >= 0
             else None
         ),
+        author=_login(data.get("user"), redactor),
+        base_ref=_text(redactor, _optional_str(_mapping(data, "base"), "ref")),
+        labels=_names(data, "labels", "name", redactor),
+        reviewers=_names(data, "requested_reviewers", "login", redactor),
+        teams=_names(data, "requested_teams", "slug", redactor),
+        draft=data.get("draft") is True,
     )
+
+
+def _mapping(data: Json, key: str) -> Json:
+    value = data.get(key)
+    return value if isinstance(value, Mapping) else {}
+
+
+def _login(user: Any, redactor: Redactor) -> str:
+    """GitHub sends `user: null` for a deleted account."""
+    login = user.get("login") if isinstance(user, Mapping) else None
+    return _text(redactor, login) if isinstance(login, str) else "(unknown user)"
+
+
+def _names(data: Json, key: str, field: str, redactor: Redactor) -> tuple[str, ...]:
+    entries = data.get(key)
+    values = (
+        e.get(field) for e in (entries if isinstance(entries, list) else ())
+        if isinstance(e, Mapping)
+    )  # fmt: skip
+    return tuple(_text(redactor, v) for v in values if isinstance(v, str))
 
 
 def issue_refs(body: str) -> tuple[int, ...]:
@@ -152,8 +193,168 @@ def _check_run(run: Json, fetched_at: datetime, redactor: Redactor) -> EvidenceI
     )
 
 
-def parse_commit_shas(items: Sequence[Any]) -> tuple[str, ...]:
-    return tuple(_field(c, "sha", str) for c in _objects(items, "commit"))
+@dataclass(frozen=True)
+class PrCommit:
+    """One commit of the PR: its SHA, checked as a full 40-hex id because it
+    labels evidence and telemetry, and its subject line (raw, PR-written):
+    the message up to its first line terminator of any kind, since git keeps
+    a bare `\\r` or U+2028 inside a subject. `parents` and `committed_at`
+    (committer date as GitHub sends it, or empty) order the commits."""
+
+    sha: str
+    subject: str
+    parents: tuple[str, ...] = ()
+    committed_at: str = ""
+
+
+def parse_commits(items: Sequence[Any]) -> tuple[PrCommit, ...]:
+    """Oldest first in history, whatever order GitHub lists them in."""
+    return in_history_order(parse_commit_entries(items))
+
+
+def parse_commit_entries(items: Sequence[Any]) -> tuple[PrCommit, ...]:
+    """The commits as listed, unordered: order only means something over the
+    whole listing, so callers that parse entry by entry order once at the end
+    with `in_history_order`."""
+    return tuple(_commit(c) for c in _objects(items, "commit"))
+
+
+def _commit(data: Json) -> PrCommit:
+    sha = _field(data, "sha", str)
+    if not _SHA.fullmatch(sha):
+        raise BoundaryError("GitHub commit sha is not a full 40-hex id")
+    commit = _mapping(data, "commit")
+    lines = _optional_str(commit, "message").splitlines()
+    return PrCommit(
+        sha,
+        lines[0] if lines else "",
+        _parent_shas(data),
+        _optional_str(_mapping(commit, "committer"), "date"),
+    )
+
+
+def _parent_shas(data: Json) -> tuple[str, ...]:
+    parents = data.get("parents")
+    shas = (
+        p.get("sha") for p in (parents if isinstance(parents, list) else ())
+        if isinstance(p, Mapping)
+    )  # fmt: skip
+    return tuple(s for s in shas if isinstance(s, str))
+
+
+def in_history_order(commits: Sequence[PrCommit]) -> tuple[PrCommit, ...]:
+    """Each commit after every parent listed with it; commits with no such
+    order between them by committer date, then by listed position. A
+    repeated SHA is kept once; a parent cycle, which git cannot produce,
+    falls back to date order."""
+    rank = {c.sha: (c.committed_at, i) for i, c in reversed(list(enumerate(commits)))}
+    by_sha = {c.sha: c for c in reversed(commits)}
+    graph = {sha: [p for p in c.parents if p in rank] for sha, c in by_sha.items()}
+    try:
+        order = _layered(TopologicalSorter(graph), rank)
+    except CycleError:
+        order = sorted(rank, key=rank.__getitem__)
+    return tuple(by_sha[sha] for sha in order)
+
+
+def _layered(
+    sorter: TopologicalSorter[str], rank: Mapping[str, tuple[str, int]]
+) -> list[str]:
+    sorter.prepare()
+    order: list[str] = []
+    while sorter.is_active():
+        ready = sorted(sorter.get_ready(), key=rank.__getitem__)
+        order.extend(ready)
+        sorter.done(*ready)
+    return order
+
+
+@dataclass(frozen=True)
+class Remark:
+    """One review, review comment or conversation comment on the PR, raw.
+    `at` is GitHub's own timestamp, which orders remarks; `context` is built
+    by the controller from typed fields; `author` and `body` are PR text,
+    redacted when the conversation block is built."""
+
+    source_id: str
+    at: str
+    author: str
+    context: str
+    body: str
+
+
+def parse_issue_comment(data: Json, head_sha: str) -> Remark:
+    comment_id = _field(data, "id", int)
+    return Remark(
+        f"issue_comment:{comment_id}",
+        _field(data, "created_at", str),
+        _optional_login(data),
+        "conversation comment",
+        _optional_str(data, "body"),
+    )
+
+
+def parse_review(data: Json, head_sha: str) -> Remark:
+    """A review's `submitted_at` is absent while it is pending."""
+    review_id = _field(data, "id", int)
+    state = _field(data, "state", str)
+    return Remark(
+        f"review:{review_id}",
+        _optional_str(data, "submitted_at"),
+        _optional_login(data),
+        f"review, state {_quoted(state)}, {_commit_label(data, head_sha)}",
+        _optional_str(data, "body"),
+    )
+
+
+def parse_review_comment(data: Json, head_sha: str) -> Remark:
+    comment_id = _field(data, "id", int)
+    path = _field(data, "path", str)
+    return Remark(
+        f"review_comment:{comment_id}",
+        _field(data, "created_at", str),
+        _optional_login(data),
+        f"review comment on {_quoted(path)}{_line_label(data)}, "
+        f"{_commit_label(data, head_sha)}{_thread_label(data)}",
+        _optional_str(data, "body"),
+    )
+
+
+def _optional_login(data: Json) -> str:
+    login = _mapping(data, "user").get("login")
+    return login if isinstance(login, str) else "(unknown user)"
+
+
+def _quoted(text: str) -> str:
+    return json.dumps(text, ensure_ascii=True)
+
+
+def _int_field(data: Json, key: str) -> int | None:
+    value = data.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _line_label(data: Json) -> str:
+    """`line` is null once the commented line is outdated; `original_line`
+    is where it was."""
+    line, original = _int_field(data, "line"), _int_field(data, "original_line")
+    if line is not None:
+        return f" line {line}"
+    return "" if original is None else f" (outdated; was line {original})"
+
+
+def _commit_label(data: Json, head_sha: str) -> str:
+    commit = _optional_str(data, "commit_id")
+    if commit == head_sha:
+        return "at the reviewed head SHA"
+    return (
+        f"at commit {commit[:12]}" if _SHA.fullmatch(commit) else "commit not reported"
+    )
+
+
+def _thread_label(data: Json) -> str:
+    parent = _int_field(data, "in_reply_to_id")
+    return "" if parent is None else f", reply to review_comment:{parent}"
 
 
 @dataclass(frozen=True)

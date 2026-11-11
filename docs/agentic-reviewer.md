@@ -1,10 +1,12 @@
 # Agentic reviewer — direction and phased plan
 
 **Status: direction accepted (D34 in
-[`open-questions.md`](open-questions.md), 2026-11-08); nothing is built.**
+[`open-questions.md`](open-questions.md), 2026-11-08); phase 1 is built
+offline (D38), the rest is not built.**
 The owner accepted the recommendations below as proposed ("I can roll with
-recommendations as proposed for now"). Every budget number is still
-pending his decision; see [Open numeric decisions](#open-numeric-decisions-pending-brandon).
+recommendations as proposed for now"). Phase 1 (full PR conversation and
+branch-wide CI) is on a draft PR stacked on #607, tested against fixtures
+only. Every budget number is still pending his decision; see [Open numeric decisions](#open-numeric-decisions-pending-brandon).
 This doc carries no live-run approval. No model call, Sprite run, merge or
 deploy was made to write it.
 
@@ -36,7 +38,8 @@ lenses, the picker (`choosing-review-lenses`), depth modes
 ([`review-depth-modes.md`](review-depth-modes.md)), the finding merger
 (`synthesizing-review-findings`), and tool grounding
 (`grounding-review-in-tool-output`). The reviewer service on the stack
-(D24-D33) is a careful substrate but a one-shot one:
+(D24-D33) is a careful substrate but a one-shot one. Before D38 it had
+these gaps (D38 closes the second and third):
 
 - **The model sees a parcel, not a checkout.** It gets a fetched diff,
   split into parts by size, and cannot open a file or compare branches.
@@ -137,8 +140,13 @@ a pass for head. Missing evidence stays UNKNOWN, so D24's fail-closed rule
 is unchanged.
 
 All of this text is untrusted. It is fenced with the per-prompt nonce and
-redacted, as D33 keeps for PR, issue and CI text. Repository content
-follows the secret rule below.
+redacted, as D33 keeps for PR, issue and CI text. Inside the conversation
+block (D38), every one-line field a person wrote (title, names, branches,
+labels, commit subjects) is a JSON string, and every body is split at
+every line terminator with each line starting `>`, so nothing PR-written
+can begin an unquoted, controller-looking line. Commits are ordered by
+their parents and committer date, not by how GitHub lists them.
+Repository content follows the secret rule below.
 
 ### Secret rule for everything the model reads
 
@@ -229,7 +237,7 @@ owner at every phase.
 | Phase | Scope | Gate to start |
 |---|---|---|
 | 0 | Land #601-#607 as the one-shot reviewer and fallback, with the D33 note (#608). No agentic scope in those PRs. | none |
-| 1 | Full PR conversation (about 64 KiB, omissions named) and branch-wide CI labelled by SHA, in the shared evidence code. Fixture-tested. | stack merged |
+| 1 | Full PR conversation (about 64 KiB, omissions named) and branch-wide CI labelled by SHA, in the shared evidence code. Fixture-tested. Built offline (D38), stacked on #607 with the owner's go-ahead rather than after the stack merged. | stack merged |
 | 2 | The tool bridge, offline: closed git tools (diff, list, read range, grep) against `FakeSprites` and a fixture repo, with argument rejection, byte and time caps, and git hardening. Option B staging. | phase 1 merged |
 | 3 | The controller loop and one attested lens, offline first: body injection, the attestation ledger, quote checks, retry and escalate. Then one owner-approved live run, compared with the one-shot draft on the same head. | offline work: none. Live run: a provisional budget Brandon approves |
 | 4 | Triage mode: the four critical lenses, pool size 1, ID-reconciled merge, coverage never claimed complete unless the ledger shows it. | phase 3 measured |
@@ -238,7 +246,8 @@ owner at every phase.
 
 ## Open numeric decisions (pending Brandon)
 
-None of these has a value yet. Until each is set, the phase that needs it
+Brandon has set none of these yet; a working default stands in where one
+is named. Until each is set, the phase that needs it
 does not run live.
 
 | Decision | Current state | Note |
@@ -249,7 +258,7 @@ does not run live.
 | Per-lens turn cap | none | D31 suggested 12. |
 | Per-lens and per-review wall clocks | none | Crossing either ends the lens or review as partial, never clean. |
 | PR conversation budget split | about 64 KiB total, working default | The body and comment caps within it. |
-| Branch-wide CI budget | none | Page and byte caps, and how many SHAs back. |
+| Branch-wide CI budget | check runs at up to 20 other commits of the PR, working default (`IngestConfig.max_ci_commits`) | How many commits back. Each commit's list keeps the client's page cap; jobs, logs and artifacts are still read at the head SHA only, under the one-shot caps. |
 | Per-tool timeout and output caps for the baked toolchain | none | A timeout is a coverage gap. |
 | Lens worker pool size | 1 | Above 1 only after a concurrency probe. The research note suggests at most 4. |
 | Retries per failed attestation | 1, recommended | Then escalate. |

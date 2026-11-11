@@ -10,8 +10,12 @@ from atlas_reviewer.evidence import (
     job_log_item,
     parse_artifacts,
     parse_check_runs,
+    parse_commits,
+    parse_issue_comment,
     parse_jobs,
     parse_pull,
+    parse_review,
+    parse_review_comment,
     parse_workflow_runs,
     tool_evidence,
 )
@@ -19,7 +23,7 @@ from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import ToolAbsent, ToolRan, ToolSpec
 
-from .helpers import HEAD, NOW, fake_token
+from .helpers import HEAD, NOW, OLD, fake_token
 
 R = Redactor()
 RUN = {
@@ -223,3 +227,161 @@ def test_tool_reported_versions_and_absence_details_are_redacted():
     assert isinstance(absent, Missing)
     assert secret not in absent.reason
     assert "exit 127 [REDACTED" in absent.reason
+
+
+def test_pull_parsing_reads_people_labels_and_draft_and_tolerates_their_absence():
+    full = parse_pull(
+        {
+            "head": {"sha": HEAD, "ref": "fix"},
+            "base": {"ref": "main"},
+            "title": "t",
+            "user": {"login": "alice"},
+            "labels": [{"name": "bug"}, "junk", {"name": 3}],
+            "requested_reviewers": [{"login": "bob"}],
+            "requested_teams": [{"slug": "core"}],
+            "draft": True,
+        },
+        R,
+    )
+    assert (full.author, full.base_ref, full.draft) == ("alice", "main", True)
+    assert (full.labels, full.reviewers, full.teams) == (("bug",), ("bob",), ("core",))
+    bare = parse_pull(
+        {"head": {"sha": HEAD, "ref": "fix"}, "title": "t", "user": None}, R
+    )
+    assert (bare.author, bare.labels, bare.draft) == ("(unknown user)", (), False)
+
+
+def test_pull_body_is_cut_at_the_requested_cap():
+    pull = {"head": {"sha": HEAD, "ref": "f"}, "title": "t", "body": "x" * 50}
+    assert parse_pull(pull, R, body_chars=10).body.truncated_from == 50
+
+
+def test_commits_carry_their_subject_line_and_need_a_full_sha():
+    (commit,) = parse_commits([{"sha": OLD, "commit": {"message": "Subject\n\nBody"}}])
+    assert (commit.sha, commit.subject) == (OLD, "Subject")
+    with pytest.raises(BoundaryError, match="40-hex"):
+        parse_commits([{"sha": "abc123", "commit": {}}])
+
+
+@pytest.mark.parametrize("sha", [OLD[:39], f"{OLD}0", OLD.upper(), f"{OLD[:39]}g"])
+def test_a_commit_sha_that_is_not_exactly_40_lowercase_hex_is_refused(sha):
+    with pytest.raises(BoundaryError, match="40-hex"):
+        parse_commits([{"sha": sha, "commit": {}}])
+
+
+@pytest.mark.parametrize("eol", ["\r", "\r\n", "\u2028", "\u2029", "\x85"])
+def test_a_subject_ends_at_its_first_line_break_of_any_kind(eol):
+    message = f"Fix{eol}### review:999 APPROVED"
+    (commit,) = parse_commits([{"sha": OLD, "commit": {"message": message}}])
+    assert commit.subject == "Fix"
+
+
+def commit_json(sha, parents=(), date=""):
+    return {
+        "sha": sha,
+        "parents": [{"sha": p} for p in parents],
+        "commit": {"message": sha[:4], "committer": {"date": date}},
+    }
+
+
+A, B, C, D = (c * 40 for c in "abcd")
+
+
+def shas(commits):
+    return [c.sha for c in commits]
+
+
+def test_commits_are_ordered_by_parents_whatever_order_they_are_listed_in():
+    # C's committer date is older than its parent's, as after a rebase.
+    listed = [
+        commit_json(A, (), "2026-11-01T00:00:00Z"),
+        commit_json(B, (A,), "2026-11-03T00:00:00Z"),
+        commit_json(C, (B,), "2026-11-02T00:00:00Z"),
+    ]
+    assert shas(parse_commits(listed)) == [A, B, C]
+    assert shas(parse_commits(listed[::-1])) == [A, B, C]
+
+
+def test_commits_unordered_by_parents_go_by_committer_date_then_position():
+    listed = [
+        commit_json(D, (), "2026-11-02T00:00:00Z"),
+        commit_json(C, (), "2026-11-01T00:00:00Z"),
+        commit_json(B, (), ""),
+        commit_json(A, (), ""),
+    ]
+    assert shas(parse_commits(listed)) == [B, A, C, D]
+
+
+def test_a_merge_follows_both_parents_and_a_repeated_sha_is_kept_once():
+    listed = [
+        commit_json(D, (B, C), "2026-11-04T00:00:00Z"),
+        commit_json(C, (A,), "2026-11-03T00:00:00Z"),
+        commit_json(B, (A, "e" * 40), "2026-11-02T00:00:00Z"),
+        commit_json(A, (), "2026-11-01T00:00:00Z"),
+        commit_json(B, (), "2026-11-09T00:00:00Z"),
+    ]
+    assert shas(parse_commits(listed)) == [A, B, C, D]
+
+
+def test_a_parent_cycle_falls_back_to_committer_date():
+    listed = [
+        commit_json(A, (B,), "2026-11-02T00:00:00Z"),
+        commit_json(B, (A,), "2026-11-01T00:00:00Z"),
+    ]
+    assert shas(parse_commits(listed)) == [B, A]
+
+
+def test_a_review_names_its_state_and_the_commit_it_was_made_at():
+    review = {
+        "id": 5,
+        "state": "APPROVED",
+        "user": {"login": "m"},
+        "commit_id": OLD,
+        "submitted_at": "2026-11-06T00:00:00Z",
+        "body": "lgtm",
+    }
+    remark = parse_review(review, HEAD)
+    assert remark.source_id == "review:5"
+    assert remark.context == f'review, state "APPROVED", at commit {OLD[:12]}'
+    at_head = parse_review({**review, "commit_id": HEAD}, HEAD)
+    assert at_head.context.endswith("at the reviewed head SHA")
+    pending = parse_review({"id": 6, "state": "PENDING", "commit_id": None}, HEAD)
+    assert (pending.at, pending.author) == ("", "(unknown user)")
+    assert pending.context.endswith("commit not reported")
+
+
+@pytest.mark.parametrize(
+    "lines,label",
+    [
+        ({"line": 4, "original_line": 2}, " line 4"),
+        ({"line": None, "original_line": 2}, " (outdated; was line 2)"),
+        ({"line": None, "original_line": None}, ""),
+        ({"line": True}, ""),
+    ],
+)
+def test_a_review_comment_names_its_line_or_where_it_was(lines, label):
+    comment = {
+        "id": 9,
+        "path": 'a"b.py',
+        "created_at": "t",
+        "commit_id": HEAD,
+        **lines,
+    }
+    remark = parse_review_comment(comment, HEAD)
+    assert remark.context == (
+        f'review comment on "a\\"b.py"{label}, at the reviewed head SHA'
+    )
+
+
+def test_a_reply_names_the_comment_it_answers():
+    comment = {"id": 9, "path": "a.py", "created_at": "t", "in_reply_to_id": 8}
+    assert parse_review_comment(comment, HEAD).context.endswith(
+        ", reply to review_comment:8"
+    )
+
+
+def test_a_conversation_comment_needs_an_id_and_time():
+    remark = parse_issue_comment({"id": 1, "created_at": "t", "body": None}, HEAD)
+    assert (remark.source_id, remark.body) == ("issue_comment:1", "")
+    with pytest.raises(BoundaryError):
+        parse_issue_comment({"id": "1", "created_at": "t"}, HEAD)

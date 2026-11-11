@@ -14,8 +14,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
 from atlas_reviewer.budget import CallLimits, prompt_token_room
-from atlas_reviewer.classify import classify
+from atlas_reviewer.classify import classify, not_rerun_failures
 from atlas_reviewer.committed_secrets import DiffSecrets, scan_diff
+from atlas_reviewer.conversation import (
+    Conversation,
+    ConversationBudget,
+    build_conversation,
+    fetch_remarks,
+)
 from atlas_reviewer.diffs import (
     UNPARSED_PATH,
     DiffPart,
@@ -115,6 +121,7 @@ class ReviewConfig:
     first_frame_s: float = FIRST_FRAME_BUDGET_S
     depth: Depth = Depth.REVIEW
     prompt_tokens: int = PROMPT_TOKEN_ROOM
+    conversation: ConversationBudget = field(default_factory=ConversationBudget)
 
     def __post_init__(self) -> None:
         """`model_calls` covers the lens picker's call (unless the depth is
@@ -165,7 +172,11 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
     deps = replace(
         deps, github=InstrumentedGitHub(deps.github, telemetry), telemetry=telemetry
     )
-    pull = parse_pull(deps.github.get_pull(event.repo, event.pr_number), deps.redactor)
+    pull = parse_pull(
+        deps.github.get_pull(event.repo, event.pr_number),
+        deps.redactor,
+        config.conversation.body_chars,
+    )
     collected = Collected(notes=_head_notes(event, pull))
     gather_ci(
         event,
@@ -187,13 +198,14 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
     flagged = () if diff is None else diff.secrets.values
     scrubber = replace(deps.redactor, flagged=flagged)
     scrub = lambda text: scrubber(text).text
-    _note_truncation(collected, "pull request body", pull.body, DETAIL_CHARS)
+    conversation = _conversation(event, pull, deps, config, collected, scrub=scrub)
+    collected.notes.extend(_not_rerun_notes(evidence, scrub=scrub))
     issues = _issue_blocks(event, pull, deps, config, collected, scrub=scrub)
     lenses = _select_lenses(event, pull, diff, deps, config, telemetry, scrub=scrub)
     collected.notes.extend(n for n in (lenses.note,) if n)
     base = _Base(
         event,
-        _pull_block(pull, deps),
+        UntrustedBlock("pull-request", conversation.text),
         tuple(issues),
         evidence,
         ControllerFacts(
@@ -207,6 +219,7 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
         tuple(collected.links),
         deps.redactor,
         () if diff is None else diff.paths,
+        tuple(c.sha for c in collected.commits),
     )
     calls = config.model_calls - int(lenses.used_call)
     selection = None if diff is None else _fit(diff.text, calls, base, deps, config)
@@ -250,10 +263,12 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
                 pull,
                 collected.items,
                 _shared(base, selection),
-            ),
+            )
+            + conversation.inner_redactions,
             generated_at=deps.clock.now(),
             telemetry=telemetry.events,
             verdict=verdict,
+            commits=base.commits,
         ),
         scrub,
     )
@@ -497,9 +512,56 @@ class _Base:
     links: tuple[Link, ...]
     redactor: Redactor
     diff_paths: tuple[str, ...] = ()
+    commits: tuple[str, ...] = ()
+
+
+def _conversation(
+    event: PrEvent,
+    pull: PullInfo,
+    deps: Deps,
+    config: ReviewConfig,
+    collected: Collected,
+    *,
+    scrub: Callable[[str], str],
+) -> Conversation:
+    remarks = fetch_remarks(event, deps.github, collected, scrub=scrub)
+    conversation = build_conversation(
+        pull,
+        collected.commits,
+        remarks,
+        event.head_sha,
+        deps.redactor,
+        config.conversation,
+    )
+    collected.omissions.extend(conversation.omissions)
+    return conversation
+
+
+MAX_NOTED_FAILURES = 10
+
+
+def _not_rerun_notes(
+    evidence: tuple[Evidence, ...], *, scrub: Callable[[str], str]
+) -> list[str]:
+    failures = not_rerun_failures(evidence)
+    lines = [
+        f"{e.item.provenance.key.kind.value} {quote_untrusted(e.item.provenance.key.name, scrub=scrub)} "
+        f"concluded `{e.item.conclusion.value}` at commit `{e.item.head_sha[:12]}` and "
+        "has no result at the reviewed head SHA, so the head may still carry that "
+        "failure (UNKNOWN, not a pass)."
+        for e in failures[:MAX_NOTED_FAILURES]
+    ]
+    more = len(failures) - MAX_NOTED_FAILURES
+    return lines + (
+        [f"{more} more check(s) failed at other commits with no head-SHA result."]
+        if more > 0
+        else []
+    )
 
 
 def _pull_block(pull: PullInfo, deps: Deps) -> UntrustedBlock:
+    """The picker's view of the PR: title and body only, not the whole
+    conversation."""
     return UntrustedBlock(
         "pull-request", deps.redactor(f"Title: {pull.title.text}\n\n{pull.body.text}")
     )
@@ -547,7 +609,9 @@ def _notes(
 def _shared(base: _Base, sel: DiffSelection | None) -> _Shared:
     # The prompt's copy is not flag-scrubbed: the model is shown the diff
     # unredacted (D33). The draft passes the flagged scrub instead.
-    text = render_evidence(base.evidence, _omissions(base, sel, scrub=str), base.links)
+    text = render_evidence(
+        base.evidence, _omissions(base, sel, scrub=str), base.links, base.commits
+    )
     evidence = UntrustedBlock("ci-and-runner-evidence", base.redactor(text))
     return _Shared(base.pull, evidence, base.issues)
 

@@ -14,6 +14,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from atlas_reviewer.domain import (
+    Conclusion,
     Evidence,
     EvidenceItem,
     Matched,
@@ -61,6 +62,26 @@ def _missing(
     for key in expected:
         reasons.setdefault(key, REASON_EXPECTED_ABSENT)
     return tuple(Missing(k, r) for k, r in reasons.items() if k not in covered)
+
+
+_FAILED_THERE = frozenset(
+    {Conclusion.FAILURE, Conclusion.TIMED_OUT, Conclusion.ACTION_REQUIRED}
+)
+
+
+def not_rerun_failures(evidence: Iterable[Evidence]) -> tuple[Stale, ...]:
+    """Checks that failed at another commit of the PR and have no result of
+    any kind at the head SHA: the head may still carry the failure. They
+    stay UNKNOWN for the head; this only keeps them from reading as old news."""
+    evidence = tuple(evidence)
+    at_head = {e.item.provenance.key for e in evidence if isinstance(e, Matched)}
+    return tuple(
+        e
+        for e in evidence
+        if isinstance(e, Stale)
+        and e.item.conclusion in _FAILED_THERE
+        and e.item.provenance.key not in at_head
+    )
 
 
 @dataclass(frozen=True)

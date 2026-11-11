@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
-from atlas_reviewer.classify import tally
+from atlas_reviewer.classify import not_rerun_failures, tally
 from atlas_reviewer.committed_secrets import CommittedSecret
 from atlas_reviewer.diffs import FileDiff
 from atlas_reviewer.domain import (
@@ -92,6 +92,7 @@ class DraftInput:
     telemetry: tuple[Event, ...] = ()
     secrets: tuple[CommittedSecret, ...] | None = None
     verdict: Verdict = UNDETERMINED
+    commits: tuple[str, ...] = ()
 
 
 MAX_WARNED_PATHS = 100
@@ -158,6 +159,7 @@ def _rendered(d: DraftInput, scrub: Callable[[str], str]) -> str:
         _lenses(d.lenses, any(p.model_reviewed for p in d.narratives)),
         _checks(d.evidence, d.links),
         _at_head(d.evidence),
+        _other_commits(d.evidence, d.commits),
         _unknowns(d.evidence),
         _omissions(d.omissions),
         _usage(d.model_usage),
@@ -199,6 +201,8 @@ def _summary(d: DraftInput) -> str:
         f"- UNKNOWN at the head SHA (missing or inconclusive): {t.unknown}\n"
         f"- Not read (logs, artifacts, archive entries or GitHub lists; UNKNOWN): {t.unread}\n"
         f"- Stale (other commits; UNKNOWN for this SHA): {t.stale}\n"
+        f"- Failed at another commit, with no result at the head SHA (UNKNOWN): "
+        f"{len(not_rerun_failures(d.evidence))}\n"
         f"- Present, no verdict (artifacts): {t.present}\n"
         f"- Supporting evidence folded into the checks above (jobs, logs, workflow runs): {t.supporting}\n\n"
         "UNKNOWN is never counted as passing."
@@ -306,6 +310,41 @@ def _outcome_label(m: Matched) -> str:
     return result.value.upper() if result is not Outcome.INFO else result.value
 
 
+def _other_commits(evidence: Iterable[Evidence], commits: tuple[str, ...]) -> str:
+    """Every item from another commit, labelled by its commit and newest
+    first. A row here is never a result for the reviewed head SHA."""
+    position = {sha: i for i, sha in enumerate(commits, 1)}
+    stale = sorted(
+        (e for e in evidence if isinstance(e, Stale)),
+        key=lambda e: (-position.get(e.item.head_sha, 0), *_sort_key(e)),
+    )
+    if not stale:
+        return "## Evidence at other commits of this PR (stale)\n\nNone."
+    rows = "\n".join(_stale_row(e, position, len(commits)) for e in stale)
+    return (
+        "## Evidence at other commits of this PR (stale)\n\n"
+        "Labelled by commit, newest first. None of it is a result for the reviewed "
+        "head SHA: a pass here is not a pass there, and a failure here may still "
+        "hold at the head until the same check reports there.\n\n"
+        "| Commit | Conclusion there | Kind | Name | Provenance |\n"
+        "| --- | --- | --- | --- | --- |\n" + rows
+    )
+
+
+def _stale_row(e: Stale, position: dict[str, int], total: int) -> str:
+    i = e.item
+    where = position.get(i.head_sha)
+    commit = f"`{i.head_sha[:12]}`" + (f" ({where} of {total})" if where else "")
+    cells = (
+        commit,
+        i.conclusion.value,
+        i.provenance.key.kind.value,
+        i.provenance.key.name,
+        i.provenance.source_id,
+    )
+    return "| " + " | ".join(_cell(c) for c in cells) + " |"
+
+
 def _unknowns(evidence: Iterable[Evidence]) -> str:
     rows = [
         _unknown_row(e)
@@ -335,7 +374,11 @@ def _unknown_reason(e: Evidence) -> tuple[str, str]:
         case Stale(item=item):
             return (
                 "stale",
-                f"evidence is for `{item.head_sha[:12]}` ({item.provenance.source_id})",
+                (
+                    f"evidence is for `{item.head_sha[:12]}` "
+                    f"({item.provenance.source_id}), conclusion "
+                    f"`{item.conclusion.value}` there"
+                ),
             )
         case Missing(reason=reason):
             return "missing", reason
@@ -403,11 +446,13 @@ def render_evidence(
     evidence: tuple[Evidence, ...],
     omissions: tuple[Omission, ...] = (),
     links: tuple[Link, ...] = (),
+    commits: tuple[str, ...] = (),
 ) -> str:
-    """The grouped checks, evidence tables, omissions, and each head-SHA
-    item's (redacted) detail text. This is the prompt's copy, which is not
-    flag-scrubbed (D33), so the encoding scrub here is the identity. The
-    draft sets its own scrub in render_draft."""
+    """The grouped checks, evidence tables (other commits labelled by
+    commit), omissions, and each head-SHA item's (redacted) detail text.
+    This is the prompt's copy, which is not flag-scrubbed (D33), so the
+    encoding scrub here is the identity. The draft sets its own scrub in
+    render_draft."""
     token = _scrubber.set(str)
     try:
         details = "\n\n".join(
@@ -419,7 +464,8 @@ def render_evidence(
         )
         return (
             f"{_checks(evidence, links)}\n\n"
-            f"{_at_head(evidence)}\n\n{_unknowns(evidence)}\n\n{_omissions(omissions)}"
+            f"{_at_head(evidence)}\n\n{_other_commits(evidence, commits)}\n\n"
+            f"{_unknowns(evidence)}\n\n{_omissions(omissions)}"
             f"\n\n## Details\n\n{details or 'None.'}"
         )
     finally:
