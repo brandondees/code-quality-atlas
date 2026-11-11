@@ -2,6 +2,8 @@
 """File-backed runner ledger and single-review lock (controller-local state).
 
 POSIX only: the lock is `fcntl.flock`, and directory fsync is not portable.
+Files are created 0600 and directories 0700: runner names and the lock
+are the operator's state, not anyone else's on the machine.
 """
 
 from __future__ import annotations
@@ -46,21 +48,30 @@ class FileLedger:
 
 
 def _write_synced(path: Path, mode: str, text: str) -> None:
-    with path.open(mode, encoding="utf-8") as fh:
+    flags = os.O_WRONLY | os.O_CREAT | (os.O_APPEND if mode == "a" else os.O_TRUNC)
+    with os.fdopen(os.open(path, flags, 0o600), mode, encoding="utf-8") as fh:
         fh.write(text)
         fh.flush()
         os.fsync(fh.fileno())
 
 
-def _make_dirs_synced(path: Path) -> None:
-    """A new directory's entry lives in its parent, so each one created here
-    is synced there too, or a crash could lose the ledger's directory."""
+def make_private_dirs(path: Path) -> tuple[Path, ...]:
+    """Create `path` and each missing ancestor at 0700, outermost first,
+    and return the ones created. `Path.mkdir(mode=..., parents=True)`
+    applies the mode to the leaf only."""
     missing = []
     while not path.exists():
         missing.append(path)
         path = path.parent
     for created in reversed(missing):
-        created.mkdir(exist_ok=True)
+        created.mkdir(mode=0o700, exist_ok=True)
+    return tuple(reversed(missing))
+
+
+def _make_dirs_synced(path: Path) -> None:
+    """A new directory's entry lives in its parent, so each one created here
+    is synced there too, or a crash could lose the ledger's directory."""
+    for created in make_private_dirs(path):
         _sync_dir(created.parent)
 
 
@@ -75,8 +86,9 @@ def _sync_dir(path: Path) -> None:
 @contextmanager
 def single_review_lock(path: Path) -> Iterator[None]:
     """One review at a time per state directory (operator-funded runs)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fh:
+    make_private_dirs(path.parent)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
         try:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:

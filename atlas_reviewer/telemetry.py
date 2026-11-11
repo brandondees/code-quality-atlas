@@ -23,12 +23,14 @@ from __future__ import annotations
 
 import itertools
 import json
+import os
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, Self, TextIO
 
+from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.ports import BoundaryError, Clock
 from atlas_reviewer.redact import redact
 
@@ -77,7 +79,8 @@ class JsonlSink:
     entering the sink as a context manager until it exits, and flushes
     each line, so a crashed or killed run still leaves every event up to
     the crash on disk. Holding the descriptor means a file deleted
-    mid-run is never recreated outside its claim."""
+    mid-run is never recreated outside its claim. A file it creates is
+    0600, and each directory it creates 0700."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -86,8 +89,9 @@ class JsonlSink:
         self._lock = threading.Lock()
 
     def __enter__(self) -> Self:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._out = self.path.open("a", encoding="utf-8")
+        make_private_dirs(self.path.parent)
+        fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        self._out = os.fdopen(fd, "a", encoding="utf-8")
         return self
 
     def __exit__(self, *_exc: object) -> None:

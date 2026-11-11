@@ -148,6 +148,18 @@ def test_only_one_review_at_a_time(tmp_path):
         pass
 
 
+def test_the_lock_and_the_ledger_create_each_missing_directory_private(tmp_path):
+    lock = tmp_path / "l1" / "l2" / "review.lock"
+    with single_review_lock(lock):
+        pass
+    ledger = tmp_path / "d1" / "d2" / "runners.ledger"
+    FileLedger(ledger).record("a")
+    for path in (lock, ledger):
+        assert path.stat().st_mode & 0o777 == 0o600, path
+        assert path.parent.stat().st_mode & 0o777 == 0o700, path
+        assert path.parent.parent.stat().st_mode & 0o777 == 0o700, path
+
+
 # A slow route sleeps _SLOW_S (or trickles about that long) and only then
 # sets `slow_finished`. A cutoff test passes when the client has already
 # returned with that still unset, so the assertion is not a wall-clock bound.

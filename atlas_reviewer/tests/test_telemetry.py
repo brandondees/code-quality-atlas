@@ -188,6 +188,15 @@ def test_a_record_after_the_sink_closes_is_kept_in_memory_only(tmp_path):
     assert json.loads(line)["step"] == "inside"
 
 
+def test_a_sink_creates_its_file_and_each_missing_directory_private(tmp_path):
+    path = tmp_path / "t1" / "t2" / "events.jsonl"
+    with JsonlSink(path):
+        pass
+    assert path.stat().st_mode & 0o777 == 0o600
+    for directory in (path.parent, path.parent.parent):
+        assert directory.stat().st_mode & 0o777 == 0o700, directory
+
+
 def test_a_sink_without_a_credential_aware_scrub_is_refused(tmp_path):
     with pytest.raises(TypeError, match="scrub"):
         Telemetry(FakeClock(), JsonlSink(tmp_path / "events.jsonl"))

@@ -188,6 +188,10 @@ further GitHub or model work. The cleanup budget bounds the delete, and
 SIGKILL still ends the process.
 
 `--state-dir DIR` is a top-level option, so it goes before the subcommand.
+Every file the controller creates (the `--out` draft, telemetry and an
+`--events` file's lock, the runner ledger and the review lock) is created
+mode 0600, and every directory it creates 0700, missing parents included.
+A file or directory that already exists keeps its mode.
 Live inference is off by default. `--provider openrouter` is refused
 without `--allow-live-inference`, and refused with `--dry-run`.
 

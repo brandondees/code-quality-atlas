@@ -91,14 +91,14 @@ def test_an_unwritable_out_path_is_refused_before_the_review(tmp_path, monkeypat
 
 def test_a_failed_draft_write_still_prints_the_draft(tmp_path, monkeypatch):
     target = tmp_path / "draft.md"
-    real = Path.write_text
+    real = cli.os.open
 
-    def failing(self, *args, **kwargs):
-        if self == target:
+    def failing(path, *args, **kwargs):
+        if Path(path) == target:
             raise OSError("disk full")
-        return real(self, *args, **kwargs)
+        return real(path, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "write_text", failing)
+    monkeypatch.setattr(cli.os, "open", failing)
     code, out, err = run_cli(
         "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run", "--out", str(target),
     )  # fmt: skip
@@ -187,6 +187,30 @@ def test_a_dangling_out_symlink_is_refused_before_the_review(tmp_path):
     assert code == cli.EXIT_USAGE
     assert "symlink to a missing target" in err
     assert out == ""
+
+
+def test_drafts_telemetry_ledger_and_lock_are_private(tmp_path, monkeypatch):
+    live_github(monkeypatch)
+    state = tmp_path / "s1" / "s2" / "state"
+    draft = tmp_path / "draft.md"
+    code = cli.main(
+        ["--state-dir", str(state), "review", "--event", EVENT, "--out", str(draft)],
+        env=APP_ENV, out=io.StringIO(), err=io.StringIO(), sprites_factory=scripted_sprites,
+    )  # fmt: skip
+    assert code == cli.EXIT_INCOMPLETE
+    events = tmp_path / "e1" / "e2" / "events.jsonl"
+    code, _, _ = run_cli(
+        "--state-dir", str(state), "review", "--event", EVENT, "--dry-run",
+        "--events", str(events),
+    )  # fmt: skip
+    assert code == cli.EXIT_INCOMPLETE
+    (default_events,) = (state / "telemetry").glob("review-*.jsonl")
+    files = (draft, default_events, events, events.with_name("events.jsonl.lock"))
+    for path in (*files, state / "runners.ledger", state / "review.lock"):
+        assert path.stat().st_mode & 0o777 == 0o600, path
+    created = (state.parent.parent, state.parent, state, state / "telemetry")
+    for path in (*created, events.parent.parent, events.parent):
+        assert path.stat().st_mode & 0o777 == 0o700, path
 
 
 def test_module_entry_point_runs_offline(tmp_path):

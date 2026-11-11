@@ -62,7 +62,12 @@ from atlas_reviewer.harness import SkillBundleHarness, load_bundle
 from atlas_reviewer.http import UrllibStreamingTransport, UrllibTransport
 from atlas_reviewer.instrumented import InstrumentedGitHub
 from atlas_reviewer.interpreter import TrustedPython
-from atlas_reviewer.ledger import FileLedger, ReviewInProgressError, single_review_lock
+from atlas_reviewer.ledger import (
+    FileLedger,
+    ReviewInProgressError,
+    make_private_dirs,
+    single_review_lock,
+)
 from atlas_reviewer.openrouter import OpenRouterProvider
 from atlas_reviewer.picker import Depth
 from atlas_reviewer.ports import BoundaryError, Clock, ModelProvider, SpritesApi
@@ -231,7 +236,7 @@ def _review_lock(
 ) -> AbstractContextManager[None]:
     state_dir = _state_dir(args, env)
     try:
-        state_dir.mkdir(parents=True, exist_ok=True)
+        make_private_dirs(state_dir)
     except OSError as exc:
         raise UsageError(f"--state-dir {state_dir}: cannot be created ({exc})") from exc
     return single_review_lock(state_dir / "review.lock")
@@ -273,7 +278,7 @@ def _claimed(path: Path) -> Iterator[None]:
     stays, since unlinking one another run may be opening would race."""
     lock = path.with_name(f"{path.name}.lock")
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        make_private_dirs(path.parent)
         fd = os.open(lock, os.O_WRONLY | os.O_CREAT, 0o600)
     except OSError as exc:
         raise UsageError(f"telemetry file {path}: {exc}") from exc
@@ -487,7 +492,9 @@ def _emit(draft: str, out_path: str | None, out: TextIO, err: TextIO) -> bool:
         out.write(draft)
         return False
     try:
-        Path(out_path).write_text(draft, encoding="utf-8")
+        fd = os.open(out_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(draft)
     except OSError as exc:
         out.write(draft)
         err.write(
