@@ -189,7 +189,9 @@ that reports BYOK, that does not say, or whose HTTP 200 body cannot
 be parsed, stops the review with exit 3 and makes no further model
 call. A key with the flag set true is
 unchanged: a BYOK response is accepted, and its upstream cost counts
-toward the review cap.
+toward the review cap. A response whose `usage.is_byok` is false
+settles `usage.cost` only. A reported upstream cost is still added
+when `is_byok` is true, missing, or any other value.
 
 The entrypoint does not print the environment. The Sprites adapter still
 sends no `env`, `dir`, `path`, or `tty` into a Sprite; the Sprites token

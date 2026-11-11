@@ -275,10 +275,20 @@ preflight, and never after inference. It can lag a completion by about 90
 seconds (an owner-reported pilot observation; not checked against
 OpenRouter's documentation), so a $0 readback right after a call is expected
 and is not a mismatch. Cost is taken from each response's `usage`, never
-from that counter: `usage.cost`, plus `cost_details.upstream_inference_cost`
-when an upstream charge is reported. On a BYOK call `usage.cost` is only
-OpenRouter's fee. A BYOK call that does not report the upstream charge keeps
-its full reservation, including one refused in no-BYOK mode.
+from that counter. When `usage.is_byok` is boolean false, the settled
+amount is `usage.cost` and a reported `cost_details.upstream_inference_cost`
+is not added. OpenRouter's usage-accounting page calls `cost` the total
+charged to the account and `upstream_inference_cost` the upstream
+provider's charge
+(https://openrouter.ai/docs/cookbook/administration/usage-accounting,
+fetched 2026-11-11); that page does not say whether a non-BYOK `cost`
+already includes the upstream amount (verify). The SDK says that on a
+BYOK request `cost` is the OpenRouter fee only
+(https://openrouter.ai/docs/client-sdks/typescript/models/decisionsresponseusage,
+fetched 2026-11-11), so `is_byok: true` adds a reported upstream cost,
+and a missing upstream cost keeps the reservation. A missing or
+non-boolean `is_byok` adds a reported upstream cost too, including a
+call refused in no-BYOK mode.
 
 ## What the draft contains
 

@@ -589,6 +589,67 @@ def test_an_explicit_non_byok_response_is_accepted_when_the_flag_is_off():
     assert p.budget.committed_usd() == Decimal("0.05")
 
 
+@pytest.mark.parametrize("upstream", ["0.0790", None])
+def test_a_non_byok_response_settles_usage_cost_when_upstream_is_present(upstream):
+    """Boolean false means usage.cost is the whole charge. Adding the
+    reported upstream amount settled the live call at twice the key charge."""
+    usage = {
+        "prompt_tokens": 36_614,
+        "completion_tokens": 576,
+        "cost": "0.0790",
+        "is_byok": False,
+        "cost_details": {"upstream_inference_cost": upstream},
+    }
+    p = provider(OpenRouterFake(reply(completion(usage=usage))))
+    p.complete(SMALL)
+    assert p.budget.calls[0].actual_usd == Decimal("0.0790")
+
+
+@pytest.mark.parametrize("flag", ["false", 0, None])
+def test_a_non_boolean_is_byok_still_adds_a_reported_upstream_cost(flag):
+    """Anything other than boolean false still adds upstream, so an
+    unlabelled call cannot under-count."""
+    usage = {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "cost": "0.05",
+        "is_byok": flag,
+        "cost_details": {"upstream_inference_cost": "1.26"},
+    }
+    p = provider(OpenRouterFake(reply(completion(usage=usage))))
+    p.complete(SMALL)
+    assert p.budget.calls[0].actual_usd == Decimal("1.31")
+
+
+def test_a_non_byok_call_priced_from_tokens_does_not_add_upstream():
+    usage = {
+        "prompt_tokens": 1000,
+        "completion_tokens": 100,
+        "is_byok": False,
+        "cost_details": {"upstream_inference_cost": "1.26"},
+    }
+    p = provider(OpenRouterFake(reply(completion(usage=usage))))
+    p.complete(SMALL)
+    # 1000 x 0.000006 + 100 x 0.0000225, and not that sum plus 1.26.
+    assert p.budget.calls[0].actual_usd == Decimal("0.00825")
+
+
+def test_a_refused_unlabelled_call_still_adds_its_upstream_cost():
+    """The refusal path settles before it stops the review. A non-boolean
+    flag is not proof the cost already includes the provider charge."""
+    usage = {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "cost": "0.05",
+        "is_byok": "false",
+        "cost_details": {"upstream_inference_cost": "1.26"},
+    }
+    p, _fake = _no_byok_provider(usage)
+    with pytest.raises(ByokRefusedError, match="is not false"):
+        p.complete(SMALL)
+    assert p.budget.calls[0].actual_usd == Decimal("1.31")
+
+
 def test_an_upstream_cost_is_added_when_the_call_is_not_marked_byok():
     usage = {
         "prompt_tokens": 10,

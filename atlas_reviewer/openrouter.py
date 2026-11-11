@@ -36,11 +36,19 @@
   seconds (one owner-reported pilot observation, not checked against
   OpenRouter's documentation), so a $0 readback right after a call is
   expected and is not a mismatch with the per-response cost recorded here.
-  Spend is reconciled from the response, never from that counter:
-  `usage.cost`, plus `cost_details.upstream_inference_cost` when an
-  upstream charge is reported (on a BYOK call `usage.cost` is only
-  OpenRouter's fee). A BYOK call that omits the upstream charge, or an
-  upstream charge that cannot be read, keeps its full reservation. A key
+  Spend is reconciled from the response, never from that counter.
+  When `usage.is_byok` is boolean false, `usage.cost` is the whole
+  charge and a reported `cost_details.upstream_inference_cost` is not
+  added. Otherwise a reported upstream cost is added. The SDK says that
+  on a BYOK request `cost` is the OpenRouter fee only
+  (https://openrouter.ai/docs/client-sdks/typescript/models/decisionsresponseusage,
+  fetched 2026-11-11). The usage-accounting page calls `cost` the total
+  charged to the account and does not say whether a non-BYOK `cost`
+  already includes the upstream amount
+  (https://openrouter.ai/docs/cookbook/administration/usage-accounting,
+  fetched 2026-11-11) (verify). A BYOK call that omits the upstream
+  charge, or an upstream charge that cannot be read on a call that is
+  not explicitly non-BYOK, keeps its full reservation. A key
   whose `include_byok_in_limit` is not true passes preflight and the run
   is in no-BYOK mode: a response is used only when `usage.is_byok` is
   boolean false. True, a missing field, any other value, or an HTTP 200
@@ -405,8 +413,12 @@ def _actual_cost(usage: Json, terms: ModelTerms) -> tuple[Decimal | None, str]:
         _tokens(details, "reasoning_tokens") if isinstance(details, dict) else None
     )
     summary = f"tokens in={prompt_t} out={completion_t} reasoning={reasoning_t}"
+    # Boolean false means usage.cost is the whole charge, so the upstream
+    # field is not added and a null or unreadable one is not an error.
+    # Any other flag still adds a reported upstream cost.
+    explicitly_non_byok = usage.get("is_byok") is False
     try:
-        upstream = _upstream_cost(usage)
+        upstream = None if explicitly_non_byok else _upstream_cost(usage)
     except PricingUnknownError:
         return None, summary
     if usage.get("is_byok") is True and upstream is None:
@@ -432,7 +444,7 @@ def _actual_cost(usage: Json, terms: ModelTerms) -> tuple[Decimal | None, str]:
 
 
 def _upstream_cost(usage: Json) -> Decimal | None:
-    """The provider's own charge, reported beside OpenRouter's fee."""
+    """`cost_details.upstream_inference_cost` when the response reports one."""
     details = usage.get("cost_details")
     if not isinstance(details, dict) or "upstream_inference_cost" not in details:
         return None
