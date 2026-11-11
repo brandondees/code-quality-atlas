@@ -517,6 +517,15 @@ def test_an_unreadable_upstream_cost_keeps_the_reservation():
     assert "actual unknown (counted at the reservation)" in p.usage_lines()[1]
 
 
+def test_an_accepted_call_with_no_upstream_field_settles_usage_cost():
+    """A missing upstream field keeps the reservation only when is_byok
+    is true. An accepted call that omits the field settles usage.cost."""
+    usage = {"prompt_tokens": 10, "completion_tokens": 5, "cost": "0.05"}
+    p = provider(OpenRouterFake(reply(completion(usage=usage))))
+    p.complete(SMALL)
+    assert p.budget.calls[0].actual_usd == Decimal("0.05")
+
+
 def _no_byok_provider(usage, *, flag=False):
     fake = OpenRouterFake(
         reply(completion(usage=usage)),
