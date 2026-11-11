@@ -46,9 +46,10 @@ from atlas_reviewer.runner import (
     strip_start,
     sweep,
 )
+from atlas_reviewer.source_archive import UnpackLimits
 from atlas_reviewer.telemetry import Telemetry
 
-from .helpers import CallbackRule, FakeClock, fake_token
+from .helpers import SOURCE_TARBALL, CallbackRule, FakeClock, fake_token, source_tarball
 
 NAME = "cqa-rev-20261106-230000-abc123"
 TOOLS = (
@@ -73,7 +74,7 @@ def run(api, ledger=None, clock=None, deadline_s=60.0, tools=TOOLS):
     return run_disposable(
         api,
         ledger if ledger is not None else MemoryLedger(),
-        RunnerJob(b"tarball-bytes", tools),
+        RunnerJob(SOURCE_TARBALL, tools),
         name=NAME,
         deadline_s=deadline_s,
         clock=clock or FakeClock(),
@@ -170,7 +171,7 @@ def test_a_run_stopped_before_create_is_verified_and_leaves_no_entry():
     clock = FakeClock()
     ledger = MemoryLedger()
     outcome = run_disposable(
-        FakeSprites(rules=OK_RULES), ledger, RunnerJob(b"tarball-bytes", TOOLS),
+        FakeSprites(rules=OK_RULES), ledger, RunnerJob(SOURCE_TARBALL, TOOLS),
         name=NAME, deadline_s=0.0, clock=clock,
     )  # fmt: skip
     assert outcome.report.status is RunnerStatus.DEADLINE_EXCEEDED
@@ -298,7 +299,7 @@ def test_a_diagnostic_that_swallows_the_deadline_does_not_make_the_run_complete(
     telemetry = Telemetry(clock)
     outcome = run_disposable(
         LastDiagnosticOverruns(rules=PY_RULES), MemoryLedger(),
-        RunnerJob(b"tarball-bytes", (COMPILEALL,), diagnose=True),
+        RunnerJob(SOURCE_TARBALL, (COMPILEALL,), diagnose=True),
         name=NAME, deadline_s=60.0, clock=clock, telemetry=telemetry,
     )  # fmt: skip
     assert outcome.report.status is RunnerStatus.DEADLINE_EXCEEDED
@@ -346,7 +347,7 @@ def test_a_last_diagnostic_past_the_deadline_does_not_make_the_run_complete(fail
 
     api = BareDiagnosticOverruns(rules=PY_RULES)
     outcome = run_disposable(
-        api, MemoryLedger(), RunnerJob(b"tarball-bytes", (COMPILEALL,), diagnose=True),
+        api, MemoryLedger(), RunnerJob(SOURCE_TARBALL, (COMPILEALL,), diagnose=True),
         name=NAME, deadline_s=60.0, clock=clock,
     )  # fmt: skip
     assert outcome.diagnostics[-1].name == "bare python3 in the checkout"
@@ -409,7 +410,7 @@ def _run_with_create_held_past_the_watchdog(on_created=None):
     api, ledger = CreateOutlivesWatchdog(rules=OK_RULES), MemoryLedger()
     telemetry = Telemetry(SystemClock(), signal, scrub=_no_secrets)
     outcome = run_disposable(
-        api, ledger, RunnerJob(b"tarball-bytes", TOOLS), name=NAME,
+        api, ledger, RunnerJob(SOURCE_TARBALL, TOOLS), name=NAME,
         deadline_s=0.01, clock=FakeClock(), telemetry=telemetry,
     )  # fmt: skip
     return api, ledger, outcome, seen, telemetry.events
@@ -436,7 +437,7 @@ def test_a_telemetry_write_failure_does_not_stop_cleanup():
         run_disposable(
             api,
             ledger,
-            RunnerJob(b"tarball-bytes", TOOLS),
+            RunnerJob(SOURCE_TARBALL, TOOLS),
             name=NAME,
             deadline_s=60.0,
             clock=FakeClock(),
@@ -521,7 +522,7 @@ def test_a_failure_note_is_scrubbed_like_the_telemetry_it_came_from():
             raise BoundaryError(f"POST https://api.example failed: echo {secret}")
 
     outcome = run_disposable(
-        LeakyCreate(), MemoryLedger(), RunnerJob(b"tarball-bytes", TOOLS), name=NAME,
+        LeakyCreate(), MemoryLedger(), RunnerJob(SOURCE_TARBALL, TOOLS), name=NAME,
         deadline_s=60.0, clock=FakeClock(),
         telemetry=Telemetry(FakeClock(), scrub=lambda text: Redactor((secret,))(text).text),
     )  # fmt: skip
@@ -551,7 +552,7 @@ def test_the_only_input_the_runner_gets_is_the_tarball():
     test_the_wrapper_really_runs_with_only_the_minimal_environment)."""
     api = FakeSprites(rules=OK_RULES)
     run(api)
-    assert [s for s in api.stdin_seen if s] == [b"tarball-bytes"]
+    assert [s for s in api.stdin_seen if s] == [SOURCE_TARBALL]
 
 
 def test_network_policy_sent_is_deny_all():
@@ -629,7 +630,7 @@ def test_probe_runs_after_deny_all_and_before_the_source_upload():
     run(api)
     scripts = [c[2] for c in api.calls if c[0] == "exec"]
     assert PROBE_TAG in scripts[0]
-    assert "head -c 13 | " in scripts[1]
+    assert f"head -c {len(SOURCE_TARBALL)} | " in scripts[1]
     assert "tar -xzf" in scripts[2]
 
 
@@ -985,7 +986,7 @@ def exec_timeouts(api):
 def test_upload_exec_gets_the_dedicated_upload_budget_not_the_client_default():
     api = FakeSprites(rules=OK_RULES)
     run(api, deadline_s=600.0)
-    (timeout,) = [t for s, t in exec_timeouts(api).items() if "head -c" in s]
+    (timeout,) = [t for s, t in exec_timeouts(api).items() if "cat > " in s]
     assert timeout == UPLOAD_BUDGET_S
     assert timeout > 30.0
 
@@ -993,8 +994,51 @@ def test_upload_exec_gets_the_dedicated_upload_budget_not_the_client_default():
 def test_upload_exec_is_capped_by_the_remaining_review_deadline():
     api = FakeSprites(rules=OK_RULES)
     run(api, deadline_s=90.0)
-    (timeout,) = [t for s, t in exec_timeouts(api).items() if "head -c" in s]
+    (timeout,) = [t for s, t in exec_timeouts(api).items() if "cat > " in s]
     assert 60.0 < timeout <= 90.0
+
+
+@pytest.mark.parametrize(
+    "archive,limits,reason",
+    [
+        (
+            source_tarball({"zeros": b"\0" * (2 * 1024 * 1024)}),
+            UnpackLimits(max_bytes=1024 * 1024),
+            (
+                "source archive unpacks to over 1048576 bytes (at least 2097152); "
+                "not unpacked; no runner was created"
+            ),
+        ),
+        (
+            source_tarball({f"f{i}": b"" for i in range(3)}),
+            UnpackLimits(max_members=2),
+            "source archive has over 2 members; not unpacked; no runner was created",
+        ),
+        (
+            b"tarball-bytes",
+            UnpackLimits(),
+            (
+                "source archive is not a readable gzip tar: BadGzipFile; "
+                "no runner was created"
+            ),
+        ),
+    ],
+)
+def test_an_archive_that_would_unpack_past_a_cap_is_refused_before_any_sprite(
+    archive, limits, reason
+):
+    api, ledger = FakeSprites(rules=OK_RULES), MemoryLedger()
+    telemetry = Telemetry(FakeClock())
+    outcome = run_disposable(
+        api, ledger, RunnerJob(archive, TOOLS, unpack=limits), name=NAME,
+        deadline_s=60.0, clock=FakeClock(), telemetry=telemetry,
+    )  # fmt: skip
+    assert (outcome.report.status, outcome.report.cleanup) == (
+        RunnerStatus.FAILED,
+        CleanupStatus.NOT_CREATED,
+    )
+    assert outcome.report.note == reason
+    assert (api.calls, ledger.pending()) == ([], ())
 
 
 def test_an_archive_over_the_exec_stdin_limit_is_refused_before_any_sprite_exists():
@@ -1021,8 +1065,8 @@ def test_an_archive_over_the_exec_stdin_limit_is_refused_before_any_sprite_exist
 def test_upload_does_not_wait_for_a_stdin_eof():
     api = FakeSprites(rules=OK_RULES)
     run(api)
-    (script,) = [s for s in exec_timeouts(api) if "head -c" in s]
-    assert f"head -c {len(b'tarball-bytes')} | {{ cat > " in script
+    (script,) = [s for s in exec_timeouts(api) if "cat > " in s]
+    assert f"head -c {len(SOURCE_TARBALL)} | {{ cat > " in script
 
 
 def test_upload_transport_failure_names_the_size_and_still_destroys():
@@ -1090,7 +1134,7 @@ def test_default_tools_are_limited_to_what_the_runner_image_is_known_to_have():
 def run_traced(api, clock=None, deadline_s=600.0, tools=TOOLS):
     telemetry = Telemetry(clock or FakeClock())
     outcome = run_disposable(
-        api, MemoryLedger(), RunnerJob(b"tarball-bytes", tools), name=NAME,
+        api, MemoryLedger(), RunnerJob(SOURCE_TARBALL, tools), name=NAME,
         deadline_s=deadline_s, clock=clock or FakeClock(), telemetry=telemetry,
     )  # fmt: skip
     return outcome, telemetry.events
@@ -1107,7 +1151,7 @@ def test_every_lifecycle_phase_is_recorded_in_order():
         ("exec", "tool check"),
         ("tool check", "availability"),
         ("exec", "source upload"),
-        ("upload", "13-byte tarball"),
+        ("upload", f"{len(SOURCE_TARBALL)}-byte tarball"),
         ("exec", "source unpack"),
         ("unpack", "tar -xzf"),
         ("exec", "ruff version"),
@@ -1122,9 +1166,9 @@ def test_every_lifecycle_phase_is_recorded_in_order():
     assert all(e.status == "ok" for e in events)
     by_step = {(e.phase, e.step): e.fields for e in events}
     assert by_step[("egress", "read back")] == {"deny_all": True}
-    assert by_step[("upload", "13-byte tarball")] == {
-        "bytes": 13,
-        "runner_received": 13,
+    assert by_step[("upload", f"{len(SOURCE_TARBALL)}-byte tarball")] == {
+        "bytes": len(SOURCE_TARBALL),
+        "runner_received": len(SOURCE_TARBALL),
     }
     assert by_step[("tool", "ruff")]["exit_status"] == 1
     assert by_step[("verify", "existence check")] == {
@@ -1143,7 +1187,7 @@ def test_each_exec_records_purpose_timeouts_bytes_frames_and_exit():
     upload = execs["source upload"]
     assert upload["purpose"] == "source upload"
     assert upload["timeout_s"] == UPLOAD_BUDGET_S
-    assert upload["bytes_sent"] == 13
+    assert upload["bytes_sent"] == len(SOURCE_TARBALL)
     assert upload["bytes_received"] > 0
     assert upload["frames_seen"] == "0x01:1"
     assert upload["exit_status"] == 0
@@ -1203,8 +1247,13 @@ def test_a_short_upload_is_a_labelled_failure_naming_the_byte_counts():
     api = ShortWrite(rules=OK_RULES)
     outcome, _ = run_traced(api)
     assert outcome.report.status is RunnerStatus.FAILED
-    assert "upload / 13-byte tarball failed after" in outcome.report.note
-    assert "runner wrote 5 of 13 bytes (exit 0)" in outcome.report.note
+    assert (
+        f"upload / {len(SOURCE_TARBALL)}-byte tarball failed after"
+        in outcome.report.note
+    )
+    assert (
+        f"runner wrote 5 of {len(SOURCE_TARBALL)} bytes (exit 0)" in outcome.report.note
+    )
     assert "tar -xzf" not in " ".join(c[-1] for c in api.calls)
 
 
@@ -1320,7 +1369,7 @@ def _inner(script):
 def test_only_commands_without_input_get_the_first_frame_window():
     api = FakeSprites(rules=PY_RULES)
     run_disposable(
-        api, MemoryLedger(), RunnerJob(b"tarball-bytes", (COMPILEALL,)), name=NAME,
+        api, MemoryLedger(), RunnerJob(SOURCE_TARBALL, (COMPILEALL,)), name=NAME,
         deadline_s=600.0, clock=FakeClock(), first_frame_s=5.0,
     )  # fmt: skip
     assert api.first_bytes_seen == [5.0, 5.0, None, 5.0, 5.0, 5.0]
@@ -1445,7 +1494,7 @@ def _leaky_review(secret, scrub, rules=(), failed_checks=()):
     clock = FakeClock()
     return run_disposable(
         Leaky(rules=rules), MemoryLedger(),
-        RunnerJob(b"tarball-bytes", (*TOOLS, COMPILEALL), diagnose=True),
+        RunnerJob(SOURCE_TARBALL, (*TOOLS, COMPILEALL), diagnose=True),
         name=NAME, deadline_s=60.0, clock=clock,
         telemetry=None if scrub is None else Telemetry(clock, scrub=scrub),
     )  # fmt: skip
@@ -1546,7 +1595,7 @@ def test_no_cleanup_call_starts_after_the_cleanup_budget(fails):
     ledger = MemoryLedger()
     telemetry = Telemetry(clock)
     outcome = run_disposable(
-        api, ledger, RunnerJob(b"tarball-bytes", TOOLS), name=NAME,
+        api, ledger, RunnerJob(SOURCE_TARBALL, TOOLS), name=NAME,
         deadline_s=60.0, clock=clock, telemetry=telemetry,
     )  # fmt: skip
     first = api.cleanup_starts[0]
@@ -1580,7 +1629,7 @@ def test_the_final_destroy_stops_waiting_for_a_hung_watchdog_destroy():
     api, ledger = HungDelete(rules=OK_RULES), MemoryLedger()
     try:
         outcome = run_disposable(
-            api, ledger, RunnerJob(b"tarball-bytes", TOOLS), name=NAME,
+            api, ledger, RunnerJob(SOURCE_TARBALL, TOOLS), name=NAME,
             deadline_s=0.01, clock=clock,
         )  # fmt: skip
         assert not release.is_set()

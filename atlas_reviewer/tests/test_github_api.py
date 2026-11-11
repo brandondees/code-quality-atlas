@@ -124,6 +124,14 @@ def test_conversation_lists_are_paginated_arrays(method, path):
     assert {r[0] for r in t.requests} == {"GET"}
 
 
+def test_compare_percent_encodes_a_branch_name_end():
+    t = Recorder(ok({"merge_base_commit": {"sha": HEAD}}))
+    data = github(t).get_compare("o/r", "release/1.x", HEAD)
+    assert data["merge_base_commit"]["sha"] == HEAD
+    assert t.requests[0][1] == f"{API}/repos/o/r/compare/release%2F1.x...{HEAD}"
+    assert t.requests[0][0] == "GET"
+
+
 def test_pull_commits_that_are_not_an_array_are_refused():
     with pytest.raises(BoundaryError, match="non-array"):
         github(Recorder(ok({"sha": "a"}))).list_pull_commits("o/r", 42)

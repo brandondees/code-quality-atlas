@@ -79,6 +79,7 @@ from atlas_reviewer.redact import RedactedText, Redactor
 from atlas_reviewer.runner import (
     DEFAULT_TOOLS,
     FIRST_FRAME_BUDGET_S,
+    MAX_TARBALL_BYTES,
     RunnerJob,
     ToolResult,
     ToolSpec,
@@ -104,7 +105,6 @@ DEFAULT_DIFF_CHARS_PER_CALL = PROMPT_TOKEN_ROOM
 MIN_DIFF_CHARS_PER_CALL = 1_000
 MAX_LISTED_PATHS = 100
 MAX_PICKER_PATHS = 500
-MAX_TARBALL_BYTES = 9 * 1024 * 1024
 
 
 @dataclass(frozen=True)

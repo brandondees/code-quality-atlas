@@ -8,7 +8,8 @@ as GitHub serves them), `check-runs.json` (the runs at every commit;
 listed under the head branch's name; `list_workflow_runs_at` serves those at one SHA),
 `jobs-<run_id>.json`, `job-log-<job_id>.txt`, `artifacts-<run_id>.json`,
 `artifact-<id>/` (a directory zipped on read, as GitHub serves artifacts),
-`issue-<n>.json`, and a `source/` tree served as the head-SHA tarball.
+`issue-<n>.json`, `compare.json`, and a `source/` tree served as the
+tarball at any SHA.
 Each list file is one page (`truncated` is never set). A file that is
 absent behaves like a GitHub 404; a download over its byte cap raises
 `ResponseTooLargeError`, as the live client does.
@@ -102,6 +103,10 @@ class FixtureGitHub:
     def list_reviews(self, repo: str, number: int) -> Listing:
         self.calls.append(("list_reviews", repo, str(number)))
         return self._array("reviews.json")
+
+    def get_compare(self, repo: str, base: str, head: str) -> Json:
+        self.calls.append(("get_compare", repo, f"{base}...{head}"))
+        return self._json("compare.json")
 
     def list_workflow_runs(self, repo: str, branch: str) -> Listing:
         self.calls.append(("list_workflow_runs", repo, branch))

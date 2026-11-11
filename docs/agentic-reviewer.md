@@ -1,12 +1,13 @@
 # Agentic reviewer — direction and phased plan
 
 **Status: direction accepted (D34 in
-[`open-questions.md`](open-questions.md), 2026-11-08); phase 1 is built
-offline (D38), the rest is not built.**
+[`open-questions.md`](open-questions.md), 2026-11-08); phases 1 and 2 are
+built offline (D38, D39), the rest is not built.**
 The owner accepted the recommendations below as proposed ("I can roll with
 recommendations as proposed for now"). Phase 1 (full PR conversation and
-branch-wide CI) is on a draft PR stacked on #607, tested against fixtures
-only. Every budget number is still pending his decision; see [Open numeric decisions](#open-numeric-decisions-pending-brandon).
+branch-wide CI, D38) and phase 2 (the read-only tool bridge with Option B
+staging, D39) are on draft PRs stacked on #607, tested against fixtures
+only; nothing calls the bridge yet. Every budget number is still pending his decision; see [Open numeric decisions](#open-numeric-decisions-pending-brandon).
 This doc carries no live-run approval. No model call, Sprite run, merge or
 deploy was made to write it.
 
@@ -231,14 +232,19 @@ itself, and a timeout is a coverage gap.
 
 Each phase is its own PR, or set of PRs, off `main` after the stack lands.
 None of them changes the one-shot path's behaviour except phase 1, which
-improves the context both paths share. Live runs need a fresh yes from the
+improves the context both paths share, and phase 2's archive check (D39),
+which the one-shot source upload now also passes: it refuses, before any
+runner is created, an archive that is not a readable gzip tar, that unpacks
+past 256 MiB, that has more than 50,000 members (files, directories and
+links), or that holds a member whose parent directory is not an earlier
+entry, which a repository can reach well under the 9 MiB compressed cap. Live runs need a fresh yes from the
 owner at every phase.
 
 | Phase | Scope | Gate to start |
 |---|---|---|
 | 0 | Land #601-#607 as the one-shot reviewer and fallback, with the D33 note (#608). No agentic scope in those PRs. | none |
 | 1 | Full PR conversation (about 64 KiB, omissions named) and branch-wide CI labelled by SHA, in the shared evidence code. Fixture-tested. Built offline (D38), stacked on #607 with the owner's go-ahead rather than after the stack merged. | stack merged |
-| 2 | The tool bridge, offline: closed git tools (diff, list, read range, grep) against `FakeSprites` and a fixture repo, with argument rejection, byte and time caps, and git hardening. Option B staging. | phase 1 merged |
+| 2 | The tool bridge, offline: closed git tools (diff, list, read range, grep) against `FakeSprites` and a fixture repo, with argument rejection, byte and time caps, and git hardening. Option B staging. Built offline (D39), stacked on phase 1 with the owner's go-ahead. | phase 1 merged |
 | 3 | The controller loop and one attested lens, offline first: body injection, the attestation ledger, quote checks, retry and escalate. Then one owner-approved live run, compared with the one-shot draft on the same head. | offline work: none. Live run: a provisional budget Brandon approves |
 | 4 | Triage mode: the four critical lenses, pool size 1, ID-reconciled merge, coverage never claimed complete unless the ledger shows it. | phase 3 measured |
 | 5 | The baked toolchain: the first tool set in the Sprite image, with summarized hits routed to lenses. | image build approved |

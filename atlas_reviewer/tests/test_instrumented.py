@@ -34,6 +34,7 @@ def test_every_read_is_one_event_with_its_size():
     gh.list_reviews(REPO, 42)
     gh.list_review_comments(REPO, 42)
     gh.list_issue_comments(REPO, 42)
+    gh.get_compare(REPO, "main", HEAD)
     steps = [(e.phase, e.step) for e in t.events]
     assert steps == [
         ("evidence fetch", "pull #42"),
@@ -51,6 +52,7 @@ def test_every_read_is_one_event_with_its_size():
         ("conversation fetch", "reviews of #42"),
         ("conversation fetch", "review comments of #42"),
         ("conversation fetch", "issue comments of #42"),
+        ("source fetch", f"compare to {HEAD[:12]}"),
     ]
     assert all("secret-branch-name" not in str(e.as_json()) for e in t.events)
     by_step = {e.step: e.fields for e in t.events}
@@ -104,6 +106,7 @@ READS = [
     ("list_issue_comments", (REPO, 42)),
     ("list_review_comments", (REPO, 42)),
     ("list_reviews", (REPO, 42)),
+    ("get_compare", (REPO, "main", HEAD)),
 ]
 
 

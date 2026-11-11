@@ -8,6 +8,8 @@ bounded by the client's own window (`sprites_api`, 30s by default), and
 all of a runner's cleanup by `CLEANUP_BUDGET_S` from its first destroy, so
 cleanup ends at most that plus one call window after it starts:
 
+0. refuse a source archive the exec stdin cannot carry, or one that is
+   unreadable or unpacks past its size or member cap (`source_archive`)
 1. record the runner name in the ledger (before anything exists remotely)
 2. create a fresh Sprite -- never reuse one: guests can restore checkpoints
    and create Tasks, so a used Sprite is contaminated
@@ -69,6 +71,7 @@ from typing import Literal
 
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import CleanupStatus, RunnerReport, RunnerStatus
+from atlas_reviewer.guest_unpack import unpack_refusal, unpack_script
 from atlas_reviewer.interpreter import (
     PYTHON_PLACEHOLDER,
     SYSTEM_PYTHON,
@@ -91,11 +94,14 @@ from atlas_reviewer.ports import (
     SpritesApi,
     StreamTimeoutError,
 )
+from atlas_reviewer.source_archive import DEFAULT_UNPACK, UnpackLimits, measure
 from atlas_reviewer.sprites_api import EXEC_STDIN_MAX_BYTES
 from atlas_reviewer.telemetry import ERROR, Fields, Telemetry
 
 DENY_ALL: tuple[Json, ...] = ({"action": "deny", "domain": "*"},)
 MEMORY_LIMIT_MB = 1024
+# Under the exec stdin limit, so one upload exec always carries a tarball.
+MAX_TARBALL_BYTES = 9 * 1024 * 1024
 WORKDIR = "/work"
 SOURCE_ARCHIVE = "/tmp/atlas-source.tar.gz"
 EXIT_MARKER = "__ATLAS_EXIT__="
@@ -214,6 +220,23 @@ class RunnerJob:
     source_tarball: bytes
     tools: tuple[ToolSpec, ...]
     diagnose: bool = False
+    unpack: UnpackLimits = DEFAULT_UNPACK
+
+
+def refused_archive(data: bytes, limits: UnpackLimits = DEFAULT_UNPACK) -> str | None:
+    """Why a source archive may not go to a runner, or None: over the exec
+    stdin it is uploaded through, unreadable, or past an unpack cap
+    (`source_archive.measure`)."""
+    if len(data) > EXEC_STDIN_MAX_BYTES:
+        return (
+            f"source archive is {len(data)} bytes, over the {EXEC_STDIN_MAX_BYTES}-byte "
+            "limit of the exec stdin it is uploaded through"
+        )
+    try:
+        measure(data, limits)
+    except BoundaryError as exc:
+        return str(exc)
+    return None
 
 
 @dataclass(frozen=True)
@@ -664,6 +687,56 @@ def _deadline_reached(run: _Run, note: str) -> tuple[RunnerStatus, str]:
     return RunnerStatus.DEADLINE_EXCEEDED, run.telemetry.scrub(note)
 
 
+@dataclass(frozen=True)
+class Session:
+    """One live, policy-verified runner handed to a `run_session` body.
+    Every exec goes through the one exec wrapper (`exec_argv`) under the
+    run's deadline and is recorded in its telemetry; scripts are
+    controller-built and their output is untrusted."""
+
+    _run: _Run
+
+    def exec(
+        self,
+        purpose: str,
+        script: str,
+        *,
+        stage: str = "session",
+        budget_s: float | None = None,
+    ) -> tuple[int | None, str]:
+        """The script's exit status (None with no marker) and its output,
+        from `parse_exit`. Raises `BoundaryError` (a `StreamTimeoutError`
+        when output stopped) and `DeadlineExceededError`."""
+        return _exec(self._run, _Exec(stage, purpose, script, budget_s=budget_s))
+
+    def upload(self, data: bytes, path: str, purpose: str) -> None:
+        """Writes `data` to the controller-chosen `path` through the same
+        exec shape as the source upload; raises unless every byte landed."""
+        _upload(self._run, data, path, purpose)
+
+
+def run_session(
+    api: SpritesApi,
+    ledger: RunnerLedger,
+    body: Callable[[Session], str],
+    *,
+    name: str,
+    deadline_s: float,
+    clock: Clock,
+    telemetry: Telemetry | None = None,
+    first_frame_s: float = FIRST_FRAME_BUDGET_S,
+) -> RunnerReport:
+    """`body` on a fresh disposable runner with the same lifecycle as a
+    review: recorded in the ledger, provisioned deny-all and verified,
+    bounded by the deadline and its watchdog, always destroyed. The body's
+    return value is the report's note."""
+    return _disposable(
+        api, ledger, lambda run: body(Session(run)), name=name,
+        deadline_s=deadline_s, clock=clock,
+        telemetry=telemetry or Telemetry(clock), first_frame_s=first_frame_s,
+    )  # fmt: skip
+
+
 def run_disposable(
     api: SpritesApi,
     ledger: RunnerLedger,
@@ -676,15 +749,14 @@ def run_disposable(
     first_frame_s: float = FIRST_FRAME_BUDGET_S,
 ) -> RunnerOutcome:
     """The review's exec sequence: tool check, upload, unpack, then each
-    available tool. An archive the one-exec upload cannot carry is refused
-    before anything is created or recorded in the ledger."""
+    available tool. An archive the one-exec upload cannot carry, or one
+    that is unreadable or unpacks past `job.unpack`, is refused before
+    anything is created or recorded in the ledger."""
     telemetry = telemetry or Telemetry(clock)
     size = len(job.source_tarball)
-    if size > EXEC_STDIN_MAX_BYTES:
-        note = (
-            f"source archive is {size} bytes, over the {EXEC_STDIN_MAX_BYTES}-byte "
-            "limit of the exec stdin it is uploaded through; no runner was created"
-        )
+    refused = refused_archive(job.source_tarball, job.unpack)
+    if refused is not None:
+        note = f"{refused}; no runner was created"
         telemetry.record(
             "upload", "size check", {"bytes": size, "limit": EXEC_STDIN_MAX_BYTES},
             status=ERROR, error=note,
@@ -702,7 +774,7 @@ def run_disposable(
         pythons.append(found.trusted_python)
         diagnostics.extend(_diagnose(run, diagnostics_before_unpack(), job.diagnose))
         _upload(run, job.source_tarball)
-        _unpack(run)
+        _unpack(run, job.unpack)
         results.extend(_tool(run, tool, found) for tool in job.tools)
         after = diagnostics_after_unpack(
             found.trusted_python, WORKDIR, DIAGNOSTIC_BOUND_S
@@ -1121,19 +1193,23 @@ def _recorded(run: _Run, result: Diagnostic) -> Diagnostic:
     return result
 
 
-def _upload(run: _Run, tarball: bytes) -> None:
+def _upload(
+    run: _Run,
+    tarball: bytes,
+    path: str = SOURCE_ARCHIVE,
+    purpose: str = "source upload",
+) -> None:
     """`exec_argv` feeds exactly the bytes sent through `head -c`, so the
     upload does not depend on the exec channel delivering a stdin EOF; the
-    runner reports back how many bytes it wrote."""
+    runner reports back how many bytes it wrote. `path` is controller-chosen
+    and inserted as is."""
     size = len(tarball)
-    script = f"cat > {SOURCE_ARCHIVE} && wc -c < {SOURCE_ARCHIVE}"
+    script = f"cat > {path} && wc -c < {path}"
     run.telemetry.span(
         "upload",
         f"{size}-byte tarball",
         lambda: _confirm_upload(
-            _exec(
-                run, _Exec("upload", "source upload", script, tarball, UPLOAD_BUDGET_S)
-            ),
+            _exec(run, _Exec("upload", purpose, script, tarball, UPLOAD_BUDGET_S)),
             size,
         ),
         {"bytes": size},
@@ -1152,10 +1228,11 @@ def _confirm_upload(result: tuple[int | None, str], size: int) -> int:
     return got
 
 
-def _unpack(run: _Run) -> None:
+def _unpack(run: _Run, limits: UnpackLimits) -> None:
+    """The runner holds `limits` again by its own tar (`guest_unpack`)."""
     script = (
-        f"mkdir -p {WORKDIR} && tar -xzf {SOURCE_ARCHIVE} -C {WORKDIR} "
-        f"--strip-components=1 && rm -f {SOURCE_ARCHIVE}"
+        f"{unpack_script(SOURCE_ARCHIVE, WORKDIR, '--strip-components=1', limits)}"
+        f" && rm -f {SOURCE_ARCHIVE}"
     )
     run.telemetry.span(
         "unpack",
@@ -1163,14 +1240,18 @@ def _unpack(run: _Run) -> None:
         lambda: _confirm_unpack(
             _exec(
                 run, _Exec("unpack", "source unpack", script, budget_s=UNPACK_BUDGET_S)
-            )
+            ),
+            limits,
         ),
         after=lambda code: {"exit_status": code},
     )
 
 
-def _confirm_unpack(result: tuple[int | None, str]) -> int:
+def _confirm_unpack(result: tuple[int | None, str], limits: UnpackLimits) -> int:
     code, text = result
+    refused = unpack_refusal(text, limits) if code != 0 else None
+    if refused is not None:
+        raise BoundaryError(f"source unpack failed (exit {code}): {refused}")
     if code != 0:
         raise BoundaryError(
             f"source unpack failed (exit {code}): {guest_text(text, GUEST_TAIL_CHARS)}"

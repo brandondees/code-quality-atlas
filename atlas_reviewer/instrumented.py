@@ -139,6 +139,14 @@ class InstrumentedGitHub:
             CONVERSATION,
         )
 
+    def get_compare(self, repo: str, base: str, head: str) -> Json:
+        return self._read(
+            f"compare to {head[:12]}",
+            lambda: self._inner.get_compare(repo, base, head),
+            lambda _: {},
+            SOURCE,
+        )
+
     def list_reviews(self, repo: str, number: int) -> Listing:
         return self._read(
             f"reviews of #{number}",

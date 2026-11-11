@@ -74,7 +74,19 @@ default tools (`--tools review`). It calls no model and gathers no CI
 evidence. The source is a local `.tar.gz` (`--tarball`, for example from
 `git archive --format=tar.gz --prefix=src/ HEAD`) or the head-SHA tarball
 fetched with the GitHub App (`--event`, needing the three `ATLAS_GITHUB_*`
-variables). Both are held to the review's 9 MiB tarball cap.
+variables). Both are held to the review's caps: 9 MiB compressed, and
+256 MiB or 50,000 members unpacked, counted from the tar headers across
+every gzip member before any runner exists (`source_archive.py`); an
+archive past them, or not a gzip tar, is refused. The header walk fails
+closed: it reads the blocks itself and accepts only what `git archive`
+writes, in a form GNU tar reads the same way. That means plain-octal
+header numbers; member types `git archive` writes; a pax global `comment`
+and per-member `path`, `linkpath` and `mtime`, each at most once; metadata
+entries of at most 1 MiB and 16 MiB in all; paths of plain segments, within
+4,096 bytes, 64 deep and 1,000,000 segments in all, each member's parent
+directory listed as an entry before it (so unpacking creates no directory
+the walk did not count); and zero padding after the end block. Every other
+header is refused (D39).
 
 `probe-runner` exits 3 when the runner did not complete or, for the
 protocol probe, the stdin round-trip did not come back `ok` or the
@@ -528,6 +540,69 @@ The PR's files cannot choose the interpreter or a tool binary. The
 interpreter is chosen before they exist. Every other binary comes from
 `PATH=/usr/bin:/bin`, which the unpacked tree in `/work` is not on.
 
+## Read-only tool bridge (offline, D39)
+
+`bridge.py` is the tool surface agentic lens loops will use (D31, D34).
+Nothing calls it yet, and it has only run against fakes. `run_bridge`
+stages the sources on a fresh disposable runner (`runner.run_session`, the
+same create, deny-all, verify and destroy lifecycle as a review) and hands
+a `Bridge` to the caller.
+
+- **Staging** (`bridge_staging.py`, D31 Option B). git is found at
+  `/usr/bin/git` or `/bin/git` before anything is uploaded. The merge-base
+  and head tarballs, plus an optional default-branch tarball, are each at
+  most 9 MiB compressed and 256 MiB or 50,000 members unpacked
+  (`source_archive.py`, counted from the tar headers in memory across every
+  gzip member, refusing any header it cannot fully read), and any
+  other is refused before a runner exists. The one-shot reviewer's source
+  upload and `probe-runner` are checked the same way, so they now also
+  refuse a non-gzip archive, a repository of over 50,000 members
+  (files, directories and links), which can fit well under 9 MiB, and one
+  with a member whose parent directory is not an earlier entry. Each is
+  uploaded through the source-upload exec shape, then all are committed in
+  one exec into a bare repository with a fixed identity and date. That
+  exec has 120 seconds (`runner.UNPACK_BUDGET_S`), and each tree's
+  `tar -xzf` inside it is also stopped by the guest's `timeout` at 60
+  seconds (`EXTRACT_TIMEOUT_S`). The runner holds the unpack caps again
+  by its own tar before writing, counting the directories member paths
+  imply, and under `ulimit -f` while writing (`guest_unpack.py`). A tree
+  past them is refused, and a failed extraction that the script survives
+  has its partial tree removed (a killed script cannot clean up: the
+  runner is destroyed). HEAD's
+  parent is BASE; DEFAULT is its own root commit. Tools use only the
+  synthetic ids staging reports. The merge base comes from GitHub's
+  compare endpoint (`fetch_sources`).
+- **Tools** (`bridge_args.py`). There are five, each with typed arguments:
+  `diff_stat`, `diff_file` (path, byte offset), `list_files` (rev,
+  prefix), `read_file` (rev, path, at most 400 lines) and `grep` (pattern,
+  rev, prefix, fixed-string unless `regex`). `rev` is BASE, HEAD or a
+  staged DEFAULT. Anything else is rejected before an exec, with a fixed
+  code and a controller-written reason that echoes neither the tool name
+  nor any value sent. A session serves at most 64 calls and 1 MiB of
+  output in all, then refuses calls without running them.
+- **Exec.** Each call is a fixed git argv with every value shell-quoted,
+  under `env -i`, `timeout` and `ulimit -f`. The `-c` options, environment
+  and repository attributes disable config, hooks, pagers, transports,
+  diff drivers, filters, pathspec magic and in-tree `.gitattributes`.
+  Output returns base64-encoded and is capped at the tool's bound (16 or
+  32 KiB; 2,000 entries, 400 lines or 200 matches), cut only between
+  whole UTF-8 characters, and the cut and the next diff offset are
+  reported; output lost after git succeeded is an error, not an empty
+  result. A timeout is a coverage gap, never a finding. `grep` and
+  `list_files` read git's NUL-separated output, so a newline in a file
+  name cannot move a match to another file, and every name `list_files`
+  shows plainly reads back through `read_file` (the rest are marked).
+  `diff_file` shows a renamed file as a rename from either path.
+- **Results** are repository content and are not redacted. Each is
+  scanned for committed secrets, and every hit is reported by path, line
+  and pattern, pre-existing outside HEAD or in a file the PR did not
+  change. Values are kept only for scrubbing and never shown. git's stderr
+  is redacted. Every call is a ledger record, and telemetry names only the
+  tool.
+
+Not built yet: `log`, `blame`, `run_check`, fetching the default-branch
+tarball, and the controller loop that calls the bridge (phase 3).
+
 ## Module layout
 
 | Module | Job | I/O? |
@@ -551,8 +626,13 @@ interpreter is chosen before they exist. Every other binary comes from
 | `telemetry.py` | lifecycle events, the `EventSink` (JSONL), labelled timed spans, the summary rows | writes the JSONL file |
 | `instrumented.py` | `GitHubReader` wrapper that records every read as an event | via `GitHubReader` |
 | `lenses.py` | load the chosen lenses' bodies whole under the budget and cap, or mark them NOT RUN with a reason | reads the bundle |
+| `bridge.py` | the read-only git tool bridge: per-call scripts, capped base64 replies, result statuses, secret locations, the call ledger, `run_bridge` | via `SpritesApi` |
+| `bridge_args.py` | the closed tool set and its argument rules (`validate`) | no |
+| `source_archive.py` | the unpacked-size and member caps a source tarball must pass before upload (`measure`) | no |
+| `guest_unpack.py` | the same caps held again in the runner: its tar measures bytes, members and implied directories before extracting, then `ulimit -f` while extracting, every tar run under `timeout` | no |
+| `bridge_staging.py` | Option B staging: trusted git, the hardened git options, tarballs committed into a bare repository, `fetch_sources` | via `SpritesApi`, `GitHubReader` |
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`) | no |
-| `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → resolve interpreter → upload → unpack → tools → destroy), `probe_runner`, the one exec wrapper (`exec_argv`, minimal `env -i` environment) | via `SpritesApi` |
+| `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → resolve interpreter → upload → unpack → tools → destroy), `probe_runner`, `run_session` (a `Session` on the same lifecycle), the one exec wrapper (`exec_argv`, minimal `env -i` environment) | via `SpritesApi` |
 | `interpreter.py` | the resolve script, `choose_python` (accepts only the pyenv-versions and `/usr/bin/python3` path shapes), `{python}` substitution, the probe-only diagnostic scripts and output summary | no |
 | `gather.py` | CI evidence labelled by SHA: check runs at the head and other PR commits, workflow runs, head-SHA job logs and artifact contents, omissions | via `GitHubReader` |
 | `controller.py` | one event in, one draft and its review verdict out | via ports |
@@ -602,7 +682,13 @@ interpreter is chosen before they exist. Every other binary comes from
   (fed through `head -c N` into `/tmp/atlas-source.tar.gz`, so nothing
   waits for a stdin EOF) with a 300-second budget, and the runner reports the bytes it wrote,
   which must equal the bytes sent. A second exec unpacks it into `/work`
-  with a 120-second budget. The tool check has 60 seconds and each tool
+  with a 120-second budget. Before writing anything, the runner's own tar
+  checks the archive against the same unpacked-size and member caps
+  (`guest_unpack.py`), and extraction runs under `ulimit -f` sized to the
+  byte cap, and every tar run is under a 60-second `timeout`. An archive
+  past a cap, or a tar that stalls, is refused with a named reason, and a
+  failed unpack the script survives removes its partial tree (D39; the
+  shell's block size is (verify)). The tool check has 60 seconds and each tool
   exec its timeout plus 15. Every budget is capped by the remaining review
   deadline. The controller fetches the tarball with its own token. An external
   deadline is enforced by a watchdog timer. Destroy runs in `finally` and
