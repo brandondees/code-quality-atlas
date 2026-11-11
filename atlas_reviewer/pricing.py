@@ -12,12 +12,17 @@ whatever its condition, so no tier can cost more than reserved.
 
 Key shape: `GET /api/v1/key` returns `{"data": {"limit": number|null,
 "limit_remaining": number|null, "usage": number, ...}}`
-(https://openrouter.ai/docs/api_reference/limits). `include_byok_in_limit`
-must be true when present: a key that does not count BYOK spend against
-its limit is refused.
+(https://openrouter.ai/docs/api_reference/limits).
+`include_byok_in_limit` true means the key counts BYOK spend against that
+limit. False or absent is accepted: `KeyStatus.counts_byok` is then false,
+and the caller runs in no-BYOK mode. OpenRouter's key-limit guide says the
+field defaults to false
+(https://openrouter.ai/docs/guides/best-practices/capping-shared-agent-keys,
+fetched 2026-11-11).
 
-Anything missing, non-numeric, negative (the catalog uses -1 for unknown),
-non-finite or of an unexpected type raises `PricingUnknownError`.
+A price, a token limit, or the key's `limit`, `limit_remaining` or
+`usage` that is missing, non-numeric, negative (the catalog uses -1 for
+unknown), non-finite or of an unexpected type raises `PricingUnknownError`.
 """
 
 from __future__ import annotations
@@ -53,6 +58,9 @@ class KeyStatus:
     limit: Decimal
     limit_remaining: Decimal
     usage: Decimal
+    # True only when `include_byok_in_limit` is boolean true. False, absent
+    # or any other value means the limit does not cover BYOK spend.
+    counts_byok: bool
 
 
 def money(value: Any, what: str) -> Decimal:
@@ -128,12 +136,9 @@ def parse_key_status(data: Json) -> KeyStatus:
         raise PricingUnknownError("key status response has no data object")
     if key.get("limit") is None:
         raise PricingUnknownError("the OpenRouter key has no credit limit (unlimited)")
-    if key.get("include_byok_in_limit", True) is not True:
-        raise PricingUnknownError(
-            "the OpenRouter key does not count BYOK spend against its credit limit"
-        )
     return KeyStatus(
         limit=money(key.get("limit"), "key limit"),
         limit_remaining=money(key.get("limit_remaining"), "key limit_remaining"),
         usage=money(key.get("usage"), "key usage"),
+        counts_byok=key.get("include_byok_in_limit") is True,
     )

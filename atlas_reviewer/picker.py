@@ -12,6 +12,8 @@ NOT RUN. Triage considers only the critical tier, without a call, and so
 does a review where no other lens could fit whole. If the picker cannot run
 or its reply is unusable, only the critical tier is considered and the
 controller notes say why, so a failed pick never means an empty review.
+A `ByokRefusedError` is re-raised: falling back would make another model
+call, and that refusal has to end the review.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ from atlas_reviewer.lenses import (
     plan_lenses,
 )
 from atlas_reviewer.notes import quote_untrusted
-from atlas_reviewer.ports import BoundaryError
+from atlas_reviewer.ports import BoundaryError, ByokRefusedError
 
 PICKER_PATH = (
     Path(__file__).resolve().parent.parent
@@ -157,6 +159,8 @@ def select_lenses(
         return _critical(no_room, False)
     try:
         names = parse_picks(run_picker())
+    except ByokRefusedError:
+        raise
     except BoundaryError as exc:
         return _critical(
             "Lens selection: the lens picker gave no usable lens list (reason, "
