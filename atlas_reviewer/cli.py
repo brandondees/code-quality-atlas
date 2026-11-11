@@ -19,6 +19,7 @@ installation token minted during the run.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import io
 import json
 import math
@@ -27,8 +28,8 @@ import re
 import secrets
 import sys
 import time
-from collections.abc import Callable, Mapping, Sequence
-from contextlib import AbstractContextManager
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
@@ -240,20 +241,50 @@ def _telemetry(
     args: argparse.Namespace,
     run: _Run,
     command: str,
+    claims: ExitStack,
     *,
     default_file: bool,
 ) -> Telemetry:
     """Call with the review lock held: a contender that loses the lock must
-    not have created, let alone written, a telemetry file."""
+    not have created, let alone written, a telemetry file. An explicit
+    `--events` file is claimed before it is opened, for the same reason.
+    The sink's descriptor and the claim are released when `claims` closes."""
     clock = SystemClock()
     stamp = f"{clock.now():%Y%m%dT%H%M%S.%fZ}-{secrets.token_hex(4)}"
     default = _state_dir(args, run.env) / "telemetry" / f"{command}-{stamp}.jsonl"
     path = Path(args.events) if args.events else (default if default_file else None)
+    if path is None:
+        return Telemetry(clock, None, scrub=run.credentials.scrub)
+    if args.events:
+        claims.enter_context(_claimed(path))
     try:
-        sink = JsonlSink(path) if path else None
+        sink = claims.enter_context(JsonlSink(path))
     except OSError as exc:
         raise UsageError(f"telemetry file {path}: {exc}") from exc
     return Telemetry(clock, sink, scrub=run.credentials.scrub)
+
+
+@contextmanager
+def _claimed(path: Path) -> Iterator[None]:
+    """Hold `<path>.lock` for this run. The review lock is per state
+    directory, so two runs with different state directories could still
+    interleave their events in one explicit `--events` file. Locking a
+    sibling leaves a refused run with no telemetry file; the lock file
+    stays, since unlinking one another run may be opening would race."""
+    lock = path.with_name(f"{path.name}.lock")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(lock, os.O_WRONLY | os.O_CREAT, 0o600)
+    except OSError as exc:
+        raise UsageError(f"telemetry file {path}: {exc}") from exc
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise UsageError(f"telemetry file {path} is in use by another run") from exc
+        yield
+    finally:
+        os.close(fd)
 
 
 def _telemetry_line(run: _Run, telemetry: Telemetry) -> str:
@@ -394,8 +425,10 @@ def _cmd_review(args: argparse.Namespace, run: _Run) -> int:
     event = load_event(event_path)
     _review_config(args, "check")
     _check_out_path(args.out)
-    with _review_lock(args, env):
-        telemetry = _telemetry(args, run, "review", default_file=not args.dry_run)
+    with _review_lock(args, env), ExitStack() as claims:
+        telemetry = _telemetry(
+            args, run, "review", claims, default_file=not args.dry_run
+        )
         run.telemetry = telemetry
         provider = _select_provider(args, env, args.openrouter_factory, telemetry)
         if args.dry_run:
@@ -539,8 +572,10 @@ def _cmd_probe(args: argparse.Namespace, run: _Run) -> int:
     env, out = run.env, run.out
     sequence = _PROBE_SEQUENCES[args.sequence]
     report = io.StringIO()
-    with _review_lock(args, env):
-        telemetry = _telemetry(args, run, f"probe-{args.sequence}", default_file=True)
+    with _review_lock(args, env), ExitStack() as claims:
+        telemetry = _telemetry(
+            args, run, f"probe-{args.sequence}", claims, default_file=True
+        )
         run.telemetry = telemetry
         try:
             usable = sequence(args, run, report, telemetry)

@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: MIT
 """Lifecycle telemetry: one structured event per step of a review or probe.
 
-Every event goes to one `EventSink` (a JSONL file in live use, nothing in
-tests) and is also kept in memory for the summary table that the draft and
-`probe-runner` print. Field values are numbers,
+Every event is kept in memory for the summary table that the draft and
+`probe-runner` print, and goes to one `EventSink` (a JSONL file in live
+use, nothing in tests), except that an event recorded after the sink has
+closed stays in memory only. Field values are numbers,
 booleans or labels the controller chose. Free text (error messages, which
 can quote URLs or runner output) goes through `scrub`, the controller's
 redactor, before any sink sees it, so no event carries a credential; a
@@ -26,7 +27,7 @@ import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, Self, TextIO
 
 from atlas_reviewer.ports import BoundaryError, Clock
 from atlas_reviewer.redact import redact
@@ -72,17 +73,44 @@ class NullSink:
 
 
 class JsonlSink:
-    """Appends one JSON object per line, opening and closing the file for
-    each event, so a crashed or killed run still leaves every event up to
-    the crash on disk."""
+    """Appends one JSON object per line through one descriptor, held from
+    entering the sink as a context manager until it exits, and flushes
+    each line, so a crashed or killed run still leaves every event up to
+    the crash on disk. Holding the descriptor means a file deleted
+    mid-run is never recreated outside its claim."""
 
     def __init__(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
+        self._out: TextIO | None = None
+        self._closed = False
+        self._lock = threading.Lock()
+
+    def __enter__(self) -> Self:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._out = self.path.open("a", encoding="utf-8")
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        # The same lock as `emit`: the runner watchdog can still be
+        # writing when the CLI leaves this sink, and a close landing
+        # mid-write would raise on that thread.
+        with self._lock:
+            if self._out is not None:
+                self._out.close()
+                self._out = None
+            self._closed = True
 
     def emit(self, event: Event) -> None:
-        with self.path.open("a", encoding="utf-8") as out:
-            out.write(json.dumps(event.as_json()) + "\n")
+        with self._lock:
+            if self._out is None:
+                # Closed, not merely unopened. `runner.py` returns from the
+                # final destroy while the watchdog may still be inside
+                # delete; that late record is dropped, not raised.
+                if self._closed:
+                    return
+                raise RuntimeError(f"telemetry sink {self.path} is not open")
+            self._out.write(json.dumps(event.as_json()) + "\n")
+            self._out.flush()
 
 
 def _redact_shapes(text: str) -> str:

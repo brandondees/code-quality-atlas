@@ -83,7 +83,11 @@ No model reviewed any file, so a dry run always exits 4, review incomplete
 - `--depth {triage,review,comprehensive}` (default `review`) is the atlas
   depth mode. Triage runs the critical tier with no picker call.
 - `--events FILE` writes lifecycle telemetry as JSONL (see Lifecycle
-  telemetry). A dry run writes none without it.
+  telemetry). A dry run writes none without it. A run holds the file for
+  its whole duration, so a second run naming the same file, even from
+  another state directory, is refused with the usage error (2) and creates
+  no telemetry file. The hold is a lock on a sibling `FILE.lock`, which
+  stays after the run.
 - `--first-frame-seconds N` (default 30, also on `probe-runner`) fails any
   exec that sends no input if no output byte arrives within N seconds (see
   One exec shape).
@@ -533,15 +537,21 @@ purpose, timeout, bytes sent and received, the stream-id bytes seen
 (`frames_seen`, for example `0x01:1`), the exit status, and its duration.
 The upload event carries the byte count the runner reports writing.
 
-Events go to one `EventSink`. Live commands write JSONL to `--events FILE`,
+Events go to one `EventSink`. An event recorded after that sink has closed
+stays in memory only. Live commands write JSONL to `--events FILE`,
 or by default to
-`<state dir>/telemetry/<command>-<UTC time to the microsecond>-<random hex>.jsonl`,
-named only once the single-review lock is held, so two runs never share a
-file and a run refused the lock creates none. `review` and `probe-runner`
-print the file's path when they finish (`review` on stderr when stdout is
-the draft), and on stderr after the error message when a usage or boundary
-error ends a run whose telemetry had started. Each line is written and closed as it happens, so a killed run
-keeps its events. The draft and `probe-runner` print the same events as a
+`<state dir>/telemetry/<command>-<UTC time to the microsecond>-<random hex>.jsonl`.
+A default path is named only once the single-review lock is held and is
+unique to that run, so two runs never share one, and a run refused the lock
+creates none. An explicit `--events` file is claimed with a sibling
+`FILE.lock` for the whole run, so a second run naming it is refused and
+creates no telemetry file. `review` and `probe-runner` print the file's path
+when they finish (`review` on stderr when stdout is the draft), and on
+stderr after the error message when a usage or boundary error ends a run
+whose telemetry had started. That line's event count is the number kept
+in memory, so it can include an event recorded after the sink closed,
+which was not written. Each line is written and flushed on the descriptor
+held for the run, so a killed run keeps its events. The draft and `probe-runner` print the same events as a
 summary table. Field values are numbers, booleans or controller-chosen
 labels (step labels never include branch names or other PR text). Error
 text goes through a redactor holding every credential value from the

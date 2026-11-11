@@ -1058,6 +1058,21 @@ def test_an_error_before_telemetry_starts_names_no_telemetry_file(tmp_path):
     assert "telemetry:" not in err
 
 
+def test_an_events_file_another_run_holds_is_refused_and_reusable_after(tmp_path):
+    target = tmp_path / "shared.jsonl"
+    argv = ("review", "--event", EVENT, "--dry-run", "--events", str(target))
+    with cli._claimed(target):
+        code, out, err = run_cli("--state-dir", str(tmp_path / "a"), *argv)
+    assert code == cli.EXIT_USAGE
+    assert "is in use by another run" in err
+    assert not target.exists()
+    assert out == ""
+    for state in ("b", "c"):
+        code, _, _ = run_cli("--state-dir", str(tmp_path / state), *argv)
+        assert code == cli.EXIT_INCOMPLETE
+    assert jsonl(target)
+
+
 def test_a_dry_run_writes_telemetry_only_when_asked(tmp_path):
     run_cli("--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run")
     assert not (tmp_path / "telemetry").exists()
