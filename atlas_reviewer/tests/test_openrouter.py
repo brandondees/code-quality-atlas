@@ -589,10 +589,11 @@ def test_an_explicit_non_byok_response_is_accepted_when_the_flag_is_off():
     assert p.budget.committed_usd() == Decimal("0.05")
 
 
-@pytest.mark.parametrize("upstream", ["0.0790", None])
-def test_a_non_byok_response_settles_usage_cost_when_upstream_is_present(upstream):
-    """Boolean false means usage.cost is the whole charge. Adding the
-    reported upstream amount settled the live call at twice the key charge."""
+@pytest.mark.parametrize("upstream", ["0.0790", None, "not-a-number", {}])
+def test_a_non_byok_response_settles_usage_cost_whatever_upstream_reports(upstream):
+    """PR #585 settled twice the key charge by adding this field. Boolean
+    false settles usage.cost instead, and the budget line keeps the raw
+    value, including null and unreadable ones."""
     usage = {
         "prompt_tokens": 36_614,
         "completion_tokens": 576,
@@ -603,6 +604,10 @@ def test_a_non_byok_response_settles_usage_cost_when_upstream_is_present(upstrea
     p = provider(OpenRouterFake(reply(completion(usage=usage))))
     p.complete(SMALL)
     assert p.budget.calls[0].actual_usd == Decimal("0.0790")
+    assert (
+        f"(upstream {upstream!r} reported, not added: is_byok false)"
+        in p.usage_lines()[1]
+    )
 
 
 @pytest.mark.parametrize("flag", ["false", 0, None])

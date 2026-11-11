@@ -46,7 +46,10 @@
   charged to the account and does not say whether a non-BYOK `cost`
   already includes the upstream amount
   (https://openrouter.ai/docs/cookbook/administration/usage-accounting,
-  fetched 2026-11-11) (verify). A BYOK call that omits the upstream
+  fetched 2026-11-11) (verify). On PR #585 (2026-11-11) the key charge
+  equalled `usage.cost` and the previous sum settled twice that, so
+  boolean false settles `usage.cost`. The settlement line records the
+  raw upstream value that was not added. A BYOK call that omits the upstream
   charge, or an upstream charge that cannot be read on a call that is
   not explicitly non-BYOK, keeps its full reservation. A key
   whose `include_byok_in_limit` is not true passes preflight and the run
@@ -413,14 +416,22 @@ def _actual_cost(usage: Json, terms: ModelTerms) -> tuple[Decimal | None, str]:
         _tokens(details, "reasoning_tokens") if isinstance(details, dict) else None
     )
     summary = f"tokens in={prompt_t} out={completion_t} reasoning={reasoning_t}"
-    # Boolean false means usage.cost is the whole charge, so the upstream
-    # field is not added and a null or unreadable one is not an error.
-    # Any other flag still adds a reported upstream cost.
+    # PR #585 (2026-11-11): the key charge equalled usage.cost and the old
+    # sum settled twice that. Boolean false therefore settles usage.cost.
+    # Whether the reported upstream amount is already inside cost is not
+    # stated in OpenRouter's docs (verify). Any other flag still adds it.
     explicitly_non_byok = usage.get("is_byok") is False
-    try:
-        upstream = None if explicitly_non_byok else _upstream_cost(usage)
-    except PricingUnknownError:
-        return None, summary
+    if explicitly_non_byok:
+        cost_details = usage.get("cost_details")
+        if isinstance(cost_details, dict) and "upstream_inference_cost" in cost_details:
+            raw = cost_details["upstream_inference_cost"]
+            summary += f" (upstream {raw!r} reported, not added: is_byok false)"
+        upstream = None
+    else:
+        try:
+            upstream = _upstream_cost(usage)
+        except PricingUnknownError:
+            return None, summary
     if usage.get("is_byok") is True and upstream is None:
         return None, f"{summary} (BYOK upstream cost not reported)"
     try:

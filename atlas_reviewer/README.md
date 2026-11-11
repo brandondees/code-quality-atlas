@@ -277,7 +277,8 @@ OpenRouter's documentation), so a $0 readback right after a call is expected
 and is not a mismatch. Cost is taken from each response's `usage`, never
 from that counter. When `usage.is_byok` is boolean false, the settled
 amount is `usage.cost` and a reported `cost_details.upstream_inference_cost`
-is not added. OpenRouter's usage-accounting page calls `cost` the total
+is not added, and the settlement line records the raw upstream value
+that was left out. OpenRouter's usage-accounting page calls `cost` the total
 charged to the account and `upstream_inference_cost` the upstream
 provider's charge
 (https://openrouter.ai/docs/cookbook/administration/usage-accounting,
