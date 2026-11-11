@@ -344,6 +344,10 @@ def fly_commands(text: str) -> list[str]:
         joined = re.sub(r"\\\n\s*", " ", block).replace("flyp() {", "")
         for segment in re.split(r"\n|\|\||&&|\||;|\$\(|\(|\)", joined):
             words = segment.split()
+            # A timeout wrapper runs fly inside a subshell; strip it so the
+            # guards still see those machine-run commands.
+            if len(words) >= 3 and words[0] == "timeout" and words[1].isdigit():
+                words = words[2:]
             if words and words[0] in ("fly", "flyp"):
                 commands.append(" ".join(words))
     return commands
@@ -360,15 +364,23 @@ def test_every_runbook_fly_command_names_its_app_or_org():
 
 def test_only_the_token_mint_and_the_wrapper_call_fly_without_the_org_token():
     bare = [c for c in fly_commands(RUNBOOK) if c.startswith("fly ")]
-    assert bare == [
-        (
-            "fly tokens create org --org personal --name atlas-reviewer "
-            '--expiry 168h > "$SECRETS_DIR/fly-personal.token"'
-        ),
-        'fly "$@"',
-    ]
-    assert "unset FLY_ACCESS_TOKEN" in RUNBOOK
+    mint = (
+        "fly tokens create org --org personal --name atlas-reviewer "
+        '--expiry 168h > "$SECRETS_DIR/fly-personal.token"'
+    )
+    timed = [c for c in bare if c.startswith("fly machine run ")]
+    assert bare == [mint, 'fly "$@"', *timed]
+    assert len(timed) == 3
+    for command in timed:
+        assert "--rm" in command
+        assert "--app atlas-reviewer" in command
+    assert "timeout 45 fly machine run" in RUNBOOK
+    # The timed runs keep the token in a subshell export, never as an
+    # argv assignment the way `env FLY_API_TOKEN=...` would.
     assert 'export FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN"' in RUNBOOK
+    assert "env -u FLY_ACCESS_TOKEN" not in RUNBOOK
+    assert not re.search(r"(?m)^\s*FLY_API_TOKEN=", RUNBOOK)
+    assert "unset FLY_ACCESS_TOKEN" in RUNBOOK
     assert "export FLY_PERSONAL_API_TOKEN" not in RUNBOOK
 
 
@@ -465,7 +477,11 @@ def test_a_review_writes_to_the_machine_disk_and_is_held_not_removed():
         for block in blocks:
             assert "--rm" in block
             assert "--restart no" in block
-            assert "timeout 45" in block
+            assert "timeout 45 fly machine run" in block
+            assert "unset FLY_ACCESS_TOKEN" in block
+            assert 'export FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN"' in block
+            assert not re.search(r"(?m)^\s*FLY_API_TOKEN=", block)
+    assert 'flyp logs --app atlas-reviewer --machine "$MACHINE_ID" --no-tail' in RUNBOOK
 
 
 def test_a_review_is_waited_for_copied_released_and_destroyed_in_that_order():
@@ -497,9 +513,8 @@ def test_runbook_has_a_hard_stop_and_recovers_sprites_by_name():
     assert "runner Sprite for this review:" in RUNBOOK
     recover = RUNBOOK.split("### Recover a runner Sprite by name", 1)[1]
     sweep = block_with("-- sweep --event")
-    assert sweep.rstrip().endswith(
-        "-- sweep --event /home/atlas/event.json --force-live"
-    )
+    assert "-- sweep --event /home/atlas/event.json --force-live" in sweep
+    assert sweep.rstrip().endswith(")")
     assert recover.index("flyp machine list --app atlas-reviewer") < recover.index(
         sweep
     )

@@ -455,12 +455,14 @@ is how long Fly waits before SIGKILL.
 `fly machine stop`, including `--signal SIGINT`, signals the entrypoint.
 The entrypoint then exits without holding, so there is nothing to copy.
 On 2026-11-11, with flyctl, that stop ended the Machine with exit 130
-about 1 second later, and the runner Sprite was gone.
+about 1 second later, and the runner Sprite was gone. That is the
+supported hard stop.
 
 A SIGTERM sent straight to the CLI process does not signal the
 entrypoint. Observed the same day with flyctl, the entrypoint held, and
-`/home/atlas/out/exit-code` was 130. That file can be copied while the
-Machine is held.
+`/home/atlas/out/exit-code` was 130. That is an observation from that
+run, not a supported stop path: this runbook does not say how to find
+the CLI's PID or when to prefer that over `fly machine stop`.
 
 `--force` destroys the Machine in any state. A SIGKILL skips `finally`,
 so after a hard stop check for the runner Sprite as below.
@@ -487,50 +489,67 @@ to start machine..." after the Machine had already exited and been
 removed. It hung twice for more than 4 minutes, and a third time on a
 very short command (`probe-runner`). `timeout 45` stopped the hang.
 This is what that run showed, not a documented Fly behavior. `timeout`
-runs a program and cannot call the `flyp` function, so the command
-passes the org token the way `flyp` does. If the wrapper stops a hung
-flyctl, its status is timeout's, not the controller's. The controller's
-exit code is then the logs line `Main child exited normally with code: N`:
+is GNU coreutils (`gtimeout` from Homebrew coreutils on macOS). It
+runs a program and cannot call the `flyp` function, so each command
+below exports the org token inside a subshell the way `flyp` does, and
+runs `timeout 45 fly ...` there. The token stays in that subshell's
+environment, not on a command line.
+
+Note the Machine ID that `fly machine run` prints before any hang. If
+the wrapper stops a hung flyctl, its status is timeout's, not the
+controller's. Read that Machine's logs only
+([fly logs](https://fly.io/docs/flyctl/cmd/fly_logs) filters with
+`--machine`):
 
 ```sh
-flyp logs --app atlas-reviewer --no-tail
+flyp logs --app atlas-reviewer --machine "$MACHINE_ID" --no-tail
 ```
 
-The probe below uses the same wrapper and the same logs line.
+App-wide `--no-tail` keeps only the last 100 lines and can return
+another Machine's `Main child exited normally with code: N`. A
+timeout can also stop a slow but healthy run before this Machine has
+written that line; then the outcome is unknown. For the sweep, the
+success signal is that Machine's own
+`<name>: destroyed (verified absent)` or
+`<name>: already absent, nothing deleted (verified absent)` line. If
+neither line appears for that Machine, run the sweep again. Exit 3
+means the same: the runner was not verified gone.
+
+The probe commands below use the same subshell wrapper and the same
+per-Machine logs read.
 
 ```sh
-timeout 45 env -u FLY_ACCESS_TOKEN \
-  FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN" \
-  fly machine run "$IMAGE" \
-  --app atlas-reviewer \
-  --region iad \
-  --vm-cpu-kind shared \
-  --vm-cpus 1 \
-  --vm-memory 1024 \
-  --rm \
-  --restart no \
-  --entrypoint /usr/local/bin/atlas-reviewer \
-  --env ATLAS_EVENT_JSON="$EVENT" \
-  -- sweep --event /home/atlas/event.json --force-live
+(
+  unset FLY_ACCESS_TOKEN
+  export FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN"
+  timeout 45 fly machine run "$IMAGE" \
+    --app atlas-reviewer \
+    --region iad \
+    --vm-cpu-kind shared \
+    --vm-cpus 1 \
+    --vm-memory 1024 \
+    --rm \
+    --restart no \
+    --entrypoint /usr/local/bin/atlas-reviewer \
+    --env ATLAS_EVENT_JSON="$EVENT" \
+    -- sweep --event /home/atlas/event.json --force-live
+)
 ```
 
 `sweep --event` derives the runner name from the event. `sweep --runner
 <name>` takes the name from the logs line instead. Either one records the
-name in that Machine's ledger and destroys it; the logs show
-`<name>: destroyed (verified absent)`, or `<name>: already absent,
-nothing deleted (verified absent)` when no Sprite had that name. The
-sweep exits 3 when it cannot verify the runner is gone; run it again.
-The same command works from a checkout with `ATLAS_SPRITES_TOKEN` set:
+name in that Machine's ledger and destroys it. The same command works
+from a checkout with `ATLAS_SPRITES_TOKEN` set:
 `python -m atlas_reviewer sweep --event event.json --force-live`.
 
 `probe-runner` uses the same image, the same `--rm --restart no`
-flags, and the same `timeout 45` wrapper. Its output is short. On the
+flags, and the same `timeout 45` subshell. Its output is short. On the
 2026-11-11 probe-runner run, telemetry from a `--rm` probe was gone
 with the Machine's disk and survived only in `fly logs`. Start
 streaming logs before the probe, with the `flyp logs` command in
 [Run one review](#run-one-review). If flyctl hangs after the Machine
-has already exited, the exit code is the same logs line, `Main child
-exited normally with code: N`.
+has already exited, read that Machine's exit with the
+`--machine "$MACHINE_ID"` logs command above.
 
 A probe does not call a model, and nothing in the controller checks
 that. App secrets are on every Machine, so the probe Machine also
@@ -548,18 +567,20 @@ flyp secrets list --app atlas-reviewer
 The command with no `ATLAS_EVENT_JSON` is only the protocol probe:
 
 ```sh
-timeout 45 env -u FLY_ACCESS_TOKEN \
-  FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN" \
-  fly machine run "$IMAGE" \
-  --app atlas-reviewer \
-  --region iad \
-  --vm-cpu-kind shared \
-  --vm-cpus 1 \
-  --vm-memory 1024 \
-  --rm \
-  --restart no \
-  --entrypoint /usr/local/bin/atlas-reviewer \
-  -- probe-runner
+(
+  unset FLY_ACCESS_TOKEN
+  export FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN"
+  timeout 45 fly machine run "$IMAGE" \
+    --app atlas-reviewer \
+    --region iad \
+    --vm-cpu-kind shared \
+    --vm-cpus 1 \
+    --vm-memory 1024 \
+    --rm \
+    --restart no \
+    --entrypoint /usr/local/bin/atlas-reviewer \
+    -- probe-runner
+)
 ```
 
 `probe-runner --sequence review` on Fly cannot use `--tarball`. This
@@ -570,19 +591,21 @@ probe-runner run the command was `--sequence review --event
 /home/atlas/event.json --tools review`:
 
 ```sh
-timeout 45 env -u FLY_ACCESS_TOKEN \
-  FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN" \
-  fly machine run "$IMAGE" \
-  --app atlas-reviewer \
-  --region iad \
-  --vm-cpu-kind shared \
-  --vm-cpus 1 \
-  --vm-memory 1024 \
-  --rm \
-  --restart no \
-  --entrypoint /usr/local/bin/atlas-reviewer \
-  --env ATLAS_EVENT_JSON="$EVENT" \
-  -- probe-runner --sequence review --event /home/atlas/event.json --tools review
+(
+  unset FLY_ACCESS_TOKEN
+  export FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN"
+  timeout 45 fly machine run "$IMAGE" \
+    --app atlas-reviewer \
+    --region iad \
+    --vm-cpu-kind shared \
+    --vm-cpus 1 \
+    --vm-memory 1024 \
+    --rm \
+    --restart no \
+    --entrypoint /usr/local/bin/atlas-reviewer \
+    --env ATLAS_EVENT_JSON="$EVENT" \
+    -- probe-runner --sequence review --event /home/atlas/event.json --tools review
+)
 ```
 
 After the probe, stage the pilot key again from stdin. The `grep`
