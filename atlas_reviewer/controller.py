@@ -65,6 +65,7 @@ from atlas_reviewer.picker import (
 )
 from atlas_reviewer.ports import (
     BoundaryError,
+    ByokRefusedError,
     Clock,
     GitHubReader,
     Narrative,
@@ -896,8 +897,9 @@ def _narrate_parts(
 ) -> tuple[PartNarrative, ...]:
     """One model call per part, in risk order. A part whose call fails or is
     refused (call cap, cost cap, token bound) still yields a `PartNarrative`,
-    so its files are reported as unreviewed rather than dropped. No diff, no
-    call."""
+    so its files are reported as unreviewed rather than dropped. A
+    `ByokRefusedError` does not: it ends the review, so no later part is
+    called and the run is not a partial draft. No diff, no call."""
     if selection is None:
         return ()
     requests = _requests(base, selection)
@@ -947,6 +949,8 @@ def _narrate_part(
             lambda: deps.harness.review(request),
             {"files": len(part.files), "diff_chars": part.chars},
         )
+    except ByokRefusedError:
+        raise
     except BoundaryError as exc:
         return PartNarrative(
             index, total, part.files, NarrativeFailure(deps.harness.name, str(exc))

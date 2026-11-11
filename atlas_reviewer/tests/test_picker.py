@@ -17,7 +17,7 @@ from atlas_reviewer.picker import (
     picker_instructions,
     select_lenses,
 )
-from atlas_reviewer.ports import BoundaryError
+from atlas_reviewer.ports import BoundaryError, ByokRefusedError
 
 from .helpers import StubLibrary, small_bundle
 
@@ -282,6 +282,14 @@ def _scrub(value):
         return text.replace(value, "[REDACTED:possible-committed-secret]")
 
     return scrub
+
+
+def test_a_byok_refusal_is_not_turned_into_a_fallback_pick():
+    def fail():
+        raise ByokRefusedError("refusing the review: usage.is_byok is true")
+
+    with pytest.raises(ByokRefusedError, match="usage.is_byok is true"):
+        select_lenses(Depth.REVIEW, fail, small_bundle("checking-restraint"), scrub=str)
 
 
 @pytest.mark.parametrize("value", MARKUP_VALUES)

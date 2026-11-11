@@ -23,6 +23,13 @@ class BoundaryError(RuntimeError):
     returned something this service cannot use."""
 
 
+class ByokRefusedError(BoundaryError):
+    """The key does not count BYOK spend, and this model response is not
+    an explicit non-BYOK call. A caller that turns some other
+    `BoundaryError` into a skipped part or a fallback pick re-raises this
+    one: the review stops, and no later model call is made."""
+
+
 class NotFoundError(BoundaryError):
     """The external resource does not exist (HTTP 404)."""
 

@@ -177,6 +177,20 @@ run stays on the offline provider; a run that passes
 `--provider openrouter --allow-live-inference` then fails in the
 controller before a model call, because the variable is missing.
 
+The key needs a hard credit limit of at most $5. OpenRouter's key-limit
+guide says `include_byok_in_limit` defaults to false, so a key made in
+the website, without that field set through the management API, does not
+count BYOK spend against its limit. Brandon found no toggle for the flag
+on key creation or on edit (2026-11-11); the same guide says the
+dashboard toggle is shown once the account has BYOK provider keys
+configured. The controller accepts the key and runs in no-BYOK mode: a
+model response is used only when `usage.is_byok` is false. A response
+that reports BYOK, that does not say, or whose HTTP 200 body cannot
+be parsed, stops the review with exit 3 and makes no further model
+call. A key with the flag set true is
+unchanged: a BYOK response is accepted, and its upstream cost counts
+toward the review cap.
+
 The entrypoint does not print the environment. The Sprites adapter still
 sends no `env`, `dir`, `path`, or `tty` into a Sprite; the Sprites token
 is only the control-plane `Authorization` header. The redactor still

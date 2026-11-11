@@ -251,8 +251,15 @@ slug is not one of them, and the routing docs say a bare slug matches
 every region of that provider, so any slug outside this list is refused
 before a request. Before any inference, `preflight()` reads
 `GET /api/v1/key` and refuses unless the key has a hard limit of at most
-$5 with credit left. Each call re-reads the model's public catalog entry
-and fails closed if a price or limit is missing or unparseable. It then
+$5 with credit left. A key whose `include_byok_in_limit` is not true is
+accepted, and that run is in no-BYOK mode: a model response is used only
+when `usage.is_byok` is false. Any other value, including a missing
+field, or an HTTP 200 whose body cannot be parsed, stops the review
+as a boundary error (exit 3) before another model call, and no draft
+is written. When the flag is true, a BYOK
+response is accepted, as before. Each call re-reads the model's public
+catalog entry and fails closed if a price or limit is missing or
+unparseable. It then
 checks the input bound (200k tokens), max output (24k) and reasoning
 budget (12k), and reserves the call's worst case at the highest listed
 price tier. A reservation is refused if it would be the fourth call in the
@@ -267,8 +274,11 @@ The key's own usage counter (`GET /api/v1/key`) is read once, by the
 preflight, and never after inference. It can lag a completion by about 90
 seconds (an owner-reported pilot observation; not checked against
 OpenRouter's documentation), so a $0 readback right after a call is expected
-and is not a mismatch. Cost is taken from each response's `usage.cost`, never
-from that counter.
+and is not a mismatch. Cost is taken from each response's `usage`, never
+from that counter: `usage.cost`, plus `cost_details.upstream_inference_cost`
+when an upstream charge is reported. On a BYOK call `usage.cost` is only
+OpenRouter's fee. A BYOK call that does not report the upstream charge keeps
+its full reservation, including one refused in no-BYOK mode.
 
 ## What the draft contains
 

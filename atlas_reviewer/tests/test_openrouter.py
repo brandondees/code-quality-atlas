@@ -22,7 +22,7 @@ from atlas_reviewer.openrouter import (
     PINNED_PROVIDERS,
     OpenRouterProvider,
 )
-from atlas_reviewer.ports import BoundaryError
+from atlas_reviewer.ports import BoundaryError, ByokRefusedError
 from atlas_reviewer.pricing import (
     PricingUnknownError,
     parse_key_status,
@@ -54,10 +54,14 @@ def catalog(**pricing_changes):
     }
 
 
-def key_status(limit=5, remaining=5, usage=0, **extra):
-    return {
-        "data": {"limit": limit, "limit_remaining": remaining, "usage": usage, **extra}
-    }
+_OMIT = object()
+
+
+def key_status(limit=5, remaining=5, usage=0, include_byok_in_limit=True, **extra):
+    data = {"limit": limit, "limit_remaining": remaining, "usage": usage, **extra}
+    if include_byok_in_limit is not _OMIT:
+        data["include_byok_in_limit"] = include_byok_in_limit
+    return {"data": data}
 
 
 def completion(text="review text", model=MODEL_ID, usage=None, finish="stop"):
@@ -401,8 +405,6 @@ def test_unknown_or_unparseable_pricing_refuses_before_any_call(model, match):
         (reply(key_status(limit=100, remaining=100)), "pilot ceiling"),
         (reply(key_status(remaining=0)), "no credit remaining"),
         (reply(key_status(remaining=None)), "limit_remaining"),
-        (reply(key_status(include_byok_in_limit=False)), "BYOK spend"),
-        (reply(key_status(include_byok_in_limit=None)), "BYOK spend"),
         (reply({}, status=401), "HTTP 401"),
         (reply(b"nope"), "non-JSON"),
         (reply({"data": None}), "no data object"),
@@ -421,6 +423,18 @@ def test_preflight_refuses_unless_the_key_has_a_hard_limit_of_at_most_five_dolla
 def test_preflight_accepts_a_five_dollar_key():
     status = OpenRouterProvider(OpenRouterFake(), KEY).preflight()
     assert status == parse_key_status(key_status())
+    assert status.counts_byok is True
+
+
+@pytest.mark.parametrize("flag", [False, None, _OMIT], ids=["false", "null", "absent"])
+def test_preflight_accepts_a_key_that_does_not_count_byok_spend(flag):
+    """A website key leaves `include_byok_in_limit` false or absent. The
+    other refusals (no limit, over $5, no credit left) still apply."""
+    fake = OpenRouterFake(key=reply(key_status(include_byok_in_limit=flag)))
+    status = OpenRouterProvider(fake, KEY).preflight()
+    assert status.counts_byok is False
+    assert status.limit == Decimal(5)
+    assert [r[1] for r in fake.requests] == [f"{API}/key"]
 
 
 def test_key_status_is_read_only_by_the_preflight_so_a_lagging_counter_cannot_mismatch():
@@ -465,7 +479,10 @@ def test_byok_upstream_cost_counts_toward_the_review_ceiling():
         "is_byok": True,
         "cost_details": {"upstream_inference_cost": "1.26"},
     }
-    fake = OpenRouterFake(*[reply(completion(usage=usage)) for _ in range(3)])
+    fake = OpenRouterFake(
+        *[reply(completion(usage=usage)) for _ in range(3)],
+        key=reply(key_status(include_byok_in_limit=True)),
+    )
     p = provider(fake)
     assert p.complete(SMALL) == "review text"
     assert p.complete(SMALL) == "review text"
@@ -498,6 +515,78 @@ def test_an_unreadable_upstream_cost_keeps_the_reservation():
     p = provider(OpenRouterFake(reply(completion(usage=usage))))
     p.complete(SMALL)
     assert "actual unknown (counted at the reservation)" in p.usage_lines()[1]
+
+
+def _no_byok_provider(usage, *, flag=False):
+    fake = OpenRouterFake(
+        reply(completion(usage=usage)),
+        reply(completion()),
+        key=reply(key_status(include_byok_in_limit=flag)),
+    )
+    return provider(fake), fake
+
+
+def test_a_byok_response_keeps_its_upstream_cost_when_no_byok_mode_refuses_it():
+    """The review stops. The call is still settled: a reported upstream
+    charge counts, so the cap does not forget the spend."""
+    usage = {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "cost": "0.05",
+        "is_byok": True,
+        "cost_details": {"upstream_inference_cost": "1.26"},
+    }
+    p, fake = _no_byok_provider(usage)
+    with pytest.raises(ByokRefusedError, match="usage.is_byok is true"):
+        p.complete(SMALL)
+    assert len(fake.chat_requests()) == 1
+    assert fake.chat  # the next reply was not consumed
+    assert p.budget.committed_usd() == Decimal("1.31")
+
+
+@pytest.mark.parametrize("flag", [None, "false", 0, []])
+def test_a_non_boolean_is_byok_is_refused_and_keeps_the_reservation(flag):
+    """Only boolean false is non-BYOK. Null, a string, a number, or a list
+    is not that value, so the review stops and the reservation stands."""
+    usage = {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "cost": "0.05",
+        "is_byok": flag,
+    }
+    p, fake = _no_byok_provider(usage)
+    with pytest.raises(ByokRefusedError, match="is not false"):
+        p.complete(SMALL)
+    assert len(fake.chat_requests()) == 1
+    assert fake.chat  # the next reply was not consumed
+    assert p.budget.calls[0].actual_usd is None
+    assert "counted at the reservation" in p.usage_lines()[1]
+
+
+def test_a_missing_is_byok_field_is_refused_and_keeps_the_reservation():
+    """Fail closed. The usage cookbook's Chat Completions example omits
+    `is_byok`, so absence is not proof the call was non-BYOK. With no
+    upstream charge to read, the full reservation stays counted."""
+    usage = {"prompt_tokens": 10, "completion_tokens": 5, "cost": "0.05"}
+    p, fake = _no_byok_provider(usage)
+    with pytest.raises(ByokRefusedError, match="no is_byok field"):
+        p.complete(SMALL)
+    assert len(fake.chat_requests()) == 1
+    assert p.budget.calls[0].actual_usd is None
+    assert "counted at the reservation" in p.usage_lines()[1]
+
+
+def test_an_explicit_non_byok_response_is_accepted_when_the_flag_is_off():
+    usage = {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "cost": "0.05",
+        "is_byok": False,
+    }
+    p, fake = _no_byok_provider(usage)
+    assert p.complete(SMALL) == "review text"
+    assert len(fake.chat_requests()) == 1
+    assert p.budget.committed_usd() == Decimal("0.05")
 
 
 def test_an_upstream_cost_is_added_when_the_call_is_not_marked_byok():

@@ -1432,6 +1432,137 @@ def test_the_exit_codes_are_the_documented_numbers():
     ) == (0, 2, 3, 4, 5)  # fmt: skip
 
 
+def _stopped_no_byok_review(tmp_path, monkeypatch, usage, *, first=None):
+    """A two-part diff. The first response is the one under test; a second
+    reply is queued and must not be sent. `first` replaces the completion
+    built from `usage`."""
+    from atlas_reviewer.openrouter import OpenRouterProvider
+
+    from .test_openrouter import OpenRouterFake, completion, key_status, reply
+
+    body = "+line\n" * 400
+    wide = (
+        "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1,400 @@\n"
+        + body
+        + "diff --git a/b.py b/b.py\n--- a/b.py\n+++ b/b.py\n@@ -1 +1,400 @@\n"
+        + body
+    )
+
+    class WideDiff(FixtureGitHub):
+        def get_pull_diff(self, repo, number):
+            self.calls.append(("get_pull_diff", repo, str(number)))
+            return wide
+
+    held = {}
+
+    def factory(key, limits):
+        opening = (
+            first
+            if first is not None
+            else reply(completion("Reviewed.\n\nReview event: APPROVE", usage=usage))
+        )
+        # The queued reply is an explicit non-BYOK completion, so a refusal
+        # that is swallowed becomes a second model call and a written draft.
+        continued = {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "cost": "0.01",
+            "is_byok": False,
+        }
+        fake = OpenRouterFake(
+            opening,
+            reply(completion("Reviewed.\n\nReview event: APPROVE", usage=continued)),
+            key=reply(key_status(include_byok_in_limit=False)),
+        )
+        held["provider"] = OpenRouterProvider(fake, key, limits=limits)
+        held["fake"] = fake
+        return held["provider"]
+
+    monkeypatch.setattr(
+        cli,
+        "AppInstallationTokens",
+        lambda transport, clock, **kw: type("T", (), {"secrets": lambda self: ()})(),
+    )
+    monkeypatch.setattr(cli, "GitHubClient", lambda transport, t: WideDiff(FIXTURE))
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        [
+            "--state-dir",
+            str(tmp_path),
+            "review",
+            "--event",
+            EVENT,
+            "--provider",
+            "openrouter",
+            "--allow-live-inference",
+            "--depth",
+            "triage",
+            "--max-model-calls",
+            "2",
+            "--diff-chars-per-call",
+            "1000",
+        ],
+        env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"},
+        out=out,
+        err=err,
+        sprites_factory=scripted_sprites,
+        openrouter_factory=factory,
+    )
+    return code, out.getvalue(), err.getvalue(), held
+
+
+def test_a_byok_response_in_no_byok_mode_stops_the_review(tmp_path, monkeypatch):
+    """The first response is BYOK, so the review exits 3 and the second
+    model call is never sent. A swallowed error would send it and exit 4.
+    The reported upstream charge is still counted."""
+    from decimal import Decimal
+
+    usage = {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "cost": "0.05",
+        "is_byok": True,
+        "cost_details": {"upstream_inference_cost": "1.26"},
+    }
+    code, out, err, held = _stopped_no_byok_review(tmp_path, monkeypatch, usage)
+    assert code == cli.EXIT_BOUNDARY == 3
+    assert out == ""
+    assert "does not count BYOK spend" in err
+    assert "usage.is_byok is true" in err
+    assert len(held["fake"].chat_requests()) == 1
+    assert held["provider"].budget.committed_usd() == Decimal("1.31")
+
+
+def test_an_unparseable_response_in_no_byok_mode_stops_the_review(
+    tmp_path, monkeypatch
+):
+    """An HTTP 200 that cannot be parsed does not say the call was non-BYOK.
+    The review exits 3 after that one request. A plain boundary error would
+    continue to the next part."""
+    from .test_openrouter import reply
+
+    code, out, err, held = _stopped_no_byok_review(
+        tmp_path, monkeypatch, None, first=reply(b"<html>")
+    )
+    assert code == cli.EXIT_BOUNDARY == 3
+    assert out == ""
+    assert "could not be parsed, so is_byok could not be checked" in err
+    assert len(held["fake"].chat_requests()) == 1
+    assert held["provider"].budget.calls[0].actual_usd is None
+
+
+def test_a_missing_is_byok_field_stops_the_review(tmp_path, monkeypatch):
+    """Fail closed: a response that does not say whether it was BYOK is not
+    a review. The upstream charge is unknown, so the reservation stands."""
+    usage = {"prompt_tokens": 10, "completion_tokens": 5, "cost": "0.05"}
+    code, out, err, held = _stopped_no_byok_review(tmp_path, monkeypatch, usage)
+    assert code == cli.EXIT_BOUNDARY == 3
+    assert out == ""
+    assert "no is_byok field" in err
+    assert len(held["fake"].chat_requests()) == 1
+    assert held["provider"].budget.calls[0].actual_usd is None
+
+
 def test_a_review_whose_model_call_failed_exits_incomplete_and_never_approves(
     tmp_path, monkeypatch
 ):

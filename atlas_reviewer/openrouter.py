@@ -23,7 +23,8 @@
   endpoints.
 - `preflight()` must pass before any inference: it reads the key's own
   status (`GET /api/v1/key`) and refuses unless the key has a hard credit
-  limit of at most `KEY_LIMIT_MAX_USD`, with credit left.
+  limit of at most `KEY_LIMIT_MAX_USD`, with credit left. A key whose
+  `include_byok_in_limit` is false or absent is accepted.
 - Before each completion the public catalog entry is re-fetched (without
   the key) and every limit is checked in code before a request is sent;
   each attempt, retries included, reserves its worst-case cost in a
@@ -40,8 +41,17 @@
   upstream charge is reported (on a BYOK call `usage.cost` is only
   OpenRouter's fee). A BYOK call that omits the upstream charge, or an
   upstream charge that cannot be read, keeps its full reservation. A key
-  whose `include_byok_in_limit` is not true is refused at preflight: its
-  credit limit would not cover that upstream charge.
+  whose `include_byok_in_limit` is not true passes preflight and the run
+  is in no-BYOK mode: a response is used only when `usage.is_byok` is
+  boolean false. True, a missing field, any other value, or an HTTP 200
+  whose body cannot be parsed raises `ByokRefusedError` after the call
+  is settled, so the review stops before another model call.
+  OpenRouter's usage cookbook shows
+  `is_byok: false` on its Responses API example and omits the field from
+  its Chat Completions example, and the SDK types it as optional
+  (https://openrouter.ai/docs/cookbook/administration/usage-accounting,
+  fetched 2026-11-11), so a missing field is not evidence the call was
+  non-BYOK.
 """
 
 from __future__ import annotations
@@ -63,7 +73,7 @@ from atlas_reviewer.budget import (
     worst_case_usd,
 )
 from atlas_reviewer.http import HttpResponse, Transport, safe_url
-from atlas_reviewer.ports import BoundaryError, Json
+from atlas_reviewer.ports import BoundaryError, ByokRefusedError, Json
 from atlas_reviewer.pricing import (
     KeyStatus,
     ModelTerms,
@@ -216,7 +226,8 @@ class OpenRouterProvider:
         if resp.status != 200:
             ReviewBudget.settle(record, f"HTTP {resp.status}")
             raise BoundaryError(f"OpenRouter HTTP {resp.status} for {safe_url(url)}")
-        return _completion(resp, terms, record)
+        counts_byok = self._key_status.counts_byok if self._key_status else False
+        return _completion(resp, terms, record, counts_byok=counts_byok)
 
     def _body(self, prompt: Prompt, terms: ModelTerms) -> bytes:
         limits = self.budget.limits
@@ -291,14 +302,25 @@ def _json_object(raw: bytes, where: str, error: type[BoundaryError]) -> Json:
     return data
 
 
-def _completion(resp: HttpResponse, terms: ModelTerms, record: CallRecord) -> str:
+def _completion(
+    resp: HttpResponse, terms: ModelTerms, record: CallRecord, *, counts_byok: bool
+) -> str:
     try:
         data = _json_object(resp.body, "OpenRouter chat completion", BoundaryError)
     except BoundaryError:
         ReviewBudget.settle(record, "unparseable response")
+        if not counts_byok:
+            raise ByokRefusedError(
+                "refusing the review: this OpenRouter key does not count BYOK "
+                "spend against its credit limit, and the response could not be "
+                "parsed, so is_byok could not be checked"
+            ) from None
         raise
     usage = data.get("usage")
-    actual, summary = _actual_cost(usage if isinstance(usage, dict) else {}, terms)
+    usage_obj = usage if isinstance(usage, dict) else {}
+    if not counts_byok:
+        _refuse_unless_explicitly_non_byok(usage_obj, terms, record)
+    actual, summary = _actual_cost(usage_obj, terms)
     served = data.get("model")
     if not isinstance(served, str) or not _is_pinned_model(served):
         ReviewBudget.settle(record, f"rejected: served by {served!r}", actual, summary)
@@ -334,6 +356,36 @@ def _message(data: Json) -> tuple[str, str]:
     content = message.get("content") if isinstance(message, dict) else None
     finish = first.get("finish_reason") if isinstance(first, dict) else None
     return (content if isinstance(content, str) else ""), str(finish)
+
+
+def _refuse_unless_explicitly_non_byok(
+    usage: Json, terms: ModelTerms, record: CallRecord
+) -> None:
+    """No-BYOK mode. Only boolean false is a non-BYOK response. True, a
+    missing field, or any other value ends the review. The call is settled
+    first, as a BYOK call would be, so an unreported upstream charge keeps
+    the full reservation."""
+    reason = _no_byok_reason(usage)
+    if reason is None:
+        return
+    marked = usage if usage.get("is_byok") is True else {**usage, "is_byok": True}
+    actual, summary = _actual_cost(marked, terms)
+    ReviewBudget.settle(record, f"refused: {reason}", actual, summary)
+    raise ByokRefusedError(
+        "refusing the review: this OpenRouter key does not count BYOK spend "
+        f"against its credit limit, and {reason}"
+    )
+
+
+def _no_byok_reason(usage: Json) -> str | None:
+    if "is_byok" not in usage:
+        return "the response usage has no is_byok field"
+    flag = usage["is_byok"]
+    if flag is False:
+        return None
+    if flag is True:
+        return "the response usage.is_byok is true"
+    return "the response usage.is_byok is not false"
 
 
 def _tokens(usage: Json, key: str) -> int | None:
