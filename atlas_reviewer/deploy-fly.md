@@ -8,7 +8,11 @@ This is the D24 shape on a Fly host (D37 in
 [`docs/open-questions.md`](../docs/open-questions.md)).
 
 Nothing in this repository creates the app or sets a secret. The commands
-below are what an operator runs. They were not run from this change.
+below are what an operator runs. One operator run, of app `atlas-reviewer`
+in the Fly org `personal`, is recorded under
+[What the 2026-11-10 deploy showed](#what-the-2026-11-10-deploy-showed).
+That run used the earlier shape, `fly machine run --rm` with the draft on
+stdout, before the review wrote to disk and was held.
 
 The commands pass `--app atlas-reviewer`. That is the `app` value in the
 repo-root [`fly.toml`](../fly.toml). Fly app names are global. If
@@ -158,6 +162,15 @@ flyp secrets import --stage --app atlas-reviewer < "$SECRETS_DIR/secrets.env"
 flyp secrets list --app atlas-reviewer
 ```
 
+Do not run `fly secrets deploy`. After `--stage`, flyctl suggests that
+command. The secrets guide says `fly secrets deploy` redeploys the current
+release with the staged secrets
+([Secrets and Fly Apps](https://fly.io/docs/apps/secrets)). That is a
+release, and it updates the app's Machines. This runbook does not release
+the app and does not keep a Machine. On the deploy recorded below, the
+secrets stored by `--stage` were already applied to the next
+`fly machine run`.
+
 `fly secrets list` prints names and digests, not values. The env file
 holds all five names. `ATLAS_OPENROUTER_API_KEY` can be omitted when every
 run stays on the offline provider; a run that passes
@@ -181,6 +194,21 @@ LABEL="reviewer-$(git rev-parse --short=12 HEAD)"
 flyp deploy --build-only --push --image-label "$LABEL" --app atlas-reviewer
 IMAGE="registry.fly.io/atlas-reviewer:$LABEL"
 ```
+
+If the default Depot builder fails, run the same publish with
+`--depot=false`:
+
+```sh
+flyp deploy --build-only --push --image-label "$LABEL" --depot=false --app atlas-reviewer
+```
+
+`--depot=false` is the documented switch off Depot when a remote build
+hangs waiting for the Depot builder
+([Troubleshoot your deployment](https://fly.io/docs/getting-started/troubleshooting)).
+On the 2026-11-10 deploy, Depot timed out after about 5 minutes with
+`authentication handshake failed: EOF`. The same publish with
+`--depot=false` then succeeded in about 2 minutes. Do not drop
+`--build-only` from either command.
 
 `fly deploy --build-only --push` builds and pushes and does not deploy
 ([Working with Docker on Fly.io](https://fly.io/docs/blueprints/working-with-docker)).
@@ -224,14 +252,19 @@ single-review lock is a file on that Machine's disk, so a second
 flyp machine list --app atlas-reviewer
 ```
 
-Optionally stream the logs in another terminal. Run the load block
-from [Fly credentials](#fly-credentials) there first: a new shell has
-neither the token variable nor `flyp`. The controller's progress and the
-runner Sprite's name go to the logs:
+In another terminal, start the logs before the review. Run the load
+block from [Fly credentials](#fly-credentials) there first: a new shell
+has neither the token variable nor `flyp`. The controller's progress and
+the runner Sprite's name go to the logs:
 
 ```sh
 flyp logs --app atlas-reviewer
 ```
+
+`fly logs` streams the app's logs until you stop it
+([fly logs](https://fly.io/docs/flyctl/cmd/fly_logs)). A fetch started
+afterwards can miss the start of the run (see
+[What the 2026-11-10 deploy showed](#what-the-2026-11-10-deploy-showed)).
 
 ### Start the review
 
@@ -311,8 +344,20 @@ echo "review exit code: ${code:-none after an hour}"
 `review` exits 0 when file coverage is complete and 4 when it is not
 (D36). Usage is 2 and a boundary failure is 3. A stop is 130, the
 shell's status for a process that died on SIGINT (`subprocess` sees
-the signal as a negative code). With no code after an hour, the review
-is hung. Go to [Hard stop](#hard-stop).
+the signal as a negative code). flyctl's own exit status is not one
+of those. With no code after an hour, the review is hung. Go to
+[Hard stop](#hard-stop).
+
+Two other places show the process exit code, but not during the hold.
+The entrypoint is the Machine's main child and keeps running while it
+holds, so they appear only when the hold ends or the Machine stops, and
+by then the draft is gone:
+
+- the `fly logs` line `Main child exited normally with code: N`
+- `fly machine status <id>` events, which show `exit_code=N`
+
+Use them to confirm the code after the release step below, never in
+place of the poll.
 
 ### Copy the output off
 
@@ -458,6 +503,40 @@ flyp machine list --app atlas-reviewer
 flyp apps destroy atlas-reviewer --yes
 ```
 
+## What the 2026-11-10 deploy showed
+
+An operator created app `atlas-reviewer` in the Fly org `personal` and
+ran one offline-provider review of
+[PR #605](https://github.com/brandondees/code-quality-atlas/pull/605),
+with `fly machine run --rm` and the draft on stdout. This repository
+still does not create the app or set a secret. That run showed:
+
+- `fly deploy --build-only --push` accepted this no-service `fly.toml`.
+  The default Depot builder timed out after about 5 minutes with
+  `authentication handshake failed: EOF`. The same command with
+  `--depot=false` succeeded in about 2 minutes.
+- The builder pulled the pinned `python:3.12.16-slim-bookworm` base image.
+- The process ran as uid 10001.
+- The process exited 4. flyctl's own exit only meant the Machine started.
+  The code was the logs line `Main child exited normally with code: 4`
+  and `exit_code=4` on `fly machine status <id>` after `--rm` had
+  destroyed the Machine.
+- The controller destroyed the Sprite, and a check afterwards found it
+  absent.
+- No secret values appeared in `fly logs`.
+- `fly secrets import --stage` was enough. flyctl suggested
+  `fly secrets deploy`. That command was not run, and the next
+  `fly machine run` already had the staged secrets.
+- `fly logs` started before the run kept all 137 draft lines.
+  `fly logs --no-tail` after `--rm` returned the last 100 lines only, so
+  the draft header and the "REVIEW INCOMPLETE -- not approvable" warning
+  were already gone. That is why a review now writes its draft to disk.
+
+It did not show the held shape this runbook now uses, a complete review
+exiting 0, a run that passes `--provider openrouter
+--allow-live-inference`, or a taken app name handled only with
+`--app <name>`.
+
 ## Accepted costs
 
 - Every app secret is in the environment of every Machine of the app
@@ -484,12 +563,11 @@ Its checks on this runbook's text are string-presence guards: they
 confirm a command or a warning is written here, not that Fly accepts it.
 No Fly API was called.
 
-A live deploy is what can show: that `fly deploy --build-only --push`
-accepts a `fly.toml` with no service; which platform image the builder
-pulls from the pinned manifest list; that uid 10001 can read the event
-file the entrypoint wrote; that the five secret names arrive in the
-process environment and do not appear in `fly logs`; that an org token
-for `personal` is enough for every step here, `fly ssh` and
-`fly ssh sftp` included; that Fly refuses a second Machine with the same
-`--name`; and that `fly machine stop` reaches the entrypoint and the
-runner Sprite is deleted.
+The 2026-11-10 run covered the build, the base image, uid 10001, and
+the secrets staying out of `fly logs`. A live run of the held shape is
+what can show: that an org token for `personal` is enough for every step
+here, `fly ssh` and `fly ssh sftp` included; that the exit-code file,
+the draft, and the telemetry can be copied off a held Machine; that Fly
+refuses a second Machine with the same `--name`; and that
+`fly machine stop` reaches the entrypoint and the runner Sprite is
+deleted.

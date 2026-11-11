@@ -518,6 +518,38 @@ def test_runbook_records_the_accepted_costs():
     assert "whole dev lock" in costs
 
 
+def test_runbook_keeps_what_the_first_deploy_showed():
+    for text in (
+        "--depot=false",
+        "Do not run `fly secrets deploy`",
+        "Main child exited normally with code:",
+        "fly machine status <id>",
+        "exit_code=",
+        "fly logs --no-tail",
+        "leave `fly.toml` unchanged",
+        "## What the 2026-11-10 deploy showed",
+    ):
+        assert text in RUNBOOK, text
+    assert RUNBOOK.index("flyp logs --app atlas-reviewer") < RUNBOOK.index(
+        "-- review --event"
+    )
+    wait = RUNBOOK.split("### Wait for the review to exit", 1)[1].split("\n### ", 1)[0]
+    flat = " ".join(wait.split())
+    assert "they appear only when the hold ends or the Machine stops" in flat
+    assert "never in place of the poll" in flat
+    assert "2026-11-10" not in wait
+
+
 def test_readme_points_at_the_runbook():
     assert "deploy-fly.md" in README
     assert "D37" in README
+    flat = " ".join(README.split())
+    for text in (
+        "Do not run `fly secrets deploy`",
+        "--depot=false",
+        "Main child exited normally with code:",
+        "exit_code=",
+        "leave `fly.toml` unchanged",
+        "Start `fly logs` before the run",
+    ):
+        assert text in flat, text

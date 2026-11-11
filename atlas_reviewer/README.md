@@ -28,9 +28,26 @@ to the Fly org `personal` and names the app or org. A review Machine
 writes the draft and telemetry to its own disk and is held after the
 review exits. The operator copies both off with `fly ssh sftp` and then
 destroys the Machine. `fly apps destroy` does not remove Sprites; a
-runner left behind is destroyed by name with `sweep --event --force-live`. The exact
-commands are in [`deploy-fly.md`](deploy-fly.md). No app has been
-created from this repo.
+runner left behind is destroyed by name with
+`sweep --event --force-live`. Stage the secrets with
+`fly secrets import --stage`. Do not run `fly secrets deploy`. If the
+Depot builder fails, publish again with `--depot=false`. Start
+`fly logs` before the run. flyctl's exit means the Machine started; poll
+the exit-code file the entrypoint writes. Once the hold ends or the
+Machine stops, the code is also the logs line
+`Main child exited normally with code: N` and `exit_code=N` on
+`fly machine status <id>`. If the app name is taken, pass `--app <name>`
+on each command and leave `fly.toml` unchanged. The exact commands are
+in [`deploy-fly.md`](deploy-fly.md). This repository does not create the
+app.
+
+One operator deploy of app `atlas-reviewer` (org `personal`) ran an
+offline-provider review of #605, in the earlier `fly machine run --rm`
+shape with the draft on stdout. The no-service `fly.toml` was accepted,
+the pinned base image was pulled, the process ran as uid 10001 and exited
+4, the Sprite was destroyed and then absent, and `fly logs` showed no
+secrets. A stream started late would have lost the start of the draft,
+which is why a review now writes it to disk.
 
 ## Run it offline (no credentials)
 

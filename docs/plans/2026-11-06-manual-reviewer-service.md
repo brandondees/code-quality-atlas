@@ -27,7 +27,8 @@ committed secrets are flagged by file and line). All are scoped steps under the 
 separate, undecided proposal for a lens-based agentic reviewer, and none of
 it is built here. **D35** (a lens runs whole or is NOT RUN) and **D36**
 (partial file coverage does not approve) are recorded below. **D37** is the
-Fly one-off deploy configuration; this repository does not create the app.
+Fly one-off deploy configuration; this repository does not create the app,
+and D37 records one operator run of it on 2026-11-10.
 
 **Goal.** Produce one Code Quality Atlas review **draft** for one PR commit.
 The run is triggered by an operator and funded by the operator. It never
@@ -566,7 +567,9 @@ each needing its own decision:
 - **Deploying the controller.** D37 records the Fly one-off configuration
   and the runbook,
   [`../../atlas_reviewer/deploy-fly.md`](../../atlas_reviewer/deploy-fly.md).
-  This repository does not create the app or set secrets.
+  This repository does not create the app or set secrets. One operator
+  deploy on 2026-11-10 ran an offline review of #605 in the earlier
+  `fly machine run --rm` shape; D37 and the runbook record what it showed.
   The shape stays one operator-started review at a time, with no webhook
   and no queue.
 - **Omission rows for check summaries and log tails.** These are capped
