@@ -2,7 +2,8 @@
 """The Fly one-off deploy config stays a non-service, non-root, hashed image.
 
 `fly.toml` and the Dockerfile are parsed. The entrypoint is run against a
-stub CLI. The runbook and README checks are string-presence guards: they
+stub CLI. The runbook checks parse each fenced command, so a comment or a
+``timeout`` / ``env`` prefix cannot hide the ``fly`` invocation. They
 confirm a command or warning is written down, not that Fly accepts it.
 Nothing here builds the image or calls Fly.
 """
@@ -15,6 +16,7 @@ import sys
 import time
 import tomllib
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -338,19 +340,86 @@ def shell_blocks(text: str) -> list[str]:
     return re.findall(r"```sh\n(.*?)```", text, flags=re.DOTALL)
 
 
-def fly_commands(text: str) -> list[str]:
+class ShellCommand(NamedTuple):
+    """One command from a fenced block.
+
+    ``prefix`` holds a leading ``timeout <seconds>``, ``env``, or
+    ``NAME=value``. ``program`` is the argv those wrappers run. A full-line
+    comment is not a command.
+    """
+
+    prefix: tuple[str, ...]
+    program: tuple[str, ...]
+
+
+_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _peel_wrappers(words: list[str]) -> ShellCommand:
+    index = 0
+    while index < len(words):
+        word = words[index]
+        if word == "timeout" and index + 1 < len(words) and words[index + 1].isdigit():
+            index += 2
+            continue
+        if word == "env":
+            index += 1
+            while index < len(words):
+                if words[index] == "-u" and index + 1 < len(words):
+                    index += 2
+                    continue
+                if words[index].startswith("-") or _ASSIGNMENT.match(words[index]):
+                    index += 1
+                    continue
+                break
+            continue
+        if _ASSIGNMENT.match(word):
+            index += 1
+            continue
+        break
+    return ShellCommand(tuple(words[:index]), tuple(words[index:]))
+
+
+def shell_commands(block: str) -> list[ShellCommand]:
+    """Commands in one fenced sh block, comments dropped, wrappers kept."""
+    lines = []
+    for line in block.replace("flyp() {", "").splitlines():
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        lines.append(re.sub(r"\s+#.*$", "", line))
+    joined = re.sub(r"\\\n\s*", " ", "\n".join(lines))
     commands = []
-    for block in shell_blocks(text):
-        joined = re.sub(r"\\\n\s*", " ", block).replace("flyp() {", "")
-        for segment in re.split(r"\n|\|\||&&|\||;|\$\(|\(|\)", joined):
-            words = segment.split()
-            # A timeout wrapper runs fly inside a subshell; strip it so the
-            # guards still see those machine-run commands.
-            if len(words) >= 3 and words[0] == "timeout" and words[1].isdigit():
-                words = words[2:]
-            if words and words[0] in ("fly", "flyp"):
-                commands.append(" ".join(words))
+    for segment in re.split(r"\n|\|\||&&|\||;|\$\(|\(|\)", joined):
+        words = segment.split()
+        if not words or words[0].startswith("#"):
+            continue
+        commands.append(_peel_wrappers(words))
     return commands
+
+
+def fly_invocations(text: str) -> list[ShellCommand]:
+    found = []
+    for block in shell_blocks(text):
+        for command in shell_commands(block):
+            if command.program and command.program[0] in ("fly", "flyp"):
+                found.append(command)
+    return found
+
+
+def _is_machine_run(command: ShellCommand) -> bool:
+    return command.program[:3] in {
+        ("fly", "machine", "run"),
+        ("flyp", "machine", "run"),
+    }
+
+
+def _assigns_api_token(words: tuple[str, ...]) -> bool:
+    return any(word.startswith("FLY_API_TOKEN=") for word in words)
+
+
+def fly_commands(text: str) -> list[str]:
+    return [" ".join(command.program) for command in fly_invocations(text)]
 
 
 def test_every_runbook_fly_command_names_its_app_or_org():
@@ -363,28 +432,48 @@ def test_every_runbook_fly_command_names_its_app_or_org():
 
 
 def test_only_the_token_mint_and_the_wrapper_call_fly_without_the_org_token():
-    bare = [c for c in fly_commands(RUNBOOK) if c.startswith("fly ")]
+    invocations = fly_invocations(RUNBOOK)
+    for command in invocations:
+        assert "env" not in command.prefix, command
+        assert not _assigns_api_token(command.prefix + command.program), command
+    bare = [" ".join(c.program) for c in invocations if c.program[0] == "fly"]
     mint = (
         "fly tokens create org --org personal --name atlas-reviewer "
         '--expiry 168h > "$SECRETS_DIR/fly-personal.token"'
     )
-    runs = [c for c in bare if c.startswith("fly machine run ")]
-    assert bare == [mint, 'fly "$@"', *runs]
-    detached = [c for c in runs if "--detach" in c]
-    wrapped = [c for c in runs if "--detach" not in c]
+    runs = [c for c in invocations if _is_machine_run(c)]
+    # The held review is the one flyp machine run. Every other machine
+    # run is a raw fly command: timeout cannot call the flyp function.
+    # An extra `timeout 45 flyp machine run` is a machine run too.
+    held = [c for c in runs if c.program[0] == "flyp"]
+    one_off = [c for c in runs if c.program[0] == "fly"]
+    assert bare == [mint, 'fly "$@"', *[" ".join(c.program) for c in one_off]]
+    assert len(held) == 1 and held[0].prefix == ()
+    assert "--rm" not in held[0].program and "--detach" not in held[0].program
+    assert len(one_off) == 3
+    detached = [c for c in one_off if "--detach" in c.program]
+    wrapped = [c for c in one_off if c.prefix == ("timeout", "45")]
     assert len(detached) == 1 and len(wrapped) == 2
-    assert "--sequence review" in detached[0]
-    for command in runs:
-        assert "--rm" in command
-        assert "--app atlas-reviewer" in command
-    assert "timeout 45 fly machine run" in RUNBOOK
-    # The timed runs keep the token in a subshell export, never as an
-    # argv assignment the way `env FLY_API_TOKEN=...` would.
-    assert 'export FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN"' in RUNBOOK
-    assert "env -u FLY_ACCESS_TOKEN" not in RUNBOOK
-    assert not re.search(r"(?m)^\s*FLY_API_TOKEN=", RUNBOOK)
-    assert "unset FLY_ACCESS_TOKEN" in RUNBOOK
-    assert "export FLY_PERSONAL_API_TOKEN" not in RUNBOOK
+    assert set(detached + wrapped) == set(one_off)
+    assert "timeout" not in detached[0].prefix
+    assert "--sequence" in detached[0].program and "review" in detached[0].program
+    for command in one_off:
+        assert "--rm" in command.program
+        assert "--app" in command.program and "atlas-reviewer" in command.program
+    # The token reaches fly through the subshell export, not an argv
+    # assignment and not an exported personal-token name.
+    exports = [
+        command.program
+        for block in shell_blocks(RUNBOOK)
+        for command in shell_commands(block)
+        if command.program[:1] == ("export",)
+    ]
+    assert ("export", 'FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN"') in [
+        (words[0], words[1]) for words in exports if len(words) > 1
+    ]
+    assert not any(
+        word.startswith("FLY_PERSONAL_API_TOKEN") for words in exports for word in words
+    )
 
 
 def test_runbook_creates_the_app_if_missing_before_setting_secrets():
@@ -481,17 +570,36 @@ def test_a_review_writes_to_the_machine_disk_and_is_held_not_removed():
     ]
     assert len(short) == 2
     review_seq = block_with("-- probe-runner --sequence review")
-    assert "timeout 45" not in review_seq
-    assert "--detach" in review_seq
     for block in (*short, review_seq):
-        assert "--rm" in block
-        assert "--restart no" in block
-        assert "unset FLY_ACCESS_TOKEN" in block
-        assert 'export FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN"' in block
-        assert not re.search(r"(?m)^\s*FLY_API_TOKEN=", block)
+        runs = [c for c in shell_commands(block) if _is_machine_run(c)]
+        assert len(runs) == 1, block
+        assert runs[0].program[0] == "fly"
+        assert "--rm" in runs[0].program
+        assert "--restart" in runs[0].program and "no" in runs[0].program
+        assert "env" not in runs[0].prefix
+        assert not _assigns_api_token(runs[0].prefix + runs[0].program)
+        commands = shell_commands(block)
+        assert ("unset", "FLY_ACCESS_TOKEN") in [c.program for c in commands]
+        assert ("export", 'FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN"') in [
+            c.program for c in commands
+        ]
     for block in short:
-        assert "timeout 45 fly machine run" in block
-    assert 'flyp logs --app atlas-reviewer --machine "$MACHINE_ID" --no-tail' in RUNBOOK
+        (run,) = [c for c in shell_commands(block) if _is_machine_run(c)]
+        assert run.prefix == ("timeout", "45")
+        assert "--detach" not in run.program
+    (review_run,) = [c for c in shell_commands(review_seq) if _is_machine_run(c)]
+    # Any timeout wrapper, not only `timeout 45`. A `timeout 90` in front
+    # of this fly would cut off a review sequence that is still working.
+    assert "timeout" not in review_run.prefix
+    assert "--detach" in review_run.program
+    assert "If `MACHINE_ID` is empty, stop" in RUNBOOK
+    review_at = RUNBOOK.index("-- probe-runner --sequence review")
+    logs_line = 'flyp logs --app atlas-reviewer --machine "$MACHINE_ID" --no-tail'
+    logs_at = RUNBOOK.index(logs_line, review_at)
+    restage_at = RUNBOOK.index("grep -E", review_at)
+    assert review_at < logs_at < restage_at
+    assert "Main child exited normally with code: 0" in RUNBOOK[review_at:logs_at]
+    assert "flyp secrets list --app atlas-reviewer" in block_with("grep -E")
 
 
 def test_a_review_is_waited_for_copied_released_and_destroyed_in_that_order():

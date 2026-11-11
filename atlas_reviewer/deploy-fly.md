@@ -490,13 +490,23 @@ removed. It hung twice for more than 4 minutes, and a third time on a
 very short command (`probe-runner`). `timeout 45` stopped the hang.
 This is what that run showed, not a documented Fly behavior. `timeout`
 is GNU coreutils (`gtimeout` from Homebrew coreutils on macOS). It
-runs a program and cannot call the `flyp` function, so each command
-below exports the org token inside a subshell the way `flyp` does, and
-runs `timeout 45 fly ...` there. The token stays in that subshell's
-environment, not on a command line.
+runs a program and cannot call the `flyp` function, so the sweep and
+the protocol probe export the org token inside a subshell the way
+`flyp` does, and run `timeout 45 fly ...` there. The review-sequence
+run uses that same subshell and `--detach`, with no `timeout`. The
+token stays in the subshell's environment, not on a command line.
 
-Note the Machine ID that `fly machine run` prints before any hang. If
-the wrapper stops a hung flyctl, its status is timeout's, not the
+Note the Machine ID that `fly machine run` prints before any hang.
+If `MACHINE_ID` is empty, stop. Read the Machine list
+(`fly machine list`) and take the ID from there. Do not run the logs
+command until `MACHINE_ID` is set. With it empty, that command reads
+the app-wide log.
+
+```sh
+flyp machine list --app atlas-reviewer
+```
+
+If the wrapper stops a hung flyctl, its status is timeout's, not the
 controller's. Read that Machine's logs only
 ([fly logs](https://fly.io/docs/flyctl/cmd/fly_logs) filters with
 `--machine`):
@@ -550,9 +560,10 @@ name in that Machine's ledger and destroys it. The same command works
 from a checkout with `ATLAS_SPRITES_TOKEN` set:
 `python -m atlas_reviewer sweep --event event.json --force-live`.
 
-`probe-runner` uses the same image, the same `--rm --restart no`
-flags, and the same `timeout 45` subshell. Its output is short. On the
-2026-11-11 probe-runner run, telemetry from a `--rm` probe was gone
+The protocol probe and the sweep use the same image, the same
+`--rm --restart no` flags, and the same `timeout 45` subshell. The
+review-sequence run uses `--detach` instead. The protocol probe's output
+is short. On the 2026-11-11 probe-runner run, telemetry from a `--rm` probe was gone
 with the Machine's disk and survived only in `fly logs`. Start
 streaming logs before the probe, with the `flyp logs` command in
 [Run one review](#run-one-review). If flyctl hangs after the Machine
@@ -620,13 +631,28 @@ probe-runner run the command was `--sequence review --event
 )
 ```
 
+Note the Machine ID that command prints.
+If `MACHINE_ID` is empty, stop and read the Machine list, as above.
+Do not run the logs command until it is set. Then read that Machine's logs, before staging the key
+again. The probe passed when that Machine's line is
+`Main child exited normally with code: 0`. The controller writes
+`status: completed` for that exit. It writes
+`probe: FAILED -- the runner is not usable as probed` and the logs
+line ends in `code: 3` when the runner did not complete.
+
+```sh
+flyp logs --app atlas-reviewer --machine "$MACHINE_ID" --no-tail
+```
+
 After the probe, stage the pilot key again from stdin. The `grep`
 writes that one line to the import, not to the terminal. `--stage`
-still skips a release:
+still skips a release. Then list the names again. `fly secrets list`
+prints names, not values; the OpenRouter name should be present:
 
 ```sh
 grep -E '^ATLAS_OPENROUTER_API_KEY=' "$SECRETS_DIR/secrets.env" |
   flyp secrets import --stage --app atlas-reviewer
+flyp secrets list --app atlas-reviewer
 ```
 
 ## Tear it down
