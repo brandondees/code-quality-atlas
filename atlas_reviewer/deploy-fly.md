@@ -482,9 +482,10 @@ flyp machine list --app atlas-reviewer
 Then sweep by name. `--force-live` records that you checked; without it
 the sweep refuses (exit 2).
 
-On 2026-11-11, with flyctl, `fly machine run --rm` hung twice for more
-than 4 minutes at "Attempting to start machine..." after the Machine
-had already exited and been removed. `timeout 45` stopped the hang.
+On 2026-11-11, with flyctl, `fly machine run --rm` hung at "Attempting
+to start machine..." after the Machine had already exited and been
+removed. It hung twice for more than 4 minutes, and a third time on a
+very short command (`probe-runner`). `timeout 45` stopped the hang.
 This is what that run showed, not a documented Fly behavior. `timeout`
 runs a program and cannot call the `flyp` function, so the command
 passes the org token the way `flyp` does. If the wrapper stops a hung
@@ -523,11 +524,28 @@ The same command works from a checkout with `ATLAS_SPRITES_TOKEN` set:
 `python -m atlas_reviewer sweep --event event.json --force-live`.
 
 `probe-runner` uses the same image, the same `--rm --restart no`
-flags, and the same `timeout 45` wrapper, with no `ATLAS_EVENT_JSON`.
-Its output is short and goes to `fly logs`. If flyctl hangs after the
-Machine has already exited, the exit code is the same logs line,
-`Main child exited normally with code: N`, from
-`flyp logs --app atlas-reviewer --no-tail`.
+flags, and the same `timeout 45` wrapper. Its output is short. On the
+2026-11-11 probe-runner run, telemetry from a `--rm` probe was gone
+with the Machine's disk and survived only in `fly logs`. Start
+streaming logs before the probe, with the `flyp logs` command in
+[Run one review](#run-one-review). If flyctl hangs after the Machine
+has already exited, the exit code is the same logs line, `Main child
+exited normally with code: N`.
+
+A probe does not call a model, and nothing in the controller checks
+that. App secrets are on every Machine, so the probe Machine also
+receives `ATLAS_OPENROUTER_API_KEY`. That is a current limitation. On
+that probe-runner run the key was there. Before the probe, unstage it.
+`--stage` skips a release, as [Secrets](#secrets) already says for
+`fly secrets set`. `fly secrets list` prints names, not values; the
+OpenRouter name should be absent:
+
+```sh
+flyp secrets unset ATLAS_OPENROUTER_API_KEY --stage --app atlas-reviewer
+flyp secrets list --app atlas-reviewer
+```
+
+The command with no `ATLAS_EVENT_JSON` is only the protocol probe:
 
 ```sh
 timeout 45 env -u FLY_ACCESS_TOKEN \
@@ -542,6 +560,38 @@ timeout 45 env -u FLY_ACCESS_TOKEN \
   --restart no \
   --entrypoint /usr/local/bin/atlas-reviewer \
   -- probe-runner
+```
+
+`probe-runner --sequence review` on Fly cannot use `--tarball`. This
+image copies the controller, not a checkout tarball. The review
+sequence needs `--event` and `ATLAS_EVENT_JSON`. The entrypoint writes
+that variable to `/home/atlas/event.json`. On the 2026-11-11
+probe-runner run the command was `--sequence review --event
+/home/atlas/event.json --tools review`:
+
+```sh
+timeout 45 env -u FLY_ACCESS_TOKEN \
+  FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN" \
+  fly machine run "$IMAGE" \
+  --app atlas-reviewer \
+  --region iad \
+  --vm-cpu-kind shared \
+  --vm-cpus 1 \
+  --vm-memory 1024 \
+  --rm \
+  --restart no \
+  --entrypoint /usr/local/bin/atlas-reviewer \
+  --env ATLAS_EVENT_JSON="$EVENT" \
+  -- probe-runner --sequence review --event /home/atlas/event.json --tools review
+```
+
+After the probe, stage the pilot key again from stdin. The `grep`
+writes that one line to the import, not to the terminal. `--stage`
+still skips a release:
+
+```sh
+grep -E '^ATLAS_OPENROUTER_API_KEY=' "$SECRETS_DIR/secrets.env" |
+  flyp secrets import --stage --app atlas-reviewer
 ```
 
 ## Tear it down
@@ -597,7 +647,11 @@ exiting 0, a run that passes `--provider openrouter
 - Every app secret is in the environment of every Machine of the app
   ([Secrets and Fly Apps](https://fly.io/docs/apps/secrets)). A
   `probe-runner` or `sweep` Machine needs only `ATLAS_SPRITES_TOKEN` and
-  still gets the GitHub App key and the OpenRouter key. Each Machine runs
+  still gets the GitHub App key and the OpenRouter key. A probe does
+  not call a model, and nothing refuses to run it while
+  `ATLAS_OPENROUTER_API_KEY` is set. Unstage that key before a probe,
+  as in [Recover a runner Sprite by name](#recover-a-runner-sprite-by-name).
+  Each Machine runs
   one controller command from this image and publishes no port. A second
   app per credential set is not worth it for one operator.
 - The image installs the whole dev lock, so mypy, pytest, and ruff are in

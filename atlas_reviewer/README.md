@@ -138,7 +138,10 @@ default tools (`--tools review`). It calls no model and gathers no CI
 evidence. The source is a local `.tar.gz` (`--tarball`, for example from
 `git archive --format=tar.gz --prefix=src/ HEAD`) or the head-SHA tarball
 fetched with the GitHub App (`--event`, needing the three `ATLAS_GITHUB_*`
-variables). Both are held to the review's caps: 9 MiB compressed, and
+variables). On Fly the image has no checkout tarball, so
+`--sequence review` there uses `--event` and `ATLAS_EVENT_JSON` instead
+of `--tarball`. Those commands are in
+[`deploy-fly.md`](deploy-fly.md). Both sources are held to the review's caps: 9 MiB compressed, and
 256 MiB or 50,000 members unpacked, counted from the tar headers across
 every gzip member before any runner exists (`source_archive.py`); an
 archive past them, or not a gzip tar, is refused. The header walk fails

@@ -460,9 +460,12 @@ def test_a_review_writes_to_the_machine_disk_and_is_held_not_removed():
         assert flag in review
     assert "--port" not in review
     for one_off in ("-- sweep --event", "-- probe-runner"):
-        block = block_with(one_off)
-        assert "--rm" in block
-        assert "--restart no" in block
+        blocks = [b for b in shell_blocks(RUNBOOK) if one_off in b]
+        assert blocks
+        for block in blocks:
+            assert "--rm" in block
+            assert "--restart no" in block
+            assert "timeout 45" in block
 
 
 def test_a_review_is_waited_for_copied_released_and_destroyed_in_that_order():
