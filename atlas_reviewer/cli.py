@@ -19,6 +19,7 @@ installation token minted during the run.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import io
 import json
 import math
@@ -27,8 +28,8 @@ import re
 import secrets
 import sys
 import time
-from collections.abc import Callable, Mapping, Sequence
-from contextlib import AbstractContextManager
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
@@ -61,7 +62,12 @@ from atlas_reviewer.harness import SkillBundleHarness, load_bundle
 from atlas_reviewer.http import UrllibStreamingTransport, UrllibTransport
 from atlas_reviewer.instrumented import InstrumentedGitHub
 from atlas_reviewer.interpreter import TrustedPython
-from atlas_reviewer.ledger import FileLedger, ReviewInProgressError, single_review_lock
+from atlas_reviewer.ledger import (
+    FileLedger,
+    ReviewInProgressError,
+    make_private_dirs,
+    single_review_lock,
+)
 from atlas_reviewer.openrouter import OpenRouterProvider
 from atlas_reviewer.picker import Depth
 from atlas_reviewer.ports import BoundaryError, Clock, ModelProvider, SpritesApi
@@ -86,6 +92,7 @@ from atlas_reviewer.runner import (
 from atlas_reviewer.sprites_api import RUNNER_PREFIX, SpritesClient
 from atlas_reviewer.stops import raise_if_stopped
 from atlas_reviewer.telemetry import JsonlSink, Telemetry
+from atlas_reviewer.verdict import ReviewEvent, Verdict
 
 ENV_APP_ID = "ATLAS_GITHUB_APP_ID"
 ENV_APP_KEY = "ATLAS_GITHUB_APP_PRIVATE_KEY"
@@ -98,6 +105,7 @@ PROVIDER_CHOICES = ("offline", "openrouter")
 SECRET_ENV = (ENV_APP_KEY, ENV_SPRITES_TOKEN, ENV_OPENROUTER_KEY)
 
 EXIT_OK, EXIT_USAGE, EXIT_BOUNDARY, EXIT_INCOMPLETE = 0, 2, 3, 4
+EXIT_CHANGES_REQUESTED = 5
 
 
 class UsageError(Exception):
@@ -212,12 +220,23 @@ class _Credentials:
         return tuple(s for source in self._sources for s in source())
 
 
+@dataclass
+class _Run:
+    """One invocation's state that is not a command-line option."""
+
+    env: Mapping[str, str]
+    out: TextIO
+    err: TextIO
+    credentials: _Credentials
+    telemetry: Telemetry | None = None
+
+
 def _review_lock(
     args: argparse.Namespace, env: Mapping[str, str]
 ) -> AbstractContextManager[None]:
     state_dir = _state_dir(args, env)
     try:
-        state_dir.mkdir(parents=True, exist_ok=True)
+        make_private_dirs(state_dir)
     except OSError as exc:
         raise UsageError(f"--state-dir {state_dir}: cannot be created ({exc})") from exc
     return single_review_lock(state_dir / "review.lock")
@@ -225,27 +244,62 @@ def _review_lock(
 
 def _telemetry(
     args: argparse.Namespace,
-    env: Mapping[str, str],
+    run: _Run,
     command: str,
+    claims: ExitStack,
     *,
     default_file: bool,
 ) -> Telemetry:
     """Call with the review lock held: a contender that loses the lock must
-    not have created, let alone written, a telemetry file."""
+    not have created, let alone written, a telemetry file. An explicit
+    `--events` file is claimed before it is opened, for the same reason.
+    The sink's descriptor and the claim are released when `claims` closes."""
     clock = SystemClock()
     stamp = f"{clock.now():%Y%m%dT%H%M%S.%fZ}-{secrets.token_hex(4)}"
-    default = _state_dir(args, env) / "telemetry" / f"{command}-{stamp}.jsonl"
+    default = _state_dir(args, run.env) / "telemetry" / f"{command}-{stamp}.jsonl"
     path = Path(args.events) if args.events else (default if default_file else None)
+    if path is None:
+        return Telemetry(clock, None, scrub=run.credentials.scrub)
+    if args.events:
+        claims.enter_context(_claimed(path))
     try:
-        sink = JsonlSink(path) if path else None
+        sink = claims.enter_context(JsonlSink(path))
     except OSError as exc:
         raise UsageError(f"telemetry file {path}: {exc}") from exc
-    return Telemetry(clock, sink, scrub=args.credentials.scrub)
+    return Telemetry(clock, sink, scrub=run.credentials.scrub)
 
 
-def _events_path(telemetry: Telemetry) -> str:
+@contextmanager
+def _claimed(path: Path) -> Iterator[None]:
+    """Hold `<path>.lock` for this run. The review lock is per state
+    directory, so two runs with different state directories could still
+    interleave their events in one explicit `--events` file. Locking a
+    sibling leaves a refused run with no telemetry file; the lock file
+    stays, since unlinking one another run may be opening would race."""
+    lock = path.with_name(f"{path.name}.lock")
+    try:
+        make_private_dirs(path.parent)
+        fd = os.open(lock, os.O_WRONLY | os.O_CREAT, 0o600)
+    except OSError as exc:
+        raise UsageError(f"telemetry file {path}: {exc}") from exc
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise UsageError(f"telemetry file {path} is in use by another run") from exc
+        yield
+    finally:
+        os.close(fd)
+
+
+def _telemetry_line(run: _Run, telemetry: Telemetry) -> str:
+    """Scrubbed like any other stderr text: an `--events` path is free text
+    that could hold a credential value."""
     sink = telemetry.sink
-    return str(sink.path) if isinstance(sink, JsonlSink) else "(not written)"
+    path = str(sink.path) if isinstance(sink, JsonlSink) else "(not written)"
+    return (
+        f"telemetry: {len(telemetry.events)} event(s), {run.credentials.scrub(path)}\n"
+    )
 
 
 def _dry_run_wiring(
@@ -313,14 +367,15 @@ def _live_wiring(
     provider: ModelProvider,
     telemetry: Telemetry,
     runner: str,
+    credentials: _Credentials,
 ) -> _Wiring:
     _require_env(env, ENV_APP_KEY)
     _require_env(env, ENV_SPRITES_TOKEN)
     clock = SystemClock()
     transport = UrllibTransport()
     tokens = _app_tokens(env, event, args.include_issues, transport)
-    args.credentials.register(tokens.secrets)
-    redactor = args.credentials.redactor
+    credentials.register(tokens.secrets)
+    redactor = credentials.redactor
     sprites = args.sprites_factory(env)
     _require_runner_absent(sprites, runner)
     deps = Deps(
@@ -369,34 +424,49 @@ def _review_config(args: argparse.Namespace, mode: str) -> ReviewConfig:
         raise UsageError(str(exc)) from exc
 
 
-def _cmd_review(
-    args: argparse.Namespace, env: Mapping[str, str], out: TextIO, err: TextIO
-) -> int:
+def _cmd_review(args: argparse.Namespace, run: _Run) -> int:
+    env, out, err = run.env, run.out, run.err
     event_path = Path(args.event)
     event = load_event(event_path)
     _review_config(args, "check")
     _check_out_path(args.out)
-    with _review_lock(args, env):
-        telemetry = _telemetry(args, env, "review", default_file=not args.dry_run)
+    with _review_lock(args, env), ExitStack() as claims:
+        telemetry = _telemetry(
+            args, run, "review", claims, default_file=not args.dry_run
+        )
+        run.telemetry = telemetry
         provider = _select_provider(args, env, args.openrouter_factory, telemetry)
         if args.dry_run:
             wiring = _dry_run_wiring(args, event_path, provider, telemetry)
         else:
             runner = event_runner_name(event)
             err.write(f"atlas_reviewer: runner Sprite for this review: {runner}\n")
-            wiring = _live_wiring(args, env, event, provider, telemetry, runner)
+            wiring = _live_wiring(
+                args, env, event, provider, telemetry, runner, run.credentials
+            )
         outcome = run_review(event, wiring.deps, _review_config(args, wiring.mode))
     written = _emit(outcome.draft, args.out, out, err)
     verdict = outcome.verdict
     # Stdout carries the draft unless it went to a file; the summary must
     # not be appended to a draft someone pipes on.
     (out if written else err).write(
-        f"telemetry: {len(telemetry.events)} event(s), {_events_path(telemetry)}\n"
+        f"{_telemetry_line(run, telemetry)}"
         f"review event: {verdict.event.value}; coverage_complete="
         f"{str(verdict.coverage_complete).lower()}; unreviewed_files="
         f"{len(verdict.coverage.unreviewed)}\n"
     )
-    return EXIT_OK if verdict.coverage_complete else EXIT_INCOMPLETE
+    return review_exit(verdict)
+
+
+def review_exit(verdict: Verdict) -> int:
+    """`review`'s exit code, enough to gate a pipeline on: 4 when file
+    coverage is incomplete (D36), whatever the model proposed; with
+    complete coverage, 5 when the review requests changes, else 0."""
+    if not verdict.coverage_complete:
+        return EXIT_INCOMPLETE
+    if verdict.event is ReviewEvent.REQUEST_CHANGES:
+        return EXIT_CHANGES_REQUESTED
+    return EXIT_OK
 
 
 def _check_out_path(out_path: str | None) -> None:
@@ -422,7 +492,9 @@ def _emit(draft: str, out_path: str | None, out: TextIO, err: TextIO) -> bool:
         out.write(draft)
         return False
     try:
-        Path(out_path).write_text(draft, encoding="utf-8")
+        fd = os.open(out_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(draft)
     except OSError as exc:
         out.write(draft)
         err.write(
@@ -440,9 +512,8 @@ def _live_sprites(env: Mapping[str, str]) -> SpritesApi:
     )
 
 
-def _cmd_sweep(
-    args: argparse.Namespace, env: Mapping[str, str], out: TextIO, err: TextIO
-) -> int:
+def _cmd_sweep(args: argparse.Namespace, run: _Run) -> int:
+    env, out = run.env, run.out
     named = _named_runners(args)
     api = args.sprites_factory(env)
     # The ledger lists a live review's runner too; sweeping during a review
@@ -504,29 +575,30 @@ def _require_force_live(args: argparse.Namespace, pending: Sequence[str]) -> Non
         )
 
 
-def _cmd_probe(
-    args: argparse.Namespace, env: Mapping[str, str], out: TextIO, err: TextIO
-) -> int:
+def _cmd_probe(args: argparse.Namespace, run: _Run) -> int:
+    env, out = run.env, run.out
     sequence = _PROBE_SEQUENCES[args.sequence]
     report = io.StringIO()
-    with _review_lock(args, env):
-        telemetry = _telemetry(args, env, f"probe-{args.sequence}", default_file=True)
+    with _review_lock(args, env), ExitStack() as claims:
+        telemetry = _telemetry(
+            args, run, f"probe-{args.sequence}", claims, default_file=True
+        )
+        run.telemetry = telemetry
         try:
-            usable = sequence(args, env, report, telemetry)
+            usable = sequence(args, run, report, telemetry)
         finally:
-            out.write(args.credentials.scrub(report.getvalue()))
+            out.write(run.credentials.scrub(report.getvalue()))
     out.write(f"\n{telemetry_section(telemetry.events)}\n\n")
-    out.write(
-        f"telemetry: {len(telemetry.events)} event(s), {_events_path(telemetry)}\n"
-    )
+    out.write(_telemetry_line(run, telemetry))
     if not usable:
         out.write("probe: FAILED -- the runner is not usable as probed\n")
     return EXIT_OK if usable else EXIT_BOUNDARY
 
 
 def _probe_protocol(
-    args: argparse.Namespace, env: Mapping[str, str], out: TextIO, telemetry: Telemetry
+    args: argparse.Namespace, run: _Run, out: TextIO, telemetry: Telemetry
 ) -> bool:
+    env = run.env
     clock: Clock = SystemClock()
     outcome = probe_runner(
         args.sprites_factory(env),
@@ -554,11 +626,12 @@ def _probe_protocol(
 
 
 def _probe_review_sequence(
-    args: argparse.Namespace, env: Mapping[str, str], out: TextIO, telemetry: Telemetry
+    args: argparse.Namespace, run: _Run, out: TextIO, telemetry: Telemetry
 ) -> bool:
     """The review's exact exec sequence (tool check, upload, unpack, tools)
     on a real checkout, with no model call and no evidence gathering."""
-    tarball = _probe_source(args, env, telemetry)
+    env, credentials = run.env, run.credentials
+    tarball = _probe_source(args, env, telemetry, credentials)
     if len(tarball) > MAX_TARBALL_BYTES:
         raise UsageError(f"tarball is {len(tarball)} bytes, over {MAX_TARBALL_BYTES}")
     clock: Clock = SystemClock()
@@ -575,7 +648,7 @@ def _probe_review_sequence(
     )
     _write_report(outcome.report, out)
     out.write(f"source tarball: {len(tarball)} bytes\n")
-    redactor = args.credentials.redactor
+    redactor = credentials.redactor
     out.writelines(f"{_tool_report(r, redactor)}\n" for r in outcome.results)
     out.write(f"{_python_report(outcome.python)}\n")
     out.writelines(f"{_diagnostic_report(d)}\n" for d in outcome.diagnostics)
@@ -596,7 +669,10 @@ def _diagnostic_report(result: Diagnostic) -> str:
 
 
 def _probe_source(
-    args: argparse.Namespace, env: Mapping[str, str], telemetry: Telemetry
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+    telemetry: Telemetry,
+    credentials: _Credentials,
 ) -> bytes:
     if args.tarball:
         return _read_tarball(Path(args.tarball))
@@ -605,7 +681,7 @@ def _probe_source(
     event = load_event(Path(args.event))
     transport = UrllibTransport()
     tokens = _app_tokens(env, event, False, transport)
-    args.credentials.register(tokens.secrets)
+    credentials.register(tokens.secrets)
     github = InstrumentedGitHub(GitHubClient(transport, tokens), telemetry)
     return github.get_tarball(event.repo, event.head_sha)
 
@@ -633,7 +709,8 @@ def _tool_report(result: ToolResult, redactor: Redactor) -> str:
 
 
 _PROBE_SEQUENCES: dict[
-    str, Callable[[argparse.Namespace, Mapping[str, str], TextIO, Telemetry], bool]
+    str,
+    Callable[[argparse.Namespace, _Run, TextIO, Telemetry], bool],
 ] = {"protocol": _probe_protocol, "review": _probe_review_sequence}
 
 
@@ -809,15 +886,14 @@ def main(
     if openrouter_factory is not None:
         args.openrouter_factory = openrouter_factory
     env = os.environ if env is None else env
-    args.credentials = _Credentials(env)
-    handler: Callable[[argparse.Namespace, Mapping[str, str], TextIO, TextIO], int] = (
-        args.handler
-    )
-    err = err or sys.stderr
+    run = _Run(env, out or sys.stdout, err or sys.stderr, _Credentials(env))
+    handler: Callable[[argparse.Namespace, _Run], int] = args.handler
     try:
-        code = handler(args, env, out or sys.stdout, err)
+        code = handler(args, run)
     except tuple(e for e, _ in _ERRORS) as exc:
-        err.write(f"atlas_reviewer: {args.credentials.scrub(str(exc))}\n")
+        run.err.write(f"atlas_reviewer: {run.credentials.scrub(str(exc))}\n")
+        if run.telemetry is not None:
+            run.err.write(_telemetry_line(run, run.telemetry))
         code = next(mapped for kind, mapped in _ERRORS if isinstance(exc, kind))
     finally:
         # The review raises a held stop right after its runner phase.

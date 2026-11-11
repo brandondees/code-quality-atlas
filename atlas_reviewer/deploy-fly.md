@@ -341,8 +341,9 @@ done
 echo "review exit code: ${code:-none after an hour}"
 ```
 
-`review` exits 0 when file coverage is complete and 4 when it is not
-(D36). Usage is 2 and a boundary failure is 3. A stop is 130, the
+`review` exits 4 when file coverage is incomplete (D36). With complete
+coverage it exits 5 when the review requests changes and 0 otherwise.
+Usage is 2 and a boundary failure is 3. A stop is 130, the
 shell's status for a process that died on SIGINT (`subprocess` sees
 the signal as a negative code). flyctl's own exit status is not one
 of those. With no code after an hour, the review is hung. Go to

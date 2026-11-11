@@ -9,6 +9,7 @@ import pytest
 
 from atlas_reviewer.controller import Deps, ReviewConfig, review
 from atlas_reviewer.conversation import ConversationBudget
+from atlas_reviewer.diffs import UNPARSED_PATH
 from atlas_reviewer.domain import PrEvent, SourceKey, SourceKind
 from atlas_reviewer.fakes import FakeSprites, MemoryLedger
 from atlas_reviewer.github_fixture import FixtureGitHub
@@ -1456,11 +1457,12 @@ def test_a_changed_file_count_that_moves_during_the_fetch_blocks_approval():
     assert "head moved" not in draft
 
 
-def test_unknown_coverage_keeps_the_call_stats_and_its_label():
+def test_unknown_coverage_keeps_the_call_stats_and_is_never_called_complete():
     draft = approving(github=with_diff(sized_diff(2, 40), changed_files=3).github).run()
     notes = section(draft, "Controller notes")
+    assert "calls: complete" not in notes
     assert (
-        "Diff coverage after the model calls: complete. 1 of 1 call(s) returned "
+        "Diff coverage after the model calls: 1 of 1 call(s) returned "
         "a review, covering 2 of 2 file(s) in full and 0 cut to fit; 0 file(s) "
         "went to no call. File coverage could not be determined (the diff names "
         "2 file(s) but GitHub reports 3 changed), so it counts as incomplete."
@@ -1630,6 +1632,62 @@ def two_parts():
         for i, part in enumerate(sel.parts, 1)
     )
     return sel, parts
+
+
+def preamble_in_its_own_part(*, headers=True):
+    from atlas_reviewer.diffs import DiffPart, DiffSelection, FileDiff, risk_tier
+    from atlas_reviewer.draft import NarrativeFailure, PartNarrative
+
+    pre = FileDiff(UNPARSED_PATH, "stray preamble\n", 15, risk_tier(UNPARSED_PATH))
+    real = FileDiff(
+        "src/a.py", "diff --git a/src/a.py b/src/a.py\n", 33, risk_tier("src/a.py")
+    )
+    files = (pre, real) if headers else (pre,)
+    sel = DiffSelection(len(files), 48, tuple(DiffPart((f,)) for f in files), ())
+    reply = Redactor()("Fine.\n\nReview event: APPROVE")
+    failed = PartNarrative(
+        1, len(files), (pre,), NarrativeFailure("skill-bundle", "HTTP 503")
+    )
+    reviewed = tuple(
+        PartNarrative(2, 2, (real,), Narrative("skill-bundle", "fixture-model", reply))
+        for _ in range(headers)
+    )
+    return sel, (failed, *reviewed)
+
+
+def test_a_preamble_alone_in_a_failed_part_is_no_unreviewed_file():
+    from atlas_reviewer.controller import _file_coverage, _unreviewed_parts
+
+    sel, parts = preamble_in_its_own_part()
+    (row,) = _unreviewed_parts(sel, parts, scrub=str)
+    assert row.source == "pull request diff, part 1 of 2"
+    assert row.detail.startswith("no changed file: only diff text before")
+    assert UNPARSED_PATH not in row.detail
+    coverage = _file_coverage(sel, parts, (), listed=1, changed=1, prior=1)
+    assert coverage.complete
+    assert gaps(coverage) == []
+
+
+def test_a_preamble_alone_in_a_failed_part_leaves_the_note_complete():
+    from atlas_reviewer.controller import _coverage_lines, _file_coverage
+
+    sel, parts = preamble_in_its_own_part()
+    coverage = _file_coverage(sel, parts, (), listed=1, changed=1, prior=1)
+    (note,) = _coverage_lines(sel, parts, (), coverage)
+    assert note == (
+        "Diff coverage after the model calls: complete. 1 of 2 call(s) returned "
+        "a review, covering 1 of 1 file(s) in full and 0 cut to fit; 0 file(s) "
+        "went to no call."
+    )
+
+
+def test_a_header_less_diff_in_a_failed_part_is_still_listed():
+    from atlas_reviewer.controller import _unreviewed_parts
+
+    sel, parts = preamble_in_its_own_part(headers=False)
+    (row,) = _unreviewed_parts(sel, parts, scrub=str)
+    assert row.detail.startswith("1 file(s) sent but not reviewed: ")
+    assert UNPARSED_PATH in row.detail
 
 
 def gaps(coverage):

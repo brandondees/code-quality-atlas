@@ -91,14 +91,14 @@ def test_an_unwritable_out_path_is_refused_before_the_review(tmp_path, monkeypat
 
 def test_a_failed_draft_write_still_prints_the_draft(tmp_path, monkeypatch):
     target = tmp_path / "draft.md"
-    real = Path.write_text
+    real = cli.os.open
 
-    def failing(self, *args, **kwargs):
-        if self == target:
+    def failing(path, *args, **kwargs):
+        if Path(path) == target:
             raise OSError("disk full")
-        return real(self, *args, **kwargs)
+        return real(path, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "write_text", failing)
+    monkeypatch.setattr(cli.os, "open", failing)
     code, out, err = run_cli(
         "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run", "--out", str(target),
     )  # fmt: skip
@@ -187,6 +187,30 @@ def test_a_dangling_out_symlink_is_refused_before_the_review(tmp_path):
     assert code == cli.EXIT_USAGE
     assert "symlink to a missing target" in err
     assert out == ""
+
+
+def test_drafts_telemetry_ledger_and_lock_are_private(tmp_path, monkeypatch):
+    live_github(monkeypatch)
+    state = tmp_path / "s1" / "s2" / "state"
+    draft = tmp_path / "draft.md"
+    code = cli.main(
+        ["--state-dir", str(state), "review", "--event", EVENT, "--out", str(draft)],
+        env=APP_ENV, out=io.StringIO(), err=io.StringIO(), sprites_factory=scripted_sprites,
+    )  # fmt: skip
+    assert code == cli.EXIT_INCOMPLETE
+    events = tmp_path / "e1" / "e2" / "events.jsonl"
+    code, _, _ = run_cli(
+        "--state-dir", str(state), "review", "--event", EVENT, "--dry-run",
+        "--events", str(events),
+    )  # fmt: skip
+    assert code == cli.EXIT_INCOMPLETE
+    (default_events,) = (state / "telemetry").glob("review-*.jsonl")
+    files = (draft, default_events, events, events.with_name("events.jsonl.lock"))
+    for path in (*files, state / "runners.ledger", state / "review.lock"):
+        assert path.stat().st_mode & 0o777 == 0o600, path
+    created = (state.parent.parent, state.parent, state, state / "telemetry")
+    for path in (*created, events.parent.parent, events.parent):
+        assert path.stat().st_mode & 0o777 == 0o700, path
 
 
 def test_module_entry_point_runs_offline(tmp_path):
@@ -618,7 +642,7 @@ from atlas_reviewer import cli
 from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.stops import held, install_interrupts
 
-def boom(args, env, out, err):
+def boom(args, run):
     with held():
         os.kill(os.getpid(), signal.SIGTERM)
     if os.environ["STOP_ERROR"] == "boundary":
@@ -1017,6 +1041,62 @@ def test_the_probe_report_scrubs_minted_tokens_and_environment_credentials(
         assert APP_ENV[cli.ENV_SPRITES_TOKEN] not in leaked
 
 
+def test_a_boundary_error_still_names_the_telemetry_file(tmp_path, monkeypatch):
+    class NoPull(FixtureGitHub):
+        def get_pull(self, repo, number):
+            raise NotFoundError("GitHub 404")
+
+    minting_github(monkeypatch, MINTED, NoPull)
+    err = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "review", "--event", EVENT],
+        env=APP_ENV, out=io.StringIO(), err=err, sprites_factory=scripted_sprites,
+    )  # fmt: skip
+    assert code == cli.EXIT_BOUNDARY
+    (events_file,) = (tmp_path / "telemetry").glob("review-*.jsonl")
+    count = len(jsonl(events_file))
+    assert count > 0
+    assert f"telemetry: {count} event(s), {events_file}\n" in err.getvalue()
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_the_printed_telemetry_path_is_scrubbed(tmp_path, fails):
+    secret = "sprites-secret-value-0123456789"
+    target = tmp_path / f"run-{secret}" / "events.jsonl"
+    broken = ["--fixtures", str(tmp_path / "missing")] if fails else []
+    code, _, err = run_cli(
+        "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run",
+        "--events", str(target), *broken,
+        env={cli.ENV_SPRITES_TOKEN: secret},
+    )  # fmt: skip
+    assert code == (cli.EXIT_USAGE if fails else cli.EXIT_INCOMPLETE)
+    assert "telemetry: " in err
+    assert secret not in err
+
+
+def test_an_error_before_telemetry_starts_names_no_telemetry_file(tmp_path):
+    _, _, err = run_cli(
+        "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run",
+        "--max-model-calls", "9",
+    )  # fmt: skip
+    assert "telemetry:" not in err
+
+
+def test_an_events_file_another_run_holds_is_refused_and_reusable_after(tmp_path):
+    target = tmp_path / "shared.jsonl"
+    argv = ("review", "--event", EVENT, "--dry-run", "--events", str(target))
+    with cli._claimed(target):
+        code, out, err = run_cli("--state-dir", str(tmp_path / "a"), *argv)
+    assert code == cli.EXIT_USAGE
+    assert "is in use by another run" in err
+    assert not target.exists()
+    assert out == ""
+    for state in ("b", "c"):
+        code, _, _ = run_cli("--state-dir", str(tmp_path / state), *argv)
+        assert code == cli.EXIT_INCOMPLETE
+    assert jsonl(target)
+
+
 def test_a_dry_run_writes_telemetry_only_when_asked(tmp_path):
     run_cli("--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run")
     assert not (tmp_path / "telemetry").exists()
@@ -1301,6 +1381,55 @@ def test_a_complete_approving_review_exits_ok_and_reports_its_event(
     first = draft_path.read_text().split("\n", 1)[0]
     assert '"review_event": "APPROVE"' in first
     assert '"coverage_complete": true' in first
+
+
+@pytest.mark.parametrize(
+    ("event", "expected"),
+    [
+        ("APPROVE", cli.EXIT_OK),
+        ("COMMENT", cli.EXIT_OK),
+        ("REQUEST_CHANGES", cli.EXIT_CHANGES_REQUESTED),
+    ],
+)
+def test_a_complete_review_exits_by_its_event(tmp_path, monkeypatch, event, expected):
+    code, out = openrouter_review(
+        tmp_path, monkeypatch, f"Notes.\n\nReview event: {event}",
+        "--out", str(tmp_path / "draft.md"),
+    )  # fmt: skip
+    assert code == expected
+    assert f"review event: {event}; coverage_complete=true" in out
+
+
+def test_requested_changes_with_incomplete_coverage_exit_incomplete():
+    from atlas_reviewer.verdict import FileCoverage, ReviewEvent, decide
+
+    incomplete = FileCoverage(
+        2, unknown="the diff names 1 file(s) but GitHub reports 2"
+    )
+    verdict = decide(ReviewEvent.REQUEST_CHANGES, incomplete)
+    assert cli.review_exit(verdict) == cli.EXIT_INCOMPLETE
+    assert cli.review_exit(decide(ReviewEvent.REQUEST_CHANGES, FileCoverage(1))) == (
+        cli.EXIT_CHANGES_REQUESTED
+    )
+
+
+def test_a_held_review_lock_exits_with_the_usage_code(tmp_path):
+    from atlas_reviewer.ledger import single_review_lock
+
+    with single_review_lock(tmp_path / "review.lock"):
+        code, out, err = run_cli(
+            "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run"
+        )
+    assert code == cli.EXIT_USAGE == 2
+    assert "another review holds" in err
+    assert out == ""
+
+
+def test_the_exit_codes_are_the_documented_numbers():
+    assert (
+        cli.EXIT_OK, cli.EXIT_USAGE, cli.EXIT_BOUNDARY, cli.EXIT_INCOMPLETE,
+        cli.EXIT_CHANGES_REQUESTED,
+    ) == (0, 2, 3, 4, 5)  # fmt: skip
 
 
 def test_a_review_whose_model_call_failed_exits_incomplete_and_never_approves(

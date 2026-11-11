@@ -83,7 +83,11 @@ No model reviewed any file, so a dry run always exits 4, review incomplete
 - `--depth {triage,review,comprehensive}` (default `review`) is the atlas
   depth mode. Triage runs the critical tier with no picker call.
 - `--events FILE` writes lifecycle telemetry as JSONL (see Lifecycle
-  telemetry). A dry run writes none without it.
+  telemetry). A dry run writes none without it. A run holds the file for
+  its whole duration, so a second run naming the same file, even from
+  another state directory, is refused with the usage error (2) and creates
+  no telemetry file. The hold is a lock on a sibling `FILE.lock`, which
+  stays after the run.
 - `--first-frame-seconds N` (default 30, also on `probe-runner`) fails any
   exec that sends no input if no output byte arrives within N seconds (see
   One exec shape).
@@ -184,6 +188,10 @@ further GitHub or model work. The cleanup budget bounds the delete, and
 SIGKILL still ends the process.
 
 `--state-dir DIR` is a top-level option, so it goes before the subcommand.
+Every file the controller creates (the `--out` draft, telemetry and an
+`--events` file's lock, the runner ledger and the review lock) is created
+mode 0600, and every directory it creates 0700, missing parents included.
+A file or directory that already exists keeps its mode.
 Live inference is off by default. `--provider openrouter` is refused
 without `--allow-live-inference`, and refused with `--dry-run`.
 
@@ -415,12 +423,14 @@ kept, files sent in full, files cut, and the files never sent, grouped by
 risk tier, highest first, each path quoted as data; past 100 the rest are
 counted. A part whose call fails or is refused (call cap,
 cost cap, token bound) gets its own row listing the files sent but not
-reviewed. A file the diff's headers name that the selection does not
+reviewed. A part that held only the text before the first file header
+lists no file: that row says so, since the preamble is not a changed file. A file the diff's headers name that the selection does not
 account for gets a `dropped before the model calls` row and makes coverage
 PARTIAL. After the calls, a controller note states whether coverage is
 complete or PARTIAL and how many files each outcome covers. Nothing short of
 every file sent in full with every call returning a review is called
-complete.
+complete, and neither is coverage that could not be determined: that note
+gives the call stats and the reason, with no label.
 
 **Part size (D32).** The default part size is the whole prompt room under
 the token check, 176,000 characters: `min(200,000 input, 200,000 assumed
@@ -496,13 +506,26 @@ this rule: it is about files only.
   incomplete, it opens with a **REVIEW INCOMPLETE -- not approvable**
   warning instead, giving the count and naming the unreviewed files by
   reason, highest risk first, each quoted as data, with at most 100 listed.
-- `review` exits **4** when file coverage is incomplete, and 0 when it is
-  complete. Exit 0 says only that every changed file was reviewed in full,
-  not that the model approved: a complete COMMENT or REQUEST_CHANGES review
-  also exits 0. A pipeline with no human reading the draft must also read
-  the review event, from the status comment's `review_event` or the
-  printed summary, `review event: ...; coverage_complete=...;
-  unreviewed_files=N`. With `--out` the summary goes to stdout; without it,
+- `review`'s exit code is enough for a pipeline with no human reading the
+  draft to gate on (Brandon chose these codes on 2026-11-10, via
+  delegation):
+
+  | Exit | Meaning |
+  | --- | --- |
+  | 0 | file coverage complete, and the review approves or comments |
+  | 5 | file coverage complete, and the review requests changes |
+  | 4 | file coverage incomplete, whatever the model proposed (D36) |
+  | 2 | usage error, or another review holds the lock |
+  | 3 | boundary error (GitHub, Sprites or OpenRouter refused or failed) |
+
+  No other exit is a review result. An uncaught crash exits 1, a
+  malformed command line exits 2 from `argparse` itself, the same code as
+  the usage errors above, and a stop ends the process on SIGINT (130 in a
+  shell).
+
+  Exit 0 does not tell APPROVE from COMMENT; the status comment's
+  `review_event` and the printed summary, `review event: ...;
+  coverage_complete=...; unreviewed_files=N`, do. With `--out` the summary goes to stdout; without it,
   stdout is the draft alone and the summary goes to stderr. A failed
   `--out` write prints the draft to stdout and the error to stderr, and
   keeps the exit code of the review, since the review itself finished.
@@ -519,14 +542,21 @@ purpose, timeout, bytes sent and received, the stream-id bytes seen
 (`frames_seen`, for example `0x01:1`), the exit status, and its duration.
 The upload event carries the byte count the runner reports writing.
 
-Events go to one `EventSink`. Live commands write JSONL to `--events FILE`,
+Events go to one `EventSink`. An event recorded after that sink has closed
+stays in memory only. Live commands write JSONL to `--events FILE`,
 or by default to
-`<state dir>/telemetry/<command>-<UTC time to the microsecond>-<random hex>.jsonl`,
-named only once the single-review lock is held, so two runs never share a
-file and a run refused the lock creates none. `review` and `probe-runner`
-print the file's path when they finish (`review` on stderr when stdout is
-the draft). Each line is written and closed as it happens, so a killed run
-keeps its events. The draft and `probe-runner` print the same events as a
+`<state dir>/telemetry/<command>-<UTC time to the microsecond>-<random hex>.jsonl`.
+A default path is named only once the single-review lock is held and is
+unique to that run, so two runs never share one, and a run refused the lock
+creates none. An explicit `--events` file is claimed with a sibling
+`FILE.lock` for the whole run, so a second run naming it is refused and
+creates no telemetry file. `review` and `probe-runner` print the file's path
+when they finish (`review` on stderr when stdout is the draft), and on
+stderr after the error message when a usage or boundary error ends a run
+whose telemetry had started. That line's event count is the number kept
+in memory, so it can include an event recorded after the sink closed,
+which was not written. Each line is written and flushed on the descriptor
+held for the run, so a killed run keeps its events. The draft and `probe-runner` print the same events as a
 summary table. Field values are numbers, booleans or controller-chosen
 labels (step labels never include branch names or other PR text). Error
 text goes through a redactor holding every credential value from the

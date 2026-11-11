@@ -3,12 +3,14 @@
 error leaves a span without its phase, step and timing."""
 
 import json
+import threading
+import time
 
 import pytest
 
 from atlas_reviewer.ports import BoundaryError, NotFoundError, StreamTimeoutError
 from atlas_reviewer.redact import Redactor
-from atlas_reviewer.telemetry import JsonlSink, Telemetry, summary_rows
+from atlas_reviewer.telemetry import Event, JsonlSink, Telemetry, summary_rows
 
 from .helpers import FakeClock, fake_token
 
@@ -134,16 +136,16 @@ def test_other_exceptions_are_recorded_and_re_raised_unchanged():
 def test_events_are_scrubbed_before_any_sink_and_written_as_jsonl(tmp_path):
     token = fake_token("ghs_")
     redactor = Redactor((fake_token("sk-or-v1-"),))
-    sink = JsonlSink(tmp_path / "deep" / "events.jsonl")
-    t = Telemetry(FakeClock(), sink, scrub=lambda s: redactor(s).text)
+    with JsonlSink(tmp_path / "deep" / "events.jsonl") as sink:
+        t = Telemetry(FakeClock(), sink, scrub=lambda s: redactor(s).text)
 
-    def leaks():
-        raise BoundaryError(f"POST https://example.test failed: token {token}")
+        def leaks():
+            raise BoundaryError(f"POST https://example.test failed: token {token}")
 
-    t.record("create", "create sprite", {"runner": "cqa-rev-x", "note": token})
-    with pytest.raises(BoundaryError):
-        t.span("exec", "tool check", leaks, {"timeout_s": 60.0})
-    raw = sink.path.read_text()
+        t.record("create", "create sprite", {"runner": "cqa-rev-x", "note": token})
+        with pytest.raises(BoundaryError):
+            t.span("exec", "tool check", leaks, {"timeout_s": 60.0})
+        raw = sink.path.read_text()
     assert token not in raw
     lines = [json.loads(line) for line in raw.splitlines()]
     assert [e["seq"] for e in lines] == [1, 2]
@@ -152,8 +154,47 @@ def test_events_are_scrubbed_before_any_sink_and_written_as_jsonl(tmp_path):
     assert lines[1]["timeout_s"] == 60.0
     assert "exec / tool check failed after" in lines[1]["error"]
     assert "[REDACTED:github-token]" in lines[1]["error"]
-    JsonlSink(sink.path).emit(t.events[0])
+    with JsonlSink(sink.path) as again:
+        again.emit(t.events[0])
     assert len(sink.path.read_text().splitlines()) == 3
+
+
+def test_a_sink_writes_only_while_open_and_never_recreates_a_deleted_file(tmp_path):
+    path = tmp_path / "events.jsonl"
+    sink = JsonlSink(path)
+    t = Telemetry(FakeClock(), sink, scrub=str)
+    with pytest.raises(RuntimeError, match="not open"):
+        t.record("create", "before")
+    assert not path.exists()
+    with sink:
+        t.record("create", "first")
+        path.unlink()
+        t.record("create", "second")
+        assert not path.exists()
+
+
+def test_a_record_after_the_sink_closes_is_kept_in_memory_only(tmp_path):
+    """The final destroy returns while the watchdog may still be inside
+    delete (runner.py). The CLI then closes the sink, and that late record
+    must not raise."""
+    path = tmp_path / "events.jsonl"
+    sink = JsonlSink(path)
+    t = Telemetry(FakeClock(), sink, scrub=str)
+    with sink:
+        t.record("delete", "inside")
+    t.record("delete", "after the sink closed")
+    assert [e.step for e in t.events] == ["inside", "after the sink closed"]
+    (line,) = path.read_text().splitlines()
+    assert json.loads(line)["step"] == "inside"
+
+
+def test_a_sink_creates_its_file_and_each_missing_directory_private(tmp_path):
+    path = tmp_path / "t1" / "t2" / "events.jsonl"
+    with JsonlSink(path):
+        pass
+    assert path.stat().st_mode & 0o777 == 0o600
+    for directory in (path.parent, path.parent.parent):
+        assert directory.stat().st_mode & 0o777 == 0o700, directory
 
 
 def test_a_sink_without_a_credential_aware_scrub_is_refused(tmp_path):
@@ -224,3 +265,39 @@ def test_a_reused_exception_keeps_the_innermost_label_of_its_latest_raise():
         "destroy / delete attempt 2",
         "destroy / delete attempt 2",
     ]
+
+
+def test_a_close_during_emit_does_not_raise_or_tear_a_line(tmp_path):
+    """One thread emits while the main thread closes. `__exit__` holds the
+    same lock as `emit`, so close cannot land mid-write. Without that lock
+    the write hits the closed file."""
+    event = Event(1, "delete", "watchdog", "ok", 0.0, 0.0)
+    for i in range(40):
+        path = tmp_path / f"race-{i}.jsonl"
+        sink = JsonlSink(path)
+        errors: list[BaseException] = []
+
+        def emit_until_closed(
+            sink: JsonlSink = sink, found: list[BaseException] = errors
+        ) -> None:
+            while not sink._closed:
+                try:
+                    sink.emit(event)
+                except Exception as exc:  # noqa: BLE001 -- the thread must report it
+                    found.append(exc)
+                    return
+
+        with sink:
+            thread = threading.Thread(target=emit_until_closed)
+            thread.start()
+            deadline = time.monotonic() + 2
+            while path.stat().st_size == 0:
+                if errors or time.monotonic() > deadline:
+                    break
+        thread.join(5)
+        assert not thread.is_alive()
+        assert errors == []
+        lines = path.read_text().splitlines()
+        assert lines
+        for line in lines:
+            assert json.loads(line)["step"] == "watchdog"
