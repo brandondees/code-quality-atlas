@@ -425,7 +425,7 @@ def _actual_cost(usage: Json, terms: ModelTerms) -> tuple[Decimal | None, str]:
         cost_details = usage.get("cost_details")
         if isinstance(cost_details, dict) and "upstream_inference_cost" in cost_details:
             raw = cost_details["upstream_inference_cost"]
-            summary += f" (upstream {raw!r} reported, not added: is_byok false)"
+            summary += f" (upstream {raw!r:.200} reported, not added: is_byok false)"
         upstream = None
     else:
         try:

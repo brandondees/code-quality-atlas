@@ -619,6 +619,22 @@ def test_a_non_byok_response_settles_usage_cost_whatever_upstream_reports(upstre
     )
 
 
+def test_a_long_skipped_upstream_value_is_cut_in_the_settlement_line():
+    usage = {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "cost": "0.05",
+        "is_byok": False,
+        "cost_details": {"upstream_inference_cost": "9" * 1000},
+    }
+    p = provider(OpenRouterFake(reply(completion(usage=usage))))
+    p.complete(SMALL)
+    line = p.usage_lines()[1]
+    assert p.budget.calls[0].actual_usd == Decimal("0.05")
+    assert "9" * 150 in line
+    assert "9" * 200 not in line
+
+
 @pytest.mark.parametrize("flag", ["false", 0, None])
 def test_a_non_boolean_is_byok_still_adds_a_reported_upstream_cost(flag):
     """Anything other than boolean false still adds upstream, so an
