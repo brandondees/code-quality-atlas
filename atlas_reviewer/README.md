@@ -280,7 +280,9 @@ amount is `usage.cost` and a reported `cost_details.upstream_inference_cost`
 is not added, with two over-counts: an upstream amount larger than
 `usage.cost` settles at that amount, and an upstream value that is present,
 not null and unreadable keeps the full reservation. A null or absent
-upstream settles `usage.cost`. The settlement line records the raw upstream
+upstream settles `usage.cost`. With no usable `usage.cost` the call is
+priced from the highest catalog rates and upstream is still not added.
+The settlement line records the raw upstream
 value on such a call, cut to 200 characters. This is the controller's
 policy, not a confirmed OpenRouter fact. OpenRouter's usage-accounting page
 calls `cost` the total charged to the account and `upstream_inference_cost`
@@ -293,9 +295,9 @@ BYOK request `cost` is the OpenRouter fee only
 fetched 2026-11-11), so `is_byok: true` adds a reported upstream cost,
 and a missing upstream cost keeps the reservation. A missing or
 non-boolean `is_byok` adds a reported upstream cost too, including a
-call refused in no-BYOK mode. An upstream value that cannot be read
-keeps the reservation on any response that is not explicitly non-BYOK
-as well.
+call refused in no-BYOK mode. A present, unreadable upstream value
+keeps the reservation on any response, including an explicitly
+non-BYOK one.
 
 ## What the draft contains
 

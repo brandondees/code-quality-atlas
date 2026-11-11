@@ -44,9 +44,10 @@
   and unreadable keeps the full reservation. A null or absent upstream
   settles `usage.cost`; with no usable `usage.cost` it is priced from the
   highest catalog rates and upstream is still not added. For any other
-  `is_byok` value a reported upstream cost is added. A call with `is_byok` true and no upstream cost, or with
-  an upstream value that cannot be read on a call that is not explicitly
-  non-BYOK, keeps its full reservation. The settlement line records the
+  `is_byok` value a reported upstream cost is added. A call with `is_byok`
+  true and no upstream cost keeps its full reservation. A present,
+  unreadable upstream value keeps the reservation on any response,
+  including an explicitly non-BYOK one. The settlement line records the
   raw upstream value on an explicit non-BYOK call, cut to 200 characters.
   The SDK says that on a BYOK request `cost` is the OpenRouter fee only
   (https://openrouter.ai/docs/client-sdks/typescript/models/decisionsresponseusage,
@@ -420,11 +421,12 @@ def _actual_cost(usage: Json, terms: ModelTerms) -> tuple[Decimal | None, str]:
         _tokens(details, "reasoning_tokens") if isinstance(details, dict) else None
     )
     summary = f"tokens in={prompt_t} out={completion_t} reasoning={reasoning_t}"
-    # Policy, not a confirmed OpenRouter fact: boolean false settles usage.cost
-    # alone (see the module docstring, verify). PR #585 (2026-11-11) charged
-    # usage.cost and the old sum settled twice that. Ambiguity over-counts:
-    # an upstream amount above usage.cost, or one that is present and
-    # unreadable, is never settled below what it could cost.
+    # Policy: boolean false settles usage.cost. OpenRouter's docs do not
+    # say whether that cost already includes the upstream amount (verify).
+    # PR #585 (2026-11-11) charged usage.cost and the old sum settled twice
+    # that. Ambiguity over-counts: an upstream amount above usage.cost, or
+    # one that is present and unreadable, is never settled below what it
+    # could cost.
     explicitly_non_byok = usage.get("is_byok") is False
     raw = _upstream_raw(usage)
     try:
@@ -457,10 +459,11 @@ def _actual_cost(usage: Json, terms: ModelTerms) -> tuple[Decimal | None, str]:
             base += upstream
     elif raw is not _ABSENT:
         if from_usage_cost and upstream is not None and upstream > base:
-            base = upstream
             summary += (
-                f" (upstream {_shown(raw)} exceeds usage.cost: settled at upstream)"
+                f" (upstream {_shown(raw)} exceeds usage.cost {base}:"
+                " settled at upstream)"
             )
+            base = upstream
         else:
             summary += f" (upstream {_shown(raw)} reported, not added: is_byok false)"
     return base, summary

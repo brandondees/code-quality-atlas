@@ -629,7 +629,10 @@ def test_a_non_byok_call_settles_the_larger_upstream_cost(upstream):
     p = provider(OpenRouterFake(reply(completion(usage=_non_byok_usage(upstream)))))
     p.complete(SMALL)
     assert p.budget.calls[0].actual_usd == Decimal(upstream)
-    assert f"(upstream {upstream!r} exceeds usage.cost" in p.usage_lines()[1]
+    assert (
+        f"(upstream {upstream!r} exceeds usage.cost {Decimal('0.0790')}:"
+        " settled at upstream)" in p.usage_lines()[1]
+    )
 
 
 def test_a_non_byok_call_with_a_null_upstream_settles_usage_cost():
@@ -651,12 +654,37 @@ def test_a_non_byok_call_with_an_unreadable_upstream_keeps_the_reservation(upstr
 
 
 def test_a_long_unreadable_upstream_value_is_cut_in_the_settlement_line():
-    p = provider(OpenRouterFake(reply(completion(usage=_non_byok_usage("x" * 1000)))))
+    raw = "x" * 1000
+    p = provider(OpenRouterFake(reply(completion(usage=_non_byok_usage(raw)))))
     p.complete(SMALL)
     line = p.usage_lines()[1]
+    shown = repr(raw)[:200]
     assert p.budget.calls[0].actual_usd is None
-    assert "x" * 150 in line
-    assert "x" * 200 not in line
+    assert f"(upstream {shown} unreadable)" in line
+
+
+_MISSING = object()
+
+
+@pytest.mark.parametrize(
+    "flag",
+    [True, "false", 0, _MISSING],
+    ids=["True", "false", "0", "missing"],
+)
+def test_a_null_upstream_keeps_the_reservation_unless_explicitly_non_byok(flag):
+    """Null is an absent upstream only when is_byok is boolean false.
+    True, a non-boolean flag, or a missing field keeps the reservation."""
+    usage = {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "cost": "0.05",
+        "cost_details": {"upstream_inference_cost": None},
+    }
+    if flag is not _MISSING:
+        usage["is_byok"] = flag
+    p = provider(OpenRouterFake(reply(completion(usage=usage))))
+    p.complete(SMALL)
+    assert p.budget.calls[0].actual_usd is None
 
 
 @pytest.mark.parametrize("flag", ["false", 0, None])
