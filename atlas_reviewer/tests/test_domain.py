@@ -85,7 +85,7 @@ def test_evidence_requires_aware_fetch_time():
             good.head_sha,
             good.provenance,
             good.tool,
-            datetime(2026, 1, 1),
+            datetime(2026, 1, 1),  # noqa: DTZ001
             good.conclusion,
             redact(""),
         )
