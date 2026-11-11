@@ -23,6 +23,7 @@ import io
 import json
 import math
 import os
+import re
 import secrets
 import sys
 import time
@@ -43,6 +44,7 @@ from atlas_reviewer.controller import (
     run_review,
 )
 from atlas_reviewer.domain import (
+    CleanupStatus,
     InvalidEventError,
     PrEvent,
     RunnerReport,
@@ -71,15 +73,18 @@ from atlas_reviewer.runner import (
     TRIVIAL_TOOL,
     Diagnostic,
     RunnerJob,
+    Swept,
     ToolAbsent,
     ToolRan,
     ToolResult,
+    event_runner_name,
     probe_runner,
     run_disposable,
     runner_name,
     sweep,
 )
-from atlas_reviewer.sprites_api import SpritesClient
+from atlas_reviewer.sprites_api import RUNNER_PREFIX, SpritesClient
+from atlas_reviewer.stops import raise_if_stopped
 from atlas_reviewer.telemetry import JsonlSink, Telemetry
 
 ENV_APP_ID = "ATLAS_GITHUB_APP_ID"
@@ -307,6 +312,7 @@ def _live_wiring(
     event: PrEvent,
     provider: ModelProvider,
     telemetry: Telemetry,
+    runner: str,
 ) -> _Wiring:
     _require_env(env, ENV_APP_KEY)
     _require_env(env, ENV_SPRITES_TOKEN)
@@ -315,17 +321,31 @@ def _live_wiring(
     tokens = _app_tokens(env, event, args.include_issues, transport)
     args.credentials.register(tokens.secrets)
     redactor = args.credentials.redactor
+    sprites = args.sprites_factory(env)
+    _require_runner_absent(sprites, runner)
     deps = Deps(
         github=GitHubClient(transport, tokens),
-        sprites=args.sprites_factory(env),
+        sprites=sprites,
         ledger=FileLedger(_state_dir(args, env) / "runners.ledger"),
         harness=SkillBundleHarness(provider, load_bundle(), redactor),
         clock=clock,
         redactor=redactor,
-        runner_name=lambda: runner_name(clock),
+        runner_name=lambda: runner,
         telemetry=telemetry,
     )
     return _Wiring(deps, f"live (GitHub App + Sprites; provider {provider.name})")
+
+
+def _require_runner_absent(api: SpritesApi, name: str) -> None:
+    """The name comes from the event, so a Sprite that already holds it was
+    left by an earlier review of this commit or belongs to one still
+    running. Neither is a fresh runner."""
+    if api.exists(name):
+        raise BoundaryError(
+            f"a Sprite named {name} already exists. If no review of this commit "
+            f"is running, delete it with `sweep --runner {name} --force-live`, "
+            "then review again"
+        )
 
 
 def _permissions(include_issues: bool) -> dict[str, str]:
@@ -359,11 +379,12 @@ def _cmd_review(
     with _review_lock(args, env):
         telemetry = _telemetry(args, env, "review", default_file=not args.dry_run)
         provider = _select_provider(args, env, args.openrouter_factory, telemetry)
-        wiring = (
-            _dry_run_wiring(args, event_path, provider, telemetry)
-            if args.dry_run
-            else _live_wiring(args, env, event, provider, telemetry)
-        )
+        if args.dry_run:
+            wiring = _dry_run_wiring(args, event_path, provider, telemetry)
+        else:
+            runner = event_runner_name(event)
+            err.write(f"atlas_reviewer: runner Sprite for this review: {runner}\n")
+            wiring = _live_wiring(args, env, event, provider, telemetry, runner)
         outcome = run_review(event, wiring.deps, _review_config(args, wiring.mode))
     written = _emit(outcome.draft, args.out, out, err)
     verdict = outcome.verdict
@@ -422,14 +443,65 @@ def _live_sprites(env: Mapping[str, str]) -> SpritesApi:
 def _cmd_sweep(
     args: argparse.Namespace, env: Mapping[str, str], out: TextIO, err: TextIO
 ) -> int:
+    named = _named_runners(args)
     api = args.sprites_factory(env)
     # The ledger lists a live review's runner too; sweeping during a review
     # would destroy it mid-run, so sweep waits its turn like review does.
     with _review_lock(args, env):
-        results = sweep(api, FileLedger(_state_dir(args, env) / "runners.ledger"))
-    out.writelines(f"{name}: {status.value}\n" for name, status in results.items())
+        ledger = FileLedger(_state_dir(args, env) / "runners.ledger")
+        _require_force_live(args, ledger.pending())
+        for name in named:
+            ledger.record(name)
+        results = sweep(api, ledger)
+    out.writelines(f"{name}: {_swept_line(r)}\n" for name, r in results.items())
     out.write(f"{len(results)} runner(s) in the ledger\n")
-    return EXIT_OK
+    verified = all(
+        r.cleanup is CleanupStatus.DESTROYED_VERIFIED for r in results.values()
+    )
+    return EXIT_OK if verified else EXIT_BOUNDARY
+
+
+def _swept_line(result: Swept) -> str:
+    if result.cleanup is CleanupStatus.DESTROYED_VERIFIED and not result.deleted:
+        return "already absent, nothing deleted (verified absent)"
+    return result.cleanup.value
+
+
+_RUNNER_NAME = re.compile(re.escape(RUNNER_PREFIX) + r"[a-z0-9-]+")
+
+
+def _named_runners(args: argparse.Namespace) -> list[str]:
+    """Runners to add to this machine's ledger before sweeping it: a review
+    on another machine recorded them in a ledger this one cannot read."""
+    names = list(args.runner)
+    if args.event:
+        names.append(event_runner_name(load_event(Path(args.event))))
+    for name in names:
+        if not _RUNNER_NAME.fullmatch(name):
+            raise UsageError(
+                f"--runner must be a {RUNNER_PREFIX}* name of lowercase letters, "
+                f"digits and hyphens, got {name!r}"
+            )
+    if names and not args.force_live:
+        raise UsageError(
+            "no lock covers a runner recorded on another machine, so a review "
+            "still running there would lose its runner mid-run. Check that no "
+            "review of that commit is running, then add --force-live"
+        )
+    return names
+
+
+def _require_force_live(args: argparse.Namespace, pending: Sequence[str]) -> None:
+    """A ledger entry does not show this machine's create made the Sprite:
+    a create of unknown outcome keeps its name, and a review of the same
+    commit on another machine may have created that name since."""
+    if pending and not args.force_live:
+        raise UsageError(
+            f"the ledger lists {len(pending)} runner(s). A name whose create "
+            "was never confirmed may now be the runner of a review of that "
+            "commit on another machine, and no lock covers that. Check that "
+            "no such review is running, then add --force-live"
+        )
 
 
 def _cmd_probe(
@@ -647,6 +719,22 @@ def build_parser() -> argparse.ArgumentParser:
     swp = sub.add_parser(
         "sweep", help="destroy runners a crashed review left in the ledger"
     )
+    swp.add_argument(
+        "--runner",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="also destroy this runner, recorded in another state dir's ledger",
+    )
+    swp.add_argument(
+        "--event",
+        help="also destroy the runner a review of this event file is named",
+    )
+    swp.add_argument(
+        "--force-live",
+        action="store_true",
+        help="required to delete anything: you checked no review using it runs",
+    )
     swp.set_defaults(handler=_cmd_sweep)
     probe = sub.add_parser(
         "probe-runner",
@@ -727,7 +815,13 @@ def main(
     )
     err = err or sys.stderr
     try:
-        return handler(args, env, out or sys.stdout, err)
+        code = handler(args, env, out or sys.stdout, err)
     except tuple(e for e, _ in _ERRORS) as exc:
         err.write(f"atlas_reviewer: {args.credentials.scrub(str(exc))}\n")
-        return next(code for kind, code in _ERRORS if isinstance(exc, kind))
+        code = next(mapped for kind, mapped in _ERRORS if isinstance(exc, kind))
+    finally:
+        # The review raises a held stop right after its runner phase.
+        # One still pending here is a command that ended in an error,
+        # including an exception this handler does not map.
+        raise_if_stopped()
+    return code

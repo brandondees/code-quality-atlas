@@ -11,7 +11,7 @@ from urllib.parse import parse_qsl, urlsplit
 import pytest
 
 from atlas_reviewer.http import StreamWindow, UrllibStreamingTransport
-from atlas_reviewer.ports import BoundaryError, NotFoundError
+from atlas_reviewer.ports import BoundaryError, NotFoundError, RefusedError
 from atlas_reviewer.runner import DENY_ALL
 from atlas_reviewer.sprites_api import EXEC_STDIN_MAX_BYTES, SpritesClient, exec_request
 
@@ -83,6 +83,18 @@ def test_sprites_exec_http_errors_are_checked_like_other_calls():
         SpritesClient(Recorder(ok(status=404)), "t").exec(NAME, ("true",), b"", 5.0)
     with pytest.raises(BoundaryError, match="HTTP 500"):
         SpritesClient(Recorder(ok(status=500)), "t").exec(NAME, ("true",), b"", 5.0)
+
+
+@pytest.mark.parametrize("status", [400, 409, 422])
+def test_a_create_answered_with_a_4xx_is_refused(status):
+    with pytest.raises(RefusedError, match=f"HTTP {status}"):
+        SpritesClient(Recorder(ok(status=status)), "t").create(NAME)
+
+
+def test_a_create_answered_with_a_5xx_is_not_a_refusal():
+    with pytest.raises(BoundaryError) as caught:
+        SpritesClient(Recorder(ok(status=503)), "t").create(NAME)
+    assert not isinstance(caught.value, RefusedError)
 
 
 @pytest.mark.parametrize(

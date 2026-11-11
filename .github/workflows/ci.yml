@@ -216,6 +216,12 @@ jobs:
               # pre-existing gap in the same class this PR fixes for
               # session-log.md, caught by atlas review round 2 on #522.
               - "docs/runbooks/pr-review-automation.md"
+              # The Fly deploy files atlas_reviewer/tests/test_fly_deploy.py
+              # parses or reads.
+              - "Dockerfile"
+              - "fly.toml"
+              - ".dockerignore"
+              - ".gitignore"
               - "*.py"
               - "pyproject.toml"
               - ".python-version"
@@ -262,11 +268,16 @@ jobs:
               - "docs/open-questions.md"
               - "docs/session-log.md"
               - "docs/runbooks/pr-review-automation.md"
+              - "Dockerfile"
+              - "fly.toml"
+              - ".dockerignore"
+              - ".gitignore"
               - "*.py"
             shell:
               - "tooling/**/*.sh"
               - "hooks/**"
               - "collapsed/hooks/**"
+              - "atlas_reviewer/**/*.sh"
               # The whole workflows/ tree, not just ci.yml: actionlint below
               # also shells out to shellcheck for embedded run: scripts in
               # *any* workflow file, so a change to a workflow other than
@@ -732,7 +743,7 @@ jobs:
           # the exact bug this PR exists to close, just for hidden paths
           # instead of nested ones (round-1 review finding).
           shopt -s nullglob globstar dotglob
-          "$RUNNER_TEMP/bin/shellcheck" --source-path=SCRIPTDIR -x tooling/**/*.sh hooks/**/*.sh collapsed/hooks/**/*.sh
+          "$RUNNER_TEMP/bin/shellcheck" --source-path=SCRIPTDIR -x tooling/**/*.sh hooks/**/*.sh collapsed/hooks/**/*.sh atlas_reviewer/**/*.sh
       - name: actionlint
         if: steps.filter.outputs.workflows == 'true'
         # timeout-minutes is a backstop, not the primary fix -- see the

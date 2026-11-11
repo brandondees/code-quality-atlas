@@ -25,7 +25,10 @@ fixes driven by each live run); **D32** (diff fitting and the lens
 picker); **D33** (the diff goes to the model unredacted, and possible
 committed secrets are flagged by file and line). All are scoped steps under the still-open **Q24**. **D31** is a
 separate, undecided proposal for a lens-based agentic reviewer, and none of
-it is built here.
+it is built here. **D35** (a lens runs whole or is NOT RUN) and **D36**
+(partial file coverage does not approve) are recorded below. **D37** is the
+Fly one-off deploy configuration; this repository does not create the app,
+and D37 records one operator run of it on 2026-11-10.
 
 **Goal.** Produce one Code Quality Atlas review **draft** for one PR commit.
 The run is triggered by an operator and funded by the operator. It never
@@ -209,7 +212,8 @@ propagates).
 Destroy is idempotent and thread-safe. A 404 counts as already destroyed,
 a failed delete is retried once, and a follow-up existence check verifies
 the result. Only a verified destroy clears the ledger. An unverified one is
-reported in the draft and left for `sweep`.
+reported in the draft and left for `sweep --force-live` (an empty ledger
+needs no flag).
 
 Exec follows the Sprites OpenAPI 0.1.12 (`POST /v1/sprites/{name}/exec`:
 argv as repeated `cmd` query parameters, `stdin=true` on every exec since
@@ -560,8 +564,14 @@ each needing its own decision:
   review is undecided. A dated research doc comes before any code.
 - **The lens-based agentic loop.** D31, proposal only:
   [`2026-11-07-lens-based-agentic-reviewer.md`](2026-11-07-lens-based-agentic-reviewer.md).
-- **Deploying the controller** (for example on Fly) instead of running it
-  from an operator's trusted machine.
+- **Deploying the controller.** D37 records the Fly one-off configuration
+  and the runbook,
+  [`../../atlas_reviewer/deploy-fly.md`](../../atlas_reviewer/deploy-fly.md).
+  This repository does not create the app or set secrets. One operator
+  deploy on 2026-11-10 ran an offline review of #605 in the earlier
+  `fly machine run --rm` shape; D37 and the runbook record what it showed.
+  The shape stays one operator-started review at a time, with no webhook
+  and no queue.
 - **Omission rows for check summaries and log tails.** These are capped
   today, but the caps are not listed as omissions the way diff, PR-body,
   issue-body and artifact-excerpt cuts are.

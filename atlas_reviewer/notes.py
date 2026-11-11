@@ -37,8 +37,12 @@ CLEANUP_SENTENCE = {
         "(cleanup proven)"
     ),
     CleanupStatus.DESTROY_UNVERIFIED: (
-        "destroy was NOT verified; the runner may still exist and stays in the "
-        "ledger until `sweep` removes it"
+        "destroy was NOT verified; the runner may still exist, and if its create "
+        "was never confirmed it may be another review's. Its name stays in the "
+        "ledger of the machine that ran the review, and on Fly that ledger goes "
+        "with the review Machine. Once no review of this commit is running, "
+        "remove it by name with `sweep --event EVENT_FILE --force-live` or "
+        "`sweep --runner NAME --force-live`"
     ),
     CleanupStatus.NOT_CREATED: "no runner was created, so there was nothing to clean up",
 }

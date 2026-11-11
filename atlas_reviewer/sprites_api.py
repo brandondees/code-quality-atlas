@@ -48,7 +48,7 @@ from atlas_reviewer.http import (
     StreamWindow,
     safe_url,
 )
-from atlas_reviewer.ports import BoundaryError, Json, NotFoundError
+from atlas_reviewer.ports import BoundaryError, Json, NotFoundError, RefusedError
 
 API_URL = "https://api.sprites.dev"
 RUNNER_PREFIX = "cqa-rev-"
@@ -93,6 +93,8 @@ def exec_request(
 def _checked(method: str, url: str, resp: HttpResponse) -> HttpResponse:
     if resp.status == 404:
         raise NotFoundError(f"Sprites 404 for {method} {safe_url(url)}")
+    if 400 <= resp.status < 500:
+        raise RefusedError(f"Sprites HTTP {resp.status} for {method} {safe_url(url)}")
     if not 200 <= resp.status < 300:
         raise BoundaryError(f"Sprites HTTP {resp.status} for {method} {safe_url(url)}")
     return resp

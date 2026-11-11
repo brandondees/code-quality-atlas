@@ -85,6 +85,7 @@ from atlas_reviewer.runner import (
     ToolSpec,
     run_disposable,
 )
+from atlas_reviewer.stops import raise_if_stopped
 from atlas_reviewer.telemetry import Telemetry
 from atlas_reviewer.verdict import (
     FileCoverage,
@@ -188,6 +189,9 @@ def run_review(event: PrEvent, deps: Deps, config: ReviewConfig) -> ReviewOutcom
         collected,
     )
     runner, tool_results = _run_tools(event, deps, config, collected)
+    # A stop held across the final delete ends the review here, after
+    # cleanup and before any further GitHub or model work.
+    raise_if_stopped()
     evidence = classify(
         event.head_sha, collected.items, config.expected, collected.failures
     )

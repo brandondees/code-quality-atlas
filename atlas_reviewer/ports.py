@@ -27,6 +27,11 @@ class NotFoundError(BoundaryError):
     """The external resource does not exist (HTTP 404)."""
 
 
+class RefusedError(BoundaryError):
+    """The server answered with a 4xx other than 404: it refused the
+    request and did not act on it."""
+
+
 class ResponseTooLargeError(BoundaryError):
     """A download exceeded the byte cap the caller set for it."""
 

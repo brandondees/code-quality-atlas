@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: MIT
 import io
 import json
+import os
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -12,8 +14,8 @@ from atlas_reviewer import cli
 from atlas_reviewer.fakes import FakeSprites
 from atlas_reviewer.github_fixture import FixtureGitHub
 from atlas_reviewer.interpreter import PYENV_VERSIONS, PYTHON_TAG
-from atlas_reviewer.ports import BoundaryError, NotFoundError
-from atlas_reviewer.runner import EGRESS_TAG
+from atlas_reviewer.ports import BoundaryError, NotFoundError, StreamTimeoutError
+from atlas_reviewer.runner import EGRESS_TAG, event_runner_name
 
 from .helpers import FIXTURE, HEAD, SOURCE_TARBALL, FakeClock, fake_token
 
@@ -516,12 +518,324 @@ def test_sweep_destroys_ledgered_runners(tmp_path):
     (tmp_path / "runners.ledger").write_text("cqa-rev-leftover\n")
     out = io.StringIO()
     code = cli.main(
-        ["--state-dir", str(tmp_path), "sweep"],
+        ["--state-dir", str(tmp_path), "sweep", "--force-live"],
         env={}, out=out, err=io.StringIO(), sprites_factory=lambda env: api,
     )  # fmt: skip
     assert code == cli.EXIT_OK
     assert "cqa-rev-leftover: destroyed (verified absent)" in out.getvalue()
     assert api.live_names() == ()
+
+
+EVENT_RUNNER = event_runner_name(cli.load_event(Path(EVENT)))
+
+
+def _offline_live_review(tmp_path, monkeypatch, api):
+    monkeypatch.setattr(
+        cli,
+        "AppInstallationTokens",
+        lambda transport, clock, **kw: type("T", (), {"secrets": lambda self: ()})(),
+    )
+    monkeypatch.setattr(
+        cli, "GitHubClient", lambda transport, t: FixtureGitHub(FIXTURE)
+    )
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "review", "--event", EVENT],
+        env=APP_ENV, out=out, err=err, sprites_factory=lambda env: api,
+    )  # fmt: skip
+    return code, out.getvalue(), err.getvalue()
+
+
+_STOP_DURING_REVIEW = """\
+import json, os, signal
+from pathlib import Path
+from atlas_reviewer import cli
+from atlas_reviewer.fakes import FakeSprites
+from atlas_reviewer.github_fixture import FixtureGitHub
+from atlas_reviewer.stops import install_interrupts
+
+fixture = Path(os.environ["STOP_FIXTURE"])
+
+class StopMidDelete(FakeSprites):
+    def delete(self, name):
+        os.kill(os.getpid(), signal.SIGTERM)
+        super().delete(name)
+
+api = StopMidDelete.from_script(
+    json.loads((fixture / "runner-script.json").read_text())
+)
+cli.AppInstallationTokens = lambda *a, **k: type("T", (), {"secrets": lambda self: ()})()
+cli.GitHubClient = lambda transport, tokens: FixtureGitHub(fixture)
+install_interrupts()
+raise SystemExit(cli.main(
+    ["--state-dir", os.environ["STOP_STATE"], "review", "--event",
+     str(fixture / "event.json"), "--out", os.environ["STOP_DRAFT"],
+     "--events", os.environ["STOP_EVENTS"], "--depth", "triage"],
+    env={
+        "ATLAS_GITHUB_APP_ID": "5648875",
+        "ATLAS_GITHUB_APP_PRIVATE_KEY": "not-a-real-key",
+        "ATLAS_GITHUB_INSTALLATION_ID": "12345",
+        "ATLAS_SPRITES_TOKEN": "org/1/sprites-secret",
+    },
+    sprites_factory=lambda env: api,
+))
+"""
+
+
+def test_a_stop_during_the_final_delete_ends_the_review_before_later_work(
+    tmp_path,
+):
+    """The delete finishes, then the stop ends the review. Conversation
+    fetches, model calls, or a draft written after that signal are the
+    over-deferral this catches."""
+    draft = tmp_path / "draft.md"
+    events_path = tmp_path / "events.jsonl"
+    proc = subprocess.run(
+        [sys.executable, "-c", _STOP_DURING_REVIEW],
+        env={
+            **os.environ,
+            "PYTHONPATH": str(Path(__file__).resolve().parents[2]),
+            "STOP_FIXTURE": str(FIXTURE),
+            "STOP_STATE": str(tmp_path / "state"),
+            "STOP_DRAFT": str(draft),
+            "STOP_EVENTS": str(events_path),
+        },
+        capture_output=True, text=True, timeout=120, check=False,
+    )  # fmt: skip
+    # An uncaught KeyboardInterrupt kills the process with SIGINT. A shell
+    # reports that as 130; subprocess reports the signal as a negative code.
+    assert proc.returncode == -signal.SIGINT, proc.stderr
+    events = [json.loads(line) for line in events_path.read_text().splitlines()]
+    assert any(e["phase"] == "destroy" and e["step"] == "outcome" for e in events)
+    assert not any(e["phase"] == "conversation fetch" for e in events), events
+    assert not any(e["phase"] == "model call" for e in events), events
+    assert not draft.exists()
+
+
+_STOP_THEN_ERROR = """\
+import os, signal
+from atlas_reviewer import cli
+from atlas_reviewer.ports import BoundaryError
+from atlas_reviewer.stops import held, install_interrupts
+
+def boom(args, env, out, err):
+    with held():
+        os.kill(os.getpid(), signal.SIGTERM)
+    if os.environ["STOP_ERROR"] == "boundary":
+        raise BoundaryError("sprites down")
+    raise OSError("disk")
+
+cli._cmd_sweep = boom
+install_interrupts()
+raise SystemExit(cli.main(
+    ["--state-dir", os.environ["STOP_STATE"], "sweep"],
+    env={"ATLAS_SPRITES_TOKEN": "org/1/sprites-secret"},
+    sprites_factory=lambda env: None,
+))
+"""
+
+
+@pytest.mark.parametrize("kind", ["boundary", "oserror"])
+def test_a_pending_stop_is_not_dropped_when_the_command_fails(tmp_path, kind):
+    """A stop held before a mapped or unmapped error still ends the
+    process. Returning the mapped code, or letting OSError propagate,
+    would drop it."""
+    proc = subprocess.run(
+        [sys.executable, "-c", _STOP_THEN_ERROR],
+        env={
+            **os.environ,
+            "PYTHONPATH": str(Path(__file__).resolve().parents[2]),
+            "STOP_STATE": str(tmp_path / "state"),
+            "STOP_ERROR": kind,
+        },
+        capture_output=True, text=True, timeout=30, check=False,
+    )  # fmt: skip
+    assert proc.returncode == -signal.SIGINT, proc.stderr
+    if kind == "boundary":
+        assert "atlas_reviewer: sprites down" in proc.stderr
+
+
+def test_a_live_review_prints_its_event_runner_name_before_creating_it(
+    tmp_path, monkeypatch
+):
+    api = scripted_sprites({})
+    code, _, err = _offline_live_review(tmp_path, monkeypatch, api)
+    assert code == cli.EXIT_INCOMPLETE, err
+    assert err.startswith(
+        f"atlas_reviewer: runner Sprite for this review: {EVENT_RUNNER}\n"
+    )
+    assert api.calls.index(("exists", EVENT_RUNNER)) < api.calls.index(
+        ("create", EVENT_RUNNER)
+    )
+    assert api.live_names() == ()
+
+
+def test_a_live_review_refuses_a_sprite_that_already_holds_its_name(
+    tmp_path, monkeypatch
+):
+    api = scripted_sprites({})
+    api.create(EVENT_RUNNER)
+    code, out, err = _offline_live_review(tmp_path, monkeypatch, api)
+    assert code == cli.EXIT_BOUNDARY
+    assert f"a Sprite named {EVENT_RUNNER} already exists" in err
+    assert f"sweep --runner {EVENT_RUNNER} --force-live" in err
+    assert out == ""
+    assert [c[0] for c in api.calls] == ["create", "exists"]
+    assert api.live_names() == (EVENT_RUNNER,)
+
+
+def test_a_live_review_that_loses_the_create_race_stops_and_deletes_nothing(
+    tmp_path, monkeypatch
+):
+    """Another review of the commit creates the runner between this one's
+    existence check and its create: create is the claim, so this review
+    exits 3 without touching the other review's Sprite."""
+    api = scripted_sprites({})
+    checked = api.exists
+
+    def the_other_review_creates_it_next(name):
+        found = checked(name)
+        api.create(name)
+        return found
+
+    monkeypatch.setattr(api, "exists", the_other_review_creates_it_next)
+    code, out, err = _offline_live_review(tmp_path, monkeypatch, api)
+    assert code == cli.EXIT_BOUNDARY, err
+    assert f"refused to create runner {EVENT_RUNNER}" in err
+    assert "delete" not in [c[0] for c in api.calls]
+    assert api.live_names() == (EVENT_RUNNER,)
+    assert (tmp_path / "runners.ledger").read_text() == ""
+    assert out == ""
+
+
+def test_a_plain_sweep_cannot_delete_a_runner_another_review_created_after_a_lost_create(
+    tmp_path, monkeypatch
+):
+    """This review's create times out and never lands, so its name stays in
+    the ledger. A review of the same commit on another machine then creates
+    that name. A plain sweep here must not delete the other review's Sprite."""
+    api = scripted_sprites({})
+
+    def create_times_out(name):
+        api.calls.append(("create", name))
+        raise StreamTimeoutError("create: no response within 30s")
+
+    monkeypatch.setattr(api, "create", create_times_out)
+    code, out, err = _offline_live_review(tmp_path, monkeypatch, api)
+    assert code == cli.EXIT_INCOMPLETE, err
+    assert "destroy was NOT verified" in out
+    assert (tmp_path / "runners.ledger").read_text() == f"{EVENT_RUNNER}\n"
+
+    FakeSprites.create(api, EVENT_RUNNER)
+    err = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "sweep"],
+        env={}, out=io.StringIO(), err=err, sprites_factory=lambda env: api,
+    )  # fmt: skip
+    assert code == cli.EXIT_USAGE
+    assert "add --force-live" in err.getvalue()
+    assert api.live_names() == (EVENT_RUNNER,)
+    assert "delete" not in [c[0] for c in api.calls]
+
+
+def test_a_plain_sweep_of_an_empty_ledger_needs_no_force_live(tmp_path):
+    out = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "sweep"],
+        env={}, out=out, err=io.StringIO(), sprites_factory=lambda env: FakeSprites(),
+    )  # fmt: skip
+    assert code == cli.EXIT_OK
+    assert out.getvalue() == "0 runner(s) in the ledger\n"
+
+
+def test_sweep_destroys_a_runner_named_on_the_command_line(tmp_path):
+    api = FakeSprites()
+    api.create("cqa-rev-left-on-another-machine")
+    out = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "sweep", "--runner", "cqa-rev-left-on-another-machine",
+         "--force-live"],
+        env={}, out=out, err=io.StringIO(), sprites_factory=lambda env: api,
+    )  # fmt: skip
+    assert code == cli.EXIT_OK
+    assert "cqa-rev-left-on-another-machine: destroyed (verified absent)" in (
+        out.getvalue()
+    )
+    assert api.live_names() == ()
+    assert (tmp_path / "runners.ledger").read_text() == ""
+
+
+def test_sweep_derives_the_runner_name_from_an_event_file(tmp_path):
+    api = FakeSprites()
+    api.create(EVENT_RUNNER)
+    out = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "sweep", "--event", EVENT, "--force-live"],
+        env={}, out=out, err=io.StringIO(), sprites_factory=lambda env: api,
+    )  # fmt: skip
+    assert code == cli.EXIT_OK
+    assert f"{EVENT_RUNNER}: destroyed (verified absent)" in out.getvalue()
+    assert api.live_names() == ()
+
+
+@pytest.mark.parametrize(
+    "named",
+    [["--runner", "cqa-rev-maybe-live"], ["--event", EVENT]],
+    ids=["runner", "event"],
+)
+def test_sweep_by_name_needs_force_live_because_no_lock_covers_it(tmp_path, named):
+    api = FakeSprites()
+    api.create("cqa-rev-maybe-live")
+    api.create(EVENT_RUNNER)
+    err = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "sweep", *named],
+        env={}, out=io.StringIO(), err=err, sprites_factory=lambda env: api,
+    )  # fmt: skip
+    assert code == cli.EXIT_USAGE
+    assert "add --force-live" in err.getvalue()
+    assert [c[0] for c in api.calls] == ["create", "create"]
+    assert not (tmp_path / "runners.ledger").exists()
+
+
+def test_sweep_says_when_a_named_runner_was_already_absent(tmp_path):
+    out = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "sweep", "--runner", "cqa-rev-mistyped", "--force-live"],
+        env={}, out=out, err=io.StringIO(), sprites_factory=lambda env: FakeSprites(),
+    )  # fmt: skip
+    assert code == cli.EXIT_OK
+    assert "cqa-rev-mistyped: already absent, nothing deleted" in out.getvalue()
+
+
+def test_sweep_exits_nonzero_when_it_cannot_verify_cleanup(tmp_path):
+    api = FakeSprites(fail_on={"delete": BoundaryError("Sprites HTTP 500")})
+    api.create("cqa-rev-stuck")
+    (tmp_path / "runners.ledger").write_text("cqa-rev-stuck\n")
+    out = io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "sweep", "--force-live"],
+        env={}, out=out, err=io.StringIO(), sprites_factory=lambda env: api,
+    )  # fmt: skip
+    assert code == cli.EXIT_BOUNDARY
+    assert "cqa-rev-stuck: destroy NOT verified" in out.getvalue()
+    assert (tmp_path / "runners.ledger").read_text() == "cqa-rev-stuck\n"
+
+
+@pytest.mark.parametrize(
+    "name", ["not-ours", "cqa-rev-UPPER", "cqa-rev-a\nb", "cqa-rev-"]
+)
+def test_sweep_refuses_a_runner_name_it_would_not_manage(tmp_path, name):
+    api = FakeSprites()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "sweep", "--runner", name],
+        env={}, out=io.StringIO(), err=(err := io.StringIO()),
+        sprites_factory=lambda env: api,
+    )  # fmt: skip
+    assert code == cli.EXIT_USAGE
+    assert "--runner must be a cqa-rev-* name" in err.getvalue()
+    assert not (tmp_path / "runners.ledger").exists()
+    assert api.calls == []
 
 
 def test_sweep_refuses_to_run_while_a_review_holds_the_lock(tmp_path):
@@ -533,7 +847,7 @@ def test_sweep_refuses_to_run_while_a_review_holds_the_lock(tmp_path):
     out, err = io.StringIO(), io.StringIO()
     with single_review_lock(tmp_path / "review.lock"):
         code = cli.main(
-            ["--state-dir", str(tmp_path), "sweep"],
+            ["--state-dir", str(tmp_path), "sweep", "--force-live"],
             env={}, out=out, err=err, sprites_factory=lambda env: api,
         )  # fmt: skip
     assert code == cli.EXIT_USAGE
@@ -541,7 +855,7 @@ def test_sweep_refuses_to_run_while_a_review_holds_the_lock(tmp_path):
     assert "delete" not in [c[0] for c in api.calls]
     assert "another review holds" in err.getvalue()
     code = cli.main(
-        ["--state-dir", str(tmp_path), "sweep"],
+        ["--state-dir", str(tmp_path), "sweep", "--force-live"],
         env={}, out=io.StringIO(), err=io.StringIO(), sprites_factory=lambda env: api,
     )  # fmt: skip
     assert code == cli.EXIT_OK

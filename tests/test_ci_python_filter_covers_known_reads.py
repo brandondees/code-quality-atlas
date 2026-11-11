@@ -60,6 +60,10 @@ _KNOWN_EXTERNAL_READS = (
     "hooks/route.sh",
     "hooks/lib/feedback-tier.sh",
     ".claude/skills/**",  # test_self_vendored_skills_sync.py, test_map_twins_sync.py
+    "Dockerfile",  # atlas_reviewer/tests/test_fly_deploy.py
+    "fly.toml",
+    ".dockerignore",
+    ".gitignore",
 )
 
 
