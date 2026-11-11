@@ -46,9 +46,11 @@
   highest catalog rates and upstream is still not added. For any other
   `is_byok` value a reported upstream cost is added. A call with `is_byok`
   true and no upstream cost keeps its full reservation. A present,
-  unreadable upstream value keeps the reservation on any response,
-  including an explicitly non-BYOK one. The settlement line records the
-  raw upstream value on an explicit non-BYOK call, cut to 200 characters.
+  non-null, unreadable upstream value keeps the reservation on any
+  response, including an explicitly non-BYOK one. A null upstream
+  keeps the reservation unless `is_byok` is exactly false. The
+  settlement line records the raw upstream value on an explicit
+  non-BYOK call, cut to 200 characters.
   The SDK says that on a BYOK request `cost` is the OpenRouter fee only
   (https://openrouter.ai/docs/client-sdks/typescript/models/decisionsresponseusage,
   fetched 2026-11-11). The usage-accounting page calls `cost` the total

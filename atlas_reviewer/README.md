@@ -295,9 +295,10 @@ BYOK request `cost` is the OpenRouter fee only
 fetched 2026-11-11), so `is_byok: true` adds a reported upstream cost,
 and a missing upstream cost keeps the reservation. A missing or
 non-boolean `is_byok` adds a reported upstream cost too, including a
-call refused in no-BYOK mode. A present, unreadable upstream value
-keeps the reservation on any response, including an explicitly
-non-BYOK one.
+call refused in no-BYOK mode. A present, non-null, unreadable upstream
+value keeps the reservation on any response, including an explicitly
+non-BYOK one. A null upstream keeps the reservation unless `is_byok`
+is exactly false.
 
 ## What the draft contains
 
