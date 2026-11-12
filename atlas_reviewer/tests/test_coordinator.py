@@ -299,7 +299,7 @@ def test_quotes_that_fail_twice_leave_the_lens_partial_and_report_only_verified(
 
 def test_a_cut_short_lens_is_partial_and_not_retried(tmp_path):
     result, model, _ = review(
-        tmp_path, [READ_DIFF] * 10, limits=replace(LIMITS, max_turns=2)
+        tmp_path, [READ_ALL] * 10, limits=replace(LIMITS, max_turns=2)
     )
     (lens,) = result.lenses
     assert (lens.state, lens.attempts) == (LensState.PARTIAL, 1)

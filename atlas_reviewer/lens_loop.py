@@ -430,13 +430,16 @@ class _Progress:
 
     def cut(self, cause: Cause, detail: str = "") -> AttemptOutcome:
         self.causes.add(cause)
+        unread = self.pages.unread(self.changed)
+        if unread:
+            self.causes.add(Cause.FILES_UNREAD)
         return AttemptOutcome(
             Attestation.UNACKNOWLEDGED,
             frozenset(self.causes),
             tools=tuple(self.tools),
             turns=self.turns,
             detail=detail,
-            unread=self.pages.unread(self.changed),
+            unread=unread,
             changed_files=len(self.changed),
         )
 

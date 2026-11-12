@@ -594,7 +594,7 @@ def test_the_loop_turn_cap_stops_the_adapter_at_one_request(tmp_path):
         model=lens,
         limits=replace(LIMITS, reservation_usd=Decimal(5), max_turns=1, max_calls=20),
     )
-    assert outcome.causes == {Cause.TURN_CAP}
+    assert outcome.causes == {Cause.TURN_CAP, Cause.FILES_UNREAD}
     assert len(fake.chat_requests()) == 1
     assert len(fake.chat) == 1
 

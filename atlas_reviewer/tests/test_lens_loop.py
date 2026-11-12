@@ -463,7 +463,15 @@ def test_a_reply_that_names_another_body_or_lens_fails_and_is_retried(tmp_path, 
 
 
 def endless():
-    return [READ_DIFF] * 50
+    return [READ_ALL] * 50
+
+
+def test_a_cut_short_attempt_keeps_the_files_it_never_finished(tmp_path):
+    outcome, _, _ = attempt(
+        tmp_path, [READ_DIFF] * 5, limits=replace(LIMITS, max_turns=2)
+    )
+    assert outcome.causes == {Cause.TURN_CAP, Cause.FILES_UNREAD}
+    assert outcome.unread == ("config/keys.py",)
 
 
 def test_the_turn_cap_ends_the_lens_partial(tmp_path):
@@ -487,7 +495,7 @@ def test_the_reviews_call_cap_ends_the_lens_before_another_call(tmp_path):
 
 def test_the_dollar_reservation_holds_the_worst_case_before_each_call(tmp_path):
     limits = replace(LIMITS, reservation_usd=Decimal("0.25"))
-    pricey = replace(READ_DIFF, cost_usd=Decimal("0.08"))
+    pricey = replace(READ_ALL, cost_usd=Decimal("0.08"))
     model = ScriptedLensModel([pricey] * 10, worst_usd=Decimal("0.10"))
     outcome, model, spend = attempt(tmp_path, [], limits=limits, model=model)
     assert outcome.causes == {Cause.BUDGET}
@@ -531,7 +539,7 @@ def advance(clock, seconds, step):
 
 def test_the_lens_wall_clock_ends_the_lens_partial(tmp_path):
     clock = FakeClock()
-    script = [advance(clock, 301, READ_DIFF), final()]
+    script = [advance(clock, 301, READ_ALL), final()]
     outcome, model, _ = attempt(tmp_path, script, clock=clock)
     assert outcome.causes == {Cause.LENS_CLOCK}
     assert len(model.requests) == 1
@@ -539,7 +547,7 @@ def test_the_lens_wall_clock_ends_the_lens_partial(tmp_path):
 
 def test_the_review_wall_clock_ends_the_lens_partial(tmp_path):
     clock = FakeClock()
-    script = [advance(clock, 61, READ_DIFF), final()]
+    script = [advance(clock, 61, READ_ALL), final()]
     outcome, _, _ = attempt(tmp_path, script, clock=clock, deadline=60)
     assert outcome.causes == {Cause.REVIEW_CLOCK}
     assert outcome.state is LensState.PARTIAL
@@ -557,7 +565,8 @@ def test_a_runner_deadline_inside_a_tool_call_ends_the_lens_partial(tmp_path):
         job(), DeadBridge(), model, Spend(LIMITS.resolve()), FakeClock(),
         review_deadline=600,
     )  # fmt: skip
-    assert outcome.causes == {Cause.REVIEW_CLOCK}
+    assert outcome.causes == {Cause.REVIEW_CLOCK, Cause.FILES_UNREAD}
+    assert set(outcome.unread) == set(CHANGED)
     assert "deadline passed" in outcome.detail
 
 
