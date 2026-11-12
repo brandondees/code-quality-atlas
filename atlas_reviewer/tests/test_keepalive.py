@@ -232,6 +232,13 @@ def test_a_raised_error_still_deletes_the_hold():
     assert client.events == ["create", "delete"]
 
 
+def test_a_delete_failure_surfaces_when_the_lens_succeeds():
+    client = Recording(fail="delete")
+    with pytest.raises(BoundaryError, match="delete failed"), LensHold(client, NAME):
+        pass
+    assert client.events == ["create", "delete"]
+
+
 def test_a_delete_failure_does_not_hide_the_lens_error():
     client = Recording(fail="delete")
     with pytest.raises(RuntimeError, match="boom"), LensHold(client, NAME):
