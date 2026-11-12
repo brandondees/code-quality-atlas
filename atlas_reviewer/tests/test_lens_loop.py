@@ -510,7 +510,7 @@ def test_the_turn_cap_ends_the_lens_partial(tmp_path):
     assert outcome.limit_hit.limit == "max_turns"
     assert outcome.limit_hit.observed == "2 used"
     assert "configured 2" in outcome.detail
-    assert "--max-turns or ATLAS_MAX_TURNS" in outcome.detail
+    assert outcome.limit_hit.setting == "--max-turns or ATLAS_MAX_TURNS"
 
 
 def test_the_reviews_call_cap_ends_the_lens_before_another_call(tmp_path):
@@ -527,7 +527,7 @@ def test_the_reviews_call_cap_ends_the_lens_before_another_call(tmp_path):
     assert outcome.limit_hit.limit == "max_calls"
     assert outcome.limit_hit.observed == "next call 4"
     assert "configured 3" in outcome.detail
-    assert "--max-calls or ATLAS_MAX_CALLS" in outcome.detail
+    assert outcome.limit_hit.setting == "--max-calls or ATLAS_MAX_CALLS"
 
 
 def test_the_dollar_reservation_holds_the_worst_case_before_each_call(tmp_path):
@@ -542,7 +542,7 @@ def test_the_dollar_reservation_holds_the_worst_case_before_each_call(tmp_path):
     assert spend.committed_usd == Decimal("0.16")
     assert outcome.limit_hit is not None
     assert outcome.limit_hit.limit == "reservation_usd"
-    assert "ATLAS_RESERVATION_USD" in outcome.detail
+    assert outcome.limit_hit.setting == "--reservation-usd or ATLAS_RESERVATION_USD"
 
 
 def test_a_zero_cost_is_a_cost_and_settles_at_zero(tmp_path):
@@ -589,7 +589,7 @@ def test_the_lens_wall_clock_ends_the_lens_partial(tmp_path):
     assert len(model.requests) == 1
     assert outcome.limit_hit is not None
     assert outcome.limit_hit.limit == "lens_wall_s"
-    assert "--lens-wall-seconds or ATLAS_LENS_WALL_S" in outcome.detail
+    assert outcome.limit_hit.setting == "--lens-wall-seconds or ATLAS_LENS_WALL_S"
 
 
 def test_the_review_wall_clock_ends_the_lens_partial(tmp_path):
@@ -602,7 +602,7 @@ def test_the_review_wall_clock_ends_the_lens_partial(tmp_path):
     assert outcome.limit_hit is not None
     assert outcome.limit_hit.limit == "review_wall_s"
     assert outcome.limit_hit.observed == "61.000s"
-    assert "--review-wall-seconds or ATLAS_REVIEW_WALL_S" in outcome.detail
+    assert outcome.limit_hit.setting == "--review-wall-seconds or ATLAS_REVIEW_WALL_S"
 
 
 def test_a_runner_deadline_inside_a_tool_call_ends_the_lens_partial(tmp_path):

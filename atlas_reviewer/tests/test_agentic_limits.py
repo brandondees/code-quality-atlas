@@ -60,6 +60,8 @@ def test_a_flag_wins_over_the_environment_and_can_only_tighten():
     assert resolve_per_call(limits.resolve(), terms).max_input_tokens == 5000
     with pytest.raises(LimitRefused, match="max_input_tokens"):
         resolve_per_call(replace(limits.resolve(), max_input_tokens=2_000_000), terms)
+    with pytest.raises(LimitRefused, match="max_input_tokens"):
+        resolve_per_call(replace(limits.resolve(), max_input_tokens=950_000), terms)
 
 
 def test_an_empty_flag_is_refused_and_an_empty_variable_stays_unset():
@@ -82,7 +84,7 @@ def test_the_output_default_is_the_models_and_an_override_cannot_exceed_it():
     with pytest.raises(LimitRefused, match="max_output_tokens") as raised:
         resolve_per_call(over, terms)
     assert raised.value.hit.observed == "64000"
-    assert raised.value.hit.setting.endswith("ATLAS_MAX_OUTPUT_TOKENS")
+    assert raised.value.hit.setting == "--max-output-tokens or ATLAS_MAX_OUTPUT_TOKENS"
 
 
 def test_the_adapter_sends_the_model_caps_and_ignores_the_reasoning_hint():
@@ -116,7 +118,7 @@ def test_a_prompt_over_the_input_cap_names_the_limit_and_is_not_sent():
     lens.per_call = replace(AgenticLimits().resolve(), max_input_tokens=8)
     with pytest.raises(LimitRefused, match="max_input_tokens") as raised:
         lens.worst_case_usd(request())
-    assert raised.value.hit.setting.endswith("ATLAS_MAX_INPUT_TOKENS")
+    assert raised.value.hit.setting == "--max-input-tokens or ATLAS_MAX_INPUT_TOKENS"
     assert int(raised.value.hit.observed) > int(raised.value.hit.configured)
     assert fake.chat_requests() == []
 
@@ -146,7 +148,8 @@ def test_the_loop_records_an_input_cap_as_its_own_cause():
         Capped(),
         Spend(LIMITS.resolve()),
         FakeClock(),
-        review_deadline=600, review_started=0,
+        review_deadline=600,
+        review_started=0,
     )
     assert Cause.INPUT_CAP in outcome.causes
     assert Cause.MODEL_ERROR not in outcome.causes
@@ -173,7 +176,8 @@ def test_a_limit_hit_round_trips_through_the_ledger(tmp_path):
         Capped(),
         Spend(LIMITS.resolve()),
         FakeClock(),
-        review_deadline=600, review_started=0,
+        review_deadline=600,
+        review_started=0,
     )
     path = tmp_path / "ledger.jsonl"
     book = AttemptLedger(path, FakeClock())
@@ -186,6 +190,7 @@ def test_a_limit_hit_round_trips_through_the_ledger(tmp_path):
 def test_the_one_shot_input_cap_stays_200k():
     assert CallLimits().max_input_tokens == 200_000
     assert CallLimits().max_calls == 3
+    assert CallLimits().budget_usd == Decimal("3.00")
 
 
 def test_every_agentic_limit_can_be_set_and_a_bad_one_is_refused():
@@ -236,7 +241,7 @@ def test_a_per_call_override_must_be_a_positive_int_the_model_can_hold():
     tight = replace(terms, context_length=64_000, max_completion_tokens=64_000)
     with pytest.raises(LimitRefused, match="context_length") as raised:
         resolve_per_call(base, tight)
-    assert "catalog context_length" in raised.value.hit.setting
+    assert raised.value.hit.setting == "the pinned model's catalog context_length"
     with pytest.raises(ValueError, match="unknown limit"):
         hit("not-a-limit", 1, 2)
 
@@ -257,13 +262,16 @@ def test_a_limit_refused_on_the_turn_is_not_a_model_error():
         Capped(),
         Spend(LIMITS.resolve()),
         FakeClock(),
-        review_deadline=600, review_started=0,
+        review_deadline=600,
+        review_started=0,
     )
     assert outcome.causes == {Cause.CONTEXT, Cause.FILES_UNREAD}
     assert outcome.state is LensState.PARTIAL
     assert outcome.retryable is False
     assert outcome.limit_hit is not None
-    assert "max_completion_tokens" in outcome.limit_hit.setting
+    assert (
+        outcome.limit_hit.setting == "the pinned model's catalog max_completion_tokens"
+    )
 
 
 def test_a_damaged_limit_object_abandons_the_ledger_line(tmp_path):
@@ -282,7 +290,8 @@ def test_a_damaged_limit_object_abandons_the_ledger_line(tmp_path):
         Capped(),
         Spend(LIMITS.resolve()),
         FakeClock(),
-        review_deadline=600, review_started=0,
+        review_deadline=600,
+        review_started=0,
     )
     path = tmp_path / "ledger.jsonl"
     book = AttemptLedger(path, FakeClock())
@@ -324,7 +333,8 @@ def test_an_output_override_and_a_reasoning_hint_have_their_own_causes():
         Refuses(hit("max_output_tokens", 128_000, 64_000)),
         Spend(LIMITS.resolve()),
         FakeClock(),
-        review_deadline=600, review_started=0,
+        review_deadline=600,
+        review_started=0,
     )
     reasoning = run_attempt(
         job(),
@@ -332,7 +342,8 @@ def test_an_output_override_and_a_reasoning_hint_have_their_own_causes():
         Refuses(hit("reasoning_max_tokens", 0, "1..63")),
         Spend(LIMITS.resolve()),
         FakeClock(),
-        review_deadline=600, review_started=0,
+        review_deadline=600,
+        review_started=0,
     )
     assert Cause.OUTPUT_CAP in output.causes
     assert Cause.CONTEXT not in output.causes
