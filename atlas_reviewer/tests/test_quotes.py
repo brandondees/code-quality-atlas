@@ -118,6 +118,20 @@ def test_a_quote_not_at_the_cited_range_is_not_verified(start, end, evidence):
     assert isinstance(check(LineRange("calc.py", start, end), evidence), Unverified)
 
 
+def test_a_head_file_outside_the_diff_can_be_added_once_read():
+    tarball = source_tarball(HEAD_FILES, "t")
+    narrow = read_sources(tarball, DIFF, ["calc.py"])
+    wide = quotes.with_head_files(narrow, tarball, ["src/new_name.py", "calc.py"])
+    assert set(wide.head) == {"calc.py", "src/new_name.py"}
+    assert wide.removed == narrow.removed
+    assert quotes.with_head_files(narrow, b"", ["src/new_name.py"]) is narrow
+    assert (
+        quotes.with_head_files(narrow, b"not a tarball", ["src/new_name.py"]) is narrow
+    )
+    unreadable = read_sources(b"not a tarball", DIFF, ["calc.py"])
+    assert quotes.with_head_files(unreadable, tarball, ["calc.py"]) is unreadable
+
+
 def test_internal_whitespace_does_not_reject_the_cited_line():
     evidence = "return  sum(round(x, 2)  for x in xs)"
     result = check(LineRange("calc.py", 2, 2), evidence)
