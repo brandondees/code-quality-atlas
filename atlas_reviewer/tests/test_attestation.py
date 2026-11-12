@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 import json
+import os
 import stat
+from dataclasses import replace
 
 import pytest
 
@@ -237,6 +239,60 @@ def test_a_record_from_another_version_or_shape_is_damaged_not_trusted(tmp_path)
             fh.write(json.dumps(bad) + "\n")
     assert book.attempts(KEY) == (Attempt(1, ABANDONED),)
     assert book.damaged == 3
+
+
+def test_start_and_finish_sync_the_file_and_its_directory(tmp_path, monkeypatch):
+    synced = []
+    real_fsync = os.fsync
+
+    def spy(fd):
+        synced.append(os.fstat(fd).st_ino)
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", spy)
+    book = ledger(tmp_path)
+    book.start(KEY, 1)
+    file_ino, dir_ino = book.path.stat().st_ino, book.path.parent.stat().st_ino
+    assert file_ino in synced
+    assert dir_ino in synced
+    synced.clear()
+    book.finish(KEY, 1, outcome(), scrub=str)
+    assert file_ino in synced
+    assert dir_ino in synced
+
+
+def test_an_unattested_attempt_read_back_through_the_ledger_is_never_clean(tmp_path):
+    book = ledger(tmp_path)
+    written = AttemptOutcome(
+        Attestation.UNACKNOWLEDGED,
+        findings=(CheckedFinding(finding(), QuoteSource.HEAD),),
+    )
+    book.finish(KEY, 1, written, scrub=str)
+    (attempt,) = ledger(tmp_path).attempts(KEY)
+    assert attempt.outcome.attestation is Attestation.UNACKNOWLEDGED
+    assert attempt.outcome.state is LensState.PARTIAL
+    assert attempt.outcome.findings
+
+
+def test_a_findings_text_is_scrubbed_before_it_reaches_the_file(tmp_path):
+    flagged = "ghp_" + "Ab1" * 12
+    book = ledger(tmp_path)
+    book.finish(
+        KEY,
+        1,
+        outcome(
+            findings=(
+                CheckedFinding(
+                    replace(finding(), finding=f"leaks {flagged}"), QuoteSource.HEAD
+                ),
+            ),
+            detail="",
+        ),
+        scrub=lambda text: text.replace(flagged, "[flagged]"),
+    )
+    raw = book.path.read_text()
+    assert flagged not in raw
+    assert "[flagged]" in raw
 
 
 def test_values_are_scrubbed_before_they_reach_the_file(tmp_path):
