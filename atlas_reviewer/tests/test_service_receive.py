@@ -19,18 +19,22 @@ import pytest
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.service import (
+    PostAuthError,
+    PostNotCurrent,
+    RateLimited,
     ReviewServer,
     ServiceConfig,
     ServiceError,
     Worker,
     _state_is_writable,
+    before_send,
     config_from_env,
     handle_delivery,
 )
 from atlas_reviewer.service_admit import signature_matches
 from atlas_reviewer.service_queue import Board, Enqueue, JobState, QueueError
-from atlas_reviewer.service_run import ReviewReport, ReviewRun
-from atlas_reviewer.telemetry import Telemetry
+from atlas_reviewer.service_run import ReviewReport, ReviewRun, run_dir
+from atlas_reviewer.telemetry import JsonlSink, Telemetry
 
 SECRET = "webhook-secret-value"
 SHA_A = "a" * 40
@@ -427,10 +431,128 @@ def test_a_trimmed_commit_and_a_pre_attempts_queue_stay_duplicates(tmp_path):
     assert loaded.enqueue(PrEvent(REPO, 7, SHA_A)) is Enqueue.DUPLICATE
 
 
+def test_seen_keeps_current_heads_and_drops_the_oldest_other_keys(tmp_path):
+    board = Board(tmp_path / "queue.json", max_remembered=1, max_seen=2)
+    base = datetime(2026, 11, 12, 18, tzinfo=UTC)
+    shas = [f"{number}" * 40 for number in range(1, 5)]
+    for index, sha in enumerate(shas):
+        moment = base.replace(hour=18 + index)
+        assert board.enqueue(PrEvent(REPO, 7, sha), at=moment) is Enqueue.QUEUED
+        job = board.claim()
+        assert job is not None
+        board.finish(job, JobState.DONE)
+    later = datetime(2026, 11, 12, 23, tzinfo=UTC)
+    # The current head and the newest trimmed keys stay duplicates. The
+    # oldest trimmed key can be admitted again, which is the cap.
+    assert board.enqueue(PrEvent(REPO, 7, shas[3]), at=later) is Enqueue.DUPLICATE
+    assert board.enqueue(PrEvent(REPO, 7, shas[2]), at=later) is Enqueue.DUPLICATE
+    assert board.enqueue(PrEvent(REPO, 7, shas[1]), at=later) is Enqueue.DUPLICATE
+    assert board.enqueue(PrEvent(REPO, 7, shas[0]), at=later) is Enqueue.QUEUED
+
+
+def test_a_finished_review_removes_its_run_directory_and_is_logged(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    event = PrEvent(REPO, 7, SHA_A)
+    directory = run_dir(tmp_path, event)
+    directory.mkdir(parents=True)
+    (directory / "draft.md").write_text("kept until the job ends\n", encoding="utf-8")
+    with JsonlSink(tmp_path / "service.jsonl") as sink:
+        worker = Worker(
+            board,
+            lambda event, cancel: ReviewRun(False, error="no"),
+            Telemetry(SystemClock(), sink=sink, scrub=lambda text: text),
+            state_root=tmp_path,
+        )
+        board.enqueue(event)
+        assert worker.run_one() is True
+    assert not directory.exists()
+    assert "review failed" in (tmp_path / "service.jsonl").read_text(encoding="utf-8")
+
+
+def test_a_post_that_finds_the_head_moved_is_not_retried(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    calls = []
+
+    def publish(event, report):
+        calls.append(event.head_sha)
+        raise PostNotCurrent("moved")
+
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(True, REPORT), publish, tmp_path
+    )
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    assert worker.run_one() is True
+    worker._retry_post()
+    assert calls == [SHA_A]
+    assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
+
+
+def test_the_send_rechecks_the_head_before_it_leaves(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    earlier = datetime(2026, 11, 12, 20, tzinfo=UTC)
+    later = datetime(2026, 11, 12, 21, tzinfo=UTC)
+    verdict = []
+
+    def publish(event, report):
+        board.enqueue(PrEvent(REPO, 7, SHA_B), at=later)
+        check = before_send.get()
+        assert check is not None
+        verdict.append(check())
+        if not verdict[-1]:
+            raise PostNotCurrent("moved")
+
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(True, REPORT), publish, tmp_path
+    )
+    board.enqueue(PrEvent(REPO, 7, SHA_A), at=earlier)
+    assert worker.run_one() is True
+    assert verdict == [False]
+    assert board.states()[0] == (SHA_A, JobState.SUPERSEDED)
+
+
+def test_an_auth_refusal_fails_the_post_without_a_retry(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    calls = []
+
+    def publish(event, report):
+        calls.append(1)
+        raise PostAuthError("HTTP 401")
+
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(True, REPORT), publish, tmp_path
+    )
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    assert worker.run_one() is True
+    worker._retry_post()
+    assert calls == [1]
+    assert board.states() == ((SHA_A, JobState.FAILED),)
+
+
+def test_a_rate_limit_waits_at_least_as_long_as_github_asked(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    clock = {"t": 1_000.0}
+    calls = []
+
+    def publish(event, report):
+        calls.append(clock["t"])
+        raise RateLimited("slow down", 50)
+
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(True, REPORT), publish, tmp_path
+    )
+    worker._now = lambda: clock["t"]
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    assert worker.run_one() is True
+    clock["t"] += 49
+    worker._retry_post()
+    assert calls == [1_000.0]
+    assert board.states() == ((SHA_A, JobState.POST_PENDING),)
+
+
 def test_the_module_refuses_to_start_without_a_secret():
-    env = os.environ.copy()
-    env["ATLAS_GITHUB_WEBHOOK_SECRET"] = ""
-    env["ATLAS_SERVICE_PROVIDER"] = "offline"
+    env = {
+        key: value for key, value in os.environ.items() if not key.startswith("ATLAS_")
+    }
     proc = subprocess.run(
         [sys.executable, "-m", "atlas_reviewer.service"],
         env=env,

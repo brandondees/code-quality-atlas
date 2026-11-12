@@ -12,11 +12,14 @@ without it.
 
 from __future__ import annotations
 
+import contextvars
 import os
+import random
+import shutil
 import sys
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -40,9 +43,10 @@ from atlas_reviewer.service_run import (
     ReviewRun,
     RunConfig,
     make_runner,
+    run_dir,
 )
 from atlas_reviewer.stops import install_interrupts
-from atlas_reviewer.telemetry import ERROR, Telemetry
+from atlas_reviewer.telemetry import ERROR, Event, EventSink, JsonlSink, Telemetry
 
 DEFAULT_REPO = "brandondees/code-quality-atlas"
 # A pool past this is a bad environment value, not a review budget. Each
@@ -50,10 +54,35 @@ DEFAULT_REPO = "brandondees/code-quality-atlas"
 MAX_CONCURRENCY = 32
 MAX_BODY_BYTES = 5_000_000
 MAX_POST_ATTEMPTS = 5
-# A failed post is tried again on this schedule, then given up. The waits
-# stop a dead GitHub endpoint from turning into a tight loop. They are not
-# a cost cap: the review itself has already finished.
+# A failed post is tried again on this schedule, then given up. Each wait
+# is stretched by up to 20% so several machines do not retry together.
+# The waits stop a dead GitHub endpoint from turning into a tight loop.
+# They are not a cost cap: the review itself has already finished.
 _POST_BACKOFF_S = (5.0, 15.0, 30.0, 60.0, 120.0)
+_BACKOFF_JITTER = 0.2
+
+
+class PostNotCurrent(Exception):
+    """The head moved before the review was sent. Do not retry."""
+
+
+class PostAuthError(Exception):
+    """GitHub refused the credential. Do not retry."""
+
+
+class RateLimited(Exception):
+    """GitHub asked the caller to wait. ``retry_after`` is seconds."""
+
+    def __init__(self, message: str, retry_after: float) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+# The poster reads this in the worker thread, immediately before the
+# create, and sends nothing when it returns false.
+before_send: contextvars.ContextVar[Callable[[], bool] | None] = contextvars.ContextVar(
+    "atlas_review_before_send", default=None
+)
 _POLL_S = 0.2
 _REQUEST_TIMEOUT_S = 20.0
 _MAX_HTTP_HANDLERS = 16
@@ -215,11 +244,11 @@ class Worker:
             run = ReviewRun(False, error=f"{type(exc).__name__}: {exc}")
         fields = _fields(job.event)
         if job.superseded or job.cancel.is_set():
-            self._board.finish(job, JobState.SUPERSEDED)
+            self._settle(job, JobState.SUPERSEDED)
             self._telemetry.record("service", "review superseded", fields)
             return
         if not run.ok or run.report is None:
-            self._board.finish(job, JobState.FAILED)
+            self._settle(job, JobState.FAILED)
             self._telemetry.record(
                 "service",
                 "review failed",
@@ -229,36 +258,61 @@ class Worker:
             )
             return
         if not self._board.still_current(job):
-            self._board.finish(job, JobState.SUPERSEDED)
+            self._settle(job, JobState.SUPERSEDED)
             self._telemetry.record("service", "review superseded", fields)
             return
         self._publish(job, run.report)
 
     def _publish(self, job: Job, report: ReviewReport) -> None:
         if not self._board.still_current(job):
-            self._board.finish(job, JobState.SUPERSEDED)
+            self._settle(job, JobState.SUPERSEDED)
             self._telemetry.record("service", "review superseded", _fields(job.event))
             return
         if self._publisher is None:
-            self._board.finish(job, JobState.DONE)
+            self._settle(job, JobState.DONE)
             self._telemetry.record("service", "review finished", _fields(job.event))
             return
+        token = before_send.set(lambda: self._board.begin_post(job))
+        try:
+            self._send(job, report)
+        finally:
+            before_send.reset(token)
+
+    def _send(self, job: Job, report: ReviewReport) -> None:
+        assert self._publisher is not None
         try:
             self._publisher(job.event, report)
+        except PostNotCurrent:
+            self._settle(job, JobState.SUPERSEDED)
+            self._telemetry.record("service", "review superseded", _fields(job.event))
+            return
+        except PostAuthError as exc:
+            self._settle(job, JobState.FAILED)
+            self._telemetry.record(
+                "service",
+                "review post failed",
+                _fields(job.event),
+                status=ERROR,
+                error=f"post auth refused: {exc}",
+            )
+            return
+        except RateLimited as exc:
+            self._defer_post(job, str(exc), retry_after=exc.retry_after)
+            return
         except Exception as exc:  # noqa: BLE001 -- a post failure must not post again here
             self._defer_post(job, f"{type(exc).__name__}: {exc}")
             return
-        self._board.finish(job, JobState.DONE)
+        self._settle(job, JobState.DONE)
         self._telemetry.record("service", "review posted", _fields(job.event))
 
     def _publish_saved(self, job: Job) -> None:
         """A post that failed after the draft was written. The review is
         not run again. A missing draft posts nothing."""
-        from atlas_reviewer.service_run import run_dir, summarize_draft
+        from atlas_reviewer.service_run import summarize_draft
 
         path = run_dir(self._state_root, job.event) / "draft.md"
         if not path.is_file() or self._publisher is None:
-            self._board.finish(job, JobState.FAILED)
+            self._settle(job, JobState.FAILED)
             self._telemetry.record(
                 "service",
                 "review post failed",
@@ -274,14 +328,21 @@ class Worker:
             return
         self._publish(job, report)
 
-    def _defer_post(self, job: Job, error: str) -> None:
+    def _defer_post(
+        self, job: Job, error: str, *, retry_after: float | None = None
+    ) -> None:
         """Try the post again later, up to ``MAX_POST_ATTEMPTS``. After
         that the review stays unpublished and the job is failed, so a
-        dead endpoint cannot spin the worker."""
+        dead endpoint cannot spin the worker. A rate-limit wait replaces
+        the schedule when it is longer."""
+        if job.superseded or job.cancel.is_set():
+            self._settle(job, JobState.SUPERSEDED)
+            self._telemetry.record("service", "review superseded", _fields(job.event))
+            return
         job.attempts += 1
         fields = _fields(job.event)
         if job.attempts >= MAX_POST_ATTEMPTS:
-            self._board.finish(job, JobState.FAILED)
+            self._settle(job, JobState.FAILED)
             self._telemetry.record(
                 "service",
                 "review post failed",
@@ -290,16 +351,26 @@ class Worker:
                 error=f"post attempts exhausted: {error}",
             )
             return
-        delay = _POST_BACKOFF_S[min(job.attempts - 1, len(_POST_BACKOFF_S) - 1)]
+        base = _POST_BACKOFF_S[min(job.attempts - 1, len(_POST_BACKOFF_S) - 1)]
+        delay = base * (1 + random.random() * _BACKOFF_JITTER)
+        if retry_after is not None:
+            delay = max(delay, retry_after)
         job.retry_at = self._now() + delay
         self._board.finish(job, JobState.POST_PENDING)
         self._telemetry.record(
             "service",
             "review post failed",
-            {**fields, "attempts": job.attempts, "retry_s": delay},
+            {**fields, "attempts": job.attempts, "retry_s": round(delay, 3)},
             status=ERROR,
             error=error,
         )
+
+    def _settle(self, job: Job, state: JobState) -> None:
+        self._board.finish(job, state)
+        if state in {JobState.DONE, JobState.FAILED, JobState.SUPERSEDED}:
+            path = run_dir(self._state_root, job.event)
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
 
 
 def _fields(event: PrEvent) -> dict[str, str | int]:
@@ -414,6 +485,20 @@ def _state_is_writable(path: Path) -> bool:
     return True
 
 
+class _LoggingSink:
+    """Writes each service event to the JSONL sink and to the operator log.
+    The event is already scrubbed by the time it is emitted."""
+
+    def __init__(self, inner: EventSink, log: Callable[[str], None]) -> None:
+        self._inner = inner
+        self._log = log
+
+    def emit(self, event: Event) -> None:
+        self._inner.emit(event)
+        pr = event.fields.get("pr", "")
+        self._log(f"atlas-reviewer: {event.step} status={event.status} pr={pr}")
+
+
 def serve(
     config: ServiceConfig,
     env: Mapping[str, str],
@@ -421,42 +506,49 @@ def serve(
     runner: Runner | None = None,
     publisher: Publisher | None = None,
     log: Callable[[str], None] = lambda line: print(line, file=sys.stderr),
+    secret_sources: tuple[Callable[[], Sequence[str]], ...] = (),
 ) -> int:
     install_interrupts()
     if not _state_is_writable(config.state_dir):
         log(f"atlas-reviewer: state dir {config.state_dir} is not writable")
         return 2
     board = Board(config.state_dir / "queue.json")
-    redactor = Redactor(known_secrets=(config.secret,))
-    telemetry = Telemetry(
-        SystemClock(),
-        scrub=lambda text: redactor(text).text,
-    )
-    if runner is None:
-        runner = make_runner(
-            RunConfig(
-                config.provider,
-                config.allow_live_inference,
-                config.state_dir,
-            ),
-            env,
-        )
-    worker = Worker(
-        board, runner, telemetry, publisher, config.concurrency, config.state_dir
-    )
-    server = ReviewServer(config, board, log)
-    worker.start()
-    log(
-        "atlas-reviewer: service listening"
-        f" on {config.host}:{config.port};"
-        f" concurrency {config.concurrency} (refuses above {MAX_CONCURRENCY});"
-        f" repos {', '.join(sorted(config.allowlist))}"
-    )
+    redactor = Redactor(known_secrets=(config.secret,), sources=secret_sources)
+    sink = JsonlSink(config.state_dir / "service.jsonl")
+    sink.__enter__()
     try:
-        server.serve_forever()
+        telemetry = Telemetry(
+            SystemClock(),
+            scrub=lambda text: redactor(text).text,
+            sink=_LoggingSink(sink, log),
+        )
+        if runner is None:
+            runner = make_runner(
+                RunConfig(
+                    config.provider,
+                    config.allow_live_inference,
+                    config.state_dir,
+                ),
+                env,
+            )
+        worker = Worker(
+            board, runner, telemetry, publisher, config.concurrency, config.state_dir
+        )
+        server = ReviewServer(config, board, log)
+        worker.start()
+        log(
+            "atlas-reviewer: service listening"
+            f" on {config.host}:{config.port};"
+            f" concurrency {config.concurrency} (refuses above {MAX_CONCURRENCY});"
+            f" repos {', '.join(sorted(config.allowlist))}"
+        )
+        try:
+            server.serve_forever()
+        finally:
+            worker.stop()
+            server.server_close()
     finally:
-        worker.stop()
-        server.server_close()
+        sink.__exit__(None, None, None)
     return 0
 
 

@@ -78,22 +78,41 @@ class Job:
         }
 
 
-# Terminal jobs older than this are dropped from the queue file. Their
-# keys stay in `seen`, so a replay is still a duplicate. The cap is a
-# bound on the file, not a review budget.
+# Full job records kept in the queue file. Older terminal jobs are dropped
+# from this list. Their keys move to `seen`, which is what makes a replay
+# a duplicate. `seen` drops the oldest key that is not a PR's current
+# head once it passes the cap, and it never drops a current head, so the
+# commit already accepted for a PR stays a duplicate. A dropped historical
+# key can be reviewed again when its `updated_at` is later than that PR's
+# current head. A review that was already posted still will not be posted
+# twice, because the GitHub marker is checked before a create. Both caps
+# bound the file. They are not a review budget. A key is about 80 bytes,
+# so 20,000 keys are about 1.6 MB. A run directory is removed when its
+# job reaches a terminal state. That fits in the 1 GB state volume.
 MAX_REMEMBERED = 2_000
+MAX_SEEN = 20_000
 
 
 class Board:
-    def __init__(self, path: Path, *, max_remembered: int = MAX_REMEMBERED) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        max_remembered: int = MAX_REMEMBERED,
+        max_seen: int = MAX_SEEN,
+    ) -> None:
         self._path = path
         self._cv = threading.Condition()
         self._jobs: list[Job] = []
+        self._seen_order: list[tuple[str, int, str]] = []
         self._seen: set[tuple[str, int, str]] = set()
         self._heads: dict[tuple[str, int], tuple[str, datetime | None]] = {}
         self._max_remembered = max_remembered
+        self._max_seen = max_seen
         if path.exists():
-            self._jobs, self._seen, self._heads = _load(path)
+            self._jobs, seen, self._heads = _load(path)
+            for key in seen:
+                self._remember(key)
 
     def enqueue(self, event: PrEvent, *, at: datetime | None = None) -> Enqueue:
         """``at`` is the pull request's ``updated_at`` on this delivery.
@@ -175,6 +194,21 @@ class Board:
                 job.state in {JobState.RUNNING, JobState.POSTING} and not job.superseded
             )
 
+    def begin_post(self, job: Job) -> bool:
+        """True only when this job may be sent. A running job becomes
+        POSTING under the lock, so a supersede that lands before this
+        returns is not sent. A post GitHub has already accepted cannot
+        be recalled."""
+        with self._cv:
+            if job.superseded or job.cancel.is_set():
+                return False
+            if job.state not in {JobState.RUNNING, JobState.POSTING}:
+                return False
+            if job.state is JobState.RUNNING:
+                job.state = JobState.POSTING
+                self._save()
+            return True
+
     def finish(self, job: Job, state: JobState) -> None:
         with self._cv:
             if job.superseded and state is not JobState.SUPERSEDED:
@@ -218,7 +252,7 @@ class Board:
         _store(
             self._path,
             [job.as_dict() for job in self._jobs],
-            [_key_text(key) for key in self._seen],
+            [_key_text(key) for key in self._seen_order],
             [_head_record(key, sha, at) for key, (sha, at) in self._heads.items()],
         )
 
@@ -230,10 +264,31 @@ class Board:
         ]
         overflow = len(self._jobs) - self._max_remembered
         for job in terminal[: max(0, overflow)]:
-            self._seen.add(job.key())
+            self._remember(job.key())
             self._jobs.remove(job)
-        if len(self._seen) > self._max_remembered:
-            self._seen = set(list(self._seen)[-self._max_remembered :])
+        while len(self._seen_order) > self._max_seen:
+            dropped = self._drop_oldest_seen()
+            if not dropped:
+                break
+
+    def _drop_oldest_seen(self) -> bool:
+        """Drop the oldest key that is not a PR's current head. A current
+        head stays, so a replay of the commit already accepted for that
+        PR remains a duplicate. Returns false when every remembered key
+        is a current head."""
+        for index, key in enumerate(self._seen_order):
+            current = self._heads.get((key[0], key[1]))
+            if current is not None and current[0] == key[2]:
+                continue
+            self._seen.discard(self._seen_order.pop(index))
+            return True
+        return False
+
+    def _remember(self, key: tuple[str, int, str]) -> None:
+        if key in self._seen:
+            return
+        self._seen.add(key)
+        self._seen_order.append(key)
 
 
 def _store(
@@ -261,7 +316,7 @@ def _load(
     path: Path,
 ) -> tuple[
     list[Job],
-    set[tuple[str, int, str]],
+    list[tuple[str, int, str]],
     dict[tuple[str, int], tuple[str, datetime | None]],
 ]:
     try:
@@ -322,19 +377,19 @@ def _job(item: object, path: Path) -> Job:
     return Job(event, state, superseded, attempts, float(retry_at))
 
 
-def _seen(raw: object, path: Path) -> set[tuple[str, int, str]]:
+def _seen(raw: object, path: Path) -> list[tuple[str, int, str]]:
     if raw is None:
-        return set()
+        return []
     if not isinstance(raw, list):
         raise QueueError(f"review queue {path} holds a seen list that is not a list")
-    keys: set[tuple[str, int, str]] = set()
+    keys: list[tuple[str, int, str]] = []
     for item in raw:
         key = _parse_key(item)
         if key is None:
             raise QueueError(
                 f"review queue {path} holds a seen key that cannot be read"
             )
-        keys.add(key)
+        keys.append(key)
     return keys
 
 
