@@ -774,8 +774,9 @@ tool-calling model adapter yet.
   deadline during a tool call.
 - **Checking the reply.** The reply must meet the finding contract
   (`lens_contract.py`) and name the lens and its body digest. Each quote is
-  checked against the head file at the cited lines, or the diff's removed
-  lines (`quotes.py`).
+  checked against the head file at the cited lines. The cited span is the
+  quote's own line count, so a wider range does not verify. A removed line
+  of that file still verifies (`quotes.py`).
 - **Partial results.** No findings counts as clean only after a
   `diff_file` page or a HEAD `read_file` of a changed file. A timed-out,
   unavailable or over-limit tool call makes the lens partial.
@@ -828,7 +829,7 @@ tool-calling model adapter yet.
 | `guest_unpack.py` | the same caps held again in the runner: its tar measures bytes, members and implied directories before extracting, then `ulimit -f` while extracting, every tar run under `timeout` | no |
 | `bridge_staging.py` | Option B staging: trusted git, the hardened git options, tarballs committed into a bare repository, `fetch_sources` | via `SpritesApi`, `GitHubReader` |
 | `lens_contract.py` | a lens's final reply under the finding contract, parsed strictly into typed findings (`parse_reply`); refusals never echo model text | no |
-| `quotes.py` | check each finding's quoted evidence against the head file at the cited lines, or the diff's removed lines (`check_quote`) | no |
+| `quotes.py` | check each finding's quoted evidence against the head file at the cited lines (the span is the quote's line count), or the diff's removed lines (`check_quote`) | no |
 | `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) | writes the ledger file |
 | `lens_loop.py` | the agentic limits (Brandon's provisional defaults, 2026-11-11), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the lens system prompt, the spend tracker, one lens attempt (`run_attempt`) | via `Bridge`, `LensModel` |
 | `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft | via ports, the ledger |

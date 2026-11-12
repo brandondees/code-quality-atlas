@@ -2,24 +2,27 @@
 """Quote checks (D31, D34 (2); `synthesis.md`'s quote-the-line gate). Pure
 apart from reading the head tarball in memory.
 
-A `file:line` finding is verified only when its evidence is found in the
-cited lines of the head file, or among the PR diff's removed lines of that
-file (code the PR deletes is not in the head). The window is those lines
-and no others: a range that runs past the end of the file is not trimmed
-to the file and searched, since that would let a quote match anywhere in
-it. A whole-file finding is verified when the path is in the head tree
-or the diff. A design reference has no
-line to quote. Anything else is unverified and never reported as a
-verified finding.
+A `file:line` finding is verified only when its evidence is the cited
+lines of the head file, or among the PR diff's removed lines of that file
+(code the PR deletes is not in the head). The cited span is the quote's
+own line count: one line of evidence needs `start == end`, and several
+lines need a range of that many lines. A wider range is not searched, so
+a quote cannot verify against a line the citation does not name. A range
+that runs past the end of the file is not trimmed to the file and
+searched, since that would let a quote match anywhere in it. A whole-file
+finding is verified when the path is in the head tree or the diff. A
+design reference has no line to quote. Anything else is unverified and
+never reported as a verified finding.
 
 Matching compares lines with surrounding whitespace stripped, so
 indentation and line endings do not decide it. A one-line quote may be a
-fragment of one line in the range, but a fragment shorter than
+fragment of that one cited line, but a fragment shorter than
 `MIN_FRAGMENT_CHARS` non-space characters must be the whole line, so a
-quote such as `}` cannot pass by luck. A quote of several lines must match
-that many consecutive lines exactly. Removed lines match within one run of
-consecutive `-` lines of one hunk, at any line of the file's diff: D31
-checks the head at the cited range, and the removed side has no head line.
+quote such as `}` cannot pass by luck. A quote of several lines must be
+those cited lines, exactly. Removed lines match within one run of
+consecutive `-` lines of one hunk, at any line of the file's diff, and the
+span rule does not apply to them: D31 checks the head at the cited range,
+and the removed side has no head line.
 """
 
 from __future__ import annotations
@@ -178,7 +181,10 @@ def _check_range(finding: Finding, where: LineRange, sources: SourceText) -> Quo
         return Unverified(finding, "the evidence quotes nothing")
     head = sources.head.get(where.path)
     window = None if head is None else _cited_lines(head, where)
-    if window is not None and _found(quote, window):
+    # The span is the quote's own line count. A wider window would let a
+    # one-line quote verify against any line inside it.
+    span_matches = where.end - where.start + 1 == len(quote)
+    if window is not None and span_matches and _found(quote, window):
         return Verified(finding, QuoteSource.HEAD)
     if any(_found(quote, run) for run in sources.removed.get(where.path, ())):
         return Verified(finding, QuoteSource.REMOVED)
