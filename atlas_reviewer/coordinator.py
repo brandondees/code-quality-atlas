@@ -1,17 +1,23 @@
 # SPDX-License-Identifier: MIT
-"""The agentic coordinator: run the selected lens under the attestation
-ledger, verify its output and synthesize the draft (D31, D34; phase 3).
+"""The agentic coordinator: run the selected lenses under the attestation
+ledger, verify their output and synthesize one draft (D31, D34, D44).
 
-Phase 3 runs one lens, pool size 1. The synthesis is mechanical: the
+`review_lens` runs one lens. `review_lenses` runs every selected lens,
+up to the configured pool, then assigns files none of them read to a
+continuation while a call and the review clock remain. The synthesis is
+mechanical: the
 controller mints `L<lens>-F<n>` IDs, ranks the verified findings by
 severity and sets the verdict from them by `synthesis.md`'s rule (one
 introduced Blocker blocks; anything else that sets the verdict means
 approve with changes; only nits or nothing means approve). There is no
 model merge call yet.
 
-Coverage is complete only when the ledger shows every selected lens
-settled CLEAN on this head with this body, every changed file's diff was
-read in full, and, when this review ran a runner, that runner completed.
+Coverage is complete only when every changed file's diff was read in
+full by some lens (a file left unread by every lens blocks approval),
+no lens failed for another cause, and, when this review ran a runner,
+every runner completed. A single-lens result with no assigned scope
+keeps the older rule: that lens itself must be clean and have read
+every file.
 A keepalive failure is a failed runner, so a clean lens cannot approve
 it away. A lens that left a changed file unread is partial, so the same
 rule applies. Anything less fails closed:
@@ -30,9 +36,11 @@ not make another billed call.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any, cast
@@ -76,7 +84,7 @@ from atlas_reviewer.ports import ByokRefusedError, Clock, RunnerLedger, SpritesA
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
 from atlas_reviewer.quotes import read_sources
 from atlas_reviewer.redact import Redactor
-from atlas_reviewer.runner import event_runner_name
+from atlas_reviewer.runner import event_runner_name, lens_runner_name
 from atlas_reviewer.telemetry import Telemetry
 from atlas_reviewer.tool_model import OpenRouterLensModel
 from atlas_reviewer.tracing import (
@@ -86,6 +94,7 @@ from atlas_reviewer.tracing import (
     limit_label,
     opening_trace,
     release_shared,
+    submit_with_review_context,
 )
 from atlas_reviewer.verdict import STATUS_PREFIX, ReviewEvent
 
@@ -112,6 +121,9 @@ class LensResult:
     escalated: bool = False
     retry_pending: bool = False
     reason: str = ""
+    scope: frozenset[str] | None = None
+    """Changed paths this lens was asked to read. None keeps the older
+    rule: any unread path on any lens blocks approval."""
 
     @property
     def state(self) -> LensState:
@@ -165,6 +177,14 @@ class AgenticReview:
         clean, so a missing cause cannot approve a partial read. An outcome
         with no changed-file count predates the per-file gate and shows no
         coverage, so it blocks approval too."""
+        if _scoped(self.lenses):
+            if _still_unread(self.lenses):
+                return False
+            if not self.lenses or any(_blocks_coverage(r) for r in self.lenses):
+                return False
+            if self.runner is None:
+                return True
+            return self.runner.status is RunnerStatus.COMPLETED
         if any(
             r.outcome is not None
             and (r.outcome.unread or r.outcome.changed_files is None)
@@ -338,27 +358,107 @@ def review_lens(
     declared = getattr(model, "per_call", None)
     if declared is not None and declared != resolved:
         raise ValueError("the model's per-call limits differ from this review's limits")
-    if trace is None:
-        acquire_shared()
-    try:
-        return _open_review(
-            event, lens, diff, trees, library, model, resolved, ledger, sprites,
-            runner_ledger, redactor, clock, context, telemetry, nonce, bridge_root,
-            contract, task_socket, trace,
-        )  # fmt: skip
-    finally:
-        if trace is None:
-            release_shared()
+
+    def one(active: ReviewTrace) -> AgenticReview:
+        ran = _traced_lens(
+            active,
+            event,
+            lens,
+            diff,
+            trees,
+            library=library,
+            model=model,
+            limits=limits,
+            ledger=ledger,
+            sprites=sprites,
+            runner_ledger=runner_ledger,
+            redactor=redactor,
+            clock=clock,
+            context=context,
+            telemetry=telemetry,
+            nonce=nonce,
+            bridge_root=bridge_root,
+            contract=contract,
+            task_socket=task_socket,
+            index=1,
+        )
+        return synthesize([ran.result], ran.secrets, ran.report, ran.spend, ran.flagged)
+
+    return _traced_review(event, trace, redactor, one)
 
 
-def _open_review(
+def review_lenses(
     event: PrEvent,
-    lens: str,
+    lenses: Sequence[str],
     diff: str,
     trees: SourceTrees,
+    *,
     library: LensLibrary,
     model: LensModel,
-    resolved: Limits,
+    limits: AgenticLimits,
+    ledger: AttemptLedger,
+    sprites: SpritesApi,
+    runner_ledger: RunnerLedger,
+    redactor: Redactor,
+    clock: Clock,
+    context: Sequence[UntrustedBlock] = (),
+    telemetry: Telemetry | None = None,
+    nonce: Callable[[], str] = lambda: secrets.token_hex(NONCE_BYTES),
+    bridge_root: str = BRIDGE_ROOT,
+    contract: str | None = None,
+    task_socket: str = SOCKET_PATH,
+    model_for: Callable[[], LensModel] | None = None,
+    trace: ReviewTrace | None = None,
+) -> AgenticReview:
+    """Run every named lens, up to `pool_size` at once, then one combined
+    verdict. Each lens gets its own runner name. Files no lens read are
+    handed to a continuation of the first lens that has a body, while a
+    call and the review clock remain. Partial coverage still cannot approve.
+
+    One review span covers every lens, and each lens run, pooled or a
+    continuation, is a lens span under it. Spans are recorded as
+    `review_lens` describes."""
+    resolved = limits.resolve()
+    return _traced_review(
+        event,
+        trace,
+        redactor,
+        lambda active: _review_lenses(
+            active,
+            event,
+            lenses,
+            diff,
+            trees,
+            library=library,
+            model=model,
+            limits=limits,
+            ledger=ledger,
+            sprites=sprites,
+            runner_ledger=runner_ledger,
+            redactor=redactor,
+            clock=clock,
+            context=context,
+            telemetry=telemetry,
+            nonce=nonce,
+            bridge_root=bridge_root,
+            contract=contract,
+            task_socket=task_socket,
+            model_for=model_for,
+            resolved=resolved,
+        ),
+    )
+
+
+def _review_lenses(
+    trace: ReviewTrace,
+    event: PrEvent,
+    lenses: Sequence[str],
+    diff: str,
+    trees: SourceTrees,
+    *,
+    library: LensLibrary,
+    model: LensModel,
+    limits: AgenticLimits,
     ledger: AttemptLedger,
     sprites: SpritesApi,
     runner_ledger: RunnerLedger,
@@ -370,68 +470,102 @@ def _open_review(
     bridge_root: str,
     contract: str | None,
     task_socket: str,
-    trace: ReviewTrace | None,
+    model_for: Callable[[], LensModel] | None,
+    resolved: Limits,
 ) -> AgenticReview:
-    active = opening_trace(trace, lambda text: redactor(text).text)
-    outer = current_review()
-    if outer is None:
-        with (
-            active.review(event.repo, event.pr_number, event.head_sha) as review_span,
-            active.lens(lens) as lens_span,
-        ):
-            return _with_trace(
-                review_span,
-                _one_lens(
-                    active,
-                    lens_span,
-                    review_span,
-                    event,
-                    lens,
-                    diff,
-                    trees,
-                    library,
-                    model,
-                    resolved,
-                    ledger,
-                    sprites,
-                    runner_ledger,
-                    redactor,
-                    clock,
-                    context,
-                    telemetry,
-                    nonce,
-                    bridge_root,
-                    contract,
-                    task_socket,
-                ),
-            )
-    with active.lens(lens) as lens_span:
-        return _with_trace(
-            outer,
-            _one_lens(
-                active,
-                lens_span,
-                outer,
-                event,
-                lens,
-                diff,
-                trees,
-                library,
-                model,
-                resolved,
-                ledger,
-                sprites,
-                runner_ledger,
-                redactor,
-                clock,
-                context,
-                telemetry,
-                nonce,
-                bridge_root,
-                contract,
-                task_socket,
-            ),
+    changed = frozenset(f.path for f in split_files(diff))
+    spend = Spend(resolved)
+    started = clock.monotonic()
+    deadline = started + resolved.review_wall_s
+    runs: list[_LensRun] = []
+
+    def run(lens: str, assigned: frozenset[str], index: int) -> _LensRun:
+        return _traced_lens(
+            trace,
+            event,
+            lens,
+            diff,
+            trees,
+            library=library,
+            model=model if model_for is None else model_for(),
+            limits=limits,
+            ledger=ledger,
+            sprites=sprites,
+            runner_ledger=runner_ledger,
+            redactor=redactor,
+            clock=clock,
+            context=context,
+            telemetry=telemetry,
+            nonce=nonce,
+            bridge_root=f"{bridge_root}-{index}",
+            contract=contract,
+            task_socket=task_socket,
+            index=index,
+            assigned=assigned,
+            spend=spend,
+            review_started=started,
+            review_deadline=deadline,
+            runner_name=lens_runner_name(event, f"{lens}:{index}"),
+            continuation=index > len(names),
         )
+
+    names = tuple(lenses)
+    with ThreadPoolExecutor(max_workers=resolved.pool_size) as pool:
+        futures = [
+            submit_with_review_context(pool, run, lens, changed, index)
+            for index, lens in enumerate(names, start=1)
+        ]
+        for future in futures:
+            runs.append(future.result())
+    for _ in range(4):
+        unread = _still_unread(tuple(ran.result for ran in runs))
+        if (
+            not unread
+            or spend.calls >= resolved.max_calls
+            or clock.monotonic() >= deadline
+        ):
+            break
+        before = set(unread)
+        host = next(
+            (ran.result.lens for ran in runs if ran.result.body_sha256), names[0]
+        )
+        runs.append(run(host, frozenset(unread), len(runs) + 1))
+        if not before - set(_still_unread(tuple(ran.result for ran in runs))):
+            break
+    secrets = [secret for ran in runs for secret in ran.secrets]
+    flagged = tuple(value for ran in runs for value in ran.flagged)
+    return synthesize(
+        [ran.result for ran in runs],
+        secrets,
+        _combined_runner(tuple(ran.report for ran in runs)),
+        spend,
+        flagged,
+    )
+
+
+def _traced_review(
+    event: PrEvent,
+    trace: ReviewTrace | None,
+    redactor: Redactor,
+    body: Callable[[ReviewTrace], AgenticReview],
+) -> AgenticReview:
+    """Run `body` under one review span, or under the caller's open one."""
+    if trace is None:
+        acquire_shared()
+    try:
+        active = opening_trace(trace, lambda text: redactor(text).text)
+        outer = current_review()
+        if outer is not None:
+            review = body(active)
+            outer.set("atlas.review_event", review.event.value)
+            return _with_trace(outer, review)
+        with active.review(event.repo, event.pr_number, event.head_sha) as span:
+            review = body(active)
+            span.set("atlas.review_event", review.event.value)
+            return _with_trace(span, review)
+    finally:
+        if trace is None:
+            release_shared()
 
 
 def _with_trace(span: Any, review: AgenticReview) -> AgenticReview:
@@ -441,42 +575,43 @@ def _with_trace(span: Any, review: AgenticReview) -> AgenticReview:
     return replace(review, trace_id=trace_id)
 
 
-def _one_lens(
-    active: ReviewTrace,
-    lens_span: Any,
-    review_span: Any,
-    event: PrEvent,
-    lens: str,
-    diff: str,
-    trees: SourceTrees,
-    library: LensLibrary,
-    model: LensModel,
-    resolved: Limits,
-    ledger: AttemptLedger,
-    sprites: SpritesApi,
-    runner_ledger: RunnerLedger,
-    redactor: Redactor,
-    clock: Clock,
-    context: Sequence[UntrustedBlock],
-    telemetry: Telemetry | None,
-    nonce: Callable[[], str],
-    bridge_root: str,
-    contract: str | None,
-    task_socket: str,
-) -> AgenticReview:
-    review = _review_lens(
-        event, lens, diff, trees, library=library, model=model,
-        resolved=resolved, ledger=ledger, sprites=sprites,
-        runner_ledger=runner_ledger, redactor=redactor, clock=clock,
-        context=context, telemetry=telemetry, nonce=nonce,
-        bridge_root=bridge_root, contract=contract, task_socket=task_socket,
-        trace=active,
-    )  # fmt: skip
-    _annotate(lens_span, review_span, review)
-    return review
+def _traced_lens(
+    trace: ReviewTrace, event: PrEvent, lens: str, *args: Any, **kwargs: Any
+) -> _LensRun:
+    with trace.lens(lens) as lens_span:
+        ran = _review_one(event, lens, *args, trace=trace, **kwargs)
+        lens_span.set("atlas.lens.state", ran.result.state.value)
+        if ran.result.outcome is not None:
+            label = limit_label(
+                [cause.value for cause in ran.result.outcome.causes],
+                ran.result.outcome.detail,
+            )
+            if label:
+                lens_span.set("atlas.limit_stop", label)
+        return ran
 
 
-def _review_lens(
+@dataclass
+class _LensRun:
+    result: LensResult
+    secrets: list[BridgeSecret]
+    report: RunnerReport | None
+    spend: Spend
+    flagged: tuple[str, ...]
+
+
+def _combined_runner(reports: Sequence[RunnerReport | None]) -> RunnerReport | None:
+    present = [report for report in reports if report is not None]
+    if not present:
+        return None
+    failed = next(
+        (report for report in present if report.status is not RunnerStatus.COMPLETED),
+        None,
+    )
+    return failed if failed is not None else present[-1]
+
+
+def _review_one(
     event: PrEvent,
     lens: str,
     diff: str,
@@ -484,7 +619,7 @@ def _review_lens(
     *,
     library: LensLibrary,
     model: LensModel,
-    resolved: Limits,
+    limits: AgenticLimits,
     ledger: AttemptLedger,
     sprites: SpritesApi,
     runner_ledger: RunnerLedger,
@@ -496,18 +631,53 @@ def _review_lens(
     bridge_root: str,
     contract: str | None,
     task_socket: str,
+    index: int,
+    assigned: frozenset[str] | None = None,
+    spend: Spend | None = None,
+    review_started: float | None = None,
+    review_deadline: float | None = None,
+    runner_name: str | None = None,
+    continuation: bool = False,
     trace: ReviewTrace,
-) -> AgenticReview:
+) -> _LensRun:
+    resolved = limits.resolve()
+    declared = getattr(model, "per_call", None)
+    if declared is not None and declared != resolved:
+        raise ValueError("the model's per-call limits differ from this review's limits")
     contract = finding_contract() if contract is None else contract
+    changed = frozenset(f.path for f in split_files(diff))
+    scope = changed if assigned is None else assigned
     body = library.body(lens)
     if body is None:
-        missing = LensResult(lens, 1, None, None, reason="no lens body in the bundle")
-        return synthesize([missing])
-    key = LensKey(event.repo, event.pr_number, event.head_sha, lens, body_digest(body))
+        missing = LensResult(
+            lens, index, None, None, reason="no lens body in the bundle", scope=scope
+        )
+        return _LensRun(missing, [], None, spend or Spend(resolved), ())
+    ledger_lens = lens
+    if continuation:
+        # A continuation is its own ledger entry. The lens's own attempt
+        # stays settled when it left files unread (D42); this entry is the
+        # coordinator assigning those files, not a retry of that attempt.
+        digest = hashlib.sha256("\n".join(sorted(scope)).encode()).hexdigest()[:12]
+        ledger_lens = f"{lens}#{digest}"
+    key = LensKey(
+        event.repo, event.pr_number, event.head_sha, ledger_lens, body_digest(body)
+    )
     if isinstance(next_step(ledger.attempts(key), resolved.retries), Settled):
-        return synthesize([_result(key, ledger.attempts(key), resolved, "")])
-
-    changed = frozenset(f.path for f in split_files(diff))
+        settled = _result(key, ledger.attempts(key), resolved, "", index)
+        settled = LensResult(
+            lens,
+            settled.index,
+            settled.body_sha256,
+            settled.outcome,
+            settled.attempts,
+            settled.escalated,
+            settled.retry_pending,
+            settled.reason,
+        )
+        return _LensRun(
+            replace_scope(settled, scope), [], None, spend or Spend(resolved), ()
+        )
     diff_secrets = scan_diff(diff)
     session = _Session()
     scrubber = Redactor(
@@ -519,60 +689,74 @@ def _review_lens(
     def scrub(text: str) -> str:
         return scrubber(text).text
 
-    trace.scrub = scrub
-    traced_model = trace.wrap_model(model)
-    spend = Spend(resolved)
+    lens_trace = trace.with_scrub(scrub)
+    traced_model = lens_trace.wrap_model(model)
+    spend = spend or Spend(resolved)
     fence_nonce = nonce()
     job = LensJob(
         lens,
         body,
         key.body_sha256,
         contract,
-        first_turn(event, diff, context, fence_nonce),
-        changed,
-        read_sources(trees.head, diff, changed),
+        first_turn(event, diff, context, fence_nonce, only=scope),
+        scope,
+        read_sources(trees.head, diff, scope),
         fence_nonce,
     )
-    review_started = clock.monotonic()
-    review_deadline = review_started + resolved.review_wall_s
+    started = clock.monotonic() if review_started is None else review_started
+    deadline = (
+        started + resolved.review_wall_s if review_deadline is None else review_deadline
+    )
+    name = runner_name or event_runner_name(event)
 
     def in_session(bridge: Bridge) -> str:
         session.bridges.append(bridge)
-        digest = event_runner_name(event).rsplit("-", 1)[-1]
+        digest = name.rsplit("-", 1)[-1]
         with lens_hold(bridge.session, digest, task_socket):
             return _attempts(
-                trace.wrap_bridge(bridge), job, traced_model,
+                lens_trace.wrap_bridge(bridge), job, traced_model,
                 spend, clock, ledger, key, resolved,
-                review_deadline, review_started, session, scrub,
+                deadline, started, session, scrub,
             )  # fmt: skip
 
     report = run_bridge(
         sprites, runner_ledger, trees, in_session,
-        redactor=scrubber, changed=changed, name=event_runner_name(event),
+        redactor=scrubber, changed=scope, name=name,
         deadline_s=resolved.review_wall_s, clock=clock, telemetry=telemetry,
         root=bridge_root,
     )  # fmt: skip
-    result = _result(key, ledger.attempts(key), resolved, scrub(report.note))
-    return synthesize(
-        [result],
-        session.secrets,
+    result = _result(key, ledger.attempts(key), resolved, scrub(report.note), index)
+    result = LensResult(
+        lens,
+        result.index,
+        result.body_sha256,
+        result.outcome,
+        result.attempts,
+        result.escalated,
+        result.retry_pending,
+        result.reason,
+    )
+    return _LensRun(
+        replace_scope(result, scope),
+        list(session.secrets),
         report,
         spend,
-        (*diff_secrets.values, *session.flagged()),
+        tuple(diff_secrets.values) + tuple(session.flagged()),
     )
 
 
-def _annotate(lens_span: Any, review_span: Any, review: AgenticReview) -> None:
-    lens = review.lenses[0] if review.lenses else None
-    if lens is not None:
-        lens_span.set("atlas.lens.state", lens.state.value)
-        if lens.outcome is not None:
-            label = limit_label(
-                [cause.value for cause in lens.outcome.causes], lens.outcome.detail
-            )
-            if label:
-                lens_span.set("atlas.limit_stop", label)
-    review_span.set("atlas.review_event", review.event.value)
+def replace_scope(result: LensResult, scope: frozenset[str]) -> LensResult:
+    return LensResult(
+        result.lens,
+        result.index,
+        result.body_sha256,
+        result.outcome,
+        result.attempts,
+        result.escalated,
+        result.retry_pending,
+        result.reason,
+        scope,
+    )
 
 
 def _attempts(
@@ -629,31 +813,46 @@ def _attempts(
 
 
 def _result(
-    key: LensKey, attempts: tuple[Attempt, ...], limits: Limits, runner_note: str
+    key: LensKey,
+    attempts: tuple[Attempt, ...],
+    limits: Limits,
+    runner_note: str,
+    index: int = 1,
 ) -> LensResult:
     if not attempts:
         return LensResult(
-            key.lens, 1, key.body_sha256, None,
+            key.lens, index, key.body_sha256, None,
             reason=f"no attempt was recorded: {runner_note or 'the runner did not start'}",
         )  # fmt: skip
     step = next_step(attempts, limits.retries)
     if isinstance(step, Settled):
         return LensResult(
-            key.lens, 1, key.body_sha256, step.outcome, step.attempts, step.escalated
+            key.lens,
+            index,
+            key.body_sha256,
+            step.outcome,
+            step.attempts,
+            step.escalated,
         )
     return LensResult(
-        key.lens, 1, key.body_sha256, attempts[-1].outcome, len(attempts),
+        key.lens, index, key.body_sha256, attempts[-1].outcome, len(attempts),
         retry_pending=True,
     )  # fmt: skip
 
 
 def first_turn(
-    event: PrEvent, diff: str, context: Sequence[UntrustedBlock], nonce: str
+    event: PrEvent,
+    diff: str,
+    context: Sequence[UntrustedBlock],
+    nonce: str,
+    only: frozenset[str] | None = None,
 ) -> str:
     """The operator's subject, then fenced: any caller context, the diff
     stat and the changed files in risk order. No diff text: the lens reads
-    it through the tools."""
-    files = by_risk(split_files(diff))
+    it through the tools. `only` narrows the list to a continuation's files."""
+    files = list(by_risk(split_files(diff)))
+    if only is not None:
+        files = [f for f in files if f.path in only]
     listing = "\n".join(
         f"[{f.tier.label}] {f.path} (+{added} -{removed})"
         for f in files
@@ -799,10 +998,46 @@ def _headline(review: AgenticReview, scrub: Callable[[str], str]) -> str:
     )
 
 
+def _scoped(lenses: Sequence[LensResult]) -> bool:
+    return any(result.scope is not None for result in lenses)
+
+
+def _blocks_coverage(result: LensResult) -> bool:
+    """A lens that is partial only because it left a file unread does not
+    block once another lens, or a continuation, has read that file."""
+    unread_only = (
+        result.outcome is not None
+        and result.state is LensState.PARTIAL
+        and result.outcome.causes <= frozenset({Cause.FILES_UNREAD})
+    )
+    return result.state is not LensState.CLEAN and not unread_only
+
+
+def _still_unread(lenses: Sequence[LensResult]) -> tuple[str, ...]:
+    assigned: set[str] = set()
+    covered: set[str] = set()
+    for result in lenses:
+        if result.scope is None:
+            continue
+        assigned.update(result.scope)
+        if result.outcome is None or result.outcome.changed_files is None:
+            continue
+        covered.update(set(result.scope) - set(result.outcome.unread))
+    return tuple(
+        sorted(assigned - covered, key=lambda path: (risk_tier(path).rank, path))
+    )
+
+
 def _coverage_gap_name(review: AgenticReview) -> str:
     """Why a review of clean lenses is still incomplete, or "" when no
     lens was selected. A clean outcome can still lack coverage: unread
     paths, or no changed-file count from before the per-file gate."""
+    if _scoped(review.lenses):
+        if _still_unread(review.lenses):
+            return "unread files"
+        if any(_blocks_coverage(result) for result in review.lenses):
+            return "a lens did not finish clean"
+        return ""
     if any(r.outcome is not None and r.outcome.unread for r in review.lenses):
         return "unread files"
     if any(
@@ -813,6 +1048,8 @@ def _coverage_gap_name(review: AgenticReview) -> str:
 
 
 def _unread_paths(review: AgenticReview) -> tuple[str, ...]:
+    if _scoped(review.lenses):
+        return _still_unread(review.lenses)
     seen: list[str] = []
     for result in review.lenses:
         if result.outcome is None:

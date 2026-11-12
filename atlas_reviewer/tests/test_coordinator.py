@@ -3,6 +3,8 @@
 bridge (`LocalSprites`), a scripted model, verification and the draft. No
 model, Sprite or GitHub call is made."""
 
+import re
+import threading
 from dataclasses import replace
 from decimal import Decimal
 
@@ -25,6 +27,7 @@ from atlas_reviewer.coordinator import (
     Verdict,
     render_draft,
     review_lens,
+    review_lenses,
     status_line,
     synthesize,
 )
@@ -780,3 +783,103 @@ def test_findings_of_an_unattested_attempt_are_never_reported():
     result = synthesize([lens_result(misack)])
     assert result.findings == ()
     assert result.verdict is Verdict.APPROVE
+
+
+OTHER = "sweeping-for-security"
+OTHER_BODY = "# Sweeping for security\n\nLook for a secret in a changed file.\n"
+_MARKER = re.compile(r"lens body begins: (\S+) \(sha256 ([0-9a-f]{64})\)")
+
+
+def _acknowledge(request):
+    match = _MARKER.search(request.system)
+    assert match is not None
+    return final(lens=match.group(1), digest=match.group(2))
+
+
+def _lenses(tmp_path, names, model, *, pool=1, models=None, limits=None):
+    from .test_keepalive import TaskServer, socket_path
+
+    tasks = TaskServer(socket_path(tmp_path))
+    tasks.start()
+    sprites = LocalSprites()
+    pending = list(models or [])
+    lock = threading.Lock()
+
+    def model_for():
+        with lock:
+            return pending.pop(0)
+
+    try:
+        result = review_lenses(
+            EVENT,
+            names,
+            DIFF,
+            trees(),
+            library=StubLibrary({LENS: BODY, OTHER: OTHER_BODY}),
+            model=model,
+            limits=replace(LIMITS, pool_size=pool) if limits is None else limits,
+            ledger=ledger(tmp_path),
+            sprites=sprites,
+            runner_ledger=MemoryLedger(),
+            redactor=Redactor(),
+            clock=FakeClock(),
+            nonce=lambda: "f00dfeedf00dfeed",
+            bridge_root=str(tmp_path / "bridge"),
+            task_socket=str(tasks.path),
+            model_for=model_for if models is not None else None,
+        )
+    finally:
+        tasks.close()
+        assert tasks.tasks == {}, tasks.order
+    return result, sprites
+
+
+def test_unread_files_go_to_a_continuation_and_the_union_can_approve(tmp_path):
+    model = ScriptedLensModel(
+        [
+            tools(("diff_file", {"path": "calc.py"})),
+            final(),
+            tools(("diff_file", {"path": "config/keys.py"})),
+            final(),
+        ]
+    )
+    result, sprites = _lenses(tmp_path, [LENS], model)
+    assert result.coverage_complete
+    assert [lens.lens for lens in result.lenses] == [LENS, LENS]
+    assert result.lenses[0].outcome.causes == {Cause.FILES_UNREAD}
+    assert result.lenses[1].state is LensState.CLEAN
+    created = [call[1] for call in sprites.calls if call[0] == "create"]
+    assert len(created) == 2 and len(set(created)) == 2
+
+
+def test_a_continuation_that_makes_no_progress_stops(tmp_path):
+    result, sprites = _lenses(tmp_path, [LENS], ScriptedLensModel([final(), final()]))
+    assert not result.coverage_complete
+    assert len(result.lenses) == 2
+    created = [call[1] for call in sprites.calls if call[0] == "create"]
+    assert len(created) == 2
+
+
+def test_a_failed_lens_blocks_approval_after_every_file_was_read(tmp_path):
+    bad = final(text="nope")
+    result, _ = _lenses(
+        tmp_path,
+        [LENS],
+        ScriptedLensModel([READ_ALL, bad, bad]),
+        limits=replace(LIMITS, retries=0),
+    )
+    assert not result.coverage_complete
+    assert result.lenses[0].outcome is not None
+    assert Cause.UNPARSED in result.lenses[0].outcome.causes
+
+
+def test_two_lenses_run_together_under_different_runner_names(tmp_path):
+    models = [
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+    ]
+    result, sprites = _lenses(tmp_path, [LENS, OTHER], models[0], pool=2, models=models)
+    assert result.coverage_complete
+    assert {lens.lens for lens in result.lenses} == {LENS, OTHER}
+    created = [call[1] for call in sprites.calls if call[0] == "create"]
+    assert len(set(created)) == 2

@@ -1643,3 +1643,47 @@ def test_a_review_whose_model_call_failed_exits_incomplete_and_never_approves(
     assert '"review_event": "COMMENT"' in first
     assert '"coverage_complete": false' in first
     assert "> **REVIEW INCOMPLETE -- not approvable.**" in out
+
+
+def test_agentic_review_help_says_the_command_applies_its_limits(capsys):
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["agentic-review", "--help"], env={})
+    assert raised.value.code == 0
+    text = " ".join(capsys.readouterr().out.split())
+    assert "This command applies it." in text
+    assert "ATLAS_POOL_SIZE" in text
+    assert "ATLAS_KEY_CEILING_USD" in text
+
+
+def test_agentic_review_refuses_a_pool_outside_one_to_sixteen(tmp_path):
+    code, _out, err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "agentic-review",
+        "--dry-run",
+        "--event",
+        EVENT,
+        "--pool-size",
+        "0",
+    )
+    assert code == cli.EXIT_USAGE
+    assert "pool_size" in err
+
+
+def test_agentic_review_dry_run_writes_one_draft_without_credentials(tmp_path):
+    code, out, err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "agentic-review",
+        "--dry-run",
+        "--event",
+        EVENT,
+        "--depth",
+        "triage",
+        "--pool-size",
+        "1",
+    )
+    assert code == cli.EXIT_INCOMPLETE, err
+    assert "coverage_complete=false" in err
+    assert "lenses=" in err
+    assert "REVIEW INCOMPLETE" in out

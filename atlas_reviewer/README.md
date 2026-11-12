@@ -196,6 +196,7 @@ and a review with export off make the same draft.
 ## Live mode
 
 ```sh
+python -m atlas_reviewer agentic-review --event atlas_reviewer/fixtures/sample-pr/event.json --dry-run
 python -m atlas_reviewer review --event event.json   # GitHub App + Sprites, offline provider
 python -m atlas_reviewer review --event event.json \
   --provider openrouter --allow-live-inference       # plus one capped OpenRouter review
@@ -305,7 +306,7 @@ Environment variables (names only; never commit values):
 | `ATLAS_GITHUB_APP_PRIVATE_KEY` | controller → token minter | The App's PEM private key. Literal `\n` sequences are accepted for single-line env stores |
 | `ATLAS_GITHUB_INSTALLATION_ID` | controller → token minter | Installation ID of the App on the target repo's account, numeric |
 | `ATLAS_SPRITES_TOKEN` | controller → Sprites adapter | Sprites org token for the outside control-plane API |
-| `ATLAS_OPENROUTER_API_KEY` | controller → OpenRouter adapter | Read only with `--provider openrouter --allow-live-inference`. The key must carry a hard credit limit of at most $5 |
+| `ATLAS_OPENROUTER_API_KEY` | controller → OpenRouter adapter | Read only with `--provider openrouter --allow-live-inference`. The key must carry a hard credit limit of at most the configured ceiling |
 | `ATLAS_REVIEWER_STATE_DIR` | controller | Runner ledger and single-review lock (default `.atlas-reviewer-state/`, gitignored) |
 | `ATLAS_RESERVATION_USD` | agentic lens entry | Dollar reservation for one agentic review (default 5) |
 | `ATLAS_MAX_CALLS` | agentic lens entry | Model calls across every lens attempt (default 50) |
@@ -315,6 +316,8 @@ Environment variables (names only; never commit values):
 | `ATLAS_MAX_INPUT_TOKENS` | agentic lens entry | Per-call input cap. Unset uses the model's context minus the output reserve |
 | `ATLAS_MAX_OUTPUT_TOKENS` | agentic lens entry | Per-call output cap. Unset uses the model's completion limit |
 | `ATLAS_REASONING_MAX_TOKENS` | agentic lens entry | Reasoning hint sent on the request. Unset is half the output cap, so the reply has the other half. It is not a price |
+| `ATLAS_POOL_SIZE` | `agentic-review` | Lenses at once, 1 to 16. Unset uses 4 on that command. `review_lens` still defaults to 1 |
+| `ATLAS_KEY_CEILING_USD` | `review` and `agentic-review` | Most the OpenRouter key's own credit limit may be. Unset is $5. A higher key is refused before inference, and the refusal names this variable |
 
 The six credential and state variables above the limit rows never reach a
 Sprite, a prompt, or the draft. Each one goes only to the adapter that
@@ -873,7 +876,9 @@ D41 records the 2026-11-12 probe that did.
   positive and finite, and a per-lens limit no greater than its per-review
   limit. Clearing one back to unset makes `resolve` raise
   `LimitsUnsetError`, naming each unset field, before any model, runner or
-  ledger work. `retries` is 1 and `pool_size` must be 1. The per-call
+  ledger work. `retries` is 1. `pool_size` is 1 to 16. It defaults to
+  1, and `agentic-review` uses 4 when neither `--pool-size` nor
+  `ATLAS_POOL_SIZE` is set. The per-call
   input cap is the pinned model's catalog context minus the output
   reserve, and the output cap is the model's completion limit. An
   override can tighten either and cannot exceed the model. The

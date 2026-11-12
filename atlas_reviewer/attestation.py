@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -244,8 +245,15 @@ class AttemptLedger:
     path: Path
     clock: Clock
     damaged: int = field(default=0, init=False)
+    _lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False
+    )
 
     def attempts(self, key: LensKey) -> tuple[Attempt, ...]:
+        with self._lock:
+            return self._attempts(key)
+
+    def _attempts(self, key: LensKey) -> tuple[Attempt, ...]:
         started: dict[int, AttemptOutcome] = {}
         for record in self._records():
             if record.get("key_id") != key.id:
@@ -280,8 +288,19 @@ class AttemptLedger:
     ) -> None:
         if attempt < 1:
             raise ValueError("attempts are numbered from 1")
-        if any(_same(r, key, attempt, event) for r in self._records()):
-            return
+        with self._lock:
+            if any(_same(r, key, attempt, event) for r in self._records()):
+                return
+            self._write_record(key, attempt, event, outcome, scrub)
+
+    def _write_record(
+        self,
+        key: LensKey,
+        attempt: int,
+        event: str,
+        outcome: AttemptOutcome | None,
+        scrub: Callable[[str], str],
+    ) -> None:
         record: dict[str, Any] = {
             "v": LEDGER_VERSION,
             "key_id": key.id,

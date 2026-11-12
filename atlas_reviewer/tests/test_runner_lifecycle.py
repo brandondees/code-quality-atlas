@@ -284,6 +284,28 @@ def test_a_refused_create_stops_with_nothing_to_clean_up():
     assert ledger.pending() == ()
 
 
+def test_a_rate_limited_create_is_retried_and_then_runs(monkeypatch):
+    """Sprites HTTP 429 on #636 happened before a Sprite existed. A later
+    create of the same name succeeded, so a 429 is waited out."""
+    slept = []
+    monkeypatch.setattr("atlas_reviewer.runner._sleep", slept.append)
+
+    class Once(FakeSprites):
+        def create(self, name):
+            with self._lock:
+                first = not any(call[0] == "create" for call in self.calls)
+            if first:
+                self._record("create", name)
+                raise RefusedError("Sprites HTTP 429: slow down")
+            super().create(name)
+
+    api = Once(rules=OK_RULES)
+    report = run(api, MemoryLedger()).report
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    assert ops(api)[:2] == ["create", "create"]
+    assert slept == [1.0]
+
+
 def test_a_run_stopped_before_create_deletes_nothing_and_leaves_no_entry():
     clock = FakeClock()
     ledger = MemoryLedger()

@@ -20,12 +20,8 @@ from pathlib import Path
 
 from atlas_reviewer.prompt import LoadedLens
 
-BUNDLE_ROOT = (
-    Path(__file__).resolve().parent.parent
-    / "collapsed"
-    / "skills"
-    / "reviewing-a-change"
-)
+_COLLAPSED = Path(__file__).resolve().parent.parent / "collapsed" / "skills"
+BUNDLE_ROOT = _COLLAPSED / "reviewing-a-change"
 # The top of review mode's 3-8 breadth (skills/manifest.yaml `modes:`).
 MAX_LENSES = 8
 LENS_BUDGET_CHARS = 60_000
@@ -76,22 +72,39 @@ def _describe(use: LensUse) -> str:
     return use.name
 
 
+def _read_body(lenses: Path, name: str) -> str | None:
+    """None for a name with no body, including one that would resolve
+    outside the lens directory (`../x`), whatever the caller validated."""
+    root = lenses.resolve()
+    path = (root / name / "body.md").resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
 class LensLibrary:
     def __init__(self, root: Path = BUNDLE_ROOT) -> None:
+        self._root = root
         self._lenses = root / "reference" / "lenses"
 
     def names(self) -> frozenset[str]:
         return frozenset(p.name for p in self._lenses.iterdir() if p.is_dir())
 
     def body(self, name: str) -> str | None:
-        """None for a name with no body, including one that would resolve
-        outside the bundle's lens directory (`../x`), whatever the caller
-        validated."""
-        root = self._lenses.resolve()
-        path = (root / name / "body.md").resolve()
-        if not path.is_relative_to(root) or not path.is_file():
-            return None
-        return path.read_text(encoding="utf-8")
+        """The lens body in this bundle, or, for the change-review bundle,
+        in another collapsed entrypoint. A repo-shaped lens such as
+        `auditing-documentation-health` is generated under the audit
+        entrypoint, and the picker can still name it on a diff."""
+        found = _read_body(self._lenses, name)
+        if found is not None or self._root != BUNDLE_ROOT:
+            return found
+        for entry in sorted(_COLLAPSED.iterdir()):
+            if not entry.is_dir() or entry == self._root:
+                continue
+            found = _read_body(entry / "reference" / "lenses", name)
+            if found is not None:
+                return found
+        return None
 
 
 def plan_lenses(
@@ -121,6 +134,17 @@ def plan_lenses(
                 LensUse(choice.name, LensStatus.NOT_RUN, size, choice.why, skip or "")
             )
     return LensPlan(tuple(uses), tuple(loaded))
+
+
+def plan_agentic_lenses(library: LensLibrary, ranked: Iterable[LensChoice]) -> LensPlan:
+    """Every chosen lens that has a body. The 60,000-character budget is
+    for a one-shot prompt that inlines every body. An agentic lens is its
+    own conversation, so that budget does not apply and does not drop the
+    critical tier."""
+    choices = tuple(ranked)
+    return plan_lenses(
+        library, choices, max_lenses=max(len(choices), 1), budget_chars=10**9
+    )
 
 
 def _skip_reason(

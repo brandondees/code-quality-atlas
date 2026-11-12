@@ -175,6 +175,11 @@ def test_the_working_defaults_are_one_retry_and_one_worker():
     assert (resolved.retries, resolved.pool_size) == (1, 1)
 
 
+def test_a_pool_from_one_to_sixteen_is_accepted():
+    assert replace(LIMITS, pool_size=4).resolve().pool_size == 4
+    assert replace(LIMITS, pool_size=16).resolve().pool_size == 16
+
+
 @pytest.mark.parametrize(
     "change",
     [
@@ -188,7 +193,9 @@ def test_the_working_defaults_are_one_retry_and_one_worker():
         {"lens_wall_s": 0},
         {"review_wall_s": -1},
         {"retries": 2},
-        {"pool_size": 2},
+        {"pool_size": 0},
+        {"pool_size": 17},
+        {"pool_size": True},
     ],
 )
 def test_a_limit_outside_its_range_is_refused(change):
@@ -442,13 +449,25 @@ def test_a_finding_whose_quote_is_not_at_head_is_unverified_and_retried(tmp_path
     assert [c.verified for c in outcome.findings] == [True, False]
 
 
-def test_a_reply_outside_the_contract_fails_and_is_retried(tmp_path):
-    outcome, _, _ = attempt(tmp_path, [READ_ALL, final(text="Looks fine to me!")])
+def test_a_reply_outside_the_contract_is_sent_back_once_then_fails(tmp_path):
+    bad = final(text="Looks fine to me!")
+    outcome, model, _ = attempt(tmp_path, [READ_ALL, bad, bad])
     assert outcome.attestation is Attestation.UNACKNOWLEDGED
     assert outcome.causes == {Cause.UNPARSED}
     assert outcome.state is LensState.FAILED
     assert outcome.retryable
     assert outcome.findings == ()
+    repair = model.requests[2].messages[-1].text
+    assert "the reply is not one JSON object" in repair
+    assert "quoted" in repair
+
+
+def test_a_repaired_reply_that_meets_the_contract_is_accepted(tmp_path):
+    outcome, _, _ = attempt(
+        tmp_path, [READ_ALL, final(text="Looks fine to me!"), final()]
+    )
+    assert outcome.state is LensState.CLEAN
+    assert outcome.causes == set()
 
 
 @pytest.mark.parametrize(

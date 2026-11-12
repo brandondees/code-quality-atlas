@@ -8,6 +8,7 @@ from atlas_reviewer.lenses import (
     LensChoice,
     LensLibrary,
     LensStatus,
+    plan_agentic_lenses,
     plan_lenses,
 )
 from atlas_reviewer.picker import CRITICAL_TIER, Depth, select_lenses
@@ -143,3 +144,40 @@ def test_a_lens_name_cannot_reach_outside_the_bundle(tmp_path):
     assert library.body("../secret") is None
     assert library.body("../../reference/secret") is None
     assert library.body("missing") is None
+    assert library.body("auditing-documentation-health") is None
+
+
+def test_the_change_review_library_loads_a_repo_lens_body():
+    """The picker can name a repo-shaped lens. Its body is generated under
+    the audit entrypoint, and the change-review bundle does not list it."""
+    library = LensLibrary()
+    body = library.body("auditing-documentation-health")
+    assert body is not None and "documentation" in body.lower()
+    assert "auditing-documentation-health" not in library.names()
+
+
+def test_every_lens_a_route_can_run_has_a_body():
+    from pathlib import Path
+
+    from tooling.manifest import load_manifest
+
+    manifest = load_manifest(str(Path("skills/manifest.yaml")))
+    assert manifest.router is not None
+    library = LensLibrary()
+    missing = sorted(
+        {
+            name
+            for route in manifest.router.routes
+            for name in route.run
+            if library.body(name) is None
+        }
+    )
+    assert missing == []
+
+
+def test_an_agentic_plan_runs_every_chosen_lens_that_has_a_body():
+    choices = [LensChoice(name, "critical tier") for name in CRITICAL_TIER]
+    choices.append(LensChoice("auditing-documentation-health", "picker rank 1"))
+    plan = plan_agentic_lenses(LensLibrary(), choices)
+    ran = [use.name for use in plan.uses if use.status is LensStatus.RUN]
+    assert ran == [choice.name for choice in choices]

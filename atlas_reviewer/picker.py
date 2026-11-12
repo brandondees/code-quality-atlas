@@ -30,6 +30,8 @@ from atlas_reviewer.lenses import (
     MAX_LENSES,
     LensChoice,
     LensLibrary,
+    LensPlan,
+    plan_agentic_lenses,
     plan_lenses,
 )
 from atlas_reviewer.notes import quote_untrusted
@@ -181,6 +183,59 @@ def select_lenses(
         f"bundle. The critical tier is considered first, then the picked names "
         f"in rank order, and at most {depth.limit} lenses run: the Lenses line "
         "says which ran whole and which are NOT RUN, and why."
+    )
+    return LensSelection(_with_critical(names), note, True)
+
+
+def select_agentic_lenses(
+    depth: Depth,
+    run_picker: Callable[[], str] | None,
+    library: LensLibrary,
+    *,
+    scrub: Callable[[str], str],
+) -> tuple[LensSelection, LensPlan]:
+    """The critical tier plus the picker's full ranking. The one-shot
+    character budget is not consulted, so a review-depth PR still calls
+    the picker and still runs every critical lens that has a body."""
+    selection = _agentic_selection(depth, run_picker, library, scrub=scrub)
+    return selection, plan_agentic_lenses(library, selection.choices)
+
+
+def _agentic_selection(
+    depth: Depth,
+    run_picker: Callable[[], str] | None,
+    library: LensLibrary,
+    *,
+    scrub: Callable[[str], str],
+) -> LensSelection:
+    if depth is Depth.TRIAGE:
+        return _critical("Lens selection: triage depth makes no picker call", False)
+    if run_picker is None:
+        return _critical(
+            "Lens selection: no model call is left for the lens picker", False
+        )
+    try:
+        names = parse_picks(run_picker())
+    except ByokRefusedError:
+        raise
+    except BoundaryError as exc:
+        return _critical(
+            "Lens selection: the lens picker gave no usable lens list (reason, "
+            f"quoted: {quote_untrusted(str(exc), scrub=scrub)})",
+            True,
+        )
+    if not any(library.body(n) is not None for n in names):
+        return _critical(
+            f"Lens selection: none of the {len(names)} lens name(s) the picker "
+            "ranked has a body in the bundle",
+            True,
+        )
+    with_body = sum(library.body(n) is not None for n in names)
+    note = (
+        f"Lens selection: `choosing-review-lenses` ran as one model call at "
+        f"{depth.value} depth. The one-shot character budget does not apply. "
+        f"The picker ranked {len(names)} lens name(s), {with_body} with a body. "
+        "The critical tier runs, then every picked lens that has a body."
     )
     return LensSelection(_with_critical(names), note, True)
 
