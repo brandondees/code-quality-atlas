@@ -23,12 +23,16 @@ line, so a quote such as `}` cannot pass by luck. A quote of several
 lines must be those cited lines, after that whitespace collapse. A quote
 of whole lines whose text is at least `MIN_FRAGMENT_CHARS` non-space
 characters may also match the same number of lines starting within
-`QUOTE_DRIFT` lines of the citation. That match is tagged as drifted. A
-shorter quote, including `}`, does not get that search, and a wider
-cited range is still not searched. Removed lines match within one
-run of consecutive `-` lines of one hunk, at any line of the file's
-diff, and the span rule does not apply to them: D31 checks the head at
-the cited range, and the removed side has no head line.
+`QUOTE_DRIFT` lines of the citation. That match is tagged as drifted, and
+the verified finding's location becomes the matched head lines, so the
+location names the lines that hold the quote. A shorter quote, including
+`}`, does not get that search, and a wider cited range is still not
+searched. Removed lines match within one run of consecutive `-` lines of
+one hunk, at any line of the file's diff, with the same whitespace
+collapse, and the span rule does not apply to them: D31 checks the head
+at the cited range, and the removed side has no head line. A removed
+match is checked before a drifted head match, so a quote of a removed
+line is tagged as removed even when the same text sits near the citation.
 """
 
 from __future__ import annotations
@@ -36,7 +40,7 @@ from __future__ import annotations
 import io
 import tarfile
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 from atlas_reviewer.diffs import split_files
@@ -52,7 +56,7 @@ _HUNK_START = "@@ "
 
 class QuoteSource(StrEnum):
     HEAD = "head"
-    HEAD_NEAR = "head, within 2 lines of the citation"
+    HEAD_NEAR = f"head, within {QUOTE_DRIFT} lines of the citation"
     REMOVED = "removed lines"
     NOT_NEEDED = "no line to quote"
 
@@ -213,10 +217,11 @@ def _check_range(finding: Finding, where: LineRange, sources: SourceText) -> Quo
     span_matches = where.end - where.start + 1 == len(quote)
     if window is not None and span_matches and _found(quote, window):
         return Verified(finding, QuoteSource.HEAD)
-    if head is not None and span_matches and _near(quote, head, where):
-        return Verified(finding, QuoteSource.HEAD_NEAR)
     if any(_found(quote, run) for run in sources.removed.get(where.path, ())):
         return Verified(finding, QuoteSource.REMOVED)
+    near = None if head is None or not span_matches else _near(quote, head, where)
+    if near is not None:
+        return Verified(replace(finding, location=near), QuoteSource.HEAD_NEAR)
     if head is None and sources.unreadable:
         return Unverified(finding, sources.unreadable)
     if head is not None and window is None:
@@ -271,13 +276,15 @@ def _squash(line: str) -> str:
     return " ".join(line.split())
 
 
-def _near(quote: tuple[str, ...], head: tuple[str, ...], where: LineRange) -> bool:
-    """A whole-line quote within `QUOTE_DRIFT` lines of the citation.
-    A fragment does not qualify: it would match a nearby line that merely
-    contains the words."""
+def _near(
+    quote: tuple[str, ...], head: tuple[str, ...], where: LineRange
+) -> LineRange | None:
+    """The head lines a whole-line quote matches within `QUOTE_DRIFT`
+    lines of the citation, or None. A fragment does not qualify: it would
+    match a nearby line that merely contains the words."""
     joined = "".join(_squash(line).replace(" ", "") for line in quote)
     if len(joined) < MIN_FRAGMENT_CHARS:
-        return False
+        return None
     wanted = tuple(_squash(line) for line in quote)
     for delta in range(1, QUOTE_DRIFT + 1):
         for sign in (1, -1):
@@ -287,8 +294,8 @@ def _near(quote: tuple[str, ...], head: tuple[str, ...], where: LineRange) -> bo
             shifted = LineRange(where.path, start, where.end + sign * delta)
             window = _cited_lines(head, shifted)
             if window is not None and tuple(_squash(line) for line in window) == wanted:
-                return True
-    return False
+                return shifted
+    return None
 
 
 def check_all(

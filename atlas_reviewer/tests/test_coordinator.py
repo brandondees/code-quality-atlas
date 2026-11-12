@@ -1050,6 +1050,12 @@ def test_a_quote_matched_within_two_lines_is_tagged_in_the_draft():
     assert result.event is ReviewEvent.COMMENT
 
 
+def test_a_drifted_major_finding_still_requests_changes():
+    drifted = CheckedFinding(checked(Severity.MAJOR).finding, QuoteSource.HEAD_NEAR)
+    result = synthesize([lens_result(clean(drifted))])
+    assert result.event is ReviewEvent.REQUEST_CHANGES
+
+
 def test_an_unverified_findings_problem_text_is_scrubbed_in_the_draft():
     opaque = "zq-problem-7c1f9a"
     bad = CheckedFinding(

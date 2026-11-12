@@ -90,7 +90,7 @@ from atlas_reviewer.notes import quote_untrusted
 from atlas_reviewer.openrouter import OpenRouterProvider
 from atlas_reviewer.ports import ByokRefusedError, Clock, RunnerLedger, SpritesApi
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
-from atlas_reviewer.quotes import read_sources
+from atlas_reviewer.quotes import QuoteSource, read_sources
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.rounds import (
     PRIOR_ROUND_CHARS,
@@ -1377,7 +1377,7 @@ def _finding_line(f: MintedFinding, scrub: Callable[[str], str]) -> str:
         f"route: {x.route.value}",
         x.attribution.value,
     ]
-    if f.source in ("removed lines", "head, within 2 lines of the citation"):
+    if f.source in (QuoteSource.REMOVED, QuoteSource.HEAD_NEAR):
         tags.append(f.source)
     text = (
         f"- **{f.id}** [{', '.join(tags)}] "
