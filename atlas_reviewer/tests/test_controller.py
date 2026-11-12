@@ -1869,13 +1869,14 @@ def test_notes_re_renders_pre_existing_omissions_with_its_own_scrub(value):
 
     The inner `_omissions(base, sel, scrub=scrub)` forwarding is NOT
     reachable through this (or any) behaviour test: with `sel=None`, as
-    here, `_omissions` never touches `scrub` at all (`_selection_omission`/
-    `_dropped_omission` both short-circuit to `()`). With a real `sel`,
-    `_selection_omission`/`_dropped_omission` DO use `scrub`, but only to
-    compute each new `Omission`'s `detail` field -- its `source`/`limit`
-    stay fixed templates ("pull request diff", "too large for one review
-    pass: N part(s)...", counts, no PR text). `_notes`'s own output feeds
-    `DraftInput.controller_notes` (Controller notes prose), rendered by
+    here, `_omissions` never touches `scrub` at all (`_selection_omission`
+    short-circuits to `()`, and `_dropped_omission` doesn't take a `scrub`
+    parameter in the first place). With a real `sel`, `_selection_omission`
+    uses `scrub` to compute its new `Omission`'s `detail` field -- its
+    `source`/`limit` stay fixed templates ("pull request diff", "too large
+    for one review pass: N part(s)...", no PR text either way). `_notes`'s
+    own output feeds `DraftInput.controller_notes` (Controller notes
+    prose), rendered by
     `_omission_line`, which quotes only `source`/`limit`, never `detail`
     (the omissions *table* is what shows `detail`, via a separate
     `_omissions(..., scrub=scrub)` call at `DraftInput.omissions`'s own
