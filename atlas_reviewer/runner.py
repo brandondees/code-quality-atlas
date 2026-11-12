@@ -63,6 +63,7 @@ from an in-band marker each script prints.
 from __future__ import annotations
 
 import hashlib
+import random
 import re
 import secrets
 import threading
@@ -93,6 +94,7 @@ from atlas_reviewer.ports import (
     Clock,
     Json,
     NotFoundError,
+    RateLimitedError,
     RefusedError,
     RunnerLedger,
     SpritesApi,
@@ -1054,17 +1056,20 @@ def _stdin_roundtrip(run: _Run) -> str:
 def _create_with_backoff(run: _Run) -> None:
     """Sprites answers HTTP 429 when several creates arrive together.
     The #636 live run refused two of ten creates before anything existed,
-    so a 429 is waited out and tried again. Any other refusal is final."""
+    so a 429 is waited out and tried again, with jitter so pooled lenses
+    do not retry in step, and only while the runner's deadline has time
+    left. Any other refusal is final."""
     api, name, t = run.api, run.name, run.telemetry
     waits = 0
     while True:
         try:
             t.span("create", "create sprite", lambda: api.create(name))
             return
-        except RefusedError as exc:
-            if "HTTP 429" not in str(exc) or waits >= len(_CREATE_BACKOFF_S):
+        except RateLimitedError:
+            if waits >= len(_CREATE_BACKOFF_S):
                 raise
-            _sleep(_CREATE_BACKOFF_S[waits])
+            _sleep(_CREATE_BACKOFF_S[waits] * random.uniform(0.5, 1.0))
+            run.deadline.check("create retry")
             waits += 1
 
 
