@@ -127,6 +127,32 @@ def test_ledger_writes_and_their_directory_are_synced(tmp_path, monkeypatch):
     assert ledger.pending() == ()
 
 
+def test_a_record_during_a_clear_is_not_dropped(tmp_path, monkeypatch):
+    """Two lenses' runners: one clears while the other records. Without
+    the lock the record lands between clear's read and its replace."""
+    import threading
+
+    from atlas_reviewer import ledger as ledger_module
+
+    ledger = FileLedger(tmp_path / "runners.ledger")
+    ledger.record("cqa-rev-a")
+    real = ledger_module._write_synced
+    other: list[threading.Thread] = []
+
+    def write(path, mode, text):
+        if path.name.endswith(".clearing") and not other:
+            other.append(threading.Thread(target=ledger.record, args=("cqa-rev-b",)))
+            other[0].start()
+            other[0].join(timeout=0.2)
+        real(path, mode, text)
+
+    monkeypatch.setattr(ledger_module, "_write_synced", write)
+    ledger.clear("cqa-rev-a")
+    other[0].join(timeout=5)
+    assert not other[0].is_alive()
+    assert ledger.pending() == ("cqa-rev-b",)
+
+
 def test_a_ledger_named_like_its_temp_file_still_clears(tmp_path):
     ledger = FileLedger(tmp_path / "runners.tmp")
     ledger.record("a")
