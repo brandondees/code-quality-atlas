@@ -869,6 +869,8 @@ def test_an_early_flyctl_return_is_polled_until_the_machines_own_line():
     (destroy_block,) = [
         block for block in shell_blocks(recover) if "machine destroy" in block
     ]
+    assert 'grep -F -q -- "$MACHINE_ID" &&' in flattened(destroy_block)
+    assert destroy_block.index("grep -F -q") < destroy_block.index("machine destroy")
     listed = [
         command.program
         for command in shell_commands(destroy_block)
@@ -877,6 +879,9 @@ def test_an_early_flyctl_return_is_polled_until_the_machines_own_line():
     assert listed == [("flyp", "machine", "list", "--app", "atlas-reviewer")]
     assert destroy_block.index("machine list") < destroy_block.index("machine destroy")
     assert "as when the sweep poll's `$found` is empty" in flat
+    assert (
+        "The destroy runs only when the list output contains this Machine's ID:" in flat
+    )
 
 
 def prose_after_fence(section: str, marker: str) -> str:

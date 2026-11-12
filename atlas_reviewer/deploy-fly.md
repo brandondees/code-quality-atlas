@@ -653,11 +653,12 @@ Run the sweep again now. Exit 3 means the same.
 If `$found` is empty after the hour, this Machine may still be
 running. `--rm` destroys it when it stops, not when the poll stops.
 List Machines and, if this one is still listed, destroy it with
-`--force`, then run the sweep again:
+`--force`, then run the sweep again. The destroy runs only when the
+list output contains this Machine's ID:
 
 ```sh
-flyp machine list --app atlas-reviewer
-flyp machine destroy "$MACHINE_ID" --app atlas-reviewer --force
+flyp machine list --app atlas-reviewer | grep -F -q -- "$MACHINE_ID" &&
+  flyp machine destroy "$MACHINE_ID" --app atlas-reviewer --force
 ```
 
 The protocol probe below uses the same `timeout 45` subshell. Its
