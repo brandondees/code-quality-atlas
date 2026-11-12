@@ -35,7 +35,6 @@ from pathlib import Path
 from typing import TextIO
 
 from atlas_reviewer.agentic_config import ENV as AGENTIC_ENV
-from atlas_reviewer.agentic_config import load_agentic_limits
 from atlas_reviewer.budget import CallLimits
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.controller import (
@@ -231,7 +230,6 @@ class _Run:
     err: TextIO
     credentials: _Credentials
     telemetry: Telemetry | None = None
-    agentic_limits: object | None = None
 
 
 def _review_lock(
@@ -429,12 +427,9 @@ def _review_config(args: argparse.Namespace, mode: str) -> ReviewConfig:
 
 def _cmd_review(args: argparse.Namespace, run: _Run) -> int:
     env, out, err = run.env, run.out, run.err
-    try:
-        # Validated here so a bad agentic limit fails closed. The one-shot
-        # path does not apply these values: its ceilings stay D25's.
-        run.agentic_limits = load_agentic_limits(env, **_agentic_flags(args))
-    except ValueError as exc:
-        raise UsageError(str(exc)) from exc
+    # Agentic flags and ATLAS_* limit variables are not read here. D25's
+    # one-shot ceilings stay, and a value such as ATLAS_MAX_CALLS=10 must
+    # not refuse this command. The lens entry point is what applies them.
     event_path = Path(args.event)
     event = load_event(event_path)
     _review_config(args, "check")
@@ -869,7 +864,8 @@ def _positive_seconds(text: str) -> float:
 
 
 def _agentic_limit_args(parser: argparse.ArgumentParser) -> None:
-    """Agentic review limits. They do not change the one-shot D25 ceilings."""
+    """Shown on `review` so there is one place to see them. This command
+    does not read them. `limits_for_lens` does."""
     flags = (
         ("--reservation-usd", "reservation_usd", "per-review dollar reservation"),
         ("--max-calls", "max_calls", "model calls per agentic review"),
@@ -899,13 +895,9 @@ def _agentic_limit_args(parser: argparse.ArgumentParser) -> None:
             default=None,
             help=(
                 f"{meaning} (env {AGENTIC_ENV[name]}; default when unset). "
-                "Validated only: the one-shot review does not apply it."
+                "Agentic only: the one-shot review does not read or apply it."
             ),
         )
-
-
-def _agentic_flags(args: argparse.Namespace) -> dict[str, str | None]:
-    return {name: getattr(args, name) for name in AGENTIC_ENV}
 
 
 def _events_arg(parser: argparse.ArgumentParser) -> None:

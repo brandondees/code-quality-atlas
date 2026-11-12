@@ -52,6 +52,15 @@ def model(*chat, key=None, limits=None, catalog_reply=None):
     return OpenRouterLensModel(provider), fake
 
 
+def test_the_adapter_is_built_with_the_configured_limits():
+    from atlas_reviewer.coordinator import limits_for_lens, model_for_lens
+
+    limits = limits_for_lens({"ATLAS_MAX_INPUT_TOKENS": "8"})
+    adapter = model_for_lens(OpenRouterProvider(OpenRouterFake(), KEY), limits)
+    assert adapter.per_call == limits.resolve()
+    assert adapter.per_call.max_input_tokens == 8
+
+
 def sent(fake: OpenRouterFake) -> dict:
     ((_method, _url, _headers, body),) = fake.chat_requests()
     return json.loads(body)

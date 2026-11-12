@@ -33,11 +33,11 @@ def test_agentic_limit_help_says_the_one_shot_review_does_not_apply_them(capsys)
         cli.main(["review", "--help"], env={})
     assert raised.value.code == 0
     text = " ".join(capsys.readouterr().out.split())
-    assert "Validated only: the one-shot review does not apply it." in text
+    assert "Agentic only: the one-shot review does not read or apply it." in text
 
 
-def test_a_bad_agentic_limit_is_refused_before_the_review(tmp_path):
-    code, _out, err = run_cli(
+def test_agentic_settings_do_not_change_a_one_shot_review(tmp_path):
+    code, out, err = run_cli(
         "--state-dir",
         str(tmp_path),
         "review",
@@ -46,20 +46,24 @@ def test_a_bad_agentic_limit_is_refused_before_the_review(tmp_path):
         "--dry-run",
         "--reservation-usd",
         "0",
+        env={"ATLAS_MAX_CALLS": "10", "ATLAS_MAX_TURNS": "nope"},
     )
-    assert code == cli.EXIT_USAGE
-    assert "reservation_usd" in err
-    code, _out, err = run_cli(
+    assert code == cli.EXIT_INCOMPLETE
+    assert "reservation_usd" not in err
+    assert "max_turns" not in err
+    assert out.startswith("<!-- atlas-review-status: {")
+    bare, bare_out, bare_err = run_cli(
         "--state-dir",
         str(tmp_path),
         "review",
         "--event",
         EVENT,
         "--dry-run",
-        env={"ATLAS_MAX_TURNS": "nope"},
+        env={"ATLAS_MAX_CALLS": "10"},
     )
-    assert code == cli.EXIT_USAGE
-    assert "max_turns" in err
+    assert bare == cli.EXIT_INCOMPLETE
+    assert "max_calls" not in bare_err
+    assert bare_out.startswith("<!-- atlas-review-status: {")
 
 
 def test_dry_run_needs_no_credentials_and_prints_a_draft(tmp_path):

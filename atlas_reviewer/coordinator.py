@@ -32,11 +32,12 @@ from __future__ import annotations
 
 import json
 import secrets
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import cast
 
+from atlas_reviewer.agentic_config import load_agentic_limits
 from atlas_reviewer.attestation import (
     Attempt,
     AttemptLedger,
@@ -70,12 +71,14 @@ from atlas_reviewer.lens_loop import (
 )
 from atlas_reviewer.lenses import LensLibrary
 from atlas_reviewer.notes import quote_untrusted
+from atlas_reviewer.openrouter import OpenRouterProvider
 from atlas_reviewer.ports import ByokRefusedError, Clock, RunnerLedger, SpritesApi
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
 from atlas_reviewer.quotes import read_sources
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import event_runner_name
 from atlas_reviewer.telemetry import Telemetry
+from atlas_reviewer.tool_model import OpenRouterLensModel
 from atlas_reviewer.verdict import STATUS_PREFIX, ReviewEvent
 
 QUOTED_CHARS = 600
@@ -271,6 +274,22 @@ class _Session:
 
     def flagged(self) -> tuple[str, ...]:
         return tuple(v for b in self.bridges for v in b.flagged())
+
+
+def limits_for_lens(env: Mapping[str, str], **flags: str | None) -> AgenticLimits:
+    """The limits one lens run uses. A flag wins over its `ATLAS_*` variable.
+
+    This is the reader `review_lens` is given. The one-shot `review`
+    command does not call it, so those settings cannot refuse that path.
+    """
+    return load_agentic_limits(env, **flags)
+
+
+def model_for_lens(
+    provider: OpenRouterProvider, limits: AgenticLimits
+) -> OpenRouterLensModel:
+    """The live adapter bound to the same resolved limits as the loop."""
+    return OpenRouterLensModel(provider, per_call=limits.resolve())
 
 
 def review_lens(

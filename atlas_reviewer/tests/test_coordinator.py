@@ -315,6 +315,19 @@ def test_quotes_that_fail_twice_leave_the_lens_partial_and_report_only_verified(
     assert "## Not verified (not reported as findings)" in draft
 
 
+def test_a_configured_turn_cap_reaches_the_loop(tmp_path):
+    from atlas_reviewer.coordinator import limits_for_lens
+
+    limits = limits_for_lens({"ATLAS_MAX_CALLS": "4"}, max_turns="2")
+    result, model, _ = review(tmp_path, [READ_ALL] * 10, limits=limits)
+    (lens,) = result.lenses
+    assert lens.outcome is not None
+    assert lens.outcome.causes == {Cause.TURN_CAP}
+    assert lens.outcome.limit_hit is not None
+    assert lens.outcome.limit_hit.configured == "2"
+    assert len(model.requests) == 2
+
+
 def test_a_cut_short_lens_is_partial_and_not_retried(tmp_path):
     result, model, _ = review(
         tmp_path, [READ_ALL] * 10, limits=replace(LIMITS, max_turns=2)

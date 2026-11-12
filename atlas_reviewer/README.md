@@ -769,10 +769,12 @@ D41 records the 2026-11-12 probe that did.
   override can tighten either and cannot exceed the model. The
   reasoning value is a hint; the reservation prices the whole output
   cap at the completion rate plus the reasoning rate.
-  `agentic_config.load_agentic_limits` reads the eight limits from
-  flags or `ATLAS_*` variables. The `review` command validates them and
-  does not apply them: the one-shot path keeps its 3 calls, $3.00 and
-  200,000 input cap, and `review_lens` is not a CLI command.
+  `coordinator.limits_for_lens` reads the eight limits through
+  `agentic_config.load_agentic_limits`: a flag, else `ATLAS_*`, else
+  the default. `model_for_lens` builds the adapter with those same
+  bounds, and `review_lens` enforces the object it is given. The
+  `review` command does not read them. Its flags are agentic-only, and
+  the one-shot path keeps its 3 calls, $3.00 and 200,000 input cap.
 - **The prompt.** The system prompt is the controller's instructions, then
   the nonce fence rule, then the whole lens `body.md` between markers that
   carry its SHA-256, then `synthesis.md`'s whole *Finding contract*

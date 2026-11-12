@@ -1075,9 +1075,10 @@ OpenRouter's reasoning hint is still sent, and the reservation prices
 the whole output cap at the completion rate plus the reasoning rate,
 on this path and on the one-shot path. D43's $5 reservation and
 one-token-per-byte bound stay. The one-shot 3-call, $3, and
-200,000 ceilings stay. The eight agentic limits are flags and
-`ATLAS_*` variables, validated and not applied to the one-shot
-`review` command. A limit that stops a lens is its own cause, with the
+200,000 ceilings stay. The eight agentic limits are flags and `ATLAS_*` variables.
+`limits_for_lens` is what a lens run uses. The one-shot `review`
+command does not read them, so a value such as `ATLAS_MAX_CALLS=10`
+does not refuse it. A limit that stops a lens is its own cause, with the
 configured value, the observed value, and where to change it, in the
 ledger and on the status line's `limit_stop`. Compaction is not built.
 The Claude Code comparison and the follow-up are
