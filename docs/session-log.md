@@ -1260,6 +1260,16 @@ lists each dropped finding, including the raw severity, under its own
 heading. The other findings stand. A reply that is not a contract
 object is still sent back once. D54 records it.
 
+## 2026-11-12 — a verified Major requests changes
+
+The agentic coordinator was requesting changes only for a Blocker, so
+verified Majors on the #639, #640 and #642 runs came out as
+`COMMENT`. A verified introduced Major or Blocker is now
+`REQUEST_CHANGES`. A Minor stays `COMMENT`. Nits, and a review with no
+verdict-setting finding, still approve. D46 records that
+`synthesis.md`, `templates/REVIEW.md` and the PR-review runbook still
+describe a Blocker as what requests changes on the human-posted review.
+
 ## 2026-11-13 — pinned endpoints set the price, and ZDR can be turned off
 
 `max_price`, the reservation, the context and the completion limit come

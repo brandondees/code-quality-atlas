@@ -7,10 +7,9 @@ up to the configured pool, then gives each lens a continuation of its
 own for the files it left unread while a call and the review clock
 remain. The synthesis is mechanical: the controller mints
 `L<lens>-F<n>` IDs, ranks the verified findings by severity and sets
-the verdict from them by `synthesis.md`'s rule (one
-introduced Blocker blocks; anything else that sets the verdict means
-approve with changes; only nits or nothing means approve). There is no
-model merge call yet.
+the verdict from them (D46). An introduced Major or Blocker requests
+changes. An introduced Minor means approve with changes. Only nits, or
+nothing, means approve. There is no model merge call yet.
 
 Coverage is complete only when every lens read every changed file's
 diff in full, through its own attempts or its own continuations (D42:
@@ -288,13 +287,13 @@ def rank(findings: Sequence[MintedFinding]) -> tuple[MintedFinding, ...]:
 
 def decide(findings: Sequence[MintedFinding]) -> Verdict:
     """From the verified verdict-setting findings: only an introduced
-    defect sets the verdict."""
+    defect sets the verdict. A Major or a Blocker requests changes (D46)."""
     setting = [
         f.finding.severity for f in findings if f.verified and f.finding.sets_verdict
     ]
-    if Severity.BLOCKER in setting:
+    if any(s.rank <= Severity.MAJOR.rank for s in setting):
         return Verdict.BLOCK
-    if any(s is not Severity.NIT for s in setting):
+    if any(s is Severity.MINOR for s in setting):
         return Verdict.APPROVE_WITH_CHANGES
     return Verdict.APPROVE
 
