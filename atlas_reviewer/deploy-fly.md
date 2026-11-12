@@ -518,8 +518,8 @@ If the `fly machine wait` above errors or times out, that exit does
 not say the Machine stopped, and it does not say whether `finally`
 ran. Continue to `fly machine destroy --force`, then check the runner
 Sprite as in
-[Recover a runner Sprite by name](#recover-a-runner-sprite-by-name). If the flyctl that started this Machine is still
-running, kill it as in
+[Recover a runner Sprite by name](#recover-a-runner-sprite-by-name).
+If the flyctl that started this Machine is still running, kill it as in
 [Leftover flyctl after a stop](#leftover-flyctl-after-a-stop).
 
 The entrypoint passes a stop it receives on to the CLI as SIGTERM,
