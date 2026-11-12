@@ -202,6 +202,7 @@ class Worker:
         self._concurrency = concurrency
         self._state_root = state_root or Path(".atlas-reviewer-state")
         self._now = now or time.time
+        self._random = random.random
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
 
@@ -228,8 +229,13 @@ class Worker:
             thread.join(timeout=timeout)
 
     def run_one(self) -> bool:
+        if self._stop.is_set():
+            return False
         job = self._board.claim()
         if job is None:
+            return False
+        if self._stop.is_set():
+            job.cancel.set()
             return False
         try:
             self._execute(job)
@@ -244,6 +250,8 @@ class Worker:
                 if self._stop.is_set():
                     return
                 self.run_one()
+                if self._stop.is_set():
+                    return
                 self._retry_post()
             except Exception as exc:  # noqa: BLE001 -- the thread has to outlive one failure
                 self._telemetry.record(
@@ -257,7 +265,9 @@ class Worker:
     def _retry_post(self) -> None:
         if self._publisher is None:
             return
-        job = self._board.claim_post(self._now())
+        if self._stop.is_set():
+            return
+        job = self._board.claim_post(self._now(), stop=self._stop)
         if job is None:
             return
         try:
@@ -270,6 +280,16 @@ class Worker:
         raises, the in-memory state is left as it was so a restart can
         queue a ``running`` job again, and the thread keeps going."""
         note = f"{type(exc).__name__}: {exc}"
+        if job.state in {JobState.DONE, JobState.FAILED, JobState.SUPERSEDED}:
+            note += "; left the settled job alone"
+            self._telemetry.record(
+                "service",
+                "worker error",
+                _fields(job.event),
+                status=ERROR,
+                error=note,
+            )
+            return
         try:
             self._board.finish(job, JobState.FAILED)
         except Exception as save_exc:  # noqa: BLE001 -- the thread still has to record why
@@ -417,11 +437,14 @@ class Worker:
             )
             return
         base = _POST_BACKOFF_S[min(job.attempts - 1, len(_POST_BACKOFF_S) - 1)]
-        delay = base * (1 + random.random() * _BACKOFF_JITTER)
+        delay = base * (1 + self._random() * _BACKOFF_JITTER)
         if retry_after is not None:
             delay = max(delay, retry_after)
         job.retry_at = self._now() + delay
-        self._board.finish(job, JobState.POST_PENDING)
+        committed = self._settle(job, JobState.POST_PENDING)
+        if committed is JobState.SUPERSEDED:
+            self._note(job, committed, fields)
+            return
         self._telemetry.record(
             "service",
             "review post failed",

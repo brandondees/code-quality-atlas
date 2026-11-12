@@ -778,6 +778,151 @@ def test_a_supersede_during_finish_is_what_the_log_says(tmp_path):
     assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
 
 
+def test_a_log_error_after_a_settled_review_does_not_fail_the_job(tmp_path):
+    """The silent-failures case: the review settled DONE, then the log
+    write raised. The head must stay DONE, not become a retry."""
+
+    class RaisingSink:
+        def emit(self, event):
+            if event.step == "review finished":
+                raise OSError("log full")
+
+    board = Board(tmp_path / "queue.json")
+    worker = Worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        Telemetry(SystemClock(), sink=RaisingSink(), scrub=lambda text: text),
+        state_root=tmp_path,
+    )
+    moment = datetime(2026, 11, 12, 20, tzinfo=UTC)
+    board.enqueue(PrEvent(REPO, 7, SHA_A), at=moment)
+    assert worker.run_one() is True
+    assert board.states() == ((SHA_A, JobState.DONE),)
+    assert board.enqueue(PrEvent(REPO, 7, SHA_A), at=moment) is Enqueue.DUPLICATE
+
+
+def test_a_newer_head_replaces_the_slot_when_the_queue_is_full(tmp_path):
+    board = Board(tmp_path / "queue.json", max_remembered=1)
+    earlier = datetime(2026, 11, 12, 19, tzinfo=UTC)
+    later = datetime(2026, 11, 12, 20, tzinfo=UTC)
+    assert board.enqueue(PrEvent(REPO, 7, SHA_A), at=earlier) is Enqueue.QUEUED
+    old = board._jobs[0]
+    assert board.enqueue(PrEvent(REPO, 7, SHA_B), at=later) is Enqueue.QUEUED
+    assert old.cancel.is_set()
+    assert old.state is JobState.SUPERSEDED
+    assert dict(board.states())[SHA_B] is JobState.QUEUED
+    running = Board(tmp_path / "running.json", max_remembered=1)
+    assert running.enqueue(PrEvent(REPO, 7, SHA_A), at=earlier) is Enqueue.QUEUED
+    claimed = running.claim()
+    assert claimed is not None
+    assert running.enqueue(PrEvent(REPO, 7, SHA_B), at=later) is Enqueue.QUEUED
+    assert claimed.cancel.is_set()
+    assert claimed.superseded is True
+
+
+def test_stop_does_not_start_a_queued_review(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    entered = threading.Event()
+    release = threading.Event()
+    started: list[bool] = []
+    real = board.claim
+
+    def claim():
+        entered.set()
+        assert release.wait(2)
+        return real()
+
+    board.claim = claim
+
+    def runner(event, cancel):
+        started.append(cancel.is_set())
+        return ReviewRun(False, error="ran")
+
+    worker = _worker(board, runner, root=tmp_path)
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    worker.start()
+    assert entered.wait(2)
+
+    def release_after_stop_begins():
+        assert worker._stop.wait(2)
+        release.set()
+
+    threading.Thread(target=release_after_stop_begins).start()
+    worker.stop(timeout=2)
+    assert started == []
+
+
+def test_a_failed_claim_save_leaves_the_job_queued(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    real = board._save
+    calls = {"n": 0}
+
+    def save():
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise OSError("disk")
+        return real()
+
+    board._save = save
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    with pytest.raises(OSError, match="disk"):
+        board.claim()
+    assert board.states() == ((SHA_A, JobState.QUEUED),)
+    board._save = real
+    claimed = board.claim()
+    assert claimed is not None
+    assert claimed.state is JobState.RUNNING
+
+
+def test_a_supersede_during_a_deferred_post_is_not_logged_as_a_retry(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(True, REPORT), root=tmp_path
+    )
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    real = board.finish
+
+    def finish(current, state):
+        current.superseded = True
+        return real(current, state)
+
+    board.finish = finish
+    worker._defer_post(job, "github down")
+    assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
+    steps = [event.step for event in worker._telemetry.events]
+    assert "review post failed" not in steps
+    assert "review superseded" in steps
+
+
+def test_finish_stores_superseded_when_the_flag_is_already_set(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    job.superseded = True
+    assert board.finish(job, JobState.DONE) is JobState.SUPERSEDED
+    assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
+
+
+def test_the_post_backoff_includes_jitter(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    clock = {"t": 1_000.0}
+    worker = _worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        lambda event, report: (_ for _ in ()).throw(RuntimeError("down")),
+        tmp_path,
+    )
+    worker._now = lambda: clock["t"]
+    worker._random = lambda: 1.0
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    assert worker.run_one() is True
+    job = board._jobs[0]
+    assert job.retry_at == 1_000.0 + 5.0 * 1.2
+
+
 def test_the_module_refuses_to_start_without_a_secret():
     env = {
         key: value for key, value in os.environ.items() if not key.startswith("ATLAS_")

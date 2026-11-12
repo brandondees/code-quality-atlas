@@ -542,12 +542,15 @@ step 8 (#607).
 
 ## Explicitly out of scope
 
-Each item below is left out on purpose rather than deferred:
+Each item below is left out of the operator CLI on purpose rather than
+deferred. **Note (2026-11-12, D48):** a webhook receiver and its queue
+exist as a separate process, `python -m atlas_reviewer.service`. They are
+not part of this operator path. This list still describes the CLI.
 
 - publishing anything to GitHub
-- webhooks
-- a queue or concurrency beyond one review at a time (enforced by a lock
-  file)
+- webhooks on the operator CLI
+- a queue on the operator CLI, or concurrency beyond one review at a time
+  (enforced by a lock file)
 - billing, BYOK onboarding, Vercel, Neon, and multi-tenancy
 - executing or extracting artifact or log content (it is parsed in memory
   as text only)

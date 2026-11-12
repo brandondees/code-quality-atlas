@@ -148,7 +148,17 @@ class Board:
             ):
                 return Enqueue.STALE
             active = sum(1 for job in self._jobs if job.state in _ACTIVE)
-            if active >= self._max_remembered:
+            replaces = any(
+                job.event.repo == event.repo
+                and job.event.pr_number == event.pr_number
+                and job.state in _ACTIVE
+                for job in self._jobs
+            )
+            # A newer head of a PR already in the queue takes that slot.
+            # Refusing it would leave the old review running. A running
+            # job stays active until it notices the cancel, so the count
+            # can be one over the cap until that job settles.
+            if active >= self._max_remembered and not replaces:
                 return Enqueue.FULL
             if failed_job is not None:
                 self._jobs.remove(failed_job)
@@ -196,8 +206,12 @@ class Board:
         with self._cv:
             return self._claim(JobState.QUEUED, JobState.RUNNING)
 
-    def claim_post(self, now: float) -> Job | None:
+    def claim_post(
+        self, now: float, *, stop: threading.Event | None = None
+    ) -> Job | None:
         with self._cv:
+            if stop is not None and stop.is_set():
+                return None
             for job in self._jobs:
                 if (
                     job.state is JobState.POST_PENDING
@@ -266,7 +280,11 @@ class Board:
         for job in self._jobs:
             if job.state is source and not job.superseded:
                 job.state = dest
-                self._save()
+                try:
+                    self._save()
+                except Exception:
+                    job.state = source
+                    raise
                 return job
         return None
 
