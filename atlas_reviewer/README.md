@@ -810,12 +810,13 @@ socket for the hold. No live model, Sprite or Fly call has been made.
   `review_lens` holds the Sprite with a Tasks API task on
   `/.sprite/api.sock`: a 5-minute expiry, refreshed every 60 seconds, and
   deleted on the way out, including when the lens raises or is cancelled.
-  The refresh thread is joined before the delete, so a refresh error is
-  not lost, and the join waits at most 20 seconds. The lock and the stop
-  and held guards are what stop a refresh after the hold has stopped from
-  recreating the task. Each hold exec has its own 15 second budget, and
-  the guest socket call times out after 10 seconds and reads only the
-  status line. Refresh and tool execs share the runner's exec lock so
+  The refresh thread is joined before the delete, and the join waits at
+  most 20 seconds. A refresh stores a failure under the lock before
+  releasing it. The lock and the stop and held guards are what stop a
+  refresh after the hold has stopped from recreating the task; the Tasks
+  API's PUT would otherwise upsert it. Each hold exec has its own 15 second
+  budget, and the guest socket call times out after 10 seconds and reads
+  only the status line. Refresh and tool execs share the runner's exec lock so
   they do not write one stream; the 15 second budget is how long a
   refresh can block a tool. A keepalive failure fails the runner, and a
   failed runner is not complete coverage. Snapshot and restore is not

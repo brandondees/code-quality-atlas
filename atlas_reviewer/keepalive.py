@@ -222,17 +222,17 @@ Wait = Callable[[float], bool]
 class LensHold:
     """Create a hold, refresh it until exit, then delete it.
 
-    `__exit__` joins the refresh thread before it deletes. The join is
-    what makes a refresh error visible: the thread stores that error
-    after the refresh returns, and the join waits until that store has
-    happened. The lock, and the stop and held guards, are what stop a
-    refresh from upserting the task after the delete (the Tasks API's
-    PUT is an upsert); the join is not that guard. The join itself is
-    bounded (`join_s`). Delete runs when the body returns, when it
-    raises, and when it is cancelled, including when the join is
-    interrupted. A refresh that fails is raised after the delete, unless
-    the body already raised: the body's exception is the one the caller
-    sees, and a delete error does not replace it."""
+    `__exit__` joins the refresh thread before it deletes. A refresh
+    stores a failure under the lock before it releases the lock, so the
+    delete cannot pass until that error is stored; the join waits for an
+    in-flight refresh to finish, and it is bounded (`join_s`). The lock,
+    and the stop and held guards, are what stop a refresh from upserting
+    the task after the delete (the Tasks API's PUT is an upsert). Delete
+    runs when the body returns, when it raises, and when it is cancelled,
+    including when the join is interrupted. A refresh that fails is
+    raised after the delete, unless the body already raised: the body's
+    exception is the one the caller sees, and no error from the delete
+    replaces it."""
 
     client: TaskClient
     name: str
@@ -272,10 +272,10 @@ class LensHold:
                 thread.join(self.join_s)
         except KeyboardInterrupt as exc:
             join_error = exc
-        delete_error: BoundaryError | None = None
+        delete_error: Exception | None = None
         try:
             self._release()
-        except BoundaryError as exc:
+        except Exception as exc:  # noqa: BLE001 - any delete error yields to the lens
             delete_error = exc
         if join_error is not None:
             raise join_error

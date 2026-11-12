@@ -240,6 +240,18 @@ def test_a_delete_failure_does_not_hide_the_lens_error():
     assert client.events == ["create", "delete"]
 
 
+def test_a_deadline_during_delete_does_not_hide_the_lens_error():
+    class Late(Recording):
+        def delete(self, name: str) -> None:
+            self.events.append("delete")
+            raise DeadlineExceededError("deadline reached before task hold")
+
+    client = Late()
+    with pytest.raises(ValueError, match="boom"), LensHold(client, NAME):
+        raise ValueError("boom")
+    assert client.events == ["create", "delete"]
+
+
 def test_an_interrupt_during_the_join_still_deletes(monkeypatch):
     client = Recording()
     original = threading.Thread.join
@@ -339,6 +351,30 @@ def test_a_refresh_past_the_deadline_is_raised_on_exit():
         pass
     assert client.events[-1] == "delete"
     assert client.events.count("refresh") == 1
+
+
+def test_a_delete_does_not_wait_out_a_refresh_that_still_holds_the_lock():
+    client = Recording()
+    holding = threading.Event()
+    release = threading.Event()
+
+    def refresh(_name: str) -> None:
+        client.events.append("refresh")
+        holding.set()
+        release.wait(30)
+
+    client.refresh = refresh
+    seen: list[float] = []
+    hold = LensHold(
+        client, NAME, wait=lambda seconds: _once(seconds, seen), join_s=0.05
+    )
+    hold.__enter__()
+    assert holding.wait(2)
+    started = time.monotonic()
+    with pytest.raises(BoundaryError, match="timed out"):
+        hold.__exit__(None, None, None)
+    assert time.monotonic() - started < 2
+    release.set()
 
 
 def test_exit_does_not_wait_out_a_stuck_refresh():
