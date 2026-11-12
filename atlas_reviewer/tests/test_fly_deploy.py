@@ -10,6 +10,7 @@ Nothing here builds the image or calls Fly.
 
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -430,8 +431,19 @@ def fly_commands(text: str) -> list[str]:
 def test_every_runbook_fly_command_names_its_app_or_org():
     commands = fly_commands(RUNBOOK)
     assert len(commands) > 20
+    # `wireguard reset` takes the org as a positional argument, and
+    # `agent restart` takes none. Both are pinned exactly, including an
+    # empty wrapper prefix, by test_a_stuck_tunnel_resets_the_personal_wireguard_peer.
+    # A timeout or env wrapper would still match these strings, so that
+    # test is what rejects the wrapper.
+    allowed_without_flag = {
+        'fly "$@"',
+        f"flyp apps destroy {APP_NAME} --yes",
+        "flyp wireguard reset personal",
+        "flyp agent restart",
+    }
     for command in commands:
-        if command in ('fly "$@"', f"flyp apps destroy {APP_NAME} --yes"):
+        if command in allowed_without_flag:
             continue
         assert "--app atlas-reviewer" in command or "--org personal" in command, command
 
@@ -730,6 +742,408 @@ def test_a_review_is_waited_for_copied_released_and_destroyed_in_that_order():
     assert RUNBOOK.index("flyp machine list --app atlas-reviewer") < RUNBOOK.index(
         "-- review --event"
     )
+
+
+def heading_body(heading: str, text: str | None = None) -> str:
+    """Text from a heading through the next heading of the same or higher level.
+
+    A ``#`` at column 0 inside a fenced block is not a heading. An unclosed
+    fence hides every later heading, because the rest of the text stays inside
+    that fence.
+    """
+    source = RUNBOOK if text is None else text
+    start = source.index(f"{heading}\n")
+    level = len(heading) - len(heading.lstrip("#"))
+    rest = source[start + len(heading) + 1 :]
+    in_fence = False
+    kept: list[str] = []
+    for line in rest.splitlines(keepends=True):
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            kept.append(line)
+            continue
+        if not in_fence and re.match(rf"#{{1,{level}}} ", line):
+            break
+        kept.append(line)
+    return "".join(kept)
+
+
+def flattened(text: str) -> str:
+    return " ".join(text.split())
+
+
+class PollLoop(NamedTuple):
+    """One ``while`` poll in a fenced block, comments already dropped."""
+
+    sleep_seconds: int
+    deadline_seconds: int
+    grep_argv: tuple[str, ...] | None
+
+
+def _comment_stripped(block: str) -> str:
+    lines = []
+    for line in block.splitlines():
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        lines.append(re.sub(r"\s+#.*$", "", line))
+    return re.sub(r"\\\n\s*", " ", "\n".join(lines))
+
+
+_START_LINE = re.compile(r"(?m)^start=\$\(\(\s*\$\(\s*date \+%s\s*\)\s*\)\)\s*$")
+_LOOP_CONDITION = re.compile(
+    r'^\[\s*-z\s+"\$[A-Za-z_][A-Za-z0-9_]*"\s*\]'
+    r"\s*&&\s*"
+    r'\[\s*"\$\(date \+%s\)"\s*-lt\s*"\$\(\(\s*start \+\s*3600\s*\)\)"\s*\]$'
+)
+
+
+def poll_loops(block: str) -> list[PollLoop]:
+    """Sleep from the ``while`` body, deadline from the ``while`` condition.
+
+    Full-line comments are dropped first, so a pattern that lives only in a
+    comment is not part of the ``grep`` command. ``start=$(( $(date +%s) ))``
+    must be the line before the ``while`` and must not appear in the body.
+    The condition must be ``[ -z "$var" ] && [ "$(date +%s)" -lt "$(( start + 3600 ))" ]``.
+    """
+    code = _comment_stripped(block)
+    found = []
+    previous = 0
+    for match in re.finditer(r"while\b(.*?)\bdo\b(.*?)done", code, flags=re.DOTALL):
+        condition, body = match.group(1), match.group(2)
+        before = code[previous : match.start()]
+        assert len(_START_LINE.findall(before)) == 1, block
+        assert not re.search(r"(?m)^start=", body), block
+        condition = condition.strip().removesuffix(";").strip()
+        assert _LOOP_CONDITION.fullmatch(condition), condition
+        sleeps = [int(n) for n in re.findall(r"(?m)^\s*sleep\s+(\d+)\s*$", body)]
+        deadlines = [int(n) for n in re.findall(r"start \+\s*(\d+)", condition)]
+        assert len(sleeps) == 1, block
+        assert deadlines == [3600], block
+        greps = re.findall(r"(?m)^\s*(grep\b.*?)\s*(?:\|\||$)", body)
+        assert len(greps) <= 1, block
+        grep_argv = tuple(shlex.split(greps[0])) if greps else None
+        found.append(PollLoop(sleeps[0], deadlines[0], grep_argv))
+        previous = match.end()
+    return found
+
+
+def _e_patterns(argv: tuple[str, ...]) -> tuple[str, ...]:
+    patterns = []
+    index = 0
+    while index < len(argv):
+        if argv[index] == "-e":
+            patterns.append(argv[index + 1])
+            index += 2
+            continue
+        index += 1
+    return tuple(patterns)
+
+
+def test_heading_body_ignores_a_hash_inside_a_fence():
+    sample = "### First\n\n```sh\n# Second\necho hi\n```\n\nstill in first\n\n### Second\n\ngone\n"
+    body = heading_body("### First", sample)
+    assert "still in first" in body
+    assert "# Second" in body
+    assert "gone" not in body
+
+
+def test_a_stuck_tunnel_resets_the_personal_wireguard_peer():
+    wait = heading_body("### Wait for the review to exit")
+    assert (
+        "Error: tunnel unavailable: Error contacting Fly.io API when probing "
+        '"personal": timed out (context deadline exceeded)'
+    ) in wait
+    flat = flattened(wait)
+    assert "stale WireGuard peer" in flat
+    assert "A likely cause is a stale" in flat
+    assert "the run did not confirm it" in flat
+    assert "not the slow first connection" in flat
+    assert "no `tunnel unavailable` line" in flat
+    assert "WireGuard-over-WebSockets" in flat
+    assert "did not isolate which of those changes" in flat
+    assert "not a documented Fly behavior" in flat
+    assert "evening of 2026-11-11, with flyctl" in flat
+    resets = [
+        command
+        for command in fly_invocations(wait)
+        if command.program[:3] == ("flyp", "wireguard", "reset")
+    ]
+    assert resets == [ShellCommand((), ("flyp", "wireguard", "reset", "personal"))]
+    restarts = [
+        command
+        for command in fly_invocations(wait)
+        if command.program[:2] == ("flyp", "agent")
+    ]
+    assert restarts == [ShellCommand((), ("flyp", "agent", "restart"))]
+    copy = flattened(heading_body("### Copy the output off"))
+    assert "tunnel unavailable" in copy
+    assert "#wait-for-the-review-to-exit" in copy
+    assert "sftp worked a few seconds after those steps" in copy
+
+
+def _logs_polls(text: str) -> list[tuple[str, ShellCommand]]:
+    expected = (
+        "flyp",
+        "logs",
+        "--app",
+        "atlas-reviewer",
+        "--machine",
+        '"$MACHINE_ID"',
+        "--no-tail",
+    )
+    found = []
+    for block in shell_blocks(text):
+        logs = [
+            command
+            for command in shell_commands(block)
+            if command.program[:3] == ("flyp", "logs", "--app")
+        ]
+        if not logs:
+            continue
+        assert logs == [ShellCommand((), expected)], block
+        found.append((block, logs[0]))
+    return found
+
+
+def test_an_early_flyctl_return_is_polled_until_the_machines_own_line():
+    recover = heading_body("### Recover a runner Sprite by name")
+    flat = flattened(recover)
+    assert 'returned at "Machine started" with wrapper status 0' in flat
+    assert "Neither flyctl's exit status nor its return means the run finished" in flat
+    assert "not a documented Fly behavior" in flat
+    assert "evening of 2026-11-11, with flyctl" in flat
+    assert "Do not take one `--no-tail` fetch right after flyctl returns." in flat
+    assert "or until one hour passes, the same bound as the review poll" in flat
+    assert '`--detach` returning, like the sweep returning at "Machine started"' in flat
+    polls = _logs_polls(recover)
+    # The sweep poll, the protocol-probe poll, and the one-shot read after
+    # a wait that returned. A comment or a timeout wrapper cannot satisfy
+    # the --machine pin: _logs_polls checks the peeled fly argv.
+    assert len(polls) == 3
+    sweep_block, probe_block, after_wait = (block for block, _ in polls)
+    (sweep_poll,) = poll_loops(sweep_block)
+    (probe_poll,) = poll_loops(probe_block)
+    assert poll_loops(after_wait) == []
+    assert sweep_poll.sleep_seconds > 0
+    assert probe_poll.sleep_seconds > 0
+    assert sweep_poll.deadline_seconds == 3600
+    assert probe_poll.deadline_seconds == 3600
+    assert sweep_poll.grep_argv == (
+        "grep",
+        "-F",
+        "-e",
+        "destroyed (verified absent)",
+        "-e",
+        "already absent, nothing deleted (verified absent)",
+        "-e",
+        "Main child exited normally with code:",
+    )
+    assert probe_poll.grep_argv == (
+        "grep",
+        "-F",
+        "-e",
+        "Main child exited normally with code:",
+    )
+    assert _e_patterns(sweep_poll.grep_argv) == sweep_poll.grep_argv[3::2]
+    assert _e_patterns(probe_poll.grep_argv) == (
+        "Main child exited normally with code:",
+    )
+    (exit_block,) = [
+        block
+        for block in shell_blocks(heading_body("### Wait for the review to exit"))
+        if "while " in block
+    ]
+    (exit_poll,) = poll_loops(exit_block)
+    assert exit_poll.grep_argv is None
+    assert exit_poll.deadline_seconds == 3600
+    assert exit_poll.sleep_seconds > 0
+    every_poll = [loop for block in shell_blocks(RUNBOOK) for loop in poll_loops(block)]
+    assert every_poll == [exit_poll, sweep_poll, probe_poll]
+    after_probe = recover.split(probe_block, 1)[1]
+    assert after_probe.lstrip("\n").startswith("```")
+    probe_fallback = flattened(
+        after_probe.split("```", 1)[1]
+        .split("```", 1)[0]
+        .split("probe-runner --sequence review", 1)[0]
+    )
+    assert "machine list" in probe_fallback
+    assert "--force" in probe_fallback
+    assert "sweep its runner by name" in probe_fallback
+    assert "wrapper status 124" in flat
+    assert "stderr stays on the terminal" in flat
+    assert "was not measured" in flat
+    assert (
+        "If `$found` is only the exit line, the runner was not verified gone." in flat
+    )
+    assert (
+        "If `$found` is empty after the hour, this Machine may still be running."
+        in flat
+    )
+    destroys = [
+        command
+        for command in fly_invocations(recover)
+        if command.program[:3] == ("flyp", "machine", "destroy")
+    ]
+    assert destroys == [
+        ShellCommand(
+            (),
+            (
+                "flyp",
+                "machine",
+                "destroy",
+                '"$MACHINE_ID"',
+                "--app",
+                "atlas-reviewer",
+                "--force",
+            ),
+        )
+    ]
+    (destroy_block,) = [
+        block for block in shell_blocks(recover) if "machine destroy" in block
+    ]
+    assert 'grep -F -q -- "$MACHINE_ID" &&' in flattened(destroy_block)
+    assert destroy_block.index("grep -F -q") < destroy_block.index("machine destroy")
+    listed = [
+        command.program
+        for command in shell_commands(destroy_block)
+        if command.program[:3] == ("flyp", "machine", "list")
+    ]
+    assert listed == [("flyp", "machine", "list", "--app", "atlas-reviewer")]
+    assert destroy_block.index("machine list") < destroy_block.index("machine destroy")
+    assert "as when the sweep poll's `$found` is empty" in flat
+    assert (
+        "The destroy runs only when the list output contains this Machine's ID:" in flat
+    )
+
+
+def prose_after_fence(section: str, marker: str) -> str:
+    """Prose between the fence that contains ``marker`` and the next fence."""
+    blocks = [block for block in shell_blocks(section) if marker in block]
+    assert len(blocks) == 1, marker
+    after_block = section.split(blocks[0], 1)[1]
+    assert after_block.lstrip("\n").startswith("```")
+    after_close = after_block.split("```", 1)[1]
+    return after_close.split("```", 1)[0]
+
+
+def test_a_failed_machine_wait_still_reaches_its_check():
+    waits = [
+        command
+        for command in fly_invocations(RUNBOOK)
+        if command.program[:3] == ("flyp", "machine", "wait")
+    ]
+    stopped = (
+        "flyp",
+        "machine",
+        "wait",
+        '"$MACHINE_ID"',
+        "--app",
+        "atlas-reviewer",
+        "--state",
+        "stopped",
+    )
+    destroyed = (
+        "flyp",
+        "machine",
+        "wait",
+        '"$MACHINE_ID"',
+        "--app",
+        "atlas-reviewer",
+        "--state",
+        "destroyed",
+        "--wait-timeout",
+        "1h",
+    )
+    assert [command.program for command in waits] == [stopped, stopped, destroyed]
+    assert all(command.prefix == () for command in waits)
+    release = flattened(
+        prose_after_fence(
+            heading_body("### Release and destroy the Machine"),
+            'flyp machine wait "$MACHINE_ID" --app atlas-reviewer --state stopped',
+        )
+    )
+    assert "errors or times out" in release
+    assert "that exit is flyctl's, not the review's" in release
+    assert "Do not skip `fly machine status`" in release
+    assert "no `--force`" in release
+    assert "go to [Hard stop](#hard-stop)" in release
+    release_logs = [
+        command
+        for command in fly_invocations(
+            heading_body("### Release and destroy the Machine")
+        )
+        if command.program[:2] == ("flyp", "logs")
+    ]
+    assert release_logs == [
+        ShellCommand(
+            (),
+            (
+                "flyp",
+                "logs",
+                "--app",
+                "atlas-reviewer",
+                "--machine",
+                '"$MACHINE_ID"',
+                "--no-tail",
+            ),
+        )
+    ]
+    hard = flattened(
+        prose_after_fence(
+            heading_body("### Hard stop"),
+            'flyp machine wait "$MACHINE_ID" --app atlas-reviewer --state stopped',
+        )
+    )
+    assert "errors or times out" in hard
+    assert "does not say the Machine stopped" in hard
+    assert "does not say whether `finally` ran" in hard
+    assert "Continue to `fly machine destroy --force`" in hard
+    assert heading_body("### Hard stop").count("#recover-a-runner-sprite-by-name") == 2
+    recover = flattened(
+        prose_after_fence(
+            heading_body("### Recover a runner Sprite by name"),
+            "--wait-timeout 1h",
+        )
+    )
+    assert "errors or times out" in recover
+    assert "the exit is flyctl's, not the probe's" in recover
+    assert "logs have not been read yet" in recover
+    assert "Do not stage the key" in recover
+    assert "protocol-probe loop" in recover
+    assert "did not show `code: 0`" in recover
+    assert "The Machine may still be running" in recover
+    assert "did not see `destroyed`" in recover
+    assert "destroy it with `--force`" in recover
+    assert "sweep its runner by name" in recover
+    assert "as when the sweep poll's `$found` is empty" in recover
+
+
+def test_a_non_rm_stop_kills_a_leftover_flyctl_after_the_machine_is_gone():
+    body = flattened(heading_body("### Leftover flyctl after a stop"))
+    assert "evening of 2026-11-11, with flyctl" in body
+    assert "flyctl's exit means the Machine started" in body
+    assert "That is the normal return." in body
+    assert "still running 30 seconds after a mid-run `fly machine stop`" in body
+    assert "killed it once the Machine had been destroyed" in body
+    assert "not a documented Fly behavior" in body
+    assert "does not show that every start without `--rm` keeps waiting" in body
+    assert "has not returned in its shell" in body
+    assert "kill that flyctl" in body
+    assert "Ctrl-C" in body
+    assert "pgrep -af 'fly machine run'" in body
+    assert 'kill "$PID"' in body
+    assert '--name "$NAME"' in body
+    assert "no `--rm`" in body
+    assert "are not the Machine's state" in body
+    assert "timeout 45" in body and "--detach" in body
+    for heading in (
+        "### Release and destroy the Machine",
+        "### Hard stop",
+    ):
+        text = flattened(heading_body(heading))
+        assert "#leftover-flyctl-after-a-stop" in text
+        assert "If the flyctl that started this Machine is still running" in text
 
 
 def test_runbook_has_a_hard_stop_and_recovers_sprites_by_name():
