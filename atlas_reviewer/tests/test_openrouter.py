@@ -252,16 +252,47 @@ def test_call_whose_worst_case_could_pass_three_dollars_is_refused():
     )
 
 
-def test_a_separate_reasoning_price_is_reserved():
+def test_a_separate_reasoning_price_reserves_the_whole_output_cap():
+    """The hint is not a bound. A separate reasoning rate is reserved on
+    every output token, not only on `reasoning_max_tokens`."""
     terms = parse_model_terms(catalog(internal_reasoning="0.00002"), MODEL_ID)
     plain = parse_model_terms(catalog(), MODEL_ID)
     limits = CallLimits()
-    extra = limits.reasoning_max_tokens * terms.reasoning_rate
-    assert extra == Decimal("0.24")
+    extra = limits.max_output_tokens * terms.reasoning_rate
+    assert extra == Decimal("0.48")
     assert (
         worst_case_usd(1000, terms, limits)
         == worst_case_usd(1000, plain, limits) + extra
     )
+    hinted = CallLimits(reasoning_max_tokens=100)
+    assert worst_case_usd(1000, terms, hinted) == worst_case_usd(1000, terms, limits)
+
+
+def test_reported_reasoning_past_the_hint_stays_inside_the_reservation():
+    """A reply can report more reasoning tokens than the hint. The fallback
+    price of that reply, the path `_actual_cost` uses when `usage.cost` is
+    missing, must not exceed the reservation that was held for the call."""
+    terms = parse_model_terms(catalog(internal_reasoning="0.00002"), MODEL_ID)
+    limits = CallLimits()
+    reasoning = limits.reasoning_max_tokens + 1_000
+    assert reasoning < limits.max_output_tokens
+    usage = {
+        "prompt_tokens": 10,
+        "completion_tokens": reasoning,
+        "completion_tokens_details": {"reasoning_tokens": reasoning},
+        "is_byok": False,
+    }
+    fake = OpenRouterFake(
+        reply(completion(usage=usage)),
+        model=reply(catalog(internal_reasoning="0.00002")),
+    )
+    p = provider(fake, max_calls=1)
+    p.preflight()
+    p.complete(SMALL)
+    record = p.budget.calls[0]
+    assert record.actual_usd is not None
+    assert record.actual_usd <= record.reserved_usd
+    assert "reasoning=13000" in record.usage
 
 
 def test_reservation_uses_the_highest_price_tier_and_cache_writes():

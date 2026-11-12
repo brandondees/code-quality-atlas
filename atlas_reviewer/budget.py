@@ -9,12 +9,16 @@ past `budget_usd`. A failed or unparseable attempt keeps its full
 reservation as spent, since it may still have been billed.
 
 Worst case of one call = input tokens x highest input rate (cache write
-included) + max output tokens x highest completion rate + reasoning budget
-x any separate reasoning rate + any per-request fee. OpenRouter bills
-reasoning tokens as output and counts them against `max_tokens`
-(https://openrouter.ai/docs/guides/best-practices/reasoning-tokens), so
-the output term already covers them; the separate reasoning term only
-matters for models priced with an `internal_reasoning` rate.
+included) + max output tokens x (completion rate + any separate reasoning
+rate) + any per-request fee. OpenRouter's `reasoning.max_tokens` is a hint,
+not a cap: a provider can return more reasoning tokens than the hint, up
+to `max_tokens`, and still bill them
+(https://openrouter.ai/docs/guides/best-practices/reasoning-tokens).
+`_actual_cost` prices completion tokens at the completion rate and
+reasoning tokens at the reasoning rate, and both counts can be as large
+as the output cap. The reservation prices the whole output cap at the
+sum of those rates, so it does not depend on the hint. The hint is still
+sent.
 """
 
 from __future__ import annotations
@@ -98,10 +102,12 @@ def check_tokens(input_tokens: int, terms: ModelTerms, limits: CallLimits) -> No
 
 
 def worst_case_usd(input_tokens: int, terms: ModelTerms, limits: CallLimits) -> Decimal:
+    """A cost that stays at least what `_actual_cost` would compute if every
+    output token were also a reasoning token. Independent of
+    `reasoning_max_tokens`: that field is only the hint sent on the request."""
     return (
         input_tokens * terms.input_rate
-        + limits.max_output_tokens * terms.completion_rate
-        + limits.reasoning_max_tokens * terms.reasoning_rate
+        + limits.max_output_tokens * (terms.completion_rate + terms.reasoning_rate)
         + terms.request_fee
     )
 
