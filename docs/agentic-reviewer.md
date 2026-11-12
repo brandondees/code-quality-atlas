@@ -14,8 +14,10 @@ offline (D41), tested with recorded HTTP and a fake Tasks socket; nothing
 calls either from the CLI. The 2026-11-12 probe is recorded in D41. Brandon
 set provisional defaults for the five phase-3 limits on 2026-11-11 (see
 [Open numeric decisions](#open-numeric-decisions-pending-brandon)). D43
-(2026-11-12) keeps the $5 per-review reservation and the byte-bound
-worst-case check. The other four limits stay headroom, configurable, and
+(2026-11-12) keeps the $5 per-review reservation and the one-token-per-byte
+input bound. The reservation prices the whole output cap at the completion
+rate plus the reasoning rate, so it does not depend on the reasoning hint.
+The other four limits stay headroom, configurable, and
 to be revisited after live runs. The other rows in that table are unchanged.
 This doc carries no live-run approval. No model call, Sprite run, merge or
 deploy was made to write it.
@@ -215,12 +217,17 @@ itself, and a timeout is a coverage gap.
 
 ### 5. Caps unchanged; start triage-only; own loop; issue-hit scoring
 
-- **Caps.** The one-shot path keeps D25's 3 calls and $3.00 reservation,
-  and the model pin stays (`anthropic/claude-sonnet-5.5`, no fallbacks).
-  Agentic mode has Brandon's provisional defaults (2026-11-11), for
-  headroom and configurable. The $5 reservation is D43's decision; the
-  other four limits stay provisional. The tool-calling adapter and the Sprite
-  keepalive are built offline (D41), and the D41 probe (2026-11-12) is recorded there.
+- **Caps.** The one-shot path keeps D25's 3 calls, $3.00 reservation,
+  and 200,000 input cap, and the model pin stays
+  (`anthropic/claude-sonnet-5.5`, no fallbacks). Agentic mode has
+  Brandon's provisional defaults (2026-11-11), for headroom and
+  configurable. The $5 reservation is D43's decision; the other four
+  limits stay provisional. The per-call input cap is the pinned model's
+  context minus the output reserve, and the output cap is the model's
+  completion limit. The reasoning value is a hint; the reservation does
+  not depend on it. The tool-calling adapter and the Sprite keepalive
+  are built offline (D41), and the D41 probe (2026-11-12) is recorded
+  there.
 - **Starting scope.** Triage only: the four critical-tier lenses from
   [`review-depth-modes.md`](review-depth-modes.md) —
   `tracing-correctness-and-invariants`, `sweeping-for-security`,
@@ -266,7 +273,8 @@ owner at every phase.
 Brandon set provisional defaults for the five phase-3 limits on
 2026-11-11, for headroom, configurable, and to be revisited after live
 runs. D43 (2026-11-12) settles the dollar reservation: it stays $5, and
-the per-call byte-bound worst case is unchanged. The other four limits
+the one-token-per-byte input bound stays. The reservation prices the
+whole output cap at the completion rate plus the reasoning rate. The other four limits
 stay provisional. A run with those defaults is accepted. Clearing one back to unset
 makes `coordinator.review_lens` refuse before any model, runner or ledger
 work (`LimitsUnsetError`, naming each unset field). An override must be
@@ -276,15 +284,19 @@ is named, and a row still marked none stays unset until Brandon sets it.
 Until each of those is set, the phase that needs it does not run live.
 The five are fields of
 `lens_loop.AgenticLimits` (`reservation_usd`, `max_calls`, `max_turns`,
-`lens_wall_s`, `review_wall_s`).
+`lens_wall_s`, `review_wall_s`). The same object holds the three
+per-call token fields. Left unset, they are filled from the model at
+the call.
 
 | Decision | Current state | Note |
 |---|---|---|
-| Agentic per-review dollar reservation | $5 (D43, 2026-11-12); one-shot stays $3.00 | The byte-bound worst-case check stays. Headroom is this per-review reservation. Still configurable through `AgenticLimits`. |
+| Agentic per-review dollar reservation | $5 (D43, 2026-11-12); one-shot stays $3.00 | The one-token-per-byte input bound stays. The reservation prices the whole output cap at the completion rate plus the reasoning rate. Headroom is this per-review reservation. Still configurable through `AgenticLimits`. |
 | OpenRouter key hard limit for agentic runs | the one-shot preflight requires at most $5 | Must cover the agentic reservation. The reservation is $5 (D43), the same ceiling this preflight already requires. |
 | Agentic per-review model-call cap | 50, provisional default (2026-11-11); one-shot stays 3 | Headroom, configurable. Includes the picker, each lens's turns and the merge. A per-lens turn cap is no greater than this. |
 | Per-lens turn cap | 50, provisional default (2026-11-11) | Headroom, configurable, and no greater than the review's call cap. D31 suggested 12. |
 | Per-lens and per-review wall clocks | 20 minutes per lens and 60 minutes per review, provisional defaults (2026-11-11) | Headroom, configurable. The per-lens clock is no greater than the review clock. Crossing either ends the lens or review as partial, never clean. |
+| Per-call input cap | the pinned model's `context_length` minus the output reserve | An override (`--max-input-tokens` or `ATLAS_MAX_INPUT_TOKENS`) can tighten it and cannot exceed the model's context. Unknown context fails closed. The one-shot path stays at 200,000. |
+| Per-call output cap | the pinned model's `max_completion_tokens` | An override cannot exceed that completion limit. The reasoning hint defaults to one under the output cap and is not a price. |
 | PR conversation budget split | about 64 KiB total, working default | The body and comment caps within it. |
 | Branch-wide CI budget | check runs at up to 20 other commits of the PR, working default (`IngestConfig.max_ci_commits`) | How many commits back. Each commit's list keeps the client's page cap; jobs, logs and artifacts are still read at the head SHA only, under the one-shot caps. |
 | Per-tool timeout and output caps for the baked toolchain | none | A timeout is a coverage gap. |

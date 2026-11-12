@@ -755,7 +755,7 @@ socket for the hold. The tests make no live model, Sprite or Fly call.
 D41 records the 2026-11-12 probe that did.
 
 - **Limits.** `lens_loop.AgenticLimits` has a $5 per-review reservation,
-  kept by D43 (2026-11-12): the byte-bound worst-case check is unchanged,
+  kept by D43 (2026-11-12). The one-token-per-byte input bound stays,
   and the headroom is this reservation. The other defaults are still
   Brandon's provisional headroom (2026-11-11), configurable and to be
   revisited after live runs: 50 model calls per review, 50 turns per
@@ -763,7 +763,16 @@ D41 records the 2026-11-12 probe that did.
   positive and finite, and a per-lens limit no greater than its per-review
   limit. Clearing one back to unset makes `resolve` raise
   `LimitsUnsetError`, naming each unset field, before any model, runner or
-  ledger work. `retries` is 1 and `pool_size` must be 1.
+  ledger work. `retries` is 1 and `pool_size` must be 1. The per-call
+  input cap is the pinned model's catalog context minus the output
+  reserve, and the output cap is the model's completion limit. An
+  override can tighten either and cannot exceed the model. The
+  reasoning value is a hint; the reservation prices the whole output
+  cap at the completion rate plus the reasoning rate.
+  `agentic_config.load_agentic_limits` reads the eight limits from
+  flags or `ATLAS_*` variables. The `review` command validates them and
+  does not apply them: the one-shot path keeps its 3 calls, $3.00 and
+  200,000 input cap, and `review_lens` is not a CLI command.
 - **The prompt.** The system prompt is the controller's instructions, then
   the nonce fence rule, then the whole lens `body.md` between markers that
   carry its SHA-256, then `synthesis.md`'s whole *Finding contract*
@@ -776,8 +785,12 @@ D41 records the 2026-11-12 probe that did.
   first model call. The attempt ends at the final reply, or when one of
   these cuts it short: the turn cap, the call cap, the dollar reservation
   (each call is reserved at the model's worst case, then settled at its
-  reported cost), either wall clock, a failed model call, or the runner's
-  deadline during a tool call.
+  reported cost), either wall clock, the per-call input cap, a call that
+  does not fit the model's context, a failed model call, or the runner's
+  deadline during a tool call. A limit stop names the limit, the
+  configured value, the observed value, and the flag or variable that
+  changes it. That is its own cause (`INPUT_CAP` or `CONTEXT` for a
+  token refusal), not a model error.
 - **Checking the reply.** The reply must meet the finding contract
   (`lens_contract.py`) and name the lens and its body digest. Each quote is
   checked against the head file at the cited lines. The cited span is the
@@ -852,9 +865,10 @@ D41 records the 2026-11-12 probe that did.
   built; there is no public fork API (Fly support, 2026-11-06).
 - **The draft** (`coordinator.render_draft`).
   - **Status line.** The first line is a status line: `"mode": "agentic"`,
-    `coverage_complete`, `changed_files`, `unreviewed_files`, and the lens
-    counts by state. The two file fields are counts. Paths stay out of
-    the line.
+    `coverage_complete`, `changed_files`, `unreviewed_files`, the lens
+    counts by state, and `limit_stop`. The two file fields are counts.
+    `limit_stop` is the first limit that stopped a lens, or null. Paths
+    stay out of the line.
   - **Coverage.** Coverage is complete only if every selected lens settled
     clean, every changed file's diff was read, the outcome recorded a
     changed-file count, and, when this review ran a runner, that runner
@@ -899,7 +913,9 @@ D41 records the 2026-11-12 probe that did.
 | `lens_contract.py` | a lens's final reply under the finding contract, parsed strictly into typed findings (`parse_reply`); refusals never echo model text | no |
 | `quotes.py` | check each finding's quoted evidence against the head file at the cited lines (the span is the quote's line count), or the diff's removed lines (`check_quote`) | no |
 | `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) | writes the ledger file |
-| `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the lens system prompt, the spend tracker, one lens attempt (`run_attempt`) | via `Bridge`, `LensModel` |
+| `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11; per-call bounds from the model), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the lens system prompt, the spend tracker, one lens attempt (`run_attempt`) | via `Bridge`, `LensModel` |
+| `agentic_config.py` | the one reader for those limits: a flag, else `ATLAS_*`, else the default | no |
+| `limit_stop.py` | the text and ledger fields for a limit that stopped a lens | no |
 | `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft; holds the Sprite for the lens (`keepalive.lens_hold`) | via ports, the ledger |
 | `tool_model.py` | the live tool-calling adapter (`OpenRouterLensModel`): one pinned Chat Completions request per `LensModel` turn, top-level `cache_control: ephemeral`, strict tool-call arguments, cost from `_actual_cost` (BYOK upstream included; catalog rates when the cost is missing but the token counts are usable, with cache read and write counts at the catalog's cache rates when the response reports them; a reasoning rate with no reasoning-token count is unpriced only when the cost is also missing). Not on the CLI. Tested with recorded HTTP only | via the OpenRouter client |
 | `keepalive.py` | the Sprite Tasks API hold for one lens: create, refresh every 60 seconds with a 5-minute expiry, delete on exit. Not on the CLI. Tested with `LocalSprites` and a fake socket | via the runner exec |
