@@ -162,6 +162,14 @@ TOOLS: Mapping[str, tuple[_Arg, ...]] = MappingProxyType(
 )  # fmt: skip
 
 
+def arg_names(tool: str) -> tuple[str, ...]:
+    return tuple(a.name for a in TOOLS[tool])
+
+
+def required_args(tool: str) -> tuple[str, ...]:
+    return tuple(a.name for a in TOOLS[tool] if a.default is _REQUIRED)
+
+
 def validate(tool: Any, args: Any, revs: frozenset[Rev]) -> Call:
     """Raises `RejectedError` with a fixed code for the first problem. The
     tool name and argument values the model sent are never echoed; unknown

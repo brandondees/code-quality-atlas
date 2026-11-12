@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""In-memory stand-ins for the Sprites API, the runner ledger, and a
-GitHub token source.
+"""In-memory stand-ins for the Sprites API, the runner ledger, a GitHub
+token source, and an agentic lens model.
 
 Used by the test suite and by `--dry-run`; none ever touches a real API.
 `FakeSprites` records every control-plane call in order so a caller can
@@ -15,9 +15,11 @@ import re
 import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 from atlas_reviewer.interpreter import PYENV_VERSIONS, PYTHON_TAG
+from atlas_reviewer.lens_loop import ModelTurn, TurnRequest
 from atlas_reviewer.ports import BoundaryError, Json, NotFoundError, RefusedError
 from atlas_reviewer.runner import EXIT_MARKER, EXIT_NOT_FOUND, PROBE_TAG, START_MARKER
 
@@ -207,6 +209,31 @@ class StaticToken:
 
     def token(self) -> str:
         return self.value
+
+
+@dataclass
+class ScriptedLensModel:
+    """A `LensModel` that plays a script: each turn takes the next entry,
+    a `ModelTurn` or a function of the request, or raises it when it is a
+    `BoundaryError`. Every request is kept. Past the script's end each
+    turn fails."""
+
+    script: list[Any]
+    worst_usd: Decimal = Decimal("0.10")
+    name: str = "scripted"
+    requests: list[TurnRequest] = field(default_factory=list)
+
+    def worst_case_usd(self, request: TurnRequest) -> Decimal:
+        return self.worst_usd
+
+    def turn(self, request: TurnRequest) -> ModelTurn:
+        self.requests.append(request)
+        if not self.script:
+            raise BoundaryError("the scripted model has no turn left")
+        step = self.script.pop(0)
+        if isinstance(step, BoundaryError):
+            raise step
+        return step(request) if callable(step) else step
 
 
 def _fed(script: str, stdin: bytes) -> bytes:
