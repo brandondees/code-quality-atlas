@@ -636,6 +636,7 @@ def test_the_status_line_is_the_drafts_first_line_and_only_controller_values():
         "unverified_findings": 0,
         "changed_files": 1,
         "unreviewed_files": 0,
+        "limit_stop": None,
     }
 
 

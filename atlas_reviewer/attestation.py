@@ -43,6 +43,7 @@ from atlas_reviewer.lens_contract import (
     Valence,
     parse_location,
 )
+from atlas_reviewer.limit_stop import LimitHit
 from atlas_reviewer.ports import Clock
 from atlas_reviewer.quotes import QuoteSource
 
@@ -100,6 +101,8 @@ class Cause(StrEnum):
     QUOTES_FAILED = "a finding's quote was not found at the head SHA"
     ABANDONED = "the attempt never finished (the controller stopped mid-attempt)"
     MODEL_ERROR = "a model call failed"
+    INPUT_CAP = "the per-call input cap was reached"
+    CONTEXT = "the call does not fit the model's context"
     TURN_CAP = "the per-lens turn cap was reached"
     CALL_CAP = "the review's model-call cap was reached"
     BUDGET = "the review's dollar reservation was reached"
@@ -171,6 +174,8 @@ class AttemptOutcome:
     unread: tuple[str, ...] = ()
     # None on a ledger line from before the per-file gate recorded a count.
     changed_files: int | None = None
+    # None when the attempt was not stopped by a configured limit.
+    limit_hit: LimitHit | None = None
 
     @property
     def state(self) -> LensState:
@@ -372,6 +377,7 @@ def _outcome_json(
         "detail": scrub(outcome.detail),
         "unread": [scrub(path) for path in outcome.unread],
         "changed_files": outcome.changed_files,
+        "limit": _limit_json(outcome.limit_hit, scrub),
     }
 
 
@@ -419,6 +425,33 @@ def _outcome_from(data: Mapping[str, Any]) -> AttemptOutcome:
         _str(data["detail"]),
         tuple(unread),
         changed,
+        _limit_from(data.get("limit")),
+    )
+
+
+def _limit_json(
+    found: LimitHit | None, scrub: Callable[[str], str]
+) -> dict[str, str] | None:
+    if found is None:
+        return None
+    return {key: scrub(value) for key, value in found.as_dict().items()}
+
+
+def _limit_from(data: object) -> LimitHit | None:
+    if data is None:
+        return None
+    if not isinstance(data, Mapping):
+        raise TypeError("limit must be an object")
+    values = {
+        key: data.get(key) for key in ("limit", "configured", "observed", "setting")
+    }
+    if not all(isinstance(value, str) and value for value in values.values()):
+        raise TypeError("limit must name the limit, both values, and the setting")
+    return LimitHit(
+        str(values["limit"]),
+        str(values["configured"]),
+        str(values["observed"]),
+        str(values["setting"]),
     )
 
 

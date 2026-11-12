@@ -489,8 +489,18 @@ def status_line(review: AgenticReview) -> str:
         "unverified_findings": len(review.unverified),
         "changed_files": _changed_file_count(review),
         "unreviewed_files": len(_unread_paths(review)),
+        "limit_stop": _limit_stop(review),
     }
     return f"{STATUS_PREFIX}{json.dumps(fields, sort_keys=True)} -->"
+
+
+def _limit_stop(review: AgenticReview) -> dict[str, str] | None:
+    """The first limit that stopped a lens, or null when none did."""
+    for result in review.lenses:
+        found = None if result.outcome is None else result.outcome.limit_hit
+        if found is not None:
+            return found.as_dict()
+    return None
 
 
 def render_draft(review: AgenticReview, redactor: Redactor) -> str:

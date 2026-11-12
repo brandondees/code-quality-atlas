@@ -38,19 +38,29 @@ from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
-from atlas_reviewer.budget import check_tokens, input_token_bound, worst_case_usd
+from atlas_reviewer.budget import (
+    TokenBoundError,
+    check_tokens,
+    input_token_bound,
+    worst_case_usd,
+)
 from atlas_reviewer.http import safe_url
 from atlas_reviewer.lens_loop import (
+    AgenticLimits,
     AssistantCalls,
     FinalReply,
+    Limits,
     Message,
     ModelTurn,
+    ResolvedCall,
     ToolCalls,
     ToolRequest,
     ToolSchema,
     TurnRequest,
     UserText,
+    resolve_per_call,
 )
+from atlas_reviewer.limit_stop import LimitRefused, hit
 from atlas_reviewer.openrouter import (
     _PER_MILLION,
     MODEL_ID,
@@ -71,8 +81,14 @@ UNPRICED = Decimal("Infinity")
 class OpenRouterLensModel:
     """The phase-3 `LensModel` port, backed by the one-shot OpenRouter client."""
 
-    def __init__(self, provider: OpenRouterProvider) -> None:
+    def __init__(
+        self, provider: OpenRouterProvider, per_call: Limits | None = None
+    ) -> None:
         self.provider = provider
+        # None derives the per-call bounds from the catalog. The one-shot
+        # CallLimits on the provider stay the D25 ceilings and are not the
+        # agentic input cap.
+        self.per_call = AgenticLimits().resolve() if per_call is None else per_call
         self._ready_for_turn: tuple[ModelTerms, bool] | None = None
 
     @property
@@ -84,20 +100,23 @@ class OpenRouterLensModel:
         # The loop prices the turn and then places it. One catalog fetch
         # serves both; the next turn fetches again.
         self._ready_for_turn = (terms, counts_byok)
-        payload = _payload(self.provider, request, terms)
-        check_tokens(
-            input_token_bound(json.dumps(payload)), terms, self.provider.budget.limits
-        )
-        return worst_case_usd(
-            input_token_bound(json.dumps(payload)), terms, self.provider.budget.limits
-        )
+        bounds = resolve_per_call(self.per_call, terms)
+        payload = _payload(self.provider, request, terms, bounds)
+        bound = input_token_bound(json.dumps(payload))
+        try:
+            check_tokens(bound, terms, bounds)
+        except TokenBoundError as exc:
+            raise LimitRefused(hit(exc.limit, exc.configured, exc.observed)) from exc
+        return worst_case_usd(bound, terms, bounds)
 
     def turn(self, request: TurnRequest) -> ModelTurn:
         """One request, no retry. The loop counts the call and settles the cost."""
         cached = self._ready_for_turn
         self._ready_for_turn = None
         terms, counts_byok = self._ready() if cached is None else cached
-        payload = _payload(self.provider, request, terms)
+        payload = _payload(
+            self.provider, request, terms, resolve_per_call(self.per_call, terms)
+        )
         url = f"{self.provider._api_url}/chat/completions"
         body = json.dumps(payload).encode()
         try:
@@ -152,9 +171,11 @@ def _routing(provider: OpenRouterProvider, terms: ModelTerms) -> dict[str, Any]:
 
 
 def _payload(
-    provider: OpenRouterProvider, request: TurnRequest, terms: ModelTerms
+    provider: OpenRouterProvider,
+    request: TurnRequest,
+    terms: ModelTerms,
+    limits: ResolvedCall,
 ) -> dict[str, Any]:
-    limits = provider.budget.limits
     return {
         "model": MODEL_ID,
         "messages": _messages(request),

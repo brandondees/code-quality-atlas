@@ -481,6 +481,10 @@ def test_the_turn_cap_ends_the_lens_partial(tmp_path):
     assert outcome.causes == {Cause.TURN_CAP}
     assert outcome.state is LensState.PARTIAL
     assert len(model.requests) == 2
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "max_turns"
+    assert "configured 2" in outcome.detail
+    assert "--max-turns or ATLAS_MAX_TURNS" in outcome.detail
 
 
 def test_the_reviews_call_cap_ends_the_lens_before_another_call(tmp_path):
@@ -491,6 +495,10 @@ def test_the_reviews_call_cap_ends_the_lens_before_another_call(tmp_path):
     assert outcome.causes == {Cause.CALL_CAP}
     assert len(model.requests) == 1
     assert spend.calls == 3
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "max_calls"
+    assert "configured 3" in outcome.detail
+    assert "--max-calls or ATLAS_MAX_CALLS" in outcome.detail
 
 
 def test_the_dollar_reservation_holds_the_worst_case_before_each_call(tmp_path):
@@ -501,6 +509,9 @@ def test_the_dollar_reservation_holds_the_worst_case_before_each_call(tmp_path):
     assert outcome.causes == {Cause.BUDGET}
     assert len(model.requests) == 2
     assert spend.committed_usd == Decimal("0.16")
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "reservation_usd"
+    assert "ATLAS_RESERVATION_USD" in outcome.detail
 
 
 def test_a_zero_cost_is_a_cost_and_settles_at_zero(tmp_path):
@@ -543,6 +554,9 @@ def test_the_lens_wall_clock_ends_the_lens_partial(tmp_path):
     outcome, model, _ = attempt(tmp_path, script, clock=clock)
     assert outcome.causes == {Cause.LENS_CLOCK}
     assert len(model.requests) == 1
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "lens_wall_s"
+    assert "--lens-wall-seconds or ATLAS_LENS_WALL_S" in outcome.detail
 
 
 def test_the_review_wall_clock_ends_the_lens_partial(tmp_path):
@@ -551,6 +565,9 @@ def test_the_review_wall_clock_ends_the_lens_partial(tmp_path):
     outcome, _, _ = attempt(tmp_path, script, clock=clock, deadline=60)
     assert outcome.causes == {Cause.REVIEW_CLOCK}
     assert outcome.state is LensState.PARTIAL
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "review_wall_s"
+    assert "--review-wall-seconds or ATLAS_REVIEW_WALL_S" in outcome.detail
 
 
 def test_a_runner_deadline_inside_a_tool_call_ends_the_lens_partial(tmp_path):
@@ -568,6 +585,8 @@ def test_a_runner_deadline_inside_a_tool_call_ends_the_lens_partial(tmp_path):
     assert outcome.causes == {Cause.REVIEW_CLOCK, Cause.FILES_UNREAD}
     assert set(outcome.unread) == set(CHANGED)
     assert "deadline passed" in outcome.detail
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "review_wall_s"
 
 
 def test_a_failed_model_call_fails_the_lens_and_is_not_retried(tmp_path):

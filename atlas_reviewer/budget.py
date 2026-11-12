@@ -25,9 +25,26 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import Protocol
 
 from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.pricing import ModelTerms
+
+
+class TokenLimits(Protocol):
+    """The three per-call token fields `check_tokens` and `worst_case_usd` read.
+
+    Read-only, so a frozen limit object satisfies it."""
+
+    @property
+    def max_input_tokens(self) -> int: ...
+
+    @property
+    def max_output_tokens(self) -> int: ...
+
+    @property
+    def reasoning_max_tokens(self) -> int: ...
+
 
 MESSAGE_OVERHEAD_TOKENS = 64
 # The pinned model's context window as the operator states it (Sonnet,
@@ -38,6 +55,19 @@ ASSUMED_CONTEXT_TOKENS = 200_000
 class BudgetRefusedError(BoundaryError):
     """A model call was refused before sending: call cap, cost cap, or a
     token bound the model cannot honour."""
+
+
+class TokenBoundError(BudgetRefusedError):
+    """A prompt, output or context bound. `limit` is the field that bound
+    it; the message stays the one-shot text those callers already match."""
+
+    def __init__(
+        self, message: str, *, limit: str, configured: object, observed: object
+    ) -> None:
+        super().__init__(message)
+        self.limit = limit
+        self.configured = configured
+        self.observed = observed
 
 
 # D25's hard ceilings: a caller may tighten them, never loosen them.
@@ -84,24 +114,35 @@ def prompt_token_room(
     return min(limits.max_input_tokens, context_tokens - limits.max_output_tokens)
 
 
-def check_tokens(input_tokens: int, terms: ModelTerms, limits: CallLimits) -> None:
+def check_tokens(input_tokens: int, terms: ModelTerms, limits: TokenLimits) -> None:
     if input_tokens > limits.max_input_tokens:
-        raise BudgetRefusedError(
+        raise TokenBoundError(
             f"prompt bound {input_tokens} tokens exceeds the "
-            f"{limits.max_input_tokens}-token input cap"
+            f"{limits.max_input_tokens}-token input cap",
+            limit="max_input_tokens",
+            configured=limits.max_input_tokens,
+            observed=input_tokens,
         )
     if limits.max_output_tokens > terms.max_completion_tokens:
-        raise BudgetRefusedError(
+        raise TokenBoundError(
             f"max output {limits.max_output_tokens} exceeds the model's "
-            f"{terms.max_completion_tokens}-token completion limit"
+            f"{terms.max_completion_tokens}-token completion limit",
+            limit="max_output_tokens",
+            configured=limits.max_output_tokens,
+            observed=terms.max_completion_tokens,
         )
     if input_tokens + limits.max_output_tokens > terms.context_length:
-        raise BudgetRefusedError(
-            f"prompt bound plus max output exceeds the {terms.context_length}-token context"
+        raise TokenBoundError(
+            f"prompt bound plus max output exceeds the {terms.context_length}-token context",
+            limit="context_length",
+            configured=terms.context_length,
+            observed=input_tokens + limits.max_output_tokens,
         )
 
 
-def worst_case_usd(input_tokens: int, terms: ModelTerms, limits: CallLimits) -> Decimal:
+def worst_case_usd(
+    input_tokens: int, terms: ModelTerms, limits: TokenLimits
+) -> Decimal:
     """A cost that stays at least what `_actual_cost` would compute if every
     output token were also a reasoning token. Independent of
     `reasoning_max_tokens`: that field is only the hint sent on the request."""
