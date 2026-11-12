@@ -421,7 +421,6 @@ def _passing_pair(head: str) -> dict:
             "unreviewed_files": 0,
             "changed_files": [],
             "lenses_run": [],
-            "outside_diff_reads": [],
         },
         "metadata": {"run": "lens-fan-out", "over_context_window": False},
     }
@@ -484,7 +483,10 @@ def test_a_clean_pair_passes_the_gate_and_a_missed_major_does_not():
 def test_a_line_matches_loosely_and_ignores_severity():
     left = EvalFinding("major", "a.py", "", 1, 3)
     assert left.same_issue(EvalFinding("nit", "a.py", "", 8, 8))
-    assert left.same_issue(EvalFinding("major", "a.py", "", None, None))
+    assert not left.same_issue(EvalFinding("major", "a.py", "", None, None))
+    assert EvalFinding("nit", "a.py", "", None, None).same_issue(
+        EvalFinding("major", "a.py", "", 4, 4)
+    )
     assert not left.same_issue(EvalFinding("major", "b.py", "", 1, 3))
     assert not left.same_issue(EvalFinding("major", "a.py", "", 20, 20))
 

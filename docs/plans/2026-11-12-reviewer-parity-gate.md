@@ -40,10 +40,12 @@ person reads. It is not permission to post `APPROVE`.
 | Per-lens fan-out, synthesis, verification | Unmet | A selected lens that is NOT RUN or failed fails the gate, and every lens a reference finding names was run |
 | Recall of the protocol findings | Unmet | Every reference finding is recalled (same path, line within five). An extra finding is reported and does not fail the gate. Verdict and severity do not have to match |
 
-Major+ is `blocker` and `major`. A Minor or Nit that the reference has and
-the candidate lacks does not fail the gate. An unmatched candidate finding
-at Minor or Nit does not fail it either. Both are still counted in the
-score JSON.
+Recall is every reference finding, at every severity. A missed Minor or
+Nit fails the gate the same way a missed Major does. An extra candidate
+finding is counted in the score and does not fail the gate, at any
+severity. A reference finding that has a line is recalled only by a
+candidate finding on that path with a line within five. A candidate
+finding with no line does not stand in for it.
 
 The reference set is the Claude Code protocol rounds on PRs #602–#637,
 stored as Phoenix dataset rows in
@@ -84,10 +86,9 @@ The one-shot path never opens that bridge. `controller._fit` calls
 past the session budget does not run, and there is no default-branch
 snapshot. A file the tarball omitted cannot be read.
 
-**Measure.** The candidate records `changed_files` and
-`outside_diff_reads`. For every reference finding whose path is not in
-`changed_files`, the gate fails unless that path is in
-`outside_diff_reads`. `eval_harness.gate_failures` applies that check.
+**Measure.** The gate does not fail a pair because a reference path
+outside the diff was not read. File coverage is the next criterion.
+`outside_diff_reads` is not a gate field.
 
 ### 2. Full diff, any size, without a silent partial
 
@@ -176,8 +177,10 @@ by backticked lens names) and body-anchored lines that name a path and
 a line. `eval_harness.protocol_review` reads those shapes, skips a
 CodeRabbit comment (`coderabbit-ai-generated`), and redacts the summary.
 The match in `eval_harness.score` is the same path and a line within
-five (`PLACE_LINES`). Severity is not compared. A finding with no line
-matches any finding on that path. Each candidate finding is used once.
+five (`PLACE_LINES`). Severity is not compared. A reference finding
+with a line is not matched by a candidate finding that has no line.
+A reference finding with no line matches any finding on that path.
+Each candidate finding is used once.
 Unmatched candidate findings are `extras`.
 
 **Gap.** No candidate review of those PRs is stored, so nothing is scored

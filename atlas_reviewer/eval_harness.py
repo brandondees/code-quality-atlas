@@ -15,8 +15,10 @@ reference rows alone is not a scored run: scoring needs a ``candidate``
 object next to the reference, which the hand-built fixture has and the
 reference set does not.
 
-A match is the same path and a line within five. Severity and the
-verdict are not compared. Each candidate finding is used at most once.
+A match is the same path and a line within five. A reference finding
+with a line is not matched by a candidate finding that has none.
+Severity and the verdict are not compared. Each candidate finding is
+used at most once.
 The gate scores a pair against the checked-in reference for that
 identity, not against a reference carried in the pair file.
 """
@@ -113,8 +115,10 @@ class EvalFinding:
         """Same path and a nearby line. Severity is ignored."""
         if self.path != other.path:
             return False
-        if self.line_start is None or other.line_start is None:
+        if self.line_start is None:
             return True
+        if other.line_start is None:
+            return False
         end = self.line_end or self.line_start
         other_end = other.line_end or other.line_start
         return self.line_start - PLACE_LINES <= other_end and (
@@ -132,8 +136,7 @@ class EvalReview:
 class CandidateReview(EvalReview):
     """The fields the parity gate reads off a recorded candidate.
 
-    ``changed_files`` is the diff's path list. ``outside_diff_reads`` is
-    every path the candidate read at head that is not in that list.
+    ``changed_files`` is the diff's path list.
     """
 
     coverage_complete: bool | None = None
@@ -142,7 +145,6 @@ class CandidateReview(EvalReview):
     lenses_run: tuple[str, ...] | None = None
     lenses_not_run: tuple[str, ...] = ()
     lenses_failed: tuple[str, ...] = ()
-    outside_diff_reads: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -834,7 +836,6 @@ def _parse_candidate(value: object, name: str) -> CandidateReview:
         ran,
         not_run,
         failed,
-        _opt_strs(value.get("outside_diff_reads"), name, "outside_diff_reads"),
     )
 
 
