@@ -1161,6 +1161,17 @@ slug such as `deepinfra` is refused and the error names the exact tags.
 per provider. A zero required rate and a non-finite per-million price
 are refused. No live call was made.
 
+## 2026-11-12 — each agentic round reviews the whole pull request
+
+The agentic first turn now carries the PR conversation
+(`conversation.review_context`) and prior atlas rounds
+(`rounds.RoundLog`, keyed by repository and pull request, not by head
+SHA). A superseded head stays in the log, labelled as not this
+review's scope. The changed-file list is still every file in the
+current diff. A round that does not fit, or a log line that does not
+parse, is an omission, and that omission cannot approve. D52. The
+plan is [`plans/2026-11-12-full-pr-context-rounds.md`](plans/2026-11-12-full-pr-context-rounds.md).
+
 ## 2026-11-13 — round 2 on the configurable model pin
 
 D51's cost sentence now says each review adds one GET of the ZDR list

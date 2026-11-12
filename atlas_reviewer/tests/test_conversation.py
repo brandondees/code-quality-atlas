@@ -11,6 +11,7 @@ from atlas_reviewer.conversation import (
     ConversationBudget,
     build_conversation,
     fetch_remarks,
+    review_context,
 )
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.evidence import PrCommit, Remark, parse_pull
@@ -218,6 +219,11 @@ def test_the_whole_block_is_held_to_its_total():
     assert marker == "[... truncated by atlas_reviewer ...]"
     assert len(c.text.text) - len(marker) - 2 <= 400
     assert ("pull request conversation", "400-character total") in limits(c)
+    block, omissions = review_context(c)
+    assert block.label == "pull-request"
+    assert block.content is c.text
+    assert omissions == c.omissions
+    assert omissions
 
 
 def test_secrets_in_remarks_and_commit_subjects_are_redacted_and_counted():

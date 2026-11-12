@@ -56,7 +56,7 @@ from atlas_reviewer.bridge import Bridge, BridgeSecret, run_bridge
 from atlas_reviewer.bridge_staging import BRIDGE_ROOT, SourceTrees
 from atlas_reviewer.committed_secrets import scan_diff
 from atlas_reviewer.diffs import by_risk, risk_tier, split_files
-from atlas_reviewer.domain import PrEvent, RunnerReport, RunnerStatus
+from atlas_reviewer.domain import Omission, PrEvent, RunnerReport, RunnerStatus
 from atlas_reviewer.keepalive import SOCKET_PATH, lens_hold
 from atlas_reviewer.lens_contract import Finding, Severity
 from atlas_reviewer.lens_loop import (
@@ -76,6 +76,13 @@ from atlas_reviewer.ports import ByokRefusedError, Clock, RunnerLedger, SpritesA
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
 from atlas_reviewer.quotes import read_sources
 from atlas_reviewer.redact import Redactor
+from atlas_reviewer.rounds import (
+    PRIOR_ROUND_CHARS,
+    RoundLog,
+    RoundRecord,
+    fit_record,
+    prior_blocks,
+)
 from atlas_reviewer.runner import event_runner_name
 from atlas_reviewer.telemetry import Telemetry
 from atlas_reviewer.tool_model import OpenRouterLensModel
@@ -151,6 +158,7 @@ class AgenticReview:
     committed_usd: str = "0"
     model_calls: int = 0
     flagged: tuple[str, ...] = field(default=(), repr=False)
+    context_omissions: tuple[Omission, ...] = ()
     trace_id: str = ""
 
     @property
@@ -164,7 +172,12 @@ class AgenticReview:
         Unread paths block approval even when a lens's state was recorded
         clean, so a missing cause cannot approve a partial read. An outcome
         with no changed-file count predates the per-file gate and shows no
-        coverage, so it blocks approval too."""
+        coverage, so it blocks approval too. Context that was left out of
+        the first turn, or a prior-round record that did not parse, is
+        the same kind of gap: the review cannot approve on a partial
+        picture of the pull request."""
+        if self.context_omissions:
+            return False
         if any(
             r.outcome is not None
             and (r.outcome.unread or r.outcome.changed_files is None)
@@ -257,6 +270,7 @@ def synthesize(
     runner: RunnerReport | None = None,
     spend: Spend | None = None,
     flagged: Sequence[str] = (),
+    context_omissions: Sequence[Omission] = (),
 ) -> AgenticReview:
     findings = rank(mint(lenses))
     return AgenticReview(
@@ -268,6 +282,7 @@ def synthesize(
         "0" if spend is None else str(spend.committed_usd),
         0 if spend is None else spend.calls,
         tuple(dict.fromkeys(flagged)),
+        tuple(context_omissions),
     )
 
 
@@ -316,6 +331,9 @@ def review_lens(
     redactor: Redactor,
     clock: Clock,
     context: Sequence[UntrustedBlock] = (),
+    context_omissions: Sequence[Omission] = (),
+    round_log: RoundLog | None = None,
+    prior_chars: int = PRIOR_ROUND_CHARS,
     telemetry: Telemetry | None = None,
     nonce: Callable[[], str] = lambda: secrets.token_hex(NONCE_BYTES),
     bridge_root: str = BRIDGE_ROOT,
@@ -499,13 +517,19 @@ def _review_lens(
     trace: ReviewTrace,
 ) -> AgenticReview:
     contract = finding_contract() if contract is None else contract
+    blocks, omissions = _review_context(
+        event, context, context_omissions, round_log, prior_chars, redactor
+    )
     body = library.body(lens)
     if body is None:
         missing = LensResult(lens, 1, None, None, reason="no lens body in the bundle")
-        return synthesize([missing])
+        return synthesize([missing], context_omissions=omissions)
     key = LensKey(event.repo, event.pr_number, event.head_sha, lens, body_digest(body))
     if isinstance(next_step(ledger.attempts(key), resolved.retries), Settled):
-        return synthesize([_result(key, ledger.attempts(key), resolved, "")])
+        return synthesize(
+            [_result(key, ledger.attempts(key), resolved, "")],
+            context_omissions=omissions,
+        )
 
     changed = frozenset(f.path for f in split_files(diff))
     diff_secrets = scan_diff(diff)
@@ -528,7 +552,7 @@ def _review_lens(
         body,
         key.body_sha256,
         contract,
-        first_turn(event, diff, context, fence_nonce),
+        first_turn(event, diff, blocks, fence_nonce),
         changed,
         read_sources(trees.head, diff, changed),
         fence_nonce,
@@ -553,13 +577,17 @@ def _review_lens(
         root=bridge_root,
     )  # fmt: skip
     result = _result(key, ledger.attempts(key), resolved, scrub(report.note))
-    return synthesize(
+    review = synthesize(
         [result],
         session.secrets,
         report,
         spend,
         (*diff_secrets.values, *session.flagged()),
+        omissions,
     )
+    if round_log is not None:
+        round_log.append(_round_record(event, lens, review, scrub))
+    return review
 
 
 def _annotate(lens_span: Any, review_span: Any, review: AgenticReview) -> None:
@@ -647,12 +675,69 @@ def _result(
     )  # fmt: skip
 
 
+def _review_context(
+    event: PrEvent,
+    context: Sequence[UntrustedBlock],
+    context_omissions: Sequence[Omission],
+    round_log: RoundLog | None,
+    prior_chars: int,
+    redactor: Redactor,
+) -> tuple[tuple[UntrustedBlock, ...], tuple[Omission, ...]]:
+    """Caller context, then prior rounds for this pull request.
+
+    The changed-file list is not built here. `first_turn` always appends
+    every file in the current diff after these blocks."""
+    blocks = list(context)
+    omissions = list(context_omissions)
+    if round_log is not None:
+        records, unreadable = round_log.read()
+        mine = tuple(
+            record
+            for record in records
+            if record.repo == event.repo and record.pr_number == event.pr_number
+        )
+        prior, prior_omissions = prior_blocks(
+            mine,
+            event.head_sha,
+            prior_chars,
+            unreadable=unreadable,
+            scrub=lambda text: redactor(text).text,
+        )
+        blocks = [*prior, *blocks]
+        omissions.extend(prior_omissions)
+    return tuple(blocks), tuple(omissions)
+
+
+def _round_record(
+    event: PrEvent, lens: str, review: AgenticReview, scrub: Callable[[str], str]
+) -> RoundRecord:
+    lines = tuple(
+        scrub(
+            f"{item.id} {item.finding.severity.value} "
+            f"{item.finding.location} {item.finding.finding}"
+        )
+        for item in review.verified
+    )
+    return fit_record(
+        RoundRecord(
+            event.repo,
+            event.pr_number,
+            event.head_sha,
+            lens,
+            review.event.value,
+            lines,
+            bool(review.context_omissions),
+        )
+    )
+
+
 def first_turn(
     event: PrEvent, diff: str, context: Sequence[UntrustedBlock], nonce: str
 ) -> str:
-    """The operator's subject, then fenced: any caller context, the diff
-    stat and the changed files in risk order. No diff text: the lens reads
-    it through the tools."""
+    """The operator's subject, then fenced: prior reviews and any caller
+    context, then the diff stat and every changed file in risk order. No
+    diff text: the lens reads the whole current diff through the tools.
+    Prior findings do not remove a file from that list."""
     files = by_risk(split_files(diff))
     listing = "\n".join(
         f"[{f.tier.label}] {f.path} (+{added} -{removed})"
@@ -706,6 +791,7 @@ def status_line(review: AgenticReview) -> str:
         "unverified_findings": len(review.unverified),
         "changed_files": _changed_file_count(review),
         "unreviewed_files": len(_unread_paths(review)),
+        "context_omissions": len(review.context_omissions),
         "limit_stop": _limit_stop(review),
     }
     if review.trace_id:
@@ -744,6 +830,14 @@ def render_draft(review: AgenticReview, redactor: Redactor) -> str:
             f"- {f.id} {quote_untrusted(str(f.finding.location), QUOTED_CHARS, scrub=scrub)}: "
             f"{quote_untrusted(f.problem, QUOTED_CHARS, scrub=scrub)}"
             for f in review.unverified
+        ]
+    if review.context_omissions:
+        lines += ["", "## Context omissions", ""]
+        lines += [
+            f"- {quote_untrusted(item.source, scrub=scrub)} "
+            f"({quote_untrusted(item.limit, scrub=scrub)}): "
+            f"{quote_untrusted(item.detail, scrub=scrub)}"
+            for item in review.context_omissions
         ]
     if review.secrets:
         lines += ["", "## Possible committed secrets (controller findings)", ""]
@@ -803,6 +897,8 @@ def _coverage_gap_name(review: AgenticReview) -> str:
     """Why a review of clean lenses is still incomplete, or "" when no
     lens was selected. A clean outcome can still lack coverage: unread
     paths, or no changed-file count from before the per-file gate."""
+    if review.context_omissions:
+        return "partial context"
     if any(r.outcome is not None and r.outcome.unread for r in review.lenses):
         return "unread files"
     if any(
