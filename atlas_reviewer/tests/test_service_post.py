@@ -4,6 +4,7 @@ post a second review."""
 
 import inspect
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -11,6 +12,11 @@ import pytest
 
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
+from atlas_reviewer.github_auth import (
+    POST_PERMISSIONS,
+    POST_WRITABLE,
+    AppInstallationTokens,
+)
 from atlas_reviewer.http import HttpResponse
 from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.service import (
@@ -18,9 +24,12 @@ from atlas_reviewer.service import (
     PostNotCurrent,
     PostRejected,
     RateLimited,
+    ReviewServer,
     Worker,
     before_send,
+    config_from_env,
     main,
+    serve,
 )
 from atlas_reviewer.service_post import (
     PostLedger,
@@ -601,6 +610,139 @@ def test_a_corrupt_post_ledger_exits_2(tmp_path, capsys):
     )
     assert code == 2
     assert "post ledger" in capsys.readouterr().err
+
+
+def test_stop_does_not_send_a_deferred_post(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    posted: list[str] = []
+    in_post = threading.Event()
+    release = threading.Event()
+    other = "e" * 40
+
+    def publish(event, report):
+        posted.append(event.head_sha)
+        if event.head_sha == SHA:
+            in_post.set()
+            release.wait(2)
+
+    worker = Worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        Telemetry(SystemClock()),
+        publish,
+        state_root=tmp_path,
+    )
+    board.enqueue(EVENT)
+    board.enqueue(PrEvent(REPO, 8, other))
+    worker.start()
+    assert in_post.wait(2)
+    for job in board._jobs:
+        if job.event.head_sha == other:
+            job.state = JobState.POST_PENDING
+            job.retry_at = 0
+
+    def release_after_stop_begins():
+        assert worker._stop.wait(2)
+        release.set()
+
+    threading.Thread(target=release_after_stop_begins).start()
+    worker.stop(timeout=2)
+    assert posted == [SHA]
+
+
+def test_a_rejected_post_fails_without_a_retry(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    calls: list[int] = []
+
+    def publish(event, report):
+        calls.append(1)
+        raise PostRejected("HTTP 422")
+
+    worker = Worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        Telemetry(SystemClock()),
+        publish,
+        state_root=tmp_path,
+    )
+    board.enqueue(EVENT)
+    assert worker.run_one() is True
+    worker._retry_post()
+    assert calls == [1]
+    assert board.states() == ((SHA, JobState.FAILED),)
+    refused = [event for event in worker._telemetry.events if "422" in event.error]
+    assert refused
+    assert refused[0].error.startswith("post rejected:")
+    assert "post auth refused" not in refused[0].error
+
+
+def test_the_service_log_scrubs_the_sprites_and_openrouter_secrets(
+    tmp_path, monkeypatch
+):
+    captured: dict[str, object] = {}
+
+    def fake_init(self, config, board, log):
+        self.config = config
+        self.board = board
+        self.log = log
+        self.worker = None
+
+    monkeypatch.setattr(ReviewServer, "__init__", fake_init)
+    monkeypatch.setattr(ReviewServer, "serve_forever", lambda self: None)
+    monkeypatch.setattr(ReviewServer, "server_close", lambda self: None)
+    monkeypatch.setattr(Worker, "start", lambda self: None)
+    monkeypatch.setattr(Worker, "stop", lambda self, timeout=30: None)
+    real = Telemetry
+
+    def capture(clock, sink=None, scrub=None, max_kept=500):
+        captured["scrub"] = scrub
+        return real(clock, sink=sink, scrub=scrub, max_kept=max_kept)
+
+    monkeypatch.setattr("atlas_reviewer.service.Telemetry", capture)
+    sprite = "org/1/sprites-secret-value"
+    model = "sk-or-v1-secret-value"
+    env = {
+        "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
+        "ATLAS_SERVICE_PROVIDER": "offline",
+        "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
+        "ATLAS_SPRITES_TOKEN": sprite,
+        "ATLAS_OPENROUTER_API_KEY": model,
+    }
+    assert serve(config_from_env(env), env) == 0
+    scrub = captured["scrub"]
+    assert callable(scrub)
+    text = scrub(f"see {sprite} and {model}")
+    assert sprite not in text
+    assert model not in text
+
+
+def test_limit_timeout_is_the_mint_socket_timeout():
+    seen: dict[str, float] = {}
+
+    class Transport:
+        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
+            seen["timeout"] = timeout_s
+            payload = {
+                "token": "ghs_minted_value",
+                "expires_at": "2099-01-01T00:00:00Z",
+                "permissions": {"pull_requests": "write"},
+            }
+            return HttpResponse(201, {}, json.dumps(payload).encode())
+
+    tokens = AppInstallationTokens(
+        Transport(),
+        SystemClock(),
+        app_id="5648875",
+        private_key="not-used",
+        installation_id=1,
+        permissions=POST_PERMISSIONS,
+        writable=POST_WRITABLE,
+        encode=lambda claims, key: "jwt",
+        timeout_s=30.0,
+    )
+    tokens.limit_timeout(7.5)
+    assert tokens.token() == "ghs_minted_value"
+    assert seen["timeout"] == 7.5
 
 
 def test_main_does_not_listen_without_a_posting_token(tmp_path, capsys):

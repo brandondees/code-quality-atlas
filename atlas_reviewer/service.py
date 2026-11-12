@@ -412,18 +412,11 @@ class Worker:
         except PostNotCurrent:
             self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
             return
-        except (PostAuthError, PostRejected) as exc:
-            committed = self._settle(job, JobState.FAILED)
-            if committed is JobState.SUPERSEDED:
-                self._note(job, committed, fields)
-                return
-            self._telemetry.record(
-                "service",
-                "review post failed",
-                fields,
-                status=ERROR,
-                error=f"post auth refused: {exc}",
-            )
+        except PostAuthError as exc:
+            self._record_post_refusal(job, fields, f"post auth refused: {exc}")
+            return
+        except PostRejected as exc:
+            self._record_post_refusal(job, fields, f"post rejected: {exc}")
             return
         except RateLimited as exc:
             self._defer_post(job, str(exc), retry_after=exc.retry_after)
@@ -436,6 +429,21 @@ class Worker:
             "review superseded" if committed is JobState.SUPERSEDED else "review posted"
         )
         self._telemetry.record("service", step, fields)
+
+    def _record_post_refusal(
+        self, job: Job, fields: dict[str, str | int], error: str
+    ) -> None:
+        committed = self._settle(job, JobState.FAILED)
+        if committed is JobState.SUPERSEDED:
+            self._note(job, committed, fields)
+            return
+        self._telemetry.record(
+            "service",
+            "review post failed",
+            fields,
+            status=ERROR,
+            error=error,
+        )
 
     def _publish_saved(self, job: Job) -> None:
         """A post that failed after the draft was written. The review is
@@ -768,6 +776,17 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
     )
 
 
+def _service_secrets(config: ServiceConfig, env: Mapping[str, str]) -> tuple[str, ...]:
+    """Values the service log must never write. The comment scrubber is
+    separate and also covers the App key and minted tokens."""
+    values = [config.secret]
+    for name in ("ATLAS_SPRITES_TOKEN", "ATLAS_OPENROUTER_API_KEY"):
+        value = env.get(name, "")
+        if value:
+            values.append(value)
+    return tuple(values)
+
+
 def _state_is_writable(path: Path) -> bool:
     try:
         make_private_dirs(path)
@@ -817,7 +836,9 @@ def serve(
         log(f"atlas-reviewer: state dir {config.state_dir} is not writable")
         return 2
     board = Board(config.state_dir / "queue.json")
-    redactor = Redactor(known_secrets=(config.secret,), sources=secret_sources)
+    redactor = Redactor(
+        known_secrets=_service_secrets(config, env), sources=secret_sources
+    )
     sink = JsonlSink(config.state_dir / "service.jsonl", max_bytes=_SERVICE_LOG_BYTES)
     sink.__enter__()
     try:
