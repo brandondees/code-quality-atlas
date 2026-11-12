@@ -47,6 +47,7 @@ ENV = {
     "per_lens_usd": "ATLAS_PER_LENS_USD",
     "review_ceiling_usd": "ATLAS_REVIEW_CEILING_USD",
     "call_retries": "ATLAS_CALL_RETRIES",
+    "min_output_tokens": "ATLAS_MIN_OUTPUT_TOKENS",
 }
 
 # The review-wide limits whose configured value wins over D68's
@@ -145,6 +146,8 @@ def _apply_positive_int(
         return replace(limits, per_lens_calls=_positive_int(name, raw))
     if name == "call_retries":
         return replace(limits, call_retries=_count(name, raw))
+    if name == "min_output_tokens":
+        return replace(limits, min_output_tokens=_positive_int(name, raw))
     return None
 
 

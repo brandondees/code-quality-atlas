@@ -496,6 +496,7 @@ Environment variables (names only; never commit values):
 | `ATLAS_ALLOW_SAFETY_RETENTION` | OpenRouter adapter | `true` allows Safety Retention endpoints. Unset or `false` keeps the request on pure zero-data-retention endpoints. `--allow-safety-retention` also turns it on |
 | `ATLAS_REQUIRE_ZDR` | OpenRouter adapter | Unset or `true` sends `zdr: true` and selects only the ZDR list. `false` or `--no-require-zdr` drops that requirement and still refuses a tag the ZDR list marks Safety Retention unless the opt-in is on. Caching does not depend on it. `data_collection: deny` stays on either way. The flag wins over the variable |
 | `ATLAS_CALL_RETRIES` | agentic lens entry | Times a failed model call is sent again within a turn, 0 to 3. Unset is 1 |
+| `ATLAS_MIN_OUTPUT_TOKENS` | agentic lens entry | Smallest output cap a call is fitted to when the reservation cannot cover its full cap. Unset is 16,000 |
 | `ATLAS_KEY_CEILING_USD` | `review` and `agentic-review` | The most the OpenRouter key's own credit limit may be. Unset is $5. A higher key is refused before inference, and the refusal names this variable |
 
 The six credential and state variables above the limit rows never reach a
@@ -1187,8 +1188,13 @@ D41 records the 2026-11-12 probe that did.
   other half. The reservation prices the whole output cap at the
   completion rate plus the reasoning rate. `diff_prefix_share` (D65) is
   the share of the model's resolved input cap the shared diff prefix may
-  take; 0 pages every review, as before the prefix existed.
-  `coordinator.limits_for_lens` reads the twenty limits through
+  take; 0 pages every review, as before the prefix existed. When the
+  reservation cannot cover that whole cap, the call is sent with the
+  largest cap it can cover, if that is at least `min_output_tokens`
+  (16,000 by default), and otherwise stops on `reservation_usd` (D50). A
+  fitted cap whose previous hint does not fit it uses half that cap for
+  the hint.
+  `coordinator.limits_for_lens` reads the twenty-one limits through
   `agentic_config.load_agentic_limits`, from `ATLAS_*` or a flag string
   a caller passes. `model_for_lens` builds the adapter with those same
   bounds, and `review_lens` refuses a model whose per-call bounds differ.

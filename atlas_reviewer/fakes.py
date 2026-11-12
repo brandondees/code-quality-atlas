@@ -231,6 +231,10 @@ class ScriptedLensModel:
     def worst_case_usd(self, request: TurnRequest) -> Decimal:
         return self.worst_usd
 
+    def output_tokens_within(self, request: TurnRequest, budget_usd: Decimal) -> int:
+        """A fixed worst case: no smaller cap ever fits better."""
+        return 0
+
     def turn(self, request: TurnRequest) -> ModelTurn:
         self.requests.append(request)
         if not self.script:

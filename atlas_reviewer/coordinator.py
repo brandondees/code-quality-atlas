@@ -109,6 +109,7 @@ from atlas_reviewer.lens_loop import (
     UserText,
     _refusal_cause,
     _reserve_call,
+    _Reserved,
     finding_contract,
     retry_reasons,
     run_attempt,
@@ -1219,16 +1220,16 @@ def _reassess_call(
         (),
         None,
     )
-    priced = _reserve_call(model, request, spend, clock, deadline)
-    if not isinstance(priced, Decimal):
-        found = priced[2] if len(priced) > 2 else None
+    reserved = _reserve_call(model, request, spend, clock, deadline, fit=False)
+    if not isinstance(reserved, _Reserved):
+        found = reserved[2] if len(reserved) > 2 else None
         return AttemptOutcome(
             Attestation.UNACKNOWLEDGED,
-            frozenset({priced[0]}),
-            detail=priced[1],
+            frozenset({reserved[0]}),
+            detail=reserved[1],
             limit_hit=found,
         )
-    worst = priced
+    worst = reserved.worst
     try:
         reply = model.turn(request)
     except ByokRefusedError as exc:

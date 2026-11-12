@@ -57,6 +57,7 @@ from atlas_reviewer.budget import (
     InputTokenMeter,
     TokenBoundError,
     check_tokens,
+    input_token_bound,
     worst_case_usd,
 )
 from atlas_reviewer.cache_stats import CacheLedger, CacheSession
@@ -76,6 +77,7 @@ from atlas_reviewer.lens_loop import (
     ToolSchema,
     TurnRequest,
     UserText,
+    default_reasoning_tokens,
     resolve_per_call,
 )
 from atlas_reviewer.limit_stop import LimitRefused, hit
@@ -179,7 +181,7 @@ class OpenRouterLensModel:
         # snapshot is loaded once for this provider and reused for later
         # turns in the review.
         self._ready_for_turn = (terms, counts_byok, selected)
-        bounds = resolve_per_call(self.per_call, terms)
+        bounds = _bounds(self.per_call, terms, request)
         payload = _payload(self.provider, request, terms, bounds, selected)
         if request.system != self._last_system:
             # A different system prompt is a different conversation (a
@@ -236,6 +238,23 @@ class OpenRouterLensModel:
         retry gate (review M2): one more timeout must fit the clocks."""
         return self.provider._timeout_s
 
+    def output_tokens_within(self, request: TurnRequest, budget_usd: Decimal) -> int:
+        """The largest output cap, up to the resolved one, whose worst case
+        for this request stays within `budget_usd`. Below 1 when the input
+        alone does not fit. The input bound is taken with the resolved cap
+        in the payload, and a smaller cap is never more bytes, so the worst
+        case of the returned cap is within the budget at these prices."""
+        terms, _, selected = self._ready()
+        uncapped = replace(request, max_output_tokens=None)
+        bounds = _bounds(self.per_call, terms, uncapped)
+        payload = _payload(self.provider, uncapped, terms, bounds, selected)
+        fixed = input_token_bound(json.dumps(payload)) * terms.input_rate
+        left = budget_usd - fixed - terms.request_fee
+        rate = terms.completion_rate + terms.reasoning_rate
+        if rate <= 0:
+            return bounds.max_output_tokens if left >= 0 else 0
+        return min(bounds.max_output_tokens, math.floor(left / rate))
+
     def turn(self, request: TurnRequest) -> ModelTurn:
         """One request, no retry. A read timeout raises
         `TransportTimeoutError`, and the loop owns the one retry: it
@@ -247,7 +266,7 @@ class OpenRouterLensModel:
         cached = self._ready_for_turn
         self._ready_for_turn = None
         terms, counts_byok, selected = self._ready() if cached is None else cached
-        bounds = resolve_per_call(self.per_call, terms)
+        bounds = _bounds(self.per_call, terms, request)
         payload = _payload(self.provider, request, terms, bounds, selected)
         url = f"{self.provider._api_url}/chat/completions"
         body = json.dumps(payload).encode()
@@ -337,6 +356,20 @@ class OpenRouterLensModel:
             self.provider.budget.refusals.append(str(exc))
             raise
         return terms, status.counts_byok, selected
+
+
+def _bounds(per_call: Limits, terms: ModelTerms, request: TurnRequest) -> ResolvedCall:
+    """The resolved bounds, with the output cap tightened to the request's
+    own cap when it names a smaller one. A reasoning hint that no longer
+    fits that cap becomes half of it, so the reply still has the other half."""
+    bounds = resolve_per_call(per_call, terms)
+    cap = request.max_output_tokens
+    if cap is None or cap >= bounds.max_output_tokens:
+        return bounds
+    hint = bounds.reasoning_max_tokens
+    if hint >= cap:
+        hint = default_reasoning_tokens(cap)
+    return ResolvedCall(bounds.max_input_tokens, cap, hint)
 
 
 def _payload(
