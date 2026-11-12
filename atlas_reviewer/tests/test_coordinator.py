@@ -587,6 +587,19 @@ def test_unread_paths_block_approval_even_when_the_outcome_was_recorded_clean():
     assert "unread files" in headline
 
 
+def test_the_unread_list_names_twenty_paths_and_counts_the_rest():
+    paths = tuple(f"src/f{i:02d}.py" for i in range(21))
+    outcome = AttemptOutcome(
+        Attestation.ATTESTED, unread=paths, changed_files=len(paths)
+    )
+    result = synthesize([lens_result(outcome)])
+    headline = render_draft(result, Redactor()).splitlines()[2]
+    assert "21 changed files not read in full" in headline
+    assert "and 1 more" in headline
+    assert "src/f20.py" not in headline
+    assert "src/f00.py" in headline
+
+
 def test_the_status_line_is_the_drafts_first_line_and_only_controller_values():
     result = synthesize(
         [lens_result(AttemptOutcome(Attestation.ATTESTED, changed_files=1))]
