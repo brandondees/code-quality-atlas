@@ -218,8 +218,9 @@ itself, and a timeout is a coverage gap.
 ### 5. Caps unchanged; start triage-only; own loop; issue-hit scoring
 
 - **Caps.** The one-shot path keeps D25's 3 calls, $3.00 reservation,
-  and 200,000 input cap, and the model pin stays
-  (`anthropic/claude-sonnet-5.5`, no fallbacks). Agentic mode has
+  and 200,000 input cap. The model defaults to
+  `anthropic/claude-sonnet-5.5` (`ATLAS_MODEL` or `--model`; no fallback
+  list). Agentic mode has
   Brandon's provisional defaults (2026-11-11), for headroom and
   configurable. The $5 reservation is D43's decision; the other four
   limits stay provisional. The per-call input cap is the pinned model's

@@ -117,7 +117,7 @@ def test_the_request_uses_the_one_shot_pin_and_only_our_tools():
     assert body["provider"]["allow_fallbacks"] is False
     assert body["model"] == MODEL_ID
     assert body["stream"] is False
-    assert body["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in body
     assert "cache_control" not in body["provider"]
     assert "plugins" not in body
     assert [tool["function"]["name"] for tool in body["tools"]] == [
@@ -129,6 +129,31 @@ def test_the_request_uses_the_one_shot_pin_and_only_our_tools():
     ]
     assert fake.chat_requests()[0][2]["Authorization"] == f"Bearer {KEY}"
     assert len(fake.chat_requests()) == 1
+
+
+def test_the_tool_request_omits_parameters_the_endpoint_does_not_list():
+    from .test_openrouter import zdr_payload
+
+    bare, fake = model(
+        reply(completion("findings")),
+        # The helper's catalog_reply is the model catalog. ZDR is separate.
+    )
+    fake.zdr = reply(zdr_payload(parameters=["max_tokens", "tools"]))
+    bare.turn(request())
+    body = sent(fake)
+    assert "reasoning" not in body
+    assert "cache_control" not in body
+    assert body["provider"]["require_parameters"] is True
+    assert body["max_tokens"] == 64_000
+
+    cached, cached_fake = model(reply(completion("findings")))
+    cached_fake.zdr = reply(
+        zdr_payload(parameters=["reasoning", "cache_control", "max_tokens", "tools"])
+    )
+    cached.turn(request())
+    sent_body = sent(cached_fake)
+    assert sent_body["cache_control"] == {"type": "ephemeral"}
+    assert sent_body["reasoning"]["exclude"] is True
 
 
 def test_a_tool_result_is_forwarded_with_its_nonce_fence_unchanged():

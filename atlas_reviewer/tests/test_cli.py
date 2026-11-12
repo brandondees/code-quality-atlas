@@ -66,6 +66,78 @@ def test_agentic_settings_do_not_change_a_one_shot_review(tmp_path):
     assert bare_out.startswith("<!-- atlas-review-status: {")
 
 
+def test_a_dry_run_does_not_read_the_model_route(tmp_path):
+    code, out, err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "review",
+        "--event",
+        EVENT,
+        "--dry-run",
+        env={"ATLAS_MODEL": "not a model", "ATLAS_PROVIDERS": ""},
+    )
+    assert code == cli.EXIT_INCOMPLETE
+    assert "not an OpenRouter model id" not in err
+    assert out.startswith("<!-- atlas-review-status: {")
+
+
+def test_the_live_provider_uses_the_model_flag_and_one_provider(tmp_path):
+    from atlas_reviewer.openrouter import OpenRouterProvider
+    from atlas_reviewer.telemetry import Telemetry
+
+    from .test_openrouter import API, KEY, MODEL_ID, OpenRouterFake, catalog, reply
+
+    alt = "deepseek/deepseek-v4.1-flash"
+    listed = catalog()
+    listed["data"]["id"] = alt
+    fake = OpenRouterFake(catalogs={alt: reply(listed)})
+    held = {}
+
+    def factory(key, limits):
+        provider = OpenRouterProvider(fake, key, limits=limits)
+        held["provider"] = provider
+        return provider
+
+    args = cli.build_parser().parse_args(
+        [
+            "--state-dir",
+            str(tmp_path),
+            "review",
+            "--event",
+            EVENT,
+            "--provider",
+            "openrouter",
+            "--allow-live-inference",
+            "--model",
+            alt,
+            "--providers",
+            "deepinfra/fp8",
+        ]
+    )
+    env = {cli.ENV_OPENROUTER_KEY: KEY, "ATLAS_MODEL": MODEL_ID}
+    cli._select_provider(args, env, factory, Telemetry(FakeClock()))
+    assert held["provider"].model_id == alt
+    assert held["provider"]._providers == ("deepinfra/fp8",)
+    assert [url for _method, url, _headers, _body in fake.requests] == [f"{API}/key"]
+
+    refused = cli.build_parser().parse_args(
+        [
+            "--state-dir",
+            str(tmp_path),
+            "review",
+            "--event",
+            EVENT,
+            "--provider",
+            "openrouter",
+            "--allow-live-inference",
+            "--model",
+            "anthropic/claude-sonnet-5.5:online",
+        ]
+    )
+    with pytest.raises(BoundaryError, match="not an OpenRouter model id"):
+        cli._select_provider(refused, env, factory, Telemetry(FakeClock()))
+
+
 def test_dry_run_needs_no_credentials_and_prints_a_draft(tmp_path):
     code, out, _ = run_cli(
         "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run"

@@ -1138,3 +1138,16 @@ when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Collector header values are
 scrubbed, `http` export is loopback-only, and a dead collector cannot
 hold the process open at exit. D25's claim that `PyJWT[crypto]` is the
 only runtime dependency is amended: the OpenTelemetry packages are too.
+
+## 2026-11-12 — the live model and provider pin are configurable
+
+The OpenRouter model defaults to `anthropic/claude-sonnet-5.5` and can be
+set with `ATLAS_MODEL` or `--model`. `provider.only` defaults to the four
+Bedrock and Vertex slugs and can be one slug (`ATLAS_PROVIDERS` or
+`--providers`). `zdr: true`, `data_collection: deny`, `allow_fallbacks:
+false`, `require_parameters: true`, and `max_price` are not settings.
+Before a completion the adapter reads `GET /api/v1/endpoints/zdr` and
+refuses a slug that is not pure ZDR for that model. Safety Retention is
+off unless `ATLAS_ALLOW_SAFETY_RETENTION=true` or
+`--allow-safety-retention`. `reasoning` and `cache_control` are sent only
+when every selected endpoint lists them. No live call was made. D49.

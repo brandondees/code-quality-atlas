@@ -4,8 +4,8 @@
 One `LensModel` turn is one Chat Completions request. It sends the same
 pinned provider document as the one-shot adapter (`only`, no fallbacks,
 `require_parameters`, `zdr`, `data_collection: deny`, no plugins and no
-server tools), plus a top-level `cache_control` of `ephemeral` so a
-provider that honors it can cache the stable prefix. The lens loop
+server tools). `cache_control` and `reasoning` are added only when every
+selected ZDR endpoint lists that name in `supported_parameters`. The lens loop
 reserves the worst case and settles `_actual_cost` (BYOK upstream
 included) through its own spend tracker. A turn with no readable cost
 but usable token counts is priced from the catalog: prompt tokens at
@@ -63,17 +63,18 @@ from atlas_reviewer.lens_loop import (
 )
 from atlas_reviewer.limit_stop import LimitRefused, hit
 from atlas_reviewer.openrouter import (
-    _PER_MILLION,
-    MODEL_ID,
     OpenRouterProvider,
+    SelectedEndpoints,
     _actual_cost,
-    _is_pinned_model,
+    _is_configured_model,
     _json_object,
     _no_byok_reason,
     _tokens,
+    optional_parameters,
+    provider_preferences,
 )
 from atlas_reviewer.ports import BoundaryError, ByokRefusedError
-from atlas_reviewer.pricing import ModelTerms, parse_model_terms
+from atlas_reviewer.pricing import ModelTerms
 
 # Not a price. `Spend.settle` keeps the reservation when the cost is not
 # a finite Decimal greater than or equal to zero.
@@ -92,19 +93,19 @@ class OpenRouterLensModel:
         # agentic input cap. `review_lens` refuses this object when
         # `per_call` is not the limits that review resolved.
         self.per_call = AgenticLimits().resolve() if per_call is None else per_call
-        self._ready_for_turn: tuple[ModelTerms, bool] | None = None
+        self._ready_for_turn: tuple[ModelTerms, bool, SelectedEndpoints] | None = None
 
     @property
     def name(self) -> str:
         return self.provider.name
 
     def worst_case_usd(self, request: TurnRequest) -> Decimal:
-        terms, counts_byok = self._ready()
+        terms, counts_byok, selected = self._ready()
         # The loop prices the turn and then places it. One catalog fetch
         # serves both; the next turn fetches again.
-        self._ready_for_turn = (terms, counts_byok)
+        self._ready_for_turn = (terms, counts_byok, selected)
         bounds = resolve_per_call(self.per_call, terms)
-        payload = _payload(self.provider, request, terms, bounds)
+        payload = _payload(self.provider, request, terms, bounds, selected)
         bound = input_token_bound(json.dumps(payload))
         try:
             check_tokens(bound, terms, bounds)
@@ -116,9 +117,9 @@ class OpenRouterLensModel:
         """One request, no retry. The loop counts the call and settles the cost."""
         cached = self._ready_for_turn
         self._ready_for_turn = None
-        terms, counts_byok = self._ready() if cached is None else cached
+        terms, counts_byok, selected = self._ready() if cached is None else cached
         bounds = resolve_per_call(self.per_call, terms)
-        payload = _payload(self.provider, request, terms, bounds)
+        payload = _payload(self.provider, request, terms, bounds, selected)
         url = f"{self.provider._api_url}/chat/completions"
         body = json.dumps(payload).encode()
         try:
@@ -143,33 +144,18 @@ class OpenRouterLensModel:
                     "could not be parsed, so is_byok could not be checked"
                 ) from None
             raise
-        return _turn(data, terms, counts_byok, bounds.max_output_tokens)
+        return _turn(
+            data, terms, counts_byok, self.provider.model_id, bounds.max_output_tokens
+        )
 
-    def _ready(self) -> tuple[ModelTerms, bool]:
+    def _ready(self) -> tuple[ModelTerms, bool, SelectedEndpoints]:
         if self.provider._key_status is None:
             self.provider.preflight()
         status = self.provider._key_status
         if status is None:
             raise BoundaryError("refusing inference: key preflight has not passed")
-        terms = parse_model_terms(
-            self.provider._get_json(f"/model/{MODEL_ID}"), MODEL_ID
-        )
-        return terms, status.counts_byok
-
-
-def _routing(provider: OpenRouterProvider, terms: ModelTerms) -> dict[str, Any]:
-    """The one-shot provider document, including its price ceiling."""
-    return {
-        "only": list(provider._providers),
-        "allow_fallbacks": False,
-        "require_parameters": True,
-        "data_collection": "deny",
-        "zdr": True,
-        "max_price": {
-            "prompt": float(terms.prompt_rate * _PER_MILLION),
-            "completion": float(terms.completion_rate * _PER_MILLION),
-        },
-    }
+        terms, selected = self.provider.load_terms()
+        return terms, status.counts_byok, selected
 
 
 def _payload(
@@ -177,17 +163,18 @@ def _payload(
     request: TurnRequest,
     terms: ModelTerms,
     limits: ResolvedCall,
+    selected: SelectedEndpoints,
 ) -> dict[str, Any]:
-    return {
-        "model": MODEL_ID,
+    payload: dict[str, Any] = {
+        "model": provider.model_id,
         "messages": _messages(request),
         "tools": [_tool(tool) for tool in request.tools],
         "max_tokens": limits.max_output_tokens,
-        "reasoning": {"max_tokens": limits.reasoning_max_tokens, "exclude": True},
         "stream": False,
-        "provider": _routing(provider, terms),
-        "cache_control": {"type": "ephemeral"},
+        "provider": provider_preferences(selected.providers, terms),
     }
+    payload.update(optional_parameters(selected.supported, limits.reasoning_max_tokens))
+    return payload
 
 
 def _tool(tool: ToolSchema) -> dict[str, Any]:
@@ -257,7 +244,11 @@ def _echo(call_id: str, call: ToolRequest) -> dict[str, Any]:
 
 
 def _turn(
-    data: Mapping[str, Any], terms: ModelTerms, counts_byok: bool, output_cap: int
+    data: Mapping[str, Any],
+    terms: ModelTerms,
+    counts_byok: bool,
+    model_id: str,
+    output_cap: int,
 ) -> ModelTurn:
     usage = data.get("usage")
     usage_obj = usage if isinstance(usage, dict) else {}
@@ -268,8 +259,8 @@ def _turn(
         )
     cost = _cost(usage_obj, terms)
     served = data.get("model")
-    if not isinstance(served, str) or not _is_pinned_model(served):
-        raise BoundaryError(f"OpenRouter served {served!r}, not {MODEL_ID}")
+    if not isinstance(served, str) or not _is_configured_model(served, model_id):
+        raise BoundaryError(f"OpenRouter served {served!r}, not {model_id}")
     choice = _choice(data)
     finish = choice.get("finish_reason")
     _remember(data, usage_obj, served, finish)

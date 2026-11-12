@@ -314,13 +314,18 @@ Environment variables (names only; never commit values):
 | `ATLAS_REVIEW_WALL_S` | agentic lens entry | Seconds for the whole review (default 3600) |
 | `ATLAS_MAX_INPUT_TOKENS` | agentic lens entry | Per-call input cap. Unset uses the model's context minus the output reserve |
 | `ATLAS_MAX_OUTPUT_TOKENS` | agentic lens entry | Per-call output cap. Unset uses the model's completion limit |
-| `ATLAS_REASONING_MAX_TOKENS` | agentic lens entry | Reasoning hint sent on the request. Unset is half the output cap, so the reply has the other half. It is not a price |
+| `ATLAS_REASONING_MAX_TOKENS` | agentic lens entry | Reasoning hint sent on the request when the selected endpoints list `reasoning`. Unset is half the output cap, so the reply has the other half. It is not a price |
+| `ATLAS_MODEL` | OpenRouter adapter | Model id. Unset is `anthropic/claude-sonnet-5.5`. `--model` wins. A response from any other model is rejected |
+| `ATLAS_PROVIDERS` | OpenRouter adapter | Comma-separated `provider.only` slugs. Unset is `amazon-bedrock,google-vertex/europe,google-vertex/global,google-vertex/us`. One slug pins that provider. `--providers` wins |
+| `ATLAS_ALLOW_SAFETY_RETENTION` | OpenRouter adapter | `true` allows Safety Retention endpoints. Unset or `false` keeps the request on pure zero-data-retention endpoints. `--allow-safety-retention` also turns it on |
 
 The six credential and state variables above the limit rows never reach a
 Sprite, a prompt, or the draft. Each one goes only to the adapter that
 uses it. The eight `ATLAS_*` limit variables are not credentials.
 `limits_for_lens` reads them. The one-shot `review` command does not
-accept the matching flags and does not read the variables. The redactor also scrubs the exact
+accept the matching flags and does not read the variables. `ATLAS_MODEL`,
+`ATLAS_PROVIDERS`, and `ATLAS_ALLOW_SAFETY_RETENTION` are not credentials
+either. The live OpenRouter path reads them; a dry run does not. The redactor also scrubs the exact
 value of the App key, the Sprites token, the OpenRouter key, and every
 installation token minted during the review, on top of pattern-based
 redaction. That covers the draft, the telemetry, the probe report and the
@@ -354,15 +359,29 @@ compressed with anything but STORED or DEFLATED, is not on the text-type
 allowlist, is binary, or exceeds the size or ratio
 caps. The archive as a whole is rejected if it has more than 200 entries.
 
-**OpenRouter limits** (`openrouter.py`, `budget.py`, `pricing.py`). Model
-`anthropic/claude-sonnet-5.5` only, with no fallback models, no plugins
-and no web search. Provider routing is pinned (`only`, `allow_fallbacks:
-false`, `zdr`, `max_price`) to the slugs a 2026-11-07 read of the public
-provider list actually exposes: `amazon-bedrock`, `google-vertex/global`,
-`google-vertex/us`, and `google-vertex/europe`. The bare `google-vertex`
-slug is not one of them, and the routing docs say a bare slug matches
-every region of that provider, so any slug outside this list is refused
-before a request. Before any inference, `preflight()` reads
+**OpenRouter limits** (`openrouter.py`, `budget.py`, `pricing.py`). The
+model defaults to `anthropic/claude-sonnet-5.5` (`ATLAS_MODEL` or
+`--model`). There is no fallback model, no plugins and no web search. A
+response is accepted only from the configured id or a dated revision of
+it (`<id>-YYYYMMDD`). Provider routing stays pinned: `allow_fallbacks`
+false, `require_parameters` true, `zdr` true, `data_collection` deny, and
+`max_price` at the catalog's highest prices. Those five are not
+configurable. `provider.only` defaults to the slugs a 2026-11-07 read of
+the public provider list named: `amazon-bedrock`, `google-vertex/global`,
+`google-vertex/us`, and `google-vertex/europe`. `ATLAS_PROVIDERS` or
+`--providers` replaces that list, and one slug is a valid pin. Before a
+completion the adapter reads `GET /api/v1/endpoints/zdr` without the key.
+A slug is sent only when every row for this model and slug has
+`safety_retention: false`. A slug with no such row, or any Safety
+Retention row, is refused and no completion is sent. Safety Retention
+(for example Gemini on Vertex) needs `ATLAS_ALLOW_SAFETY_RETENTION=true`
+or `--allow-safety-retention`. `reasoning` and `cache_control` are sent
+only when every eligible row lists that name in `supported_parameters`,
+so `require_parameters` stays true. The output cap stays the configured
+limit (`--max-output-tokens` / `ATLAS_MAX_OUTPUT_TOKENS` on the agentic
+path, the one-shot `CallLimits` cap on the one-shot path), not an
+uncapped copy of the catalog's `max_completion_tokens`. Before any
+inference, `preflight()` reads
 `GET /api/v1/key` and refuses unless the key has a hard limit of at most
 $5 with credit left. A key whose `include_byok_in_limit` is not true is
 accepted, and that run is in no-BYOK mode: a model response is used only
@@ -933,9 +952,10 @@ D41 records the 2026-11-12 probe that did.
   so the review cannot approve on it.
 - **The adapter** (`tool_model.OpenRouterLensModel`). One Chat Completions
   request per turn, with the one-shot provider pin (`require_parameters`,
-  zero data retention, no fallbacks, no plugins and no server tools), a
-  top-level `cache_control` of `ephemeral`, and only the bridge's tool
-  schemas. The loop settles `_actual_cost`, which includes a BYOK
+  zero data retention, no fallbacks, no plugins and no server tools) and
+  only the bridge's tool schemas. `cache_control` and `reasoning` are
+  included only when every selected ZDR endpoint lists that parameter.
+  The loop settles `_actual_cost`, which includes a BYOK
   upstream charge. A turn with no readable cost but usable token counts
   is priced from the catalog. Prompt tokens use the highest of the prompt
   and cache-write rates, and when the response reports cache read or
@@ -1031,7 +1051,7 @@ D41 records the 2026-11-12 probe that did.
 | `agentic_config.py` | the one reader for those limits: a flag, else `ATLAS_*`, else the default | no |
 | `limit_stop.py` | the text and ledger fields for a limit that stopped a lens | no |
 | `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft; holds the Sprite for the lens (`keepalive.lens_hold`) | via ports, the ledger |
-| `tool_model.py` | the live tool-calling adapter (`OpenRouterLensModel`): one pinned Chat Completions request per `LensModel` turn, top-level `cache_control: ephemeral`, strict tool-call arguments, cost from `_actual_cost` (BYOK upstream included; catalog rates when the cost is missing but the token counts are usable, with cache read and write counts at the catalog's cache rates when the response reports them; a reasoning rate with no reasoning-token count is unpriced only when the cost is also missing). Not on the CLI. Tested with recorded HTTP only | via the OpenRouter client |
+| `tool_model.py` | the live tool-calling adapter (`OpenRouterLensModel`): one pinned Chat Completions request per `LensModel` turn, `cache_control` and `reasoning` only when the selected endpoints list them, strict tool-call arguments, cost from `_actual_cost` (BYOK upstream included; catalog rates when the cost is missing but the token counts are usable, with cache read and write counts at the catalog's cache rates when the response reports them; a reasoning rate with no reasoning-token count is unpriced only when the cost is also missing). Not on the CLI. Tested with recorded HTTP only | via the OpenRouter client |
 | `keepalive.py` | the Sprite Tasks API hold for one lens: create, refresh every 60 seconds with a 5-minute expiry, delete on exit. Not on the CLI. Tested with `LocalSprites` and a fake socket | via the runner exec |
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`); the agentic `LensModel` port is in `lens_loop.py` | no |
 | `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → resolve interpreter → upload → unpack → tools → destroy), `probe_runner`, `run_session` (a `Session` on the same lifecycle), the one exec wrapper (`exec_argv`, minimal `env -i` environment) | via `SpritesApi` |
