@@ -841,7 +841,7 @@ D41 records the 2026-11-12 probe that did.
   most 20 seconds. A refresh stores a failure under the lock before
   releasing it. The lock and the stop and held guards are what stop a
   refresh after the hold has stopped from recreating the task; the Tasks
-  API's PUT would otherwise upsert it. Each hold exec has its own 15 second
+  API's PUT would otherwise upsert it. Each hold exec has its own 15-second
   budget, and the guest socket call times out after 10 seconds and reads
   only the status line. Refresh and tool execs share the runner's exec lock so
   they do not write one stream; the 15-second budget is how long a
