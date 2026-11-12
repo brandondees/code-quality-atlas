@@ -263,8 +263,9 @@ def review_lens(
     contract: str | None = None,
 ) -> AgenticReview:
     """Review `event` with one lens. The limits are resolved before any
-    model, runner or ledger work, so a run with any of them unset is
-    refused outright (`LimitsUnsetError`)."""
+    model, runner or ledger work. Brandon's provisional defaults are
+    accepted. A limit cleared to unset is refused outright
+    (`LimitsUnsetError`)."""
     resolved = limits.resolve()
     contract = finding_contract() if contract is None else contract
     body = library.body(lens)

@@ -99,9 +99,29 @@ def attempt(tmp_path, script, *, limits=LIMITS, clock=None, spend=None, deadline
 # ------------------------------------------------------------------ limits
 
 
-def test_every_numeric_limit_is_unset_by_default_and_a_run_is_refused():
+def test_brandons_provisional_defaults_are_accepted():
+    resolved = AgenticLimits().resolve()
+    assert (
+        resolved.reservation_usd,
+        resolved.max_calls,
+        resolved.max_turns,
+        resolved.lens_wall_s,
+        resolved.review_wall_s,
+        resolved.retries,
+        resolved.pool_size,
+    ) == (Decimal(5), 50, 50, 1200, 3600, 1, 1)
+
+
+def test_clearing_a_limit_back_to_unset_is_still_refused():
     with pytest.raises(LimitsUnsetError) as exc:
-        AgenticLimits().resolve()
+        replace(
+            AgenticLimits(),
+            reservation_usd=None,
+            max_calls=None,
+            max_turns=None,
+            lens_wall_s=None,
+            review_wall_s=None,
+        ).resolve()
     for name in (
         "reservation_usd",
         "max_calls",
@@ -128,6 +148,7 @@ def test_the_working_defaults_are_one_retry_and_one_worker():
     [
         {"reservation_usd": Decimal(0)},
         {"reservation_usd": Decimal("NaN")},
+        {"reservation_usd": Decimal("Infinity")},
         {"reservation_usd": 1.0},
         {"max_calls": 0},
         {"max_calls": True},
@@ -141,6 +162,36 @@ def test_the_working_defaults_are_one_retry_and_one_worker():
 def test_a_limit_outside_its_range_is_refused(change):
     with pytest.raises(ValueError):
         replace(LIMITS, **change).resolve()
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("nan")])
+def test_a_wall_clock_must_be_finite(value):
+    with pytest.raises(ValueError, match="positive finite number of seconds"):
+        replace(AgenticLimits(), lens_wall_s=value).resolve()
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        ({"max_turns": 51}, "max_turns must be no greater than max_calls"),
+        ({"lens_wall_s": 3601}, "lens_wall_s must be no greater than review_wall_s"),
+    ],
+)
+def test_a_per_lens_limit_above_its_review_limit_is_refused(change, message):
+    with pytest.raises(ValueError, match=message):
+        replace(AgenticLimits(), **change).resolve()
+
+
+def test_a_per_lens_limit_equal_to_its_review_limit_is_accepted():
+    resolved = replace(
+        AgenticLimits(),
+        max_turns=40,
+        max_calls=40,
+        lens_wall_s=1000,
+        review_wall_s=1000,
+    ).resolve()
+    assert (resolved.max_turns, resolved.max_calls) == (40, 40)
+    assert (resolved.lens_wall_s, resolved.review_wall_s) == (1000, 1000)
 
 
 # ------------------------------------------------------------ tool schemas
@@ -325,7 +376,9 @@ def test_the_turn_cap_ends_the_lens_partial(tmp_path):
 
 
 def test_the_reviews_call_cap_ends_the_lens_before_another_call(tmp_path):
-    spend = Spend(replace(LIMITS, max_calls=3).resolve(), calls=2)
+    # Two calls are already spent. The turn cap stays within the call cap,
+    # so the next call is the one the review refuses.
+    spend = Spend(replace(LIMITS, max_calls=3, max_turns=3).resolve(), calls=2)
     outcome, model, _ = attempt(tmp_path, endless(), spend=spend)
     assert outcome.causes == {Cause.CALL_CAP}
     assert len(model.requests) == 1

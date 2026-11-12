@@ -16,13 +16,16 @@ wall clock, a failed model call, or the runner's deadline. Anything but a
 final reply that meets the contract, acknowledges the body and whose
 quotes all verify leaves the lens partial or failed, never clean.
 
-The numeric limits are the owner's decision (D31) and have no live
-defaults: `AgenticLimits.resolve` refuses until every one is set.
+The five numeric limits have provisional defaults Brandon set on
+2026-11-11, for headroom. Each can be overridden. An override must be
+positive and finite, and a per-lens limit no greater than its per-review
+limit. Clearing a limit back to unset still refuses the run.
 """
 
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields
 from decimal import Decimal
@@ -53,12 +56,19 @@ from atlas_reviewer.runner import DeadlineExceededError
 SYNTHESIS = BUNDLE_ROOT / "reference" / "synthesis.md"
 CONTRACT_HEADING = "## Finding contract"
 POOL_SIZE = 1
+# Brandon's provisional defaults, 2026-11-11: headroom, configurable,
+# to be revisited after live runs.
+DEFAULT_RESERVATION_USD = Decimal(5)
+DEFAULT_MAX_CALLS = 50
+DEFAULT_MAX_TURNS = 50
+DEFAULT_LENS_WALL_S = 1200
+DEFAULT_REVIEW_WALL_S = 3600
 
 # ------------------------------------------------------------------ limits
 
 
 class LimitsUnsetError(ValueError):
-    """A live agentic run was asked for before its limits were decided."""
+    """A limit was cleared to unset, so the run is refused."""
 
 
 @dataclass(frozen=True)
@@ -77,24 +87,24 @@ class AgenticLimits:
     """`reservation_usd`: the most a review may commit across every model
     call. `max_calls`: model calls per review. `max_turns`: model turns per
     lens attempt. `lens_wall_s` and `review_wall_s`: wall clocks, per lens
-    attempt and for the whole review (the runner's deadline). All five are
-    pending the owner and unset by default. `retries` and `pool_size` are
-    D31's working defaults; phase 3 runs one lens at a time."""
+    attempt and for the whole review (the runner's deadline). The five
+    defaults are Brandon's provisional headroom (2026-11-11); pass a value
+    to override one, or None to clear it, which `resolve` refuses.
+    `retries` and `pool_size` are D31's working defaults; phase 3 runs one
+    lens at a time."""
 
-    reservation_usd: Decimal | None = None
-    max_calls: int | None = None
-    max_turns: int | None = None
-    lens_wall_s: float | None = None
-    review_wall_s: float | None = None
+    reservation_usd: Decimal | None = DEFAULT_RESERVATION_USD
+    max_calls: int | None = DEFAULT_MAX_CALLS
+    max_turns: int | None = DEFAULT_MAX_TURNS
+    lens_wall_s: float | None = DEFAULT_LENS_WALL_S
+    review_wall_s: float | None = DEFAULT_REVIEW_WALL_S
     retries: int = RETRIES
     pool_size: int = POOL_SIZE
 
     def resolve(self) -> Limits:
         unset = [f.name for f in fields(self) if getattr(self, f.name) is None]
         if unset:
-            raise LimitsUnsetError(
-                "agentic limits are not set (pending the owner): " + ", ".join(unset)
-            )
+            raise LimitsUnsetError("agentic limits are not set: " + ", ".join(unset))
         resolved = Limits(**{f.name: getattr(self, f.name) for f in fields(self)})
         _check_limits(resolved)
         return resolved
@@ -113,8 +123,17 @@ def _check_limits(limits: Limits) -> None:
             raise ValueError(f"{name} must be a positive integer")
     for name in ("lens_wall_s", "review_wall_s"):
         value = getattr(limits, name)
-        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
-            raise ValueError(f"{name} must be a positive number of seconds")
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value <= 0
+        ):
+            raise ValueError(f"{name} must be a positive finite number of seconds")
+    if limits.max_turns > limits.max_calls:
+        raise ValueError("max_turns must be no greater than max_calls")
+    if limits.lens_wall_s > limits.review_wall_s:
+        raise ValueError("lens_wall_s must be no greater than review_wall_s")
     if isinstance(limits.retries, bool) or limits.retries not in range(2):
         raise ValueError("retries must be 0 or 1")
     if limits.pool_size != POOL_SIZE:

@@ -750,9 +750,12 @@ bridge. It is not on the CLI, and it has run only against `LocalSprites`
 and a scripted model (`fakes.ScriptedLensModel`). There is no live
 tool-calling model adapter yet.
 
-- **Limits.** `lens_loop.AgenticLimits` holds five numbers pending the
-  owner: `reservation_usd`, `max_calls`, `max_turns`, `lens_wall_s` and
-  `review_wall_s`. None has a default. `resolve` raises
+- **Limits.** `lens_loop.AgenticLimits` has Brandon's provisional defaults
+  (2026-11-11), set for headroom and configurable, to be revisited after
+  live runs: a $5 reservation, 50 model calls per review, 50 turns per
+  lens, 20 minutes per lens and 60 minutes per review. An override must be
+  positive and finite, and a per-lens limit no greater than its per-review
+  limit. Clearing one back to unset makes `resolve` raise
   `LimitsUnsetError`, naming each unset field, before any model, runner or
   ledger work. `retries` is 1 and `pool_size` must be 1.
 - **The prompt.** The system prompt is the controller's instructions, then
@@ -827,7 +830,7 @@ tool-calling model adapter yet.
 | `lens_contract.py` | a lens's final reply under the finding contract, parsed strictly into typed findings (`parse_reply`); refusals never echo model text | no |
 | `quotes.py` | check each finding's quoted evidence against the head file at the cited lines, or the diff's removed lines (`check_quote`) | no |
 | `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) | writes the ledger file |
-| `lens_loop.py` | the agentic limits (no live defaults), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the lens system prompt, the spend tracker, one lens attempt (`run_attempt`) | via `Bridge`, `LensModel` |
+| `lens_loop.py` | the agentic limits (Brandon's provisional defaults, 2026-11-11), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the lens system prompt, the spend tracker, one lens attempt (`run_attempt`) | via `Bridge`, `LensModel` |
 | `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft | via ports, the ledger |
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`); the agentic `LensModel` port is in `lens_loop.py` | no |
 | `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → resolve interpreter → upload → unpack → tools → destroy), `probe_runner`, `run_session` (a `Session` on the same lifecycle), the one exec wrapper (`exec_argv`, minimal `env -i` environment) | via `SpritesApi` |
