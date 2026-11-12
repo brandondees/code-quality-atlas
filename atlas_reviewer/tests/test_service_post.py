@@ -55,7 +55,14 @@ class GitHub:
         payload = json.loads(body)
         if self.post_status != 200:
             return HttpResponse(self.post_status, {}, b"")
-        self.reviews.append({"id": 9, "body": payload["body"]})
+        self.reviews.append(
+            {
+                "id": 9,
+                "body": payload["body"],
+                "commit_id": payload["commit_id"],
+                "user": {"login": "code-quality-atlas[bot]", "type": "Bot"},
+            }
+        )
         return HttpResponse(200, {}, b'{"id": 9}')
 
 
@@ -177,12 +184,14 @@ def test_a_post_failure_stays_unposted_until_a_later_try(tmp_path):
     board = Board(tmp_path / "queue.json")
     github = GitHub(post_status=500)
     poster, _ = _poster(tmp_path, github)
+    clock = {"t": 1_000.0}
     worker = Worker(
         board,
         lambda event, cancel: ReviewRun(True, REPORT),
         Telemetry(SystemClock()),
         poster.post,
         state_root=tmp_path,
+        now=lambda: clock["t"],
     )
     board.enqueue(EVENT)
     assert worker.run_one() is True
@@ -198,10 +207,38 @@ def test_a_post_failure_stays_unposted_until_a_later_try(tmp_path):
         "\n## Model usage\n\n- actual $0.10\n",
         encoding="utf-8",
     )
+    clock["t"] += 10_000
     worker._retry_post()
     assert board.states() == ((SHA, JobState.DONE),)
     posts = [call for call in github.calls if call[0] == "POST"]
     assert json.loads(posts[-1][2] or b"")["event"] == "COMMENT"
+
+
+def test_a_human_review_with_the_marker_does_not_suppress_the_post(tmp_path):
+    github = GitHub()
+    github.reviews.append(
+        {
+            "id": 3,
+            "body": marker_for(post_key(EVENT)),
+            "commit_id": SHA,
+            "user": {"login": "brandondees", "type": "User"},
+        }
+    )
+    poster, _ = _poster(tmp_path, github)
+    poster.post(EVENT, REPORT)
+    assert [call[0] for call in github.calls].count("POST") == 1
+    other = GitHub()
+    other.reviews.append(
+        {
+            "id": 4,
+            "body": marker_for(post_key(EVENT)),
+            "commit_id": "e" * 40,
+            "user": {"login": "code-quality-atlas[bot]", "type": "Bot"},
+        }
+    )
+    again, _ = _poster(tmp_path / "other", other)
+    again.post(EVENT, REPORT)
+    assert [call[0] for call in other.calls].count("POST") == 1
 
 
 def test_a_huge_comment_keeps_the_idempotency_marker():

@@ -223,7 +223,7 @@ class ReviewPoster:
             if not isinstance(data, list):
                 raise BoundaryError("GitHub review list returned a non-array")
             for item in data:
-                found = _marked(item, marker)
+                found = _marked(item, marker, event.head_sha)
                 if found is not None:
                     return found
             pages += 1
@@ -259,8 +259,17 @@ class ReviewPoster:
         )
 
 
-def _marked(item: object, marker: str) -> int | None:
-    if not isinstance(item, dict):
+def _marked(item: object, marker: str, sha: str) -> int | None:
+    """A review already posted for this commit by a GitHub App. A review
+    a person wrote, or one attached to another commit, does not count, so
+    planting the marker in a review cannot suppress this one."""
+    if not isinstance(item, dict) or item.get("commit_id") != sha:
+        return None
+    user = item.get("user")
+    if not isinstance(user, dict) or user.get("type") != "Bot":
+        return None
+    login = user.get("login")
+    if not isinstance(login, str) or not login.endswith("[bot]"):
         return None
     body, review_id = item.get("body"), item.get("id")
     if not isinstance(body, str) or marker not in body:
