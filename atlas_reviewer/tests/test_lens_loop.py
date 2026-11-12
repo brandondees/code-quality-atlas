@@ -470,6 +470,8 @@ def endless():
     "cause",
     [
         Cause.INPUT_CAP,
+        Cause.OUTPUT_CAP,
+        Cause.REASONING_CAP,
         Cause.CONTEXT,
         Cause.TURN_CAP,
         Cause.CALL_CAP,

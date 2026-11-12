@@ -546,15 +546,26 @@ class _Progress:
         )
 
 
+# Every name in limit_stop.SETTINGS. A missing name is a bug, not CONTEXT.
+_LIMIT_CAUSES = {
+    "max_calls": Cause.CALL_CAP,
+    "reservation_usd": Cause.BUDGET,
+    "max_turns": Cause.TURN_CAP,
+    "lens_wall_s": Cause.LENS_CLOCK,
+    "review_wall_s": Cause.REVIEW_CLOCK,
+    "max_input_tokens": Cause.INPUT_CAP,
+    "max_output_tokens": Cause.OUTPUT_CAP,
+    "reasoning_max_tokens": Cause.REASONING_CAP,
+    "context_length": Cause.CONTEXT,
+    "max_completion_tokens": Cause.CONTEXT,
+}
+
+
 def _cause_for(found: LimitHit) -> Cause:
-    return {
-        "max_calls": Cause.CALL_CAP,
-        "reservation_usd": Cause.BUDGET,
-        "max_turns": Cause.TURN_CAP,
-        "lens_wall_s": Cause.LENS_CLOCK,
-        "review_wall_s": Cause.REVIEW_CLOCK,
-        "max_input_tokens": Cause.INPUT_CAP,
-    }.get(found.limit, Cause.CONTEXT)
+    try:
+        return _LIMIT_CAUSES[found.limit]
+    except KeyError:
+        raise ValueError(f"no cause for limit {found.limit}") from None
 
 
 def _stopped(found: LimitHit) -> tuple[Cause, str, LimitHit]:

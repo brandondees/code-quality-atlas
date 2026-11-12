@@ -791,8 +791,8 @@ D41 records the 2026-11-12 probe that did.
   does not fit the model's context, a failed model call, or the runner's
   deadline during a tool call. A limit stop names the limit, the
   configured value, the observed value, and the flag or variable that
-  changes it. That is its own cause (`INPUT_CAP` or `CONTEXT` for a
-  token refusal), not a model error.
+  changes it. A token refusal is `INPUT_CAP`, `OUTPUT_CAP`,
+  `REASONING_CAP`, or `CONTEXT`, not a model error.
 - **Checking the reply.** The reply must meet the finding contract
   (`lens_contract.py`) and name the lens and its body digest. Each quote is
   checked against the head file at the cited lines. The cited span is the

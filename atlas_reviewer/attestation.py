@@ -102,6 +102,8 @@ class Cause(StrEnum):
     ABANDONED = "the attempt never finished (the controller stopped mid-attempt)"
     MODEL_ERROR = "a model call failed"
     INPUT_CAP = "the per-call input cap was reached"
+    OUTPUT_CAP = "the per-call output cap does not fit the model"
+    REASONING_CAP = "the reasoning hint does not fit the output cap"
     CONTEXT = "the call does not fit the model's context"
     TURN_CAP = "the per-lens turn cap was reached"
     CALL_CAP = "the review's model-call cap was reached"

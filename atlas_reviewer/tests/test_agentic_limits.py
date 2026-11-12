@@ -12,8 +12,15 @@ from atlas_reviewer.agentic_config import load_agentic_limits
 from atlas_reviewer.attestation import AttemptLedger, Cause, LensState
 from atlas_reviewer.budget import CallLimits
 from atlas_reviewer.coordinator import status_line, synthesize
-from atlas_reviewer.lens_loop import AgenticLimits, Spend, resolve_per_call, run_attempt
-from atlas_reviewer.limit_stop import LimitRefused, hit
+from atlas_reviewer.lens_loop import (
+    _LIMIT_CAUSES,
+    AgenticLimits,
+    Spend,
+    _cause_for,
+    resolve_per_call,
+    run_attempt,
+)
+from atlas_reviewer.limit_stop import SETTINGS, LimitHit, LimitRefused, hit
 from atlas_reviewer.openrouter import MODEL_ID
 from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.pricing import PricingUnknownError, parse_model_terms
@@ -282,3 +289,44 @@ def test_a_damaged_limit_object_abandons_the_ledger_line(tmp_path):
     (attempt,) = again.attempts(KEY)
     assert attempt.outcome.limit_hit is None
     assert again.damaged == 1
+
+
+def test_every_limit_has_one_cause_and_an_unknown_name_is_refused():
+    assert set(_LIMIT_CAUSES) == set(SETTINGS)
+    with pytest.raises(ValueError, match="no cause"):
+        _cause_for(LimitHit("not-a-limit", "1", "2", "nowhere"))
+
+
+def test_an_output_override_and_a_reasoning_hint_have_their_own_causes():
+    class Refuses:
+        name = "refuses"
+
+        def __init__(self, found):
+            self.found = found
+
+        def worst_case_usd(self, _request):
+            raise LimitRefused(self.found)
+
+        def turn(self, _request):
+            raise AssertionError("not sent")
+
+    output = run_attempt(
+        job(),
+        object(),
+        Refuses(hit("max_output_tokens", 128_000, 64_000)),
+        Spend(LIMITS.resolve()),
+        FakeClock(),
+        review_deadline=600,
+    )
+    reasoning = run_attempt(
+        job(),
+        object(),
+        Refuses(hit("reasoning_max_tokens", 0, "1..63")),
+        Spend(LIMITS.resolve()),
+        FakeClock(),
+        review_deadline=600,
+    )
+    assert Cause.OUTPUT_CAP in output.causes
+    assert Cause.CONTEXT not in output.causes
+    assert Cause.REASONING_CAP in reasoning.causes
+    assert Cause.CONTEXT not in reasoning.causes
