@@ -633,8 +633,26 @@ probe-runner run the command was `--sequence review --event
 
 Note the Machine ID that command prints.
 If `MACHINE_ID` is empty, stop and read the Machine list, as above.
-Do not run the logs command until it is set. Then read that Machine's logs, before staging the key
-again. The probe passed when that Machine's line is
+Do not run the wait or the logs command until it is set.
+
+`--rm` destroys the Machine when it stops
+([Run a new Machine](https://fly.io/docs/machines/flyctl/fly-machine-run/)).
+The Machines API can wait for `destroyed` as well as `stopped`
+([Wait for State](https://fly.io/docs/machines/api/machines-resource/#wait-for-a-machine-to-reach-a-specified-state)).
+Wait for `destroyed` here, not `stopped`: a `--rm` Machine is gone
+once it exits, so `stopped` is not the state this probe ends in.
+The 2026-11-11 run did not use `fly machine wait`.
+[`fly machine wait`](https://fly.io/docs/flyctl/cmd/fly_machine_wait/)
+defaults to 5 minutes. This wait uses 1 hour, the same bound as the
+review poll, because a review sequence also creates a runner and
+fetches a tarball.
+
+```sh
+flyp machine wait "$MACHINE_ID" --app atlas-reviewer --state destroyed --wait-timeout 1h
+```
+
+Then read that Machine's logs, before staging the key again. The probe
+passed when that Machine's line is
 `Main child exited normally with code: 0`. The controller writes
 `status: completed` for that exit. It writes
 `probe: FAILED -- the runner is not usable as probed` and the logs
@@ -643,6 +661,12 @@ line ends in `code: 3` when the runner did not complete.
 ```sh
 flyp logs --app atlas-reviewer --machine "$MACHINE_ID" --no-tail
 ```
+
+If that line is still absent after the wait, read the log stream
+started before the probe
+([Run one review](#run-one-review)). `--no-tail` keeps only the last
+100 lines. Do not stage the key. Report that this probe did not show
+`code: 0`.
 
 After the probe, stage the pilot key again from stdin. The `grep`
 writes that one line to the import, not to the terminal. `--stage`

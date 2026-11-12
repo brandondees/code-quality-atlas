@@ -415,7 +415,12 @@ def _is_machine_run(command: ShellCommand) -> bool:
 
 
 def _assigns_api_token(words: tuple[str, ...]) -> bool:
-    return any(word.startswith("FLY_API_TOKEN=") for word in words)
+    """True when any argv word carries ``FLY_API_TOKEN=``.
+
+    ``--env=FLY_API_TOKEN=...`` contains the assignment without starting
+    with it. ``-e`` and ``--env`` put ``FLY_API_TOKEN=...`` in the next word.
+    """
+    return any("FLY_API_TOKEN=" in word for word in words)
 
 
 def fly_commands(text: str) -> list[str]:
@@ -592,14 +597,121 @@ def test_a_review_writes_to_the_machine_disk_and_is_held_not_removed():
     # of this fly would cut off a review sequence that is still working.
     assert "timeout" not in review_run.prefix
     assert "--detach" in review_run.program
-    assert "If `MACHINE_ID` is empty, stop" in RUNBOOK
+    assert review_run.program[review_run.program.index("--event") + 1] == (
+        "/home/atlas/event.json"
+    )
+    assert review_run.program[review_run.program.index("--tools") + 1] == "review"
+    recover = RUNBOOK.split("### Recover a runner Sprite by name", 1)[1]
+    before_seq, after_seq = recover.split("-- probe-runner --sequence review", 1)
+    # Each empty-id stop is its own sentence. Removing either one leaves
+    # the other in place.
+    assert "If `MACHINE_ID` is empty, stop. Read the Machine list" in before_seq
+    assert (
+        "If `MACHINE_ID` is empty, stop and read the Machine list, as above."
+        in after_seq
+    )
+    assert "If `MACHINE_ID` is empty, stop. Read the Machine list" not in after_seq
     review_at = RUNBOOK.index("-- probe-runner --sequence review")
+    wait_line = (
+        'flyp machine wait "$MACHINE_ID" --app atlas-reviewer '
+        "--state destroyed --wait-timeout 1h"
+    )
     logs_line = 'flyp logs --app atlas-reviewer --machine "$MACHINE_ID" --no-tail'
+    wait_at = RUNBOOK.index(wait_line, review_at)
     logs_at = RUNBOOK.index(logs_line, review_at)
     restage_at = RUNBOOK.index("grep -E", review_at)
-    assert review_at < logs_at < restage_at
+    assert review_at < wait_at < logs_at < restage_at
     assert "Main child exited normally with code: 0" in RUNBOOK[review_at:logs_at]
+    assert "Do not stage the key" in RUNBOOK[logs_at:restage_at]
     assert "flyp secrets list --app atlas-reviewer" in block_with("grep -E")
+
+
+@pytest.mark.parametrize(
+    ("block", "prefix", "program", "assigns"),
+    [
+        (
+            (
+                "# timeout 45 fly machine run --app atlas-reviewer\n"
+                "fly machine run --app atlas-reviewer\n"
+            ),
+            (),
+            ("fly", "machine", "run", "--app", "atlas-reviewer"),
+            False,
+        ),
+        (
+            'timeout 45 flyp machine run "$IMAGE" --app atlas-reviewer --rm\n',
+            ("timeout", "45"),
+            ("flyp", "machine", "run", '"$IMAGE"', "--app", "atlas-reviewer", "--rm"),
+            False,
+        ),
+        (
+            "env FLY_API_TOKEN=staged fly machine run --app atlas-reviewer\n",
+            ("env", "FLY_API_TOKEN=staged"),
+            ("fly", "machine", "run", "--app", "atlas-reviewer"),
+            True,
+        ),
+        (
+            "fly machine run --env=FLY_API_TOKEN=staged --app atlas-reviewer\n",
+            (),
+            (
+                "fly",
+                "machine",
+                "run",
+                "--env=FLY_API_TOKEN=staged",
+                "--app",
+                "atlas-reviewer",
+            ),
+            True,
+        ),
+        (
+            "fly machine run -e FLY_API_TOKEN=staged --app atlas-reviewer\n",
+            (),
+            (
+                "fly",
+                "machine",
+                "run",
+                "-e",
+                "FLY_API_TOKEN=staged",
+                "--app",
+                "atlas-reviewer",
+            ),
+            True,
+        ),
+        (
+            "fly machine run --env FLY_API_TOKEN=staged --app atlas-reviewer\n",
+            (),
+            (
+                "fly",
+                "machine",
+                "run",
+                "--env",
+                "FLY_API_TOKEN=staged",
+                "--app",
+                "atlas-reviewer",
+            ),
+            True,
+        ),
+        (
+            "timeout 90 fly machine run --detach --app atlas-reviewer\n",
+            ("timeout", "90"),
+            ("fly", "machine", "run", "--detach", "--app", "atlas-reviewer"),
+            False,
+        ),
+    ],
+)
+def test_the_shell_parser_keeps_wrappers_and_drops_comments(
+    block: str,
+    prefix: tuple[str, ...],
+    program: tuple[str, ...],
+    assigns: bool,
+):
+    commands = [
+        command
+        for command in shell_commands(block)
+        if command.program and command.program[0] in ("fly", "flyp")
+    ]
+    assert commands == [ShellCommand(prefix, program)]
+    assert _assigns_api_token(commands[0].prefix + commands[0].program) is assigns
 
 
 def test_a_review_is_waited_for_copied_released_and_destroyed_in_that_order():
