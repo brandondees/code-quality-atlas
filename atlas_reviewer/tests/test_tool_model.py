@@ -200,13 +200,17 @@ def test_an_unparseable_reply_on_a_no_byok_key_is_refused():
 
 
 def test_non_finite_and_deeply_nested_arguments_are_refused():
-    from atlas_reviewer.tool_model import _strict_args
+    """Through `turn`, so a parser that bypasses the strict check is caught."""
 
-    assert _strict_args('{"n": 1e999}') == ()
-    assert _strict_args('{"n": [1e999]}') == ()
-    nested = "[" * 2000 + "]" * 2000
-    assert _strict_args(nested) == ()
-    assert _strict_args('{"a": ' + '{"b": ' * 2000 + "1" + "}" * 2000 + "}") == ()
+    def arguments_of(raw: str):
+        lens, _fake = model(tool_response("diff_file", raw))
+        (call,) = lens.turn(request()).calls
+        return call.tool, call.args
+
+    assert arguments_of('{"n": 1e999}') == ("diff_file", ())
+    assert arguments_of('{"n": [1e999]}') == ("diff_file", ())
+    nested = '{"a": ' + '{"b": ' * 2000 + "1" + "}" * 2000 + "}"
+    assert arguments_of(nested) == ("diff_file", ())
 
 
 def test_a_zero_cost_settles_at_zero():
