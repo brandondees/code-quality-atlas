@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: MIT
 """The review queue: one job per repository, PR and head SHA.
 
-A second delivery of the same commit is a no-op. A newer head SHA for the
-same PR marks the older job superseded and sets its cancel event, whether
-that job is still queued or already running. The file is the dedupe set:
+A second delivery of the same commit is a no-op. A head supersedes an
+in-flight review only when its ``updated_at`` is later than the head this
+PR already accepted. An older redelivery, or a SHA already superseded,
+does not cancel the newer review. The file is the dedupe set:
 it is rewritten with ``os.replace`` and an fsync, mode 0600, so a crash
 does not drop a commit that was already accepted. A job left ``running``
 when the process stopped is loaded back as ``queued`` so that one review
@@ -16,6 +17,7 @@ import json
 import os
 import threading
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 
@@ -88,11 +90,15 @@ class Board:
         self._cv = threading.Condition()
         self._jobs: list[Job] = []
         self._seen: set[tuple[str, int, str]] = set()
+        self._heads: dict[tuple[str, int], tuple[str, datetime | None]] = {}
         self._max_remembered = max_remembered
         if path.exists():
-            self._jobs, self._seen = _load(path)
+            self._jobs, self._seen, self._heads = _load(path)
 
-    def enqueue(self, event: PrEvent) -> Enqueue:
+    def enqueue(self, event: PrEvent, *, at: datetime | None = None) -> Enqueue:
+        """``at`` is the pull request's ``updated_at`` on this delivery.
+        A different head cancels the current review only when ``at`` is
+        later than the head already accepted for that PR."""
         with self._cv:
             key = (event.repo, event.pr_number, event.head_sha)
             if key in self._seen:
@@ -102,6 +108,8 @@ class Board:
                     if job.state is JobState.SUPERSEDED or job.superseded:
                         return Enqueue.STALE
                     return Enqueue.DUPLICATE
+            if not self._newer_than_current(event, at):
+                return Enqueue.STALE
             for job in self._jobs:
                 if (
                     job.event.repo != event.repo
@@ -115,9 +123,21 @@ class Board:
                 if job.state in {JobState.QUEUED, JobState.POST_PENDING}:
                     job.state = JobState.SUPERSEDED
             self._jobs.append(Job(event, JobState.QUEUED))
+            self._heads[(event.repo, event.pr_number)] = (event.head_sha, at)
             self._save()
             self._cv.notify()
             return Enqueue.QUEUED
+
+    def _newer_than_current(self, event: PrEvent, at: datetime | None) -> bool:
+        current = self._heads.get((event.repo, event.pr_number))
+        if current is None:
+            return True
+        _sha, current_at = current
+        if at is None:
+            return False
+        if current_at is None:
+            return True
+        return at > current_at
 
     def claim(self) -> Job | None:
         with self._cv:
@@ -199,6 +219,7 @@ class Board:
             self._path,
             [job.as_dict() for job in self._jobs],
             [_key_text(key) for key in self._seen],
+            [_head_record(key, sha, at) for key, (sha, at) in self._heads.items()],
         )
 
     def _trim(self) -> None:
@@ -215,12 +236,17 @@ class Board:
             self._seen = set(list(self._seen)[-self._max_remembered :])
 
 
-def _store(path: Path, jobs: list[dict[str, object]], seen: list[str]) -> None:
+def _store(
+    path: Path,
+    jobs: list[dict[str, object]],
+    seen: list[str],
+    heads: list[dict[str, object]],
+) -> None:
     make_private_dirs(path.parent)
     tmp = path.with_name(path.name + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        json.dump({"jobs": jobs, "seen": seen}, handle)
+        json.dump({"jobs": jobs, "seen": seen, "heads": heads}, handle)
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(tmp, path)
@@ -231,7 +257,13 @@ def _store(path: Path, jobs: list[dict[str, object]], seen: list[str]) -> None:
         os.close(dir_fd)
 
 
-def _load(path: Path) -> tuple[list[Job], set[tuple[str, int, str]]]:
+def _load(
+    path: Path,
+) -> tuple[
+    list[Job],
+    set[tuple[str, int, str]],
+    dict[tuple[str, int], tuple[str, datetime | None]],
+]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -246,7 +278,9 @@ def _load(path: Path) -> tuple[list[Job], set[tuple[str, int, str]]]:
         if job.superseded:
             job.cancel.set()
         loaded.append(job)
-    return loaded, _seen(raw.get("seen") if isinstance(raw, dict) else None, path)
+    seen = _seen(raw.get("seen") if isinstance(raw, dict) else None, path)
+    heads = _heads(raw.get("heads") if isinstance(raw, dict) else None, loaded, path)
+    return loaded, seen, heads
 
 
 def _job(item: object, path: Path) -> Job:
@@ -320,3 +354,68 @@ def _parse_key(item: object) -> tuple[str, int, str] | None:
     except InvalidEventError:
         return None
     return event.repo, event.pr_number, event.head_sha
+
+
+def _head_record(
+    key: tuple[str, int], sha: str, at: datetime | None
+) -> dict[str, object]:
+    return {
+        "repo": key[0],
+        "pr": key[1],
+        "sha": sha,
+        "at": None if at is None else at.isoformat(),
+    }
+
+
+def _heads(
+    raw: object, jobs: list[Job], path: Path
+) -> dict[tuple[str, int], tuple[str, datetime | None]]:
+    if raw is None:
+        return _inferred_heads(jobs)
+    if not isinstance(raw, list):
+        raise QueueError(f"review queue {path} holds a heads list that is not a list")
+    heads: dict[tuple[str, int], tuple[str, datetime | None]] = {}
+    for item in raw:
+        parsed = _head(item, path)
+        heads[(parsed[0], parsed[1])] = (parsed[2], parsed[3])
+    return heads
+
+
+def _head(item: object, path: Path) -> tuple[str, int, str, datetime | None]:
+    if not isinstance(item, dict):
+        raise QueueError(f"review queue {path} holds a head that is not an object")
+    try:
+        event = PrEvent(
+            repo=item.get("repo", ""),
+            pr_number=item.get("pr", 0),
+            head_sha=item.get("sha", ""),
+        )
+    except InvalidEventError as exc:
+        raise QueueError(
+            f"review queue {path} holds a head that cannot be read"
+        ) from exc
+    raw_at = item.get("at")
+    if raw_at is None:
+        return event.repo, event.pr_number, event.head_sha, None
+    if not isinstance(raw_at, str):
+        raise QueueError(f"review queue {path} holds a head time that is not text")
+    try:
+        parsed = datetime.fromisoformat(raw_at)
+    except ValueError as exc:
+        raise QueueError(
+            f"review queue {path} holds a head time that is not a time"
+        ) from exc
+    if parsed.tzinfo is None:
+        raise QueueError(f"review queue {path} holds a head time with no timezone")
+    return event.repo, event.pr_number, event.head_sha, parsed
+
+
+def _inferred_heads(
+    jobs: list[Job],
+) -> dict[tuple[str, int], tuple[str, datetime | None]]:
+    heads: dict[tuple[str, int], tuple[str, datetime | None]] = {}
+    for job in jobs:
+        if job.state is JobState.SUPERSEDED or job.superseded:
+            continue
+        heads[(job.event.repo, job.event.pr_number)] = (job.event.head_sha, None)
+    return heads

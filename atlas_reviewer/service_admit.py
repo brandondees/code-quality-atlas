@@ -15,6 +15,7 @@ import hmac
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from atlas_reviewer.domain import InvalidEventError, PrEvent
@@ -29,6 +30,7 @@ _DIGEST_CHARS = 64
 @dataclass(frozen=True)
 class Admitted:
     event: PrEvent
+    updated_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -99,4 +101,18 @@ def admit(payload: Mapping[str, Any], allowlist: frozenset[str]) -> Admitted | I
         event = PrEvent(repo=repo, pr_number=number, head_sha=sha)
     except InvalidEventError:
         return Ignored("event")
-    return Admitted(event)
+    return Admitted(event, _updated_at(pull.get("updated_at")))
+
+
+def _updated_at(raw: object) -> datetime | None:
+    """The pull request's ``updated_at``. A missing or naive value is
+    unknown, and an unknown time does not cancel a head already accepted."""
+    if not isinstance(raw, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed

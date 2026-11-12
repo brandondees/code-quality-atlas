@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import UTC, datetime
 from http.client import HTTPConnection
 from pathlib import Path
 
@@ -41,7 +42,15 @@ REPORT = ReviewReport(
 )
 
 
-def _body(action="opened", *, draft=False, repo=REPO, number=7, sha=SHA_A):
+def _body(
+    action="opened",
+    *,
+    draft=False,
+    repo=REPO,
+    number=7,
+    sha=SHA_A,
+    updated_at="2026-11-12T20:00:00Z",
+):
     return json.dumps(
         {
             "action": action,
@@ -49,6 +58,7 @@ def _body(action="opened", *, draft=False, repo=REPO, number=7, sha=SHA_A):
             "pull_request": {
                 "number": number,
                 "draft": draft,
+                "updated_at": updated_at,
                 "head": {"sha": sha},
                 "base": {"repo": {"full_name": repo}},
             },
@@ -174,9 +184,11 @@ def test_a_moved_head_supersedes_the_old_review(tmp_path):
 
     worker = _worker(board, runner, publish, tmp_path)
     worker.start()
-    assert board.enqueue(PrEvent(REPO, 7, SHA_A)) is Enqueue.QUEUED
+    earlier = datetime(2026, 11, 12, 19, 0, tzinfo=UTC)
+    later = datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+    assert board.enqueue(PrEvent(REPO, 7, SHA_A), at=earlier) is Enqueue.QUEUED
     assert started.wait(2)
-    assert board.enqueue(PrEvent(REPO, 7, SHA_B)) is Enqueue.QUEUED
+    assert board.enqueue(PrEvent(REPO, 7, SHA_B), at=later) is Enqueue.QUEUED
     deadline = time.monotonic() + 2
     while time.monotonic() < deadline and posted != [SHA_B]:
         time.sleep(0.01)
@@ -184,7 +196,58 @@ def test_a_moved_head_supersedes_the_old_review(tmp_path):
     assert posted == [SHA_B]
     assert (SHA_A, JobState.SUPERSEDED) in board.states()
     assert (SHA_B, JobState.DONE) in board.states()
-    assert board.enqueue(PrEvent(REPO, 7, SHA_A)) is Enqueue.STALE
+    assert board.enqueue(PrEvent(REPO, 7, SHA_A), at=earlier) is Enqueue.STALE
+
+
+def test_an_older_redelivery_does_not_cancel_the_newer_head(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    started = threading.Event()
+    older_arrived = threading.Event()
+    posted: list[str] = []
+    earlier = datetime(2026, 11, 12, 19, 0, tzinfo=UTC)
+    later = datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+
+    def runner(event, cancel):
+        if event.head_sha == SHA_B:
+            started.set()
+            assert older_arrived.wait(2)
+            assert not cancel.is_set()
+            return ReviewRun(True, REPORT)
+        return ReviewRun(True, REPORT)
+
+    def publish(event, report):
+        posted.append(event.head_sha)
+
+    worker = _worker(board, runner, publish, tmp_path)
+    worker.start()
+    assert board.enqueue(PrEvent(REPO, 7, SHA_B), at=later) is Enqueue.QUEUED
+    assert started.wait(2)
+    assert board.enqueue(PrEvent(REPO, 7, SHA_A), at=earlier) is Enqueue.STALE
+    older_arrived.set()
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline and posted != [SHA_B]:
+        time.sleep(0.01)
+    worker.stop()
+    assert posted == [SHA_B]
+    assert (SHA_B, JobState.DONE) in board.states()
+    assert SHA_A not in [sha for sha, _state in board.states()]
+    reloaded = Board(tmp_path / "queue.json")
+    assert reloaded.enqueue(PrEvent(REPO, 7, SHA_A), at=earlier) is Enqueue.STALE
+    config = _config(tmp_path)
+    hooked = Board(tmp_path / "hook.json")
+    assert (
+        _deliver(
+            config, hooked, _body(sha=SHA_B, updated_at="2026-11-12T20:00:00Z")
+        ).body
+        == b"queued\n"
+    )
+    assert (
+        _deliver(
+            config, hooked, _body(sha=SHA_A, updated_at="2026-11-12T19:00:00Z")
+        ).body
+        == b"stale\n"
+    )
+    assert hooked.states() == ((SHA_B, JobState.QUEUED),)
 
 
 def test_a_failed_review_is_recorded_and_not_published(tmp_path):

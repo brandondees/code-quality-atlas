@@ -136,7 +136,7 @@ def handle_delivery(
         return HttpResult(202, b"ignored\n", "ignored:body")
     decision = admit(payload, config.allowlist)
     if isinstance(decision, Admitted):
-        result = board.enqueue(decision.event)
+        result = board.enqueue(decision.event, at=decision.updated_at)
         return HttpResult(202, f"{result.value}\n".encode(), result.value)
     return HttpResult(202, b"ignored\n", f"ignored:{decision.reason}")
 
