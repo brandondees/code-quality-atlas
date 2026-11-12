@@ -2,12 +2,16 @@
 
 **Status: direction accepted (D34 in
 [`open-questions.md`](open-questions.md), 2026-11-08); phases 1 and 2 are
-built offline (D38, D39), the rest is not built.**
+merged and phase 3 is built offline (D38, D39, D40), the rest is not built.**
 The owner accepted the recommendations below as proposed ("I can roll with
 recommendations as proposed for now"). Phase 1 (full PR conversation and
-branch-wide CI, D38) and phase 2 (the read-only tool bridge with Option B
-staging, D39) are on draft PRs stacked on #607, tested against fixtures
-only; nothing calls the bridge yet. Every budget number is still pending his decision; see [Open numeric decisions](#open-numeric-decisions-pending-brandon).
+branch-wide CI, D38, #612) and phase 2 (the read-only tool bridge with Option B
+staging, D39, #614) are merged, tested against fixtures only. Phase 3's
+offline half (the controller loop and one attested lens, D40) is on draft
+PRs, tested with the real bridge over a fixture repository and a scripted
+model; nothing calls it from the CLI, and no live run has been made. Every
+budget number is still pending his decision, and agentic mode refuses to
+run until each is set; see [Open numeric decisions](#open-numeric-decisions-pending-brandon).
 This doc carries no live-run approval. No model call, Sprite run, merge or
 deploy was made to write it.
 
@@ -245,7 +249,7 @@ owner at every phase.
 | 0 | Land #601-#607 as the one-shot reviewer and fallback, with the D33 note (#608). No agentic scope in those PRs. | none |
 | 1 | Full PR conversation (about 64 KiB, omissions named) and branch-wide CI labelled by SHA, in the shared evidence code. Fixture-tested. Built offline (D38), stacked on #607 with the owner's go-ahead rather than after the stack merged. | stack merged |
 | 2 | The tool bridge, offline: closed git tools (diff, list, read range, grep) against `FakeSprites` and a fixture repo, with argument rejection, byte and time caps, and git hardening. Option B staging. Built offline (D39), stacked on phase 1 with the owner's go-ahead. | phase 1 merged |
-| 3 | The controller loop and one attested lens, offline first: body injection, the attestation ledger, quote checks, retry and escalate. Then one owner-approved live run, compared with the one-shot draft on the same head. | offline work: none. Live run: a provisional budget Brandon approves |
+| 3 | The controller loop and one attested lens, offline first: body injection, the attestation ledger, quote checks, retry and escalate. Offline half built (D40): `lens_loop.py`, `coordinator.py`, `attestation.py`, `quotes.py`, `lens_contract.py`, with a mechanical synthesis (no merge call for one lens) and no CLI entry point. Then one owner-approved live run, compared with the one-shot draft on the same head; that needs a tool-calling model adapter, which is not built. | offline work: none. Live run: a provisional budget Brandon approves |
 | 4 | Triage mode: the four critical lenses, pool size 1, ID-reconciled merge, coverage never claimed complete unless the ledger shows it. | phase 3 measured |
 | 5 | The baked toolchain: the first tool set in the Sprite image, with summarized hits routed to lenses. | image build approved |
 | 6 | Measured pilots on owner-labelled PRs, scored for precision, recall and coverage honesty. Then review and comprehensive depths, a concurrency probe before any pool size above 1, Option A history staging, and the decision on retiring the one-shot path. | phases 4-5 done |
@@ -254,7 +258,11 @@ owner at every phase.
 
 Brandon has set none of these yet; a working default stands in where one
 is named. Until each is set, the phase that needs it
-does not run live.
+does not run live. The five phase 3 needs are fields of
+`lens_loop.AgenticLimits` (`reservation_usd`, `max_calls`, `max_turns`,
+`lens_wall_s`, `review_wall_s`). All are unset by default, and
+`coordinator.review_lens` refuses before any model, runner or ledger work
+until every one is set, naming each one still unset.
 
 | Decision | Current state | Note |
 |---|---|---|
@@ -266,8 +274,8 @@ does not run live.
 | PR conversation budget split | about 64 KiB total, working default | The body and comment caps within it. |
 | Branch-wide CI budget | check runs at up to 20 other commits of the PR, working default (`IngestConfig.max_ci_commits`) | How many commits back. Each commit's list keeps the client's page cap; jobs, logs and artifacts are still read at the head SHA only, under the one-shot caps. |
 | Per-tool timeout and output caps for the baked toolchain | none | A timeout is a coverage gap. |
-| Lens worker pool size | 1 | Above 1 only after a concurrency probe. The research note suggests at most 4. |
-| Retries per failed attestation | 1, recommended | Then escalate. |
+| Lens worker pool size | 1; the only value phase 3 accepts | Above 1 only after a concurrency probe. The research note suggests at most 4. |
+| Retries per failed attestation | 1, recommended; the phase 3 default | Then escalate. A failed quote, a reply outside the finding contract and an abandoned attempt are retried the same way (D40). |
 | Pilot set and the bar for retiring one-shot | none | Which PRs, how many, and the precision, recall and coverage results agentic drafts must reach. |
 
 Two non-numeric decisions stay open as well. The first is a per-lens model

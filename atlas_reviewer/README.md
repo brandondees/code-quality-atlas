@@ -682,8 +682,8 @@ interpreter is chosen before they exist. Every other binary comes from
 
 ## Read-only tool bridge (offline, D39)
 
-`bridge.py` is the tool surface agentic lens loops will use (D31, D34).
-Nothing calls it yet, and it has only run against fakes. `run_bridge`
+`bridge.py` is the tool surface the agentic lens loop uses (D31, D34, D40).
+It has only run against fakes. `run_bridge`
 stages the sources on a fresh disposable runner (`runner.run_session`, the
 same create, deny-all, verify and destroy lifecycle as a review) and hands
 a `Bridge` to the caller.
@@ -740,8 +740,60 @@ a `Bridge` to the caller.
   is redacted. Every call is a ledger record, and telemetry names only the
   tool.
 
-Not built yet: `log`, `blame`, `run_check`, fetching the default-branch
-tarball, and the controller loop that calls the bridge (phase 3).
+Not built yet: `log`, `blame`, `run_check` and fetching the default-branch
+tarball.
+
+## Agentic lens loop (offline, D40)
+
+`coordinator.review_lens` reviews a PR head with one lens through the
+bridge. It is not on the CLI, and it has run only against `LocalSprites`
+and a scripted model (`fakes.ScriptedLensModel`). There is no live
+tool-calling model adapter yet.
+
+- **Limits.** `lens_loop.AgenticLimits` holds five numbers pending the
+  owner: `reservation_usd`, `max_calls`, `max_turns`, `lens_wall_s` and
+  `review_wall_s`. None has a default. `resolve` raises
+  `LimitsUnsetError`, naming each unset field, before any model, runner or
+  ledger work. `retries` is 1 and `pool_size` must be 1.
+- **The prompt.** The system prompt is the controller's instructions, then
+  the whole lens `body.md` between markers that carry its SHA-256, then
+  `synthesis.md`'s whole *Finding contract* section. Nothing is cut. The
+  first user turn is the operator's subject, then any context the caller
+  passes and the risk-ordered changed-file list, each fenced with the
+  review's nonce. It carries no diff text: the lens reads that through the
+  tools, and every tool result comes back fenced.
+- **One attempt** (`lens_loop.run_attempt`). Delivery is checked before the
+  first model call. The attempt ends at the final reply, or when one of
+  these cuts it short: the turn cap, the call cap, the dollar reservation
+  (each call is reserved at the model's worst case, then settled at its
+  reported cost), either wall clock, a failed model call, or the runner's
+  deadline during a tool call.
+- **Checking the reply.** The reply must meet the finding contract
+  (`lens_contract.py`) and name the lens and its body digest. Each quote is
+  checked against the head file at the cited lines, or the diff's removed
+  lines (`quotes.py`).
+- **Partial results.** No findings counts as clean only after a
+  `diff_file` page or a HEAD `read_file` of a changed file. A timed-out,
+  unavailable or over-limit tool call makes the lens partial.
+- **Ledger and retries** (`attestation.py`). Each attempt is fsynced to an
+  append-only ledger when it starts and again when it ends, keyed by
+  repository, PR, head SHA, lens and body digest. A failed attestation, an
+  unparsed reply, a failed quote or an abandoned attempt is retried once
+  with the body injected again; a second one escalates. A crash leaves an
+  abandoned attempt that counts as used. A lens already settled for this
+  head and body is reused without a runner.
+- **The draft** (`coordinator.render_draft`).
+  - **Status line.** The first line is a status line: `"mode": "agentic"`,
+    `coverage_complete`, and the lens counts by state.
+  - **Coverage.** Coverage is complete only if every selected lens settled
+    clean. Otherwise a REVIEW INCOMPLETE warning follows, and the review
+    never approves.
+  - **Findings.** Verified findings carry minted `L<lens>-F<n>` IDs and are
+    ranked by severity. The verdict comes from verified, introduced defects
+    only. Unverified findings are listed apart and never counted. Possible
+    committed secrets that the tools read are controller findings.
+  - **Scrubbing.** Every model-written value is redacted, scrubbed of
+    flagged values, and quoted as data.
 
 ## Module layout
 
@@ -774,7 +826,9 @@ tarball, and the controller loop that calls the bridge (phase 3).
 | `lens_contract.py` | a lens's final reply under the finding contract, parsed strictly into typed findings (`parse_reply`); refusals never echo model text | no |
 | `quotes.py` | check each finding's quoted evidence against the head file at the cited lines, or the diff's removed lines (`check_quote`) | no |
 | `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) | writes the ledger file |
-| `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`) | no |
+| `lens_loop.py` | the agentic limits (no live defaults), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the lens system prompt, the spend tracker, one lens attempt (`run_attempt`) | via `Bridge`, `LensModel` |
+| `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft | via ports, the ledger |
+| `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`); the agentic `LensModel` port is in `lens_loop.py` | no |
 | `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → resolve interpreter → upload → unpack → tools → destroy), `probe_runner`, `run_session` (a `Session` on the same lifecycle), the one exec wrapper (`exec_argv`, minimal `env -i` environment) | via `SpritesApi` |
 | `interpreter.py` | the resolve script, `choose_python` (accepts only the pyenv-versions and `/usr/bin/python3` path shapes), `{python}` substitution, the probe-only diagnostic scripts and output summary | no |
 | `gather.py` | CI evidence labelled by SHA: check runs at the head and other PR commits, workflow runs, head-SHA job logs and artifact contents, omissions | via `GitHubReader` |
