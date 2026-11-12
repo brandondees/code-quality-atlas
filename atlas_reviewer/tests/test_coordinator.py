@@ -572,6 +572,21 @@ def test_a_clean_outcome_without_a_file_count_cannot_approve():
     assert "no lens selected" not in headline
 
 
+def test_unread_paths_block_approval_even_when_the_outcome_was_recorded_clean():
+    outcome = AttemptOutcome(
+        Attestation.ATTESTED,
+        unread=("src/a.py", "auth/session.py"),
+        changed_files=2,
+    )
+    result = synthesize([lens_result(outcome)])
+    assert not result.coverage_complete
+    assert result.proposed_event is ReviewEvent.APPROVE
+    assert result.event is ReviewEvent.COMMENT
+    headline = render_draft(result, Redactor()).splitlines()[2]
+    assert "Every changed file's diff" not in headline
+    assert "unread files" in headline
+
+
 def test_the_status_line_is_the_drafts_first_line_and_only_controller_values():
     result = synthesize(
         [lens_result(AttemptOutcome(Attestation.ATTESTED, changed_files=1))]
