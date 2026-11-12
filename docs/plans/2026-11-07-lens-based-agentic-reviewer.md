@@ -5,7 +5,8 @@
 D34 (2026-11-08) accepted the direction and the phased plan in
 [`../agentic-reviewer.md`](../agentic-reviewer.md). This doc stays the
 detailed design for the loop, the bridge and the finding checks. Its
-budget figures remain estimates until the owner sets agentic numbers.
+budget figures remain estimates until the owner sets agentic numbers,
+apart from the per-review reservation (D43).
 D43 (2026-11-12) sets the per-review reservation: it stays $5, and the
 byte-bound worst-case check stays.
 D34 also replaces this doc's rule that every bridge result is redacted:
