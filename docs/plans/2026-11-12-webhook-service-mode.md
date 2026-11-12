@@ -63,19 +63,19 @@ in time. Its compute price, from Fly's pricing page for `iad` on
 2026-11-12, is the `shared-cpu-1x` with 1 GB row: $6.70 per 30 days. The
 queue, the post ledger, and `service.jsonl` are on a 1 GB volume at
 `/data` ($0.15 per month on that same page), so a restart keeps them.
-The queue keeps at most 2,000 job records and 20,000 dedupe keys, and it
-never drops a pull request's current head. A run directory is removed
+The queue refuses a new job when 2,000 are already queued or running.
+The dedupe list keeps every current head, so it can grow past 20,000 by
+one key per pull request. A run directory is removed
 when its job ends. A key is about 80 bytes, so 20,000 keys are about
 1.6 MB, which fits the volume. The Machine's root disk does not keep
 this state. The runbook records the citations.
 
 ## Open
 
-A failed review of a SHA is not started again when GitHub redelivers that
-same delivery: the dedupe key is the SHA, and a duplicate is a no-op. A
-process restart requeues a job that was `running` when the process
-stopped. Clearing a failed SHA so it can be reviewed again is not built.
-A new commit is a new review.
+A finished SHA stays a duplicate. A failed SHA can be queued again,
+because GitHub does not redeliver a delivery that was already
+acknowledged. A process restart requeues a job that was `running` when
+the process stopped. A new commit is a new review.
 
 The allowlist is enforced here, and the token is still one installation
 id. A repository on another account needs a different installation, which

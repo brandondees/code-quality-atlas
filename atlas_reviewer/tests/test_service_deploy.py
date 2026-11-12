@@ -31,6 +31,9 @@ def test_the_service_app_stays_up_and_the_one_off_publishes_nothing():
     assert vm["size"] == "shared-cpu-1x"
     assert vm["memory"] == "1024mb"
     assert SERVICE["env"]["ATLAS_REVIEWER_STATE_DIR"] == "/data"
+    assert SERVICE["env"]["ATLAS_SERVICE_HOST"] == "0.0.0.0"
+    assert "ATLAS_SERVICE_PORT" not in SERVICE["env"]
+    assert http["internal_port"] == 8080
     mounts = SERVICE["mounts"]
     assert mounts["source"] == "atlas_reviewer_state"
     assert mounts["destination"] == "/data"
@@ -88,6 +91,7 @@ def test_the_runbook_names_the_secret_the_org_and_the_webhook():
         "$6.70",
         "atlas_reviewer_state",
         "chown 10001:10001 /data",
+        "deletes the app's volumes",
         "Do not `fly deploy` it for the webhook",
     ):
         assert text in flat, text
@@ -130,3 +134,25 @@ def test_the_real_module_exits_2_when_no_atlas_env_is_set():
     )
     assert proc.returncode == 2
     assert b"webhook secret" in proc.stderr
+
+
+def test_a_non_8080_port_is_refused_and_the_toml_checks_8080():
+    """The Fly health check and ``internal_port`` are read from the file.
+    A process told to listen elsewhere exits before it binds."""
+    assert SERVICE["http_service"]["internal_port"] == 8080
+    assert SERVICE["http_service"]["checks"][0]["path"] == "/health"
+    env = {
+        key: value for key, value in os.environ.items() if not key.startswith("ATLAS_")
+    }
+    env["ATLAS_GITHUB_WEBHOOK_SECRET"] = "x" * 16
+    env["ATLAS_SERVICE_PROVIDER"] = "offline"
+    env["ATLAS_SERVICE_PORT"] = "9090"
+    proc = subprocess.run(
+        [sys.executable, "-m", "atlas_reviewer.service"],
+        env=env,
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+    )
+    assert proc.returncode == 2
+    assert b"8080" in proc.stderr

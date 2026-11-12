@@ -13,8 +13,12 @@ primary_region = "iad"
 
 [env]
   # The volume below. The queue and the post ledger live here, so a
-  # restart does not review the same commit twice or forget a post.
+  # restart does not forget a post. The process default is loopback;
+  # Fly's proxy is not on loopback, so the service listens on every
+  # interface. The port is 8080, the same value as internal_port. The
+  # process refuses any other ATLAS_SERVICE_PORT.
   ATLAS_REVIEWER_STATE_DIR = "/data"
+  ATLAS_SERVICE_HOST = "0.0.0.0"
 
 [http_service]
   internal_port = 8080
