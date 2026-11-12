@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -22,6 +23,7 @@ from pathlib import Path
 
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
+from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.service_admit import (
     EVENT_HEADER,
@@ -39,6 +41,7 @@ from atlas_reviewer.service_run import (
     RunConfig,
     make_runner,
 )
+from atlas_reviewer.stops import install_interrupts
 from atlas_reviewer.telemetry import ERROR, Telemetry
 
 DEFAULT_REPO = "brandondees/code-quality-atlas"
@@ -46,7 +49,14 @@ DEFAULT_REPO = "brandondees/code-quality-atlas"
 # review still has the controller's own call and cost caps.
 MAX_CONCURRENCY = 32
 MAX_BODY_BYTES = 5_000_000
+MAX_POST_ATTEMPTS = 5
+# A failed post is tried again on this schedule, then given up. The waits
+# stop a dead GitHub endpoint from turning into a tight loop. They are not
+# a cost cap: the review itself has already finished.
+_POST_BACKOFF_S = (5.0, 15.0, 30.0, 60.0, 120.0)
 _POLL_S = 0.2
+_REQUEST_TIMEOUT_S = 20.0
+_MAX_HTTP_HANDLERS = 16
 
 Publisher = Callable[[PrEvent, ReviewReport], None]
 Runner = Callable[[PrEvent, threading.Event], ReviewRun]
@@ -93,6 +103,7 @@ class ServiceConfig:
 class HttpResult:
     status: int
     body: bytes
+    detail: str = ""
 
 
 def handle_delivery(
@@ -112,22 +123,22 @@ def handle_delivery(
     if method != "POST" or route != "/webhook":
         return HttpResult(404, b"not found\n")
     if len(body) > config.max_body_bytes:
-        return HttpResult(413, b"body too large\n")
+        return HttpResult(413, b"body too large\n", "body too large")
     if not signature_matches(body, _header(headers, SIGNATURE_HEADER), config.secret):
-        return HttpResult(401, b"bad signature\n")
+        return HttpResult(401, b"bad signature\n", "bad signature")
     event_name = _header(headers, EVENT_HEADER)
     if event_name == "ping":
-        return HttpResult(200, b"pong\n")
+        return HttpResult(200, b"pong\n", "ping")
     if event_name != "pull_request":
-        return HttpResult(202, b"ignored\n")
+        return HttpResult(202, b"ignored\n", "ignored:event")
     payload = parse_delivery(body)
     if payload is None:
-        return HttpResult(202, b"ignored\n")
+        return HttpResult(202, b"ignored\n", "ignored:body")
     decision = admit(payload, config.allowlist)
     if isinstance(decision, Admitted):
         result = board.enqueue(decision.event)
-        return HttpResult(202, f"{result.value}\n".encode())
-    return HttpResult(202, b"ignored\n")
+        return HttpResult(202, f"{result.value}\n".encode(), result.value)
+    return HttpResult(202, b"ignored\n", f"ignored:{decision.reason}")
 
 
 def _header(headers: Mapping[str, str], name: str) -> str | None:
@@ -147,6 +158,7 @@ class Worker:
         publisher: Publisher | None = None,
         concurrency: int = 1,
         state_root: Path | None = None,
+        now: Callable[[], float] | None = None,
     ) -> None:
         self._board = board
         self._runner = runner
@@ -154,19 +166,21 @@ class Worker:
         self._publisher = publisher
         self._concurrency = concurrency
         self._state_root = state_root or Path(".atlas-reviewer-state")
+        self._now = now or time.time
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
 
     def start(self) -> None:
         for index in range(self._concurrency):
-            thread = threading.Thread(
-                target=self._loop, name=f"atlas-review-{index}", daemon=True
-            )
+            thread = threading.Thread(target=self._loop, name=f"atlas-review-{index}")
             thread.start()
             self._threads.append(thread)
 
-    def stop(self, timeout: float = 5.0) -> None:
+    def stop(self, timeout: float = 30.0) -> None:
+        """Cancel an in-flight review so its child can delete the Sprite,
+        then wait for the workers. ``timeout`` is per worker thread."""
         self._stop.set()
+        self._board.cancel_active()
         self._board.wake()
         for thread in self._threads:
             thread.join(timeout=timeout)
@@ -180,7 +194,7 @@ class Worker:
 
     def _loop(self) -> None:
         while not self._stop.is_set():
-            self._board.wait_for_work(_POLL_S, self._stop)
+            self._board.wait_for_work(_POLL_S, self._stop, self._now())
             if self._stop.is_set():
                 return
             self.run_one()
@@ -189,7 +203,7 @@ class Worker:
     def _retry_post(self) -> None:
         if self._publisher is None:
             return
-        job = self._board.claim_post()
+        job = self._board.claim_post(self._now())
         if job is None:
             return
         self._publish_saved(job)
@@ -232,14 +246,7 @@ class Worker:
         try:
             self._publisher(job.event, report)
         except Exception as exc:  # noqa: BLE001 -- a post failure must not post again here
-            self._board.finish(job, JobState.POST_PENDING)
-            self._telemetry.record(
-                "service",
-                "review post failed",
-                _fields(job.event),
-                status=ERROR,
-                error=f"{type(exc).__name__}: {exc}",
-            )
+            self._defer_post(job, f"{type(exc).__name__}: {exc}")
             return
         self._board.finish(job, JobState.DONE)
         self._telemetry.record("service", "review posted", _fields(job.event))
@@ -263,16 +270,36 @@ class Worker:
         try:
             report = summarize_draft(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError) as exc:
-            self._board.finish(job, JobState.POST_PENDING)
+            self._defer_post(job, f"{type(exc).__name__}: {exc}")
+            return
+        self._publish(job, report)
+
+    def _defer_post(self, job: Job, error: str) -> None:
+        """Try the post again later, up to ``MAX_POST_ATTEMPTS``. After
+        that the review stays unpublished and the job is failed, so a
+        dead endpoint cannot spin the worker."""
+        job.attempts += 1
+        fields = _fields(job.event)
+        if job.attempts >= MAX_POST_ATTEMPTS:
+            self._board.finish(job, JobState.FAILED)
             self._telemetry.record(
                 "service",
                 "review post failed",
-                _fields(job.event),
+                {**fields, "attempts": job.attempts},
                 status=ERROR,
-                error=f"{type(exc).__name__}: {exc}",
+                error=f"post attempts exhausted: {error}",
             )
             return
-        self._publish(job, report)
+        delay = _POST_BACKOFF_S[min(job.attempts - 1, len(_POST_BACKOFF_S) - 1)]
+        job.retry_at = self._now() + delay
+        self._board.finish(job, JobState.POST_PENDING)
+        self._telemetry.record(
+            "service",
+            "review post failed",
+            {**fields, "attempts": job.attempts, "retry_s": delay},
+            status=ERROR,
+            error=error,
+        )
 
 
 def _fields(event: PrEvent) -> dict[str, str | int]:
@@ -281,14 +308,29 @@ def _fields(event: PrEvent) -> dict[str, str | int]:
 
 class _Handler(BaseHTTPRequestHandler):
     server: ReviewServer
+    timeout = _REQUEST_TIMEOUT_S
 
     def do_GET(self) -> None:
         self._respond(b"")
 
     def do_POST(self) -> None:
+        if not self.server.slots.acquire(blocking=False):
+            self._send(429, b"busy\n")
+            self.server.log("atlas-reviewer: http 429 POST /webhook busy")
+            return
+        try:
+            self._read_post()
+        finally:
+            self.server.slots.release()
+
+    def _read_post(self) -> None:
         raw = self.headers.get("Content-Length")
         if raw is None or not raw.isascii() or not raw.isdigit():
             self._send(411, b"length required\n")
+            return
+        # Longer than the decimal length of the body cap. Reject before int().
+        if len(raw) > len(str(self.server.config.max_body_bytes)):
+            self._send(413, b"body too large\n")
             return
         length = int(raw)
         if length > self.server.config.max_body_bytes:
@@ -311,8 +353,11 @@ class _Handler(BaseHTTPRequestHandler):
             self.server.board,
         )
         self._send(result.status, result.body)
-        route = self.path.split("?", 1)[0]
-        self.server.log(f"atlas-reviewer: http {result.status} {self.command} {route}")
+        route = self.path.split("?", 1)[0][:200]
+        detail = f" {result.detail}" if result.detail else ""
+        self.server.log(
+            f"atlas-reviewer: http {result.status} {self.command} {route}{detail}"
+        )
 
     def _send(self, status: int, body: bytes) -> None:
         self.send_response(status)
@@ -333,6 +378,7 @@ class ReviewServer(ThreadingHTTPServer):
         self.config = config
         self.board = board
         self.log = log
+        self.slots = threading.BoundedSemaphore(_MAX_HTTP_HANDLERS)
 
 
 def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
@@ -357,6 +403,17 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
     )
 
 
+def _state_is_writable(path: Path) -> bool:
+    try:
+        make_private_dirs(path)
+        probe = path / ".writable"
+        fd = os.open(probe, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.close(fd)
+    except OSError:
+        return False
+    return True
+
+
 def serve(
     config: ServiceConfig,
     env: Mapping[str, str],
@@ -365,6 +422,10 @@ def serve(
     publisher: Publisher | None = None,
     log: Callable[[str], None] = lambda line: print(line, file=sys.stderr),
 ) -> int:
+    install_interrupts()
+    if not _state_is_writable(config.state_dir):
+        log(f"atlas-reviewer: state dir {config.state_dir} is not writable")
+        return 2
     board = Board(config.state_dir / "queue.json")
     redactor = Redactor(known_secrets=(config.secret,))
     telemetry = Telemetry(
@@ -414,3 +475,7 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
     except OSError as exc:
         print(f"atlas-reviewer: {exc}", file=sys.stderr)
         return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

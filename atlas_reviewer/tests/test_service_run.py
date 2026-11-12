@@ -8,6 +8,8 @@ from pathlib import Path
 
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.service_run import (
+    APP_KEY_ENV,
+    READ_TOKEN_ENV,
     WEBHOOK_SECRET_ENV,
     ReviewRun,
     RunConfig,
@@ -46,6 +48,39 @@ Not reviewed in full: `"src/a.py"`
 
 - reserved $1.00 actual $0.10
 """
+
+
+def test_the_child_does_not_receive_the_app_private_key():
+    env = child_env(
+        {
+            WEBHOOK_SECRET_ENV: "s" * 16,
+            APP_KEY_ENV: "pem-secret-value",
+            "ATLAS_SPRITES_TOKEN": "sprite",
+        },
+        token="ghs_read",
+    )
+    assert APP_KEY_ENV not in env
+    assert WEBHOOK_SECRET_ENV not in env
+    assert env[READ_TOKEN_ENV] == "ghs_read"
+    assert env["ATLAS_SPRITES_TOKEN"] == "sprite"
+
+
+def test_a_bad_app_id_does_not_start_the_child_or_echo_the_key(tmp_path):
+    started: list[object] = []
+
+    def popen(*_args, **_kwargs):
+        started.append(True)
+        return _Proc(0)
+
+    runner = make_runner(
+        RunConfig("offline", False, tmp_path),
+        {APP_KEY_ENV: "super-secret-pem", "ATLAS_GITHUB_APP_ID": "nope"},
+        popen=popen,
+    )
+    result = runner(PrEvent(REPO, 7, SHA), threading.Event())
+    assert started == []
+    assert result.ok is False
+    assert "super-secret-pem" not in result.error
 
 
 def test_the_review_command_is_the_cli_and_drops_the_webhook_secret(tmp_path):

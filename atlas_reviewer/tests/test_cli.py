@@ -1601,6 +1601,37 @@ def test_a_missing_is_byok_field_stops_the_review(tmp_path, monkeypatch):
     assert held["provider"].budget.calls[0].actual_usd is None
 
 
+def test_a_read_token_replaces_the_app_private_key(tmp_path):
+    from argparse import Namespace
+
+    from atlas_reviewer.clock import SystemClock
+    from atlas_reviewer.domain import PrEvent
+    from atlas_reviewer.providers import OfflineProvider
+    from atlas_reviewer.telemetry import Telemetry
+
+    event = PrEvent("brandondees/code-quality-atlas", 7, "a" * 40)
+    env = {
+        cli.ENV_INSTALLATION_TOKEN: "ghs_readonly_token_value",
+        cli.ENV_SPRITES_TOKEN: "sprite-token-value",
+    }
+    wiring = cli._live_wiring(
+        Namespace(
+            include_issues=False,
+            state_dir=tmp_path,
+            sprites_factory=lambda _env: FakeSprites(),
+        ),
+        env,
+        event,
+        OfflineProvider(),
+        Telemetry(SystemClock()),
+        "cqa-rev-pr7-aaaaaaaaaaaa-deadbeef",
+        cli._Credentials(env),
+    )
+    assert wiring.deps.github is not None
+    scrubbed = wiring.deps.redactor("ghs_readonly_token_value").text
+    assert "ghs_readonly_token_value" not in scrubbed
+
+
 def test_a_review_whose_model_call_failed_exits_incomplete_and_never_approves(
     tmp_path, monkeypatch
 ):

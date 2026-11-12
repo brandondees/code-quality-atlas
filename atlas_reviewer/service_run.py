@@ -30,6 +30,11 @@ from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.verdict import parse_status
 
 WEBHOOK_SECRET_ENV = "ATLAS_GITHUB_WEBHOOK_SECRET"
+APP_KEY_ENV = "ATLAS_GITHUB_APP_PRIVATE_KEY"
+READ_TOKEN_ENV = "ATLAS_GITHUB_INSTALLATION_TOKEN"
+# The child reviews with a read-only installation token. The App private
+# key stays in the parent, so the child cannot mint a write token.
+_CHILD_DROPPED = frozenset({WEBHOOK_SECRET_ENV, APP_KEY_ENV})
 # The CLI's review exits. 4 is incomplete file coverage and 5 is a finished
 # review that requests changes. Both still wrote a draft.
 POSTABLE_EXITS = frozenset({0, 4, 5})
@@ -93,10 +98,14 @@ def review_argv(config: RunConfig, directory: Path) -> list[str]:
     return argv
 
 
-def child_env(env: Mapping[str, str]) -> dict[str, str]:
-    """The review process does not need the webhook secret, so it is left
-    out of the child's environment."""
-    return {key: value for key, value in env.items() if key != WEBHOOK_SECRET_ENV}
+def child_env(env: Mapping[str, str], *, token: str = "") -> dict[str, str]:
+    """The review process does not receive the webhook secret or the App
+    private key. ``token`` is a read-only installation token, when the
+    parent minted one."""
+    cleaned = {key: value for key, value in env.items() if key not in _CHILD_DROPPED}
+    if token:
+        cleaned[READ_TOKEN_ENV] = token
+    return cleaned
 
 
 def make_runner(
@@ -112,9 +121,12 @@ def make_runner(
         _write_event(directory / "event.json", event)
         stderr_path = directory / "stderr.txt"
         argv = review_argv(config, directory)
+        token, mint_error = _read_token(env, event)
+        if mint_error:
+            return ReviewRun(False, error=mint_error)
         code = run_process(
             argv,
-            child_env(env),
+            child_env(env, token=token),
             cancel,
             stderr_path,
             popen=popen,
@@ -149,7 +161,8 @@ def run_process(
     poll_s: float = 0.05,
 ) -> int | None:
     """The child's exit code, or None when ``cancel`` stopped it."""
-    handle = stderr_path.open("ab")
+    fd = os.open(stderr_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    handle = os.fdopen(fd, "ab")
     try:
         proc = popen(
             list(argv),
@@ -246,6 +259,41 @@ def _quoted_strings(text: str) -> tuple[str, ...]:
         if isinstance(value, str) and value and value not in found:
             found.append(value)
     return tuple(found)
+
+
+def _read_token(env: Mapping[str, str], event: PrEvent) -> tuple[str, str]:
+    """A read-only installation token for the child, or ``("", "")`` when
+    the parent has no App key (offline). The second value is an error
+    label when a live mint fails. The key itself is never returned."""
+    key = env.get(APP_KEY_ENV, "")
+    if not key:
+        return "", ""
+    app_id = env.get("ATLAS_GITHUB_APP_ID", "")
+    installation = env.get("ATLAS_GITHUB_INSTALLATION_ID", "")
+    if (
+        not app_id.isdigit()
+        or not installation.isascii()
+        or not installation.isdigit()
+        or int(installation) < 1
+    ):
+        return "", "could not mint a read token"
+    from atlas_reviewer.clock import SystemClock
+    from atlas_reviewer.github_auth import READ_PERMISSIONS, AppInstallationTokens
+    from atlas_reviewer.http import UrllibTransport
+
+    try:
+        tokens = AppInstallationTokens(
+            UrllibTransport(),
+            SystemClock(),
+            app_id=app_id,
+            private_key=key.replace("\\n", "\n") if "\n" not in key else key,
+            installation_id=int(installation),
+            permissions=READ_PERMISSIONS,
+            repositories=(event.repo.split("/", 1)[1],),
+        )
+        return tokens.token(), ""
+    except (OSError, ValueError, RuntimeError) as exc:
+        return "", f"could not mint a read token ({type(exc).__name__})"
 
 
 def _write_event(path: Path, event: PrEvent) -> None:

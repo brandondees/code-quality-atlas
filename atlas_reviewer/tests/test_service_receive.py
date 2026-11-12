@@ -4,7 +4,10 @@
 import hashlib
 import hmac
 import json
+import os
 import socket
+import subprocess
+import sys
 import threading
 import time
 from http.client import HTTPConnection
@@ -19,6 +22,7 @@ from atlas_reviewer.service import (
     ServiceConfig,
     ServiceError,
     Worker,
+    _state_is_writable,
     config_from_env,
     handle_delivery,
 )
@@ -279,6 +283,105 @@ def test_health_and_the_socket_refuse_a_bad_signature(tmp_path):
         thread.join(timeout=2)
         server.server_close()
     assert board.states() == ((SHA_A, JobState.QUEUED),)
+
+
+def test_a_post_is_not_retried_immediately_or_without_a_budget(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    calls: list[float] = []
+    clock = {"t": 1_000.0}
+
+    def publish(event, report):
+        calls.append(clock["t"])
+        raise RuntimeError("github down")
+
+    worker = _worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        publish,
+        tmp_path,
+    )
+    worker._now = lambda: clock["t"]
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    assert worker.run_one() is True
+    worker._retry_post()
+    assert len(calls) == 1
+    assert board.states() == ((SHA_A, JobState.POST_PENDING),)
+    from atlas_reviewer.service_run import run_dir
+
+    draft = run_dir(tmp_path, PrEvent(REPO, 7, SHA_A))
+    draft.mkdir(parents=True)
+    (draft / "draft.md").write_text("no sections\n", encoding="utf-8")
+    for _ in range(6):
+        clock["t"] += 10_000
+        worker._retry_post()
+    assert board.states() == ((SHA_A, JobState.FAILED),)
+    assert len(calls) == 5
+
+
+def test_stop_cancels_the_review_child(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    started = threading.Event()
+
+    def runner(event, cancel):
+        started.set()
+        assert cancel.wait(2)
+        return ReviewRun(False, error="superseded")
+
+    worker = _worker(board, runner)
+    worker.start()
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    assert started.wait(2)
+    worker.stop()
+    assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
+
+
+def test_a_trimmed_commit_and_a_pre_attempts_queue_stay_duplicates(tmp_path):
+    board = Board(tmp_path / "queue.json", max_remembered=1)
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    claimed = board.claim()
+    assert claimed is not None
+    board.finish(claimed, JobState.DONE)
+    assert board.enqueue(PrEvent(REPO, 8, SHA_B)) is Enqueue.QUEUED
+    assert board.enqueue(PrEvent(REPO, 7, SHA_A)) is Enqueue.DUPLICATE
+    legacy = tmp_path / "legacy.json"
+    legacy.write_text(
+        json.dumps(
+            {
+                "jobs": [
+                    {
+                        "repo": REPO,
+                        "pr": 7,
+                        "sha": SHA_A,
+                        "state": "failed",
+                        "superseded": False,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    loaded = Board(legacy)
+    assert loaded.enqueue(PrEvent(REPO, 7, SHA_A)) is Enqueue.DUPLICATE
+
+
+def test_the_module_refuses_to_start_without_a_secret():
+    env = os.environ.copy()
+    env["ATLAS_GITHUB_WEBHOOK_SECRET"] = ""
+    env["ATLAS_SERVICE_PROVIDER"] = "offline"
+    proc = subprocess.run(
+        [sys.executable, "-m", "atlas_reviewer.service"],
+        env=env,
+        capture_output=True,
+        check=False,
+    )
+    assert proc.returncode == 2
+    assert b"webhook secret" in proc.stderr
+
+
+def test_a_file_is_not_a_writable_state_dir(tmp_path):
+    target = tmp_path / "not-a-directory"
+    target.write_text("x", encoding="utf-8")
+    assert _state_is_writable(target) is False
 
 
 def test_config_rejects_a_short_secret_and_reads_the_allowlist(tmp_path):
