@@ -44,7 +44,13 @@ extended context compact at the 200K boundary; `CLAUDE_CODE_DISABLE_1M_CONTEXT=1
 makes a native 1M model compact at 200K; models that run with a native
 1M window (Fable, Sonnet 5 and later, Haiku 5.5, Opus 4.7 and later)
 compact at about 967K. An unrecognized model id is assumed to be 200K
-until the operator sets the window.
+until the operator sets the window, except an unrecognized provider or
+custom spelling whose id contains `[1m]` (any casing): that id is
+assumed to be a 1M window, and `CLAUDE_CODE_MAX_CONTEXT_TOKENS` does
+not apply to it on its own
+([Model configuration](https://code.claude.com/docs/en/model-config),
+"Which IDs CLAUDE_CODE_MAX_CONTEXT_TOKENS applies to", and the 200K
+warning under "Correct the window for a gateway or custom model ID").
 
 Compaction keeps the system prompt and output style, re-injects the
 project-root CLAUDE.md, unscoped rules, auto memory, and a plan written
