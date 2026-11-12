@@ -19,6 +19,7 @@ from atlas_reviewer.attestation import (
     body_digest,
 )
 from atlas_reviewer.bridge import BridgeSecret
+from atlas_reviewer.bridge_staging import SourceTrees
 from atlas_reviewer.coordinator import (
     LensResult,
     Verdict,
@@ -51,13 +52,16 @@ from .agentic import (
     DIGEST,
     LENS,
     LIMITS,
+    READ_ALL,
     READ_DIFF,
     TOKEN,
+    TOP,
     final,
     finding,
+    tools,
     trees,
 )
-from .helpers import HEAD, FakeClock, LocalSprites, StubLibrary
+from .helpers import HEAD, OLD, FakeClock, LocalSprites, StubLibrary, source_tarball
 
 EVENT = PrEvent("example-org/example-app", 7, HEAD)
 KEY = LensKey(EVENT.repo, EVENT.pr_number, HEAD, LENS, DIGEST)
@@ -69,7 +73,7 @@ def ledger(tmp_path):
 
 
 def review(tmp_path, script, *, sprites=None, limits=LIMITS, library=None,
-           hold_fail="", model=None, **kw):  # fmt: skip
+           hold_fail="", model=None, the_diff=None, the_trees=None, **kw):  # fmt: skip
     from .test_keepalive import TaskServer, socket_path
 
     sprites = sprites if sprites is not None else LocalSprites()
@@ -79,7 +83,8 @@ def review(tmp_path, script, *, sprites=None, limits=LIMITS, library=None,
     tasks.start()
     try:
         result = review_lens(
-            EVENT, LENS, DIFF, trees(),
+            EVENT, LENS, DIFF if the_diff is None else the_diff,
+            trees() if the_trees is None else the_trees,
             library=library or StubLibrary({LENS: BODY}), model=model, limits=limits,
             ledger=ledger(tmp_path), sprites=sprites, runner_ledger=MemoryLedger(),
             redactor=Redactor(), clock=FakeClock(), nonce=lambda: "f00dfeedf00dfeed",
@@ -135,7 +140,7 @@ def test_a_refused_runner_create_propagates_and_records_no_attempt(tmp_path):
 
 
 def test_a_clean_lens_gives_complete_coverage_and_its_verdict(tmp_path):
-    result, _, _ = review(tmp_path, [READ_DIFF, final(finding())])
+    result, _, _ = review(tmp_path, [READ_ALL, final(finding())])
     (lens,) = result.lenses
     assert (lens.state, lens.attempts, lens.escalated) == (LensState.CLEAN, 1, False)
     assert result.coverage_complete
@@ -148,11 +153,71 @@ def test_a_clean_lens_gives_complete_coverage_and_its_verdict(tmp_path):
 
 
 def test_a_clean_lens_with_no_findings_approves(tmp_path):
-    result, _, _ = review(tmp_path, [READ_DIFF, final()])
+    result, _, _ = review(tmp_path, [READ_ALL, final()])
     assert result.event is ReviewEvent.APPROVE
-    assert status(result)["review_event"] == "APPROVE"
+    parsed = status(result)
+    assert parsed["review_event"] == "APPROVE"
+    assert parsed["coverage_complete"] is True
+    assert (parsed["changed_files"], parsed["unreviewed_files"]) == (2, 0)
+    draft = render_draft(result, Redactor())
+    assert "Every changed file's diff (2) was read in full." in draft
     assert review.hold_order[0] == "POST"
     assert review.hold_order[-1] == "DELETE"
+
+
+def test_reading_one_of_five_changed_files_cannot_approve(tmp_path):
+    """The #623 shape: one diff page of one file, a clean answer, five
+    changed files. The review cannot approve, and the draft names the
+    unread files with the highest-risk path first."""
+    names = (
+        "src/app.py",
+        "src/util.py",
+        "docs/guide.md",
+        "tests/test_app.py",
+        "auth/session.py",
+    )
+    base = {name: b"value = 1\n" for name in names}
+    head = {name: b"value = 2\n" for name in names}
+    diff = "".join(
+        f"diff --git a/{name} b/{name}\n"
+        f"--- a/{name}\n"
+        f"+++ b/{name}\n"
+        "@@ -1 +1 @@\n"
+        "-value = 1\n"
+        "+value = 2\n"
+        for name in names
+    )
+    read = tools(("diff_file", {"path": "src/app.py"}))
+    result, model, _ = review(
+        tmp_path,
+        [read, final()],
+        the_diff=diff,
+        the_trees=SourceTrees(
+            source_tarball(base, TOP), source_tarball(head, TOP), OLD, HEAD
+        ),
+    )
+    assert result.event is ReviewEvent.COMMENT
+    assert result.proposed_event is ReviewEvent.APPROVE
+    assert not result.coverage_complete
+    (lens,) = result.lenses
+    assert lens.state is LensState.PARTIAL
+    assert Cause.FILES_UNREAD in lens.outcome.causes
+    assert not lens.outcome.retryable
+    assert lens.outcome.unread == (
+        "auth/session.py",
+        "docs/guide.md",
+        "src/util.py",
+        "tests/test_app.py",
+    )
+    parsed = status(result)
+    assert parsed["coverage_complete"] is False
+    assert (parsed["changed_files"], parsed["unreviewed_files"]) == (5, 4)
+    assert "src/app.py" not in status_line(result)
+    headline = render_draft(result, Redactor()).splitlines()[2]
+    assert "4 changed files not read in full" in headline
+    assert headline.index("auth/session.py") < headline.index("src/util.py")
+    assert "src/app.py" not in headline
+    assert len(model.requests) == 2
 
 
 def test_a_hold_that_fails_to_create_does_not_run_the_lens(tmp_path):
@@ -167,7 +232,7 @@ def test_a_hold_that_fails_to_create_does_not_run_the_lens(tmp_path):
 
 def test_a_keepalive_failure_after_a_clean_lens_cannot_approve(tmp_path):
     """The hold client fails its delete after the lens is clean."""
-    result, _, _ = review(tmp_path, [READ_DIFF, final()], hold_fail="DELETE")
+    result, _, _ = review(tmp_path, [READ_ALL, final()], hold_fail="DELETE")
     (lens,) = result.lenses
     assert lens.state is LensState.CLEAN
     assert result.runner.status is RunnerStatus.FAILED
@@ -188,7 +253,7 @@ def test_the_ledger_records_each_attempt_with_its_head_and_body(tmp_path):
 
 
 def test_a_failed_attestation_is_retried_once_with_the_body_forced(tmp_path):
-    result, model, _ = review(tmp_path, [READ_DIFF, MISACK, READ_DIFF, final()])
+    result, model, _ = review(tmp_path, [READ_ALL, MISACK, READ_ALL, final()])
     (lens,) = result.lenses
     assert (lens.state, lens.attempts, lens.escalated) == (LensState.CLEAN, 2, False)
     retry = model.requests[2]
@@ -198,7 +263,7 @@ def test_a_failed_attestation_is_retried_once_with_the_body_forced(tmp_path):
 
 
 def test_a_retry_that_fails_again_escalates_and_never_approves(tmp_path):
-    result, _, _ = review(tmp_path, [READ_DIFF, MISACK, READ_DIFF, MISACK])
+    result, _, _ = review(tmp_path, [READ_ALL, MISACK, READ_ALL, MISACK])
     (lens,) = result.lenses
     assert (lens.state, lens.attempts, lens.escalated) == (LensState.FAILED, 2, True)
     assert not result.coverage_complete
@@ -221,7 +286,7 @@ def test_quotes_that_fail_twice_leave_the_lens_partial_and_report_only_verified(
     tmp_path,
 ):
     wrong = finding(evidence="return sum(x for x in xs if x)", severity="blocker")
-    script = [READ_DIFF, final(finding(), wrong)] * 2
+    script = [READ_ALL, final(finding(), wrong)] * 2
     result, _, _ = review(tmp_path, script)
     (lens,) = result.lenses
     assert (lens.state, lens.escalated) == (LensState.PARTIAL, True)
@@ -356,7 +421,7 @@ def test_a_byok_refusal_after_a_tool_keeps_the_secret_and_the_progress(tmp_path)
 
 
 def test_a_rerun_on_the_same_head_and_body_reuses_the_settled_lens(tmp_path):
-    first, _, _ = review(tmp_path, [READ_DIFF, final(finding())])
+    first, _, _ = review(tmp_path, [READ_ALL, final(finding())])
     sprites = FakeSprites()
     again, model, _ = review(tmp_path, [], sprites=sprites)
     assert sprites.calls == []
@@ -366,11 +431,11 @@ def test_a_rerun_on_the_same_head_and_body_reuses_the_settled_lens(tmp_path):
 
 
 def test_a_changed_body_is_a_new_lens_run(tmp_path):
-    review(tmp_path, [READ_DIFF, final()])
+    review(tmp_path, [READ_ALL, final()])
     new_body = BODY + "\nAlso check the docs.\n"
     new_digest = body_digest(new_body)
     result, model, _ = review(
-        tmp_path, [READ_DIFF, final(digest=new_digest)],
+        tmp_path, [READ_ALL, final(digest=new_digest)],
         library=StubLibrary({LENS: new_body}),
     )  # fmt: skip
     assert len(model.requests) == 2
@@ -394,7 +459,7 @@ def test_a_crash_mid_attempt_counts_the_attempt_and_the_rerun_retries(tmp_path):
         review(tmp_path, [READ_DIFF, crash])
     (abandoned,) = ledger(tmp_path).attempts(KEY)
     assert abandoned.outcome.causes == {Cause.ABANDONED}
-    result, model, _ = review(tmp_path, [READ_DIFF, final()])
+    result, model, _ = review(tmp_path, [READ_ALL, final()])
     (lens,) = result.lenses
     assert (lens.state, lens.attempts) == (LensState.CLEAN, 2)
     assert (
@@ -496,8 +561,18 @@ def test_a_review_carries_the_diffs_flagged_values_to_the_draft(tmp_path):
     assert TOKEN not in repr(result)
 
 
-def test_the_status_line_is_the_drafts_first_line_and_only_controller_values():
+def test_a_clean_outcome_without_a_file_count_cannot_approve():
     result = synthesize([lens_result(AttemptOutcome(Attestation.ATTESTED))])
+    assert not result.coverage_complete
+    assert result.proposed_event is ReviewEvent.APPROVE
+    assert result.event is ReviewEvent.COMMENT
+    assert status(result)["coverage_complete"] is False
+
+
+def test_the_status_line_is_the_drafts_first_line_and_only_controller_values():
+    result = synthesize(
+        [lens_result(AttemptOutcome(Attestation.ATTESTED, changed_files=1))]
+    )
     draft = render_draft(result, Redactor())
     assert draft.split("\n", 1)[0] == status_line(result)
     assert parse_status(draft) == {
@@ -508,6 +583,8 @@ def test_the_status_line_is_the_drafts_first_line_and_only_controller_values():
         "lenses": {"clean": 1, "partial": 0, "failed": 0, "not_run": 0},
         "verified_findings": 0,
         "unverified_findings": 0,
+        "changed_files": 1,
+        "unreviewed_files": 0,
     }
 
 
@@ -533,7 +610,9 @@ def checked(severity, *, attribution=Attribution.INTRODUCED, valence=Valence.DEF
 
 
 def clean(*findings):
-    return AttemptOutcome(Attestation.ATTESTED, findings=tuple(findings))
+    return AttemptOutcome(
+        Attestation.ATTESTED, findings=tuple(findings), changed_files=1
+    )
 
 
 @pytest.mark.parametrize(
@@ -585,7 +664,7 @@ def test_no_lens_selected_is_not_complete_coverage():
 def test_a_failed_runner_is_not_complete_coverage_even_when_the_lens_is_clean():
     from atlas_reviewer.domain import RunnerReport
 
-    clean_lens = lens_result(AttemptOutcome(Attestation.ATTESTED))
+    clean_lens = lens_result(AttemptOutcome(Attestation.ATTESTED, changed_files=1))
     failed = RunnerReport(
         RunnerStatus.FAILED, CleanupStatus.DESTROYED_VERIFIED, "r",
         "sprite task socket DELETE returned HTTP 500",

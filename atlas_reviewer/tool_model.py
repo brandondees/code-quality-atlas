@@ -4,11 +4,17 @@
 One `LensModel` turn is one Chat Completions request. It sends the same
 pinned provider document as the one-shot adapter (`only`, no fallbacks,
 `require_parameters`, `zdr`, `data_collection: deny`, no plugins and no
-server tools). The lens loop reserves the worst case and settles `_actual_cost`
-(BYOK upstream included) through its own spend tracker. A turn with no
-readable cost but usable token counts is priced at the highest catalog
-rates, except when the model has a reasoning rate and the response
-reports no reasoning-token count. That missing-cost case is a non-finite
+server tools), plus a top-level `cache_control` of `ephemeral` so a
+provider that honors it can cache the stable prefix. The lens loop
+reserves the worst case and settles `_actual_cost` (BYOK upstream
+included) through its own spend tracker. A turn with no readable cost
+but usable token counts is priced from the catalog: prompt tokens at
+the highest of the prompt and cache-write rates, or, when the response
+reports cache read or write counts, with those counts at the catalog's
+cache rates (a missing read rate uses the prompt rate, and a missing
+write rate uses the reservation's input rate). A model with a reasoning
+rate and a response that reports no reasoning-token count stays
+unpriced. That missing-cost case is a non-finite
 `Decimal`, which the tracker keeps at the worst case, as are an
 unreadable upstream charge, a BYOK call with no upstream charge, and a
 turn with neither a readable cost nor usable token counts. A readable
@@ -157,6 +163,7 @@ def _payload(
         "reasoning": {"max_tokens": limits.reasoning_max_tokens, "exclude": True},
         "stream": False,
         "provider": _routing(provider, terms),
+        "cache_control": {"type": "ephemeral"},
     }
 
 

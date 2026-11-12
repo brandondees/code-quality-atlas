@@ -43,7 +43,9 @@
   settles at that amount, and an upstream value that is present, not null
   and unreadable keeps the full reservation. A null or absent upstream
   settles `usage.cost`; with no usable `usage.cost` it is priced from the
-  highest catalog rates and upstream is still not added. For any other
+  highest catalog rates, or, when the response reports cache read or
+  write counts, with those counts at the catalog's cache rates
+  (`_prompt_cost`), and upstream is still not added. For any other
   `is_byok` value a reported upstream cost is added. A call with `is_byok`
   true and no upstream cost keeps its full reservation. A present,
   non-null, unreadable upstream value keeps the reservation on any
@@ -406,6 +408,53 @@ def _no_byok_reason(usage: Json) -> str | None:
     return "the response usage.is_byok is not false"
 
 
+def _prompt_cost(
+    usage: Json, terms: ModelTerms, prompt_t: int
+) -> tuple[Decimal | None, str]:
+    """Price prompt tokens when `usage.cost` is absent.
+
+    With no cache counts, every prompt token is charged at `input_rate`,
+    which is already the higher of the prompt rate and any cache-write
+    rate. When the response reports cache reads or writes, those counts
+    are subsets of `prompt_tokens`: reads are charged at the catalog's
+    cache-read rate (or the prompt rate when the catalog has none), and
+    writes at the catalog's cache-write rate (or `input_rate` when the
+    catalog has none). The rest are charged at the prompt rate when the
+    write count is reported. When it is absent, a write could be hiding
+    in the rest, so the rest is charged at `input_rate`. Counts that sum
+    past `prompt_tokens` are not a usable split, and the turn stays
+    unpriced."""
+    details = usage.get("prompt_tokens_details")
+    if not isinstance(details, dict):
+        return prompt_t * terms.input_rate, ""
+    if any(
+        details.get(key) is not None and _tokens(details, key) is None
+        for key in ("cached_tokens", "cache_write_tokens")
+    ):
+        return None, ""
+    cached = _tokens(details, "cached_tokens")
+    written = _tokens(details, "cache_write_tokens")
+    if cached is None and written is None:
+        return prompt_t * terms.input_rate, ""
+    cached_n = 0 if cached is None else cached
+    read_rate = (
+        terms.prompt_rate if terms.cache_read_rate is None else terms.cache_read_rate
+    )
+    if written is None:
+        if cached_n > prompt_t:
+            return None, ""
+        cost = cached_n * read_rate + (prompt_t - cached_n) * terms.input_rate
+        return cost, f" cache_read={cached_n} cache_write=unreported"
+    if cached_n + written > prompt_t:
+        return None, ""
+    fresh = prompt_t - cached_n - written
+    write_rate = (
+        terms.input_rate if terms.cache_write_rate is None else terms.cache_write_rate
+    )
+    cost = fresh * terms.prompt_rate + cached_n * read_rate + written * write_rate
+    return cost, f" cache_read={cached_n} cache_write={written}"
+
+
 def _tokens(usage: Json, key: str) -> int | None:
     value = usage.get(key)
     if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
@@ -448,14 +497,18 @@ def _actual_cost(usage: Json, terms: ModelTerms) -> tuple[Decimal | None, str]:
             return None, summary
         if terms.reasoning_rate > 0 and reasoning_t is None:
             return None, summary
+        prompt_cost, cache_note = _prompt_cost(usage, terms, prompt_t)
+        if prompt_cost is None:
+            return None, summary
         reasoning = (reasoning_t or 0) * terms.reasoning_rate
         base = (
-            prompt_t * terms.input_rate
+            prompt_cost
             + completion_t * terms.completion_rate
             + reasoning
             + terms.request_fee
         )
-        summary = f"{summary} (cost computed at the highest catalog rates)"
+        rates = "catalog rates" if cache_note else "the highest catalog rates"
+        summary = f"{summary}{cache_note} (cost computed at {rates})"
     if not explicitly_non_byok:
         if upstream is not None:
             base += upstream

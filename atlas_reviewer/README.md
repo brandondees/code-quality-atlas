@@ -751,7 +751,8 @@ bridge. It is not on the CLI. The offline tests run it against
 live tool-calling adapter (`tool_model.OpenRouterLensModel`) and the
 Sprite keepalive (`keepalive.py`) are built and tested offline (D41):
 recorded HTTP for the adapter, and `LocalSprites` plus a fake Tasks
-socket for the hold. No live model, Sprite or Fly call has been made.
+socket for the hold. The tests make no live model, Sprite or Fly call.
+D41 records the 2026-11-12 probe that did.
 
 - **Limits.** `lens_loop.AgenticLimits` has Brandon's provisional defaults
   (2026-11-11), set for headroom and configurable, to be revisited after
@@ -780,30 +781,49 @@ socket for the hold. No live model, Sprite or Fly call has been made.
   checked against the head file at the cited lines. The cited span is the
   quote's own line count, so a wider range does not verify. A removed line
   of that file still verifies (`quotes.py`).
-- **Partial results.** No findings counts as clean only after a
-  `diff_file` page or a HEAD `read_file` of a changed file. A timed-out,
-  unavailable or over-limit tool call makes the lens partial.
+- **Partial results.** No findings counts as clean only after every
+  changed file's diff was read in full: a `diff_file` chain from offset
+  0 through every truncated page (D42). A HEAD `read_file` does not
+  replace that. A changed file left unread makes the lens partial, names
+  the file in the draft, and is not retried. A timed-out, unavailable or
+  over-limit tool call makes the lens partial. Every `diff_file` page
+  counts against the bridge's session output budget (`SessionLimits`,
+  1 MiB by default). A PR whose diff is larger than that budget cannot
+  come clean on this path: the call past the budget is refused
+  `OVER_SESSION_LIMIT`, its file stays unread, and the review fails closed.
+  Raising the budget is the only remedy built; no path-exclusion option
+  exists.
 - **Ledger and retries** (`attestation.py`). Each attempt is fsynced to an
   append-only ledger when it starts and again when it ends, keyed by
   repository, PR, head SHA, lens and body digest. A failed attestation, an
   unparsed reply, a failed quote or an abandoned attempt is retried once
   with the body injected again; a second one escalates. A crash leaves an
   abandoned attempt that counts as used. A lens already settled for this
-  head and body is reused without a runner.
+  head and body is reused without a runner. A settled outcome with no
+  changed-file count, from before the per-file gate, shows no coverage,
+  so the review cannot approve on it.
 - **The adapter** (`tool_model.OpenRouterLensModel`). One Chat Completions
   request per turn, with the one-shot provider pin (`require_parameters`,
-  zero data retention, no fallbacks, no plugins and no server tools) and
-  only the bridge's tool schemas. The loop settles `_actual_cost`, which
-  includes a BYOK upstream charge. A turn with no readable cost but usable
-  token counts is priced at the highest catalog rates, except when the
-  model has a reasoning rate and the response reports no reasoning-token
-  count. That missing-cost case stays at the reserved worst case, as do
+  zero data retention, no fallbacks, no plugins and no server tools), a
+  top-level `cache_control` of `ephemeral`, and only the bridge's tool
+  schemas. The loop settles `_actual_cost`, which includes a BYOK
+  upstream charge. A turn with no readable cost but usable token counts
+  is priced from the catalog. Prompt tokens use the highest of the prompt
+  and cache-write rates, and when the response reports cache read or
+  write counts those counts use the catalog's cache rates: a missing
+  read rate uses the prompt rate, and a missing write rate uses the
+  reservation's input rate. A response that reports cache reads but no
+  write count charges its uncached tokens at the input rate, since a
+  write could be among them. Counts that sum past the prompt tokens leave
+  the turn unpriced. A model with a reasoning rate and a response that
+  reports no reasoning-token count also stays unpriced. That missing-cost
+  case stays at the reserved worst case, as do
   an unreadable upstream charge, a BYOK call with no upstream charge, and
   a turn with neither a readable cost nor usable token counts. A readable
   cost is used as reported, including when the reasoning-token count is
-  missing. The catalog is fetched once per turn.
-  The adapter does not
-  retry and does not reserve on the one-shot budget. A tool call whose
+  missing and when the response also reports cache tokens. The catalog is
+  fetched once per turn. The adapter does not retry and does not reserve
+  on the one-shot budget. A tool call whose
   arguments are not one JSON object, or that hold a non-finite number or
   nest deep enough to recurse, is handed to the bridge, which rejects it,
   and the refusal comes back nonce-fenced. No call is executed in the
@@ -824,7 +844,7 @@ socket for the hold. No live model, Sprite or Fly call has been made.
   API's PUT would otherwise upsert it. Each hold exec has its own 15 second
   budget, and the guest socket call times out after 10 seconds and reads
   only the status line. Refresh and tool execs share the runner's exec lock so
-  they do not write one stream; the 15 second budget is how long a
+  they do not write one stream; the 15-second budget is how long a
   refresh can block a tool. A keepalive failure fails the runner, and a
   failed runner is not complete coverage. Snapshot and restore is not
   built; there is no public fork API (Fly support, 2026-11-06).
@@ -875,7 +895,7 @@ socket for the hold. No live model, Sprite or Fly call has been made.
 | `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) | writes the ledger file |
 | `lens_loop.py` | the agentic limits (Brandon's provisional defaults, 2026-11-11), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the lens system prompt, the spend tracker, one lens attempt (`run_attempt`) | via `Bridge`, `LensModel` |
 | `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft; holds the Sprite for the lens (`keepalive.lens_hold`) | via ports, the ledger |
-| `tool_model.py` | the live tool-calling adapter (`OpenRouterLensModel`): one pinned Chat Completions request per `LensModel` turn, strict tool-call arguments, cost from `_actual_cost` (BYOK upstream included; catalog rates when the cost is missing but the token counts are usable; a reasoning rate with no reasoning-token count is unpriced only when the cost is also missing). Not on the CLI. Tested with recorded HTTP only | via the OpenRouter client |
+| `tool_model.py` | the live tool-calling adapter (`OpenRouterLensModel`): one pinned Chat Completions request per `LensModel` turn, top-level `cache_control: ephemeral`, strict tool-call arguments, cost from `_actual_cost` (BYOK upstream included; catalog rates when the cost is missing but the token counts are usable, with cache read and write counts at the catalog's cache rates when the response reports them; a reasoning rate with no reasoning-token count is unpriced only when the cost is also missing). Not on the CLI. Tested with recorded HTTP only | via the OpenRouter client |
 | `keepalive.py` | the Sprite Tasks API hold for one lens: create, refresh every 60 seconds with a 5-minute expiry, delete on exit. Not on the CLI. Tested with `LocalSprites` and a fake socket | via the runner exec |
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`); the agentic `LensModel` port is in `lens_loop.py` | no |
 | `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → resolve interpreter → upload → unpack → tools → destroy), `probe_runner`, `run_session` (a `Session` on the same lifecycle), the one exec wrapper (`exec_argv`, minimal `env -i` environment) | via `SpritesApi` |

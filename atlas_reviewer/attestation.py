@@ -107,6 +107,7 @@ class Cause(StrEnum):
     REVIEW_CLOCK = "the review wall clock ran out"
     TOOL_GAP = "a tool call timed out, was unavailable or hit a session limit"
     NO_SOURCE_READ = "no findings, and no diff page or changed file was read"
+    FILES_UNREAD = "a changed file's diff was not read in full"
 
 
 class LensState(StrEnum):
@@ -167,6 +168,9 @@ class AttemptOutcome:
     tools: tuple[ToolUse, ...] = ()
     turns: int = 0
     detail: str = ""
+    unread: tuple[str, ...] = ()
+    # None on a ledger line from before the per-file gate recorded a count.
+    changed_files: int | None = None
 
     @property
     def state(self) -> LensState:
@@ -178,6 +182,8 @@ class AttemptOutcome:
 
     @property
     def retryable(self) -> bool:
+        if Cause.FILES_UNREAD in self.causes:
+            return False
         return bool(
             self.attestation in _RETRYABLE_ATTESTATIONS or self.causes & _RETRYABLE
         )
@@ -364,6 +370,8 @@ def _outcome_json(
         "tools": [[t.tool, scrub(t.args), t.status] for t in outcome.tools],
         "turns": outcome.turns,
         "detail": scrub(outcome.detail),
+        "unread": [scrub(path) for path in outcome.unread],
+        "changed_files": outcome.changed_files,
     }
 
 
@@ -390,6 +398,18 @@ def _outcome_from(data: Mapping[str, Any]) -> AttemptOutcome:
     turns = data["turns"]
     if isinstance(turns, bool) or not isinstance(turns, int):
         raise TypeError("turns must be an integer")
+    unread = data.get("unread", [])
+    if not isinstance(unread, list) or not all(
+        isinstance(path, str) for path in unread
+    ):
+        raise TypeError("unread must be a list of strings")
+    changed = data.get("changed_files", None)
+    if changed is not None and (
+        isinstance(changed, bool) or not isinstance(changed, int)
+    ):
+        raise TypeError("changed_files must be an integer")
+    if isinstance(changed, int) and changed < 0:
+        raise TypeError("changed_files must be an integer")
     return AttemptOutcome(
         Attestation[data["attestation"]],
         frozenset(Cause[c] for c in data["causes"]),
@@ -397,6 +417,8 @@ def _outcome_from(data: Mapping[str, Any]) -> AttemptOutcome:
         tuple(ToolUse(*map(_str, t)) for t in data["tools"]),
         turns,
         _str(data["detail"]),
+        tuple(unread),
+        changed,
     )
 
 

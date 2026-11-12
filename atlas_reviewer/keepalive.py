@@ -15,7 +15,7 @@ API (Fly support, 2026-11-06); this module does not snapshot or restore.
 The controller starts the hold. A model turn runs on the controller, so
 the Sprite would otherwise sit quiet for the whole call. Refresh and tool
 execs share the runner's exec lock, so they do not write one stream. Each
-hold exec has its own 15 second budget and the guest socket call times out
+hold exec has its own 15-second budget and the guest socket call times out
 after 10 seconds, so a stuck refresh cannot hold that lock until the
 5-minute task expires. The join waits at most 20 seconds, then the delete
 runs anyway.

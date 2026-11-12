@@ -10,9 +10,11 @@ approve with changes; only nits or nothing means approve). There is no
 model merge call yet.
 
 Coverage is complete only when the ledger shows every selected lens
-settled CLEAN on this head with this body and, when this review ran a
-runner, that runner completed. A keepalive failure is a failed runner,
-so a clean lens cannot approve it away. Anything less fails closed:
+settled CLEAN on this head with this body, every changed file's diff was
+read in full, and, when this review ran a runner, that runner completed.
+A keepalive failure is a failed runner, so a clean lens cannot approve
+it away. A lens that left a changed file unread is partial, so the same
+rule applies. Anything less fails closed:
 the draft opens with the machine-readable status line
 (`coverage_complete: false`) and a REVIEW INCOMPLETE warning, and never
 approves. The runner's own note is in the draft when it did not complete.
@@ -52,7 +54,7 @@ from atlas_reviewer.attestation import (
 from atlas_reviewer.bridge import Bridge, BridgeSecret, run_bridge
 from atlas_reviewer.bridge_staging import BRIDGE_ROOT, SourceTrees
 from atlas_reviewer.committed_secrets import scan_diff
-from atlas_reviewer.diffs import by_risk, split_files
+from atlas_reviewer.diffs import by_risk, risk_tier, split_files
 from atlas_reviewer.domain import PrEvent, RunnerReport, RunnerStatus
 from atlas_reviewer.keepalive import SOCKET_PATH, lens_hold
 from atlas_reviewer.lens_contract import Finding, Severity
@@ -141,11 +143,22 @@ class AgenticReview:
 
     @property
     def coverage_complete(self) -> bool:
-        """Clean lenses, and a completed runner when this review started one.
+        """Clean lenses that read every changed file, and a completed runner
+        when this review started one.
 
         A settled lens reused from the ledger has no runner. A runner that
         failed after a clean lens (a keepalive refresh or delete, for
-        example) is not complete coverage, so the review cannot approve."""
+        example) is not complete coverage, so the review cannot approve.
+        Unread paths block approval even when a lens's state was recorded
+        clean, so a missing cause cannot approve a partial read. An outcome
+        with no changed-file count predates the per-file gate and shows no
+        coverage, so it blocks approval too."""
+        if any(
+            r.outcome is not None
+            and (r.outcome.unread or r.outcome.changed_files is None)
+            for r in self.lenses
+        ):
+            return False
         lenses_clean = bool(self.lenses) and all(
             r.state is LensState.CLEAN for r in self.lenses
         )
@@ -474,6 +487,8 @@ def status_line(review: AgenticReview) -> str:
         "lenses": counts,
         "verified_findings": len(review.verified),
         "unverified_findings": len(review.unverified),
+        "changed_files": _changed_file_count(review),
+        "unreviewed_files": len(_unread_paths(review)),
     }
     return f"{STATUS_PREFIX}{json.dumps(fields, sort_keys=True)} -->"
 
@@ -489,7 +504,7 @@ def render_draft(review: AgenticReview, redactor: Redactor) -> str:
     def scrub(text: str) -> str:
         return scrubber(text).text
 
-    lines = [status_line(review), "", _headline(review), ""]
+    lines = [status_line(review), "", _headline(review, scrub), ""]
     lines += ["## Findings (verified quotes only)", ""]
     lines += [_finding_line(f, scrub) for f in review.verified] or [
         "No verified findings."
@@ -522,11 +537,16 @@ def render_draft(review: AgenticReview, redactor: Redactor) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _headline(review: AgenticReview) -> str:
+def _headline(review: AgenticReview, scrub: Callable[[str], str]) -> str:
     if review.coverage_complete:
+        count = _changed_file_count(review)
+        files = (
+            f" Every changed file's diff ({count}) was read in full." if count else ""
+        )
         return (
             f"**Review event: {review.event.value}.** Verdict: {review.verdict.value}. "
             "Every selected lens ran whole, attested, with every quote verified."
+            + files
         )
     short = [r for r in review.lenses if r.state is not LensState.CLEAN]
     if short:
@@ -546,6 +566,45 @@ def _headline(review: AgenticReview) -> str:
         "> **REVIEW INCOMPLETE -- not approvable.** "
         f"Review event: {review.event.value}{proposed}. Lens coverage is not "
         f"complete ({named}), so this review cannot approve."
+        + _unread_clause(review, scrub)
+    )
+
+
+def _unread_paths(review: AgenticReview) -> tuple[str, ...]:
+    seen: list[str] = []
+    for result in review.lenses:
+        if result.outcome is None:
+            continue
+        for path in result.outcome.unread:
+            if path not in seen:
+                seen.append(path)
+    return tuple(sorted(seen, key=lambda path: (risk_tier(path).rank, path)))
+
+
+def _changed_file_count(review: AgenticReview) -> int | None:
+    counts = [
+        result.outcome.changed_files
+        for result in review.lenses
+        if result.outcome is not None and result.outcome.changed_files is not None
+    ]
+    if not counts:
+        return None
+    return max(counts)
+
+
+def _unread_clause(review: AgenticReview, scrub: Callable[[str], str]) -> str:
+    unread = _unread_paths(review)
+    if not unread:
+        return ""
+    shown = unread[:20]
+    listed = ", ".join(
+        quote_untrusted(path, QUOTED_CHARS, scrub=scrub) for path in shown
+    )
+    more = "" if len(unread) <= 20 else f", and {len(unread) - 20} more"
+    noun = "file" if len(unread) == 1 else "files"
+    return (
+        f" {len(unread)} changed {noun} not read in full, highest risk first: "
+        f"{listed}{more}."
     )
 
 
