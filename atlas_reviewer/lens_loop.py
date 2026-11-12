@@ -28,7 +28,9 @@ wall clock, the output cap when the model stops at it, a model call
 that still fails after its retries (`call_retries`, one by default,
 each after a short backoff), or the runner's deadline. A retried call
 reserves and settles like any other call, and the failed call's
-reservation stays committed. A final reply outside the finding
+reservation stays committed. A call the reservation cannot cover at its
+full output cap is sent with the largest cap it can cover, when that is
+at least `min_output_tokens` (D50). A final reply outside the finding
 contract is sent back once, with the validation error quoted, and a
 second such reply is the attempt's result. A final reply a quote check
 rejects earns a bounded quote-repair turn in the same conversation (D64):
@@ -190,6 +192,7 @@ DEFAULT_REVIEW_CEILING_USD = Decimal("10.00")
 DEFAULT_CALL_RETRIES = 1
 MAX_CALL_RETRIES = 3
 CALL_RETRY_BACKOFF_S = 2.0
+DEFAULT_MIN_OUTPUT_TOKENS = 16_000
 
 # ------------------------------------------------------------------ limits
 
@@ -221,6 +224,7 @@ class Limits:
     quote_repairs: int
     quote_tolerance: int
     call_retries: int = DEFAULT_CALL_RETRIES
+    min_output_tokens: int = DEFAULT_MIN_OUTPUT_TOKENS
     create_retries: int = DEFAULT_CREATE_RETRIES
     create_concurrency: int = DEFAULT_CREATE_CONCURRENCY
     max_input_tokens: int | None = None
@@ -243,7 +247,10 @@ class AgenticLimits:
     one, or None to clear it, which `resolve` refuses. `retries` is 0 or
     1. `pool_size` is how many lenses run at once (1 to 16; the default
     is one). `call_retries` is how many times a failed model call is sent
-    again within one turn (0 to 3; the default is one). `no_progress_turns`
+    again within one turn (0 to 3; the default is one).
+    `min_output_tokens` is the smallest output cap a call may be fitted
+    to when the reservation cannot cover its full cap (2 or more).
+    `no_progress_turns`
     and `duplicate_calls` are the no-progress
     detector's thresholds (D58, D66): consecutive turns without new
     content -- a successful call the attempt has not made before, or a new
@@ -289,6 +296,7 @@ class AgenticLimits:
     per_lens_usd: Decimal | None = None
     review_ceiling_usd: Decimal | None = None
     call_retries: int = DEFAULT_CALL_RETRIES
+    min_output_tokens: int = DEFAULT_MIN_OUTPUT_TOKENS
     max_input_tokens: int | None = None
     max_output_tokens: int | None = None
     reasoning_max_tokens: int | None = None
@@ -349,6 +357,15 @@ def _check_diff_prefix_share(limits: Limits) -> None:
         )
 
 
+def _check_min_output_tokens(limits: Limits) -> None:
+    """The smallest output cap a reservation-short call may be fitted to
+    (D50): at least 2, so a fitted call can still carry a reply. Split
+    from `_check_limits` so each stays under the complexity gate."""
+    value = limits.min_output_tokens
+    if isinstance(value, bool) or not isinstance(value, int) or value < 2:
+        raise ValueError("min_output_tokens must be an integer of at least 2")
+
+
 def _check_limits(limits: Limits, *, cross_limits: bool = True) -> None:
     if not (
         isinstance(limits.reservation_usd, Decimal)
@@ -386,6 +403,7 @@ def _check_limits(limits: Limits, *, cross_limits: bool = True) -> None:
         ("call_retries", 0, MAX_CALL_RETRIES),
     ):
         _check_in_range(limits, name, low, high)
+    _check_min_output_tokens(limits)
     for name in _DERIVED:
         value = getattr(limits, name)
         if value is None:
@@ -731,6 +749,8 @@ class TurnRequest:
     # keeps the paged layout: the lens-specific system first, the diff
     # read through `diff_file`.
     prefix: SharedPrefix | None = None
+    # A tighter output cap for this call only; None keeps the resolved one.
+    max_output_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -751,11 +771,16 @@ ModelTurn = ToolCalls | FinalReply
 class LensModel(Protocol):
     """One model turn with tools. `worst_case_usd` is what the turn could
     cost at most, reserved before it is sent; `turn` raises `BoundaryError`
-    when the call fails."""
+    when the call fails. `output_tokens_within` is the largest output cap
+    whose worst case for the request fits a dollar amount."""
 
     name: str
 
     def worst_case_usd(self, request: TurnRequest) -> Decimal: ...
+
+    def output_tokens_within(
+        self, request: TurnRequest, budget_usd: Decimal
+    ) -> int: ...
 
     def turn(self, request: TurnRequest) -> ModelTurn: ...
 
@@ -1219,6 +1244,10 @@ class Spend:
             self.derivation.reservation_setting(),
         )
 
+    def left(self) -> Decimal:
+        with self._lock:
+            return self.limits.reservation_usd - self.committed_usd
+
     def settle(self, worst_usd: Decimal, actual_usd: Any) -> None:
         """Settle a sent call: to its reported cost when that is a cost,
         else to its reservation, kept as spent (D43) -- a call that will
@@ -1475,10 +1504,61 @@ def _refusal_cause(exc: BoundaryError) -> Cause:
     return Cause.MODEL_ERROR
 
 
+def _fit_to_reservation(
+    request: TurnRequest,
+    model: LensModel,
+    spend: Spend,
+    refused: LimitHit,
+    clock: Clock,
+    wait_until: float,
+) -> tuple[TurnRequest, Decimal, LimitHit | None] | LimitHit:
+    """Fit the call's output cap to what the reservation has left, when
+    that leaves at least `min_output_tokens`. The fitted cap is the one
+    sent as `max_tokens`, so its worst case is still a bound. Otherwise
+    the refusal stands and names the cap the reservation could cover."""
+    floor = spend.limits.min_output_tokens
+    left = spend.left()
+    try:
+        cap = model.output_tokens_within(request, left)
+    except (LimitRefused, BoundaryError):
+        return refused
+    if cap < floor:
+        # D68's stop text is kept: the derivation's configured value and
+        # setting name the formula and the knobs, and the observed value
+        # gains what the fit found (D50).
+        return LimitHit(
+            "reservation_usd",
+            refused.configured,
+            f"{refused.observed}; the ${left} left covers {max(cap, 0)} output "
+            f"tokens, under min_output_tokens {floor} "
+            "(--min-output-tokens or ATLAS_MIN_OUTPUT_TOKENS)",
+            refused.setting,
+        )
+    fitted = replace(request, max_output_tokens=cap)
+    try:
+        worst = model.worst_case_usd(fitted)
+    except (LimitRefused, BoundaryError):
+        return refused
+    if not _valid_cost(worst):
+        return refused
+    return fitted, worst, spend.reserve(worst, clock=clock, wait_until=wait_until)
+
+
 def _failed_calls(failures: list[str]) -> str:
     if len(failures) == 1:
         return failures[0]
     return f"{len(failures)} calls failed: " + "; ".join(failures)
+
+
+@dataclass(frozen=True)
+class _Reserved:
+    """A reserved call: its worst case, the request to send -- the fitted
+    one when the output cap was tightened (D50) -- and the note a failed
+    fitted call carries in its error."""
+
+    worst: Decimal
+    request: TurnRequest
+    note: str = ""
 
 
 class _TimeoutRetry:
@@ -1504,13 +1584,14 @@ def _place_call(
     call the loop may retry (D49), its reservation committed, since the
     provider may still have billed it; `_TimeoutRetry` sends the outer
     loop back around with the request queued as D58's timeout retry."""
-    priced = _reserve_call(model, request, spend, clock, wait_until)
-    if not isinstance(priced, Decimal):
-        return p.cut(*priced)
-    worst = priced
+    reserved = _reserve_call(model, request, spend, clock, wait_until)
+    if not isinstance(reserved, _Reserved):
+        return p.cut(*reserved)
+    worst = reserved.worst
+    send = reserved.request
     _flush_pending_repair(p)
     try:
-        reply = model.turn(request)
+        reply = model.turn(send)
     except LimitRefused as exc:
         # The turn completed at the output cap: billed, kept at its
         # reservation.
@@ -1545,7 +1626,7 @@ def _place_call(
             # A ZDR or a worst-case pricing refusal is a decision, not a
             # failure: it is not retried (D49).
             return p.cut(Cause.MODEL_REFUSED, str(exc))
-        return str(exc)
+        return f"{exc}{reserved.note}"
     spend.settle(worst, reply.cost_usd)
     return reply
 
@@ -1752,10 +1833,16 @@ def _reserve_call(
     spend: Spend,
     clock: Clock,
     wait_until: float,
-) -> Decimal | tuple[Cause, str] | tuple[Cause, str, LimitHit]:
-    """The call's reserved worst case, or why it is not sent. The
-    reservation may wait, bounded by `wait_until` on `clock`, for an
-    in-flight call to settle (round-1 review of #717, M-1)."""
+    fit: bool = True,
+) -> _Reserved | tuple[Cause, str] | tuple[Cause, str, LimitHit]:
+    """The call's reserved worst case and the request to send, or why it
+    is not sent. The reservation may wait, bounded by `wait_until` on
+    `clock`, for an in-flight call to settle (round-1 review of #717,
+    M-1). A call the reservation cannot cover at its full output cap is
+    fitted to the largest cap the reservation has left, when that is at
+    least `min_output_tokens` (D50); `fit=False` keeps the refusal, for
+    the one bounded re-assessment call D73 records as refused, not
+    refitted."""
     if spend.halted:
         return Cause.MODEL_ERROR, HALTED_CALL
     try:
@@ -1778,9 +1865,25 @@ def _reserve_call(
         # the loop already records, not a dollar stop (round-2 review of
         # #717, n-7).
         return Cause.MODEL_ERROR, HALTED_CALL
-    if refused is not None:
+    if refused is None:
+        return _Reserved(worst, request)
+    if refused.limit != "reservation_usd" or not fit:
         return _stopped(refused)
-    return worst
+    fitted_call = _fit_to_reservation(
+        request, model, spend, refused, clock, wait_until
+    )  # fmt: skip
+    if isinstance(fitted_call, LimitHit):
+        return _stopped(fitted_call)
+    fitted_request, worst, refused_again = fitted_call
+    if spend.halted:
+        return Cause.MODEL_ERROR, HALTED_CALL
+    if refused_again is not None:
+        return _stopped(refused_again)
+    return _Reserved(
+        worst,
+        fitted_request,
+        f" (output cap fitted to {fitted_request.max_output_tokens} tokens)",
+    )
 
 
 def _time_up(
