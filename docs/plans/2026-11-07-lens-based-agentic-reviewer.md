@@ -15,7 +15,7 @@ It extends the manual reviewer service
 ([`2026-11-06-manual-reviewer-service.md`](2026-11-06-manual-reviewer-service.md),
 D24-D30, D32-D33) from one prompt per diff part to one model loop per review
 lens. Every number below is an estimate or a proposal, apart from the
-D43 updates, which record the owner's decision and the 2026-11-12 probe.
+D43 updates, which record the owner's decision and the 2026-11-12 PR #621 review.
 Nothing in this doc was run live.
 
 ## What this doc is, and what it is not
@@ -418,7 +418,7 @@ against a dollar cap and a call cap, and settles to the actual cost:
   `max_output_tokens` per turn (proposal: 4,000; findings are short).
   That shrinks each turn's worst-case reservation. Update (2026-11-12,
   D43): not taken. Per-call output and reasoning ceilings stay as they
-  are, and the byte-bound worst case stays. Headroom is the $5
+  are, and the byte-bound worst-case check stays. Headroom is the $5
   per-review reservation.
 - **Breadth** comes from the depth mode. **Rounds** come from `REVIEW.md`.
 - **Parallelism.** The worker-pool size is the only new number. With
@@ -516,7 +516,7 @@ The one live data point is D26's single call, which cost $0.17.
   With 2 subagents in flight, about $2.2 is held at once. So any cap below
   about $5 serialises the pool in practice. Update (2026-11-12, D43): that
   gap is accepted. The byte bound stays, and the per-review reservation
-  stays $5. The 2026-11-12 probe measured about 5–40×; see D43.
+  stays $5. The 2026-11-12 PR #621 review measured about 5–40×; see D43.
 
 ## Open questions for Brandon
 
