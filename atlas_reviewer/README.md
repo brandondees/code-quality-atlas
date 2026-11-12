@@ -96,8 +96,10 @@ has to grant that permission or the post fails and nothing is published.
 `ATLAS_SERVICE_PROVIDER` defaults to `openrouter`, and the process refuses
 to start until `ATLAS_ALLOW_LIVE_INFERENCE=1` is set, so a booted service
 does not post reviews a model never ran. `ATLAS_SERVICE_PROVIDER=offline`
-is the explicit no-model setting. The deploy shape for this process is a
-separate Fly app; the one-off `fly.toml` above is unchanged.
+is the explicit no-model setting. The deploy shape is a second Fly app,
+[`fly.service.toml`](../fly.service.toml), always on, in org `personal`.
+The one-off `fly.toml` above is unchanged. Commands:
+[`deploy-service.md`](deploy-service.md). D44.
 
 ## Run it offline (no credentials)
 

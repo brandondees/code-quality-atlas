@@ -8,6 +8,12 @@
 # resets its root filesystem, and starting it again reruns this command.
 set -eu
 umask 077
+# The one-off review path falls through. `serve` is the webhook process
+# on the service app (fly.service.toml); it does not use an event file.
+if [ "${1:-}" = "serve" ]; then
+  shift
+  exec python -m atlas_reviewer.service "$@"
+fi
 if [ -n "${ATLAS_EVENT_JSON:-}" ]; then
   printf '%s\n' "$ATLAS_EVENT_JSON" > /home/atlas/event.json
 fi
