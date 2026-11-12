@@ -369,6 +369,12 @@ def test_the_system_prompt_states_the_nonce_fence_rule(tmp_path):
     assert f'close with </untrusted-data id="{NONCE}">' in system
 
 
+def test_the_system_prompt_lists_every_allowed_severity(tmp_path):
+    _, model, _ = attempt(tmp_path, [READ_DIFF, final()])
+    system = model.requests[0].system
+    assert 'severity is exactly one of "blocker", "major", "minor" or "nit"' in system
+
+
 def test_a_body_not_delivered_whole_fails_before_any_model_call(tmp_path):
     def cut(lens, body, contract, retry_of, *, nonce):
         return lens_system(
