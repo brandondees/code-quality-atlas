@@ -10,6 +10,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+from atlas_reviewer.service import config_from_env
+
 ROOT = Path(__file__).resolve().parents[2]
 SERVICE = tomllib.loads((ROOT / "fly.service.toml").read_text(encoding="utf-8"))
 ONE_OFF = tomllib.loads((ROOT / "fly.toml").read_text(encoding="utf-8"))
@@ -134,6 +136,27 @@ def test_the_real_module_exits_2_when_no_atlas_env_is_set():
     )
     assert proc.returncode == 2
     assert b"webhook secret" in proc.stderr
+
+
+def test_the_fly_host_is_what_config_from_env_binds():
+    """A hardcoded loopback would still match the TOML string and leave
+    the proxy with nothing to reach."""
+    assert SERVICE["env"]["ATLAS_SERVICE_HOST"] == "0.0.0.0"
+    config = config_from_env(
+        {
+            "ATLAS_GITHUB_WEBHOOK_SECRET": "x" * 16,
+            "ATLAS_SERVICE_PROVIDER": "offline",
+            "ATLAS_SERVICE_HOST": "0.0.0.0",
+        }
+    )
+    assert config.host == "0.0.0.0"
+    loopback = config_from_env(
+        {
+            "ATLAS_GITHUB_WEBHOOK_SECRET": "x" * 16,
+            "ATLAS_SERVICE_PROVIDER": "offline",
+        }
+    )
+    assert loopback.host == "127.0.0.1"
 
 
 def test_a_non_8080_port_is_refused_and_the_toml_checks_8080():
