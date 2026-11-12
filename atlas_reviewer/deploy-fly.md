@@ -561,15 +561,17 @@ every start without `--rm` keeps waiting.
 If the `fly machine run` that started this Machine has not returned
 in its shell, kill that flyctl once `fly machine list` no longer
 shows the Machine. In that shell, Ctrl-C kills it. If the shell is
-gone, list the matching processes and confirm the line is the
-`fly machine run` that started this Machine, then kill that pid:
+gone, list the matching processes. Confirm the line that carries
+`--name "$NAME"` and no `--rm` (the sweep and the probe include
+`--rm`), set `PID` to that pid, and kill it:
 
 ```sh
 pgrep -af 'fly machine run'
-kill <pid>
+kill "$PID"
 ```
 
-Do this after the release destroy and after the hard-stop destroy. The process still running, and the
+Do this after the release destroy and
+after the hard-stop destroy. The process still running, and the
 status it exits with after the kill, are not the Machine's state.
 The `--rm` sweep and probe commands are a different case: they run
 under `timeout 45` or `--detach`, covered below.

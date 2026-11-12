@@ -790,25 +790,41 @@ def _comment_stripped(block: str) -> str:
     return re.sub(r"\\\n\s*", " ", "\n".join(lines))
 
 
+_START_LINE = re.compile(r"(?m)^start=\$\(\(\s*\$\(\s*date \+%s\s*\)\s*\)\)\s*$")
+_LOOP_CONDITION = re.compile(
+    r'^\[\s*-z\s+"\$[A-Za-z_][A-Za-z0-9_]*"\s*\]'
+    r"\s*&&\s*"
+    r'\[\s*"\$\(date \+%s\)"\s*-lt\s*"\$\(\(\s*start \+\s*3600\s*\)\)"\s*\]$'
+)
+
+
 def poll_loops(block: str) -> list[PollLoop]:
     """Sleep from the ``while`` body, deadline from the ``while`` condition.
 
     Full-line comments are dropped first, so a pattern that lives only in a
-    comment is not part of the ``grep`` command. A ``sleep`` or a ``+ 3600``
-    that sits above the ``while`` is not part of the loop.
+    comment is not part of the ``grep`` command. ``start=$(( $(date +%s) ))``
+    must be the line before the ``while`` and must not appear in the body.
+    The condition must be ``[ -z "$var" ] && [ "$(date +%s)" -lt "$(( start + 3600 ))" ]``.
     """
     code = _comment_stripped(block)
-    loops = re.findall(r"while\b(.*?)\bdo\b(.*?)done", code, flags=re.DOTALL)
     found = []
-    for condition, body in loops:
+    previous = 0
+    for match in re.finditer(r"while\b(.*?)\bdo\b(.*?)done", code, flags=re.DOTALL):
+        condition, body = match.group(1), match.group(2)
+        before = code[previous : match.start()]
+        assert len(_START_LINE.findall(before)) == 1, block
+        assert not re.search(r"(?m)^start=", body), block
+        condition = condition.strip().removesuffix(";").strip()
+        assert _LOOP_CONDITION.fullmatch(condition), condition
         sleeps = [int(n) for n in re.findall(r"(?m)^\s*sleep\s+(\d+)\s*$", body)]
         deadlines = [int(n) for n in re.findall(r"start \+\s*(\d+)", condition)]
         assert len(sleeps) == 1, block
-        assert len(deadlines) == 1, block
+        assert deadlines == [3600], block
         greps = re.findall(r"(?m)^\s*(grep\b.*?)\s*(?:\|\||$)", body)
         assert len(greps) <= 1, block
         grep_argv = tuple(shlex.split(greps[0])) if greps else None
         found.append(PollLoop(sleeps[0], deadlines[0], grep_argv))
+        previous = match.end()
     return found
 
 
@@ -1116,8 +1132,9 @@ def test_a_non_rm_stop_kills_a_leftover_flyctl_after_the_machine_is_gone():
     assert "kill that flyctl" in body
     assert "Ctrl-C" in body
     assert "pgrep -af 'fly machine run'" in body
-    assert "kill <pid>" in body
-    assert "confirm the line is the `fly machine run` that started this Machine" in body
+    assert 'kill "$PID"' in body
+    assert '--name "$NAME"' in body
+    assert "no `--rm`" in body
     assert "are not the Machine's state" in body
     assert "timeout 45" in body and "--detach" in body
     for heading in (
