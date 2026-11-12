@@ -44,6 +44,33 @@ def test_the_service_app_stays_up_and_the_one_off_publishes_nothing():
     assert ONE_OFF["app"] == "atlas-reviewer"
 
 
+def _fenced(text: str) -> str:
+    blocks: list[str] = []
+    current: list[str] = []
+    inside = False
+    for line in text.splitlines():
+        if line.startswith("```"):
+            if inside:
+                blocks.append("\n".join(current))
+                current = []
+            inside = not inside
+            continue
+        if inside:
+            current.append(line)
+    return "\n".join(blocks)
+
+
+def test_the_org_and_the_single_machine_flag_are_on_the_commands():
+    """The org and ``--ha=false`` have to be on the fenced commands.
+    Prose that names them does not count."""
+    commands = _fenced(RUNBOOK)
+    assert "ORG=personal" in commands.splitlines()
+    assert 'flyp apps list --org "$ORG" --quiet | grep -qx "$APP" ||' in commands
+    assert 'flyp apps create "$APP" --org "$ORG"' in commands
+    deploys = [line.strip() for line in commands.splitlines() if "flyp deploy" in line]
+    assert deploys == ['flyp deploy -c fly.service.toml --app "$APP" --ha=false']
+
+
 def test_the_runbook_names_the_secret_the_org_and_the_webhook():
     flat = " ".join(RUNBOOK.split())
     for text in (

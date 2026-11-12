@@ -61,9 +61,13 @@ Machine's start under that window, and it says auto-stop and auto-start
 should be set together. The standing Machine is the shape that can answer
 in time. Its compute price, from Fly's pricing page for `iad` on
 2026-11-12, is the `shared-cpu-1x` with 1 GB row: $6.70 per 30 days. The
-queue and the post ledger are on a 1 GB volume at `/data` ($0.15 per
-month on that same page), so a restart keeps them. The Machine's root
-disk does not. The runbook records the citations.
+queue, the post ledger, and `service.jsonl` are on a 1 GB volume at
+`/data` ($0.15 per month on that same page), so a restart keeps them.
+The queue keeps at most 2,000 job records and 20,000 dedupe keys, and it
+never drops a pull request's current head. A run directory is removed
+when its job ends. A key is about 80 bytes, so 20,000 keys are about
+1.6 MB, which fits the volume. The Machine's root disk does not keep
+this state. The runbook records the citations.
 
 ## Open
 

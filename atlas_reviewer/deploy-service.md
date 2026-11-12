@@ -117,8 +117,12 @@ flyp machine restart <id> --app "$APP"
 
 The restart is only needed when the first deploy started the process
 before the chown. After that, restarts keep the queue and the post
-ledger. `fly apps destroy` does not delete the volume. List it and
-destroy it separately after the app.
+ledger. The queue keeps at most 2,000 job records and 20,000 dedupe
+keys, and it never drops a pull request's current head. A run directory
+is removed when its job ends. A key is about 80 bytes, so 20,000 keys
+are about 1.6 MB. The 1 GB volume holds the queue file, `posted.json`,
+and `service.jsonl`. `fly apps destroy` does not delete the volume.
+List it and destroy it separately after the app.
 
 Confirm the process without printing the environment:
 
