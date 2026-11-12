@@ -517,7 +517,8 @@ flyp machine destroy "$MACHINE_ID" --app atlas-reviewer --force
 If the `fly machine wait` above errors or times out, that exit does
 not say the Machine stopped, and it does not say whether `finally`
 ran. Continue to `fly machine destroy --force`, then check the runner
-Sprite as below. If the flyctl that started this Machine is still
+Sprite as in
+[Recover a runner Sprite by name](#recover-a-runner-sprite-by-name). If the flyctl that started this Machine is still
 running, kill it as in
 [Leftover flyctl after a stop](#leftover-flyctl-after-a-stop).
 
@@ -541,7 +542,8 @@ run, not a supported stop path: this runbook does not say how to find
 the CLI's PID or when to prefer that over `fly machine stop`.
 
 `--force` destroys the Machine in any state. A SIGKILL skips `finally`,
-so after a hard stop check for the runner Sprite as below.
+so after a hard stop check for the runner Sprite as in
+[Recover a runner Sprite by name](#recover-a-runner-sprite-by-name).
 
 ### Leftover flyctl after a stop
 
@@ -558,11 +560,13 @@ every start without `--rm` keeps waiting.
 
 If the `fly machine run` that started this Machine has not returned
 in its shell, kill that flyctl once `fly machine list` no longer
-shows the Machine. Do this after the release destroy and after the
-hard-stop destroy. The process still running, and the status it
-exits with after the kill, are not the Machine's state. The `--rm`
-sweep and probe commands are a different case: they run under
-`timeout 45` or `--detach`, covered below.
+shows the Machine. In that shell, Ctrl-C kills it. If the shell is
+gone, find the process and kill it, for example
+`pgrep -af 'fly machine run'`. Do this after the release destroy and
+after the hard-stop destroy. The process still running, and the
+status it exits with after the kill, are not the Machine's state.
+The `--rm` sweep and probe commands are a different case: they run
+under `timeout 45` or `--detach`, covered below.
 
 ### Recover a runner Sprite by name
 
@@ -638,6 +642,11 @@ while [ -z "$found" ] && [ "$(date +%s)" -lt "$deadline" ]; do
 done
 printf '%s\n' "$found"
 ```
+
+`|| true` keeps this loop going when `fly logs` or `grep` fails.
+flyctl's stderr stays on the terminal, so repeated errors are visible.
+It is not a quiet wait. How far back this `--machine` `--no-tail`
+read reaches was not measured on the 2026-11-11 runs.
 
 App-wide `--no-tail` keeps only the last 100 lines and can return
 another Machine's `Main child exited normally with code: N`. A
@@ -756,15 +765,19 @@ deadline=$(( $(date +%s) + 3600 ))
 while [ -z "$found" ] && [ "$(date +%s)" -lt "$deadline" ]; do
   sleep 30
   found=$(flyp logs --app atlas-reviewer --machine "$MACHINE_ID" --no-tail |
-    grep -F 'Main child exited normally with code:' || true)
+    grep -F -e 'Main child exited normally with code:' || true)
 done
 printf '%s\n' "$found"
 ```
 
-If `$found` is empty after the hour, this Machine may still be
-running. List it and destroy it with `--force`, then sweep its
+`|| true` keeps this loop going when `fly logs` or `grep` fails.
+flyctl's stderr stays on the terminal, so repeated errors are visible.
+It is not a quiet wait. If `$found` is empty after the hour, this
+Machine may still be running. Then `fly machine list`, and if this
+Machine is still listed, `fly machine destroy --force`, and sweep its
 runner by name, as when the sweep poll's `$found` is empty. Do not
-stage the key.
+stage the key. How far back this `--machine` `--no-tail` read reaches
+was not measured on the 2026-11-11 runs.
 
 `probe-runner --sequence review` on Fly cannot use `--tarball`. This
 image copies the controller, not a checkout tarball. The review
@@ -835,12 +848,14 @@ flyp logs --app atlas-reviewer --machine "$MACHINE_ID" --no-tail
 
 If that line is still absent after the wait, read the log stream
 started before the probe
-([Run one review](#run-one-review)). `--no-tail` keeps only the last
-100 lines. Do not stage the key. Report that this probe did not show
-`code: 0`.
+([Run one review](#run-one-review)). How far back this `--machine`
+`--no-tail` read reaches was not measured on the 2026-11-11 runs.
+The app-wide `--no-tail` on the 2026-11-10 run kept the last 100
+lines, which is a different read. Do not stage the key. Report that
+this probe did not show `code: 0`.
 
-After the probe, stage the pilot key again from stdin. The `grep`
-writes that one line to the import, not to the terminal. `--stage`
+If the probe showed `code: 0`, stage the pilot key again from stdin.
+The `grep` writes that one line to the import, not to the terminal. `--stage`
 still skips a release. Then list the names again. `fly secrets list`
 prints names, not values; the OpenRouter name should be present:
 

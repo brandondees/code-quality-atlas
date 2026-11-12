@@ -10,6 +10,7 @@ Nothing here builds the image or calls Fly.
 
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -743,17 +744,95 @@ def test_a_review_is_waited_for_copied_released_and_destroyed_in_that_order():
     )
 
 
-def heading_body(heading: str) -> str:
-    """Text from a heading through the next heading of the same or higher level."""
-    start = RUNBOOK.index(f"{heading}\n")
+def heading_body(heading: str, text: str | None = None) -> str:
+    """Text from a heading through the next heading of the same or higher level.
+
+    A ``#`` at column 0 inside a fenced block is not a heading. An unclosed
+    fence hides every later heading, because the rest of the text stays inside
+    that fence.
+    """
+    source = RUNBOOK if text is None else text
+    start = source.index(f"{heading}\n")
     level = len(heading) - len(heading.lstrip("#"))
-    rest = RUNBOOK[start + len(heading) + 1 :]
-    match = re.search(rf"\n#{{1,{level}}} ", rest)
-    return rest[: match.start()] if match else rest
+    rest = source[start + len(heading) + 1 :]
+    in_fence = False
+    kept: list[str] = []
+    for line in rest.splitlines(keepends=True):
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            kept.append(line)
+            continue
+        if not in_fence and re.match(rf"#{{1,{level}}} ", line):
+            break
+        kept.append(line)
+    return "".join(kept)
 
 
 def flattened(text: str) -> str:
     return " ".join(text.split())
+
+
+class PollLoop(NamedTuple):
+    """One ``while`` poll in a fenced block, comments already dropped."""
+
+    sleep_seconds: int
+    deadline_seconds: int
+    grep_argv: tuple[str, ...] | None
+
+
+def _comment_stripped(block: str) -> str:
+    lines = []
+    for line in block.splitlines():
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        lines.append(re.sub(r"\s+#.*$", "", line))
+    return re.sub(r"\\\n\s*", " ", "\n".join(lines))
+
+
+def poll_loops(block: str) -> list[PollLoop]:
+    """Deadline, sleep, and ``grep`` argv of each poll loop in one fence.
+
+    Full-line comments are dropped first, so a pattern that lives only in a
+    comment is not part of the ``grep`` command.
+    """
+    code = _comment_stripped(block)
+    if not re.search(r"(?m)^\s*while\s", code):
+        return []
+    sleeps = [int(n) for n in re.findall(r"(?m)^\s*sleep\s+(\d+)\s*$", code)]
+    deadlines = [
+        int(n)
+        for n in re.findall(
+            r"deadline=\$\(\(\s*\$\(\s*date \+%s\s*\)\s*\+\s*(\d+)\s*\)\s*\)",
+            code,
+        )
+    ]
+    assert len(sleeps) == 1, block
+    assert len(deadlines) == 1, block
+    greps = re.findall(r"(?m)^\s*(grep\b.*?)\s*(?:\|\||$)", code)
+    assert len(greps) <= 1, block
+    grep_argv = tuple(shlex.split(greps[0])) if greps else None
+    return [PollLoop(sleeps[0], deadlines[0], grep_argv)]
+
+
+def _e_patterns(argv: tuple[str, ...]) -> tuple[str, ...]:
+    patterns = []
+    index = 0
+    while index < len(argv):
+        if argv[index] == "-e":
+            patterns.append(argv[index + 1])
+            index += 2
+            continue
+        index += 1
+    return tuple(patterns)
+
+
+def test_heading_body_ignores_a_hash_inside_a_fence():
+    sample = "### First\n\n```sh\n# Second\necho hi\n```\n\nstill in first\n\n### Second\n\ngone\n"
+    body = heading_body("### First", sample)
+    assert "still in first" in body
+    assert "# Second" in body
+    assert "gone" not in body
 
 
 def test_a_stuck_tunnel_resets_the_personal_wireguard_peer():
@@ -830,16 +909,57 @@ def test_an_early_flyctl_return_is_polled_until_the_machines_own_line():
     # the --machine pin: _logs_polls checks the peeled fly argv.
     assert len(polls) == 3
     sweep_block, probe_block, after_wait = (block for block, _ in polls)
-    assert "destroyed (verified absent)" in sweep_block
-    assert "already absent, nothing deleted (verified absent)" in sweep_block
-    assert "Main child exited normally with code:" in sweep_block
-    assert "while [ -z" in sweep_block
-    assert "Main child exited normally with code:" in probe_block
-    assert "destroyed (verified absent)" not in probe_block
-    assert "while [ -z" in probe_block
-    assert "while [ -z" not in after_wait
+    (sweep_poll,) = poll_loops(sweep_block)
+    (probe_poll,) = poll_loops(probe_block)
+    assert poll_loops(after_wait) == []
+    assert sweep_poll.sleep_seconds > 0
+    assert probe_poll.sleep_seconds > 0
+    assert sweep_poll.deadline_seconds == 3600
+    assert probe_poll.deadline_seconds == 3600
+    assert sweep_poll.grep_argv == (
+        "grep",
+        "-F",
+        "-e",
+        "destroyed (verified absent)",
+        "-e",
+        "already absent, nothing deleted (verified absent)",
+        "-e",
+        "Main child exited normally with code:",
+    )
+    assert probe_poll.grep_argv == (
+        "grep",
+        "-F",
+        "-e",
+        "Main child exited normally with code:",
+    )
+    assert _e_patterns(sweep_poll.grep_argv) == sweep_poll.grep_argv[3::2]
+    assert _e_patterns(probe_poll.grep_argv) == (
+        "Main child exited normally with code:",
+    )
+    (exit_block,) = [
+        block
+        for block in shell_blocks(heading_body("### Wait for the review to exit"))
+        if "while " in block
+    ]
+    (exit_poll,) = poll_loops(exit_block)
+    assert exit_poll.grep_argv is None
+    assert exit_poll.deadline_seconds == 3600
+    assert exit_poll.sleep_seconds > 0
+    every_poll = [loop for block in shell_blocks(RUNBOOK) for loop in poll_loops(block)]
+    assert every_poll == [exit_poll, sweep_poll, probe_poll]
+    after_probe = recover.split(probe_block, 1)[1]
+    assert after_probe.lstrip("\n").startswith("```")
+    probe_fallback = flattened(
+        after_probe.split("```", 1)[1]
+        .split("```", 1)[0]
+        .split("probe-runner --sequence review", 1)[0]
+    )
+    assert "machine list" in probe_fallback
+    assert "--force" in probe_fallback
+    assert "sweep its runner by name" in probe_fallback
     assert "wrapper status 124" in flat
-    assert "Do not keep polling for the hour once the exit line is present." in flat
+    assert "stderr stays on the terminal" in flat
+    assert "was not measured" in flat
     assert (
         "If `$found` is only the exit line, the runner was not verified gone." in flat
     )
@@ -966,6 +1086,7 @@ def test_a_failed_machine_wait_still_reaches_its_check():
     assert "does not say the Machine stopped" in hard
     assert "does not say whether `finally` ran" in hard
     assert "Continue to `fly machine destroy --force`" in hard
+    assert heading_body("### Hard stop").count("#recover-a-runner-sprite-by-name") == 2
     recover = flattened(
         prose_after_fence(
             heading_body("### Recover a runner Sprite by name"),
@@ -996,6 +1117,8 @@ def test_a_non_rm_stop_kills_a_leftover_flyctl_after_the_machine_is_gone():
     assert "does not show that every start without `--rm` keeps waiting" in body
     assert "has not returned in its shell" in body
     assert "kill that flyctl" in body
+    assert "Ctrl-C" in body
+    assert "pgrep -af 'fly machine run'" in body
     assert "are not the Machine's state" in body
     assert "timeout 45" in body and "--detach" in body
     for heading in (
