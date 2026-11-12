@@ -841,7 +841,7 @@ D41 records the 2026-11-12 probe that did.
   most 20 seconds. A refresh stores a failure under the lock before
   releasing it. The lock and the stop and held guards are what stop a
   refresh after the hold has stopped from recreating the task; the Tasks
-  API's PUT would otherwise upsert it. Each hold exec has its own 15 second
+  API's PUT would otherwise upsert it. Each hold exec has its own 15-second
   budget, and the guest socket call times out after 10 seconds and reads
   only the status line. Refresh and tool execs share the runner's exec lock so
   they do not write one stream; the 15-second budget is how long a
@@ -850,11 +850,15 @@ D41 records the 2026-11-12 probe that did.
   built; there is no public fork API (Fly support, 2026-11-06).
 - **The draft** (`coordinator.render_draft`).
   - **Status line.** The first line is a status line: `"mode": "agentic"`,
-    `coverage_complete`, and the lens counts by state.
+    `coverage_complete`, `changed_files`, `unreviewed_files`, and the lens
+    counts by state. The two file fields are counts. Paths stay out of
+    the line.
   - **Coverage.** Coverage is complete only if every selected lens settled
-    clean and, when this review ran a runner, that runner completed.
-    Otherwise a REVIEW INCOMPLETE warning follows, and the review never
-    approves. A failed runner's note is quoted in the draft.
+    clean, every changed file's diff was read, the outcome recorded a
+    changed-file count, and, when this review ran a runner, that runner
+    completed. Otherwise a REVIEW INCOMPLETE warning follows, and the
+    review never approves. A failed runner's note is quoted in the draft.
+    A settled outcome with no changed-file count shows no coverage.
   - **Findings.** Verified findings carry minted `L<lens>-F<n>` IDs and are
     ranked by severity. The verdict comes from verified, introduced defects
     only. Unverified findings are listed apart and never counted. Possible

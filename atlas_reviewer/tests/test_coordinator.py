@@ -299,7 +299,7 @@ def test_quotes_that_fail_twice_leave_the_lens_partial_and_report_only_verified(
 
 def test_a_cut_short_lens_is_partial_and_not_retried(tmp_path):
     result, model, _ = review(
-        tmp_path, [READ_DIFF] * 10, limits=replace(LIMITS, max_turns=2)
+        tmp_path, [READ_ALL] * 10, limits=replace(LIMITS, max_turns=2)
     )
     (lens,) = result.lenses
     assert (lens.state, lens.attempts) == (LensState.PARTIAL, 1)
@@ -567,6 +567,57 @@ def test_a_clean_outcome_without_a_file_count_cannot_approve():
     assert result.proposed_event is ReviewEvent.APPROVE
     assert result.event is ReviewEvent.COMMENT
     assert status(result)["coverage_complete"] is False
+    headline = render_draft(result, Redactor()).splitlines()[2]
+    assert "no recorded file coverage" in headline
+    assert "no lens selected" not in headline
+
+
+def test_unread_paths_block_approval_even_when_the_outcome_was_recorded_clean():
+    outcome = AttemptOutcome(
+        Attestation.ATTESTED,
+        unread=("src/a.py", "auth/session.py"),
+        changed_files=2,
+    )
+    result = synthesize([lens_result(outcome)])
+    assert not result.coverage_complete
+    assert result.proposed_event is ReviewEvent.APPROVE
+    assert result.event is ReviewEvent.COMMENT
+    headline = render_draft(result, Redactor()).splitlines()[2]
+    assert "Every changed file's diff" not in headline
+    assert "unread files" in headline
+
+
+def test_unread_paths_are_named_ahead_of_a_missing_file_count():
+    outcome = AttemptOutcome(
+        Attestation.ATTESTED, unread=("auth/session.py",), changed_files=None
+    )
+    result = synthesize([lens_result(outcome)])
+    headline = render_draft(result, Redactor()).splitlines()[2]
+    assert "unread files" in headline
+    assert "no recorded file coverage" not in headline
+    assert "no lens selected" not in headline
+
+
+@pytest.mark.parametrize(
+    ("count", "rest"),
+    [(20, 0), (21, 1)],
+    ids=["exactly-twenty", "one-past-twenty"],
+)
+def test_the_unread_list_names_twenty_paths_and_counts_the_rest(count, rest):
+    paths = tuple(f"src/f{i:02d}.py" for i in range(count))
+    outcome = AttemptOutcome(
+        Attestation.ATTESTED, unread=paths, changed_files=len(paths)
+    )
+    result = synthesize([lens_result(outcome)])
+    headline = render_draft(result, Redactor()).splitlines()[2]
+    assert f"{count} changed files not read in full" in headline
+    assert "src/f00.py" in headline
+    if rest:
+        assert f", and {rest} more" in headline
+        assert paths[-1] not in headline
+    else:
+        assert ", and" not in headline
+        assert all(path in headline for path in paths)
 
 
 def test_the_status_line_is_the_drafts_first_line_and_only_controller_values():
