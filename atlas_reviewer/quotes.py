@@ -2,10 +2,13 @@
 """Quote checks (D31, D34 (2); `synthesis.md`'s quote-the-line gate). Pure
 apart from reading the head tarball in memory.
 
-A `file:line` finding is verified only when its evidence is found at that
-range of the head tree, or among the PR diff's removed lines of that file
-(code the PR deletes is not in the head). A whole-file finding is verified
-when the path is in the head tree or the diff. A design reference has no
+A `file:line` finding is verified only when its evidence is found in the
+cited lines of the head file, or among the PR diff's removed lines of that
+file (code the PR deletes is not in the head). The window is those lines
+and no others: a range that runs past the end of the file is not trimmed
+to the file and searched, since that would let a quote match anywhere in
+it. A whole-file finding is verified when the path is in the head tree
+or the diff. A design reference has no
 line to quote. Anything else is unverified and never reported as a
 verified finding.
 
@@ -174,16 +177,17 @@ def _check_range(finding: Finding, where: LineRange, sources: SourceText) -> Quo
     if not quote:
         return Unverified(finding, "the evidence quotes nothing")
     head = sources.head.get(where.path)
-    if head is not None and _found(quote, head[where.start - 1 : where.end]):
+    window = None if head is None else _cited_lines(head, where)
+    if window is not None and _found(quote, window):
         return Verified(finding, QuoteSource.HEAD)
     if any(_found(quote, run) for run in sources.removed.get(where.path, ())):
         return Verified(finding, QuoteSource.REMOVED)
     if head is None and sources.unreadable:
         return Unverified(finding, sources.unreadable)
-    if head is not None and where.start > len(head):
+    if head is not None and window is None:
         return Unverified(
             finding,
-            f"the range starts past the end of the head file ({len(head)} lines), "
+            f"the range runs past the end of the head file ({len(head)} lines), "
             "and the quote is not among the diff's removed lines",
         )
     return Unverified(
@@ -191,6 +195,15 @@ def _check_range(finding: Finding, where: LineRange, sources: SourceText) -> Quo
         "the quote is not at that range of the head file, or among the "
         "diff's removed lines of that file",
     )
+
+
+def _cited_lines(head: tuple[str, ...], where: LineRange) -> tuple[str, ...] | None:
+    """The cited lines, when the range fits in the file. A range that runs
+    past the end is not a window: the slice of it would be the rest of the
+    file, and a one-line quote would then match anywhere in the file."""
+    if where.start > len(head) or where.end > len(head):
+        return None
+    return head[where.start - 1 : where.end]
 
 
 def _quote_lines(evidence: str) -> tuple[str, ...]:

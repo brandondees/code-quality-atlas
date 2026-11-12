@@ -119,6 +119,22 @@ def test_a_quote_not_at_the_cited_range_is_not_verified(start, end, evidence):
     assert isinstance(check(LineRange("calc.py", start, end), evidence), Unverified)
 
 
+def test_a_quote_that_sits_outside_its_cited_lines_is_not_verified():
+    """The text is line 2; the citation is the last three lines of the file."""
+    result = check(LineRange("calc.py", 6, 8), "return sum(round(x, 2) for x in xs)")
+    assert isinstance(result, Unverified)
+    assert "not at that range" in result.reason
+
+
+@pytest.mark.parametrize("end", [9, 10_000_000])
+def test_a_range_that_ends_past_the_file_is_not_verified(end):
+    """Line 2's text, cited from line 2 to past the file. The slice of that
+    range would be the rest of the file, and the quote would match."""
+    result = check(LineRange("calc.py", 2, end), "return sum(round(x, 2) for x in xs)")
+    assert isinstance(result, Unverified)
+    assert "past the end of the head file (8 lines)" in result.reason
+
+
 def test_a_short_fragment_passes_only_as_the_whole_line():
     assert isinstance(check(LineRange("calc.py", 1, 8), "xs)"), Unverified)
     assert isinstance(check(LineRange("calc.py", 1, 8), "}"), Verified)
