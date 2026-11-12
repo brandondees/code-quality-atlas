@@ -10,10 +10,12 @@ approve with changes; only nits or nothing means approve). There is no
 model merge call yet.
 
 Coverage is complete only when the ledger shows every selected lens
-settled CLEAN on this head with this body. Anything less fails closed:
+settled CLEAN on this head with this body and, when this review ran a
+runner, that runner completed. A keepalive failure is a failed runner,
+so a clean lens cannot approve it away. Anything less fails closed:
 the draft opens with the machine-readable status line
 (`coverage_complete: false`) and a REVIEW INCOMPLETE warning, and never
-approves.
+approves. The runner's own note is in the draft when it did not complete.
 
 Retries come from the ledger alone (`attestation.next_step`). A lens
 already settled for this head and body is reused without a runner, and a
@@ -44,7 +46,7 @@ from atlas_reviewer.bridge import Bridge, BridgeSecret, run_bridge
 from atlas_reviewer.bridge_staging import BRIDGE_ROOT, SourceTrees
 from atlas_reviewer.committed_secrets import scan_diff
 from atlas_reviewer.diffs import by_risk, split_files
-from atlas_reviewer.domain import PrEvent, RunnerReport
+from atlas_reviewer.domain import PrEvent, RunnerReport, RunnerStatus
 from atlas_reviewer.keepalive import SOCKET_PATH, lens_hold
 from atlas_reviewer.lens_contract import Finding, Severity
 from atlas_reviewer.lens_loop import (
@@ -132,9 +134,17 @@ class AgenticReview:
 
     @property
     def coverage_complete(self) -> bool:
-        return bool(self.lenses) and all(
+        """Clean lenses, and a completed runner when this review started one.
+
+        A settled lens reused from the ledger has no runner. A runner that
+        failed after a clean lens (a keepalive refresh or delete, for
+        example) is not complete coverage, so the review cannot approve."""
+        lenses_clean = bool(self.lenses) and all(
             r.state is LensState.CLEAN for r in self.lenses
         )
+        if not lenses_clean or self.runner is None:
+            return lenses_clean
+        return self.runner.status is RunnerStatus.COMPLETED
 
     @property
     def proposed_event(self) -> ReviewEvent:
@@ -476,6 +486,11 @@ def render_draft(review: AgenticReview, redactor: Redactor) -> str:
         lines.append(
             f"Runner: {review.runner.status.value}; cleanup {review.runner.cleanup.value}."
         )
+        if review.runner.status is not RunnerStatus.COMPLETED and review.runner.note:
+            lines.append(
+                "Runner reported, quoted: "
+                + quote_untrusted(review.runner.note, QUOTED_CHARS, scrub=scrub)
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -486,7 +501,14 @@ def _headline(review: AgenticReview) -> str:
             "Every selected lens ran whole, attested, with every quote verified."
         )
     short = [r for r in review.lenses if r.state is not LensState.CLEAN]
-    named = "; ".join(f"{r.lens}: {r.state.value}" for r in short) or "no lens selected"
+    if short:
+        named = "; ".join(f"{r.lens}: {r.state.value}" for r in short)
+    elif (
+        review.runner is not None and review.runner.status is not RunnerStatus.COMPLETED
+    ):
+        named = f"runner {review.runner.status.value}"
+    else:
+        named = "no lens selected"
     proposed = (
         f" (the findings alone would be {review.proposed_event.value})"
         if review.proposed_event is not review.event

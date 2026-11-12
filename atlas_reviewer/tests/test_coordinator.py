@@ -67,12 +67,14 @@ def ledger(tmp_path):
     return AttemptLedger(tmp_path / "state" / "attestations.jsonl", FakeClock())
 
 
-def review(tmp_path, script, *, sprites=None, limits=LIMITS, library=None, **kw):
+def review(tmp_path, script, *, sprites=None, limits=LIMITS, library=None,
+           hold_fail="", **kw):  # fmt: skip
     from .test_keepalive import TaskServer, socket_path
 
     sprites = sprites if sprites is not None else LocalSprites()
     model = ScriptedLensModel(list(script))
     tasks = TaskServer(socket_path(tmp_path))
+    tasks.fail = hold_fail
     tasks.start()
     try:
         result = review_lens(
@@ -83,8 +85,10 @@ def review(tmp_path, script, *, sprites=None, limits=LIMITS, library=None, **kw)
             bridge_root=str(tmp_path / "bridge"), task_socket=str(tasks.path), **kw,
         )  # fmt: skip
     finally:
+        review.hold_order = list(tasks.order)
         tasks.close()
-        assert tasks.tasks == {}, tasks.order
+        if not hold_fail:
+            assert tasks.tasks == {}, tasks.order
     return result, model, sprites
 
 
@@ -146,6 +150,33 @@ def test_a_clean_lens_with_no_findings_approves(tmp_path):
     result, _, _ = review(tmp_path, [READ_DIFF, final()])
     assert result.event is ReviewEvent.APPROVE
     assert status(result)["review_event"] == "APPROVE"
+    assert review.hold_order[0] == "POST"
+    assert review.hold_order[-1] == "DELETE"
+
+
+def test_a_hold_that_fails_to_create_does_not_run_the_lens(tmp_path):
+    result, model, _ = review(tmp_path, [READ_DIFF, final()], hold_fail="POST")
+    (lens,) = result.lenses
+    assert lens.state is LensState.NOT_RUN
+    assert model.requests == []
+    assert ledger(tmp_path).attempts(KEY) == ()
+    assert result.event is not ReviewEvent.APPROVE
+    assert "POST failed" in render_draft(result, Redactor())
+
+
+def test_a_keepalive_failure_after_a_clean_lens_cannot_approve(tmp_path):
+    """The hold client fails its delete after the lens is clean."""
+    result, _, _ = review(tmp_path, [READ_DIFF, final()], hold_fail="DELETE")
+    (lens,) = result.lenses
+    assert lens.state is LensState.CLEAN
+    assert result.runner.status is RunnerStatus.FAILED
+    assert result.verdict is Verdict.APPROVE
+    assert result.event is ReviewEvent.COMMENT
+    assert not result.coverage_complete
+    draft = render_draft(result, Redactor())
+    assert "REVIEW INCOMPLETE" in draft
+    assert "runner failed" in draft
+    assert "DELETE failed" in draft
 
 
 def test_the_ledger_records_each_attempt_with_its_head_and_body(tmp_path):
@@ -481,6 +512,23 @@ def test_coverage_short_of_clean_never_approves_even_with_no_findings(outcome):
 
 def test_no_lens_selected_is_not_complete_coverage():
     assert not synthesize([]).coverage_complete
+
+
+def test_a_failed_runner_is_not_complete_coverage_even_when_the_lens_is_clean():
+    from atlas_reviewer.domain import RunnerReport
+
+    clean_lens = lens_result(AttemptOutcome(Attestation.ATTESTED))
+    failed = RunnerReport(
+        RunnerStatus.FAILED, CleanupStatus.DESTROYED_VERIFIED, "r",
+        "sprite task socket DELETE returned HTTP 500",
+    )  # fmt: skip
+    result = synthesize([clean_lens], runner=failed)
+    assert result.verdict is Verdict.APPROVE
+    assert result.event is ReviewEvent.COMMENT
+    assert not result.coverage_complete
+    draft = render_draft(result, Redactor())
+    assert "HTTP 500" in draft
+    assert "runner failed" in draft
 
 
 def test_findings_are_minted_in_reply_order_and_ranked_by_severity():
