@@ -440,7 +440,11 @@ def run_attempt(
             return p.cut(refused)
         try:
             reply = model.turn(request)
-        except ByokRefusedError:
+        except ByokRefusedError as exc:
+            # The refusal still leaves the loop. The turns and tool calls
+            # already completed travel with it, so the ledger records them.
+            exc.turns = p.turns
+            exc.tools = tuple(p.tools)
             raise
         except BoundaryError as exc:
             return p.cut(Cause.MODEL_ERROR, str(exc))

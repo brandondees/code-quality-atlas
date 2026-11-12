@@ -27,7 +27,16 @@ class ByokRefusedError(BoundaryError):
     """The key does not count BYOK spend, and this model response is not
     an explicit non-BYOK call. A caller that turns some other
     `BoundaryError` into a skipped part or a fallback pick re-raises this
-    one: the review stops, and no later model call is made."""
+    one: the review stops, and no later model call is made.
+
+    `turns` and `tools` start empty. The lens loop fills them with the
+    turns and tool calls completed before the refusal, so the ledger
+    attempt records that work."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.turns = 0
+        self.tools: tuple[Any, ...] = ()
 
 
 class NotFoundError(BoundaryError):

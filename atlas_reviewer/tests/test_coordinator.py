@@ -307,7 +307,44 @@ def test_a_byok_refusal_is_not_retried_on_the_next_review(tmp_path):
 
     first, _, _ = review(tmp_path, [], model=Refusing())
     assert first.event is not ReviewEvent.APPROVE
+    assert first.runner is not None
+    assert first.runner.status is RunnerStatus.FAILED
+    assert "Runner reported" in render_draft(first, Redactor())
     (attempt,) = ledger(tmp_path).attempts(KEY)
+    assert Cause.MODEL_ERROR in attempt.outcome.causes
+    assert not attempt.outcome.retryable
+    assert attempt.outcome.turns == 0
+    assert attempt.outcome.tools == ()
+
+    sprites = FakeSprites()
+    again, model, _ = review(tmp_path, [READ_DIFF, final()], sprites=sprites)
+    assert model.requests == []
+    assert sprites.calls == []
+    assert again.event is not ReviewEvent.APPROVE
+    assert again.lenses[0].state is LensState.FAILED
+
+
+def test_a_byok_refusal_after_a_tool_keeps_the_secret_and_the_progress(tmp_path):
+    """A later turn refuses. The tool call already found a committed
+    secret, and that secret, the turn and the tool stay in the record.
+    Dropping the re-raise would leave the runner completed."""
+    read = READ_DIFF.__class__(
+        (READ_DIFF.calls[0].__class__("read_file", {"path": "config/keys.py"}),),
+        READ_DIFF.cost_usd,
+    )
+    result, _, _ = review(
+        tmp_path, [read, ByokRefusedError("refusing the review: byok")]
+    )
+    draft = render_draft(result, Redactor())
+    assert "## Possible committed secrets (controller findings)" in draft
+    assert TOKEN not in draft
+    assert result.runner is not None
+    assert result.runner.status is RunnerStatus.FAILED
+    assert "Runner reported" in draft
+    assert result.model_calls == 2
+    (attempt,) = ledger(tmp_path).attempts(KEY)
+    assert attempt.outcome.turns == 1
+    assert [(t.tool, t.status) for t in attempt.outcome.tools] == [("read_file", "OK")]
     assert Cause.MODEL_ERROR in attempt.outcome.causes
     assert not attempt.outcome.retryable
 
@@ -316,7 +353,6 @@ def test_a_byok_refusal_is_not_retried_on_the_next_review(tmp_path):
     assert model.requests == []
     assert sprites.calls == []
     assert again.event is not ReviewEvent.APPROVE
-    assert again.lenses[0].state is LensState.FAILED
 
 
 def test_a_rerun_on_the_same_head_and_body_reuses_the_settled_lens(tmp_path):

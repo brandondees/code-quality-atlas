@@ -20,8 +20,10 @@ approves. The runner's own note is in the draft when it did not complete.
 Retries come from the ledger alone (`attestation.next_step`). A lens
 already settled for this head and body is reused without a runner, and a
 review that stopped mid-attempt resumes its attempt count. A BYOK refusal
-is finished as a model error, which is not retried, before it leaves the
-loop, so the next review of this head does not make another billed call.
+is finished as a model error before it leaves the loop: the attempt keeps
+the turns, tool calls and committed secrets already seen, the outcome is
+not retried, and the runner fails, so the next review of this head does
+not make another billed call.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ import secrets
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import cast
 
 from atlas_reviewer.attestation import (
     Attempt,
@@ -42,6 +45,7 @@ from atlas_reviewer.attestation import (
     LensState,
     RunAttempt,
     Settled,
+    ToolUse,
     body_digest,
     next_step,
 )
@@ -369,21 +373,27 @@ def _attempts(
                 secrets=secrets_seen,
             )  # fmt: skip
         except ByokRefusedError as exc:
-            # The refusal still leaves the loop. Finish the attempt first:
-            # an unfinished one reads as abandoned, and that is retryable,
-            # so the next review of this head would bill another call.
+            # The refusal still leaves the loop, so the runner fails and
+            # its note is quoted. Finish the attempt first: an unfinished
+            # one reads as abandoned, and that is retryable, so the next
+            # review of this head would bill another call. The secrets,
+            # turns and tool calls already seen are part of that record.
+            session.secrets.extend(secrets_seen)
             ledger.finish(
                 key, step.number,
                 AttemptOutcome(
                     Attestation.UNACKNOWLEDGED,
                     frozenset({Cause.MODEL_ERROR}),
+                    tools=cast("tuple[ToolUse, ...]", tuple(exc.tools)),
+                    turns=exc.turns,
                     detail=str(exc),
                 ),
                 scrub=scrub,
             )  # fmt: skip
             raise
-        session.secrets.extend(secrets_seen)
-        ledger.finish(key, step.number, outcome, scrub=scrub)
+        else:
+            session.secrets.extend(secrets_seen)
+            ledger.finish(key, step.number, outcome, scrub=scrub)
         step = next_step(ledger.attempts(key), limits.retries)
     return f"lens {job.lens}: {len(ledger.attempts(key))} attempt(s)"
 

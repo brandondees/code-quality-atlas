@@ -809,7 +809,9 @@ socket for the hold. No live model, Sprite or Fly call has been made.
   adapter. A key that does not count BYOK spend refuses an unparseable
   reply the same way it refuses one that is not explicitly non-BYOK. The
   refusal leaves the loop, and the ledger records it as a model error that
-  is not retried, so the next review of the same head does not call again.
+  is not retried, keeping the turns and tool calls completed before it and
+  the committed secrets those calls found. The runner fails, so its note
+  is quoted, and the next review of the same head does not call again.
 - **The keepalive** (`keepalive.py`). For the length of a lens,
   `review_lens` holds the Sprite with a Tasks API task on
   `/.sprite/api.sock`: a 5-minute expiry, refreshed every 60 seconds, and
