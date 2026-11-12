@@ -116,7 +116,8 @@ commit that one passing pair records, and one passing pair has
 `metadata.over_context_window` set. A directory that holds only the
 pair for `--head` does not pass. A pair fails when recall of the
 reference findings is below 1, a selected lens was NOT RUN or failed,
-or file coverage is incomplete. An extra finding, a different verdict,
+a lens named by a reference finding was not run, or file coverage is
+incomplete. An extra finding, a different verdict,
 and a different severity do not fail it. A match is the same path and
 a line within five. The hand-built fixture is expected to fail the
 gate. The reference directory holds protocol rounds from

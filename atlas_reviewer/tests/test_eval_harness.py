@@ -228,7 +228,9 @@ def test_a_full_directory_passes_only_with_the_head_and_an_over_context_pair(
     (tmp_path / "pair.json").write_text(json.dumps(pair), encoding="utf-8")
     missed = load_directory(tmp_path, head="abc123")
     assert missed["gate_pass"] is False
-    assert any("calibration row" in item for item in missed["gate_failures"])
+    assert any(
+        "calibration row o/r#1" in item for item in missed["gate_failures"]
+    )
 
 
 def test_the_reference_set_fails_closed_and_a_pair_cannot_replace_it(
@@ -335,6 +337,16 @@ def test_zero_findings_are_a_gap_unless_the_round_says_there_are_none():
         [],
     )
     assert nothing is not None and nothing["metadata"]["parse_gap"] is False
+    earlier = reference_row(
+        {"number": 1, "head": {"sha": "abc"}, "base": {"repo": {"full_name": "o/r"}}},
+        {
+            "state": "COMMENTED",
+            "commit_id": "abc",
+            "body": "## Round 1 — 3 findings\n\nLast round had no findings.\n",
+        },
+        [],
+    )
+    assert earlier is not None and earlier["metadata"]["parse_gap"] is True
     colon = protocol_review(
         "## Round 1 — notes\n<!-- atlas-review round:1 -->\n",
         [
@@ -480,9 +492,35 @@ def test_a_clean_pair_passes_the_gate_and_a_missed_major_does_not():
     assert any("recall" in item and "unmatched" in item for item in failures)
 
 
+def test_matching_does_not_depend_on_candidate_order():
+    reference = EvalReview(
+        "COMMENT",
+        (
+            EvalFinding("major", "a.py", "", 1, 1),
+            EvalFinding("major", "a.py", "", 10, 10),
+        ),
+    )
+    near = EvalFinding("nit", "a.py", "", 5, 5)
+    exact = EvalFinding("nit", "a.py", "", 1, 1)
+    for findings in ((near, exact), (exact, near)):
+        candidate = CandidateReview("COMMENT", findings, True, 0, ("a.py",), ())
+        assert score(reference, candidate).recall == 1.0
+
+
+def test_the_tool_pre_pass_is_not_part_of_the_lens_list():
+    body = (
+        "## Round 1 — notes\n**Coverage:**\n"
+        "`reviewing-test-quality` ran.\n"
+        "- **Tool pre-pass:** the repo's `markdownlint-cli2` passes on head "
+        "(0 errors). `hunting-silent-failures`\n"
+    )
+    assert coverage_lenses(body) == ("reviewing-test-quality",)
+
+
 def test_a_line_matches_loosely_and_ignores_severity():
     left = EvalFinding("major", "a.py", "", 1, 3)
     assert left.same_issue(EvalFinding("nit", "a.py", "", 8, 8))
+    assert not left.same_issue(EvalFinding("major", "a.py", "", 9, 9))
     assert not left.same_issue(EvalFinding("major", "a.py", "", None, None))
     assert EvalFinding("nit", "a.py", "", None, None).same_issue(
         EvalFinding("major", "a.py", "", 4, 4)
