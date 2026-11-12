@@ -416,12 +416,14 @@ def _prompt_cost(
     With no cache counts, every prompt token is charged at `input_rate`,
     which is already the higher of the prompt rate and any cache-write
     rate. When the response reports cache reads or writes, those counts
-    are subsets of `prompt_tokens`: the rest are charged at the prompt
-    rate, reads at the catalog's cache-read rate (or the prompt rate when
-    the catalog has none), and writes at the catalog's cache-write rate
-    (or `input_rate` when the catalog has none, so a missing write rate
-    cannot undercharge). Counts that sum past `prompt_tokens` are not a
-    usable split, and the turn stays unpriced."""
+    are subsets of `prompt_tokens`: reads are charged at the catalog's
+    cache-read rate (or the prompt rate when the catalog has none), and
+    writes at the catalog's cache-write rate (or `input_rate` when the
+    catalog has none). The rest are charged at the prompt rate when the
+    write count is reported. When it is absent, a write could be hiding
+    in the rest, so the rest is charged at `input_rate`. Counts that sum
+    past `prompt_tokens` are not a usable split, and the turn stays
+    unpriced."""
     details = usage.get("prompt_tokens_details")
     if not isinstance(details, dict):
         return prompt_t * terms.input_rate, ""
@@ -430,18 +432,22 @@ def _prompt_cost(
     if cached is None and written is None:
         return prompt_t * terms.input_rate, ""
     cached_n = 0 if cached is None else cached
-    written_n = 0 if written is None else written
-    if cached_n + written_n > prompt_t:
-        return None, ""
-    fresh = prompt_t - cached_n - written_n
     read_rate = (
         terms.prompt_rate if terms.cache_read_rate is None else terms.cache_read_rate
     )
+    if written is None:
+        if cached_n > prompt_t:
+            return None, ""
+        cost = cached_n * read_rate + (prompt_t - cached_n) * terms.input_rate
+        return cost, f" cache_read={cached_n} cache_write=unreported"
+    if cached_n + written > prompt_t:
+        return None, ""
+    fresh = prompt_t - cached_n - written
     write_rate = (
         terms.input_rate if terms.cache_write_rate is None else terms.cache_write_rate
     )
-    cost = fresh * terms.prompt_rate + cached_n * read_rate + written_n * write_rate
-    return cost, f" cache_read={cached_n} cache_write={written_n}"
+    cost = fresh * terms.prompt_rate + cached_n * read_rate + written * write_rate
+    return cost, f" cache_read={cached_n} cache_write={written}"
 
 
 def _tokens(usage: Json, key: str) -> int | None:

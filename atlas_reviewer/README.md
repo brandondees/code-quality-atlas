@@ -786,7 +786,13 @@ D41 records the 2026-11-12 probe that did.
   0 through every truncated page (D42). A HEAD `read_file` does not
   replace that. A changed file left unread makes the lens partial, names
   the file in the draft, and is not retried. A timed-out, unavailable or
-  over-limit tool call makes the lens partial.
+  over-limit tool call makes the lens partial. Every `diff_file` page
+  counts against the bridge's session output budget (`SessionLimits`,
+  1 MiB by default). A PR whose diff is larger than that budget cannot
+  come clean on this path: the call past the budget is refused
+  `OVER_SESSION_LIMIT`, its file stays unread, and the review fails closed.
+  Raising the budget is the only remedy built; no path-exclusion option
+  exists.
 - **Ledger and retries** (`attestation.py`). Each attempt is fsynced to an
   append-only ledger when it starts and again when it ends, keyed by
   repository, PR, head SHA, lens and body digest. A failed attestation, an
@@ -804,16 +810,18 @@ D41 records the 2026-11-12 probe that did.
   and cache-write rates, and when the response reports cache read or
   write counts those counts use the catalog's cache rates: a missing
   read rate uses the prompt rate, and a missing write rate uses the
-  reservation's input rate. Counts that sum past the prompt tokens leave
+  reservation's input rate. A response that reports cache reads but no
+  write count charges its uncached tokens at the input rate, since a
+  write could be among them. Counts that sum past the prompt tokens leave
   the turn unpriced. A model with a reasoning rate and a response that
   reports no reasoning-token count also stays unpriced. That missing-cost
   case stays at the reserved worst case, as do
   an unreadable upstream charge, a BYOK call with no upstream charge, and
   a turn with neither a readable cost nor usable token counts. A readable
   cost is used as reported, including when the reasoning-token count is
-  missing and when the response also reports cache tokens. The catalog is fetched once per turn.
-  The adapter does not
-  retry and does not reserve on the one-shot budget. A tool call whose
+  missing and when the response also reports cache tokens. The catalog is
+  fetched once per turn. The adapter does not retry and does not reserve
+  on the one-shot budget. A tool call whose
   arguments are not one JSON object, or that hold a non-finite number or
   nest deep enough to recurse, is handed to the bridge, which rejects it,
   and the refusal comes back nonce-fenced. No call is executed in the

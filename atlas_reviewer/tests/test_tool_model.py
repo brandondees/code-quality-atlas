@@ -217,6 +217,29 @@ def test_cache_tokens_without_a_cost_use_the_catalog_cache_rates():
     assert lens.turn(request()).cost_usd == Decimal("0.004025")
 
 
+@pytest.mark.parametrize(
+    ("cached", "expected"),
+    [(800, Decimal("0.00905")), (0, Decimal("0.01225"))],
+    ids=["some-reads", "no-reads"],
+)
+def test_a_missing_write_count_prices_the_rest_at_the_reservation_input_rate(
+    cached, expected
+):
+    usage = {
+        "prompt_tokens": 1000,
+        "completion_tokens": 100,
+        "is_byok": False,
+        "prompt_tokens_details": {"cached_tokens": cached},
+    }
+    lens, _fake = model(
+        reply(completion("done", usage=usage)),
+        catalog_reply=reply(catalog(input_cache_write="0.00001")),
+    )
+    # The write count is absent, so the uncached tokens may include writes
+    # at 0.00001. The reads (if any) are at the prompt rate, 0.000006.
+    assert lens.turn(request()).cost_usd == expected
+
+
 def test_cache_reads_without_a_catalog_rate_use_the_prompt_rate():
     usage = {
         "prompt_tokens": 1000,

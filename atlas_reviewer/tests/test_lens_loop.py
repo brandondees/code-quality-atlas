@@ -14,7 +14,7 @@ from atlas_reviewer.attestation import (
     LensState,
     body_digest,
 )
-from atlas_reviewer.bridge import SessionLimits, run_bridge
+from atlas_reviewer.bridge import BridgeResult, SessionLimits, Status, run_bridge
 from atlas_reviewer.bridge_args import TOOLS, RejectedError, Rev, validate
 from atlas_reviewer.domain import RunnerStatus
 from atlas_reviewer.fakes import MemoryLedger, ScriptedLensModel
@@ -27,12 +27,14 @@ from atlas_reviewer.lens_loop import (
     LimitsUnsetError,
     Spend,
     ToolResults,
+    _DiffPages,
     finding_contract,
     lens_system,
     run_attempt,
     tool_schemas,
 )
 from atlas_reviewer.ports import BoundaryError, ByokRefusedError
+from atlas_reviewer.prompt import RepoText
 from atlas_reviewer.quotes import QuoteSource, read_sources
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import DeadlineExceededError
@@ -345,6 +347,17 @@ def test_a_head_read_does_not_replace_the_diff(tmp_path):
     assert set(outcome.unread) == set(CHANGED)
     assert outcome.state is LensState.PARTIAL
     assert not outcome.retryable
+
+
+@pytest.mark.parametrize("next_offset", [None, 0], ids=["no-next", "same-offset"])
+def test_a_truncated_page_that_does_not_advance_leaves_the_file_unread(next_offset):
+    stuck = BridgeResult(
+        "diff_file", '{"offset": 0, "path": "calc.py"}', Status.OK, RepoText(""),
+        None, 80, 500, 10, True, 0.0, next_offset=next_offset,
+    )  # fmt: skip
+    pages = _DiffPages()
+    pages.note(stuck, CHANGED)
+    assert pages.unread(CHANGED) == ("calc.py", "config/keys.py")
 
 
 def test_a_page_that_does_not_start_at_zero_leaves_the_file_unread(tmp_path):
