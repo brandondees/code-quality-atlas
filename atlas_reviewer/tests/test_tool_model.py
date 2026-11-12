@@ -240,6 +240,27 @@ def test_a_missing_write_count_prices_the_rest_at_the_reservation_input_rate(
     assert lens.turn(request()).cost_usd == expected
 
 
+def test_cache_reads_past_the_prompt_with_no_write_count_keep_the_reservation():
+    usage = {
+        "prompt_tokens": 10,
+        "completion_tokens": 1,
+        "is_byok": False,
+        "prompt_tokens_details": {"cached_tokens": 50},
+    }
+    lens, _fake = model(
+        reply(completion("done", usage=usage)),
+        catalog_reply=reply(catalog(input_cache_write="0.00001")),
+    )
+    spend = Spend(AgenticLimits().resolve())
+    ask = request()
+    worst = lens.worst_case_usd(ask)
+    assert spend.reserve(worst) is None
+    turn = lens.turn(ask)
+    assert turn.cost_usd.is_infinite()
+    spend.settle(worst, turn.cost_usd)
+    assert spend.committed_usd == worst
+
+
 def test_cache_reads_without_a_catalog_rate_use_the_prompt_rate():
     usage = {
         "prompt_tokens": 1000,
