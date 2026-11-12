@@ -32,6 +32,7 @@ from atlas_reviewer.attestation import (
     Attempt,
     AttemptLedger,
     AttemptOutcome,
+    Attestation,
     LensKey,
     LensState,
     RunAttempt,
@@ -155,11 +156,14 @@ class AgenticReview:
 
 
 def mint(lenses: Sequence[LensResult]) -> tuple[MintedFinding, ...]:
-    """IDs in each attested lens's reply order, verified or not; only an
-    attested attempt's findings exist at all."""
+    """IDs in each attested lens's reply order, verified or not. An attempt
+    that is not attested contributes nothing, whatever it carries."""
     minted = []
     for result in lenses:
-        if result.outcome is None:
+        if (
+            result.outcome is None
+            or result.outcome.attestation is not Attestation.ATTESTED
+        ):
             continue
         for n, checked in enumerate(result.outcome.findings, start=1):
             minted.append(

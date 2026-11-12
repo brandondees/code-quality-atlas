@@ -3,10 +3,12 @@
 read-only bridge until it gives its final findings (D31, D34).
 
 The lens worker's system prompt is the controller's instructions, then the
-lens's whole `body.md` between attested markers (`attestation.inject_body`),
-then `synthesis.md`'s whole *Finding contract* section. Nothing in it is
-ever cut: a lens runs whole or not at all. The first user turn and every
-tool result are fenced as untrusted data.
+nonce fence rule (`prompt._fence_rule`), then the lens's whole `body.md`
+between attested markers (`attestation.inject_body`), then `synthesis.md`'s
+whole *Finding contract* section. Nothing in it is ever cut: a lens runs
+whole or not at all. The first user turn and every tool result are fenced
+as untrusted data, and the fence rule names the nonce those fences carry,
+so an element without it is data.
 
 An attempt ends with the model's final reply, or is cut short by the turn
 cap, the review's call cap or dollar reservation, the per-lens or review
@@ -44,7 +46,7 @@ from atlas_reviewer.bridge_args import TOOLS, Rev, arg_names, required_args
 from atlas_reviewer.lens_contract import ContractError, parse_reply
 from atlas_reviewer.lenses import BUNDLE_ROOT
 from atlas_reviewer.ports import BoundaryError, Clock
-from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
+from atlas_reviewer.prompt import RepoText, UntrustedBlock, _fence_rule, fence
 from atlas_reviewer.quotes import SourceText, Verified, check_all
 from atlas_reviewer.runner import DeadlineExceededError
 
@@ -270,11 +272,17 @@ def finding_contract(path: Path = SYNTHESIS) -> str:
 
 
 def lens_system(
-    lens: str, body: str, contract: str, retry_of: AttemptOutcome | None = None
+    lens: str,
+    body: str,
+    contract: str,
+    retry_of: AttemptOutcome | None = None,
+    *,
+    nonce: str,
 ) -> str:
     """`retry_of` is the attempt this one retries: its reasons are stated
-    and the body is injected whole again."""
-    parts = [INSTRUCTIONS]
+    and the body is injected whole again. `nonce` is the review's fence
+    nonce, and the prompt states the rule for it."""
+    parts = [INSTRUCTIONS, _fence_rule(nonce)]
     if retry_of is not None:
         reasons = "; ".join(retry_reasons(retry_of))
         parts.append(
@@ -386,7 +394,7 @@ def run_attempt(
     Each possible committed secret a tool result reports (location and
     pattern, never the value) is appended to `secrets`."""
     limits = spend.limits
-    system = system_for(job.lens, job.body, job.contract, retry_of)
+    system = system_for(job.lens, job.body, job.contract, retry_of, nonce=job.nonce)
     if not check_delivery(system, job.lens, job.digest):
         return AttemptOutcome(Attestation.NOT_DELIVERED)
     lens_deadline = min(review_deadline, clock.monotonic() + limits.lens_wall_s)

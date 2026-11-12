@@ -756,8 +756,9 @@ tool-calling model adapter yet.
   `LimitsUnsetError`, naming each unset field, before any model, runner or
   ledger work. `retries` is 1 and `pool_size` must be 1.
 - **The prompt.** The system prompt is the controller's instructions, then
-  the whole lens `body.md` between markers that carry its SHA-256, then
-  `synthesis.md`'s whole *Finding contract* section. Nothing is cut. The
+  the nonce fence rule, then the whole lens `body.md` between markers that
+  carry its SHA-256, then `synthesis.md`'s whole *Finding contract*
+  section. Nothing is cut. The
   first user turn is the operator's subject, then any context the caller
   passes and the risk-ordered changed-file list, each fenced with the
   review's nonce. It carries no diff text: the lens reads that through the
@@ -819,7 +820,7 @@ tool-calling model adapter yet.
 | `instrumented.py` | `GitHubReader` wrapper that records every read as an event | via `GitHubReader` |
 | `lenses.py` | load the chosen lenses' bodies whole under the budget and cap, or mark them NOT RUN with a reason | reads the bundle |
 | `bridge.py` | the read-only git tool bridge: per-call scripts, capped base64 replies, result statuses, secret locations, the call ledger, `run_bridge` | via `SpritesApi` |
-| `bridge_args.py` | the closed tool set and its argument rules (`validate`) | no |
+| `bridge_args.py` | the closed tool set and its argument rules (`validate`, `arg_names`, `required_args`) | no |
 | `source_archive.py` | the unpacked-size and member caps a source tarball must pass before upload (`measure`) | no |
 | `guest_unpack.py` | the same caps held again in the runner: its tar measures bytes, members and implied directories before extracting, then `ulimit -f` while extracting, every tar run under `timeout` | no |
 | `bridge_staging.py` | Option B staging: trusted git, the hardened git options, tarballs committed into a bare repository, `fetch_sources` | via `SpritesApi`, `GitHubReader` |

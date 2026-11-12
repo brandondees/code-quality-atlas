@@ -96,14 +96,18 @@ def test_a_review_with_any_limit_unset_is_refused_before_anything_runs(tmp_path)
     assert not (tmp_path / "state").exists()
 
 
-def test_a_lens_without_a_body_is_not_run_and_no_runner_starts(tmp_path):
+def test_a_lens_with_no_body_stops_before_any_model_runner_or_ledger_work(tmp_path):
     sprites = FakeSprites()
-    result, model, _ = review(tmp_path, [], sprites=sprites, library=StubLibrary({}))
+    result, model, _ = review(
+        tmp_path, [READ_DIFF, final()], sprites=sprites, library=StubLibrary({})
+    )
     (lens,) = result.lenses
     assert lens.state is LensState.NOT_RUN
     assert lens.reason == "no lens body in the bundle"
-    assert sprites.calls == []
     assert model.requests == []
+    assert len(model.script) == 2
+    assert sprites.calls == []
+    assert not (tmp_path / "state").exists()
     assert not result.coverage_complete
 
 
@@ -356,6 +360,17 @@ def test_committed_secrets_the_tools_read_are_controller_findings(tmp_path):
     assert TOKEN not in draft
 
 
+def test_an_unverified_findings_problem_text_is_scrubbed_in_the_draft():
+    opaque = "zq-problem-7c1f9a"
+    bad = CheckedFinding(
+        checked(Severity.MAJOR).finding, problem=f"the quote missed {opaque}"
+    )
+    result = synthesize([lens_result(clean(bad))], flagged=[opaque])
+    draft = render_draft(result, Redactor())
+    assert opaque not in draft
+    assert "## Not verified" in draft
+
+
 def test_every_value_the_review_flagged_is_scrubbed_from_the_draft():
     opaque = "zq-internal-7c1f9a"
     leaky = replace(
@@ -473,5 +488,9 @@ def test_findings_are_minted_in_reply_order_and_ranked_by_severity():
 
 
 def test_findings_of_an_unattested_attempt_are_never_reported():
-    misack = AttemptOutcome(Attestation.MISACKNOWLEDGED)
-    assert synthesize([lens_result(misack)]).findings == ()
+    misack = AttemptOutcome(
+        Attestation.MISACKNOWLEDGED, findings=(checked(Severity.BLOCKER),)
+    )
+    result = synthesize([lens_result(misack)])
+    assert result.findings == ()
+    assert result.verdict is Verdict.APPROVE
