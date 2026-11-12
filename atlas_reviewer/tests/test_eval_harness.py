@@ -228,9 +228,7 @@ def test_a_full_directory_passes_only_with_the_head_and_an_over_context_pair(
     (tmp_path / "pair.json").write_text(json.dumps(pair), encoding="utf-8")
     missed = load_directory(tmp_path, head="abc123")
     assert missed["gate_pass"] is False
-    assert any(
-        "calibration row o/r#1" in item for item in missed["gate_failures"]
-    )
+    assert any("calibration row o/r#1" in item for item in missed["gate_failures"])
 
 
 def test_the_reference_set_fails_closed_and_a_pair_cannot_replace_it(
