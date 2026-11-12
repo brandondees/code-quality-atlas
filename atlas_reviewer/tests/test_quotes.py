@@ -107,7 +107,6 @@ def test_a_quote_at_the_cited_head_range_is_verified(start, end, evidence):
 @pytest.mark.parametrize(
     ("start", "end", "evidence"),
     [
-        (1, 1, "return sum(round(x, 2) for x in xs)"),
         (4, 7, "return sum(round(x, 2) for x in xs)"),
         (1, 3, "sum("),
         (4, 7, "if not xs:\n    return total(xs) / len(xs)"),
@@ -116,6 +115,40 @@ def test_a_quote_at_the_cited_head_range_is_verified(start, end, evidence):
     ],
 )
 def test_a_quote_not_at_the_cited_range_is_not_verified(start, end, evidence):
+    assert isinstance(check(LineRange("calc.py", start, end), evidence), Unverified)
+
+
+def test_internal_whitespace_does_not_reject_the_cited_line():
+    evidence = "return  sum(round(x, 2)  for x in xs)"
+    result = check(LineRange("calc.py", 2, 2), evidence)
+    assert result == Verified(result.finding, QuoteSource.HEAD)
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "evidence"),
+    [
+        (1, 1, "return sum(round(x, 2) for x in xs)"),
+        (4, 4, "return sum(round(x, 2) for x in xs)"),
+        (6, 7, "if not xs:\n    return 0"),
+    ],
+)
+def test_a_whole_line_quote_within_two_lines_is_verified_as_drifted(
+    start, end, evidence
+):
+    result = check(LineRange("calc.py", start, end), evidence)
+    assert result == Verified(result.finding, QuoteSource.HEAD_NEAR)
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "evidence"),
+    [
+        (6, 6, "return sum(round(x, 2) for x in xs)"),
+        (1, 1, "}"),
+        (7, 7, "}"),
+        (1, 1, "round(x, 2) for x"),
+    ],
+)
+def test_a_short_fragment_or_a_far_line_is_not_treated_as_drift(start, end, evidence):
     assert isinstance(check(LineRange("calc.py", start, end), evidence), Unverified)
 
 
