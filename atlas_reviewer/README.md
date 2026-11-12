@@ -850,11 +850,15 @@ D41 records the 2026-11-12 probe that did.
   built; there is no public fork API (Fly support, 2026-11-06).
 - **The draft** (`coordinator.render_draft`).
   - **Status line.** The first line is a status line: `"mode": "agentic"`,
-    `coverage_complete`, and the lens counts by state.
+    `coverage_complete`, `changed_files`, `unreviewed_files`, and the lens
+    counts by state. The two file fields are counts. Paths stay out of
+    the line.
   - **Coverage.** Coverage is complete only if every selected lens settled
-    clean and, when this review ran a runner, that runner completed.
-    Otherwise a REVIEW INCOMPLETE warning follows, and the review never
-    approves. A failed runner's note is quoted in the draft.
+    clean, every changed file's diff was read, the outcome recorded a
+    changed-file count, and, when this review ran a runner, that runner
+    completed. Otherwise a REVIEW INCOMPLETE warning follows, and the
+    review never approves. A failed runner's note is quoted in the draft.
+    A settled outcome with no changed-file count shows no coverage.
   - **Findings.** Verified findings carry minted `L<lens>-F<n>` IDs and are
     ranked by severity. The verdict comes from verified, introduced defects
     only. Unverified findings are listed apart and never counted. Possible
