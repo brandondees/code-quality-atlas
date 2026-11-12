@@ -67,13 +67,14 @@ clean lens and every changed file read can still approve.
 
 ## #646 and the webhook stack
 
-#646 fans a review out across the selected lenses. Each lens's first
-turn is this same full-PR turn: the conversation, the prior rounds and
-every changed file. Fan-out does not assign a lens a slice of the diff.
-This branch does not implement that fan-out. `review_lens` is still one
-lens.
+Pull request #646 fans a review out across the selected lenses. Each
+lens's first turn is this same full-PR turn: the conversation, the
+prior rounds and every changed file. Fan-out does not assign a lens a
+slice of the diff. This branch does not implement that fan-out.
+`review_lens` is still one lens.
 
-#639 queues one review per commit and #640 posts one comment. A new
+Pull request #639 queues one review per commit and #640 posts one
+comment. A new
 commit is a new head SHA. The queue is not this log. This log is the
 coordinator's memory of what it already reported on the pull request,
 so the review of the new head still sees those findings. Neither
