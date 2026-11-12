@@ -1097,3 +1097,17 @@ accepts the eight agentic limit flags, which it did not read. The
 `ATLAS_*` variables are unchanged, and `limits_for_lens` still reads
 them. A runner deadline reports elapsed seconds, as the other two
 clock stops do.
+
+## 2026-11-12 — parity gate for submitting APPROVE, and an offline protocol scorer
+
+The draft's `review_event` line is still D36. Submitting that line to
+GitHub as `APPROVE` is a separate decision: the poster may do it only
+when `python -m atlas_reviewer eval --gate` exits 0 on a candidate
+recorded for that head. The four criteria (repo access, a full diff at
+any size, per-lens fan-out with verification, and Major+ recall and
+precision against the Claude Code protocol rounds on PRs #602–#637) are
+all unmet in the current reviewer, so the gate fails closed. The plan is
+[`plans/2026-11-12-reviewer-parity-gate.md`](plans/2026-11-12-reviewer-parity-gate.md).
+D44 recommends self-hosted Phoenix on Fly in org `personal` and does not
+provision it. The scorer and the reference rows are offline fixtures;
+nothing in this change calls a model or writes to GitHub.

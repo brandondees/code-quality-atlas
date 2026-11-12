@@ -1,0 +1,48 @@
+{
+  "input": {
+    "repo": "brandondees/code-quality-atlas",
+    "pr": 623,
+    "head_sha": "7f955e4c95c8c77b0edfe2b7ae778899e1e89a85",
+    "round": 1,
+    "reviewed_commit": "1ec3b7192d184b398760074fded38ea4a0f5cab1"
+  },
+  "output": {
+    "verdict": "COMMENT",
+    "findings": [
+      {
+        "severity": "minor",
+        "path": "atlas_reviewer/openrouter.py",
+        "summary": "When `is_byok` is `False`, a reported `upstream_inference_cost` is now dropped without a trace. The returned `summary` doesn't record it. The docstring and README both still mark the underlying claim \"(verify)\", but the budget record has no",
+        "lenses": [
+          "reviewing-observability-and-operability",
+          "hunting-silent-failures"
+        ],
+        "line": 421
+      },
+      {
+        "severity": "minor",
+        "path": "atlas_reviewer/tests/test_openrouter.py",
+        "summary": "The PR body and the `_actual_cost` comment both say that on an explicit non-BYOK call \"a null **or unreadable** upstream field does not discard `usage.cost`\". That second half reverses old behaviour: an unparseable upstream used to hit `Pri",
+        "lenses": [
+          "reviewing-test-quality"
+        ],
+        "line": 593
+      },
+      {
+        "severity": "nit",
+        "path": "atlas_reviewer/openrouter.py",
+        "summary": "This comment says \"Boolean false means usage.cost is the whole charge\" as settled fact. The module docstring 30 lines up marks the same claim \"(verify)\". The real grounding is the live PR #585 observation: the key moved $0.0790, equal to `u",
+        "lenses": [
+          "reviewing-naming-and-readability",
+          "docs"
+        ],
+        "line": 416
+      }
+    ]
+  },
+  "metadata": {
+    "source": "claude-code-protocol",
+    "review_url": "https://github.com/brandondees/code-quality-atlas/pull/623#pullrequestreview-5864312327",
+    "review_state": "COMMENTED"
+  }
+}

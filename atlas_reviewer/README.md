@@ -12,8 +12,11 @@ time. Design and decision record:
 [`docs/plans/2026-11-06-manual-reviewer-service.md`](../docs/plans/2026-11-06-manual-reviewer-service.md)
 (D24-D30, D32, D33, D35 and D36 in
 [`docs/open-questions.md`](../docs/open-questions.md)).
-D37 is the Fly one-off deploy. Other follow-ups are in that plan's
-"Follow-ups" section.
+D37 is the Fly one-off deploy. When a draft's `APPROVE` may be submitted
+to GitHub is the parity gate in
+[`docs/plans/2026-11-12-reviewer-parity-gate.md`](../docs/plans/2026-11-12-reviewer-parity-gate.md).
+D44 is where the eval traces should live. Other follow-ups are in that
+plan's "Follow-ups" section.
 
 ## Deploy on Fly
 
@@ -93,6 +96,26 @@ No model reviewed any file, so a dry run always exits 4, review incomplete
   One exec shape).
 
 Tests: `python -m pytest atlas_reviewer/tests -q --cov=atlas_reviewer`.
+
+## Score a recorded review
+
+`eval` compares a candidate review with a reference review and prints
+JSON. It does not call a model, GitHub, or Phoenix.
+
+```sh
+python -m atlas_reviewer eval --fixtures atlas_reviewer/fixtures/eval-score
+python -m atlas_reviewer eval --fixtures atlas_reviewer/fixtures/eval-references
+python -m atlas_reviewer eval --fixtures atlas_reviewer/fixtures/eval-score --gate
+```
+
+`--fixtures` is a directory of JSON files. A file with `output` and no
+`candidate` is a reference row (the Phoenix dataset shape: `input`,
+`output`, `metadata`). A file with `candidate` is scored. `--gate` exits
+1 unless every scored pair passes the parity gate, and it exits 1 when
+nothing was scored. The hand-built fixture is expected to fail the gate.
+The reference directory holds protocol rounds from PRs #602–#637 and has
+no candidates, so the gate fails closed. Exit 2 is a fixture that does
+not parse.
 
 ## Live mode
 

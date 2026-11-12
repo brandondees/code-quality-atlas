@@ -1,0 +1,38 @@
+{
+  "input": {
+    "repo": "brandondees/code-quality-atlas",
+    "pr": 621,
+    "head_sha": "35c655c5c4aeca09900aec89abd7e2535ce4ed1b",
+    "round": 1,
+    "reviewed_commit": "4c794c0dcf3094dc053839e4ca1fa5dd05543570"
+  },
+  "output": {
+    "verdict": "COMMENT",
+    "findings": [
+      {
+        "severity": "minor",
+        "path": "atlas_reviewer/openrouter.py",
+        "summary": "The fail-closed choice is sound. The risk is that this change may not unblock the live Fly review, which is the PR's stated goal. The PR's own evidence says OpenRouter's usage cookbook leaves `is_byok` out of its **Chat Completions** exampl",
+        "lenses": [
+          "tracing-correctness-and-invariants",
+          "hunting-silent-failures"
+        ],
+        "line": 321
+      },
+      {
+        "severity": "minor",
+        "path": "atlas_reviewer/openrouter.py",
+        "summary": "The PR description and the `openrouter.py` docstring both say \"only boolean false is accepted; null or another type fails closed\". No test reaches this branch. The new tests cover `is_byok: True`, a missing field, and `False`. Nothing sends",
+        "lenses": [
+          "reviewing-test-quality"
+        ],
+        "line": 388
+      }
+    ]
+  },
+  "metadata": {
+    "source": "claude-code-protocol",
+    "review_url": "https://github.com/brandondees/code-quality-atlas/pull/621#pullrequestreview-5856529145",
+    "review_state": "COMMENTED"
+  }
+}

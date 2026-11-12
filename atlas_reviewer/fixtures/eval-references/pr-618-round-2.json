@@ -1,0 +1,29 @@
+{
+  "input": {
+    "repo": "brandondees/code-quality-atlas",
+    "pr": 618,
+    "head_sha": "44c983eccdc11640c0d12cfeba150e9101e4f314",
+    "round": 2,
+    "reviewed_commit": "44c983eccdc11640c0d12cfeba150e9101e4f314"
+  },
+  "output": {
+    "verdict": "COMMENT",
+    "findings": [
+      {
+        "severity": "major",
+        "path": "commands/atlas-review-pr.md",
+        "summary": "This command supports a `synchronize`-triggered routine that runs once per push (the header at line 44). This push's runbook edit at `docs/runbooks/pr-review-automation.md:870` says that run \"may be the restack-only summary\". But in that mo",
+        "lenses": [
+          "hunting-silent-failures",
+          "tracing-correctness-and-invariants"
+        ],
+        "line": 242
+      }
+    ]
+  },
+  "metadata": {
+    "source": "claude-code-protocol",
+    "review_url": "https://github.com/brandondees/code-quality-atlas/pull/618#pullrequestreview-5848635375",
+    "review_state": "COMMENTED"
+  }
+}

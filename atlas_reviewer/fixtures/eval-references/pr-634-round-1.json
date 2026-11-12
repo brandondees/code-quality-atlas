@@ -1,0 +1,28 @@
+{
+  "input": {
+    "repo": "brandondees/code-quality-atlas",
+    "pr": 634,
+    "head_sha": "9aa7b0546cbacf311dd9dcc9a7b130c289cdc550",
+    "round": 1,
+    "reviewed_commit": "9aa7b0546cbacf311dd9dcc9a7b130c289cdc550"
+  },
+  "output": {
+    "verdict": "COMMENT",
+    "findings": [
+      {
+        "severity": "minor",
+        "path": "atlas_reviewer/tests/test_stops.py",
+        "summary": "The module docstring's headline property is that after the first SIGINT/SIGTERM, *later ones are ignored, so a second stop cannot cut that cleanup short* \u2014 that's the `for stop in _STOPS: signal.signal(stop, signal.SIG_IGN)` loop in `_on_st",
+        "lenses": [
+          "reviewing-test-quality"
+        ],
+        "line": 56
+      }
+    ]
+  },
+  "metadata": {
+    "source": "claude-code-protocol",
+    "review_url": "https://github.com/brandondees/code-quality-atlas/pull/634#pullrequestreview-5872283729",
+    "review_state": "COMMENTED"
+  }
+}

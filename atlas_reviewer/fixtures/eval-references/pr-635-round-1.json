@@ -1,0 +1,35 @@
+{
+  "input": {
+    "repo": "brandondees/code-quality-atlas",
+    "pr": 635,
+    "head_sha": "396bf75dc6131e20a55bc89843ba605b79fc1d89",
+    "round": 1,
+    "reviewed_commit": "cb1cc309efc486cfbfcbcc43c55eb40e9719468b"
+  },
+  "output": {
+    "verdict": "COMMENT",
+    "findings": [
+      {
+        "severity": "minor",
+        "path": "docs/open-questions.md",
+        "summary": "D43 bases the decision on \"the 2026-11-12 live agentic review of PR #621\". It cites \"Turn 9 was refused at $0.113 actual under the probe's $0.45 reservation\", a 5\u201340\u00d7 ratio, and the #631 estimate of \"a 104 KB diff ... about $0.8\u20131.0 reserve",
+        "lenses": [
+          "auditing-documentation-health"
+        ],
+        "line": 60
+      },
+      {
+        "severity": "nit",
+        "path": "docs/open-questions.md",
+        "summary": "Before this PR, D40 and `docs/agentic-reviewer.md` described the $5 reservation as provisional, \"to be revisited after live runs\", which was itself a revisit trigger. D43 removes that status but doesn't say what would reopen the decision. T",
+        "lenses": [],
+        "line": 60
+      }
+    ]
+  },
+  "metadata": {
+    "source": "claude-code-protocol",
+    "review_url": "https://github.com/brandondees/code-quality-atlas/pull/635#pullrequestreview-5879621384",
+    "review_state": "COMMENTED"
+  }
+}

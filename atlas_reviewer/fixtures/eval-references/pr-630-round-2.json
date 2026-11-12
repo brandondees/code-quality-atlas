@@ -1,0 +1,18 @@
+{
+  "input": {
+    "repo": "brandondees/code-quality-atlas",
+    "pr": 630,
+    "head_sha": "61e931026cca7e2caf458e311e826a1bea06c133",
+    "round": 2,
+    "reviewed_commit": "cd17932337c266c8f62e2b5d4f6a49e9d7e6b554"
+  },
+  "output": {
+    "verdict": "APPROVE",
+    "findings": []
+  },
+  "metadata": {
+    "source": "claude-code-protocol",
+    "review_url": "https://github.com/brandondees/code-quality-atlas/pull/630#pullrequestreview-5869177421",
+    "review_state": "COMMENTED"
+  }
+}

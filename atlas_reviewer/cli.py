@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Operator entry point: `python -m atlas_reviewer {review,sweep,probe-runner}`.
+"""Operator entry point: `python -m atlas_reviewer {review,sweep,eval,probe-runner}`.
 
 `review --dry-run` needs no credentials and no network: GitHub is a fixture
 directory, the runner is the in-memory fake, the provider is offline.
@@ -54,6 +54,7 @@ from atlas_reviewer.domain import (
     SourceKind,
 )
 from atlas_reviewer.draft import telemetry_section
+from atlas_reviewer.eval_harness import EvalFormatError, load_directory
 from atlas_reviewer.fakes import FakeSprites, MemoryLedger
 from atlas_reviewer.github_api import GitHubClient
 from atlas_reviewer.github_auth import READ_PERMISSIONS, AppInstallationTokens
@@ -817,6 +818,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="required to delete anything: you checked no review using it runs",
     )
     swp.set_defaults(handler=_cmd_sweep)
+    ev = sub.add_parser(
+        "eval",
+        help="score recorded reviews against reference fixtures (offline)",
+    )
+    ev.add_argument(
+        "--fixtures",
+        required=True,
+        help="directory of reference rows and optional candidate pairs",
+    )
+    ev.add_argument(
+        "--gate",
+        action="store_true",
+        help="exit 1 unless every scored pair passes the parity gate",
+    )
+    ev.set_defaults(handler=_cmd_eval)
     probe = sub.add_parser(
         "probe-runner",
         help="live Sprites check without a model: protocol, or the review's exec sequence",
@@ -866,6 +882,18 @@ def _events_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--events", help="telemetry JSONL file (default: under <state dir>/telemetry/)"
     )
+
+
+def _cmd_eval(args: argparse.Namespace, run: _Run) -> int:
+    """Score recorded fixtures. No model call and no network."""
+    try:
+        report = load_directory(Path(args.fixtures))
+    except EvalFormatError as exc:
+        raise UsageError(str(exc)) from exc
+    run.out.write(json.dumps(report, indent=2) + "\n")
+    if args.gate and not report["gate_pass"]:
+        return 1
+    return EXIT_OK
 
 
 _ERRORS: tuple[tuple[type[Exception], int], ...] = (
