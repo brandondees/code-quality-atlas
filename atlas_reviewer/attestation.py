@@ -24,7 +24,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -34,6 +33,7 @@ from typing import Any
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.lens_contract import (
+    DIGEST,
     Attribution,
     ContractError,
     Finding,
@@ -48,7 +48,6 @@ from atlas_reviewer.quotes import QuoteSource
 
 LEDGER_VERSION = 1
 RETRIES = 1
-DIGEST = re.compile(r"[0-9a-f]{64}")
 
 
 def body_digest(body: str) -> str:

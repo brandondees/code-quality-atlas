@@ -6,8 +6,10 @@ The fields are `synthesis.md`'s *Finding contract* (location, evidence,
 severity, valence, route, attribution, siblings, finding, fix). The reply
 is untrusted model output, so `parse_reply` accepts exactly one JSON
 object of the documented shape and raises `ContractError` naming the
-first problem. Nothing is repaired, guessed or cut: a reply that breaks
-the contract is not partly used.
+first problem. `lens` is capped and `body_sha256` must be 64 lowercase
+hex characters, the shape a lens-body digest has, so a reply is refused
+before any acknowledgement comparison. Nothing is repaired, guessed or
+cut: a reply that breaks the contract is not partly used.
 """
 
 from __future__ import annotations
@@ -25,6 +27,9 @@ MAX_TEXT_CHARS = 4_000
 MAX_LOCATION_CHARS = 600
 MAX_EVIDENCE_LINES = 40
 MAX_LINE = 10_000_000
+# The longest lens name in the suite is 44 characters.
+MAX_LENS_CHARS = 80
+DIGEST = re.compile(r"[0-9a-f]{64}")
 _FENCED = re.compile(r"\A```(?:json)?\n(.*)\n```\Z", re.DOTALL)
 _RANGE = re.compile(r"(?P<path>.+):(?P<start>[1-9][0-9]*)(?:-(?P<end>[1-9][0-9]*))?")
 _DESIGN = re.compile(r"(?:boundary|component):\S.*")
@@ -158,6 +163,10 @@ def parse_reply(text: str) -> LensReply:
     lens, digest, findings = data["lens"], data["body_sha256"], data["findings"]
     if not isinstance(lens, str) or not isinstance(digest, str):
         raise ContractError("lens and body_sha256 must be strings")
+    if len(lens) > MAX_LENS_CHARS:
+        raise ContractError(f"lens is over {MAX_LENS_CHARS} characters")
+    if DIGEST.fullmatch(digest) is None:
+        raise ContractError("body_sha256 must be 64 lowercase hex characters")
     if not isinstance(findings, list):
         raise ContractError("findings must be a list")
     if len(findings) > MAX_FINDINGS:

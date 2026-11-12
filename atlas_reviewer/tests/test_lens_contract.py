@@ -5,6 +5,7 @@ import pytest
 
 from atlas_reviewer.lens_contract import (
     MAX_FINDINGS,
+    MAX_LENS_CHARS,
     MAX_TEXT_CHARS,
     Attribution,
     ContractError,
@@ -126,6 +127,23 @@ def test_a_pre_existing_or_improvement_finding_does_not_set_the_verdict():
 def test_a_reply_outside_the_contract_is_refused_whole(text, where):
     with pytest.raises(ContractError, match=where):
         parse_reply(text)
+
+
+def test_a_lens_name_at_the_cap_parses_and_one_past_it_is_refused():
+    accepted = parse_reply(reply(lens="n" * MAX_LENS_CHARS))
+    assert accepted.lens == "n" * MAX_LENS_CHARS
+    oversized = "INJECT" * (MAX_LENS_CHARS // 6 + 2)
+    with pytest.raises(ContractError, match=f"lens is over {MAX_LENS_CHARS}") as exc:
+        parse_reply(reply(lens=oversized))
+    assert "INJECT" not in str(exc.value)
+
+
+@pytest.mark.parametrize("digest", ["A" * 64, "a" * 63, "a" * 65, "g" * 64, ""])
+def test_a_body_digest_must_be_64_lowercase_hex_characters(digest):
+    with pytest.raises(ContractError, match="64 lowercase hex") as exc:
+        parse_reply(reply(body_sha256=digest))
+    if digest:
+        assert digest not in str(exc.value)
 
 
 def test_a_refusal_does_not_echo_what_the_model_wrote():
