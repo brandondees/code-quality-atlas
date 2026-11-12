@@ -1,0 +1,142 @@
+# SPDX-License-Identifier: MIT
+"""The service runs the existing review command and reads its draft."""
+
+import os
+import sys
+import threading
+from pathlib import Path
+
+from atlas_reviewer.domain import PrEvent
+from atlas_reviewer.service_run import (
+    WEBHOOK_SECRET_ENV,
+    ReviewRun,
+    RunConfig,
+    child_env,
+    make_runner,
+    review_argv,
+    run_process,
+    summarize_draft,
+)
+
+SECRET = "webhook-secret-value"
+SHA = "c" * 40
+REPO = "brandondees/code-quality-atlas"
+DRAFT = """\
+<!-- atlas-review-status: {"review_event": "APPROVE", "proposed_event": "APPROVE", "coverage_complete": false, "changed_files": 2, "unreviewed_files": 1} -->
+Not reviewed in full: `"src/a.py"`
+
+## Review lenses
+
+| Lens | Status | Characters | Chosen as | Why not run |
+| --- | --- | --- | --- | --- |
+| tracing-correctness-and-invariants | run whole | 10 | critical |  |
+| reviewing-concurrency-and-async | NOT RUN | 10 | critical | over the character budget |
+
+## Controller notes
+
+- Diff coverage after the model calls: PARTIAL. 1 of 1 file(s) in full.
+
+## Omissions and limits hit
+
+| Source | Limit | Detail |
+| --- | --- | --- |
+| pull request diff | too large for one review pass | kept 1 |
+
+## Model usage
+
+- reserved $1.00 actual $0.10
+"""
+
+
+def test_the_review_command_is_the_cli_and_drops_the_webhook_secret(tmp_path):
+    offline = RunConfig("offline", False, tmp_path)
+    argv = review_argv(offline, tmp_path / "run")
+    assert argv[1:4] == ["-m", "atlas_reviewer", "--state-dir"]
+    assert "review" in argv
+    assert "--provider" in argv and "offline" in argv
+    assert "--allow-live-inference" not in argv
+    assert "APPROVE" not in argv and "REQUEST_CHANGES" not in argv
+    live = review_argv(RunConfig("openrouter", True, tmp_path), tmp_path / "run")
+    assert live[-1] == "--allow-live-inference"
+    env = child_env({WEBHOOK_SECRET_ENV: SECRET, "ATLAS_SPRITES_TOKEN": "sprite"})
+    assert WEBHOOK_SECRET_ENV not in env
+    assert env["ATLAS_SPRITES_TOKEN"] == "sprite"
+
+
+def test_a_draft_reports_lenses_limits_cost_and_files():
+    report = summarize_draft(DRAFT)
+    assert report.lenses_run == ("tracing-correctness-and-invariants",)
+    assert report.lenses_not_run == (
+        "reviewing-concurrency-and-async: over the character budget",
+    )
+    assert report.files_not_read == ("src/a.py",)
+    assert "PARTIAL" in report.files_note
+    assert report.limit_stops == (
+        "pull request diff | too large for one review pass | kept 1",
+    )
+    assert report.cost_lines == ("reserved $1.00 actual $0.10",)
+    assert report.recommended_event == "APPROVE"
+    empty = summarize_draft("no sections\n")
+    assert empty.lenses_run == ()
+    assert empty.files_note == "The draft has no diff-coverage note."
+
+
+def test_cancel_stops_the_child(tmp_path):
+    cancel = threading.Event()
+
+    def sleeper(seconds):
+        cancel.set()
+
+    code = run_process(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        os.environ,
+        cancel,
+        tmp_path / "stderr.txt",
+        sleeper=sleeper,
+        poll_s=0.01,
+    )
+    assert code is None
+
+
+def test_a_finished_child_becomes_a_report_and_a_failure_does_not(tmp_path):
+    config = RunConfig("offline", False, tmp_path)
+    event = PrEvent(REPO, 7, SHA)
+
+    def popen(argv, env, stdout, stderr):
+        assert WEBHOOK_SECRET_ENV not in env
+        out = Path(argv[argv.index("--out") + 1])
+        out.write_text(DRAFT, encoding="utf-8")
+        return _Proc(0)
+
+    runner = make_runner(config, {WEBHOOK_SECRET_ENV: SECRET}, popen=popen)
+    done = runner(event, threading.Event())
+    assert done.ok
+    assert done.report is not None
+    assert done.report.recommended_event == "APPROVE"
+
+    def fail(argv, env, stdout, stderr):
+        return _Proc(3)
+
+    failed = make_runner(config, {}, popen=fail)(event, threading.Event())
+    assert failed == ReviewRun(False, error="review exited 3: ")
+
+
+class _Proc:
+    def __init__(self, code: int) -> None:
+        self._code = code
+        self._polls = 0
+
+    def poll(self):
+        self._polls += 1
+        if self._polls > 1:
+            return self._code
+        return None
+
+    def send_signal(self, signum):
+        return None
+
+    def kill(self):
+        return None
+
+    def wait(self, timeout=None):
+        return self._code
