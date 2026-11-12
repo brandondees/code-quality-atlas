@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+import argparse
 import io
 import json
 import os
@@ -6,6 +7,7 @@ import shutil
 import signal
 import subprocess
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -1687,3 +1689,15 @@ def test_agentic_review_dry_run_writes_one_draft_without_credentials(tmp_path):
     assert "coverage_complete=false" in err
     assert "lenses=" in err
     assert "REVIEW INCOMPLETE" in out
+
+
+@pytest.mark.parametrize("raw", ["Infinity", "inf", "NaN", "sNaN", "0", "-3", "abc"])
+def test_a_key_ceiling_must_be_a_finite_positive_dollar_amount(raw):
+    from atlas_reviewer.cli import UsageError, _key_ceiling
+
+    args = argparse.Namespace(key_ceiling_usd=raw)
+    with pytest.raises(UsageError, match="positive number of dollars"):
+        _key_ceiling(args, {})
+    assert _key_ceiling(argparse.Namespace(key_ceiling_usd="12.5"), {}) == Decimal(
+        "12.5"
+    )

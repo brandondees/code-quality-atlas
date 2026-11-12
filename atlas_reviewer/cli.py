@@ -553,7 +553,6 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
     fixture directory and an in-memory runner and does not read credentials.
     """
     env, out, err = run.env, run.out, run.err
-    ceiling = _key_ceiling(args, env)
     limits = _agentic_limits(args, env)
     event = load_event(Path(args.event))
     _check_out_path(args.out)
@@ -582,7 +581,6 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     "agentic-review live mode needs --provider openrouter "
                     "--allow-live-inference"
                 )
-            provider.key_ceiling = ceiling
             github = _live_github(args, env, event, run.credentials)
             sprites = args.sprites_factory(env)
             redactor = run.credentials.redactor
@@ -652,7 +650,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         f"{_telemetry_line(run, telemetry)}"
         f"review event: {review.proposed_event.value}; coverage_complete="
         f"{str(review.coverage_complete).lower()}; unreviewed_files="
-        f"{len(_gap_files(review))}; lenses={len(names)}\n"
+        f"{len(review.unreviewed_paths)}; lenses={len(names)}\n"
     )
     if not review.coverage_complete:
         return EXIT_INCOMPLETE
@@ -702,18 +700,12 @@ def _key_ceiling(args: argparse.Namespace, env: Mapping[str, str]) -> Decimal:
             "(--key-ceiling-usd or ATLAS_KEY_CEILING_USD), "
             f"not {raw!r}"
         ) from None
-    if value <= 0:
+    if not value.is_finite() or value <= 0:
         raise UsageError(
             "the key ceiling must be a positive number of dollars "
             f"(--key-ceiling-usd or ATLAS_KEY_CEILING_USD), not {raw!r}"
         )
     return value
-
-
-def _gap_files(review) -> tuple[str, ...]:
-    from atlas_reviewer.coordinator import _unread_paths
-
-    return _unread_paths(review)
 
 
 def review_exit(verdict: Verdict) -> int:

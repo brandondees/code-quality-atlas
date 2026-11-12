@@ -101,6 +101,12 @@ from atlas_reviewer.verdict import STATUS_PREFIX, ReviewEvent
 QUOTED_CHARS = 600
 EVIDENCE_CHARS = 1_200
 NONCE_BYTES = 8
+# Continuation rounds per review. Each round re-runs the lenses that still
+# have unread files; a round that does not shrink the gap ends it earlier.
+MAX_CONTINUATIONS = 4
+HALTED_REASON = (
+    "not started: an earlier call in this review stopped it (BYOK or a failed lens)"
+)
 
 # ----------------------------------------------------------------- results
 
@@ -164,6 +170,10 @@ class AgenticReview:
     model_calls: int = 0
     flagged: tuple[str, ...] = field(default=(), repr=False)
     trace_id: str = ""
+
+    @property
+    def unreviewed_paths(self) -> tuple[str, ...]:
+        return _unread_paths(self)
 
     @property
     def coverage_complete(self) -> bool:
@@ -411,9 +421,10 @@ def review_lenses(
     trace: ReviewTrace | None = None,
 ) -> AgenticReview:
     """Run every named lens, up to `pool_size` at once, then one combined
-    verdict. Each lens gets its own runner name. Files no lens read are
-    handed to a continuation of the first lens that has a body, while a
-    call and the review clock remain. Partial coverage still cannot approve.
+    verdict. Each lens gets its own runner name. A changed file a lens
+    left unread is handed back to that same lens as a continuation, for up
+    to `MAX_CONTINUATIONS` rounds, while a call and the review clock remain.
+    Partial coverage still cannot approve.
 
     One review span covers every lens, and each lens run, pooled or a
     continuation, is a lens span under it. Spans are recorded as
@@ -480,6 +491,18 @@ def _review_lenses(
     runs: list[_LensRun] = []
 
     def run(lens: str, assigned: frozenset[str], index: int) -> _LensRun:
+        if spend.halted:
+            halted = LensResult(
+                lens, index, None, None, reason=HALTED_REASON, scope=assigned
+            )
+            return _LensRun(halted, [], None, spend, ())
+        try:
+            return _run_lens(lens, assigned, index)
+        except BaseException:
+            spend.halt()
+            raise
+
+    def _run_lens(lens: str, assigned: frozenset[str], index: int) -> _LensRun:
         return _traced_lens(
             trace,
             event,
@@ -517,20 +540,32 @@ def _review_lenses(
         ]
         for future in futures:
             runs.append(future.result())
-    for _ in range(4):
-        unread = _still_unread(tuple(ran.result for ran in runs))
+    for _ in range(MAX_CONTINUATIONS):
+        if spend.halted:
+            break
+        results = tuple(ran.result for ran in runs)
+        pending = {
+            lens: paths
+            for lens, paths in _pending_by_lens(results).items()
+            if library.body(lens) is not None
+        }
         if (
-            not unread
+            not pending
             or spend.calls >= resolved.max_calls
             or clock.monotonic() >= deadline
         ):
             break
-        before = set(unread)
-        host = next(
-            (ran.result.lens for ran in runs if ran.result.body_sha256), names[0]
-        )
-        runs.append(run(host, frozenset(unread), len(runs) + 1))
-        if not before - set(_still_unread(tuple(ran.result for ran in runs))):
+        before = _pending_pairs(pending)
+        for lens, paths in pending.items():
+            runs.append(run(lens, paths, len(runs) + 1))
+        after = {
+            lens: paths
+            for lens, paths in _pending_by_lens(
+                tuple(ran.result for ran in runs)
+            ).items()
+            if library.body(lens) is not None
+        }
+        if not before - _pending_pairs(after):
             break
     secrets = [secret for ran in runs for secret in ran.secrets]
     flagged = tuple(value for ran in runs for value in ran.flagged)
@@ -665,18 +700,12 @@ def _review_one(
     )
     if isinstance(next_step(ledger.attempts(key), resolved.retries), Settled):
         settled = _result(key, ledger.attempts(key), resolved, "", index)
-        settled = LensResult(
-            lens,
-            settled.index,
-            settled.body_sha256,
-            settled.outcome,
-            settled.attempts,
-            settled.escalated,
-            settled.retry_pending,
-            settled.reason,
-        )
         return _LensRun(
-            replace_scope(settled, scope), [], None, spend or Spend(resolved), ()
+            replace(settled, lens=lens, scope=scope),
+            [],
+            None,
+            spend or Spend(resolved),
+            (),
         )
     diff_secrets = scan_diff(diff)
     session = _Session()
@@ -726,36 +755,12 @@ def _review_one(
         root=bridge_root,
     )  # fmt: skip
     result = _result(key, ledger.attempts(key), resolved, scrub(report.note), index)
-    result = LensResult(
-        lens,
-        result.index,
-        result.body_sha256,
-        result.outcome,
-        result.attempts,
-        result.escalated,
-        result.retry_pending,
-        result.reason,
-    )
     return _LensRun(
-        replace_scope(result, scope),
+        replace(result, lens=lens, scope=scope),
         list(session.secrets),
         report,
         spend,
         tuple(diff_secrets.values) + tuple(session.flagged()),
-    )
-
-
-def replace_scope(result: LensResult, scope: frozenset[str]) -> LensResult:
-    return LensResult(
-        result.lens,
-        result.index,
-        result.body_sha256,
-        result.outcome,
-        result.attempts,
-        result.escalated,
-        result.retry_pending,
-        result.reason,
-        scope,
     )
 
 
@@ -1004,28 +1009,47 @@ def _scoped(lenses: Sequence[LensResult]) -> bool:
 
 def _blocks_coverage(result: LensResult) -> bool:
     """A lens that is partial only because it left a file unread does not
-    block once another lens, or a continuation, has read that file."""
+    block once that same lens, or its continuation, has read the file."""
     unread_only = (
         result.outcome is not None
-        and result.state is LensState.PARTIAL
-        and result.outcome.causes <= frozenset({Cause.FILES_UNREAD})
+        and result.outcome.attestation is Attestation.ATTESTED
+        and result.outcome.causes == frozenset({Cause.FILES_UNREAD})
     )
     return result.state is not LensState.CLEAN and not unread_only
 
 
-def _still_unread(lenses: Sequence[LensResult]) -> tuple[str, ...]:
-    assigned: set[str] = set()
-    covered: set[str] = set()
+def _pending_by_lens(lenses: Sequence[LensResult]) -> dict[str, frozenset[str]]:
+    """For each lens, the scope paths none of its attempts read in full.
+    A file read by a different lens does not cover it (D42: the gate is
+    per lens). A lens with no body has no attempt, so it stays pending."""
+    assigned: dict[str, set[str]] = {}
+    covered: dict[str, set[str]] = {}
     for result in lenses:
         if result.scope is None:
             continue
-        assigned.update(result.scope)
+        assigned.setdefault(result.lens, set()).update(result.scope)
         if result.outcome is None or result.outcome.changed_files is None:
             continue
-        covered.update(set(result.scope) - set(result.outcome.unread))
-    return tuple(
-        sorted(assigned - covered, key=lambda path: (risk_tier(path).rank, path))
-    )
+        covered.setdefault(result.lens, set()).update(
+            set(result.scope) - set(result.outcome.unread)
+        )
+    pending: dict[str, frozenset[str]] = {}
+    for lens in sorted(assigned):
+        gap = assigned[lens] - covered.get(lens, set())
+        if gap:
+            pending[lens] = frozenset(gap)
+    return pending
+
+
+def _pending_pairs(pending: dict[str, frozenset[str]]) -> set[tuple[str, str]]:
+    return {(lens, path) for lens, paths in pending.items() for path in paths}
+
+
+def _still_unread(lenses: Sequence[LensResult]) -> tuple[str, ...]:
+    paths: set[str] = set()
+    for gap in _pending_by_lens(lenses).values():
+        paths.update(gap)
+    return tuple(sorted(paths, key=lambda path: (risk_tier(path).rank, path)))
 
 
 def _coverage_gap_name(review: AgenticReview) -> str:

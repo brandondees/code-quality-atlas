@@ -49,6 +49,7 @@ from atlas_reviewer.http import safe_url
 from atlas_reviewer.lens_loop import (
     AgenticLimits,
     AssistantCalls,
+    AssistantText,
     FinalReply,
     Limits,
     Message,
@@ -221,6 +222,11 @@ def _one_message(
         if pending is not None:
             raise BoundaryError("a tool result is missing")
         out.append({"role": "user", "content": message.text})
+        return None
+    if isinstance(message, AssistantText):
+        if pending is not None:
+            raise BoundaryError("a tool result is missing")
+        out.append({"role": "assistant", "content": message.text})
         return None
     if isinstance(message, AssistantCalls):
         if pending is not None:

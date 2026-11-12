@@ -292,13 +292,21 @@ class AssistantCalls:
 
 
 @dataclass(frozen=True)
+class AssistantText:
+    """A final reply the contract rejected, sent back as the model's own
+    turn so the repair turn can correct it."""
+
+    text: str
+
+
+@dataclass(frozen=True)
 class ToolResults:
     """One fenced result per call of the turn before, in order."""
 
     results: tuple[str, ...]
 
 
-Message = UserText | AssistantCalls | ToolResults
+Message = UserText | AssistantCalls | AssistantText | ToolResults
 
 
 @dataclass(frozen=True)
@@ -460,7 +468,21 @@ class Spend:
     limits: Limits
     calls: int = 0
     committed_usd: Decimal = Decimal(0)
-    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False, compare=False
+    )
+    _halted: threading.Event = field(
+        default_factory=threading.Event, init=False, repr=False, compare=False
+    )
+
+    @property
+    def halted(self) -> bool:
+        """Set once the key refused BYOK spend or a lens failed fatally.
+        No further model call is made in this review after that."""
+        return self._halted.is_set()
+
+    def halt(self) -> None:
+        self._halted.set()
 
     def reserve(self, worst_usd: Decimal) -> LimitHit | None:
         with self._lock:
@@ -639,6 +661,12 @@ def run_attempt(
         if stopped is not None:
             return stopped
         request = TurnRequest(system, tuple(messages), tools)
+        if spend.halted:
+            return p.cut(
+                Cause.MODEL_ERROR,
+                "the review stopped before this call: the key refused BYOK spend "
+                "or another lens failed",
+            )
         try:
             worst = model.worst_case_usd(request)
         except LimitRefused as exc:
@@ -657,6 +685,8 @@ def run_attempt(
         except ByokRefusedError as exc:
             # The refusal still leaves the loop. The turns and tool calls
             # already completed travel with it, so the ledger records them.
+            # No other lens in this review makes another model call.
+            spend.halt()
             exc.turns = p.turns
             exc.tools = tuple(p.tools)
             raise
@@ -734,7 +764,7 @@ def _accept_or_repair(
     repaired = _repair(text, p)
     if repaired is None:
         return _final(job, text, p)
-    messages.append(UserText(repaired))
+    messages += [AssistantText(text), UserText(repaired)]
     return None
 
 

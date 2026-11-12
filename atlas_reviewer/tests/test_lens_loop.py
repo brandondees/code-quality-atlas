@@ -23,6 +23,7 @@ from atlas_reviewer.lens_loop import (
     SYNTHESIS,
     AgenticLimits,
     AssistantCalls,
+    AssistantText,
     LensJob,
     LimitsUnsetError,
     Spend,
@@ -129,6 +130,21 @@ def test_a_byok_refusal_leaves_the_loop_and_keeps_the_reservation():
             review_started=clock.monotonic(),
         )  # fmt: skip
     assert spend.committed_usd == Decimal("0.01")
+
+
+def test_a_call_after_a_byok_refusal_elsewhere_in_the_review_is_not_sent():
+    model = ScriptedLensModel([final()])
+    spend = Spend(LIMITS.resolve())
+    spend.halt()
+    clock = FakeClock()
+    outcome = run_attempt(
+        job(), object(), model, spend, clock,
+        review_deadline=clock.monotonic() + 600,
+        review_started=clock.monotonic(),
+    )  # fmt: skip
+    assert Cause.MODEL_ERROR in outcome.causes
+    assert model.requests == []
+    assert spend.calls == 0
 
 
 def test_brandons_provisional_defaults_are_accepted():
@@ -460,6 +476,10 @@ def test_a_reply_outside_the_contract_is_sent_back_once_then_fails(tmp_path):
     repair = model.requests[2].messages[-1].text
     assert "the reply is not one JSON object" in repair
     assert "quoted" in repair
+    assert model.requests[2].messages[-2] == AssistantText("Looks fine to me!")
+    assert len(model.requests) == 3
+    assert Cause.UNPARSED in outcome.causes
+    assert outcome.state is not LensState.CLEAN
 
 
 def test_a_repaired_reply_that_meets_the_contract_is_accepted(tmp_path):

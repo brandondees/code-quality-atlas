@@ -23,8 +23,11 @@ from atlas_reviewer.attestation import (
 from atlas_reviewer.bridge import BridgeSecret
 from atlas_reviewer.bridge_staging import SourceTrees
 from atlas_reviewer.coordinator import (
+    HALTED_REASON,
     LensResult,
     Verdict,
+    _blocks_coverage,
+    _still_unread,
     render_draft,
     review_lens,
     review_lenses,
@@ -681,6 +684,14 @@ def lens_result(outcome, **kw):
     return LensResult(LENS, 1, DIGEST, outcome, attempts=1, **kw)
 
 
+def scoped(lens, paths, *, unread=(), attestation=Attestation.ATTESTED):
+    causes = frozenset({Cause.FILES_UNREAD}) if unread else frozenset()
+    outcome = AttemptOutcome(
+        attestation, causes, unread=tuple(unread), changed_files=len(paths)
+    )
+    return LensResult(lens, 1, DIGEST, outcome, attempts=1, scope=frozenset(paths))
+
+
 def checked(severity, *, attribution=Attribution.INTRODUCED, valence=Valence.DEFECT,
             verified=True, route=None):  # fmt: skip
     route = route or (
@@ -796,12 +807,12 @@ def _acknowledge(request):
     return final(lens=match.group(1), digest=match.group(2))
 
 
-def _lenses(tmp_path, names, model, *, pool=1, models=None, limits=None):
+def _lenses(tmp_path, names, model, *, pool=1, models=None, limits=None, sprites=None):
     from .test_keepalive import TaskServer, socket_path
 
     tasks = TaskServer(socket_path(tmp_path))
     tasks.start()
-    sprites = LocalSprites()
+    sprites = sprites or LocalSprites()
     pending = list(models or [])
     lock = threading.Lock()
 
@@ -858,6 +869,52 @@ def test_a_continuation_that_makes_no_progress_stops(tmp_path):
     assert len(result.lenses) == 2
     created = [call[1] for call in sprites.calls if call[0] == "create"]
     assert len(created) == 2
+
+
+def test_a_file_one_lens_left_unread_is_not_covered_by_another_lens(tmp_path):
+    model = ScriptedLensModel(
+        [
+            tools(("diff_file", {"path": "calc.py"})),
+            final(),
+            tools(("diff_file", {"path": "calc.py"})),
+            tools(("diff_file", {"path": "config/keys.py"})),
+            final(),
+        ]
+    )
+    result, _ = _lenses(tmp_path, [LENS, OTHER], model)
+    assert not result.coverage_complete
+    assert result.lenses[0].outcome.unread == ("config/keys.py",)
+
+
+def test_a_file_unread_by_one_lens_is_covered_once_that_lens_reads_it():
+    skipped = scoped(LENS, ["a.py", "b.py"], unread=["b.py"])
+    other = scoped(OTHER, ["a.py", "b.py"])
+    assert _still_unread([skipped, other]) == ("b.py",)
+    rerun = scoped(LENS, ["b.py"])
+    assert _still_unread([skipped, other, rerun]) == ()
+
+
+def test_a_partial_with_no_cause_still_blocks_coverage():
+    unexplained = scoped(LENS, ["a.py"], attestation=Attestation.UNACKNOWLEDGED)
+    assert _blocks_coverage(unexplained)
+    only_unread = scoped(LENS, ["a.py"], unread=["a.py"])
+    assert not _blocks_coverage(only_unread)
+
+
+def test_a_byok_refusal_stops_the_lenses_that_have_not_started(tmp_path):
+    def refuse(request):
+        raise ByokRefusedError("refusing the review: byok")
+
+    sprites = LocalSprites()
+    result, _ = _lenses(
+        tmp_path, [LENS, OTHER], ScriptedLensModel([refuse]), sprites=sprites
+    )
+    created = [call[1] for call in sprites.calls if call[0] == "create"]
+    assert len(created) == 1
+    assert result.lenses[0].state is LensState.FAILED
+    assert result.lenses[1].outcome is None
+    assert result.lenses[1].reason == HALTED_REASON
+    assert not result.coverage_complete
 
 
 def test_a_failed_lens_blocks_approval_after_every_file_was_read(tmp_path):
