@@ -183,15 +183,15 @@ _NOT_A_REVIEW_LENS = frozenset(
         "grounding-review-in-tool-output",
     }
 )
-_BACKTICK_NAME = re.compile(r"`([a-z]+(?:-[a-z]+)+)`")
+_BACKTICK_NAME = re.compile(r"`([a-z0-9]+(?:-[a-z0-9]+)+)`")
 
 
 def test_every_lens_the_picker_names_has_a_body():
     text = Path("skills/choosing-review-lenses/SKILL.md").read_text()
-    on_disk = {
-        path.name for path in Path("skills").iterdir() if (path / "SKILL.md").is_file()
-    }
-    pickable = sorted(set(_BACKTICK_NAME.findall(text)) & on_disk - _NOT_A_REVIEW_LENS)
+    cited = set(_BACKTICK_NAME.findall(text))
+    directories = {path.name for path in Path("skills").iterdir() if path.is_dir()}
+    assert sorted(cited - directories) == []
+    pickable = sorted((cited & directories) - _NOT_A_REVIEW_LENS)
     assert "auditing-infrastructure-as-code" in pickable
     library = LensLibrary()
     missing = [name for name in pickable if library.body(name) is None]
