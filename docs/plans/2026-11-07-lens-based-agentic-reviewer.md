@@ -516,7 +516,7 @@ The one live data point is D26's single call, which cost $0.17.
   With 2 subagents in flight, about $2.2 is held at once. So any cap below
   about $5 serialises the pool in practice. Update (2026-11-12, D43): that
   gap is accepted. The byte bound stays, and the per-review reservation
-  stays $5. The 2026-11-12 PR #621 review measured about 5–40×; see D43.
+  stays $5. The 2026-11-12 reviews of PR #621 and PR #631 measured about 5–44×; see D43.
 
 ## Open questions for Brandon
 
