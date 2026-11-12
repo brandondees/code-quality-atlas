@@ -795,9 +795,13 @@ socket for the hold. No live model, Sprite or Fly call has been made.
   zero data retention, no fallbacks, no plugins and no server tools) and
   only the bridge's tool schemas. The loop settles `_actual_cost`, which
   includes a BYOK upstream charge. A turn with no readable cost but usable
-  token counts is priced at the highest catalog rates. Only a turn with
-  neither a readable cost nor usable token counts stays at the reserved
-  worst case. The catalog is fetched once per turn. The adapter does not
+  token counts is priced at the highest catalog rates, unless the model
+  has a reasoning rate and the response reports no reasoning-token count.
+  A turn stays at the reserved worst case when it cannot be priced: an
+  unreadable upstream charge, a BYOK call with no upstream charge, neither
+  a readable cost nor usable token counts, or a reasoning rate with no
+  reasoning-token count. The catalog is fetched once per turn.
+  The adapter does not
   retry and does not reserve on the one-shot budget. A tool call whose
   arguments are not one JSON object, or that hold a non-finite number or
   nest deep enough to recurse, is handed to the bridge, which rejects it,

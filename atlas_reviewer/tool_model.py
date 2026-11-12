@@ -7,11 +7,14 @@ pinned provider document as the one-shot adapter (`only`, no fallbacks,
 server tools). The lens loop reserves the worst case and settles `_actual_cost`
 (BYOK upstream included) through its own spend tracker. A turn with no
 readable cost but usable token counts is priced at the highest catalog
-rates. Only a turn with neither a readable cost nor usable token counts
-is returned as a non-finite `Decimal`, which the tracker keeps at the
-worst case. This module does not touch that tracker's rules, and it
-does not reserve on the one-shot `ReviewBudget` (that budget's ceiling
-is the one-shot 3 calls and $3).
+rates, unless the model has a reasoning rate and the response reports no
+reasoning-token count. The turn is a non-finite `Decimal`, which the
+tracker keeps at the worst case, when it cannot be priced: an unreadable
+upstream charge, a BYOK call with no upstream charge, neither a readable
+cost nor usable token counts, or a reasoning rate with no
+reasoning-token count. This module does not touch that
+tracker's rules, and it does not reserve on the one-shot `ReviewBudget`
+(that budget's ceiling is the one-shot 3 calls and $3).
 
 Tool calls are parsed and handed back. The loop runs them through the
 bridge, which rejects an unknown tool or bad arguments before anything
