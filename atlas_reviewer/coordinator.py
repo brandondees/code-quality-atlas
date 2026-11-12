@@ -577,8 +577,7 @@ def _coverage_gap_name(review: AgenticReview) -> str:
     if any(r.outcome is not None and r.outcome.unread for r in review.lenses):
         return "unread files"
     if any(
-        r.outcome is not None and r.outcome.changed_files is None
-        for r in review.lenses
+        r.outcome is not None and r.outcome.changed_files is None for r in review.lenses
     ):
         return "no recorded file coverage"
     return ""
