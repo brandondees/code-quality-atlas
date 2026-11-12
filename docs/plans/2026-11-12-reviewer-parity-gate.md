@@ -13,14 +13,16 @@ that feed the score is D45 in [`../open-questions.md`](../open-questions.md).
 The service does not post reviews. A later poster may submit a GitHub
 review event of `APPROVE` for a head SHA only when an offline
 `python -m atlas_reviewer eval --fixtures <dir> --head <sha> --gate`
-exits 0. The directory is the calibration set: every file must be a
-scored pair and every pair must pass, one passing pair must be for that
-head (`input.head_sha` or `input.reviewed_commit`), and one passing pair
-must record `metadata.over_context_window` (a diff larger than one model
-context window). A reference row with no candidate is a failure. One
-easy pair next to unscored reference rows does not open the gate. A new
-pull request has no protocol row of its own, so this gate certifies the
-calibration set plus that head's pair, not the reference rows alone.
+exits 0. The calibration set is the checked-in rows under
+`atlas_reviewer/fixtures/eval-references/`. The directory must contain a
+passing pair for every one of those rows, matched on repo, pull request,
+round, and `reviewed_commit`. One passing pair must be for the head
+being approved (`input.head_sha` or `input.reviewed_commit`), and one
+passing pair must record `metadata.over_context_window` (a diff larger
+than one model context window). A directory that holds only the pair for
+that head does not open the gate. A new pull request has no protocol row
+of its own, so the gate certifies the whole calibration set plus that
+head's pair.
 
 D36 still decides the draft's `review_event` line. That line is what a
 person reads. It is not permission to post `APPROVE`.

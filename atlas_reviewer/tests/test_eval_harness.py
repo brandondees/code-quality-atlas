@@ -186,14 +186,26 @@ def test_one_easy_pair_beside_unscored_references_does_not_open_the_gate(tmp_pat
     assert any("no candidate" in item for item in report["gate_failures"])
 
 
-def test_a_full_directory_passes_only_with_the_head_and_an_over_context_pair(tmp_path):
+def test_a_full_directory_passes_only_with_the_head_and_an_over_context_pair(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "atlas_reviewer.eval_harness.reference_identities",
+        lambda: (("o/r", 1, 1, "abc123"),),
+    )
     pair = _passing_pair("abc123")
+    pair["input"]["repo"] = "o/r"
     (tmp_path / "pair.json").write_text(json.dumps(pair), encoding="utf-8")
     assert load_directory(tmp_path, head="abc123")["gate_pass"] is False
     pair["metadata"]["over_context_window"] = True
     (tmp_path / "pair.json").write_text(json.dumps(pair), encoding="utf-8")
     assert load_directory(tmp_path, head="abc123")["gate_pass"] is True
     assert load_directory(tmp_path, head="other")["gate_pass"] is False
+    pair["input"]["pr"] = 99
+    (tmp_path / "pair.json").write_text(json.dumps(pair), encoding="utf-8")
+    missed = load_directory(tmp_path, head="abc123")
+    assert missed["gate_pass"] is False
+    assert any("calibration row" in item for item in missed["gate_failures"])
 
 
 def test_a_non_utf8_fixture_is_a_usage_error(tmp_path):

@@ -110,10 +110,11 @@ python -m atlas_reviewer eval --fixtures atlas_reviewer/fixtures/eval-score --ga
 
 `--fixtures` is a directory of JSON files. A file with `output` and no
 `candidate` is a reference row (the Phoenix dataset shape: `input`,
-`output`, `metadata`). A file with `candidate` is scored. `--gate` exits
-1 unless every file is a passing pair, `--head` names a commit that one
-passing pair records, and one passing pair has
-`metadata.over_context_window` set. The hand-built fixture is expected
+`output`, `metadata`). A file with `candidate` is scored. `--gate` exits 1 unless the directory has a passing pair for every
+checked-in row under `fixtures/eval-references/`, `--head` names a
+commit that one passing pair records, and one passing pair has
+`metadata.over_context_window` set. A directory that holds only the
+pair for `--head` does not pass. The hand-built fixture is expected
 to fail the gate. The reference directory holds protocol rounds from
 PRs #602–#637 and has no candidates, so the gate fails closed. Exit 2
 is a fixture that does not parse, including one that is not UTF-8 or

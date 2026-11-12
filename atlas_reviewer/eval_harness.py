@@ -545,12 +545,12 @@ def _finding_json(finding: EvalFinding) -> dict[str, Any]:
 def load_directory(path: Path, *, head: str | None = None) -> dict[str, Any]:
     """Score every JSON file in ``path``.
 
-    ``gate_pass`` is true only when every file is a scored pair, every
-    pair passes, one passing pair is for ``head`` (``input.head_sha`` or
-    ``input.reviewed_commit``), and one passing pair records
-    ``metadata.over_context_window``. A reference row with no candidate
-    fails the gate. A directory of references plus one easy pair does not
-    open it.
+    ``gate_pass`` is true only when every checked-in calibration row
+    (``fixtures/eval-references/pr-*.json``, matched on repo, PR, round,
+    and ``reviewed_commit``) is present as a passing pair, one passing
+    pair is for ``head``, and one passing pair records
+    ``metadata.over_context_window``. A directory that holds only the
+    pair for ``head`` does not open the gate.
     """
     files = sorted(p for p in path.glob("*.json") if p.is_file())
     if not files:
@@ -559,6 +559,7 @@ def load_directory(path: Path, *, head: str | None = None) -> dict[str, Any]:
     examples = 0
     run_counts = {name: 0 for name in sorted(RUNS)}
     failures: list[str] = []
+    seen: set[tuple[str, int, int, str]] = set()
     for file in files:
         try:
             payload = json.loads(file.read_text(encoding="utf-8"))
@@ -570,6 +571,7 @@ def load_directory(path: Path, *, head: str | None = None) -> dict[str, Any]:
             raise EvalFormatError(f"{file.name} is not an object")
         examples += 1
         run_counts[_run_of(payload)] += 1
+        seen.add(_identity(payload))
         if "candidate" not in payload:
             failures.append(f"{file.name}: reference row has no candidate")
             if _flag(payload, "parse_gap"):
@@ -585,6 +587,11 @@ def load_directory(path: Path, *, head: str | None = None) -> dict[str, Any]:
         failures.append(f"no passing pair for head {head}")
     if not any(row["passed"] and row["over_context_window"] for row in results):
         failures.append("no passing pair records over_context_window")
+    for repo, pr, round_number, commit in reference_identities():
+        if (repo, pr, round_number, commit) not in seen:
+            failures.append(
+                f"calibration row {repo}#{pr} round {round_number} at {commit} is missing"
+            )
     totals = _totals(results)
     return {
         "examples": examples,
@@ -619,6 +626,37 @@ def _score_file(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         "head_sha": _text(entered, "head_sha"),
         "reviewed_commit": _text(entered, "reviewed_commit"),
     }
+
+
+_REFERENCES = Path(__file__).resolve().parent / "fixtures" / "eval-references"
+
+
+def reference_identities() -> tuple[tuple[str, int, int, str], ...]:
+    """The checked-in protocol rows, as (repo, pr, round, reviewed_commit)."""
+    found: list[tuple[str, int, int, str]] = []
+    for path in sorted(_REFERENCES.glob("pr-*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            found.append(_identity(payload))
+    return tuple(found)
+
+
+def _identity(payload: Mapping[str, Any]) -> tuple[str, int, int, str]:
+    entered = payload.get("input")
+    if not isinstance(entered, dict):
+        return ("", 0, 0, "")
+    repo = entered.get("repo")
+    pr = entered.get("pr")
+    round_number = entered.get("round")
+    commit = entered.get("reviewed_commit")
+    return (
+        repo if isinstance(repo, str) else "",
+        pr if isinstance(pr, int) and not isinstance(pr, bool) else 0,
+        round_number
+        if isinstance(round_number, int) and not isinstance(round_number, bool)
+        else 0,
+        commit if isinstance(commit, str) else "",
+    )
 
 
 def _matches_head(row: Mapping[str, Any], head: str) -> bool:
