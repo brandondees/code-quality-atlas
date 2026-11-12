@@ -21,8 +21,12 @@ repository must be on `ATLAS_REVIEW_REPOS`, which defaults to
 and head SHA. A newer SHA for the same PR cancels the older review, and
 the cancelled review is not posted.
 
-The review is the existing `review` command, as a child process, without
-the webhook secret in its environment. The controller's own call and cost
+The review is the existing `review` command, as a child process. That
+child does not receive the webhook secret or the App private key. The
+parent mints a read-only installation token and passes that instead. The
+child does receive `ATLAS_OPENROUTER_API_KEY`, because it calls the model,
+and `ATLAS_SPRITES_TOKEN`, because it creates and destroys the Sprite.
+Neither of those is sent into the Sprite. The controller's own call and cost
 caps are unchanged. Concurrency defaults to 1 and a value above 32 is
 refused at startup, as a bad-configuration guard rather than a price cap.
 

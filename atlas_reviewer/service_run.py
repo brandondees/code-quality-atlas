@@ -148,14 +148,17 @@ def make_runner(
     sleeper: Sleeper = time.sleep,
     deadline_s: float = REVIEW_DEADLINE_S,
     clock: Callable[[], float] = time.monotonic,
+    read_token: Callable[[Mapping[str, str], PrEvent], tuple[str, str]] | None = None,
 ) -> Callable[[PrEvent, threading.Event], ReviewRun]:
+    mint = read_token or _read_token
+
     def run(event: PrEvent, cancel: threading.Event) -> ReviewRun:
         directory = run_dir(config.state_root, event)
         make_private_dirs(directory)
         _write_event(directory / "event.json", event)
         stderr_path = directory / "stderr.txt"
         argv = review_argv(config, directory)
-        token, mint_error = _read_token(env, event)
+        token, mint_error = mint(env, event)
         if mint_error:
             return ReviewRun(False, error=mint_error)
         code = run_process(

@@ -77,6 +77,38 @@ def test_the_child_receives_only_the_allowlist():
     }
 
 
+def test_the_child_process_starts_without_the_app_key(tmp_path):
+    seen: dict[str, dict[str, str]] = {}
+
+    def popen(argv, env, stdout, stderr):
+        seen["env"] = dict(env)
+        return _Proc(3)
+
+    parent = {
+        APP_KEY_ENV: "pem-secret-value",
+        "ATLAS_OPENROUTER_API_KEY": "sk-or-secret",
+        "ATLAS_SPRITES_TOKEN": "sprite-secret",
+        WEBHOOK_SECRET_ENV: "webhook-secret-value",
+        "FLY_API_TOKEN": "fly-token-value",
+    }
+    runner = make_runner(
+        RunConfig("offline", False, tmp_path),
+        parent,
+        popen=popen,
+        read_token=lambda _env, _event: ("ghs_read", ""),
+    )
+    result = runner(PrEvent(REPO, 7, SHA), threading.Event())
+    assert result.ok is False
+    child = seen["env"]
+    assert APP_KEY_ENV not in child
+    assert "pem-secret-value" not in child.values()
+    assert WEBHOOK_SECRET_ENV not in child
+    assert child["ATLAS_OPENROUTER_API_KEY"] == "sk-or-secret"
+    assert child["ATLAS_SPRITES_TOKEN"] == "sprite-secret"
+    assert child[READ_TOKEN_ENV] == "ghs_read"
+    assert "FLY_API_TOKEN" not in child
+
+
 def test_the_child_does_not_receive_the_app_private_key():
     env = child_env(
         {

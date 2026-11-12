@@ -74,7 +74,8 @@ posted.
 The review itself is the existing `review` command, one at a time unless
 `ATLAS_REVIEW_CONCURRENCY` says otherwise (1 to 32; 32 is a startup refusal
 so a bad value cannot start an unbounded pool, not a cost cap). The child
-process receives only an allowlist: the OpenRouter key, the Sprites token,
+process receives only an allowlist: the OpenRouter key, because it calls
+the model, the Sprites token, because it creates and destroys the Sprite,
 a read-only installation token, and the process basics. It does not receive
 the webhook secret, the App private key, or a Fly API token. Exit 0, 4 and 5 are finished
 reviews and are posted. Any other exit posts nothing; the failure is a
