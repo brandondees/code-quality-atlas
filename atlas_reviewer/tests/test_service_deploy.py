@@ -138,6 +138,15 @@ def test_the_real_module_exits_2_when_no_atlas_env_is_set():
     assert b"webhook secret" in proc.stderr
 
 
+def test_d44_counts_every_active_job_state():
+    text = (ROOT / "docs/open-questions.md").read_text(encoding="utf-8")
+    start = text.index("- **D44")
+    entry = text[start:].split("\n- **D", 1)[0]
+    assert "post_pending" in entry
+    assert "posting" in entry
+    assert "already queued or running" not in entry
+
+
 def test_the_fly_host_is_what_config_from_env_binds():
     """A hardcoded loopback would still match the TOML string and leave
     the proxy with nothing to reach."""
