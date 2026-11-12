@@ -273,6 +273,7 @@ def test_reported_reasoning_past_the_hint_stays_inside_the_reservation():
     price of that reply, the path `_actual_cost` uses when `usage.cost` is
     missing, must not exceed the reservation that was held for the call."""
     terms = parse_model_terms(catalog(internal_reasoning="0.00002"), MODEL_ID)
+    assert terms.reasoning_rate == Decimal("0.00002")
     limits = CallLimits()
     reasoning = limits.reasoning_max_tokens + 1_000
     assert reasoning < limits.max_output_tokens
