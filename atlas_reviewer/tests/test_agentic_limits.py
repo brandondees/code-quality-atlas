@@ -62,6 +62,13 @@ def test_a_flag_wins_over_the_environment_and_can_only_tighten():
         resolve_per_call(replace(limits.resolve(), max_input_tokens=2_000_000), terms)
 
 
+def test_an_empty_flag_is_refused_and_an_empty_variable_stays_unset():
+    with pytest.raises(ValueError, match="max_calls"):
+        load_agentic_limits({"ATLAS_MAX_CALLS": "10"}, max_calls="")
+    limits = load_agentic_limits({"ATLAS_MAX_CALLS": ""})
+    assert limits.max_calls == AgenticLimits().max_calls
+
+
 def test_an_unparseable_limit_is_refused():
     with pytest.raises(ValueError, match="max_turns"):
         load_agentic_limits({"ATLAS_MAX_TURNS": "nope"})

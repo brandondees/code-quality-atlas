@@ -35,15 +35,21 @@ def load_agentic_limits(
 ) -> AgenticLimits:
     """`flags` are the CLI strings, keyed by the limit name. None means
     the flag was omitted, so the environment variable is read. An empty
-    variable is omitted too. `resolve` then refuses a value that is not
-    a usable limit."""
+    flag is a value and is refused, so it cannot fall through to the
+    variable. An empty variable is still omitted. `resolve` then refuses
+    a value that is not a usable limit."""
     unknown = set(flags) - set(ENV)
     if unknown:
         raise ValueError("unknown agentic limit: " + ", ".join(sorted(unknown)))
     limits = AgenticLimits()
     for name, variable in ENV.items():
-        raw = flags.get(name)
-        if raw is None:
+        if name in flags:
+            raw = flags[name]
+            if raw is None:
+                raw = env.get(variable)
+            elif raw == "":
+                raise ValueError(f"{name} was given an empty value")
+        else:
             raw = env.get(variable)
         if raw is None or raw == "":
             continue
