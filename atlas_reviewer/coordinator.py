@@ -556,7 +556,7 @@ def _headline(review: AgenticReview, scrub: Callable[[str], str]) -> str:
     ):
         named = f"runner {review.runner.status.value}"
     else:
-        named = "no lens selected"
+        named = _coverage_gap_name(review) or "no lens selected"
     proposed = (
         f" (the findings alone would be {review.proposed_event.value})"
         if review.proposed_event is not review.event
@@ -568,6 +568,20 @@ def _headline(review: AgenticReview, scrub: Callable[[str], str]) -> str:
         f"complete ({named}), so this review cannot approve."
         + _unread_clause(review, scrub)
     )
+
+
+def _coverage_gap_name(review: AgenticReview) -> str:
+    """Why a review of clean lenses is still incomplete, or "" when no
+    lens was selected. A clean outcome can still lack coverage: unread
+    paths, or no changed-file count from before the per-file gate."""
+    if any(r.outcome is not None and r.outcome.unread for r in review.lenses):
+        return "unread files"
+    if any(
+        r.outcome is not None and r.outcome.changed_files is None
+        for r in review.lenses
+    ):
+        return "no recorded file coverage"
+    return ""
 
 
 def _unread_paths(review: AgenticReview) -> tuple[str, ...]:

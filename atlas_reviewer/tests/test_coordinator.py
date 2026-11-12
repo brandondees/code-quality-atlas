@@ -567,6 +567,9 @@ def test_a_clean_outcome_without_a_file_count_cannot_approve():
     assert result.proposed_event is ReviewEvent.APPROVE
     assert result.event is ReviewEvent.COMMENT
     assert status(result)["coverage_complete"] is False
+    headline = render_draft(result, Redactor()).splitlines()[2]
+    assert "no recorded file coverage" in headline
+    assert "no lens selected" not in headline
 
 
 def test_the_status_line_is_the_drafts_first_line_and_only_controller_values():
