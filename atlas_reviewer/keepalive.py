@@ -14,7 +14,11 @@ API (Fly support, 2026-11-06); this module does not snapshot or restore.
 
 The controller starts the hold. A model turn runs on the controller, so
 the Sprite would otherwise sit quiet for the whole call. Refresh and tool
-execs share the runner's exec lock, so they do not write one stream.
+execs share the runner's exec lock, so they do not write one stream. Each
+hold exec has its own 15 second budget and the guest socket call times out
+after 10 seconds, so a stuck refresh cannot hold that lock until the
+5-minute task expires. The join waits at most 20 seconds, then the delete
+runs anyway.
 """
 
 from __future__ import annotations
@@ -28,16 +32,20 @@ import socket
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Protocol, Self
+from typing import Literal, Protocol, Self
 from urllib.parse import quote
 
 from atlas_reviewer.ports import BoundaryError
-from atlas_reviewer.runner import Session
+from atlas_reviewer.runner import DeadlineExceededError, Session
 
 SOCKET_PATH = "/.sprite/api.sock"
 HOST = "sprite"
 EXPIRE = "5m"
 REFRESH_S = 60.0
+# Short enough that a stuck refresh, even while it holds the exec lock,
+# ends well inside the 5-minute expiry (the refresh itself is every 60s).
+HOLD_BUDGET_S = 15.0
+JOIN_S = 20.0
 _NAME = re.compile(r"atlas-lens-[a-z0-9-]{1,48}\Z")
 
 
@@ -63,10 +71,13 @@ def task_name(digest: str) -> str:
 def exchange(socket_path: str, method: str, target: str, body: str) -> None:
     """One HTTP/1.1 request on the Sprite management socket.
 
-    Create and refresh must answer 200, 201 or 204. Delete may also answer
-    404, which means the hold is already gone. A bad status or a socket
-    error raises `RuntimeError` or `OSError`. This function is copied into
-    the guest script, so it uses only the standard library."""
+    Create and refresh must answer 200, 201 or 204. A 404 is success only
+    for delete, which means the hold is already gone; a refresh that gets
+    404 has not renewed the task. The socket call times out after 10
+    seconds, and only the status line is read (at most 512 bytes). A bad
+    status or a socket error raises `RuntimeError` or `OSError`. This
+    function is copied into the guest script, so it uses only the standard
+    library and does not refer to names outside itself."""
     payload = body.encode()
     request = (
         f"{method} {target} HTTP/1.1\r\n"
@@ -78,11 +89,12 @@ def exchange(socket_path: str, method: str, target: str, body: str) -> None:
     ).encode() + payload
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
+        sock.settimeout(10)
         sock.connect(socket_path)
         sock.sendall(request)
         data = bytearray()
-        while True:
-            chunk = sock.recv(65536)
+        while b"\r\n" not in data and len(data) < 512:
+            chunk = sock.recv(min(256, 512 - len(data)))
             if not chunk:
                 break
             data += chunk
@@ -187,15 +199,20 @@ class ExecTaskClient:
         self._run("DELETE", name)
 
     def _run(self, method: str, name: str) -> None:
-        code, _text = self.session.exec(
+        code, text = self.session.exec(
             "task hold",
             hold_script(
                 self.socket_path, method, _target(name, method), _payload(name, method)
             ),
             stage="keepalive",
+            budget_s=HOLD_BUDGET_S,
         )
         if code != 0:
-            raise BoundaryError(f"sprite task hold {method} failed (exit {code})")
+            tail = " ".join(text.split())[:200]
+            detail = f": {tail}" if tail else ""
+            raise BoundaryError(
+                f"sprite task hold {method} failed (exit {code}){detail}"
+            )
 
 
 Wait = Callable[[float], bool]
@@ -205,17 +222,23 @@ Wait = Callable[[float], bool]
 class LensHold:
     """Create a hold, refresh it until exit, then delete it.
 
-    `__exit__` stops the refresh thread before it deletes, so a refresh
-    cannot upsert the task after the delete (the Tasks API's PUT is an
-    upsert). Delete runs when the body returns, when it raises, and when
-    it is cancelled (`BaseException`). A refresh that fails inside the
-    heartbeat is raised to the caller once the hold has been deleted,
-    unless the body already raised."""
+    `__exit__` joins the refresh thread before it deletes. The join is
+    what makes a refresh error visible: the thread stores that error
+    after the refresh returns, and the join waits until that store has
+    happened. The lock, and the stop and held guards, are what stop a
+    refresh from upserting the task after the delete (the Tasks API's
+    PUT is an upsert); the join is not that guard. The join itself is
+    bounded (`join_s`). Delete runs when the body returns, when it
+    raises, and when it is cancelled, including when the join is
+    interrupted. A refresh that fails is raised after the delete, unless
+    the body already raised: the body's exception is the one the caller
+    sees, and a delete error does not replace it."""
 
     client: TaskClient
     name: str
     refresh_s: float = REFRESH_S
     wait: Wait | None = None
+    join_s: float = JOIN_S
     _stop: threading.Event = field(default_factory=threading.Event, init=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
     _error: Exception | None = field(default=None, init=False)
@@ -240,38 +263,65 @@ class LensHold:
         exc_type: type[BaseException] | None,
         _exc: BaseException | None,
         _tb: object,
-    ) -> None:
+    ) -> Literal[False]:
         self._stop.set()
         thread = self._thread
-        if thread is not None and thread is not threading.current_thread():
-            thread.join()
-        self._release()
-        if exc_type is None and self._error is not None:
+        join_error: KeyboardInterrupt | None = None
+        try:
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(self.join_s)
+        except KeyboardInterrupt as exc:
+            join_error = exc
+        delete_error: BoundaryError | None = None
+        try:
+            self._release()
+        except BoundaryError as exc:
+            delete_error = exc
+        if join_error is not None:
+            raise join_error
+        if exc_type is not None:
+            return False
+        if self._error is not None:
+            if delete_error is not None:
+                raise self._error from delete_error
             raise self._error
+        if delete_error is not None:
+            raise delete_error
+        return False
 
     def refresh(self) -> None:
-        """One refresh. A failure propagates to the caller."""
+        """One refresh. A failure is stored before the lock is released,
+        then raised to the caller."""
         with self._lock:
             if self._stop.is_set() or not self._held:
                 return
-            self.client.refresh(self.name)
+            try:
+                self.client.refresh(self.name)
+            except (BoundaryError, DeadlineExceededError) as exc:
+                self._error = exc
+                self._stop.set()
+                raise
 
     def _beat(self) -> None:
         wait = self._stop.wait if self.wait is None else self.wait
         while not wait(self.refresh_s):
             try:
                 self.refresh()
-            except BoundaryError as exc:
-                self._error = exc
-                self._stop.set()
+            except (BoundaryError, DeadlineExceededError):
                 return
 
     def _release(self) -> None:
-        with self._lock:
+        if not self._lock.acquire(timeout=self.join_s):
+            raise BoundaryError(
+                "sprite task hold delete timed out waiting for a refresh"
+            )
+        try:
             if not self._held:
                 return
             self._held = False
             self.client.delete(self.name)
+        finally:
+            self._lock.release()
 
 
 def lens_hold(
