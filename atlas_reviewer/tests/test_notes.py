@@ -229,3 +229,39 @@ def test_a_tool_version_is_scrubbed_before_it_is_quoted(value):
     )
     (line,) = [n for n in lines if n.startswith("Tool")]
     _assert_scrubbed(line, value)
+
+
+@pytest.mark.parametrize("value", MARKUP_VALUES)
+def test_a_tool_absent_detail_is_scrubbed_before_it_is_quoted(value):
+    lines = controller_notes(
+        ControllerFacts(
+            DONE, (), (ToolAbsent(SHELLCHECK, value),), (), LensPlan((), ()), ()
+        ),
+        scrub=_scrub(value),
+    )
+    (line,) = [n for n in lines if n.startswith("Tool")]
+    _assert_scrubbed(line, value)
+
+
+@pytest.mark.parametrize("value", MARKUP_VALUES)
+def test_an_omission_source_is_scrubbed_before_it_is_quoted(value):
+    lines = controller_notes(
+        ControllerFacts(
+            DONE, (), (), (Omission(value, "cap", "detail"),), LensPlan((), ()), ()
+        ),
+        scrub=_scrub(value),
+    )
+    (line,) = [n for n in lines if n.startswith("Omissions")]
+    _assert_scrubbed(line, value)
+
+
+@pytest.mark.parametrize("value", MARKUP_VALUES)
+def test_an_omission_limit_is_scrubbed_before_it_is_quoted(value):
+    lines = controller_notes(
+        ControllerFacts(
+            DONE, (), (), (Omission("src", value, "detail"),), LensPlan((), ()), ()
+        ),
+        scrub=_scrub(value),
+    )
+    (line,) = [n for n in lines if n.startswith("Omissions")]
+    _assert_scrubbed(line, value)

@@ -1819,6 +1819,182 @@ def test_a_lens_selection_error_is_scrubbed_before_it_is_quoted(value):
 
 
 @pytest.mark.parametrize("value", MARKUP_VALUES)
+def test_a_flagged_lens_picker_error_is_scrubbed_in_the_draft(value):
+    """`run_review` forwards its own flagged scrub into `_select_lenses`,
+    not just `_select_lenses`'s own internal use of it (the above test calls
+    `_select_lenses` directly, bypassing that call site)."""
+
+    class Refusing(PickingProvider):
+        def complete(self, prompt):
+            if "--- lens picker ---" in prompt.system:
+                raise BoundaryError(value)
+            return super().complete(prompt)
+
+    draft = Setup(
+        github=_flagging(value)(FIXTURE), provider=Refusing(), lenses=ROOMY
+    ).run()
+    _assert_quoted_scrub(
+        _note_with(draft, "Lens selection: the lens picker gave no usable lens list"),
+        value,
+    )
+
+
+@pytest.mark.parametrize("value", MARKUP_VALUES)
+def test_a_flagged_issue_fetch_error_is_scrubbed_in_the_draft(value):
+    """Covers the `scrub=scrub` call sites forwarding into `_issue_blocks`
+    and `_issue_block` from `run_review` -- the test above calls
+    `_issue_block` directly, bypassing both."""
+
+    class Issuing(_flagging(value)):
+        def get_pull(self, repo, number):
+            return {**super().get_pull(repo, number), "body": "Closes #7"}
+
+        def get_issue(self, repo, number):
+            raise BoundaryError(f"HTTP 502 {value}")
+
+    draft = Setup(github=Issuing(FIXTURE)).run(include_issues=True)
+    _assert_quoted_scrub(_note_with(draft, "could not be fetched"), value)
+
+
+@pytest.mark.parametrize("value", MARKUP_VALUES)
+def test_notes_re_renders_pre_existing_omissions_with_its_own_scrub(value):
+    """`_notes` wraps `controller_notes(replace(base.facts, omissions=
+    _omissions(base, sel, scrub=scrub)), scrub=scrub)` -- two forwardings of
+    its own `scrub` parameter on one line. This covers the outer
+    `controller_notes(...)` forwarding: a pre-existing omission (as
+    `gather.py`'s truncated-listing omissions carry a PR-controlled source,
+    e.g. a workflow run's name) is spliced into `_omissions`'s result
+    unchanged, so `controller_notes`'s own scrub is what has to redact it
+    in `_omission_line`.
+
+    The inner `_omissions(base, sel, scrub=scrub)` forwarding is NOT
+    reachable through this (or any) behaviour test: with `sel=None`, as
+    here, `_omissions` never touches `scrub` at all (`_selection_omission`/
+    `_dropped_omission` both short-circuit to `()`). With a real `sel`,
+    `_selection_omission`/`_dropped_omission` DO use `scrub`, but only to
+    compute each new `Omission`'s `detail` field -- its `source`/`limit`
+    stay fixed templates ("pull request diff", "too large for one review
+    pass: N part(s)...", counts, no PR text). `_notes`'s own output feeds
+    `DraftInput.controller_notes` (Controller notes prose), rendered by
+    `_omission_line`, which quotes only `source`/`limit`, never `detail`
+    (the omissions *table* is what shows `detail`, via a separate
+    `_omissions(..., scrub=scrub)` call at `DraftInput.omissions`'s own
+    call site, already covered by
+    `test_a_flagged_value_is_scrubbed_before_it_is_encoded`). So nothing
+    this specific forwarding could redact is ever displayed through this
+    path, for any selection -- see issue #624's own escape hatch ("if a
+    site's input can't carry a credential, record why and drop it")."""
+    from atlas_reviewer.controller import ControllerFacts, _Base, _notes
+    from atlas_reviewer.domain import (
+        CleanupStatus,
+        Omission,
+        RunnerReport,
+        RunnerStatus,
+    )
+    from atlas_reviewer.lenses import LensPlan
+    from atlas_reviewer.prompt import RepoText, UntrustedBlock
+    from atlas_reviewer.redact import Redactor
+
+    base = _Base(
+        EVENT,
+        UntrustedBlock("pull-request", RepoText("")),
+        (),
+        (),
+        ControllerFacts(
+            RunnerReport(
+                RunnerStatus.COMPLETED, CleanupStatus.DESTROYED_VERIFIED, "r", ""
+            ),
+            (),
+            (),
+            (Omission(value, "cap", "detail"),),
+            LensPlan((), ()),
+            (),
+        ),
+        (),
+        Redactor(),
+    )
+    lines = _notes(base, None, scrub=_exact_scrub(value))
+    (line,) = [n for n in lines if n.startswith("Omissions")]
+    _assert_quoted_scrub(line, value)
+
+
+@pytest.mark.parametrize("value", MARKUP_VALUES)
+def test_run_review_forwards_its_real_scrub_into_notes(value, monkeypatch):
+    """Covers `run_review`'s own `*_notes(base, selection, scrub=scrub)`
+    call (`DraftInput.controller_notes`) -- the call site itself, not
+    `_notes`'s internal behaviour (covered directly above). Driving this
+    end-to-end needs a pre-existing omission whose *source* carries a
+    credential reaching `run_review` through the real pipeline (e.g. a
+    truncated job listing naming a PR-controlled workflow run), which is
+    disproportionate scaffolding for one forwarding already exercised at
+    both ends; capturing the exact closure `run_review` hands to `_notes`
+    and checking it actually redacts a flagged value is the direct way to
+    pin this specific call site."""
+    from atlas_reviewer import controller as controller_mod
+
+    captured = {}
+    real_notes = controller_mod._notes
+
+    def capture(base, sel, *, scrub):
+        captured["scrub"] = scrub
+        return real_notes(base, sel, scrub=scrub)
+
+    monkeypatch.setattr(controller_mod, "_notes", capture)
+    Setup(github=_flagging(value)(FIXTURE)).run()
+    assert captured["scrub"](value) == "[REDACTED:possible-committed-secret]"
+
+
+@pytest.mark.parametrize("value", MARKUP_VALUES)
+def test_a_flagged_unreviewed_file_listing_is_scrubbed_in_the_draft(value):
+    """End-to-end sibling of the direct-call test below: covers
+    `run_review`'s own `*_unreviewed_parts(selection, parts, scrub=scrub)`
+    call site, not just `_unreviewed_parts`'s internal use of its `scrub`
+    parameter. The second part's call is made to fail so it stays
+    `NarrativeFailure` (unreviewed) rather than cut or simulated."""
+    path = f"src/{value}.py"
+    diff = (
+        "diff --git a/src/kept.py b/src/kept.py\n--- a/src/kept.py\n+++ b/src/kept.py\n"
+        "@@ -1 +1,2 @@\n x\n+" + "x" * 700 + "\n"
+        f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n"
+        f'@@ -1 +1,2 @@\n x\n+password = "{value}"\n+' + "y" * 700 + "\n"
+    )
+
+    class Titled(FixtureGitHub):
+        def get_pull(self, repo, number):
+            return {**super().get_pull(repo, number), "changed_files": 2}
+
+        def get_pull_diff(self, repo, number):
+            return diff
+
+    class PartFailing(Approving):
+        def complete(self, prompt):
+            if path in prompt.user:
+                raise BoundaryError(f"HTTP 500 {value}")
+            return super().complete(prompt)
+
+    s = Setup(github=Titled(FIXTURE), provider=PartFailing())
+    draft = s.run(model_calls=3, diff_chars_per_call=1_000)
+    omissions = section(draft, "Omissions and limits hit")
+    assert "file(s) sent but not reviewed" in omissions
+    _assert_quoted_scrub(omissions, value)
+
+
+@pytest.mark.parametrize("value", MARKUP_VALUES)
+def test_an_unreviewed_part_s_file_listing_is_scrubbed_before_it_is_encoded(value):
+    from atlas_reviewer.controller import _unreviewed_parts
+    from atlas_reviewer.diffs import DiffPart, DiffSelection, FileDiff, risk_tier
+    from atlas_reviewer.draft import NarrativeFailure, PartNarrative
+
+    path = f"src/{value}.py"
+    text = "diff --git a/src/x.py b/src/x.py\n"
+    f = FileDiff(path, text, len(text), risk_tier(path))
+    sel = DiffSelection(1, len(text), (DiffPart((f,)),), ())
+    parts = (PartNarrative(1, 1, (f,), NarrativeFailure("skill-bundle", "HTTP 503")),)
+    (row,) = _unreviewed_parts(sel, parts, scrub=_exact_scrub(value))
+    _assert_quoted_scrub(row.detail, value)
+
+
+@pytest.mark.parametrize("value", MARKUP_VALUES)
 def test_a_diff_fetch_error_is_scrubbed_before_it_is_quoted(value, monkeypatch):
     from atlas_reviewer import controller as controller_mod
 
