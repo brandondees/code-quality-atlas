@@ -13,6 +13,12 @@
   "metadata": {
     "source": "claude-code-protocol",
     "review_url": "https://github.com/brandondees/code-quality-atlas/pull/608#pullrequestreview-5817483160",
+    "run": "lens-fan-out",
+    "lenses_recorded": [
+      "reviewing-decision-lifecycle",
+      "auditing-documentation-health",
+      "reviewing-pr-and-process-hygiene"
+    ],
     "review_state": "COMMENTED"
   }
 }

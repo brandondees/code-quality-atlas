@@ -6,7 +6,7 @@ or Fly resource was created. The comparison the rule uses is the Claude
 Code routine in [`commands/atlas-review-pr.md`](../../commands/atlas-review-pr.md).
 Scoring shape (issue hit, not text overlap) is the one already accepted in
 [`../agentic-reviewer.md`](../agentic-reviewer.md). Hosting for the traces
-that feed the score is D44 in [`../open-questions.md`](../open-questions.md).
+that feed the score is D45 in [`../open-questions.md`](../open-questions.md).
 
 ## The rule
 
@@ -150,7 +150,14 @@ did run.
 candidate's `lenses_run`. The score is computed from the candidate
 findings the caller recorded, which are the verified findings the
 coordinator would have minted. A candidate that omits `lenses_run` fails
-the gate.
+the gate. Each reference row records `metadata.run`: `lens-fan-out` when
+the coverage section names lenses it ran, loaded, or re-ran;
+`coordinator-verified` when the round says that (fan-out did not finish);
+`unrecorded` when the body says neither. A coordinator-verified row is
+flagged and does not clear this criterion, so it cannot by itself make
+`--gate` exit 0. #637 has no protocol review in the 2026-11-12 fetch, and
+#636's fetch has rounds 1 and 2 only, so the cited coordinator-verified
+rounds (637 round 2, 636 round 4) are not rows in this set.
 
 ### 4. Recall and precision against the protocol reviews
 
@@ -185,5 +192,5 @@ is `REQUEST_CHANGES`. Every other round heading is `COMMENT`, including
 - Whether an unmatched Major+ finding should fail the gate when he
   believes the protocol round missed a real defect. This plan counts it
   as a failure.
-- The numeric Fly size in D44 is a published price, not a measured
+- The numeric Fly size in D45 is a published price, not a measured
   Phoenix resident set. He picks the Machine size when he provisions it.

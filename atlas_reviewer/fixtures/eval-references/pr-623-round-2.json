@@ -13,6 +13,8 @@
   "metadata": {
     "source": "claude-code-protocol",
     "review_url": "https://github.com/brandondees/code-quality-atlas/pull/623#pullrequestreview-5864457671",
+    "run": "lens-fan-out",
+    "lenses_recorded": [],
     "review_state": "COMMENTED"
   }
 }

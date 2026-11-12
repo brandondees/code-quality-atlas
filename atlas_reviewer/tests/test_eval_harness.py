@@ -13,10 +13,12 @@ from atlas_reviewer.eval_harness import (
     EvalFinding,
     EvalFormatError,
     EvalReview,
+    coverage_lenses,
     example_json,
     gate_failures,
     load_directory,
     protocol_review,
+    run_mode,
     score,
 )
 
@@ -70,6 +72,47 @@ def test_protocol_review_reads_the_round_heading_and_redacts_the_summary():
     )
     assert "ghp_" not in finding.summary
     assert "[REDACTED:" in finding.summary
+
+
+def test_run_mode_flags_a_coordinator_verified_round_and_reads_a_lens_list():
+    fan = (
+        PROTOCOL + "\n**Coverage.** Lenses run: `reviewing-test-quality`, loaded from "
+        "the vendored skills.\n"
+    )
+    partial = (
+        PROTOCOL + "\n**Coverage.** This round is coordinator-verified. "
+        "It did not complete lens fan-out. Lenses run: `hunting-silent-failures`.\n"
+    )
+    assert run_mode(fan) == "lens-fan-out"
+    assert coverage_lenses(fan) == ("reviewing-test-quality",)
+    assert run_mode(partial) == "coordinator-verified"
+    assert run_mode(PROTOCOL) == "unrecorded"
+    reran = (
+        "## Round 2 — notes\n**Coverage:** I re-ran `auditing-documentation-health`.\n"
+    )
+    assert run_mode(reran) == "lens-fan-out"
+    assert coverage_lenses(reran) == ("auditing-documentation-health",)
+    assert run_mode("## Round 2 — notes\ncoordinator verified the partial pass\n") == (
+        "coordinator-verified"
+    )
+
+
+def test_a_coordinator_verified_reference_does_not_clear_fan_out():
+    finding = EvalFinding("nit", "a.py", "", 1, 1, ("hunting-silent-failures",))
+    reference = EvalReview("COMMENT", (finding,))
+    candidate = CandidateReview(
+        "COMMENT",
+        (finding,),
+        True,
+        0,
+        ("a.py",),
+        ("hunting-silent-failures",),
+        (),
+    )
+    failures = gate_failures(
+        reference, candidate, score(reference, candidate), run="coordinator-verified"
+    )
+    assert any("coordinator-verified" in item for item in failures)
 
 
 def test_an_approve_heading_is_approve_and_a_non_round_is_skipped():

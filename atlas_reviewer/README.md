@@ -15,7 +15,7 @@ time. Design and decision record:
 D37 is the Fly one-off deploy. When a draft's `APPROVE` may be submitted
 to GitHub is the parity gate in
 [`docs/plans/2026-11-12-reviewer-parity-gate.md`](../docs/plans/2026-11-12-reviewer-parity-gate.md).
-D44 is where the eval traces should live. Other follow-ups are in that
+D45 is where the eval traces should live. Other follow-ups are in that
 plan's "Follow-ups" section.
 
 ## Deploy on Fly

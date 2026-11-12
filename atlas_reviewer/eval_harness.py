@@ -33,12 +33,15 @@ from typing import Any
 from atlas_reviewer.redact import redact
 
 MAJOR_OR_ABOVE = frozenset({"blocker", "major"})
+RUNS = frozenset({"lens-fan-out", "coordinator-verified", "unrecorded"})
+_COORDINATOR = "reference run is coordinator-verified; the round did not complete lens fan-out and does not clear that criterion"
 _VERDICTS = frozenset({"APPROVE", "COMMENT", "REQUEST_CHANGES"})
 _SEVERITIES = frozenset({"blocker", "major", "minor", "nit"})
 _ROUND = re.compile(r"^## Round\s+(\d+)\s+[—–-]\s+(.*)\s*$", re.MULTILINE)
 _MARKER = re.compile(r"<!--\s*atlas-review round:(\d+)\b")
 _HEADING = re.compile(r"^\*\*(Blocker|Major|Minor|Nit)\s*·\s*([^*\n]+?)\*\*")
 _LENS = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+_LENS_TICK = re.compile(r"`([a-z0-9]+(?:-[a-z0-9]+)+)`")
 _SUMMARY_CHARS = 240
 _CODERABBIT = "coderabbit-ai-generated"
 
@@ -136,7 +139,11 @@ def score(reference: EvalReview, candidate: EvalReview) -> Score:
 
 
 def gate_failures(
-    reference: EvalReview, candidate: CandidateReview, scored: Score
+    reference: EvalReview,
+    candidate: CandidateReview,
+    scored: Score,
+    *,
+    run: str = "lens-fan-out",
 ) -> tuple[str, ...]:
     """Why this pair does not yet allow APPROVE. Empty means it passes.
 
@@ -144,9 +151,12 @@ def gate_failures(
     finding at Major or above, and the same verdict. The coverage bar is
     the candidate's own record: complete coverage, no unreviewed files,
     every lens the reference named was run, and every reference path
-    outside the diff was read at head.
+    outside the diff was read at head. A ``coordinator-verified`` reference
+    did not finish lens fan-out, so the pair cannot clear that criterion.
     """
     failures: list[str] = []
+    if run == "coordinator-verified":
+        failures.append(_COORDINATOR)
     if scored.missed_major_or_above:
         failures.append(
             f"missed {scored.missed_major_or_above} Major+ reference finding(s)"
@@ -215,6 +225,53 @@ def protocol_review(
     return number, EvalReview(_verdict(title), findings)
 
 
+def run_mode(body: str) -> str:
+    """How the protocol round says it was run.
+
+    ``coordinator-verified`` is the phrase a round uses when lens fan-out
+    did not finish and the coordinator verified the partial result.
+    ``lens-fan-out`` is a coverage section that names lenses it ran,
+    loaded, or re-ran. Anything else is ``unrecorded``.
+    """
+    text = body or ""
+    lowered = text.lower()
+    if "coordinator-verified" in lowered or "coordinator verified" in lowered:
+        return "coordinator-verified"
+    if re.search(
+        r"did not complete lens fan-out|fan-out did not complete|fan-out didn't complete",
+        lowered,
+    ):
+        return "coordinator-verified"
+    coverage = _coverage_section(text)
+    named = bool(_LENS_TICK.search(coverage))
+    ran = re.search(
+        r"lenses?(?::| run| re-ran| re-run| loaded)", coverage, re.IGNORECASE
+    )
+    if coverage and (named or ran):
+        return "lens-fan-out"
+    return "unrecorded"
+
+
+def coverage_lenses(body: str) -> tuple[str, ...]:
+    """Lens names in backticks in the coverage section, in order, once each."""
+    seen: list[str] = []
+    for name in _LENS_TICK.findall(_coverage_section(body or "")):
+        if name not in seen:
+            seen.append(name)
+    return tuple(seen)
+
+
+def _coverage_section(body: str) -> str:
+    match = re.search(r"\*\*Coverage[^*\n]*\*\*(.*)", body, re.IGNORECASE | re.DOTALL)
+    if match is None:
+        match = re.search(r"(?m)^Coverage:?\s*(.*)", body, re.IGNORECASE | re.DOTALL)
+    if match is None:
+        return ""
+    text = match.group(1)
+    stop = re.search(r"\n## |\n\*\*[A-Z]", text)
+    return text[: stop.start()] if stop else text[:2000]
+
+
 def _verdict(title: str) -> str:
     if re.search(r"\bAPPROVE\b", title):
         return "APPROVE"
@@ -270,8 +327,16 @@ def example_json(
     round_number: int,
     review: EvalReview,
     review_url: str = "",
+    run: str = "unrecorded",
+    lenses_recorded: Sequence[str] = (),
 ) -> dict[str, Any]:
-    """One Phoenix dataset example. ``output`` is the reference review."""
+    """One Phoenix dataset example. ``output`` is the reference review.
+
+    ``run`` is how the round says it was executed. ``lenses_recorded`` are
+    the lens names in its coverage section.
+    """
+    if run not in RUNS:
+        raise EvalFormatError(f"run must be one of {sorted(RUNS)}")
     return {
         "input": {
             "repo": repo,
@@ -283,6 +348,8 @@ def example_json(
         "metadata": {
             "source": "claude-code-protocol",
             "review_url": review_url,
+            "run": run,
+            "lenses_recorded": list(lenses_recorded),
         },
     }
 
@@ -321,6 +388,7 @@ def load_directory(path: Path) -> dict[str, Any]:
         raise EvalFormatError(f"no JSON fixtures in {path}")
     results: list[dict[str, Any]] = []
     examples = 0
+    run_counts = {name: 0 for name in sorted(RUNS)}
     for file in files:
         try:
             payload = json.loads(file.read_text(encoding="utf-8"))
@@ -329,6 +397,7 @@ def load_directory(path: Path) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise EvalFormatError(f"{file.name} is not an object")
         examples += 1
+        run_counts[_run_of(payload)] += 1
         if "candidate" not in payload:
             continue
         results.append(_score_file(file.name, payload))
@@ -340,6 +409,7 @@ def load_directory(path: Path) -> dict[str, Any]:
         "gate_pass": bool(results) and not failures,
         "gate_failures": failures,
         "totals": totals,
+        "run_counts": run_counts,
         "results": results,
     }
 
@@ -347,12 +417,15 @@ def load_directory(path: Path) -> dict[str, Any]:
 def _score_file(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
     reference = _parse_review(payload.get("reference") or payload.get("output"), name)
     candidate = _parse_candidate(payload.get("candidate"), name)
+    run = _run_of(payload)
     scored = score(reference, candidate)
     failures = [
-        f"{name}: {item}" for item in gate_failures(reference, candidate, scored)
+        f"{name}: {item}"
+        for item in gate_failures(reference, candidate, scored, run=run)
     ]
     return {
         "fixture": name,
+        "run": run,
         "score": scored.as_json(),
         "gate_failures": failures,
     }
@@ -373,6 +446,13 @@ def _totals(results: Sequence[Mapping[str, Any]]) -> dict[str, int]:
             totals[key] += int(score_row[key])
         totals["verdict_agreements"] += int(bool(score_row["verdict_agrees"]))
     return totals
+
+
+def _run_of(payload: Mapping[str, Any]) -> str:
+    meta = payload.get("metadata")
+    if isinstance(meta, dict) and meta.get("run") in RUNS:
+        return str(meta["run"])
+    return "unrecorded"
 
 
 def _parse_review(value: object, name: str) -> EvalReview:

@@ -1108,6 +1108,10 @@ any size, per-lens fan-out with verification, and Major+ recall and
 precision against the Claude Code protocol rounds on PRs #602–#637) are
 all unmet in the current reviewer, so the gate fails closed. The plan is
 [`plans/2026-11-12-reviewer-parity-gate.md`](plans/2026-11-12-reviewer-parity-gate.md).
-D44 recommends self-hosted Phoenix on Fly in org `personal` and does not
+D45 recommends self-hosted Phoenix on Fly in org `personal` and does not
 provision it. The scorer and the reference rows are offline fixtures;
-nothing in this change calls a model or writes to GitHub.
+nothing in this change calls a model or writes to GitHub. The hosting
+decision is D45: D44 is the webhook receiver's Fly app on #642. A
+reference row's `metadata.run` is `coordinator-verified` when the round
+says fan-out did not finish, and that row does not clear the fan-out
+criterion.
