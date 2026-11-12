@@ -28,6 +28,32 @@ def run_cli(*argv, env=None):
     return code, out.getvalue(), err.getvalue()
 
 
+def test_a_bad_agentic_limit_is_refused_before_the_review(tmp_path):
+    code, _out, err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "review",
+        "--event",
+        EVENT,
+        "--dry-run",
+        "--reservation-usd",
+        "0",
+    )
+    assert code == cli.EXIT_USAGE
+    assert "reservation_usd" in err
+    code, _out, err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "review",
+        "--event",
+        EVENT,
+        "--dry-run",
+        env={"ATLAS_MAX_TURNS": "nope"},
+    )
+    assert code == cli.EXIT_USAGE
+    assert "max_turns" in err
+
+
 def test_dry_run_needs_no_credentials_and_prints_a_draft(tmp_path):
     code, out, _ = run_cli(
         "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run"

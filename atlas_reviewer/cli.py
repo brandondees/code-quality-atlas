@@ -34,6 +34,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
+from atlas_reviewer.agentic_config import ENV as AGENTIC_ENV
+from atlas_reviewer.agentic_config import load_agentic_limits
 from atlas_reviewer.budget import CallLimits
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.controller import (
@@ -229,6 +231,7 @@ class _Run:
     err: TextIO
     credentials: _Credentials
     telemetry: Telemetry | None = None
+    agentic_limits: object | None = None
 
 
 def _review_lock(
@@ -426,6 +429,12 @@ def _review_config(args: argparse.Namespace, mode: str) -> ReviewConfig:
 
 def _cmd_review(args: argparse.Namespace, run: _Run) -> int:
     env, out, err = run.env, run.out, run.err
+    try:
+        # Validated here so a bad agentic limit fails closed. The one-shot
+        # path does not apply these values: its ceilings stay D25's.
+        run.agentic_limits = load_agentic_limits(env, **_agentic_flags(args))
+    except ValueError as exc:
+        raise UsageError(str(exc)) from exc
     event_path = Path(args.event)
     event = load_event(event_path)
     _review_config(args, "check")
@@ -785,6 +794,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="the atlas depth mode: triage runs the critical tier with no picker call",
     )
     _events_arg(rev)
+    _agentic_limit_args(rev)
     rev.add_argument("--provider", choices=PROVIDER_CHOICES, default="offline")
     rev.add_argument(
         "--allow-live-inference",
@@ -856,6 +866,43 @@ def _positive_seconds(text: str) -> float:
     if not (math.isfinite(value) and value > 0):
         raise argparse.ArgumentTypeError("must be a positive number of seconds")
     return value
+
+
+def _agentic_limit_args(parser: argparse.ArgumentParser) -> None:
+    """Agentic review limits. They do not change the one-shot D25 ceilings."""
+    flags = (
+        ("--reservation-usd", "reservation_usd", "per-review dollar reservation"),
+        ("--max-calls", "max_calls", "model calls per agentic review"),
+        ("--max-turns", "max_turns", "model turns per lens"),
+        ("--lens-wall-seconds", "lens_wall_s", "seconds per lens"),
+        ("--review-wall-seconds", "review_wall_s", "seconds per review"),
+        (
+            "--max-input-tokens",
+            "max_input_tokens",
+            "per-call input cap; default is the model's context minus the output reserve",
+        ),
+        (
+            "--max-output-tokens",
+            "max_output_tokens",
+            "per-call output cap; default is the model's completion limit",
+        ),
+        (
+            "--reasoning-max-tokens",
+            "reasoning_max_tokens",
+            "reasoning hint sent on the request; the reservation does not depend on it",
+        ),
+    )
+    for flag, name, meaning in flags:
+        parser.add_argument(
+            flag,
+            dest=name,
+            default=None,
+            help=f"{meaning} (env {AGENTIC_ENV[name]}; default when unset)",
+        )
+
+
+def _agentic_flags(args: argparse.Namespace) -> dict[str, str | None]:
+    return {name: getattr(args, name) for name in AGENTIC_ENV}
 
 
 def _events_arg(parser: argparse.ArgumentParser) -> None:

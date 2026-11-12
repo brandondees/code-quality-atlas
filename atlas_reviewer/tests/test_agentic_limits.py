@@ -8,6 +8,7 @@ from decimal import Decimal
 
 import pytest
 
+from atlas_reviewer.agentic_config import load_agentic_limits
 from atlas_reviewer.attestation import AttemptLedger, Cause, LensState
 from atlas_reviewer.budget import CallLimits
 from atlas_reviewer.coordinator import status_line, synthesize
@@ -28,7 +29,8 @@ from .test_tool_model import model, request, sent
 
 
 def test_unset_limits_keep_the_defaults_and_derive_per_call_bounds():
-    resolved = AgenticLimits().resolve()
+    limits = load_agentic_limits({})
+    resolved = limits.resolve()
     assert (resolved.max_calls, resolved.reservation_usd) == (50, Decimal(5))
     assert resolved.max_input_tokens is None
     terms = parse_model_terms(catalog(), MODEL_ID)
@@ -37,12 +39,27 @@ def test_unset_limits_keep_the_defaults_and_derive_per_call_bounds():
     assert call.max_input_tokens == 1_000_000 - 64_000
 
 
-def test_an_input_override_can_only_tighten():
+def test_a_flag_wins_over_the_environment_and_can_only_tighten():
+    limits = load_agentic_limits(
+        {
+            "ATLAS_MAX_CALLS": "10",
+            "ATLAS_MAX_TURNS": "4",
+            "ATLAS_MAX_INPUT_TOKENS": "5000",
+        },
+        max_calls="4",
+    )
+    assert (limits.max_calls, limits.max_input_tokens) == (4, 5000)
     terms = parse_model_terms(catalog(), MODEL_ID)
-    tight = replace(AgenticLimits().resolve(), max_input_tokens=5000)
-    assert resolve_per_call(tight, terms).max_input_tokens == 5000
+    assert resolve_per_call(limits.resolve(), terms).max_input_tokens == 5000
     with pytest.raises(LimitRefused, match="max_input_tokens"):
-        resolve_per_call(replace(tight, max_input_tokens=2_000_000), terms)
+        resolve_per_call(replace(limits.resolve(), max_input_tokens=2_000_000), terms)
+
+
+def test_an_unparseable_limit_is_refused():
+    with pytest.raises(ValueError, match="max_turns"):
+        load_agentic_limits({"ATLAS_MAX_TURNS": "nope"})
+    with pytest.raises(ValueError, match="max_turns"):
+        load_agentic_limits({}, max_turns="80", max_calls="10")
 
 
 def test_the_output_default_is_the_models_and_an_override_cannot_exceed_it():
@@ -154,6 +171,36 @@ def test_a_limit_hit_round_trips_through_the_ledger(tmp_path):
 def test_the_one_shot_input_cap_stays_200k():
     assert CallLimits().max_input_tokens == 200_000
     assert CallLimits().max_calls == 3
+
+
+def test_every_agentic_limit_can_be_set_and_a_bad_one_is_refused():
+    limits = load_agentic_limits(
+        {
+            "ATLAS_RESERVATION_USD": "2.50",
+            "ATLAS_LENS_WALL_S": "100",
+            "ATLAS_REVIEW_WALL_S": "200",
+            "ATLAS_MAX_OUTPUT_TOKENS": "4000",
+            "ATLAS_REASONING_MAX_TOKENS": "1500",
+            "ATLAS_MAX_CALLS": "",
+        },
+        max_calls="8",
+        max_turns="6",
+        max_input_tokens="1000",
+    )
+    assert limits.reservation_usd == Decimal("2.50")
+    assert (limits.lens_wall_s, limits.review_wall_s) == (100.0, 200.0)
+    assert (limits.max_output_tokens, limits.reasoning_max_tokens) == (4000, 1500)
+    assert (limits.max_calls, limits.max_turns, limits.max_input_tokens) == (8, 6, 1000)
+    with pytest.raises(ValueError, match="reservation_usd"):
+        load_agentic_limits({"ATLAS_RESERVATION_USD": "nope"})
+    with pytest.raises(ValueError, match="max_calls"):
+        load_agentic_limits({"ATLAS_MAX_CALLS": "0"})
+    with pytest.raises(ValueError, match="lens_wall_s"):
+        load_agentic_limits({"ATLAS_LENS_WALL_S": "0"})
+    with pytest.raises(ValueError, match="review_wall_s"):
+        load_agentic_limits({"ATLAS_REVIEW_WALL_S": "later"})
+    with pytest.raises(ValueError, match="unknown agentic limit"):
+        load_agentic_limits({}, nope="1")
 
 
 def test_a_per_call_override_must_be_a_positive_int_the_model_can_hold():

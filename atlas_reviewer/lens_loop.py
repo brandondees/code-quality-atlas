@@ -28,8 +28,8 @@ positive and finite, and a per-lens limit no greater than its
 per-review limit. Clearing one of those five back to unset still
 refuses the run. The per-call input, output and reasoning values
 default to the pinned model's own context and completion limit; an
-override can tighten them and cannot exceed the model. An override is
-a field on `AgenticLimits`.
+override can tighten them and cannot exceed the model. Load them with
+`agentic_config.load_agentic_limits`.
 """
 
 from __future__ import annotations
