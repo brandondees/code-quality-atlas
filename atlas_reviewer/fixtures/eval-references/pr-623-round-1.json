@@ -45,6 +45,7 @@
     "review_url": "https://github.com/brandondees/code-quality-atlas/pull/623#pullrequestreview-5864312327",
     "run": "unrecorded",
     "lenses_recorded": [],
-    "review_state": "COMMENTED"
+    "review_state": "COMMENTED",
+    "parse_gap": false
   }
 }

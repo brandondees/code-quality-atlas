@@ -16,21 +16,24 @@
         "lenses": [
           "tracing-correctness-and-invariants"
         ],
-        "line": 548
+        "line": 546,
+        "end_line": 548
       },
       {
         "severity": "minor",
         "path": "atlas_reviewer/deploy-fly.md",
         "summary": "\"That was a stale WireGuard peer\" is written as a diagnosis. The same section (lines 404-407) says the operator also enabled WireGuard-over-WebSockets and \"did not isolate which of those changes cleared the probe timeout.\" If the fix is not",
         "lenses": [],
-        "line": 387
+        "line": 385,
+        "end_line": 387
       },
       {
         "severity": "minor",
         "path": "atlas_reviewer/deploy-fly.md",
         "summary": "The sweep poll only stops on the two success lines. When the sweep fails (exit 3, \"the runner was not verified gone\"), its Machine writes `Main child exited normally with code: 3` and neither success line. The loop then sleeps and polls for",
         "lenses": [],
-        "line": 651
+        "line": 642,
+        "end_line": 651
       },
       {
         "severity": "minor",
@@ -39,7 +42,8 @@
         "lenses": [
           "tracing-correctness-and-invariants"
         ],
-        "line": 797
+        "line": 792,
+        "end_line": 797
       }
     ]
   },
@@ -55,6 +59,7 @@
       "reviewing-pr-and-process-hygiene",
       "auditing-documentation-health"
     ],
-    "review_state": "COMMENTED"
+    "review_state": "COMMENTED",
+    "parse_gap": false
   }
 }

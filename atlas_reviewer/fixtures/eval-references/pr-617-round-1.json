@@ -7,7 +7,7 @@
     "reviewed_commit": "748bffac2690b99591f9d58813731e747fdf5728"
   },
   "output": {
-    "verdict": "COMMENT",
+    "verdict": "APPROVE",
     "findings": []
   },
   "metadata": {
@@ -15,6 +15,7 @@
     "review_url": "https://github.com/brandondees/code-quality-atlas/pull/617#pullrequestreview-5840937675",
     "run": "lens-fan-out",
     "lenses_recorded": [],
-    "review_state": "APPROVED"
+    "review_state": "APPROVED",
+    "parse_gap": false
   }
 }

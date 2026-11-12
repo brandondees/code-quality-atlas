@@ -1114,4 +1114,7 @@ nothing in this change calls a model or writes to GitHub. The hosting
 decision is D45: D44 is the webhook receiver's Fly app on #642. A
 reference row's `metadata.run` is `coordinator-verified` when the round
 says fan-out did not finish, and that row does not clear the fan-out
-criterion.
+criterion. `--gate` also fails when any reference row has no candidate,
+when `--head` has no passing pair, or when no passing pair records
+`over_context_window`. GitHub `APPROVED` is `APPROVE`. Body findings and
+the `**Severity** · \`lens\`` inline shape are parsed.

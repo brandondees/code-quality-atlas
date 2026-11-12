@@ -8,13 +8,22 @@
   },
   "output": {
     "verdict": "COMMENT",
-    "findings": []
+    "findings": [
+      {
+        "severity": "major",
+        "path": "pyproject.toml",
+        "summary": "incomplete bump: the `[tool.ruff.lint]` comment still cites `ruff==0.17.3`.",
+        "lenses": [],
+        "line": 28
+      }
+    ]
   },
   "metadata": {
     "source": "claude-code-protocol",
     "review_url": "https://github.com/brandondees/code-quality-atlas/pull/616#pullrequestreview-5840949425",
     "run": "unrecorded",
     "lenses_recorded": [],
-    "review_state": "COMMENTED"
+    "review_state": "COMMENTED",
+    "parse_gap": false
   }
 }

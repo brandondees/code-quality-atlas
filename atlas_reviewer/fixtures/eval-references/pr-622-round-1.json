@@ -8,13 +8,27 @@
   },
   "output": {
     "verdict": "COMMENT",
-    "findings": []
+    "findings": [
+      {
+        "severity": "major",
+        "path": "atlas_reviewer/tests/test_domain.py",
+        "summary": "`# noqa: DTZ001` is an unused suppression under the pinned ruff, and RUF100 fails on it.",
+        "lenses": [],
+        "line": 88
+      }
+    ]
   },
   "metadata": {
     "source": "claude-code-protocol",
     "review_url": "https://github.com/brandondees/code-quality-atlas/pull/622#pullrequestreview-5856583223",
-    "run": "unrecorded",
-    "lenses_recorded": [],
-    "review_state": "COMMENTED"
+    "run": "lens-fan-out",
+    "lenses_recorded": [
+      "auditing-enforcement-and-meta-artifacts",
+      "checking-idioms-and-consistency",
+      "reviewing-test-quality",
+      "reviewing-pr-and-process-hygiene"
+    ],
+    "review_state": "COMMENTED",
+    "parse_gap": false
   }
 }

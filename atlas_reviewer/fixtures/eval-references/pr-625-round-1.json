@@ -14,7 +14,8 @@
         "path": "atlas_reviewer/deploy-fly.md",
         "summary": "`timeout 45 env -u FLY_ACCESS_TOKEN FLY_API_TOKEN=\"[REDACTED:assignment]\" fly ...`: the shell expands the token into an argument, so `timeout`'s argv holds `FLY_API_TOKEN=[REDACTED:assignment] for the whole run. `timeout` forks the child an",
         "lenses": [],
-        "line": 503
+        "line": 501,
+        "end_line": 503
       },
       {
         "severity": "major",
@@ -23,7 +24,8 @@
         "lenses": [
           "tracing-correctness-and-invariants"
         ],
-        "line": 495
+        "line": 490,
+        "end_line": 495
       },
       {
         "severity": "minor",
@@ -37,7 +39,8 @@
         "path": "atlas_reviewer/deploy-fly.md",
         "summary": "The paragraph says a SIGTERM sent straight to the CLI leaves the entrypoint holding, so `exit-code` can be copied. That reads as a way to stop a run and keep its output. But it never says how to send that signal. That would mean `flyp ssh c",
         "lenses": [],
-        "line": 463
+        "line": 459,
+        "end_line": 463
       }
     ]
   },
@@ -46,6 +49,7 @@
     "review_url": "https://github.com/brandondees/code-quality-atlas/pull/625#pullrequestreview-5864680638",
     "run": "lens-fan-out",
     "lenses_recorded": [],
-    "review_state": "COMMENTED"
+    "review_state": "COMMENTED",
+    "parse_gap": false
   }
 }

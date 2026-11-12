@@ -8,7 +8,27 @@
   },
   "output": {
     "verdict": "COMMENT",
-    "findings": []
+    "findings": [
+      {
+        "severity": "minor",
+        "path": "docs/plans/2026-11-06-manual-reviewer-service.md",
+        "summary": "convention sweep: this plan's own decision index still omits D33. This PR amends this plan, but the places that enumerate which decisions govern it were not updated. At the PR head: - Lines 21-26: \"**D24** \u2026 **D25** \u2026; **D26-D30** \u2026; **D32*",
+        "lenses": [
+          "reviewing-pr-and-process-hygiene",
+          "auditing-documentation-health"
+        ],
+        "line": 1
+      },
+      {
+        "severity": "nit",
+        "path": "docs/plans/2026-11-07-lens-based-agentic-reviewer.md",
+        "summary": "the status header (line 6) says this proposal extends the manual reviewer service \"D24-D30, D32\". D33 now amends this very doc (five markers), so the header's decision range should include it, or say \"D24-D33\". Same sweep as the comment on ",
+        "lenses": [
+          "auditing-documentation-health"
+        ],
+        "line": 1
+      }
+    ]
   },
   "metadata": {
     "source": "claude-code-protocol",
@@ -19,6 +39,7 @@
       "reviewing-pr-and-process-hygiene",
       "auditing-documentation-health"
     ],
-    "review_state": "COMMENTED"
+    "review_state": "COMMENTED",
+    "parse_gap": false
   }
 }

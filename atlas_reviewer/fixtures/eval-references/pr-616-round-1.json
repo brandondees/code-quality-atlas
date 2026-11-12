@@ -7,7 +7,7 @@
     "reviewed_commit": "426f19f80ecfea576b060996d9e4a24b80a0368e"
   },
   "output": {
-    "verdict": "COMMENT",
+    "verdict": "APPROVE",
     "findings": []
   },
   "metadata": {
@@ -19,6 +19,7 @@
       "auditing-config-and-build-hygiene",
       "reviewing-pr-and-process-hygiene"
     ],
-    "review_state": "APPROVED"
+    "review_state": "APPROVED",
+    "parse_gap": false
   }
 }

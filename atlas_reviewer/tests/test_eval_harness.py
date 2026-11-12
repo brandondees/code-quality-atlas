@@ -115,6 +115,133 @@ def test_a_coordinator_verified_reference_does_not_clear_fan_out():
     assert any("coordinator-verified" in item for item in failures)
 
 
+def test_split_headings_body_findings_ranges_and_approved_state_are_kept():
+    parsed = protocol_review(
+        "## Round 1 — Minor findings, not blocking merge\n<!-- atlas-review round:1 -->\n",
+        [
+            {
+                "path": "docs/plan.md",
+                "line": 4,
+                "start_line": 1,
+                "body": (
+                    "**Minor** · `reviewing-pr-and-process-hygiene` / "
+                    "`auditing-documentation-health` · the index omits D33\n"
+                ),
+            }
+        ],
+    )
+    assert parsed is not None
+    finding = parsed[1].findings[0]
+    assert finding.severity == "minor"
+    assert finding.line_start == 1 and finding.line_end == 4
+    assert "reviewing-pr-and-process-hygiene" in finding.lenses
+    body = (
+        "## Round 1 — Major findings, not blocking merge\n"
+        "<!-- atlas-review round:1 -->\n"
+        "### Major\n"
+        "**`atlas_reviewer/tests/test_domain.py:88`: unused suppression**\n"
+    )
+    major = protocol_review(body, [])
+    assert major is not None
+    assert major[1].findings[0].path == "atlas_reviewer/tests/test_domain.py"
+    assert major[1].findings[0].line_start == 88
+    anchored = protocol_review(
+        "## Round 2 — Major finding, not blocking merge\n"
+        "**Major · `pyproject.toml:28` (not in this diff) · stale version pin**\n",
+        [],
+    )
+    assert anchored is not None
+    assert anchored[1].findings[0].path == "pyproject.toml"
+    approved = protocol_review(
+        "## Round 1 — no new findings at or above this round's floor\n",
+        [],
+        state="APPROVED",
+    )
+    assert approved is not None and approved[1].verdict == "APPROVE"
+    clean = protocol_review(
+        "## Round 2 — no new findings at or above this round's floor\n",
+        [],
+        state="COMMENTED",
+    )
+    assert clean is not None and clean[1].verdict == "APPROVE"
+    assert run_mode("the notes say this is not coordinator-verified\n") == "unrecorded"
+    covered = (
+        "## Round 1 — notes\n### Coverage\n"
+        "- **Lenses:** `reviewing-test-quality`, loaded from the vendored copy.\n"
+    )
+    assert run_mode(covered) == "lens-fan-out"
+
+
+def test_one_easy_pair_beside_unscored_references_does_not_open_the_gate(tmp_path):
+    (tmp_path / "ref.json").write_text(
+        json.dumps({"output": {"verdict": "APPROVE", "findings": []}}),
+        encoding="utf-8",
+    )
+    (tmp_path / "easy.json").write_text(
+        json.dumps(_passing_pair("abc123")),
+        encoding="utf-8",
+    )
+    report = load_directory(tmp_path, head="abc123")
+    assert report["gate_pass"] is False
+    assert any("no candidate" in item for item in report["gate_failures"])
+
+
+def test_a_full_directory_passes_only_with_the_head_and_an_over_context_pair(tmp_path):
+    pair = _passing_pair("abc123")
+    (tmp_path / "pair.json").write_text(json.dumps(pair), encoding="utf-8")
+    assert load_directory(tmp_path, head="abc123")["gate_pass"] is False
+    pair["metadata"]["over_context_window"] = True
+    (tmp_path / "pair.json").write_text(json.dumps(pair), encoding="utf-8")
+    assert load_directory(tmp_path, head="abc123")["gate_pass"] is True
+    assert load_directory(tmp_path, head="other")["gate_pass"] is False
+
+
+def test_a_non_utf8_fixture_is_a_usage_error(tmp_path):
+    (tmp_path / "bad.json").write_bytes(b"\xff")
+    with pytest.raises(EvalFormatError, match="cannot be read"):
+        load_directory(tmp_path)
+
+
+def test_reference_row_records_the_commit_the_state_and_a_parse_gap():
+    from atlas_reviewer.eval_harness import reference_row
+
+    row = reference_row(
+        {"number": 608, "head": {"sha": "abc"}, "base": {"repo": {"full_name": "o/r"}}},
+        {
+            "state": "COMMENTED",
+            "commit_id": "def",
+            "html_url": "https://example.test/r",
+            "body": (
+                "## Round 1 — Minor findings, not blocking merge\n"
+                "<!-- atlas-review round:1 -->\n"
+            ),
+        },
+        [],
+    )
+    assert row is not None
+    assert row["input"]["reviewed_commit"] == "def"
+    assert row["metadata"]["review_state"] == "COMMENTED"
+    assert row["metadata"]["parse_gap"] is True
+    assert row["output"]["verdict"] == "COMMENT"
+
+
+def _passing_pair(head: str) -> dict:
+    return {
+        "input": {"head_sha": head, "reviewed_commit": head, "pr": 1, "round": 1},
+        "reference": {"verdict": "APPROVE", "findings": []},
+        "candidate": {
+            "verdict": "APPROVE",
+            "findings": [],
+            "coverage_complete": True,
+            "unreviewed_files": 0,
+            "changed_files": [],
+            "lenses_run": [],
+            "outside_diff_reads": [],
+        },
+        "metadata": {"run": "lens-fan-out", "over_context_window": False},
+    }
+
+
 def test_an_approve_heading_is_approve_and_a_non_round_is_skipped():
     parsed = protocol_review(APPROVE, [])
     assert parsed is not None

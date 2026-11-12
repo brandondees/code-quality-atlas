@@ -38,6 +38,7 @@
       "reviewing-pr-and-process-hygiene",
       "markdownlint-cli2"
     ],
-    "review_state": "COMMENTED"
+    "review_state": "COMMENTED",
+    "parse_gap": false
   }
 }

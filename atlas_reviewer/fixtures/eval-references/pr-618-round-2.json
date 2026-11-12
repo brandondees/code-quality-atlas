@@ -17,7 +17,8 @@
           "hunting-silent-failures",
           "tracing-correctness-and-invariants"
         ],
-        "line": 242
+        "line": 241,
+        "end_line": 242
       }
     ]
   },
@@ -33,6 +34,7 @@
       "checking-idioms-and-consistency",
       "reviewing-pr-and-process-hygiene"
     ],
-    "review_state": "COMMENTED"
+    "review_state": "COMMENTED",
+    "parse_gap": false
   }
 }

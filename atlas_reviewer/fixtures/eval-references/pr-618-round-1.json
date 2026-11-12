@@ -34,7 +34,8 @@
         "lenses": [
           "reviewing-agent-legibility"
         ],
-        "line": 67
+        "line": 66,
+        "end_line": 67
       },
       {
         "severity": "minor",
@@ -43,7 +44,8 @@
         "lenses": [
           "reviewing-agent-legibility"
         ],
-        "line": 78
+        "line": 72,
+        "end_line": 78
       },
       {
         "severity": "nit",
@@ -52,7 +54,8 @@
         "lenses": [
           "auditing-documentation-health"
         ],
-        "line": 88
+        "line": 79,
+        "end_line": 88
       }
     ]
   },
@@ -68,6 +71,7 @@
       "checking-idioms-and-consistency",
       "reviewing-pr-and-process-hygiene"
     ],
-    "review_state": "COMMENTED"
+    "review_state": "COMMENTED",
+    "parse_gap": false
   }
 }

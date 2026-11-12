@@ -1,12 +1,12 @@
 # Protocol reference rows
 
-Each JSON file is one Claude Code protocol round from PRs #602–#637, normalized by `atlas_reviewer.eval_harness.protocol_review`. `input.head_sha` is the pull's head at fetch time. `input.reviewed_commit` is the commit on the GitHub review, which is the commit that round judged. Findings are inline review comments whose `pull_request_review_id` is that review and whose first line is `**Severity · lens**`. Summaries are redacted and cut to 240 characters. `metadata.run` is how the round says it was run: `lens-fan-out` when the coverage section names lenses or says lenses were run, re-ran, or loaded; `coordinator-verified` when the body says that (lens fan-out did not finish); `unrecorded` when it says neither. `metadata.lenses_recorded` is the backticked lens names in that coverage section. A coordinator-verified row does not clear the fan-out criterion. These files have no `candidate`, so `eval --gate` on this directory exits 1.
+Built by `atlas_reviewer.eval_harness.reference_row` from the pull, its reviews, and the inline comments whose `pull_request_review_id` matches. `input.reviewed_commit` is the review's `commit_id`. `metadata.review_state` is the GitHub review state. `metadata.run` is `lens-fan-out`, `coordinator-verified`, or `unrecorded`. `metadata.parse_gap` is true when the heading announces findings and none were parsed. Summaries are redacted and cut to 240 characters. These files have no `candidate`, so `eval --gate` exits 1.
 
-Fetched 2026-11-12. 26 round file(s). Runs: lens-fan-out 20, coordinator-verified 0, unrecorded 6. Flagged coordinator-verified: none in this fetch.
+Fetched 2026-11-12. 26 round file(s). Runs: lens-fan-out 21, coordinator-verified 0, unrecorded 5. Parse gaps: none.
 
 Pull 637 has no protocol review in this fetch, and pull 636 has rounds 1 and 2 only, so the coordinator-verified examples named for those pulls (637 round 2 and 636 round 4) are not rows here.
 
-## PRs in #602–#637 with no protocol round in this fetch
+## PRs in #602-#637 with no protocol round in this fetch
 
 - #602: no protocol round by brandondees
 - #603: no protocol round by brandondees

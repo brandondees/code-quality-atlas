@@ -828,9 +828,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="directory of reference rows and optional candidate pairs",
     )
     ev.add_argument(
+        "--head",
+        help="commit the gate must have a passing pair for",
+    )
+    ev.add_argument(
         "--gate",
         action="store_true",
-        help="exit 1 unless every scored pair passes the parity gate",
+        help="exit 1 unless every row is a passing pair, one matches --head, "
+        "and one records over_context_window",
     )
     ev.set_defaults(handler=_cmd_eval)
     probe = sub.add_parser(
@@ -887,7 +892,7 @@ def _events_arg(parser: argparse.ArgumentParser) -> None:
 def _cmd_eval(args: argparse.Namespace, run: _Run) -> int:
     """Score recorded fixtures. No model call and no network."""
     try:
-        report = load_directory(Path(args.fixtures))
+        report = load_directory(Path(args.fixtures), head=args.head)
     except EvalFormatError as exc:
         raise UsageError(str(exc)) from exc
     run.out.write(json.dumps(report, indent=2) + "\n")

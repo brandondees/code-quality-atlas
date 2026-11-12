@@ -12,10 +12,15 @@ that feed the score is D45 in [`../open-questions.md`](../open-questions.md).
 
 The service does not post reviews. A later poster may submit a GitHub
 review event of `APPROVE` for a head SHA only when an offline
-`python -m atlas_reviewer eval --fixtures <dir> --gate` run exits 0 on a
-candidate recorded for that same head. The gate exits 0 only when every
-scored pair has all four criteria below green. A directory with no
-candidate exits 1, so the absence of a recorded review fails closed.
+`python -m atlas_reviewer eval --fixtures <dir> --head <sha> --gate`
+exits 0. The directory is the calibration set: every file must be a
+scored pair and every pair must pass, one passing pair must be for that
+head (`input.head_sha` or `input.reviewed_commit`), and one passing pair
+must record `metadata.over_context_window` (a diff larger than one model
+context window). A reference row with no candidate is a failure. One
+easy pair next to unscored reference rows does not open the gate. A new
+pull request has no protocol row of its own, so this gate certifies the
+calibration set plus that head's pair, not the reference rows alone.
 
 D36 still decides the draft's `review_event` line. That line is what a
 person reads. It is not permission to post `APPROVE`.
@@ -183,10 +188,13 @@ write down counts as an unmatched Major+ finding and fails the gate.
 That is the bar this plan sets. Loosening it is a new decision.
 
 Verdict strings are the GitHub events `APPROVE`, `COMMENT`, and
-`REQUEST_CHANGES`. A protocol heading that contains `APPROVE` is
-`APPROVE`. A heading that contains `REQUEST_CHANGES` or "request changes"
-is `REQUEST_CHANGES`. Every other round heading is `COMMENT`, including
-"Minor findings, not blocking merge".
+`REQUEST_CHANGES`. The review's GitHub state wins: `APPROVED` is
+`APPROVE` and `CHANGES_REQUESTED` is `REQUEST_CHANGES`. A `COMMENTED`
+review uses the heading. A heading that contains `APPROVE` is `APPROVE`.
+A heading that contains `REQUEST_CHANGES` or "request changes" is
+`REQUEST_CHANGES`. The clean-round heading "no new findings at or above
+this round's floor" is `APPROVE`. Every other heading is `COMMENT`,
+including "Minor findings, not blocking merge".
 
 ## What is still Brandon's
 

@@ -34,12 +34,20 @@ from atlas_reviewer.redact import redact
 
 MAJOR_OR_ABOVE = frozenset({"blocker", "major"})
 RUNS = frozenset({"lens-fan-out", "coordinator-verified", "unrecorded"})
-_COORDINATOR = "reference run is coordinator-verified; the round did not complete lens fan-out and does not clear that criterion"
 _VERDICTS = frozenset({"APPROVE", "COMMENT", "REQUEST_CHANGES"})
 _SEVERITIES = frozenset({"blocker", "major", "minor", "nit"})
 _ROUND = re.compile(r"^## Round\s+(\d+)\s+[—–-]\s+(.*)\s*$", re.MULTILINE)
 _MARKER = re.compile(r"<!--\s*atlas-review round:(\d+)\b")
 _HEADING = re.compile(r"^\*\*(Blocker|Major|Minor|Nit)\s*·\s*([^*\n]+?)\*\*")
+_HEADING_SPLIT = re.compile(
+    r"^\*\*(Blocker|Major|Minor|Nit)\*\*\s*·\s*(.*?)\s*·\s*(.*)$"
+)
+_BODY_ANCHORED = re.compile(
+    r"^\*\*(Blocker|Major|Minor|Nit)\s*·\s*`([^`]+)`[^*]*·\s*(.*?)\s*\*+\s*$"
+)
+_BODY_PATH = re.compile(r"^\*\*`([^`]+)`:\s*(.*?)\*\*\s*$")
+_SECTION = re.compile(r"^###\s+(Blocker|Major|Minor|Nit)\b", re.IGNORECASE)
+_PATH_LINE = re.compile(r"(.+):(\d+)(?:-(\d+))?$")
 _LENS = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _LENS_TICK = re.compile(r"`([a-z0-9]+(?:-[a-z0-9]+)+)`")
 _SUMMARY_CHARS = 240
@@ -155,8 +163,10 @@ def gate_failures(
     did not finish lens fan-out, so the pair cannot clear that criterion.
     """
     failures: list[str] = []
-    if run == "coordinator-verified":
-        failures.append(_COORDINATOR)
+    if run != "lens-fan-out":
+        failures.append(
+            f"reference run is {run}; only a recorded lens-fan-out clears that criterion"
+        )
     if scored.missed_major_or_above:
         failures.append(
             f"missed {scored.missed_major_or_above} Major+ reference finding(s)"
@@ -199,7 +209,10 @@ def gate_failures(
 
 
 def protocol_review(
-    body: str, comments: Sequence[Mapping[str, Any]]
+    body: str,
+    comments: Sequence[Mapping[str, Any]],
+    *,
+    state: str | None = None,
 ) -> tuple[int, EvalReview] | None:
     """One protocol round, or None when ``body`` is not one.
 
@@ -222,7 +235,9 @@ def protocol_review(
         for comment in comments
         if (parsed := _comment_finding(comment)) is not None
     )
-    return number, EvalReview(_verdict(title), findings)
+    return number, EvalReview(
+        verdict_of(title, state), (*findings, *_body_findings(body or ""))
+    )
 
 
 def run_mode(body: str) -> str:
@@ -235,7 +250,11 @@ def run_mode(body: str) -> str:
     """
     text = body or ""
     lowered = text.lower()
-    if "coordinator-verified" in lowered or "coordinator verified" in lowered:
+    # A leading "not " is a denial, not a statement that this round stopped
+    # after the coordinator. Reviews of this term itself must not flip the row.
+    if re.search(r"(?<!not )coordinator-verified", lowered) or re.search(
+        r"(?<!not )coordinator verified", lowered
+    ):
         return "coordinator-verified"
     if re.search(
         r"did not complete lens fan-out|fan-out did not complete|fan-out didn't complete",
@@ -264,6 +283,10 @@ def coverage_lenses(body: str) -> tuple[str, ...]:
 def _coverage_section(body: str) -> str:
     match = re.search(r"\*\*Coverage[^*\n]*\*\*(.*)", body, re.IGNORECASE | re.DOTALL)
     if match is None:
+        match = re.search(
+            r"(?m)^#{1,3} Coverage\b[^\n]*\n(.*)", body, re.IGNORECASE | re.DOTALL
+        )
+    if match is None:
         match = re.search(r"(?m)^Coverage:?\s*(.*)", body, re.IGNORECASE | re.DOTALL)
     if match is None:
         return ""
@@ -272,12 +295,33 @@ def _coverage_section(body: str) -> str:
     return text[: stop.start()] if stop else text[:2000]
 
 
-def _verdict(title: str) -> str:
+def verdict_of(title: str, state: str | None = None) -> str:
+    """GitHub review state wins. A COMMENTED own-PR review spells APPROVE
+    or REQUEST_CHANGES in the heading. The clean-round heading
+    ``no new findings at or above this round's floor`` is an approval
+    (``commands/atlas-review-pr.md`` step 5) even when the heading does
+    not contain the word APPROVE."""
+    normalized = (state or "").upper()
+    if normalized == "APPROVED":
+        return "APPROVE"
+    if normalized == "CHANGES_REQUESTED":
+        return "REQUEST_CHANGES"
     if re.search(r"\bAPPROVE\b", title):
         return "APPROVE"
     if re.search(r"REQUEST_CHANGES|request changes", title, re.IGNORECASE):
         return "REQUEST_CHANGES"
+    if re.search(r"no new findings at or above", title, re.IGNORECASE):
+        return "APPROVE"
     return "COMMENT"
+
+
+def findings_expected(title: str) -> bool:
+    """A heading that announces findings must parse at least one."""
+    if re.search(r"no new findings", title, re.IGNORECASE):
+        return False
+    return bool(
+        re.search(r"\b(blocker|major|minor)\s+findings?\b", title, re.IGNORECASE)
+    )
 
 
 def _comment_finding(comment: Mapping[str, Any]) -> EvalFinding | None:
@@ -285,38 +329,155 @@ def _comment_finding(comment: Mapping[str, Any]) -> EvalFinding | None:
     if not isinstance(text, str) or _CODERABBIT in text:
         return None
     first, _, rest = text.lstrip().partition("\n")
-    heading = _HEADING.match(first)
-    if heading is None:
+    parsed = _heading_fields(first)
+    if parsed is None:
         return None
+    severity, lenses, inline_summary = parsed
     path = comment.get("path")
     if not isinstance(path, str) or not path:
         return None
-    line = _line(comment)
-    lenses = tuple(
-        part
-        for part in (
-            piece.strip() for piece in heading.group(2).split("(")[0].split("/")
-        )
-        if _LENS.fullmatch(part)
-    )
-    summary = redact(rest.strip()).text
+    start, end = _span(comment)
+    summary = redact(
+        " ".join(part for part in (inline_summary, rest.strip()) if part)
+    ).text
     summary = re.sub(r"\s+", " ", summary)[:_SUMMARY_CHARS]
-    return EvalFinding(
-        heading.group(1).lower(),
-        path,
-        summary,
-        line,
-        line,
-        lenses,
+    return EvalFinding(severity, path, summary, start, end, lenses)
+
+
+def _heading_fields(first: str) -> tuple[str, tuple[str, ...], str] | None:
+    heading = _HEADING.match(first)
+    if heading is not None:
+        lenses = tuple(
+            part
+            for part in (
+                piece.strip() for piece in heading.group(2).split("(")[0].split("/")
+            )
+            if _LENS.fullmatch(part)
+        )
+        return heading.group(1).lower(), lenses, ""
+    split = _HEADING_SPLIT.match(first)
+    if split is None:
+        return None
+    lenses = tuple(name for name in _LENS_TICK.findall(split.group(2)))
+    return split.group(1).lower(), lenses, split.group(3).strip()
+
+
+def _span(comment: Mapping[str, Any]) -> tuple[int | None, int | None]:
+    end = _pos(comment.get("line")) or _pos(comment.get("original_line"))
+    start = (
+        _pos(comment.get("start_line"))
+        or _pos(comment.get("original_start_line"))
+        or end
     )
+    return start, end
 
 
-def _line(comment: Mapping[str, Any]) -> int | None:
-    for key in ("line", "original_line"):
-        value = comment.get(key)
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            return value
+def _pos(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
     return None
+
+
+def _body_findings(body: str) -> tuple[EvalFinding, ...]:
+    """Findings written in the review summary because they had no inline
+    anchor. Two shapes occur: ``**Major · `path:line` · summary**`` and,
+    under a ``### Major`` heading, ``**`path:line`: summary**``."""
+    section = ""
+    found: list[EvalFinding] = []
+    for line in body.splitlines():
+        opened = _SECTION.match(line)
+        if opened is not None:
+            section = opened.group(1).lower()
+            continue
+        if line.startswith(("### ", "## ")):
+            section = ""
+            continue
+        anchored = _BODY_ANCHORED.match(line.strip())
+        if anchored is not None:
+            located = _path_span(anchored.group(2))
+            if located is not None:
+                path, start, end = located
+                found.append(
+                    _made(
+                        anchored.group(1).lower(), path, anchored.group(3), start, end
+                    )
+                )
+            continue
+        if not section:
+            continue
+        named = _BODY_PATH.match(line.strip())
+        if named is None:
+            continue
+        located = _path_span(named.group(1))
+        if located is None:
+            continue
+        path, start, end = located
+        found.append(_made(section, path, named.group(2), start, end))
+    return tuple(found)
+
+
+def _path_span(text: str) -> tuple[str, int, int] | None:
+    match = _PATH_LINE.fullmatch(text.strip())
+    if match is None:
+        return None
+    start = int(match.group(2))
+    end = int(match.group(3) or start)
+    return match.group(1), start, end
+
+
+def _made(severity: str, path: str, summary: str, start: int, end: int) -> EvalFinding:
+    text = re.sub(r"\s+", " ", redact(summary).text)[:_SUMMARY_CHARS]
+    return EvalFinding(severity, path, text, start, end, ())
+
+
+def reference_row(
+    pull: Mapping[str, Any],
+    review: Mapping[str, Any],
+    comments: Sequence[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    """One dataset row from a recorded pull, review, and its inline comments.
+
+    Returns None when the review is not a protocol round. ``reviewed_commit``
+    and ``review_state`` come from the review object. ``parse_gap`` is set
+    when the heading announces findings and none were parsed.
+    """
+    raw_body = review.get("body")
+    body = raw_body if isinstance(raw_body, str) else ""
+    parsed = protocol_review(
+        body,
+        comments,
+        state=review.get("state") if isinstance(review.get("state"), str) else None,
+    )
+    if parsed is None:
+        return None
+    number, built = parsed
+    heading = _ROUND.search(body)
+    title = heading.group(2) if heading is not None else ""
+    head = pull.get("head")
+    sha = head.get("sha") if isinstance(head, dict) else ""
+    repo = ""
+    base = pull.get("base")
+    if isinstance(base, dict) and isinstance(base.get("repo"), dict):
+        full = base["repo"].get("full_name")
+        repo = full if isinstance(full, str) else ""
+    number_raw = pull.get("number")
+    pr = number_raw if isinstance(number_raw, int) else 0
+    commit = review.get("commit_id")
+    state = review.get("state")
+    url = review.get("html_url")
+    return example_json(
+        repo=repo,
+        pr=pr,
+        head_sha=sha if isinstance(sha, str) else "",
+        round_number=number,
+        review=built,
+        review_url=url if isinstance(url, str) else "",
+        run=run_mode(body),
+        lenses_recorded=coverage_lenses(body),
+        reviewed_commit=commit if isinstance(commit, str) else "",
+        review_state=state if isinstance(state, str) else "",
+        parse_gap=findings_expected(title) and not built.findings,
+    )
 
 
 def example_json(
@@ -329,6 +490,9 @@ def example_json(
     review_url: str = "",
     run: str = "unrecorded",
     lenses_recorded: Sequence[str] = (),
+    reviewed_commit: str = "",
+    review_state: str = "",
+    parse_gap: bool = False,
 ) -> dict[str, Any]:
     """One Phoenix dataset example. ``output`` is the reference review.
 
@@ -343,6 +507,7 @@ def example_json(
             "pr": pr,
             "head_sha": head_sha,
             "round": round_number,
+            "reviewed_commit": reviewed_commit,
         },
         "output": _review_json(review),
         "metadata": {
@@ -350,6 +515,8 @@ def example_json(
             "review_url": review_url,
             "run": run,
             "lenses_recorded": list(lenses_recorded),
+            "review_state": review_state,
+            "parse_gap": parse_gap,
         },
     }
 
@@ -375,13 +542,15 @@ def _finding_json(finding: EvalFinding) -> dict[str, Any]:
     return row
 
 
-def load_directory(path: Path) -> dict[str, Any]:
+def load_directory(path: Path, *, head: str | None = None) -> dict[str, Any]:
     """Score every JSON file in ``path``.
 
-    A file with ``candidate`` is a pair and is scored. A file with only
-    ``output`` is a reference row and is counted, not scored. ``gate_pass``
-    is true only when at least one pair was scored and every pair's
-    ``gate_failures`` is empty.
+    ``gate_pass`` is true only when every file is a scored pair, every
+    pair passes, one passing pair is for ``head`` (``input.head_sha`` or
+    ``input.reviewed_commit``), and one passing pair records
+    ``metadata.over_context_window``. A reference row with no candidate
+    fails the gate. A directory of references plus one easy pair does not
+    open it.
     """
     files = sorted(p for p in path.glob("*.json") if p.is_file())
     if not files:
@@ -389,24 +558,38 @@ def load_directory(path: Path) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     examples = 0
     run_counts = {name: 0 for name in sorted(RUNS)}
+    failures: list[str] = []
     for file in files:
         try:
             payload = json.loads(file.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise EvalFormatError(f"{file.name} is not JSON: {exc}") from exc
+        except (UnicodeDecodeError, OSError) as exc:
+            raise EvalFormatError(f"{file.name} cannot be read: {exc}") from exc
         if not isinstance(payload, dict):
             raise EvalFormatError(f"{file.name} is not an object")
         examples += 1
         run_counts[_run_of(payload)] += 1
         if "candidate" not in payload:
+            failures.append(f"{file.name}: reference row has no candidate")
+            if _flag(payload, "parse_gap"):
+                failures.append(
+                    f"{file.name}: heading announces findings that were not parsed"
+                )
             continue
         results.append(_score_file(file.name, payload))
-    failures = [item for row in results for item in row["gate_failures"]]
+    failures.extend(item for row in results for item in row["gate_failures"])
+    if not head:
+        failures.append("gate requires --head, the commit being approved")
+    elif not any(row["passed"] and _matches_head(row, head) for row in results):
+        failures.append(f"no passing pair for head {head}")
+    if not any(row["passed"] and row["over_context_window"] for row in results):
+        failures.append("no passing pair records over_context_window")
     totals = _totals(results)
     return {
         "examples": examples,
         "scored": len(results),
-        "gate_pass": bool(results) and not failures,
+        "gate_pass": not failures,
         "gate_failures": failures,
         "totals": totals,
         "run_counts": run_counts,
@@ -423,12 +606,34 @@ def _score_file(name: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         f"{name}: {item}"
         for item in gate_failures(reference, candidate, scored, run=run)
     ]
+    if _flag(payload, "parse_gap"):
+        failures.append(f"{name}: heading announces findings that were not parsed")
+    entered = payload.get("input")
     return {
         "fixture": name,
         "run": run,
         "score": scored.as_json(),
         "gate_failures": failures,
+        "passed": not failures,
+        "over_context_window": _flag(payload, "over_context_window"),
+        "head_sha": _text(entered, "head_sha"),
+        "reviewed_commit": _text(entered, "reviewed_commit"),
     }
+
+
+def _matches_head(row: Mapping[str, Any], head: str) -> bool:
+    return head in (row["head_sha"], row["reviewed_commit"])
+
+
+def _flag(payload: Mapping[str, Any], key: str) -> bool:
+    meta = payload.get("metadata")
+    return isinstance(meta, dict) and meta.get(key) is True
+
+
+def _text(value: object, key: str) -> str:
+    if isinstance(value, dict) and isinstance(value.get(key), str):
+        return str(value[key])
+    return ""
 
 
 def _totals(results: Sequence[Mapping[str, Any]]) -> dict[str, int]:

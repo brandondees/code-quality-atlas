@@ -19,6 +19,7 @@
       "checking-restraint",
       "reviewing-pr-and-process-hygiene"
     ],
-    "review_state": "COMMENTED"
+    "review_state": "COMMENTED",
+    "parse_gap": false
   }
 }
