@@ -18,7 +18,9 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from collections.abc import Callable, Mapping
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from urllib.parse import quote
 
@@ -34,6 +36,12 @@ from atlas_reviewer.notes import quote_untrusted
 from atlas_reviewer.pagination import DEFAULT_MAX_PAGES, next_link
 from atlas_reviewer.ports import BoundaryError, Clock, TokenSource
 from atlas_reviewer.redact import Redactor
+from atlas_reviewer.service import (
+    PostAuthError,
+    PostNotCurrent,
+    RateLimited,
+    before_send,
+)
 from atlas_reviewer.service_run import ReviewReport
 
 API_URL = "https://api.github.com"
@@ -52,6 +60,12 @@ _FILES = (
     "reviewed in full."
 )
 _EVENTS = frozenset({"APPROVE", "COMMENT", "REQUEST_CHANGES"})
+# One list-plus-create attempt. Ten pages at the 30-second socket timeout
+# would hold the worker for minutes; this deadline cuts that short.
+_ATTEMPT_DEADLINE_S = 45.0
+# A rate-limit header longer than this is capped so one response cannot
+# stall the machine for hours.
+_MAX_RETRY_AFTER_S = 900.0
 
 
 class RefusedReviewEvent(Exception):
@@ -173,6 +187,8 @@ class ReviewPoster:
         api_url: str = API_URL,
         timeout_s: float = 30.0,
         max_pages: int = DEFAULT_MAX_PAGES,
+        now: Callable[[], float] | None = None,
+        secrets: Callable[[], tuple[str, ...]] | None = None,
     ) -> None:
         self._transport = transport
         self._tokens = tokens
@@ -181,25 +197,41 @@ class ReviewPoster:
         self._api_url = api_url.rstrip("/")
         self._timeout_s = timeout_s
         self._max_pages = max_pages
+        self._now = now or time.monotonic
+        self._secrets = secrets or (lambda: ())
+        self._deadline: float | None = None
+
+    def credential_secrets(self) -> tuple[str, ...]:
+        """The App key and every token this poster has minted, for the
+        service log scrubber."""
+        return self._secrets()
 
     def post(self, event: PrEvent, report: ReviewReport) -> None:
         key = post_key(event)
         if self._ledger.seen(key) is not None:
             return
-        existing = self._find(event, marker_for(key))
-        if existing is not None:
-            self._ledger.record(key, existing)
-            return
-        body = render_comment(report, key, self._scrub)
-        review_id = self._create(event, comment_payload(event.head_sha, body))
-        self._ledger.record(key, review_id)
+        self._deadline = self._now() + _ATTEMPT_DEADLINE_S
+        try:
+            existing = self._find(event, marker_for(key))
+            if existing is not None:
+                self._ledger.record(key, existing)
+                return
+            # After the list, under the queue lock, and before the create.
+            # A review GitHub has already accepted cannot be recalled.
+            check = before_send.get()
+            if check is not None and not check():
+                raise PostNotCurrent("the head moved before the review was sent")
+            body = render_comment(report, key, self._scrub)
+            review_id = self._create(event, comment_payload(event.head_sha, body))
+            self._ledger.record(key, review_id)
+        finally:
+            self._deadline = None
 
     def _create(self, event: PrEvent, payload: Mapping[str, str]) -> int:
         if payload.get("event") != "COMMENT":
             raise RefusedReviewEvent(str(payload.get("event")))
         response = self._request("POST", self._url(event), json.dumps(payload).encode())
-        if not 200 <= response.status < 300:
-            raise BoundaryError(f"GitHub review post HTTP {response.status}")
+        _raise_for_status(response, "GitHub review post")
         try:
             data = json.loads(response.body)
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -214,8 +246,7 @@ class ReviewPoster:
         pages = 0
         while url is not None and pages < self._max_pages:
             response = self._request("GET", url, None)
-            if not 200 <= response.status < 300:
-                raise BoundaryError(f"GitHub review list HTTP {response.status}")
+            _raise_for_status(response, "GitHub review list")
             try:
                 data = json.loads(response.body)
             except (json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -244,19 +275,70 @@ class ReviewPoster:
         )
 
     def _request(self, method: str, url: str, body: bytes | None) -> HttpResponse:
+        timeout = self._timeout_s
+        if self._deadline is not None:
+            remaining = self._deadline - self._now()
+            if remaining <= 0:
+                raise BoundaryError("post attempt deadline")
+            timeout = min(timeout, remaining)
+        try:
+            token = self._tokens.token()
+        except BoundaryError as exc:
+            text = str(exc)
+            if "HTTP 401" in text or "HTTP 403" in text:
+                raise PostAuthError(text) from None
+            raise
         return self._transport.request(
             method,
             url,
             {
-                "Authorization": f"Bearer {self._tokens.token()}",
+                "Authorization": f"Bearer {token}",
                 "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": "2022-11-28",
                 "User-Agent": "code-quality-atlas-reviewer",
                 "Content-Type": "application/json",
             },
             body,
-            self._timeout_s,
+            timeout,
         )
+
+
+def _raise_for_status(response: HttpResponse, what: str) -> None:
+    if 200 <= response.status < 300:
+        return
+    wait = _retry_wait(response)
+    if response.status == 429 or (response.status == 403 and wait is not None):
+        raise RateLimited(f"{what} HTTP {response.status}", wait or 0.0)
+    if response.status in {401, 403}:
+        raise PostAuthError(f"{what} HTTP {response.status}")
+    raise BoundaryError(f"{what} HTTP {response.status}")
+
+
+def _retry_wait(response: HttpResponse) -> float | None:
+    """Seconds until GitHub asked us to try again, or None when the
+    response is not a rate limit. A wait longer than the cap is cut."""
+    header = response.header("Retry-After")
+    if header is not None:
+        try:
+            return min(max(0.0, float(header)), _MAX_RETRY_AFTER_S)
+        except ValueError:
+            try:
+                moment = parsedate_to_datetime(header)
+            except (TypeError, ValueError, OverflowError):
+                moment = None
+            if moment is not None:
+                return min(
+                    max(0.0, moment.timestamp() - time.time()), _MAX_RETRY_AFTER_S
+                )
+    reset = response.header("x-ratelimit-reset")
+    if reset is not None:
+        try:
+            return min(max(0.0, float(reset) - time.time()), _MAX_RETRY_AFTER_S)
+        except ValueError:
+            return None
+    if response.status == 429:
+        return 0.0
+    return None
 
 
 def _marked(item: object, marker: str, sha: str) -> int | None:
@@ -288,7 +370,8 @@ def publisher_from_env(
     clock: Clock,
 ) -> ReviewPoster:
     """The poster for one installation. The private key and the minted
-    token stay in this process; the scrubber removes both from the comment."""
+    token stay in this process and are not given to the review child. The
+    scrubber removes both from the comment."""
     app_id = _env(env, "ATLAS_GITHUB_APP_ID")
     private_key = _pem(_env(env, "ATLAS_GITHUB_APP_PRIVATE_KEY"))
     installation = _env(env, "ATLAS_GITHUB_INSTALLATION_ID")
@@ -315,6 +398,7 @@ def publisher_from_env(
         tokens,
         PostLedger(state_dir / "posted.json"),
         lambda text: redactor(text).text,
+        secrets=tokens.secrets,
     )
 
 

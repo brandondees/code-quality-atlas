@@ -4,6 +4,7 @@ post a second review."""
 
 import inspect
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,14 @@ from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.http import HttpResponse
 from atlas_reviewer.ports import BoundaryError
-from atlas_reviewer.service import Worker, main
+from atlas_reviewer.service import (
+    PostAuthError,
+    PostNotCurrent,
+    RateLimited,
+    Worker,
+    before_send,
+    main,
+)
 from atlas_reviewer.service_post import (
     PostLedger,
     RefusedReviewEvent,
@@ -250,6 +258,140 @@ def test_a_huge_comment_keeps_the_idempotency_marker():
     assert text.endswith(marker_for(key))
     assert "comment cut to fit the post limit" in text
     assert len(text) <= 65_000
+
+
+def test_a_secret_and_markup_in_the_report_do_not_reach_the_comment(tmp_path):
+    secret = "super-secret-value"
+    report = ReviewReport(
+        (f"see {secret} <!-- hide -->",),
+        (),
+        "note",
+        (),
+        (),
+        (),
+        "COMMENT",
+    )
+    poster, github = _poster(tmp_path)
+    poster._scrub = lambda text: text.replace(secret, "[REDACTED]")
+    poster.post(EVENT, report)
+    body = _posted_body(github)["body"]
+    assert secret not in body
+    assert "<!-- hide" not in body
+    assert r"\u003c!-- hide" in body
+    assert "[REDACTED]" in body
+
+
+def test_an_off_api_link_is_refused_and_not_followed(tmp_path):
+    class OffApi(GitHub):
+        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
+            self.calls.append((method, url, body))
+            return HttpResponse(
+                200,
+                {"Link": '<https://evil.example/reviews>; rel="next"'},
+                b"[]",
+            )
+
+    poster, github = _poster(tmp_path, OffApi())
+    with pytest.raises(BoundaryError, match="off the API"):
+        poster.post(EVENT, REPORT)
+    assert [call[0] for call in github.calls] == ["GET"]
+
+
+def test_a_rate_limit_is_not_retried_as_a_server_error(tmp_path):
+    github = GitHub(post_status=429)
+    github_headers = {"Retry-After": "12", "x-ratelimit-reset": "1"}
+
+    def request(method, url, headers, body, timeout_s, max_bytes=None):
+        github.calls.append((method, url, body))
+        if method == "GET":
+            return HttpResponse(200, {}, b"[]")
+        return HttpResponse(429, github_headers, b"")
+
+    github.request = request
+    poster, _ = _poster(tmp_path, github)
+    with pytest.raises(RateLimited) as caught:
+        poster.post(EVENT, REPORT)
+    assert caught.value.retry_after == 12
+
+
+def test_a_403_with_a_reset_header_waits_instead_of_failing_auth(tmp_path):
+    github = GitHub()
+    reset = str(int(time.time()) + 30)
+
+    def request(method, url, headers, body, timeout_s, max_bytes=None):
+        github.calls.append((method, url, body))
+        if method == "GET":
+            return HttpResponse(200, {}, b"[]")
+        return HttpResponse(403, {"x-ratelimit-reset": reset}, b"")
+
+    github.request = request
+    poster, _ = _poster(tmp_path, github)
+    with pytest.raises(RateLimited) as caught:
+        poster.post(EVENT, REPORT)
+    assert 0 < caught.value.retry_after <= 30
+
+
+def test_a_refused_token_mint_is_an_auth_failure(tmp_path):
+    class Refused:
+        def token(self) -> str:
+            raise BoundaryError(
+                "GitHub App token mint: HTTP 401 for https://api.github.com/x"
+            )
+
+    github = GitHub()
+    poster = ReviewPoster(
+        github, Refused(), PostLedger(tmp_path / "posted.json"), lambda text: text
+    )
+    with pytest.raises(PostAuthError):
+        poster.post(EVENT, REPORT)
+    assert github.calls == []
+
+
+def test_an_auth_refusal_is_not_a_retryable_post_error(tmp_path):
+    github = GitHub(post_status=401)
+
+    def request(method, url, headers, body, timeout_s, max_bytes=None):
+        github.calls.append((method, url, body))
+        if method == "GET":
+            return HttpResponse(200, {}, b"[]")
+        return HttpResponse(401, {}, b"")
+
+    github.request = request
+    poster, _ = _poster(tmp_path, github)
+    with pytest.raises(PostAuthError):
+        poster.post(EVENT, REPORT)
+    assert [call[0] for call in github.calls] == ["GET", "POST"]
+
+
+def test_a_moved_head_is_not_created(tmp_path):
+    poster, github = _poster(tmp_path)
+    token = before_send.set(lambda: False)
+    try:
+        with pytest.raises(PostNotCurrent):
+            poster.post(EVENT, REPORT)
+    finally:
+        before_send.reset(token)
+    assert [call[0] for call in github.calls] == ["GET"]
+
+
+def test_a_post_attempt_stops_at_its_deadline(tmp_path):
+    ticks = {"n": 0}
+
+    def now() -> float:
+        ticks["n"] += 1
+        return 0.0 if ticks["n"] == 1 else 100.0
+
+    github = GitHub()
+    poster = ReviewPoster(
+        github,
+        Tokens(),
+        PostLedger(tmp_path / "posted.json"),
+        lambda text: text,
+        now=now,
+    )
+    with pytest.raises(BoundaryError, match="deadline"):
+        poster.post(EVENT, REPORT)
+    assert github.calls == []
 
 
 def test_main_does_not_listen_without_a_posting_token(tmp_path, capsys):

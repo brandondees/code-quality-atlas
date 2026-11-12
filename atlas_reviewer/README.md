@@ -273,7 +273,9 @@ error message on stderr.
 the controller alone). It exchanges the JWT for an installation token that
 asks for `contents`, `checks`, `actions`, and `pull_requests` read, plus
 `issues` read only with `--include-issues`, scoped to the event's single
-repository. A response that grants any non-read permission is refused.
+repository. On the operator CLI path, a response that grants any
+non-read permission is refused. The webhook poster asks for
+`pull_requests` write and refuses every other write permission.
 The token is cached until five minutes before its `expires_at`.
 
 **CI evidence ingestion** (`gather.py`, `archive.py`). Every GitHub list

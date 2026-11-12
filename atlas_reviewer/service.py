@@ -3,11 +3,12 @@
 
 ``python -m atlas_reviewer.service`` listens for GitHub App deliveries and
 answers before it runs a review, so the request does not wait on the
-controller. Publishing a finished review is a separate step; with no
-publisher the receiver records the draft and writes nothing to GitHub.
+controller. ``main`` posts a finished review as one COMMENT through
+``publisher_from_env``. A caller that passes no publisher records the
+draft and writes nothing to GitHub.
 
-The webhook secret stays in this process. The review child is started
-without it.
+The webhook secret and the App private key stay in this process. The
+review child is started without either.
 """
 
 from __future__ import annotations
@@ -885,7 +886,10 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
             config,
             env,
             publisher=publisher.post,
-            secret_sources=(lambda: _child_secrets(env),),
+            secret_sources=(
+                lambda: _child_secrets(env),
+                publisher.credential_secrets,
+            ),
         )
     except KeyboardInterrupt:
         return 0
