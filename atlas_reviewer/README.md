@@ -208,9 +208,20 @@ Environment variables (names only; never commit values):
 | `ATLAS_SPRITES_TOKEN` | controller → Sprites adapter | Sprites org token for the outside control-plane API |
 | `ATLAS_OPENROUTER_API_KEY` | controller → OpenRouter adapter | Read only with `--provider openrouter --allow-live-inference`. The key must carry a hard credit limit of at most $5 |
 | `ATLAS_REVIEWER_STATE_DIR` | controller | Runner ledger and single-review lock (default `.atlas-reviewer-state/`, gitignored) |
+| `ATLAS_RESERVATION_USD` | agentic lens entry | Dollar reservation for one agentic review (default 5) |
+| `ATLAS_MAX_CALLS` | agentic lens entry | Model calls across every lens attempt (default 50) |
+| `ATLAS_MAX_TURNS` | agentic lens entry | Turns of one lens attempt (default 50) |
+| `ATLAS_LENS_WALL_S` | agentic lens entry | Seconds for one lens attempt (default 1200) |
+| `ATLAS_REVIEW_WALL_S` | agentic lens entry | Seconds for the whole review (default 3600) |
+| `ATLAS_MAX_INPUT_TOKENS` | agentic lens entry | Per-call input cap. Unset uses the model's context minus the output reserve |
+| `ATLAS_MAX_OUTPUT_TOKENS` | agentic lens entry | Per-call output cap. Unset uses the model's completion limit |
+| `ATLAS_REASONING_MAX_TOKENS` | agentic lens entry | Reasoning hint sent on the request. Unset is one under the output cap. It is not a price |
 
-None of these values reaches a Sprite, a prompt, or the draft. Each one
-goes only to the adapter that uses it. The redactor also scrubs the exact
+The six credential and state variables above the limit rows never reach a
+Sprite, a prompt, or the draft. Each one goes only to the adapter that
+uses it. The eight `ATLAS_*` limit variables are not credentials.
+`limits_for_lens` reads them, and a flag of the same name wins. The
+one-shot `review` command does not read them. The redactor also scrubs the exact
 value of the App key, the Sprites token, the OpenRouter key, and every
 installation token minted during the review, on top of pattern-based
 redaction. That covers the draft, the telemetry, the probe report and the
