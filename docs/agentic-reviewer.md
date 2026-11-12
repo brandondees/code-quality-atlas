@@ -220,7 +220,7 @@ itself, and a timeout is a coverage gap.
   Agentic mode has Brandon's provisional defaults (2026-11-11), for
   headroom and configurable. The $5 reservation is D43's decision; the
   other four limits stay provisional. The tool-calling adapter and the Sprite
-  keepalive are built offline (D41), and the 2026-11-12 D41 probe is recorded there.
+  keepalive are built offline (D41), and the D41 probe (2026-11-12) is recorded there.
 - **Starting scope.** Triage only: the four critical-tier lenses from
   [`review-depth-modes.md`](review-depth-modes.md) —
   `tracing-correctness-and-invariants`, `sweeping-for-security`,
@@ -256,7 +256,7 @@ owner at every phase.
 | 0 | Land #601-#607 as the one-shot reviewer and fallback, with the D33 note (#608). No agentic scope in those PRs. | none |
 | 1 | Full PR conversation (about 64 KiB, omissions named) and branch-wide CI labelled by SHA, in the shared evidence code. Fixture-tested. Built offline (D38), stacked on #607 with the owner's go-ahead rather than after the stack merged. | stack merged |
 | 2 | The tool bridge, offline: closed git tools (diff, list, read range, grep) against `FakeSprites` and a fixture repo, with argument rejection, byte and time caps, and git hardening. Option B staging. Built offline (D39), stacked on phase 1 with the owner's go-ahead. | phase 1 merged |
-| 3 | The controller loop and one attested lens, offline first: body injection, the attestation ledger, quote checks, retry and escalate. Offline half built (D40): `lens_loop.py`, `coordinator.py`, `attestation.py`, `quotes.py`, `lens_contract.py`, with a mechanical synthesis (no merge call for one lens) and no CLI entry point. The tool-calling adapter (`tool_model.py`) and the Sprite keepalive (`keepalive.py`) are built offline (D41). Then one owner-approved live run, compared with the one-shot draft on the same head. | offline work: none. Live run: Brandon's provisional defaults are set (2026-11-11) and the adapter and keepalive are built offline (D41); the 2026-11-12 D41 probe is recorded there, and D43 keeps the $5 reservation from the PR #621 review |
+| 3 | The controller loop and one attested lens, offline first: body injection, the attestation ledger, quote checks, retry and escalate. Offline half built (D40): `lens_loop.py`, `coordinator.py`, `attestation.py`, `quotes.py`, `lens_contract.py`, with a mechanical synthesis (no merge call for one lens) and no CLI entry point. The tool-calling adapter (`tool_model.py`) and the Sprite keepalive (`keepalive.py`) are built offline (D41). Then one owner-approved live run, compared with the one-shot draft on the same head. | offline work: none. Live run: Brandon's provisional defaults are set (2026-11-11) and the adapter and keepalive are built offline (D41); the D41 probe (2026-11-12) is recorded there, and D43 keeps the $5 reservation from the PR #621 review |
 | 4 | Triage mode: the four critical lenses, pool size 1, ID-reconciled merge, coverage never claimed complete unless the ledger shows it. | phase 3 measured |
 | 5 | The baked toolchain: the first tool set in the Sprite image, with summarized hits routed to lenses. | image build approved |
 | 6 | Measured pilots on owner-labelled PRs, scored for precision, recall and coverage honesty. Then review and comprehensive depths, a concurrency probe before any pool size above 1, Option A history staging, and the decision on retiring the one-shot path. | phases 4-5 done |
