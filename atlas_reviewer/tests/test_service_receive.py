@@ -850,6 +850,7 @@ def test_stop_does_not_start_a_queued_review(tmp_path):
     threading.Thread(target=release_after_stop_begins).start()
     worker.stop(timeout=2)
     assert started == []
+    assert board._jobs[0].cancel.is_set()
 
 
 def test_a_failed_claim_save_leaves_the_job_queued(tmp_path):
@@ -921,6 +922,194 @@ def test_the_post_backoff_includes_jitter(tmp_path):
     assert worker.run_one() is True
     job = board._jobs[0]
     assert job.retry_at == 1_000.0 + 5.0 * 1.2
+
+
+def test_a_log_error_after_a_defer_leaves_the_post_pending(tmp_path):
+    """A sink error after the post is deferred must not mark the job
+    FAILED, or the same commit is reviewed again."""
+    from atlas_reviewer.service_run import run_dir
+
+    class RaisingSink:
+        def emit(self, event):
+            if event.step == "review post failed":
+                raise OSError("log full")
+
+    board = Board(tmp_path / "queue.json")
+    event = PrEvent(REPO, 7, SHA_A)
+    draft = run_dir(tmp_path, event)
+    draft.mkdir(parents=True)
+    (draft / "draft.md").write_text("kept while the post waits\n", encoding="utf-8")
+    moment = datetime(2026, 11, 12, 20, tzinfo=UTC)
+
+    def publish(event, report):
+        raise RuntimeError("github down")
+
+    worker = Worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        Telemetry(SystemClock(), sink=RaisingSink(), scrub=lambda text: text),
+        publish,
+        state_root=tmp_path,
+    )
+    board.enqueue(event, at=moment)
+    assert worker.run_one() is True
+    assert board.states() == ((SHA_A, JobState.POST_PENDING),)
+    assert (draft / "draft.md").is_file()
+    assert board.enqueue(event, at=moment) is Enqueue.DUPLICATE
+
+
+def test_a_log_error_after_failure_or_supersede_leaves_that_state(tmp_path):
+    def drive(root, step, runner):
+        class RaisingSink:
+            def emit(self, event):
+                if event.step == step:
+                    raise OSError("log full")
+
+        board = Board(root / "queue.json")
+        finishes: list[JobState] = []
+        real = board.finish
+
+        def finish(job, state):
+            finishes.append(state)
+            return real(job, state)
+
+        board.finish = finish
+        worker = Worker(
+            board,
+            runner,
+            Telemetry(SystemClock(), sink=RaisingSink(), scrub=lambda text: text),
+            state_root=root,
+        )
+        board.enqueue(PrEvent(REPO, 7, SHA_A))
+        assert worker.run_one() is True
+        return board, finishes
+
+    failed, failed_calls = drive(
+        tmp_path / "failed",
+        "review failed",
+        lambda event, cancel: ReviewRun(False, error="no"),
+    )
+    assert failed.states() == ((SHA_A, JobState.FAILED),)
+    assert failed_calls == [JobState.FAILED]
+
+    board_box: dict[str, Board] = {}
+
+    def mark_runner(event, cancel):
+        for job in board_box["board"]._jobs:
+            job.superseded = True
+            job.cancel.set()
+        return ReviewRun(True, REPORT)
+
+    class RaisingSink:
+        def emit(self, event):
+            if event.step == "review superseded":
+                raise OSError("log full")
+
+    board = Board(tmp_path / "superseded" / "queue.json")
+    board_box["board"] = board
+    finishes: list[JobState] = []
+    real = board.finish
+
+    def finish(job, state):
+        finishes.append(state)
+        return real(job, state)
+
+    board.finish = finish
+    worker = Worker(
+        board,
+        mark_runner,
+        Telemetry(SystemClock(), sink=RaisingSink(), scrub=lambda text: text),
+        state_root=tmp_path / "superseded",
+    )
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    assert worker.run_one() is True
+    assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
+    assert JobState.FAILED not in finishes
+
+
+def test_stop_before_claim_does_not_claim(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    calls: list[int] = []
+    real = board.claim
+
+    def claim():
+        calls.append(1)
+        return real()
+
+    board.claim = claim
+    worker = _worker(board, lambda event, cancel: ReviewRun(False, error="no"))
+    worker._stop.set()
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    assert worker.run_one() is False
+    assert calls == []
+    assert board.states() == ((SHA_A, JobState.QUEUED),)
+
+
+def test_a_failed_post_claim_save_stays_pending(tmp_path, monkeypatch):
+    import atlas_reviewer.service_queue as queue_mod
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    board.finish(job, JobState.POST_PENDING)
+    job.retry_at = 0
+
+    def boom(*_args, **_kwargs):
+        raise OSError("disk")
+
+    monkeypatch.setattr(queue_mod, "_store", boom)
+    with pytest.raises(OSError, match="disk"):
+        board.claim_post(1.0)
+    assert board.states() == ((SHA_A, JobState.POST_PENDING),)
+    assert board.saves_ok() is False
+
+
+def test_a_persistent_save_failure_does_not_hot_loop(tmp_path, monkeypatch):
+    import atlas_reviewer.service_queue as queue_mod
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    started = time.monotonic()
+    real = queue_mod._store
+
+    def boom(*args, **kwargs):
+        if time.monotonic() - started < 1.0:
+            raise OSError("disk")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(queue_mod, "_store", boom)
+    claims = {"n": 0}
+    real_claim = board.claim
+
+    def claim():
+        claims["n"] += 1
+        return real_claim()
+
+    board.claim = claim
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(False, error="no"), root=tmp_path
+    )
+    config = _config(tmp_path)
+    server = ReviewServer(config, board, lambda line: None)
+    server.worker = worker
+    listener = threading.Thread(target=server.serve_forever, daemon=True)
+    listener.start()
+    host, port = server.server_address
+    worker.start()
+    try:
+        time.sleep(0.3)
+        health = HTTPConnection(host, port, timeout=2)
+        health.request("GET", "/health")
+        assert health.getresponse().status == 503
+        health.close()
+        time.sleep(1.0)
+        assert claims["n"] < 30
+    finally:
+        worker.stop()
+        server.shutdown()
+        listener.join(timeout=2)
+        server.server_close()
 
 
 def test_the_module_refuses_to_start_without_a_secret():

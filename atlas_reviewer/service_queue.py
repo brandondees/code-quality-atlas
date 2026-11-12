@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -100,6 +101,9 @@ class Job:
 # Neither cap is a review budget.
 MAX_REMEMBERED = 2_000
 MAX_SEEN = 20_000
+# After a failed queue save the worker waits this long before claiming
+# again. Without it a full disk turns the rollback into a tight loop.
+_SAVE_BACKOFF_S = 1.0
 
 
 class Board:
@@ -118,6 +122,8 @@ class Board:
         self._heads: dict[tuple[str, int], tuple[str, datetime | None]] = {}
         self._max_remembered = max_remembered
         self._max_seen = max_seen
+        self._saves_ok = True
+        self._save_retry_at = 0.0
         if path.exists():
             self._jobs, seen, self._heads = _load(path)
             for key in seen:
@@ -155,9 +161,11 @@ class Board:
                 for job in self._jobs
             )
             # A newer head of a PR already in the queue takes that slot.
-            # Refusing it would leave the old review running. A running
-            # job stays active until it notices the cancel, so the count
-            # can be one over the cap until that job settles.
+            # Refusing it would leave the old review running. A job that
+            # is still ``running`` or ``posting`` stays active until it
+            # notices the cancel, so the count can reach
+            # ``max_remembered`` plus those superseded jobs. That extra
+            # is at most the worker concurrency.
             if active >= self._max_remembered and not replaces:
                 return Enqueue.FULL
             if failed_job is not None:
@@ -219,7 +227,11 @@ class Board:
                     and job.retry_at <= now
                 ):
                     job.state = JobState.POSTING
-                    self._save()
+                    try:
+                        self._save()
+                    except Exception:
+                        job.state = JobState.POST_PENDING
+                        raise
                     return job
             return None
 
@@ -288,7 +300,18 @@ class Board:
                 return job
         return None
 
+    def saves_ok(self) -> bool:
+        """False after a queue save failed, until a later save works.
+        ``/health`` uses this so a full disk is not reported as healthy."""
+        return self._saves_ok
+
     def _delay(self, now: float) -> float | None:
+        save_wait = self._save_retry_at - time.monotonic()
+        if save_wait > 0:
+            return save_wait
+        return self._work_delay(now)
+
+    def _work_delay(self, now: float) -> float | None:
         if any(
             job.state is JobState.QUEUED and not job.superseded for job in self._jobs
         ):
@@ -304,12 +327,19 @@ class Board:
 
     def _save(self) -> None:
         self._trim()
-        _store(
-            self._path,
-            [job.as_dict() for job in self._jobs],
-            [_key_text(key) for key in self._seen_order],
-            [_head_record(key, sha, at) for key, (sha, at) in self._heads.items()],
-        )
+        try:
+            _store(
+                self._path,
+                [job.as_dict() for job in self._jobs],
+                [_key_text(key) for key in self._seen_order],
+                [_head_record(key, sha, at) for key, (sha, at) in self._heads.items()],
+            )
+        except Exception:
+            self._saves_ok = False
+            self._save_retry_at = time.monotonic() + _SAVE_BACKOFF_S
+            raise
+        self._saves_ok = True
+        self._save_retry_at = 0.0
 
     def _trim(self) -> None:
         terminal = [

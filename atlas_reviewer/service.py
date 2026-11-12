@@ -280,7 +280,12 @@ class Worker:
         raises, the in-memory state is left as it was so a restart can
         queue a ``running`` job again, and the thread keeps going."""
         note = f"{type(exc).__name__}: {exc}"
-        if job.state in {JobState.DONE, JobState.FAILED, JobState.SUPERSEDED}:
+        if job.state in {
+            JobState.DONE,
+            JobState.FAILED,
+            JobState.SUPERSEDED,
+            JobState.POST_PENDING,
+        }:
             note += "; left the settled job alone"
             self._telemetry.record(
                 "service",
@@ -493,9 +498,12 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         route = self.path.split("?", 1)[0]
         worker = getattr(self.server, "worker", None)
-        if route == "/health" and worker is not None and not worker.healthy():
+        if route == "/health" and (
+            (worker is not None and not worker.healthy())
+            or not self.server.board.saves_ok()
+        ):
             self._send(503, b"unhealthy\n")
-            self.server.log("atlas-reviewer: http 503 GET /health worker dead")
+            self.server.log("atlas-reviewer: http 503 GET /health")
             return
         self._respond(b"")
 
