@@ -6,6 +6,7 @@ call Fly."""
 import os
 import stat
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -84,3 +85,21 @@ def test_serve_runs_the_service_module_and_not_the_one_off_cli(tmp_path):
         "-m",
         "atlas_reviewer.service",
     ]
+
+
+def test_the_real_module_exits_2_when_no_atlas_env_is_set():
+    """Runs the real module, not a stub interpreter. Without the
+    ``__main__`` guard, ``python -m atlas_reviewer.service`` exits 0 and
+    never reaches the webhook-secret check."""
+    env = {
+        key: value for key, value in os.environ.items() if not key.startswith("ATLAS_")
+    }
+    proc = subprocess.run(
+        [sys.executable, "-m", "atlas_reviewer.service"],
+        env=env,
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+    )
+    assert proc.returncode == 2
+    assert b"webhook secret" in proc.stderr
