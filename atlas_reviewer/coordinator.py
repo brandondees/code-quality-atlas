@@ -357,7 +357,8 @@ def review_lens(
         read_sources(trees.head, diff, changed),
         fence_nonce,
     )
-    review_deadline = clock.monotonic() + resolved.review_wall_s
+    review_started = clock.monotonic()
+    review_deadline = review_started + resolved.review_wall_s
 
     def in_session(bridge: Bridge) -> str:
         session.bridges.append(bridge)
@@ -365,7 +366,7 @@ def review_lens(
         with lens_hold(bridge.session, digest, task_socket):
             return _attempts(
                 bridge, job, model, spend, clock, ledger, key, resolved,
-                review_deadline, session, scrub,
+                review_deadline, review_started, session, scrub,
             )  # fmt: skip
 
     report = run_bridge(
@@ -394,6 +395,7 @@ def _attempts(
     key: LensKey,
     limits: Limits,
     review_deadline: float,
+    review_started: float,
     session: _Session,
     scrub: Callable[[str], str],
 ) -> str:
@@ -406,6 +408,7 @@ def _attempts(
             outcome = run_attempt(
                 job, bridge, model, spend, clock,
                 review_deadline=review_deadline,
+                review_started=review_started,
                 retry_of=attempts[-1].outcome if step.forced and attempts else None,
                 secrets=secrets_seen,
             )  # fmt: skip

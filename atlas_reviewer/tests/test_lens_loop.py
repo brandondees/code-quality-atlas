@@ -83,9 +83,11 @@ def attempt(tmp_path, script, *, limits=LIMITS, clock=None, spend=None, deadline
     out = {}
 
     def body(bridge):
+        started = clock.monotonic()
         out["outcome"] = run_attempt(
             the_job or job(), bridge, model, spend, clock,
-            review_deadline=clock.monotonic() + (deadline or 600), **kw,
+            review_deadline=started + (deadline or 600),
+            review_started=started, **kw,
         )  # fmt: skip
         return "done"
 
@@ -122,6 +124,7 @@ def test_a_byok_refusal_leaves_the_loop_and_keeps_the_reservation():
         run_attempt(
             job(), object(), Model(), spend, clock,
             review_deadline=clock.monotonic() + 600,
+            review_started=clock.monotonic(),
         )  # fmt: skip
     assert spend.committed_usd == Decimal("0.01")
 
@@ -598,6 +601,7 @@ def test_the_review_wall_clock_ends_the_lens_partial(tmp_path):
     assert outcome.retryable is False
     assert outcome.limit_hit is not None
     assert outcome.limit_hit.limit == "review_wall_s"
+    assert outcome.limit_hit.observed == "61.000s"
     assert "--review-wall-seconds or ATLAS_REVIEW_WALL_S" in outcome.detail
 
 
@@ -611,7 +615,7 @@ def test_a_runner_deadline_inside_a_tool_call_ends_the_lens_partial(tmp_path):
     model = ScriptedLensModel([READ_DIFF, final()])
     outcome = run_attempt(
         job(), DeadBridge(), model, Spend(LIMITS.resolve()), FakeClock(),
-        review_deadline=600,
+        review_deadline=600, review_started=0,
     )  # fmt: skip
     assert outcome.causes == {Cause.REVIEW_CLOCK, Cause.FILES_UNREAD}
     assert set(outcome.unread) == set(CHANGED)

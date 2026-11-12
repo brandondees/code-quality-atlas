@@ -582,13 +582,14 @@ def run_attempt(
     clock: Clock,
     *,
     review_deadline: float,
+    review_started: float,
     retry_of: AttemptOutcome | None = None,
     secrets: list[BridgeSecret] | None = None,
     system_for: Callable[..., str] = lens_system,
 ) -> AttemptOutcome:
-    """Run one attempt to its end. `review_deadline` is on `clock.monotonic`.
-    Each possible committed secret a tool result reports (location and
-    pattern, never the value) is appended to `secrets`."""
+    """Run one attempt to its end. `review_deadline` and `review_started`
+    are on `clock.monotonic`. Each possible committed secret a tool result
+    reports (location and pattern, never the value) is appended to `secrets`."""
     limits = spend.limits
     system = system_for(job.lens, job.body, job.contract, retry_of, nonce=job.nonce)
     if not check_delivery(system, job.lens, job.digest):
@@ -603,7 +604,7 @@ def run_attempt(
     while True:
         now = clock.monotonic()
         if now >= review_deadline:
-            elapsed = now - (review_deadline - limits.review_wall_s)
+            elapsed = now - review_started
             return p.cut(
                 *_stopped(hit("review_wall_s", limits.review_wall_s, f"{elapsed:.3f}s"))
             )

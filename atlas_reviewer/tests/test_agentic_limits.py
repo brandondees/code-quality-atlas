@@ -139,7 +139,7 @@ def test_the_loop_records_an_input_cap_as_its_own_cause():
         Capped(),
         Spend(LIMITS.resolve()),
         FakeClock(),
-        review_deadline=600,
+        review_deadline=600, review_started=0,
     )
     assert Cause.INPUT_CAP in outcome.causes
     assert Cause.MODEL_ERROR not in outcome.causes
@@ -166,7 +166,7 @@ def test_a_limit_hit_round_trips_through_the_ledger(tmp_path):
         Capped(),
         Spend(LIMITS.resolve()),
         FakeClock(),
-        review_deadline=600,
+        review_deadline=600, review_started=0,
     )
     path = tmp_path / "ledger.jsonl"
     book = AttemptLedger(path, FakeClock())
@@ -250,7 +250,7 @@ def test_a_limit_refused_on_the_turn_is_not_a_model_error():
         Capped(),
         Spend(LIMITS.resolve()),
         FakeClock(),
-        review_deadline=600,
+        review_deadline=600, review_started=0,
     )
     assert outcome.causes == {Cause.CONTEXT, Cause.FILES_UNREAD}
     assert outcome.state is LensState.PARTIAL
@@ -275,7 +275,7 @@ def test_a_damaged_limit_object_abandons_the_ledger_line(tmp_path):
         Capped(),
         Spend(LIMITS.resolve()),
         FakeClock(),
-        review_deadline=600,
+        review_deadline=600, review_started=0,
     )
     path = tmp_path / "ledger.jsonl"
     book = AttemptLedger(path, FakeClock())
@@ -317,7 +317,7 @@ def test_an_output_override_and_a_reasoning_hint_have_their_own_causes():
         Refuses(hit("max_output_tokens", 128_000, 64_000)),
         Spend(LIMITS.resolve()),
         FakeClock(),
-        review_deadline=600,
+        review_deadline=600, review_started=0,
     )
     reasoning = run_attempt(
         job(),
@@ -325,7 +325,7 @@ def test_an_output_override_and_a_reasoning_hint_have_their_own_causes():
         Refuses(hit("reasoning_max_tokens", 0, "1..63")),
         Spend(LIMITS.resolve()),
         FakeClock(),
-        review_deadline=600,
+        review_deadline=600, review_started=0,
     )
     assert Cause.OUTPUT_CAP in output.causes
     assert Cause.CONTEXT not in output.causes
