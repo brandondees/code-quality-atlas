@@ -4,6 +4,7 @@ bridge (`LocalSprites`), a scripted model, verification and the draft. No
 model, Sprite or GitHub call is made."""
 
 from dataclasses import replace
+from decimal import Decimal
 
 import pytest
 
@@ -37,7 +38,7 @@ from atlas_reviewer.lens_contract import (
     Valence,
 )
 from atlas_reviewer.lens_loop import LimitsUnsetError
-from atlas_reviewer.ports import RefusedError
+from atlas_reviewer.ports import ByokRefusedError, RefusedError
 from atlas_reviewer.prompt import UntrustedBlock
 from atlas_reviewer.quotes import QuoteSource
 from atlas_reviewer.redact import Redactor, redact
@@ -68,11 +69,11 @@ def ledger(tmp_path):
 
 
 def review(tmp_path, script, *, sprites=None, limits=LIMITS, library=None,
-           hold_fail="", **kw):  # fmt: skip
+           hold_fail="", model=None, **kw):  # fmt: skip
     from .test_keepalive import TaskServer, socket_path
 
     sprites = sprites if sprites is not None else LocalSprites()
-    model = ScriptedLensModel(list(script))
+    model = ScriptedLensModel(list(script)) if model is None else model
     tasks = TaskServer(socket_path(tmp_path))
     tasks.fail = hold_fail
     tasks.start()
@@ -285,6 +286,37 @@ def test_a_secret_hit_without_a_location_is_still_listed():
 
 
 # ------------------------------------------------- restarts and reruns
+
+
+def test_a_byok_refusal_is_not_retried_on_the_next_review(tmp_path):
+    """The refusal leaves this review, and the attempt is a model error.
+    A later review of the same head does not bill another call or approve."""
+
+    class Refusing:
+        name = "byok"
+
+        def __init__(self) -> None:
+            self.requests: list[object] = []
+
+        def worst_case_usd(self, request):
+            self.requests.append(request)
+            return Decimal("0.01")
+
+        def turn(self, request):
+            raise ByokRefusedError("refusing the review: byok")
+
+    first, _, _ = review(tmp_path, [], model=Refusing())
+    assert first.event is not ReviewEvent.APPROVE
+    (attempt,) = ledger(tmp_path).attempts(KEY)
+    assert Cause.MODEL_ERROR in attempt.outcome.causes
+    assert not attempt.outcome.retryable
+
+    sprites = FakeSprites()
+    again, model, _ = review(tmp_path, [READ_DIFF, final()], sprites=sprites)
+    assert model.requests == []
+    assert sprites.calls == []
+    assert again.event is not ReviewEvent.APPROVE
+    assert again.lenses[0].state is LensState.FAILED
 
 
 def test_a_rerun_on_the_same_head_and_body_reuses_the_settled_lens(tmp_path):

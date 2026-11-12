@@ -19,7 +19,9 @@ approves. The runner's own note is in the draft when it did not complete.
 
 Retries come from the ledger alone (`attestation.next_step`). A lens
 already settled for this head and body is reused without a runner, and a
-review that stopped mid-attempt resumes its attempt count.
+review that stopped mid-attempt resumes its attempt count. A BYOK refusal
+is finished as a model error, which is not retried, before it leaves the
+loop, so the next review of this head does not make another billed call.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from atlas_reviewer.attestation import (
     AttemptLedger,
     AttemptOutcome,
     Attestation,
+    Cause,
     LensKey,
     LensState,
     RunAttempt,
@@ -61,7 +64,7 @@ from atlas_reviewer.lens_loop import (
 )
 from atlas_reviewer.lenses import LensLibrary
 from atlas_reviewer.notes import quote_untrusted
-from atlas_reviewer.ports import Clock, RunnerLedger, SpritesApi
+from atlas_reviewer.ports import ByokRefusedError, Clock, RunnerLedger, SpritesApi
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
 from atlas_reviewer.quotes import read_sources
 from atlas_reviewer.redact import Redactor
@@ -358,12 +361,27 @@ def _attempts(
         attempts = ledger.attempts(key)
         ledger.start(key, step.number)
         secrets_seen: list[BridgeSecret] = []
-        outcome = run_attempt(
-            job, bridge, model, spend, clock,
-            review_deadline=review_deadline,
-            retry_of=attempts[-1].outcome if step.forced and attempts else None,
-            secrets=secrets_seen,
-        )  # fmt: skip
+        try:
+            outcome = run_attempt(
+                job, bridge, model, spend, clock,
+                review_deadline=review_deadline,
+                retry_of=attempts[-1].outcome if step.forced and attempts else None,
+                secrets=secrets_seen,
+            )  # fmt: skip
+        except ByokRefusedError as exc:
+            # The refusal still leaves the loop. Finish the attempt first:
+            # an unfinished one reads as abandoned, and that is retryable,
+            # so the next review of this head would bill another call.
+            ledger.finish(
+                key, step.number,
+                AttemptOutcome(
+                    Attestation.UNACKNOWLEDGED,
+                    frozenset({Cause.MODEL_ERROR}),
+                    detail=str(exc),
+                ),
+                scrub=scrub,
+            )  # fmt: skip
+            raise
         session.secrets.extend(secrets_seen)
         ledger.finish(key, step.number, outcome, scrub=scrub)
         step = next_step(ledger.attempts(key), limits.retries)
