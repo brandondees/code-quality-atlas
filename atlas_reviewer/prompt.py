@@ -122,7 +122,7 @@ def build_prompt(
     )
     if lenses or lens_coverage:
         system += f"\n\n--- lens bodies ---\n{_lens_section(lenses, lens_coverage)}"
-    fenced = (_fence(b, nonce) for b in blocks)
+    fenced = (fence(b, nonce) for b in blocks)
     user = "\n\n".join((f"Review target (from the operator): {subject}", *fenced))
     labels = tuple(_attr(b.label) for b in blocks)
     return Prompt(system=system, user=user, labels=labels)
@@ -145,7 +145,7 @@ def _fence_rule(nonce: str) -> str:
     )
 
 
-def _fence(block: UntrustedBlock, nonce: str) -> str:
+def fence(block: UntrustedBlock, nonce: str) -> str:
     body = block.content.text.replace(nonce, "[nonce-removed]")
     return (
         f'<untrusted-data id="{nonce}" label="{_attr(block.label)}">\n'

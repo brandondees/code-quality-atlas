@@ -3,6 +3,7 @@ import json
 import os
 import stat
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -241,6 +242,51 @@ def test_a_record_from_another_version_or_shape_is_damaged_not_trusted(tmp_path)
     assert book.damaged == 3
 
 
+@pytest.mark.skipif(
+    not Path("/proc/self/fd").is_dir(),
+    reason="/proc/self/fd is how this test maps an fsynced fd to a path",
+)
+def test_the_file_is_written_before_it_is_synced(tmp_path, monkeypatch):
+    events: list[tuple[str, Path]] = []
+    real_write, real_fsync = os.write, os.fsync
+
+    def write(fd, data):
+        events.append(("write", Path(os.readlink(f"/proc/self/fd/{fd}"))))
+        return real_write(fd, data)
+
+    def fsync(fd):
+        events.append(("fsync", Path(os.readlink(f"/proc/self/fd/{fd}"))))
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "write", write)
+    monkeypatch.setattr(os, "fsync", fsync)
+    book = ledger(tmp_path)
+    book.start(KEY, 1)
+    file_ops = [op for op, path in events if path == book.path]
+    assert file_ops.index("write") < file_ops.index("fsync")
+
+
+@pytest.mark.skipif(
+    not Path("/proc/self/fd").is_dir(),
+    reason="/proc/self/fd is how this test maps an fsynced fd to a path",
+)
+def test_created_parent_directories_are_synced(tmp_path, monkeypatch):
+    synced: list[Path] = []
+    real_fsync = os.fsync
+
+    def fsync(fd):
+        synced.append(Path(os.readlink(f"/proc/self/fd/{fd}")))
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    path = tmp_path / "outer" / "inner" / "attestations.jsonl"
+    AttemptLedger(path, FakeClock()).start(KEY, 1)
+    assert path in synced
+    assert path.parent in synced
+    assert path.parent.parent in synced
+    assert tmp_path in synced
+
+
 def test_start_and_finish_sync_the_file_and_its_directory(tmp_path, monkeypatch):
     synced = []
     real_fsync = os.fsync
@@ -272,6 +318,63 @@ def test_an_unattested_attempt_read_back_through_the_ledger_is_never_clean(tmp_p
     assert attempt.outcome.attestation is Attestation.UNACKNOWLEDGED
     assert attempt.outcome.state is LensState.PARTIAL
     assert attempt.outcome.findings
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "finding",
+        "fix",
+        "evidence",
+        "siblings",
+        "location",
+        "problem",
+        "detail",
+        "args",
+    ],
+)
+def test_every_text_field_is_scrubbed_before_it_reaches_the_file(tmp_path, field):
+    flagged = "ghp_" + "Ab1" * 12
+    found = finding()
+    source: QuoteSource | None = QuoteSource.HEAD
+    problem = ""
+    detail = ""
+    args = '{"offset": 0, "path": "calc.py"}'
+    if field == "finding":
+        found = replace(found, finding=f"leaks {flagged}")
+    elif field == "fix":
+        found = replace(found, fix=flagged)
+    elif field == "evidence":
+        found = replace(found, evidence=flagged)
+    elif field == "siblings":
+        found = replace(found, siblings=flagged)
+    elif field == "location":
+        found = replace(found, location=LineRange(f"{flagged}.py", 2, 2))
+    elif field == "problem":
+        source, problem = None, f"saw {flagged}"
+    elif field == "detail":
+        detail = f"saw {flagged}"
+    elif field == "args":
+        args = f'{{"path": "{flagged}"}}'
+    checked = (
+        CheckedFinding(found, source)
+        if source is not None
+        else CheckedFinding(found, problem=problem)
+    )
+    ledger(tmp_path).finish(
+        KEY,
+        1,
+        AttemptOutcome(
+            Attestation.ATTESTED,
+            findings=(checked,),
+            tools=(ToolUse("diff_file", args, "ok"),),
+            detail=detail,
+        ),
+        scrub=lambda text: text.replace(flagged, "[flagged]"),
+    )
+    raw = (tmp_path / "state" / "attestations.jsonl").read_text()
+    assert flagged not in raw
+    assert "[flagged]" in raw
 
 
 def test_a_findings_text_is_scrubbed_before_it_reaches_the_file(tmp_path):

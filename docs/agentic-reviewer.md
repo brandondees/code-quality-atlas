@@ -2,12 +2,18 @@
 
 **Status: direction accepted (D34 in
 [`open-questions.md`](open-questions.md), 2026-11-08); phases 1 and 2 are
-built offline (D38, D39), the rest is not built.**
+merged and phase 3 is built offline (D38, D39, D40), the rest is not built.**
 The owner accepted the recommendations below as proposed ("I can roll with
 recommendations as proposed for now"). Phase 1 (full PR conversation and
-branch-wide CI, D38) and phase 2 (the read-only tool bridge with Option B
-staging, D39) are on draft PRs stacked on #607, tested against fixtures
-only; nothing calls the bridge yet. Every budget number is still pending his decision; see [Open numeric decisions](#open-numeric-decisions-pending-brandon).
+branch-wide CI, D38, #612) and phase 2 (the read-only tool bridge with Option B
+staging, D39, #614) are merged, tested against fixtures only. Phase 3's
+offline half (the controller loop and one attested lens, D40) is on draft
+PRs, tested with the real bridge over a fixture repository and a scripted
+model; nothing calls it from the CLI, and no live run has been made. Brandon
+set provisional defaults for the five phase-3 limits on 2026-11-11 (see
+[Open numeric decisions](#open-numeric-decisions-pending-brandon)); they are
+headroom, configurable, and to be revisited after live runs. The other
+rows in that table are unchanged.
 This doc carries no live-run approval. No model call, Sprite run, merge or
 deploy was made to write it.
 
@@ -208,8 +214,9 @@ itself, and a timeout is a coverage gap.
 
 - **Caps.** The one-shot path keeps D25's 3 calls and $3.00 reservation,
   and the model pin stays (`anthropic/claude-sonnet-5.5`, no fallbacks).
-  Agentic mode gets its own numbers, which the owner sets. Until then,
-  nothing agentic runs live.
+  Agentic mode has Brandon's provisional defaults (2026-11-11), for
+  headroom and configurable. A live run still needs the tool-calling
+  adapter, which is not built.
 - **Starting scope.** Triage only: the four critical-tier lenses from
   [`review-depth-modes.md`](review-depth-modes.md) —
   `tracing-correctness-and-invariants`, `sweeping-for-security`,
@@ -245,29 +252,38 @@ owner at every phase.
 | 0 | Land #601-#607 as the one-shot reviewer and fallback, with the D33 note (#608). No agentic scope in those PRs. | none |
 | 1 | Full PR conversation (about 64 KiB, omissions named) and branch-wide CI labelled by SHA, in the shared evidence code. Fixture-tested. Built offline (D38), stacked on #607 with the owner's go-ahead rather than after the stack merged. | stack merged |
 | 2 | The tool bridge, offline: closed git tools (diff, list, read range, grep) against `FakeSprites` and a fixture repo, with argument rejection, byte and time caps, and git hardening. Option B staging. Built offline (D39), stacked on phase 1 with the owner's go-ahead. | phase 1 merged |
-| 3 | The controller loop and one attested lens, offline first: body injection, the attestation ledger, quote checks, retry and escalate. Then one owner-approved live run, compared with the one-shot draft on the same head. | offline work: none. Live run: a provisional budget Brandon approves |
+| 3 | The controller loop and one attested lens, offline first: body injection, the attestation ledger, quote checks, retry and escalate. Offline half built (D40): `lens_loop.py`, `coordinator.py`, `attestation.py`, `quotes.py`, `lens_contract.py`, with a mechanical synthesis (no merge call for one lens) and no CLI entry point. Then one owner-approved live run, compared with the one-shot draft on the same head; that needs a tool-calling model adapter, which is not built. | offline work: none. Live run: Brandon's provisional defaults are set (2026-11-11); the run still needs the tool-calling adapter, which is not built |
 | 4 | Triage mode: the four critical lenses, pool size 1, ID-reconciled merge, coverage never claimed complete unless the ledger shows it. | phase 3 measured |
 | 5 | The baked toolchain: the first tool set in the Sprite image, with summarized hits routed to lenses. | image build approved |
 | 6 | Measured pilots on owner-labelled PRs, scored for precision, recall and coverage honesty. Then review and comprehensive depths, a concurrency probe before any pool size above 1, Option A history staging, and the decision on retiring the one-shot path. | phases 4-5 done |
 
 ## Open numeric decisions (pending Brandon)
 
-Brandon has set none of these yet; a working default stands in where one
-is named. Until each is set, the phase that needs it
-does not run live.
+Brandon set provisional defaults for the five phase-3 limits on
+2026-11-11, for headroom, configurable, and to be revisited after live
+runs. A run with those defaults is accepted. Clearing one back to unset
+makes `coordinator.review_lens` refuse before any model, runner or ledger
+work (`LimitsUnsetError`, naming each unset field). An override must be
+positive and finite, and a per-lens limit no greater than its per-review
+limit. The other rows are unchanged: a working default stands where one
+is named, and a row still marked none stays unset until Brandon sets it.
+Until each of those is set, the phase that needs it does not run live.
+The five are fields of
+`lens_loop.AgenticLimits` (`reservation_usd`, `max_calls`, `max_turns`,
+`lens_wall_s`, `review_wall_s`).
 
 | Decision | Current state | Note |
 |---|---|---|
-| Agentic per-review dollar reservation | none; one-shot stays $3.00 | D31 estimated about $1.1 per lens uncached at 12 turns, or about $0.3-0.4 with prompt caching if the pinned routing allows it. Brandon sets a provisional reservation, with the call, turn and wall-clock caps below, before phase 3's first live run. That run's measured cost then sets the reservation for later runs. |
-| OpenRouter key hard limit for agentic runs | the one-shot preflight requires at most $5 | Must cover the agentic reservation. |
-| Agentic per-review model-call cap | none; one-shot stays 3 | Includes the picker, each lens's turns and the merge. |
-| Per-lens turn cap | none | D31 suggested 12. |
-| Per-lens and per-review wall clocks | none | Crossing either ends the lens or review as partial, never clean. |
+| Agentic per-review dollar reservation | $5, provisional default (2026-11-11); one-shot stays $3.00 | Headroom, configurable through `AgenticLimits`. Revisit after live runs. D31 estimated about $1.1 per lens uncached at 12 turns, or about $0.3-0.4 with prompt caching if the pinned routing allows it. |
+| OpenRouter key hard limit for agentic runs | the one-shot preflight requires at most $5 | Must cover the agentic reservation. The provisional reservation is $5, the same ceiling this preflight already requires. |
+| Agentic per-review model-call cap | 50, provisional default (2026-11-11); one-shot stays 3 | Headroom, configurable. Includes the picker, each lens's turns and the merge. A per-lens turn cap is no greater than this. |
+| Per-lens turn cap | 50, provisional default (2026-11-11) | Headroom, configurable, and no greater than the review's call cap. D31 suggested 12. |
+| Per-lens and per-review wall clocks | 20 minutes per lens and 60 minutes per review, provisional defaults (2026-11-11) | Headroom, configurable. The per-lens clock is no greater than the review clock. Crossing either ends the lens or review as partial, never clean. |
 | PR conversation budget split | about 64 KiB total, working default | The body and comment caps within it. |
 | Branch-wide CI budget | check runs at up to 20 other commits of the PR, working default (`IngestConfig.max_ci_commits`) | How many commits back. Each commit's list keeps the client's page cap; jobs, logs and artifacts are still read at the head SHA only, under the one-shot caps. |
 | Per-tool timeout and output caps for the baked toolchain | none | A timeout is a coverage gap. |
-| Lens worker pool size | 1 | Above 1 only after a concurrency probe. The research note suggests at most 4. |
-| Retries per failed attestation | 1, recommended | Then escalate. |
+| Lens worker pool size | 1; the only value phase 3 accepts | Above 1 only after a concurrency probe. The research note suggests at most 4. |
+| Retries per failed attestation | 1, recommended; the phase 3 default | Then escalate. A failed quote, a reply outside the finding contract and an abandoned attempt are retried the same way (D40). |
 | Pilot set and the bar for retiring one-shot | none | Which PRs, how many, and the precision, recall and coverage results agentic drafts must reach. |
 
 Two non-numeric decisions stay open as well. The first is a per-lens model

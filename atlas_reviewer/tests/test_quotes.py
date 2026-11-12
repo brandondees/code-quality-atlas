@@ -93,9 +93,9 @@ def check(location, evidence=""):
     [
         (2, 2, "return sum(round(x, 2) for x in xs)"),
         (2, 2, "        return sum(round(x, 2) for x in xs)   "),
-        (1, 3, "round(x, 2) for x"),
-        (4, 7, "if not xs:\n    return 0"),
-        (4, 7, "\n  if not xs:\nreturn 0\n\n"),
+        (2, 2, "round(x, 2) for x"),
+        (5, 6, "if not xs:\n    return 0"),
+        (5, 6, "\n  if not xs:\nreturn 0\n\n"),
         (8, 8, "}"),
     ],
 )
@@ -136,8 +136,28 @@ def test_a_range_that_ends_past_the_file_is_not_verified(end):
 
 
 def test_a_short_fragment_passes_only_as_the_whole_line():
-    assert isinstance(check(LineRange("calc.py", 1, 8), "xs)"), Unverified)
-    assert isinstance(check(LineRange("calc.py", 1, 8), "}"), Verified)
+    assert isinstance(check(LineRange("calc.py", 7, 7), "xs)"), Unverified)
+    assert isinstance(check(LineRange("calc.py", 8, 8), "}"), Verified)
+
+
+def test_a_one_line_quote_cited_across_the_file_is_not_verified():
+    """Line 7's text, cited as lines 1-8. The line sits in that window."""
+    evidence = "return total(xs) / len(xs)"
+    result = check(LineRange("calc.py", 1, 8), evidence)
+    assert isinstance(result, Unverified)
+    assert "not at that range" in result.reason
+    exact = check(LineRange("calc.py", 7, 7), evidence)
+    assert exact == Verified(exact.finding, QuoteSource.HEAD)
+
+
+def test_a_multi_line_quote_needs_a_span_of_its_own_length():
+    """Lines 5-6, cited as lines 4-7. Both lines sit in that window."""
+    evidence = "if not xs:\n    return 0"
+    wide = check(LineRange("calc.py", 4, 7), evidence)
+    assert isinstance(wide, Unverified)
+    assert "not at that range" in wide.reason
+    exact = check(LineRange("calc.py", 5, 6), evidence)
+    assert exact == Verified(exact.finding, QuoteSource.HEAD)
 
 
 def test_a_quote_of_removed_code_is_verified_against_the_diffs_removed_lines():

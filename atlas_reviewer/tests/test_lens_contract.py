@@ -138,6 +138,13 @@ def test_a_lens_name_at_the_cap_parses_and_one_past_it_is_refused():
     assert "INJECT" not in str(exc.value)
 
 
+def test_the_digest_is_checked_before_a_finding_is_parsed():
+    text = reply(finding(severity="nope"), body_sha256="not-a-digest")
+    with pytest.raises(ContractError, match="64 lowercase hex") as exc:
+        parse_reply(text)
+    assert "finding" not in str(exc.value)
+
+
 @pytest.mark.parametrize("digest", ["A" * 64, "a" * 63, "a" * 65, "g" * 64, ""])
 def test_a_body_digest_must_be_64_lowercase_hex_characters(digest):
     with pytest.raises(ContractError, match="64 lowercase hex") as exc:
