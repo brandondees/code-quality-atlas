@@ -1153,6 +1153,12 @@ def render_draft(review: AgenticReview, redactor: Redactor) -> str:
                 f"- NOT RUN: {quote_untrusted(name, QUOTED_CHARS, scrub=scrub)} ({why})"
                 for name, why in review.not_picked
             ]
+    missing = _missing_bodies(review)
+    if missing:
+        lines += ["", "## Lenses NOT RUN (no body in the bundle)", ""]
+        lines += [
+            "- " + quote_untrusted(r.lens, QUOTED_CHARS, scrub=scrub) for r in missing
+        ]
     dropped = _dropped_notes(review)
     if dropped:
         lines += ["", "## Dropped findings (left out of this review)", ""]
@@ -1428,6 +1434,14 @@ def _lens_line(r: LensResult, scrub: Callable[[str], str]) -> str:
     if o.detail:
         parts.append(f"detail {quote_untrusted(o.detail, QUOTED_CHARS, scrub=scrub)}")
     return f"{head}; " + "; ".join(parts)
+
+
+def _missing_bodies(review: AgenticReview) -> tuple[LensResult, ...]:
+    return tuple(
+        result
+        for result in review.lenses
+        if result.outcome is None and result.reason == "no lens body in the bundle"
+    )
 
 
 def _dropped_notes(review: AgenticReview) -> tuple[str, ...]:

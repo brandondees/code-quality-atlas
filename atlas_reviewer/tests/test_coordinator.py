@@ -153,6 +153,11 @@ def test_a_lens_with_no_body_stops_before_any_model_runner_or_ledger_work(tmp_pa
     assert sprites.calls == []
     assert not (tmp_path / "state").exists()
     assert not result.coverage_complete
+    draft = render_draft(result, Redactor())
+    assert draft.index("## Lenses NOT RUN (no body in the bundle)") < draft.index(
+        "## Findings"
+    )
+    assert LENS in draft.split("## Lenses NOT RUN", 1)[1].split("## Findings", 1)[0]
 
 
 def test_a_refused_runner_create_propagates_and_records_no_attempt(tmp_path):
