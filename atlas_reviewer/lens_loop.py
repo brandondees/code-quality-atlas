@@ -441,7 +441,9 @@ class Spend:
 
     def reserve(self, worst_usd: Decimal) -> LimitHit | None:
         if self.calls >= self.limits.max_calls:
-            return hit("max_calls", self.limits.max_calls, self.calls + 1)
+            return hit(
+                "max_calls", self.limits.max_calls, f"next call {self.calls + 1}"
+            )
         projected = self.committed_usd + worst_usd
         if projected > self.limits.reservation_usd:
             return hit(
@@ -611,7 +613,9 @@ def run_attempt(
                 *_stopped(hit("lens_wall_s", limits.lens_wall_s, f"{elapsed:.3f}s"))
             )
         if p.turns >= limits.max_turns:
-            return p.cut(*_stopped(hit("max_turns", limits.max_turns, p.turns)))
+            return p.cut(
+                *_stopped(hit("max_turns", limits.max_turns, f"{p.turns} used"))
+            )
         request = TurnRequest(system, tuple(messages), tools)
         try:
             worst = model.worst_case_usd(request)
