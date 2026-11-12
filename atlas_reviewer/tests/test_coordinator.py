@@ -587,6 +587,17 @@ def test_unread_paths_block_approval_even_when_the_outcome_was_recorded_clean():
     assert "unread files" in headline
 
 
+def test_unread_paths_are_named_ahead_of_a_missing_file_count():
+    outcome = AttemptOutcome(
+        Attestation.ATTESTED, unread=("auth/session.py",), changed_files=None
+    )
+    result = synthesize([lens_result(outcome)])
+    headline = render_draft(result, Redactor()).splitlines()[2]
+    assert "unread files" in headline
+    assert "no recorded file coverage" not in headline
+    assert "no lens selected" not in headline
+
+
 @pytest.mark.parametrize(
     ("count", "rest"),
     [(20, 0), (21, 1)],
