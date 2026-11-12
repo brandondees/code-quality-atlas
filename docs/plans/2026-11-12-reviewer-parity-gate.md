@@ -170,11 +170,10 @@ this set.
 
 The reference reviews are the rounds whose body starts with `## Round N`
 and carries `<!-- atlas-review round:N ... -->`, posted on PRs #602–#637.
-Findings are inline comments whose first line is `**Severity · lens**`
-or `**Severity** · \`lens\` · summary`, and body-anchored lines
-(`**Major · \`path:line\` · summary**`, or `` **`path:line`: summary** ``
-under a severity heading). `eval_harness.protocol_review` reads those
-shapes, skips a
+Findings are inline comments in either heading shape (one bold span
+for the severity and the lens names, or a split bold severity followed
+by backticked lens names) and body-anchored lines that name a path and
+a line. `eval_harness.protocol_review` reads those shapes, skips a
 CodeRabbit comment (`coderabbit-ai-generated`), and redacts the summary.
 The match in `eval_harness.score` is the same path and a line within
 five (`PLACE_LINES`). Severity is not compared. A finding with no line
