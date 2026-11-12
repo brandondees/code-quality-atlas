@@ -430,8 +430,19 @@ def fly_commands(text: str) -> list[str]:
 def test_every_runbook_fly_command_names_its_app_or_org():
     commands = fly_commands(RUNBOOK)
     assert len(commands) > 20
+    # `wireguard reset` takes the org as a positional argument, and
+    # `agent restart` takes none. Both are pinned exactly, including an
+    # empty wrapper prefix, by test_a_stuck_tunnel_resets_the_personal_wireguard_peer.
+    # A timeout or env wrapper would still match these strings, so that
+    # test is what rejects the wrapper.
+    allowed_without_flag = {
+        'fly "$@"',
+        f"flyp apps destroy {APP_NAME} --yes",
+        "flyp wireguard reset personal",
+        "flyp agent restart",
+    }
     for command in commands:
-        if command in ('fly "$@"', f"flyp apps destroy {APP_NAME} --yes"):
+        if command in allowed_without_flag:
             continue
         assert "--app atlas-reviewer" in command or "--org personal" in command, command
 
@@ -730,6 +741,218 @@ def test_a_review_is_waited_for_copied_released_and_destroyed_in_that_order():
     assert RUNBOOK.index("flyp machine list --app atlas-reviewer") < RUNBOOK.index(
         "-- review --event"
     )
+
+
+def heading_body(heading: str) -> str:
+    """Text from a heading through the next heading of the same or higher level."""
+    start = RUNBOOK.index(f"{heading}\n")
+    level = len(heading) - len(heading.lstrip("#"))
+    rest = RUNBOOK[start + len(heading) + 1 :]
+    match = re.search(rf"\n#{{1,{level}}} ", rest)
+    return rest[: match.start()] if match else rest
+
+
+def flattened(text: str) -> str:
+    return " ".join(text.split())
+
+
+def test_a_stuck_tunnel_resets_the_personal_wireguard_peer():
+    wait = heading_body("### Wait for the review to exit")
+    assert (
+        "Error: tunnel unavailable: Error contacting Fly.io API when probing "
+        '"personal": timed out (context deadline exceeded)'
+    ) in wait
+    flat = flattened(wait)
+    assert "stale WireGuard peer" in flat
+    assert "not the slow first connection" in flat
+    assert "no `tunnel unavailable` line" in flat
+    assert "WireGuard-over-WebSockets" in flat
+    assert "did not isolate which of those changes" in flat
+    assert "not a documented Fly behavior" in flat
+    assert "evening of 2026-11-11, with flyctl" in flat
+    resets = [
+        command
+        for command in fly_invocations(wait)
+        if command.program[:3] == ("flyp", "wireguard", "reset")
+    ]
+    assert resets == [ShellCommand((), ("flyp", "wireguard", "reset", "personal"))]
+    restarts = [
+        command
+        for command in fly_invocations(wait)
+        if command.program[:2] == ("flyp", "agent")
+    ]
+    assert restarts == [ShellCommand((), ("flyp", "agent", "restart"))]
+    copy = flattened(heading_body("### Copy the output off"))
+    assert "tunnel unavailable" in copy
+    assert "#wait-for-the-review-to-exit" in copy
+    assert "sftp worked a few seconds after those steps" in copy
+
+
+def _logs_polls(text: str) -> list[tuple[str, ShellCommand]]:
+    expected = (
+        "flyp",
+        "logs",
+        "--app",
+        "atlas-reviewer",
+        "--machine",
+        '"$MACHINE_ID"',
+        "--no-tail",
+    )
+    found = []
+    for block in shell_blocks(text):
+        logs = [
+            command
+            for command in shell_commands(block)
+            if command.program[:3] == ("flyp", "logs", "--app")
+        ]
+        if not logs:
+            continue
+        assert logs == [ShellCommand((), expected)], block
+        found.append((block, logs[0]))
+    return found
+
+
+def test_an_early_flyctl_return_is_polled_until_the_machines_own_line():
+    recover = heading_body("### Recover a runner Sprite by name")
+    flat = flattened(recover)
+    assert 'returned at "Machine started" with wrapper status 0' in flat
+    assert "Neither flyctl's exit status nor its return means the run finished" in flat
+    assert "not a documented Fly behavior" in flat
+    assert "evening of 2026-11-11, with flyctl" in flat
+    assert "Do not take one `--no-tail` fetch right after flyctl returns." in flat
+    assert "or until one hour passes, the same bound as the review poll" in flat
+    assert '`--detach` returning, like the sweep returning at "Machine started"' in flat
+    polls = _logs_polls(recover)
+    # The sweep poll, the protocol-probe poll, and the one-shot read after
+    # a wait that returned. A comment or a timeout wrapper cannot satisfy
+    # the --machine pin: _logs_polls checks the peeled fly argv.
+    assert len(polls) == 3
+    sweep_block, probe_block, after_wait = (block for block, _ in polls)
+    assert "destroyed (verified absent)" in sweep_block
+    assert "already absent, nothing deleted (verified absent)" in sweep_block
+    assert "Main child exited normally with code:" not in sweep_block
+    assert "while [ -z" in sweep_block
+    assert "Main child exited normally with code:" in probe_block
+    assert "destroyed (verified absent)" not in probe_block
+    assert "while [ -z" in probe_block
+    assert "while [ -z" not in after_wait
+    assert "wrapper status 124" in flat
+    assert "If `$found` is empty after the hour, run the sweep again." in flat
+
+
+def prose_after_fence(section: str, marker: str) -> str:
+    """Prose between the fence that contains ``marker`` and the next fence."""
+    blocks = [block for block in shell_blocks(section) if marker in block]
+    assert len(blocks) == 1, marker
+    after_block = section.split(blocks[0], 1)[1]
+    assert after_block.lstrip("\n").startswith("```")
+    after_close = after_block.split("```", 1)[1]
+    return after_close.split("```", 1)[0]
+
+
+def test_a_failed_machine_wait_still_reaches_its_check():
+    waits = [
+        command
+        for command in fly_invocations(RUNBOOK)
+        if command.program[:3] == ("flyp", "machine", "wait")
+    ]
+    stopped = (
+        "flyp",
+        "machine",
+        "wait",
+        '"$MACHINE_ID"',
+        "--app",
+        "atlas-reviewer",
+        "--state",
+        "stopped",
+    )
+    destroyed = (
+        "flyp",
+        "machine",
+        "wait",
+        '"$MACHINE_ID"',
+        "--app",
+        "atlas-reviewer",
+        "--state",
+        "destroyed",
+        "--wait-timeout",
+        "1h",
+    )
+    assert [command.program for command in waits] == [stopped, stopped, destroyed]
+    assert all(command.prefix == () for command in waits)
+    release = flattened(
+        prose_after_fence(
+            heading_body("### Release and destroy the Machine"),
+            'flyp machine wait "$MACHINE_ID" --app atlas-reviewer --state stopped',
+        )
+    )
+    assert "errors or times out" in release
+    assert "that exit is flyctl's, not the review's" in release
+    assert "Do not skip `fly machine status`" in release
+    assert "no `--force`" in release
+    assert "go to [Hard stop](#hard-stop)" in release
+    release_logs = [
+        command
+        for command in fly_invocations(
+            heading_body("### Release and destroy the Machine")
+        )
+        if command.program[:2] == ("flyp", "logs")
+    ]
+    assert release_logs == [
+        ShellCommand(
+            (),
+            (
+                "flyp",
+                "logs",
+                "--app",
+                "atlas-reviewer",
+                "--machine",
+                '"$MACHINE_ID"',
+                "--no-tail",
+            ),
+        )
+    ]
+    hard = flattened(
+        prose_after_fence(
+            heading_body("### Hard stop"),
+            'flyp machine wait "$MACHINE_ID" --app atlas-reviewer --state stopped',
+        )
+    )
+    assert "errors or times out" in hard
+    assert "does not say the Machine stopped" in hard
+    assert "does not say whether `finally` ran" in hard
+    assert "Continue to `fly machine destroy --force`" in hard
+    recover = flattened(
+        prose_after_fence(
+            heading_body("### Recover a runner Sprite by name"),
+            "--wait-timeout 1h",
+        )
+    )
+    assert "errors or times out" in recover
+    assert "the exit is flyctl's, not the probe's" in recover
+    assert "logs have not been read yet" in recover
+    assert "Do not stage the key" in recover
+    assert "protocol-probe loop" in recover
+    assert "did not show `code: 0`" in recover
+
+
+def test_a_non_rm_stop_kills_a_leftover_flyctl_after_the_machine_is_gone():
+    body = flattened(heading_body("### Leftover flyctl after a non-rm stop"))
+    assert "evening of 2026-11-11, with flyctl" in body
+    assert "no `--rm`" in body
+    assert "still running 30 seconds after a mid-run `fly machine stop`" in body
+    assert "killed it once the Machine had been destroyed" in body
+    assert "not a documented Fly behavior" in body
+    assert "kill that flyctl" in body
+    assert "are not the Machine's state" in body
+    assert "timeout 45" in body and "--detach" in body
+    for heading in (
+        "### Release and destroy the Machine",
+        "### Hard stop",
+    ):
+        text = heading_body(heading)
+        assert "#leftover-flyctl-after-a-non-rm-stop" in text
+        assert "no `--rm`" in text
 
 
 def test_runbook_has_a_hard_stop_and_recovers_sprites_by_name():
