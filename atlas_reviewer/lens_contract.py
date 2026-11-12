@@ -6,10 +6,13 @@ The fields are `synthesis.md`'s *Finding contract* (location, evidence,
 severity, valence, route, attribution, siblings, finding, fix). The reply
 is untrusted model output, so `parse_reply` accepts exactly one JSON
 object of the documented shape and raises `ContractError` naming the
-first problem. `lens` is capped and `body_sha256` must be 64 lowercase
-hex characters, the shape a lens-body digest has, so a reply is refused
-before any acknowledgement comparison. Nothing is repaired, guessed or
-cut: a reply that breaks the contract is not partly used.
+first problem with the object itself. `lens` is capped and `body_sha256`
+must be 64 lowercase hex characters, the shape a lens-body digest has, so
+a reply is refused before any acknowledgement comparison. One finding that
+breaks the contract is dropped and named, with its raw severity when it
+sent one; the other findings stand. Severity is matched after case,
+surrounding whitespace and a closed set of aliases (`critical` is a
+Blocker, `low` is a nit). Nothing else is repaired or guessed.
 """
 
 from __future__ import annotations
@@ -144,6 +147,8 @@ class LensReply:
     lens: str
     body_sha256: str
     findings: tuple[Finding, ...]
+    # One line per finding that was left out, naming the raw severity.
+    dropped: tuple[str, ...] = ()
 
 
 def parse_reply(text: str) -> LensReply:
@@ -171,11 +176,14 @@ def parse_reply(text: str) -> LensReply:
         raise ContractError("findings must be a list")
     if len(findings) > MAX_FINDINGS:
         raise ContractError(f"more than {MAX_FINDINGS} findings")
-    return LensReply(
-        lens,
-        digest,
-        tuple(_finding(i, f) for i, f in enumerate(findings, 1)),
-    )
+    kept: list[Finding] = []
+    dropped: list[str] = []
+    for index, raw in enumerate(findings, 1):
+        try:
+            kept.append(_finding(index, raw))
+        except ContractError as exc:
+            dropped.append(_dropped(exc, raw))
+    return LensReply(lens, digest, tuple(kept), tuple(dropped))
 
 
 def _finding(index: int, raw: Any) -> Finding:
@@ -198,7 +206,7 @@ def _parse_finding(raw: Any) -> Finding:
     location = parse_location(text["location"])
     finding = Finding(
         location,
-        _member(Severity, "severity", text["severity"]),
+        _severity(text["severity"]),
         _member(Valence, "valence", text["valence"]),
         _member(Route, "route", text["route"]),
         _member(Attribution, "attribution", text["attribution"]),
@@ -223,6 +231,56 @@ def _nonblank(key: str, value: str) -> str:
     if not value.strip():
         raise ContractError(f"{key} is empty")
     return value
+
+
+# Closed. A value outside this set and the four severity names is dropped.
+_SEVERITY_ALIASES = {
+    "critical": Severity.BLOCKER,
+    "crit": Severity.BLOCKER,
+    "blocking": Severity.BLOCKER,
+    "high": Severity.MAJOR,
+    "medium": Severity.MINOR,
+    "moderate": Severity.MINOR,
+    "low": Severity.NIT,
+    "trivial": Severity.NIT,
+}
+_RAW_SEVERITY_CHARS = 80
+
+
+def _severity(value: str) -> Severity:
+    """Case, surrounding whitespace and the closed alias set, then the
+    four names. The raw text is not rewritten into the finding."""
+    key = " ".join(value.strip().lower().split())
+    if len(key) >= 2 and key[0] == key[-1] and key[0] in "'\"":
+        key = key[1:-1].strip()
+    key = key.strip(".,:;!")
+    try:
+        return Severity(key)
+    except ValueError:
+        found = _SEVERITY_ALIASES.get(key)
+        if found is not None:
+            return found
+        raise ContractError(
+            "severity must be one of blocker, major, minor, nit"
+        ) from None
+
+
+def _dropped(exc: ContractError, raw: Any) -> str:
+    """The contract message plus the raw severity, so a later log can
+    show the value that was refused."""
+    shown = _raw_severity(raw)
+    if shown is None:
+        return str(exc)
+    return f"{exc}; raw severity {shown!r}"
+
+
+def _raw_severity(raw: Any) -> str | None:
+    if not isinstance(raw, dict) or "severity" not in raw:
+        return None
+    value = raw["severity"]
+    if not isinstance(value, str):
+        return f"type {type(value).__name__}"
+    return " ".join(value.split())[:_RAW_SEVERITY_CHARS]
 
 
 def _member[E: StrEnum](enum: type[E], key: str, value: str) -> E:

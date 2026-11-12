@@ -178,6 +178,20 @@ def test_a_clean_lens_gives_complete_coverage_and_its_verdict(tmp_path):
     assert result.model_calls == 2
 
 
+def test_a_bad_severity_is_dropped_and_the_lens_keeps_the_rest(tmp_path):
+    bad = finding(severity="urgent", finding="this one is dropped")
+    result, _, _ = review(tmp_path, [READ_ALL, final(finding(severity="nit"), bad)])
+    (lens,) = result.lenses
+    assert lens.state is LensState.CLEAN
+    assert lens.outcome is not None
+    assert "urgent" in lens.outcome.dropped[0]
+    draft = render_draft(result, Redactor())
+    assert "## Dropped findings (left out of this review)" in draft
+    assert "urgent" in draft
+    assert "1 finding(s) dropped" in draft
+    assert result.event is ReviewEvent.APPROVE
+
+
 def test_a_clean_lens_with_no_findings_approves(tmp_path):
     result, _, _ = review(tmp_path, [READ_ALL, final()])
     assert result.event is ReviewEvent.APPROVE

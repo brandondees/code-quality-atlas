@@ -860,4 +860,4 @@ def _final(job: LensJob, text: str, p: _Progress) -> AttemptOutcome:
         p.causes.add(Cause.QUOTES_FAILED)
     if not reply.findings and not p.read_source:
         p.causes.add(Cause.NO_SOURCE_READ)
-    return outcome(Attestation.ATTESTED, findings=checked)
+    return outcome(Attestation.ATTESTED, findings=checked, dropped=reply.dropped)

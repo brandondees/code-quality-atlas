@@ -1249,6 +1249,16 @@ earlier. A truncated superseded record does not block a new head. The
 round-log arguments stay on the nested trace path. No live call was
 made. D52.
 
+## 2026-11-12 — a bad severity drops that finding, and the lens keeps the rest
+
+Live runs #639, #640 and #642 were losing whole lenses because one
+finding's severity was not one of the four names. The agentic parser
+now maps a closed set of aliases (`critical` to Blocker, `low` to nit,
+and the same kind of neighbour for Major and Minor) after case and
+whitespace, and a finding that still fails is left out. The draft
+lists each dropped finding, including the raw severity, under its own
+heading. The other findings stand. A reply that is not a contract
+object is still sent back once. D45 records it.
 ## 2026-11-13 — pinned endpoints set the price, and ZDR can be turned off
 
 `max_price`, the reservation, the context and the completion limit come

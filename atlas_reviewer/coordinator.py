@@ -1142,18 +1142,24 @@ def render_draft(review: AgenticReview, redactor: Redactor) -> str:
     def scrub(text: str) -> str:
         return scrubber(text).text
 
-    lines = [status_line(review), "", _headline(review, scrub), ""]
+    lines = [status_line(review), "", _headline(review, scrub)]
     if review.selection_note or review.not_picked:
-        lines += ["## Lens selection", ""]
+        lines += ["", "## Lens selection"]
         if review.selection_note:
-            lines += [scrub(review.selection_note), ""]
-        lines += [
-            f"- NOT RUN: {quote_untrusted(name, QUOTED_CHARS, scrub=scrub)} ({why})"
-            for name, why in review.not_picked
-        ]
+            lines += ["", scrub(review.selection_note)]
         if review.not_picked:
             lines.append("")
-    lines += ["## Findings (verified quotes only)", ""]
+            lines += [
+                f"- NOT RUN: {quote_untrusted(name, QUOTED_CHARS, scrub=scrub)} ({why})"
+                for name, why in review.not_picked
+            ]
+    dropped = _dropped_notes(review)
+    if dropped:
+        lines += ["", "## Dropped findings (left out of this review)", ""]
+        lines += [
+            "- " + quote_untrusted(note, QUOTED_CHARS, scrub=scrub) for note in dropped
+        ]
+    lines += ["", "## Findings (verified quotes only)", ""]
     lines += [_finding_line(f, scrub) for f in review.verified] or [
         "No verified findings."
     ]
@@ -1417,6 +1423,17 @@ def _lens_line(r: LensResult, scrub: Callable[[str], str]) -> str:
         parts.append("escalated: the retry also failed")
     if r.retry_pending:
         parts.append("its retry did not run before the review ended")
+    if o.dropped:
+        parts.append(f"{len(o.dropped)} finding(s) dropped")
     if o.detail:
         parts.append(f"detail {quote_untrusted(o.detail, QUOTED_CHARS, scrub=scrub)}")
     return f"{head}; " + "; ".join(parts)
+
+
+def _dropped_notes(review: AgenticReview) -> tuple[str, ...]:
+    return tuple(
+        note
+        for result in review.lenses
+        if result.outcome is not None
+        for note in result.outcome.dropped
+    )
