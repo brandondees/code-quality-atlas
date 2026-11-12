@@ -342,7 +342,15 @@ offline provider. GitHub and Sprites still run. Do not pass `--dry-run`.
 
 When the CLI exits, the entrypoint writes its exit code to
 `/home/atlas/out/exit-code` and holds the Machine for
-`ATLAS_HOLD_SECONDS`. Poll for that file:
+`ATLAS_HOLD_SECONDS`. Poll for that file.
+
+On 2026-11-11, with flyctl, the first `fly ssh console` on the first
+held Machine failed for about 6 minutes, and later Machines connected
+in about 3 seconds. A likely cause is first-time SSH or WireGuard
+setup; that was not confirmed. The earlier poll discarded stderr, so
+the failure had no visible reason. This poll leaves stderr on the
+terminal. The first connection can be slow. This is what that run
+showed, not a documented Fly behavior.
 
 ```sh
 code=
@@ -350,7 +358,7 @@ deadline=$(( $(date +%s) + 3600 ))
 while [ -z "$code" ] && [ "$(date +%s)" -lt "$deadline" ]; do
   sleep 30
   code=$(flyp ssh console --app atlas-reviewer --machine "$MACHINE_ID" -q \
-    -C 'cat /home/atlas/out/exit-code' 2>/dev/null | tr -dc '0-9')
+    -C 'cat /home/atlas/out/exit-code' | tr -dc '0-9')
 done
 echo "review exit code: ${code:-none after an hour}"
 ```
@@ -437,15 +445,27 @@ flyp machine wait "$MACHINE_ID" --app atlas-reviewer --state stopped
 flyp machine destroy "$MACHINE_ID" --app atlas-reviewer --force
 ```
 
-The entrypoint passes the stop on to the CLI as SIGTERM, because `sh`
-starts the CLI with SIGINT ignored. The CLI turns SIGTERM into
-`KeyboardInterrupt`, so its `finally` blocks delete the runner Sprite
-within its 60-second cleanup budget. The CLI ignores any further stop
-signal, so stopping again does not skip that delete. `--timeout 120`
-is how long Fly waits before SIGKILL. After a signal the entrypoint does
-not hold, so there is nothing to copy. `--force` destroys the Machine in
-any state. A SIGKILL skips `finally`, so after a hard stop check for the
-runner Sprite as below.
+The entrypoint passes a stop it receives on to the CLI as SIGTERM,
+because `sh` starts the CLI with SIGINT ignored. The CLI turns SIGTERM
+into `KeyboardInterrupt`, so its `finally` blocks delete the runner
+Sprite within its 60-second cleanup budget. The CLI ignores any further
+stop signal, so stopping again does not skip that delete. `--timeout 120`
+is how long Fly waits before SIGKILL.
+
+`fly machine stop`, including `--signal SIGINT`, signals the entrypoint.
+The entrypoint then exits without holding, so there is nothing to copy.
+On 2026-11-11, with flyctl, that stop ended the Machine with exit 130
+about 1 second later, and the runner Sprite was gone. That is the
+supported hard stop.
+
+A SIGTERM sent straight to the CLI process does not signal the
+entrypoint. Observed the same day with flyctl, the entrypoint held, and
+`/home/atlas/out/exit-code` was 130. That is an observation from that
+run, not a supported stop path: this runbook does not say how to find
+the CLI's PID or when to prefer that over `fly machine stop`.
+
+`--force` destroys the Machine in any state. A SIGKILL skips `finally`,
+so after a hard stop check for the runner Sprite as below.
 
 ### Recover a runner Sprite by name
 
@@ -462,46 +482,201 @@ flyp machine list --app atlas-reviewer
 ```
 
 Then sweep by name. `--force-live` records that you checked; without it
-the sweep refuses (exit 2):
+the sweep refuses (exit 2).
+
+On 2026-11-11, with flyctl, `fly machine run --rm` hung at "Attempting
+to start machine..." after the Machine had already exited and been
+removed. It hung twice for more than 4 minutes, and a third time on a
+very short command (`probe-runner`). `timeout 45` stopped the hang.
+This is what that run showed, not a documented Fly behavior. `timeout`
+is GNU coreutils (`gtimeout` from Homebrew coreutils on macOS). It
+runs a program and cannot call the `flyp` function, so the sweep and
+the protocol probe export the org token inside a subshell the way
+`flyp` does, and run `timeout 45 fly ...` there. The review-sequence
+run uses that same subshell and `--detach`, with no `timeout`. The
+token stays in the subshell's environment, not on a command line.
+
+Note the Machine ID that `fly machine run` prints before any hang.
+If `MACHINE_ID` is empty, stop. Read the Machine list
+(`fly machine list`) and take the ID from there. Do not run the logs
+command until `MACHINE_ID` is set. With it empty, that command reads
+the app-wide log.
 
 ```sh
-flyp machine run "$IMAGE" \
-  --app atlas-reviewer \
-  --region iad \
-  --vm-cpu-kind shared \
-  --vm-cpus 1 \
-  --vm-memory 1024 \
-  --rm \
-  --restart no \
-  --entrypoint /usr/local/bin/atlas-reviewer \
-  --env ATLAS_EVENT_JSON="$EVENT" \
-  -- sweep --event /home/atlas/event.json --force-live
+flyp machine list --app atlas-reviewer
+```
+
+If the wrapper stops a hung flyctl, its status is timeout's, not the
+controller's. Read that Machine's logs only
+([fly logs](https://fly.io/docs/flyctl/cmd/fly_logs) filters with
+`--machine`):
+
+```sh
+flyp logs --app atlas-reviewer --machine "$MACHINE_ID" --no-tail
+```
+
+App-wide `--no-tail` keeps only the last 100 lines and can return
+another Machine's `Main child exited normally with code: N`. A
+timeout can also stop a slow but healthy run before this Machine has
+written that line; then the outcome is unknown. For the sweep, the
+success signal is that Machine's own
+`<name>: destroyed (verified absent)` or
+`<name>: already absent, nothing deleted (verified absent)` line. If
+neither line appears for that Machine, run the sweep again. Exit 3
+means the same: the runner was not verified gone.
+
+The protocol probe below uses the same `timeout 45` subshell and the
+same per-Machine logs read. `timeout 45` is what stopped the hang on
+the short commands that run showed. A review sequence also creates a
+runner and fetches the head-SHA tarball, so the same 45 seconds can
+stop a run that is still working. That command uses `--detach`
+instead. The machine-run doc says `--detach` returns immediately
+instead of monitoring deployment progress
+([fly machine run](https://fly.io/docs/flyctl/cmd/fly_machine_run/)).
+The 2026-11-11 run did not use `--detach`. Its exit code is still that
+Machine's logs line, read with `--machine` as above.
+
+```sh
+(
+  unset FLY_ACCESS_TOKEN
+  export FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN"
+  timeout 45 fly machine run "$IMAGE" \
+    --app atlas-reviewer \
+    --region iad \
+    --vm-cpu-kind shared \
+    --vm-cpus 1 \
+    --vm-memory 1024 \
+    --rm \
+    --restart no \
+    --entrypoint /usr/local/bin/atlas-reviewer \
+    --env ATLAS_EVENT_JSON="$EVENT" \
+    -- sweep --event /home/atlas/event.json --force-live
+)
 ```
 
 `sweep --event` derives the runner name from the event. `sweep --runner
 <name>` takes the name from the logs line instead. Either one records the
-name in that Machine's ledger and destroys it; the logs show
-`<name>: destroyed (verified absent)`, or `<name>: already absent,
-nothing deleted (verified absent)` when no Sprite had that name. The
-sweep exits 3 when it cannot verify the runner is gone; run it again.
-The same command works from a checkout with `ATLAS_SPRITES_TOKEN` set:
+name in that Machine's ledger and destroys it. The same command works
+from a checkout with `ATLAS_SPRITES_TOKEN` set:
 `python -m atlas_reviewer sweep --event event.json --force-live`.
 
-`probe-runner` uses the same image and the same `--rm --restart no`
-flags, with no `ATLAS_EVENT_JSON`. Its output is short and goes to
-`fly logs`:
+The protocol probe and the sweep use the same image, the same
+`--rm --restart no` flags, and the same `timeout 45` subshell. The
+review-sequence run uses `--detach` instead. The protocol probe's output
+is short. On the 2026-11-11 probe-runner run, telemetry from a `--rm` probe was gone
+with the Machine's disk and survived only in `fly logs`. Start
+streaming logs before the probe, with the `flyp logs` command in
+[Run one review](#run-one-review). If flyctl hangs after the Machine
+has already exited, read that Machine's exit with the
+`--machine "$MACHINE_ID"` logs command above.
+
+A probe does not call a model, and nothing in the controller checks
+that. App secrets are on every Machine, so the probe Machine also
+receives `ATLAS_OPENROUTER_API_KEY`. That is a current limitation. On
+that probe-runner run the key was there. That run did not show that
+`fly secrets unset --stage` keeps the key off the next Machine. The
+steps below are the workaround, not something that probe confirmed.
+Before the probe, unstage it. `--stage` skips a release, as
+[Secrets](#secrets) already says for
+`fly secrets set`. `fly secrets list` prints names, not values; the
+OpenRouter name should be absent:
 
 ```sh
-flyp machine run "$IMAGE" \
-  --app atlas-reviewer \
-  --region iad \
-  --vm-cpu-kind shared \
-  --vm-cpus 1 \
-  --vm-memory 1024 \
-  --rm \
-  --restart no \
-  --entrypoint /usr/local/bin/atlas-reviewer \
-  -- probe-runner
+flyp secrets unset ATLAS_OPENROUTER_API_KEY --stage --app atlas-reviewer
+flyp secrets list --app atlas-reviewer
+```
+
+The command with no `ATLAS_EVENT_JSON` is only the protocol probe:
+
+```sh
+(
+  unset FLY_ACCESS_TOKEN
+  export FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN"
+  timeout 45 fly machine run "$IMAGE" \
+    --app atlas-reviewer \
+    --region iad \
+    --vm-cpu-kind shared \
+    --vm-cpus 1 \
+    --vm-memory 1024 \
+    --rm \
+    --restart no \
+    --entrypoint /usr/local/bin/atlas-reviewer \
+    -- probe-runner
+)
+```
+
+`probe-runner --sequence review` on Fly cannot use `--tarball`. This
+image copies the controller, not a checkout tarball. The review
+sequence needs `--event` and `ATLAS_EVENT_JSON`. The entrypoint writes
+that variable to `/home/atlas/event.json`. On the 2026-11-11
+probe-runner run the command was `--sequence review --event
+/home/atlas/event.json --tools review`:
+
+```sh
+(
+  unset FLY_ACCESS_TOKEN
+  export FLY_API_TOKEN="$FLY_PERSONAL_API_TOKEN"
+  fly machine run "$IMAGE" \
+    --app atlas-reviewer \
+    --region iad \
+    --vm-cpu-kind shared \
+    --vm-cpus 1 \
+    --vm-memory 1024 \
+    --detach \
+    --rm \
+    --restart no \
+    --entrypoint /usr/local/bin/atlas-reviewer \
+    --env ATLAS_EVENT_JSON="$EVENT" \
+    -- probe-runner --sequence review --event /home/atlas/event.json --tools review
+)
+```
+
+Note the Machine ID that command prints.
+If `MACHINE_ID` is empty, stop and read the Machine list, as above.
+Do not run the wait or the logs command until it is set.
+
+`--rm` destroys the Machine when it stops
+([Run a new Machine](https://fly.io/docs/machines/flyctl/fly-machine-run/)).
+The Machines API can wait for `destroyed` as well as `stopped`
+([Wait for State](https://fly.io/docs/machines/api/machines-resource/#wait-for-a-machine-to-reach-a-specified-state)).
+Wait for `destroyed` here, not `stopped`: a `--rm` Machine is gone
+once it exits, so `stopped` is not the state this probe ends in.
+The 2026-11-11 run did not use `fly machine wait`.
+[`fly machine wait`](https://fly.io/docs/flyctl/cmd/fly_machine_wait/)
+defaults to 5 minutes. This wait uses 1 hour, the same bound as the
+review poll, because a review sequence also creates a runner and
+fetches a tarball.
+
+```sh
+flyp machine wait "$MACHINE_ID" --app atlas-reviewer --state destroyed --wait-timeout 1h
+```
+
+Then read that Machine's logs, before staging the key again. The probe
+passed when that Machine's line is
+`Main child exited normally with code: 0`. The controller writes
+`status: completed` for that exit. It writes
+`probe: FAILED -- the runner is not usable as probed` and the logs
+line ends in `code: 3` when the runner did not complete.
+
+```sh
+flyp logs --app atlas-reviewer --machine "$MACHINE_ID" --no-tail
+```
+
+If that line is still absent after the wait, read the log stream
+started before the probe
+([Run one review](#run-one-review)). `--no-tail` keeps only the last
+100 lines. Do not stage the key. Report that this probe did not show
+`code: 0`.
+
+After the probe, stage the pilot key again from stdin. The `grep`
+writes that one line to the import, not to the terminal. `--stage`
+still skips a release. Then list the names again. `fly secrets list`
+prints names, not values; the OpenRouter name should be present:
+
+```sh
+grep -E '^ATLAS_OPENROUTER_API_KEY=' "$SECRETS_DIR/secrets.env" |
+  flyp secrets import --stage --app atlas-reviewer
+flyp secrets list --app atlas-reviewer
 ```
 
 ## Tear it down
@@ -557,7 +732,11 @@ exiting 0, a run that passes `--provider openrouter
 - Every app secret is in the environment of every Machine of the app
   ([Secrets and Fly Apps](https://fly.io/docs/apps/secrets)). A
   `probe-runner` or `sweep` Machine needs only `ATLAS_SPRITES_TOKEN` and
-  still gets the GitHub App key and the OpenRouter key. Each Machine runs
+  still gets the GitHub App key and the OpenRouter key. A probe does
+  not call a model, and nothing refuses to run it while
+  `ATLAS_OPENROUTER_API_KEY` is set. Unstage that key before a probe,
+  as in [Recover a runner Sprite by name](#recover-a-runner-sprite-by-name).
+  Each Machine runs
   one controller command from this image and publishes no port. A second
   app per credential set is not worth it for one operator.
 - The image installs the whole dev lock, so mypy, pytest, and ruff are in
