@@ -39,6 +39,7 @@ from atlas_reviewer.redact import Redactor
 from atlas_reviewer.service import (
     PostAuthError,
     PostNotCurrent,
+    PostRejected,
     RateLimited,
     before_send,
 )
@@ -66,6 +67,9 @@ _ATTEMPT_DEADLINE_S = 45.0
 # A rate-limit header longer than this is capped so one response cannot
 # stall the machine for hours.
 _MAX_RETRY_AFTER_S = 900.0
+# GitHub's secondary rate limit guidance is at least a minute when the
+# response does not name a shorter wait.
+_SECONDARY_FLOOR_S = 60.0
 
 
 class RefusedReviewEvent(Exception):
@@ -189,6 +193,7 @@ class ReviewPoster:
         max_pages: int = DEFAULT_MAX_PAGES,
         now: Callable[[], float] | None = None,
         secrets: Callable[[], tuple[str, ...]] | None = None,
+        bot_login: str = "",
     ) -> None:
         self._transport = transport
         self._tokens = tokens
@@ -199,6 +204,7 @@ class ReviewPoster:
         self._max_pages = max_pages
         self._now = now or time.monotonic
         self._secrets = secrets or (lambda: ())
+        self._bot_login = bot_login
         self._deadline: float | None = None
 
     def credential_secrets(self) -> tuple[str, ...]:
@@ -254,7 +260,7 @@ class ReviewPoster:
             if not isinstance(data, list):
                 raise BoundaryError("GitHub review list returned a non-array")
             for item in data:
-                found = _marked(item, marker, event.head_sha)
+                found = _marked(item, marker, event.head_sha, self._bot_login)
                 if found is not None:
                     return found
             pages += 1
@@ -274,13 +280,21 @@ class ReviewPoster:
             f"{self._api_url}/repos/{owner_q}/{name_q}/pulls/{event.pr_number}/reviews"
         )
 
+    def _remaining(self) -> float | None:
+        if self._deadline is None:
+            return None
+        return self._deadline - self._now()
+
     def _request(self, method: str, url: str, body: bytes | None) -> HttpResponse:
-        timeout = self._timeout_s
-        if self._deadline is not None:
-            remaining = self._deadline - self._now()
-            if remaining <= 0:
-                raise BoundaryError("post attempt deadline")
-            timeout = min(timeout, remaining)
+        remaining = self._remaining()
+        if remaining is not None and remaining <= 0:
+            raise BoundaryError("post attempt deadline")
+        timeout = (
+            self._timeout_s if remaining is None else min(self._timeout_s, remaining)
+        )
+        limit = getattr(self._tokens, "limit_timeout", None)
+        if limit is not None and remaining is not None:
+            limit(remaining)
         try:
             token = self._tokens.token()
         except BoundaryError as exc:
@@ -288,6 +302,11 @@ class ReviewPoster:
             if "HTTP 401" in text or "HTTP 403" in text:
                 raise PostAuthError(text) from None
             raise
+        remaining = self._remaining()
+        if remaining is not None and remaining <= 0:
+            raise BoundaryError("post attempt deadline")
+        if remaining is not None:
+            timeout = min(self._timeout_s, remaining)
         return self._transport.request(
             method,
             url,
@@ -306,7 +325,12 @@ class ReviewPoster:
 def _raise_for_status(response: HttpResponse, what: str) -> None:
     if 200 <= response.status < 300:
         return
+    if response.status == 422:
+        raise PostRejected(f"{what} HTTP 422")
     wait = _retry_wait(response)
+    if _secondary_limit(response):
+        wait = min(max(wait or 0.0, _SECONDARY_FLOOR_S), _MAX_RETRY_AFTER_S)
+        raise RateLimited(f"{what} HTTP {response.status}", wait)
     if response.status == 429 or (response.status == 403 and wait is not None):
         raise RateLimited(f"{what} HTTP {response.status}", wait or 0.0)
     if response.status in {401, 403}:
@@ -330,8 +354,11 @@ def _retry_wait(response: HttpResponse) -> float | None:
                 return min(
                     max(0.0, moment.timestamp() - time.time()), _MAX_RETRY_AFTER_S
                 )
+    remaining = response.header("x-ratelimit-remaining")
     reset = response.header("x-ratelimit-reset")
-    if reset is not None:
+    # GitHub sends the reset header on ordinary responses. It is a rate
+    # limit only when the remaining budget is zero.
+    if remaining == "0" and reset is not None:
         try:
             return min(max(0.0, float(reset) - time.time()), _MAX_RETRY_AFTER_S)
         except ValueError:
@@ -341,17 +368,24 @@ def _retry_wait(response: HttpResponse) -> float | None:
     return None
 
 
-def _marked(item: object, marker: str, sha: str) -> int | None:
-    """A review already posted for this commit by a GitHub App. A review
-    a person wrote, or one attached to another commit, does not count, so
-    planting the marker in a review cannot suppress this one."""
-    if not isinstance(item, dict) or item.get("commit_id") != sha:
+def _secondary_limit(response: HttpResponse) -> bool:
+    try:
+        text = response.body.decode("utf-8", errors="replace").lower()
+    except (UnicodeError, AttributeError):
+        return False
+    return "secondary rate limit" in text
+
+
+def _marked(item: object, marker: str, sha: str, bot_login: str) -> int | None:
+    """A review already posted for this commit by this App. A review a
+    person wrote, one from another App, or one attached to another commit,
+    does not count, so planting the marker cannot suppress this post."""
+    if not bot_login or not isinstance(item, dict) or item.get("commit_id") != sha:
         return None
     user = item.get("user")
     if not isinstance(user, dict) or user.get("type") != "Bot":
         return None
-    login = user.get("login")
-    if not isinstance(login, str) or not login.endswith("[bot]"):
+    if user.get("login") != bot_login:
         return None
     body, review_id = item.get("body"), item.get("id")
     if not isinstance(body, str) or marker not in body:
@@ -381,7 +415,15 @@ def publisher_from_env(
         or int(installation) < 1
     ):
         raise ValueError("ATLAS_GITHUB_INSTALLATION_ID must be a positive integer")
+    slug = _env(env, "ATLAS_GITHUB_APP_SLUG")
+    if not slug.isascii() or not slug.replace("-", "").isalnum():
+        raise ValueError("ATLAS_GITHUB_APP_SLUG must be an App slug")
     secret = env.get("ATLAS_GITHUB_WEBHOOK_SECRET", "")
+    known = [secret, private_key]
+    for name in ("ATLAS_SPRITES_TOKEN", "ATLAS_OPENROUTER_API_KEY"):
+        value = env.get(name, "")
+        if value:
+            known.append(value)
     tokens = AppInstallationTokens(
         transport,
         clock,
@@ -392,13 +434,14 @@ def publisher_from_env(
         writable=POST_WRITABLE,
         repositories=tuple(sorted(repo.split("/", 1)[1] for repo in allowlist)),
     )
-    redactor = Redactor(known_secrets=(secret, private_key), sources=(tokens.secrets,))
+    redactor = Redactor(known_secrets=tuple(known), sources=(tokens.secrets,))
     return ReviewPoster(
         transport,
         tokens,
         PostLedger(state_dir / "posted.json"),
         lambda text: redactor(text).text,
         secrets=tokens.secrets,
+        bot_login=f"{slug}[bot]",
     )
 
 

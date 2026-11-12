@@ -97,6 +97,11 @@ class AppInstallationTokens:
         self._minted: list[str] = []
         self._lock = threading.Lock()
 
+    def limit_timeout(self, seconds: float) -> None:
+        """The next mint waits at most ``seconds``. The poster's attempt
+        deadline is what passes this in, so the mint cannot run past it."""
+        self._timeout_s = max(0.0, seconds)
+
     def token(self) -> str:
         with self._lock:
             if self._cached is None or self._stale(self._cached):

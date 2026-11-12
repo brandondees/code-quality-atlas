@@ -69,7 +69,9 @@ posted.
 The review itself is the existing `review` command, one at a time unless
 `ATLAS_REVIEW_CONCURRENCY` says otherwise (1 to 32; 32 is a startup refusal
 so a bad value cannot start an unbounded pool, not a cost cap). The child
-process does not receive the webhook secret. Exit 0, 4 and 5 are finished
+process receives only an allowlist: the OpenRouter key, the Sprites token,
+a read-only installation token, and the process basics. It does not receive
+the webhook secret, the App private key, or a Fly API token. Exit 0, 4 and 5 are finished
 reviews and are posted. Any other exit posts nothing; the failure is a
 telemetry event.
 
@@ -80,7 +82,9 @@ the controller's file-coverage note, the limit stops, and the cost. The
 draft's own APPROVE or REQUEST_CHANGES line is quoted as a recommendation
 and is not sent. A retry of the same commit does not post a second time:
 the key `repo#pr#sha` is stored after GitHub accepts the review, and a
-review that already contains that marker is reused. The posting token asks
+review is reused only when it carries that marker, its `commit_id` is this
+SHA, and its author is this App's bot (`ATLAS_GITHUB_APP_SLUG` plus
+`[bot]`). Another App's bot does not count. The posting token asks
 for `pull_requests: write` and for no other write. The App installation
 has to grant that permission or the post fails and nothing is published.
 

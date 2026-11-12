@@ -16,6 +16,7 @@ from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.service import (
     PostAuthError,
     PostNotCurrent,
+    PostRejected,
     RateLimited,
     Worker,
     before_send,
@@ -88,6 +89,7 @@ def _poster(
         Tokens(),
         PostLedger(tmp_path / "posted.json"),
         lambda text: text,
+        bot_login="code-quality-atlas[bot]",
     )
     return poster, github
 
@@ -153,6 +155,7 @@ def test_a_retry_finds_the_marker_when_the_local_record_was_lost(tmp_path):
         Tokens(),
         PostLedger(tmp_path / "fresh.json"),
         lambda text: text,
+        bot_login="code-quality-atlas[bot]",
     )
     before = len(github.calls)
     second.post(EVENT, REPORT)
@@ -314,7 +317,7 @@ def test_a_rate_limit_is_not_retried_as_a_server_error(tmp_path):
     assert caught.value.retry_after == 12
 
 
-def test_a_403_with_a_reset_header_waits_instead_of_failing_auth(tmp_path):
+def test_a_403_with_a_reset_header_and_budget_left_is_auth(tmp_path):
     github = GitHub()
     reset = str(int(time.time()) + 30)
 
@@ -322,13 +325,91 @@ def test_a_403_with_a_reset_header_waits_instead_of_failing_auth(tmp_path):
         github.calls.append((method, url, body))
         if method == "GET":
             return HttpResponse(200, {}, b"[]")
-        return HttpResponse(403, {"x-ratelimit-reset": reset}, b"")
+        return HttpResponse(
+            403, {"x-ratelimit-reset": reset, "x-ratelimit-remaining": "12"}, b""
+        )
+
+    github.request = request
+    poster, _ = _poster(tmp_path, github)
+    with pytest.raises(PostAuthError):
+        poster.post(EVENT, REPORT)
+
+
+def test_a_403_with_no_budget_left_waits_for_the_reset(tmp_path):
+    github = GitHub()
+    reset = str(int(time.time()) + 30)
+
+    def request(method, url, headers, body, timeout_s, max_bytes=None):
+        github.calls.append((method, url, body))
+        if method == "GET":
+            return HttpResponse(200, {}, b"[]")
+        return HttpResponse(
+            403, {"x-ratelimit-reset": reset, "x-ratelimit-remaining": "0"}, b""
+        )
 
     github.request = request
     poster, _ = _poster(tmp_path, github)
     with pytest.raises(RateLimited) as caught:
         poster.post(EVENT, REPORT)
     assert 0 < caught.value.retry_after <= 30
+
+
+def test_a_retry_after_above_15_minutes_is_capped_and_a_bare_403_is_auth(tmp_path):
+    github = GitHub()
+
+    def limited(method, url, headers, body, timeout_s, max_bytes=None):
+        github.calls.append((method, url, body))
+        if method == "GET":
+            return HttpResponse(200, {}, b"[]")
+        return HttpResponse(429, {"Retry-After": "100000"}, b"")
+
+    github.request = limited
+    poster, _ = _poster(tmp_path, github)
+    with pytest.raises(RateLimited) as caught:
+        poster.post(EVENT, REPORT)
+    assert caught.value.retry_after == 900
+
+    def bare(method, url, headers, body, timeout_s, max_bytes=None):
+        github.calls.append((method, url, body))
+        if method == "GET":
+            return HttpResponse(200, {}, b"[]")
+        return HttpResponse(403, {}, b"")
+
+    github.request = bare
+    poster, _ = _poster(tmp_path / "bare", github)
+    with pytest.raises(PostAuthError):
+        poster.post(EVENT, REPORT)
+
+
+def test_a_secondary_limit_with_no_headers_waits_a_minute(tmp_path):
+    github = GitHub()
+
+    def request(method, url, headers, body, timeout_s, max_bytes=None):
+        github.calls.append((method, url, body))
+        if method == "GET":
+            return HttpResponse(200, {}, b"[]")
+        return HttpResponse(403, {}, b"You have exceeded a secondary rate limit")
+
+    github.request = request
+    poster, _ = _poster(tmp_path, github)
+    with pytest.raises(RateLimited) as caught:
+        poster.post(EVENT, REPORT)
+    assert caught.value.retry_after == 60
+
+
+def test_a_422_is_not_retried(tmp_path):
+    github = GitHub()
+
+    def request(method, url, headers, body, timeout_s, max_bytes=None):
+        github.calls.append((method, url, body))
+        if method == "GET":
+            return HttpResponse(200, {}, b"[]")
+        return HttpResponse(422, {}, b"")
+
+    github.request = request
+    poster, _ = _poster(tmp_path, github)
+    with pytest.raises(PostRejected):
+        poster.post(EVENT, REPORT)
 
 
 def test_a_refused_token_mint_is_an_auth_failure(tmp_path):
@@ -392,6 +473,134 @@ def test_a_post_attempt_stops_at_its_deadline(tmp_path):
     with pytest.raises(BoundaryError, match="deadline"):
         poster.post(EVENT, REPORT)
     assert github.calls == []
+
+
+def test_another_apps_bot_does_not_suppress_the_post(tmp_path):
+    github = GitHub()
+    github.reviews.append(
+        {
+            "id": 4,
+            "body": marker_for(post_key(EVENT)),
+            "commit_id": SHA,
+            "user": {"login": "evil-app[bot]", "type": "Bot"},
+        }
+    )
+    poster, _ = _poster(tmp_path, github)
+    poster.post(EVENT, REPORT)
+    assert [call[0] for call in github.calls].count("POST") == 1
+
+
+def test_sprites_and_openrouter_secrets_do_not_reach_the_comment(tmp_path):
+    sprite = "org/1/sprites-secret-value"
+    model = "sk-or-v1-secret-value"
+    report = ReviewReport(
+        (f"see {sprite} and {model}",), (), "note", (), (), (), "COMMENT"
+    )
+    poster, github = _poster(tmp_path)
+    poster._scrub = lambda text: text.replace(sprite, "[REDACTED]").replace(
+        model, "[REDACTED]"
+    )
+    poster.post(EVENT, report)
+    body = _posted_body(github)["body"]
+    assert sprite not in body
+    assert model not in body
+
+
+def test_a_minted_token_in_the_report_does_not_reach_the_comment(tmp_path, monkeypatch):
+    minted = "ghs_minted_value"
+
+    class Minted:
+        def __init__(self, *args, **kwargs):
+            self._values: list[str] = []
+
+        def token(self) -> str:
+            self._values.append(minted)
+            return minted
+
+        def secrets(self) -> tuple[str, ...]:
+            return tuple(self._values)
+
+        def limit_timeout(self, seconds: float) -> None:
+            return None
+
+    monkeypatch.setattr("atlas_reviewer.service_post.AppInstallationTokens", Minted)
+    from atlas_reviewer.clock import SystemClock
+    from atlas_reviewer.service_post import publisher_from_env
+
+    github = GitHub()
+    poster = publisher_from_env(
+        {
+            "ATLAS_GITHUB_APP_ID": "5648875",
+            "ATLAS_GITHUB_APP_PRIVATE_KEY": "pem-secret-value",
+            "ATLAS_GITHUB_INSTALLATION_ID": "1",
+            "ATLAS_GITHUB_APP_SLUG": "code-quality-atlas",
+            "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
+            "ATLAS_SPRITES_TOKEN": "org/1/sprites-secret-value",
+            "ATLAS_OPENROUTER_API_KEY": "sk-or-v1-secret-value",
+        },
+        frozenset({REPO}),
+        tmp_path,
+        transport=github,
+        clock=SystemClock(),
+    )
+    report = ReviewReport(
+        (f"leaked {minted} org/1/sprites-secret-value sk-or-v1-secret-value",),
+        (),
+        "note",
+        (),
+        (),
+        (),
+        "COMMENT",
+    )
+    poster.post(EVENT, report)
+    body = _posted_body(github)["body"]
+    assert minted not in body
+    assert "sprites-secret-value" not in body
+    assert "sk-or-v1-secret-value" not in body
+
+
+def test_the_deadline_includes_the_token_mint(tmp_path):
+    clock = {"t": 0.0}
+    seen: list[float] = []
+
+    class Mint:
+        def token(self) -> str:
+            clock["t"] = 100.0
+            return "ghs_test"
+
+        def limit_timeout(self, seconds: float) -> None:
+            seen.append(seconds)
+
+    github = GitHub()
+    poster = ReviewPoster(
+        github,
+        Mint(),
+        PostLedger(tmp_path / "posted.json"),
+        lambda text: text,
+        now=lambda: clock["t"],
+        bot_login="code-quality-atlas[bot]",
+    )
+    with pytest.raises(BoundaryError, match="deadline"):
+        poster.post(EVENT, REPORT)
+    assert github.calls == []
+    assert seen and seen[0] <= 45
+
+
+def test_a_corrupt_post_ledger_exits_2(tmp_path, capsys):
+    (tmp_path / "posted.json").write_text("{", encoding="utf-8")
+    code = main(
+        env={
+            "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
+            "ATLAS_SERVICE_PROVIDER": "offline",
+            "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
+            "ATLAS_GITHUB_APP_ID": "5648875",
+            "ATLAS_GITHUB_APP_PRIVATE_KEY": "pem-secret-value",
+            "ATLAS_GITHUB_INSTALLATION_ID": "1",
+            "ATLAS_GITHUB_APP_SLUG": "code-quality-atlas",
+        }
+    )
+    assert code == 2
+    assert "post ledger" in capsys.readouterr().err
 
 
 def test_main_does_not_listen_without_a_posting_token(tmp_path, capsys):

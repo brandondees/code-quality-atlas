@@ -752,6 +752,7 @@ def test_the_module_refuses_a_port_other_than_8080(tmp_path):
         config_from_env(
             {
                 "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
+                "ATLAS_SERVICE_PROVIDER": "offline",
                 "ATLAS_SERVICE_PORT": "8081",
                 "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
             }
@@ -759,6 +760,7 @@ def test_the_module_refuses_a_port_other_than_8080(tmp_path):
     config = config_from_env(
         {
             "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
+            "ATLAS_SERVICE_PROVIDER": "offline",
             "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
         }
     )

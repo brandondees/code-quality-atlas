@@ -28,6 +28,7 @@ from pathlib import Path
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.ledger import make_private_dirs
+from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.service_admit import (
     EVENT_HEADER,
@@ -73,6 +74,10 @@ class PostNotCurrent(Exception):
 
 class PostAuthError(Exception):
     """GitHub refused the credential. Do not retry."""
+
+
+class PostRejected(Exception):
+    """GitHub rejected the review. The request will not succeed on retry."""
 
 
 class RateLimited(Exception):
@@ -407,7 +412,7 @@ class Worker:
         except PostNotCurrent:
             self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
             return
-        except PostAuthError as exc:
+        except (PostAuthError, PostRejected) as exc:
             committed = self._settle(job, JobState.FAILED)
             if committed is JobState.SUPERSEDED:
                 self._note(job, committed, fields)
@@ -878,7 +883,7 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
             transport=UrllibTransport(),
             clock=SystemClock(),
         )
-    except (ServiceError, ValueError) as exc:
+    except (ServiceError, ValueError, BoundaryError) as exc:
         print(f"atlas-reviewer: {exc}", file=sys.stderr)
         return 2
     try:
