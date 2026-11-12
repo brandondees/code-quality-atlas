@@ -746,9 +746,12 @@ tarball.
 ## Agentic lens loop (offline, D40)
 
 `coordinator.review_lens` reviews a PR head with one lens through the
-bridge. It is not on the CLI, and it has run only against `LocalSprites`
-and a scripted model (`fakes.ScriptedLensModel`). There is no live
-tool-calling model adapter yet.
+bridge. It is not on the CLI. The offline tests run it against
+`LocalSprites` with a scripted model (`fakes.ScriptedLensModel`). The
+live tool-calling adapter (`tool_model.OpenRouterLensModel`) and the
+Sprite keepalive (`keepalive.py`) are built and tested offline (D41):
+recorded HTTP for the adapter, and `LocalSprites` plus a fake Tasks
+socket for the hold. No live model, Sprite or Fly call has been made.
 
 - **Limits.** `lens_loop.AgenticLimits` has Brandon's provisional defaults
   (2026-11-11), set for headroom and configurable, to be revisited after
@@ -787,6 +790,21 @@ tool-calling model adapter yet.
   with the body injected again; a second one escalates. A crash leaves an
   abandoned attempt that counts as used. A lens already settled for this
   head and body is reused without a runner.
+- **The adapter** (`tool_model.OpenRouterLensModel`). One Chat Completions
+  request per turn, with the one-shot provider pin (`require_parameters`,
+  zero data retention, no fallbacks, no plugins and no server tools) and
+  only the bridge's tool schemas. `usage.cost` is settled by the loop's
+  spend tracker; an unreadable cost stays at the reserved worst case. The
+  adapter does not retry and does not reserve on the one-shot budget. A
+  tool call with arguments that are not one JSON object is handed to the
+  bridge, which rejects it, and the refusal comes back nonce-fenced. No
+  call is executed in the adapter.
+- **The keepalive** (`keepalive.py`). For the length of a lens,
+  `review_lens` holds the Sprite with a Tasks API task on
+  `/.sprite/api.sock`: a 5-minute expiry, refreshed every 60 seconds, and
+  deleted on the way out, including when the lens raises or is cancelled.
+  The refresh thread is joined before the delete. Snapshot and restore is
+  not built; there is no public fork API (Fly support, 2026-11-06).
 - **The draft** (`coordinator.render_draft`).
   - **Status line.** The first line is a status line: `"mode": "agentic"`,
     `coverage_complete`, and the lens counts by state.
@@ -832,7 +850,9 @@ tool-calling model adapter yet.
 | `quotes.py` | check each finding's quoted evidence against the head file at the cited lines (the span is the quote's line count), or the diff's removed lines (`check_quote`) | no |
 | `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) | writes the ledger file |
 | `lens_loop.py` | the agentic limits (Brandon's provisional defaults, 2026-11-11), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the lens system prompt, the spend tracker, one lens attempt (`run_attempt`) | via `Bridge`, `LensModel` |
-| `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft | via ports, the ledger |
+| `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft; holds the Sprite for the lens (`keepalive.lens_hold`) | via ports, the ledger |
+| `tool_model.py` | the live tool-calling adapter (`OpenRouterLensModel`): one pinned Chat Completions request per `LensModel` turn, strict tool-call arguments, cost through the one-shot settlement helper. Not on the CLI. Tested with recorded HTTP only | via the OpenRouter client |
+| `keepalive.py` | the Sprite Tasks API hold for one lens: create, refresh every 60 seconds with a 5-minute expiry, delete on exit. Not on the CLI. Tested with `LocalSprites` and a fake socket | via the runner exec |
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`); the agentic `LensModel` port is in `lens_loop.py` | no |
 | `runner.py` | disposable-runner lifecycle (create → deny-all → verify → tool check → resolve interpreter → upload → unpack → tools → destroy), `probe_runner`, `run_session` (a `Session` on the same lifecycle), the one exec wrapper (`exec_argv`, minimal `env -i` environment) | via `SpritesApi` |
 | `interpreter.py` | the resolve script, `choose_python` (accepts only the pyenv-versions and `/usr/bin/python3` path shapes), `{python}` substitution, the probe-only diagnostic scripts and output summary | no |

@@ -68,15 +68,23 @@ def ledger(tmp_path):
 
 
 def review(tmp_path, script, *, sprites=None, limits=LIMITS, library=None, **kw):
+    from .test_keepalive import TaskServer, socket_path
+
     sprites = sprites if sprites is not None else LocalSprites()
     model = ScriptedLensModel(list(script))
-    result = review_lens(
-        EVENT, LENS, DIFF, trees(),
-        library=library or StubLibrary({LENS: BODY}), model=model, limits=limits,
-        ledger=ledger(tmp_path), sprites=sprites, runner_ledger=MemoryLedger(),
-        redactor=Redactor(), clock=FakeClock(), nonce=lambda: "f00dfeedf00dfeed",
-        bridge_root=str(tmp_path / "bridge"), **kw,
-    )  # fmt: skip
+    tasks = TaskServer(socket_path(tmp_path))
+    tasks.start()
+    try:
+        result = review_lens(
+            EVENT, LENS, DIFF, trees(),
+            library=library or StubLibrary({LENS: BODY}), model=model, limits=limits,
+            ledger=ledger(tmp_path), sprites=sprites, runner_ledger=MemoryLedger(),
+            redactor=Redactor(), clock=FakeClock(), nonce=lambda: "f00dfeedf00dfeed",
+            bridge_root=str(tmp_path / "bridge"), task_socket=str(tasks.path), **kw,
+        )  # fmt: skip
+    finally:
+        tasks.close()
+        assert tasks.tasks == {}, tasks.order
     return result, model, sprites
 
 

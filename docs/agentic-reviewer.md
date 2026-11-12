@@ -2,14 +2,16 @@
 
 **Status: direction accepted (D34 in
 [`open-questions.md`](open-questions.md), 2026-11-08); phases 1 and 2 are
-merged and phase 3 is built offline (D38, D39, D40), the rest is not built.**
+merged and phase 3 is built offline (D38, D39, D40, D41), the rest is not built.**
 The owner accepted the recommendations below as proposed ("I can roll with
 recommendations as proposed for now"). Phase 1 (full PR conversation and
 branch-wide CI, D38, #612) and phase 2 (the read-only tool bridge with Option B
 staging, D39, #614) are merged, tested against fixtures only. Phase 3's
 offline half (the controller loop and one attested lens, D40) is on draft
 PRs, tested with the real bridge over a fixture repository and a scripted
-model; nothing calls it from the CLI, and no live run has been made. Brandon
+model. The tool-calling adapter and the Sprite keepalive are also built
+offline (D41), tested with recorded HTTP and a fake Tasks socket; nothing
+calls either from the CLI, and no live run has been made. Brandon
 set provisional defaults for the five phase-3 limits on 2026-11-11 (see
 [Open numeric decisions](#open-numeric-decisions-pending-brandon)); they are
 headroom, configurable, and to be revisited after live runs. The other
@@ -215,8 +217,9 @@ itself, and a timeout is a coverage gap.
 - **Caps.** The one-shot path keeps D25's 3 calls and $3.00 reservation,
   and the model pin stays (`anthropic/claude-sonnet-5.5`, no fallbacks).
   Agentic mode has Brandon's provisional defaults (2026-11-11), for
-  headroom and configurable. A live run still needs the tool-calling
-  adapter, which is not built.
+  headroom and configurable. The tool-calling adapter and the Sprite
+  keepalive are built offline (D41). A live run still needs a probe; none
+  has been made.
 - **Starting scope.** Triage only: the four critical-tier lenses from
   [`review-depth-modes.md`](review-depth-modes.md) —
   `tracing-correctness-and-invariants`, `sweeping-for-security`,
@@ -252,7 +255,7 @@ owner at every phase.
 | 0 | Land #601-#607 as the one-shot reviewer and fallback, with the D33 note (#608). No agentic scope in those PRs. | none |
 | 1 | Full PR conversation (about 64 KiB, omissions named) and branch-wide CI labelled by SHA, in the shared evidence code. Fixture-tested. Built offline (D38), stacked on #607 with the owner's go-ahead rather than after the stack merged. | stack merged |
 | 2 | The tool bridge, offline: closed git tools (diff, list, read range, grep) against `FakeSprites` and a fixture repo, with argument rejection, byte and time caps, and git hardening. Option B staging. Built offline (D39), stacked on phase 1 with the owner's go-ahead. | phase 1 merged |
-| 3 | The controller loop and one attested lens, offline first: body injection, the attestation ledger, quote checks, retry and escalate. Offline half built (D40): `lens_loop.py`, `coordinator.py`, `attestation.py`, `quotes.py`, `lens_contract.py`, with a mechanical synthesis (no merge call for one lens) and no CLI entry point. Then one owner-approved live run, compared with the one-shot draft on the same head; that needs a tool-calling model adapter, which is not built. | offline work: none. Live run: Brandon's provisional defaults are set (2026-11-11); the run still needs the tool-calling adapter, which is not built |
+| 3 | The controller loop and one attested lens, offline first: body injection, the attestation ledger, quote checks, retry and escalate. Offline half built (D40): `lens_loop.py`, `coordinator.py`, `attestation.py`, `quotes.py`, `lens_contract.py`, with a mechanical synthesis (no merge call for one lens) and no CLI entry point. The tool-calling adapter (`tool_model.py`) and the Sprite keepalive (`keepalive.py`) are built offline (D41). Then one owner-approved live run, compared with the one-shot draft on the same head. | offline work: none. Live run: Brandon's provisional defaults are set (2026-11-11) and the adapter and keepalive are built offline (D41); the live probe is not done |
 | 4 | Triage mode: the four critical lenses, pool size 1, ID-reconciled merge, coverage never claimed complete unless the ledger shows it. | phase 3 measured |
 | 5 | The baked toolchain: the first tool set in the Sprite image, with summarized hits routed to lenses. | image build approved |
 | 6 | Measured pilots on owner-labelled PRs, scored for precision, recall and coverage honesty. Then review and comprehensive depths, a concurrency probe before any pool size above 1, Option A history staging, and the decision on retiring the one-shot path. | phases 4-5 done |

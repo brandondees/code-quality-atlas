@@ -45,6 +45,7 @@ from atlas_reviewer.bridge_staging import BRIDGE_ROOT, SourceTrees
 from atlas_reviewer.committed_secrets import scan_diff
 from atlas_reviewer.diffs import by_risk, split_files
 from atlas_reviewer.domain import PrEvent, RunnerReport
+from atlas_reviewer.keepalive import SOCKET_PATH, lens_hold
 from atlas_reviewer.lens_contract import Finding, Severity
 from atlas_reviewer.lens_loop import (
     AgenticLimits,
@@ -261,11 +262,13 @@ def review_lens(
     nonce: Callable[[], str] = lambda: secrets.token_hex(NONCE_BYTES),
     bridge_root: str = BRIDGE_ROOT,
     contract: str | None = None,
+    task_socket: str = SOCKET_PATH,
 ) -> AgenticReview:
     """Review `event` with one lens. The limits are resolved before any
     model, runner or ledger work. Brandon's provisional defaults are
     accepted. A limit cleared to unset is refused outright
-    (`LimitsUnsetError`)."""
+    (`LimitsUnsetError`). The runner holds a Sprite task for the length
+    of the lens and deletes it on the way out."""
     resolved = limits.resolve()
     contract = finding_contract() if contract is None else contract
     body = library.body(lens)
@@ -304,21 +307,12 @@ def review_lens(
 
     def in_session(bridge: Bridge) -> str:
         session.bridges.append(bridge)
-        step = next_step(ledger.attempts(key), resolved.retries)
-        while isinstance(step, RunAttempt):
-            attempts = ledger.attempts(key)
-            ledger.start(key, step.number)
-            secrets_seen: list[BridgeSecret] = []
-            outcome = run_attempt(
-                job, bridge, model, spend, clock,
-                review_deadline=review_deadline,
-                retry_of=attempts[-1].outcome if step.forced and attempts else None,
-                secrets=secrets_seen,
+        digest = event_runner_name(event).rsplit("-", 1)[-1]
+        with lens_hold(bridge.session, digest, task_socket):
+            return _attempts(
+                bridge, job, model, spend, clock, ledger, key, resolved,
+                review_deadline, session, scrub,
             )  # fmt: skip
-            session.secrets.extend(secrets_seen)
-            ledger.finish(key, step.number, outcome, scrub=scrub)
-            step = next_step(ledger.attempts(key), resolved.retries)
-        return f"lens {lens}: {len(ledger.attempts(key))} attempt(s)"
 
     report = run_bridge(
         sprites, runner_ledger, trees, in_session,
@@ -334,6 +328,36 @@ def review_lens(
         spend,
         (*diff_secrets.values, *session.flagged()),
     )
+
+
+def _attempts(
+    bridge: Bridge,
+    job: LensJob,
+    model: LensModel,
+    spend: Spend,
+    clock: Clock,
+    ledger: AttemptLedger,
+    key: LensKey,
+    limits: Limits,
+    review_deadline: float,
+    session: _Session,
+    scrub: Callable[[str], str],
+) -> str:
+    step = next_step(ledger.attempts(key), limits.retries)
+    while isinstance(step, RunAttempt):
+        attempts = ledger.attempts(key)
+        ledger.start(key, step.number)
+        secrets_seen: list[BridgeSecret] = []
+        outcome = run_attempt(
+            job, bridge, model, spend, clock,
+            review_deadline=review_deadline,
+            retry_of=attempts[-1].outcome if step.forced and attempts else None,
+            secrets=secrets_seen,
+        )  # fmt: skip
+        session.secrets.extend(secrets_seen)
+        ledger.finish(key, step.number, outcome, scrub=scrub)
+        step = next_step(ledger.attempts(key), limits.retries)
+    return f"lens {job.lens}: {len(ledger.attempts(key))} attempt(s)"
 
 
 def _result(

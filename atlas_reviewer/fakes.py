@@ -155,6 +155,8 @@ class FakeSprites:
             return "\n".join(f"{PYTHON_TAG}:{p}:{v}" for p, v in self.pythons), 0
         if "wc -c" in script and _FEED_RE.search(script):
             return str(len(stdin)), 0
+        if "atlas-task-hold" in script:
+            return "", 0
         for rule in self.rules:
             if rule.match in script:
                 return rule.handler(script, stdin)

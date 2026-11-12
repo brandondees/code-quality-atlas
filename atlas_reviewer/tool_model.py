@@ -1,0 +1,295 @@
+# SPDX-License-Identifier: MIT
+"""The live tool-calling model, on the controller, over OpenRouter.
+
+One `LensModel` turn is one Chat Completions request. It sends the same
+pinned provider document as the one-shot adapter (`only`, no fallbacks,
+`require_parameters`, `zdr`, `data_collection: deny`, no plugins and no
+server tools). The lens loop reserves the worst case and settles
+`usage.cost` through its own spend tracker; this module does not touch
+that tracker's rules, and it does not reserve on the one-shot
+`ReviewBudget` (that budget's ceiling is the one-shot 3 calls and $3).
+An unreadable cost is returned as a non-finite `Decimal`, which the
+tracker keeps at the worst case.
+
+Tool calls are parsed and handed back. The loop runs them through the
+bridge, which rejects an unknown tool or bad arguments before anything
+executes and returns that refusal, nonce-fenced, as the next tool
+result. This module does not execute a tool and does not retry a call:
+a retry would be a second billed request under one reservation.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Mapping
+from decimal import Decimal
+from typing import Any
+
+from atlas_reviewer.budget import check_tokens, input_token_bound, worst_case_usd
+from atlas_reviewer.http import safe_url
+from atlas_reviewer.lens_loop import (
+    AssistantCalls,
+    FinalReply,
+    Message,
+    ModelTurn,
+    ToolCalls,
+    ToolRequest,
+    ToolSchema,
+    TurnRequest,
+    UserText,
+)
+from atlas_reviewer.openrouter import (
+    _PER_MILLION,
+    MODEL_ID,
+    OpenRouterProvider,
+    _actual_cost,
+    _is_pinned_model,
+    _json_object,
+    _no_byok_reason,
+)
+from atlas_reviewer.ports import BoundaryError, ByokRefusedError
+from atlas_reviewer.pricing import ModelTerms, parse_model_terms
+
+# Not a price. `Spend.settle` keeps the reservation when the cost is not
+# a finite Decimal greater than or equal to zero.
+UNPRICED = Decimal("Infinity")
+
+
+class OpenRouterLensModel:
+    """The phase-3 `LensModel` port, backed by the one-shot OpenRouter client."""
+
+    def __init__(self, provider: OpenRouterProvider) -> None:
+        self.provider = provider
+
+    @property
+    def name(self) -> str:
+        return self.provider.name
+
+    def worst_case_usd(self, request: TurnRequest) -> Decimal:
+        terms, _counts_byok = self._ready()
+        payload = _payload(self.provider, request, terms)
+        check_tokens(
+            input_token_bound(json.dumps(payload)), terms, self.provider.budget.limits
+        )
+        return worst_case_usd(
+            input_token_bound(json.dumps(payload)), terms, self.provider.budget.limits
+        )
+
+    def turn(self, request: TurnRequest) -> ModelTurn:
+        """One request, no retry. The loop counts the call and settles the cost."""
+        terms, counts_byok = self._ready()
+        payload = _payload(self.provider, request, terms)
+        url = f"{self.provider._api_url}/chat/completions"
+        body = json.dumps(payload).encode()
+        try:
+            resp = self.provider._transport.request(
+                "POST",
+                url,
+                self.provider._headers(authed=True, json_body=True),
+                body,
+                self.provider._timeout_s,
+            )
+        except BoundaryError as exc:
+            raise BoundaryError(f"OpenRouter transport error: {exc}") from exc
+        if resp.status != 200:
+            raise BoundaryError(f"OpenRouter HTTP {resp.status} for {safe_url(url)}")
+        return _turn(
+            _json_object(resp.body, "OpenRouter chat completion", BoundaryError),
+            terms,
+            counts_byok,
+        )
+
+    def _ready(self) -> tuple[ModelTerms, bool]:
+        if self.provider._key_status is None:
+            self.provider.preflight()
+        status = self.provider._key_status
+        if status is None:
+            raise BoundaryError("refusing inference: key preflight has not passed")
+        terms = parse_model_terms(
+            self.provider._get_json(f"/model/{MODEL_ID}"), MODEL_ID
+        )
+        return terms, status.counts_byok
+
+
+def _routing(provider: OpenRouterProvider, terms: ModelTerms) -> dict[str, Any]:
+    """The one-shot provider document, including its price ceiling."""
+    return {
+        "only": list(provider._providers),
+        "allow_fallbacks": False,
+        "require_parameters": True,
+        "data_collection": "deny",
+        "zdr": True,
+        "max_price": {
+            "prompt": float(terms.prompt_rate * _PER_MILLION),
+            "completion": float(terms.completion_rate * _PER_MILLION),
+        },
+    }
+
+
+def _payload(
+    provider: OpenRouterProvider, request: TurnRequest, terms: ModelTerms
+) -> dict[str, Any]:
+    limits = provider.budget.limits
+    return {
+        "model": MODEL_ID,
+        "messages": _messages(request),
+        "tools": [_tool(tool) for tool in request.tools],
+        "max_tokens": limits.max_output_tokens,
+        "reasoning": {"max_tokens": limits.reasoning_max_tokens, "exclude": True},
+        "stream": False,
+        "provider": _routing(provider, terms),
+    }
+
+
+def _tool(tool: ToolSchema) -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": dict(tool.parameters),
+        },
+    }
+
+
+def _messages(request: TurnRequest) -> list[dict[str, Any]]:
+    """History in OpenAI chat shape. Tool-call ids are assigned here, and
+    the following tool results must line up with them. Result text is sent
+    unchanged, fence included."""
+    out: list[dict[str, Any]] = [{"role": "system", "content": request.system}]
+    pending: tuple[str, ...] | None = None
+    for message in request.messages:
+        pending = _one_message(out, message, pending)
+    if pending is not None:
+        raise BoundaryError("a tool result is missing")
+    return out
+
+
+def _one_message(
+    out: list[dict[str, Any]], message: Message, pending: tuple[str, ...] | None
+) -> tuple[str, ...] | None:
+    if isinstance(message, UserText):
+        if pending is not None:
+            raise BoundaryError("a tool result is missing")
+        out.append({"role": "user", "content": message.text})
+        return None
+    if isinstance(message, AssistantCalls):
+        if pending is not None:
+            raise BoundaryError("a tool result is missing")
+        ids = tuple(f"call-{len(out)}-{n}" for n in range(len(message.calls)))
+        out.append(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    _echo(call_id, call)
+                    for call_id, call in zip(ids, message.calls, strict=True)
+                ],
+            }
+        )
+        return ids
+    if pending is None or len(message.results) != len(pending):
+        raise BoundaryError("tool results do not match the tool calls")
+    for call_id, result in zip(pending, message.results, strict=True):
+        out.append({"role": "tool", "tool_call_id": call_id, "content": result})
+    return None
+
+
+def _echo(call_id: str, call: ToolRequest) -> dict[str, Any]:
+    arguments = "{}"
+    if isinstance(call.args, Mapping):
+        arguments = json.dumps(dict(call.args), sort_keys=True, ensure_ascii=True)
+    name = call.tool if isinstance(call.tool, str) else ""
+    return {
+        "id": call_id,
+        "type": "function",
+        "function": {"name": name, "arguments": arguments},
+    }
+
+
+def _turn(data: Mapping[str, Any], terms: ModelTerms, counts_byok: bool) -> ModelTurn:
+    usage = data.get("usage")
+    usage_obj = usage if isinstance(usage, dict) else {}
+    if not counts_byok and _no_byok_reason(usage_obj) is not None:
+        raise ByokRefusedError(
+            "refusing the review: this OpenRouter key does not count BYOK "
+            f"spend against its credit limit, and {_no_byok_reason(usage_obj)}"
+        )
+    cost = _cost(usage_obj, terms)
+    served = data.get("model")
+    if not isinstance(served, str) or not _is_pinned_model(served):
+        raise BoundaryError(f"OpenRouter served {served!r}, not {MODEL_ID}")
+    choice = _choice(data)
+    finish = choice.get("finish_reason")
+    if finish == "length":
+        raise BoundaryError("model turn stopped at the output-token limit")
+    message = choice.get("message")
+    if not isinstance(message, dict):
+        raise BoundaryError("model response has no message")
+    calls = message.get("tool_calls")
+    if isinstance(calls, list) and calls:
+        if finish not in ("tool_calls", "stop"):
+            raise BoundaryError(
+                f"model tool calls did not finish (finish_reason={finish})"
+            )
+        return ToolCalls(tuple(_one_call(call) for call in calls), cost)
+    if finish != "stop":
+        raise BoundaryError(f"model turn did not finish (finish_reason={finish})")
+    text = message.get("content")
+    if not isinstance(text, str) or not text.strip():
+        raise BoundaryError(f"model returned no text (finish_reason={finish})")
+    return FinalReply(text, cost)
+
+
+def _choice(data: Mapping[str, Any]) -> Mapping[str, Any]:
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise BoundaryError("model response has no choice")
+    return choices[0]
+
+
+def _cost(usage: Mapping[str, Any], terms: ModelTerms) -> Decimal:
+    actual, _summary = _actual_cost(usage, terms)
+    return actual if actual is not None else UNPRICED
+
+
+def _one_call(raw: Any) -> ToolRequest:
+    """A call the bridge can refuse. A shape that is not one function call
+    with a JSON-object argument string comes back with arguments the bridge
+    rejects, so it is never executed."""
+    if not isinstance(raw, dict):
+        return ToolRequest("", ())
+    if (
+        raw.get("type") != "function"
+        or not isinstance(raw.get("id"), str)
+        or not raw.get("id")
+    ):
+        return ToolRequest("", ())
+    function = raw.get("function")
+    if not isinstance(function, dict):
+        return ToolRequest("", ())
+    name = function.get("name")
+    if not isinstance(name, str) or not name:
+        return ToolRequest("", ())
+    return ToolRequest(name, _strict_args(function.get("arguments")))
+
+
+def _strict_args(raw: Any) -> Any:
+    if not isinstance(raw, str):
+        return ()
+    try:
+        value = json.loads(raw, object_pairs_hook=_pairs)
+    except (json.JSONDecodeError, ValueError, UnicodeError):
+        return ()
+    if not isinstance(value, dict):
+        return ()
+    return value
+
+
+def _pairs(pairs: list[tuple[Any, Any]]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in pairs:
+        if not isinstance(key, str) or key in out:
+            raise ValueError("duplicate or non-string key")
+        out[key] = value
+    return out
