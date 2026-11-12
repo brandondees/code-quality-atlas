@@ -153,12 +153,32 @@ def test_a_whole_line_quote_within_two_lines_is_verified_as_drifted(
     assert result == Verified(result.finding, QuoteSource.HEAD_NEAR)
 
 
+def test_a_drifted_quote_takes_the_location_of_the_matched_lines():
+    result = check(LineRange("calc.py", 4, 4), "return sum(round(x, 2) for x in xs)")
+    assert result.finding.location == LineRange("calc.py", 2, 2)
+
+
+def test_a_quote_of_a_removed_line_is_tagged_removed_even_near_the_citation():
+    head = source_tarball({"calc.py": b"def total(xs):\n    return sum(xs)\n"}, "t")
+    diff = (
+        "diff --git a/calc.py b/calc.py\n--- a/calc.py\n+++ b/calc.py\n"
+        "@@ -1,2 +1,2 @@\n def total(xs):\n-    return sum(xs)\n"
+        "+    return sum(round(xs))\n"
+    )
+    sources = read_sources(head, diff, ["calc.py"])
+    result = check_quote(
+        finding(LineRange("calc.py", 1, 1), "    return sum(xs)"), sources
+    )
+    assert result.source is QuoteSource.REMOVED
+
+
 @pytest.mark.parametrize(
     ("start", "end", "evidence"),
     [
         (6, 6, "return sum(round(x, 2) for x in xs)"),
         (1, 1, "}"),
         (7, 7, "}"),
+        (5, 5, "return sum(round(x, 2) for x in xs)"),
         (1, 1, "round(x, 2) for x"),
     ],
 )
