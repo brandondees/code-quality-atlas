@@ -606,6 +606,15 @@ def _dropped_omission(dropped: tuple[str, ...]) -> tuple[Omission, ...]:
 def _notes(
     base: _Base, sel: DiffSelection | None, *, scrub: Callable[[str], str]
 ) -> tuple[str, ...]:
+    # The `scrub` this `_omissions` call forwards only shapes the `detail`
+    # field of the new Omission(s) it adds here (`_selection_omission`);
+    # their `source`/`limit` stay fixed templates. `base.facts.omissions`
+    # (already-collected, possibly PR-controlled) pass through unchanged --
+    # any redaction they need comes from the other `scrub` on this line,
+    # feeding `controller_notes`. `_omission_line` (notes.py) renders only
+    # `source`/`limit`, never `detail`, so this specific forwarding can
+    # never leak a credential through `controller_notes`'s prose, for any
+    # `sel` -- #624.
     return controller_notes(
         replace(base.facts, omissions=_omissions(base, sel, scrub=scrub)), scrub=scrub
     )
@@ -748,6 +757,11 @@ def _pick_lenses(
     if diff is None:
         return LensSelection((), "", used_call=False, skipped="no diff to pick for")
     if config.model_calls < 2:
+        # `run_picker` is the literal `None` here, so `select_lenses`
+        # (picker.py) always returns at its own `Depth.TRIAGE` or
+        # `run_picker is None` guard, before it ever reads `scrub`. No
+        # `depth`/`config` combination reaching this branch can make the
+        # forwarded `scrub` observable -- #624.
         return select_lenses(config.depth, None, deps.lenses, scrub=scrub)
     paths = diff_paths(diff.text)
     request = PickRequest(
