@@ -369,6 +369,7 @@ class _Run:
     telemetry: Telemetry
     first_frame_s: float = FIRST_FRAME_BUDGET_S
     create: _Create = field(default_factory=_Create)
+    exec_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 @dataclass(frozen=True)
@@ -1129,7 +1130,10 @@ def _exec_fields(raw: bytes) -> Fields:
 
 
 def _exec(run: _Run, step: _Exec) -> tuple[int | None, str]:
-    return parse_exit(strip_start(decode_exec_output(_raw_exec(run, step))))
+    """One exec at a time on this runner. The lens keepalive refreshes from
+    its own thread, and a tool call must not share the stream with it."""
+    with run.exec_lock:
+        return parse_exit(strip_start(decode_exec_output(_raw_exec(run, step))))
 
 
 Availability = dict[str, bool] | ExecFailed

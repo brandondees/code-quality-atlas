@@ -59,6 +59,9 @@ class FakeSprites:
     fail_on: Mapping[str, BoundaryError] = field(default_factory=dict)
     policy_read_back: Json | None = None
     hang_on: str | None = None
+    # Exit status of an `atlas-task-hold` exec. Tests set this to inject a
+    # keepalive failure; the default is a hold that succeeds.
+    hold_exit: int = 0
     delete_takes_effect: bool = True
     calls: list[tuple[str, ...]] = field(default_factory=list)
     stdin_seen: list[bytes] = field(default_factory=list)
@@ -155,6 +158,8 @@ class FakeSprites:
             return "\n".join(f"{PYTHON_TAG}:{p}:{v}" for p, v in self.pythons), 0
         if "wc -c" in script and _FEED_RE.search(script):
             return str(len(stdin)), 0
+        if "atlas-task-hold" in script:
+            return "", self.hold_exit
         for rule in self.rules:
             if rule.match in script:
                 return rule.handler(script, stdin)

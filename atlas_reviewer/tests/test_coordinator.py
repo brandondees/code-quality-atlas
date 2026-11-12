@@ -4,6 +4,7 @@ bridge (`LocalSprites`), a scripted model, verification and the draft. No
 model, Sprite or GitHub call is made."""
 
 from dataclasses import replace
+from decimal import Decimal
 
 import pytest
 
@@ -37,7 +38,7 @@ from atlas_reviewer.lens_contract import (
     Valence,
 )
 from atlas_reviewer.lens_loop import LimitsUnsetError
-from atlas_reviewer.ports import RefusedError
+from atlas_reviewer.ports import ByokRefusedError, RefusedError
 from atlas_reviewer.prompt import UntrustedBlock
 from atlas_reviewer.quotes import QuoteSource
 from atlas_reviewer.redact import Redactor, redact
@@ -67,16 +68,28 @@ def ledger(tmp_path):
     return AttemptLedger(tmp_path / "state" / "attestations.jsonl", FakeClock())
 
 
-def review(tmp_path, script, *, sprites=None, limits=LIMITS, library=None, **kw):
+def review(tmp_path, script, *, sprites=None, limits=LIMITS, library=None,
+           hold_fail="", model=None, **kw):  # fmt: skip
+    from .test_keepalive import TaskServer, socket_path
+
     sprites = sprites if sprites is not None else LocalSprites()
-    model = ScriptedLensModel(list(script))
-    result = review_lens(
-        EVENT, LENS, DIFF, trees(),
-        library=library or StubLibrary({LENS: BODY}), model=model, limits=limits,
-        ledger=ledger(tmp_path), sprites=sprites, runner_ledger=MemoryLedger(),
-        redactor=Redactor(), clock=FakeClock(), nonce=lambda: "f00dfeedf00dfeed",
-        bridge_root=str(tmp_path / "bridge"), **kw,
-    )  # fmt: skip
+    model = ScriptedLensModel(list(script)) if model is None else model
+    tasks = TaskServer(socket_path(tmp_path))
+    tasks.fail = hold_fail
+    tasks.start()
+    try:
+        result = review_lens(
+            EVENT, LENS, DIFF, trees(),
+            library=library or StubLibrary({LENS: BODY}), model=model, limits=limits,
+            ledger=ledger(tmp_path), sprites=sprites, runner_ledger=MemoryLedger(),
+            redactor=Redactor(), clock=FakeClock(), nonce=lambda: "f00dfeedf00dfeed",
+            bridge_root=str(tmp_path / "bridge"), task_socket=str(tasks.path), **kw,
+        )  # fmt: skip
+    finally:
+        review.hold_order = list(tasks.order)
+        tasks.close()
+        if not hold_fail:
+            assert tasks.tasks == {}, tasks.order
     return result, model, sprites
 
 
@@ -138,6 +151,33 @@ def test_a_clean_lens_with_no_findings_approves(tmp_path):
     result, _, _ = review(tmp_path, [READ_DIFF, final()])
     assert result.event is ReviewEvent.APPROVE
     assert status(result)["review_event"] == "APPROVE"
+    assert review.hold_order[0] == "POST"
+    assert review.hold_order[-1] == "DELETE"
+
+
+def test_a_hold_that_fails_to_create_does_not_run_the_lens(tmp_path):
+    result, model, _ = review(tmp_path, [READ_DIFF, final()], hold_fail="POST")
+    (lens,) = result.lenses
+    assert lens.state is LensState.NOT_RUN
+    assert model.requests == []
+    assert ledger(tmp_path).attempts(KEY) == ()
+    assert result.event is not ReviewEvent.APPROVE
+    assert "POST failed" in render_draft(result, Redactor())
+
+
+def test_a_keepalive_failure_after_a_clean_lens_cannot_approve(tmp_path):
+    """The hold client fails its delete after the lens is clean."""
+    result, _, _ = review(tmp_path, [READ_DIFF, final()], hold_fail="DELETE")
+    (lens,) = result.lenses
+    assert lens.state is LensState.CLEAN
+    assert result.runner.status is RunnerStatus.FAILED
+    assert result.verdict is Verdict.APPROVE
+    assert result.event is ReviewEvent.COMMENT
+    assert not result.coverage_complete
+    draft = render_draft(result, Redactor())
+    assert "REVIEW INCOMPLETE" in draft
+    assert "runner failed" in draft
+    assert "DELETE failed" in draft
 
 
 def test_the_ledger_records_each_attempt_with_its_head_and_body(tmp_path):
@@ -246,6 +286,73 @@ def test_a_secret_hit_without_a_location_is_still_listed():
 
 
 # ------------------------------------------------- restarts and reruns
+
+
+def test_a_byok_refusal_is_not_retried_on_the_next_review(tmp_path):
+    """The refusal leaves this review, and the attempt is a model error.
+    A later review of the same head does not bill another call or approve."""
+
+    class Refusing:
+        name = "byok"
+
+        def __init__(self) -> None:
+            self.requests: list[object] = []
+
+        def worst_case_usd(self, request):
+            self.requests.append(request)
+            return Decimal("0.01")
+
+        def turn(self, request):
+            raise ByokRefusedError("refusing the review: byok")
+
+    first, _, _ = review(tmp_path, [], model=Refusing())
+    assert first.event is not ReviewEvent.APPROVE
+    assert first.runner is not None
+    assert first.runner.status is RunnerStatus.FAILED
+    assert "Runner reported" in render_draft(first, Redactor())
+    (attempt,) = ledger(tmp_path).attempts(KEY)
+    assert Cause.MODEL_ERROR in attempt.outcome.causes
+    assert not attempt.outcome.retryable
+    assert attempt.outcome.turns == 0
+    assert attempt.outcome.tools == ()
+
+    sprites = FakeSprites()
+    again, model, _ = review(tmp_path, [READ_DIFF, final()], sprites=sprites)
+    assert model.requests == []
+    assert sprites.calls == []
+    assert again.event is not ReviewEvent.APPROVE
+    assert again.lenses[0].state is LensState.FAILED
+
+
+def test_a_byok_refusal_after_a_tool_keeps_the_secret_and_the_progress(tmp_path):
+    """A later turn refuses. The tool call already found a committed
+    secret, and that secret, the turn and the tool stay in the record.
+    Dropping the re-raise would leave the runner completed."""
+    read = READ_DIFF.__class__(
+        (READ_DIFF.calls[0].__class__("read_file", {"path": "config/keys.py"}),),
+        READ_DIFF.cost_usd,
+    )
+    result, _, _ = review(
+        tmp_path, [read, ByokRefusedError("refusing the review: byok")]
+    )
+    draft = render_draft(result, Redactor())
+    assert "## Possible committed secrets (controller findings)" in draft
+    assert TOKEN not in draft
+    assert result.runner is not None
+    assert result.runner.status is RunnerStatus.FAILED
+    assert "Runner reported" in draft
+    assert result.model_calls == 2
+    (attempt,) = ledger(tmp_path).attempts(KEY)
+    assert attempt.outcome.turns == 1
+    assert [(t.tool, t.status) for t in attempt.outcome.tools] == [("read_file", "OK")]
+    assert Cause.MODEL_ERROR in attempt.outcome.causes
+    assert not attempt.outcome.retryable
+
+    sprites = FakeSprites()
+    again, model, _ = review(tmp_path, [READ_DIFF, final()], sprites=sprites)
+    assert model.requests == []
+    assert sprites.calls == []
+    assert again.event is not ReviewEvent.APPROVE
 
 
 def test_a_rerun_on_the_same_head_and_body_reuses_the_settled_lens(tmp_path):
@@ -473,6 +580,23 @@ def test_coverage_short_of_clean_never_approves_even_with_no_findings(outcome):
 
 def test_no_lens_selected_is_not_complete_coverage():
     assert not synthesize([]).coverage_complete
+
+
+def test_a_failed_runner_is_not_complete_coverage_even_when_the_lens_is_clean():
+    from atlas_reviewer.domain import RunnerReport
+
+    clean_lens = lens_result(AttemptOutcome(Attestation.ATTESTED))
+    failed = RunnerReport(
+        RunnerStatus.FAILED, CleanupStatus.DESTROYED_VERIFIED, "r",
+        "sprite task socket DELETE returned HTTP 500",
+    )  # fmt: skip
+    result = synthesize([clean_lens], runner=failed)
+    assert result.verdict is Verdict.APPROVE
+    assert result.event is ReviewEvent.COMMENT
+    assert not result.coverage_complete
+    draft = render_draft(result, Redactor())
+    assert "HTTP 500" in draft
+    assert "runner failed" in draft
 
 
 def test_findings_are_minted_in_reply_order_and_ranked_by_severity():

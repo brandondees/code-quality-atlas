@@ -10,14 +10,20 @@ approve with changes; only nits or nothing means approve). There is no
 model merge call yet.
 
 Coverage is complete only when the ledger shows every selected lens
-settled CLEAN on this head with this body. Anything less fails closed:
+settled CLEAN on this head with this body and, when this review ran a
+runner, that runner completed. A keepalive failure is a failed runner,
+so a clean lens cannot approve it away. Anything less fails closed:
 the draft opens with the machine-readable status line
 (`coverage_complete: false`) and a REVIEW INCOMPLETE warning, and never
-approves.
+approves. The runner's own note is in the draft when it did not complete.
 
 Retries come from the ledger alone (`attestation.next_step`). A lens
 already settled for this head and body is reused without a runner, and a
-review that stopped mid-attempt resumes its attempt count.
+review that stopped mid-attempt resumes its attempt count. A BYOK refusal
+is finished as a model error before it leaves the loop: the attempt keeps
+the turns, tool calls and committed secrets already seen, the outcome is
+not retried, and the runner fails, so the next review of this head does
+not make another billed call.
 """
 
 from __future__ import annotations
@@ -27,16 +33,19 @@ import secrets
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import cast
 
 from atlas_reviewer.attestation import (
     Attempt,
     AttemptLedger,
     AttemptOutcome,
     Attestation,
+    Cause,
     LensKey,
     LensState,
     RunAttempt,
     Settled,
+    ToolUse,
     body_digest,
     next_step,
 )
@@ -44,7 +53,8 @@ from atlas_reviewer.bridge import Bridge, BridgeSecret, run_bridge
 from atlas_reviewer.bridge_staging import BRIDGE_ROOT, SourceTrees
 from atlas_reviewer.committed_secrets import scan_diff
 from atlas_reviewer.diffs import by_risk, split_files
-from atlas_reviewer.domain import PrEvent, RunnerReport
+from atlas_reviewer.domain import PrEvent, RunnerReport, RunnerStatus
+from atlas_reviewer.keepalive import SOCKET_PATH, lens_hold
 from atlas_reviewer.lens_contract import Finding, Severity
 from atlas_reviewer.lens_loop import (
     AgenticLimits,
@@ -58,7 +68,7 @@ from atlas_reviewer.lens_loop import (
 )
 from atlas_reviewer.lenses import LensLibrary
 from atlas_reviewer.notes import quote_untrusted
-from atlas_reviewer.ports import Clock, RunnerLedger, SpritesApi
+from atlas_reviewer.ports import ByokRefusedError, Clock, RunnerLedger, SpritesApi
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
 from atlas_reviewer.quotes import read_sources
 from atlas_reviewer.redact import Redactor
@@ -131,9 +141,17 @@ class AgenticReview:
 
     @property
     def coverage_complete(self) -> bool:
-        return bool(self.lenses) and all(
+        """Clean lenses, and a completed runner when this review started one.
+
+        A settled lens reused from the ledger has no runner. A runner that
+        failed after a clean lens (a keepalive refresh or delete, for
+        example) is not complete coverage, so the review cannot approve."""
+        lenses_clean = bool(self.lenses) and all(
             r.state is LensState.CLEAN for r in self.lenses
         )
+        if not lenses_clean or self.runner is None:
+            return lenses_clean
+        return self.runner.status is RunnerStatus.COMPLETED
 
     @property
     def proposed_event(self) -> ReviewEvent:
@@ -261,11 +279,13 @@ def review_lens(
     nonce: Callable[[], str] = lambda: secrets.token_hex(NONCE_BYTES),
     bridge_root: str = BRIDGE_ROOT,
     contract: str | None = None,
+    task_socket: str = SOCKET_PATH,
 ) -> AgenticReview:
     """Review `event` with one lens. The limits are resolved before any
     model, runner or ledger work. Brandon's provisional defaults are
     accepted. A limit cleared to unset is refused outright
-    (`LimitsUnsetError`)."""
+    (`LimitsUnsetError`). The runner holds a Sprite task for the length
+    of the lens and deletes it on the way out."""
     resolved = limits.resolve()
     contract = finding_contract() if contract is None else contract
     body = library.body(lens)
@@ -304,21 +324,12 @@ def review_lens(
 
     def in_session(bridge: Bridge) -> str:
         session.bridges.append(bridge)
-        step = next_step(ledger.attempts(key), resolved.retries)
-        while isinstance(step, RunAttempt):
-            attempts = ledger.attempts(key)
-            ledger.start(key, step.number)
-            secrets_seen: list[BridgeSecret] = []
-            outcome = run_attempt(
-                job, bridge, model, spend, clock,
-                review_deadline=review_deadline,
-                retry_of=attempts[-1].outcome if step.forced and attempts else None,
-                secrets=secrets_seen,
+        digest = event_runner_name(event).rsplit("-", 1)[-1]
+        with lens_hold(bridge.session, digest, task_socket):
+            return _attempts(
+                bridge, job, model, spend, clock, ledger, key, resolved,
+                review_deadline, session, scrub,
             )  # fmt: skip
-            session.secrets.extend(secrets_seen)
-            ledger.finish(key, step.number, outcome, scrub=scrub)
-            step = next_step(ledger.attempts(key), resolved.retries)
-        return f"lens {lens}: {len(ledger.attempts(key))} attempt(s)"
 
     report = run_bridge(
         sprites, runner_ledger, trees, in_session,
@@ -334,6 +345,57 @@ def review_lens(
         spend,
         (*diff_secrets.values, *session.flagged()),
     )
+
+
+def _attempts(
+    bridge: Bridge,
+    job: LensJob,
+    model: LensModel,
+    spend: Spend,
+    clock: Clock,
+    ledger: AttemptLedger,
+    key: LensKey,
+    limits: Limits,
+    review_deadline: float,
+    session: _Session,
+    scrub: Callable[[str], str],
+) -> str:
+    step = next_step(ledger.attempts(key), limits.retries)
+    while isinstance(step, RunAttempt):
+        attempts = ledger.attempts(key)
+        ledger.start(key, step.number)
+        secrets_seen: list[BridgeSecret] = []
+        try:
+            outcome = run_attempt(
+                job, bridge, model, spend, clock,
+                review_deadline=review_deadline,
+                retry_of=attempts[-1].outcome if step.forced and attempts else None,
+                secrets=secrets_seen,
+            )  # fmt: skip
+        except ByokRefusedError as exc:
+            # The refusal still leaves the loop, so the runner fails and
+            # its note is quoted. Finish the attempt first: an unfinished
+            # one reads as abandoned, and that is retryable, so the next
+            # review of this head would bill another call. The secrets,
+            # turns and tool calls already seen are part of that record.
+            session.secrets.extend(secrets_seen)
+            ledger.finish(
+                key, step.number,
+                AttemptOutcome(
+                    Attestation.UNACKNOWLEDGED,
+                    frozenset({Cause.MODEL_ERROR}),
+                    tools=cast("tuple[ToolUse, ...]", tuple(exc.tools)),
+                    turns=exc.turns,
+                    detail=str(exc),
+                ),
+                scrub=scrub,
+            )  # fmt: skip
+            raise
+        else:
+            session.secrets.extend(secrets_seen)
+            ledger.finish(key, step.number, outcome, scrub=scrub)
+        step = next_step(ledger.attempts(key), limits.retries)
+    return f"lens {job.lens}: {len(ledger.attempts(key))} attempt(s)"
 
 
 def _result(
@@ -452,6 +514,11 @@ def render_draft(review: AgenticReview, redactor: Redactor) -> str:
         lines.append(
             f"Runner: {review.runner.status.value}; cleanup {review.runner.cleanup.value}."
         )
+        if review.runner.status is not RunnerStatus.COMPLETED and review.runner.note:
+            lines.append(
+                "Runner reported, quoted: "
+                + quote_untrusted(review.runner.note, QUOTED_CHARS, scrub=scrub)
+            )
     return "\n".join(lines) + "\n"
 
 
@@ -462,7 +529,14 @@ def _headline(review: AgenticReview) -> str:
             "Every selected lens ran whole, attested, with every quote verified."
         )
     short = [r for r in review.lenses if r.state is not LensState.CLEAN]
-    named = "; ".join(f"{r.lens}: {r.state.value}" for r in short) or "no lens selected"
+    if short:
+        named = "; ".join(f"{r.lens}: {r.state.value}" for r in short)
+    elif (
+        review.runner is not None and review.runner.status is not RunnerStatus.COMPLETED
+    ):
+        named = f"runner {review.runner.status.value}"
+    else:
+        named = "no lens selected"
     proposed = (
         f" (the findings alone would be {review.proposed_event.value})"
         if review.proposed_event is not review.event
