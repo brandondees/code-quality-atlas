@@ -466,6 +466,25 @@ def endless():
     return [READ_ALL] * 50
 
 
+@pytest.mark.parametrize(
+    "cause",
+    [
+        Cause.INPUT_CAP,
+        Cause.CONTEXT,
+        Cause.TURN_CAP,
+        Cause.CALL_CAP,
+        Cause.BUDGET,
+        Cause.LENS_CLOCK,
+        Cause.REVIEW_CLOCK,
+    ],
+)
+def test_a_limit_cause_alone_is_partial_and_not_retried(cause):
+    outcome = AttemptOutcome(Attestation.UNACKNOWLEDGED, frozenset({cause}))
+    assert Cause.FILES_UNREAD not in outcome.causes
+    assert outcome.state is LensState.PARTIAL
+    assert outcome.retryable is False
+
+
 def test_a_cut_short_attempt_keeps_the_files_it_never_finished(tmp_path):
     outcome, _, _ = attempt(
         tmp_path, [READ_DIFF] * 5, limits=replace(LIMITS, max_turns=2)
@@ -480,6 +499,7 @@ def test_the_turn_cap_ends_the_lens_partial(tmp_path):
     )
     assert outcome.causes == {Cause.TURN_CAP}
     assert outcome.state is LensState.PARTIAL
+    assert outcome.retryable is False
     assert len(model.requests) == 2
     assert outcome.limit_hit is not None
     assert outcome.limit_hit.limit == "max_turns"
@@ -493,6 +513,8 @@ def test_the_reviews_call_cap_ends_the_lens_before_another_call(tmp_path):
     spend = Spend(replace(LIMITS, max_calls=3, max_turns=3).resolve(), calls=2)
     outcome, model, _ = attempt(tmp_path, endless(), spend=spend)
     assert outcome.causes == {Cause.CALL_CAP}
+    assert outcome.state is LensState.PARTIAL
+    assert outcome.retryable is False
     assert len(model.requests) == 1
     assert spend.calls == 3
     assert outcome.limit_hit is not None
@@ -507,6 +529,8 @@ def test_the_dollar_reservation_holds_the_worst_case_before_each_call(tmp_path):
     model = ScriptedLensModel([pricey] * 10, worst_usd=Decimal("0.10"))
     outcome, model, spend = attempt(tmp_path, [], limits=limits, model=model)
     assert outcome.causes == {Cause.BUDGET}
+    assert outcome.state is LensState.PARTIAL
+    assert outcome.retryable is False
     assert len(model.requests) == 2
     assert spend.committed_usd == Decimal("0.16")
     assert outcome.limit_hit is not None
@@ -553,6 +577,8 @@ def test_the_lens_wall_clock_ends_the_lens_partial(tmp_path):
     script = [advance(clock, 301, READ_ALL), final()]
     outcome, model, _ = attempt(tmp_path, script, clock=clock)
     assert outcome.causes == {Cause.LENS_CLOCK}
+    assert outcome.state is LensState.PARTIAL
+    assert outcome.retryable is False
     assert len(model.requests) == 1
     assert outcome.limit_hit is not None
     assert outcome.limit_hit.limit == "lens_wall_s"
@@ -565,6 +591,7 @@ def test_the_review_wall_clock_ends_the_lens_partial(tmp_path):
     outcome, _, _ = attempt(tmp_path, script, clock=clock, deadline=60)
     assert outcome.causes == {Cause.REVIEW_CLOCK}
     assert outcome.state is LensState.PARTIAL
+    assert outcome.retryable is False
     assert outcome.limit_hit is not None
     assert outcome.limit_hit.limit == "review_wall_s"
     assert "--review-wall-seconds or ATLAS_REVIEW_WALL_S" in outcome.detail
