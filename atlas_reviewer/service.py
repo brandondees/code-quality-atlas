@@ -407,6 +407,11 @@ class Worker:
         if not self._board.begin_post(job):
             self._stopped_or_superseded(job, fields)
             return
+        # stop() can land after the claim moved the job to POSTING and
+        # before this send. begin_post has already returned.
+        if self._stop.is_set() or job.cancel.is_set():
+            self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
+            return
         try:
             self._publisher(job.event, report)
         except PostNotCurrent:

@@ -640,14 +640,86 @@ def test_stop_does_not_send_a_deferred_post(tmp_path):
         if job.event.head_sha == other:
             job.state = JobState.POST_PENDING
             job.retry_at = 0
+    from atlas_reviewer.service_run import run_dir
+
+    draft = run_dir(tmp_path, PrEvent(REPO, 8, other))
+    draft.mkdir(parents=True)
+    (draft / "draft.md").write_text("a deferred review\n", encoding="utf-8")
 
     def release_after_stop_begins():
         assert worker._stop.wait(2)
         release.set()
 
-    threading.Thread(target=release_after_stop_begins).start()
+    helper = threading.Thread(target=release_after_stop_begins)
+    helper.start()
     worker.stop(timeout=2)
+    helper.join(timeout=2)
     assert posted == [SHA]
+    assert other not in posted
+
+
+def test_stop_after_the_post_is_claimed_does_not_send(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    posted: list[str] = []
+
+    def publish(event, report):
+        posted.append(event.head_sha)
+
+    worker = Worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        Telemetry(SystemClock()),
+        publish,
+        state_root=tmp_path,
+    )
+    real = board.begin_post
+
+    def begin_post(job):
+        ok = real(job)
+        worker._stop.set()
+        job.cancel.set()
+        return ok
+
+    board.begin_post = begin_post
+    board.enqueue(EVENT)
+    assert worker.run_one() is True
+    assert posted == []
+    assert board.states() == ((SHA, JobState.SUPERSEDED),)
+
+
+def test_limit_timeout_stays_on_the_calling_thread():
+    seen: dict[str, float] = {}
+
+    class Transport:
+        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
+            seen["timeout"] = timeout_s
+            payload = {
+                "token": "ghs_minted_value",
+                "expires_at": "2099-01-01T00:00:00Z",
+                "permissions": {"pull_requests": "write"},
+            }
+            return HttpResponse(201, {}, json.dumps(payload).encode())
+
+    tokens = AppInstallationTokens(
+        Transport(),
+        SystemClock(),
+        app_id="5648875",
+        private_key="not-used",
+        installation_id=1,
+        permissions=POST_PERMISSIONS,
+        writable=POST_WRITABLE,
+        encode=lambda claims, key: "jwt",
+    )
+    tokens.limit_timeout(7.5)
+
+    def other() -> None:
+        tokens.limit_timeout(1.0)
+
+    thread = threading.Thread(target=other)
+    thread.start()
+    thread.join()
+    assert tokens.token() == "ghs_minted_value"
+    assert seen["timeout"] == 7.5
 
 
 def test_a_rejected_post_fails_without_a_retry(tmp_path):

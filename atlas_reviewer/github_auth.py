@@ -93,14 +93,24 @@ class AppInstallationTokens:
         self._repositories = tuple(repositories)
         self._api_url = api_url.rstrip("/")
         self._encode, self._timeout_s = encode, timeout_s
+        # Per thread. Workers share one token source, and one worker's
+        # deadline must not shorten another's mint.
+        self._timeout_override = threading.local()
         self._cached: _Cached | None = None
         self._minted: list[str] = []
         self._lock = threading.Lock()
 
     def limit_timeout(self, seconds: float) -> None:
-        """The next mint waits at most ``seconds``. The poster's attempt
-        deadline is what passes this in, so the mint cannot run past it."""
-        self._timeout_s = max(0.0, seconds)
+        """The next mint on this thread waits at most ``seconds``. The
+        poster's attempt deadline is what passes this in, so the mint
+        cannot run past it. Another thread keeps its own value."""
+        self._timeout_override.seconds = max(0.0, seconds)
+
+    def _mint_timeout(self) -> float:
+        override = getattr(self._timeout_override, "seconds", None)
+        if override is None:
+            return self._timeout_s
+        return override
 
     def token(self) -> str:
         with self._lock:
@@ -147,7 +157,7 @@ class AppInstallationTokens:
                 "Content-Type": "application/json",
             },
             json.dumps(body).encode(),
-            self._timeout_s,
+            self._mint_timeout(),
         )
         if resp.status != 201:
             raise BoundaryError(
