@@ -1298,6 +1298,16 @@ and counts toward the call cap, and the failed call's reservation stays
 committed. `--call-retries` and `ATLAS_CALL_RETRIES` set the count, 0
 to 3. D49 records it.
 
+## 2026-11-12 — a call is fitted to what the reservation has left
+
+A live driver stopped about $2 short of its reservation, pricing each
+call at the full 128k output cap. The product priced calls the same
+way. A call the reservation cannot cover whole is now sent with the
+largest output cap it can cover, as `max_tokens`, when that is at least
+`min_output_tokens` (16,000 by default; `--min-output-tokens` or
+`ATLAS_MIN_OUTPUT_TOKENS`). Below that it stops on `reservation_usd`,
+and the stop names the cap the remainder covered. D50 records it.
+
 ## 2026-11-13 — pinned endpoints set the price, and ZDR can be turned off
 
 `max_price`, the reservation, the context and the completion limit come

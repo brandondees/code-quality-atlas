@@ -554,6 +554,9 @@ class _DryRunLensModel:
     def worst_case_usd(self, request: TurnRequest) -> Decimal:
         return Decimal("0.01")
 
+    def output_tokens_within(self, request: TurnRequest, budget_usd: Decimal) -> int:
+        return 0
+
     def turn(self, request: TurnRequest) -> FinalReply:
         system = getattr(request, "system", "")
         match = _BODY_MARKER.search(system)
@@ -1346,6 +1349,11 @@ def _agentic_limit_args(parser: argparse.ArgumentParser) -> None:
             "--call-retries",
             "call_retries",
             "times a failed model call is sent again, 0 to 3",
+        ),
+        (
+            "--min-output-tokens",
+            "min_output_tokens",
+            "smallest output cap a call is fitted to when the reservation is short",
         ),
     )
     for flag, name, meaning in flags:

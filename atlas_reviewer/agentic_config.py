@@ -28,6 +28,7 @@ ENV = {
     "reasoning_max_tokens": "ATLAS_REASONING_MAX_TOKENS",
     "pool_size": "ATLAS_POOL_SIZE",
     "call_retries": "ATLAS_CALL_RETRIES",
+    "min_output_tokens": "ATLAS_MIN_OUTPUT_TOKENS",
 }
 
 
@@ -81,6 +82,8 @@ def _apply(limits: AgenticLimits, name: str, raw: str) -> AgenticLimits:
         return replace(limits, pool_size=_positive_int(name, raw))
     if name == "call_retries":
         return replace(limits, call_retries=_count(name, raw))
+    if name == "min_output_tokens":
+        return replace(limits, min_output_tokens=_positive_int(name, raw))
     raise ValueError(f"unknown agentic limit {name}")  # pragma: no cover
 
 
