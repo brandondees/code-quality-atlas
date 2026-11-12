@@ -4,7 +4,8 @@ apart from reading the head tarball in memory.
 
 A `file:line` finding is verified only when its evidence is the cited
 lines of the head file, or among the PR diff's removed lines of that file
-(code the PR deletes is not in the head). The cited span is the quote's
+(code the PR deletes is not in the head). The head files are the changed
+ones plus, through `with_head_files`, any file the lens read at head. The cited span is the quote's
 own line count: one line of evidence needs `start == end`, and several
 lines need a range of that many lines. A wider range is not searched, so
 a quote cannot verify against a line the citation does not name. A range
@@ -99,6 +100,24 @@ def read_sources(head_tarball: bytes, diff: str, paths: Iterable[str]) -> Source
     except (tarfile.TarError, OSError, EOFError) as exc:
         return SourceText({}, removed, diffed, f"the head tree is unreadable: {exc}")
     return SourceText(head, removed, diffed)
+
+
+def with_head_files(
+    sources: SourceText, head_tarball: bytes, paths: Iterable[str]
+) -> SourceText:
+    """`sources` plus the head lines of `paths` it does not already hold:
+    files the lens read at head that the pull request does not change.
+    With no head tree, or one that cannot be read, `sources` is unchanged."""
+    extra = frozenset(paths) - set(sources.head)
+    if not extra or not head_tarball or sources.unreadable:
+        return sources
+    if refused_archive(head_tarball) is not None:
+        return sources
+    try:
+        found = _head_lines(head_tarball, extra)
+    except (tarfile.TarError, OSError, EOFError):
+        return sources
+    return SourceText({**sources.head, **found}, sources.removed, sources.diffed)
 
 
 def _head_lines(data: bytes, wanted: frozenset[str]) -> dict[str, tuple[str, ...]]:

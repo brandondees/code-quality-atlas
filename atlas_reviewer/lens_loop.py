@@ -68,7 +68,7 @@ from atlas_reviewer.notes import quote_untrusted
 from atlas_reviewer.ports import BoundaryError, ByokRefusedError, Clock
 from atlas_reviewer.pricing import ModelTerms
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, _fence_rule, fence
-from atlas_reviewer.quotes import SourceText, Verified, check_all
+from atlas_reviewer.quotes import SourceText, Verified, check_all, with_head_files
 from atlas_reviewer.runner import DeadlineExceededError
 
 SYNTHESIS = BUNDLE_ROOT / "reference" / "synthesis.md"
@@ -565,6 +565,9 @@ class LensJob:
     changed: frozenset[str]
     sources: SourceText
     nonce: str
+    # The head tree, so a quote from a file the lens read at head but the
+    # PR does not change can still be checked. Empty: only `sources`.
+    head_tree: bytes = b""
 
 
 @dataclass
@@ -611,6 +614,7 @@ class _Progress:
     secrets: list[BridgeSecret] = field(default_factory=list)
     pages: _DiffPages = field(default_factory=_DiffPages)
     repair_sent: bool = False
+    head_reads: set[str] = field(default_factory=set)
 
     def cut(
         self, cause: Cause, detail: str = "", limit_hit: LimitHit | None = None
@@ -786,6 +790,10 @@ def _tool(job: LensJob, bridge: Bridge, call: ToolRequest, p: _Progress) -> str:
         p.causes.add(Cause.TOOL_GAP)
     p.read_source = p.read_source or _reads_source(result, job.changed)
     p.pages.note(result, job.changed)
+    if result.status is Status.OK and result.tool == "read_file":
+        args = json.loads(result.args)
+        if args["rev"] == Rev.HEAD:
+            p.head_reads.add(args["path"])
     return fence(UntrustedBlock("tool-result", RepoText(render(result))), job.nonce)
 
 
@@ -857,7 +865,9 @@ def _final(job: LensJob, text: str, p: _Progress) -> AttemptOutcome:
         CheckedFinding(c.finding, c.source)
         if isinstance(c, Verified)
         else CheckedFinding(c.finding, problem=c.reason)
-        for c in check_all(reply.findings, job.sources)
+        for c in check_all(
+            reply.findings, with_head_files(job.sources, job.head_tree, p.head_reads)
+        )
     )
     if any(not c.verified for c in checked):
         p.causes.add(Cause.QUOTES_FAILED)

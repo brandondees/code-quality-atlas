@@ -1277,7 +1277,8 @@ exit-code Major. The quote text is not in the comments on #639, #640
 or #642. Comparison now collapses internal whitespace, and a quote of
 whole lines may match within two lines of the citation. That match is
 tagged in the draft. A short fragment, such as `}`, still has to be
-the cited line. D47 records it.
+the cited line. A quote from a file the pull request does not change
+now verifies when the lens read that file at HEAD. D47 records it.
 
 ## 2026-11-13 — pinned endpoints set the price, and ZDR can be turned off
 

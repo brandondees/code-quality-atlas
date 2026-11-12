@@ -401,6 +401,28 @@ def test_a_retry_states_why_and_injects_the_body_whole_again(tmp_path):
 # -------------------------------------------------------------- outcomes
 
 
+@pytest.mark.parametrize(
+    ("rev", "verified"), [("HEAD", True), ("BASE", False), (None, False)]
+)
+def test_a_quote_from_a_file_the_lens_read_at_head_is_checked(tmp_path, rev, verified):
+    reads = READ_ALL.calls
+    if rev is not None:
+        call = READ_ALL.calls[0].__class__
+        reads += (call("read_file", {"path": "docs/notes.md", "rev": rev}),)
+    script = [
+        READ_ALL.__class__(reads, COST),
+        final(finding(location="docs/notes.md:1", evidence="rounding notes")),
+    ]
+    outcome, _, _ = attempt(
+        tmp_path, script, the_job=replace(job(), head_tree=HEAD_TARBALL)
+    )
+    (checked,) = outcome.findings
+    assert checked.verified is verified
+    if verified:
+        assert checked.source is QuoteSource.HEAD
+        assert outcome.state is LensState.CLEAN
+
+
 def test_a_lens_that_reads_the_diff_and_cites_a_head_line_is_clean(tmp_path):
     outcome, model, _ = attempt(tmp_path, [READ_ALL, final(finding())])
     assert outcome.state is LensState.CLEAN

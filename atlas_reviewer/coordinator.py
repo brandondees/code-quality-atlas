@@ -809,6 +809,7 @@ def _review_one(
         scope,
         read_sources(trees.head, diff, scope),
         fence_nonce,
+        trees.head,
     )
     started = clock.monotonic() if review_started is None else review_started
     deadline = (
