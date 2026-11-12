@@ -22,7 +22,9 @@ passing pair must record `metadata.over_context_window` (a diff larger
 than one model context window). A directory that holds only the pair for
 that head does not open the gate. A new pull request has no protocol row
 of its own, so the gate certifies the whole calibration set plus that
-head's pair.
+head's pair. The reference for each pair is the checked-in row with
+the same repo, pull request, round, and reviewed commit. A reference
+copied into the pair file is not the one the gate scores.
 
 D36 still decides the draft's `review_event` line. That line is what a
 person reads. It is not permission to post `APPROVE`.
@@ -168,8 +170,11 @@ this set.
 
 The reference reviews are the rounds whose body starts with `## Round N`
 and carries `<!-- atlas-review round:N ... -->`, posted on PRs #602–#637.
-Inline comments whose first line is `**Severity · lens**` are the
-findings. `eval_harness.protocol_review` reads that shape, skips a
+Findings are inline comments whose first line is `**Severity · lens**`
+or `**Severity** · \`lens\` · summary`, and body-anchored lines
+(`**Major · \`path:line\` · summary**`, or `` **`path:line`: summary** ``
+under a severity heading). `eval_harness.protocol_review` reads those
+shapes, skips a
 CodeRabbit comment (`coderabbit-ai-generated`), and redacts the summary.
 The match in `eval_harness.score` is the same path and a line within
 five (`PLACE_LINES`). Severity is not compared. A finding with no line

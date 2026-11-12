@@ -12,7 +12,7 @@
       {
         "severity": "major",
         "path": "commands/atlas-review-pr.md",
-        "summary": "This command supports a `synchronize`-triggered routine that runs once per push (the header at line 44). This push's runbook edit at `docs/runbooks/pr-review-automation.md:870` says that run \"may be the restack-only summary\". But in that mo",
+        "summary": "(new in `44c983e`). In the per-push trigger model, \"post nothing and stop, and let the next wake re-check\" has no next wake. That makes the common restack case end silently. This command supports a `synchronize`-triggered routine that runs ",
         "lenses": [
           "hunting-silent-failures",
           "tracing-correctness-and-invariants"

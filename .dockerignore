@@ -15,7 +15,9 @@ node_modules
 docs
 tests
 atlas_reviewer/tests
-atlas_reviewer/fixtures
+atlas_reviewer/fixtures/*
+!atlas_reviewer/fixtures/eval-references
+!atlas_reviewer/fixtures/eval-references/**
 *.egg-info
 dist
 # Secrets files and keys never enter the build context

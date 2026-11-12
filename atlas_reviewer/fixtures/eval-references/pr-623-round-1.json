@@ -33,8 +33,7 @@
         "path": "atlas_reviewer/openrouter.py",
         "summary": "This comment says \"Boolean false means usage.cost is the whole charge\" as settled fact. The module docstring 30 lines up marks the same claim \"(verify)\". The real grounding is the live PR #585 observation: the key moved $0.0790, equal to `u",
         "lenses": [
-          "reviewing-naming-and-readability",
-          "docs"
+          "reviewing-naming-and-readability"
         ],
         "line": 416
       }
@@ -43,8 +42,16 @@
   "metadata": {
     "source": "claude-code-protocol",
     "review_url": "https://github.com/brandondees/code-quality-atlas/pull/623#pullrequestreview-5864312327",
-    "run": "unrecorded",
-    "lenses_recorded": [],
+    "run": "lens-fan-out",
+    "lenses_recorded": [
+      "tracing-correctness-and-invariants",
+      "hunting-silent-failures",
+      "reviewing-test-quality",
+      "reviewing-observability-and-operability",
+      "reviewing-llm-integration",
+      "auditing-documentation-health",
+      "reviewing-pr-and-process-hygiene"
+    ],
     "review_state": "COMMENTED",
     "parse_gap": false
   }

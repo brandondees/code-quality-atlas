@@ -34,7 +34,13 @@
     "source": "claude-code-protocol",
     "review_url": "https://github.com/brandondees/code-quality-atlas/pull/621#pullrequestreview-5856529145",
     "run": "lens-fan-out",
-    "lenses_recorded": [],
+    "lenses_recorded": [
+      "tracing-correctness-and-invariants",
+      "hunting-silent-failures",
+      "reviewing-test-quality",
+      "reviewing-llm-integration",
+      "reviewing-pr-and-process-hygiene"
+    ],
     "review_state": "COMMENTED",
     "parse_gap": false
   }

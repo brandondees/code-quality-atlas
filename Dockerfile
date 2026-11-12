@@ -21,6 +21,7 @@ RUN pip install --require-hashes --only-binary=:all: -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
 
 COPY atlas_reviewer/*.py /opt/atlas/atlas_reviewer/
+COPY atlas_reviewer/fixtures/eval-references /opt/atlas/atlas_reviewer/fixtures/eval-references
 COPY collapsed/skills/reviewing-a-change/SKILL.md /opt/atlas/collapsed/skills/reviewing-a-change/SKILL.md
 COPY collapsed/skills/reviewing-a-change/reference/lenses /opt/atlas/collapsed/skills/reviewing-a-change/reference/lenses
 COPY skills/choosing-review-lenses/SKILL.md /opt/atlas/skills/choosing-review-lenses/SKILL.md

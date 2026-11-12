@@ -12,7 +12,7 @@
       {
         "severity": "minor",
         "path": "commands/atlas-rebase-stale.md",
-        "summary": "A stack falls behind every time someone pushes to a lower layer. The fix this poke asks for is `gh stack rebase` + `gh stack push`, a force-push. That outdates the anchored line, but nobody resolves the thread. So after the first restack th",
+        "summary": "\u2014 the stack-restack poke reuses the conflict poke's \"outstanding = thread not resolved\" test, so it fires once per PR lifetime, not once per time the stack falls behind. A stack falls behind every time someone pushes to a lower layer. The f",
         "lenses": [
           "tracing-correctness-and-invariants"
         ],
@@ -21,7 +21,7 @@
       {
         "severity": "minor",
         "path": "commands/atlas-rebase-stale.md",
-        "summary": "The PR body confirms `mcp__github__pull_request_read` never returns `stack`, and this sweep is API-only. So \"if the tool doesn't return it\" is not an edge case: the base-ref test is the only test that ever runs. Treating any non-default bas",
+        "summary": "\u2014 the fallback runs every time in practice, and it hands `gh stack` instructions to PRs that aren't stacks. The PR body confirms `mcp__github__pull_request_read` never returns `stack`, and this sweep is API-only. So \"if the tool doesn't ret",
         "lenses": [
           "tracing-correctness-and-invariants"
         ],
@@ -30,7 +30,7 @@
       {
         "severity": "minor",
         "path": "CLAUDE.md",
-        "summary": "\"Today the reviewer stack is #606 \u2192 #607 \u2192 #613, and #612 \u2192 #614 \u2026\" is true only until the first of those merges. After that, every session reads a stale stack map as current guidance and may act on it, for example restacking a merged layer",
+        "summary": "\u2014 a point-in-time snapshot of open PR numbers sits in two always-loaded onboarding files. \"Today the reviewer stack is #606 \u2192 #607 \u2192 #613, and #612 \u2192 #614 \u2026\" is true only until the first of those merges. After that, every session reads a st",
         "lenses": [
           "reviewing-agent-legibility"
         ],
@@ -40,7 +40,7 @@
       {
         "severity": "minor",
         "path": "CLAUDE.md",
-        "summary": "This repo is worked on heavily from Claude Code cloud sessions. In those sessions the `gh` CLI is unavailable or limited to `gh api` search, and GitHub writes go through the MCP tools. An agent there that follows this bullet either can't ru",
+        "summary": "\u2014 the restack procedure assumes a working `gh` CLI with extension install, and gives no fallback. This repo is worked on heavily from Claude Code cloud sessions. In those sessions the `gh` CLI is unavailable or limited to `gh api` search, a",
         "lenses": [
           "reviewing-agent-legibility"
         ],
@@ -50,7 +50,7 @@
       {
         "severity": "nit",
         "path": "CLAUDE.md",
-        "summary": "The claims are specific: GitHub restacks automatically when the bottom PR merges; it does not restack child stacks and only retargets them on branch delete; `gh stack rebase` exits with code **3** on conflict; merging a PR lands every unmer",
+        "summary": "\u2014 specific behavioral claims about GitHub stacks with no source or `(verify)`, per standing authoring rule 1 (`docs/research/README.md`). The claims are specific: GitHub restacks automatically when the bottom PR merges; it does not restack ",
         "lenses": [
           "auditing-documentation-health"
         ],

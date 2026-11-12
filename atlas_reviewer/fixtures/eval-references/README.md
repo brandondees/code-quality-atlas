@@ -1,8 +1,8 @@
 # Protocol reference rows
 
-Built by `atlas_reviewer.eval_harness.reference_row` from the pull, its reviews, and the inline comments whose `pull_request_review_id` matches. `input.reviewed_commit` is the review's `commit_id`. `metadata.review_state` is the GitHub review state. `metadata.run` is `lens-fan-out`, `coordinator-verified`, or `unrecorded`. `metadata.parse_gap` is true when the heading announces findings and none were parsed. Summaries are redacted and cut to 240 characters. These files have no `candidate`, so `eval --gate` exits 1.
+Built by `atlas_reviewer.eval_harness.reference_row` from the pull, its reviews, and the inline comments whose `pull_request_review_id` matches. `input.reviewed_commit` is the review's `commit_id`. `metadata.review_state` is the GitHub review state. `metadata.run` is `lens-fan-out`, `coordinator-verified`, or `unrecorded`. `metadata.parse_gap` is true when nothing was parsed and the round does not say there are no findings. The gate scores a candidate against these files, not against a reference copied into the pair. Summaries are redacted and cut to 240 characters. These files have no `candidate`, so `eval --gate` exits 1.
 
-Fetched 2026-11-12. 26 round file(s). Runs: lens-fan-out 21, coordinator-verified 0, unrecorded 5. Parse gaps: none.
+Fetched 2026-11-12. 26 round file(s). Runs: lens-fan-out 24, coordinator-verified 0, unrecorded 2. Parse gaps: none.
 
 Pull 637 has no protocol review in this fetch, and pull 636 has rounds 1 and 2 only, so the coordinator-verified examples named for those pulls (637 round 2 and 636 round 4) are not rows here.
 

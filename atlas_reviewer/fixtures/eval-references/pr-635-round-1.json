@@ -12,17 +12,20 @@
       {
         "severity": "minor",
         "path": "docs/open-questions.md",
-        "summary": "D43 bases the decision on \"the 2026-11-12 live agentic review of PR #621\". It cites \"Turn 9 was refused at $0.113 actual under the probe's $0.45 reservation\", a 5\u201340\u00d7 ratio, and the #631 estimate of \"a 104 KB diff ... about $0.8\u20131.0 reserve",
+        "summary": "D43's evidence has no source record, and it conflicts with the probe the PR sends readers to. D43 bases the decision on \"the 2026-11-12 live agentic review of PR #621\". It cites \"Turn 9 was refused at $0.113 actual under the probe's $0.45 r",
         "lenses": [
-          "auditing-documentation-health"
+          "auditing-documentation-health",
+          "reviewing-decision-lifecycle"
         ],
         "line": 60
       },
       {
         "severity": "nit",
         "path": "docs/open-questions.md",
-        "summary": "Before this PR, D40 and `docs/agentic-reviewer.md` described the $5 reservation as provisional, \"to be revisited after live runs\", which was itself a revisit trigger. D43 removes that status but doesn't say what would reopen the decision. T",
-        "lenses": [],
+        "summary": "D43 turns a provisional limit into a settled one but names no revisit trigger. Before this PR, D40 and `docs/agentic-reviewer.md` described the $5 reservation as provisional, \"to be revisited after live runs\", which was itself a revisit tri",
+        "lenses": [
+          "reviewing-decision-lifecycle"
+        ],
         "line": 60
       }
     ]
@@ -35,8 +38,7 @@
       "auditing-documentation-health",
       "reviewing-decision-lifecycle",
       "tracing-correctness-and-invariants",
-      "reviewing-pr-and-process-hygiene",
-      "markdownlint-cli2"
+      "reviewing-pr-and-process-hygiene"
     ],
     "review_state": "COMMENTED",
     "parse_gap": false

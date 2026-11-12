@@ -1102,8 +1102,8 @@ clock stops do.
 
 The draft's `review_event` line is still D36. Submitting that line to
 GitHub as `APPROVE` is a separate decision: the poster may do it only
-when `python -m atlas_reviewer eval --gate` exits 0 on a candidate
-recorded for that head. The four criteria (repo access, a full diff at
+when `python -m atlas_reviewer eval --fixtures <dir> --head <sha> --gate`
+exits 0 on a candidate recorded for that head. The four criteria (repo access, a full diff at
 any size, per-lens fan-out with verification, and recall of the Claude
 Code protocol findings on PRs #602–#637) are all unmet in the current
 reviewer, so the gate fails closed. The plan is
@@ -1122,3 +1122,6 @@ the `**Severity** · \`lens\`` inline shape are parsed. Brandon's
 and the severity do not have to match. The gate fails on a selected
 lens that was NOT RUN or failed, incomplete file coverage, or recall
 below 1 of the reference findings (same path, line within five).
+The reference is the checked-in row, and a missing or malformed
+reference set fails closed. Zero parsed findings are a gap unless the
+round says there are none.
