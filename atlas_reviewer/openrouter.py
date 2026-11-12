@@ -427,6 +427,11 @@ def _prompt_cost(
     details = usage.get("prompt_tokens_details")
     if not isinstance(details, dict):
         return prompt_t * terms.input_rate, ""
+    if any(
+        details.get(key) is not None and _tokens(details, key) is None
+        for key in ("cached_tokens", "cache_write_tokens")
+    ):
+        return None, ""
     cached = _tokens(details, "cached_tokens")
     written = _tokens(details, "cache_write_tokens")
     if cached is None and written is None:

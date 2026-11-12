@@ -452,7 +452,7 @@ def test_a_reply_outside_the_contract_fails_and_is_retried(tmp_path):
     ids=["other-body", "other-lens"],
 )
 def test_a_reply_that_names_another_body_or_lens_fails_and_is_retried(tmp_path, reply):
-    outcome, _, _ = attempt(tmp_path, [READ_DIFF, reply])
+    outcome, _, _ = attempt(tmp_path, [READ_ALL, reply])
     assert outcome.attestation is Attestation.MISACKNOWLEDGED
     assert outcome.state is LensState.FAILED
     assert outcome.retryable

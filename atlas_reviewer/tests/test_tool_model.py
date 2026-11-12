@@ -252,6 +252,35 @@ def test_cache_reads_without_a_catalog_rate_use_the_prompt_rate():
     assert lens.turn(request()).cost_usd == Decimal("0.008025")
 
 
+@pytest.mark.parametrize(
+    "details",
+    [
+        {"cached_tokens": 0, "cache_write_tokens": "1000"},
+        {"cached_tokens": -1, "cache_write_tokens": 0},
+    ],
+    ids=["malformed-write", "negative-read"],
+)
+def test_an_unreadable_cache_count_keeps_the_reservation(details):
+    usage = {
+        "prompt_tokens": 1000,
+        "completion_tokens": 100,
+        "is_byok": False,
+        "prompt_tokens_details": details,
+    }
+    lens, _fake = model(
+        reply(completion("done", usage=usage)),
+        catalog_reply=reply(catalog(input_cache_write="0.00001")),
+    )
+    spend = Spend(AgenticLimits().resolve())
+    ask = request()
+    worst = lens.worst_case_usd(ask)
+    assert spend.reserve(worst) is None
+    turn = lens.turn(ask)
+    assert turn.cost_usd.is_infinite()
+    spend.settle(worst, turn.cost_usd)
+    assert spend.committed_usd == worst
+
+
 def test_cache_counts_past_the_prompt_keep_the_reservation():
     usage = {
         "prompt_tokens": 10,

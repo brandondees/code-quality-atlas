@@ -799,7 +799,9 @@ D41 records the 2026-11-12 probe that did.
   unparsed reply, a failed quote or an abandoned attempt is retried once
   with the body injected again; a second one escalates. A crash leaves an
   abandoned attempt that counts as used. A lens already settled for this
-  head and body is reused without a runner.
+  head and body is reused without a runner. A settled outcome with no
+  changed-file count, from before the per-file gate, shows no coverage,
+  so the review cannot approve on it.
 - **The adapter** (`tool_model.OpenRouterLensModel`). One Chat Completions
   request per turn, with the one-shot provider pin (`require_parameters`,
   zero data retention, no fallbacks, no plugins and no server tools), a
@@ -842,7 +844,7 @@ D41 records the 2026-11-12 probe that did.
   API's PUT would otherwise upsert it. Each hold exec has its own 15 second
   budget, and the guest socket call times out after 10 seconds and reads
   only the status line. Refresh and tool execs share the runner's exec lock so
-  they do not write one stream; the 15 second budget is how long a
+  they do not write one stream; the 15-second budget is how long a
   refresh can block a tool. A keepalive failure fails the runner, and a
   failed runner is not complete coverage. Snapshot and restore is not
   built; there is no public fork API (Fly support, 2026-11-06).

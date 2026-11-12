@@ -150,8 +150,14 @@ class AgenticReview:
         failed after a clean lens (a keepalive refresh or delete, for
         example) is not complete coverage, so the review cannot approve.
         Unread paths block approval even when a lens's state was recorded
-        clean, so a missing cause cannot approve a partial read."""
-        if any(r.outcome is not None and r.outcome.unread for r in self.lenses):
+        clean, so a missing cause cannot approve a partial read. An outcome
+        with no changed-file count predates the per-file gate and shows no
+        coverage, so it blocks approval too."""
+        if any(
+            r.outcome is not None
+            and (r.outcome.unread or r.outcome.changed_files is None)
+            for r in self.lenses
+        ):
             return False
         lenses_clean = bool(self.lenses) and all(
             r.state is LensState.CLEAN for r in self.lenses

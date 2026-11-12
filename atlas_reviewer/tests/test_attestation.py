@@ -89,6 +89,13 @@ def test_a_reply_acknowledges_only_its_own_lens_and_body():
         (Attestation.ATTESTED, {Cause.TOOL_GAP}, LensState.PARTIAL, False),
         (Attestation.ATTESTED, {Cause.NO_SOURCE_READ}, LensState.PARTIAL, False),
         (Attestation.ATTESTED, {Cause.FILES_UNREAD}, LensState.PARTIAL, False),
+        (
+            Attestation.UNACKNOWLEDGED,
+            {Cause.UNPARSED, Cause.FILES_UNREAD},
+            LensState.FAILED,
+            False,
+        ),
+        (Attestation.MISACKNOWLEDGED, {Cause.FILES_UNREAD}, LensState.FAILED, False),
         (Attestation.UNACKNOWLEDGED, {Cause.TURN_CAP}, LensState.PARTIAL, False),
         (Attestation.UNACKNOWLEDGED, {Cause.LENS_CLOCK}, LensState.PARTIAL, False),
         (Attestation.UNACKNOWLEDGED, {Cause.UNPARSED}, LensState.FAILED, True),

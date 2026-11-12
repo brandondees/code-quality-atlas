@@ -263,7 +263,7 @@ def test_a_failed_attestation_is_retried_once_with_the_body_forced(tmp_path):
 
 
 def test_a_retry_that_fails_again_escalates_and_never_approves(tmp_path):
-    result, _, _ = review(tmp_path, [READ_DIFF, MISACK, READ_DIFF, MISACK])
+    result, _, _ = review(tmp_path, [READ_ALL, MISACK, READ_ALL, MISACK])
     (lens,) = result.lenses
     assert (lens.state, lens.attempts, lens.escalated) == (LensState.FAILED, 2, True)
     assert not result.coverage_complete
@@ -286,7 +286,7 @@ def test_quotes_that_fail_twice_leave_the_lens_partial_and_report_only_verified(
     tmp_path,
 ):
     wrong = finding(evidence="return sum(x for x in xs if x)", severity="blocker")
-    script = [READ_DIFF, final(finding(), wrong)] * 2
+    script = [READ_ALL, final(finding(), wrong)] * 2
     result, _, _ = review(tmp_path, script)
     (lens,) = result.lenses
     assert (lens.state, lens.escalated) == (LensState.PARTIAL, True)
@@ -561,8 +561,18 @@ def test_a_review_carries_the_diffs_flagged_values_to_the_draft(tmp_path):
     assert TOKEN not in repr(result)
 
 
-def test_the_status_line_is_the_drafts_first_line_and_only_controller_values():
+def test_a_clean_outcome_without_a_file_count_cannot_approve():
     result = synthesize([lens_result(AttemptOutcome(Attestation.ATTESTED))])
+    assert not result.coverage_complete
+    assert result.proposed_event is ReviewEvent.APPROVE
+    assert result.event is ReviewEvent.COMMENT
+    assert status(result)["coverage_complete"] is False
+
+
+def test_the_status_line_is_the_drafts_first_line_and_only_controller_values():
+    result = synthesize(
+        [lens_result(AttemptOutcome(Attestation.ATTESTED, changed_files=1))]
+    )
     draft = render_draft(result, Redactor())
     assert draft.split("\n", 1)[0] == status_line(result)
     assert parse_status(draft) == {
@@ -573,7 +583,7 @@ def test_the_status_line_is_the_drafts_first_line_and_only_controller_values():
         "lenses": {"clean": 1, "partial": 0, "failed": 0, "not_run": 0},
         "verified_findings": 0,
         "unverified_findings": 0,
-        "changed_files": None,
+        "changed_files": 1,
         "unreviewed_files": 0,
     }
 
@@ -600,7 +610,9 @@ def checked(severity, *, attribution=Attribution.INTRODUCED, valence=Valence.DEF
 
 
 def clean(*findings):
-    return AttemptOutcome(Attestation.ATTESTED, findings=tuple(findings))
+    return AttemptOutcome(
+        Attestation.ATTESTED, findings=tuple(findings), changed_files=1
+    )
 
 
 @pytest.mark.parametrize(
@@ -652,7 +664,7 @@ def test_no_lens_selected_is_not_complete_coverage():
 def test_a_failed_runner_is_not_complete_coverage_even_when_the_lens_is_clean():
     from atlas_reviewer.domain import RunnerReport
 
-    clean_lens = lens_result(AttemptOutcome(Attestation.ATTESTED))
+    clean_lens = lens_result(AttemptOutcome(Attestation.ATTESTED, changed_files=1))
     failed = RunnerReport(
         RunnerStatus.FAILED, CleanupStatus.DESTROYED_VERIFIED, "r",
         "sprite task socket DELETE returned HTTP 500",

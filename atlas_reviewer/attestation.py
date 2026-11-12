@@ -182,6 +182,8 @@ class AttemptOutcome:
 
     @property
     def retryable(self) -> bool:
+        if Cause.FILES_UNREAD in self.causes:
+            return False
         return bool(
             self.attestation in _RETRYABLE_ATTESTATIONS or self.causes & _RETRYABLE
         )
