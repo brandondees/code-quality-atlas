@@ -572,7 +572,8 @@ def test_a_runner_deadline_inside_a_tool_call_ends_the_lens_partial(tmp_path):
 
 def test_a_failed_model_call_fails_the_lens_and_is_not_retried(tmp_path):
     outcome, _, spend = attempt(tmp_path, [BoundaryError("OpenRouter HTTP 502")])
-    assert outcome.causes == {Cause.MODEL_ERROR}
+    assert outcome.causes == {Cause.MODEL_ERROR, Cause.FILES_UNREAD}
+    assert set(outcome.unread) == set(CHANGED)
     assert outcome.state is LensState.FAILED
     assert not outcome.retryable
     assert spend.committed_usd == ScriptedLensModel([]).worst_usd
