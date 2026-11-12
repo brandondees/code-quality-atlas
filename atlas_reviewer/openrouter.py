@@ -36,17 +36,35 @@
   seconds (one owner-reported pilot observation, not checked against
   OpenRouter's documentation), so a $0 readback right after a call is
   expected and is not a mismatch with the per-response cost recorded here.
-  Spend is reconciled from the response, never from that counter:
-  `usage.cost`, plus `cost_details.upstream_inference_cost` when an
-  upstream charge is reported (on a BYOK call `usage.cost` is only
-  OpenRouter's fee). A BYOK call that omits the upstream charge, or an
-  upstream charge that cannot be read, keeps its full reservation. A key
-  whose `include_byok_in_limit` is not true passes preflight and the run
-  is in no-BYOK mode: a response is used only when `usage.is_byok` is
-  boolean false. True, a missing field, any other value, or an HTTP 200
-  whose body cannot be parsed raises `ByokRefusedError` after the call
-  is settled, so the review stops before another model call.
-  OpenRouter's usage cookbook shows
+  Spend is reconciled from the response, never from that counter.
+  Settlement rule. When `usage.is_byok` is boolean false, the call settles
+  `usage.cost` and a reported `cost_details.upstream_inference_cost` is not
+  added, with two over-counts: an upstream amount larger than `usage.cost`
+  settles at that amount, and an upstream value that is present, not null
+  and unreadable keeps the full reservation. A null or absent upstream
+  settles `usage.cost`; with no usable `usage.cost` it is priced from the
+  highest catalog rates and upstream is still not added. For any other
+  `is_byok` value a reported upstream cost is added. A call with `is_byok`
+  true and no upstream cost keeps its full reservation. A present,
+  non-null, unreadable upstream value keeps the reservation on any
+  response, including an explicitly non-BYOK one. A null upstream
+  keeps the reservation unless `is_byok` is exactly false. The
+  settlement line records the raw upstream value on an explicit
+  non-BYOK call, cut to 200 characters.
+  The SDK says that on a BYOK request `cost` is the OpenRouter fee only
+  (https://openrouter.ai/docs/client-sdks/typescript/models/decisionsresponseusage,
+  fetched 2026-11-11). The usage-accounting page calls `cost` the total
+  charged to the account and does not say whether a non-BYOK `cost`
+  already includes the upstream amount
+  (https://openrouter.ai/docs/cookbook/administration/usage-accounting,
+  fetched 2026-11-11) (verify). The rule is policy: on PR #585 (2026-11-11)
+  the key charge equalled `usage.cost` and the previous sum settled twice
+  that. A key whose `include_byok_in_limit` is not true passes preflight
+  and the run is in no-BYOK mode: a response is used only when
+  `usage.is_byok` is boolean false. True, a missing field, any other
+  value, or an HTTP 200 whose body cannot be parsed raises
+  `ByokRefusedError` after the call is settled, so the review stops
+  before another model call. OpenRouter's usage cookbook shows
   `is_byok: false` on its Responses API example and omits the field from
   its Chat Completions example, and the SDK types it as optional
   (https://openrouter.ai/docs/cookbook/administration/usage-accounting,
@@ -405,15 +423,27 @@ def _actual_cost(usage: Json, terms: ModelTerms) -> tuple[Decimal | None, str]:
         _tokens(details, "reasoning_tokens") if isinstance(details, dict) else None
     )
     summary = f"tokens in={prompt_t} out={completion_t} reasoning={reasoning_t}"
+    # Policy: boolean false settles usage.cost. OpenRouter's docs do not
+    # say whether that cost already includes the upstream amount (verify).
+    # PR #585 (2026-11-11) charged usage.cost and the old sum settled twice
+    # that. Ambiguity over-counts: an upstream amount above usage.cost, or
+    # one that is present and unreadable, is never settled below what it
+    # could cost.
+    explicitly_non_byok = usage.get("is_byok") is False
+    raw = _upstream_raw(usage)
     try:
-        upstream = _upstream_cost(usage)
+        upstream = _upstream_cost(raw, null_is_absent=explicitly_non_byok)
     except PricingUnknownError:
+        if explicitly_non_byok:
+            summary += f" (upstream {_shown(raw)} unreadable)"
         return None, summary
     if usage.get("is_byok") is True and upstream is None:
         return None, f"{summary} (BYOK upstream cost not reported)"
+    from_usage_cost = True
     try:
         base = money(usage["cost"], "usage.cost")
     except (KeyError, PricingUnknownError):
+        from_usage_cost = False
         if prompt_t is None or completion_t is None:
             return None, summary
         if terms.reasoning_rate > 0 and reasoning_t is None:
@@ -426,17 +456,39 @@ def _actual_cost(usage: Json, terms: ModelTerms) -> tuple[Decimal | None, str]:
             + terms.request_fee
         )
         summary = f"{summary} (cost computed at the highest catalog rates)"
-    if upstream is not None:
-        base += upstream
+    if not explicitly_non_byok:
+        if upstream is not None:
+            base += upstream
+    elif raw is not _ABSENT:
+        if from_usage_cost and upstream is not None and upstream > base:
+            summary += (
+                f" (upstream {_shown(raw)} exceeds usage.cost {base}:"
+                " settled at upstream)"
+            )
+            base = upstream
+        else:
+            summary += f" (upstream {_shown(raw)} reported, not added: is_byok false)"
     return base, summary
 
 
-def _upstream_cost(usage: Json) -> Decimal | None:
-    """The provider's own charge, reported beside OpenRouter's fee."""
+_ABSENT: Any = object()
+
+
+def _upstream_raw(usage: Json) -> Any:
+    """The reported `cost_details.upstream_inference_cost`, or `_ABSENT`."""
     details = usage.get("cost_details")
     if not isinstance(details, dict) or "upstream_inference_cost" not in details:
+        return _ABSENT
+    return details["upstream_inference_cost"]
+
+
+def _upstream_cost(raw: Any, *, null_is_absent: bool) -> Decimal | None:
+    """`raw` as money. Absent is None. A null is None only when the caller
+    says so; any other value that cannot be read raises."""
+    if raw is _ABSENT or (raw is None and null_is_absent):
         return None
-    return money(
-        details["upstream_inference_cost"],
-        "usage.cost_details.upstream_inference_cost",
-    )
+    return money(raw, "usage.cost_details.upstream_inference_cost")
+
+
+def _shown(raw: Any) -> str:
+    return f"{raw!r:.200}"

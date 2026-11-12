@@ -189,7 +189,19 @@ that reports BYOK, that does not say, or whose HTTP 200 body cannot
 be parsed, stops the review with exit 3 and makes no further model
 call. A key with the flag set true is
 unchanged: a BYOK response is accepted, and its upstream cost counts
-toward the review cap.
+toward the review cap. A response whose `usage.is_byok` is false
+settles `usage.cost`, and a reported upstream cost is not added, with
+two over-counts: an upstream amount larger than `usage.cost` settles at
+that amount, and an upstream value that is present, not null and
+unreadable keeps the full reservation. A null or absent upstream settles
+`usage.cost`. With no usable `usage.cost` the call is priced from the
+highest catalog rates and upstream is still not added. The settlement
+line records the raw upstream value, cut to 200 characters. A present,
+non-null, unreadable upstream value keeps the reservation on any
+response, including an explicitly non-BYOK one. A null upstream keeps
+the reservation unless `is_byok` is exactly false. A true `is_byok`
+with no upstream cost keeps the reservation. A reported upstream cost
+is still added when `is_byok` is true, missing, or any other value.
 
 The entrypoint does not print the environment. The Sprites adapter still
 sends no `env`, `dir`, `path`, or `tty` into a Sprite; the Sprites token
