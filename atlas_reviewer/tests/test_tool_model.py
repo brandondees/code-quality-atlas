@@ -165,6 +165,50 @@ def test_a_reported_cost_settles_and_an_invalid_one_stays_at_the_worst_case():
     assert broken.provider.budget.calls == []
 
 
+def test_token_counts_without_a_cost_are_priced_from_the_catalog():
+    usage = {"prompt_tokens": 1000, "completion_tokens": 100, "is_byok": False}
+    lens, _fake = model(reply(completion("done", usage=usage)))
+    # 1000 x 0.000006 + 100 x 0.0000225, the highest catalog rates.
+    assert lens.turn(request()).cost_usd == Decimal("0.00825")
+
+
+def test_a_turn_fetches_the_catalog_once():
+    usage = {"cost": "0.01", "is_byok": False}
+    lens, fake = model(
+        reply(completion("one", usage=usage)),
+        reply(completion("two", usage=usage)),
+    )
+    ask = request()
+    lens.worst_case_usd(ask)
+    lens.turn(ask)
+    lens.worst_case_usd(ask)
+    lens.turn(ask)
+    fetched = [
+        url for _method, url, _headers, _body in fake.requests if "/model/" in url
+    ]
+    assert len(fetched) == 2
+
+
+def test_an_unparseable_reply_on_a_no_byok_key_is_refused():
+    lens, fake = model(
+        reply(b"not-json"),
+        key=reply(key_status(include_byok_in_limit=False)),
+    )
+    with pytest.raises(ByokRefusedError, match="could not be parsed"):
+        lens.turn(request())
+    assert len(fake.chat) == 0
+
+
+def test_non_finite_and_deeply_nested_arguments_are_refused():
+    from atlas_reviewer.tool_model import _strict_args
+
+    assert _strict_args('{"n": 1e999}') == ()
+    assert _strict_args('{"n": [1e999]}') == ()
+    nested = "[" * 2000 + "]" * 2000
+    assert _strict_args(nested) == ()
+    assert _strict_args('{"a": ' + '{"b": ' * 2000 + "1" + "}" * 2000 + "}") == ()
+
+
 def test_a_zero_cost_settles_at_zero():
     lens, _fake = model(reply(completion("done", usage={"cost": 0, "is_byok": False})))
     ask = request()

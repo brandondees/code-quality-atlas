@@ -48,7 +48,7 @@ from atlas_reviewer.bridge import Bridge, BridgeResult, BridgeSecret, Status, re
 from atlas_reviewer.bridge_args import TOOLS, Rev, arg_names, required_args
 from atlas_reviewer.lens_contract import ContractError, parse_reply
 from atlas_reviewer.lenses import BUNDLE_ROOT
-from atlas_reviewer.ports import BoundaryError, Clock
+from atlas_reviewer.ports import BoundaryError, ByokRefusedError, Clock
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, _fence_rule, fence
 from atlas_reviewer.quotes import SourceText, Verified, check_all
 from atlas_reviewer.runner import DeadlineExceededError
@@ -440,6 +440,8 @@ def run_attempt(
             return p.cut(refused)
         try:
             reply = model.turn(request)
+        except ByokRefusedError:
+            raise
         except BoundaryError as exc:
             return p.cut(Cause.MODEL_ERROR, str(exc))
         spend.settle(worst, reply.cost_usd)

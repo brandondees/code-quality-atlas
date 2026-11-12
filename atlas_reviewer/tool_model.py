@@ -4,12 +4,14 @@
 One `LensModel` turn is one Chat Completions request. It sends the same
 pinned provider document as the one-shot adapter (`only`, no fallbacks,
 `require_parameters`, `zdr`, `data_collection: deny`, no plugins and no
-server tools). The lens loop reserves the worst case and settles
-`usage.cost` through its own spend tracker; this module does not touch
-that tracker's rules, and it does not reserve on the one-shot
-`ReviewBudget` (that budget's ceiling is the one-shot 3 calls and $3).
-An unreadable cost is returned as a non-finite `Decimal`, which the
-tracker keeps at the worst case.
+server tools). The lens loop reserves the worst case and settles `_actual_cost`
+(BYOK upstream included) through its own spend tracker. A turn with no
+readable cost but usable token counts is priced at the highest catalog
+rates. Only a turn with neither a readable cost nor usable token counts
+is returned as a non-finite `Decimal`, which the tracker keeps at the
+worst case. This module does not touch that tracker's rules, and it
+does not reserve on the one-shot `ReviewBudget` (that budget's ceiling
+is the one-shot 3 calls and $3).
 
 Tool calls are parsed and handed back. The loop runs them through the
 bridge, which rejects an unknown tool or bad arguments before anything
@@ -21,6 +23,7 @@ a retry would be a second billed request under one reservation.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
@@ -60,13 +63,17 @@ class OpenRouterLensModel:
 
     def __init__(self, provider: OpenRouterProvider) -> None:
         self.provider = provider
+        self._ready_for_turn: tuple[ModelTerms, bool] | None = None
 
     @property
     def name(self) -> str:
         return self.provider.name
 
     def worst_case_usd(self, request: TurnRequest) -> Decimal:
-        terms, _counts_byok = self._ready()
+        terms, counts_byok = self._ready()
+        # The loop prices the turn and then places it. One catalog fetch
+        # serves both; the next turn fetches again.
+        self._ready_for_turn = (terms, counts_byok)
         payload = _payload(self.provider, request, terms)
         check_tokens(
             input_token_bound(json.dumps(payload)), terms, self.provider.budget.limits
@@ -77,7 +84,9 @@ class OpenRouterLensModel:
 
     def turn(self, request: TurnRequest) -> ModelTurn:
         """One request, no retry. The loop counts the call and settles the cost."""
-        terms, counts_byok = self._ready()
+        cached = self._ready_for_turn
+        self._ready_for_turn = None
+        terms, counts_byok = self._ready() if cached is None else cached
         payload = _payload(self.provider, request, terms)
         url = f"{self.provider._api_url}/chat/completions"
         body = json.dumps(payload).encode()
@@ -93,11 +102,17 @@ class OpenRouterLensModel:
             raise BoundaryError(f"OpenRouter transport error: {exc}") from exc
         if resp.status != 200:
             raise BoundaryError(f"OpenRouter HTTP {resp.status} for {safe_url(url)}")
-        return _turn(
-            _json_object(resp.body, "OpenRouter chat completion", BoundaryError),
-            terms,
-            counts_byok,
-        )
+        try:
+            data = _json_object(resp.body, "OpenRouter chat completion", BoundaryError)
+        except BoundaryError:
+            if not counts_byok:
+                raise ByokRefusedError(
+                    "refusing the review: this OpenRouter key does not count "
+                    "BYOK spend against its credit limit, and the response "
+                    "could not be parsed, so is_byok could not be checked"
+                ) from None
+            raise
+        return _turn(data, terms, counts_byok)
 
     def _ready(self) -> tuple[ModelTerms, bool]:
         if self.provider._key_status is None:
@@ -279,11 +294,26 @@ def _strict_args(raw: Any) -> Any:
         return ()
     try:
         value = json.loads(raw, object_pairs_hook=_pairs)
-    except (json.JSONDecodeError, ValueError, UnicodeError):
+        _finite(value)
+    except (json.JSONDecodeError, ValueError, UnicodeError, RecursionError):
         return ()
     if not isinstance(value, dict):
         return ()
     return value
+
+
+def _finite(value: Any) -> None:
+    """Refuse a non-finite number anywhere in the arguments."""
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("non-finite number")
+        return
+    if isinstance(value, dict):
+        for item in value.values():
+            _finite(item)
+    elif isinstance(value, list):
+        for item in value:
+            _finite(item)
 
 
 def _pairs(pairs: list[tuple[Any, Any]]) -> dict[str, Any]:

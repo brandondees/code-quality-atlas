@@ -32,7 +32,7 @@ from atlas_reviewer.lens_loop import (
     run_attempt,
     tool_schemas,
 )
-from atlas_reviewer.ports import BoundaryError
+from atlas_reviewer.ports import BoundaryError, ByokRefusedError
 from atlas_reviewer.quotes import QuoteSource, read_sources
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import DeadlineExceededError
@@ -97,6 +97,26 @@ def attempt(tmp_path, script, *, limits=LIMITS, clock=None, spend=None, deadline
 
 
 # ------------------------------------------------------------------ limits
+
+
+def test_a_byok_refusal_leaves_the_loop_and_keeps_the_reservation():
+    class Model:
+        name = "byok"
+
+        def worst_case_usd(self, request):
+            return Decimal("0.01")
+
+        def turn(self, request):
+            raise ByokRefusedError("refusing the review: byok")
+
+    clock = FakeClock()
+    spend = Spend(LIMITS.resolve())
+    with pytest.raises(ByokRefusedError, match="byok"):
+        run_attempt(
+            job(), object(), Model(), spend, clock,
+            review_deadline=clock.monotonic() + 600,
+        )  # fmt: skip
+    assert spend.committed_usd == Decimal("0.01")
 
 
 def test_brandons_provisional_defaults_are_accepted():
