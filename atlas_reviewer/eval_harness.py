@@ -32,7 +32,13 @@ from typing import Any
 
 from atlas_reviewer.redact import redact
 
-MAJOR_OR_ABOVE = frozenset({"blocker", "major"})
+# A reference finding is recalled when a candidate finding is on the same
+# path and its lines sit within this many lines of the reference span.
+# Severity and verdict are not part of the match. Brandon, 2026-11-12:
+# exact conclusions are not expected, and an extra finding never fails.
+PLACE_LINES = 5
+RECALL_THRESHOLD = 1.0
+_STOPPED = frozenset({"not run", "failed"})
 RUNS = frozenset({"lens-fan-out", "coordinator-verified", "unrecorded"})
 _VERDICTS = frozenset({"APPROVE", "COMMENT", "REQUEST_CHANGES"})
 _SEVERITIES = frozenset({"blocker", "major", "minor", "nit"})
@@ -67,13 +73,16 @@ class EvalFinding:
     line_end: int | None = None
     lenses: tuple[str, ...] = ()
 
-    def overlaps(self, other: EvalFinding) -> bool:
-        if self.severity != other.severity or self.path != other.path:
+    def same_issue(self, other: EvalFinding) -> bool:
+        """Same path and a nearby line. Severity is ignored."""
+        if self.path != other.path:
             return False
         if self.line_start is None or other.line_start is None:
-            return self.line_start is None and other.line_start is None
-        return self.line_start <= (other.line_end or other.line_start) and (
-            other.line_start <= (self.line_end or self.line_start)
+            return True
+        end = self.line_end or self.line_start
+        other_end = other.line_end or other.line_start
+        return self.line_start - PLACE_LINES <= other_end and (
+            other.line_start <= end + PLACE_LINES
         )
 
 
@@ -95,53 +104,59 @@ class CandidateReview(EvalReview):
     unreviewed_files: int | None = None
     changed_files: tuple[str, ...] | None = None
     lenses_run: tuple[str, ...] | None = None
+    lenses_not_run: tuple[str, ...] = ()
+    lenses_failed: tuple[str, ...] = ()
     outside_diff_reads: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
 class Score:
     matched: int
-    missed_major_or_above: int
-    false_positives: int
-    false_positives_major_or_above: int
+    missed: int
+    extras: int
+    recall: float
     verdict_agrees: bool
 
-    def as_json(self) -> dict[str, int | bool]:
+    def as_json(self) -> dict[str, int | float | bool]:
         return {
             "matched": self.matched,
-            "missed_major_or_above": self.missed_major_or_above,
-            "false_positives": self.false_positives,
-            "false_positives_major_or_above": self.false_positives_major_or_above,
+            "missed": self.missed,
+            "extras": self.extras,
+            "recall": self.recall,
             "verdict_agrees": self.verdict_agrees,
         }
 
 
 def score(reference: EvalReview, candidate: EvalReview) -> Score:
-    """Match findings one-to-one. Order is the reference's order."""
+    """Loose one-to-one match. Each candidate finding is used at most once.
+
+    A match is the same path and a line within ``PLACE_LINES``. Severity
+    and the wording of the conclusion are not compared. Findings the
+    reference did not record are ``extras``.
+    """
     used: set[int] = set()
     matched = 0
-    missed_major = 0
     for finding in reference.findings:
         slot = next(
             (
                 i
                 for i, other in enumerate(candidate.findings)
-                if i not in used and finding.overlaps(other)
+                if i not in used and finding.same_issue(other)
             ),
             None,
         )
         if slot is None:
-            if finding.severity in MAJOR_OR_ABOVE:
-                missed_major += 1
             continue
         used.add(slot)
         matched += 1
-    unmatched = [f for i, f in enumerate(candidate.findings) if i not in used]
+    missed = len(reference.findings) - matched
+    total = len(reference.findings)
+    recall = 1.0 if total == 0 else matched / total
     return Score(
         matched,
-        missed_major,
-        len(unmatched),
-        sum(1 for f in unmatched if f.severity in MAJOR_OR_ABOVE),
+        missed,
+        len(candidate.findings) - len(used),
+        recall,
         reference.verdict == candidate.verdict,
     )
 
@@ -155,56 +170,35 @@ def gate_failures(
 ) -> tuple[str, ...]:
     """Why this pair does not yet allow APPROVE. Empty means it passes.
 
-    The finding bar is no missed Major+ finding, no unmatched candidate
-    finding at Major or above, and the same verdict. The coverage bar is
-    the candidate's own record: complete coverage, no unreviewed files,
-    every lens the reference named was run, and every reference path
-    outside the diff was read at head. A ``coordinator-verified`` reference
-    did not finish lens fan-out, so the pair cannot clear that criterion.
+    Brandon, 2026-11-12: an extra finding never fails the gate, and the
+    verdict and the severity do not have to match. The gate fails when
+    recall of the reference findings is below ``RECALL_THRESHOLD``, a
+    selected lens was NOT RUN or failed, or file coverage is incomplete.
+    ``run`` is recorded and does not itself fail the gate.
     """
+    del run
     failures: list[str] = []
-    if run != "lens-fan-out":
+    if scored.recall < RECALL_THRESHOLD:
         failures.append(
-            f"reference run is {run}; only a recorded lens-fan-out clears that criterion"
-        )
-    if scored.missed_major_or_above:
-        failures.append(
-            f"missed {scored.missed_major_or_above} Major+ reference finding(s)"
-        )
-    if scored.false_positives_major_or_above:
-        failures.append(
-            f"{scored.false_positives_major_or_above} unmatched Major+ "
-            "candidate finding(s)"
-        )
-    if not scored.verdict_agrees:
-        failures.append(
-            f"verdict {candidate.verdict} disagrees with {reference.verdict}"
+            f"recall {scored.recall:.2f} is below {RECALL_THRESHOLD:.2f} "
+            f"({scored.missed} reference finding(s) unmatched)"
         )
     if candidate.coverage_complete is not True:
         failures.append("coverage_complete is not true")
     if candidate.unreviewed_files not in (0,):
         failures.append("unreviewed_files is not 0")
-    if candidate.lenses_run is None or candidate.changed_files is None:
-        failures.append("candidate does not record lenses_run and changed_files")
-        return tuple(failures)
-    if candidate.outside_diff_reads is None:
-        failures.append("candidate does not record outside_diff_reads")
+    if candidate.lenses_run is None:
+        failures.append("candidate does not record lenses_run")
         return tuple(failures)
     ran = set(candidate.lenses_run)
-    changed = set(candidate.changed_files)
-    read_outside = set(candidate.outside_diff_reads)
+    for name in candidate.lenses_not_run:
+        failures.append(f"lens {name} was NOT RUN")
+    for name in candidate.lenses_failed:
+        failures.append(f"lens {name} failed")
     for finding in reference.findings:
         missing = [name for name in finding.lenses if name not in ran]
         if missing:
             failures.append(f"lens {missing[0]} named by the reference was not run")
-        if (
-            finding.path
-            and finding.path not in changed
-            and (finding.path not in read_outside)
-        ):
-            failures.append(
-                f"reference path {finding.path} is outside the diff and was not read"
-            )
     return tuple(dict.fromkeys(failures))
 
 
@@ -674,19 +668,18 @@ def _text(value: object, key: str) -> str:
     return ""
 
 
-def _totals(results: Sequence[Mapping[str, Any]]) -> dict[str, int]:
-    keys = (
-        "matched",
-        "missed_major_or_above",
-        "false_positives",
-        "false_positives_major_or_above",
-    )
-    totals = {key: 0 for key in keys}
-    totals["verdict_agreements"] = 0
+def _totals(results: Sequence[Mapping[str, Any]]) -> dict[str, int | float]:
+    totals: dict[str, int | float] = {
+        "matched": 0,
+        "missed": 0,
+        "extras": 0,
+        "verdict_agreements": 0,
+    }
     for row in results:
         score_row = row["score"]
-        for key in keys:
-            totals[key] += int(score_row[key])
+        totals["matched"] += int(score_row["matched"])
+        totals["missed"] += int(score_row["missed"])
+        totals["extras"] += int(score_row["extras"])
         totals["verdict_agreements"] += int(bool(score_row["verdict_agrees"]))
     return totals
 
@@ -713,15 +706,50 @@ def _parse_review(value: object, name: str) -> EvalReview:
 def _parse_candidate(value: object, name: str) -> CandidateReview:
     review = _parse_review(value, name)
     assert isinstance(value, dict)
+    ran, not_run, failed = _lens_lists(value, name)
     return CandidateReview(
         review.verdict,
         review.findings,
         _opt_bool(value.get("coverage_complete"), name, "coverage_complete"),
         _opt_int(value.get("unreviewed_files"), name, "unreviewed_files"),
         _opt_strs(value.get("changed_files"), name, "changed_files"),
-        _opt_strs(value.get("lenses_run"), name, "lenses_run"),
+        ran,
+        not_run,
+        failed,
         _opt_strs(value.get("outside_diff_reads"), name, "outside_diff_reads"),
     )
+
+
+def _lens_lists(
+    value: Mapping[str, Any], name: str
+) -> tuple[tuple[str, ...] | None, tuple[str, ...], tuple[str, ...]]:
+    selected = value.get("lenses")
+    if isinstance(selected, list) and any(isinstance(item, dict) for item in selected):
+        ran: list[str] = []
+        not_run: list[str] = []
+        failed: list[str] = []
+        for item in selected:
+            if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+                raise EvalFormatError(f"{name} lenses need a name")
+            state = str(item.get("state", "clean")).lower().replace("_", " ")
+            lens = str(item["name"])
+            if state not in _STOPPED:
+                ran.append(lens)
+            elif state == "failed":
+                failed.append(lens)
+            else:
+                not_run.append(lens)
+        return tuple(ran), tuple(not_run), tuple(failed)
+    return (
+        _opt_strs(value.get("lenses_run"), name, "lenses_run"),
+        _listed(value.get("lenses_not_run"), name, "lenses_not_run"),
+        _listed(value.get("lenses_failed"), name, "lenses_failed"),
+    )
+
+
+def _listed(value: object, name: str, field: str) -> tuple[str, ...]:
+    parsed = _opt_strs(value, name, field)
+    return () if parsed is None else parsed
 
 
 def _parse_finding(value: object, name: str) -> EvalFinding:

@@ -33,10 +33,10 @@ person reads. It is not permission to post `APPROVE`.
 
 | Criterion | Today | Gate |
 |---|---|---|
-| Full repo access | Unmet | A reference finding whose path is outside the diff was read at head |
+| Full repo access | Unmet | The reviewer can read any path at head. An unread path outside the diff does not by itself fail the gate |
 | Full diff, any size, no silent partial coverage | Unmet | `coverage_complete` is true and `unreviewed_files` is 0, including a diff larger than one context window |
-| Per-lens fan-out, synthesis, verification | Unmet | Every lens the reference finding names was run, and the score uses only the candidate's findings |
-| Recall and precision against protocol reviews | Unmet | No missed Major+ finding, no unmatched Major+ candidate finding, same verdict |
+| Per-lens fan-out, synthesis, verification | Unmet | A selected lens that is NOT RUN or failed fails the gate, and every lens a reference finding names was run |
+| Recall of the protocol findings | Unmet | Every reference finding is recalled (same path, line within five). An extra finding is reported and does not fail the gate. Verdict and severity do not have to match |
 
 Major+ is `blocker` and `major`. A Minor or Nit that the reference has and
 the candidate lacks does not fail the gate. An unmatched candidate finding
@@ -153,41 +153,39 @@ do not. There is no cross-lens merge of several attested replies. Quote
 verification and the mechanical verdict exist for the single lens that
 did run.
 
-**Measure.** Every lens name on a reference finding must appear in the
-candidate's `lenses_run`. The score is computed from the candidate
-findings the caller recorded, which are the verified findings the
-coordinator would have minted. A candidate that omits `lenses_run` fails
-the gate. Each reference row records `metadata.run`: `lens-fan-out` when
-the coverage section names lenses it ran, loaded, or re-ran;
-`coordinator-verified` when the round says that (fan-out did not finish);
-`unrecorded` when the body says neither. A coordinator-verified row is
-flagged and does not clear this criterion, so it cannot by itself make
-`--gate` exit 0. Pull 637 has no protocol review in the 2026-11-12 fetch,
+**Measure.** A lens listed in `lenses_not_run` or `lenses_failed`, or in
+`lenses` with state `not run` or `failed`, fails the gate. Every lens
+name on a reference finding must appear in `lenses_run`. A candidate
+that omits `lenses_run` fails the gate. Each reference row records
+`metadata.run` (`lens-fan-out`, `coordinator-verified`, or `unrecorded`).
+That field is information. It does not itself fail the gate. Pull 637
+has no protocol review in the 2026-11-12 fetch,
 and pull 636's fetch has rounds 1 and 2 only, so the cited
 coordinator-verified rounds (637 round 2, 636 round 4) are not rows in
 this set.
 
-### 4. Recall and precision against the protocol reviews
+### 4. Recall of the protocol findings
 
 The reference reviews are the rounds whose body starts with `## Round N`
 and carries `<!-- atlas-review round:N ... -->`, posted on PRs #602–#637.
 Inline comments whose first line is `**Severity · lens**` are the
 findings. `eval_harness.protocol_review` reads that shape, skips a
 CodeRabbit comment (`coderabbit-ai-generated`), and redacts the summary.
-The match key in `eval_harness.score` is severity, path, and an
-overlapping line span. A finding with no line matches only a finding of
-the same severity and path that also has no line. Each candidate finding
-is used once.
+The match in `eval_harness.score` is the same path and a line within
+five (`PLACE_LINES`). Severity is not compared. A finding with no line
+matches any finding on that path. Each candidate finding is used once.
+Unmatched candidate findings are `extras`.
 
 **Gap.** No candidate review of those PRs is stored, so nothing is scored
 and `--gate` exits 1. The scorer itself is covered by the hand-built
 fixture under `atlas_reviewer/fixtures/eval-score/`.
 
-**Measure.** `missed_major_or_above` is 0, `false_positives_major_or_above`
-is 0, and `verdict_agrees` is true, on every scored pair. The reference
-is one reviewer's report. A real defect that the protocol round did not
-write down counts as an unmatched Major+ finding and fails the gate.
-That is the bar this plan sets. Loosening it is a new decision.
+**Measure.** `recall` is 1 on every scored pair: every reference finding
+has a loose match. `extras` is reported and never a failure, at any
+severity. `verdict_agrees` is reported and is not a failure. Brandon
+set this bar on 2026-11-12 (3:14 PM CT): exceeding the protocol is fine,
+and a missing finding means the multi-lens review is not fully
+functional. Exact matching conclusions are not expected.
 
 Verdict strings are the GitHub events `APPROVE`, `COMMENT`, and
 `REQUEST_CHANGES`. The review's GitHub state wins: `APPROVED` is
@@ -200,8 +198,5 @@ including "Minor findings, not blocking merge".
 
 ## What is still Brandon's
 
-- Whether an unmatched Major+ finding should fail the gate when he
-  believes the protocol round missed a real defect. This plan counts it
-  as a failure.
 - The numeric Fly size in D45 is a published price, not a measured
   Phoenix resident set. He picks the Machine size when he provisions it.

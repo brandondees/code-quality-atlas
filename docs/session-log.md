@@ -1104,17 +1104,21 @@ The draft's `review_event` line is still D36. Submitting that line to
 GitHub as `APPROVE` is a separate decision: the poster may do it only
 when `python -m atlas_reviewer eval --gate` exits 0 on a candidate
 recorded for that head. The four criteria (repo access, a full diff at
-any size, per-lens fan-out with verification, and Major+ recall and
-precision against the Claude Code protocol rounds on PRs #602–#637) are
-all unmet in the current reviewer, so the gate fails closed. The plan is
+any size, per-lens fan-out with verification, and recall of the Claude
+Code protocol findings on PRs #602–#637) are all unmet in the current
+reviewer, so the gate fails closed. The plan is
 [`plans/2026-11-12-reviewer-parity-gate.md`](plans/2026-11-12-reviewer-parity-gate.md).
 D45 recommends self-hosted Phoenix on Fly in org `personal` and does not
 provision it. The scorer and the reference rows are offline fixtures;
 nothing in this change calls a model or writes to GitHub. The hosting
 decision is D45: D44 is the webhook receiver's Fly app on #642. A
-reference row's `metadata.run` is `coordinator-verified` when the round
-says fan-out did not finish, and that row does not clear the fan-out
-criterion. `--gate` also fails when any reference row has no candidate,
+reference row's `metadata.run` records `coordinator-verified` when the
+round says fan-out did not finish. That field is information and does
+not itself fail the gate. `--gate` also fails when any reference row has no candidate,
 when `--head` has no passing pair, or when no passing pair records
 `over_context_window`. GitHub `APPROVED` is `APPROVE`. Body findings and
-the `**Severity** · \`lens\`` inline shape are parsed.
+the `**Severity** · \`lens\`` inline shape are parsed. Brandon's
+2026-11-12 bar: an extra finding never fails the gate, and the verdict
+and the severity do not have to match. The gate fails on a selected
+lens that was NOT RUN or failed, incomplete file coverage, or recall
+below 1 of the reference findings (same path, line within five).

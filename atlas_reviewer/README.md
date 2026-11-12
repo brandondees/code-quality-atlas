@@ -114,8 +114,12 @@ python -m atlas_reviewer eval --fixtures atlas_reviewer/fixtures/eval-score --ga
 checked-in row under `fixtures/eval-references/`, `--head` names a
 commit that one passing pair records, and one passing pair has
 `metadata.over_context_window` set. A directory that holds only the
-pair for `--head` does not pass. The hand-built fixture is expected
-to fail the gate. The reference directory holds protocol rounds from
+pair for `--head` does not pass. A pair fails when recall of the
+reference findings is below 1, a selected lens was NOT RUN or failed,
+or file coverage is incomplete. An extra finding, a different verdict,
+and a different severity do not fail it. A match is the same path and
+a line within five. The hand-built fixture is expected to fail the
+gate. The reference directory holds protocol rounds from
 PRs #602–#637 and has no candidates, so the gate fails closed. Exit 2
 is a fixture that does not parse, including one that is not UTF-8 or
 cannot be read.

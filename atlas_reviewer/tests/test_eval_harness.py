@@ -97,22 +97,41 @@ def test_run_mode_flags_a_coordinator_verified_round_and_reads_a_lens_list():
     )
 
 
-def test_a_coordinator_verified_reference_does_not_clear_fan_out():
-    finding = EvalFinding("nit", "a.py", "", 1, 1, ("hunting-silent-failures",))
-    reference = EvalReview("COMMENT", (finding,))
+def test_extras_and_a_different_verdict_do_not_fail_and_a_stopped_lens_does():
+    reference = EvalReview(
+        "REQUEST_CHANGES",
+        (EvalFinding("major", "a.py", "bug", 10, 12, ("sweeping-for-security",)),),
+    )
     candidate = CandidateReview(
-        "COMMENT",
-        (finding,),
+        "APPROVE",
+        (
+            EvalFinding("nit", "a.py", "nearby", 14, 14),
+            EvalFinding("blocker", "z.py", "extra", 1, 1),
+        ),
         True,
         0,
         ("a.py",),
+        ("sweeping-for-security",),
+    )
+    scored = score(reference, candidate)
+    assert scored.matched == 1
+    assert scored.extras == 1
+    assert scored.recall == 1.0
+    assert scored.verdict_agrees is False
+    assert gate_failures(reference, candidate, scored) == ()
+    stopped = CandidateReview(
+        "APPROVE",
+        (EvalFinding("nit", "a.py", "nearby", 14, 14),),
+        True,
+        0,
+        ("a.py",),
+        ("sweeping-for-security",),
+        ("reviewing-test-quality",),
         ("hunting-silent-failures",),
-        (),
     )
-    failures = gate_failures(
-        reference, candidate, score(reference, candidate), run="coordinator-verified"
-    )
-    assert any("coordinator-verified" in item for item in failures)
+    failures = gate_failures(reference, stopped, score(reference, stopped))
+    assert any("NOT RUN" in item for item in failures)
+    assert any("failed" in item for item in failures)
 
 
 def test_split_headings_body_findings_ranges_and_approved_state_are_kept():
@@ -268,16 +287,14 @@ def test_the_hand_built_fixture_scores_the_overlap_the_miss_and_the_false_positi
     assert report["examples"] == 1
     assert report["scored"] == 1
     (row,) = report["results"]
-    assert row["score"] == {
-        "matched": 2,
-        "missed_major_or_above": 0,
-        "false_positives": 1,
-        "false_positives_major_or_above": 1,
-        "verdict_agrees": False,
-    }
+    assert row["score"]["matched"] == 2
+    assert row["score"]["missed"] == 1
+    assert row["score"]["extras"] == 1
+    assert row["score"]["verdict_agrees"] is False
     assert report["gate_pass"] is False
-    assert any("unmatched Major+" in item for item in report["gate_failures"])
-    assert any("verdict" in item for item in report["gate_failures"])
+    assert any("recall" in item for item in report["gate_failures"])
+    assert not any("extra" in item for item in report["gate_failures"])
+    assert not any("verdict" in item for item in report["gate_failures"])
     assert any("coverage_complete" in item for item in report["gate_failures"])
     assert any(
         "reviewing-naming-and-readability" in item for item in row["gate_failures"]
@@ -307,38 +324,22 @@ def test_a_clean_pair_passes_the_gate_and_a_missed_major_does_not():
         (),
     )
     failures = gate_failures(reference, missed, score(reference, missed))
-    assert any(item.startswith("missed 1") for item in failures)
+    assert any("recall" in item and "unmatched" in item for item in failures)
 
 
-def test_a_reference_path_outside_the_diff_must_be_read():
-    finding = EvalFinding("nit", "pkg/util.py", "name", 3, 3, ())
-    reference = EvalReview("COMMENT", (finding,))
-    candidate = CandidateReview(
-        "COMMENT",
-        (finding,),
-        True,
-        0,
-        ("a.py",),
-        (),
-        (),
-    )
-    failures = gate_failures(reference, candidate, score(reference, candidate))
-    assert any("pkg/util.py" in item for item in failures)
-
-
-def test_a_line_range_does_not_match_a_different_path_or_a_lineless_finding():
+def test_a_line_matches_loosely_and_ignores_severity():
     left = EvalFinding("major", "a.py", "", 1, 3)
-    assert left.overlaps(EvalFinding("major", "a.py", "", 3, 5))
-    assert not left.overlaps(EvalFinding("major", "b.py", "", 1, 3))
-    assert not left.overlaps(EvalFinding("major", "a.py", "", None, None))
-    assert not left.overlaps(EvalFinding("minor", "a.py", "", 1, 1))
+    assert left.same_issue(EvalFinding("nit", "a.py", "", 8, 8))
+    assert left.same_issue(EvalFinding("major", "a.py", "", None, None))
+    assert not left.same_issue(EvalFinding("major", "b.py", "", 1, 3))
+    assert not left.same_issue(EvalFinding("major", "a.py", "", 20, 20))
 
 
 def test_the_cli_prints_the_score_and_gate_exits_1(tmp_path):
     code, out, err = _cli("eval", "--fixtures", str(FIXTURE))
     assert code == 0
     assert err == ""
-    assert json.loads(out)["totals"]["false_positives_major_or_above"] == 1
+    assert json.loads(out)["totals"]["extras"] == 1
     gated, _, gated_err = _cli("eval", "--fixtures", str(FIXTURE), "--gate")
     assert gated == 1
     assert gated_err == ""
@@ -431,8 +432,34 @@ def test_the_gate_names_a_missing_coverage_record():
     failures = gate_failures(reference, bare, score(reference, bare))
     assert any("lenses_run" in item for item in failures)
     partial = CandidateReview("COMMENT", (finding,), True, 0, ("a.py",), ())
-    named = gate_failures(reference, partial, score(reference, partial))
-    assert any("outside_diff_reads" in item for item in named)
+    assert gate_failures(reference, partial, score(reference, partial)) == ()
+
+
+def test_a_lens_state_list_records_not_run_and_failed(tmp_path):
+    payload = {
+        "input": {"repo": "o/r", "pr": 1, "head_sha": "abc", "round": 1},
+        "reference": {"verdict": "COMMENT", "findings": []},
+        "candidate": {
+            "verdict": "COMMENT",
+            "findings": [],
+            "coverage_complete": True,
+            "unreviewed_files": 0,
+            "lenses": [
+                {"name": "sweeping-for-security", "state": "clean"},
+                {"name": "reviewing-test-quality", "state": "not_run"},
+                {"name": "hunting-silent-failures", "state": "failed"},
+            ],
+        },
+    }
+    path = tmp_path / "pair.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    row = load_directory(tmp_path)["results"][0]
+    assert any("NOT RUN" in item for item in row["gate_failures"])
+    assert any("failed" in item for item in row["gate_failures"])
+    payload["candidate"]["lenses"] = [{"state": "clean"}]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(EvalFormatError, match="lenses need a name"):
+        load_directory(tmp_path)
 
 
 def test_a_fixture_that_is_not_an_object_is_an_error(tmp_path):
