@@ -31,6 +31,7 @@ from .test_openrouter import (
     KEY,
     MODEL_ID,
     OpenRouterFake,
+    catalog,
     completion,
     key_status,
     reply,
@@ -44,8 +45,9 @@ def request(*messages, tools=None) -> TurnRequest:
     return TurnRequest(SYSTEM, history, tools if tools is not None else tool_schemas())
 
 
-def model(*chat, key=None, limits=None):
-    fake = OpenRouterFake(*chat, key=key)
+def model(*chat, key=None, limits=None, catalog_reply=None):
+    extra = {} if catalog_reply is None else {"model": catalog_reply}
+    fake = OpenRouterFake(*chat, key=key, **extra)
     provider = OpenRouterProvider(fake, KEY, limits=limits)
     return OpenRouterLensModel(provider), fake
 
@@ -105,6 +107,8 @@ def test_the_request_uses_the_one_shot_pin_and_only_our_tools():
     assert body["provider"]["allow_fallbacks"] is False
     assert body["model"] == MODEL_ID
     assert body["stream"] is False
+    assert body["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in body["provider"]
     assert "plugins" not in body
     assert [tool["function"]["name"] for tool in body["tools"]] == [
         "diff_stat",
@@ -170,6 +174,89 @@ def test_token_counts_without_a_cost_are_priced_from_the_catalog():
     lens, _fake = model(reply(completion("done", usage=usage)))
     # 1000 x 0.000006 + 100 x 0.0000225, the highest catalog rates.
     assert lens.turn(request()).cost_usd == Decimal("0.00825")
+
+
+def test_a_missing_cost_with_no_cache_counts_uses_the_reservation_input_rate():
+    usage = {"prompt_tokens": 1000, "completion_tokens": 100, "is_byok": False}
+    lens, _fake = model(
+        reply(completion("done", usage=usage)),
+        catalog_reply=reply(catalog(input_cache_write="0.00001")),
+    )
+    # The write rate is above the prompt rate, so every prompt token is
+    # charged at that reservation rate when the response names no cache split.
+    # 1000 x 0.00001 + 100 x 0.0000225.
+    assert lens.turn(request()).cost_usd == Decimal("0.01225")
+
+
+def test_an_empty_cache_detail_object_still_uses_the_reservation_input_rate():
+    usage = {
+        "prompt_tokens": 1000,
+        "completion_tokens": 100,
+        "is_byok": False,
+        "prompt_tokens_details": {},
+    }
+    lens, _fake = model(
+        reply(completion("done", usage=usage)),
+        catalog_reply=reply(catalog(input_cache_write="0.00001")),
+    )
+    assert lens.turn(request()).cost_usd == Decimal("0.01225")
+
+
+def test_cache_tokens_without_a_cost_use_the_catalog_cache_rates():
+    usage = {
+        "prompt_tokens": 1000,
+        "completion_tokens": 100,
+        "is_byok": False,
+        "prompt_tokens_details": {"cached_tokens": 800, "cache_write_tokens": 100},
+    }
+    lens, _fake = model(
+        reply(completion("done", usage=usage)),
+        catalog_reply=reply(catalog(input_cache_read="0.000001")),
+    )
+    # 100 x 0.000006 + 800 x 0.000001 + 100 x 0.00000375 + 100 x 0.0000225.
+    assert lens.turn(request()).cost_usd == Decimal("0.004025")
+
+
+def test_cache_reads_without_a_catalog_rate_use_the_prompt_rate():
+    usage = {
+        "prompt_tokens": 1000,
+        "completion_tokens": 100,
+        "is_byok": False,
+        "prompt_tokens_details": {"cache_write_tokens": 100},
+    }
+    lens, _fake = model(reply(completion("done", usage=usage)))
+    # 900 x 0.000006 + 100 x 0.00000375 + 100 x 0.0000225.
+    assert lens.turn(request()).cost_usd == Decimal("0.008025")
+
+
+def test_cache_counts_past_the_prompt_keep_the_reservation():
+    usage = {
+        "prompt_tokens": 10,
+        "completion_tokens": 1,
+        "is_byok": False,
+        "prompt_tokens_details": {"cached_tokens": 8, "cache_write_tokens": 8},
+    }
+    lens, _fake = model(reply(completion("done", usage=usage)))
+    spend = Spend(AgenticLimits().resolve())
+    ask = request()
+    worst = lens.worst_case_usd(ask)
+    assert spend.reserve(worst) is None
+    turn = lens.turn(ask)
+    assert turn.cost_usd.is_infinite()
+    spend.settle(worst, turn.cost_usd)
+    assert spend.committed_usd == worst
+
+
+def test_a_reported_cost_is_used_when_cache_tokens_are_present():
+    usage = {
+        "cost": "0.42",
+        "is_byok": False,
+        "prompt_tokens": 1000,
+        "completion_tokens": 100,
+        "prompt_tokens_details": {"cached_tokens": 900, "cache_write_tokens": 50},
+    }
+    lens, _fake = model(reply(completion("done", usage=usage)))
+    assert lens.turn(request()).cost_usd == Decimal("0.42")
 
 
 def test_a_turn_fetches_the_catalog_once():

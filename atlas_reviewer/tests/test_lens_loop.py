@@ -46,6 +46,7 @@ from .agentic import (
     HEAD_TARBALL,
     LENS,
     LIMITS,
+    READ_ALL,
     READ_DIFF,
     TOKEN,
     final,
@@ -73,7 +74,7 @@ def job(body=BODY, digest=DIGEST):
 
 
 def attempt(tmp_path, script, *, limits=LIMITS, clock=None, spend=None, deadline=None,
-            the_job=None, session_limits=None, model=None, **kw):  # fmt: skip
+            the_job=None, session_limits=None, tool_limits=None, model=None, **kw):  # fmt: skip
     model = model or ScriptedLensModel(list(script))
     clock = clock or FakeClock()
     spend = spend or Spend(limits.resolve())
@@ -86,7 +87,11 @@ def attempt(tmp_path, script, *, limits=LIMITS, clock=None, spend=None, deadline
         )  # fmt: skip
         return "done"
 
-    extra = {"session_limits": session_limits} if session_limits else {}
+    extra = {}
+    if session_limits:
+        extra["session_limits"] = session_limits
+    if tool_limits:
+        extra["limits"] = tool_limits
     report = run_bridge(
         LocalSprites(), MemoryLedger(), trees(), body, redactor=Redactor(),
         changed=CHANGED, name="cqa-lens-test", deadline_s=900, clock=clock,
@@ -305,29 +310,91 @@ def test_a_retry_states_why_and_injects_the_body_whole_again(tmp_path):
 
 
 def test_a_lens_that_reads_the_diff_and_cites_a_head_line_is_clean(tmp_path):
-    outcome, model, _ = attempt(tmp_path, [READ_DIFF, final(finding())])
+    outcome, model, _ = attempt(tmp_path, [READ_ALL, final(finding())])
     assert outcome.state is LensState.CLEAN
     (checked,) = outcome.findings
     assert checked.source is QuoteSource.HEAD
     assert outcome.turns == 2
-    assert [(t.tool, t.status) for t in outcome.tools] == [("diff_file", "OK")]
+    assert [(t.tool, t.status) for t in outcome.tools] == [
+        ("diff_file", "OK"),
+        ("diff_file", "OK"),
+    ]
     second = model.requests[1].messages
     assert isinstance(second[1], AssistantCalls)
-    (result,) = second[2].results
-    assert result.startswith(f'<untrusted-data id="{NONCE}" label="tool-result">')
-    assert "+    return sum(round(x, 2) for x in xs)" in result
+    results = second[2].results
+    assert results[0].startswith(f'<untrusted-data id="{NONCE}" label="tool-result">')
+    assert any(
+        "+    return sum(round(x, 2) for x in xs)" in result for result in results
+    )
 
 
-@pytest.mark.parametrize(
-    "read",
-    [
-        READ_DIFF,
-        tools(("read_file", {"path": "calc.py"})),
-    ],
-)
-def test_no_findings_after_reading_the_change_is_clean(tmp_path, read):
-    outcome, _, _ = attempt(tmp_path, [read, final()])
+def test_reading_every_changed_file_with_no_findings_is_clean(tmp_path):
+    outcome, _, _ = attempt(tmp_path, [READ_ALL, final()])
     assert outcome.state is LensState.CLEAN
+    assert outcome.unread == ()
+    assert outcome.changed_files == 2
+
+
+def test_a_head_read_does_not_replace_the_diff(tmp_path):
+    read = tools(
+        ("read_file", {"path": "calc.py"}),
+        ("read_file", {"path": "config/keys.py"}),
+    )
+    outcome, _, _ = attempt(tmp_path, [read, final()])
+    assert outcome.causes == {Cause.FILES_UNREAD}
+    assert set(outcome.unread) == set(CHANGED)
+    assert outcome.state is LensState.PARTIAL
+    assert not outcome.retryable
+
+
+def test_a_page_that_does_not_start_at_zero_leaves_the_file_unread(tmp_path):
+    skipped = tools(("diff_file", {"path": "calc.py", "offset": 40}))
+    outcome, _, _ = attempt(tmp_path, [skipped, final()])
+    assert "calc.py" in outcome.unread
+    assert outcome.state is LensState.PARTIAL
+
+
+def test_one_page_of_a_cut_diff_leaves_the_file_unread(tmp_path):
+    from atlas_reviewer.bridge import DEFAULT_LIMITS, ToolLimits
+
+    limits = {**DEFAULT_LIMITS, "diff_file": ToolLimits(80, 10)}
+    outcome, model, _ = attempt(tmp_path, [READ_ALL, final()], tool_limits=limits)
+    assert "calc.py" in outcome.unread
+    assert Cause.FILES_UNREAD in outcome.causes
+    assert outcome.state is LensState.PARTIAL
+    assert not outcome.retryable
+    assert len(model.requests) == 2
+
+
+def test_following_every_diff_page_reads_the_file(tmp_path):
+    import re
+
+    from atlas_reviewer.bridge import DEFAULT_LIMITS, ToolLimits
+
+    limits = {**DEFAULT_LIMITS, "diff_file": ToolLimits(80, 10)}
+
+    def page(request):
+        results = getattr(request.messages[-1], "results", ())
+        pending = []
+        for result in results:
+            match = re.search(r'"path": "([^"]+)".*next page at offset (\d+)', result)
+            if match:
+                pending.append((match.group(1), int(match.group(2))))
+        if pending:
+            return tools(
+                *(
+                    ("diff_file", {"path": path, "offset": offset})
+                    for path, offset in pending
+                )
+            )
+        if len(request.messages) == 1:
+            return READ_ALL
+        return final()
+
+    outcome, model, _ = attempt(tmp_path, [page] * 12, tool_limits=limits)
+    assert outcome.state is LensState.CLEAN
+    assert outcome.unread == ()
+    assert len(model.requests) > 2
 
 
 @pytest.mark.parametrize(
@@ -343,14 +410,14 @@ def test_no_findings_after_reading_the_change_is_clean(tmp_path, read):
 )
 def test_no_findings_without_reading_the_change_is_partial(tmp_path, script):
     outcome, _, _ = attempt(tmp_path, script)
-    assert outcome.causes == {Cause.NO_SOURCE_READ}
+    assert outcome.causes == {Cause.NO_SOURCE_READ, Cause.FILES_UNREAD}
     assert outcome.state is LensState.PARTIAL
     assert not outcome.retryable
 
 
 def test_a_finding_whose_quote_is_not_at_head_is_unverified_and_retried(tmp_path):
     wrong = finding(evidence="return sum(x for x in xs if x)")
-    outcome, _, _ = attempt(tmp_path, [READ_DIFF, final(finding(), wrong)])
+    outcome, _, _ = attempt(tmp_path, [READ_ALL, final(finding(), wrong)])
     assert outcome.causes == {Cause.QUOTES_FAILED}
     assert outcome.state is LensState.PARTIAL
     assert outcome.retryable
@@ -358,7 +425,7 @@ def test_a_finding_whose_quote_is_not_at_head_is_unverified_and_retried(tmp_path
 
 
 def test_a_reply_outside_the_contract_fails_and_is_retried(tmp_path):
-    outcome, _, _ = attempt(tmp_path, [READ_DIFF, final(text="Looks fine to me!")])
+    outcome, _, _ = attempt(tmp_path, [READ_ALL, final(text="Looks fine to me!")])
     assert outcome.attestation is Attestation.UNACKNOWLEDGED
     assert outcome.causes == {Cause.UNPARSED}
     assert outcome.state is LensState.FAILED
@@ -494,14 +561,14 @@ def test_a_tool_that_hits_the_session_limit_is_a_coverage_gap(tmp_path):
     outcome, _, _ = attempt(
         tmp_path, [two, final()], session_limits=SessionLimits(max_calls=1)
     )
-    assert outcome.causes == {Cause.TOOL_GAP}
+    assert outcome.causes == {Cause.TOOL_GAP, Cause.FILES_UNREAD}
     assert [t.status for t in outcome.tools] == ["OK", "OVER_SESSION_LIMIT"]
     assert outcome.state is LensState.PARTIAL
 
 
 def test_a_rejected_tool_call_is_answered_and_the_lens_goes_on(tmp_path):
     bad = tools(("shell", {"cmd": "cat /etc/passwd"}))
-    outcome, model, _ = attempt(tmp_path, [bad, READ_DIFF, final()])
+    outcome, model, _ = attempt(tmp_path, [bad, READ_ALL, final()])
     assert outcome.state is LensState.CLEAN
     (rejected,) = model.requests[1].messages[2].results
     assert "rejected" in rejected

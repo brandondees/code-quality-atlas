@@ -67,6 +67,10 @@ def tools(*calls):
 
 
 READ_DIFF = tools(("diff_file", {"path": "calc.py"}))
+READ_ALL = tools(
+    ("diff_file", {"path": "calc.py"}),
+    ("diff_file", {"path": "config/keys.py"}),
+)
 
 
 def finding(**overrides):

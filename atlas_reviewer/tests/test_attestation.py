@@ -88,6 +88,7 @@ def test_a_reply_acknowledges_only_its_own_lens_and_body():
         (Attestation.ATTESTED, {Cause.QUOTES_FAILED}, LensState.PARTIAL, True),
         (Attestation.ATTESTED, {Cause.TOOL_GAP}, LensState.PARTIAL, False),
         (Attestation.ATTESTED, {Cause.NO_SOURCE_READ}, LensState.PARTIAL, False),
+        (Attestation.ATTESTED, {Cause.FILES_UNREAD}, LensState.PARTIAL, False),
         (Attestation.UNACKNOWLEDGED, {Cause.TURN_CAP}, LensState.PARTIAL, False),
         (Attestation.UNACKNOWLEDGED, {Cause.LENS_CLOCK}, LensState.PARTIAL, False),
         (Attestation.UNACKNOWLEDGED, {Cause.UNPARSED}, LensState.FAILED, True),
@@ -179,6 +180,37 @@ def test_a_finished_attempt_reads_back_exactly(tmp_path):
     book.finish(KEY, 1, outcome(causes=frozenset({Cause.TOOL_GAP})), scrub=str)
     (attempt,) = ledger(tmp_path).attempts(KEY)
     assert attempt == Attempt(1, outcome(causes=frozenset({Cause.TOOL_GAP})))
+
+
+def test_a_ledger_line_from_before_the_file_gate_has_no_unread_list(tmp_path):
+    book = ledger(tmp_path)
+    book.start(KEY, 1)
+    book.finish(KEY, 1, outcome(), scrub=str)
+    lines = book.path.read_text().splitlines()
+    finished = json.loads(lines[-1])
+    del finished["outcome"]["unread"]
+    del finished["outcome"]["changed_files"]
+    lines[-1] = json.dumps(finished)
+    book.path.write_text("\n".join(lines) + "\n")
+    (attempt,) = ledger(tmp_path).attempts(KEY)
+    assert attempt.outcome.unread == ()
+    assert attempt.outcome.changed_files is None
+    assert attempt.outcome.state is LensState.CLEAN
+
+
+def test_a_ledger_line_with_a_bad_unread_list_is_abandoned(tmp_path):
+    book = ledger(tmp_path)
+    book.start(KEY, 1)
+    book.finish(KEY, 1, outcome(), scrub=str)
+    lines = book.path.read_text().splitlines()
+    finished = json.loads(lines[-1])
+    finished["outcome"]["unread"] = "calc.py"
+    lines[-1] = json.dumps(finished)
+    book.path.write_text("\n".join(lines) + "\n")
+    again = ledger(tmp_path)
+    (attempt,) = again.attempts(KEY)
+    assert attempt.outcome is ABANDONED
+    assert again.damaged == 1
 
 
 def test_the_ledger_file_is_private_and_holds_the_key_and_head(tmp_path):

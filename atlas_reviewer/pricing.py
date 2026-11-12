@@ -51,6 +51,11 @@ class ModelTerms:
     request_fee: Decimal
     context_length: int
     max_completion_tokens: int
+    # None when the catalog has no rate for that cache token. A reported
+    # zero is a rate. The reservation still uses input_rate, which already
+    # takes the higher of the prompt rate and any cache-write rate.
+    cache_read_rate: Decimal | None = None
+    cache_write_rate: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +95,20 @@ def _tiers(pricing: Json) -> list[Json]:
     return [pricing, *overrides]
 
 
+def _optional_rate(tiers: Iterable[Json], *keys: str) -> Decimal | None:
+    """The highest rate among keys a tier actually carries, or None when
+    none of them appear. Absence is not a free rate."""
+    present = [
+        money(tier[key], f"pricing.{key}")
+        for key in keys
+        for tier in tiers
+        if key in tier
+    ]
+    if not present:
+        return None
+    return max(present)
+
+
 def _max_rate(tiers: Iterable[Json], key: str, required: bool) -> Decimal:
     present = [(i, t[key]) for i, t in enumerate(tiers) if key in t]
     if required and not any(i == 0 for i, _ in present):
@@ -126,6 +145,10 @@ def parse_model_terms(data: Json, expected_id: str) -> ModelTerms:
         max_completion_tokens=_count(
             top.get("max_completion_tokens") if isinstance(top, Mapping) else None,
             "top_provider.max_completion_tokens",
+        ),
+        cache_read_rate=_optional_rate(tiers, "input_cache_read"),
+        cache_write_rate=_optional_rate(
+            tiers, "input_cache_write", "input_cache_write_1h"
         ),
     )
 
