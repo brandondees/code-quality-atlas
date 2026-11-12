@@ -57,7 +57,9 @@ Machine's start under that window, and it says auto-stop and auto-start
 should be set together. The standing Machine is the shape that can answer
 in time. Its compute price, from Fly's pricing page for `iad` on
 2026-11-12, is the `shared-cpu-1x` with 1 GB row: $6.70 per 30 days. The
-runbook records the citations.
+queue and the post ledger are on a 1 GB volume at `/data` ($0.15 per
+month on that same page), so a restart keeps them. The Machine's root
+disk does not. The runbook records the citations.
 
 ## Open
 

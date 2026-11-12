@@ -14,7 +14,7 @@ trusted machine, with a token scoped to the Fly org `personal`.
 
 | File | Role |
 | --- | --- |
-| [`fly.service.toml`](../fly.service.toml) | App `atlas-reviewer-service`, HTTP on 8080, `auto_stop_machines = "off"`, `auto_start_machines = false`, one `shared-cpu-1x` Machine with 1024 MB |
+| [`fly.service.toml`](../fly.service.toml) | App `atlas-reviewer-service`, HTTP on 8080, `auto_stop_machines = "off"`, `auto_start_machines = false`, one `shared-cpu-1x` Machine with 1024 MB, and a 1 GB volume at `/data` for the queue and the post ledger |
 | [`docker-entrypoint.sh`](docker-entrypoint.sh) | `serve` runs `python -m atlas_reviewer.service`. Any other argument stays the one-off CLI |
 | [`Dockerfile`](../Dockerfile) | The same image as the one-off controller. It does not publish a port by itself |
 
@@ -30,7 +30,9 @@ continuous runtime. `shared-cpu-1x` with 1 GB of RAM is $6.70 per 30 days.
 This Machine is `shared-cpu-1x` with 1024 MB, the same memory as the
 one-off review Machine, so that row is the compute cost while it stays up.
 A stopped Machine is billed $0.15 per GB of its root filesystem per month.
-This image's root filesystem size is not measured here.
+This image's root filesystem size is not measured here. The queue volume
+is 1 GB, which that page prices at $0.15 per GB per month, so $0.15 per
+month on top of the compute.
 
 The alternative, Fly Proxy auto-stop and auto-start, was not chosen.
 GitHub closes a webhook delivery that has no 2xx within 10 seconds and
@@ -99,6 +101,24 @@ flyp deploy -c fly.service.toml --app "$APP" --ha=false
 `off`, so that Machine keeps running after the deploy. If it is later
 stopped, a webhook does not start it (`auto_start_machines` is false).
 Start it with `flyp machine start <id> --app "$APP"`.
+
+`initial_size` makes `fly deploy` create the volume `atlas_reviewer_state`
+in `iad` when one does not exist yet (Fly's configuration reference,
+`mounts.initial_size`, read 2026-11-12). It is mounted at `/data`, which
+is `ATLAS_REVIEWER_STATE_DIR`. The process runs as uid 10001. A new volume
+is owned by root, so the service exits 2 and the health check fails until
+that directory is writable. From `flyp machine list --app "$APP"`, take
+the Machine id and run:
+
+```sh
+flyp ssh console --app "$APP" -C "chown 10001:10001 /data"
+flyp machine restart <id> --app "$APP"
+```
+
+The restart is only needed when the first deploy started the process
+before the chown. After that, restarts keep the queue and the post
+ledger. `fly apps destroy` does not delete the volume. List it and
+destroy it separately after the app.
 
 Confirm the process without printing the environment:
 

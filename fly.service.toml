@@ -11,6 +11,11 @@ primary_region = "iad"
 [processes]
   app = "serve"
 
+[env]
+  # The volume below. The queue and the post ledger live here, so a
+  # restart does not review the same commit twice or forget a post.
+  ATLAS_REVIEWER_STATE_DIR = "/data"
+
 [http_service]
   internal_port = 8080
   force_https = true
@@ -31,3 +36,11 @@ primary_region = "iad"
 [[vm]]
   size = "shared-cpu-1x"
   memory = "1024mb"
+
+# Created on first deploy when the volume does not exist yet
+# (fly deploy reads initial_size). One Machine, one volume, region iad.
+[mounts]
+  source = "atlas_reviewer_state"
+  destination = "/data"
+  initial_size = "1gb"
+  processes = ["app"]

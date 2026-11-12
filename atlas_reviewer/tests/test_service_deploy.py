@@ -29,6 +29,12 @@ def test_the_service_app_stays_up_and_the_one_off_publishes_nothing():
     vm = SERVICE["vm"][0]
     assert vm["size"] == "shared-cpu-1x"
     assert vm["memory"] == "1024mb"
+    assert SERVICE["env"]["ATLAS_REVIEWER_STATE_DIR"] == "/data"
+    mounts = SERVICE["mounts"]
+    assert mounts["source"] == "atlas_reviewer_state"
+    assert mounts["destination"] == "/data"
+    assert mounts["initial_size"] == "1gb"
+    assert mounts["processes"] == ["app"]
     check = SERVICE["http_service"]["checks"][0]
     assert check["path"] == "/health"
     assert check["method"] == "GET"
@@ -52,6 +58,8 @@ def test_the_runbook_names_the_secret_the_org_and_the_webhook():
         "COMMENT",
         "auto_stop_machines",
         "$6.70",
+        "atlas_reviewer_state",
+        "chown 10001:10001 /data",
         "Do not `fly deploy` it for the webhook",
     ):
         assert text in flat, text
