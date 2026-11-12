@@ -764,6 +764,8 @@ def test_a_stuck_tunnel_resets_the_personal_wireguard_peer():
     ) in wait
     flat = flattened(wait)
     assert "stale WireGuard peer" in flat
+    assert "A likely cause is a stale" in flat
+    assert "the run did not confirm it" in flat
     assert "not the slow first connection" in flat
     assert "no `tunnel unavailable` line" in flat
     assert "WireGuard-over-WebSockets" in flat
@@ -830,14 +832,51 @@ def test_an_early_flyctl_return_is_polled_until_the_machines_own_line():
     sweep_block, probe_block, after_wait = (block for block, _ in polls)
     assert "destroyed (verified absent)" in sweep_block
     assert "already absent, nothing deleted (verified absent)" in sweep_block
-    assert "Main child exited normally with code:" not in sweep_block
+    assert "Main child exited normally with code:" in sweep_block
     assert "while [ -z" in sweep_block
     assert "Main child exited normally with code:" in probe_block
     assert "destroyed (verified absent)" not in probe_block
     assert "while [ -z" in probe_block
     assert "while [ -z" not in after_wait
     assert "wrapper status 124" in flat
-    assert "If `$found` is empty after the hour, run the sweep again." in flat
+    assert "Do not keep polling for the hour once the exit line is present." in flat
+    assert (
+        "If `$found` is only the exit line, the runner was not verified gone." in flat
+    )
+    assert (
+        "If `$found` is empty after the hour, this Machine may still be running."
+        in flat
+    )
+    destroys = [
+        command
+        for command in fly_invocations(recover)
+        if command.program[:3] == ("flyp", "machine", "destroy")
+    ]
+    assert destroys == [
+        ShellCommand(
+            (),
+            (
+                "flyp",
+                "machine",
+                "destroy",
+                '"$MACHINE_ID"',
+                "--app",
+                "atlas-reviewer",
+                "--force",
+            ),
+        )
+    ]
+    (destroy_block,) = [
+        block for block in shell_blocks(recover) if "machine destroy" in block
+    ]
+    listed = [
+        command.program
+        for command in shell_commands(destroy_block)
+        if command.program[:3] == ("flyp", "machine", "list")
+    ]
+    assert listed == [("flyp", "machine", "list", "--app", "atlas-reviewer")]
+    assert destroy_block.index("machine list") < destroy_block.index("machine destroy")
+    assert "as when the sweep poll's `$found` is empty" in flat
 
 
 def prose_after_fence(section: str, marker: str) -> str:
@@ -934,15 +973,23 @@ def test_a_failed_machine_wait_still_reaches_its_check():
     assert "Do not stage the key" in recover
     assert "protocol-probe loop" in recover
     assert "did not show `code: 0`" in recover
+    assert "The Machine may still be running" in recover
+    assert "did not see `destroyed`" in recover
+    assert "destroy it with `--force`" in recover
+    assert "sweep its runner by name" in recover
+    assert "as when the sweep poll's `$found` is empty" in recover
 
 
 def test_a_non_rm_stop_kills_a_leftover_flyctl_after_the_machine_is_gone():
-    body = flattened(heading_body("### Leftover flyctl after a non-rm stop"))
+    body = flattened(heading_body("### Leftover flyctl after a stop"))
     assert "evening of 2026-11-11, with flyctl" in body
-    assert "no `--rm`" in body
+    assert "flyctl's exit means the Machine started" in body
+    assert "That is the normal return." in body
     assert "still running 30 seconds after a mid-run `fly machine stop`" in body
     assert "killed it once the Machine had been destroyed" in body
     assert "not a documented Fly behavior" in body
+    assert "does not show that every start without `--rm` keeps waiting" in body
+    assert "has not returned in its shell" in body
     assert "kill that flyctl" in body
     assert "are not the Machine's state" in body
     assert "timeout 45" in body and "--detach" in body
@@ -950,9 +997,9 @@ def test_a_non_rm_stop_kills_a_leftover_flyctl_after_the_machine_is_gone():
         "### Release and destroy the Machine",
         "### Hard stop",
     ):
-        text = heading_body(heading)
-        assert "#leftover-flyctl-after-a-non-rm-stop" in text
-        assert "no `--rm`" in text
+        text = flattened(heading_body(heading))
+        assert "#leftover-flyctl-after-a-stop" in text
+        assert "If the flyctl that started this Machine is still running" in text
 
 
 def test_runbook_has_a_hard_stop_and_recovers_sprites_by_name():

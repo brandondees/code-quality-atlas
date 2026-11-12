@@ -383,11 +383,14 @@ Error: tunnel unavailable: Error contacting Fly.io API when probing "personal": 
 ```
 
 On the evening of 2026-11-11, with flyctl, the first `fly ssh console`
-failed for about 4 minutes with that line. That was a stale WireGuard
-peer. It is not the slow first connection above: that earlier run the
-same day recorded no `tunnel unavailable` line, and its later Machines
-connected in about 3 seconds without a reset. This is what the evening
-run showed, not a documented Fly behavior.
+failed for about 4 minutes with that line. A likely cause is a stale
+WireGuard peer; the run did not confirm it. The same operator also
+enabled WireGuard-over-WebSockets, and a WebSockets-only change would
+not say the peer was stale. It is not the slow first connection
+above: that earlier run the same day recorded no `tunnel unavailable`
+line, and its later Machines connected in about 3 seconds without a
+reset. This is what the evening run showed, not a documented Fly
+behavior.
 
 `fly wireguard reset` takes the org as its argument
 ([fly wireguard reset](https://fly.io/docs/flyctl/cmd/fly_wireguard_reset)).
@@ -497,10 +500,9 @@ flyp machine list --app atlas-reviewer
 `fly machine stop` sends SIGINT. During the hold, the entrypoint exits
 on that signal with the review's exit code, so the Machine's exit code
 is the review's. A normal exit destroys the runner Sprite in the
-controller's `finally` before the process exits. This `fly machine run`
-has no `--rm`. After the Machine is gone, check for the leftover
-flyctl in
-[Leftover flyctl after a non-rm stop](#leftover-flyctl-after-a-non-rm-stop).
+controller's `finally` before the process exits. If the flyctl that
+started this Machine is still running, kill it as in
+[Leftover flyctl after a stop](#leftover-flyctl-after-a-stop).
 
 ### Hard stop
 
@@ -515,9 +517,9 @@ flyp machine destroy "$MACHINE_ID" --app atlas-reviewer --force
 If the `fly machine wait` above errors or times out, that exit does
 not say the Machine stopped, and it does not say whether `finally`
 ran. Continue to `fly machine destroy --force`, then check the runner
-Sprite as below. This start has no `--rm`. After the Machine is gone,
-check for the leftover flyctl in
-[Leftover flyctl after a non-rm stop](#leftover-flyctl-after-a-non-rm-stop).
+Sprite as below. If the flyctl that started this Machine is still
+running, kill it as in
+[Leftover flyctl after a stop](#leftover-flyctl-after-a-stop).
 
 The entrypoint passes a stop it receives on to the CLI as SIGTERM,
 because `sh` starts the CLI with SIGINT ignored. The CLI turns SIGTERM
@@ -541,22 +543,26 @@ the CLI's PID or when to prefer that over `fly machine stop`.
 `--force` destroys the Machine in any state. A SIGKILL skips `finally`,
 so after a hard stop check for the runner Sprite as below.
 
-### Leftover flyctl after a non-rm stop
+### Leftover flyctl after a stop
 
-The review Machine is started with `fly machine run` and no `--rm`, so
-the flyctl that started it waits in the operator's shell. On the
-evening of 2026-11-11, with flyctl, that process was still running 30
-seconds after a mid-run `fly machine stop`. The operator killed it
-once the Machine had been destroyed. This is what that run showed, not
-a documented Fly behavior.
+[Start the review](#start-the-review) says flyctl's exit means the
+Machine started, not that the review finished. The SSH poll, the
+copy, and `fly machine stop` then run in that shell. That is the
+normal return.
 
-Do this after the release destroy and after the hard-stop destroy,
-once `fly machine list` no longer shows the Machine. In the shell that
-is still inside that `fly machine run`, kill that flyctl. The process
-still running, and the status it exits with after the kill, are not
-the Machine's state. The `--rm` sweep and probe commands are a
-different case: they run under `timeout 45` or `--detach`, covered
-below.
+On the evening of 2026-11-11, with flyctl, one `fly machine run` was
+still running 30 seconds after a mid-run `fly machine stop`. The
+operator killed it once the Machine had been destroyed. This is what
+that run showed, not a documented Fly behavior. It does not show that
+every start without `--rm` keeps waiting.
+
+If the `fly machine run` that started this Machine has not returned
+in its shell, kill that flyctl once `fly machine list` no longer
+shows the Machine. Do this after the release destroy and after the
+hard-stop destroy. The process still running, and the status it
+exits with after the kill, are not the Machine's state. The `--rm`
+sweep and probe commands are a different case: they run under
+`timeout 45` or `--detach`, covered below.
 
 ### Recover a runner Sprite by name
 
@@ -627,7 +633,8 @@ while [ -z "$found" ] && [ "$(date +%s)" -lt "$deadline" ]; do
   sleep 30
   found=$(flyp logs --app atlas-reviewer --machine "$MACHINE_ID" --no-tail |
     grep -F -e 'destroyed (verified absent)' \
-      -e 'already absent, nothing deleted (verified absent)' || true)
+      -e 'already absent, nothing deleted (verified absent)' \
+      -e 'Main child exited normally with code:' || true)
 done
 printf '%s\n' "$found"
 ```
@@ -635,13 +642,23 @@ printf '%s\n' "$found"
 App-wide `--no-tail` keeps only the last 100 lines and can return
 another Machine's `Main child exited normally with code: N`. A
 timeout can also stop a slow but healthy run before this Machine has
-written that line; then the outcome is unknown. For the sweep, the
-success signal is that Machine's own
-`<name>: destroyed (verified absent)` or
-`<name>: already absent, nothing deleted (verified absent)` line,
-which is what the poll stores. If `$found` is empty after the hour,
-run the sweep again. Exit 3 means the same: the runner was not
-verified gone.
+written that line; then the outcome is unknown. The poll stops on a
+success line or on that exit line. Do not keep polling for the hour
+once the exit line is present. For the sweep, the success signal is
+that Machine's own `<name>: destroyed (verified absent)` or
+`<name>: already absent, nothing deleted (verified absent)` line.
+If `$found` is only the exit line, the runner was not verified gone.
+Run the sweep again now. Exit 3 means the same.
+
+If `$found` is empty after the hour, this Machine may still be
+running. `--rm` destroys it when it stops, not when the poll stops.
+List Machines and, if this one is still listed, destroy it with
+`--force`, then run the sweep again:
+
+```sh
+flyp machine list --app atlas-reviewer
+flyp machine destroy "$MACHINE_ID" --app atlas-reviewer --force
+```
 
 The protocol probe below uses the same `timeout 45` subshell. Its
 success signal is that Machine's own
@@ -743,6 +760,11 @@ done
 printf '%s\n' "$found"
 ```
 
+If `$found` is empty after the hour, this Machine may still be
+running. List it and destroy it with `--force`, then sweep its
+runner by name, as when the sweep poll's `$found` is empty. Do not
+stage the key.
+
 `probe-runner --sequence review` on Fly cannot use `--tarball`. This
 image copies the controller, not a checkout tarball. The review
 sequence needs `--event` and `ATLAS_EVENT_JSON`. The entrypoint writes
@@ -790,11 +812,14 @@ flyp machine wait "$MACHINE_ID" --app atlas-reviewer --state destroyed --wait-ti
 ```
 
 If that wait errors or times out, the exit is flyctl's, not the
-probe's, and the logs have not been read yet. Do not stage the key.
-Poll with the protocol-probe loop above until
+probe's, and the logs have not been read yet. The Machine may still
+be running: a timeout means the wait did not see `destroyed`. Do not
+stage the key. Poll with the protocol-probe loop above until
 `Main child exited normally with code:` appears or the hour passes.
 If `$found` is empty or the line is not `code: 0`, report that this
-probe did not show `code: 0`.
+probe did not show `code: 0`. Then list Machines and, if this one is
+still listed, destroy it with `--force` and sweep its runner by name,
+as when the sweep poll's `$found` is empty.
 
 When the wait returns, read that Machine's logs once, before staging
 the key again. The probe passed when that Machine's line is
