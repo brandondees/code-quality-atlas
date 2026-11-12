@@ -46,6 +46,7 @@ ENV = {
     "per_lens_calls": "ATLAS_PER_LENS_CALLS",
     "per_lens_usd": "ATLAS_PER_LENS_USD",
     "review_ceiling_usd": "ATLAS_REVIEW_CEILING_USD",
+    "call_retries": "ATLAS_CALL_RETRIES",
 }
 
 # The review-wide limits whose configured value wins over D68's
@@ -142,6 +143,8 @@ def _apply_positive_int(
         return replace(limits, pool_size=_positive_int(name, raw))
     if name == "per_lens_calls":
         return replace(limits, per_lens_calls=_positive_int(name, raw))
+    if name == "call_retries":
+        return replace(limits, call_retries=_count(name, raw))
     return None
 
 
@@ -180,6 +183,13 @@ def _bounded_int(name: str, raw: str, hi: int) -> int:
     if not 0 <= value <= hi:
         raise ValueError(f"{name} must be an integer from 0 to {hi}, not {raw!r}")
     return value
+
+
+def _count(name: str, raw: str) -> int:
+    try:
+        return int(raw)
+    except ValueError:
+        raise ValueError(f"{name} must be a whole number, not {raw!r}") from None
 
 
 def _positive_seconds(name: str, raw: str) -> float:

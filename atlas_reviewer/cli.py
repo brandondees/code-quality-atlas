@@ -1817,6 +1817,11 @@ def _agentic_limit_args(parser: argparse.ArgumentParser) -> None:
             "review_ceiling_usd",
             "the absolute per-review dollar ceiling the derived reservation clamps to (D68); the reviewed repo's REVIEW.md may override it",
         ),
+        (
+            "--call-retries",
+            "call_retries",
+            "times a failed model call is sent again, 0 to 3",
+        ),
     )
     for flag, name, meaning in flags:
         parser.add_argument(
