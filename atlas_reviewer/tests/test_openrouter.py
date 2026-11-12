@@ -275,8 +275,9 @@ def test_reported_reasoning_past_the_hint_stays_inside_the_reservation():
     terms = parse_model_terms(catalog(internal_reasoning="0.00002"), MODEL_ID)
     assert terms.reasoning_rate == Decimal("0.00002")
     limits = CallLimits()
-    reasoning = limits.reasoning_max_tokens + 1_000
-    assert reasoning < limits.max_output_tokens
+    # The whole output cap, not the hint plus a little. Pricing only the
+    # hint would leave this reply over the reservation.
+    reasoning = limits.max_output_tokens
     usage = {
         "prompt_tokens": 10,
         "completion_tokens": reasoning,
@@ -293,7 +294,7 @@ def test_reported_reasoning_past_the_hint_stays_inside_the_reservation():
     record = p.budget.calls[0]
     assert record.actual_usd is not None
     assert record.actual_usd <= record.reserved_usd
-    assert "reasoning=13000" in record.usage
+    assert f"reasoning={reasoning}" in record.usage
 
 
 def test_reservation_uses_the_highest_price_tier_and_cache_writes():

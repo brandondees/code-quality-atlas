@@ -85,8 +85,9 @@ def test_the_adapter_sends_the_model_caps_and_ignores_the_reasoning_hint():
     assert body["max_tokens"] == 64_000
     assert body["reasoning"]["max_tokens"] == 63_999
 
-    low, low_fake = model(reply(completion("ok")))
-    high, high_fake = model(reply(completion("ok")))
+    priced = reply(catalog(internal_reasoning="0.00002"))
+    low, low_fake = model(reply(completion("ok")), catalog_reply=priced)
+    high, high_fake = model(reply(completion("ok")), catalog_reply=priced)
     low.per_call = replace(
         AgenticLimits().resolve(), max_output_tokens=4_000, reasoning_max_tokens=100
     )
