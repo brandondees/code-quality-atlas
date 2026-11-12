@@ -3,8 +3,9 @@
 One operator, one review at a time. The app has no public service and no
 standing Machine. Each review is one Machine. It writes the draft and
 telemetry to its own disk and waits. The operator copies both files off
-and then destroys the Machine. There is no webhook receiver and no queue.
-This is the D24 shape on a Fly host (D37 in
+and then destroys the Machine. This app has no webhook receiver and no
+queue. The webhook receiver is a separate process (D48); it is not this
+Fly app. This is the D24 shape on a Fly host (D37 in
 [`docs/open-questions.md`](../docs/open-questions.md)).
 
 Nothing in this repository creates the app or sets a secret. The commands
@@ -272,7 +273,8 @@ NAME="review-pr$PR-$(printf '%.12s' "$SHA")"
 
 Check that no review Machine is already started. The controller's
 single-review lock is a file on that Machine's disk, so a second
-`fly machine run` is a second review. There is no queue to stop you.
+`fly machine run` is a second review. This one-off app has no queue.
+The webhook receiver (D48) is a different process.
 
 ```sh
 flyp machine list --app atlas-reviewer

@@ -1,13 +1,17 @@
 # SPDX-License-Identifier: MIT
 """Run one queued commit through the existing ``review`` command.
 
-The child is ``python -m atlas_reviewer review``. It inherits the
-controller's credentials and not the webhook secret. When the queue
-cancels the job, the child is signalled SIGTERM, which the CLI turns into
-the stop that deletes its Sprite, and the result is not a draft to post.
-Exit codes 0, 4 and 5 are the CLI's finished reviews (complete, incomplete
-coverage, changes requested). Any other exit, or a finished process with
-no draft file, is a failure and produces no report.
+The child is ``python -m atlas_reviewer review``. It receives an allowlist
+of environment variables: the model key, the Sprites token, a read-only
+installation token, and the process basics (``PATH``, ``HOME``, language
+and CA paths). The webhook secret, the App private key, and anything else
+the parent holds, including a Fly API token, are not passed on. When the
+queue cancels the job, or the wall-clock deadline passes, the child is
+signalled SIGTERM, which the CLI turns into the stop that deletes its
+Sprite, and the result is not a draft to post. Exit codes 0, 4 and 5 are
+the CLI's finished reviews (complete, incomplete coverage, changes
+requested). Any other exit, or a finished process with no draft file, is
+a failure and produces no report.
 """
 
 from __future__ import annotations
@@ -34,7 +38,35 @@ APP_KEY_ENV = "ATLAS_GITHUB_APP_PRIVATE_KEY"
 READ_TOKEN_ENV = "ATLAS_GITHUB_INSTALLATION_TOKEN"
 # The child reviews with a read-only installation token. The App private
 # key stays in the parent, so the child cannot mint a write token.
-_CHILD_DROPPED = frozenset({WEBHOOK_SECRET_ENV, APP_KEY_ENV})
+# Passed through to the child. Everything else the parent holds stays there.
+_CHILD_ALLOWED = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        "PYTHONPATH",
+        "PYTHONUNBUFFERED",
+        "PYTHONIOENCODING",
+        "PYTHONHASHSEED",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        "CURL_CA_BUNDLE",
+        "ATLAS_OPENROUTER_API_KEY",
+        "ATLAS_SPRITES_TOKEN",
+        READ_TOKEN_ENV,
+    }
+)
+# The parent stops the child after this long even if the child is still
+# running. The controller has its own shorter caps; this is the wall
+# around a child that never hits them.
+REVIEW_DEADLINE_S = 1200.0
+_DEADLINE_EXIT = -1
 # The CLI's review exits. 4 is incomplete file coverage and 5 is a finished
 # review that requests changes. Both still wrote a draft.
 POSTABLE_EXITS = frozenset({0, 4, 5})
@@ -99,10 +131,9 @@ def review_argv(config: RunConfig, directory: Path) -> list[str]:
 
 
 def child_env(env: Mapping[str, str], *, token: str = "") -> dict[str, str]:
-    """The review process does not receive the webhook secret or the App
-    private key. ``token`` is a read-only installation token, when the
-    parent minted one."""
-    cleaned = {key: value for key, value in env.items() if key not in _CHILD_DROPPED}
+    """The review process gets only ``_CHILD_ALLOWED``. ``token`` is a
+    read-only installation token, when the parent minted one."""
+    cleaned = {key: value for key, value in env.items() if key in _CHILD_ALLOWED}
     if token:
         cleaned[READ_TOKEN_ENV] = token
     return cleaned
@@ -114,6 +145,8 @@ def make_runner(
     *,
     popen: Popen = subprocess.Popen,
     sleeper: Sleeper = time.sleep,
+    deadline_s: float = REVIEW_DEADLINE_S,
+    clock: Callable[[], float] = time.monotonic,
 ) -> Callable[[PrEvent, threading.Event], ReviewRun]:
     def run(event: PrEvent, cancel: threading.Event) -> ReviewRun:
         directory = run_dir(config.state_root, event)
@@ -131,7 +164,11 @@ def make_runner(
             stderr_path,
             popen=popen,
             sleeper=sleeper,
+            deadline_s=deadline_s,
+            clock=clock,
         )
+        if code == _DEADLINE_EXIT:
+            return ReviewRun(False, error="review deadline")
         if code is None or cancel.is_set():
             return ReviewRun(False, error="superseded")
         if code not in POSTABLE_EXITS:
@@ -159,8 +196,11 @@ def run_process(
     popen: Popen = subprocess.Popen,
     sleeper: Sleeper = time.sleep,
     poll_s: float = 0.05,
+    deadline_s: float = REVIEW_DEADLINE_S,
+    clock: Callable[[], float] = time.monotonic,
 ) -> int | None:
-    """The child's exit code, or None when ``cancel`` stopped it."""
+    """The child's exit code, None when ``cancel`` stopped it, or
+    ``_DEADLINE_EXIT`` when ``deadline_s`` passed."""
     fd = os.open(stderr_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     handle = os.fdopen(fd, "ab")
     try:
@@ -170,10 +210,14 @@ def run_process(
             stdout=subprocess.DEVNULL,
             stderr=handle,
         )
+        started = clock()
         while True:
             if cancel.is_set():
                 _stop(proc)
                 return None
+            if clock() - started >= deadline_s:
+                _stop(proc)
+                return _DEADLINE_EXIT
             code = proc.poll()
             if code is not None:
                 return code

@@ -50,22 +50,26 @@ def _body(
     action="opened",
     *,
     draft=False,
+    include_draft=True,
     repo=REPO,
+    base_repo=None,
     number=7,
     sha=SHA_A,
     updated_at="2026-11-12T20:00:00Z",
 ):
+    pull = {
+        "number": number,
+        "updated_at": updated_at,
+        "head": {"sha": sha},
+        "base": {"repo": {"full_name": repo if base_repo is None else base_repo}},
+    }
+    if include_draft:
+        pull["draft"] = draft
     return json.dumps(
         {
             "action": action,
             "repository": {"full_name": repo},
-            "pull_request": {
-                "number": number,
-                "draft": draft,
-                "updated_at": updated_at,
-                "head": {"sha": sha},
-                "base": {"repo": {"full_name": repo}},
-            },
+            "pull_request": pull,
         }
     ).encode()
 
@@ -123,6 +127,8 @@ def test_a_bad_signature_is_refused(tmp_path):
     assert refused.status == 401
     assert missing.status == 401
     assert board.states() == ()
+    digest = hmac.new(SECRET.encode(), body, hashlib.sha256).hexdigest()
+    assert not signature_matches(body, "sha1=" + digest, SECRET)
     assert not signature_matches(body, "sha1=" + "ab" * 32, SECRET)
     assert not signature_matches(body, "sha256=abcd", SECRET)
     tiny = ServiceConfig(
@@ -138,6 +144,16 @@ def test_a_non_allowlisted_repo_is_ignored(tmp_path):
     result = _deliver(config, board, _body(repo=OTHER))
     assert result.status == 202
     assert result.body == b"ignored\n"
+    assert board.states() == ()
+
+
+def test_a_missing_draft_and_a_different_base_repo_are_ignored(tmp_path):
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    missing = _deliver(config, board, _body(include_draft=False))
+    forked = _deliver(config, board, _body(base_repo=OTHER))
+    assert missing.body == b"ignored\n"
+    assert forked.body == b"ignored\n"
     assert board.states() == ()
 
 
@@ -176,10 +192,13 @@ def test_a_moved_head_supersedes_the_old_review(tmp_path):
     started = threading.Event()
     posted: list[str] = []
 
+    cancelled: list[bool] = []
+
     def runner(event, cancel):
         if event.head_sha == SHA_A:
             started.set()
-            assert cancel.wait(2)
+            cancel.wait(2)
+            cancelled.append(cancel.is_set())
             return ReviewRun(True, REPORT)
         return ReviewRun(True, REPORT)
 
@@ -188,15 +207,18 @@ def test_a_moved_head_supersedes_the_old_review(tmp_path):
 
     worker = _worker(board, runner, publish, tmp_path)
     worker.start()
-    earlier = datetime(2026, 11, 12, 19, 0, tzinfo=UTC)
-    later = datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
-    assert board.enqueue(PrEvent(REPO, 7, SHA_A), at=earlier) is Enqueue.QUEUED
-    assert started.wait(2)
-    assert board.enqueue(PrEvent(REPO, 7, SHA_B), at=later) is Enqueue.QUEUED
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline and posted != [SHA_B]:
-        time.sleep(0.01)
-    worker.stop()
+    try:
+        earlier = datetime(2026, 11, 12, 19, 0, tzinfo=UTC)
+        later = datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
+        assert board.enqueue(PrEvent(REPO, 7, SHA_A), at=earlier) is Enqueue.QUEUED
+        assert started.wait(2)
+        assert board.enqueue(PrEvent(REPO, 7, SHA_B), at=later) is Enqueue.QUEUED
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and posted != [SHA_B]:
+            time.sleep(0.01)
+    finally:
+        worker.stop()
+    assert cancelled == [True]
     assert posted == [SHA_B]
     assert (SHA_A, JobState.SUPERSEDED) in board.states()
     assert (SHA_B, JobState.DONE) in board.states()
@@ -211,11 +233,13 @@ def test_an_older_redelivery_does_not_cancel_the_newer_head(tmp_path):
     earlier = datetime(2026, 11, 12, 19, 0, tzinfo=UTC)
     later = datetime(2026, 11, 12, 20, 0, tzinfo=UTC)
 
+    still_running: list[bool] = []
+
     def runner(event, cancel):
         if event.head_sha == SHA_B:
             started.set()
-            assert older_arrived.wait(2)
-            assert not cancel.is_set()
+            older_arrived.wait(2)
+            still_running.append(not cancel.is_set())
             return ReviewRun(True, REPORT)
         return ReviewRun(True, REPORT)
 
@@ -224,14 +248,17 @@ def test_an_older_redelivery_does_not_cancel_the_newer_head(tmp_path):
 
     worker = _worker(board, runner, publish, tmp_path)
     worker.start()
-    assert board.enqueue(PrEvent(REPO, 7, SHA_B), at=later) is Enqueue.QUEUED
-    assert started.wait(2)
-    assert board.enqueue(PrEvent(REPO, 7, SHA_A), at=earlier) is Enqueue.STALE
-    older_arrived.set()
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline and posted != [SHA_B]:
-        time.sleep(0.01)
-    worker.stop()
+    try:
+        assert board.enqueue(PrEvent(REPO, 7, SHA_B), at=later) is Enqueue.QUEUED
+        assert started.wait(2)
+        assert board.enqueue(PrEvent(REPO, 7, SHA_A), at=earlier) is Enqueue.STALE
+        older_arrived.set()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and posted != [SHA_B]:
+            time.sleep(0.01)
+    finally:
+        worker.stop()
+    assert still_running == [True]
     assert posted == [SHA_B]
     assert (SHA_B, JobState.DONE) in board.states()
     assert SHA_A not in [sha for sha, _state in board.states()]
@@ -389,16 +416,22 @@ def test_stop_cancels_the_review_child(tmp_path):
     board = Board(tmp_path / "queue.json")
     started = threading.Event()
 
+    cancelled: list[bool] = []
+
     def runner(event, cancel):
         started.set()
-        assert cancel.wait(2)
+        cancel.wait(2)
+        cancelled.append(cancel.is_set())
         return ReviewRun(False, error="superseded")
 
     worker = _worker(board, runner)
     worker.start()
-    board.enqueue(PrEvent(REPO, 7, SHA_A))
-    assert started.wait(2)
-    worker.stop()
+    try:
+        board.enqueue(PrEvent(REPO, 7, SHA_A))
+        assert started.wait(2)
+    finally:
+        worker.stop()
+    assert cancelled == [True]
     assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
 
 
@@ -428,7 +461,9 @@ def test_a_trimmed_commit_and_a_pre_attempts_queue_stay_duplicates(tmp_path):
         encoding="utf-8",
     )
     loaded = Board(legacy)
-    assert loaded.enqueue(PrEvent(REPO, 7, SHA_A)) is Enqueue.DUPLICATE
+    # A failed head is not a duplicate: the delivery was already
+    # acknowledged, so this is the retry.
+    assert loaded.enqueue(PrEvent(REPO, 7, SHA_A)) is Enqueue.QUEUED
 
 
 def test_seen_keeps_current_heads_and_drops_the_oldest_other_keys(tmp_path):
@@ -547,6 +582,200 @@ def test_a_rate_limit_waits_at_least_as_long_as_github_asked(tmp_path):
     worker._retry_post()
     assert calls == [1_000.0]
     assert board.states() == ((SHA_A, JobState.POST_PENDING),)
+
+
+def test_a_failed_head_can_be_queued_again(tmp_path):
+    board = Board(tmp_path / "queue.json", max_remembered=1)
+    moment = datetime(2026, 11, 12, 20, tzinfo=UTC)
+    board.enqueue(PrEvent(REPO, 7, SHA_A), at=moment)
+    job = board.claim()
+    assert job is not None
+    board.finish(job, JobState.FAILED)
+    assert board.enqueue(PrEvent(REPO, 7, SHA_A), at=moment) is Enqueue.QUEUED
+    # Trim the failure out of the file, then deliver the same SHA again.
+    other = board.claim()
+    assert other is not None
+    board.finish(other, JobState.FAILED)
+    assert board.enqueue(PrEvent(REPO, 8, SHA_B), at=moment) is Enqueue.QUEUED
+    trimmed = board.claim()
+    assert trimmed is not None
+    board.finish(trimmed, JobState.DONE)
+    assert board.enqueue(PrEvent(REPO, 7, SHA_A), at=moment) is Enqueue.QUEUED
+
+
+def test_the_current_head_stays_a_duplicate_after_the_seen_cap(tmp_path):
+    board = Board(tmp_path / "queue.json", max_remembered=1, max_seen=1)
+    base = datetime(2026, 11, 12, 18, tzinfo=UTC)
+    later = datetime(2026, 11, 12, 23, tzinfo=UTC)
+    first = "1" * 40
+    second = "2" * 40
+    third = "3" * 40
+    assert board.enqueue(PrEvent(REPO, 7, first), at=base) is Enqueue.QUEUED
+    job = board.claim()
+    assert job is not None
+    board.finish(job, JobState.DONE)
+    assert (
+        board.enqueue(PrEvent(REPO, 8, second), at=base.replace(hour=19))
+        is Enqueue.QUEUED
+    )
+    job = board.claim()
+    assert job is not None
+    board.finish(job, JobState.DONE)
+    assert (
+        board.enqueue(PrEvent(REPO, 9, third), at=base.replace(hour=20))
+        is Enqueue.QUEUED
+    )
+    assert board.enqueue(PrEvent(REPO, 7, first), at=later) is Enqueue.DUPLICATE
+
+
+def test_active_jobs_stop_at_the_cap(tmp_path):
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json", max_remembered=1)
+    assert board.enqueue(PrEvent(REPO, 7, SHA_A)) is Enqueue.QUEUED
+    assert board.enqueue(PrEvent(REPO, 8, SHA_B)) is Enqueue.FULL
+    refused = _deliver(config, board, _body(number=9, sha="9" * 40))
+    assert refused.status == 503
+    assert refused.body == b"full\n"
+
+
+def test_a_save_error_does_not_kill_the_worker(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    ran: list[str] = []
+
+    def runner(event, cancel):
+        ran.append(event.head_sha)
+        return ReviewRun(False, error="no")
+
+    worker = _worker(board, runner, root=tmp_path)
+    original = board.finish
+
+    def finish(job, state):
+        if job.event.head_sha == SHA_A:
+            raise OSError("disk")
+        return original(job, state)
+
+    board.finish = finish
+    worker.start()
+    try:
+        board.enqueue(PrEvent(REPO, 7, SHA_A))
+        board.enqueue(PrEvent(REPO, 8, SHA_B))
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and SHA_B not in ran:
+            time.sleep(0.01)
+        assert SHA_B in ran
+        assert worker.healthy()
+    finally:
+        worker.stop()
+
+
+def test_a_dead_worker_fails_health(tmp_path):
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    server = ReviewServer(config, board, lambda line: None)
+    worker = _worker(board, lambda event, cancel: ReviewRun(False, error="no"))
+    thread = threading.Thread(target=lambda: None)
+    thread.start()
+    thread.join()
+    worker._threads.append(thread)
+    server.worker = worker
+    server.timeout = 0.2
+    listener = threading.Thread(target=server.serve_forever, daemon=True)
+    listener.start()
+    host, port = server.server_address
+    try:
+        health = HTTPConnection(host, port, timeout=2)
+        health.request("GET", "/health")
+        assert health.getresponse().status == 503
+        health.close()
+    finally:
+        server.shutdown()
+        listener.join(timeout=2)
+        server.server_close()
+
+
+def test_the_service_log_rotates_and_names_the_head(tmp_path):
+    from atlas_reviewer.telemetry import JsonlSink
+
+    with JsonlSink(tmp_path / "service.jsonl", max_bytes=1) as sink:
+        telemetry = Telemetry(SystemClock(), sink=sink, scrub=lambda text: text)
+        telemetry.record(
+            "service",
+            "review failed",
+            {"pr": 7, "sha12": "a" * 12, "attempts": 2, "retry_s": 5},
+            status="error",
+            error="HTTP 500",
+        )
+        telemetry.record("service", "review posted", {"pr": 7, "sha12": "b" * 12})
+    assert (tmp_path / "service.jsonl.1").is_file()
+    assert [event.step for event in telemetry.events] == [
+        "review failed",
+        "review posted",
+    ]
+    bounded = Telemetry(SystemClock(), max_kept=2)
+    for number in range(4):
+        bounded.record("service", f"step-{number}", {})
+    assert [event.step for event in bounded.events] == ["step-2", "step-3"]
+
+
+def test_the_module_refuses_a_port_other_than_8080(tmp_path):
+    with pytest.raises(ServiceError, match="8080"):
+        config_from_env(
+            {
+                "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
+                "ATLAS_SERVICE_PORT": "8081",
+                "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
+            }
+        )
+    config = config_from_env(
+        {
+            "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
+            "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
+        }
+    )
+    assert config.host == "127.0.0.1"
+    assert config.port == 8080
+
+
+def test_a_publisher_that_ignores_the_recheck_is_not_called_once_superseded(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    called: list[str] = []
+
+    def publish(event, report):
+        called.append(event.head_sha)
+
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(True, REPORT), publish, tmp_path
+    )
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    job.superseded = True
+    worker._send(job, REPORT)
+    assert called == []
+    assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
+
+
+def test_a_supersede_during_finish_is_what_the_log_says(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(True, REPORT), root=tmp_path
+    )
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    real = board.still_current
+
+    def still(current):
+        ok = real(current)
+        current.superseded = True
+        return ok
+
+    board.still_current = still
+    worker._execute(job)
+    finished = [event.step for event in worker._telemetry.events]
+    assert "review finished" not in finished
+    assert "review superseded" in finished
+    assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
 
 
 def test_the_module_refuses_to_start_without_a_secret():

@@ -50,6 +50,27 @@ Not reviewed in full: `"src/a.py"`
 """
 
 
+def test_the_child_receives_only_the_allowlist():
+    env = child_env(
+        {
+            WEBHOOK_SECRET_ENV: "s" * 16,
+            APP_KEY_ENV: "pem-secret-value",
+            "ATLAS_SPRITES_TOKEN": "sprite",
+            "ATLAS_OPENROUTER_API_KEY": "sk-or",
+            "FLY_API_TOKEN": "fly-token-value",
+            "ATLAS_GITHUB_APP_ID": "5648875",
+            "PATH": "/usr/bin",
+        },
+        token="ghs_read",
+    )
+    assert env == {
+        "ATLAS_SPRITES_TOKEN": "sprite",
+        "ATLAS_OPENROUTER_API_KEY": "sk-or",
+        "PATH": "/usr/bin",
+        READ_TOKEN_ENV: "ghs_read",
+    }
+
+
 def test_the_child_does_not_receive_the_app_private_key():
     env = child_env(
         {
@@ -131,6 +152,48 @@ def test_cancel_stops_the_child(tmp_path):
         poll_s=0.01,
     )
     assert code is None
+
+
+def test_exits_0_4_and_5_are_postable_and_3_is_not(tmp_path):
+    config = RunConfig("offline", False, tmp_path)
+    event = PrEvent(REPO, 7, SHA)
+
+    def popen_for(code):
+        def popen(argv, env, stdout, stderr):
+            Path(argv[argv.index("--out") + 1]).write_text(DRAFT, encoding="utf-8")
+            return _Proc(code)
+
+        return popen
+
+    for code in (0, 4, 5):
+        result = make_runner(config, {}, popen=popen_for(code))(
+            event, threading.Event()
+        )
+        assert result.ok, code
+        assert result.report is not None
+    failed = make_runner(config, {}, popen=popen_for(3))(event, threading.Event())
+    assert failed.ok is False
+    assert "exited 3" in failed.error
+
+
+def test_the_child_is_stopped_at_the_deadline(tmp_path):
+    clock = {"t": 0.0}
+
+    def now():
+        clock["t"] += 1000.0
+        return clock["t"]
+
+    result = make_runner(
+        RunConfig("offline", False, tmp_path),
+        {},
+        popen=lambda *args, **kwargs: _Proc(None),
+        sleeper=lambda _seconds: None,
+        deadline_s=1.0,
+        clock=now,
+    )(PrEvent(REPO, 7, SHA), threading.Event())
+    assert result.ok is False
+    assert result.report is None
+    assert result.error == "review deadline"
 
 
 def test_a_finished_child_becomes_a_report_and_a_failure_does_not(tmp_path):

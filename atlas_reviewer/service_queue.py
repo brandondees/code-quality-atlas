@@ -29,6 +29,7 @@ class Enqueue(StrEnum):
     QUEUED = "queued"
     DUPLICATE = "duplicate"
     STALE = "stale"
+    FULL = "full"
 
 
 class JobState(StrEnum):
@@ -78,17 +79,25 @@ class Job:
         }
 
 
-# Full job records kept in the queue file. Older terminal jobs are dropped
-# from this list. Their keys move to `seen`, which is what makes a replay
-# a duplicate. `seen` drops the oldest key that is not a PR's current
-# head once it passes the cap, and it never drops a current head, so the
-# commit already accepted for a PR stays a duplicate. A dropped historical
-# key can be reviewed again when its `updated_at` is later than that PR's
-# current head. A review that was already posted still will not be posted
-# twice, because the GitHub marker is checked before a create. Both caps
-# bound the file. They are not a review budget. A key is about 80 bytes,
-# so 20,000 keys are about 1.6 MB. A run directory is removed when its
-# job reaches a terminal state. That fits in the 1 GB state volume.
+# ``MAX_REMEMBERED`` is a hard cap on jobs that are still in progress.
+# When that many are queued or running, ``enqueue`` returns ``FULL`` and
+# the HTTP handler answers 503, so the file cannot grow by accepting more
+# active work. Terminal jobs are trimmed to make room. A ``FAILED`` job is
+# not remembered as a duplicate: GitHub does not redeliver a delivery we
+# already acknowledged, so the only way to review that commit again is to
+# accept the same SHA when it is delivered again.
+#
+# ``MAX_SEEN`` is a soft cap. It drops the oldest key that is not a PR's
+# current head, and it keeps every current head, so the set can grow by
+# one key per pull request past 20,000. Dropping a current head would let
+# a replay of that commit start a second review. A key is about 80 bytes.
+# At 30,000 keys one enqueue holds the queue lock for about 338 ms while
+# it rewrites the file, which is why the cap exists and why the rewrite
+# stays on this path instead of keeping an unbounded history. A dropped
+# historical key can be reviewed again when its ``updated_at`` is later
+# than that PR's current head. A review that was already posted still will
+# not be posted twice, because the GitHub marker is checked before a create.
+# Neither cap is a review budget.
 MAX_REMEMBERED = 2_000
 MAX_SEEN = 20_000
 
@@ -122,13 +131,27 @@ class Board:
             key = (event.repo, event.pr_number, event.head_sha)
             if key in self._seen:
                 return Enqueue.DUPLICATE
+            failed_job: Job | None = None
             for job in self._jobs:
-                if job.key() == key:
-                    if job.state is JobState.SUPERSEDED or job.superseded:
-                        return Enqueue.STALE
-                    return Enqueue.DUPLICATE
-            if not self._newer_than_current(event, at):
+                if job.key() != key:
+                    continue
+                if job.state is JobState.SUPERSEDED or job.superseded:
+                    return Enqueue.STALE
+                if job.state is JobState.FAILED:
+                    failed_job = job
+                    break
+                return Enqueue.DUPLICATE
+            if (
+                failed_job is None
+                and not self._retry_of_failed_head(event, at)
+                and not self._newer_than_current(event, at)
+            ):
                 return Enqueue.STALE
+            active = sum(1 for job in self._jobs if job.state in _ACTIVE)
+            if active >= self._max_remembered:
+                return Enqueue.FULL
+            if failed_job is not None:
+                self._jobs.remove(failed_job)
             for job in self._jobs:
                 if (
                     job.event.repo != event.repo
@@ -146,6 +169,17 @@ class Board:
             self._save()
             self._cv.notify()
             return Enqueue.QUEUED
+
+    def _retry_of_failed_head(self, event: PrEvent, at: datetime | None) -> bool:
+        """The current head's only record was a failure that has already
+        been trimmed. A redelivery of that same SHA is a new attempt.
+        ``at`` is unused: the delivery may carry the same timestamp."""
+        del at
+        current = self._heads.get((event.repo, event.pr_number))
+        if current is None or current[0] != event.head_sha:
+            return False
+        key = (event.repo, event.pr_number, event.head_sha)
+        return key not in self._seen and all(job.key() != key for job in self._jobs)
 
     def _newer_than_current(self, event: PrEvent, at: datetime | None) -> bool:
         current = self._heads.get((event.repo, event.pr_number))
@@ -209,13 +243,16 @@ class Board:
                 self._save()
             return True
 
-    def finish(self, job: Job, state: JobState) -> None:
+    def finish(self, job: Job, state: JobState) -> JobState:
+        """The state actually stored. A job that was superseded is stored
+        as superseded even when the caller asked for a success."""
         with self._cv:
             if job.superseded and state is not JobState.SUPERSEDED:
                 state = JobState.SUPERSEDED
             job.state = state
             self._save()
             self._cv.notify_all()
+            return state
 
     def wake(self) -> None:
         with self._cv:
@@ -264,7 +301,10 @@ class Board:
         ]
         overflow = len(self._jobs) - self._max_remembered
         for job in terminal[: max(0, overflow)]:
-            self._remember(job.key())
+            # A failure is not a duplicate. Remembering it would block the
+            # only retry GitHub can still deliver.
+            if job.state is not JobState.FAILED:
+                self._remember(job.key())
             self._jobs.remove(job)
         while len(self._seen_order) > self._max_seen:
             dropped = self._drop_oldest_seen()

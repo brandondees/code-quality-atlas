@@ -36,7 +36,7 @@ from atlas_reviewer.service_admit import (
     parse_delivery,
     signature_matches,
 )
-from atlas_reviewer.service_queue import Board, Job, JobState
+from atlas_reviewer.service_queue import Board, Enqueue, Job, JobState
 from atlas_reviewer.service_run import (
     WEBHOOK_SECRET_ENV,
     ReviewReport,
@@ -54,11 +54,15 @@ DEFAULT_REPO = "brandondees/code-quality-atlas"
 MAX_CONCURRENCY = 32
 MAX_BODY_BYTES = 5_000_000
 MAX_POST_ATTEMPTS = 5
-# A failed post is tried again on this schedule, then given up. Each wait
-# is stretched by up to 20% so several machines do not retry together.
-# The waits stop a dead GitHub endpoint from turning into a tight loop.
-# They are not a cost cap: the review itself has already finished.
-_POST_BACKOFF_S = (5.0, 15.0, 30.0, 60.0, 120.0)
+# A failed post is tried again on this schedule, then given up. The fifth
+# attempt does not wait: it is the last try, so there is no fifth delay.
+# Each wait is stretched by up to 20% so several machines do not retry
+# together. The waits stop a dead GitHub endpoint from turning into a
+# tight loop. They are not a cost cap: the review itself has already finished.
+_POST_BACKOFF_S = (5.0, 15.0, 30.0, 60.0)
+# One current file plus one rotated file. The cap is the operator log,
+# not the review queue.
+_SERVICE_LOG_BYTES = 1_048_576
 _BACKOFF_JITTER = 0.2
 
 
@@ -166,6 +170,8 @@ def handle_delivery(
     decision = admit(payload, config.allowlist)
     if isinstance(decision, Admitted):
         result = board.enqueue(decision.event, at=decision.updated_at)
+        if result is Enqueue.FULL:
+            return HttpResult(503, b"full\n", "full")
         return HttpResult(202, f"{result.value}\n".encode(), result.value)
     return HttpResult(202, b"ignored\n", f"ignored:{decision.reason}")
 
@@ -199,6 +205,13 @@ class Worker:
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
 
+    def healthy(self) -> bool:
+        """False once a worker thread has died. ``/health`` then fails
+        so a dead worker is not hidden behind a 200."""
+        return bool(self._threads) and all(
+            thread.is_alive() for thread in self._threads
+        )
+
     def start(self) -> None:
         for index in range(self._concurrency):
             thread = threading.Thread(target=self._loop, name=f"atlas-review-{index}")
@@ -218,16 +231,28 @@ class Worker:
         job = self._board.claim()
         if job is None:
             return False
-        self._execute(job)
+        try:
+            self._execute(job)
+        except Exception as exc:  # noqa: BLE001 -- one job must not kill the worker
+            self._fail_closed(job, exc)
         return True
 
     def _loop(self) -> None:
         while not self._stop.is_set():
-            self._board.wait_for_work(_POLL_S, self._stop, self._now())
-            if self._stop.is_set():
-                return
-            self.run_one()
-            self._retry_post()
+            try:
+                self._board.wait_for_work(_POLL_S, self._stop, self._now())
+                if self._stop.is_set():
+                    return
+                self.run_one()
+                self._retry_post()
+            except Exception as exc:  # noqa: BLE001 -- the thread has to outlive one failure
+                self._telemetry.record(
+                    "service",
+                    "worker error",
+                    {},
+                    status=ERROR,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
 
     def _retry_post(self) -> None:
         if self._publisher is None:
@@ -235,7 +260,27 @@ class Worker:
         job = self._board.claim_post(self._now())
         if job is None:
             return
-        self._publish_saved(job)
+        try:
+            self._publish_saved(job)
+        except Exception as exc:  # noqa: BLE001 -- a post retry must not kill the worker
+            self._fail_closed(job, exc)
+
+    def _fail_closed(self, job: Job, exc: BaseException) -> None:
+        """The job stays FAILED when the save works. When the save itself
+        raises, the in-memory state is left as it was so a restart can
+        queue a ``running`` job again, and the thread keeps going."""
+        note = f"{type(exc).__name__}: {exc}"
+        try:
+            self._board.finish(job, JobState.FAILED)
+        except Exception as save_exc:  # noqa: BLE001 -- the thread still has to record why
+            note += f"; queue save failed: {type(save_exc).__name__}"
+        self._telemetry.record(
+            "service",
+            "worker error",
+            _fields(job.event),
+            status=ERROR,
+            error=note,
+        )
 
     def _execute(self, job: Job) -> None:
         try:
@@ -244,11 +289,13 @@ class Worker:
             run = ReviewRun(False, error=f"{type(exc).__name__}: {exc}")
         fields = _fields(job.event)
         if job.superseded or job.cancel.is_set():
-            self._settle(job, JobState.SUPERSEDED)
-            self._telemetry.record("service", "review superseded", fields)
+            self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
             return
         if not run.ok or run.report is None:
-            self._settle(job, JobState.FAILED)
+            committed = self._settle(job, JobState.FAILED)
+            if committed is JobState.SUPERSEDED:
+                self._note(job, committed, fields)
+                return
             self._telemetry.record(
                 "service",
                 "review failed",
@@ -258,19 +305,23 @@ class Worker:
             )
             return
         if not self._board.still_current(job):
-            self._settle(job, JobState.SUPERSEDED)
-            self._telemetry.record("service", "review superseded", fields)
+            self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
             return
         self._publish(job, run.report)
 
     def _publish(self, job: Job, report: ReviewReport) -> None:
+        fields = _fields(job.event)
         if not self._board.still_current(job):
-            self._settle(job, JobState.SUPERSEDED)
-            self._telemetry.record("service", "review superseded", _fields(job.event))
+            self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
             return
         if self._publisher is None:
-            self._settle(job, JobState.DONE)
-            self._telemetry.record("service", "review finished", _fields(job.event))
+            committed = self._settle(job, JobState.DONE)
+            step = (
+                "review superseded"
+                if committed is JobState.SUPERSEDED
+                else "review finished"
+            )
+            self._telemetry.record("service", step, fields)
             return
         token = before_send.set(lambda: self._board.begin_post(job))
         try:
@@ -280,18 +331,24 @@ class Worker:
 
     def _send(self, job: Job, report: ReviewReport) -> None:
         assert self._publisher is not None
+        fields = _fields(job.event)
+        if not self._board.begin_post(job):
+            self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
+            return
         try:
             self._publisher(job.event, report)
         except PostNotCurrent:
-            self._settle(job, JobState.SUPERSEDED)
-            self._telemetry.record("service", "review superseded", _fields(job.event))
+            self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
             return
         except PostAuthError as exc:
-            self._settle(job, JobState.FAILED)
+            committed = self._settle(job, JobState.FAILED)
+            if committed is JobState.SUPERSEDED:
+                self._note(job, committed, fields)
+                return
             self._telemetry.record(
                 "service",
                 "review post failed",
-                _fields(job.event),
+                fields,
                 status=ERROR,
                 error=f"post auth refused: {exc}",
             )
@@ -302,8 +359,11 @@ class Worker:
         except Exception as exc:  # noqa: BLE001 -- a post failure must not post again here
             self._defer_post(job, f"{type(exc).__name__}: {exc}")
             return
-        self._settle(job, JobState.DONE)
-        self._telemetry.record("service", "review posted", _fields(job.event))
+        committed = self._settle(job, JobState.DONE)
+        step = (
+            "review superseded" if committed is JobState.SUPERSEDED else "review posted"
+        )
+        self._telemetry.record("service", step, fields)
 
     def _publish_saved(self, job: Job) -> None:
         """A post that failed after the draft was written. The review is
@@ -312,14 +372,17 @@ class Worker:
 
         path = run_dir(self._state_root, job.event) / "draft.md"
         if not path.is_file() or self._publisher is None:
-            self._settle(job, JobState.FAILED)
-            self._telemetry.record(
-                "service",
-                "review post failed",
-                _fields(job.event),
-                status=ERROR,
-                error="no draft to post",
-            )
+            committed = self._settle(job, JobState.FAILED)
+            if committed is not JobState.SUPERSEDED:
+                self._telemetry.record(
+                    "service",
+                    "review post failed",
+                    _fields(job.event),
+                    status=ERROR,
+                    error="no draft to post",
+                )
+            else:
+                self._note(job, committed, _fields(job.event))
             return
         try:
             report = summarize_draft(path.read_text(encoding="utf-8"))
@@ -336,13 +399,15 @@ class Worker:
         dead endpoint cannot spin the worker. A rate-limit wait replaces
         the schedule when it is longer."""
         if job.superseded or job.cancel.is_set():
-            self._settle(job, JobState.SUPERSEDED)
-            self._telemetry.record("service", "review superseded", _fields(job.event))
+            self._note(job, self._settle(job, JobState.SUPERSEDED), _fields(job.event))
             return
         job.attempts += 1
         fields = _fields(job.event)
         if job.attempts >= MAX_POST_ATTEMPTS:
-            self._settle(job, JobState.FAILED)
+            committed = self._settle(job, JobState.FAILED)
+            if committed is JobState.SUPERSEDED:
+                self._note(job, committed, fields)
+                return
             self._telemetry.record(
                 "service",
                 "review post failed",
@@ -365,12 +430,33 @@ class Worker:
             error=error,
         )
 
-    def _settle(self, job: Job, state: JobState) -> None:
-        self._board.finish(job, state)
-        if state in {JobState.DONE, JobState.FAILED, JobState.SUPERSEDED}:
+    def _settle(self, job: Job, state: JobState) -> JobState:
+        committed = self._board.finish(job, state)
+        if committed in {JobState.DONE, JobState.FAILED, JobState.SUPERSEDED}:
             path = run_dir(self._state_root, job.event)
             if path.is_dir():
-                shutil.rmtree(path, ignore_errors=True)
+                try:
+                    shutil.rmtree(path)
+                except OSError as exc:
+                    self._telemetry.record(
+                        "service",
+                        "run dir not removed",
+                        _fields(job.event),
+                        status=ERROR,
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
+        return committed
+
+    def _note(
+        self, job: Job, committed: JobState, fields: dict[str, str | int]
+    ) -> None:
+        del job
+        step = (
+            "review superseded"
+            if committed is JobState.SUPERSEDED
+            else "review finished"
+        )
+        self._telemetry.record("service", step, fields)
 
 
 def _fields(event: PrEvent) -> dict[str, str | int]:
@@ -382,6 +468,12 @@ class _Handler(BaseHTTPRequestHandler):
     timeout = _REQUEST_TIMEOUT_S
 
     def do_GET(self) -> None:
+        route = self.path.split("?", 1)[0]
+        worker = getattr(self.server, "worker", None)
+        if route == "/health" and worker is not None and not worker.healthy():
+            self._send(503, b"unhealthy\n")
+            self.server.log("atlas-reviewer: http 503 GET /health worker dead")
+            return
         self._respond(b"")
 
     def do_POST(self) -> None:
@@ -439,6 +531,8 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 class ReviewServer(ThreadingHTTPServer):
+    worker: Worker | None = None
+
     def __init__(
         self,
         config: ServiceConfig,
@@ -459,8 +553,13 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
     concurrency = int(env.get("ATLAS_REVIEW_CONCURRENCY", "1"))
     provider = env.get("ATLAS_SERVICE_PROVIDER", "offline")
     live = env.get("ATLAS_ALLOW_LIVE_INFERENCE", "") == "1"
-    host = env.get("ATLAS_SERVICE_HOST", "0.0.0.0")
-    port = int(env.get("ATLAS_SERVICE_PORT", "8080"))
+    # Local default is the loopback. The Fly app sets
+    # ATLAS_SERVICE_HOST=0.0.0.0 because the proxy is not on loopback.
+    host = env.get("ATLAS_SERVICE_HOST", "127.0.0.1")
+    raw_port = env.get("ATLAS_SERVICE_PORT", "8080")
+    if raw_port != "8080":
+        raise ServiceError("ATLAS_SERVICE_PORT must be 8080, the port Fly checks")
+    port = 8080
     state = Path(env.get("ATLAS_REVIEWER_STATE_DIR", ".atlas-reviewer-state"))
     return ServiceConfig(
         secret=secret,
@@ -496,7 +595,17 @@ class _LoggingSink:
     def emit(self, event: Event) -> None:
         self._inner.emit(event)
         pr = event.fields.get("pr", "")
-        self._log(f"atlas-reviewer: {event.step} status={event.status} pr={pr}")
+        sha = event.fields.get("sha12", "")
+        attempts = event.fields.get("attempts", "")
+        retry = event.fields.get("retry_s", "")
+        line = f"atlas-reviewer: {event.step} status={event.status} pr={pr} sha={sha}"
+        if attempts != "":
+            line += f" attempts={attempts}"
+        if retry != "":
+            line += f" retry_s={retry}"
+        if event.error:
+            line += f" error={event.error}"
+        self._log(line)
 
 
 def serve(
@@ -514,7 +623,7 @@ def serve(
         return 2
     board = Board(config.state_dir / "queue.json")
     redactor = Redactor(known_secrets=(config.secret,), sources=secret_sources)
-    sink = JsonlSink(config.state_dir / "service.jsonl")
+    sink = JsonlSink(config.state_dir / "service.jsonl", max_bytes=_SERVICE_LOG_BYTES)
     sink.__enter__()
     try:
         telemetry = Telemetry(
@@ -535,6 +644,7 @@ def serve(
             board, runner, telemetry, publisher, config.concurrency, config.state_dir
         )
         server = ReviewServer(config, board, log)
+        server.worker = worker
         worker.start()
         log(
             "atlas-reviewer: service listening"
