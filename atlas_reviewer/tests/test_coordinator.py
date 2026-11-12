@@ -1042,6 +1042,14 @@ def test_committed_secrets_the_tools_read_are_controller_findings(tmp_path):
     assert TOKEN not in draft
 
 
+def test_a_quote_matched_within_two_lines_is_tagged_in_the_draft():
+    drifted = CheckedFinding(checked(Severity.MINOR).finding, QuoteSource.HEAD_NEAR)
+    result = synthesize([lens_result(clean(drifted))])
+    draft = render_draft(result, Redactor())
+    assert "head, within 2 lines of the citation" in draft
+    assert result.event is ReviewEvent.COMMENT
+
+
 def test_an_unverified_findings_problem_text_is_scrubbed_in_the_draft():
     opaque = "zq-problem-7c1f9a"
     bad = CheckedFinding(

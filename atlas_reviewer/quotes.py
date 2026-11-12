@@ -14,15 +14,20 @@ finding is verified when the path is in the head tree or the diff. A
 design reference has no line to quote. Anything else is unverified and
 never reported as a verified finding.
 
-Matching compares lines with surrounding whitespace stripped, so
-indentation and line endings do not decide it. A one-line quote may be a
-fragment of that one cited line, but a fragment shorter than
-`MIN_FRAGMENT_CHARS` non-space characters must be the whole line, so a
-quote such as `}` cannot pass by luck. A quote of several lines must be
-those cited lines, exactly. Removed lines match within one run of
-consecutive `-` lines of one hunk, at any line of the file's diff, and the
-span rule does not apply to them: D31 checks the head at the cited range,
-and the removed side has no head line.
+Matching collapses internal whitespace and strips the ends of a line,
+so indentation, line endings and a doubled space do not decide it. A
+one-line quote may be a fragment of that one cited line, but a fragment
+shorter than `MIN_FRAGMENT_CHARS` non-space characters must be the whole
+line, so a quote such as `}` cannot pass by luck. A quote of several
+lines must be those cited lines, after that whitespace collapse. A quote
+of whole lines whose text is at least `MIN_FRAGMENT_CHARS` non-space
+characters may also match the same number of lines starting within
+`QUOTE_DRIFT` lines of the citation. That match is tagged as drifted. A
+shorter quote, including `}`, does not get that search, and a wider
+cited range is still not searched. Removed lines match within one
+run of consecutive `-` lines of one hunk, at any line of the file's
+diff, and the span rule does not apply to them: D31 checks the head at
+the cited range, and the removed side has no head line.
 """
 
 from __future__ import annotations
@@ -38,12 +43,15 @@ from atlas_reviewer.lens_contract import DesignRef, Finding, LineRange, WholeFil
 from atlas_reviewer.runner import refused_archive
 
 MIN_FRAGMENT_CHARS = 8
+# A whole-line quote may sit this many lines off the citation.
+QUOTE_DRIFT = 2
 MAX_CHECKED_FILE_BYTES = 8 * 1024 * 1024
 _HUNK_START = "@@ "
 
 
 class QuoteSource(StrEnum):
     HEAD = "head"
+    HEAD_NEAR = "head, within 2 lines of the citation"
     REMOVED = "removed lines"
     NOT_NEEDED = "no line to quote"
 
@@ -186,6 +194,8 @@ def _check_range(finding: Finding, where: LineRange, sources: SourceText) -> Quo
     span_matches = where.end - where.start + 1 == len(quote)
     if window is not None and span_matches and _found(quote, window):
         return Verified(finding, QuoteSource.HEAD)
+    if head is not None and span_matches and _near(quote, head, where):
+        return Verified(finding, QuoteSource.HEAD_NEAR)
     if any(_found(quote, run) for run in sources.removed.get(where.path, ())):
         return Verified(finding, QuoteSource.REMOVED)
     if head is None and sources.unreadable:
@@ -222,7 +232,8 @@ def _quote_lines(evidence: str) -> tuple[str, ...]:
 
 
 def _found(quote: tuple[str, ...], window: Iterable[str]) -> bool:
-    lines = tuple(line.strip() for line in window)
+    lines = tuple(_squash(line) for line in window)
+    quote = tuple(_squash(part) for part in quote)
     if len(quote) == 1:
         return any(_fragment_of(quote[0], line) for line in lines)
     return any(
@@ -233,8 +244,32 @@ def _found(quote: tuple[str, ...], window: Iterable[str]) -> bool:
 def _fragment_of(quote: str, line: str) -> bool:
     if quote == line:
         return True
-    long_enough = len("".join(quote.split())) >= MIN_FRAGMENT_CHARS
+    long_enough = len(quote.replace(" ", "")) >= MIN_FRAGMENT_CHARS
     return long_enough and quote in line
+
+
+def _squash(line: str) -> str:
+    return " ".join(line.split())
+
+
+def _near(quote: tuple[str, ...], head: tuple[str, ...], where: LineRange) -> bool:
+    """A whole-line quote within `QUOTE_DRIFT` lines of the citation.
+    A fragment does not qualify: it would match a nearby line that merely
+    contains the words."""
+    joined = "".join(_squash(line).replace(" ", "") for line in quote)
+    if len(joined) < MIN_FRAGMENT_CHARS:
+        return False
+    wanted = tuple(_squash(line) for line in quote)
+    for delta in range(1, QUOTE_DRIFT + 1):
+        for sign in (1, -1):
+            start = where.start + sign * delta
+            if start < 1:
+                continue
+            shifted = LineRange(where.path, start, where.end + sign * delta)
+            window = _cited_lines(head, shifted)
+            if window is not None and tuple(_squash(line) for line in window) == wanted:
+                return True
+    return False
 
 
 def check_all(

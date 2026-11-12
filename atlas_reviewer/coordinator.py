@@ -1376,8 +1376,8 @@ def _finding_line(f: MintedFinding, scrub: Callable[[str], str]) -> str:
         f"route: {x.route.value}",
         x.attribution.value,
     ]
-    if f.source == "removed lines":
-        tags.append("removed lines")
+    if f.source in ("removed lines", "head, within 2 lines of the citation"):
+        tags.append(f.source)
     text = (
         f"- **{f.id}** [{', '.join(tags)}] "
         f"{quote_untrusted(str(x.location), QUOTED_CHARS, scrub=scrub)} "

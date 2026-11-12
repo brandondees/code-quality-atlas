@@ -1270,6 +1270,15 @@ verdict-setting finding, still approve. D55 records that
 `synthesis.md`, `templates/REVIEW.md` and the PR-review runbook still
 describe a Blocker as what requests changes on the human-posted review.
 
+## 2026-11-12 — a whole-line quote may sit two lines off its citation
+
+The quote check was rejecting a finding the owner read as a real
+exit-code Major. The quote text is not in the comments on #639, #640
+or #642. Comparison now collapses internal whitespace, and a quote of
+whole lines may match within two lines of the citation. That match is
+tagged in the draft. A short fragment, such as `}`, still has to be
+the cited line. D47 records it.
+
 ## 2026-11-13 — pinned endpoints set the price, and ZDR can be turned off
 
 `max_price`, the reservation, the context and the completion limit come
