@@ -754,9 +754,11 @@ recorded HTTP for the adapter, and `LocalSprites` plus a fake Tasks
 socket for the hold. The tests make no live model, Sprite or Fly call.
 D41 records the 2026-11-12 probe that did.
 
-- **Limits.** `lens_loop.AgenticLimits` has Brandon's provisional defaults
-  (2026-11-11), set for headroom and configurable, to be revisited after
-  live runs: a $5 reservation, 50 model calls per review, 50 turns per
+- **Limits.** `lens_loop.AgenticLimits` has a $5 per-review reservation,
+  kept by D43 (2026-11-12): the byte-bound worst-case check is unchanged,
+  and the headroom is this reservation. The other defaults are still
+  Brandon's provisional headroom (2026-11-11), configurable and to be
+  revisited after live runs: 50 model calls per review, 50 turns per
   lens, 20 minutes per lens and 60 minutes per review. An override must be
   positive and finite, and a per-lens limit no greater than its per-review
   limit. Clearing one back to unset makes `resolve` raise
@@ -897,7 +899,7 @@ D41 records the 2026-11-12 probe that did.
 | `lens_contract.py` | a lens's final reply under the finding contract, parsed strictly into typed findings (`parse_reply`); refusals never echo model text | no |
 | `quotes.py` | check each finding's quoted evidence against the head file at the cited lines (the span is the quote's line count), or the diff's removed lines (`check_quote`) | no |
 | `attestation.py` | lens-body delivery and acknowledgement checks, attempt outcomes and lens states, the append-only attempt ledger (`AttemptLedger`), the retry-once policy (`next_step`) | writes the ledger file |
-| `lens_loop.py` | the agentic limits (Brandon's provisional defaults, 2026-11-11), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the lens system prompt, the spend tracker, one lens attempt (`run_attempt`) | via `Bridge`, `LensModel` |
+| `lens_loop.py` | the agentic limits (the $5 reservation is D43; the other four are Brandon's provisional defaults, 2026-11-11), the `LensModel` port and its messages, tool schemas built from `bridge_args.TOOLS`, the lens system prompt, the spend tracker, one lens attempt (`run_attempt`) | via `Bridge`, `LensModel` |
 | `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft; holds the Sprite for the lens (`keepalive.lens_hold`) | via ports, the ledger |
 | `tool_model.py` | the live tool-calling adapter (`OpenRouterLensModel`): one pinned Chat Completions request per `LensModel` turn, top-level `cache_control: ephemeral`, strict tool-call arguments, cost from `_actual_cost` (BYOK upstream included; catalog rates when the cost is missing but the token counts are usable, with cache read and write counts at the catalog's cache rates when the response reports them; a reasoning rate with no reasoning-token count is unpriced only when the cost is also missing). Not on the CLI. Tested with recorded HTTP only | via the OpenRouter client |
 | `keepalive.py` | the Sprite Tasks API hold for one lens: create, refresh every 60 seconds with a 5-minute expiry, delete on exit. Not on the CLI. Tested with `LocalSprites` and a fake socket | via the runner exec |

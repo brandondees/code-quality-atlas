@@ -11,11 +11,12 @@ offline half (the controller loop and one attested lens, D40) is on draft
 PRs, tested with the real bridge over a fixture repository and a scripted
 model. The tool-calling adapter and the Sprite keepalive are also built
 offline (D41), tested with recorded HTTP and a fake Tasks socket; nothing
-calls either from the CLI, and no live run has been made. Brandon
+calls either from the CLI. The 2026-11-12 probe is recorded in D41. Brandon
 set provisional defaults for the five phase-3 limits on 2026-11-11 (see
-[Open numeric decisions](#open-numeric-decisions-pending-brandon)); they are
-headroom, configurable, and to be revisited after live runs. The other
-rows in that table are unchanged.
+[Open numeric decisions](#open-numeric-decisions-pending-brandon)). D43
+(2026-11-12) keeps the $5 per-review reservation and the byte-bound
+worst-case check. The other four limits stay headroom, configurable, and
+to be revisited after live runs. The other rows in that table are unchanged.
 This doc carries no live-run approval. No model call, Sprite run, merge or
 deploy was made to write it.
 
@@ -217,9 +218,9 @@ itself, and a timeout is a coverage gap.
 - **Caps.** The one-shot path keeps D25's 3 calls and $3.00 reservation,
   and the model pin stays (`anthropic/claude-sonnet-5.5`, no fallbacks).
   Agentic mode has Brandon's provisional defaults (2026-11-11), for
-  headroom and configurable. The tool-calling adapter and the Sprite
-  keepalive are built offline (D41). A live run still needs a probe; none
-  has been made.
+  headroom and configurable. The $5 reservation is D43's decision; the
+  other four limits stay provisional. The tool-calling adapter and the Sprite
+  keepalive are built offline (D41), and the D41 probe (2026-11-12) is recorded there.
 - **Starting scope.** Triage only: the four critical-tier lenses from
   [`review-depth-modes.md`](review-depth-modes.md) —
   `tracing-correctness-and-invariants`, `sweeping-for-security`,
@@ -255,7 +256,7 @@ owner at every phase.
 | 0 | Land #601-#607 as the one-shot reviewer and fallback, with the D33 note (#608). No agentic scope in those PRs. | none |
 | 1 | Full PR conversation (about 64 KiB, omissions named) and branch-wide CI labelled by SHA, in the shared evidence code. Fixture-tested. Built offline (D38), stacked on #607 with the owner's go-ahead rather than after the stack merged. | stack merged |
 | 2 | The tool bridge, offline: closed git tools (diff, list, read range, grep) against `FakeSprites` and a fixture repo, with argument rejection, byte and time caps, and git hardening. Option B staging. Built offline (D39), stacked on phase 1 with the owner's go-ahead. | phase 1 merged |
-| 3 | The controller loop and one attested lens, offline first: body injection, the attestation ledger, quote checks, retry and escalate. Offline half built (D40): `lens_loop.py`, `coordinator.py`, `attestation.py`, `quotes.py`, `lens_contract.py`, with a mechanical synthesis (no merge call for one lens) and no CLI entry point. The tool-calling adapter (`tool_model.py`) and the Sprite keepalive (`keepalive.py`) are built offline (D41). Then one owner-approved live run, compared with the one-shot draft on the same head. | offline work: none. Live run: Brandon's provisional defaults are set (2026-11-11) and the adapter and keepalive are built offline (D41); the live probe is not done |
+| 3 | The controller loop and one attested lens, offline first: body injection, the attestation ledger, quote checks, retry and escalate. Offline half built (D40): `lens_loop.py`, `coordinator.py`, `attestation.py`, `quotes.py`, `lens_contract.py`, with a mechanical synthesis (no merge call for one lens) and no CLI entry point. The tool-calling adapter (`tool_model.py`) and the Sprite keepalive (`keepalive.py`) are built offline (D41). Then one owner-approved live run, compared with the one-shot draft on the same head. | offline work: none. Live run: Brandon's provisional defaults are set (2026-11-11) and the adapter and keepalive are built offline (D41); the D41 probe (2026-11-12) is recorded there, and D43 keeps the $5 reservation from the PR #621 review |
 | 4 | Triage mode: the four critical lenses, pool size 1, ID-reconciled merge, coverage never claimed complete unless the ledger shows it. | phase 3 measured |
 | 5 | The baked toolchain: the first tool set in the Sprite image, with summarized hits routed to lenses. | image build approved |
 | 6 | Measured pilots on owner-labelled PRs, scored for precision, recall and coverage honesty. Then review and comprehensive depths, a concurrency probe before any pool size above 1, Option A history staging, and the decision on retiring the one-shot path. | phases 4-5 done |
@@ -264,7 +265,9 @@ owner at every phase.
 
 Brandon set provisional defaults for the five phase-3 limits on
 2026-11-11, for headroom, configurable, and to be revisited after live
-runs. A run with those defaults is accepted. Clearing one back to unset
+runs. D43 (2026-11-12) settles the dollar reservation: it stays $5, and
+the per-call byte-bound worst case is unchanged. The other four limits
+stay provisional. A run with those defaults is accepted. Clearing one back to unset
 makes `coordinator.review_lens` refuse before any model, runner or ledger
 work (`LimitsUnsetError`, naming each unset field). An override must be
 positive and finite, and a per-lens limit no greater than its per-review
@@ -277,8 +280,8 @@ The five are fields of
 
 | Decision | Current state | Note |
 |---|---|---|
-| Agentic per-review dollar reservation | $5, provisional default (2026-11-11); one-shot stays $3.00 | Headroom, configurable through `AgenticLimits`. Revisit after live runs. D31 estimated about $1.1 per lens uncached at 12 turns, or about $0.3-0.4 with prompt caching if the pinned routing allows it. |
-| OpenRouter key hard limit for agentic runs | the one-shot preflight requires at most $5 | Must cover the agentic reservation. The provisional reservation is $5, the same ceiling this preflight already requires. |
+| Agentic per-review dollar reservation | $5 (D43, 2026-11-12); one-shot stays $3.00 | The byte-bound worst-case check stays. Headroom is this per-review reservation. Still configurable through `AgenticLimits`. |
+| OpenRouter key hard limit for agentic runs | the one-shot preflight requires at most $5 | Must cover the agentic reservation. The reservation is $5 (D43), the same ceiling this preflight already requires. |
 | Agentic per-review model-call cap | 50, provisional default (2026-11-11); one-shot stays 3 | Headroom, configurable. Includes the picker, each lens's turns and the merge. A per-lens turn cap is no greater than this. |
 | Per-lens turn cap | 50, provisional default (2026-11-11) | Headroom, configurable, and no greater than the review's call cap. D31 suggested 12. |
 | Per-lens and per-review wall clocks | 20 minutes per lens and 60 minutes per review, provisional defaults (2026-11-11) | Headroom, configurable. The per-lens clock is no greater than the review clock. Crossing either ends the lens or review as partial, never clean. |
