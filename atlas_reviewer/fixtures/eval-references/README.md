@@ -4,7 +4,7 @@ Each JSON file is one Claude Code protocol round from PRs #602–#637, normalize
 
 Fetched 2026-11-12. 26 round file(s). Runs: lens-fan-out 20, coordinator-verified 0, unrecorded 6. Flagged coordinator-verified: none in this fetch.
 
-#637 has no protocol review in this fetch, and #636 has rounds 1 and 2 only, so the coordinator-verified examples named for those pulls (#637 round 2 and #636 round 4) are not rows here.
+Pull 637 has no protocol review in this fetch, and pull 636 has rounds 1 and 2 only, so the coordinator-verified examples named for those pulls (637 round 2 and 636 round 4) are not rows here.
 
 ## PRs in #602–#637 with no protocol round in this fetch
 

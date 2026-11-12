@@ -155,9 +155,10 @@ the coverage section names lenses it ran, loaded, or re-ran;
 `coordinator-verified` when the round says that (fan-out did not finish);
 `unrecorded` when the body says neither. A coordinator-verified row is
 flagged and does not clear this criterion, so it cannot by itself make
-`--gate` exit 0. #637 has no protocol review in the 2026-11-12 fetch, and
-#636's fetch has rounds 1 and 2 only, so the cited coordinator-verified
-rounds (637 round 2, 636 round 4) are not rows in this set.
+`--gate` exit 0. Pull 637 has no protocol review in the 2026-11-12 fetch,
+and pull 636's fetch has rounds 1 and 2 only, so the cited
+coordinator-verified rounds (637 round 2, 636 round 4) are not rows in
+this set.
 
 ### 4. Recall and precision against the protocol reviews
 
