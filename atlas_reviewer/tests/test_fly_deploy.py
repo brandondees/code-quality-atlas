@@ -791,28 +791,25 @@ def _comment_stripped(block: str) -> str:
 
 
 def poll_loops(block: str) -> list[PollLoop]:
-    """Deadline, sleep, and ``grep`` argv of each poll loop in one fence.
+    """Sleep from the ``while`` body, deadline from the ``while`` condition.
 
     Full-line comments are dropped first, so a pattern that lives only in a
-    comment is not part of the ``grep`` command.
+    comment is not part of the ``grep`` command. A ``sleep`` or a ``+ 3600``
+    that sits above the ``while`` is not part of the loop.
     """
     code = _comment_stripped(block)
-    if not re.search(r"(?m)^\s*while\s", code):
-        return []
-    sleeps = [int(n) for n in re.findall(r"(?m)^\s*sleep\s+(\d+)\s*$", code)]
-    deadlines = [
-        int(n)
-        for n in re.findall(
-            r"deadline=\$\(\(\s*\$\(\s*date \+%s\s*\)\s*\+\s*(\d+)\s*\)\s*\)",
-            code,
-        )
-    ]
-    assert len(sleeps) == 1, block
-    assert len(deadlines) == 1, block
-    greps = re.findall(r"(?m)^\s*(grep\b.*?)\s*(?:\|\||$)", code)
-    assert len(greps) <= 1, block
-    grep_argv = tuple(shlex.split(greps[0])) if greps else None
-    return [PollLoop(sleeps[0], deadlines[0], grep_argv)]
+    loops = re.findall(r"while\b(.*?)\bdo\b(.*?)done", code, flags=re.DOTALL)
+    found = []
+    for condition, body in loops:
+        sleeps = [int(n) for n in re.findall(r"(?m)^\s*sleep\s+(\d+)\s*$", body)]
+        deadlines = [int(n) for n in re.findall(r"start \+\s*(\d+)", condition)]
+        assert len(sleeps) == 1, block
+        assert len(deadlines) == 1, block
+        greps = re.findall(r"(?m)^\s*(grep\b.*?)\s*(?:\|\||$)", body)
+        assert len(greps) <= 1, block
+        grep_argv = tuple(shlex.split(greps[0])) if greps else None
+        found.append(PollLoop(sleeps[0], deadlines[0], grep_argv))
+    return found
 
 
 def _e_patterns(argv: tuple[str, ...]) -> tuple[str, ...]:
@@ -1119,6 +1116,8 @@ def test_a_non_rm_stop_kills_a_leftover_flyctl_after_the_machine_is_gone():
     assert "kill that flyctl" in body
     assert "Ctrl-C" in body
     assert "pgrep -af 'fly machine run'" in body
+    assert "kill <pid>" in body
+    assert "confirm the line is the `fly machine run` that started this Machine" in body
     assert "are not the Machine's state" in body
     assert "timeout 45" in body and "--detach" in body
     for heading in (

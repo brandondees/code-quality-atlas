@@ -366,8 +366,8 @@ showed, not a documented Fly behavior.
 
 ```sh
 code=
-deadline=$(( $(date +%s) + 3600 ))
-while [ -z "$code" ] && [ "$(date +%s)" -lt "$deadline" ]; do
+start=$(( $(date +%s) ))
+while [ -z "$code" ] && [ "$(date +%s)" -lt "$(( start + 3600 ))" ]; do
   sleep 30
   code=$(flyp ssh console --app atlas-reviewer --machine "$MACHINE_ID" -q \
     -C 'cat /home/atlas/out/exit-code' | tr -dc '0-9')
@@ -561,9 +561,15 @@ every start without `--rm` keeps waiting.
 If the `fly machine run` that started this Machine has not returned
 in its shell, kill that flyctl once `fly machine list` no longer
 shows the Machine. In that shell, Ctrl-C kills it. If the shell is
-gone, find the process and kill it, for example
-`pgrep -af 'fly machine run'`. Do this after the release destroy and
-after the hard-stop destroy. The process still running, and the
+gone, list the matching processes and confirm the line is the
+`fly machine run` that started this Machine, then kill that pid:
+
+```sh
+pgrep -af 'fly machine run'
+kill <pid>
+```
+
+Do this after the release destroy and after the hard-stop destroy. The process still running, and the
 status it exits with after the kill, are not the Machine's state.
 The `--rm` sweep and probe commands are a different case: they run
 under `timeout 45` or `--detach`, covered below.
@@ -632,8 +638,8 @@ hour passes, the same bound as the review poll. Do not take one
 
 ```sh
 found=
-deadline=$(( $(date +%s) + 3600 ))
-while [ -z "$found" ] && [ "$(date +%s)" -lt "$deadline" ]; do
+start=$(( $(date +%s) ))
+while [ -z "$found" ] && [ "$(date +%s)" -lt "$(( start + 3600 ))" ]; do
   sleep 30
   found=$(flyp logs --app atlas-reviewer --machine "$MACHINE_ID" --no-tail |
     grep -F -e 'destroyed (verified absent)' \
@@ -761,8 +767,8 @@ hour passes. The line is the probe's result. flyctl's status is not.
 
 ```sh
 found=
-deadline=$(( $(date +%s) + 3600 ))
-while [ -z "$found" ] && [ "$(date +%s)" -lt "$deadline" ]; do
+start=$(( $(date +%s) ))
+while [ -z "$found" ] && [ "$(date +%s)" -lt "$(( start + 3600 ))" ]; do
   sleep 30
   found=$(flyp logs --app atlas-reviewer --machine "$MACHINE_ID" --no-tail |
     grep -F -e 'Main child exited normally with code:' || true)
