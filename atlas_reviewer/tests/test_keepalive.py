@@ -124,8 +124,7 @@ class TaskServer:
             return 201
         name = target.rsplit("/", 1)[-1]
         if method == "PUT":
-            if name not in self.tasks:
-                return 404
+            # The live Tasks API upserts: a PUT of a missing task creates it.
             self.tasks[name] = body.decode()
             return 200
         if method == "DELETE":
@@ -500,14 +499,50 @@ def test_a_refresh_http_failure_deletes_the_socket_hold(server: TaskServer):
     assert server.tasks == {}
 
 
-def test_a_refresh_of_a_missing_task_is_not_a_success(server: TaskServer):
-    """A 404 means the hold is gone. Delete may treat that as success.
-    A refresh may not: the task was not renewed."""
+def test_a_refresh_of_a_deleted_task_recreates_it(server: TaskServer):
+    """The live Tasks API upserts, and so does this socket. A PUT after
+    delete brings the task back. The hold refuses that PUT once it has
+    stopped, which is what keeps a stopped hold from being recreated."""
     client = SocketTaskClient(str(server.path))
     client.create(NAME)
     client.delete(NAME)
+    assert NAME not in server.tasks
+    client.refresh(NAME)
+    assert NAME in server.tasks
+    assert server.order == ["POST", "DELETE", "PUT"]
+
+
+def test_a_refresh_after_the_hold_stops_sends_no_request(server: TaskServer):
+    client = SocketTaskClient(str(server.path))
+    with LensHold(client, NAME) as hold:
+        pass
+    assert server.order == ["POST", "DELETE"]
+    assert server.tasks == {}
+    hold.refresh()
+    assert server.order == ["POST", "DELETE"]
+    assert server.tasks == {}
+
+
+def test_a_refresh_answered_404_is_not_a_success(tmp_path):
+    """Delete may treat 404 as gone. A refresh may not: the task was not
+    renewed. The fake socket upserts, so this answer comes from a stub."""
+    path = socket_path(tmp_path)
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(path))
+    listener.listen(1)
+
+    def once():
+        conn, _addr = listener.accept()
+        conn.recv(65536)
+        conn.sendall(
+            b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+        conn.close()
+        listener.close()
+
+    threading.Thread(target=once, daemon=True).start()
     with pytest.raises(BoundaryError, match="HTTP 404"):
-        client.refresh(NAME)
+        SocketTaskClient(str(path)).refresh(NAME)
 
 
 def test_the_status_line_is_enough(tmp_path):
