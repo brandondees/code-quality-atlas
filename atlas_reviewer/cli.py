@@ -897,7 +897,10 @@ def _agentic_limit_args(parser: argparse.ArgumentParser) -> None:
             flag,
             dest=name,
             default=None,
-            help=f"{meaning} (env {AGENTIC_ENV[name]}; default when unset)",
+            help=(
+                f"{meaning} (env {AGENTIC_ENV[name]}; default when unset). "
+                "Validated only: the one-shot review does not apply it."
+            ),
         )
 
 

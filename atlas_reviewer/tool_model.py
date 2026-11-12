@@ -87,7 +87,8 @@ class OpenRouterLensModel:
         self.provider = provider
         # None derives the per-call bounds from the catalog. The one-shot
         # CallLimits on the provider stay the D25 ceilings and are not the
-        # agentic input cap.
+        # agentic input cap. `review_lens` refuses this object when
+        # `per_call` is not the limits that review resolved.
         self.per_call = AgenticLimits().resolve() if per_call is None else per_call
         self._ready_for_turn: tuple[ModelTerms, bool] | None = None
 

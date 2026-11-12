@@ -19,10 +19,15 @@ Pages read 2026-11-12:
 - [Create custom subagents](https://code.claude.com/docs/en/sub-agents)
 - [CLI reference](https://code.claude.com/docs/en/cli-reference)
 
-**Context and compaction.** Automatic compaction summarizes the
+**Context and compaction.** With automatic compaction on, which is
+the session these pages describe, Claude Code summarizes the
 conversation as it approaches the model's context limit, so a full
-window does not end the session. The same pass is what `/compact`
-does. `/compact` can take a focus instruction. `/rewind` can summarize
+window does not end the session. That is not true with auto-compaction
+off. The model-config page says that under
+`CLAUDE_CODE_DISABLE_1M_CONTEXT=1`, a native 1M model then stops at the
+200K boundary with the context-limit error instead of compacting.
+`DISABLE_COMPACT` turns compaction off entirely. The automatic pass,
+when it runs, is what `/compact` does. `/compact` can take a focus instruction. `/rewind` can summarize
 from a chosen message or up to it. `/clear` drops the conversation when
 the next task is unrelated. `/autocompact`, `autoCompactWindow`,
 `--autocompact`, and `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set how full the
@@ -83,7 +88,7 @@ percentage does not say when compaction will run.
 
 | Claude Code | Atlas, after the per-call limits change |
 |---|---|
-| Window from the model, compaction before it fills | The agentic per-call input cap is the pinned model's catalog `context_length` minus the output reserve. The output cap defaults to `max_completion_tokens`. There is no compaction. A prompt that does not fit is refused before it is sent. |
+| Window from the model. With automatic compaction on, compaction runs before the window fills. With it off under `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`, the session stops at the 200K boundary | The agentic per-call input cap is the pinned model's catalog `context_length` minus the output reserve. The output cap defaults to `max_completion_tokens`. There is no compaction. A prompt that does not fit is refused before it is sent. |
 | History is summarized; up to five recent files are re-read | Every later turn resends the system prompt and the tool results so far, including diff pages already read. |
 | Subagent keeps a large read out of the parent | One lens at a time (`pool_size` 1). A lens does not see another lens's tool results. Inside one lens, tool results stay in that lens's history. |
 | `--max-turns`, no default; `--max-budget-usd` can be passed by the estimate | 50 turns, 50 calls, a $5 reservation, 20 minutes per lens and 60 minutes per review, all overridable. The loop reserves the worst case and refuses before the call, so a call is not sent once the reservation would be exceeded. |

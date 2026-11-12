@@ -28,6 +28,14 @@ def run_cli(*argv, env=None):
     return code, out.getvalue(), err.getvalue()
 
 
+def test_agentic_limit_help_says_the_one_shot_review_does_not_apply_them(capsys):
+    with pytest.raises(SystemExit) as raised:
+        cli.main(["review", "--help"], env={})
+    assert raised.value.code == 0
+    text = " ".join(capsys.readouterr().out.split())
+    assert "Validated only: the one-shot review does not apply it." in text
+
+
 def test_a_bad_agentic_limit_is_refused_before_the_review(tmp_path):
     code, _out, err = run_cli(
         "--state-dir",

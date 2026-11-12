@@ -297,9 +297,14 @@ def review_lens(
     """Review `event` with one lens. The limits are resolved before any
     model, runner or ledger work. Brandon's provisional defaults are
     accepted. A limit cleared to unset is refused outright
-    (`LimitsUnsetError`). The runner holds a Sprite task for the length
-    of the lens and deletes it on the way out."""
+    (`LimitsUnsetError`). A model that names its own `per_call` bounds
+    must name these; a different set is refused before any of that work.
+    A model that names none is not checked. The runner holds a Sprite
+    task for the length of the lens and deletes it on the way out."""
     resolved = limits.resolve()
+    declared = getattr(model, "per_call", None)
+    if declared is not None and declared != resolved:
+        raise ValueError("the model's per-call limits differ from this review's limits")
     contract = finding_contract() if contract is None else contract
     body = library.body(lens)
     if body is None:

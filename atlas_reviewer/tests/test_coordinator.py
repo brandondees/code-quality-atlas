@@ -105,6 +105,24 @@ def status(result):
 # ------------------------------------------------------------ refusals
 
 
+def test_a_model_with_other_per_call_limits_is_refused_before_anything_runs(tmp_path):
+    sprites = FakeSprites()
+    model = ScriptedLensModel([])
+    model.per_call = replace(LIMITS.resolve(), max_input_tokens=8)
+    with pytest.raises(ValueError, match="per-call limits"):
+        review(tmp_path, [], sprites=sprites, model=model)
+    assert sprites.calls == []
+    assert not (tmp_path / "state").exists()
+
+
+def test_a_model_that_names_these_limits_still_runs(tmp_path):
+    model = ScriptedLensModel([READ_ALL, final(finding())])
+    model.per_call = LIMITS.resolve()
+    result, seen, _ = review(tmp_path, [], model=model)
+    assert result.lenses[0].state is LensState.CLEAN
+    assert seen.requests
+
+
 def test_a_review_with_any_limit_unset_is_refused_before_anything_runs(tmp_path):
     sprites = FakeSprites()
     with pytest.raises(LimitsUnsetError, match="reservation_usd"):
