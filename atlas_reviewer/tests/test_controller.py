@@ -1897,22 +1897,22 @@ def test_notes_re_renders_pre_existing_omissions_with_its_own_scrub(value):
     from atlas_reviewer.redact import Redactor
 
     base = _Base(
-        EVENT,
-        UntrustedBlock("pull-request", RepoText("")),
-        (),
-        (),
-        ControllerFacts(
-            RunnerReport(
+        event=EVENT,
+        pull=UntrustedBlock("pull-request", RepoText("")),
+        issues=(),
+        evidence=(),
+        facts=ControllerFacts(
+            runner=RunnerReport(
                 RunnerStatus.COMPLETED, CleanupStatus.DESTROYED_VERIFIED, "r", ""
             ),
-            (),
-            (),
-            (Omission(value, "cap", "detail"),),
-            LensPlan((), ()),
-            (),
+            configured_tools=(),
+            tool_results=(),
+            omissions=(Omission(value, "cap", "detail"),),
+            lenses=LensPlan((), ()),
+            notes=(),
         ),
-        (),
-        Redactor(),
+        links=(),
+        redactor=Redactor(),
     )
     lines = _notes(base, None, scrub=_exact_scrub(value))
     (line,) = [n for n in lines if n.startswith("Omissions")]
@@ -1981,7 +1981,7 @@ def test_a_flagged_unreviewed_file_listing_is_scrubbed_in_the_draft(value):
 
 
 @pytest.mark.parametrize("value", MARKUP_VALUES)
-def test_an_unreviewed_part_s_file_listing_is_scrubbed_before_it_is_encoded(value):
+def test_an_unreviewed_parts_file_listing_is_scrubbed_before_it_is_encoded(value):
     from atlas_reviewer.controller import _unreviewed_parts
     from atlas_reviewer.diffs import DiffPart, DiffSelection, FileDiff, risk_tier
     from atlas_reviewer.draft import NarrativeFailure, PartNarrative
