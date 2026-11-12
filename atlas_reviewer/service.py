@@ -740,7 +740,7 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
     repos = env.get("ATLAS_REVIEW_REPOS", DEFAULT_REPO)
     allowlist = frozenset(part.strip() for part in repos.split(",") if part.strip())
     concurrency = int(env.get("ATLAS_REVIEW_CONCURRENCY", "1"))
-    provider = env.get("ATLAS_SERVICE_PROVIDER", "offline")
+    provider = env.get("ATLAS_SERVICE_PROVIDER", "openrouter")
     live = env.get("ATLAS_ALLOW_LIVE_INFERENCE", "") == "1"
     # Local default is the loopback. The Fly app sets
     # ATLAS_SERVICE_HOST=0.0.0.0 because the proxy is not on loopback.
@@ -867,11 +867,26 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
     env = os.environ if env is None else env
     try:
         config = config_from_env(env)
+        from atlas_reviewer.http import UrllibTransport
+        from atlas_reviewer.service_post import publisher_from_env
+
+        publisher = publisher_from_env(
+            env,
+            config.allowlist,
+            config.state_dir,
+            transport=UrllibTransport(),
+            clock=SystemClock(),
+        )
     except (ServiceError, ValueError) as exc:
         print(f"atlas-reviewer: {exc}", file=sys.stderr)
         return 2
     try:
-        return serve(config, env, secret_sources=(lambda: _child_secrets(env),))
+        return serve(
+            config,
+            env,
+            publisher=publisher.post,
+            secret_sources=(lambda: _child_secrets(env),),
+        )
     except KeyboardInterrupt:
         return 0
     except QueueError as exc:

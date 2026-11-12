@@ -182,3 +182,38 @@ def test_minted_tokens_reach_the_redactor_as_they_are_minted():
 
 def test_static_token_is_a_token_source():
     assert StaticToken("abc").token() == "abc"
+
+
+def test_pull_request_write_is_minted_only_when_the_caller_accepts_it():
+    clock = FakeClock()
+    transport = Minter(clock, permissions={"pull_requests": "write"})
+    source = tokens(
+        transport,
+        clock,
+        permissions={"pull_requests": "write"},
+        writable=frozenset({"pull_requests"}),
+    )
+    assert source.token().startswith("ghs_")
+    assert transport.requests[0][3]["permissions"] == {"pull_requests": "write"}
+    with pytest.raises(ValueError, match="only read"):
+        tokens(
+            Minter(clock),
+            clock,
+            permissions={"pull_requests": "write"},
+        )
+    broader = Minter(clock, permissions={"pull_requests": "write", "contents": "write"})
+    with pytest.raises(BoundaryError, match="not read-only: contents"):
+        tokens(
+            broader,
+            clock,
+            permissions={"pull_requests": "write"},
+            writable=frozenset({"pull_requests"}),
+        ).token()
+    dropped = Minter(clock, permissions={"pull_requests": "read"})
+    with pytest.raises(BoundaryError, match="did not grant pull_requests=write"):
+        tokens(
+            dropped,
+            clock,
+            permissions={"pull_requests": "write"},
+            writable=frozenset({"pull_requests"}),
+        ).token()

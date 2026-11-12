@@ -1,15 +1,19 @@
 # atlas_reviewer — manual Code Quality Atlas review service
 
-An operator-triggered controller. You give it one PR event (repo, PR number,
+An operator-triggered controller, and a webhook receiver that posts one
+advisory review. You give the controller one PR event (repo, PR number,
 head SHA). It collects CI evidence for that exact SHA, runs extra review tools
 in a fresh Sprite with no credentials, runs the review through this repo's
 collapsed `reviewing-a-change` skill bundle, and writes a **review draft** to
 stdout or a file.
 
-It never writes to GitHub. No reviews, comments, check runs, labels, or
-issues. The operator CLI has no webhook receiver and no queue, and runs
-one review at a time. The webhook receiver is a separate process,
-`python -m atlas_reviewer.service` (D48). Design and decision record:
+The operator CLI (`review`, `sweep`, `probe-runner`) never writes to GitHub:
+no reviews, comments, check runs, labels, or issues. It has no queue of its
+own and runs one review at a time in its state directory.
+`python -m atlas_reviewer.service` is the webhook receiver (D48). It verifies
+the delivery, queues one review per commit, and posts a single pull-request
+review with event COMMENT. It never sends APPROVE or REQUEST_CHANGES.
+Design and decision record:
 [`docs/plans/2026-11-06-manual-reviewer-service.md`](../docs/plans/2026-11-06-manual-reviewer-service.md)
 (D24-D30, D32, D33, D35 and D36 in
 [`docs/open-questions.md`](../docs/open-questions.md)).
@@ -50,6 +54,41 @@ the pinned base image was pulled, the process ran as uid 10001 and exited
 4, the Sprite was destroyed and then absent, and `fly logs` showed no
 secrets. A stream started late would have lost the start of the draft,
 which is why a review now writes it to disk.
+
+## Webhook service
+
+`python -m atlas_reviewer.service` listens for GitHub App `pull_request`
+deliveries (`opened`, `synchronize`, `ready_for_review`). A draft is
+ignored. The HMAC is `X-Hub-Signature-256` over the raw body with
+`ATLAS_GITHUB_WEBHOOK_SECRET` (at least 16 characters). The repository
+must be on `ATLAS_REVIEW_REPOS` (default `brandondees/code-quality-atlas`).
+A second delivery of the same head SHA does nothing. A newer head SHA
+cancels the review of the previous one, and that cancelled review is not
+posted.
+
+The review itself is the existing `review` command, one at a time unless
+`ATLAS_REVIEW_CONCURRENCY` says otherwise (1 to 32; 32 is a startup refusal
+so a bad value cannot start an unbounded pool, not a cost cap). The child
+process does not receive the webhook secret. Exit 0, 4 and 5 are finished
+reviews and are posted. Any other exit posts nothing; the failure is a
+telemetry event.
+
+The post is one pull-request review whose event is COMMENT. The body says
+the review is advisory and not a substitute for the full Claude Code
+protocol review, then lists the lenses that ran, the lenses that did not,
+the controller's file-coverage note, the limit stops, and the cost. The
+draft's own APPROVE or REQUEST_CHANGES line is quoted as a recommendation
+and is not sent. A retry of the same commit does not post a second time:
+the key `repo#pr#sha` is stored after GitHub accepts the review, and a
+review that already contains that marker is reused. The posting token asks
+for `pull_requests: write` and for no other write. The App installation
+has to grant that permission or the post fails and nothing is published.
+
+`ATLAS_SERVICE_PROVIDER` defaults to `openrouter`, and the process refuses
+to start until `ATLAS_ALLOW_LIVE_INFERENCE=1` is set, so a booted service
+does not post reviews a model never ran. `ATLAS_SERVICE_PROVIDER=offline`
+is the explicit no-model setting. The deploy shape for this process is a
+separate Fly app; the one-off `fly.toml` above is unchanged.
 
 ## Run it offline (no credentials)
 
@@ -946,6 +985,11 @@ D41 records the 2026-11-12 probe that did.
 | `github_api.py`, `github_auth.py`, `sprites_api.py`, `openrouter.py`, `http.py` | live adapters | network |
 | `github_fixture.py`, `fakes.py`, `ledger.py`, `clock.py` | offline adapters, local state | local files |
 | `cli.py`, `__main__.py` | entry point, dispatch tables | env, files |
+| `service_admit.py` | webhook signature, event and allowlist admission | no |
+| `service_queue.py` | dedupe by repo, PR and head SHA; supersede a moved head | the queue file |
+| `service_run.py` | one queued commit through the existing `review` command | the review child |
+| `service_post.py` | one COMMENT review, idempotent; no other event can be sent | GitHub |
+| `service.py` | webhook HTTP server and the review worker | network |
 
 ## Trust boundaries
 

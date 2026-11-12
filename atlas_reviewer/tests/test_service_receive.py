@@ -1794,6 +1794,7 @@ def test_config_rejects_a_short_secret_and_reads_the_allowlist(tmp_path):
             "ATLAS_REVIEW_REPOS": f"{REPO}, {OTHER}",
             "ATLAS_REVIEW_CONCURRENCY": "2",
             "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
+            "ATLAS_SERVICE_PROVIDER": "offline",
         }
     )
     assert config.allowlist == frozenset({REPO, OTHER})
