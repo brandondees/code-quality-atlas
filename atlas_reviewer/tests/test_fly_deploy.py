@@ -111,6 +111,7 @@ def test_image_copies_exactly_the_files_the_controller_reads():
     assert sources == [
         "requirements.txt",
         "atlas_reviewer/*.py",
+        "atlas_reviewer/fixtures/eval-references",
         "collapsed/skills/reviewing-a-change/SKILL.md",
         "collapsed/skills/reviewing-a-change/reference/lenses",
         "skills/choosing-review-lenses/SKILL.md",

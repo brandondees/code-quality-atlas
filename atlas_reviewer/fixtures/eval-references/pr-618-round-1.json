@@ -1,0 +1,77 @@
+{
+  "input": {
+    "repo": "brandondees/code-quality-atlas",
+    "pr": 618,
+    "head_sha": "44c983eccdc11640c0d12cfeba150e9101e4f314",
+    "round": 1,
+    "reviewed_commit": "2b215d261851f85f2a9ae20def4b8af1c04c9b9c"
+  },
+  "output": {
+    "verdict": "COMMENT",
+    "findings": [
+      {
+        "severity": "minor",
+        "path": "commands/atlas-rebase-stale.md",
+        "summary": "\u2014 the stack-restack poke reuses the conflict poke's \"outstanding = thread not resolved\" test, so it fires once per PR lifetime, not once per time the stack falls behind. A stack falls behind every time someone pushes to a lower layer. The f",
+        "lenses": [
+          "tracing-correctness-and-invariants"
+        ],
+        "line": 246
+      },
+      {
+        "severity": "minor",
+        "path": "commands/atlas-rebase-stale.md",
+        "summary": "\u2014 the fallback runs every time in practice, and it hands `gh stack` instructions to PRs that aren't stacks. The PR body confirms `mcp__github__pull_request_read` never returns `stack`, and this sweep is API-only. So \"if the tool doesn't ret",
+        "lenses": [
+          "tracing-correctness-and-invariants"
+        ],
+        "line": 57
+      },
+      {
+        "severity": "minor",
+        "path": "CLAUDE.md",
+        "summary": "\u2014 a point-in-time snapshot of open PR numbers sits in two always-loaded onboarding files. \"Today the reviewer stack is #606 \u2192 #607 \u2192 #613, and #612 \u2192 #614 \u2026\" is true only until the first of those merges. After that, every session reads a st",
+        "lenses": [
+          "reviewing-agent-legibility"
+        ],
+        "line": 66,
+        "end_line": 67
+      },
+      {
+        "severity": "minor",
+        "path": "CLAUDE.md",
+        "summary": "\u2014 the restack procedure assumes a working `gh` CLI with extension install, and gives no fallback. This repo is worked on heavily from Claude Code cloud sessions. In those sessions the `gh` CLI is unavailable or limited to `gh api` search, a",
+        "lenses": [
+          "reviewing-agent-legibility"
+        ],
+        "line": 72,
+        "end_line": 78
+      },
+      {
+        "severity": "nit",
+        "path": "CLAUDE.md",
+        "summary": "\u2014 specific behavioral claims about GitHub stacks with no source or `(verify)`, per standing authoring rule 1 (`docs/research/README.md`). The claims are specific: GitHub restacks automatically when the bottom PR merges; it does not restack ",
+        "lenses": [
+          "auditing-documentation-health"
+        ],
+        "line": 79,
+        "end_line": 88
+      }
+    ]
+  },
+  "metadata": {
+    "source": "claude-code-protocol",
+    "review_url": "https://github.com/brandondees/code-quality-atlas/pull/618#pullrequestreview-5848220166",
+    "run": "lens-fan-out",
+    "lenses_recorded": [
+      "tracing-correctness-and-invariants",
+      "reviewing-agent-legibility",
+      "auditing-documentation-health",
+      "reviewing-agentic-safety",
+      "checking-idioms-and-consistency",
+      "reviewing-pr-and-process-hygiene"
+    ],
+    "review_state": "COMMENTED",
+    "parse_gap": false
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "input": {
+    "repo": "brandondees/code-quality-atlas",
+    "pr": 617,
+    "head_sha": "748bffac2690b99591f9d58813731e747fdf5728",
+    "round": 1,
+    "reviewed_commit": "748bffac2690b99591f9d58813731e747fdf5728"
+  },
+  "output": {
+    "verdict": "APPROVE",
+    "findings": []
+  },
+  "metadata": {
+    "source": "claude-code-protocol",
+    "review_url": "https://github.com/brandondees/code-quality-atlas/pull/617#pullrequestreview-5840937675",
+    "run": "lens-fan-out",
+    "lenses_recorded": [],
+    "review_state": "APPROVED",
+    "parse_gap": false
+  }
+}

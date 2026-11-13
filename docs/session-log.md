@@ -1097,3 +1097,34 @@ accepts the eight agentic limit flags, which it did not read. The
 `ATLAS_*` variables are unchanged, and `limits_for_lens` still reads
 them. A runner deadline reports elapsed seconds, as the other two
 clock stops do.
+
+## 2026-11-12 — parity gate for submitting APPROVE, and an offline protocol scorer
+
+The draft's `review_event` line is still D36. Submitting that line to
+GitHub as `APPROVE` is a separate decision: the poster may do it only
+when `python -m atlas_reviewer eval --fixtures <dir> --head <sha> --gate`
+exits 0 on a candidate recorded for that head. The four criteria (repo
+access, a full diff at any size, per-lens fan-out with verification, and
+recall of the Claude Code protocol findings on PRs #602–#637) are all
+unmet in the current reviewer, so the gate fails closed. The plan is
+[`plans/2026-11-12-reviewer-parity-gate.md`](plans/2026-11-12-reviewer-parity-gate.md).
+D45 recommends self-hosted Phoenix on Fly in org `personal` and does not
+provision it. The scorer and the reference rows are offline fixtures;
+nothing in this change calls a model or writes to GitHub. The hosting
+decision is D45. D44 is reserved for #646. #639 records D48 and #640
+records D46; neither is on main. A reference row's `metadata.run`
+records `coordinator-verified` when the
+round says fan-out did not finish. That field is information and does
+not itself fail the gate. `--gate` also fails when any reference row has
+no candidate, when `--head` has no passing pair, or when no passing pair
+records `over_context_window`. GitHub `APPROVED` is `APPROVE`. Body
+findings and
+the `**Severity** · \`lens\`` inline shape are parsed. Brandon's
+2026-11-12 bar: an extra finding never fails the gate, and the verdict
+and the severity do not have to match. The gate fails on a selected
+lens that was NOT RUN or failed, a lens named by a reference finding
+that was not run, incomplete file coverage, or recall below 1 of the
+reference findings (same path, line within five).
+The reference is the checked-in row, and a missing or malformed
+reference set fails closed. Zero parsed findings are a gap unless the
+round says there are none.
