@@ -39,12 +39,16 @@ reply as the next round's instructions.
 
 ## Where state lives
 
-`rounds.RoundLog` is an append-only JSONL file, mode 0600, next to the
-attestation ledger. A record is keyed by repository and pull request
-number, and it carries the head SHA it was recorded at. The
-attestation ledger stays keyed by head SHA, lens and body digest, so a
-new head still runs the lens. The round log is what carries the
-earlier findings across that boundary.
+`rounds.RoundLog` is an append-only JSONL file, mode 0600 on every
+write. The path is chosen when a caller is wired. No shipped caller
+builds one yet: `round_log` is an argument of `review_lens`, and the
+tests pass it. `cli`, the controller and the service do not. A record
+is keyed by repository and pull request number, compared
+case-insensitively, and it carries the head SHA it was recorded at.
+The attestation ledger stays keyed by head SHA, lens and body digest,
+so a new head still runs the lens. The round log is what carries the
+earlier findings across that boundary. "Round" here is one finished
+review, not a continuation turn.
 
 A superseded head stays in the log. Its block says it was recorded at
 that SHA and is not this review's scope. The current round still lists

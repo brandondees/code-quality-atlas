@@ -1186,3 +1186,14 @@ That is what `load_terms` does. The module docstring and the agentic
 README said it was fetched on every completion or turn, which was true
 before this cache. D41's sentence keeps the original design and notes
 the amendment. No live call was made.
+
+## 2026-11-13 — round 2 on whole-PR review rounds
+
+The round log keeps another pull request's records out of this review,
+compares the repository key case-insensitively, and counts the records
+it sets aside without treating them as omissions. A file that cannot
+be read is an omission. Mode 0600 is applied on every write. A record
+of 8,192 characters is kept and 8,193 is not, and the newest record is
+the one that stays when the budget holds one. Prior finding lines are
+quoted. The first turn still lists every changed file. A continuation
+may later list a subset. No live call was made. D52.

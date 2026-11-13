@@ -6,6 +6,8 @@ the previous head's attempt. This log is keyed by repository and pull
 request number. A round recorded at an older head stays, labelled with
 that SHA, and the next round still reviews the current diff in full.
 Prior findings are input to verify. They do not drop a changed file.
+"Round" here is one finished review of the pull request. It is not a
+continuation turn inside that review.
 
 Nothing is cut silently. A round that does not fit the budget is left
 out whole, and that omission is returned to the coordinator. A line that
@@ -17,7 +19,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from atlas_reviewer.domain import Omission
@@ -46,25 +48,35 @@ class RoundRecord:
 
 
 class RoundLog:
-    """Append-only JSON lines, mode 0600, one file for every pull request.
+    """Append-only JSON lines, mode 0600 on every write, one file for
+    every pull request.
 
-    `read` skips a torn or foreign line and reports how many it skipped.
-    The caller turns that count into an omission."""
+    `read` returns every record that parsed. The count is lines that
+    did not parse, and a file that could not be read counts as one.
+    Records for another pull request stay in the result. `records_for`
+    drops them and reports how many. That drop is not an omission. The
+    repository key is compared case-insensitively. The path is chosen
+    by the caller. Nothing in the service builds one yet."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
 
     def append(self, record: RoundRecord) -> None:
+        stored = replace(record, repo=record.repo.casefold())
         _make_dirs_synced(self.path.parent)
-        _write_synced(self.path, "a", json.dumps(_dump(record), sort_keys=True) + "\n")
+        _write_synced(self.path, "a", json.dumps(_dump(stored), sort_keys=True) + "\n")
         _sync_dir(self.path.parent)
 
     def read(self) -> tuple[tuple[RoundRecord, ...], int]:
         if not self.path.exists():
             return (), 0
+        try:
+            text = self.path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            return (), 1
         records: list[RoundRecord] = []
         skipped = 0
-        for line in self.path.read_text(encoding="utf-8").splitlines():
+        for line in text.splitlines():
             if line.strip() == "":
                 continue
             parsed = _parse(line)
@@ -73,6 +85,27 @@ class RoundLog:
             else:
                 records.append(parsed)
         return tuple(records), skipped
+
+
+def same_pull_request(record: RoundRecord, repo: str, pr_number: int) -> bool:
+    """True when `record` is this repository and pull request.
+
+    The repository string is compared case-insensitively, so a record
+    stored as `Org/Repo` still matches a review of `org/repo`."""
+    return record.repo.casefold() == repo.casefold() and record.pr_number == pr_number
+
+
+def records_for(
+    records: Sequence[RoundRecord], repo: str, pr_number: int
+) -> tuple[tuple[RoundRecord, ...], int]:
+    """This pull request's records, and how many others were set aside.
+
+    The set-aside records are not omissions. Another pull request in
+    the same file is not this review's context."""
+    mine = tuple(
+        record for record in records if same_pull_request(record, repo, pr_number)
+    )
+    return mine, len(records) - len(mine)
 
 
 def fit_record(record: RoundRecord) -> RoundRecord:

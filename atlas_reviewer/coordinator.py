@@ -82,6 +82,7 @@ from atlas_reviewer.rounds import (
     RoundRecord,
     fit_record,
     prior_blocks,
+    records_for,
 )
 from atlas_reviewer.runner import event_runner_name
 from atlas_reviewer.telemetry import Telemetry
@@ -552,6 +553,8 @@ def _review_lens(
         body,
         key.body_sha256,
         contract,
+        # No scope. The first turn lists every file in `diff`. A
+        # continuation (#646) may pass `scope`. Prior findings are not one.
         first_turn(event, diff, blocks, fence_nonce),
         changed,
         read_sources(trees.head, diff, changed),
@@ -691,11 +694,9 @@ def _review_context(
     omissions = list(context_omissions)
     if round_log is not None:
         records, unreadable = round_log.read()
-        mine = tuple(
-            record
-            for record in records
-            if record.repo == event.repo and record.pr_number == event.pr_number
-        )
+        # Other pull requests in the same file are counted and are not
+        # omissions. The repository key is case-insensitive.
+        mine, _dropped_other = records_for(records, event.repo, event.pr_number)
         prior, prior_omissions = prior_blocks(
             mine,
             event.head_sha,
@@ -732,23 +733,34 @@ def _round_record(
 
 
 def first_turn(
-    event: PrEvent, diff: str, context: Sequence[UntrustedBlock], nonce: str
+    event: PrEvent,
+    diff: str,
+    context: Sequence[UntrustedBlock],
+    nonce: str,
+    *,
+    scope: frozenset[str] | None = None,
 ) -> str:
     """The operator's subject, then fenced: prior reviews and any caller
     context, then the diff stat and every changed file in risk order. No
     diff text: the lens reads the whole current diff through the tools.
-    Prior findings do not remove a file from that list."""
-    files = by_risk(split_files(diff))
+    Prior findings do not remove a file from that list.
+
+    `scope` is for a continuation (#646), which lists its assigned
+    files. The first turn of a review passes none, so it lists every
+    file in `diff`. Prior-round paths are not a scope."""
+    listed = by_risk(split_files(diff))
+    if scope is not None:
+        listed = tuple(f for f in listed if f.path in scope)
     listing = "\n".join(
         f"[{f.tier.label}] {f.path} (+{added} -{removed})"
-        for f in files
+        for f in listed
         for added, removed in (_counts(f.text),)
     )
     blocks = (
         *context,
         UntrustedBlock(
             "changed-files",
-            RepoText(f"{len(files)} changed file(s), highest risk first:\n{listing}"),
+            RepoText(f"{len(listed)} changed file(s), highest risk first:\n{listing}"),
         ),
     )
     subject = f"{event.repo}#{event.pr_number} at {event.head_sha}"

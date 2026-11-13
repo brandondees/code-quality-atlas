@@ -918,11 +918,17 @@ D41 records the 2026-11-12 probe that did.
 - **The prompt.** The system prompt is the controller's instructions, then
   the nonce fence rule, then the whole lens `body.md` between markers that
   carry its SHA-256, then `synthesis.md`'s whole *Finding contract*
-  section. Nothing is cut. The
-  first user turn is the operator's subject, then any context the caller
-  passes and the risk-ordered changed-file list, each fenced with the
-  review's nonce. It carries no diff text: the lens reads that through the
-  tools, and every tool result comes back fenced.
+  section. Nothing is cut. The first user turn is the operator's
+  subject, then prior atlas rounds (`rounds.RoundLog`) and any context
+  the caller passes, then the risk-ordered list of every file in the
+  current diff, each fenced with the review's nonce. Prior finding
+  lines are quoted. They do not remove a file. A continuation may
+  later list a subset. This first turn does not. The log is
+  append-only JSONL, mode 0600 on every write, keyed by repository and
+  pull request number. The path is chosen when a caller is wired. No
+  shipped caller builds one yet. It carries no diff text: the lens
+  reads that through the tools, and every tool result comes back
+  fenced.
 - **One attempt** (`lens_loop.run_attempt`). Delivery is checked before the
   first model call. The attempt ends at the final reply, or when one of
   these cuts it short: the turn cap, the call cap, the dollar reservation
