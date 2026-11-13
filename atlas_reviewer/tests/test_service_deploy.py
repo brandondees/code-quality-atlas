@@ -202,9 +202,9 @@ def test_the_real_module_exits_2_when_no_atlas_env_is_set():
     assert b"webhook secret" in proc.stderr
 
 
-def test_d49_counts_every_active_job_state():
+def test_d53_counts_every_active_job_state():
     text = (ROOT / "docs/open-questions.md").read_text(encoding="utf-8")
-    start = text.index("- **D49")
+    start = text.index("- **D53")
     entry = text[start:].splitlines()[0]
     runbook = (ROOT / "atlas_reviewer/deploy-service.md").read_text(encoding="utf-8")
     plan = (ROOT / "docs/plans/2026-11-12-webhook-service-mode.md").read_text(

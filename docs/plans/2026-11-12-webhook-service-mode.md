@@ -6,7 +6,7 @@ repository does not create the Fly app, set a secret, or enable the
 GitHub App webhook. Tests use fakes. No live GitHub, Fly, Sprite, or
 model call was made for this change.
 
-Decision: **D49** in [`../open-questions.md`](../open-questions.md).
+Decision: **D53** in [`../open-questions.md`](../open-questions.md).
 The one-off path stays D37: [`../../atlas_reviewer/deploy-fly.md`](../../atlas_reviewer/deploy-fly.md)
 and [`../../fly.toml`](../../fly.toml). The service runbook is
 [`../../atlas_reviewer/deploy-service.md`](../../atlas_reviewer/deploy-service.md).
@@ -91,4 +91,4 @@ PR #636 edits `atlas_reviewer/deploy-fly.md` and its test. This change
 leaves that runbook alone and adds `deploy-service.md`. PR #637 edits the
 agentic limits, `cli.py`, the README, and `docs/open-questions.md`. This
 change does not edit `cli.py` or the agentic modules. It does edit the
-README and adds D49 at the end of the decision list.
+README and adds D53 at the end of the decision list.

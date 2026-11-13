@@ -3,7 +3,7 @@
 One always-on Machine receives GitHub App webhooks and posts one COMMENT
 review per commit. This is a second app from the one-off controller in
 [`deploy-fly.md`](deploy-fly.md). That app stays without a public service
-and without a standing Machine. Decision: D49 in
+and without a standing Machine. Decision: D53 in
 [`docs/open-questions.md`](../docs/open-questions.md).
 
 Nothing in this repository creates the app, sets a secret, or turns on the
