@@ -4,9 +4,11 @@
 Flow (https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation):
 sign an RS256 JWT with the App private key (`iss` = App ID, lifetime <= 10
 minutes), then `POST /app/installations/{id}/access_tokens`. The request
-asks for read-only permissions and, when given, a single repository, so the
-token is narrower than whatever the App itself was granted; a response
-granting any non-read permission is refused.
+asks for read permissions and, when given, a single repository, so the
+token is narrower than whatever the App itself was granted. A response
+granting a non-read permission is refused, except a ``write`` on a
+permission named in ``writable`` (the service poster passes
+``pull_requests`` so it can create one COMMENT review).
 
 Tokens are cached until `REFRESH_MARGIN_S` before their `expires_at`. The
 private key and every token stay inside this object: they are exposed only
@@ -25,8 +27,18 @@ from typing import Any
 
 import jwt
 
-from atlas_reviewer.http import Transport, safe_url
+from atlas_reviewer.http import HttpResponse, Transport, safe_url
 from atlas_reviewer.ports import BoundaryError, Clock
+
+
+class MintError(BoundaryError):
+    """A token mint that GitHub refused. ``response`` is the HTTP result,
+    so the caller can tell a rate limit from an auth failure."""
+
+    def __init__(self, message: str, response: HttpResponse) -> None:
+        super().__init__(message)
+        self.response = response
+
 
 API_URL = "https://api.github.com"
 JWT_BACKDATE_S = 60
@@ -38,6 +50,10 @@ READ_PERMISSIONS: Mapping[str, str] = {
     "actions": "read",
     "pull_requests": "read",
 }
+# Creating a pull-request review requires write. Write on a GitHub App
+# permission includes read on that same permission.
+POST_PERMISSIONS: Mapping[str, str] = {"pull_requests": "write"}
+POST_WRITABLE = frozenset({"pull_requests"})
 
 Encoder = Callable[[Mapping[str, Any], str], str]
 
@@ -65,6 +81,7 @@ class AppInstallationTokens:
         installation_id: int,
         permissions: Mapping[str, str] = READ_PERMISSIONS,
         repositories: Sequence[str] = (),
+        writable: frozenset[str] = frozenset(),
         api_url: str = API_URL,
         encode: Encoder = rs256,
         timeout_s: float = 30.0,
@@ -73,25 +90,48 @@ class AppInstallationTokens:
             raise ValueError("GitHub App ID must be numeric")
         if installation_id < 1:
             raise ValueError("installation id must be positive")
-        if any(level != "read" for level in permissions.values()):
+        if any(
+            level != "read" and not (level == "write" and name in writable)
+            for name, level in permissions.items()
+        ):
             raise ValueError("only read permissions may be requested")
         self._transport, self._clock = transport, clock
         self._app_id, self._key = app_id, private_key
         self._installation_id = installation_id
         self._permissions = dict(permissions)
+        self._writable = frozenset(writable)
         self._repositories = tuple(repositories)
         self._api_url = api_url.rstrip("/")
         self._encode, self._timeout_s = encode, timeout_s
+        # Per thread. Workers share one token source, and one worker's
+        # deadline must not shorten another's mint.
+        self._timeout_override = threading.local()
         self._cached: _Cached | None = None
         self._minted: list[str] = []
         self._lock = threading.Lock()
 
+    def limit_timeout(self, seconds: float) -> None:
+        """The next mint on this thread waits at most ``seconds``. The
+        poster's attempt deadline is what passes this in, so the mint
+        cannot run past it. Another thread keeps its own value."""
+        self._timeout_override.seconds = max(0.0, seconds)
+
+    def _mint_timeout(self) -> float:
+        override = getattr(self._timeout_override, "seconds", None)
+        if override is None:
+            return self._timeout_s
+        return override
+
     def token(self) -> str:
         with self._lock:
-            if self._cached is None or self._stale(self._cached):
-                self._cached = self._mint()
-                self._minted.append(self._cached.token)
-            return self._cached.token
+            try:
+                if self._cached is None or self._stale(self._cached):
+                    self._cached = self._mint()
+                    self._minted.append(self._cached.token)
+                return self._cached.token
+            finally:
+                if hasattr(self._timeout_override, "seconds"):
+                    del self._timeout_override.seconds
 
     def secrets(self) -> tuple[str, ...]:
         with self._lock:
@@ -131,11 +171,12 @@ class AppInstallationTokens:
                 "Content-Type": "application/json",
             },
             json.dumps(body).encode(),
-            self._timeout_s,
+            self._mint_timeout(),
         )
         if resp.status != 201:
-            raise BoundaryError(
-                f"GitHub App token mint: HTTP {resp.status} for {safe_url(url)}"
+            raise MintError(
+                f"GitHub App token mint: HTTP {resp.status} for {safe_url(url)}",
+                resp,
             )
         return self._parse(resp.body)
 
@@ -149,16 +190,34 @@ class AppInstallationTokens:
         token, expires = data.get("token"), data.get("expires_at")
         if not isinstance(token, str) or not token or not isinstance(expires, str):
             raise BoundaryError("GitHub App token mint lacks token or expires_at")
-        _require_read_only(data.get("permissions"))
+        granted = data.get("permissions")
+        _require_read_only(granted, self._writable)
+        missing = sorted(
+            name
+            for name, level in self._permissions.items()
+            if level == "write"
+            and (not isinstance(granted, dict) or granted.get(name) != "write")
+        )
+        if missing:
+            raise BoundaryError(
+                f"minted token did not grant {', '.join(missing)}=write"
+            )
         return _Cached(token, _expiry(expires, self._clock.now()))
 
 
-def _require_read_only(granted: object) -> None:
+def _require_read_only(granted: object, writable: frozenset[str] = frozenset()) -> None:
     if not isinstance(granted, dict):
         raise BoundaryError("GitHub App token mint did not report its permissions")
-    writable = sorted(k for k, v in granted.items() if v != "read")
-    if writable:
-        raise BoundaryError(f"minted token is not read-only: {', '.join(writable)}")
+    accepted = {
+        name for name, level in granted.items() if level == "write" and name in writable
+    }
+    extra = sorted(
+        name
+        for name, level in granted.items()
+        if level != "read" and name not in accepted
+    )
+    if extra:
+        raise BoundaryError(f"minted token is not read-only: {', '.join(extra)}")
 
 
 def _expiry(raw: str, now: datetime) -> datetime:

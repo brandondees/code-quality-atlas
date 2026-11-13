@@ -3,11 +3,12 @@
 
 ``python -m atlas_reviewer.service`` listens for GitHub App deliveries and
 answers before it runs a review, so the request does not wait on the
-controller. Publishing a finished review is a separate step; with no
-publisher the receiver records the draft and writes nothing to GitHub.
+controller. ``main`` posts a finished review as one COMMENT through
+``publisher_from_env``. A caller that passes no publisher records the
+draft and writes nothing to GitHub.
 
-The webhook secret stays in this process. The review child is started
-without it.
+The webhook secret and the App private key stay in this process. The
+review child is started without either.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from pathlib import Path
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.ledger import make_private_dirs
+from atlas_reviewer.ports import BoundaryError
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.service_admit import (
     EVENT_HEADER,
@@ -67,11 +69,19 @@ _BACKOFF_JITTER = 0.2
 
 
 class PostNotCurrent(Exception):
-    """The head moved before the review was sent. Do not retry."""
+    """The head moved, or a stop landed, before the review was sent."""
+
+
+class PostHookMissing(Exception):
+    """The pre-create check was not installed. Nothing is sent."""
 
 
 class PostAuthError(Exception):
     """GitHub refused the credential. Do not retry."""
+
+
+class PostRejected(Exception):
+    """GitHub rejected the review. The request will not succeed on retry."""
 
 
 class RateLimited(Exception):
@@ -94,7 +104,7 @@ _REQUEST_TIMEOUT_S = 20.0
 _BODY_BUDGET_S = _REQUEST_TIMEOUT_S
 _MAX_HTTP_HANDLERS = 16
 
-Publisher = Callable[[PrEvent, ReviewReport], None]
+Publisher = Callable[[PrEvent, ReviewReport], bool | None]
 Runner = Callable[[PrEvent, threading.Event], ReviewRun]
 
 
@@ -316,9 +326,12 @@ class Worker:
             )
             return
         try:
-            self._board.finish(job, JobState.FAILED)
+            committed = self._settle(job, JobState.FAILED)
         except Exception as save_exc:  # noqa: BLE001 -- the thread still has to record why
             note += f"; queue save failed: {type(save_exc).__name__}"
+        else:
+            if committed is JobState.SUPERSEDED:
+                self._note(job, committed, _fields(job.event))
         self._telemetry.record(
             "service",
             "worker error",
@@ -401,23 +414,27 @@ class Worker:
         if not self._board.begin_post(job):
             self._stopped_or_superseded(job, fields)
             return
+        # stop() can land after the claim moved the job to POSTING and
+        # before this send. begin_post has already returned.
+        if self._stop.is_set() or job.cancel.is_set():
+            self._stopped_or_superseded(job, fields)
+            return
         try:
-            self._publisher(job.event, report)
+            already = self._publisher(job.event, report)
         except PostNotCurrent:
-            self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
+            # begin_post refused. A stop keeps the draft. A moved head
+            # is SUPERSEDED. Settling every refusal as SUPERSEDED deletes
+            # a finished review that a restart should still post.
+            self._stopped_or_superseded(job, fields)
+            return
+        except PostHookMissing as exc:
+            self._record_post_refusal(job, fields, f"post hook missing: {exc}")
             return
         except PostAuthError as exc:
-            committed = self._settle(job, JobState.FAILED)
-            if committed is JobState.SUPERSEDED:
-                self._note(job, committed, fields)
-                return
-            self._telemetry.record(
-                "service",
-                "review post failed",
-                fields,
-                status=ERROR,
-                error=f"post auth refused: {exc}",
-            )
+            self._record_post_refusal(job, fields, f"post auth refused: {exc}")
+            return
+        except PostRejected as exc:
+            self._record_post_refusal(job, fields, f"post rejected: {exc}")
             return
         except RateLimited as exc:
             self._defer_post(job, str(exc), retry_after=exc.retry_after)
@@ -426,10 +443,28 @@ class Worker:
             self._defer_post(job, f"{type(exc).__name__}: {exc}")
             return
         committed = self._settle(job, JobState.DONE)
-        step = (
-            "review superseded" if committed is JobState.SUPERSEDED else "review posted"
-        )
+        if committed is JobState.SUPERSEDED:
+            step = "review superseded"
+        elif already:
+            step = "review already posted"
+        else:
+            step = "review posted"
         self._telemetry.record("service", step, fields)
+
+    def _record_post_refusal(
+        self, job: Job, fields: dict[str, str | int], error: str
+    ) -> None:
+        committed = self._settle(job, JobState.FAILED)
+        if committed is JobState.SUPERSEDED:
+            self._note(job, committed, fields)
+            return
+        self._telemetry.record(
+            "service",
+            "review post failed",
+            fields,
+            status=ERROR,
+            error=error,
+        )
 
     def _publish_saved(self, job: Job) -> None:
         """A post that failed after the draft was written. The review is
@@ -506,9 +541,14 @@ class Worker:
             self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
             return
         if job.state is JobState.POSTING:
-            self._stored_supersede(job, self._board.pause_post(job))
+            stored = self._board.pause_post(job)
+        else:
+            stored = self._board.release_claim(job)
+        if stored is JobState.SUPERSEDED:
+            self._stored_supersede(job, stored)
             return
-        self._stored_supersede(job, self._board.release_claim(job))
+        if stored in {JobState.QUEUED, JobState.POST_PENDING}:
+            self._telemetry.record("service", "review stopped", fields)
 
     def _settle(self, job: Job, state: JobState) -> JobState:
         committed = self._board.finish(job, state)
@@ -740,7 +780,7 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
     repos = env.get("ATLAS_REVIEW_REPOS", DEFAULT_REPO)
     allowlist = frozenset(part.strip() for part in repos.split(",") if part.strip())
     concurrency = int(env.get("ATLAS_REVIEW_CONCURRENCY", "1"))
-    provider = env.get("ATLAS_SERVICE_PROVIDER", "offline")
+    provider = env.get("ATLAS_SERVICE_PROVIDER", "openrouter")
     live = env.get("ATLAS_ALLOW_LIVE_INFERENCE", "") == "1"
     # Local default is the loopback. The Fly app sets
     # ATLAS_SERVICE_HOST=0.0.0.0 because the proxy is not on loopback.
@@ -760,6 +800,17 @@ def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
         provider=provider,
         allow_live_inference=live,
     )
+
+
+def _service_secrets(config: ServiceConfig, env: Mapping[str, str]) -> tuple[str, ...]:
+    """Values the service log must never write. The comment scrubber is
+    separate and also covers the App key and minted tokens."""
+    values = [config.secret]
+    for name in ("ATLAS_SPRITES_TOKEN", "ATLAS_OPENROUTER_API_KEY"):
+        value = env.get(name, "")
+        if value:
+            values.append(value)
+    return tuple(values)
 
 
 def _state_is_writable(path: Path) -> bool:
@@ -811,7 +862,9 @@ def serve(
         log(f"atlas-reviewer: state dir {config.state_dir} is not writable")
         return 2
     board = Board(config.state_dir / "queue.json")
-    redactor = Redactor(known_secrets=(config.secret,), sources=secret_sources)
+    redactor = Redactor(
+        known_secrets=_service_secrets(config, env), sources=secret_sources
+    )
     sink = JsonlSink(config.state_dir / "service.jsonl", max_bytes=_SERVICE_LOG_BYTES)
     sink.__enter__()
     try:
@@ -867,11 +920,29 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
     env = os.environ if env is None else env
     try:
         config = config_from_env(env)
-    except (ServiceError, ValueError) as exc:
+        from atlas_reviewer.http import UrllibTransport
+        from atlas_reviewer.service_post import publisher_from_env
+
+        publisher = publisher_from_env(
+            env,
+            config.allowlist,
+            config.state_dir,
+            transport=UrllibTransport(),
+            clock=SystemClock(),
+        )
+    except (ServiceError, ValueError, BoundaryError) as exc:
         print(f"atlas-reviewer: {exc}", file=sys.stderr)
         return 2
     try:
-        return serve(config, env, secret_sources=(lambda: _child_secrets(env),))
+        return serve(
+            config,
+            env,
+            publisher=publisher.post,
+            secret_sources=(
+                lambda: _child_secrets(env),
+                publisher.credential_secrets,
+            ),
+        )
     except KeyboardInterrupt:
         return 0
     except QueueError as exc:
@@ -883,4 +954,10 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # `python -m` runs this file as __main__. Importing it again under
+    # its package name would be a second module, with its own
+    # before_send and exception classes. Run the package module's main
+    # so the worker and the poster share one set of objects.
+    from atlas_reviewer.service import main as run_service
+
+    sys.exit(run_service())
