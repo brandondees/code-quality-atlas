@@ -1374,6 +1374,25 @@ def test_main_scrubs_the_child_secrets(tmp_path, monkeypatch):
         return 0
 
     monkeypatch.setattr(service_mod, "serve", serve)
+    # On the posting branch, main mints a publisher before serve. That
+    # construction needs App env this test does not set, and it is not
+    # what the assertion checks.
+    try:
+        import atlas_reviewer.service_post as post_mod
+    except ImportError:
+        post_mod = None
+    if post_mod is not None and hasattr(post_mod, "publisher_from_env"):
+
+        class _Poster:
+            def post(self, event, report):
+                return None
+
+            def credential_secrets(self):
+                return ()
+
+        monkeypatch.setattr(
+            post_mod, "publisher_from_env", lambda *args, **kwargs: _Poster()
+        )
     sprite = "sprite-token-value"
     env = {
         "ATLAS_GITHUB_WEBHOOK_SECRET": "webhook-secret-value",
