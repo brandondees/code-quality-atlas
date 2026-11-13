@@ -574,18 +574,25 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(413, b"body too large\n")
             return
 
+        # arm() narrows the socket timeout to the body budget. The
+        # response write uses the handler timeout again.
+        previous = self.connection.gettimeout()
+
         def arm(seconds: float) -> None:
             # The buffered reader otherwise waits for the whole chunk.
             # The socket timeout is the time left on the body deadline.
             self.connection.settimeout(max(seconds, 0.05))
 
-        body = read_bounded(
-            self.rfile.read1,
-            length,
-            _monotonic() + _BODY_BUDGET_S,
-            _monotonic,
-            arm=arm,
-        )
+        try:
+            body = read_bounded(
+                self.rfile.read1,
+                length,
+                _monotonic() + _BODY_BUDGET_S,
+                _monotonic,
+                arm=arm,
+            )
+        finally:
+            self.connection.settimeout(previous)
         if body is None:
             self._send(408, b"timeout\n")
             self.server.log("atlas-reviewer: http 408 POST /webhook slow body")

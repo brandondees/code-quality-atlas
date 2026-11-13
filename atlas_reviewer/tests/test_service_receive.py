@@ -1304,8 +1304,16 @@ def test_a_slow_body_is_refused(tmp_path, monkeypatch):
         def read1(self, n: int) -> bytes:
             return self.read(n)
 
+    class Conn:
+        def gettimeout(self) -> float:
+            return 20.0
+
+        def settimeout(self, value: float) -> None:
+            return None
+
     handler = _Handler.__new__(_Handler)
     handler.rfile = Reader()
+    handler.connection = Conn()
     handler.headers = {"Content-Length": "40"}
     handler.timeout = 20.0
     sent: list[int] = []
@@ -1473,6 +1481,103 @@ def test_serve_scrubs_a_child_secret_from_the_log(tmp_path, monkeypatch):
     text = (tmp_path / "service.jsonl").read_text(encoding="utf-8")
     assert "review failed" in text
     assert secret not in text
+
+
+def test_the_body_read_restores_the_handler_timeout(monkeypatch):
+    import atlas_reviewer.service as service_mod
+
+    monkeypatch.setattr(service_mod, "_BODY_BUDGET_S", 0.4)
+
+    class Conn:
+        def __init__(self) -> None:
+            self.calls: list[float | None] = []
+            self._timeout: float | None = 20.0
+
+        def gettimeout(self) -> float | None:
+            return self._timeout
+
+        def settimeout(self, value: float | None) -> None:
+            self._timeout = value
+            self.calls.append(value)
+
+    class Reader:
+        def read1(self, _n: int) -> bytes:
+            return b""
+
+    handler = _Handler.__new__(_Handler)
+    handler.rfile = Reader()
+    handler.connection = Conn()
+    handler.headers = {"Content-Length": "40"}
+    sent: list[int] = []
+    handler._send = lambda status, body: sent.append(status)  # type: ignore[method-assign]
+    handler.server = type(
+        "S",
+        (),
+        {
+            "config": type("C", (), {"max_body_bytes": 1_000_000})(),
+            "log": staticmethod(lambda line: None),
+        },
+    )()
+    handler._read_post()
+    assert sent == [408]
+    assert handler.connection.calls
+    assert min(c for c in handler.connection.calls if c is not None) < 1
+    assert handler.connection.calls[-1] == 20.0
+
+
+def test_a_continuous_trickle_is_refused_before_the_body_ends(tmp_path, monkeypatch):
+    """Bytes that keep arriving inside the socket timeout must still 408.
+
+    ``BufferedReader.read`` would collect the whole body, because each
+    byte lands before the timeout ``arm`` set once. ``read1`` returns
+    after the bytes already buffered, so the deadline is checked again.
+    """
+    import atlas_reviewer.service as service_mod
+
+    monkeypatch.setattr(service_mod, "_BODY_BUDGET_S", 0.4)
+    board = Board(tmp_path / "queue.json")
+    server = ReviewServer(_config(tmp_path), board, lambda line: None)
+    listener = threading.Thread(target=server.serve_forever, daemon=True)
+    listener.start()
+    host, port = server.server_address
+    sock = socket.create_connection((host, port), timeout=2)
+    try:
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        length = 20
+        sock.sendall(
+            b"POST /webhook HTTP/1.1\r\n"
+            b"Host: localhost\r\n"
+            b"Content-Length: 20\r\n"
+            b"X-GitHub-Event: pull_request\r\n"
+            b"\r\n"
+        )
+        sock.settimeout(0.05)
+        started = time.monotonic()
+        sent = 0
+        data = b""
+        while sent < length and b"408" not in data and time.monotonic() - started < 3:
+            try:
+                sock.sendall(b"x")
+            except OSError:
+                break
+            sent += 1
+            try:
+                while True:
+                    chunk = sock.recv(1024)
+                    if not chunk:
+                        break
+                    data += chunk
+            except TimeoutError:
+                pass
+            time.sleep(0.12)
+        assert b"408" in data
+        assert sent < length
+        assert time.monotonic() - started < 2
+    finally:
+        sock.close()
+        server.shutdown()
+        listener.join(timeout=2)
+        server.server_close()
 
 
 def test_a_trickled_body_is_refused_on_the_socket(tmp_path, monkeypatch):
