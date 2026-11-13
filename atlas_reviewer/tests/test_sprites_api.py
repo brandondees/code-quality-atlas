@@ -11,7 +11,12 @@ from urllib.parse import parse_qsl, urlsplit
 import pytest
 
 from atlas_reviewer.http import StreamWindow, UrllibStreamingTransport
-from atlas_reviewer.ports import BoundaryError, NotFoundError, RefusedError
+from atlas_reviewer.ports import (
+    BoundaryError,
+    NotFoundError,
+    RateLimitedError,
+    RefusedError,
+)
 from atlas_reviewer.runner import DENY_ALL
 from atlas_reviewer.sprites_api import EXEC_STDIN_MAX_BYTES, SpritesClient, exec_request
 
@@ -89,6 +94,11 @@ def test_sprites_exec_http_errors_are_checked_like_other_calls():
 def test_a_create_answered_with_a_4xx_is_refused(status):
     with pytest.raises(RefusedError, match=f"HTTP {status}"):
         SpritesClient(Recorder(ok(status=status)), "t").create(NAME)
+
+
+def test_a_create_answered_with_429_is_a_typed_rate_limit():
+    with pytest.raises(RateLimitedError, match="HTTP 429"):
+        SpritesClient(Recorder(ok(status=429)), "t").create(NAME)
 
 
 def test_a_create_answered_with_a_5xx_is_not_a_refusal():

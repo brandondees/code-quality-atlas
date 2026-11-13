@@ -405,8 +405,10 @@ def event_runner_name(event: PrEvent) -> str:
 
 def lens_runner_name(event: PrEvent, lens: str) -> str:
     """One Sprite name per lens of a commit. Parallel lenses would collide
-    on `event_runner_name` alone."""
-    extra = hashlib.sha256(lens.encode()).hexdigest()[:6]
+    on `event_runner_name` alone, and one lens's cleanup deletes by name,
+    so the suffix is 12 hex digits: a collision would delete a sibling's
+    Sprite. The whole name stays under a 63-character DNS label."""
+    extra = hashlib.sha256(lens.encode()).hexdigest()[:12]
     return f"{event_runner_name(event)}-{extra}"
 
 
