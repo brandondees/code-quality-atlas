@@ -20,10 +20,12 @@ round, and `reviewed_commit`. One passing pair must be for the head
 being approved. A calibration pair counts only when ``--head`` is that
 row's ``reviewed_commit``. Editing its ``input.head_sha`` does not make
 another commit pass. A new pull request has no protocol row, so the
-directory also holds a pair for that head. That pair records
-``metadata.run`` ``lens-fan-out``, complete file coverage, and at least
-one lens that ran, and it is not scored against a reference it does not
-have. One passing pair must record `metadata.over_context_window` (a diff
+directory also holds a pair for that head. That pair matches
+``--head`` at its ``head_sha`` or its ``reviewed_commit``. It records
+``metadata.run`` ``lens-fan-out``, complete file coverage, zero
+unreviewed files, and at least one lens that ran, and none of its
+lenses was NOT RUN or failed. It is not scored against a reference it
+does not have. One passing pair must record `metadata.over_context_window` (a diff
 larger than one model context window). A directory that holds only the
 pair for that head does not open the gate. The reference for each calibration pair is the checked-in row with
 the same repo, pull request, round, and reviewed commit. A reference

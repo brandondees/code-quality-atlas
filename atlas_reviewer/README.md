@@ -115,8 +115,10 @@ checked-in row under `fixtures/eval-references/`, `--head` names a
 commit that one passing pair records, and one passing pair has
 `metadata.over_context_window` set. A directory that holds only the
 pair for `--head` does not pass. A calibration pair matches `--head`
-only at its `reviewed_commit`. A new head passes on its own pair, which
-records lens-fan-out, complete coverage, and a lens that ran, and is
+only at its `reviewed_commit`. A new head passes on its own pair,
+which matches `--head` at `head_sha` or `reviewed_commit`. That pair
+records lens-fan-out, complete coverage, zero unreviewed files, and a
+lens that ran, and it fails when a lens was NOT RUN or failed. It is
 not scored for recall. A pair fails when recall of the
 reference findings is below 1, a selected lens was NOT RUN or failed,
 a lens named by a reference finding was not run, or file coverage is

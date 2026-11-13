@@ -16,6 +16,7 @@ from atlas_reviewer.eval_harness import (
     ReferenceRow,
     coverage_lenses,
     example_json,
+    findings_expected,
     gate_failures,
     load_directory,
     load_reference_set,
@@ -245,6 +246,56 @@ def test_a_full_directory_passes_only_with_the_head_and_an_over_context_pair(
     assert opened["gate_pass"] is True
 
 
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (
+            lambda pair: pair["metadata"].__setitem__("run", "one-shot"),
+            "must record lens-fan-out",
+        ),
+        (
+            lambda pair: pair["candidate"].__setitem__("lenses_run", []),
+            "does not record a lens that ran",
+        ),
+        (
+            lambda pair: pair["candidate"].__setitem__(
+                "lenses_not_run", ["reviewing-test-quality"]
+            ),
+            "was NOT RUN",
+        ),
+        (
+            lambda pair: pair["candidate"].__setitem__(
+                "lenses_failed", ["reviewing-test-quality"]
+            ),
+            "lens reviewing-test-quality failed",
+        ),
+    ],
+)
+def test_a_new_head_fails_each_operational_guard(
+    tmp_path, monkeypatch, change, message
+):
+    monkeypatch.setattr(
+        "atlas_reviewer.eval_harness.load_reference_set",
+        lambda: {
+            ("o/r", 1, 1, "abc123"): ReferenceRow(EvalReview("APPROVE", ()), False)
+        },
+    )
+    calibration = _passing_pair("abc123")
+    calibration["input"]["repo"] = "o/r"
+    calibration["metadata"]["over_context_window"] = True
+    (tmp_path / "pair.json").write_text(json.dumps(calibration), encoding="utf-8")
+    head = _passing_pair("c" * 40)
+    head["input"]["repo"] = "other/app"
+    head["input"]["pr"] = 9
+    head["candidate"]["lenses_run"] = ["reviewing-test-quality"]
+    head["metadata"]["run"] = "lens-fan-out"
+    change(head)
+    (tmp_path / "head.json").write_text(json.dumps(head), encoding="utf-8")
+    report = load_directory(tmp_path, head="c" * 40)
+    assert report["gate_pass"] is False
+    assert any(message in item for item in report["gate_failures"])
+
+
 def test_the_reference_set_fails_closed_and_a_pair_cannot_replace_it(
     tmp_path, monkeypatch
 ):
@@ -369,6 +420,7 @@ def test_zero_findings_are_a_gap_unless_the_round_says_there_are_none():
         [],
     )
     assert titled is not None and titled["metadata"]["parse_gap"] is False
+    assert findings_expected("APPROVE — no findings", "unrelated body") is False
     for sentence in (
         "No findings at or above this round's floor (Nit).",
         "**No new findings at or above this round's floor.**",
@@ -461,6 +513,18 @@ def test_a_reference_without_a_candidate_reports_a_parse_gap(tmp_path, monkeypat
     assert any(
         "heading announces findings that were not parsed" in item
         for item in report["gate_failures"]
+    )
+    outside = _passing_pair("c" * 40)
+    outside["input"]["repo"] = "other/app"
+    outside["input"]["pr"] = 9
+    outside["candidate"]["lenses_run"] = ["reviewing-test-quality"]
+    outside["metadata"]["run"] = "lens-fan-out"
+    outside["metadata"]["parse_gap"] = True
+    (tmp_path / "head.json").write_text(json.dumps(outside), encoding="utf-8")
+    scored = load_directory(tmp_path, head="c" * 40)
+    assert any(
+        "head.json: heading announces findings that were not parsed" in item
+        for item in scored["gate_failures"]
     )
     (tmp_path / "bad.json").write_bytes(b"\xff")
     with pytest.raises(EvalFormatError, match="cannot be read"):
