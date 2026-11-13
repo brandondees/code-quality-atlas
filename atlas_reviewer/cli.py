@@ -38,7 +38,12 @@ from typing import TextIO, cast
 from atlas_reviewer.agentic_config import ENV as AGENTIC_ENV
 from atlas_reviewer.attestation import AttemptLedger
 from atlas_reviewer.bridge_staging import fetch_sources
-from atlas_reviewer.budget import CallLimits
+from atlas_reviewer.budget import (
+    BUDGET_CEILING_USD,
+    MAX_CALLS_CEILING,
+    CallLimits,
+    ReviewBudget,
+)
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.controller import (
     DEFAULT_DIFF_CHARS_PER_CALL,
@@ -205,6 +210,7 @@ def _select_provider(
     env: Mapping[str, str],
     openrouter: Callable[[str, CallLimits], OpenRouterProvider],
     telemetry: Telemetry,
+    limits: CallLimits,
 ) -> ModelProvider:
     if args.provider == "offline":
         return OfflineProvider()
@@ -214,10 +220,7 @@ def _select_provider(
         raise UsageError(
             "live inference is off: pass --allow-live-inference with --provider openrouter"
         )
-    provider = openrouter(
-        _require_env(env, ENV_OPENROUTER_KEY),
-        CallLimits(max_calls=args.max_model_calls),
-    )
+    provider = openrouter(_require_env(env, ENV_OPENROUTER_KEY), limits)
     if isinstance(provider, OpenRouterProvider):
         provider.key_ceiling = _key_ceiling(args, env)
     telemetry.span("model preflight", "key status", provider.preflight)
@@ -496,7 +499,13 @@ def _cmd_review(args: argparse.Namespace, run: _Run) -> int:
             args, run, "review", claims, default_file=not args.dry_run
         )
         run.telemetry = telemetry
-        provider = _select_provider(args, env, args.openrouter_factory, telemetry)
+        provider = _select_provider(
+            args,
+            env,
+            args.openrouter_factory,
+            telemetry,
+            CallLimits(max_calls=args.max_model_calls),
+        )
         if args.dry_run:
             wiring = _dry_run_wiring(args, event_path, provider, telemetry)
         else:
@@ -576,7 +585,9 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
             model_factory = None
             picker_provider = OfflineProvider()
         else:
-            provider = _select_provider(args, env, args.openrouter_factory, telemetry)
+            provider = _select_provider(
+                args, env, args.openrouter_factory, telemetry, _picker_limits(limits)
+            )
             if not isinstance(provider, OpenRouterProvider):
                 raise UsageError(
                     "agentic-review live mode needs --provider openrouter "
@@ -594,8 +605,14 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
             model_factory = live_model
 
         clock = SystemClock()
-        diff = github.get_pull_diff(event.repo, event.pr_number)
         pull = github.get_pull(event.repo, event.pr_number)
+        _require_head(pull, event, "the PR head is no longer the event SHA")
+        diff = github.get_pull_diff(event.repo, event.pr_number)
+        _require_head(
+            github.get_pull(event.repo, event.pr_number),
+            event,
+            "the PR head moved while the diff was fetched",
+        )
         base = pull.get("base") if isinstance(pull, dict) else None
         ref = base.get("ref") if isinstance(base, dict) else None
         if not isinstance(ref, str) or not ref:
@@ -619,7 +636,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     event.head_sha,
                     picker_instructions(depth),
                     (
-                        UntrustedBlock("pull-request", RepoText(str(title or ""))),
+                        UntrustedBlock("pull-request", redactor(str(title or ""))),
                         UntrustedBlock("changed-paths", RepoText(shown)),
                     ),
                 )
@@ -629,6 +646,12 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
             depth, None if depth is Depth.TRIAGE else run_picker, library, scrub=scrub
         )
         names = tuple(loaded.name for loaded in plan.loaded)
+        budget = getattr(picker_provider, "budget", None)
+        picker_spend = (
+            (len(budget.calls), budget.committed_usd())
+            if isinstance(budget, ReviewBudget)
+            else (0, Decimal(0))
+        )
         ledger = AttemptLedger(_state_dir(args, env) / "attestation.ledger", clock)
         review = review_lenses(
             event,
@@ -645,6 +668,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
             clock=clock,
             telemetry=telemetry,
             model_for=model_factory,
+            picker_spend=picker_spend,
         )
         review = replace(
             review,
@@ -658,15 +682,36 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
     written = _emit(render_draft(review, redactor), args.out, out, err)
     (out if written else err).write(
         f"{_telemetry_line(run, telemetry)}"
-        f"review event: {review.proposed_event.value}; coverage_complete="
+        f"review event: {review.event.value}; coverage_complete="
         f"{str(review.coverage_complete).lower()}; unreviewed_files="
-        f"{len(review.unreviewed_paths)}; lenses={len(names)}\n"
+        f"{len(review.unreviewed_paths)}; lenses={len(names)}; "
+        f"not_run={len(review.not_picked)}\n"
     )
     if not review.coverage_complete:
         return EXIT_INCOMPLETE
     if review.proposed_event is ReviewEvent.REQUEST_CHANGES:
         return EXIT_CHANGES_REQUESTED
     return EXIT_OK
+
+
+def _picker_limits(limits: AgenticLimits) -> CallLimits:
+    """The picker's provider budget: no more calls or dollars than the
+    agentic review allows, and never past the one-shot D25 ceilings."""
+    resolved = limits.resolve()
+    return CallLimits(
+        max_calls=min(resolved.max_calls, MAX_CALLS_CEILING),
+        budget_usd=min(resolved.reservation_usd, BUDGET_CEILING_USD),
+    )
+
+
+def _require_head(pull: object, event: PrEvent, why: str) -> None:
+    """The diff endpoint serves the PR's current head; the lenses read
+    files at `event.head_sha`. Refuse before any model call when the two
+    can differ."""
+    head = pull.get("head") if isinstance(pull, dict) else None
+    sha = head.get("sha") if isinstance(head, dict) else None
+    if sha != event.head_sha:
+        raise BoundaryError(f"{why}; no model call was made")
 
 
 def _live_github(

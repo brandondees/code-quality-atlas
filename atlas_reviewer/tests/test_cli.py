@@ -1721,6 +1721,8 @@ def test_agentic_review_lists_a_picked_name_with_no_body_as_not_run(
     assert code == cli.EXIT_INCOMPLETE, err
     assert '- NOT RUN: `"made-up-lens"` (no body.md in the bundle)' in out
     assert "ranked 2 lens name(s), 1 with a body" in out
+    assert "review event: COMMENT; coverage_complete=false" in err
+    assert "not_run=1" in err
 
 
 @pytest.mark.parametrize("raw", ["Infinity", "inf", "NaN", "sNaN", "0", "-3", "abc"])
@@ -1733,3 +1735,111 @@ def test_a_key_ceiling_must_be_a_finite_positive_dollar_amount(raw):
     assert _key_ceiling(argparse.Namespace(key_ceiling_usd="12.5"), {}) == Decimal(
         "12.5"
     )
+
+
+def _fixture_copy(tmp_path, **pull_changes):
+    fixtures = tmp_path / "fixtures"
+    shutil.copytree(FIXTURE, fixtures)
+    pull = json.loads((fixtures / "pull.json").read_text())
+    pull.update(pull_changes)
+    (fixtures / "pull.json").write_text(json.dumps(pull))
+    return fixtures
+
+
+def _agentic_on(tmp_path, fixtures, *extra):
+    return run_cli(
+        "--state-dir", str(tmp_path / "state"), "agentic-review", "--dry-run",
+        "--event", EVENT, "--fixtures", str(fixtures), "--pool-size", "1", *extra,
+    )  # fmt: skip
+
+
+def test_agentic_review_refuses_a_pr_whose_head_is_not_the_event_sha(tmp_path):
+    fixtures = _fixture_copy(tmp_path, head={"sha": "0" * 40, "ref": "moved"})
+    code, out, err = _agentic_on(tmp_path, fixtures, "--depth", "triage")
+    assert code == cli.EXIT_BOUNDARY
+    assert "the PR head is no longer the event SHA" in err
+    assert out == ""
+
+
+def test_agentic_review_refuses_a_head_that_moved_while_the_diff_was_fetched(
+    tmp_path, monkeypatch
+):
+    reads = []
+    real = FixtureGitHub.get_pull
+
+    def moving(self, repo, number):
+        pull = dict(real(self, repo, number))
+        reads.append(pull)
+        if len(reads) > 1:
+            pull["head"] = {"sha": "0" * 40, "ref": "moved"}
+        return pull
+
+    monkeypatch.setattr(FixtureGitHub, "get_pull", moving)
+    code, out, err = _agentic_dry_run(tmp_path)
+    assert code == cli.EXIT_BOUNDARY
+    assert "the PR head moved while the diff was fetched" in err
+    assert out == ""
+
+
+def test_agentic_review_redacts_the_pr_title_before_the_picker(tmp_path, monkeypatch):
+    token = fake_token("ghp_")
+    fixtures = _fixture_copy(tmp_path, title=f"Rotate {token}")
+    seen = []
+
+    class Picks:
+        name = "picks"
+
+        def complete(self, prompt):
+            seen.append(prompt.user)
+            return '{"lenses": ["reviewing-test-quality"]}'
+
+    monkeypatch.setattr(cli, "OfflineProvider", Picks)
+    _agentic_on(tmp_path, fixtures, "--depth", "review")
+    assert len(seen) == 1
+    assert "Rotate" in seen[0]
+    assert token not in seen[0]
+
+
+def test_a_live_agentic_review_gets_past_provider_selection(tmp_path, monkeypatch):
+    """A live run builds its provider from the agentic limits, not the
+    one-shot `--max-model-calls` it does not have, and the picker's call
+    counts in the review's model calls."""
+    from atlas_reviewer.budget import CallLimits, ReviewBudget
+    from atlas_reviewer.openrouter import OpenRouterProvider
+
+    made = []
+
+    class Live(OpenRouterProvider):
+        def preflight(self):
+            return None
+
+        def complete(self, prompt):
+            record = self.budget.reserve(Decimal("0.05"))
+            ReviewBudget.settle(record, "ok", Decimal("0.02"))
+            return '{"lenses": ["reviewing-test-quality"]}'
+
+    def factory(key, limits):
+        made.append(limits)
+        return Live(object(), key, limits=limits)
+
+    monkeypatch.setattr(
+        cli, "AppInstallationTokens",
+        lambda transport, clock, **kw: type("T", (), {"secrets": lambda self: ()})(),
+    )  # fmt: skip
+    monkeypatch.setattr(
+        cli, "GitHubClient", lambda transport, t: FixtureGitHub(FIXTURE)
+    )
+    out, err = io.StringIO(), io.StringIO()
+    code = cli.main(
+        ["--state-dir", str(tmp_path), "agentic-review", "--event", EVENT,
+         "--provider", "openrouter", "--allow-live-inference", "--depth", "review",
+         "--pool-size", "1", "--max-calls", "2", "--max-turns", "2",
+         "--reservation-usd", "0.50"],
+        env={**APP_ENV, cli.ENV_OPENROUTER_KEY: "sk-or-v1-x"}, out=out, err=err,
+        sprites_factory=lambda env: cli._scripted_runner(FIXTURE / "runner-script.json"),
+        openrouter_factory=factory,
+    )  # fmt: skip
+    assert code == cli.EXIT_INCOMPLETE, err.getvalue()
+    assert made == [CallLimits(max_calls=2, budget_usd=Decimal("0.50"))]
+    assert "Model calls: 1; committed: $0.02." in out.getvalue()
+    assert "sk-or-v1-x" not in out.getvalue()
