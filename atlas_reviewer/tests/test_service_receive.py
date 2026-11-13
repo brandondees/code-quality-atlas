@@ -1534,6 +1534,48 @@ def test_a_supersede_during_finish_removes_the_draft(tmp_path, monkeypatch):
     assert not directory.exists()
 
 
+def test_a_supersede_that_wins_the_pause_race_is_not_left_pending(tmp_path):
+    """The worker reads ``superseded`` outside the lock, then parks the post.
+
+    A newer head can set the flag in that window. ``pause_post`` has to
+    store SUPERSEDED under the lock, or the job stays pending and holds
+    an active slot ``claim_post`` will not take.
+    """
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A), at=datetime(2026, 11, 12, 20, tzinfo=UTC))
+    job = board.claim()
+    assert job is not None
+    assert board.begin_post(job) is True
+    saw_clear = threading.Event()
+    landed = threading.Event()
+
+    def worker() -> None:
+        superseded = job.superseded
+        saw_clear.set()
+        assert landed.wait(2)
+        if superseded:
+            board.finish(job, JobState.SUPERSEDED)
+            return
+        board.pause_post(job)
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    assert saw_clear.wait(2)
+    assert (
+        board.enqueue(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 21, tzinfo=UTC)
+        )
+        is Enqueue.QUEUED
+    )
+    assert job.superseded and job.state is JobState.POSTING
+    landed.set()
+    thread.join(2)
+    assert not thread.is_alive()
+    assert job.state is JobState.SUPERSEDED
+    loaded = Board(tmp_path / "queue.json")
+    assert (SHA_A, JobState.SUPERSEDED) in loaded.states()
+
+
 def test_releasing_a_superseded_claim_does_not_leave_it_queued(tmp_path):
     board = Board(tmp_path / "queue.json")
     moment = datetime(2026, 11, 12, 20, tzinfo=UTC)

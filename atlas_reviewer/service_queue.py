@@ -386,22 +386,29 @@ class Board:
 
     def pause_post(self, job: Job) -> JobState | None:
         """Stop landed after the post was claimed and before it was sent.
-        The draft stays, and a later process can post it."""
+        Returns the state stored, or None when this job was not posting.
+        A pending job keeps its draft. A superseded job is stored as
+        superseded, and the caller removes its run directory. Leaving it
+        pending would hold an active slot that ``claim_post`` never takes."""
         with self._cv:
             if job.state is not JobState.POSTING:
                 return None
+            target = JobState.SUPERSEDED if job.superseded else JobState.POST_PENDING
             previous = job.state
-            job.state = JobState.POST_PENDING
+            job.state = target
             was_set = job.cancel.is_set()
-            job.cancel.clear()
+            if target is JobState.POST_PENDING:
+                job.cancel.clear()
             try:
                 self._save()
             except Exception:
                 job.state = previous
                 if was_set:
                     job.cancel.set()
+                elif target is JobState.POST_PENDING:
+                    job.cancel.clear()
                 raise
-            return JobState.POST_PENDING
+            return target
 
     def wake(self) -> None:
         with self._cv:
