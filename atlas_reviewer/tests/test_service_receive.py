@@ -18,7 +18,9 @@ import pytest
 
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
+from atlas_reviewer.redact import Redactor
 from atlas_reviewer.service import (
+    _MAX_HTTP_HANDLERS,
     PostAuthError,
     PostNotCurrent,
     RateLimited,
@@ -26,10 +28,13 @@ from atlas_reviewer.service import (
     ServiceConfig,
     ServiceError,
     Worker,
+    _Handler,
     _state_is_writable,
     before_send,
     config_from_env,
     handle_delivery,
+    main,
+    read_bounded,
 )
 from atlas_reviewer.service_admit import signature_matches
 from atlas_reviewer.service_queue import Board, Enqueue, JobState, QueueError
@@ -432,7 +437,30 @@ def test_stop_cancels_the_review_child(tmp_path):
     finally:
         worker.stop()
     assert cancelled == [True]
-    assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
+    assert board.states() == ((SHA_A, JobState.QUEUED),)
+
+
+def test_a_stopped_review_is_queued_again_after_reload(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    started = threading.Event()
+
+    def runner(event, cancel):
+        started.set()
+        cancel.wait(2)
+        return ReviewRun(True, REPORT)
+
+    worker = _worker(board, runner, root=tmp_path)
+    moment = datetime(2026, 11, 12, 20, tzinfo=UTC)
+    board.enqueue(PrEvent(REPO, 7, SHA_A), at=moment)
+    worker.start()
+    try:
+        assert started.wait(2)
+    finally:
+        worker.stop()
+    reloaded = Board(tmp_path / "queue.json")
+    assert reloaded.states() == ((SHA_A, JobState.QUEUED),)
+    later = datetime(2026, 11, 12, 21, tzinfo=UTC)
+    assert reloaded.enqueue(PrEvent(REPO, 7, SHA_A), at=later) is Enqueue.DUPLICATE
 
 
 def test_a_trimmed_commit_and_a_pre_attempts_queue_stay_duplicates(tmp_path):
@@ -1189,10 +1217,175 @@ def test_a_claim_save_error_names_the_job(tmp_path, monkeypatch):
 def test_a_deeply_nested_body_is_ignored(tmp_path):
     config = _config(tmp_path)
     board = Board(tmp_path / "queue.json")
-    body = b"[" * 2000 + b"]" * 2000
+    body = b"[" * 10_000 + b"]" * 10_000
     result = _deliver(config, board, body)
     assert result.status == 202
     assert board.states() == ()
+
+
+def test_the_same_second_with_a_different_sha_is_not_stale(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    moment = datetime(2026, 11, 12, 20, tzinfo=UTC)
+    assert board.enqueue(PrEvent(REPO, 7, SHA_A), at=moment) is Enqueue.QUEUED
+    assert board.enqueue(PrEvent(REPO, 7, SHA_B), at=moment) is Enqueue.QUEUED
+    assert board.states()[0] == (SHA_A, JobState.SUPERSEDED)
+    assert board.states()[1] == (SHA_B, JobState.QUEUED)
+
+
+def test_a_post_claim_waits_out_a_failed_save(tmp_path, monkeypatch):
+    import atlas_reviewer.service_queue as queue_mod
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    board.finish(job, JobState.POST_PENDING)
+    job.retry_at = 0
+
+    def boom(*_args, **_kwargs):
+        raise OSError("disk")
+
+    monkeypatch.setattr(queue_mod, "_store", boom)
+    with pytest.raises(OSError):
+        board._save()
+    assert board.claim_post(time.time()) is None
+    assert board.states() == ((SHA_A, JobState.POST_PENDING),)
+
+
+def test_a_due_post_does_not_spin_without_a_publisher(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    board.finish(job, JobState.POST_PENDING)
+    job.retry_at = 0
+    started = time.monotonic()
+    board.wait_for_work(0.4, threading.Event(), time.time(), posts=False)
+    assert time.monotonic() - started >= 0.3
+
+
+def test_a_log_that_always_raises_does_not_kill_the_worker(tmp_path):
+    class Boom:
+        def emit(self, event):
+            raise OSError("log")
+
+    board = Board(tmp_path / "queue.json")
+    worker = Worker(
+        board,
+        lambda event, cancel: ReviewRun(False, error="no"),
+        Telemetry(SystemClock(), sink=Boom(), scrub=lambda text: text),
+        state_root=tmp_path,
+    )
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    worker.start()
+    try:
+        time.sleep(0.3)
+        assert worker.healthy()
+    finally:
+        worker.stop()
+
+
+def test_a_slow_body_is_refused(tmp_path, monkeypatch):
+    import atlas_reviewer.service as service_mod
+
+    clock = {"t": 0.0}
+
+    def now() -> float:
+        clock["t"] += 25
+        return clock["t"]
+
+    monkeypatch.setattr(service_mod, "_monotonic", now)
+
+    class Reader:
+        def read(self, _n: int) -> bytes:
+            return b"x"
+
+    handler = _Handler.__new__(_Handler)
+    handler.rfile = Reader()
+    handler.headers = {"Content-Length": "40"}
+    handler.timeout = 20.0
+    sent: list[int] = []
+    handler._send = lambda status, body: sent.append(status)  # type: ignore[method-assign]
+    handler.server = type(
+        "S",
+        (),
+        {
+            "config": type("C", (), {"max_body_bytes": 1_000_000})(),
+            "log": staticmethod(lambda line: None),
+        },
+    )()
+    handler._read_post()
+    assert sent == [408]
+
+
+def test_read_bounded_stops_at_the_deadline():
+    def read(_n: int) -> bytes:
+        return b"x"
+
+    clock = iter((0.0, 0.0, 100.0))
+    assert read_bounded(read, 40, 20.0, lambda: next(clock)) is None
+
+
+def test_a_full_connection_table_refuses_the_next_client(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    server = ReviewServer(_config(tmp_path), board, lambda line: None)
+    held = [server.connections.acquire(blocking=False) for _ in range(_MAX_HTTP_HANDLERS)]
+    assert all(held)
+    sent: list[bytes] = []
+
+    class Sock:
+        def sendall(self, data: bytes) -> None:
+            sent.append(data)
+
+        def close(self) -> None:
+            return None
+
+    server.process_request(Sock(), ("127.0.0.1", 9))  # type: ignore[arg-type]
+    assert sent and b"429" in sent[0]
+    for _ in held:
+        server.connections.release()
+    server.server_close()
+
+
+def test_main_scrubs_the_child_secrets(tmp_path, monkeypatch):
+    import atlas_reviewer.service as service_mod
+
+    seen: dict[str, object] = {}
+
+    def serve(config, env, **kwargs):
+        seen["sources"] = kwargs.get("secret_sources", ())
+        return 0
+
+    monkeypatch.setattr(service_mod, "serve", serve)
+    sprite = "sprite-token-value"
+    env = {
+        "ATLAS_GITHUB_WEBHOOK_SECRET": "webhook-secret-value",
+        "ATLAS_SERVICE_PROVIDER": "offline",
+        "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
+        "ATLAS_SPRITES_TOKEN": sprite,
+    }
+    assert main(env=env) == 0
+    sources = seen["sources"]
+    assert isinstance(sources, tuple) and sources
+    scrubbed = Redactor(known_secrets=("webhook-secret-value",), sources=sources)(
+        f"stderr saw {sprite}"
+    )
+    assert sprite not in scrubbed.text
+
+
+def test_a_finished_review_keeps_its_draft_when_nothing_is_posted(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    event = PrEvent(REPO, 7, SHA_A)
+    directory = run_dir(tmp_path, event)
+    directory.mkdir(parents=True)
+    (directory / "draft.md").write_text("the review\n", encoding="utf-8")
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(True, REPORT), root=tmp_path
+    )
+    board.enqueue(event)
+    assert worker.run_one() is True
+    assert board.states() == ((SHA_A, JobState.DONE),)
+    assert (directory / "draft.md").is_file()
 
 
 def test_the_module_refuses_to_start_without_a_secret():

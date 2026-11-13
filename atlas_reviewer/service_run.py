@@ -105,7 +105,8 @@ class ReviewRun:
 
 
 def run_dir(root: Path, event: PrEvent) -> Path:
-    return root / "runs" / f"{event.pr_number}-{event.head_sha}"
+    repo = event.repo.replace("/", "-")
+    return root / "runs" / f"{repo}-{event.pr_number}-{event.head_sha}"
 
 
 def review_argv(config: RunConfig, directory: Path) -> list[str]:

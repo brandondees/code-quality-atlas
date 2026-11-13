@@ -246,7 +246,12 @@ class Worker:
     def _loop(self) -> None:
         while not self._stop.is_set():
             try:
-                self._board.wait_for_work(_POLL_S, self._stop, self._now())
+                self._board.wait_for_work(
+                    _POLL_S,
+                    self._stop,
+                    self._now(),
+                    posts=self._publisher is not None,
+                )
                 if self._stop.is_set():
                     return
                 self.run_one()
@@ -255,13 +260,16 @@ class Worker:
                 self._retry_post()
             except Exception as exc:  # noqa: BLE001 -- the thread has to outlive one failure
                 event = getattr(exc, "event", None)
-                self._telemetry.record(
-                    "service",
-                    "worker error",
-                    _fields(event) if event is not None else {},
-                    status=ERROR,
-                    error=f"{type(exc).__name__}: {exc}",
-                )
+                try:
+                    self._telemetry.record(
+                        "service",
+                        "worker error",
+                        _fields(event) if event is not None else {},
+                        status=ERROR,
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
+                except Exception:  # noqa: BLE001, S110 -- the log itself failed
+                    pass
 
     def _retry_post(self) -> None:
         if self._publisher is None:
@@ -314,8 +322,13 @@ class Worker:
         except Exception as exc:  # noqa: BLE001 -- a review bug must not post
             run = ReviewRun(False, error=f"{type(exc).__name__}: {exc}")
         fields = _fields(job.event)
-        if job.superseded or job.cancel.is_set():
+        if job.superseded:
             self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
+            return
+        if job.cancel.is_set():
+            # Stop is not a supersede. The same commit can be reviewed
+            # again after the process starts.
+            self._board.release_claim(job)
             return
         if not run.ok or run.report is None:
             committed = self._settle(job, JobState.FAILED)
@@ -341,7 +354,9 @@ class Worker:
             self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
             return
         if self._publisher is None:
-            committed = self._settle(job, JobState.DONE)
+            # Keep the draft. This process publishes nothing, and the
+            # draft is the record of the review.
+            committed = self._board.finish(job, JobState.DONE)
             step = (
                 "review superseded"
                 if committed is JobState.SUPERSEDED
@@ -359,7 +374,7 @@ class Worker:
         assert self._publisher is not None
         fields = _fields(job.event)
         if not self._board.begin_post(job):
-            self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
+            self._stopped_or_superseded(job, fields)
             return
         try:
             self._publisher(job.event, report)
@@ -425,7 +440,7 @@ class Worker:
         dead endpoint cannot spin the worker. A rate-limit wait replaces
         the schedule when it is longer."""
         if job.superseded or job.cancel.is_set():
-            self._note(job, self._settle(job, JobState.SUPERSEDED), _fields(job.event))
+            self._stopped_or_superseded(job, _fields(job.event))
             return
         job.attempts += 1
         fields = _fields(job.event)
@@ -458,6 +473,17 @@ class Worker:
             status=ERROR,
             error=error,
         )
+
+    def _stopped_or_superseded(self, job: Job, fields: dict[str, str | int]) -> None:
+        """A real supersede ends the job. A stop puts it back so the same
+        commit is reviewed or posted after the process starts again."""
+        if job.superseded:
+            self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
+            return
+        if job.state is JobState.POSTING:
+            self._board.pause_post(job)
+            return
+        self._board.release_claim(job)
 
     def _settle(self, job: Job, state: JobState) -> JobState:
         committed = self._board.finish(job, state)
@@ -531,7 +557,14 @@ class _Handler(BaseHTTPRequestHandler):
         if length > self.server.config.max_body_bytes:
             self._send(413, b"body too large\n")
             return
-        self._respond(self.rfile.read(length))
+        body = read_bounded(
+            self.rfile.read, length, _monotonic() + self.timeout, _monotonic
+        )
+        if body is None:
+            self._send(408, b"timeout\n")
+            self.server.log("atlas-reviewer: http 408 POST /webhook slow body")
+            return
+        self._respond(body)
 
     def log_message(self, fmt: str, *args: object) -> None:
         """The access log would record the request line only, and a body
@@ -562,6 +595,33 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+def read_bounded(
+    read: Callable[[int], bytes], length: int, deadline: float, now: Callable[[], float]
+) -> bytes | None:
+    """Read ``length`` bytes, or None when ``now`` passes ``deadline``.
+
+    One socket timeout is not enough: a sender can trickle a byte just
+    inside each timeout and hold the handler for as long as it likes.
+    """
+    chunks: list[bytes] = []
+    remaining = length
+    while remaining:
+        if now() >= deadline:
+            return None
+        block = read(min(remaining, 65536))
+        if not block:
+            break
+        chunks.append(block)
+        remaining -= len(block)
+    if remaining:
+        return None
+    return b"".join(chunks)
+
+
+def _monotonic() -> float:
+    return time.monotonic()
+
+
 class ReviewServer(ThreadingHTTPServer):
     worker: Worker | None = None
 
@@ -576,6 +636,31 @@ class ReviewServer(ThreadingHTTPServer):
         self.board = board
         self.log = log
         self.slots = threading.BoundedSemaphore(_MAX_HTTP_HANDLERS)
+        # Covers the thread, including a client that never finishes its
+        # headers. The body slots alone start after the headers arrive.
+        self.connections = threading.BoundedSemaphore(_MAX_HTTP_HANDLERS)
+
+    def process_request(self, request, client_address):
+        if not self.connections.acquire(blocking=False):
+            try:
+                request.sendall(
+                    b"HTTP/1.1 429 Too Many Requests\r\n"
+                    b"Content-Length: 5\r\n"
+                    b"Connection: close\r\n"
+                    b"\r\n"
+                    b"busy\n"
+                )
+            except OSError:
+                pass
+            request.close()
+            return
+        super().process_request(request, client_address)
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.connections.release()
 
 
 def config_from_env(env: Mapping[str, str]) -> ServiceConfig:
@@ -694,6 +779,17 @@ def serve(
     return 0
 
 
+def _child_secrets(env: Mapping[str, str]) -> tuple[str, ...]:
+    """Values the review child is allowed to hold. The service log has to
+    scrub them, because the child's stderr is recorded here."""
+    names = (
+        "ATLAS_SPRITES_TOKEN",
+        "ATLAS_OPENROUTER_API_KEY",
+        "ATLAS_GITHUB_INSTALLATION_TOKEN",
+    )
+    return tuple(value for name in names if len(value := env.get(name, "")) >= 8)
+
+
 def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) -> int:
     del argv
     env = os.environ if env is None else env
@@ -703,7 +799,9 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
         print(f"atlas-reviewer: {exc}", file=sys.stderr)
         return 2
     try:
-        return serve(config, env)
+        return serve(
+            config, env, secret_sources=(lambda: _child_secrets(env),)
+        )
     except KeyboardInterrupt:
         return 0
     except OSError as exc:

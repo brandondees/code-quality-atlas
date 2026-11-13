@@ -348,7 +348,11 @@ def _scripted_runner(path: Path) -> FakeSprites:
 
 
 class _FixedToken:
-    """A token the parent already minted. It cannot mint another."""
+    """A token the parent already minted. It cannot mint another.
+
+    GitHub installation tokens last one hour. The service stops the child
+    at 1,200 seconds, which is inside that hour, so this token is not
+    refreshed."""
 
     def __init__(self, token: str) -> None:
         self._token = token

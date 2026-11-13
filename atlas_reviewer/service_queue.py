@@ -103,7 +103,9 @@ class Job:
 # historical key can be reviewed again when its ``updated_at`` is later
 # than that PR's current head. A review that was already posted still will
 # not be posted twice, because the GitHub marker is checked before a create.
-# Neither cap is a review budget.
+# Neither cap is a review budget. ``_heads`` keeps one record per pull
+# request that has been queued. It is not trimmed with ``MAX_SEEN``, so it
+# grows by one entry per pull request rather than with every delivery.
 MAX_REMEMBERED = 2_000
 MAX_SEEN = 20_000
 # After a failed queue save the worker waits this long before claiming
@@ -237,7 +239,11 @@ class Board:
             return False
         if current_at is None:
             return True
-        return at > current_at
+        if at > current_at:
+            return True
+        # Two pushes in one second share a timestamp. The different SHA
+        # is the newer delivery; dropping it would leave the old head.
+        return at == current_at and event.head_sha != _sha
 
     def claim(self) -> Job | None:
         with self._cv:
@@ -248,6 +254,8 @@ class Board:
     ) -> Job | None:
         with self._cv:
             if stop is not None and stop.is_set():
+                return None
+            if time.monotonic() < self._save_retry_at:
                 return None
             for job in self._jobs:
                 if (
@@ -270,9 +278,16 @@ class Board:
                 if job.state in {JobState.RUNNING, JobState.POSTING}:
                     job.cancel.set()
 
-    def wait_for_work(self, timeout: float, stop: threading.Event, now: float) -> None:
+    def wait_for_work(
+        self,
+        timeout: float,
+        stop: threading.Event,
+        now: float,
+        *,
+        posts: bool = True,
+    ) -> None:
         with self._cv:
-            delay = self._delay(now)
+            delay = self._delay(now, posts=posts)
             if stop.is_set() or delay == 0:
                 return
             # A failed save names its own wait. Capping it at the poll
@@ -342,6 +357,24 @@ class Board:
                     job.cancel.set()
                 raise
 
+    def pause_post(self, job: Job) -> None:
+        """Stop landed after the post was claimed and before it was sent.
+        The draft stays, and a later process can post it."""
+        with self._cv:
+            if job.state is not JobState.POSTING:
+                return
+            previous = job.state
+            job.state = JobState.POST_PENDING
+            was_set = job.cancel.is_set()
+            job.cancel.clear()
+            try:
+                self._save()
+            except Exception:
+                job.state = previous
+                if was_set:
+                    job.cancel.set()
+                raise
+
     def wake(self) -> None:
         with self._cv:
             self._cv.notify_all()
@@ -370,17 +403,19 @@ class Board:
         ``/health`` uses this so a full disk is not reported as healthy."""
         return self._saves_ok
 
-    def _delay(self, now: float) -> float | None:
+    def _delay(self, now: float, *, posts: bool = True) -> float | None:
         save_wait = self._save_retry_at - time.monotonic()
         if save_wait > 0:
             return save_wait
-        return self._work_delay(now)
+        return self._work_delay(now, posts=posts)
 
-    def _work_delay(self, now: float) -> float | None:
+    def _work_delay(self, now: float, *, posts: bool = True) -> float | None:
         if any(
             job.state is JobState.QUEUED and not job.superseded for job in self._jobs
         ):
             return 0.0
+        if not posts:
+            return None
         waiting = [
             job.retry_at - now
             for job in self._jobs
