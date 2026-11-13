@@ -563,7 +563,9 @@ jobs:
         if: steps.filter.outputs.python == 'true' || steps.filter.outputs.requirements == 'true'
         run: |
           pip install pip-licenses==5.5.5
-          pip-licenses --allow-only="MIT License;MIT;MIT-0;BSD License;BSD-2-Clause;BSD-3-Clause;Apache Software License;Apache-2.0;Apache 2.0;Apache-2.0 OR BSD-2-Clause;Apache-2.0 OR BSD-3-Clause;Python Software Foundation License;PSF-2.0;ISC License (ISCL);The Unlicense (Unlicense);Mozilla Public License 2.0 (MPL 2.0)"
+          # protobuf 7.36.2 reports the trove classifier "3-Clause BSD License",
+          # the same BSD-3-Clause license the allow list names by SPDX id.
+          pip-licenses --allow-only="MIT License;MIT;MIT-0;BSD License;BSD-2-Clause;BSD-3-Clause;3-Clause BSD License;Apache Software License;Apache-2.0;Apache 2.0;Apache-2.0 OR BSD-2-Clause;Apache-2.0 OR BSD-3-Clause;Python Software Foundation License;PSF-2.0;ISC License (ISCL);The Unlicense (Unlicense);Mozilla Public License 2.0 (MPL 2.0)"
       # requirements.txt-is-in-sync and dependency-vulnerability-audit run
       # last among the python-filtered steps, deliberately (#378): both
       # `pip install` an unpinned tool (pip-tools/pip-audit) straight into

@@ -93,6 +93,12 @@ from atlas_reviewer.runner import (
 from atlas_reviewer.sprites_api import RUNNER_PREFIX, SpritesClient
 from atlas_reviewer.stops import raise_if_stopped
 from atlas_reviewer.telemetry import JsonlSink, Telemetry
+from atlas_reviewer.tracing import (
+    header_values,
+    shared_trace,
+    shutdown_shared,
+    validate_export,
+)
 from atlas_reviewer.verdict import ReviewEvent, Verdict
 
 ENV_APP_ID = "ATLAS_GITHUB_APP_ID"
@@ -210,6 +216,7 @@ class _Credentials:
         values = [env.get(name, "") for name in SECRET_ENV]
         values.append(_pem(env.get(ENV_APP_KEY, "")))
         values.append(env.get(ENV_INSTALLATION_TOKEN, ""))
+        values.extend(header_values(env))
         self._sources: list[Callable[[], Sequence[str]]] = []
         self.redactor = Redactor(
             tuple(dict.fromkeys(v for v in values if v)), sources=(self._minted,)
@@ -949,7 +956,13 @@ def main(
     if openrouter_factory is not None:
         args.openrouter_factory = openrouter_factory
     env = os.environ if env is None else env
+    try:
+        validate_export(env)
+    except ValueError as exc:
+        (err or sys.stderr).write(f"atlas_reviewer: {exc}\n")
+        return EXIT_USAGE
     run = _Run(env, out or sys.stdout, err or sys.stderr, _Credentials(env))
+    shared_trace(env, run.credentials.scrub)
     handler: Callable[[argparse.Namespace, _Run], int] = args.handler
     try:
         code = handler(args, run)
@@ -962,5 +975,6 @@ def main(
         # The review raises a held stop right after its runner phase.
         # One still pending here is a command that ended in an error,
         # including an exception this handler does not map.
+        shutdown_shared()
         raise_if_stopped()
     return code

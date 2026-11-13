@@ -1128,3 +1128,13 @@ reference findings (same path, line within five).
 The reference is the checked-in row, and a missing or malformed
 reference set fails closed. Zero parsed findings are a gap unless the
 round says there are none.
+
+The agentic loop also emits OpenInference spans when
+`ATLAS_OTEL_ENDPOINT` is set on the controller. Prompt and completion
+bodies stay off unless `ATLAS_OTEL_EXPORT_BODIES=1`, and every string
+attribute goes through the review's redactor. The JSONL event file is
+unchanged. No exporter is built when the endpoint is unset, including
+when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Collector header values are
+scrubbed, `http` export is loopback-only, and a dead collector cannot
+hold the process open at exit. D25's claim that `PyJWT[crypto]` is the
+only runtime dependency is amended: the OpenTelemetry packages are too.
