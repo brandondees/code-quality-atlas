@@ -810,7 +810,7 @@ def _acknowledge(request):
 
 def _lenses(
     tmp_path, names, model, *, pool=1, models=None, limits=None, sprites=None,
-    clock=None, picker_spend=(0, Decimal(0)),
+    clock=None, picker_spend=(0, Decimal(0)), trace=None,
 ):  # fmt: skip
     from .test_keepalive import TaskServer, socket_path
 
@@ -843,6 +843,7 @@ def _lenses(
             task_socket=str(tasks.path),
             model_for=model_for if models is not None else None,
             picker_spend=picker_spend,
+            trace=trace,
         )
     finally:
         tasks.close()

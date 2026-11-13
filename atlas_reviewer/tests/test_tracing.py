@@ -477,6 +477,26 @@ def test_the_agentic_loop_emits_one_review_span_around_the_lens(tmp_path):
     assert SECRET not in blob
 
 
+def test_pooled_lenses_are_lens_spans_under_one_review_span(tmp_path):
+    from .test_coordinator import OTHER, _clean_pair, _lenses
+
+    models = _clean_pair()
+    trace, exporter = memory_trace(scrub)
+    try:
+        result, _ = _lenses(
+            tmp_path, [LENS, OTHER], models[0], pool=2, models=models, trace=trace
+        )
+    finally:
+        trace.shutdown()
+    spans = exporter.get_finished_spans()
+    reviews = [span for span in spans if span.name == "review"]
+    lenses = [span for span in spans if span.name == "lens"]
+    assert len(reviews) == 1 and len(lenses) == 2
+    assert {span.parent.span_id for span in lenses} == {reviews[0].context.span_id}
+    assert {_attrs(span)["agent.name"] for span in lenses} == {LENS, OTHER}
+    assert result.trace_id == format(reviews[0].context.trace_id, "032x")
+
+
 def test_bodies_are_on_only_for_the_value_1_and_http_is_loopback_only():
     base = {"ATLAS_OTEL_ENDPOINT": "https://phoenix.internal"}
     assert export_plan(base).bodies is False
