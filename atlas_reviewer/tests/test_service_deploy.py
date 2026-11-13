@@ -103,7 +103,7 @@ def test_the_runbook_names_the_secret_the_org_and_the_webhook():
         "leave `app` in `fly.service.toml` unchanged",
         "deletes the app's volumes",
         "Do not `fly deploy` it for the webhook",
-        "the four `ATLAS_GITHUB_APP_*` values",
+        "the three `ATLAS_GITHUB_APP_*` values and `ATLAS_GITHUB_INSTALLATION_ID`",
     ):
         assert text in flat, text
 
