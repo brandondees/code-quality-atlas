@@ -196,9 +196,10 @@ class Board:
         if failed_job is not None:
             self._jobs.remove(failed_job)
         touched: list[tuple[Job, JobState, bool, bool]] = []
-        # A queued job is stored SUPERSEDED here and never returns to the
-        # worker, so the caller has to remove its run directory. A
-        # running job is only flagged; the worker settles that one.
+        # A queued or pending job is stored SUPERSEDED here and never
+        # returns to the worker, so the caller has to remove its run
+        # directory. A running or posting job is only flagged; the
+        # worker settles that one.
         settled: list[Job] = []
         for job in self._jobs:
             if job.event.repo != event.repo or job.event.pr_number != event.pr_number:
@@ -208,10 +209,8 @@ class Board:
             touched.append((job, job.state, job.superseded, job.cancel.is_set()))
             job.superseded = True
             job.cancel.set()
-            if job.state is JobState.QUEUED:
+            if job.state in {JobState.QUEUED, JobState.POST_PENDING}:
                 settled.append(job)
-                job.state = JobState.SUPERSEDED
-            elif job.state is JobState.POST_PENDING:
                 job.state = JobState.SUPERSEDED
         self._jobs.append(Job(event, JobState.QUEUED))
         self._heads[head_key] = (event.head_sha, at)

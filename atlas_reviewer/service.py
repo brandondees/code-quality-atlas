@@ -322,9 +322,12 @@ class Worker:
             )
             return
         try:
-            self._board.finish(job, JobState.FAILED)
+            committed = self._settle(job, JobState.FAILED)
         except Exception as save_exc:  # noqa: BLE001 -- the thread still has to record why
             note += f"; queue save failed: {type(save_exc).__name__}"
+        else:
+            if committed is JobState.SUPERSEDED:
+                self._note(job, committed, _fields(job.event))
         self._telemetry.record(
             "service",
             "worker error",

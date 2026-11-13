@@ -1503,6 +1503,70 @@ def test_a_newer_head_removes_a_queued_run_directory(tmp_path):
     )
 
 
+def test_a_newer_head_removes_a_pending_post_directory(tmp_path):
+    """A post waiting to retry is stored SUPERSEDED inside enqueue.
+
+    The draft and the child's stderr are on disk, and this job does not
+    go back through the worker.
+    """
+    board = Board(tmp_path / "queue.json")
+    event = PrEvent(REPO, 7, SHA_A)
+    directory = run_dir(tmp_path, event)
+    board.enqueue(event, at=datetime(2026, 11, 12, 20, tzinfo=UTC))
+    job = board.claim()
+    assert job is not None
+    assert board.finish(job, JobState.POST_PENDING) is JobState.POST_PENDING
+    directory.mkdir(parents=True)
+    (directory / "draft.md").write_text("the review\n", encoding="utf-8")
+    (directory / "stderr.txt").write_text("plainchildsecretvalue\n", encoding="utf-8")
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(True, REPORT), root=tmp_path
+    )
+    delivered = _deliver(
+        _config(tmp_path),
+        board,
+        _body(sha=SHA_B, updated_at="2026-11-12T21:00:00Z"),
+        worker=worker,
+    )
+    assert delivered.status == 202
+    assert job.state is JobState.SUPERSEDED
+    assert not directory.exists()
+    assert any(
+        record.step == "review superseded" for record in worker._telemetry.events
+    )
+
+
+def test_a_bad_status_line_removes_the_run_directory(tmp_path):
+    """``parse_status`` raises on a status wrapper that is not JSON.
+
+    ``_publish_saved`` does not catch that, so ``_fail_closed`` has to
+    settle the job and remove the directory.
+    """
+    from atlas_reviewer.verdict import STATUS_PREFIX
+
+    board = Board(tmp_path / "queue.json")
+    event = PrEvent(REPO, 7, SHA_A)
+    directory = run_dir(tmp_path, event)
+    board.enqueue(event)
+    job = board.claim()
+    assert job is not None
+    assert board.finish(job, JobState.POST_PENDING) is JobState.POST_PENDING
+    directory.mkdir(parents=True)
+    (directory / "draft.md").write_text(
+        f"{STATUS_PREFIX}not-json -->\n", encoding="utf-8"
+    )
+    (directory / "stderr.txt").write_text("plainchildsecretvalue\n", encoding="utf-8")
+    worker = _worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        publisher=lambda event, report: None,
+        root=tmp_path,
+    )
+    worker._retry_post()
+    assert job.state is JobState.FAILED
+    assert not directory.exists()
+
+
 def test_a_supersede_during_finish_removes_the_draft(tmp_path, monkeypatch):
     """A no-publisher finish that stores SUPERSEDED drops the directory.
 
