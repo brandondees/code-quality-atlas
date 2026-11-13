@@ -306,29 +306,20 @@ def model_route(
 
 
 def _safety_flag(row: Json) -> bool | None:
-    flag = _named(row, "safety_retention", "safetyRetention")
+    flag = row.get("safety_retention")
     if flag is True or flag is False:
         return flag
     return None
-
-
-def _named(row: Mapping[str, Any], *names: str) -> Any:
-    """The first present alias. Two aliases with different values refuse."""
-    found = [row[name] for name in names if name in row]
-    if not found:
-        return None
-    if any(value != found[0] for value in found[1:]):
-        raise PricingUnknownError("endpoint row repeats a field with two values")
-    return found[0]
 
 
 def _endpoint_rows(data: Json, model_id: str) -> list[Mapping[str, Any]]:
     """Rows from the ZDR list (`data` is an array) or from
     `GET /api/v1/models/{id}/endpoints` (`data.endpoints` is the array).
 
-    A row may use the ZDR list's snake_case names or the public endpoint
-    object's camelCase names. A row for another model is ignored. A row
-    with no model id on the nested document is this model.
+    Both documents are snake_case. `tag` is the provider slug.
+    `provider_name` is a display name, such as ``Amazon Bedrock`` next
+    to ``amazon-bedrock``, and is not read. A row for another model is
+    ignored. A row with no model id on the nested document is this model.
     """
     payload = data.get("data")
     if isinstance(payload, list):
@@ -339,12 +330,12 @@ def _endpoint_rows(data: Json, model_id: str) -> list[Mapping[str, Any]]:
             rows.append(item)
         return rows
     if isinstance(payload, Mapping):
-        listed = _named(payload, "id")
+        listed = payload.get("id")
         if listed is not None and listed != model_id:
             raise PricingUnknownError(
                 f"endpoint list is for {listed!r}, not {model_id!r}"
             )
-        endpoints = _named(payload, "endpoints")
+        endpoints = payload.get("endpoints")
         if not isinstance(endpoints, list):
             raise PricingUnknownError("endpoint list has no endpoints array")
         rows = []
@@ -352,7 +343,7 @@ def _endpoint_rows(data: Json, model_id: str) -> list[Mapping[str, Any]]:
             if not isinstance(item, Mapping):
                 raise PricingUnknownError("endpoint list has a non-object entry")
             row = dict(item)
-            if _named(row, "model_id", "modelId") in (None, model_id):
+            if row.get("model_id") in (None, model_id):
                 row["model_id"] = model_id
                 rows.append(row)
         return rows
@@ -360,14 +351,15 @@ def _endpoint_rows(data: Json, model_id: str) -> list[Mapping[str, Any]]:
 
 
 def _row_tag(row: Mapping[str, Any]) -> str | None:
-    tag = _named(row, "tag", "provider_name", "providerName")
+    """The provider slug. `provider_name` is the display name, not a slug."""
+    tag = row.get("tag")
     if isinstance(tag, str) and tag != "":
         return tag
     return None
 
 
 def _row_parameters(row: Mapping[str, Any]) -> frozenset[str]:
-    params = _named(row, "supported_parameters", "supportedParameters")
+    params = row.get("supported_parameters")
     if not isinstance(params, list) or not all(isinstance(p, str) for p in params):
         return frozenset()
     return frozenset(params)
@@ -395,7 +387,7 @@ def select_endpoints(data: Json, route: ModelRoute) -> SelectedEndpoints:
     items = _endpoint_rows(data, route.model_id)
     grouped: dict[str, list[Mapping[str, Any]]] = {}
     for item in items:
-        if _named(item, "model_id", "modelId") != route.model_id:
+        if item.get("model_id") != route.model_id:
             continue
         tag = _row_tag(item)
         if tag is None:
@@ -521,13 +513,13 @@ def terms_from_endpoints(
         completions.append(completion)
         contexts.append(
             _positive_count(
-                _named(row, "context_length", "contextLength"),
+                row.get("context_length"),
                 f"endpoint row {index} context_length",
             )
         )
         outputs.append(
             _positive_count(
-                _named(row, "max_completion_tokens", "maxCompletionTokens"),
+                row.get("max_completion_tokens"),
                 f"endpoint row {index} max_completion_tokens",
             )
         )

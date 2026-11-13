@@ -432,6 +432,7 @@ def test_a_run_records_whether_zdr_was_required_and_whether_caching_was_enabled(
             "endpoints": [
                 {
                     "tag": "amazon-bedrock",
+                    "provider_name": "Amazon Bedrock",
                     "pricing": {"prompt": "0.000003", "completion": "0.000015"},
                     "context_length": 1_000_000,
                     "max_completion_tokens": 64_000,

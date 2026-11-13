@@ -85,6 +85,29 @@ def endpoint_price(**changes):
     return {key: value for key, value in price.items() if value is not None}
 
 
+def display_name(tag):
+    """A human-readable provider name that is not the slug.
+
+    Live rows carry both. `provider_name` is ``Amazon Bedrock`` where
+    `tag` is ``amazon-bedrock``.
+    """
+    known = {
+        "amazon-bedrock": "Amazon Bedrock",
+        "google-vertex/europe": "Google",
+        "google-vertex/global": "Google",
+        "google-vertex/us": "Google",
+        "fireworks": "Fireworks",
+        "deepinfra/fp8": "DeepInfra",
+        "deepinfra/fp4": "DeepInfra",
+    }
+    if tag in known:
+        return known[tag]
+    titled = tag.replace("-", " ").replace("/", " ").title()
+    if titled == tag:
+        return f"{tag} provider"
+    return titled
+
+
 def with_terms(row, **changes):
     """A hand-built endpoint row the selector can price."""
     filled = {
@@ -94,6 +117,9 @@ def with_terms(row, **changes):
     }
     filled.update(row)
     filled.update(changes)
+    tag = filled.get("tag")
+    if isinstance(tag, str) and "provider_name" not in filled:
+        filled["provider_name"] = display_name(tag)
     return filled
 
 
@@ -117,6 +143,7 @@ def zdr_payload(
         {
             "model_id": model,
             "tag": tag,
+            "provider_name": display_name(tag),
             "safety_retention": safety,
             "supported_parameters": params,
             "pricing": price,
@@ -1556,11 +1583,12 @@ def test_zdr_stays_on_by_default_and_can_be_turned_off():
             "id": MODEL_ID,
             "endpoints": [
                 {
-                    "provider_name": "amazon-bedrock",
+                    "tag": "amazon-bedrock",
+                    "provider_name": "Amazon Bedrock",
                     "pricing": {"prompt": "0.000003", "completion": "0.000015"},
-                    "contextLength": 1_000_000,
-                    "maxCompletionTokens": 64_000,
-                    "supportedParameters": ["reasoning", "max_tokens"],
+                    "context_length": 1_000_000,
+                    "max_completion_tokens": 64_000,
+                    "supported_parameters": ["reasoning", "max_tokens"],
                 }
             ],
         }
@@ -1582,3 +1610,17 @@ def test_zdr_stays_on_by_default_and_can_be_turned_off():
     assert f"{API}/endpoints/zdr" not in urls
     assert "zdr required: false" in relaxed.usage_lines()[0]
     assert "cache_control: true" in relaxed.usage_lines()[0]
+
+
+def test_a_display_name_next_to_a_different_tag_is_still_selected():
+    """Live rows carry both. `provider_name` is not another spelling of `tag`."""
+    payload = zdr_payload(providers=("amazon-bedrock",))
+    row = payload["data"][0]
+    assert row["tag"] == "amazon-bedrock"
+    assert row["provider_name"] == "Amazon Bedrock"
+    fake = OpenRouterFake(reply(completion()), zdr=reply(payload))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    adapter.complete(SMALL)
+    sent = json.loads(fake.chat_requests()[0][3])
+    assert sent["provider"]["only"] == ["amazon-bedrock"]
