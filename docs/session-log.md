@@ -1287,7 +1287,7 @@ config pull request, and its body lives in the audit bundle. The
 change-review library already reads that body. A test now requires a
 body for every review lens the picker skill names, and that lens is in
 the set. A lens that still has none stays NOT RUN, and the draft lists
-it under its own heading before the findings. D48 records it.
+it under its own heading before the findings. D56 records it.
 
 ## 2026-11-13 — pinned endpoints set the price, and ZDR can be turned off
 
