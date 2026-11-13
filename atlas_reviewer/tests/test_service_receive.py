@@ -536,20 +536,57 @@ def test_a_finished_review_removes_its_run_directory_and_is_logged(tmp_path):
 
 def test_a_post_that_finds_the_head_moved_is_not_retried(tmp_path):
     board = Board(tmp_path / "queue.json")
+    event = PrEvent(REPO, 7, SHA_A)
+    directory = run_dir(tmp_path, event)
+    directory.mkdir(parents=True)
+    (directory / "draft.md").write_text("the review\n", encoding="utf-8")
     calls = []
 
-    def publish(event, report):
-        calls.append(event.head_sha)
+    def publish(reviewed, report):
+        calls.append(reviewed.head_sha)
+        for job in board._jobs:
+            if job.event.head_sha == reviewed.head_sha:
+                job.superseded = True
         raise PostNotCurrent("moved")
 
     worker = _worker(
         board, lambda event, cancel: ReviewRun(True, REPORT), publish, tmp_path
     )
-    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    board.enqueue(event)
     assert worker.run_one() is True
     worker._retry_post()
     assert calls == [SHA_A]
     assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
+    assert not directory.exists()
+
+
+def test_a_stop_during_the_post_keeps_the_draft(tmp_path):
+    """A stop while the poster is listing is not a moved head.
+
+    The draft stays, and the job goes back to pending so a restart can
+    post it. A supersede in the same window still removes the directory.
+    """
+    board = Board(tmp_path / "queue.json")
+    event = PrEvent(REPO, 7, SHA_A)
+    directory = run_dir(tmp_path, event)
+    directory.mkdir(parents=True)
+    (directory / "draft.md").write_text("the review\n", encoding="utf-8")
+    (directory / "stderr.txt").write_text("plainchildsecretvalue\n", encoding="utf-8")
+
+    def publish(_event, _report):
+        for job in board._jobs:
+            if job.event.head_sha == SHA_A:
+                job.cancel.set()
+        raise PostNotCurrent("stopped")
+
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(True, REPORT), publish, tmp_path
+    )
+    board.enqueue(event)
+    assert worker.run_one() is True
+    assert board.states() == ((SHA_A, JobState.POST_PENDING),)
+    assert (directory / "draft.md").is_file()
+    assert (directory / "stderr.txt").is_file()
 
 
 def test_the_send_rechecks_the_head_before_it_leaves(tmp_path):
@@ -1979,6 +2016,65 @@ def test_a_trickled_body_is_refused_on_the_socket(tmp_path, monkeypatch):
         server.shutdown()
         listener.join(timeout=2)
         server.server_close()
+
+
+def test_the_module_entry_shares_the_poster_hook():
+    """``python -m atlas_reviewer.service`` must use one module object.
+
+    The worker sets ``before_send`` and catches the poster's exceptions.
+    A second import of this file leaves the poster's hook unset and its
+    exception classes unmatched.
+    """
+    root = Path(__file__).resolve().parents[2]
+    script = """
+import sys
+from runpy import _run_module_as_main
+
+import atlas_reviewer.service as canonical
+
+def wrapped():
+    import atlas_reviewer.service_post as poster
+    token = canonical.before_send.set(lambda: False)
+    try:
+        hook = poster.before_send.get()
+        fired = hook is not None and hook() is False
+        same = (
+            poster.before_send is canonical.before_send
+            and poster.PostNotCurrent is canonical.PostNotCurrent
+            and poster.PostAuthError is canonical.PostAuthError
+            and poster.PostRejected is canonical.PostRejected
+            and poster.RateLimited is canonical.RateLimited
+        )
+    finally:
+        canonical.before_send.reset(token)
+    print(f"fired={fired} same={same}")
+    return 0 if fired and same else 1
+
+canonical.main = wrapped
+
+def capture(code=0):
+    raise SystemExit(code)
+
+sys.exit = capture
+try:
+    _run_module_as_main("atlas_reviewer.service")
+except SystemExit as exc:
+    raise SystemExit(exc.code)
+"""
+    env = {
+        key: value for key, value in os.environ.items() if not key.startswith("ATLAS_")
+    }
+    env["PYTHONPATH"] = str(root)
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "fired=True same=True" in proc.stdout
 
 
 def test_the_module_refuses_to_start_without_a_secret():

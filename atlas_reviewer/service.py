@@ -418,7 +418,10 @@ class Worker:
         try:
             self._publisher(job.event, report)
         except PostNotCurrent:
-            self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
+            # begin_post refused. A stop keeps the draft. A moved head
+            # is SUPERSEDED. Settling every refusal as SUPERSEDED deletes
+            # a finished review that a restart should still post.
+            self._stopped_or_superseded(job, fields)
             return
         except PostAuthError as exc:
             self._record_post_refusal(job, fields, f"post auth refused: {exc}")
@@ -936,4 +939,10 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # `python -m` runs this file as __main__. Importing it again under
+    # its package name would be a second module, with its own
+    # before_send and exception classes. Run the package module's main
+    # so the worker and the poster share one set of objects.
+    from atlas_reviewer.service import main as run_service
+
+    sys.exit(run_service())
