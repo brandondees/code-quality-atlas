@@ -56,6 +56,12 @@ def test_the_run_directory_names_the_repository():
     assert path.name.startswith("alice-widgets-7-")
 
 
+def test_the_child_does_not_receive_root_as_home():
+    env = child_env({"HOME": "/root", "PATH": "/usr/bin"})
+    assert env["HOME"] == "/home/atlas"
+    assert "/root" not in env.values()
+
+
 def test_the_child_receives_only_the_allowlist():
     env = child_env(
         {

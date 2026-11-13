@@ -221,6 +221,7 @@ def test_d53_counts_every_active_job_state():
         assert "2,000 plus those superseded jobs" in document
         assert "at most the worker concurrency" in document
     assert "**Reversibility.**" in entry
+    assert "$0.15 per month" in entry
     assert "entrypoint chowns" in entry
 
 

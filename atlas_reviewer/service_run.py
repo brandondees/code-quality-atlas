@@ -135,6 +135,10 @@ def child_env(env: Mapping[str, str], *, token: str = "") -> dict[str, str]:
     """The review process gets only ``_CHILD_ALLOWED``. ``token`` is a
     read-only installation token, when the parent minted one."""
     cleaned = {key: value for key, value in env.items() if key in _CHILD_ALLOWED}
+    # The image starts as root, so HOME can still be /root after the
+    # uid drop. The child must not inherit a home it cannot write.
+    if cleaned.get("HOME") == "/root":
+        cleaned["HOME"] = "/home/atlas"
     if token:
         cleaned[READ_TOKEN_ENV] = token
     return cleaned
