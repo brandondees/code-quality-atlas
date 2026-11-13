@@ -421,6 +421,18 @@ def test_zero_findings_are_a_gap_unless_the_round_says_there_are_none():
     )
     assert titled is not None and titled["metadata"]["parse_gap"] is False
     assert findings_expected("APPROVE — no findings", "unrelated body") is False
+    assert (
+        findings_expected("3 findings", "Last round had no findings at or above.")
+        is True
+    )
+    assert (
+        findings_expected(
+            "3 findings",
+            "Last round had no findings at or above. "
+            "Nothing new at or above this round's floor.",
+        )
+        is False
+    )
     for sentence in (
         "No findings at or above this round's floor (Nit).",
         "**No new findings at or above this round's floor.**",
