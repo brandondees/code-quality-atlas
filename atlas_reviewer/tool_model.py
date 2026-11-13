@@ -44,6 +44,7 @@ from atlas_reviewer.budget import (
     input_token_bound,
     worst_case_usd,
 )
+from atlas_reviewer.call_facts import CallFacts, note_call
 from atlas_reviewer.http import safe_url
 from atlas_reviewer.lens_loop import (
     AgenticLimits,
@@ -69,6 +70,7 @@ from atlas_reviewer.openrouter import (
     _is_pinned_model,
     _json_object,
     _no_byok_reason,
+    _tokens,
 )
 from atlas_reviewer.ports import BoundaryError, ByokRefusedError
 from atlas_reviewer.pricing import ModelTerms, parse_model_terms
@@ -270,6 +272,7 @@ def _turn(
         raise BoundaryError(f"OpenRouter served {served!r}, not {MODEL_ID}")
     choice = _choice(data)
     finish = choice.get("finish_reason")
+    _remember(data, usage_obj, served, finish)
     if finish == "length":
         raise LimitRefused(hit("max_output_tokens", output_cap, "finish_reason=length"))
     message = choice.get("message")
@@ -288,6 +291,61 @@ def _turn(
     if not isinstance(text, str) or not text.strip():
         raise BoundaryError(f"model returned no text (finish_reason={finish})")
     return FinalReply(text, cost)
+
+
+def _remember(
+    data: Mapping[str, Any], usage: Mapping[str, Any], served: object, finish: object
+) -> None:
+    """Stash token counts before a length stop raises, so the span still
+    records them. A scripted model never calls this."""
+    details = usage.get("completion_tokens_details")
+    prompt_details = usage.get("prompt_tokens_details")
+    finish_reason = finish if isinstance(finish, str) else None
+    provider, endpoint = _served_host(data.get("provider"))
+    note_call(
+        CallFacts(
+            model=served if isinstance(served, str) else "",
+            prompt_tokens=_tokens(usage, "prompt_tokens"),
+            completion_tokens=_tokens(usage, "completion_tokens"),
+            reasoning_tokens=(
+                _tokens(details, "reasoning_tokens")
+                if isinstance(details, dict)
+                else None
+            ),
+            finish_reason=finish_reason,
+            limit_stop="output-token limit" if finish_reason == "length" else None,
+            cache_read_tokens=(
+                _tokens(prompt_details, "cached_tokens")
+                if isinstance(prompt_details, dict)
+                else None
+            ),
+            cache_write_tokens=(
+                _tokens(prompt_details, "cache_write_tokens")
+                if isinstance(prompt_details, dict)
+                else None
+            ),
+            provider=provider,
+            provider_endpoint=endpoint,
+        )
+    )
+
+
+def _served_host(raw: object) -> tuple[str, str]:
+    """The provider that served the call, and a more specific endpoint
+    when the response names one. Both are untrusted text."""
+    if isinstance(raw, str):
+        return raw, ""
+    if not isinstance(raw, dict):
+        return "", ""
+    return _text(raw, ("name", "slug", "id")), _text(raw, ("endpoint", "host"))
+
+
+def _text(raw: Mapping[str, Any], keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = raw.get(key)
+        if isinstance(value, str):
+            return value
+    return ""
 
 
 def _choice(data: Mapping[str, Any]) -> Mapping[str, Any]:

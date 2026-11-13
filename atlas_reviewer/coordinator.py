@@ -33,9 +33,9 @@ from __future__ import annotations
 import json
 import secrets
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from typing import cast
+from typing import Any, cast
 
 from atlas_reviewer.agentic_config import load_agentic_limits
 from atlas_reviewer.attestation import (
@@ -79,6 +79,14 @@ from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import event_runner_name
 from atlas_reviewer.telemetry import Telemetry
 from atlas_reviewer.tool_model import OpenRouterLensModel
+from atlas_reviewer.tracing import (
+    ReviewTrace,
+    acquire_shared,
+    current_review,
+    limit_label,
+    opening_trace,
+    release_shared,
+)
 from atlas_reviewer.verdict import STATUS_PREFIX, ReviewEvent
 
 QUOTED_CHARS = 600
@@ -143,6 +151,7 @@ class AgenticReview:
     committed_usd: str = "0"
     model_calls: int = 0
     flagged: tuple[str, ...] = field(default=(), repr=False)
+    trace_id: str = ""
 
     @property
     def coverage_complete(self) -> bool:
@@ -312,6 +321,7 @@ def review_lens(
     bridge_root: str = BRIDGE_ROOT,
     contract: str | None = None,
     task_socket: str = SOCKET_PATH,
+    trace: ReviewTrace | None = None,
 ) -> AgenticReview:
     """Review `event` with one lens. The limits are resolved before any
     model, runner or ledger work. Brandon's provisional defaults are
@@ -319,11 +329,175 @@ def review_lens(
     (`LimitsUnsetError`). A model that names its own `per_call` bounds
     must name these; a different set is refused before any of that work.
     A model that names none is not checked. The runner holds a Sprite
-    task for the length of the lens and deletes it on the way out."""
+    task for the length of the lens and deletes it on the way out.
+
+    Spans are recorded when `trace` is passed, or when
+    `ATLAS_OTEL_ENDPOINT` is set in the environment. With neither, no
+    exporter is built. JSONL telemetry is unchanged."""
     resolved = limits.resolve()
     declared = getattr(model, "per_call", None)
     if declared is not None and declared != resolved:
         raise ValueError("the model's per-call limits differ from this review's limits")
+    if trace is None:
+        acquire_shared()
+    try:
+        return _open_review(
+            event, lens, diff, trees, library, model, resolved, ledger, sprites,
+            runner_ledger, redactor, clock, context, telemetry, nonce, bridge_root,
+            contract, task_socket, trace,
+        )  # fmt: skip
+    finally:
+        if trace is None:
+            release_shared()
+
+
+def _open_review(
+    event: PrEvent,
+    lens: str,
+    diff: str,
+    trees: SourceTrees,
+    library: LensLibrary,
+    model: LensModel,
+    resolved: Limits,
+    ledger: AttemptLedger,
+    sprites: SpritesApi,
+    runner_ledger: RunnerLedger,
+    redactor: Redactor,
+    clock: Clock,
+    context: Sequence[UntrustedBlock],
+    telemetry: Telemetry | None,
+    nonce: Callable[[], str],
+    bridge_root: str,
+    contract: str | None,
+    task_socket: str,
+    trace: ReviewTrace | None,
+) -> AgenticReview:
+    active = opening_trace(trace, lambda text: redactor(text).text)
+    outer = current_review()
+    if outer is None:
+        with (
+            active.review(event.repo, event.pr_number, event.head_sha) as review_span,
+            active.lens(lens) as lens_span,
+        ):
+            return _with_trace(
+                review_span,
+                _one_lens(
+                    active,
+                    lens_span,
+                    review_span,
+                    event,
+                    lens,
+                    diff,
+                    trees,
+                    library,
+                    model,
+                    resolved,
+                    ledger,
+                    sprites,
+                    runner_ledger,
+                    redactor,
+                    clock,
+                    context,
+                    telemetry,
+                    nonce,
+                    bridge_root,
+                    contract,
+                    task_socket,
+                ),
+            )
+    with active.lens(lens) as lens_span:
+        return _with_trace(
+            outer,
+            _one_lens(
+                active,
+                lens_span,
+                outer,
+                event,
+                lens,
+                diff,
+                trees,
+                library,
+                model,
+                resolved,
+                ledger,
+                sprites,
+                runner_ledger,
+                redactor,
+                clock,
+                context,
+                telemetry,
+                nonce,
+                bridge_root,
+                contract,
+                task_socket,
+            ),
+        )
+
+
+def _with_trace(span: Any, review: AgenticReview) -> AgenticReview:
+    trace_id = span.trace_id() if span is not None else ""
+    if not trace_id:
+        return review
+    return replace(review, trace_id=trace_id)
+
+
+def _one_lens(
+    active: ReviewTrace,
+    lens_span: Any,
+    review_span: Any,
+    event: PrEvent,
+    lens: str,
+    diff: str,
+    trees: SourceTrees,
+    library: LensLibrary,
+    model: LensModel,
+    resolved: Limits,
+    ledger: AttemptLedger,
+    sprites: SpritesApi,
+    runner_ledger: RunnerLedger,
+    redactor: Redactor,
+    clock: Clock,
+    context: Sequence[UntrustedBlock],
+    telemetry: Telemetry | None,
+    nonce: Callable[[], str],
+    bridge_root: str,
+    contract: str | None,
+    task_socket: str,
+) -> AgenticReview:
+    review = _review_lens(
+        event, lens, diff, trees, library=library, model=model,
+        resolved=resolved, ledger=ledger, sprites=sprites,
+        runner_ledger=runner_ledger, redactor=redactor, clock=clock,
+        context=context, telemetry=telemetry, nonce=nonce,
+        bridge_root=bridge_root, contract=contract, task_socket=task_socket,
+        trace=active,
+    )  # fmt: skip
+    _annotate(lens_span, review_span, review)
+    return review
+
+
+def _review_lens(
+    event: PrEvent,
+    lens: str,
+    diff: str,
+    trees: SourceTrees,
+    *,
+    library: LensLibrary,
+    model: LensModel,
+    resolved: Limits,
+    ledger: AttemptLedger,
+    sprites: SpritesApi,
+    runner_ledger: RunnerLedger,
+    redactor: Redactor,
+    clock: Clock,
+    context: Sequence[UntrustedBlock],
+    telemetry: Telemetry | None,
+    nonce: Callable[[], str],
+    bridge_root: str,
+    contract: str | None,
+    task_socket: str,
+    trace: ReviewTrace,
+) -> AgenticReview:
     contract = finding_contract() if contract is None else contract
     body = library.body(lens)
     if body is None:
@@ -345,6 +519,8 @@ def review_lens(
     def scrub(text: str) -> str:
         return scrubber(text).text
 
+    trace.scrub = scrub
+    traced_model = trace.wrap_model(model)
     spend = Spend(resolved)
     fence_nonce = nonce()
     job = LensJob(
@@ -365,7 +541,8 @@ def review_lens(
         digest = event_runner_name(event).rsplit("-", 1)[-1]
         with lens_hold(bridge.session, digest, task_socket):
             return _attempts(
-                bridge, job, model, spend, clock, ledger, key, resolved,
+                trace.wrap_bridge(bridge), job, traced_model,
+                spend, clock, ledger, key, resolved,
                 review_deadline, review_started, session, scrub,
             )  # fmt: skip
 
@@ -383,6 +560,19 @@ def review_lens(
         spend,
         (*diff_secrets.values, *session.flagged()),
     )
+
+
+def _annotate(lens_span: Any, review_span: Any, review: AgenticReview) -> None:
+    lens = review.lenses[0] if review.lenses else None
+    if lens is not None:
+        lens_span.set("atlas.lens.state", lens.state.value)
+        if lens.outcome is not None:
+            label = limit_label(
+                [cause.value for cause in lens.outcome.causes], lens.outcome.detail
+            )
+            if label:
+                lens_span.set("atlas.limit_stop", label)
+    review_span.set("atlas.review_event", review.event.value)
 
 
 def _attempts(
@@ -518,6 +708,8 @@ def status_line(review: AgenticReview) -> str:
         "unreviewed_files": len(_unread_paths(review)),
         "limit_stop": _limit_stop(review),
     }
+    if review.trace_id:
+        fields["trace_id"] = review.trace_id
     return f"{STATUS_PREFIX}{json.dumps(fields, sort_keys=True)} -->"
 
 

@@ -132,6 +132,61 @@ PRs #602–#637 and has no candidates, so the gate fails closed. Exit 2
 is a fixture that does not parse, including one that is not UTF-8 or
 cannot be read.
 
+## OpenTelemetry
+
+Agentic reviews emit OpenInference spans when `ATLAS_OTEL_ENDPOINT` is
+set in the controller's environment. Unset, no exporter is built. An
+`OTEL_EXPORTER_OTLP_ENDPOINT` left in the environment does not turn
+export on. The value is an `https` URL, or `http` to loopback
+(`localhost`, `127.0.0.1`, `::1`). A base such as
+`https://phoenix.internal:6006` is sent as
+`https://phoenix.internal:6006/v1/traces`. `ATLAS_OTEL_HEADERS` is
+comma-separated `name=value` pairs (an `Authorization` header belongs
+here) and is read only on the controller. Those values are scrubbed
+like the other controller credentials. A `Bearer`, `Basic`, or `token`
+scheme is split off, and the credential is scrubbed on its own.
+`ATLAS_OTEL_EXPORT_BODIES` exports
+scrubbed prompt and completion text only when the value is exactly `1`.
+An LLM span records cache-read and cache-write prompt tokens when the
+reply reports them (`llm.token_count.prompt_details.cache_read` and
+`cache_write`), and omits each one that was not reported. It records
+the provider that served the call as `atlas.provider` and, when that
+name is a known OpenRouter slug, the OpenInference value as
+`llm.provider` (`amazon-bedrock` and `Amazon Bedrock` are `aws`). An
+unknown name stays on `llm.provider`. `atlas.provider_endpoint` is set
+when the reply names a more specific endpoint, and userinfo in that
+endpoint is removed. All three are scrubbed and cut to 120 characters.
+The per-call
+reservation is `atlas.reservation_usd`, a decimal string beside
+`atlas.cost_usd`.
+Tool results are not exported as bodies. A tool argument that does not
+fit in 240 characters is replaced with a short JSON object, so
+`tool.parameters` stays valid JSON. Every string attribute passes
+through the review's redactor before it is set, and the tool span's
+name is the fixed name `tool`. The SDK does not record the raw
+exception. The scrubbed message is the span status, including when the
+review or lens span itself raises. One exporter serves the process. The SDK's own exit hook is off. At
+process exit the controller flushes that exporter and waits at most one
+second, so a review that exits immediately still exports its spans and
+a dead collector does not hold the process open. A lens does
+not shut it down, and a provider a review still holds is not replaced
+out from under it. A caller that has already opened the review span gets
+a lens span under it. A lens that runs on a worker thread has to be
+started with `submit_with_review_context`, which copies that span into
+the worker. The draft status line carries `trace_id` when a span was
+recorded. `validate_export` runs at startup, so a bad endpoint or header
+stops the process before a review. The JSONL `--events` file is unchanged.
+
+`OTEL_EXPORTER_OTLP_HEADERS` and `OTEL_EXPORTER_OTLP_TRACES_HEADERS` are
+removed from the process environment while the exporter is built, so
+they are not merged into the request, and then restored. `cli.main`
+builds that exporter on the main thread, before the command handler
+runs. The only header sent is
+`ATLAS_OTEL_HEADERS`.
+
+Spans do not change the parity gate. A review with export configured
+and a review with export off make the same draft.
+
 ## Live mode
 
 ```sh
