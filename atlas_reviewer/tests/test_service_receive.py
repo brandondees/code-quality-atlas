@@ -536,20 +536,59 @@ def test_a_finished_review_removes_its_run_directory_and_is_logged(tmp_path):
 
 def test_a_post_that_finds_the_head_moved_is_not_retried(tmp_path):
     board = Board(tmp_path / "queue.json")
+    event = PrEvent(REPO, 7, SHA_A)
+    directory = run_dir(tmp_path, event)
+    directory.mkdir(parents=True)
+    (directory / "draft.md").write_text("the review\n", encoding="utf-8")
     calls = []
 
-    def publish(event, report):
-        calls.append(event.head_sha)
+    def publish(reviewed, report):
+        calls.append(reviewed.head_sha)
+        for job in board._jobs:
+            if job.event.head_sha == reviewed.head_sha:
+                job.superseded = True
         raise PostNotCurrent("moved")
 
     worker = _worker(
         board, lambda event, cancel: ReviewRun(True, REPORT), publish, tmp_path
     )
-    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    board.enqueue(event)
     assert worker.run_one() is True
     worker._retry_post()
     assert calls == [SHA_A]
     assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
+    assert not directory.exists()
+
+
+def test_a_stop_during_the_post_keeps_the_draft(tmp_path):
+    """A stubbed stop is not a moved head.
+
+    The draft stays, and the job goes back to pending. The real listing
+    path is ``test_a_stop_during_the_listing_does_not_post``. A moved
+    head still removes the directory in
+    ``test_a_post_that_finds_the_head_moved_is_not_retried``.
+    """
+    board = Board(tmp_path / "queue.json")
+    event = PrEvent(REPO, 7, SHA_A)
+    directory = run_dir(tmp_path, event)
+    directory.mkdir(parents=True)
+    (directory / "draft.md").write_text("the review\n", encoding="utf-8")
+    (directory / "stderr.txt").write_text("plainchildsecretvalue\n", encoding="utf-8")
+
+    def publish(_event, _report):
+        for job in board._jobs:
+            if job.event.head_sha == SHA_A:
+                job.cancel.set()
+        raise PostNotCurrent("stopped")
+
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(True, REPORT), publish, tmp_path
+    )
+    board.enqueue(event)
+    assert worker.run_one() is True
+    assert board.states() == ((SHA_A, JobState.POST_PENDING),)
+    assert (directory / "draft.md").is_file()
+    assert (directory / "stderr.txt").is_file()
 
 
 def test_the_send_rechecks_the_head_before_it_leaves(tmp_path):
@@ -752,6 +791,7 @@ def test_the_module_refuses_a_port_other_than_8080(tmp_path):
         config_from_env(
             {
                 "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
+                "ATLAS_SERVICE_PROVIDER": "offline",
                 "ATLAS_SERVICE_PORT": "8081",
                 "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
             }
@@ -759,6 +799,7 @@ def test_the_module_refuses_a_port_other_than_8080(tmp_path):
     config = config_from_env(
         {
             "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
+            "ATLAS_SERVICE_PROVIDER": "offline",
             "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
         }
     )
@@ -1372,6 +1413,25 @@ def test_main_scrubs_the_child_secrets(tmp_path, monkeypatch):
         return 0
 
     monkeypatch.setattr(service_mod, "serve", serve)
+    # On the posting branch, main mints a publisher before serve. That
+    # construction needs App env this test does not set, and it is not
+    # what the assertion checks.
+    try:
+        import atlas_reviewer.service_post as post_mod
+    except ImportError:
+        post_mod = None
+    if post_mod is not None and hasattr(post_mod, "publisher_from_env"):
+
+        class _Poster:
+            def post(self, event, report):
+                return None
+
+            def credential_secrets(self):
+                return ("minted-app-credential",)
+
+        monkeypatch.setattr(
+            post_mod, "publisher_from_env", lambda *args, **kwargs: _Poster()
+        )
     sprite = "sprite-token-value"
     env = {
         "ATLAS_GITHUB_WEBHOOK_SECRET": "webhook-secret-value",
@@ -1383,9 +1443,10 @@ def test_main_scrubs_the_child_secrets(tmp_path, monkeypatch):
     sources = seen["sources"]
     assert isinstance(sources, tuple) and sources
     scrubbed = Redactor(known_secrets=("webhook-secret-value",), sources=sources)(
-        f"stderr saw {sprite}"
+        f"stderr saw {sprite} and minted-app-credential"
     )
     assert sprite not in scrubbed.text
+    assert "minted-app-credential" not in scrubbed.text
 
 
 def test_a_finished_review_keeps_its_draft_when_nothing_is_posted(tmp_path):
@@ -1481,6 +1542,70 @@ def test_a_newer_head_removes_a_queued_run_directory(tmp_path):
     )
 
 
+def test_a_newer_head_removes_a_pending_post_directory(tmp_path):
+    """A post waiting to retry is stored SUPERSEDED inside enqueue.
+
+    The draft and the child's stderr are on disk, and this job does not
+    go back through the worker.
+    """
+    board = Board(tmp_path / "queue.json")
+    event = PrEvent(REPO, 7, SHA_A)
+    directory = run_dir(tmp_path, event)
+    board.enqueue(event, at=datetime(2026, 11, 12, 20, tzinfo=UTC))
+    job = board.claim()
+    assert job is not None
+    assert board.finish(job, JobState.POST_PENDING) is JobState.POST_PENDING
+    directory.mkdir(parents=True)
+    (directory / "draft.md").write_text("the review\n", encoding="utf-8")
+    (directory / "stderr.txt").write_text("plainchildsecretvalue\n", encoding="utf-8")
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(True, REPORT), root=tmp_path
+    )
+    delivered = _deliver(
+        _config(tmp_path),
+        board,
+        _body(sha=SHA_B, updated_at="2026-11-12T21:00:00Z"),
+        worker=worker,
+    )
+    assert delivered.status == 202
+    assert job.state is JobState.SUPERSEDED
+    assert not directory.exists()
+    assert any(
+        record.step == "review superseded" for record in worker._telemetry.events
+    )
+
+
+def test_a_bad_status_line_removes_the_run_directory(tmp_path):
+    """``parse_status`` raises on a status wrapper that is not JSON.
+
+    ``_publish_saved`` does not catch that, so ``_fail_closed`` has to
+    settle the job and remove the directory.
+    """
+    from atlas_reviewer.verdict import STATUS_PREFIX
+
+    board = Board(tmp_path / "queue.json")
+    event = PrEvent(REPO, 7, SHA_A)
+    directory = run_dir(tmp_path, event)
+    board.enqueue(event)
+    job = board.claim()
+    assert job is not None
+    assert board.finish(job, JobState.POST_PENDING) is JobState.POST_PENDING
+    directory.mkdir(parents=True)
+    (directory / "draft.md").write_text(
+        f"{STATUS_PREFIX}not-json -->\n", encoding="utf-8"
+    )
+    (directory / "stderr.txt").write_text("plainchildsecretvalue\n", encoding="utf-8")
+    worker = _worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        publisher=lambda event, report: None,
+        root=tmp_path,
+    )
+    worker._retry_post()
+    assert job.state is JobState.FAILED
+    assert not directory.exists()
+
+
 def test_a_supersede_during_finish_removes_the_draft(tmp_path, monkeypatch):
     """A no-publisher finish that stores SUPERSEDED drops the directory.
 
@@ -1512,6 +1637,118 @@ def test_a_supersede_during_finish_removes_the_draft(tmp_path, monkeypatch):
     assert not directory.exists()
 
 
+def test_a_supersede_that_wins_the_pause_race_is_not_left_pending(tmp_path):
+    """The worker reads ``superseded`` outside the lock, then parks the post.
+
+    A newer head can set the flag in that window. ``pause_post`` has to
+    store SUPERSEDED under the lock, or the job stays pending and holds
+    an active slot ``claim_post`` will not take.
+    """
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A), at=datetime(2026, 11, 12, 20, tzinfo=UTC))
+    job = board.claim()
+    assert job is not None
+    assert board.begin_post(job) is True
+    saw_clear = threading.Event()
+    landed = threading.Event()
+
+    def worker() -> None:
+        superseded = job.superseded
+        saw_clear.set()
+        assert landed.wait(2)
+        if superseded:
+            board.finish(job, JobState.SUPERSEDED)
+            return
+        board.pause_post(job)
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    assert saw_clear.wait(2)
+    assert (
+        board.enqueue(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 21, tzinfo=UTC)
+        )
+        is Enqueue.QUEUED
+    )
+    assert job.superseded and job.state is JobState.POSTING
+    landed.set()
+    thread.join(2)
+    assert not thread.is_alive()
+    assert job.state is JobState.SUPERSEDED
+    loaded = Board(tmp_path / "queue.json")
+    assert (SHA_A, JobState.SUPERSEDED) in loaded.states()
+
+
+def test_a_supersede_during_pause_removes_the_run_directory(tmp_path, monkeypatch):
+    """The worker reads ``superseded`` before ``pause_post``.
+
+    A newer head in that window makes the Board store SUPERSEDED. The
+    run directory has to be removed, and the supersede has to be logged.
+    """
+    board = Board(tmp_path / "queue.json")
+    event = PrEvent(REPO, 7, SHA_A)
+    directory = run_dir(tmp_path, event)
+    directory.mkdir(parents=True)
+    (directory / "draft.md").write_text("the review\n", encoding="utf-8")
+    (directory / "stderr.txt").write_text("plainchildsecretvalue\n", encoding="utf-8")
+    board.enqueue(event, at=datetime(2026, 11, 12, 20, tzinfo=UTC))
+    job = board.claim()
+    assert job is not None
+    assert board.begin_post(job) is True
+    job.cancel.set()
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(True, REPORT), root=tmp_path
+    )
+    real = board.pause_post
+
+    def pause(claimed):
+        assert (
+            board.enqueue(
+                PrEvent(REPO, 7, SHA_B),
+                at=datetime(2026, 11, 12, 21, tzinfo=UTC),
+            )
+            is Enqueue.QUEUED
+        )
+        return real(claimed)
+
+    monkeypatch.setattr(board, "pause_post", pause)
+    worker._stopped_or_superseded(job, {"pr": 7, "sha12": SHA_A[:12], "repo": REPO})
+    assert job.state is JobState.SUPERSEDED
+    assert not directory.exists()
+    assert any(
+        record.step == "review superseded" for record in worker._telemetry.events
+    )
+
+
+def test_a_failed_pause_save_restores_a_superseded_post(tmp_path, monkeypatch):
+    import atlas_reviewer.service_queue as queue_mod
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A), at=datetime(2026, 11, 12, 20, tzinfo=UTC))
+    job = board.claim()
+    assert job is not None
+    assert board.begin_post(job) is True
+    job.cancel.set()
+    assert (
+        board.enqueue(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 21, tzinfo=UTC)
+        )
+        is Enqueue.QUEUED
+    )
+    assert job.state is JobState.POSTING
+    assert job.superseded and job.cancel.is_set()
+
+    def boom(*_args, **_kwargs):
+        raise OSError("disk")
+
+    monkeypatch.setattr(queue_mod, "_store", boom)
+    with pytest.raises(OSError, match="disk"):
+        board.pause_post(job)
+    assert job.state is JobState.POSTING
+    assert job.superseded
+    assert job.cancel.is_set()
+
+
 def test_releasing_a_superseded_claim_does_not_leave_it_queued(tmp_path):
     board = Board(tmp_path / "queue.json")
     moment = datetime(2026, 11, 12, 20, tzinfo=UTC)
@@ -1537,7 +1774,25 @@ def test_a_superseded_running_job_reloads_as_superseded(tmp_path):
     assert loaded.states() == ((SHA_A, JobState.SUPERSEDED),)
 
 
-def test_a_corrupt_queue_exits_2(tmp_path, capsys):
+def test_a_corrupt_queue_exits_2(tmp_path, capsys, monkeypatch):
+    # Posting builds a publisher before it opens the queue. Stub that so
+    # this test reaches the corrupt file.
+    try:
+        import atlas_reviewer.service_post as post_mod
+    except ImportError:
+        post_mod = None
+    if post_mod is not None and hasattr(post_mod, "publisher_from_env"):
+
+        class _Poster:
+            def post(self, event, report):
+                return None
+
+            def credential_secrets(self):
+                return ()
+
+        monkeypatch.setattr(
+            post_mod, "publisher_from_env", lambda *args, **kwargs: _Poster()
+        )
     (tmp_path / "queue.json").write_text("{", encoding="utf-8")
     code = main(
         env={
@@ -1765,6 +2020,115 @@ def test_a_trickled_body_is_refused_on_the_socket(tmp_path, monkeypatch):
         server.server_close()
 
 
+def test_the_module_entry_shares_the_poster_hook():
+    """``python -m atlas_reviewer.service`` must use one module object.
+
+    The worker sets ``before_send`` and catches the poster's exceptions.
+    A second import of this file leaves the poster's hook unset and its
+    exception classes unmatched.
+    """
+    root = Path(__file__).resolve().parents[2]
+    script = """
+import sys
+from runpy import _run_module_as_main
+
+import atlas_reviewer.service as canonical
+
+def wrapped():
+    import tempfile
+    from pathlib import Path
+
+    import atlas_reviewer.service_post as poster_mod
+    from atlas_reviewer.clock import SystemClock
+    from atlas_reviewer.domain import PrEvent
+    from atlas_reviewer.http import HttpResponse
+    from atlas_reviewer.service_queue import Board
+    from atlas_reviewer.service_run import ReviewReport, ReviewRun, run_dir
+    from atlas_reviewer.telemetry import Telemetry
+
+    poster = poster_mod
+    token = canonical.before_send.set(lambda: False)
+    try:
+        hook = poster.before_send.get()
+        fired = hook is not None and hook() is False
+        same = (
+            poster.before_send is canonical.before_send
+            and poster.PostNotCurrent is canonical.PostNotCurrent
+            and poster.PostAuthError is canonical.PostAuthError
+            and poster.PostRejected is canonical.PostRejected
+            and poster.RateLimited is canonical.RateLimited
+            and poster.PostHookMissing is canonical.PostHookMissing
+        )
+    finally:
+        canonical.before_send.reset(token)
+    root = Path(tempfile.mkdtemp())
+    board = Board(root / "queue.json")
+    event = PrEvent("brandondees/code-quality-atlas", 7, "d" * 40)
+    directory = run_dir(root, event)
+    calls = []
+
+    class GitHub:
+        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
+            calls.append(method)
+            if method == "GET":
+                board.cancel_active()
+                return HttpResponse(200, {}, b"[]")
+            return HttpResponse(200, {}, b'{"id": 9}')
+
+    class Tokens:
+        def token(self):
+            return "ghs_test"
+
+    review_poster = poster.ReviewPoster(
+        GitHub(),
+        Tokens(),
+        poster.PostLedger(root / "posted.json"),
+        lambda text: text,
+    )
+    report = ReviewReport(("tracing",), (), "note", (), (), (), "COMMENT")
+
+    def runner(_event, _cancel):
+        directory.mkdir(parents=True)
+        (directory / "draft.md").write_text("the review\\n", encoding="utf-8")
+        return ReviewRun(True, report)
+
+    worker = canonical.Worker(
+        board, runner, Telemetry(SystemClock()), review_poster.post, state_root=root
+    )
+    board.enqueue(event)
+    worker.run_one()
+    posted = calls.count("POST")
+    kept = (directory / "draft.md").is_file()
+    print(f"fired={fired} same={same} posted={posted} kept={kept}")
+    return 0 if fired and same and posted == 0 and kept else 1
+
+canonical.main = wrapped
+
+def capture(code=0):
+    raise SystemExit(code)
+
+sys.exit = capture
+try:
+    _run_module_as_main("atlas_reviewer.service")
+except SystemExit as exc:
+    raise SystemExit(exc.code)
+"""
+    env = {
+        key: value for key, value in os.environ.items() if not key.startswith("ATLAS_")
+    }
+    env["PYTHONPATH"] = str(root)
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "fired=True same=True posted=0 kept=True" in proc.stdout
+
+
 def test_the_module_refuses_to_start_without_a_secret():
     env = {
         key: value for key, value in os.environ.items() if not key.startswith("ATLAS_")
@@ -1794,6 +2158,7 @@ def test_config_rejects_a_short_secret_and_reads_the_allowlist(tmp_path):
             "ATLAS_REVIEW_REPOS": f"{REPO}, {OTHER}",
             "ATLAS_REVIEW_CONCURRENCY": "2",
             "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
+            "ATLAS_SERVICE_PROVIDER": "offline",
         }
     )
     assert config.allowlist == frozenset({REPO, OTHER})

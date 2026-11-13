@@ -1,15 +1,20 @@
 # atlas_reviewer — manual Code Quality Atlas review service
 
-An operator-triggered controller. You give it one PR event (repo, PR number,
+An operator-triggered controller, and a webhook receiver that posts one
+advisory review. You give the controller one PR event (repo, PR number,
 head SHA). It collects CI evidence for that exact SHA, runs extra review tools
 in a fresh Sprite with no credentials, runs the review through this repo's
 collapsed `reviewing-a-change` skill bundle, and writes a **review draft** to
 stdout or a file.
 
-It never writes to GitHub. No reviews, comments, check runs, labels, or
-issues. The operator CLI has no webhook receiver and no queue, and runs
-one review at a time. The webhook receiver is a separate process,
-`python -m atlas_reviewer.service` (D48). Design and decision record:
+The operator CLI (`review`, `sweep`, `probe-runner`) never writes to GitHub:
+no reviews, comments, check runs, labels, or issues. It has no queue of its
+own and runs one review at a time in its state directory.
+`python -m atlas_reviewer.service` is the webhook receiver (D48) and posts
+one COMMENT review (D46, which amends D48's no-publish rule). It verifies
+the delivery, queues one review per commit, and posts that review with
+event COMMENT. It never sends APPROVE or REQUEST_CHANGES.
+Design and decision record:
 [`docs/plans/2026-11-06-manual-reviewer-service.md`](../docs/plans/2026-11-06-manual-reviewer-service.md)
 (D24-D30, D32, D33, D35 and D36 in
 [`docs/open-questions.md`](../docs/open-questions.md)).
@@ -53,6 +58,46 @@ the pinned base image was pulled, the process ran as uid 10001 and exited
 4, the Sprite was destroyed and then absent, and `fly logs` showed no
 secrets. A stream started late would have lost the start of the draft,
 which is why a review now writes it to disk.
+
+## Webhook service
+
+`python -m atlas_reviewer.service` listens for GitHub App `pull_request`
+deliveries (`opened`, `synchronize`, `ready_for_review`). A draft is
+ignored. The HMAC is `X-Hub-Signature-256` over the raw body with
+`ATLAS_GITHUB_WEBHOOK_SECRET` (at least 16 characters). The repository
+must be on `ATLAS_REVIEW_REPOS` (default `brandondees/code-quality-atlas`).
+A second delivery of a head SHA whose review already finished does nothing.
+A head whose review failed can be queued again. A newer head SHA
+cancels the review of the previous one, and that cancelled review is not
+posted.
+
+The review itself is the existing `review` command, one at a time unless
+`ATLAS_REVIEW_CONCURRENCY` says otherwise (1 to 32; 32 is a startup refusal
+so a bad value cannot start an unbounded pool, not a cost cap). The child
+process receives only an allowlist: the OpenRouter key, the Sprites token,
+a read-only installation token, and the process basics. It does not receive
+the webhook secret, the App private key, or a Fly API token. Exit 0, 4 and 5 are finished
+reviews and are posted. Any other exit posts nothing; the failure is a
+telemetry event.
+
+The post is one pull-request review whose event is COMMENT. The body says
+the review is advisory and not a substitute for the full Claude Code
+protocol review, then lists the lenses that ran, the lenses that did not,
+the controller's file-coverage note, the limit stops, and the cost. The
+draft's own APPROVE or REQUEST_CHANGES line is quoted as a recommendation
+and is not sent. A retry of the same commit does not post a second time:
+the key `repo#pr#sha` is stored after GitHub accepts the review, and a
+review is reused only when it carries that marker, its `commit_id` is this
+SHA, and its author is this App's bot (`ATLAS_GITHUB_APP_SLUG` plus
+`[bot]`). Another App's bot does not count. The posting token asks
+for `pull_requests: write` and for no other write. The App installation
+has to grant that permission or the post fails and nothing is published.
+
+`ATLAS_SERVICE_PROVIDER` defaults to `openrouter`, and the process refuses
+to start until `ATLAS_ALLOW_LIVE_INFERENCE=1` is set, so a booted service
+does not post reviews a model never ran. `ATLAS_SERVICE_PROVIDER=offline`
+is the explicit no-model setting. The deploy shape for this process is a
+separate Fly app; the one-off `fly.toml` above is unchanged.
 
 ## Run it offline (no credentials)
 
@@ -344,7 +389,9 @@ error message on stderr.
 the controller alone). It exchanges the JWT for an installation token that
 asks for `contents`, `checks`, `actions`, and `pull_requests` read, plus
 `issues` read only with `--include-issues`, scoped to the event's single
-repository. A response that grants any non-read permission is refused.
+repository. On the operator CLI path, a response that grants any
+non-read permission is refused. The webhook poster asks for
+`pull_requests` write and refuses every other write permission.
 The token is cached until five minutes before its `expires_at`.
 
 **CI evidence ingestion** (`gather.py`, `archive.py`). Every GitHub list
@@ -931,11 +978,25 @@ D41 records the 2026-11-12 probe that did.
 - **The prompt.** The system prompt is the controller's instructions, then
   the nonce fence rule, then the whole lens `body.md` between markers that
   carry its SHA-256, then `synthesis.md`'s whole *Finding contract*
-  section. Nothing is cut. The
-  first user turn is the operator's subject, then any context the caller
-  passes and the risk-ordered changed-file list, each fenced with the
-  review's nonce. It carries no diff text: the lens reads that through the
-  tools, and every tool result comes back fenced.
+  section. Nothing is cut. The first user turn is the operator's
+  subject, then prior atlas rounds (`rounds.RoundLog`) and any context
+  the caller passes, then the risk-ordered list of every file in the
+  current diff, each fenced with the review's nonce. Prior finding
+  lines are quoted in full, up to the 8,192-character record cap,
+  not the 200-character quote default. They do not remove a file. A
+  continuation may later list a subset. This first turn does not, and
+  it has no parameter for one. The log is append-only JSONL, mode 0600
+  on every write, keyed by repository and pull request number. The
+  repository key is case-insensitive. An older head is labelled
+  superseded and is not this review's scope. A record over 8,192
+  characters stores no finding text. Prior blocks stay whole, newest
+  first, inside 16,384 characters. Leaving out a superseded round does
+  not block approval. Leaving out a round at the head under review
+  does. A line that names another pull request, or no pull request,
+  does not block this one. The path is chosen when a caller is wired. No
+  shipped caller builds one yet. It carries no diff text: the lens
+  reads that through the tools, and every tool result comes back
+  fenced.
 - **One attempt** (`lens_loop.run_attempt`). Delivery is checked before the
   first model call. The attempt ends at the final reply, or when one of
   these cuts it short: the turn cap, the call cap, the dollar reservation
@@ -1022,10 +1083,15 @@ D41 records the 2026-11-12 probe that did.
   built; there is no public fork API (Fly support, 2026-11-06).
 - **The draft** (`coordinator.render_draft`).
   - **Status line.** The first line is a status line: `"mode": "agentic"`,
-    `coverage_complete`, `changed_files`, `unreviewed_files`, the lens
-    counts by state, and `limit_stop`. The two file fields are counts.
-    `limit_stop` is the first limit that stopped a lens, or null. Paths
-    stay out of the line.
+    `coverage_complete`, `changed_files`, `unreviewed_files`,
+    `context_omissions`, `other_pull_requests`, `round_log_note`,
+    `trace_id` when a span was recorded, the lens counts by state, and
+    `limit_stop`. The two file fields are counts. `context_omissions` is
+    a count. `other_pull_requests` is how many records in the log belonged
+    to another pull request. `round_log_note` is empty, or the error class
+    and its strerror when the log could not be written. `limit_stop` is
+    the first limit that stopped a lens, or null. Paths stay out of the
+    line.
   - **Coverage.** Coverage is complete only if every selected lens settled
     clean, every changed file's diff was read, the outcome recorded a
     changed-file count, and, when this review ran a runner, that runner
@@ -1074,6 +1140,7 @@ D41 records the 2026-11-12 probe that did.
 | `agentic_config.py` | the one reader for those limits: a flag, else `ATLAS_*`, else the default | no |
 | `limit_stop.py` | the text and ledger fields for a limit that stopped a lens | no |
 | `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft; holds the Sprite for the lens (`keepalive.lens_hold`) | via ports, the ledger |
+| `rounds.py` | the prior-round log (`RoundLog`): append-only JSONL, mode 0600, one record per finished review, fenced back as untrusted data. No shipped caller builds the path yet | writes the log file |
 | `tool_model.py` | the live tool-calling adapter (`OpenRouterLensModel`): one pinned Chat Completions request per `LensModel` turn, `cache_control` and `reasoning` only when the selected endpoints list them, strict tool-call arguments, cost from `_actual_cost` (BYOK upstream included; catalog rates when the cost is missing but the token counts are usable, with cache read and write counts at the catalog's cache rates when the response reports them; a reasoning rate with no reasoning-token count is unpriced only when the cost is also missing). Not on the CLI. Tested with recorded HTTP only | via the OpenRouter client |
 | `keepalive.py` | the Sprite Tasks API hold for one lens: create, refresh every 60 seconds with a 5-minute expiry, delete on exit. Not on the CLI. Tested with `LocalSprites` and a fake socket | via the runner exec |
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`); the agentic `LensModel` port is in `lens_loop.py` | no |
@@ -1086,6 +1153,11 @@ D41 records the 2026-11-12 probe that did.
 | `github_api.py`, `github_auth.py`, `sprites_api.py`, `openrouter.py`, `http.py` | live adapters | network |
 | `github_fixture.py`, `fakes.py`, `ledger.py`, `clock.py` | offline adapters, local state | local files |
 | `cli.py`, `__main__.py` | entry point, dispatch tables | env, files |
+| `service_admit.py` | webhook signature, event and allowlist admission | no |
+| `service_queue.py` | dedupe by repo, PR and head SHA; supersede a moved head | the queue file |
+| `service_run.py` | one queued commit through the existing `review` command | the review child |
+| `service_post.py` | one COMMENT review, idempotent; no other event can be sent | GitHub |
+| `service.py` | webhook HTTP server and the review worker | network |
 
 ## Trust boundaries
 

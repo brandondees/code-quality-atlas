@@ -196,9 +196,10 @@ class Board:
         if failed_job is not None:
             self._jobs.remove(failed_job)
         touched: list[tuple[Job, JobState, bool, bool]] = []
-        # A queued job is stored SUPERSEDED here and never returns to the
-        # worker, so the caller has to remove its run directory. A
-        # running job is only flagged; the worker settles that one.
+        # A queued or pending job is stored SUPERSEDED here and never
+        # returns to the worker, so the caller has to remove its run
+        # directory. A running or posting job is only flagged; the
+        # worker settles that one.
         settled: list[Job] = []
         for job in self._jobs:
             if job.event.repo != event.repo or job.event.pr_number != event.pr_number:
@@ -208,10 +209,8 @@ class Board:
             touched.append((job, job.state, job.superseded, job.cancel.is_set()))
             job.superseded = True
             job.cancel.set()
-            if job.state is JobState.QUEUED:
+            if job.state in {JobState.QUEUED, JobState.POST_PENDING}:
                 settled.append(job)
-                job.state = JobState.SUPERSEDED
-            elif job.state is JobState.POST_PENDING:
                 job.state = JobState.SUPERSEDED
         self._jobs.append(Job(event, JobState.QUEUED))
         self._heads[head_key] = (event.head_sha, at)
@@ -386,22 +385,29 @@ class Board:
 
     def pause_post(self, job: Job) -> JobState | None:
         """Stop landed after the post was claimed and before it was sent.
-        The draft stays, and a later process can post it."""
+        Returns the state stored, or None when this job was not posting.
+        A pending job keeps its draft. A superseded job is stored as
+        superseded, and the caller removes its run directory. Leaving it
+        pending would hold an active slot that ``claim_post`` never takes."""
         with self._cv:
             if job.state is not JobState.POSTING:
                 return None
+            target = JobState.SUPERSEDED if job.superseded else JobState.POST_PENDING
             previous = job.state
-            job.state = JobState.POST_PENDING
+            job.state = target
             was_set = job.cancel.is_set()
-            job.cancel.clear()
+            if target is JobState.POST_PENDING:
+                job.cancel.clear()
             try:
                 self._save()
             except Exception:
                 job.state = previous
                 if was_set:
                     job.cancel.set()
+                elif target is JobState.POST_PENDING:
+                    job.cancel.clear()
                 raise
-            return JobState.POST_PENDING
+            return target
 
     def wake(self) -> None:
         with self._cv:

@@ -239,6 +239,11 @@ itself, and a timeout is a coverage gap.
   SDK. Our own loop is how we keep a closed tool set, D25's pinned routing
   and the attestation ledger without a second provider path or a new
   dependency.
+- **Prior rounds.** `rounds.RoundLog` carries earlier verified findings
+  into the next review of the same pull request (D52). The first turn
+  lists every file in the current diff. Prior findings are quoted
+  input. They do not drop a file. The path is chosen when a caller is
+  wired. No shipped caller builds one yet.
 - **Scoring.** Score issue-hit precision and recall against pilot PRs the
   owner labels: did the review name the issues a human cared about, and
   how many of its findings were real? This is the hit-or-miss shape

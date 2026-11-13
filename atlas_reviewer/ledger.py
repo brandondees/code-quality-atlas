@@ -55,8 +55,16 @@ class FileLedger:
 
 
 def _write_synced(path: Path, mode: str, text: str) -> None:
+    """Write `text` and fsync it. The file is mode 0600 on every write,
+    including when it already existed with a wider mode."""
     flags = os.O_WRONLY | os.O_CREAT | (os.O_APPEND if mode == "a" else os.O_TRUNC)
-    with os.fdopen(os.open(path, flags, 0o600), mode, encoding="utf-8") as fh:
+    fd = os.open(path, flags, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+    except BaseException:
+        os.close(fd)
+        raise
+    with os.fdopen(fd, mode, encoding="utf-8") as fh:
         fh.write(text)
         fh.flush()
         os.fsync(fh.fileno())
