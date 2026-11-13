@@ -1156,7 +1156,13 @@ while a call and the review clock remain. Coverage is per lens, as D42
 approved: a read by another lens does not cover a file, and a file a
 lens still has not read cannot approve. The draft names any runner
 whose delete was not verified, and carries the picker's selection note
-and the picked names that did not run. `auditing-documentation-health`
+and the picked names that did not run; a picked name that did not run
+blocks approval. A live run builds the picker's provider from the
+agentic limits, and the picker's calls and dollars count in the
+review's totals. The PR head is pinned to the event SHA before and
+after the diff fetch, the picker sees a redacted title, a lens queued
+past the review deadline is not started, and a halt is checked again
+after a call is priced. `auditing-documentation-health`
 keeps its repo shape; the change-review library reads its body from
 the audit bundle. The OpenRouter key ceiling stays $5 unless
 `--key-ceiling-usd` or `ATLAS_KEY_CEILING_USD` raises it, and a refusal

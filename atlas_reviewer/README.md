@@ -891,6 +891,9 @@ D41 records the 2026-11-12 probe that did.
   bounds, and `review_lens` refuses a model whose per-call bounds differ.
   The `review` command does not accept these flags and does not read the
   variables. The one-shot path keeps its 3 calls, $3.00 and 200,000 input cap.
+  On `agentic-review`, the picker's provider takes the smaller of those
+  ceilings and `max_calls` / `reservation_usd`, and the picker's calls and
+  dollars count toward the review's totals.
 - **The prompt.** The system prompt is the controller's instructions, then
   the nonce fence rule, then the whole lens `body.md` between markers that
   carry its SHA-256, then `synthesis.md`'s whole *Finding contract*
