@@ -149,6 +149,8 @@ def handle_delivery(
     body: bytes,
     config: ServiceConfig,
     board: Board,
+    *,
+    worker: Worker | None = None,
 ) -> HttpResult:
     """One HTTP request. A bad signature is refused. Everything else that
     is not a queued review is acknowledged so GitHub does not keep the
@@ -172,7 +174,13 @@ def handle_delivery(
         return HttpResult(202, b"ignored\n", "ignored:body")
     decision = admit(payload, config.allowlist)
     if isinstance(decision, Admitted):
-        result = board.enqueue(decision.event, at=decision.updated_at)
+        settled: list[Job] = []
+        result = board.enqueue(
+            decision.event, at=decision.updated_at, superseded=settled
+        )
+        if worker is not None:
+            for job in settled:
+                worker._stored_supersede(job, JobState.SUPERSEDED)
         if result is Enqueue.FULL:
             return HttpResult(503, b"full\n", "full")
         return HttpResult(202, f"{result.value}\n".encode(), result.value)
@@ -363,6 +371,10 @@ class Worker:
             # draft is the record of the review. The child's stderr is
             # not: it can hold a secret the log scrubber would remove.
             committed = self._board.finish(job, JobState.DONE)
+            if committed is JobState.SUPERSEDED:
+                self._drop_run_dir(job)
+                self._telemetry.record("service", "review superseded", fields)
+                return
             stderr = run_dir(self._state_root, job.event) / "stderr.txt"
             if stderr.is_file():
                 try:
@@ -375,12 +387,7 @@ class Worker:
                         status=ERROR,
                         error=f"{type(exc).__name__}: {exc}",
                     )
-            step = (
-                "review superseded"
-                if committed is JobState.SUPERSEDED
-                else "review finished"
-            )
-            self._telemetry.record("service", step, fields)
+            self._telemetry.record("service", "review finished", fields)
             return
         token = before_send.set(lambda: self._board.begin_post(job))
         try:
@@ -630,6 +637,7 @@ class _Handler(BaseHTTPRequestHandler):
             body,
             self.server.config,
             self.server.board,
+            worker=getattr(self.server, "worker", None),
         )
         self._send(result.status, result.body)
         route = self.path.split("?", 1)[0][:200]

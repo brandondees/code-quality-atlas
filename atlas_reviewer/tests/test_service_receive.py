@@ -104,13 +104,14 @@ def _deliver(
     event="pull_request",
     method="POST",
     path="/webhook",
+    worker=None,
 ):
     headers = {"X-GitHub-Event": event}
     if signature is None:
         headers["X-Hub-Signature-256"] = _sign(body)
     elif signature:
         headers["X-Hub-Signature-256"] = signature
-    return handle_delivery(method, path, headers, body, config, board)
+    return handle_delivery(method, path, headers, body, config, board, worker=worker)
 
 
 def _worker(board, runner, publisher=None, root=None):
@@ -1445,6 +1446,70 @@ def test_a_supersede_during_release_removes_the_run_directory(tmp_path, monkeypa
     assert any(
         record.step == "review superseded" for record in worker._telemetry.events
     )
+
+
+def test_a_newer_head_removes_a_queued_run_directory(tmp_path):
+    """A queued job is stored SUPERSEDED inside enqueue.
+
+    It never returns to the worker, so the delivery has to remove the
+    run directory and log the supersede.
+    """
+    board = Board(tmp_path / "queue.json")
+    event = PrEvent(REPO, 7, SHA_A)
+    directory = run_dir(tmp_path, event)
+    board.enqueue(event, at=datetime(2026, 11, 12, 20, tzinfo=UTC))
+    job = board.claim()
+    assert job is not None
+    directory.mkdir(parents=True)
+    (directory / "draft.md").write_text("the review\n", encoding="utf-8")
+    (directory / "stderr.txt").write_text("plainchildsecretvalue\n", encoding="utf-8")
+    assert board.release_claim(job) is JobState.QUEUED
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(True, REPORT), root=tmp_path
+    )
+    delivered = _deliver(
+        _config(tmp_path),
+        board,
+        _body(sha=SHA_B, updated_at="2026-11-12T21:00:00Z"),
+        worker=worker,
+    )
+    assert delivered.status == 202
+    assert job.state is JobState.SUPERSEDED
+    assert not directory.exists()
+    assert any(
+        record.step == "review superseded" for record in worker._telemetry.events
+    )
+
+
+def test_a_supersede_during_finish_removes_the_draft(tmp_path, monkeypatch):
+    """A no-publisher finish that stores SUPERSEDED drops the directory.
+
+    The draft stays only when the stored state is DONE.
+    """
+    board = Board(tmp_path / "queue.json")
+    event = PrEvent(REPO, 7, SHA_A)
+    directory = run_dir(tmp_path, event)
+    board.enqueue(event)
+
+    def runner(_event, _cancel):
+        directory.mkdir(parents=True)
+        (directory / "draft.md").write_text("the review\n", encoding="utf-8")
+        (directory / "stderr.txt").write_text(
+            "plainchildsecretvalue\n", encoding="utf-8"
+        )
+        return ReviewRun(True, REPORT)
+
+    worker = _worker(board, runner, root=tmp_path)
+    real = board.finish
+
+    def finish(job, state):
+        job.superseded = True
+        return real(job, state)
+
+    monkeypatch.setattr(board, "finish", finish)
+    assert worker.run_one() is True
+    assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
+    assert not directory.exists()
 
 
 def test_releasing_a_superseded_claim_does_not_leave_it_queued(tmp_path):

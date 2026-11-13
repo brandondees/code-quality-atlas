@@ -136,7 +136,13 @@ class Board:
             for key in seen:
                 self._remember(key)
 
-    def enqueue(self, event: PrEvent, *, at: datetime | None = None) -> Enqueue:
+    def enqueue(
+        self,
+        event: PrEvent,
+        *,
+        at: datetime | None = None,
+        superseded: list[Job] | None = None,
+    ) -> Enqueue:
         """``at`` is the pull request's ``updated_at`` on this delivery.
         A different head cancels the current review only when ``at`` is
         later than the head already accepted for that PR."""
@@ -175,19 +181,25 @@ class Board:
             # is at most the worker concurrency.
             if active >= self._max_remembered and not replaces:
                 return Enqueue.FULL
-            self._install(event, at, failed_job)
+            settled = self._install(event, at, failed_job)
+            if superseded is not None:
+                superseded.extend(settled)
             self._cv.notify()
             return Enqueue.QUEUED
 
     def _install(
         self, event: PrEvent, at: datetime | None, failed_job: Job | None
-    ) -> None:
+    ) -> tuple[Job, ...]:
         """Swap in ``event`` and save. A failed save puts the memory back."""
         head_key = (event.repo, event.pr_number)
         previous_head = self._heads.get(head_key)
         if failed_job is not None:
             self._jobs.remove(failed_job)
         touched: list[tuple[Job, JobState, bool, bool]] = []
+        # A queued job is stored SUPERSEDED here and never returns to the
+        # worker, so the caller has to remove its run directory. A
+        # running job is only flagged; the worker settles that one.
+        settled: list[Job] = []
         for job in self._jobs:
             if job.event.repo != event.repo or job.event.pr_number != event.pr_number:
                 continue
@@ -196,7 +208,10 @@ class Board:
             touched.append((job, job.state, job.superseded, job.cancel.is_set()))
             job.superseded = True
             job.cancel.set()
-            if job.state in {JobState.QUEUED, JobState.POST_PENDING}:
+            if job.state is JobState.QUEUED:
+                settled.append(job)
+                job.state = JobState.SUPERSEDED
+            elif job.state is JobState.POST_PENDING:
                 job.state = JobState.SUPERSEDED
         self._jobs.append(Job(event, JobState.QUEUED))
         self._heads[head_key] = (event.head_sha, at)
@@ -218,6 +233,7 @@ class Board:
             else:
                 self._heads[head_key] = previous_head
             raise
+        return tuple(settled)
 
     def _retry_of_failed_head(self, event: PrEvent, at: datetime | None) -> bool:
         """The current head's only record was a failure that has already
