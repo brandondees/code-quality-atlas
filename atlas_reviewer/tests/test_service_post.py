@@ -35,6 +35,7 @@ from atlas_reviewer.service_post import (
     PostLedger,
     RefusedReviewEvent,
     ReviewPoster,
+    _repository_names,
     comment_only,
     comment_payload,
     marker_for,
@@ -128,6 +129,7 @@ def test_approve_and_request_changes_cannot_be_sent(tmp_path):
 def test_a_finished_review_is_one_comment_with_the_banner_and_the_lists(tmp_path):
     poster, github = _poster(tmp_path)
     poster.post(EVENT, REPORT)
+    assert "per_page=100" in github.calls[0][1]
     payload = _posted_body(github)
     assert payload["event"] == "COMMENT"
     assert payload["commit_id"] == SHA
@@ -684,7 +686,7 @@ def test_stop_after_the_post_is_claimed_does_not_send(tmp_path):
     board.enqueue(EVENT)
     assert worker.run_one() is True
     assert posted == []
-    assert board.states() == ((SHA, JobState.SUPERSEDED),)
+    assert board.states() == ((SHA, JobState.POST_PENDING),)
 
 
 def test_limit_timeout_stays_on_the_calling_thread():
@@ -910,6 +912,73 @@ def test_the_service_log_scrubs_the_sprites_and_openrouter_secrets(
     text = scrub(f"see {sprite} and {model}")
     assert sprite not in text
     assert model not in text
+
+
+def _minting_poster(tmp_path: Path, status: int, body: bytes) -> ReviewPoster:
+    class Transport:
+        def request(self, method, url, headers, body_bytes, timeout_s, max_bytes=None):
+            if str(url).endswith("/access_tokens"):
+                return HttpResponse(status, {}, body)
+            return HttpResponse(200, {}, b"[]")
+
+    tokens = AppInstallationTokens(
+        Transport(),
+        SystemClock(),
+        app_id="5648875",
+        private_key="not-used",
+        installation_id=1,
+        permissions=POST_PERMISSIONS,
+        writable=POST_WRITABLE,
+        encode=lambda claims, key: "jwt",
+    )
+    return ReviewPoster(
+        Transport(),
+        tokens,
+        PostLedger(tmp_path / "posted.json"),
+        lambda text: text,
+        bot_login="code-quality-atlas[bot]",
+    )
+
+
+def test_a_mint_secondary_limit_is_retried(tmp_path):
+    poster = _minting_poster(
+        tmp_path, 403, b'{"message":"You have exceeded a secondary rate limit."}'
+    )
+    board = Board(tmp_path / "queue.json")
+    worker = Worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        Telemetry(SystemClock()),
+        poster.post,
+        state_root=tmp_path,
+    )
+    board.enqueue(EVENT)
+    assert worker.run_one() is True
+    assert board.states() == ((SHA, JobState.POST_PENDING),)
+
+
+def test_a_mint_401_is_not_retried(tmp_path):
+    poster = _minting_poster(tmp_path, 401, b"")
+    board = Board(tmp_path / "queue.json")
+    worker = Worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        Telemetry(SystemClock()),
+        poster.post,
+        state_root=tmp_path,
+    )
+    board.enqueue(EVENT)
+    assert worker.run_one() is True
+    assert board.states() == ((SHA, JobState.FAILED),)
+
+
+def test_the_posting_token_covers_one_account():
+    with pytest.raises(ValueError, match="one GitHub account"):
+        _repository_names(frozenset({"alice/shared", "bob/shared"}))
+    assert _repository_names(frozenset({"alice/shared", "alice/other"})) == (
+        "other",
+        "shared",
+    )
 
 
 def test_limit_timeout_is_the_mint_socket_timeout():

@@ -27,8 +27,18 @@ from typing import Any
 
 import jwt
 
-from atlas_reviewer.http import Transport, safe_url
+from atlas_reviewer.http import HttpResponse, Transport, safe_url
 from atlas_reviewer.ports import BoundaryError, Clock
+
+
+class MintError(BoundaryError):
+    """A token mint that GitHub refused. ``response`` is the HTTP result,
+    so the caller can tell a rate limit from an auth failure."""
+
+    def __init__(self, message: str, response: HttpResponse) -> None:
+        super().__init__(message)
+        self.response = response
+
 
 API_URL = "https://api.github.com"
 JWT_BACKDATE_S = 60
@@ -164,8 +174,9 @@ class AppInstallationTokens:
             self._mint_timeout(),
         )
         if resp.status != 201:
-            raise BoundaryError(
-                f"GitHub App token mint: HTTP {resp.status} for {safe_url(url)}"
+            raise MintError(
+                f"GitHub App token mint: HTTP {resp.status} for {safe_url(url)}",
+                resp,
             )
         return self._parse(resp.body)
 

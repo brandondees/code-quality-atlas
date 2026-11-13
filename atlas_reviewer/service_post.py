@@ -279,7 +279,8 @@ class ReviewPoster:
         owner, name = event.repo.split("/", 1)
         owner_q, name_q = quote(owner, safe=""), quote(name, safe="")
         return (
-            f"{self._api_url}/repos/{owner_q}/{name_q}/pulls/{event.pr_number}/reviews"
+            f"{self._api_url}/repos/{owner_q}/{name_q}/pulls/"
+            f"{event.pr_number}/reviews?per_page=100"
         )
 
     def _remaining(self) -> float | None:
@@ -301,9 +302,11 @@ class ReviewPoster:
         try:
             token = self._tokens.token()
         except BoundaryError as exc:
-            text = str(exc)
-            if "HTTP 401" in text or "HTTP 403" in text:
-                raise PostAuthError(text) from None
+            response = getattr(exc, "response", None)
+            if isinstance(response, HttpResponse):
+                _raise_for_status(response, "GitHub App token mint")
+            if "HTTP 401" in str(exc):
+                raise PostAuthError(str(exc)) from None
             raise
         remaining = self._remaining()
         if remaining is not None and remaining <= 0:
@@ -398,6 +401,16 @@ def _marked(item: object, marker: str, sha: str, bot_login: str) -> int | None:
     return review_id
 
 
+def _repository_names(allowlist: frozenset[str]) -> tuple[str, ...]:
+    """GitHub scopes an installation token by repository name on the
+    installation's account. Two owners would make a shared name grant
+    both, so this refuses that list."""
+    owners = {repo.split("/", 1)[0] for repo in allowlist}
+    if len(owners) > 1:
+        raise ValueError("the posting token covers one GitHub account")
+    return tuple(sorted({repo.split("/", 1)[1] for repo in allowlist}))
+
+
 def publisher_from_env(
     env: Mapping[str, str],
     allowlist: frozenset[str],
@@ -435,7 +448,7 @@ def publisher_from_env(
         installation_id=int(installation),
         permissions=POST_PERMISSIONS,
         writable=POST_WRITABLE,
-        repositories=tuple(sorted(repo.split("/", 1)[1] for repo in allowlist)),
+        repositories=_repository_names(allowlist),
     )
     redactor = Redactor(known_secrets=tuple(known), sources=(tokens.secrets,))
     return ReviewPoster(
