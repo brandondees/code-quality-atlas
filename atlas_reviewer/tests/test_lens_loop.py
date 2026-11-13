@@ -147,6 +147,40 @@ def test_a_call_after_a_byok_refusal_elsewhere_in_the_review_is_not_sent():
     assert spend.calls == 0
 
 
+def test_concurrent_reservations_never_pass_the_call_cap():
+    """Pooled lenses reserve at once. A worst case whose addition is slow
+    holds each thread between the cap check and the count; only the lock
+    keeps the other threads out of that window."""
+    import threading
+    import time
+
+    class Slow(Decimal):
+        def __radd__(self, other):
+            time.sleep(0.05)
+            return Decimal(other) + Decimal(self)
+
+    spend = Spend(replace(LIMITS, max_calls=1, max_turns=1).resolve())
+    start = threading.Barrier(8)
+    refused = []
+
+    def reserve():
+        start.wait()
+        refused.append(spend.reserve(Slow("0.01")))
+
+    threads = [threading.Thread(target=reserve) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert spend.calls == 1
+    assert sum(r is None for r in refused) == 1
+
+
+def test_two_spends_with_the_same_totals_are_equal():
+    """The lock and the halt flag are not fields a caller passes or compares."""
+    assert Spend(LIMITS.resolve()) == Spend(LIMITS.resolve())
+
+
 def test_brandons_provisional_defaults_are_accepted():
     resolved = AgenticLimits().resolve()
     assert (
