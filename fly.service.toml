@@ -4,10 +4,11 @@
 
 app = "atlas-reviewer-service"
 primary_region = "iad"
-# serve drains workers for up to 30s. The platform default can cut that
-# short and leave a Sprite behind.
+# A review's Sprite cleanup may take 60s plus one 30s Sprites call. The
+# parent waits that out before SIGKILL. This is longer, so Fly's own
+# SIGKILL does not land while that cleanup is still running.
 kill_signal = "SIGINT"
-kill_timeout = "30s"
+kill_timeout = "120s"
 
 [build]
   dockerfile = "Dockerfile"

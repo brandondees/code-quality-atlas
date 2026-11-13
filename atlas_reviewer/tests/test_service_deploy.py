@@ -48,7 +48,7 @@ def test_the_service_app_stays_up_and_the_one_off_publishes_nothing():
     assert "services" not in ONE_OFF
     assert ONE_OFF["app"] == "atlas-reviewer"
     assert SERVICE["kill_signal"] == "SIGINT"
-    assert SERVICE["kill_timeout"] == "30s"
+    assert SERVICE["kill_timeout"] == "120s"
 
 
 def _fenced(text: str) -> str:
@@ -81,6 +81,28 @@ def test_the_org_and_the_single_machine_flag_are_on_the_commands():
     )
     assert 'flyp machine restart <id> --app "$APP"' in commands
     assert "ATLAS_GITHUB_APP_SLUG=" in commands
+
+
+def test_the_runbook_names_the_child_model_settings_outside_the_secret_file():
+    secret = RUNBOOK.split("```text", 1)[1].split("```", 1)[0]
+    for name in (
+        "ATLAS_MODEL",
+        "ATLAS_PROVIDERS",
+        "ATLAS_ALLOW_SAFETY_RETENTION",
+        "ATLAS_MAX_CALLS",
+        "ATLAS_MAX_TURNS",
+        "ATLAS_MAX_INPUT_TOKENS",
+        "ATLAS_MAX_OUTPUT_TOKENS",
+        "ATLAS_REASONING_MAX_TOKENS",
+        "ATLAS_RESERVATION_USD",
+        "ATLAS_LENS_WALL_S",
+        "ATLAS_REVIEW_WALL_S",
+    ):
+        assert name in RUNBOOK
+        assert name not in secret
+    flat = " ".join(RUNBOOK.split())
+    assert "They are not secrets" in flat
+    assert "read-only installation token" in flat
 
 
 def test_the_runbook_names_the_secret_the_org_and_the_webhook():
@@ -129,53 +151,21 @@ def test_serve_runs_the_service_module_and_not_the_one_off_cli(tmp_path):
     ]
 
 
-def test_the_entrypoint_chowns_the_volume_before_dropping_root(tmp_path):
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    recorded = tmp_path / "argv"
-    chowned = tmp_path / "chown"
-    dropped = tmp_path / "setpriv"
-
-    def write(name: str, body: str) -> None:
-        path = bindir / name
-        path.write_text(body, encoding="utf-8")
-        path.chmod(path.stat().st_mode | stat.S_IEXEC)
-
-    write("id", "#!/bin/sh\necho 0\n")
-    write("chown", '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$CHOWN"\n')
-    write(
-        "setpriv",
-        '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$SETPRIV"\n'
-        'shift 4\nPATH="${PATH#*:}"\nexec "$@"\n',
+def test_the_entrypoint_chowns_the_volume_before_dropping_root():
+    """The root tools are absolute paths, so a caller-controlled PATH
+    cannot substitute ``chown`` or ``setpriv`` while the process is root.
+    ``chown -h`` does not follow a symlink at the state path."""
+    text = ENTRYPOINT.read_text(encoding="utf-8")
+    subprocess.run(["sh", "-n", str(ENTRYPOINT)], check=True)
+    assert "/usr/bin/id -u" in text
+    assert "/usr/bin/mkdir -p" in text
+    assert "/usr/bin/chown -h 10001:10001" in text
+    assert "chown 10001:10001" not in text.replace("chown -h 10001:10001", "")
+    drop = (
+        "/usr/bin/setpriv --reuid=10001 --regid=10001 --init-groups "
+        "--inh-caps=-all --no-new-privs --bounding-set=-all --ambient-caps=-all"
     )
-    pybin = tmp_path / "pybin"
-    pybin.mkdir()
-    python = pybin / "python"
-    python.write_text(
-        '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$RECORD"\n', encoding="utf-8"
-    )
-    python.chmod(python.stat().st_mode | stat.S_IEXEC)
-    env = os.environ.copy()
-    env["PATH"] = f"{bindir}{os.pathsep}{pybin}{os.pathsep}{env.get('PATH', '')}"
-    env["RECORD"] = str(recorded)
-    env["CHOWN"] = str(chowned)
-    env["SETPRIV"] = str(dropped)
-    state = tmp_path / "data"
-    env["ATLAS_REVIEWER_STATE_DIR"] = str(state)
-    subprocess.run(["sh", str(ENTRYPOINT), "serve"], check=True, env=env)
-    assert chowned.read_text(encoding="utf-8").splitlines() == [
-        "10001:10001",
-        str(state),
-    ]
-    dropped_text = dropped.read_text(encoding="utf-8")
-    assert "--reuid=10001" in dropped_text
-    assert "--regid=10001" in dropped_text
-    assert "--init-groups" in dropped_text
-    assert "--inh-caps=-all" in dropped_text
-    assert recorded.read_text(encoding="utf-8").splitlines()[:2] == [
-        "-m",
-        "atlas_reviewer.service",
-    ]
+    assert drop in " ".join(text.split())
 
 
 def test_serve_exits_2_when_the_state_dir_is_not_writable(tmp_path):
@@ -213,12 +203,16 @@ def test_the_real_module_exits_2_when_no_atlas_env_is_set():
 
 def test_d53_counts_every_active_job_state():
     text = (ROOT / "docs/open-questions.md").read_text(encoding="utf-8")
-    start = text.index("- **D53")
-    entry = text[start:].splitlines()[0]
+    entry = text[text.index("- **D53") :].splitlines()[0]
+    d48 = text[text.index("- **D48") :].splitlines()[0]
     runbook = (ROOT / "atlas_reviewer/deploy-service.md").read_text(encoding="utf-8")
     plan = (ROOT / "docs/plans/2026-11-12-webhook-service-mode.md").read_text(
         encoding="utf-8"
     )
+    # D48 uses the same state list. This sentence is D53's own.
+    phrase = "The queue refuses a new job when 2,000 active jobs"
+    assert phrase in entry
+    assert phrase not in d48
     states = "(`queued`, `running`, `post_pending`, `posting`)"
     for document in (entry, runbook, plan):
         assert states in document
@@ -228,6 +222,46 @@ def test_d53_counts_every_active_job_state():
     assert "**Reversibility.**" in entry
     assert "$0.15 per month" in entry
     assert "entrypoint chowns" in entry
+
+
+def test_teardown_disables_the_webhook_before_it_sweeps():
+    """A sweep that runs while the webhook is still delivering can miss
+    a Sprite a queued job creates afterwards. A plain sweep reads a
+    ledger the service never writes."""
+    prose = RUNBOOK
+    commands = _fenced(RUNBOOK)
+    assert prose.index("Disable the GitHub App webhook") < prose.index(
+        "flyp machine stop"
+    )
+    lines = [line.strip() for line in commands.splitlines() if line.strip()]
+    stop = next(
+        i for i, line in enumerate(lines) if line.startswith("flyp machine stop")
+    )
+    sweeps = [i for i, line in enumerate(lines) if "atlas_reviewer sweep" in line]
+    destroy = next(i for i, line in enumerate(lines) if "apps destroy" in line)
+    assert sweeps
+    assert stop < min(sweeps) < destroy
+    assert all("--event" in lines[i] or "--runner" in lines[i] for i in sweeps)
+    assert "sweep --event" in lines[sweeps[0]]
+    assert "sweep --runner" in lines[sweeps[1]]
+    assert "--timeout 120" in lines[stop]
+    assert "python -m atlas_reviewer sweep\n" not in commands
+    assert "/data/runners.ledger" in prose
+    assert "cqa-rev-" in prose
+
+
+def test_the_kill_timeout_covers_sprite_cleanup():
+    import inspect
+
+    from atlas_reviewer.runner import CLEANUP_BUDGET_S
+    from atlas_reviewer.service_run import CLEANUP_WAIT_S
+    from atlas_reviewer.sprites_api import SpritesClient
+
+    window = inspect.signature(SpritesClient.__init__).parameters["timeout_s"].default
+    assert CLEANUP_WAIT_S >= CLEANUP_BUDGET_S + window
+    number = SERVICE["kill_timeout"]
+    assert number.endswith("s")
+    assert int(number[:-1]) >= CLEANUP_WAIT_S
 
 
 def test_the_fly_host_is_what_config_from_env_binds():

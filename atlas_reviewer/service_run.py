@@ -3,12 +3,14 @@
 
 The child is ``python -m atlas_reviewer review``. It receives an allowlist
 of environment variables: the model key, the Sprites token, a read-only
-installation token, and the process basics (``PATH``, ``HOME``, language
-and CA paths). The webhook secret, the App private key, and anything else
-the parent holds, including a Fly API token, are not passed on. When the
-queue cancels the job, or the wall-clock deadline passes, the child is
-signalled SIGTERM, which the CLI turns into the stop that deletes its
-Sprite, and the result is not a draft to post. Exit codes 0, 4 and 5 are
+installation token, the model and limit settings, and the process basics
+(``PATH``, ``HOME``, language and CA paths). The webhook secret, the App
+private key, and anything else the parent holds, including a Fly API
+token, are not passed on. When the queue cancels the job, or the
+wall-clock deadline passes, the child is signalled SIGTERM, which the CLI
+turns into the stop that deletes its Sprite. The parent waits out the
+Sprite cleanup budget plus one Sprites call before SIGKILL, and the
+result is not a draft to post. Exit codes 0, 4 and 5 are
 the CLI's finished reviews (complete, incomplete coverage, changes
 requested). Any other exit, or a finished process with no draft file, is
 a failure and produces no report.
@@ -29,8 +31,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from atlas_reviewer.agentic_config import ENV as LIMIT_ENV
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.ledger import make_private_dirs
+from atlas_reviewer.openrouter import (
+    ENV_ALLOW_SAFETY_RETENTION,
+    ENV_MODEL,
+    ENV_PROVIDERS,
+)
+from atlas_reviewer.runner import CLEANUP_BUDGET_S
 from atlas_reviewer.verdict import parse_status
 
 WEBHOOK_SECRET_ENV = "ATLAS_GITHUB_WEBHOOK_SECRET"
@@ -60,6 +69,10 @@ _CHILD_ALLOWED = frozenset(
         "ATLAS_OPENROUTER_API_KEY",
         "ATLAS_SPRITES_TOKEN",
         READ_TOKEN_ENV,
+        ENV_MODEL,
+        ENV_PROVIDERS,
+        ENV_ALLOW_SAFETY_RETENTION,
+        *LIMIT_ENV.values(),
     }
 )
 # The parent stops the child after this long even if the child is still
@@ -70,7 +83,12 @@ _DEADLINE_EXIT = -1
 # The CLI's review exits. 4 is incomplete file coverage and 5 is a finished
 # review that requests changes. Both still wrote a draft.
 POSTABLE_EXITS = frozenset({0, 4, 5})
-_STOP_WAIT_S = 5.0
+# ``CLEANUP_BUDGET_S`` is how long a destroy may start new Sprites calls.
+# One call can still be in flight, and ``SpritesClient`` bounds that call
+# at 30 seconds. SIGKILL before both have elapsed leaves the Sprite up.
+_SPRITE_CALL_S = 30.0
+CLEANUP_WAIT_S = CLEANUP_BUDGET_S + _SPRITE_CALL_S
+_KILL_WAIT_S = 5.0
 _QUOTED = re.compile(r"`(\"(?:\\.|[^\"\\])*\")`")
 
 Popen = Callable[..., Any]
@@ -370,7 +388,7 @@ def _stop(proc: subprocess.Popen[bytes]) -> None:
         return
     proc.send_signal(signal.SIGTERM)
     try:
-        proc.wait(timeout=_STOP_WAIT_S)
+        proc.wait(timeout=CLEANUP_WAIT_S)
     except subprocess.TimeoutExpired:
         proc.kill()
-        proc.wait(timeout=_STOP_WAIT_S)
+        proc.wait(timeout=_KILL_WAIT_S)

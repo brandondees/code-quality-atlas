@@ -40,6 +40,7 @@ from atlas_reviewer.service_admit import (
 )
 from atlas_reviewer.service_queue import Board, Enqueue, Job, JobState, QueueError
 from atlas_reviewer.service_run import (
+    CLEANUP_WAIT_S,
     WEBHOOK_SECRET_ENV,
     ReviewReport,
     ReviewRun,
@@ -240,9 +241,10 @@ class Worker:
             thread.start()
             self._threads.append(thread)
 
-    def stop(self, timeout: float = 30.0) -> None:
+    def stop(self, timeout: float = CLEANUP_WAIT_S) -> None:
         """Cancel an in-flight review so its child can delete the Sprite,
-        then wait for the workers. ``timeout`` is per worker thread."""
+        then wait for the workers. ``timeout`` is per worker thread, and
+        the default is the child's Sprite cleanup wait."""
         self._stop.set()
         self._board.cancel_active()
         self._board.wake()

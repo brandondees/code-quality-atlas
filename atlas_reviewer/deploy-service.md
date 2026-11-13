@@ -71,6 +71,18 @@ refuses to listen without the webhook secret, the three `ATLAS_GITHUB_APP_*`
 values and `ATLAS_GITHUB_INSTALLATION_ID`, and, for the default `openrouter`
 provider, `ATLAS_ALLOW_LIVE_INFERENCE=1`.
 
+The child also receives the model and limit settings when they are set
+on the Machine. They are not secrets, and they do not belong in
+`service.env`. `ATLAS_MODEL` selects the model. `ATLAS_PROVIDERS` is the
+provider list. `ATLAS_ALLOW_SAFETY_RETENTION` is the Safety Retention
+opt-in. The limit settings are `ATLAS_RESERVATION_USD`, `ATLAS_MAX_CALLS`,
+`ATLAS_MAX_TURNS`, `ATLAS_LENS_WALL_S`, `ATLAS_REVIEW_WALL_S`,
+`ATLAS_MAX_INPUT_TOKENS`, `ATLAS_MAX_OUTPUT_TOKENS`, and
+`ATLAS_REASONING_MAX_TOKENS`. Unset, the child keeps the defaults. The
+only GitHub credential the child receives is still the read-only
+installation token the parent minted. The App private key, the webhook
+secret, and `FLY_API_TOKEN` stay in the parent.
+
 The App needs Pull requests set to read and write. The service's posting
 token asks for `pull_requests: write` and no other write. The operator CLI
 still asks for read only. After the permission change, accept it on the
@@ -110,7 +122,11 @@ in `iad` when one does not exist yet (Fly's configuration reference,
 is `ATLAS_REVIEWER_STATE_DIR`. The image starts as root. The entrypoint
 chowns that directory to uid 10001 and continues as that user, so a fresh
 root-owned volume does not need a manual chown. `kill_signal` is `SIGINT`
-and `kill_timeout` is `30s`, which covers the worker drain.
+and `kill_timeout` is `120s`. A review child is signalled SIGTERM and the
+parent waits 90 seconds, the 60 second Sprite cleanup budget plus one 30
+second Sprites call, before SIGKILL. The extra 30 seconds is the parent
+exiting after that wait. A shorter `kill_timeout` kills the process while
+the Sprite is still being destroyed.
 
 After that, restarts keep the queue and the post
 ledger. The queue refuses a new job when 2,000 active jobs (`queued`, `running`, `post_pending`, `posting`) belong to other pull requests. A newer head of a pull request that already has an active job takes that slot. Replacing a job that is still `running` or `posting` can leave the count at 2,000 plus those superseded jobs, and that extra is at most the worker concurrency. The dedupe list keeps every pull request's current head, so it
@@ -178,12 +194,41 @@ file-coverage note, limit stops, and cost.
 
 ## Tear down
 
-Destroy the runner Sprites first (`python -m atlas_reviewer sweep` is the
-one-off tool; a Sprite left by a crashed review is still destroyed by
-name). Then:
+Disable the GitHub App webhook before stopping the Machine. A delivery
+that arrives after the sweep can queue a review, and that review can
+create a Sprite the sweep already missed. In the App's webhook settings,
+turn the webhook off, or unsubscribe **Pull requests**.
+
+Stop the Machine only after that, and let it drain. The stop below sends
+SIGINT and waits 120 seconds, matching `kill_timeout`. Fly SIGKILLs the
+process when `kill_timeout` ends. The command waits that long so the
+client does not give up while the child is still destroying its Sprite.
+
+A plain `python -m atlas_reviewer sweep` reads `runners.ledger` in its
+state directory. The service does not write `/data/runners.ledger`. Each
+review writes its ledger under `/data/runs/<repo>-<pr>-<sha>/state/`, and
+that directory is removed when the job ends, so the plain sweep finds
+nothing.
+
+The Sprite name is derived from the event:
+`cqa-rev-pr<number>-<first 12 hex of the head>-<8 hex>`. Every review
+Sprite starts with `cqa-rev-`. Sweep each leftover with `--event` of the
+event file copied off the Machine before that run directory was removed,
+or with `--runner` and that name, from a machine that holds
+`ATLAS_SPRITES_TOKEN`. The sweep prints `verified absent` for each name.
+`NOT verified` means that Sprite is still billable. Run that name again.
+Destroy the app only after those lines say verified absent.
 
 ```sh
+flyp machine stop <id> --app "$APP" --signal SIGINT --timeout 120
+
+python -m atlas_reviewer sweep --event "$EVENT" --force-live
+
+python -m atlas_reviewer sweep --runner "$RUNNER" --force-live
+
 flyp apps destroy "$APP" --yes
 ```
 
-That does not destroy the one-off app `atlas-reviewer`.
+`$EVENT` is the copied event file. `$RUNNER` is the `cqa-rev-` name. One
+leftover uses one of the two sweep commands. The destroy deletes the
+app's volumes. It does not destroy the one-off app `atlas-reviewer`.

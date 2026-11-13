@@ -27,7 +27,7 @@ is then `registry.fly.io/<name>:<label>`. `fly apps create` and
 
 | File | Role |
 | --- | --- |
-| [`Dockerfile`](../Dockerfile) | `python:3.12.16-slim-bookworm` pinned by manifest-list digest, `pip install --require-hashes --only-binary=:all: -r requirements.txt`, user `atlas` (uid 10001) |
+| [`Dockerfile`](../Dockerfile) | `python:3.12.16-slim-bookworm` pinned by manifest-list digest, `pip install --require-hashes --only-binary=:all: -r requirements.txt`. The image starts as root so the entrypoint can chown the state directory, then `setpriv` continues as user `atlas` (uid 10001) |
 | [`fly.toml`](../fly.toml) | App name, primary region, and Dockerfile. No HTTP service, no `services` table, no process group |
 | [`docker-entrypoint.sh`](docker-entrypoint.sh) | Writes the event file, runs `python -m atlas_reviewer`, and with `ATLAS_HOLD_SECONDS` set keeps the Machine up after the CLI exits |
 | [`.dockerignore`](../.dockerignore) | Keeps the build context to the files the image copies, and keeps `.env`, `*.env`, `secrets.env`, and `*.pem` out of it |
