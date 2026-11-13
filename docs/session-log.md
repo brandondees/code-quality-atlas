@@ -1266,7 +1266,7 @@ The agentic coordinator was requesting changes only for a Blocker, so
 verified Majors on the #639, #640 and #642 runs came out as
 `COMMENT`. A verified introduced Major or Blocker is now
 `REQUEST_CHANGES`. A Minor stays `COMMENT`. Nits, and a review with no
-verdict-setting finding, still approve. D46 records that
+verdict-setting finding, still approve. D55 records that
 `synthesis.md`, `templates/REVIEW.md` and the PR-review runbook still
 describe a Blocker as what requests changes on the human-posted review.
 

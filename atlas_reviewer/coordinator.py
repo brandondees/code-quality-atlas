@@ -7,7 +7,7 @@ up to the configured pool, then gives each lens a continuation of its
 own for the files it left unread while a call and the review clock
 remain. The synthesis is mechanical: the controller mints
 `L<lens>-F<n>` IDs, ranks the verified findings by severity and sets
-the verdict from them (D46). An introduced Major or Blocker requests
+the verdict from them (D55). An introduced Major or Blocker requests
 changes. An introduced Minor means approve with changes. Only nits, or
 nothing, means approve. There is no model merge call yet.
 
@@ -287,7 +287,7 @@ def rank(findings: Sequence[MintedFinding]) -> tuple[MintedFinding, ...]:
 
 def decide(findings: Sequence[MintedFinding]) -> Verdict:
     """From the verified verdict-setting findings: only an introduced
-    defect sets the verdict. A Major or a Blocker requests changes (D46)."""
+    defect sets the verdict. A Major or a Blocker requests changes (D55)."""
     setting = [
         f.finding.severity for f in findings if f.verified and f.finding.sets_verdict
     ]
