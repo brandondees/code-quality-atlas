@@ -71,17 +71,15 @@ refuses to listen without the webhook secret, the three `ATLAS_GITHUB_APP_*`
 values and `ATLAS_GITHUB_INSTALLATION_ID`, and, for the default `openrouter`
 provider, `ATLAS_ALLOW_LIVE_INFERENCE=1`.
 
-The child also receives the model and limit settings when they are set
-on the Machine. They are not secrets, and they do not belong in
-`service.env`. `ATLAS_MODEL` selects the model. `ATLAS_PROVIDERS` is the
-provider list. `ATLAS_ALLOW_SAFETY_RETENTION` is the Safety Retention
-opt-in. The limit settings are `ATLAS_RESERVATION_USD`, `ATLAS_MAX_CALLS`,
-`ATLAS_MAX_TURNS`, `ATLAS_LENS_WALL_S`, `ATLAS_REVIEW_WALL_S`,
-`ATLAS_MAX_INPUT_TOKENS`, `ATLAS_MAX_OUTPUT_TOKENS`, and
-`ATLAS_REASONING_MAX_TOKENS`. Unset, the child keeps the defaults. The
-only GitHub credential the child receives is still the read-only
-installation token the parent minted. The App private key, the webhook
-secret, and `FLY_API_TOKEN` stay in the parent.
+The child also receives the model settings when they are set on the
+Machine. They are not secrets, and they do not belong in `service.env`.
+`ATLAS_MODEL` selects the model. `ATLAS_PROVIDERS` is the provider list.
+`ATLAS_ALLOW_SAFETY_RETENTION` opts into provider retention. The child is
+the one-shot `review` command. It does not read the agentic limit
+variables, and D25's ceilings apply: 3 calls, $3, and 200,000 input
+tokens. The only GitHub credential the child receives is still the
+read-only installation token the parent minted. The App private key, the
+webhook secret, and `FLY_API_TOKEN` stay in the parent.
 
 The App needs Pull requests set to read and write. The service's posting
 token asks for `pull_requests: write` and no other write. The operator CLI
@@ -210,25 +208,22 @@ review writes its ledger under `/data/runs/<repo>-<pr>-<sha>/state/`, and
 that directory is removed when the job ends, so the plain sweep finds
 nothing.
 
-The Sprite name is derived from the event:
-`cqa-rev-pr<number>-<first 12 hex of the head>-<8 hex>`. Every review
-Sprite starts with `cqa-rev-`. Sweep each leftover with `--event` of the
-event file copied off the Machine before that run directory was removed,
-or with `--runner` and that name, from a machine that holds
-`ATLAS_SPRITES_TOKEN`. The sweep prints `verified absent` for each name.
-`NOT verified` means that Sprite is still billable. Run that name again.
-Destroy the app only after those lines say verified absent.
+The Sprite name is `cqa-rev-pr<number>-<first 12 hex of the head>-<8 hex>`.
+Every review Sprite starts with `cqa-rev-`. Sweep each leftover with
+`--runner` and that name, from a machine that holds
+`ATLAS_SPRITES_TOKEN`. The run directory is removed when the job ends, so
+this teardown does not copy an event file and does not use `--event`. The
+sweep prints `verified absent` for each name. `NOT verified` means that
+Sprite is still billable. Run that name again. Destroy the app only after
+those lines say verified absent.
 
 ```sh
 flyp machine stop <id> --app "$APP" --signal SIGINT --timeout 120
-
-python -m atlas_reviewer sweep --event "$EVENT" --force-live
 
 python -m atlas_reviewer sweep --runner "$RUNNER" --force-live
 
 flyp apps destroy "$APP" --yes
 ```
 
-`$EVENT` is the copied event file. `$RUNNER` is the `cqa-rev-` name. One
-leftover uses one of the two sweep commands. The destroy deletes the
-app's volumes. It does not destroy the one-off app `atlas-reviewer`.
+`$RUNNER` is the `cqa-rev-` name. The destroy deletes the app's volumes.
+It does not destroy the one-off app `atlas-reviewer`.

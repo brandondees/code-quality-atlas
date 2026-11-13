@@ -118,7 +118,7 @@ def test_the_child_process_starts_without_the_app_key(tmp_path):
     assert "FLY_API_TOKEN" not in child
 
 
-def test_the_child_receives_the_model_and_limits_and_nothing_unlisted():
+def test_the_child_receives_the_model_settings_and_not_the_limit_variables():
     from atlas_reviewer.agentic_config import ENV as LIMIT_ENV
 
     parent = {
@@ -143,9 +143,8 @@ def test_the_child_receives_the_model_and_limits_and_nothing_unlisted():
     assert env["ATLAS_MODEL"] == "anthropic/claude-sonnet-5.5"
     assert env["ATLAS_PROVIDERS"] == "amazon-bedrock"
     assert env["ATLAS_ALLOW_SAFETY_RETENTION"] == "true"
-    assert env["ATLAS_MAX_CALLS"] == "4"
     for name in LIMIT_ENV.values():
-        assert env[name] == parent[name]
+        assert name not in env
     assert "ATLAS_NOT_A_CHILD_SETTING" not in env
     assert "FLY_API_TOKEN" not in env
     assert APP_KEY_ENV not in env

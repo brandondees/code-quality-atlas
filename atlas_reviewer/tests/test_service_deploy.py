@@ -84,25 +84,29 @@ def test_the_org_and_the_single_machine_flag_are_on_the_commands():
 
 
 def test_the_runbook_names_the_child_model_settings_outside_the_secret_file():
+    from atlas_reviewer.agentic_config import ENV as LIMIT_ENV
+
     secret = RUNBOOK.split("```text", 1)[1].split("```", 1)[0]
-    for name in (
-        "ATLAS_MODEL",
-        "ATLAS_PROVIDERS",
-        "ATLAS_ALLOW_SAFETY_RETENTION",
-        "ATLAS_MAX_CALLS",
-        "ATLAS_MAX_TURNS",
-        "ATLAS_MAX_INPUT_TOKENS",
-        "ATLAS_MAX_OUTPUT_TOKENS",
-        "ATLAS_REASONING_MAX_TOKENS",
-        "ATLAS_RESERVATION_USD",
-        "ATLAS_LENS_WALL_S",
-        "ATLAS_REVIEW_WALL_S",
-    ):
+    flat = " ".join(RUNBOOK.split())
+    for name in ("ATLAS_MODEL", "ATLAS_PROVIDERS", "ATLAS_ALLOW_SAFETY_RETENTION"):
         assert name in RUNBOOK
         assert name not in secret
-    flat = " ".join(RUNBOOK.split())
-    assert "They are not secrets" in flat
+    for name in LIMIT_ENV.values():
+        assert name not in RUNBOOK
+    assert "opts into provider retention" in flat
+    assert "D25's ceilings apply: 3 calls, $3, and 200,000 input tokens" in flat
     assert "read-only installation token" in flat
+    webhook = (
+        (ROOT / "atlas_reviewer/README.md")
+        .read_text(encoding="utf-8")
+        .split("## Webhook service", 1)[1]
+        .split("\n## ", 1)[0]
+    )
+    webhook_flat = " ".join(webhook.split())
+    assert "ATLAS_MODEL" in webhook_flat
+    assert "D25's ceilings apply: 3 calls, $3, and 200,000 input tokens" in webhook_flat
+    for name in LIMIT_ENV.values():
+        assert name not in webhook_flat
 
 
 def test_the_runbook_names_the_secret_the_org_and_the_webhook():
@@ -227,38 +231,40 @@ def test_d53_counts_every_active_job_state():
 def test_teardown_disables_the_webhook_before_it_sweeps():
     """A sweep that runs while the webhook is still delivering can miss
     a Sprite a queued job creates afterwards. A plain sweep reads a
-    ledger the service never writes."""
-    prose = RUNBOOK
-    commands = _fenced(RUNBOOK)
-    assert prose.index("Disable the GitHub App webhook") < prose.index(
-        "flyp machine stop"
+    ledger the service never writes. Each marker has to stay in this
+    order. Moving one step earlier still fails."""
+    teardown = RUNBOOK.split("## Tear down", 1)[1]
+    markers = (
+        "Disable the GitHub App webhook",
+        "Stop the Machine only after that",
+        "does not write `/data/runners.ledger`",
+        "Sweep each leftover with",
+        "does not use `--event`",
+        "prints `verified absent`",
+        'flyp machine stop <id> --app "$APP" --signal SIGINT --timeout 120',
+        'python -m atlas_reviewer sweep --runner "$RUNNER" --force-live',
+        'flyp apps destroy "$APP" --yes',
     )
-    lines = [line.strip() for line in commands.splitlines() if line.strip()]
-    stop = next(
-        i for i, line in enumerate(lines) if line.startswith("flyp machine stop")
-    )
-    sweeps = [i for i, line in enumerate(lines) if "atlas_reviewer sweep" in line]
-    destroy = next(i for i, line in enumerate(lines) if "apps destroy" in line)
-    assert sweeps
-    assert stop < min(sweeps) < destroy
-    assert all("--event" in lines[i] or "--runner" in lines[i] for i in sweeps)
-    assert "sweep --event" in lines[sweeps[0]]
-    assert "sweep --runner" in lines[sweeps[1]]
-    assert "--timeout 120" in lines[stop]
-    assert "python -m atlas_reviewer sweep\n" not in commands
-    assert "/data/runners.ledger" in prose
-    assert "cqa-rev-" in prose
+    positions = [teardown.index(marker) for marker in markers]
+    assert positions == sorted(positions)
+    assert len(set(positions)) == len(positions)
+    assert "sweep --event" not in teardown
+    assert "copied off the Machine" not in teardown
 
 
 def test_the_kill_timeout_covers_sprite_cleanup():
     import inspect
 
     from atlas_reviewer.runner import CLEANUP_BUDGET_S
+    from atlas_reviewer.service import Worker
     from atlas_reviewer.service_run import CLEANUP_WAIT_S
     from atlas_reviewer.sprites_api import SpritesClient
 
     window = inspect.signature(SpritesClient.__init__).parameters["timeout_s"].default
     assert CLEANUP_WAIT_S >= CLEANUP_BUDGET_S + window
+    assert (
+        inspect.signature(Worker.stop).parameters["timeout"].default == CLEANUP_WAIT_S
+    )
     number = SERVICE["kill_timeout"]
     assert number.endswith("s")
     assert int(number[:-1]) >= CLEANUP_WAIT_S

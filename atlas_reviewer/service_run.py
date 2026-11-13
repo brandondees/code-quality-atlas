@@ -3,10 +3,12 @@
 
 The child is ``python -m atlas_reviewer review``. It receives an allowlist
 of environment variables: the model key, the Sprites token, a read-only
-installation token, the model and limit settings, and the process basics
-(``PATH``, ``HOME``, language and CA paths). The webhook secret, the App
-private key, and anything else the parent holds, including a Fly API
-token, are not passed on. When the queue cancels the job, or the
+installation token, ``ATLAS_MODEL``, ``ATLAS_PROVIDERS``,
+``ATLAS_ALLOW_SAFETY_RETENTION``, and the process basics (``PATH``,
+``HOME``, language and CA paths). The agentic limit variables are not
+passed. This command is the one-shot review, and D25's ceilings stay.
+The webhook secret, the App private key, and anything else the parent
+holds, including a Fly API token, are not passed on. When the queue cancels the job, or the
 wall-clock deadline passes, the child is signalled SIGTERM, which the CLI
 turns into the stop that deletes its Sprite. The parent waits out the
 Sprite cleanup budget plus one Sprites call before SIGKILL, and the
@@ -31,7 +33,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from atlas_reviewer.agentic_config import ENV as LIMIT_ENV
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.openrouter import (
@@ -72,7 +73,6 @@ _CHILD_ALLOWED = frozenset(
         ENV_MODEL,
         ENV_PROVIDERS,
         ENV_ALLOW_SAFETY_RETENTION,
-        *LIMIT_ENV.values(),
     }
 )
 # The parent stops the child after this long even if the child is still

@@ -76,8 +76,12 @@ The review itself is the existing `review` command, one at a time unless
 so a bad value cannot start an unbounded pool, not a cost cap). The child
 process receives only an allowlist: the OpenRouter key, because it calls
 the model, the Sprites token, because it creates and destroys the Sprite,
-a read-only installation token, and the process basics. It does not receive
-the webhook secret, the App private key, or a Fly API token. Exit 0, 4 and 5 are finished
+a read-only installation token, `ATLAS_MODEL`, `ATLAS_PROVIDERS`,
+`ATLAS_ALLOW_SAFETY_RETENTION`, and the process basics. It does not
+receive the agentic limit variables. This child is the one-shot `review`
+command, so D25's ceilings apply: 3 calls, $3, and 200,000 input tokens.
+It does not receive the webhook secret, the App private key, or a Fly API
+token. Exit 0, 4 and 5 are finished
 reviews and are posted. Any other exit posts nothing; the failure is a
 telemetry event.
 
