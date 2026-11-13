@@ -147,6 +147,28 @@ def test_a_call_after_a_byok_refusal_elsewhere_in_the_review_is_not_sent():
     assert spend.calls == 0
 
 
+def test_a_halt_while_the_call_is_priced_stops_the_call():
+    """Pricing can wait on the catalog. A lens that halts the review in
+    that wait stops this lens's call before it is reserved or sent."""
+    spend = Spend(LIMITS.resolve())
+
+    class Model(ScriptedLensModel):
+        def worst_case_usd(self, request):
+            spend.halt()
+            return Decimal("0.01")
+
+    model = Model([final()])
+    clock = FakeClock()
+    outcome = run_attempt(
+        job(), object(), model, spend, clock,
+        review_deadline=clock.monotonic() + 600,
+        review_started=clock.monotonic(),
+    )  # fmt: skip
+    assert Cause.MODEL_ERROR in outcome.causes
+    assert model.requests == []
+    assert spend.calls == 0
+
+
 def test_concurrent_reservations_never_pass_the_call_cap():
     """Pooled lenses reserve at once. A worst case whose addition is slow
     holds each thread between the cap check and the count; only the lock

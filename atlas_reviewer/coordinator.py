@@ -44,6 +44,7 @@ import secrets
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
+from decimal import Decimal
 from enum import StrEnum
 from typing import Any, cast
 
@@ -109,6 +110,7 @@ MAX_CONTINUATIONS = 4
 HALTED_REASON = (
     "not started: an earlier call in this review stopped it (BYOK or a failed lens)"
 )
+LATE_REASON = "not started: the review deadline had passed"
 
 # ----------------------------------------------------------------- results
 
@@ -411,13 +413,16 @@ def review_lenses(
     contract: str | None = None,
     task_socket: str = SOCKET_PATH,
     model_for: Callable[[], LensModel] | None = None,
+    picker_spend: tuple[int, Decimal] = (0, Decimal(0)),
     trace: ReviewTrace | None = None,
 ) -> AgenticReview:
     """Run every named lens, up to `pool_size` at once, then one combined
     verdict. Each lens gets its own runner name. A changed file a lens
     left unread is handed back to that same lens as a continuation, for up
     to `MAX_CONTINUATIONS` rounds, while a call and the review clock remain.
-    Partial coverage still cannot approve.
+    Partial coverage still cannot approve. `picker_spend` is the calls and
+    dollars the lens picker already committed; they count toward this
+    review's `max_calls` and `reservation_usd`.
 
     One review span covers every lens, and each lens run, pooled or a
     continuation, is a lens span under it. Spans are recorded as
@@ -449,6 +454,7 @@ def review_lenses(
             task_socket=task_socket,
             model_for=model_for,
             resolved=resolved,
+            picker_spend=picker_spend,
         ),
     )
 
@@ -476,9 +482,10 @@ def _review_lenses(
     task_socket: str,
     model_for: Callable[[], LensModel] | None,
     resolved: Limits,
+    picker_spend: tuple[int, Decimal],
 ) -> AgenticReview:
     changed = frozenset(f.path for f in split_files(diff))
-    spend = Spend(resolved)
+    spend = Spend(resolved, *picker_spend)
     started = clock.monotonic()
     deadline = started + resolved.review_wall_s
     runs: list[_LensRun] = []
@@ -489,6 +496,11 @@ def _review_lenses(
                 lens, index, None, None, reason=HALTED_REASON, scope=assigned
             )
             return _LensRun(halted, [], None, spend, ())
+        if clock.monotonic() >= deadline:
+            late = LensResult(
+                lens, index, None, None, reason=LATE_REASON, scope=assigned
+            )
+            return _LensRun(late, [], None, spend, ())
         try:
             return _run_lens(lens, assigned, index)
         except BaseException:
@@ -749,7 +761,8 @@ def _review_one(
     report = run_bridge(
         sprites, runner_ledger, trees, in_session,
         redactor=scrubber, changed=scope, name=name,
-        deadline_s=resolved.review_wall_s, clock=clock, telemetry=telemetry,
+        deadline_s=max(deadline - clock.monotonic(), 0.0), clock=clock,
+        telemetry=telemetry,
         root=bridge_root,
     )  # fmt: skip
     result = _result(key, ledger.attempts(key), resolved, scrub(report.note), index)
@@ -1082,6 +1095,8 @@ def _lens_gap(review: AgenticReview) -> str:
     The one coverage rule: `coverage_complete`, the headline and the
     unread list all read it. A clean outcome can still lack coverage:
     unread paths, or no changed-file count from before the per-file gate."""
+    if review.not_picked:
+        return "a picked lens did not run"
     if not review.lenses:
         return "no lens selected"
     if _unread_paths(review):

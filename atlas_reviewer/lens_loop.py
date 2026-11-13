@@ -514,6 +514,11 @@ def _valid_cost(value: Any) -> bool:
 
 # ------------------------------------------------------------- the attempt
 
+HALTED_CALL = (
+    "the review stopped before this call: the key refused BYOK spend "
+    "or another lens failed"
+)
+
 GAP_STATUSES = frozenset(
     {Status.TIMED_OUT, Status.UNAVAILABLE, Status.OVER_SESSION_LIMIT}
 )
@@ -661,23 +666,10 @@ def run_attempt(
         if stopped is not None:
             return stopped
         request = TurnRequest(system, tuple(messages), tools)
-        if spend.halted:
-            return p.cut(
-                Cause.MODEL_ERROR,
-                "the review stopped before this call: the key refused BYOK spend "
-                "or another lens failed",
-            )
-        try:
-            worst = model.worst_case_usd(request)
-        except LimitRefused as exc:
-            return p.cut(*_stopped(exc.hit))
-        except BoundaryError as exc:
-            return p.cut(Cause.MODEL_ERROR, str(exc))
-        if not _valid_cost(worst):
-            return p.cut(Cause.MODEL_ERROR, "the model's worst-case cost is not a cost")
-        refused = spend.reserve(worst)
-        if refused is not None:
-            return p.cut(*_stopped(refused))
+        priced = _reserve_call(model, request, spend)
+        if not isinstance(priced, Decimal):
+            return p.cut(*priced)
+        worst = priced
         try:
             reply = model.turn(request)
         except LimitRefused as exc:
@@ -706,6 +698,29 @@ def run_attempt(
             found = hit("review_wall_s", limits.review_wall_s, f"{elapsed:.3f}s")
             return p.cut(_cause_for(found), f"{found.message()} ({exc})", found)
         messages += [AssistantCalls(reply.calls), ToolResults(results)]
+
+
+def _reserve_call(
+    model: LensModel, request: TurnRequest, spend: Spend
+) -> Decimal | tuple[Cause, str] | tuple[Cause, str, LimitHit]:
+    """The call's reserved worst case, or why it is not sent."""
+    if spend.halted:
+        return Cause.MODEL_ERROR, HALTED_CALL
+    try:
+        worst = model.worst_case_usd(request)
+    except LimitRefused as exc:
+        return _stopped(exc.hit)
+    except BoundaryError as exc:
+        return Cause.MODEL_ERROR, str(exc)
+    # The estimate can wait on the catalog while another lens halts.
+    if spend.halted:
+        return Cause.MODEL_ERROR, HALTED_CALL
+    if not _valid_cost(worst):
+        return Cause.MODEL_ERROR, "the model's worst-case cost is not a cost"
+    refused = spend.reserve(worst)
+    if refused is not None:
+        return _stopped(refused)
+    return worst
 
 
 def _time_up(

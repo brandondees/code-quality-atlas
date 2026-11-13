@@ -24,6 +24,7 @@ from atlas_reviewer.bridge import BridgeSecret
 from atlas_reviewer.bridge_staging import SourceTrees
 from atlas_reviewer.coordinator import (
     HALTED_REASON,
+    LATE_REASON,
     LensResult,
     Verdict,
     _blocks_coverage,
@@ -807,7 +808,10 @@ def _acknowledge(request):
     return final(lens=match.group(1), digest=match.group(2))
 
 
-def _lenses(tmp_path, names, model, *, pool=1, models=None, limits=None, sprites=None):
+def _lenses(
+    tmp_path, names, model, *, pool=1, models=None, limits=None, sprites=None,
+    clock=None, picker_spend=(0, Decimal(0)),
+):  # fmt: skip
     from .test_keepalive import TaskServer, socket_path
 
     tasks = TaskServer(socket_path(tmp_path))
@@ -833,11 +837,12 @@ def _lenses(tmp_path, names, model, *, pool=1, models=None, limits=None, sprites
             sprites=sprites,
             runner_ledger=MemoryLedger(),
             redactor=Redactor(),
-            clock=FakeClock(),
+            clock=clock or FakeClock(),
             nonce=lambda: "f00dfeedf00dfeed",
             bridge_root=str(tmp_path / "bridge"),
             task_socket=str(tasks.path),
             model_for=model_for if models is not None else None,
+            picker_spend=picker_spend,
         )
     finally:
         tasks.close()
@@ -1025,6 +1030,98 @@ def test_a_sibling_lens_failure_still_deletes_every_runner(tmp_path):
     deleted = [call[1] for call in sprites.calls if call[0] == "delete"]
     assert len(set(created)) == 2
     assert set(created) <= set(deleted)
+
+
+def _clean_pair():
+    return [
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+    ]
+
+
+def test_a_picked_lens_that_did_not_run_blocks_approval(tmp_path):
+    models = _clean_pair()
+    result, _ = _lenses(tmp_path, [LENS, OTHER], models[0], models=models)
+    assert result.coverage_complete and result.event is ReviewEvent.APPROVE
+    missing = replace(result, not_picked=(("made-up-lens", "no body.md"),))
+    assert not missing.coverage_complete
+    assert missing.event is ReviewEvent.COMMENT
+    assert "a picked lens did not run" in render_draft(missing, Redactor())
+
+
+def test_a_lens_queued_past_the_review_deadline_does_not_start(tmp_path, monkeypatch):
+    from atlas_reviewer import coordinator
+
+    clock = FakeClock()
+    real = coordinator.run_bridge
+
+    def then_late(*args, **kwargs):
+        report = real(*args, **kwargs)
+        clock.advance(LIMITS.review_wall_s + 1)
+        return report
+
+    monkeypatch.setattr(coordinator, "run_bridge", then_late)
+    models = _clean_pair()
+    result, sprites = _lenses(
+        tmp_path, [LENS, OTHER], models[0], models=models, clock=clock
+    )
+    assert [(r.lens, r.reason) for r in result.lenses if r.lens == OTHER] == [
+        (OTHER, LATE_REASON)
+    ]
+    assert models[1].requests == []
+    assert len([c for c in sprites.calls if c[0] == "create"]) == 1
+    assert not result.coverage_complete
+
+
+def test_a_queued_lens_runner_gets_only_the_review_time_left(tmp_path, monkeypatch):
+    from atlas_reviewer import coordinator
+
+    given = []
+    real = coordinator.run_bridge
+
+    def spy(*args, deadline_s, **kwargs):
+        given.append(deadline_s)
+        return real(*args, deadline_s=deadline_s, **kwargs)
+
+    monkeypatch.setattr(coordinator, "run_bridge", spy)
+    clock = FakeClock()
+
+    def slow(request):
+        clock.advance(100)
+        return READ_ALL
+
+    models = [
+        ScriptedLensModel([slow, _acknowledge]),
+        ScriptedLensModel([READ_ALL, _acknowledge]),
+    ]
+    _lenses(tmp_path, [LENS, OTHER], models[0], models=models, clock=clock)
+    assert given[:2] == [LIMITS.review_wall_s, LIMITS.review_wall_s - 100]
+
+
+def test_the_picker_calls_count_toward_the_review_spend(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    models = _clean_pair()
+    base, _ = _lenses(tmp_path / "a", [LENS, OTHER], models[0], models=models)
+    models = _clean_pair()
+    picked, _ = _lenses(
+        tmp_path / "b", [LENS, OTHER], models[0], models=models,
+        picker_spend=(1, Decimal("0.25")),
+    )  # fmt: skip
+    assert picked.model_calls == base.model_calls + 1
+    assert Decimal(picked.committed_usd) == Decimal(base.committed_usd) + Decimal(
+        "0.25"
+    )
+
+
+def test_a_picker_that_used_every_call_leaves_none_for_the_lenses(tmp_path):
+    model = ScriptedLensModel([READ_ALL, _acknowledge])
+    result, _ = _lenses(
+        tmp_path, [LENS], model, picker_spend=(LIMITS.max_calls, Decimal(0))
+    )
+    assert model.requests == []
+    assert result.model_calls == LIMITS.max_calls
+    assert not result.coverage_complete
 
 
 def test_the_continuation_rounds_stop_at_max_continuations(tmp_path, monkeypatch):
