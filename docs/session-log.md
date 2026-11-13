@@ -1111,9 +1111,9 @@ unmet in the current reviewer, so the gate fails closed. The plan is
 D45 recommends self-hosted Phoenix on Fly in org `personal` and does not
 provision it. The scorer and the reference rows are offline fixtures;
 nothing in this change calls a model or writes to GitHub. The hosting
-decision is D45. D44 is reserved for #646. #639 records D48 and
-#640 records D46; neither is on main. A
-reference row's `metadata.run` records `coordinator-verified` when the
+decision is D45. D44 is reserved for #646. #639 records D48 and #640
+records D46; neither is on main. A reference row's `metadata.run`
+records `coordinator-verified` when the
 round says fan-out did not finish. That field is information and does
 not itself fail the gate. `--gate` also fails when any reference row has
 no candidate, when `--head` has no passing pair, or when no passing pair
