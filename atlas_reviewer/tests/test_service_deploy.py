@@ -47,6 +47,8 @@ def test_the_service_app_stays_up_and_the_one_off_publishes_nothing():
     assert "http_service" not in ONE_OFF
     assert "services" not in ONE_OFF
     assert ONE_OFF["app"] == "atlas-reviewer"
+    assert SERVICE["kill_signal"] == "SIGINT"
+    assert SERVICE["kill_timeout"] == "30s"
 
 
 def _fenced(text: str) -> str:
@@ -74,6 +76,9 @@ def test_the_org_and_the_single_machine_flag_are_on_the_commands():
     assert 'flyp apps create "$APP" --org "$ORG"' in commands
     deploys = [line.strip() for line in commands.splitlines() if "flyp deploy" in line]
     assert deploys == ['flyp deploy -c fly.service.toml --app "$APP" --ha=false']
+    assert 'flyp ssh console --app "$APP" -C "tail -n 200 /data/service.jsonl"' in commands
+    assert 'flyp machine restart <id> --app "$APP"' in commands
+    assert "ATLAS_GITHUB_APP_SLUG=" in commands
 
 
 def test_the_runbook_names_the_secret_the_org_and_the_webhook():
@@ -92,7 +97,8 @@ def test_the_runbook_names_the_secret_the_org_and_the_webhook():
         "auto_stop_machines",
         "$6.70",
         "atlas_reviewer_state",
-        "chown 10001:10001 /data",
+        "chowns that directory to uid 10001",
+        "leave `app` in `fly.service.toml` unchanged",
         "deletes the app's volumes",
         "Do not `fly deploy` it for the webhook",
     ):
@@ -120,6 +126,64 @@ def test_serve_runs_the_service_module_and_not_the_one_off_cli(tmp_path):
     ]
 
 
+def test_the_entrypoint_chowns_the_volume_before_dropping_root(tmp_path):
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    recorded = tmp_path / "argv"
+    chowned = tmp_path / "chown"
+    dropped = tmp_path / "setpriv"
+
+    def write(name: str, body: str) -> None:
+        path = bindir / name
+        path.write_text(body, encoding="utf-8")
+        path.chmod(path.stat().st_mode | stat.S_IEXEC)
+
+    write("id", "#!/bin/sh\necho 0\n")
+    write("chown", '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$CHOWN"\n')
+    write(
+        "setpriv",
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$SETPRIV\"\n"
+        'shift 4\nPATH="${PATH#*:}"\nexec "$@"\n',
+    )
+    pybin = tmp_path / "pybin"
+    pybin.mkdir()
+    python = pybin / "python"
+    python.write_text('#!/bin/sh\nprintf \'%s\\n\' "$@" > "$RECORD"\n', encoding="utf-8")
+    python.chmod(python.stat().st_mode | stat.S_IEXEC)
+    env = os.environ.copy()
+    env["PATH"] = f"{bindir}{os.pathsep}{pybin}{os.pathsep}{env.get('PATH', '')}"
+    env["RECORD"] = str(recorded)
+    env["CHOWN"] = str(chowned)
+    env["SETPRIV"] = str(dropped)
+    state = tmp_path / "data"
+    env["ATLAS_REVIEWER_STATE_DIR"] = str(state)
+    subprocess.run(["sh", str(ENTRYPOINT), "serve"], check=True, env=env)
+    assert chowned.read_text(encoding="utf-8").splitlines() == [
+        "10001:10001",
+        str(state),
+    ]
+    assert "--reuid=10001" in dropped.read_text(encoding="utf-8")
+    assert recorded.read_text(encoding="utf-8").splitlines()[:2] == [
+        "-m",
+        "atlas_reviewer.service",
+    ]
+
+
+def test_serve_exits_2_when_the_state_dir_is_not_writable(tmp_path):
+    from atlas_reviewer.service import serve
+
+    blocked = tmp_path / "blocked"
+    blocked.write_text("not a directory", encoding="utf-8")
+    env = {
+        "ATLAS_GITHUB_WEBHOOK_SECRET": "x" * 16,
+        "ATLAS_SERVICE_PROVIDER": "offline",
+        "ATLAS_REVIEWER_STATE_DIR": str(blocked),
+    }
+    lines: list[str] = []
+    assert serve(config_from_env(env), env, log=lines.append) == 2
+    assert any("not writable" in line for line in lines)
+
+
 def test_the_real_module_exits_2_when_no_atlas_env_is_set():
     """Runs the real module, not a stub interpreter. Without the
     ``__main__`` guard, ``python -m atlas_reviewer.service`` exits 0 and
@@ -138,20 +202,22 @@ def test_the_real_module_exits_2_when_no_atlas_env_is_set():
     assert b"webhook secret" in proc.stderr
 
 
-def test_d44_counts_every_active_job_state():
+def test_d49_counts_every_active_job_state():
     text = (ROOT / "docs/open-questions.md").read_text(encoding="utf-8")
-    start = text.index("- **D44")
-    entry = text[start:].split("\n- **D", 1)[0]
+    start = text.index("- **D49")
+    entry = text[start:].splitlines()[0]
     runbook = (ROOT / "atlas_reviewer/deploy-service.md").read_text(encoding="utf-8")
     plan = (ROOT / "docs/plans/2026-11-12-webhook-service-mode.md").read_text(
         encoding="utf-8"
     )
+    states = "(`queued`, `running`, `post_pending`, `posting`)"
     for document in (entry, runbook, plan):
-        assert "post_pending" in document
-        assert "posting" in document
+        assert states in document
         assert "already queued or running" not in document
         assert "2,000 plus those superseded jobs" in document
         assert "at most the worker concurrency" in document
+    assert "**Reversibility.**" in entry
+    assert "entrypoint chowns" in entry
 
 
 def test_the_fly_host_is_what_config_from_env_binds():

@@ -4,6 +4,10 @@
 
 app = "atlas-reviewer-service"
 primary_region = "iad"
+# serve drains workers for up to 30s. The platform default can cut that
+# short and leave a Sprite behind.
+kill_signal = "SIGINT"
+kill_timeout = "30s"
 
 [build]
   dockerfile = "Dockerfile"

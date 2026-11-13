@@ -3,7 +3,7 @@
 One always-on Machine receives GitHub App webhooks and posts one COMMENT
 review per commit. This is a second app from the one-off controller in
 [`deploy-fly.md`](deploy-fly.md). That app stays without a public service
-and without a standing Machine. Decision: D44 in
+and without a standing Machine. Decision: D49 in
 [`docs/open-questions.md`](../docs/open-questions.md).
 
 Nothing in this repository creates the app, sets a secret, or turns on the
@@ -56,6 +56,7 @@ file. Put them in a file outside the repo, mode 0600:
 ATLAS_GITHUB_APP_ID=
 ATLAS_GITHUB_APP_PRIVATE_KEY=
 ATLAS_GITHUB_INSTALLATION_ID=
+ATLAS_GITHUB_APP_SLUG=
 ATLAS_GITHUB_WEBHOOK_SECRET=
 ATLAS_SPRITES_TOKEN=
 ATLAS_OPENROUTER_API_KEY=
@@ -105,18 +106,12 @@ Start it with `flyp machine start <id> --app "$APP"`.
 `initial_size` makes `fly deploy` create the volume `atlas_reviewer_state`
 in `iad` when one does not exist yet (Fly's configuration reference,
 `mounts.initial_size`, read 2026-11-12). It is mounted at `/data`, which
-is `ATLAS_REVIEWER_STATE_DIR`. The process runs as uid 10001. A new volume
-is owned by root, so the service exits 2 and the health check fails until
-that directory is writable. From `flyp machine list --app "$APP"`, take
-the Machine id and run:
+is `ATLAS_REVIEWER_STATE_DIR`. The image starts as root. The entrypoint
+chowns that directory to uid 10001 and continues as that user, so a fresh
+root-owned volume does not need a manual chown. `kill_signal` is `SIGINT`
+and `kill_timeout` is `30s`, which covers the worker drain.
 
-```sh
-flyp ssh console --app "$APP" -C "chown 10001:10001 /data"
-flyp machine restart <id> --app "$APP"
-```
-
-The restart is only needed when the first deploy started the process
-before the chown. After that, restarts keep the queue and the post
+After that, restarts keep the queue and the post
 ledger. The queue refuses a new job when 2,000 active jobs (`queued`, `running`, `post_pending`, `posting`) belong to other pull requests. A newer head of a pull request that already has an active job takes that slot. Replacing a job that is still `running` or `posting` can leave the count at 2,000 plus those superseded jobs, and that extra is at most the worker concurrency. The dedupe list keeps every pull request's current head, so it
 can grow past 20,000 by one key per pull request. A run directory is
 removed when its job ends. A key is about 80 bytes. The 1 GB volume
@@ -132,6 +127,16 @@ Confirm the process without printing the environment:
 ```sh
 flyp status --app "$APP"
 flyp checks list --app "$APP"
+flyp logs --app "$APP"
+flyp ssh console --app "$APP" -C "tail -n 200 /data/service.jsonl"
+```
+
+If `flyp checks list` shows `/health` critical while the Machine is
+started, restart it and read the log. A 503 there means a worker died or
+the queue could not be saved, and GitHub will not redeliver the webhook:
+
+```sh
+flyp machine restart <id> --app "$APP"
 flyp logs --app "$APP"
 ```
 

@@ -8,6 +8,16 @@
 # resets its root filesystem, and starting it again reruns this command.
 set -eu
 umask 077
+# A fresh Fly volume is owned by root. The image starts as root so this
+# can chown the state directory, then the process continues as uid 10001.
+if [ "$(id -u)" -eq 0 ]; then
+  state="${ATLAS_REVIEWER_STATE_DIR:-}"
+  if [ -n "$state" ]; then
+    mkdir -p "$state"
+    chown 10001:10001 "$state"
+  fi
+  exec setpriv --reuid=10001 --regid=10001 --init-groups --inh-caps=-all "$0" "$@"
+fi
 # The one-off review path falls through. `serve` is the webhook process
 # on the service app (fly.service.toml); it does not use an event file.
 if [ "${1:-}" = "serve" ]; then

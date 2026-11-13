@@ -28,7 +28,8 @@ COPY skills/choosing-review-lenses/SKILL.md /opt/atlas/skills/choosing-review-le
 COPY atlas_reviewer/docker-entrypoint.sh /usr/local/bin/atlas-reviewer
 RUN chmod 755 /usr/local/bin/atlas-reviewer
 
-USER atlas
+# Root only long enough for the entrypoint to chown the state volume.
+# The entrypoint then continues as uid 10001.
 WORKDIR /home/atlas
 
 ENTRYPOINT ["/usr/local/bin/atlas-reviewer"]

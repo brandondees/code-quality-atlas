@@ -100,7 +100,7 @@ does not post reviews a model never ran. `ATLAS_SERVICE_PROVIDER=offline`
 is the explicit no-model setting. The deploy shape is a second Fly app,
 [`fly.service.toml`](../fly.service.toml), always on, in org `personal`.
 The one-off `fly.toml` above is unchanged. Commands:
-[`deploy-service.md`](deploy-service.md). D44.
+[`deploy-service.md`](deploy-service.md). D49.
 
 ## Run it offline (no credentials)
 

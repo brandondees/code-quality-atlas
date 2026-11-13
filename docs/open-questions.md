@@ -242,7 +242,7 @@ decision. The one-shot 200,000 input cap is unchanged.
 
 **Update (2026-11-10) — D35-D37.** D35 makes a lens run whole or NOT RUN, and skips the picker call when no further lens could fit; with today's bodies every depth runs 2 of 4 critical lenses. D36 makes partial file coverage non-approving, and `review` exits 4. D37 adds the Fly one-off deploy config for the same controller: no public service, no standing Machine, one operator-started Machine per review, held until the operator copies the draft off and destroys it. This repository does not create the app. One operator deploy ran an offline review of #605 on 2026-11-10 in the earlier `--rm` shape; D37 records what it showed. Q24 stays open.
 
-**Update (2026-11-12) — D44.** The webhook path is a second Fly app, `atlas-reviewer-service`: one always-on Machine, COMMENT reviews only, allowlisted to this repository. The one-off app from D37 is unchanged. Nothing here is deployed by the change that records D44. Q24 stays open.
+**Update (2026-11-12) — D49.** The webhook path is a second Fly app, `atlas-reviewer-service`: one always-on Machine, COMMENT reviews only, allowlisted to this repository. The one-off app from D37 is unchanged. Nothing here is deployed by the change that records D49. Q24 stays open.
 
 ### Q23 — Does a repo-committed, non-plugin hook fire in a Claude Code cloud/routine session?  → RESOLVED — yes, it fires *(new, 2026-09-01)*
 

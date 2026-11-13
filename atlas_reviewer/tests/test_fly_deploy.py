@@ -95,10 +95,12 @@ def test_image_is_pinned_python_312_slim_installed_with_hashes_as_non_root():
     assert "useradd --create-home --uid 10001 --shell /bin/false atlas" in args_of(
         "RUN"
     )
-    assert args_of("USER") == ["atlas"]
     keywords = [kw for kw, _ in INSTRUCTIONS]
-    last_run = max(i for i, kw in enumerate(keywords) if kw == "RUN")
-    assert keywords.index("USER") > last_run
+    assert "USER" not in keywords
+    entry = (ROOT / "atlas_reviewer" / "docker-entrypoint.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "setpriv --reuid=10001 --regid=10001" in entry
     assert args_of("ENTRYPOINT") == ['["/usr/local/bin/atlas-reviewer"]']
     for keyword in ("EXPOSE", "ARG", "VOLUME", "HEALTHCHECK", "ADD"):
         assert keyword not in keywords
