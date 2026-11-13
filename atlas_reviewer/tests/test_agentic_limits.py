@@ -17,6 +17,7 @@ from atlas_reviewer.lens_loop import (
     AgenticLimits,
     Spend,
     _cause_for,
+    default_reasoning_tokens,
     resolve_per_call,
     run_attempt,
 )
@@ -42,7 +43,9 @@ def test_unset_limits_keep_the_defaults_and_derive_per_call_bounds():
     assert resolved.max_input_tokens is None
     terms = parse_model_terms(catalog(), MODEL_ID)
     call = resolve_per_call(resolved, terms)
-    assert (call.max_output_tokens, call.reasoning_max_tokens) == (64_000, 63_999)
+    assert call.max_output_tokens == 64_000
+    assert call.reasoning_max_tokens == default_reasoning_tokens(64_000) == 32_000
+    assert call.max_output_tokens - call.reasoning_max_tokens == 32_000
     assert call.max_input_tokens == 1_000_000 - 64_000
 
 
@@ -92,7 +95,7 @@ def test_the_adapter_sends_the_model_caps_and_ignores_the_reasoning_hint():
     lens.turn(request())
     body = sent(fake)
     assert body["max_tokens"] == 64_000
-    assert body["reasoning"]["max_tokens"] == 63_999
+    assert body["reasoning"]["max_tokens"] == 32_000
 
     priced = reply(catalog(internal_reasoning="0.00002"))
     low, low_fake = model(reply(completion("ok")), catalog_reply=priced)
@@ -312,6 +315,25 @@ def test_every_limit_has_one_cause_and_an_unknown_name_is_refused():
     assert set(_LIMIT_CAUSES) == set(SETTINGS)
     with pytest.raises(ValueError, match="no cause"):
         _cause_for(LimitHit("not-a-limit", "1", "2", "nowhere"))
+
+
+def test_a_length_stop_is_the_output_cap_and_not_a_model_error():
+    lens, _fake = model(reply(completion("cut off", finish="length")))
+    outcome = run_attempt(
+        job(),
+        object(),
+        lens,
+        Spend(replace(LIMITS, reservation_usd=Decimal(5)).resolve()),
+        FakeClock(),
+        review_deadline=600,
+        review_started=0,
+    )
+    assert Cause.OUTPUT_CAP in outcome.causes
+    assert Cause.MODEL_ERROR not in outcome.causes
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "max_output_tokens"
+    assert outcome.limit_hit.configured == "64000"
+    assert outcome.limit_hit.observed == "finish_reason=length"
 
 
 def test_an_output_override_and_a_reasoning_hint_have_their_own_causes():

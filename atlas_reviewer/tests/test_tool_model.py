@@ -20,6 +20,7 @@ from atlas_reviewer.lens_loop import (
     UserText,
     tool_schemas,
 )
+from atlas_reviewer.limit_stop import LimitRefused
 from atlas_reviewer.openrouter import OpenRouterProvider
 from atlas_reviewer.ports import BoundaryError, ByokRefusedError
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
@@ -468,10 +469,13 @@ def test_a_tool_call_that_is_not_one_function_cannot_be_executed():
     ) == ToolRequest("", ())
 
 
-def test_a_truncated_turn_is_rejected():
+def test_a_truncated_turn_is_an_output_cap_stop():
     lens, _fake = model(tool_response(finish="length"))
-    with pytest.raises(BoundaryError, match="output-token limit"):
+    with pytest.raises(LimitRefused) as raised:
         lens.turn(request())
+    assert raised.value.hit.limit == "max_output_tokens"
+    assert raised.value.hit.configured == "64000"
+    assert raised.value.hit.observed == "finish_reason=length"
 
 
 def test_an_empty_or_non_text_reply_is_rejected():

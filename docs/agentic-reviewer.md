@@ -296,7 +296,7 @@ the call.
 | Per-lens turn cap | 50, provisional default (2026-11-11) | Headroom, configurable, and no greater than the review's call cap. D31 suggested 12. |
 | Per-lens and per-review wall clocks | 20 minutes per lens and 60 minutes per review, provisional defaults (2026-11-11) | Headroom, configurable. The per-lens clock is no greater than the review clock. Crossing either ends the lens or review as partial, never clean. |
 | Per-call input cap | the pinned model's `context_length` minus the output reserve | An override (`--max-input-tokens` or `ATLAS_MAX_INPUT_TOKENS`) can tighten it and cannot exceed the model's context. Unknown context fails closed. The one-shot path stays at 200,000. |
-| Per-call output cap | the pinned model's `max_completion_tokens` | An override cannot exceed that completion limit. The reasoning hint defaults to one under the output cap and is not a price. |
+| Per-call output cap | the pinned model's `max_completion_tokens` | An override cannot exceed that completion limit. The reasoning hint defaults to half the output cap, so the reply has the other half, and is not a price. A turn that stops with `finish_reason=length` is this cap's stop, not a model error. |
 | PR conversation budget split | about 64 KiB total, working default | The body and comment caps within it. |
 | Branch-wide CI budget | check runs at up to 20 other commits of the PR, working default (`IngestConfig.max_ci_commits`) | How many commits back. Each commit's list keeps the client's page cap; jobs, logs and artifacts are still read at the head SHA only, under the one-shot caps. |
 | Per-tool timeout and output caps for the baked toolchain | none | A timeout is a coverage gap. |

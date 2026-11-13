@@ -215,13 +215,13 @@ Environment variables (names only; never commit values):
 | `ATLAS_REVIEW_WALL_S` | agentic lens entry | Seconds for the whole review (default 3600) |
 | `ATLAS_MAX_INPUT_TOKENS` | agentic lens entry | Per-call input cap. Unset uses the model's context minus the output reserve |
 | `ATLAS_MAX_OUTPUT_TOKENS` | agentic lens entry | Per-call output cap. Unset uses the model's completion limit |
-| `ATLAS_REASONING_MAX_TOKENS` | agentic lens entry | Reasoning hint sent on the request. Unset is one under the output cap. It is not a price |
+| `ATLAS_REASONING_MAX_TOKENS` | agentic lens entry | Reasoning hint sent on the request. Unset is half the output cap, so the reply has the other half. It is not a price |
 
 The six credential and state variables above the limit rows never reach a
 Sprite, a prompt, or the draft. Each one goes only to the adapter that
 uses it. The eight `ATLAS_*` limit variables are not credentials.
-`limits_for_lens` reads them, and a flag of the same name wins. The
-one-shot `review` command does not read them. The redactor also scrubs the exact
+`limits_for_lens` reads them. The one-shot `review` command does not
+accept the matching flags and does not read the variables. The redactor also scrubs the exact
 value of the App key, the Sprites token, the OpenRouter key, and every
 installation token minted during the review, on top of pattern-based
 redaction. That covers the draft, the telemetry, the probe report and the
@@ -778,14 +778,15 @@ D41 records the 2026-11-12 probe that did.
   input cap is the pinned model's catalog context minus the output
   reserve, and the output cap is the model's completion limit. An
   override can tighten either and cannot exceed the model. The
-  reasoning value is a hint; the reservation prices the whole output
-  cap at the completion rate plus the reasoning rate.
+  reasoning hint defaults to half the output cap, so the reply has the
+  other half. The reservation prices the whole output cap at the
+  completion rate plus the reasoning rate.
   `coordinator.limits_for_lens` reads the eight limits through
-  `agentic_config.load_agentic_limits`: a flag, else `ATLAS_*`, else
-  the default. `model_for_lens` builds the adapter with those same
-  bounds, and `review_lens` enforces the object it is given. The
-  `review` command does not read them. Its flags are agentic-only, and
-  the one-shot path keeps its 3 calls, $3.00 and 200,000 input cap.
+  `agentic_config.load_agentic_limits`, from `ATLAS_*` or a flag string
+  a caller passes. `model_for_lens` builds the adapter with those same
+  bounds, and `review_lens` refuses a model whose per-call bounds differ.
+  The `review` command does not accept these flags and does not read the
+  variables. The one-shot path keeps its 3 calls, $3.00 and 200,000 input cap.
 - **The prompt.** The system prompt is the controller's instructions, then
   the nonce fence rule, then the whole lens `body.md` between markers that
   carry its SHA-256, then `synthesis.md`'s whole *Finding contract*
@@ -799,7 +800,8 @@ D41 records the 2026-11-12 probe that did.
   these cuts it short: the turn cap, the call cap, the dollar reservation
   (each call is reserved at the model's worst case, then settled at its
   reported cost), either wall clock, the per-call input cap, a call that
-  does not fit the model's context, a failed model call, or the runner's
+  does not fit the model's context, a turn the model ends at the output
+  cap (`finish_reason=length`), a failed model call, or the runner's
   deadline during a tool call. A limit stop names the limit, the
   configured value, the observed value, and the flag or variable that
   changes it. A token refusal is `INPUT_CAP`, `OUTPUT_CAP`,

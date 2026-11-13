@@ -606,15 +606,18 @@ def test_the_review_wall_clock_ends_the_lens_partial(tmp_path):
 
 
 def test_a_runner_deadline_inside_a_tool_call_ends_the_lens_partial(tmp_path):
+    clock = FakeClock()
+
     class DeadBridge:
         def call(self, tool, args):
+            clock.advance(12.5)
             raise DeadlineExceededError(
                 "the review deadline passed during bridge diff_file"
             )
 
     model = ScriptedLensModel([READ_DIFF, final()])
     outcome = run_attempt(
-        job(), DeadBridge(), model, Spend(LIMITS.resolve()), FakeClock(),
+        job(), DeadBridge(), model, Spend(LIMITS.resolve()), clock,
         review_deadline=600, review_started=0,
     )  # fmt: skip
     assert outcome.causes == {Cause.REVIEW_CLOCK, Cause.FILES_UNREAD}
@@ -622,6 +625,8 @@ def test_a_runner_deadline_inside_a_tool_call_ends_the_lens_partial(tmp_path):
     assert "deadline passed" in outcome.detail
     assert outcome.limit_hit is not None
     assert outcome.limit_hit.limit == "review_wall_s"
+    assert outcome.limit_hit.observed == "12.500s"
+    assert outcome.limit_hit.configured == "600"
 
 
 def test_a_failed_model_call_fails_the_lens_and_is_not_retried(tmp_path):

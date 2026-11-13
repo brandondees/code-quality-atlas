@@ -12,8 +12,9 @@ so an element without it is data.
 
 An attempt ends with the model's final reply, or is cut short by the turn
 cap, the review's call cap or dollar reservation, the per-lens or review
-wall clock, a failed model call, or the runner's deadline. Anything but a
-final reply that meets the contract, acknowledges the body and whose
+wall clock, the output cap when the model stops at it, a failed model
+call, or the runner's deadline. Anything but a final reply that meets
+the contract, acknowledges the body and whose
 quotes all verify leaves the lens partial or failed, never clean. A final
 reply is clean only when every changed file's diff was read in full: a
 `diff_file` chain from offset 0 through every truncated page. A changed
@@ -26,9 +27,10 @@ headroom: a $5 reservation, 50 calls, 50 turns, 20 minutes per lens and
 60 minutes per review. Each can be overridden. An override must be
 positive and finite, and a per-lens limit no greater than its
 per-review limit. Clearing one of those five back to unset still
-refuses the run. The per-call input, output and reasoning values
-default to the pinned model's own context and completion limit; an
-override can tighten them and cannot exceed the model. Load them with
+refuses the run. The per-call input and output values default to the
+pinned model's own context and completion limit. The reasoning hint
+defaults to half that output cap, so the reply has the other half. An
+override can tighten a bound and cannot exceed the model. Load them with
 `agentic_config.load_agentic_limits`.
 """
 
@@ -180,6 +182,16 @@ def _check_limits(limits: Limits) -> None:
         raise ValueError("reasoning_max_tokens must be less than max_output_tokens")
 
 
+def default_reasoning_tokens(output: int) -> int:
+    """Half of `output`, so the reply has the other half.
+
+    OpenRouter counts reasoning tokens against `max_tokens`. A hint one
+    under the cap leaves one token for the tool call or the final reply,
+    and that turn stops with `finish_reason=length`.
+    """
+    return output // 2
+
+
 @dataclass(frozen=True)
 class ResolvedCall:
     """The per-call bounds for one request, after the catalog is known."""
@@ -195,11 +207,13 @@ def resolve_per_call(limits: Limits, terms: ModelTerms) -> ResolvedCall:
     Hard caps exist to stop a runaway call, not to make a review shallow.
     With no override, the output cap is the model's own completion limit
     and the input cap is the context that cap leaves. The reasoning value
-    is a hint one token under the output cap; the reservation does not
-    depend on it. An override may tighten a bound. It may not exceed the
-    model's context, and the output override may not exceed the model's
-    completion limit. An unknown context never reaches here:
-    `parse_model_terms` has already refused it.
+    defaults to half that output cap (`default_reasoning_tokens`), so the
+    reply has the other half. OpenRouter counts reasoning tokens against
+    `max_tokens`, and the reservation does not depend on the hint. An
+    override may tighten a bound. It may not exceed the model's context,
+    and the output override may not exceed the model's completion limit.
+    An unknown context never reaches here: `parse_model_terms` has
+    already refused it.
     """
     output = (
         terms.max_completion_tokens
@@ -217,7 +231,7 @@ def resolve_per_call(limits: Limits, terms: ModelTerms) -> ResolvedCall:
     if output < 2:
         raise LimitRefused(hit("max_output_tokens", output, "at least 2"))
     reasoning = (
-        output - 1
+        default_reasoning_tokens(output)
         if limits.reasoning_max_tokens is None
         else limits.reasoning_max_tokens
     )
@@ -648,9 +662,9 @@ def run_attempt(
         try:
             results = tuple(_tool(job, bridge, call, p) for call in reply.calls)
         except DeadlineExceededError as exc:
-            return p.cut(
-                *_stopped(hit("review_wall_s", limits.review_wall_s, str(exc)))
-            )
+            elapsed = clock.monotonic() - review_started
+            found = hit("review_wall_s", limits.review_wall_s, f"{elapsed:.3f}s")
+            return p.cut(_cause_for(found), f"{found.message()} ({exc})", found)
         messages += [AssistantCalls(reply.calls), ToolResults(results)]
 
 

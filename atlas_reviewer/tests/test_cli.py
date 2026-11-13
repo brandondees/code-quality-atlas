@@ -28,12 +28,14 @@ def run_cli(*argv, env=None):
     return code, out.getvalue(), err.getvalue()
 
 
-def test_agentic_limit_help_says_the_one_shot_review_does_not_apply_them(capsys):
+def test_review_rejects_an_agentic_limit_flag(capsys):
     with pytest.raises(SystemExit) as raised:
-        cli.main(["review", "--help"], env={})
-    assert raised.value.code == 0
-    text = " ".join(capsys.readouterr().out.split())
-    assert "Agentic only: the one-shot review does not read or apply it." in text
+        cli.main(
+            ["review", "--event", EVENT, "--dry-run", "--reservation-usd", "0"],
+            env={},
+        )
+    assert raised.value.code == 2
+    assert "unrecognized arguments: --reservation-usd" in capsys.readouterr().err
 
 
 def test_agentic_settings_do_not_change_a_one_shot_review(tmp_path):
@@ -44,8 +46,6 @@ def test_agentic_settings_do_not_change_a_one_shot_review(tmp_path):
         "--event",
         EVENT,
         "--dry-run",
-        "--reservation-usd",
-        "0",
         env={"ATLAS_MAX_CALLS": "10", "ATLAS_MAX_TURNS": "nope"},
     )
     assert code == cli.EXIT_INCOMPLETE

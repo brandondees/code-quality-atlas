@@ -115,9 +115,8 @@ class OpenRouterLensModel:
         cached = self._ready_for_turn
         self._ready_for_turn = None
         terms, counts_byok = self._ready() if cached is None else cached
-        payload = _payload(
-            self.provider, request, terms, resolve_per_call(self.per_call, terms)
-        )
+        bounds = resolve_per_call(self.per_call, terms)
+        payload = _payload(self.provider, request, terms, bounds)
         url = f"{self.provider._api_url}/chat/completions"
         body = json.dumps(payload).encode()
         try:
@@ -142,7 +141,7 @@ class OpenRouterLensModel:
                     "could not be parsed, so is_byok could not be checked"
                 ) from None
             raise
-        return _turn(data, terms, counts_byok)
+        return _turn(data, terms, counts_byok, bounds.max_output_tokens)
 
     def _ready(self) -> tuple[ModelTerms, bool]:
         if self.provider._key_status is None:
@@ -255,7 +254,9 @@ def _echo(call_id: str, call: ToolRequest) -> dict[str, Any]:
     }
 
 
-def _turn(data: Mapping[str, Any], terms: ModelTerms, counts_byok: bool) -> ModelTurn:
+def _turn(
+    data: Mapping[str, Any], terms: ModelTerms, counts_byok: bool, output_cap: int
+) -> ModelTurn:
     usage = data.get("usage")
     usage_obj = usage if isinstance(usage, dict) else {}
     if not counts_byok and _no_byok_reason(usage_obj) is not None:
@@ -270,7 +271,7 @@ def _turn(data: Mapping[str, Any], terms: ModelTerms, counts_byok: bool) -> Mode
     choice = _choice(data)
     finish = choice.get("finish_reason")
     if finish == "length":
-        raise BoundaryError("model turn stopped at the output-token limit")
+        raise LimitRefused(hit("max_output_tokens", output_cap, "finish_reason=length"))
     message = choice.get("message")
     if not isinstance(message, dict):
         raise BoundaryError("model response has no message")
