@@ -1133,7 +1133,8 @@ def test_a_non_rm_stop_kills_a_leftover_flyctl_after_the_machine_is_gone():
     assert "Ctrl-C" in body
     assert "pgrep -af 'fly machine run'" in body
     assert 'kill "$PID"' in body
-    assert "`--name` with this run's `$NAME` value" in body
+    assert "`--name` is this run's name" in body
+    assert "`review-pr<PR>-<first 12 chars of the SHA>`" in body
     assert "no `--rm`" in body
     assert "are not the Machine's state" in body
     assert "timeout 45" in body and "--detach" in body
