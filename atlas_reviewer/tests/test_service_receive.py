@@ -1329,7 +1329,9 @@ def test_read_bounded_stops_at_the_deadline():
 def test_a_full_connection_table_refuses_the_next_client(tmp_path):
     board = Board(tmp_path / "queue.json")
     server = ReviewServer(_config(tmp_path), board, lambda line: None)
-    held = [server.connections.acquire(blocking=False) for _ in range(_MAX_HTTP_HANDLERS)]
+    held = [
+        server.connections.acquire(blocking=False) for _ in range(_MAX_HTTP_HANDLERS)
+    ]
     assert all(held)
     sent: list[bytes] = []
 

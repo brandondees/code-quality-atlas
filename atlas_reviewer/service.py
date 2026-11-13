@@ -799,9 +799,7 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
         print(f"atlas-reviewer: {exc}", file=sys.stderr)
         return 2
     try:
-        return serve(
-            config, env, secret_sources=(lambda: _child_secrets(env),)
-        )
+        return serve(config, env, secret_sources=(lambda: _child_secrets(env),))
     except KeyboardInterrupt:
         return 0
     except OSError as exc:
