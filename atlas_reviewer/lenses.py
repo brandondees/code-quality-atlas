@@ -74,12 +74,14 @@ def _describe(use: LensUse) -> str:
 
 def _read_body(lenses: Path, name: str) -> str | None:
     """None for a name with no body, including one that would resolve
-    outside the lens directory (`../x`), whatever the caller validated."""
+    outside the lens directory (`../x`), whatever the caller validated,
+    and an empty or blank `body.md`, which has nothing to review with."""
     root = lenses.resolve()
     path = (root / name / "body.md").resolve()
     if not path.is_relative_to(root) or not path.is_file():
         return None
-    return path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
+    return text if text.strip() else None
 
 
 class LensLibrary:

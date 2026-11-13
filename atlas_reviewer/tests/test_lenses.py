@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from atlas_reviewer.lenses import (
     LENS_BUDGET_CHARS,
     MAX_LENSES,
@@ -150,10 +152,25 @@ def test_a_lens_name_cannot_reach_outside_the_bundle(tmp_path):
 def test_the_change_review_library_loads_a_repo_lens_body():
     """The picker can name a repo-shaped lens. Its body is generated under
     the audit entrypoint, and the change-review bundle does not list it."""
+    from atlas_reviewer.lenses import _COLLAPSED
+
     library = LensLibrary()
     body = library.body("auditing-documentation-health")
-    assert body is not None and "documentation" in body.lower()
+    generated = (
+        _COLLAPSED / "auditing-a-repository" / "reference" / "lenses"
+        / "auditing-documentation-health" / "body.md"
+    )  # fmt: skip
+    assert body == generated.read_text(encoding="utf-8")
     assert "auditing-documentation-health" not in library.names()
+
+
+@pytest.mark.parametrize("text", ["", "  \n\n"])
+def test_a_blank_body_is_no_body(tmp_path, text):
+    (tmp_path / "reference" / "lenses" / "empty").mkdir(parents=True)
+    (tmp_path / "reference" / "lenses" / "empty" / "body.md").write_text(
+        text, encoding="utf-8"
+    )
+    assert LensLibrary(tmp_path).body("empty") is None
 
 
 def test_every_lens_a_route_can_run_has_a_body():

@@ -149,32 +149,16 @@ def select_lenses(
     def has_body(name: str) -> bool:
         return library.body(name) is not None
 
-    if depth is Depth.TRIAGE:
-        return _critical("Lens selection: triage depth makes no picker call", False)
-    if run_picker is None:
-        return _critical(
-            "Lens selection: no model call is left for the lens picker",
-            False,
-        )
-    no_room = _no_room_for_a_pick(library, depth, budget_chars)
-    if no_room:
-        return _critical(no_room, False)
-    try:
-        names = parse_picks(run_picker())
-    except ByokRefusedError:
-        raise
-    except BoundaryError as exc:
-        return _critical(
-            "Lens selection: the lens picker gave no usable lens list (reason, "
-            f"quoted: {quote_untrusted(str(exc), scrub=scrub)})",
-            True,
-        )
-    if not any(has_body(n) for n in names):
-        return _critical(
-            f"Lens selection: none of the {len(names)} lens name(s) the picker "
-            "ranked has a body in the bundle",
-            True,
-        )
+    picked = _pick(
+        depth,
+        run_picker,
+        has_body,
+        scrub=scrub,
+        no_room=lambda: _no_room_for_a_pick(library, depth, budget_chars),
+    )
+    if isinstance(picked, LensSelection):
+        return picked
+    names = picked
     with_body = sum(has_body(n) for n in names)
     note = (
         f"Lens selection: `choosing-review-lenses` ran as one model call at "
@@ -208,12 +192,44 @@ def _agentic_selection(
     *,
     scrub: Callable[[str], str],
 ) -> LensSelection:
+    def has_body(name: str) -> bool:
+        return library.body(name) is not None
+
+    picked = _pick(depth, run_picker, has_body, scrub=scrub)
+    if isinstance(picked, LensSelection):
+        return picked
+    names = picked
+    with_body = sum(has_body(n) for n in names)
+    note = (
+        f"Lens selection: `choosing-review-lenses` ran as one model call at "
+        f"{depth.value} depth. The one-shot character budget does not apply. "
+        f"The picker ranked {len(names)} lens name(s), {with_body} with a body. "
+        "The critical tier runs, then every picked lens that has a body."
+    )
+    return LensSelection(_with_critical(names), note, True)
+
+
+def _pick(
+    depth: Depth,
+    run_picker: Callable[[], str] | None,
+    has_body: Callable[[str], bool],
+    *,
+    scrub: Callable[[str], str],
+    no_room: Callable[[], str] = lambda: "",
+) -> tuple[str, ...] | LensSelection:
+    """The picker's ranked names, or the critical-tier fallback with its
+    reason. Both the one-shot and the agentic selection use this, so they
+    fall back for the same reasons with the same notes. `no_room` is the
+    one-shot budget check; the agentic path has none."""
     if depth is Depth.TRIAGE:
         return _critical("Lens selection: triage depth makes no picker call", False)
     if run_picker is None:
         return _critical(
             "Lens selection: no model call is left for the lens picker", False
         )
+    skip = no_room()
+    if skip:
+        return _critical(skip, False)
     try:
         names = parse_picks(run_picker())
     except ByokRefusedError:
@@ -224,20 +240,13 @@ def _agentic_selection(
             f"quoted: {quote_untrusted(str(exc), scrub=scrub)})",
             True,
         )
-    if not any(library.body(n) is not None for n in names):
+    if not any(has_body(n) for n in names):
         return _critical(
             f"Lens selection: none of the {len(names)} lens name(s) the picker "
             "ranked has a body in the bundle",
             True,
         )
-    with_body = sum(library.body(n) is not None for n in names)
-    note = (
-        f"Lens selection: `choosing-review-lenses` ran as one model call at "
-        f"{depth.value} depth. The one-shot character budget does not apply. "
-        f"The picker ranked {len(names)} lens name(s), {with_body} with a body. "
-        "The critical tier runs, then every picked lens that has a body."
-    )
-    return LensSelection(_with_critical(names), note, True)
+    return names
 
 
 def _with_critical(names: tuple[str, ...]) -> tuple[LensChoice, ...]:
