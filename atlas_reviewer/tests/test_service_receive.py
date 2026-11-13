@@ -1559,7 +1559,25 @@ def test_a_superseded_running_job_reloads_as_superseded(tmp_path):
     assert loaded.states() == ((SHA_A, JobState.SUPERSEDED),)
 
 
-def test_a_corrupt_queue_exits_2(tmp_path, capsys):
+def test_a_corrupt_queue_exits_2(tmp_path, capsys, monkeypatch):
+    # Posting builds a publisher before it opens the queue. Stub that so
+    # this test reaches the corrupt file.
+    try:
+        import atlas_reviewer.service_post as post_mod
+    except ImportError:
+        post_mod = None
+    if post_mod is not None and hasattr(post_mod, "publisher_from_env"):
+
+        class _Poster:
+            def post(self, event, report):
+                return None
+
+            def credential_secrets(self):
+                return ()
+
+        monkeypatch.setattr(
+            post_mod, "publisher_from_env", lambda *args, **kwargs: _Poster()
+        )
     (tmp_path / "queue.json").write_text("{", encoding="utf-8")
     code = main(
         env={
