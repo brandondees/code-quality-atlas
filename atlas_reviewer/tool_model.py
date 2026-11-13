@@ -169,6 +169,8 @@ def _payload(
         "model": provider.model_id,
         "messages": _messages(request),
         "tools": [_tool(tool) for tool in request.tools],
+        # Always the configured output cap, even when the endpoint does
+        # not list max_tokens. The reservation prices this cap.
         "max_tokens": limits.max_output_tokens,
         "stream": False,
         "provider": provider_preferences(selected.providers, terms),

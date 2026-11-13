@@ -371,16 +371,24 @@ the public provider list named: `amazon-bedrock`, `google-vertex/global`,
 `google-vertex/us`, and `google-vertex/europe`. `ATLAS_PROVIDERS` or
 `--providers` replaces that list, and one slug is a valid pin. Before a
 completion the adapter reads `GET /api/v1/endpoints/zdr` without the key.
-A slug is sent only when every row for this model and slug has
-`safety_retention: false`. A slug with no such row, or any Safety
-Retention row, is refused and no completion is sent. Safety Retention
-(for example Gemini on Vertex) needs `ATLAS_ALLOW_SAFETY_RETENTION=true`
-or `--allow-safety-retention`. `reasoning` and `cache_control` are sent
-only when every eligible row lists that name in `supported_parameters`,
-so `require_parameters` stays true. The output cap stays the configured
-limit (`--max-output-tokens` / `ATLAS_MAX_OUTPUT_TOKENS` on the agentic
-path, the one-shot `CallLimits` cap on the one-shot path), not an
-uncapped copy of the catalog's `max_completion_tokens`. Before any
+A slug is sent only when every row for this model and that exact tag
+has `safety_retention: false`, and every child tag (`<slug>/...`) on
+the list for this model does too. A child that is Safety Retention
+refuses the parent, because `provider.only` of the parent can expand
+to it. A slug with no exact row is refused, and the error names child
+tags when the list has them: `deepinfra` is not a tag, `deepinfra/fp8`
+is. Safety Retention (for example Gemini on Vertex) needs
+`ATLAS_ALLOW_SAFETY_RETENTION=true` or `--allow-safety-retention`.
+`reasoning` and `cache_control` are sent only when every eligible row
+lists that name in `supported_parameters`. `max_tokens` is always the
+configured output cap. `require_parameters` stays true. The output cap
+stays `--max-output-tokens` / `ATLAS_MAX_OUTPUT_TOKENS` on the agentic
+path and the one-shot `CallLimits` cap on the one-shot path, not an
+uncapped copy of the catalog's `max_completion_tokens`. `max_price`
+stays the model's highest catalog prompt and completion rates,
+including overrides, which can be higher than the eligible rows. The
+provider reads the catalog and the ZDR list once and reuses them for
+later completions in that review. Before any
 inference, `preflight()` reads
 `GET /api/v1/key` and refuses unless the key has a hard limit of at most
 $5 with credit left. A key whose `include_byok_in_limit` is not true is
@@ -389,9 +397,11 @@ when `usage.is_byok` is false. Any other value, including a missing
 field, or an HTTP 200 whose body cannot be parsed, stops the review
 as a boundary error (exit 3) before another model call, and no draft
 is written. When the flag is true, a BYOK
-response is accepted, as before. Each call re-reads the model's public
-catalog entry and fails closed if a price or limit is missing or
-unparseable. It then
+response is accepted, as before. The first completion reads the model's
+public catalog entry and fails closed if a price or limit is missing,
+unparseable, or a required prompt or completion rate is zero. A
+per-million price that is not a finite number is refused the same way.
+Later completions in that review reuse the snapshot. It then
 checks the input bound (200k tokens), max output (24k) and reasoning
 budget (12k), and reserves the call's worst case at the highest listed
 price tier. A reservation is refused if it would be the fourth call in the

@@ -21,7 +21,6 @@ from atlas_reviewer.openrouter import (
     ENV_ALLOW_SAFETY_RETENTION,
     ENV_MODEL,
     ENV_PROVIDERS,
-    LISTED_PROVIDER_SLUGS,
     MODEL_ID,
     PINNED_PROVIDERS,
     OpenRouterProvider,
@@ -184,7 +183,6 @@ def test_request_is_pinned_to_one_model_with_no_fallbacks_or_plugins():
         "zdr": True,
         "max_price": {"prompt": 6.0, "completion": 22.5},
     }
-    assert set(PINNED_PROVIDERS) == LISTED_PROVIDER_SLUGS
     assert "google-vertex" not in sent["provider"]["only"]
 
 
@@ -453,6 +451,124 @@ def test_an_unreadable_zdr_list_refuses_before_a_completion():
     pinned.preflight()
     pinned.complete(SMALL)
     assert "reasoning" not in json.loads(quiet.chat_requests()[0][3])
+
+
+def test_a_non_200_zdr_list_and_a_timeout_send_no_completion():
+    refused = OpenRouterFake(reply(completion()), zdr=reply({}, status=503))
+    adapter = provider(refused)
+    with pytest.raises(PricingUnknownError, match="HTTP 503"):
+        adapter.complete(SMALL)
+    assert refused.chat_requests() == []
+    assert any(url.endswith("/endpoints/zdr") for _m, url, _h, _b in refused.requests)
+
+    class Timeout(OpenRouterFake):
+        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
+            if str(url).endswith("/endpoints/zdr"):
+                self.requests.append((method, url, dict(headers), body))
+                raise BoundaryError("timed out")
+            return super().request(method, url, headers, body, timeout_s, max_bytes)
+
+    timed = Timeout(reply(completion()))
+    waiting = provider(timed)
+    with pytest.raises(BoundaryError, match="timed out"):
+        waiting.complete(SMALL)
+    assert timed.chat_requests() == []
+
+
+def test_max_tokens_is_sent_when_the_endpoint_does_not_advertise_it():
+    fake = OpenRouterFake(
+        reply(completion()), zdr=reply(zdr_payload(parameters=["tools"]))
+    )
+    provider(fake).complete(SMALL)
+    sent = json.loads(fake.chat_requests()[0][3])
+    assert sent["max_tokens"] == 24_000
+    assert "max_tokens" not in sent.get("provider", {})
+
+
+def test_a_safety_retention_child_refuses_the_parent_slug():
+    payload = zdr_payload(providers=("amazon-bedrock",))
+    payload["data"].append(
+        {
+            "model_id": MODEL_ID,
+            "tag": "amazon-bedrock/eu-west-1",
+            "safety_retention": True,
+            "supported_parameters": ["reasoning", "max_tokens"],
+        }
+    )
+    fake = OpenRouterFake(reply(completion()), zdr=reply(payload))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    with pytest.raises(BudgetRefusedError, match="child tag"):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []
+
+
+def test_a_bare_slug_with_only_child_rows_names_those_tags_and_sends_nothing():
+    payload = zdr_payload(providers=("deepinfra/fp8",), parameters=["tools"])
+    fake = OpenRouterFake(reply(completion()), zdr=reply(payload))
+    adapter = OpenRouterProvider(fake, KEY, providers=("deepinfra",))
+    adapter.preflight()
+    with pytest.raises(BudgetRefusedError, match="deepinfra/fp8"):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []
+
+
+def test_a_pure_child_does_not_rewrite_the_requested_slug():
+    payload = zdr_payload(providers=("amazon-bedrock",))
+    payload["data"].append(
+        {
+            "model_id": MODEL_ID,
+            "tag": "amazon-bedrock/us-east-1",
+            "safety_retention": False,
+            "supported_parameters": ["reasoning", "max_tokens", "tools"],
+        }
+    )
+    fake = OpenRouterFake(reply(completion()), zdr=reply(payload))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    assert adapter.complete(SMALL) == "review text"
+    assert json.loads(fake.chat_requests()[0][3])["provider"]["only"] == [
+        "amazon-bedrock"
+    ]
+
+
+def test_the_zdr_list_is_read_once_for_the_provider():
+    fake = OpenRouterFake(reply(completion()), reply(completion()))
+    adapter = provider(fake)
+    adapter.complete(SMALL)
+    adapter.complete(SMALL)
+    zdr_reads = [
+        url for _m, url, _h, _b in fake.requests if url.endswith("/endpoints/zdr")
+    ]
+    assert zdr_reads == [f"{API}/endpoints/zdr"]
+
+
+def test_a_zero_catalog_rate_and_a_non_finite_price_send_no_completion():
+    zero = catalog(prompt="0", completion="0", overrides=[])
+    fake = OpenRouterFake(reply(completion()), model=reply(zero))
+    adapter = provider(fake)
+    with pytest.raises(PricingUnknownError, match="pricing.prompt is zero"):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []
+
+    huge = catalog(prompt="1e1000", overrides=[])
+    overflow = OpenRouterFake(reply(completion()), model=reply(huge))
+    priced = provider(overflow)
+    with pytest.raises(PricingUnknownError, match="not a finite"):
+        priced.complete(SMALL)
+    assert overflow.chat_requests() == []
+
+
+def test_the_environment_selects_the_model_and_provider_without_a_flag():
+    route = model_route(
+        {
+            ENV_MODEL: "deepseek/deepseek-v4.1-flash",
+            ENV_PROVIDERS: "fireworks",
+        }
+    )
+    assert route.model_id == "deepseek/deepseek-v4.1-flash"
+    assert route.providers == ("fireworks",)
+    assert route.allow_safety_retention is False
 
 
 # --- 3-call cap, retries included ------------------------------------------

@@ -129,6 +129,11 @@ def parse_model_terms(data: Json, expected_id: str) -> ModelTerms:
         raise PricingUnknownError("catalog entry has no pricing object")
     tiers = _tiers(pricing)
     prompt = _max_rate(tiers, "prompt", required=True)
+    if prompt == ZERO:
+        raise PricingUnknownError("pricing.prompt is zero")
+    completion = _max_rate(tiers, "completion", required=True)
+    if completion == ZERO:
+        raise PricingUnknownError("pricing.completion is zero")
     cache_write = max(
         _max_rate(tiers, "input_cache_write", required=False),
         _max_rate(tiers, "input_cache_write_1h", required=False),
@@ -138,7 +143,7 @@ def parse_model_terms(data: Json, expected_id: str) -> ModelTerms:
         model_id=expected_id,
         input_rate=max(prompt, cache_write),
         prompt_rate=prompt,
-        completion_rate=_max_rate(tiers, "completion", required=True),
+        completion_rate=completion,
         reasoning_rate=_max_rate(tiers, "internal_reasoning", required=False),
         request_fee=_max_rate(tiers, "request", required=False),
         context_length=_count(model.get("context_length"), "context_length"),

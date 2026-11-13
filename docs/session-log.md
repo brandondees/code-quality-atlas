@@ -1150,4 +1150,13 @@ Before a completion the adapter reads `GET /api/v1/endpoints/zdr` and
 refuses a slug that is not pure ZDR for that model. Safety Retention is
 off unless `ATLAS_ALLOW_SAFETY_RETENTION=true` or
 `--allow-safety-retention`. `reasoning` and `cache_control` are sent only
-when every selected endpoint lists them. No live call was made. D49.
+when every selected endpoint lists them. No live call was made. D51.
+
+## 2026-11-12 — round 1 on the configurable model pin
+
+D51, not D49: #654 and #655 already use D49 and D50. A parent slug is
+refused when a child tag on the ZDR list is Safety Retention. A bare
+slug such as `deepinfra` is refused and the error names the exact tags.
+`max_tokens` stays the configured output cap. The ZDR list is read once
+per provider. A zero required rate and a non-finite per-million price
+are refused. No live call was made.
