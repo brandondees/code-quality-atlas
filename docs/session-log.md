@@ -1139,7 +1139,7 @@ scrubbed, `http` export is loopback-only, and a dead collector cannot
 hold the process open at exit. D25's claim that `PyJWT[crypto]` is the
 only runtime dependency is amended: the OpenTelemetry packages are too.
 
-## 2026-11-12 — agentic reviews run every selected lens, and a file nobody read can be assigned again
+## 2026-11-12 — agentic reviews run every selected lens, and a lens's unread files can be assigned to it again
 
 `agentic-review` is the command that applies the agentic limits. The
 one-shot `review` command does not accept those flags and does not read
@@ -1150,9 +1150,13 @@ critical tier plus every ranked lens that has a body, up to the pool
 (1 to 16; 4 when the operator does not set it). Each lens has its own
 Sprite name. A Sprites HTTP 429 on create is waited out and tried
 again. A final reply outside the finding contract is quoted back once
-inside the attempt. Files no lens read are handed to a continuation
-while a call and the review clock remain, and a file that is still
-unread after that cannot approve. `auditing-documentation-health`
+inside the attempt, with the rejected reply in the model's own turn.
+A lens's own unread files are handed to a continuation of that lens
+while a call and the review clock remain. Coverage is per lens, as D42
+approved: a read by another lens does not cover a file, and a file a
+lens still has not read cannot approve. The draft names any runner
+whose delete was not verified, and carries the picker's selection note
+and the picked names that did not run. `auditing-documentation-health`
 keeps its repo shape; the change-review library reads its body from
 the audit bundle. The OpenRouter key ceiling stays $5 unless
 `--key-ceiling-usd` or `ATLAS_KEY_CEILING_USD` raises it, and a refusal

@@ -1129,7 +1129,8 @@ offline only. Before another live review:
    anywhere in this repo. Find it on the App's installation settings page
    (the number in the URL) for the account that owns the test PR. The App
    must already be granted at least the read permissions listed above.
-3. **OpenRouter.** Create a key with a hard credit limit of at most $5 and
+3. **OpenRouter.** Create a key with a hard credit limit of at most $5 (or at
+   most `--key-ceiling-usd` or `ATLAS_KEY_CEILING_USD`, when raised) and
    set `ATLAS_OPENROUTER_API_KEY`.
 4. **A test PR.** Write an event file (`repo`, `pr_number`, `head_sha`)
    for a PR that has finished CI at that head SHA.

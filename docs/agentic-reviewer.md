@@ -291,7 +291,7 @@ the call.
 | Decision | Current state | Note |
 |---|---|---|
 | Agentic per-review dollar reservation | $5 (D43, 2026-11-12); one-shot stays $3.00 | The one-token-per-byte input bound stays. The reservation prices the whole output cap at the completion rate plus the reasoning rate. Headroom is this per-review reservation. Still configurable through `AgenticLimits`. |
-| OpenRouter key hard limit for agentic runs | the one-shot preflight requires at most $5 | Must cover the agentic reservation. The reservation is $5 (D43), the same ceiling this preflight already requires. |
+| OpenRouter key hard limit for agentic runs | the preflight requires at most the key ceiling: $5 unless `--key-ceiling-usd` or `ATLAS_KEY_CEILING_USD` raises it (D44) | Must cover the agentic reservation. The reservation is $5 (D43), the same as the default ceiling. |
 | Agentic per-review model-call cap | 50, provisional default (2026-11-11); one-shot stays 3 | Headroom, configurable. Includes the picker, each lens's turns and the merge. A per-lens turn cap is no greater than this. |
 | Per-lens turn cap | 50, provisional default (2026-11-11) | Headroom, configurable, and no greater than the review's call cap. D31 suggested 12. |
 | Per-lens and per-review wall clocks | 20 minutes per lens and 60 minutes per review, provisional defaults (2026-11-11) | Headroom, configurable. The per-lens clock is no greater than the review clock. Crossing either ends the lens or review as partial, never clean. |
