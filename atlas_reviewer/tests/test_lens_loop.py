@@ -28,6 +28,8 @@ from atlas_reviewer.lens_loop import (
     Spend,
     ToolResults,
     _DiffPages,
+    _Progress,
+    _time_up,
     finding_contract,
     lens_system,
     run_attempt,
@@ -589,7 +591,93 @@ def test_the_lens_wall_clock_ends_the_lens_partial(tmp_path):
     assert len(model.requests) == 1
     assert outcome.limit_hit is not None
     assert outcome.limit_hit.limit == "lens_wall_s"
+    assert outcome.limit_hit.observed == "301.000s"
     assert outcome.limit_hit.setting == "--lens-wall-seconds or ATLAS_LENS_WALL_S"
+
+
+def _run(tmp_path, clock, script, spend, *, review_deadline, review_started):
+    model = ScriptedLensModel(list(script))
+    out = {}
+
+    def body(bridge):
+        out["outcome"] = run_attempt(
+            job(), bridge, model, spend, clock,
+            review_deadline=review_deadline, review_started=review_started,
+        )  # fmt: skip
+        return "done"
+
+    report = run_bridge(
+        LocalSprites(),
+        MemoryLedger(),
+        trees(),
+        body,
+        redactor=Redactor(),
+        changed=CHANGED,
+        name="cqa-lens-test",
+        deadline_s=900,
+        clock=clock,
+        root=str(tmp_path / "bridge"),
+    )
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    return out["outcome"]
+
+
+def test_the_lens_clock_counts_from_the_attempt_when_the_review_is_older(tmp_path):
+    """The review is already underway when the attempt starts. The lens
+    wall is what stops it, and the observed time is this attempt's own
+    seconds. A start reconstructed as the deadline minus the configured
+    wall is that number only when the review deadline did not clamp it."""
+    clock = FakeClock()
+    clock.advance(200)
+    outcome = _run(
+        tmp_path,
+        clock,
+        [advance(clock, 55, READ_ALL), final()],
+        Spend(replace(LIMITS, lens_wall_s=50).resolve()),
+        review_deadline=10_000,
+        review_started=0,
+    )
+    assert outcome.causes == {Cause.LENS_CLOCK}
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.observed == "55.000s"
+    assert outcome.limit_hit.configured == "50"
+
+
+def test_a_clamped_lens_deadline_counts_from_the_attempt():
+    """The lens deadline is the review deadline, not one lens wall after
+    the attempt started. At 460s, an attempt that started at 400s has run
+    60s. Rebuilding the start as that deadline minus the 300s lens wall
+    reports 310s."""
+    clock = FakeClock(460)
+    outcome = _time_up(
+        _Progress(), clock, LIMITS.resolve(),
+        10_000, 0, 450, 400,
+    )  # fmt: skip
+    assert outcome is not None
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "lens_wall_s"
+    assert outcome.limit_hit.observed == "60.000s"
+    assert outcome.limit_hit.configured == "300"
+
+
+def test_a_review_deadline_closer_than_the_lens_wall_is_the_review_clock(tmp_path):
+    """The review deadline clamps the lens deadline. The stop is the
+    review clock, counted from the review's start, not a lens elapsed
+    rebuilt as that deadline minus the lens wall."""
+    clock = FakeClock()
+    clock.advance(400)
+    outcome = _run(
+        tmp_path,
+        clock,
+        [advance(clock, 60, READ_ALL), final()],
+        Spend(LIMITS.resolve()),
+        review_deadline=450,
+        review_started=0,
+    )
+    assert Cause.REVIEW_CLOCK in outcome.causes
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "review_wall_s"
+    assert outcome.limit_hit.observed == "460.000s"
 
 
 def test_the_review_wall_clock_ends_the_lens_partial(tmp_path):

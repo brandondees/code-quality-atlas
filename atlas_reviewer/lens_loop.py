@@ -608,7 +608,8 @@ def run_attempt(
     system = system_for(job.lens, job.body, job.contract, retry_of, nonce=job.nonce)
     if not check_delivery(system, job.lens, job.digest):
         return AttemptOutcome(Attestation.NOT_DELIVERED)
-    lens_deadline = min(review_deadline, clock.monotonic() + limits.lens_wall_s)
+    attempt_start = clock.monotonic()
+    lens_deadline = min(review_deadline, attempt_start + limits.lens_wall_s)
     messages: list[Message] = [UserText(job.first_turn)]
     tools = tool_schemas()
     p = _Progress(
@@ -616,21 +617,12 @@ def run_attempt(
         secrets=[] if secrets is None else secrets,
     )
     while True:
-        now = clock.monotonic()
-        if now >= review_deadline:
-            elapsed = now - review_started
-            return p.cut(
-                *_stopped(hit("review_wall_s", limits.review_wall_s, f"{elapsed:.3f}s"))
-            )
-        if now >= lens_deadline:
-            elapsed = now - (lens_deadline - limits.lens_wall_s)
-            return p.cut(
-                *_stopped(hit("lens_wall_s", limits.lens_wall_s, f"{elapsed:.3f}s"))
-            )
-        if p.turns >= limits.max_turns:
-            return p.cut(
-                *_stopped(hit("max_turns", limits.max_turns, f"{p.turns} used"))
-            )
+        stopped = _time_up(
+            p, clock, limits, review_deadline, review_started,
+            lens_deadline, attempt_start,
+        )  # fmt: skip
+        if stopped is not None:
+            return stopped
         request = TurnRequest(system, tuple(messages), tools)
         try:
             worst = model.worst_case_usd(request)
@@ -666,6 +658,34 @@ def run_attempt(
             found = hit("review_wall_s", limits.review_wall_s, f"{elapsed:.3f}s")
             return p.cut(_cause_for(found), f"{found.message()} ({exc})", found)
         messages += [AssistantCalls(reply.calls), ToolResults(results)]
+
+
+def _time_up(
+    p: _Progress,
+    clock: Clock,
+    limits: Limits,
+    review_deadline: float,
+    review_started: float,
+    lens_deadline: float,
+    attempt_start: float,
+) -> AttemptOutcome | None:
+    """A clock or turn stop, or None to keep going. The lens deadline may
+    be the review deadline, so the lens elapsed is counted from
+    `attempt_start`, not back from that deadline."""
+    now = clock.monotonic()
+    if now >= review_deadline:
+        elapsed = now - review_started
+        return p.cut(
+            *_stopped(hit("review_wall_s", limits.review_wall_s, f"{elapsed:.3f}s"))
+        )
+    if now >= lens_deadline:
+        elapsed = now - attempt_start
+        return p.cut(
+            *_stopped(hit("lens_wall_s", limits.lens_wall_s, f"{elapsed:.3f}s"))
+        )
+    if p.turns >= limits.max_turns:
+        return p.cut(*_stopped(hit("max_turns", limits.max_turns, f"{p.turns} used")))
+    return None
 
 
 def _tool(job: LensJob, bridge: Bridge, call: ToolRequest, p: _Progress) -> str:

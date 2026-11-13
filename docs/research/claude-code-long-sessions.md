@@ -27,9 +27,10 @@ off. The model-config page says that under
 `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`, a native 1M model then stops at the
 200K boundary with the context-limit error instead of compacting.
 `DISABLE_COMPACT` turns compaction off entirely. The automatic pass,
-when it runs, is what `/compact` does. `/compact` can take a focus instruction. `/rewind` can summarize
-from a chosen message or up to it. `/clear` drops the conversation when
-the next task is unrelated. `/autocompact`, `autoCompactWindow`,
+when it runs, is what `/compact` does. `/compact` can take a focus
+instruction. `/rewind` can summarize from a chosen message or up to
+it. `/clear` drops the conversation when the next task is unrelated.
+`/autocompact`, `autoCompactWindow`,
 `--autocompact`, and `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set how full the
 window may get first. A configured window is capped at the model's own
 context window, and a usable `CLAUDE_CODE_AUTO_COMPACT_WINDOW` is a
