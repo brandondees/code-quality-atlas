@@ -573,8 +573,10 @@ each needing its own decision:
   This repository does not create the app or set secrets. One operator
   deploy on 2026-11-10 ran an offline review of #605 in the earlier
   `fly machine run --rm` shape; D37 and the runbook record what it showed.
-  The shape stays one operator-started review at a time, with no webhook
-  and no queue.
+  The shape stays one operator-started review at a time.
+  **Note (2026-11-12, D48):** the webhook receiver and its queue are a
+  separate process, `python -m atlas_reviewer.service`. They are not part
+  of this operator path.
 - **Omission rows for check summaries and log tails.** These are capped
   today, but the caps are not listed as omissions the way diff, PR-body,
   issue-body and artifact-excerpt cuts are.

@@ -80,10 +80,15 @@ class Job:
         }
 
 
-# ``MAX_REMEMBERED`` is a hard cap on jobs that are still in progress.
-# When that many are queued or running, ``enqueue`` returns ``FULL`` and
-# the HTTP handler answers 503, so the file cannot grow by accepting more
-# active work. Terminal jobs are trimmed to make room. A ``FAILED`` job is
+# ``MAX_REMEMBERED`` is a hard cap on jobs that are still in progress
+# (``queued``, ``running``, ``post_pending``, ``posting``). When that many
+# belong to pull requests that are not already in the queue, ``enqueue``
+# returns ``FULL`` and the HTTP handler answers 503, so the file cannot
+# grow by accepting more active work. A newer head of a pull request that
+# already has an active job takes that slot. Replacing a job that is still
+# ``running`` or ``posting`` can leave the count at the cap plus those
+# superseded jobs, and that extra is at most the worker concurrency.
+# Terminal jobs are trimmed to make room. A ``FAILED`` job is
 # not remembered as a duplicate: GitHub does not redeliver a delivery we
 # already acknowledged, so the only way to review that commit again is to
 # accept the same SHA when it is delivered again.
@@ -168,25 +173,49 @@ class Board:
             # is at most the worker concurrency.
             if active >= self._max_remembered and not replaces:
                 return Enqueue.FULL
-            if failed_job is not None:
-                self._jobs.remove(failed_job)
-            for job in self._jobs:
-                if (
-                    job.event.repo != event.repo
-                    or job.event.pr_number != event.pr_number
-                ):
-                    continue
-                if job.state not in _ACTIVE:
-                    continue
-                job.superseded = True
-                job.cancel.set()
-                if job.state in {JobState.QUEUED, JobState.POST_PENDING}:
-                    job.state = JobState.SUPERSEDED
-            self._jobs.append(Job(event, JobState.QUEUED))
-            self._heads[(event.repo, event.pr_number)] = (event.head_sha, at)
-            self._save()
+            self._install(event, at, failed_job)
             self._cv.notify()
             return Enqueue.QUEUED
+
+    def _install(
+        self, event: PrEvent, at: datetime | None, failed_job: Job | None
+    ) -> None:
+        """Swap in ``event`` and save. A failed save puts the memory back."""
+        head_key = (event.repo, event.pr_number)
+        previous_head = self._heads.get(head_key)
+        if failed_job is not None:
+            self._jobs.remove(failed_job)
+        touched: list[tuple[Job, JobState, bool, bool]] = []
+        for job in self._jobs:
+            if job.event.repo != event.repo or job.event.pr_number != event.pr_number:
+                continue
+            if job.state not in _ACTIVE:
+                continue
+            touched.append((job, job.state, job.superseded, job.cancel.is_set()))
+            job.superseded = True
+            job.cancel.set()
+            if job.state in {JobState.QUEUED, JobState.POST_PENDING}:
+                job.state = JobState.SUPERSEDED
+        self._jobs.append(Job(event, JobState.QUEUED))
+        self._heads[head_key] = (event.head_sha, at)
+        try:
+            self._save()
+        except Exception:
+            self._jobs.pop()
+            if failed_job is not None:
+                self._jobs.append(failed_job)
+            for job, state, superseded, cancelled in touched:
+                job.state = state
+                job.superseded = superseded
+                if cancelled:
+                    job.cancel.set()
+                else:
+                    job.cancel.clear()
+            if previous_head is None:
+                self._heads.pop(head_key, None)
+            else:
+                self._heads[head_key] = previous_head
+            raise
 
     def _retry_of_failed_head(self, event: PrEvent, at: datetime | None) -> bool:
         """The current head's only record was a failure that has already
@@ -246,6 +275,13 @@ class Board:
             delay = self._delay(now)
             if stop.is_set() or delay == 0:
                 return
+            # A failed save names its own wait. Capping it at the poll
+            # interval retries the claim every 0.2 s, which is the loop
+            # the backoff exists to stop.
+            remaining = self._save_retry_at - time.monotonic()
+            if remaining > 0:
+                self._cv.wait(remaining)
+                return
             self._cv.wait(timeout if delay is None else min(timeout, delay))
 
     def still_current(self, job: Job) -> bool:
@@ -266,7 +302,11 @@ class Board:
                 return False
             if job.state is JobState.RUNNING:
                 job.state = JobState.POSTING
-                self._save()
+                try:
+                    self._save()
+                except Exception:
+                    job.state = JobState.RUNNING
+                    raise
             return True
 
     def finish(self, job: Job, state: JobState) -> JobState:
@@ -275,10 +315,32 @@ class Board:
         with self._cv:
             if job.superseded and state is not JobState.SUPERSEDED:
                 state = JobState.SUPERSEDED
+            previous = job.state
             job.state = state
-            self._save()
+            try:
+                self._save()
+            except Exception:
+                job.state = previous
+                raise
             self._cv.notify_all()
             return state
+
+    def release_claim(self, job: Job) -> None:
+        """``stop()`` landed after this job was claimed and before it ran.
+        Put it back to ``queued`` so a later pass can claim it."""
+        with self._cv:
+            if job.state is not JobState.RUNNING:
+                return
+            job.state = JobState.QUEUED
+            was_set = job.cancel.is_set()
+            job.cancel.clear()
+            try:
+                self._save()
+            except Exception:
+                job.state = JobState.RUNNING
+                if was_set:
+                    job.cancel.set()
+                raise
 
     def wake(self) -> None:
         with self._cv:
@@ -289,13 +351,16 @@ class Board:
             return tuple((job.event.head_sha, job.state) for job in self._jobs)
 
     def _claim(self, source: JobState, dest: JobState) -> Job | None:
+        if time.monotonic() < self._save_retry_at:
+            return None
         for job in self._jobs:
             if job.state is source and not job.superseded:
                 job.state = dest
                 try:
                     self._save()
-                except Exception:
+                except Exception as exc:
                     job.state = source
+                    exc.event = job.event  # type: ignore[attr-defined]
                     raise
                 return job
         return None

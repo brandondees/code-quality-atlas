@@ -62,7 +62,7 @@ def parse_delivery(body: bytes) -> Any | None:
     """The JSON value, or None when the body is not a JSON object."""
     try:
         data = json.loads(body)
-    except (json.JSONDecodeError, UnicodeDecodeError):
+    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):
         return None
     if not isinstance(data, dict):
         return None

@@ -850,7 +850,8 @@ def test_stop_does_not_start_a_queued_review(tmp_path):
     threading.Thread(target=release_after_stop_begins).start()
     worker.stop(timeout=2)
     assert started == []
-    assert board._jobs[0].cancel.is_set()
+    assert board.states() == ((SHA_A, JobState.QUEUED),)
+    assert board._jobs[0].cancel.is_set() is False
 
 
 def test_a_failed_claim_save_leaves_the_job_queued(tmp_path):
@@ -1079,10 +1080,11 @@ def test_a_persistent_save_failure_does_not_hot_loop(tmp_path, monkeypatch):
         return real(*args, **kwargs)
 
     monkeypatch.setattr(queue_mod, "_store", boom)
-    claims = {"n": 0}
+    claims = {"n": 0, "at": []}
     real_claim = board.claim
 
     def claim():
+        claims["at"].append(time.monotonic())
         claims["n"] += 1
         return real_claim()
 
@@ -1103,13 +1105,94 @@ def test_a_persistent_save_failure_does_not_hot_loop(tmp_path, monkeypatch):
         health.request("GET", "/health")
         assert health.getresponse().status == 503
         health.close()
-        time.sleep(1.0)
-        assert claims["n"] < 30
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and not board.saves_ok():
+            time.sleep(0.05)
+        recovered = HTTPConnection(host, port, timeout=2)
+        recovered.request("GET", "/health")
+        assert recovered.getresponse().status == 200
+        recovered.close()
+        gaps = [
+            claims["at"][index] - claims["at"][index - 1]
+            for index in range(1, len(claims["at"]))
+        ]
+        assert gaps
+        assert min(gaps) >= 0.8
     finally:
         worker.stop()
         server.shutdown()
         listener.join(timeout=2)
         server.server_close()
+
+
+def test_a_failed_save_rolls_back_enqueue_finish_and_begin_post(tmp_path, monkeypatch):
+    import atlas_reviewer.service_queue as queue_mod
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+
+    def boom(*_args, **_kwargs):
+        raise OSError("disk")
+
+    monkeypatch.setattr(queue_mod, "_store", boom)
+    with pytest.raises(OSError, match="disk"):
+        board.enqueue(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 21, tzinfo=UTC)
+        )
+    assert job.superseded is False
+    assert job.cancel.is_set() is False
+    assert board.states() == ((SHA_A, JobState.RUNNING),)
+    with pytest.raises(OSError, match="disk"):
+        board.begin_post(job)
+    assert board.states() == ((SHA_A, JobState.RUNNING),)
+    with pytest.raises(OSError, match="disk"):
+        board.finish(job, JobState.DONE)
+    assert board.states() == ((SHA_A, JobState.RUNNING),)
+
+
+def test_a_claim_save_error_names_the_job(tmp_path, monkeypatch):
+    import atlas_reviewer.service_queue as queue_mod
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+
+    def boom(*_args, **_kwargs):
+        raise OSError("disk")
+
+    monkeypatch.setattr(queue_mod, "_store", boom)
+    holder: dict[str, Worker] = {}
+
+    class Sink:
+        def emit(self, event):
+            if event.step == "worker error":
+                holder["worker"]._stop.set()
+
+    worker = Worker(
+        board,
+        lambda event, cancel: ReviewRun(False, error="no"),
+        Telemetry(SystemClock(), sink=Sink(), scrub=lambda text: text),
+        state_root=tmp_path,
+    )
+    holder["worker"] = worker
+    worker._loop()
+    errors = [
+        event for event in worker._telemetry.events if event.step == "worker error"
+    ]
+    assert errors
+    assert errors[0].fields["pr"] == 7
+    assert errors[0].fields["repo"] == REPO
+    assert errors[0].fields["sha12"] == SHA_A[:12]
+
+
+def test_a_deeply_nested_body_is_ignored(tmp_path):
+    config = _config(tmp_path)
+    board = Board(tmp_path / "queue.json")
+    body = b"[" * 2000 + b"]" * 2000
+    result = _deliver(config, board, body)
+    assert result.status == 202
+    assert board.states() == ()
 
 
 def test_the_module_refuses_to_start_without_a_secret():

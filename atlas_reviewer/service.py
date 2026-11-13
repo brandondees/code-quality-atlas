@@ -235,7 +235,7 @@ class Worker:
         if job is None:
             return False
         if self._stop.is_set():
-            job.cancel.set()
+            self._board.release_claim(job)
             return False
         try:
             self._execute(job)
@@ -254,10 +254,11 @@ class Worker:
                     return
                 self._retry_post()
             except Exception as exc:  # noqa: BLE001 -- the thread has to outlive one failure
+                event = getattr(exc, "event", None)
                 self._telemetry.record(
                     "service",
                     "worker error",
-                    {},
+                    _fields(event) if event is not None else {},
                     status=ERROR,
                     error=f"{type(exc).__name__}: {exc}",
                 )
