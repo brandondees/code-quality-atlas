@@ -119,7 +119,10 @@ from atlas_reviewer.sprites_api import RUNNER_PREFIX, SpritesClient
 from atlas_reviewer.stops import raise_if_stopped
 from atlas_reviewer.telemetry import JsonlSink, Telemetry
 from atlas_reviewer.tracing import (
+    acquire_shared,
     header_values,
+    opening_trace,
+    release_shared,
     shared_trace,
     shutdown_shared,
     validate_export,
@@ -642,43 +645,56 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                 )
             )
 
-        selection, plan = select_agentic_lenses(
-            depth, None if depth is Depth.TRIAGE else run_picker, library, scrub=scrub
-        )
-        names = tuple(loaded.name for loaded in plan.loaded)
-        budget = getattr(picker_provider, "budget", None)
-        picker_spend = (
-            (len(budget.calls), budget.committed_usd())
-            if isinstance(budget, ReviewBudget)
-            else (0, Decimal(0))
-        )
-        ledger = AttemptLedger(_state_dir(args, env) / "attestation.ledger", clock)
-        review = review_lenses(
-            event,
-            names,
-            diff,
-            trees,
-            library=library,
-            model=lens_model,
-            limits=limits,
-            ledger=ledger,
-            sprites=sprites,
-            runner_ledger=FileLedger(_state_dir(args, env) / "runners.ledger"),
-            redactor=redactor,
-            clock=clock,
-            telemetry=telemetry,
-            model_for=model_factory,
-            picker_spend=picker_spend,
-        )
-        review = replace(
-            review,
-            selection_note=selection.note,
-            not_picked=tuple(
-                (use.name, use.reason)
-                for use in plan.uses
-                if use.status is LensStatus.NOT_RUN
-            ),
-        )
+        acquire_shared()
+        try:
+            with opening_trace(None, scrub).review(
+                event.repo, event.pr_number, event.head_sha
+            ) as span:
+                selection, plan = select_agentic_lenses(
+                    depth,
+                    None if depth is Depth.TRIAGE else run_picker,
+                    library,
+                    scrub=scrub,
+                )
+                names = tuple(loaded.name for loaded in plan.loaded)
+                budget = getattr(picker_provider, "budget", None)
+                picker_spend = (
+                    (len(budget.calls), budget.committed_usd())
+                    if isinstance(budget, ReviewBudget)
+                    else (0, Decimal(0))
+                )
+                ledger = AttemptLedger(
+                    _state_dir(args, env) / "attestation.ledger", clock
+                )
+                review = review_lenses(
+                    event,
+                    names,
+                    diff,
+                    trees,
+                    library=library,
+                    model=lens_model,
+                    limits=limits,
+                    ledger=ledger,
+                    sprites=sprites,
+                    runner_ledger=FileLedger(_state_dir(args, env) / "runners.ledger"),
+                    redactor=redactor,
+                    clock=clock,
+                    telemetry=telemetry,
+                    model_for=model_factory,
+                    picker_spend=picker_spend,
+                )
+                review = replace(
+                    review,
+                    selection_note=selection.note,
+                    not_picked=tuple(
+                        (use.name, use.reason)
+                        for use in plan.uses
+                        if use.status is LensStatus.NOT_RUN
+                    ),
+                )
+                span.set("atlas.review_event", review.event.value)
+        finally:
+            release_shared()
     written = _emit(render_draft(review, redactor), args.out, out, err)
     (out if written else err).write(
         f"{_telemetry_line(run, telemetry)}"

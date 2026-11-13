@@ -179,7 +179,12 @@ not shut it down, and a provider a review still holds is not replaced
 out from under it. A caller that has already opened the review span gets
 a lens span under it. A lens that runs on a worker thread has to be
 started with `submit_with_review_context`, which copies that span into
-the worker. The draft status line carries `trace_id` when a span was
+the worker. `agentic-review` opens the review span itself, around the
+picker and every lens, and sets `atlas.review_event` to the event the
+draft ends with, after the not-run lenses count. A lens that is never
+started (a halted review, or a queued lens past the deadline) still gets a
+lens span with `atlas.lens.state` `NOT RUN` and `atlas.lens.reason`.
+The draft status line carries `trace_id` when a span was
 recorded. `validate_export` runs at startup, so a bad endpoint or header
 stops the process before a review. The JSONL `--events` file is unchanged.
 
@@ -191,7 +196,7 @@ runs. The only header sent is
 `ATLAS_OTEL_HEADERS`.
 
 Spans do not change the parity gate. A review with export configured
-and a review with export off make the same draft.
+and a review with export off reach the same outcome; the status line may add `trace_id`.
 
 ## Live mode
 
@@ -317,7 +322,7 @@ Environment variables (names only; never commit values):
 | `ATLAS_MAX_OUTPUT_TOKENS` | agentic lens entry | Per-call output cap. Unset uses the model's completion limit |
 | `ATLAS_REASONING_MAX_TOKENS` | agentic lens entry | Reasoning hint sent on the request. Unset is half the output cap, so the reply has the other half. It is not a price |
 | `ATLAS_POOL_SIZE` | `agentic-review` | Lenses at once, 1 to 16. Unset uses 4 on that command. `review_lens` still defaults to 1 |
-| `ATLAS_KEY_CEILING_USD` | `review` and `agentic-review` | Most the OpenRouter key's own credit limit may be. Unset is $5. A higher key is refused before inference, and the refusal names this variable |
+| `ATLAS_KEY_CEILING_USD` | `review` and `agentic-review` | The most the OpenRouter key's own credit limit may be. Unset is $5. A higher key is refused before inference, and the refusal names this variable |
 
 The six credential and state variables above the limit rows never reach a
 Sprite, a prompt, or the draft. Each one goes only to the adapter that

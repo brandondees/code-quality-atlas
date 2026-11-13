@@ -492,15 +492,9 @@ def _review_lenses(
 
     def run(lens: str, assigned: frozenset[str], index: int) -> _LensRun:
         if spend.halted:
-            halted = LensResult(
-                lens, index, None, None, reason=HALTED_REASON, scope=assigned
-            )
-            return _LensRun(halted, [], None, spend, ())
+            return _not_run(trace, lens, index, assigned, HALTED_REASON, spend)
         if clock.monotonic() >= deadline:
-            late = LensResult(
-                lens, index, None, None, reason=LATE_REASON, scope=assigned
-            )
-            return _LensRun(late, [], None, spend, ())
+            return _not_run(trace, lens, index, assigned, LATE_REASON, spend)
         try:
             return _run_lens(lens, assigned, index)
         except BaseException:
@@ -631,6 +625,23 @@ def _traced_lens(
             if label:
                 lens_span.set("atlas.limit_stop", label)
         return ran
+
+
+def _not_run(
+    trace: ReviewTrace,
+    lens: str,
+    index: int,
+    assigned: frozenset[str],
+    reason: str,
+    spend: Spend,
+) -> _LensRun:
+    """A lens that was never started still gets a span, so a trace shows
+    why a picked lens has no model calls."""
+    with trace.lens(lens) as lens_span:
+        result = LensResult(lens, index, None, None, reason=reason, scope=assigned)
+        lens_span.set("atlas.lens.state", result.state.value)
+        lens_span.set("atlas.lens.reason", reason)
+        return _LensRun(result, [], None, spend, ())
 
 
 @dataclass

@@ -300,7 +300,7 @@ the call.
 | PR conversation budget split | about 64 KiB total, working default | The body and comment caps within it. |
 | Branch-wide CI budget | check runs at up to 20 other commits of the PR, working default (`IngestConfig.max_ci_commits`) | How many commits back. Each commit's list keeps the client's page cap; jobs, logs and artifacts are still read at the head SHA only, under the one-shot caps. |
 | Per-tool timeout and output caps for the baked toolchain | none | A timeout is a coverage gap. |
-| Lens worker pool size | 1; the only value phase 3 accepts | Above 1 only after a concurrency probe. The research note suggests at most 4. |
+| Lens worker pool size | 1 to 16; `agentic-review` defaults to 4, and `review_lens` stays at 1 (D44) | Set with `--pool-size` or `ATLAS_POOL_SIZE`. The concurrency probe and the research note's cap of 4 are not enforced. |
 | Retries per failed attestation | 1, recommended; the phase 3 default | Then escalate. A failed quote, a reply outside the finding contract and an abandoned attempt are retried the same way (D40). |
 | Pilot set and the bar for retiring one-shot | none | Which PRs, how many, and the precision, recall and coverage results agentic drafts must reach. |
 

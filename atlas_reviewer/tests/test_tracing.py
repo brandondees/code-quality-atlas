@@ -9,6 +9,7 @@ from opentelemetry.sdk.trace.export import SpanExportResult
 
 from atlas_reviewer.bridge import BridgeResult, Status
 from atlas_reviewer.call_facts import CallFacts, note_call, take_call
+from atlas_reviewer.fakes import ScriptedLensModel
 from atlas_reviewer.lens_loop import (
     FinalReply,
     ToolCalls,
@@ -24,7 +25,7 @@ from atlas_reviewer.redact import Redactor, redact
 from atlas_reviewer.tool_model import _turn
 from atlas_reviewer.tracing import export_plan, limit_label, memory_trace
 
-from .agentic import LENS, READ_ALL, final
+from .agentic import LENS, READ_ALL, final, finding
 from .helpers import fake_token
 from .test_openrouter import MODEL_ID
 
@@ -494,7 +495,234 @@ def test_pooled_lenses_are_lens_spans_under_one_review_span(tmp_path):
     assert len(reviews) == 1 and len(lenses) == 2
     assert {span.parent.span_id for span in lenses} == {reviews[0].context.span_id}
     assert {_attrs(span)["agent.name"] for span in lenses} == {LENS, OTHER}
+    assert [_attrs(span)["atlas.lens.state"] for span in lenses] == ["clean", "clean"]
     assert result.trace_id == format(reviews[0].context.trace_id, "032x")
+
+
+def _memory_shared(monkeypatch):
+    from atlas_reviewer import tracing
+
+    trace, exporter = memory_trace(scrub)
+    monkeypatch.setattr(tracing, "trace_from_env", lambda env, scrubber: trace)
+    monkeypatch.setattr(tracing, "_SHARED", None)
+    monkeypatch.setattr(tracing, "_SHARED_ENDPOINT", None)
+    monkeypatch.setattr(tracing, "_HOLDERS", 0)
+    return trace, exporter
+
+
+def _approving_review(monkeypatch, picks):
+    """The CLI over a dry-run fixture, with a review_lenses that returns a
+    clean, fully covered review through the real tracing wrapper. A dry run
+    cannot reach APPROVE itself, because its lens reads no file."""
+    from atlas_reviewer import cli, coordinator
+
+    from .test_coordinator import clean, lens_result
+
+    class Picks:
+        name = "picks"
+
+        def complete(self, prompt):
+            return json.dumps({"lenses": picks})
+
+    def approving(event, names, diff, trees, *, redactor, trace=None, **kwargs):
+        return coordinator._traced_review(
+            event,
+            trace,
+            redactor,
+            lambda active: coordinator.synthesize([lens_result(clean())]),
+        )
+
+    monkeypatch.setattr(cli, "OfflineProvider", Picks)
+    monkeypatch.setattr(cli, "review_lenses", approving)
+
+
+@pytest.mark.parametrize(
+    ("picks", "event"),
+    [
+        (["reviewing-test-quality"], "APPROVE"),
+        (["made-up-lens", "reviewing-test-quality"], "COMMENT"),
+    ],
+)
+def test_the_review_span_records_the_event_the_cli_ends_with(
+    tmp_path, monkeypatch, picks, event
+):
+    from .test_cli import _agentic_on, _fixture_copy
+
+    trace, exporter = _memory_shared(monkeypatch)
+    _approving_review(monkeypatch, picks)
+    try:
+        _, _, err = _agentic_on(tmp_path, _fixture_copy(tmp_path), "--depth", "review")
+    finally:
+        trace.shutdown()
+    assert f"review event: {event};" in err, err
+    reviews = [s for s in exporter.get_finished_spans() if s.name == "review"]
+    assert len(reviews) == 1
+    assert _attrs(reviews[0])["atlas.review_event"] == event
+
+
+def test_the_picker_runs_inside_the_cli_review_span_and_the_hold_is_released(
+    tmp_path, monkeypatch
+):
+    from atlas_reviewer import cli, tracing
+
+    from .test_cli import _agentic_on, _fixture_copy
+
+    trace, exporter = _memory_shared(monkeypatch)
+    inside = []
+
+    class Picks:
+        name = "picks"
+
+        def complete(self, prompt):
+            inside.append(tracing.current_review() is not None)
+            return '{"lenses": ["reviewing-test-quality"]}'
+
+    monkeypatch.setattr(cli, "OfflineProvider", Picks)
+    try:
+        _agentic_on(tmp_path, _fixture_copy(tmp_path), "--depth", "review")
+    finally:
+        trace.shutdown()
+    assert inside == [True]
+    assert tracing._HOLDERS == 0
+    reviews = [s for s in exporter.get_finished_spans() if s.name == "review"]
+    assert len(reviews) == 1
+
+
+def test_a_continuation_is_a_lens_span_under_the_same_review_span(tmp_path):
+    from .agentic import tools
+    from .test_coordinator import _lenses
+
+    model = ScriptedLensModel(
+        [
+            tools(("diff_file", {"path": "calc.py"})),
+            final(),
+            tools(("diff_file", {"path": "config/keys.py"})),
+            final(),
+        ]
+    )
+    trace, exporter = memory_trace(scrub)
+    try:
+        result, _ = _lenses(tmp_path, [LENS], model, trace=trace)
+    finally:
+        trace.shutdown()
+    assert [lens.lens for lens in result.lenses] == [LENS, LENS]
+    spans = exporter.get_finished_spans()
+    review = next(span for span in spans if span.name == "review")
+    lenses = sorted(
+        (span for span in spans if span.name == "lens"),
+        key=lambda span: span.start_time,
+    )
+    assert len(lenses) == 2
+    assert {span.parent.span_id for span in lenses} == {review.context.span_id}
+    assert [_attrs(span)["atlas.lens.state"] for span in lenses] == [
+        "partial",
+        "clean",
+    ]
+    assert len([span for span in spans if span.name == "review"]) == 1
+
+
+def test_a_secret_only_the_diff_names_is_scrubbed_from_every_pooled_lens_span(
+    tmp_path,
+):
+    from .agentic import TOKEN
+    from .test_coordinator import DIFF, OTHER, _acknowledge, _lenses
+
+    value = "Zq9xKd82mPvLw4RtYb7n"
+    leaky_diff = DIFF.replace(f'TOKEN = "{TOKEN}"', f'password = "{value}"')
+    assert leaky_diff != DIFF
+
+    def mention(request):
+        reply = _acknowledge(request)
+        data = json.loads(reply.text)
+        data["findings"] = [finding(finding=f"the value {value} is committed")]
+        return type(reply)(json.dumps(data), reply.cost_usd)
+
+    models = [
+        ScriptedLensModel([READ_ALL, mention]),
+        ScriptedLensModel([READ_ALL, mention]),
+    ]
+    trace, exporter = memory_trace(lambda text: text, bodies=True)
+    try:
+        _lenses(
+            tmp_path, [LENS, OTHER], models[0], pool=2, models=models,
+            trace=trace, diff=leaky_diff,
+        )  # fmt: skip
+    finally:
+        trace.shutdown()
+    spans = exporter.get_finished_spans()
+    blob = json.dumps(
+        [{key: str(v) for key, v in _attrs(span).items()} for span in spans]
+    )
+    outputs = [
+        str(_attrs(span).get("output.value", ""))
+        for span in spans
+        if span.name == "completion"
+    ]
+    assert any("is committed" in text for text in outputs)
+    assert value not in blob
+
+
+def test_a_lens_that_never_started_still_gets_a_span_naming_why(tmp_path):
+    from atlas_reviewer.attestation import LensState
+    from atlas_reviewer.coordinator import HALTED_REASON
+    from atlas_reviewer.ports import ByokRefusedError
+
+    from .test_coordinator import OTHER, _lenses
+
+    def refuse(request):
+        raise ByokRefusedError("refusing the review: byok")
+
+    trace, exporter = memory_trace(scrub)
+    try:
+        _lenses(tmp_path, [LENS, OTHER], ScriptedLensModel([refuse]), trace=trace)
+    finally:
+        trace.shutdown()
+    spans = exporter.get_finished_spans()
+    review = next(span for span in spans if span.name == "review")
+    lenses = {_attrs(s)["agent.name"]: s for s in spans if s.name == "lens"}
+    assert set(lenses) == {LENS, OTHER}
+    assert all(s.parent.span_id == review.context.span_id for s in lenses.values())
+    assert _attrs(lenses[LENS])["atlas.lens.state"] == LensState.FAILED.value
+    assert _attrs(lenses[OTHER])["atlas.lens.state"] == LensState.NOT_RUN.value
+    assert _attrs(lenses[OTHER])["atlas.lens.reason"] == HALTED_REASON
+    assert not any(
+        s.parent.span_id == lenses[OTHER].context.span_id for s in spans if s.parent
+    )
+
+
+def test_a_lens_queued_past_the_review_deadline_gets_a_span_naming_the_deadline(
+    tmp_path, monkeypatch
+):
+    from atlas_reviewer import coordinator
+    from atlas_reviewer.attestation import LensState
+    from atlas_reviewer.coordinator import LATE_REASON
+
+    from .test_coordinator import LIMITS, OTHER, FakeClock, _clean_pair, _lenses
+
+    clock = FakeClock()
+    real = coordinator.run_bridge
+
+    def then_late(*args, **kwargs):
+        report = real(*args, **kwargs)
+        clock.advance(LIMITS.review_wall_s + 1)
+        return report
+
+    monkeypatch.setattr(coordinator, "run_bridge", then_late)
+    models = _clean_pair()
+    trace, exporter = memory_trace(scrub)
+    try:
+        _lenses(
+            tmp_path, [LENS, OTHER], models[0], models=models, clock=clock, trace=trace
+        )
+    finally:
+        trace.shutdown()
+    late = next(
+        s
+        for s in exporter.get_finished_spans()
+        if s.name == "lens" and _attrs(s)["agent.name"] == OTHER
+    )
+    assert _attrs(late)["atlas.lens.state"] == LensState.NOT_RUN.value
+    assert _attrs(late)["atlas.lens.reason"] == LATE_REASON
 
 
 def test_bodies_are_on_only_for_the_value_1_and_http_is_loopback_only():

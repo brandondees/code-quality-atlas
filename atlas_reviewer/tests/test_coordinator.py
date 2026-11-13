@@ -810,7 +810,7 @@ def _acknowledge(request):
 
 def _lenses(
     tmp_path, names, model, *, pool=1, models=None, limits=None, sprites=None,
-    clock=None, picker_spend=(0, Decimal(0)), trace=None,
+    clock=None, picker_spend=(0, Decimal(0)), trace=None, diff=None,
 ):  # fmt: skip
     from .test_keepalive import TaskServer, socket_path
 
@@ -828,7 +828,7 @@ def _lenses(
         result = review_lenses(
             EVENT,
             names,
-            DIFF,
+            DIFF if diff is None else diff,
             trees(),
             library=StubLibrary({LENS: BODY, OTHER: OTHER_BODY}),
             model=model,
