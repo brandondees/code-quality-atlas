@@ -1258,7 +1258,8 @@ and the same kind of neighbour for Major and Minor) after case and
 whitespace, and a finding that still fails is left out. The draft
 lists each dropped finding, including the raw severity, under its own
 heading. The other findings stand. A reply that is not a contract
-object is still sent back once. D45 records it.
+object is still sent back once. D54 records it.
+
 ## 2026-11-13 — pinned endpoints set the price, and ZDR can be turned off
 
 `max_price`, the reservation, the context and the completion limit come
