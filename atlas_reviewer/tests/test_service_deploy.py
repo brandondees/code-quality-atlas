@@ -150,7 +150,9 @@ def test_the_entrypoint_chowns_the_volume_before_dropping_root(tmp_path):
     pybin = tmp_path / "pybin"
     pybin.mkdir()
     python = pybin / "python"
-    python.write_text('#!/bin/sh\nprintf \'%s\\n\' "$@" > "$RECORD"\n', encoding="utf-8")
+    python.write_text(
+        '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$RECORD"\n', encoding="utf-8"
+    )
     python.chmod(python.stat().st_mode | stat.S_IEXEC)
     env = os.environ.copy()
     env["PATH"] = f"{bindir}{os.pathsep}{pybin}{os.pathsep}{env.get('PATH', '')}"
