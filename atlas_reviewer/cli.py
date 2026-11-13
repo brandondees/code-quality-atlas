@@ -632,6 +632,10 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         trees = fetch_sources(github, event.repo, ref, event.head_sha)
         library = LensLibrary()
         depth = Depth(args.depth)
+        # The PR body decides only whether the process-hygiene lens is
+        # included (D58); the text itself reaches no lens unfenced.
+        body = pull.get("body")
+        pr_text = body if isinstance(body, str) else ""
         harness = SkillBundleHarness(picker_provider, load_bundle(), redactor)
 
         def scrub(text: str) -> str:
@@ -664,6 +668,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                     None if depth is Depth.TRIAGE else run_picker,
                     library,
                     scrub=scrub,
+                    pr_text=pr_text,
                 )
                 names = tuple(loaded.name for loaded in plan.loaded)
                 budget = getattr(picker_provider, "budget", None)

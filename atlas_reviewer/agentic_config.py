@@ -23,6 +23,8 @@ ENV = {
     "max_turns": "ATLAS_MAX_TURNS",
     "lens_wall_s": "ATLAS_LENS_WALL_S",
     "review_wall_s": "ATLAS_REVIEW_WALL_S",
+    "no_progress_turns": "ATLAS_NO_PROGRESS_TURNS",
+    "duplicate_calls": "ATLAS_DUPLICATE_CALLS",
     "max_input_tokens": "ATLAS_MAX_INPUT_TOKENS",
     "max_output_tokens": "ATLAS_MAX_OUTPUT_TOKENS",
     "reasoning_max_tokens": "ATLAS_REASONING_MAX_TOKENS",
@@ -70,6 +72,10 @@ def _apply(limits: AgenticLimits, name: str, raw: str) -> AgenticLimits:
         return replace(limits, lens_wall_s=_positive_seconds(name, raw))
     if name == "review_wall_s":
         return replace(limits, review_wall_s=_positive_seconds(name, raw))
+    if name == "no_progress_turns":
+        return replace(limits, no_progress_turns=_positive_int(name, raw))
+    if name == "duplicate_calls":
+        return replace(limits, duplicate_calls=_positive_int(name, raw))
     if name == "max_input_tokens":
         return replace(limits, max_input_tokens=_positive_int(name, raw))
     if name == "max_output_tokens":

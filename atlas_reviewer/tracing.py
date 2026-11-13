@@ -54,7 +54,7 @@ from opentelemetry.trace import Status, StatusCode, Tracer
 
 from atlas_reviewer.bridge import Bridge, BridgeResult
 from atlas_reviewer.bridge import Status as ToolStatus
-from atlas_reviewer.call_facts import take_call
+from atlas_reviewer.call_facts import take_call, take_nudge
 from atlas_reviewer.lens_loop import (
     FinalReply,
     LensModel,
@@ -72,6 +72,10 @@ _KIND = "openinference.span.kind"
 _ARG_CHARS = 240
 _ERROR_CHARS = 200
 _FLUSH_MS = 1000
+# The exporter's own HTTP timeout, not the flush wait. At 1 s, every batch
+# export to a busy collector failed and dropped its spans on long reviews
+# (the 2026-11-13 trials lost review and lens spans this way).
+_EXPORT_TIMEOUT_S = 30.0
 _MIN_SECRET = 8
 _AMBIENT_HEADERS = (
     "OTEL_EXPORTER_OTLP_HEADERS",
@@ -350,7 +354,9 @@ def trace_from_env(env: Mapping[str, str], scrub: Scrub) -> ReviewTrace:
     }
     try:
         exporter = OTLPSpanExporter(
-            endpoint=plan.endpoint, headers=dict(plan.headers), timeout=1.0
+            endpoint=plan.endpoint,
+            headers=dict(plan.headers),
+            timeout=_EXPORT_TIMEOUT_S,
         )
     finally:
         os.environ.update(saved)
@@ -384,6 +390,7 @@ class _TracedModel:
         self._model = model
         self._owner = owner
         self._reservation: Decimal | None = None
+        self._bound_note = ""
 
     @property
     def name(self) -> str:
@@ -394,6 +401,7 @@ class _TracedModel:
         self._reservation = (
             amount if isinstance(amount, Decimal) and amount.is_finite() else None
         )
+        self._bound_note = getattr(self._model, "bound_note", "")
         return amount
 
     def turn(self, request: TurnRequest) -> Any:
@@ -414,11 +422,14 @@ class _TracedModel:
                 raise
             finally:
                 reservation = self._reservation
+                bound_note = self._bound_note
+                nudge = take_nudge()
                 self._reservation = None
+                self._bound_note = ""
                 _model_attributes(
                     note, self._model, request, reply, take_call(),
                     self._owner._clock() - start, caught, self._owner._bodies,
-                    reservation,
+                    reservation, bound_note, nudge,
                 )  # fmt: skip
         return reply
 
@@ -454,6 +465,8 @@ def _model_attributes(
     caught: Exception | None,
     bodies: bool,
     reservation: Decimal | None,
+    bound_note: str = "",
+    nudge: str = "",
 ) -> None:
     model_name = model.name
     if facts is not None and facts.model:
@@ -461,6 +474,15 @@ def _model_attributes(
     note.set("llm.model_name", model_name)
     note.set("atlas.latency_s", latency_s)
     _routing_attributes(note, model)
+    if bound_note:
+        # How the input-token bound this call was priced against was
+        # computed: from the last response's reported usage plus an
+        # estimate, or from bytes. A wrong estimate is visible here.
+        note.set("atlas.input_bound", bound_note)
+    if nudge:
+        # The harness-injected turn this completion answers: one of
+        # `unread-files`, `no-progress`, `duplicate-calls`.
+        note.set("atlas.nudge", nudge)
     if facts is not None:
         _tokens(note, facts)
         if facts.finish_reason:
@@ -478,13 +500,7 @@ def _model_attributes(
         note.set("atlas.cost_usd", format(cost, "f"))
     if reservation is not None:
         note.set("atlas.reservation_usd", format(reservation, "f"))
-    if caught is not None:
-        text = str(caught)
-        if "output-token limit" in text:
-            note.set("atlas.limit_stop", "output-token limit")
-        elif "prompt bound" in text:
-            note.set("atlas.limit_stop", "prompt bound")
-        note.error(text)
+    _caught(note, caught)
     if not bodies:
         return
     texts = [request.system]
@@ -496,6 +512,17 @@ def _model_attributes(
         note.set("output.value", reply.text)
     elif isinstance(reply, ToolCalls):
         note.set("output.value", _calls_json(reply))
+
+
+def _caught(note: _Note, caught: Exception | None) -> None:
+    if caught is None:
+        return
+    text = str(caught)
+    if "output-token limit" in text:
+        note.set("atlas.limit_stop", "output-token limit")
+    elif "prompt bound" in text:
+        note.set("atlas.limit_stop", "prompt bound")
+    note.error(text)
 
 
 def _openinference_provider(name: str) -> str | None:
@@ -527,6 +554,8 @@ def _tokens(note: _Note, facts: Any) -> None:
         note.set("llm.token_count.completion", completion)
     if facts.reasoning_tokens is not None:
         note.set("llm.token_count.completion_details.reasoning", facts.reasoning_tokens)
+    if getattr(facts, "reasoning_hint", None) is not None:
+        note.set("atlas.reasoning_hint", facts.reasoning_hint)
     if facts.cache_read_tokens is not None:
         note.set("llm.token_count.prompt_details.cache_read", facts.cache_read_tokens)
     if facts.cache_write_tokens is not None:
