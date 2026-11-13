@@ -430,7 +430,7 @@ def test_a_length_response_notes_tokens_before_the_stop():
         "choices": [{"finish_reason": "length", "message": {"content": "x"}}],
     }
     with pytest.raises(LimitRefused):
-        _turn(data, terms, True, 8000)
+        _turn(data, terms, True, MODEL_ID, 8000)
     facts = take_call()
     assert facts is not None
     assert (facts.prompt_tokens, facts.completion_tokens, facts.reasoning_tokens) == (
@@ -802,7 +802,7 @@ def test_a_provider_object_keeps_its_endpoint():
         },
         "choices": [{"finish_reason": "stop", "message": {"content": "ok"}}],
     }
-    assert _turn(data, terms, True, 8000).text == "ok"
+    assert _turn(data, terms, True, MODEL_ID, 8000).text == "ok"
     facts = take_call()
     assert facts is not None
     assert (facts.provider, facts.provider_endpoint) == ("amazon-bedrock", "us-east-1")
