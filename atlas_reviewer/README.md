@@ -1023,10 +1023,15 @@ D41 records the 2026-11-12 probe that did.
   built; there is no public fork API (Fly support, 2026-11-06).
 - **The draft** (`coordinator.render_draft`).
   - **Status line.** The first line is a status line: `"mode": "agentic"`,
-    `coverage_complete`, `changed_files`, `unreviewed_files`, the lens
-    counts by state, and `limit_stop`. The two file fields are counts.
-    `limit_stop` is the first limit that stopped a lens, or null. Paths
-    stay out of the line.
+    `coverage_complete`, `changed_files`, `unreviewed_files`,
+    `context_omissions`, `other_pull_requests`, `round_log_note`,
+    `trace_id` when a span was recorded, the lens counts by state, and
+    `limit_stop`. The two file fields are counts. `context_omissions` is
+    a count. `other_pull_requests` is how many records in the log belonged
+    to another pull request. `round_log_note` is empty, or the error class
+    and its strerror when the log could not be written. `limit_stop` is
+    the first limit that stopped a lens, or null. Paths stay out of the
+    line.
   - **Coverage.** Coverage is complete only if every selected lens settled
     clean, every changed file's diff was read, the outcome recorded a
     changed-file count, and, when this review ran a runner, that runner
@@ -1075,6 +1080,7 @@ D41 records the 2026-11-12 probe that did.
 | `agentic_config.py` | the one reader for those limits: a flag, else `ATLAS_*`, else the default | no |
 | `limit_stop.py` | the text and ledger fields for a limit that stopped a lens | no |
 | `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft; holds the Sprite for the lens (`keepalive.lens_hold`) | via ports, the ledger |
+| `rounds.py` | the prior-round log (`RoundLog`): append-only JSONL, mode 0600, one record per finished review, fenced back as untrusted data. No shipped caller builds the path yet | writes the log file |
 | `tool_model.py` | the live tool-calling adapter (`OpenRouterLensModel`): one pinned Chat Completions request per `LensModel` turn, `cache_control` and `reasoning` only when the selected endpoints list them, strict tool-call arguments, cost from `_actual_cost` (BYOK upstream included; catalog rates when the cost is missing but the token counts are usable, with cache read and write counts at the catalog's cache rates when the response reports them; a reasoning rate with no reasoning-token count is unpriced only when the cost is also missing). Not on the CLI. Tested with recorded HTTP only | via the OpenRouter client |
 | `keepalive.py` | the Sprite Tasks API hold for one lens: create, refresh every 60 seconds with a 5-minute expiry, delete on exit. Not on the CLI. Tested with `LocalSprites` and a fake socket | via the runner exec |
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`); the agentic `LensModel` port is in `lens_loop.py` | no |

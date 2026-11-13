@@ -635,8 +635,8 @@ def _review_lens(
         report,
         spend,
         (*diff_secrets.values, *session.flagged()),
-        omissions,
-        other_pull_requests,
+        context_omissions=omissions,
+        other_pull_requests=other_pull_requests,
     )
     if round_log is not None:
         try:
@@ -644,7 +644,10 @@ def _review_lens(
         except OSError as exc:
             review = replace(
                 review,
-                round_log_note=f"the round log was not written: {exc}",
+                round_log_note=(
+                    "the round log was not written: "
+                    f"{_log_write_cause(exc)}. Detail: {exc}"
+                ),
             )
     return review
 
@@ -870,12 +873,37 @@ def status_line(review: AgenticReview) -> str:
         "unreviewed_files": len(_unread_paths(review)),
         "context_omissions": len(review.context_omissions),
         "other_pull_requests": review.other_pull_requests,
-        "round_log_note": review.round_log_note,
+        "round_log_note": _status_log_note(review.round_log_note),
         "limit_stop": _limit_stop(review),
     }
     if review.trace_id:
         fields["trace_id"] = review.trace_id
     return f"{STATUS_PREFIX}{json.dumps(fields, sort_keys=True)} -->"
+
+
+def _log_write_cause(exc: OSError) -> str:
+    """The error class and its strerror, with no filename.
+
+    `str(exc)` includes the path. The status line must not."""
+    name = type(exc).__name__
+    detail = exc.strerror or ""
+    if not detail:
+        filename = "" if exc.filename is None else str(exc.filename)
+        parts = [
+            str(arg)
+            for arg in exc.args
+            if not isinstance(arg, int) and str(arg) != filename
+        ]
+        detail = "; ".join(parts)
+    return f"{name}: {detail}" if detail else name
+
+
+def _status_log_note(note: str) -> str:
+    """The status-line form of a log-write note: the cause, not the path."""
+    marker = ". Detail: "
+    if marker in note:
+        return note.split(marker, 1)[0]
+    return note
 
 
 def _limit_stop(review: AgenticReview) -> dict[str, str] | None:
@@ -928,7 +956,10 @@ def render_draft(review: AgenticReview, redactor: Redactor) -> str:
         f"Model calls: {review.model_calls}; committed: ${review.committed_usd}.",
     ]
     if review.round_log_note:
-        lines.append(review.round_log_note)
+        lines.append(
+            "Round log, quoted: "
+            + quote_untrusted(review.round_log_note, QUOTED_CHARS, scrub=scrub)
+        )
     if review.runner is not None:
         lines.append(
             f"Runner: {review.runner.status.value}; cleanup {review.runner.cleanup.value}."

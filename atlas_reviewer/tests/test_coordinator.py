@@ -861,11 +861,12 @@ def test_a_log_write_failure_keeps_the_review(tmp_path):
     assert model.requests
     assert result.coverage_complete
     assert result.event is ReviewEvent.APPROVE
-    assert "the round log was not written: disk full" in render_draft(
-        result, Redactor()
-    )
+    draft = render_draft(result, Redactor())
+    assert "the round log was not written: OSError: disk full" in draft
+    assert "Round log, quoted:" in draft
     assert (
-        status(result)["round_log_note"] == "the round log was not written: disk full"
+        status(result)["round_log_note"]
+        == "the round log was not written: OSError: disk full"
     )
 
 
@@ -926,6 +927,29 @@ def test_a_round_log_reaches_the_lens_inside_an_open_review_span(tmp_path):
     assert "nested-prior-finding" in model.requests[0].messages[0].text
     assert not result.coverage_complete
     assert "caller context was omitted" in render_draft(result, Redactor())
+
+
+def test_the_status_line_names_a_log_error_without_its_path(tmp_path):
+    from atlas_reviewer.rounds import RoundLog
+
+    path = "/tmp/secret-review/rounds.jsonl"
+
+    class Broken(RoundLog):
+        def append(self, record):
+            raise PermissionError(13, "Permission denied", path)
+
+    result, _, _ = review(
+        tmp_path,
+        [READ_ALL, final()],
+        round_log=Broken(tmp_path / "state" / "rounds.jsonl"),
+    )
+    line = status_line(result)
+    assert path not in line
+    assert "PermissionError: Permission denied" in line
+    draft = render_draft(result, Redactor())
+    assert path not in draft.splitlines()[0]
+    assert path in draft
+    assert "Round log, quoted:" in draft
 
 
 def test_other_pull_requests_are_on_the_status_line(tmp_path):

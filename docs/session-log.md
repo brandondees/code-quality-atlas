@@ -1163,10 +1163,11 @@ are refused. No live call was made.
 
 ## 2026-11-12 — each agentic round reviews the whole pull request
 
-The agentic first turn now carries the PR conversation
+The agentic first turn can carry the PR conversation
 (`conversation.review_context`) and prior atlas rounds
 (`rounds.RoundLog`, keyed by repository and pull request, not by head
-SHA). A superseded head stays in the log, labelled as not this
+SHA). No shipped caller wires the log yet: `review_lens` accepts
+`round_log`, and the tests pass it. A superseded head stays in the log, labelled as not this
 review's scope. The changed-file list is still every file in the
 current diff. A round that does not fit, or a log line that does not
 parse, is an omission, and that omission cannot approve. D52. The

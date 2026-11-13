@@ -300,11 +300,32 @@ def test_a_prior_budget_must_be_a_positive_integer():
         prior_blocks((), "b" * 40, True, unreadable=0, scrub=lambda text: text)
 
 
-def test_owner_casefolds_the_repository():
-    from atlas_reviewer.rounds import _owner
+def test_owner_casefolds_the_repository(tmp_path):
+    path = tmp_path / "rounds.jsonl"
+    path.write_text(
+        json.dumps({"v": 2, "repo": "Example-Org/Example-App", "pr": 7}) + "\n",
+        encoding="utf-8",
+    )
+    loaded = RoundLog(path).read()
+    assert loaded.unreadable == (("example-org/example-app", 7),)
 
-    line = json.dumps({"v": 2, "repo": "Example-Org/Example-App", "pr": 7})
-    assert _owner(line) == ("example-org/example-app", 7)
+
+def test_packed_prior_text_stays_within_the_budget_including_separators():
+    current = record(head_sha="b" * 40, findings=("current-block",))
+    older = record(head_sha="b" * 40, findings=("older-block",))
+    (one,), _ = prior_blocks(
+        (current,), "b" * 40, 10**6, unreadable=0, scrub=lambda text: text
+    )
+    (two,), _ = prior_blocks(
+        (older,), "b" * 40, 10**6, unreadable=0, scrub=lambda text: text
+    )
+    budget = len(one.content.text) + len(two.content.text) + 1
+    blocks, _ = prior_blocks(
+        (older, current), "b" * 40, budget, unreadable=0, scrub=lambda text: text
+    )
+    assert len(blocks) == 1
+    assert len(blocks[0].content.text) <= budget
+    assert "\n\n" not in blocks[0].content.text
 
 
 def test_an_empty_head_sha_is_not_a_record():
