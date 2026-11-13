@@ -3,11 +3,11 @@
 ledger, verify their output and synthesize one draft (D31, D34, D44).
 
 `review_lens` runs one lens. `review_lenses` runs every selected lens,
-up to the configured pool, then assigns files none of them read to a
-continuation while a call and the review clock remain. The synthesis is
-mechanical: the
-controller mints `L<lens>-F<n>` IDs, ranks the verified findings by
-severity and sets the verdict from them by `synthesis.md`'s rule (one
+up to the configured pool, then gives each lens a continuation of its
+own for the files it left unread while a call and the review clock
+remain. The synthesis is mechanical: the controller mints
+`L<lens>-F<n>` IDs, ranks the verified findings by severity and sets
+the verdict from them by `synthesis.md`'s rule (one
 introduced Blocker blocks; anything else that sets the verdict means
 approve with changes; only nits or nothing means approve). There is no
 model merge call yet.
