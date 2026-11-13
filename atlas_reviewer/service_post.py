@@ -215,30 +215,33 @@ class ReviewPoster:
         service log scrubber."""
         return self._secrets()
 
-    def post(self, event: PrEvent, report: ReviewReport) -> None:
+    def post(self, event: PrEvent, report: ReviewReport) -> bool:
+        """True when this commit was already posted and nothing new was created."""
         key = post_key(event)
         if self._ledger.seen(key) is not None:
-            return
+            return True
         self._attempt.deadline = self._now() + _ATTEMPT_DEADLINE_S
         try:
             existing = self._find(event, marker_for(key))
             if existing is not None:
                 self._ledger.record(key, existing)
-                return
+                return True
             # After the list, under the queue lock, and before the create.
             # A review GitHub has already accepted cannot be recalled.
-            # A missing hook used to skip this check, which is how the
-            # double-module bug posted a stale head.
+            # A missing hook must not post.
             check = before_send.get()
             if check is None:
                 raise PostHookMissing("the pre-create check is not set")
             if not check():
-                raise PostNotCurrent("the head moved before the review was sent")
+                raise PostNotCurrent(
+                    "the head moved or the post was stopped before the review was sent"
+                )
             body = render_comment(report, key, self._scrub)
             review_id = self._create(event, comment_payload(event.head_sha, body))
             self._ledger.record(key, review_id)
         finally:
             self._attempt.deadline = None
+        return False
 
     def _create(self, event: PrEvent, payload: Mapping[str, str]) -> int:
         if payload.get("event") != "COMMENT":

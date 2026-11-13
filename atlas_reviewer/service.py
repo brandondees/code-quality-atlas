@@ -104,7 +104,7 @@ _REQUEST_TIMEOUT_S = 20.0
 _BODY_BUDGET_S = _REQUEST_TIMEOUT_S
 _MAX_HTTP_HANDLERS = 16
 
-Publisher = Callable[[PrEvent, ReviewReport], None]
+Publisher = Callable[[PrEvent, ReviewReport], bool | None]
 Runner = Callable[[PrEvent, threading.Event], ReviewRun]
 
 
@@ -420,7 +420,7 @@ class Worker:
             self._stopped_or_superseded(job, fields)
             return
         try:
-            self._publisher(job.event, report)
+            already = self._publisher(job.event, report)
         except PostNotCurrent:
             # begin_post refused. A stop keeps the draft. A moved head
             # is SUPERSEDED. Settling every refusal as SUPERSEDED deletes
@@ -443,9 +443,12 @@ class Worker:
             self._defer_post(job, f"{type(exc).__name__}: {exc}")
             return
         committed = self._settle(job, JobState.DONE)
-        step = (
-            "review superseded" if committed is JobState.SUPERSEDED else "review posted"
-        )
+        if committed is JobState.SUPERSEDED:
+            step = "review superseded"
+        elif already:
+            step = "review already posted"
+        else:
+            step = "review posted"
         self._telemetry.record("service", step, fields)
 
     def _record_post_refusal(
@@ -538,9 +541,14 @@ class Worker:
             self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
             return
         if job.state is JobState.POSTING:
-            self._stored_supersede(job, self._board.pause_post(job))
+            stored = self._board.pause_post(job)
+        else:
+            stored = self._board.release_claim(job)
+        if stored is JobState.SUPERSEDED:
+            self._stored_supersede(job, stored)
             return
-        self._stored_supersede(job, self._board.release_claim(job))
+        if stored in {JobState.QUEUED, JobState.POST_PENDING}:
+            self._telemetry.record("service", "review stopped", fields)
 
     def _settle(self, job: Job, state: JobState) -> JobState:
         committed = self._board.finish(job, state)

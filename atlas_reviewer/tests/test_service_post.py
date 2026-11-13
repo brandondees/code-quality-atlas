@@ -36,6 +36,7 @@ from atlas_reviewer.service_post import (
     PostLedger,
     RefusedReviewEvent,
     ReviewPoster,
+    _marked,
     _repository_names,
     comment_only,
     comment_payload,
@@ -155,6 +156,97 @@ def test_a_stop_during_the_listing_does_not_post(tmp_path):
     assert [call for call in github.calls if call[0] == "POST"] == []
     assert (directory / "draft.md").is_file()
     assert board.states() == ((SHA, JobState.POST_PENDING),)
+    assert any(record.step == "review stopped" for record in worker._telemetry.events)
+
+
+def test_begin_post_refuses_a_job_that_is_not_running_or_posting(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(EVENT)
+    job = board._jobs[0]
+    assert job.state is JobState.QUEUED
+    assert board.begin_post(job) is False
+    assert job.state is JobState.QUEUED
+
+
+def test_a_non_bot_review_does_not_count_as_this_apps_post():
+    marker = marker_for(post_key(EVENT))
+    item = {
+        "commit_id": SHA,
+        "body": f"note {marker}",
+        "id": 9,
+        "user": {"login": "code-quality-atlas[bot]", "type": "User"},
+    }
+    assert _marked(item, marker, SHA, "code-quality-atlas[bot]") is None
+
+
+def test_a_repeat_post_is_logged_as_already_posted(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    github = GitHub()
+    poster, _ = _poster(tmp_path, github)
+    assert poster.post(EVENT, REPORT) is False
+    board.enqueue(EVENT)
+    job = board.claim()
+    assert job is not None
+    worker = Worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        Telemetry(SystemClock()),
+        poster.post,
+        state_root=tmp_path,
+    )
+    worker._publish(job, REPORT)
+    assert len([call for call in github.calls if call[0] == "POST"]) == 1
+    assert any(
+        record.step == "review already posted" for record in worker._telemetry.events
+    )
+
+
+def test_a_marker_already_on_the_pr_is_logged_as_already_posted(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    github = GitHub()
+    marker = marker_for(post_key(EVENT))
+    github.reviews.append(
+        {
+            "id": 4,
+            "body": marker,
+            "commit_id": SHA,
+            "user": {"login": "code-quality-atlas[bot]", "type": "Bot"},
+        }
+    )
+    poster, _ = _poster(tmp_path, github)
+    board.enqueue(EVENT)
+    job = board.claim()
+    assert job is not None
+    worker = Worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        Telemetry(SystemClock()),
+        poster.post,
+        state_root=tmp_path,
+    )
+    worker._publish(job, REPORT)
+    assert [call for call in github.calls if call[0] == "POST"] == []
+    assert any(
+        record.step == "review already posted" for record in worker._telemetry.events
+    )
+
+
+def test_a_stop_before_the_review_runs_is_logged(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(EVENT)
+    job = board.claim()
+    assert job is not None
+    job.cancel.set()
+    worker = Worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        Telemetry(SystemClock()),
+        lambda event, report: False,
+        state_root=tmp_path,
+    )
+    worker._stopped_or_superseded(job, {"pr": 7, "sha12": SHA[:12], "repo": REPO})
+    assert job.state is JobState.QUEUED
+    assert any(record.step == "review stopped" for record in worker._telemetry.events)
 
 
 def test_a_missing_pre_create_hook_does_not_post(tmp_path):
@@ -163,8 +255,11 @@ def test_a_missing_pre_create_hook_does_not_post(tmp_path):
     poster, _ = _poster(tmp_path, github)
 
     def publish(event, report):
-        before_send.set(None)
-        poster.post(event, report)
+        token = before_send.set(None)
+        try:
+            poster.post(event, report)
+        finally:
+            before_send.reset(token)
 
     worker = Worker(
         board,
