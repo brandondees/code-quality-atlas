@@ -972,6 +972,11 @@ def test_a_mint_401_is_not_retried(tmp_path):
     assert board.states() == ((SHA, JobState.FAILED),)
 
 
+def test_an_allowlist_entry_without_an_owner_is_refused():
+    with pytest.raises(ValueError, match="owner/name"):
+        _repository_names(frozenset({"noslash"}))
+
+
 def test_the_posting_token_covers_one_account():
     with pytest.raises(ValueError, match="one GitHub account"):
         _repository_names(frozenset({"alice/shared", "bob/shared"}))

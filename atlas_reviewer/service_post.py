@@ -404,11 +404,21 @@ def _marked(item: object, marker: str, sha: str, bot_login: str) -> int | None:
 def _repository_names(allowlist: frozenset[str]) -> tuple[str, ...]:
     """GitHub scopes an installation token by repository name on the
     installation's account. Two owners would make a shared name grant
-    both, so this refuses that list."""
-    owners = {repo.split("/", 1)[0] for repo in allowlist}
+    both, so this refuses that list. An entry without an owner is a
+    configuration error, not a crash."""
+    owners: set[str] = set()
+    names: list[str] = []
+    for repo in allowlist:
+        if "/" not in repo:
+            raise ValueError(f"repository allowlist entry {repo!r} must be owner/name")
+        owner, name = repo.split("/", 1)
+        if not owner or not name:
+            raise ValueError(f"repository allowlist entry {repo!r} must be owner/name")
+        owners.add(owner)
+        names.append(name)
     if len(owners) > 1:
         raise ValueError("the posting token covers one GitHub account")
-    return tuple(sorted({repo.split("/", 1)[1] for repo in allowlist}))
+    return tuple(sorted(set(names)))
 
 
 def publisher_from_env(

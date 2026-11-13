@@ -1388,7 +1388,7 @@ def test_main_scrubs_the_child_secrets(tmp_path, monkeypatch):
                 return None
 
             def credential_secrets(self):
-                return ()
+                return ("minted-app-credential",)
 
         monkeypatch.setattr(
             post_mod, "publisher_from_env", lambda *args, **kwargs: _Poster()
@@ -1404,9 +1404,10 @@ def test_main_scrubs_the_child_secrets(tmp_path, monkeypatch):
     sources = seen["sources"]
     assert isinstance(sources, tuple) and sources
     scrubbed = Redactor(known_secrets=("webhook-secret-value",), sources=sources)(
-        f"stderr saw {sprite}"
+        f"stderr saw {sprite} and minted-app-credential"
     )
     assert sprite not in scrubbed.text
+    assert "minted-app-credential" not in scrubbed.text
 
 
 def test_a_finished_review_keeps_its_draft_when_nothing_is_posted(tmp_path):
