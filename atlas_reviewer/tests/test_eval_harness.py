@@ -440,6 +440,29 @@ def test_zero_findings_are_a_gap_unless_the_round_says_there_are_none():
             "Last round had no findings at or above. "
             "Nothing new at or above this round's floor.",
         )
+        is False
+    )
+    assert (
+        findings_expected(
+            "3 findings",
+            "The change adds the path.\n\nNothing new at or above this round's floor.",
+        )
+        is True
+    )
+    assert (
+        findings_expected(
+            "3 findings",
+            "## Round 1 — notes\n"
+            "<!-- No findings at or above this round's floor. -->\n\n"
+            "The parser missed them.\n",
+        )
+        is True
+    )
+    assert (
+        findings_expected(
+            "3 findings",
+            'The note said "No findings at or above this round\'s floor."',
+        )
         is True
     )
     for probe in (
@@ -482,7 +505,40 @@ def test_zero_findings_are_a_gap_unless_the_round_says_there_are_none():
         },
         [],
     )
-    assert buried is not None and buried["metadata"]["parse_gap"] is True
+    assert buried is not None and buried["metadata"]["parse_gap"] is False
+
+
+def test_a_bold_lead_closed_with_stars_splits_before_the_next_sentence():
+    from atlas_reviewer.eval_harness import _sentences
+
+    paragraph = (
+        "**No findings at or above this round's floor.**"
+        "The next sentence is not a none-line."
+    )
+    sentences = _sentences(paragraph)
+    assert sentences[0] == "**No findings at or above this round's floor.**"
+    assert "next sentence" not in sentences[0]
+    assert (
+        findings_expected(
+            "3 findings",
+            "## Round 1 — APPROVE\n"
+            "<!-- atlas-review round:1 -->\n\n" + paragraph + "\n",
+        )
+        is False
+    )
+
+
+def test_checked_in_rows_rebuild_their_parse_gap():
+    from atlas_reviewer.eval_harness import review_has_parse_gap
+
+    root = Path(__file__).resolve().parent.parent / "fixtures" / "eval-references"
+    paths = sorted(root.glob("pr-*.json"))
+    assert len(paths) == 26
+    for path in paths:
+        row = json.loads(path.read_text(encoding="utf-8"))
+        body = (root / "reviews" / f"{path.stem}.txt").read_text(encoding="utf-8")
+        gap = review_has_parse_gap(body, len(row["output"]["findings"]))
+        assert gap is row["metadata"]["parse_gap"], path.name
 
 
 def test_a_round_marker_does_not_hide_the_canonical_lead():

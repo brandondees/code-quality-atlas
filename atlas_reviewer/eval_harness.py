@@ -52,8 +52,8 @@ _NONE = re.compile(
     r"|zero findings|\b0 findings\b",
     re.IGNORECASE,
 )
-# The canonical lead, and only as the whole start of one sentence.
-# A later sentence, or a sentence that merely contains the phrase, does not count.
+# A sentence opens with the canonical lead. A sentence that only
+# contains the phrase does not.
 _CANONICAL_LEAD = re.compile(
     r"(?i)^\s*(?:\*\*)?\s*(?:no(?:\s+new)?\s+findings|nothing\s+new)\s+at\s+or\s+above\b"
 )
@@ -385,41 +385,70 @@ def verdict_of(title: str, state: str | None = None) -> str:
     return "COMMENT"
 
 
-def _lead_after_heading(body: str) -> str:
-    """The first sentence after a ``## Round N`` heading.
+def _first_paragraph(body: str) -> str:
+    """The first paragraph after a ``## Round N`` heading.
 
-    A leading ``<!-- atlas-review round:N -->`` marker is not the
-    sentence. With no heading, the first sentence of ``body`` is the
-    lead. A later sentence is not.
+    HTML comments, including the ``<!-- atlas-review round:N -->``
+    marker, are removed first. A later paragraph is not part of the
+    lead.
     """
     text = body.strip()
     heading = _ROUND.search(text)
     if heading is not None:
-        text = text[heading.end() :].strip()
-    while True:
-        comment = re.match(r"<!--.*?-->", text, re.DOTALL)
-        if comment is None:
-            break
-        text = text[comment.end() :].strip()
-    parts = re.split(r"(?<=[.!?])\s+|\n+", text, maxsplit=1)
-    return parts[0] if parts else ""
+        text = text[heading.end() :]
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL).strip()
+    return re.split(r"\n\s*\n", text, maxsplit=1)[0]
+
+
+def _sentences(paragraph: str) -> tuple[str, ...]:
+    """Sentences in one paragraph.
+
+    A bold close ``.**`` is the end of the sentence even when the next
+    sentence follows with no space.
+    """
+    chunks = re.split(r"([.!?]\*+(?=\S)|[.!?]\s+)", paragraph)
+    sentences: list[str] = []
+    index = 0
+    while index < len(chunks):
+        piece = chunks[index]
+        if index + 1 < len(chunks) and re.match(r"[.!?]", chunks[index + 1]):
+            delimiter = chunks[index + 1]
+            piece += delimiter[:1] + delimiter[1:].rstrip()
+            index += 2
+        else:
+            index += 1
+        stripped = piece.strip()
+        if stripped:
+            sentences.append(stripped)
+    return tuple(sentences)
+
+
+def _opens_canonical(sentence: str) -> bool:
+    return _CANONICAL_LEAD.match(sentence) is not None
 
 
 def findings_expected(title: str, body: str = "") -> bool:
     """Zero parsed findings is a gap unless this round says there are none.
 
-    The none-assertion is the title, or the first sentence after the
-    round heading when that sentence is the canonical lead: ``No
-    findings at or above``, ``No new findings at or above``, or
-    ``Nothing new at or above``, optionally bold. The
-    ``<!-- atlas-review round:N -->`` marker after the heading is not
-    that sentence. A later sentence does
-    not clear the gap, and neither does a sentence that only contains
-    the phrase.
+    The none-assertion is the title, or a sentence in the first
+    paragraph after the round heading that opens with the canonical
+    lead: ``No findings at or above``, ``No new findings at or above``,
+    or ``Nothing new at or above``, optionally bold. HTML comments are
+    not part of that paragraph. A later paragraph does not clear the
+    gap, and neither does a sentence that only contains the phrase.
     """
     if _NONE.search(title) is not None:
         return False
-    return _CANONICAL_LEAD.search(_lead_after_heading(body)) is None
+    return not any(
+        _opens_canonical(sentence) for sentence in _sentences(_first_paragraph(body))
+    )
+
+
+def review_has_parse_gap(body: str, finding_count: int) -> bool:
+    """The ``parse_gap`` flag ``reference_row`` stores for this review."""
+    heading = _ROUND.search(body)
+    title = heading.group(2) if heading is not None else ""
+    return finding_count == 0 and findings_expected(title, body)
 
 
 def _comment_finding(comment: Mapping[str, Any]) -> EvalFinding | None:
@@ -561,8 +590,6 @@ def reference_row(
     if parsed is None:
         return None
     number, built = parsed
-    heading = _ROUND.search(body)
-    title = heading.group(2) if heading is not None else ""
     head = pull.get("head")
     sha = head.get("sha") if isinstance(head, dict) else ""
     repo = ""
@@ -586,7 +613,7 @@ def reference_row(
         lenses_recorded=coverage_lenses(body),
         reviewed_commit=commit if isinstance(commit, str) else "",
         review_state=state if isinstance(state, str) else "",
-        parse_gap=not built.findings and findings_expected(title, body),
+        parse_gap=review_has_parse_gap(body, len(built.findings)),
     )
 
 
