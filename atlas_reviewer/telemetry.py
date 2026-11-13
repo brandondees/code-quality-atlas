@@ -2,8 +2,9 @@
 """Lifecycle telemetry: one structured event per step of a review or probe.
 
 Every event is kept in memory for the summary table that the draft and
-`probe-runner` print, and goes to one `EventSink` (a JSONL file in live
-use, nothing in tests), except that an event recorded after the sink has
+`probe-runner` print, up to 500 events, and goes to one `EventSink` (a
+JSONL file in live use, nothing in tests). Past that cap the oldest
+in-memory events are dropped. An event recorded after the sink has
 closed stays in memory only. Field values are numbers,
 booleans or labels the controller chose. Free text (error messages, which
 can quote URLs or runner output) goes through `scrub`, the controller's
@@ -82,8 +83,9 @@ class JsonlSink:
     mid-run is never recreated outside its claim. A file it creates is
     0600, and each directory it creates 0700."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, max_bytes: int | None = None) -> None:
         self.path = path
+        self._max_bytes = max_bytes
         self._out: TextIO | None = None
         self._closed = False
         self._lock = threading.Lock()
@@ -113,8 +115,25 @@ class JsonlSink:
                 if self._closed:
                     return
                 raise RuntimeError(f"telemetry sink {self.path} is not open")
+            if self._max_bytes is not None and self._out.tell() >= self._max_bytes:
+                self._rotate()
+            assert self._out is not None
             self._out.write(json.dumps(event.as_json()) + "\n")
             self._out.flush()
+
+    def _rotate(self) -> None:
+        """Called with the sink lock held. Keeps one previous file."""
+        if self._out is not None:
+            self._out.close()
+            self._out = None
+        backup = self.path.with_name(self.path.name + ".1")
+        if backup.exists():
+            backup.unlink()
+        if self.path.exists():
+            os.replace(self.path, backup)
+        make_private_dirs(self.path.parent)
+        fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        self._out = os.fdopen(fd, "a", encoding="utf-8")
 
 
 def _redact_shapes(text: str) -> str:
@@ -137,6 +156,7 @@ class Telemetry:
         clock: Clock,
         sink: EventSink | None = None,
         scrub: Callable[[str], str] | None = None,
+        max_kept: int = 500,
     ) -> None:
         if sink is not None and scrub is None:
             raise TypeError(
@@ -148,6 +168,10 @@ class Telemetry:
         self._scrub = scrub or _redact_shapes
         self._start = clock.monotonic()
         self._events: list[Event] = []
+        self._seq = 0
+        # The in-memory list feeds the draft summary. A long-lived process
+        # keeps only the newest events; the sink has the rest.
+        self._max_kept = max_kept
         self._lock = threading.Lock()
 
     @property
@@ -181,8 +205,9 @@ class Telemetry:
         duration = max(self.elapsed() - start, 0.0)
         clean = {k: self._clean(v) for k, v in (fields or {}).items()}
         with self._lock:
+            self._seq += 1
             event = Event(
-                len(self._events) + 1,
+                self._seq,
                 phase,
                 step,
                 status,
@@ -192,6 +217,8 @@ class Telemetry:
                 self._scrub(error),
             )
             self._events.append(event)
+            if len(self._events) > self._max_kept:
+                del self._events[: len(self._events) - self._max_kept]
             self._sink.emit(event)
         return event
 

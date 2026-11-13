@@ -7,8 +7,9 @@ collapsed `reviewing-a-change` skill bundle, and writes a **review draft** to
 stdout or a file.
 
 It never writes to GitHub. No reviews, comments, check runs, labels, or
-issues. It has no webhook receiver and no queue, and runs one review at a
-time. Design and decision record:
+issues. The operator CLI has no webhook receiver and no queue, and runs
+one review at a time. The webhook receiver is a separate process,
+`python -m atlas_reviewer.service` (D48). Design and decision record:
 [`docs/plans/2026-11-06-manual-reviewer-service.md`](../docs/plans/2026-11-06-manual-reviewer-service.md)
 (D24-D30, D32, D33, D35 and D36 in
 [`docs/open-questions.md`](../docs/open-questions.md)).
@@ -17,8 +18,9 @@ D37 is the Fly one-off deploy. Other follow-ups are in that plan's
 
 ## Deploy on Fly
 
-The controller can run as one Fly Machine per review: no public service,
-no standing Machine, no webhook, and no queue. The image is
+The operator CLI can run as one Fly Machine per review: no public service
+and no standing Machine. That one-off app has no webhook and no queue.
+The webhook receiver is D48, a separate process. The image is
 `python:3.12.16-slim-bookworm` pinned by digest, installed from
 `requirements.txt` with `--require-hashes`, and run as uid 10001. Fly
 secrets supply `ATLAS_GITHUB_APP_ID`, `ATLAS_GITHUB_APP_PRIVATE_KEY`,

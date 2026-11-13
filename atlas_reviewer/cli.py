@@ -97,6 +97,9 @@ from atlas_reviewer.verdict import ReviewEvent, Verdict
 ENV_APP_ID = "ATLAS_GITHUB_APP_ID"
 ENV_APP_KEY = "ATLAS_GITHUB_APP_PRIVATE_KEY"
 ENV_INSTALLATION_ID = "ATLAS_GITHUB_INSTALLATION_ID"
+# A read-only installation token minted by the webhook parent. When it is
+# set, the review does not read the App private key.
+ENV_INSTALLATION_TOKEN = "ATLAS_GITHUB_INSTALLATION_TOKEN"
 ENV_SPRITES_TOKEN = "ATLAS_SPRITES_TOKEN"
 ENV_OPENROUTER_KEY = "ATLAS_OPENROUTER_API_KEY"
 ENV_STATE_DIR = "ATLAS_REVIEWER_STATE_DIR"
@@ -205,6 +208,7 @@ class _Credentials:
     def __init__(self, env: Mapping[str, str]) -> None:
         values = [env.get(name, "") for name in SECRET_ENV]
         values.append(_pem(env.get(ENV_APP_KEY, "")))
+        values.append(env.get(ENV_INSTALLATION_TOKEN, ""))
         self._sources: list[Callable[[], Sequence[str]]] = []
         self.redactor = Redactor(
             tuple(dict.fromkeys(v for v in values if v)), sources=(self._minted,)
@@ -343,6 +347,23 @@ def _scripted_runner(path: Path) -> FakeSprites:
         raise UsageError(f"invalid runner script {path}: {exc!r}") from exc
 
 
+class _FixedToken:
+    """A token the parent already minted. It cannot mint another.
+
+    GitHub installation tokens last one hour. The service stops the child
+    at 1,200 seconds, which is inside that hour, so this token is not
+    refreshed."""
+
+    def __init__(self, token: str) -> None:
+        self._token = token
+
+    def token(self) -> str:
+        return self._token
+
+    def secrets(self) -> tuple[str, ...]:
+        return (self._token,)
+
+
 def _app_tokens(
     env: Mapping[str, str],
     event: PrEvent,
@@ -369,11 +390,16 @@ def _live_wiring(
     runner: str,
     credentials: _Credentials,
 ) -> _Wiring:
-    _require_env(env, ENV_APP_KEY)
     _require_env(env, ENV_SPRITES_TOKEN)
     clock = SystemClock()
     transport = UrllibTransport()
-    tokens = _app_tokens(env, event, args.include_issues, transport)
+    fixed = env.get(ENV_INSTALLATION_TOKEN, "")
+    tokens: _FixedToken | AppInstallationTokens
+    if fixed:
+        tokens = _FixedToken(fixed)
+    else:
+        _require_env(env, ENV_APP_KEY)
+        tokens = _app_tokens(env, event, args.include_issues, transport)
     credentials.register(tokens.secrets)
     redactor = credentials.redactor
     sprites = args.sprites_factory(env)
