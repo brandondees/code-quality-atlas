@@ -13,6 +13,7 @@ from atlas_reviewer.attestation import Cause, LensState
 from atlas_reviewer.fakes import ScriptedLensModel
 from atlas_reviewer.lens_loop import AgenticLimits, Spend, default_reasoning_tokens
 from atlas_reviewer.ports import BoundaryError
+from atlas_reviewer.pricing import PricingUnknownError
 
 from .agentic import LIMITS, READ_ALL, final
 from .test_lens_loop import attempt
@@ -120,8 +121,8 @@ def test_the_live_model_never_fits_past_the_resolved_cap_or_under_the_input():
     assert lens.output_tokens_within(request(), Decimal(1000)) == FULL
     assert lens.output_tokens_within(request(), Decimal(0)) < 1
     free, _ = model(catalog_reply=reply(_free_output()))
-    assert free.output_tokens_within(request(), Decimal(1)) == FULL
-    assert free.output_tokens_within(request(), Decimal(0)) == 0
+    with pytest.raises(PricingUnknownError, match="completion is zero"):
+        free.output_tokens_within(request(), Decimal(1))
 
 
 def _free_output():
