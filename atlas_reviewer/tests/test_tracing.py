@@ -992,6 +992,32 @@ def test_a_regional_vertex_slug_maps_and_userinfo_stays_off_the_name():
     assert plain["atlas.provider_endpoint"] == "https://h.example/a@b"
 
 
+def test_an_unencoded_at_in_userinfo_is_stripped_through_the_last_at():
+    facts = CallFacts(
+        "m",
+        1,
+        1,
+        None,
+        "stop",
+        None,
+        provider="amazon-bedrock",
+        provider_endpoint="https://us@er:pass@host.example/",
+    )
+    trace, exporter = memory_trace(scrub)
+    try:
+        with trace.lens(LENS):
+            trace.wrap_model(_Model(FinalReply("a", Decimal("0.01")), facts)).turn(
+                TurnRequest("p", (), ())
+            )
+    finally:
+        trace.shutdown()
+    attrs = _attrs(
+        next(s for s in exporter.get_finished_spans() if s.name == "completion")
+    )
+    assert attrs["atlas.provider_endpoint"] == "https://host.example/"
+    assert "pass" not in attrs["atlas.provider_endpoint"]
+
+
 def test_a_bearer_collector_token_is_scrubbed_without_its_prefix(monkeypatch):
     from atlas_reviewer.tracing import opening_trace
 

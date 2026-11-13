@@ -530,8 +530,15 @@ _OPENINFERENCE_PROVIDER = {
 
 
 def _strip_userinfo(value: str) -> str:
-    """Drop ``user:password@`` from an untrusted endpoint before scrubbing."""
-    return re.sub(r"(^|//)[^/\s@]*@", r"\1", value)
+    """Drop userinfo through the last ``@`` in the authority.
+
+    ``https://us@er:pass@host.example/`` becomes ``https://host.example/``.
+    An ``@`` after the path stays. A value with no authority is unchanged.
+    """
+    match = re.match(r"((?:[a-z][a-z0-9+.-]*:)?//)([^/?#]*)(.*)$", value, re.IGNORECASE)
+    if match is None or "@" not in match.group(2):
+        return value
+    return match.group(1) + match.group(2).rpartition("@")[2] + match.group(3)
 
 
 def _host(note: _Note, key: str, value: str) -> str:
