@@ -55,16 +55,19 @@ that SHA and is not this review's scope. The current round still lists
 every file in the current diff.
 
 A record that would exceed 8,192 characters stores no finding text and
-names how many lines were left out. A line that does not parse is
-counted. Prior blocks are kept whole, newest first, inside a
-16,384-character budget. A record that does not fit is left out whole.
-Every one of those gaps is an `Omission`.
+names how many lines were left out. Prior blocks are kept whole, newest
+first, inside a 16,384-character budget. A record that does not fit is
+left out whole. That gap is an `Omission` only when the record is the
+head under review. A line that names this pull request and does not
+parse is an `Omission` for this pull request. A line that names another
+pull request, or no pull request, is not.
 
 ## Approval
 
 `AgenticReview.coverage_complete` is false when `context_omissions` is
 non-empty, the same rule as an unread changed file (D36, D42). The
-status line carries `context_omissions` as a count. The draft lists
+status line carries `context_omissions` as a count, and how many other
+pull requests shared the file. The draft lists
 each omission's source, limit and detail. The review event cannot be
 `APPROVE` while that count is non-zero. A round with no omissions, a
 clean lens and every changed file read can still approve.

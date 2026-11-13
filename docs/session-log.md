@@ -1197,3 +1197,12 @@ of 8,192 characters is kept and 8,193 is not, and the newest record is
 the one that stays when the budget holds one. Prior finding lines are
 quoted. The first turn still lists every changed file. A continuation
 may later list a subset. No live call was made. D52.
+
+## 2026-11-13 — a later round can approve after the prior budget fills
+
+A superseded round that does not fit, and a line that names another
+pull request or no pull request, no longer block approval. A line that
+names this pull request, including a future record version, still does.
+A finding is quoted up to the 8,192-character record cap. The 16,384
+default is pinned. A log write that fails after the model call returns
+the review. No live call was made. D52.

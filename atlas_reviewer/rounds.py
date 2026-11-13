@@ -10,9 +10,14 @@ Prior findings are input to verify. They do not drop a changed file.
 continuation turn inside that review.
 
 Nothing is cut silently. A round that does not fit the budget is left
-out whole, and that omission is returned to the coordinator. A line that
-does not parse is counted the same way. The coordinator treats either
-omission as incomplete context, which cannot approve.
+out whole. That omission blocks approval only when the record is the
+head under review. A superseded head is not this review's scope, so
+leaving it out does not block a later round. A line that does not
+parse is an omission only for the pull request it names, including a
+future `ROUND_VERSION` that still carries `repo` and `pr`. A line that
+names no pull request blocks no pull request: this reader cannot tell
+whose review it was, and charging every review in the file is the
+failure that rule avoids.
 """
 
 from __future__ import annotations
@@ -47,16 +52,36 @@ class RoundRecord:
     findings_omitted: int = 0
 
 
+@dataclass(frozen=True)
+class LogRead:
+    """What `RoundLog.read` could recover.
+
+    `unreadable` is one `(repository, pull request)` pair per line that
+    names a pull request and is not a current record, including a
+    future `ROUND_VERSION`. `unattributed` counts lines that name no
+    pull request. An unattributed line blocks no pull request.
+    `file_unreadable` means the file itself could not be read, which
+    the caller reports for the review that tried."""
+
+    records: tuple[RoundRecord, ...] = ()
+    unreadable: tuple[tuple[str, int], ...] = ()
+    unattributed: int = 0
+    file_unreadable: bool = False
+
+
 class RoundLog:
     """Append-only JSON lines, mode 0600 on every write, one file for
     every pull request.
 
-    `read` returns every record that parsed. The count is lines that
-    did not parse, and a file that could not be read counts as one.
-    Records for another pull request stay in the result. `records_for`
-    drops them and reports how many. That drop is not an omission. The
-    repository key is compared case-insensitively. The path is chosen
-    by the caller. Nothing in the service builds one yet."""
+    `read` returns every current record. A line that names a repository
+    and a pull request but is not a current record is listed on
+    `unreadable` for that pull request only. A line that names neither,
+    including a torn line, increments `unattributed` and blocks no
+    pull request. A future `ROUND_VERSION` that still carries `repo`
+    and `pr` is charged to that pull request only. The repository key is compared
+    case-insensitively. `records_for` reports how many other pull
+    requests were set aside. That drop is not an omission. The path is
+    chosen by the caller. Nothing in the service builds one yet."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -67,24 +92,29 @@ class RoundLog:
         _write_synced(self.path, "a", json.dumps(_dump(stored), sort_keys=True) + "\n")
         _sync_dir(self.path.parent)
 
-    def read(self) -> tuple[tuple[RoundRecord, ...], int]:
-        if not self.path.exists():
-            return (), 0
+    def read(self) -> LogRead:
         try:
+            if not self.path.exists():
+                return LogRead()
             text = self.path.read_text(encoding="utf-8")
         except (OSError, UnicodeError):
-            return (), 1
+            return LogRead(file_unreadable=True)
         records: list[RoundRecord] = []
-        skipped = 0
+        unreadable: list[tuple[str, int]] = []
+        unattributed = 0
         for line in text.splitlines():
             if line.strip() == "":
                 continue
             parsed = _parse(line)
-            if parsed is None:
-                skipped += 1
-            else:
+            if parsed is not None:
                 records.append(parsed)
-        return tuple(records), skipped
+                continue
+            owner = _owner(line)
+            if owner is None:
+                unattributed += 1
+            else:
+                unreadable.append(owner)
+        return LogRead(tuple(records), tuple(unreadable), unattributed)
 
 
 def same_pull_request(record: RoundRecord, repo: str, pr_number: int) -> bool:
@@ -156,12 +186,13 @@ def prior_blocks(
     shown = {id(record) for record, _text in kept}
     skipped = [record for record, _text in rendered if id(record) not in shown]
     omissions: list[Omission] = []
-    if skipped:
+    blocking = [record for record in skipped if record.head_sha == current_head]
+    if blocking:
         omissions.append(
             Omission(
                 SOURCE,
                 f"{budget}-character budget",
-                f"{len(skipped)} earlier round(s) not shown",
+                f"{len(blocking)} earlier round(s) at this head not shown",
             )
         )
     if unreadable:
@@ -173,7 +204,7 @@ def prior_blocks(
             )
         )
     for record, _text in kept:
-        if record.findings_omitted:
+        if record.findings_omitted and record.head_sha == current_head:
             omissions.append(
                 Omission(
                     SOURCE,
@@ -216,7 +247,9 @@ def _render(record: RoundRecord, current_head: str, scrub: Callable[[str], str])
 
 
 def _q(text: str, scrub: Callable[[str], str]) -> str:
-    return quote_untrusted(text, scrub=scrub)
+    # A stored finding is already bounded by the record cap. The 200
+    # character quote default would cut it and record no omission.
+    return quote_untrusted(text, RECORD_CHARS, scrub=scrub)
 
 
 def _dump(record: RoundRecord) -> dict[str, object]:
@@ -249,6 +282,7 @@ def _parse(line: str) -> RoundRecord | None:
         or not isinstance(pr, int)
         or pr < 1
         or not isinstance(data.get("head_sha"), str)
+        or data["head_sha"] == ""
         or not isinstance(data.get("lens"), str)
         or not isinstance(data.get("event"), str)
         or not isinstance(findings, list)
@@ -269,3 +303,28 @@ def _parse(line: str) -> RoundRecord | None:
         data["context_partial"],
         omitted,
     )
+
+
+def _owner(line: str) -> tuple[str, int] | None:
+    """The pull request a line names, when that can be read.
+
+    A future `ROUND_VERSION` still carries `repo` and `pr`. A torn line
+    does not. The caller charges the first and charges the second to
+    nobody."""
+    try:
+        data = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    repo = data.get("repo")
+    pr = data.get("pr")
+    if (
+        not isinstance(repo, str)
+        or repo == ""
+        or isinstance(pr, bool)
+        or not isinstance(pr, int)
+        or pr < 1
+    ):
+        return None
+    return repo.casefold(), pr

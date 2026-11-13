@@ -160,7 +160,9 @@ class AgenticReview:
     model_calls: int = 0
     flagged: tuple[str, ...] = field(default=(), repr=False)
     context_omissions: tuple[Omission, ...] = ()
+    other_pull_requests: int = 0
     trace_id: str = ""
+    round_log_note: str = ""
 
     @property
     def coverage_complete(self) -> bool:
@@ -174,9 +176,11 @@ class AgenticReview:
         clean, so a missing cause cannot approve a partial read. An outcome
         with no changed-file count predates the per-file gate and shows no
         coverage, so it blocks approval too. Context that was left out of
-        the first turn, or a prior-round record that did not parse, is
-        the same kind of gap: the review cannot approve on a partial
-        picture of the pull request."""
+        the first turn, or a prior-round record for this pull request
+        and this head that did not fit, is the same kind of gap: the
+        review cannot approve on a partial picture of this head. A
+        superseded round, and a line that names another pull request
+        or no pull request, are not that gap."""
         if self.context_omissions:
             return False
         if any(
@@ -272,6 +276,7 @@ def synthesize(
     spend: Spend | None = None,
     flagged: Sequence[str] = (),
     context_omissions: Sequence[Omission] = (),
+    other_pull_requests: int = 0,
 ) -> AgenticReview:
     findings = rank(mint(lenses))
     return AgenticReview(
@@ -284,6 +289,7 @@ def synthesize(
         0 if spend is None else spend.calls,
         tuple(dict.fromkeys(flagged)),
         tuple(context_omissions),
+        other_pull_requests,
     )
 
 
@@ -518,18 +524,23 @@ def _review_lens(
     trace: ReviewTrace,
 ) -> AgenticReview:
     contract = finding_contract() if contract is None else contract
-    blocks, omissions = _review_context(
+    blocks, omissions, other_pull_requests = _review_context(
         event, context, context_omissions, round_log, prior_chars, redactor
     )
     body = library.body(lens)
     if body is None:
         missing = LensResult(lens, 1, None, None, reason="no lens body in the bundle")
-        return synthesize([missing], context_omissions=omissions)
+        return synthesize(
+            [missing],
+            context_omissions=omissions,
+            other_pull_requests=other_pull_requests,
+        )
     key = LensKey(event.repo, event.pr_number, event.head_sha, lens, body_digest(body))
     if isinstance(next_step(ledger.attempts(key), resolved.retries), Settled):
         return synthesize(
             [_result(key, ledger.attempts(key), resolved, "")],
             context_omissions=omissions,
+            other_pull_requests=other_pull_requests,
         )
 
     changed = frozenset(f.path for f in split_files(diff))
@@ -587,9 +598,13 @@ def _review_lens(
         spend,
         (*diff_secrets.values, *session.flagged()),
         omissions,
+        other_pull_requests,
     )
     if round_log is not None:
-        round_log.append(_round_record(event, lens, review, scrub))
+        try:
+            round_log.append(_round_record(event, lens, review, scrub))
+        except OSError:
+            review = replace(review, round_log_note="the round log was not written")
     return review
 
 
@@ -685,18 +700,30 @@ def _review_context(
     round_log: RoundLog | None,
     prior_chars: int,
     redactor: Redactor,
-) -> tuple[tuple[UntrustedBlock, ...], tuple[Omission, ...]]:
+) -> tuple[tuple[UntrustedBlock, ...], tuple[Omission, ...], int]:
     """Caller context, then prior rounds for this pull request.
 
-    The changed-file list is not built here. `first_turn` always appends
-    every file in the current diff after these blocks."""
+    The third value is how many records belonged to another pull
+    request. The changed-file list is not built here. `first_turn`
+    always appends every file in the current diff after these blocks."""
     blocks = list(context)
     omissions = list(context_omissions)
+    dropped_other = 0
     if round_log is not None:
-        records, unreadable = round_log.read()
+        loaded = round_log.read()
         # Other pull requests in the same file are counted and are not
-        # omissions. The repository key is case-insensitive.
-        mine, _dropped_other = records_for(records, event.repo, event.pr_number)
+        # omissions. The repository key is case-insensitive. A line that
+        # names no pull request is not charged here.
+        mine, dropped_other = records_for(loaded.records, event.repo, event.pr_number)
+        if loaded.file_unreadable:
+            unreadable = 1
+        else:
+            key = event.repo.casefold()
+            unreadable = sum(
+                1
+                for repo, number in loaded.unreadable
+                if repo == key and number == event.pr_number
+            )
         prior, prior_omissions = prior_blocks(
             mine,
             event.head_sha,
@@ -706,7 +733,7 @@ def _review_context(
         )
         blocks = [*prior, *blocks]
         omissions.extend(prior_omissions)
-    return tuple(blocks), tuple(omissions)
+    return tuple(blocks), tuple(omissions), dropped_other
 
 
 def _round_record(
@@ -733,24 +760,14 @@ def _round_record(
 
 
 def first_turn(
-    event: PrEvent,
-    diff: str,
-    context: Sequence[UntrustedBlock],
-    nonce: str,
-    *,
-    scope: frozenset[str] | None = None,
+    event: PrEvent, diff: str, context: Sequence[UntrustedBlock], nonce: str
 ) -> str:
     """The operator's subject, then fenced: prior reviews and any caller
     context, then the diff stat and every changed file in risk order. No
     diff text: the lens reads the whole current diff through the tools.
-    Prior findings do not remove a file from that list.
-
-    `scope` is for a continuation (#646), which lists its assigned
-    files. The first turn of a review passes none, so it lists every
-    file in `diff`. Prior-round paths are not a scope."""
+    Prior findings do not remove a file from that list. A continuation's
+    file subset is not a parameter of this turn."""
     listed = by_risk(split_files(diff))
-    if scope is not None:
-        listed = tuple(f for f in listed if f.path in scope)
     listing = "\n".join(
         f"[{f.tier.label}] {f.path} (+{added} -{removed})"
         for f in listed
@@ -804,6 +821,7 @@ def status_line(review: AgenticReview) -> str:
         "changed_files": _changed_file_count(review),
         "unreviewed_files": len(_unread_paths(review)),
         "context_omissions": len(review.context_omissions),
+        "other_pull_requests": review.other_pull_requests,
         "limit_stop": _limit_stop(review),
     }
     if review.trace_id:
@@ -860,6 +878,8 @@ def render_draft(review: AgenticReview, redactor: Redactor) -> str:
         "",
         f"Model calls: {review.model_calls}; committed: ${review.committed_usd}.",
     ]
+    if review.round_log_note:
+        lines.append(review.round_log_note)
     if review.runner is not None:
         lines.append(
             f"Runner: {review.runner.status.value}; cleanup {review.runner.cleanup.value}."

@@ -705,11 +705,11 @@ def test_the_first_turn_lists_every_changed_file_and_a_scope_is_a_continuation(
     from atlas_reviewer.coordinator import first_turn
     from atlas_reviewer.rounds import RoundLog, RoundRecord
 
-    sliced = first_turn(
-        EVENT, DIFF, (), "f00dfeedf00dfeed", scope=frozenset({"calc.py"})
+    full = first_turn(EVENT, DIFF, (), "f00dfeedf00dfeed")
+    assert "calc.py (+1 -1)" in full and "config/keys.py (+1 -0)" in full
+    assert "scope" not in first_turn.__doc__ or "not a parameter" in (
+        first_turn.__doc__ or ""
     )
-    assert "calc.py (+1 -1)" in sliced
-    assert "config/keys.py" not in sliced
     log = RoundLog(tmp_path / "state" / "rounds.jsonl")
     log.append(
         RoundRecord(
@@ -735,7 +735,9 @@ def test_the_first_turn_lists_every_changed_file_and_a_scope_is_a_continuation(
     assert result.coverage_complete
 
 
-def test_a_prior_round_that_does_not_fit_is_omitted_whole_and_blocks_approval(tmp_path):
+def test_a_prior_round_that_does_not_fit_is_omitted_and_a_new_head_can_approve(
+    tmp_path,
+):
     from atlas_reviewer.rounds import RoundLog, RoundRecord
 
     log = RoundLog(tmp_path / "state" / "rounds.jsonl")
@@ -756,12 +758,119 @@ def test_a_prior_round_that_does_not_fit_is_omitted_whole_and_blocks_approval(tm
     assert huge not in text
     assert "x" * 40 not in text
     assert "calc.py (+1 -1)" in text and "config/keys.py (+1 -0)" in text
+    assert result.coverage_complete
+    assert result.event is ReviewEvent.APPROVE
+    assert "earlier round" not in render_draft(result, Redactor())
+    assert status(result)["context_omissions"] == 0
+
+
+def test_a_current_head_round_that_does_not_fit_still_blocks(tmp_path):
+    from atlas_reviewer.rounds import RoundLog, RoundRecord
+
+    head = "d" * 40
+    log = RoundLog(tmp_path / "state" / "rounds.jsonl")
+    log.append(
+        RoundRecord(
+            EVENT.repo, EVENT.pr_number, head, LENS, "COMMENT", ("x" * 500,), False
+        )
+    )
+    result, model, _ = review(
+        tmp_path,
+        [READ_ALL, final()],
+        round_log=log,
+        event=PrEvent(EVENT.repo, EVENT.pr_number, head),
+        prior_chars=80,
+    )
+    assert "x" * 40 not in model.requests[0].messages[0].text
     assert not result.coverage_complete
-    assert result.event is ReviewEvent.COMMENT
-    draft = render_draft(result, Redactor())
-    assert "partial context" in draft
-    assert "earlier round(s) not shown" in draft
-    assert status(result)["context_omissions"] == 1
+    assert "at this head not shown" in render_draft(result, Redactor())
+
+
+def test_many_superseded_rounds_do_not_stop_a_later_approval(tmp_path):
+    from atlas_reviewer.rounds import RoundLog, RoundRecord
+
+    log = RoundLog(tmp_path / "state" / "rounds.jsonl")
+    old = "a" * 40
+    for _ in range(80):
+        log.append(
+            RoundRecord(EVENT.repo, EVENT.pr_number, old, LENS, "APPROVE", (), False)
+        )
+    result, _, _ = review(
+        tmp_path,
+        [READ_ALL, final()],
+        round_log=log,
+        event=PrEvent(EVENT.repo, EVENT.pr_number, "b" * 40),
+    )
+    assert result.coverage_complete
+    assert result.event is ReviewEvent.APPROVE
+
+
+def test_a_bad_line_blocks_only_the_pull_request_it_names(tmp_path):
+    import json
+
+    from atlas_reviewer.rounds import RoundLog
+
+    path = tmp_path / "state" / "rounds.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "\n".join(
+            (
+                json.dumps({"v": 2, "repo": "other-org/other-app", "pr": 9}),
+                "{not json",
+                json.dumps({"v": 2, "repo": EVENT.repo, "pr": EVENT.pr_number}),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    foreign, _, _ = review(
+        tmp_path,
+        [READ_ALL, final()],
+        round_log=RoundLog(path),
+        event=PrEvent("other-org/other-app", 3, "c" * 40),
+    )
+    assert foreign.coverage_complete
+    own, _, _ = review(
+        tmp_path,
+        [READ_ALL, final()],
+        round_log=RoundLog(path),
+        event=PrEvent(EVENT.repo, EVENT.pr_number, "c" * 40),
+    )
+    assert not own.coverage_complete
+    assert any(item.limit == "unreadable record" for item in own.context_omissions)
+
+
+def test_a_log_write_failure_keeps_the_review(tmp_path):
+    from atlas_reviewer.rounds import RoundLog
+
+    class Broken(RoundLog):
+        def append(self, record):
+            raise OSError("disk full")
+
+    result, model, _ = review(
+        tmp_path,
+        [READ_ALL, final()],
+        round_log=Broken(tmp_path / "state" / "rounds.jsonl"),
+    )
+    assert model.requests
+    assert result.coverage_complete
+    assert result.event is ReviewEvent.APPROVE
+    assert "the round log was not written" in render_draft(result, Redactor())
+
+
+def test_other_pull_requests_are_on_the_status_line(tmp_path):
+    from atlas_reviewer.rounds import RoundLog, RoundRecord
+
+    log = RoundLog(tmp_path / "state" / "rounds.jsonl")
+    log.append(
+        RoundRecord(
+            "other-org/other-app", 9, "a" * 40, LENS, "COMMENT", ("nope",), False
+        )
+    )
+    result, _, _ = review(tmp_path, [READ_ALL, final()], round_log=log)
+    assert result.other_pull_requests == 1
+    assert status(result)["other_pull_requests"] == 1
+    assert result.coverage_complete
 
 
 def test_a_caller_context_omission_blocks_approval(tmp_path):
@@ -922,6 +1031,7 @@ def test_the_status_line_is_the_drafts_first_line_and_only_controller_values():
         "changed_files": 1,
         "unreviewed_files": 0,
         "context_omissions": 0,
+        "other_pull_requests": 0,
         "limit_stop": None,
     }
 

@@ -922,10 +922,18 @@ D41 records the 2026-11-12 probe that did.
   subject, then prior atlas rounds (`rounds.RoundLog`) and any context
   the caller passes, then the risk-ordered list of every file in the
   current diff, each fenced with the review's nonce. Prior finding
-  lines are quoted. They do not remove a file. A continuation may
-  later list a subset. This first turn does not. The log is
-  append-only JSONL, mode 0600 on every write, keyed by repository and
-  pull request number. The path is chosen when a caller is wired. No
+  lines are quoted in full, up to the 8,192-character record cap,
+  not the 200-character quote default. They do not remove a file. A
+  continuation may later list a subset. This first turn does not, and
+  it has no parameter for one. The log is append-only JSONL, mode 0600
+  on every write, keyed by repository and pull request number. The
+  repository key is case-insensitive. An older head is labelled
+  superseded and is not this review's scope. A record over 8,192
+  characters stores no finding text. Prior blocks stay whole, newest
+  first, inside 16,384 characters. Leaving out a superseded round does
+  not block approval. Leaving out a round at the head under review
+  does. A line that names another pull request, or no pull request,
+  does not block this one. The path is chosen when a caller is wired. No
   shipped caller builds one yet. It carries no diff text: the lens
   reads that through the tools, and every tool result comes back
   fenced.
