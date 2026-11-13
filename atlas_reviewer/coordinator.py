@@ -368,8 +368,8 @@ def review_lens(
     try:
         return _open_review(
             event, lens, diff, trees, library, model, resolved, ledger, sprites,
-            runner_ledger, redactor, clock, context, telemetry, nonce, bridge_root,
-            contract, task_socket, trace,
+            runner_ledger, redactor, clock, context, context_omissions, round_log,
+            prior_chars, telemetry, nonce, bridge_root, contract, task_socket, trace,
         )  # fmt: skip
     finally:
         if trace is None:
@@ -390,6 +390,9 @@ def _open_review(
     redactor: Redactor,
     clock: Clock,
     context: Sequence[UntrustedBlock],
+    context_omissions: Sequence[Omission],
+    round_log: RoundLog | None,
+    prior_chars: int,
     telemetry: Telemetry | None,
     nonce: Callable[[], str],
     bridge_root: str,
@@ -423,6 +426,9 @@ def _open_review(
                     redactor,
                     clock,
                     context,
+                    context_omissions,
+                    round_log,
+                    prior_chars,
                     telemetry,
                     nonce,
                     bridge_root,
@@ -450,6 +456,9 @@ def _open_review(
                 redactor,
                 clock,
                 context,
+                context_omissions,
+                round_log,
+                prior_chars,
                 telemetry,
                 nonce,
                 bridge_root,
@@ -483,6 +492,9 @@ def _one_lens(
     redactor: Redactor,
     clock: Clock,
     context: Sequence[UntrustedBlock],
+    context_omissions: Sequence[Omission],
+    round_log: RoundLog | None,
+    prior_chars: int,
     telemetry: Telemetry | None,
     nonce: Callable[[], str],
     bridge_root: str,
@@ -493,9 +505,10 @@ def _one_lens(
         event, lens, diff, trees, library=library, model=model,
         resolved=resolved, ledger=ledger, sprites=sprites,
         runner_ledger=runner_ledger, redactor=redactor, clock=clock,
-        context=context, telemetry=telemetry, nonce=nonce,
-        bridge_root=bridge_root, contract=contract, task_socket=task_socket,
-        trace=active,
+        context=context, context_omissions=context_omissions,
+        round_log=round_log, prior_chars=prior_chars, telemetry=telemetry,
+        nonce=nonce, bridge_root=bridge_root, contract=contract,
+        task_socket=task_socket, trace=active,
     )  # fmt: skip
     _annotate(lens_span, review_span, review)
     return review
@@ -516,6 +529,9 @@ def _review_lens(
     redactor: Redactor,
     clock: Clock,
     context: Sequence[UntrustedBlock],
+    context_omissions: Sequence[Omission],
+    round_log: RoundLog | None,
+    prior_chars: int,
     telemetry: Telemetry | None,
     nonce: Callable[[], str],
     bridge_root: str,
