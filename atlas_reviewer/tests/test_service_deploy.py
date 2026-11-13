@@ -76,7 +76,9 @@ def test_the_org_and_the_single_machine_flag_are_on_the_commands():
     assert 'flyp apps create "$APP" --org "$ORG"' in commands
     deploys = [line.strip() for line in commands.splitlines() if "flyp deploy" in line]
     assert deploys == ['flyp deploy -c fly.service.toml --app "$APP" --ha=false']
-    assert 'flyp ssh console --app "$APP" -C "tail -n 200 /data/service.jsonl"' in commands
+    assert (
+        'flyp ssh console --app "$APP" -C "tail -n 200 /data/service.jsonl"' in commands
+    )
     assert 'flyp machine restart <id> --app "$APP"' in commands
     assert "ATLAS_GITHUB_APP_SLUG=" in commands
 
@@ -142,7 +144,7 @@ def test_the_entrypoint_chowns_the_volume_before_dropping_root(tmp_path):
     write("chown", '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$CHOWN"\n')
     write(
         "setpriv",
-        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$SETPRIV\"\n"
+        '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$SETPRIV"\n'
         'shift 4\nPATH="${PATH#*:}"\nexec "$@"\n',
     )
     pybin = tmp_path / "pybin"
