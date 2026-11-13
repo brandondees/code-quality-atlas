@@ -16,6 +16,7 @@ from atlas_reviewer.service_run import (
     child_env,
     make_runner,
     review_argv,
+    run_dir,
     run_process,
     summarize_draft,
 )
@@ -48,6 +49,11 @@ Not reviewed in full: `"src/a.py"`
 
 - reserved $1.00 actual $0.10
 """
+
+
+def test_the_run_directory_names_the_repository():
+    path = run_dir(Path("state"), PrEvent("alice/widgets", 7, "a" * 40))
+    assert path.name.startswith("alice-widgets-7-")
 
 
 def test_the_child_receives_only_the_allowlist():

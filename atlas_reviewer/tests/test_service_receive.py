@@ -35,6 +35,7 @@ from atlas_reviewer.service import (
     handle_delivery,
     main,
     read_bounded,
+    serve,
 )
 from atlas_reviewer.service_admit import signature_matches
 from atlas_reviewer.service_queue import Board, Enqueue, JobState, QueueError
@@ -1300,6 +1301,9 @@ def test_a_slow_body_is_refused(tmp_path, monkeypatch):
         def read(self, _n: int) -> bytes:
             return b"x"
 
+        def read1(self, n: int) -> bytes:
+            return self.read(n)
+
     handler = _Handler.__new__(_Handler)
     handler.rfile = Reader()
     handler.headers = {"Content-Length": "40"}
@@ -1381,6 +1385,7 @@ def test_a_finished_review_keeps_its_draft_when_nothing_is_posted(tmp_path):
     directory = run_dir(tmp_path, event)
     directory.mkdir(parents=True)
     (directory / "draft.md").write_text("the review\n", encoding="utf-8")
+    (directory / "stderr.txt").write_text("plainchildsecretvalue\n", encoding="utf-8")
     worker = _worker(
         board, lambda event, cancel: ReviewRun(True, REPORT), root=tmp_path
     )
@@ -1388,6 +1393,124 @@ def test_a_finished_review_keeps_its_draft_when_nothing_is_posted(tmp_path):
     assert worker.run_one() is True
     assert board.states() == ((SHA_A, JobState.DONE),)
     assert (directory / "draft.md").is_file()
+    assert not (directory / "stderr.txt").exists()
+
+
+def test_releasing_a_superseded_claim_does_not_leave_it_queued(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    moment = datetime(2026, 11, 12, 20, tzinfo=UTC)
+    board.enqueue(PrEvent(REPO, 7, SHA_A), at=moment)
+    job = board.claim()
+    assert job is not None
+    board.enqueue(PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 21, tzinfo=UTC))
+    board.release_claim(job)
+    assert (SHA_A, JobState.SUPERSEDED) in board.states()
+    claimed = board.claim()
+    assert claimed is not None
+    assert claimed.event.head_sha == SHA_B
+
+
+def test_a_superseded_running_job_reloads_as_superseded(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+    job = board.claim()
+    assert job is not None
+    job.superseded = True
+    board._save()
+    loaded = Board(tmp_path / "queue.json")
+    assert loaded.states() == ((SHA_A, JobState.SUPERSEDED),)
+
+
+def test_a_corrupt_queue_exits_2(tmp_path, capsys):
+    (tmp_path / "queue.json").write_text("{", encoding="utf-8")
+    code = main(
+        env={
+            "ATLAS_GITHUB_WEBHOOK_SECRET": SECRET,
+            "ATLAS_SERVICE_PROVIDER": "offline",
+            "ATLAS_REVIEWER_STATE_DIR": str(tmp_path),
+        }
+    )
+    assert code == 2
+    assert "queue" in capsys.readouterr().err
+
+
+def test_serve_scrubs_a_child_secret_from_the_log(tmp_path, monkeypatch):
+    import atlas_reviewer.service as service_mod
+
+    secret = "plainchildsecretvalue"
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A))
+
+    def runner(event, cancel):
+        return ReviewRun(False, error=f"child said {secret}")
+
+    def serve_forever(self, poll_interval=0.5):
+        path = tmp_path / "service.jsonl"
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            if path.is_file() and "review failed" in path.read_text(encoding="utf-8"):
+                return
+            time.sleep(0.02)
+
+    monkeypatch.setattr(service_mod.ReviewServer, "serve_forever", serve_forever)
+    config = ServiceConfig(
+        secret=SECRET,
+        allowlist=frozenset({REPO}),
+        state_dir=tmp_path,
+        host="127.0.0.1",
+        port=0,
+    )
+    assert (
+        serve(
+            config,
+            {"ATLAS_SPRITES_TOKEN": secret},
+            runner=runner,
+            log=lambda line: None,
+            secret_sources=(lambda: (secret,),),
+        )
+        == 0
+    )
+    text = (tmp_path / "service.jsonl").read_text(encoding="utf-8")
+    assert "review failed" in text
+    assert secret not in text
+
+
+def test_a_trickled_body_is_refused_on_the_socket(tmp_path, monkeypatch):
+    import atlas_reviewer.service as service_mod
+
+    monkeypatch.setattr(service_mod, "_BODY_BUDGET_S", 0.4)
+    board = Board(tmp_path / "queue.json")
+    server = ReviewServer(_config(tmp_path), board, lambda line: None)
+    listener = threading.Thread(target=server.serve_forever, daemon=True)
+    listener.start()
+    host, port = server.server_address
+    sock = socket.create_connection((host, port), timeout=2)
+    try:
+        sock.sendall(
+            b"POST /webhook HTTP/1.1\r\n"
+            b"Host: localhost\r\n"
+            b"Content-Length: 8\r\n"
+            b"X-GitHub-Event: pull_request\r\n"
+            b"\r\nx"
+        )
+        started = time.monotonic()
+        sock.settimeout(2)
+        data = b""
+        while b"\r\n\r\n" not in data and time.monotonic() - started < 1.5:
+            try:
+                chunk = sock.recv(1024)
+            except TimeoutError:
+                break
+            if not chunk:
+                break
+            data += chunk
+        assert b"408" in data
+        assert time.monotonic() - started < 1.2
+    finally:
+        sock.close()
+        server.shutdown()
+        listener.join(timeout=2)
+        server.server_close()
 
 
 def test_the_module_refuses_to_start_without_a_secret():

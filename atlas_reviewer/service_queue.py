@@ -346,15 +346,22 @@ class Board:
         with self._cv:
             if job.state is not JobState.RUNNING:
                 return
-            job.state = JobState.QUEUED
+            # A newer head already replaced this one. Putting it back to
+            # queued would leave a job claim() never takes, and it would
+            # hold an active slot until the process is wiped.
+            target = JobState.SUPERSEDED if job.superseded else JobState.QUEUED
+            job.state = target
             was_set = job.cancel.is_set()
-            job.cancel.clear()
+            if target is JobState.QUEUED:
+                job.cancel.clear()
             try:
                 self._save()
             except Exception:
                 job.state = JobState.RUNNING
                 if was_set:
                     job.cancel.set()
+                elif target is JobState.QUEUED:
+                    job.cancel.clear()
                 raise
 
     def pause_post(self, job: Job) -> None:
@@ -518,6 +525,8 @@ def _load(
     for item in jobs:
         job = _job(item, path)
         job.state = _RELOAD.get(job.state, job.state)
+        if job.superseded and job.state in {JobState.QUEUED, JobState.POST_PENDING}:
+            job.state = JobState.SUPERSEDED
         if job.superseded:
             job.cancel.set()
         loaded.append(job)

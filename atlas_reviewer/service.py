@@ -36,7 +36,7 @@ from atlas_reviewer.service_admit import (
     parse_delivery,
     signature_matches,
 )
-from atlas_reviewer.service_queue import Board, Enqueue, Job, JobState
+from atlas_reviewer.service_queue import Board, Enqueue, Job, JobState, QueueError
 from atlas_reviewer.service_run import (
     WEBHOOK_SECRET_ENV,
     ReviewReport,
@@ -89,6 +89,9 @@ before_send: contextvars.ContextVar[Callable[[], bool] | None] = contextvars.Con
 )
 _POLL_S = 0.2
 _REQUEST_TIMEOUT_S = 20.0
+# How long one request body may take, separate from the socket's idle
+# timeout so a test can shorten it without also shortening every read.
+_BODY_BUDGET_S = _REQUEST_TIMEOUT_S
 _MAX_HTTP_HANDLERS = 16
 
 Publisher = Callable[[PrEvent, ReviewReport], None]
@@ -355,8 +358,21 @@ class Worker:
             return
         if self._publisher is None:
             # Keep the draft. This process publishes nothing, and the
-            # draft is the record of the review.
+            # draft is the record of the review. The child's stderr is
+            # not: it can hold a secret the log scrubber would remove.
             committed = self._board.finish(job, JobState.DONE)
+            stderr = run_dir(self._state_root, job.event) / "stderr.txt"
+            if stderr.is_file():
+                try:
+                    stderr.unlink()
+                except OSError as exc:
+                    self._telemetry.record(
+                        "service",
+                        "stderr not removed",
+                        fields,
+                        status=ERROR,
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
             step = (
                 "review superseded"
                 if committed is JobState.SUPERSEDED
@@ -557,8 +573,18 @@ class _Handler(BaseHTTPRequestHandler):
         if length > self.server.config.max_body_bytes:
             self._send(413, b"body too large\n")
             return
+
+        def arm(seconds: float) -> None:
+            # The buffered reader otherwise waits for the whole chunk.
+            # The socket timeout is the time left on the body deadline.
+            self.connection.settimeout(max(seconds, 0.05))
+
         body = read_bounded(
-            self.rfile.read, length, _monotonic() + self.timeout, _monotonic
+            self.rfile.read1,
+            length,
+            _monotonic() + _BODY_BUDGET_S,
+            _monotonic,
+            arm=arm,
         )
         if body is None:
             self._send(408, b"timeout\n")
@@ -596,19 +622,32 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def read_bounded(
-    read: Callable[[int], bytes], length: int, deadline: float, now: Callable[[], float]
+    read: Callable[[int], bytes],
+    length: int,
+    deadline: float,
+    now: Callable[[], float],
+    *,
+    arm: Callable[[float], None] | None = None,
 ) -> bytes | None:
     """Read ``length`` bytes, or None when ``now`` passes ``deadline``.
 
-    One socket timeout is not enough: a sender can trickle a byte just
-    inside each timeout and hold the handler for as long as it likes.
+    ``read`` must return whatever is already available (``BufferedReader.read1``)
+    rather than blocking until ``n`` bytes arrive. ``arm`` sets the socket
+    timeout to the time still left, so a trickle cannot hold the handler
+    by delivering one byte inside each long timeout.
     """
     chunks: list[bytes] = []
     remaining = length
     while remaining:
-        if now() >= deadline:
+        left = deadline - now()
+        if left <= 0:
             return None
-        block = read(min(remaining, 65536))
+        if arm is not None:
+            arm(left)
+        try:
+            block = read(min(remaining, 4096))
+        except TimeoutError:
+            return None
         if not block:
             break
         chunks.append(block)
@@ -802,6 +841,9 @@ def main(argv: list[str] | None = None, env: Mapping[str, str] | None = None) ->
         return serve(config, env, secret_sources=(lambda: _child_secrets(env),))
     except KeyboardInterrupt:
         return 0
+    except QueueError as exc:
+        print(f"atlas-reviewer: {exc}", file=sys.stderr)
+        return 2
     except OSError as exc:
         print(f"atlas-reviewer: {exc}", file=sys.stderr)
         return 2
