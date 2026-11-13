@@ -533,10 +533,14 @@ def _strip_userinfo(value: str) -> str:
     """Drop userinfo through the last ``@`` in the authority.
 
     ``https://us@er:pass@host.example/`` becomes ``https://host.example/``.
-    An ``@`` after the path stays. A value with no authority is unchanged.
+    An ``@`` after the path stays. A region such as ``us-east-1`` stays.
+    A value that contains ``@`` but has no ``//`` authority, such as
+    ``user:pass@host``, is dropped.
     """
     match = re.match(r"((?:[a-z][a-z0-9+.-]*:)?//)([^/?#]*)(.*)$", value, re.IGNORECASE)
-    if match is None or "@" not in match.group(2):
+    if match is None:
+        return "" if "@" in value else value
+    if "@" not in match.group(2):
         return value
     return match.group(1) + match.group(2).rpartition("@")[2] + match.group(3)
 

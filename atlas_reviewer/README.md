@@ -156,7 +156,9 @@ name is a known OpenRouter slug, the OpenInference value as
 `google-vertex/<region>` is `google`). An
 unknown name stays on `llm.provider`. `atlas.provider_endpoint` is set
 when the reply names a more specific endpoint, and userinfo in that
-endpoint is removed through the last `@` before the host. All three
+endpoint is removed through the last `@` before the host. A value
+that contains `@` and has no `//` authority is dropped. A region such
+as `us-east-1` stays. All three
 are scrubbed and cut to 120 characters. This section states those
 rules. The span attribute names are in the `tracing.py` module
 docstring, which is not a complete field list.

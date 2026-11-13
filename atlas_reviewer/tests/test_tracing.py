@@ -1018,6 +1018,45 @@ def test_an_unencoded_at_in_userinfo_is_stripped_through_the_last_at():
     assert "pass" not in attrs["atlas.provider_endpoint"]
 
 
+def test_a_bare_userinfo_endpoint_is_dropped_and_a_region_stays():
+    bare = CallFacts(
+        "m",
+        1,
+        1,
+        None,
+        "stop",
+        None,
+        provider="amazon-bedrock",
+        provider_endpoint="user:pass@host.example",
+    )
+    region = CallFacts(
+        "m",
+        1,
+        1,
+        None,
+        "stop",
+        None,
+        provider="amazon-bedrock",
+        provider_endpoint="us-east-1",
+    )
+    trace, exporter = memory_trace(scrub)
+    try:
+        with trace.lens(LENS):
+            trace.wrap_model(_Model(FinalReply("a", Decimal("0.01")), bare)).turn(
+                TurnRequest("p", (), ())
+            )
+            trace.wrap_model(_Model(FinalReply("b", Decimal("0.01")), region)).turn(
+                TurnRequest("q", (), ())
+            )
+    finally:
+        trace.shutdown()
+    spans = [s for s in exporter.get_finished_spans() if s.name == "completion"]
+    dropped, kept = _attrs(spans[0]), _attrs(spans[1])
+    assert "atlas.provider_endpoint" not in dropped
+    assert "pass" not in "".join(str(value) for value in dropped.values())
+    assert kept["atlas.provider_endpoint"] == "us-east-1"
+
+
 def test_a_bearer_collector_token_is_scrubbed_without_its_prefix(monkeypatch):
     from atlas_reviewer.tracing import opening_trace
 
