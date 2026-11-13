@@ -152,7 +152,8 @@ reply reports them (`llm.token_count.prompt_details.cache_read` and
 `cache_write`), and omits each one that was not reported. It records
 the provider that served the call as `atlas.provider` and, when that
 name is a known OpenRouter slug, the OpenInference value as
-`llm.provider` (`amazon-bedrock` and `Amazon Bedrock` are `aws`). An
+`llm.provider` (`amazon-bedrock` and `Amazon Bedrock` are `aws`, and
+`google-vertex/<region>` is `google`). An
 unknown name stays on `llm.provider`. `atlas.provider_endpoint` is set
 when the reply names a more specific endpoint, and userinfo in that
 endpoint is removed. All three are scrubbed and cut to 120 characters.

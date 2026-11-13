@@ -842,6 +842,47 @@ def test_export_is_not_an_sdk_exit_hook_and_the_flush_is_one_second(monkeypatch)
     assert seen["shutdown_on_exit"] is False
 
 
+def test_main_builds_the_shared_exporter_before_the_handler(tmp_path, monkeypatch):
+    from atlas_reviewer import cli, tracing
+
+    saved = (
+        tracing._SHARED,
+        tracing._SHARED_ENDPOINT,
+        tracing._HOLDERS,
+        list(tracing._RETIRED),
+    )
+    seen: dict[str, bool] = {}
+
+    def fake(env: object, scrubber: object) -> tracing.ReviewTrace:
+        trace, _exporter = memory_trace(lambda text: text)
+        return trace
+
+    def handler(args: object, run: object) -> int:
+        seen["ready"] = (
+            tracing._SHARED is not None and tracing._SHARED._provider is not None
+        )
+        return 0
+
+    monkeypatch.setattr(tracing, "trace_from_env", fake)
+    monkeypatch.setattr(cli, "_cmd_eval", handler)
+    tracing._SHARED = None
+    tracing._SHARED_ENDPOINT = None
+    tracing._HOLDERS = 0
+    tracing._RETIRED.clear()
+    try:
+        code = cli.main(
+            ["eval", "--fixtures", str(tmp_path)],
+            env={"ATLAS_OTEL_ENDPOINT": "https://phoenix.internal"},
+        )
+    finally:
+        if tracing._SHARED is not None and tracing._SHARED is not saved[0]:
+            tracing._SHARED.shutdown()
+        tracing._SHARED, tracing._SHARED_ENDPOINT, tracing._HOLDERS = saved[:3]
+        tracing._RETIRED[:] = saved[3]
+    assert code == 0
+    assert seen["ready"] is True
+
+
 def test_a_scrub_view_shutdown_leaves_the_shared_provider(monkeypatch):
     from atlas_reviewer import tracing
 
@@ -910,12 +951,53 @@ def test_a_provider_endpoint_drops_userinfo_and_a_known_host_maps():
     assert attrs["atlas.provider_endpoint"] == "https://bedrock.example/invoke"
 
 
+def test_a_regional_vertex_slug_maps_and_userinfo_stays_off_the_name():
+    facts = CallFacts(
+        "m",
+        1,
+        1,
+        None,
+        "stop",
+        None,
+        provider="google-vertex/europe",
+        provider_endpoint="https://user@bedrock.example/a@b",
+    )
+    named = CallFacts(
+        "m",
+        1,
+        1,
+        None,
+        "stop",
+        None,
+        provider="team@amazon.com",
+        provider_endpoint="https://h.example/a@b",
+    )
+    trace, exporter = memory_trace(scrub)
+    try:
+        with trace.lens(LENS):
+            model = trace.wrap_model(_Model(FinalReply("a", Decimal("0.01")), facts))
+            model.turn(TurnRequest("p", (), ()))
+            trace.wrap_model(_Model(FinalReply("b", Decimal("0.01")), named)).turn(
+                TurnRequest("q", (), ())
+            )
+    finally:
+        trace.shutdown()
+    spans = [s for s in exporter.get_finished_spans() if s.name == "completion"]
+    regional, plain = _attrs(spans[0]), _attrs(spans[1])
+    assert regional["llm.provider"] == "google"
+    assert regional["atlas.provider"] == "google-vertex/europe"
+    assert regional["atlas.provider_endpoint"] == "https://bedrock.example/a@b"
+    assert plain["llm.provider"] == "team@amazon.com"
+    assert plain["atlas.provider"] == "team@amazon.com"
+    assert plain["atlas.provider_endpoint"] == "https://h.example/a@b"
+
+
 def test_a_bearer_collector_token_is_scrubbed_without_its_prefix(monkeypatch):
     from atlas_reviewer.tracing import opening_trace
 
     token = fake_token("zq", 24)
-    for scheme in ("Bearer", "bearer", "Basic", "token"):
-        monkeypatch.setenv("ATLAS_OTEL_HEADERS", f"Authorization={scheme} {token}")
+    for prefix in ("Bearer ", "bearer ", "Basic ", "token ", "Bearer  "):
+        monkeypatch.setenv("ATLAS_OTEL_HEADERS", f"Authorization={prefix}{token}")
         result = BridgeResult(
             "grep",
             "{}",
@@ -944,7 +1026,7 @@ def test_a_bearer_collector_token_is_scrubbed_without_its_prefix(monkeypatch):
             rendered += json.dumps(
                 {key: str(value) for key, value in _attrs(span).items()}
             )
-        assert token not in rendered, scheme
+        assert token not in rendered, prefix
         assert "prompt " in rendered
 
 

@@ -475,13 +475,25 @@ def _model_attributes(
         note.set("output.value", _calls_json(reply))
 
 
+def _openinference_provider(name: str) -> str | None:
+    """A known OpenRouter slug, including a regional ``provider/region``."""
+    key = name.strip().lower()
+    mapped = _OPENINFERENCE_PROVIDER.get(key)
+    if mapped:
+        return mapped
+    provider, separator, _region = key.partition("/")
+    if separator:
+        return _OPENINFERENCE_PROVIDER.get(provider)
+    return None
+
+
 def _record_provider(note: _Note, facts: Any) -> None:
     _host(note, "atlas.provider", facts.provider)
     served = _host(note, "llm.provider", facts.provider)
-    mapped = _OPENINFERENCE_PROVIDER.get(served.strip().lower())
+    mapped = _openinference_provider(served)
     if mapped:
         note.set("llm.provider", mapped)
-    _host(note, "atlas.provider_endpoint", facts.provider_endpoint)
+    _host(note, "atlas.provider_endpoint", _strip_userinfo(facts.provider_endpoint))
 
 
 def _tokens(note: _Note, facts: Any) -> None:
@@ -523,10 +535,14 @@ def _strip_userinfo(value: str) -> str:
 
 
 def _host(note: _Note, key: str, value: str) -> str:
-    """A serving-host string is untrusted. Scrub it, then cap it."""
+    """A serving-host string is untrusted. Scrub it, then cap it.
+
+    Userinfo is stripped by the caller, and only for an endpoint. A
+    provider name such as ``team@amazon.com`` stays intact.
+    """
     if not value:
         return ""
-    text = note._owner.scrub(_strip_userinfo(value)).replace("\n", " ")[:_HOST_CHARS]
+    text = note._owner.scrub(value).replace("\n", " ")[:_HOST_CHARS]
     if text:
         note.set(key, text)
     return text
