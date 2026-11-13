@@ -428,15 +428,30 @@ def test_zero_findings_are_a_gap_unless_the_round_says_there_are_none():
     assert (
         findings_expected(
             "3 findings",
-            "Last round had no findings at or above. "
-            "Nothing new at or above this round's floor.",
+            "## Round 2 — 3 findings\n\n"
+            "Nothing new at or above this round's floor. "
+            "Last round had no findings at or above.",
         )
         is False
     )
+    assert (
+        findings_expected(
+            "3 findings",
+            "Last round had no findings at or above. "
+            "Nothing new at or above this round's floor.",
+        )
+        is True
+    )
+    for probe in (
+        "Round 4 had no findings at or above.",
+        "The round-3 review found nothing new at or above.",
+        "Earlier rounds had no findings at or above.",
+        "Saying no findings at or above would be wrong; the parser missed them.",
+    ):
+        assert findings_expected("3 findings", probe) is True, probe
     for sentence in (
         "No findings at or above this round's floor (Nit).",
         "**No new findings at or above this round's floor.**",
-        "`6cdc050` adds the path. Nothing new at or above this round's floor (Major).",
     ):
         rebuilt = reference_row(
             {
@@ -454,6 +469,20 @@ def test_zero_findings_are_a_gap_unless_the_round_says_there_are_none():
         assert rebuilt is not None and rebuilt["metadata"]["parse_gap"] is False, (
             sentence
         )
+    buried = reference_row(
+        {"number": 1, "head": {"sha": "abc"}, "base": {"repo": {"full_name": "o/r"}}},
+        {
+            "state": "COMMENTED",
+            "commit_id": "abc",
+            "body": (
+                "## Round 1 — APPROVE\n\n"
+                "`6cdc050` adds the path. Nothing new at or above "
+                "this round's floor (Major).\n"
+            ),
+        },
+        [],
+    )
+    assert buried is not None and buried["metadata"]["parse_gap"] is True
     colon = protocol_review(
         "## Round 1 — notes\n<!-- atlas-review round:1 -->\n",
         [
@@ -794,10 +823,32 @@ def test_a_lens_state_list_records_not_run_and_failed(tmp_path):
     row = load_directory(tmp_path)["results"][0]
     assert any("NOT RUN" in item for item in row["gate_failures"])
     assert any("failed" in item for item in row["gate_failures"])
+    payload["candidate"]["lenses"] = [
+        {"name": "reviewing-naming-and-readability", "state": "partial"}
+    ]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    partial = load_directory(tmp_path)["results"][0]
+    assert not any("NOT RUN" in item for item in partial["gate_failures"])
     payload["candidate"]["lenses"] = [{"state": "clean"}]
     path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(EvalFormatError, match="lenses need a name"):
         load_directory(tmp_path)
+
+
+def test_a_lens_with_a_missing_or_unknown_state_does_not_count_as_run():
+    from atlas_reviewer.eval_harness import _parse_candidate
+
+    for lenses in (
+        [{"name": "reviewing-test-quality"}],
+        [{"name": "reviewing-test-quality", "state": ""}],
+        [{"name": "reviewing-test-quality", "state": "pending"}],
+    ):
+        parsed = _parse_candidate(
+            {"verdict": "COMMENT", "findings": [], "lenses": lenses},
+            "pair",
+        )
+        assert parsed.lenses_run == ()
+        assert parsed.lenses_not_run == ("reviewing-test-quality",)
 
 
 def test_a_fixture_that_is_not_an_object_is_an_error(tmp_path):
