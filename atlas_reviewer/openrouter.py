@@ -46,8 +46,9 @@
   status (`GET /api/v1/key`) and refuses unless the key has a hard credit
   limit of at most `KEY_LIMIT_MAX_USD`, with credit left. A key whose
   `include_byok_in_limit` is false or absent is accepted.
-- Before each completion the public catalog entry is re-fetched (without
-  the key) and every limit is checked in code before a request is sent;
+- The public catalog entry is fetched once per provider for the review
+  and reused, without the key. Every limit is checked in code before a
+  request is sent;
   each attempt, retries included, reserves its worst-case cost in a
   per-review `ReviewBudget` first, capped at the lower of the review
   budget and the key's remaining credit as read by the preflight. Actual usage and cost are read from the

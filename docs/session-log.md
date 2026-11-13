@@ -1167,3 +1167,11 @@ D51's cost sentence now says each review adds one GET of the ZDR list
 per provider, which is what the cache does. A tag that only shares a
 slug's prefix, such as `amazon-bedrock-extra`, is not a child of that
 slug. No live call was made.
+
+## 2026-11-13 — round 3 on the configurable model pin
+
+The catalog is fetched once per provider for the review and reused.
+That is what `load_terms` does. The module docstring and the agentic
+README said it was fetched on every completion or turn, which was true
+before this cache. D41's sentence keeps the original design and notes
+the amendment. No live call was made.

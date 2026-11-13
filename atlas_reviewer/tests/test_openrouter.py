@@ -5,9 +5,11 @@ code before a request is sent. No test here touches the network."""
 import json
 import re
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
+from atlas_reviewer import openrouter
 from atlas_reviewer.budget import (
     BudgetRefusedError,
     CallLimits,
@@ -549,6 +551,15 @@ def test_a_pure_child_does_not_rewrite_the_requested_slug():
     assert json.loads(fake.chat_requests()[0][3])["provider"]["only"] == [
         "amazon-bedrock"
     ]
+
+
+def test_the_catalog_is_documented_as_fetched_once_per_review():
+    doc = openrouter.__doc__ or ""
+    assert "fetched once per provider for the review" in doc
+    assert "re-fetched" not in doc
+    readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+    assert "fetched once per provider for the review and reused" in readme
+    assert "fetched once per turn" not in readme
 
 
 def test_the_zdr_list_is_read_once_for_the_provider():

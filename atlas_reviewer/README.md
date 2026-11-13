@@ -981,8 +981,8 @@ D41 records the 2026-11-12 probe that did.
   a turn with neither a readable cost nor usable token counts. A readable
   cost is used as reported, including when the reasoning-token count is
   missing and when the response also reports cache tokens. The catalog is
-  fetched once per turn. The adapter does not retry and does not reserve
-  on the one-shot budget. A tool call whose
+  fetched once per provider for the review and reused. The adapter does
+  not retry and does not reserve on the one-shot budget. A tool call whose
   arguments are not one JSON object, or that hold a non-finite number or
   nest deep enough to recurse, is handed to the bridge, which rejects it,
   and the refusal comes back nonce-fenced. No call is executed in the
