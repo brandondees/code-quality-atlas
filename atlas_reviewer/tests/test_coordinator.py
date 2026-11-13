@@ -696,7 +696,13 @@ def test_an_unreadable_round_log_is_an_omission(tmp_path):
     text = model.requests[0].messages[0].text
     assert "calc.py (+1 -1)" in text and "config/keys.py (+1 -0)" in text
     assert not result.coverage_complete
-    assert any(item.limit == "unreadable record" for item in result.context_omissions)
+    assert any(
+        item.detail == "the round log file could not be read"
+        for item in result.context_omissions
+    )
+    assert not any(
+        item.limit == "unreadable record" for item in result.context_omissions
+    )
 
 
 def test_the_first_turn_lists_every_changed_file_and_a_scope_is_a_continuation(
@@ -855,7 +861,71 @@ def test_a_log_write_failure_keeps_the_review(tmp_path):
     assert model.requests
     assert result.coverage_complete
     assert result.event is ReviewEvent.APPROVE
-    assert "the round log was not written" in render_draft(result, Redactor())
+    assert "the round log was not written: disk full" in render_draft(
+        result, Redactor()
+    )
+    assert (
+        status(result)["round_log_note"] == "the round log was not written: disk full"
+    )
+
+
+def test_a_superseded_truncated_record_does_not_block_a_new_head(tmp_path):
+    from atlas_reviewer.rounds import RECORD_CHARS, RoundLog, RoundRecord, fit_record
+
+    stored = fit_record(
+        RoundRecord(
+            EVENT.repo,
+            EVENT.pr_number,
+            "a" * 40,
+            LENS,
+            "COMMENT",
+            ("y" * (RECORD_CHARS + 50),),
+            False,
+        )
+    )
+    assert stored.findings_omitted > 0
+    log = RoundLog(tmp_path / "state" / "rounds.jsonl")
+    log.append(stored)
+    result, _, _ = review(
+        tmp_path,
+        [READ_ALL, final()],
+        round_log=log,
+        event=PrEvent(EVENT.repo, EVENT.pr_number, "b" * 40),
+    )
+    assert result.coverage_complete
+    assert result.event is ReviewEvent.APPROVE
+
+
+def test_a_round_log_reaches_the_lens_inside_an_open_review_span(tmp_path):
+    from atlas_reviewer.domain import Omission
+    from atlas_reviewer.rounds import RoundLog, RoundRecord
+    from atlas_reviewer.tracing import ReviewTrace
+
+    log = RoundLog(tmp_path / "state" / "rounds.jsonl")
+    log.append(
+        RoundRecord(
+            EVENT.repo,
+            EVENT.pr_number,
+            "a" * 40,
+            LENS,
+            "COMMENT",
+            ("nested-prior-finding",),
+            False,
+        )
+    )
+    omission = Omission("caller", "test budget", "caller context was omitted")
+    trace = ReviewTrace.disabled(lambda text: text)
+    with trace.review(EVENT.repo, EVENT.pr_number, "c" * 40):
+        result, model, _ = review(
+            tmp_path,
+            [READ_ALL, final()],
+            round_log=log,
+            context_omissions=(omission,),
+            event=PrEvent(EVENT.repo, EVENT.pr_number, "c" * 40),
+        )
+    assert "nested-prior-finding" in model.requests[0].messages[0].text
+    assert not result.coverage_complete
+    assert "caller context was omitted" in render_draft(result, Redactor())
 
 
 def test_other_pull_requests_are_on_the_status_line(tmp_path):
@@ -1032,6 +1102,7 @@ def test_the_status_line_is_the_drafts_first_line_and_only_controller_values():
         "unreviewed_files": 0,
         "context_omissions": 0,
         "other_pull_requests": 0,
+        "round_log_note": "",
         "limit_stop": None,
     }
 

@@ -1205,4 +1205,14 @@ pull request or no pull request, no longer block approval. A line that
 names this pull request, including a future record version, still does.
 A finding is quoted up to the 8,192-character record cap. The 16,384
 default is pinned. A log write that fails after the model call returns
-the review. No live call was made. D52.
+the review, and the draft and the status line name the cause. A
+superseded record that does not fit is skipped instead of stopping
+the pack. No live call was made. D52.
+
+## 2026-11-13 — round 5 on whole-PR review rounds
+
+An unreadable round-log file is its own omission. A superseded record
+that does not fit no longer hides a current-head record written
+earlier. A truncated superseded record does not block a new head. The
+round-log arguments stay on the nested trace path. No live call was
+made. D52.

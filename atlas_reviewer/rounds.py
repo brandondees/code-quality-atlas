@@ -154,7 +154,7 @@ def fit_record(record: RoundRecord) -> RoundRecord:
         record.lens,
         record.event,
         (),
-        True,
+        record.context_partial,
         record.findings_omitted + len(record.findings),
     )
 
@@ -179,6 +179,10 @@ def prior_blocks(
     used = 0
     for record, text in reversed(rendered):
         if used + len(text) + (2 if kept else 0) > budget:
+            # A superseded record that does not fit is skipped. Stopping
+            # here would hide an earlier current-head record that does.
+            if record.head_sha != current_head:
+                continue
             break
         kept.append((record, text))
         used += len(text) + (2 if len(kept) > 1 else 0)

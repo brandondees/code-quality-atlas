@@ -4,6 +4,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from atlas_reviewer import rounds
 from atlas_reviewer.rounds import (
     PRIOR_ROUND_CHARS,
@@ -251,6 +253,58 @@ def test_round_means_a_finished_review_and_the_docs_name_the_log():
     assert "superseded" in readme_flat
     assert "case-insensitive" in readme_flat
     assert "does not block" in readme_flat
+
+
+def test_a_superseded_record_that_does_not_fit_does_not_hide_the_current_head():
+    current = record(head_sha="b" * 40, findings=("current-small",))
+    old = record(head_sha="a" * 40, findings=("o" * 800,))
+    (current_block,), _ = prior_blocks(
+        (current,), "b" * 40, 10**6, unreadable=0, scrub=lambda text: text
+    )
+    budget = len(current_block.content.text)
+    blocks, omissions = prior_blocks(
+        (current, old), "b" * 40, budget, unreadable=0, scrub=lambda text: text
+    )
+    assert blocks
+    assert "current-small" in blocks[0].content.text
+    assert "o" * 40 not in blocks[0].content.text
+    assert omissions == ()
+
+
+def test_a_finding_overflow_does_not_also_say_the_context_was_partial():
+    stored = fit_record(record(findings=("y" * (RECORD_CHARS + 50),)))
+    blocks, _ = prior_blocks(
+        (stored,), stored.head_sha, 100_000, unreadable=0, scrub=lambda text: text
+    )
+    text = blocks[0].content.text
+    assert "were not stored" in text
+    assert "own context was partial" not in text
+
+
+def test_a_blank_line_is_not_an_unreadable_record(tmp_path):
+    path = tmp_path / "rounds.jsonl"
+    log = RoundLog(path)
+    log.append(record())
+    path.write_text(path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    log.append(record(findings=("second finding",)))
+    loaded = log.read()
+    assert loaded.unattributed == 0
+    assert loaded.unreadable == ()
+    assert len(loaded.records) == 2
+
+
+def test_a_prior_budget_must_be_a_positive_integer():
+    with pytest.raises(ValueError, match="positive integer"):
+        prior_blocks((), "b" * 40, 0, unreadable=0, scrub=lambda text: text)
+    with pytest.raises(ValueError, match="positive integer"):
+        prior_blocks((), "b" * 40, True, unreadable=0, scrub=lambda text: text)
+
+
+def test_owner_casefolds_the_repository():
+    from atlas_reviewer.rounds import _owner
+
+    line = json.dumps({"v": 2, "repo": "Example-Org/Example-App", "pr": 7})
+    assert _owner(line) == ("example-org/example-app", 7)
 
 
 def test_an_empty_head_sha_is_not_a_record():

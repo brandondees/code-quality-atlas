@@ -78,6 +78,7 @@ from atlas_reviewer.quotes import read_sources
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.rounds import (
     PRIOR_ROUND_CHARS,
+    SOURCE,
     RoundLog,
     RoundRecord,
     fit_record,
@@ -367,10 +368,29 @@ def review_lens(
         acquire_shared()
     try:
         return _open_review(
-            event, lens, diff, trees, library, model, resolved, ledger, sprites,
-            runner_ledger, redactor, clock, context, context_omissions, round_log,
-            prior_chars, telemetry, nonce, bridge_root, contract, task_socket, trace,
-        )  # fmt: skip
+            event,
+            lens,
+            diff,
+            trees,
+            library=library,
+            model=model,
+            resolved=resolved,
+            ledger=ledger,
+            sprites=sprites,
+            runner_ledger=runner_ledger,
+            redactor=redactor,
+            clock=clock,
+            context=context,
+            context_omissions=context_omissions,
+            round_log=round_log,
+            prior_chars=prior_chars,
+            telemetry=telemetry,
+            nonce=nonce,
+            bridge_root=bridge_root,
+            contract=contract,
+            task_socket=task_socket,
+            trace=trace,
+        )
     finally:
         if trace is None:
             release_shared()
@@ -381,6 +401,7 @@ def _open_review(
     lens: str,
     diff: str,
     trees: SourceTrees,
+    *,
     library: LensLibrary,
     model: LensModel,
     resolved: Limits,
@@ -417,23 +438,23 @@ def _open_review(
                     lens,
                     diff,
                     trees,
-                    library,
-                    model,
-                    resolved,
-                    ledger,
-                    sprites,
-                    runner_ledger,
-                    redactor,
-                    clock,
-                    context,
-                    context_omissions,
-                    round_log,
-                    prior_chars,
-                    telemetry,
-                    nonce,
-                    bridge_root,
-                    contract,
-                    task_socket,
+                    library=library,
+                    model=model,
+                    resolved=resolved,
+                    ledger=ledger,
+                    sprites=sprites,
+                    runner_ledger=runner_ledger,
+                    redactor=redactor,
+                    clock=clock,
+                    context=context,
+                    context_omissions=context_omissions,
+                    round_log=round_log,
+                    prior_chars=prior_chars,
+                    telemetry=telemetry,
+                    nonce=nonce,
+                    bridge_root=bridge_root,
+                    contract=contract,
+                    task_socket=task_socket,
                 ),
             )
     with active.lens(lens) as lens_span:
@@ -447,23 +468,23 @@ def _open_review(
                 lens,
                 diff,
                 trees,
-                library,
-                model,
-                resolved,
-                ledger,
-                sprites,
-                runner_ledger,
-                redactor,
-                clock,
-                context,
-                context_omissions,
-                round_log,
-                prior_chars,
-                telemetry,
-                nonce,
-                bridge_root,
-                contract,
-                task_socket,
+                library=library,
+                model=model,
+                resolved=resolved,
+                ledger=ledger,
+                sprites=sprites,
+                runner_ledger=runner_ledger,
+                redactor=redactor,
+                clock=clock,
+                context=context,
+                context_omissions=context_omissions,
+                round_log=round_log,
+                prior_chars=prior_chars,
+                telemetry=telemetry,
+                nonce=nonce,
+                bridge_root=bridge_root,
+                contract=contract,
+                task_socket=task_socket,
             ),
         )
 
@@ -483,6 +504,7 @@ def _one_lens(
     lens: str,
     diff: str,
     trees: SourceTrees,
+    *,
     library: LensLibrary,
     model: LensModel,
     resolved: Limits,
@@ -619,8 +641,11 @@ def _review_lens(
     if round_log is not None:
         try:
             round_log.append(_round_record(event, lens, review, scrub))
-        except OSError:
-            review = replace(review, round_log_note="the round log was not written")
+        except OSError as exc:
+            review = replace(
+                review,
+                round_log_note=f"the round log was not written: {exc}",
+            )
     return review
 
 
@@ -732,7 +757,14 @@ def _review_context(
         # names no pull request is not charged here.
         mine, dropped_other = records_for(loaded.records, event.repo, event.pr_number)
         if loaded.file_unreadable:
-            unreadable = 1
+            unreadable = 0
+            omissions.append(
+                Omission(
+                    SOURCE,
+                    "round log file",
+                    "the round log file could not be read",
+                )
+            )
         else:
             key = event.repo.casefold()
             unreadable = sum(
@@ -838,6 +870,7 @@ def status_line(review: AgenticReview) -> str:
         "unreviewed_files": len(_unread_paths(review)),
         "context_omissions": len(review.context_omissions),
         "other_pull_requests": review.other_pull_requests,
+        "round_log_note": review.round_log_note,
         "limit_stop": _limit_stop(review),
     }
     if review.trace_id:
