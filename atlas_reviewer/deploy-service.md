@@ -117,8 +117,7 @@ flyp machine restart <id> --app "$APP"
 
 The restart is only needed when the first deploy started the process
 before the chown. After that, restarts keep the queue and the post
-ledger. The queue refuses a new job when 2,000 are already queued or
-running. The dedupe list keeps every pull request's current head, so it
+ledger. The queue refuses a new job when 2,000 active jobs (`queued`, `running`, `post_pending`, `posting`) belong to other pull requests. A newer head of a pull request that already has an active job takes that slot. Replacing a job that is still `running` or `posting` can leave the count at 2,000 plus those superseded jobs, and that extra is at most the worker concurrency. The dedupe list keeps every pull request's current head, so it
 can grow past 20,000 by one key per pull request. A run directory is
 removed when its job ends. A key is about 80 bytes. The 1 GB volume
 holds the queue file, `posted.json`, and `service.jsonl`.
@@ -143,10 +142,12 @@ secret values.
 ## GitHub App webhook
 
 In the App's webhook settings, set the payload URL to
-`https://atlas-reviewer-service.fly.dev/webhook` when the app name is
-`atlas-reviewer-service`. If the name was taken and the app was created
-under another name, the host is `https://<that-name>.fly.dev` and the path
-is still `/webhook`. Set the webhook secret to the same value as
+`https://atlas-reviewer-service.fly.dev/webhook`. Fly app names are
+global. If `fly apps create` says `atlas-reviewer-service` is taken, leave
+`app` in `fly.service.toml` unchanged, set `APP` to the name you choose,
+and pass `--app "$APP"` on every command in this runbook, which the fences
+already do. The payload URL is then `https://<that-name>.fly.dev/webhook`.
+Set the webhook secret to the same value as
 `ATLAS_GITHUB_WEBHOOK_SECRET`. Content type JSON. Subscribe to
 **Pull requests** and nothing else. The installation must include
 `brandondees/code-quality-atlas`.

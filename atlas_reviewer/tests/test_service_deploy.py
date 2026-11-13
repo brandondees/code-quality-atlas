@@ -142,9 +142,16 @@ def test_d44_counts_every_active_job_state():
     text = (ROOT / "docs/open-questions.md").read_text(encoding="utf-8")
     start = text.index("- **D44")
     entry = text[start:].split("\n- **D", 1)[0]
-    assert "post_pending" in entry
-    assert "posting" in entry
-    assert "already queued or running" not in entry
+    runbook = (ROOT / "atlas_reviewer/deploy-service.md").read_text(encoding="utf-8")
+    plan = (ROOT / "docs/plans/2026-11-12-webhook-service-mode.md").read_text(
+        encoding="utf-8"
+    )
+    for document in (entry, runbook, plan):
+        assert "post_pending" in document
+        assert "posting" in document
+        assert "already queued or running" not in document
+        assert "2,000 plus those superseded jobs" in document
+        assert "at most the worker concurrency" in document
 
 
 def test_the_fly_host_is_what_config_from_env_binds():

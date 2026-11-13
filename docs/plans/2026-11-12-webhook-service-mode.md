@@ -63,7 +63,7 @@ in time. Its compute price, from Fly's pricing page for `iad` on
 2026-11-12, is the `shared-cpu-1x` with 1 GB row: $6.70 per 30 days. The
 queue, the post ledger, and `service.jsonl` are on a 1 GB volume at
 `/data` ($0.15 per month on that same page), so a restart keeps them.
-The queue refuses a new job when 2,000 are already queued or running.
+The queue refuses a new job when 2,000 active jobs (`queued`, `running`, `post_pending`, `posting`) belong to other pull requests. A newer head of a pull request that already has an active job takes that slot. Replacing a job that is still `running` or `posting` can leave the count at 2,000 plus those superseded jobs, and that extra is at most the worker concurrency.
 The dedupe list keeps every current head, so it can grow past 20,000 by
 one key per pull request. A run directory is removed
 when its job ends. A key is about 80 bytes, so 20,000 keys are about
