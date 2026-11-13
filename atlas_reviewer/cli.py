@@ -80,8 +80,8 @@ from atlas_reviewer.ledger import (
     make_private_dirs,
     single_review_lock,
 )
-from atlas_reviewer.lens_loop import FinalReply, LensModel, TurnRequest
-from atlas_reviewer.lenses import LensLibrary
+from atlas_reviewer.lens_loop import AgenticLimits, FinalReply, LensModel, TurnRequest
+from atlas_reviewer.lenses import LensLibrary, LensStatus
 from atlas_reviewer.openrouter import KEY_LIMIT_MAX_USD, OpenRouterProvider
 from atlas_reviewer.picker import Depth, picker_instructions, select_agentic_lenses
 from atlas_reviewer.ports import (
@@ -564,6 +564,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
         lens_model: LensModel
         model_factory: Callable[[], LensModel] | None
         picker_provider: ModelProvider
+        github: FixtureGitHub | GitHubClient
         if args.dry_run:
             fixtures = Path(args.fixtures) if args.fixtures else Path(args.event).parent
             if not fixtures.is_dir():
@@ -624,7 +625,7 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
                 )
             )
 
-        _selection, plan = select_agentic_lenses(
+        selection, plan = select_agentic_lenses(
             depth, None if depth is Depth.TRIAGE else run_picker, library, scrub=scrub
         )
         names = tuple(loaded.name for loaded in plan.loaded)
@@ -645,6 +646,15 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
             telemetry=telemetry,
             model_for=model_factory,
         )
+        review = replace(
+            review,
+            selection_note=selection.note,
+            not_picked=tuple(
+                (use.name, use.reason)
+                for use in plan.uses
+                if use.status is LensStatus.NOT_RUN
+            ),
+        )
     written = _emit(render_draft(review, redactor), args.out, out, err)
     (out if written else err).write(
         f"{_telemetry_line(run, telemetry)}"
@@ -659,14 +669,19 @@ def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
     return EXIT_OK
 
 
-def _live_github(args, env, event, credentials):
+def _live_github(
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+    event: PrEvent,
+    credentials: _Credentials,
+) -> GitHubClient:
     transport = UrllibTransport()
     tokens = _app_tokens(env, event, args.include_issues, transport)
     credentials.register(tokens.secrets)
     return GitHubClient(transport, tokens)
 
 
-def _agentic_limits(args: argparse.Namespace, env: Mapping[str, str]):
+def _agentic_limits(args: argparse.Namespace, env: Mapping[str, str]) -> AgenticLimits:
     flags = {name: getattr(args, name, None) for name in AGENTIC_ENV}
     try:
         limits = limits_for_lens(env, **flags)

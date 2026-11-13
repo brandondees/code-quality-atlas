@@ -12,12 +12,14 @@ introduced Blocker blocks; anything else that sets the verdict means
 approve with changes; only nits or nothing means approve). There is no
 model merge call yet.
 
-Coverage is complete only when every changed file's diff was read in
-full by some lens (a file left unread by every lens blocks approval),
-no lens failed for another cause, and, when this review ran a runner,
-every runner completed. A single-lens result with no assigned scope
-keeps the older rule: that lens itself must be clean and have read
-every file.
+Coverage is complete only when every lens read every changed file's
+diff in full, through its own attempts or its own continuations (D42:
+a read by another lens does not cover a file for this one), no lens
+failed for another cause, and, when this review ran a runner, every
+runner completed. A single-lens result with no assigned scope keeps the
+older rule: that lens itself must be clean and have read every file.
+A runner whose delete was not verified does not block approval, but the
+draft names it so it can be swept.
 A keepalive failure is a failed runner, so a clean lens cannot approve
 it away. A lens that left a changed file unread is partial, so the same
 rule applies. Anything less fails closed:
@@ -64,7 +66,7 @@ from atlas_reviewer.bridge import Bridge, BridgeSecret, run_bridge
 from atlas_reviewer.bridge_staging import BRIDGE_ROOT, SourceTrees
 from atlas_reviewer.committed_secrets import scan_diff
 from atlas_reviewer.diffs import by_risk, risk_tier, split_files
-from atlas_reviewer.domain import PrEvent, RunnerReport, RunnerStatus
+from atlas_reviewer.domain import CleanupStatus, PrEvent, RunnerReport, RunnerStatus
 from atlas_reviewer.keepalive import SOCKET_PATH, lens_hold
 from atlas_reviewer.lens_contract import Finding, Severity
 from atlas_reviewer.lens_loop import (
@@ -169,6 +171,14 @@ class AgenticReview:
     committed_usd: str = "0"
     model_calls: int = 0
     flagged: tuple[str, ...] = field(default=(), repr=False)
+    changed: frozenset[str] | None = None
+    """The PR's changed paths. When set, every lens is held to all of
+    them, whatever scope it was assigned."""
+    runners: tuple[RunnerReport, ...] = ()
+    """Every lens runner's report, so an unverified delete is named."""
+    selection_note: str = ""
+    not_picked: tuple[tuple[str, str], ...] = ()
+    """Picked names that did not run, with why."""
     trace_id: str = ""
 
     @property
@@ -187,26 +197,9 @@ class AgenticReview:
         clean, so a missing cause cannot approve a partial read. An outcome
         with no changed-file count predates the per-file gate and shows no
         coverage, so it blocks approval too."""
-        if _scoped(self.lenses):
-            if _still_unread(self.lenses):
-                return False
-            if not self.lenses or any(_blocks_coverage(r) for r in self.lenses):
-                return False
-            if self.runner is None:
-                return True
-            return self.runner.status is RunnerStatus.COMPLETED
-        if any(
-            r.outcome is not None
-            and (r.outcome.unread or r.outcome.changed_files is None)
-            for r in self.lenses
-        ):
+        if _lens_gap(self):
             return False
-        lenses_clean = bool(self.lenses) and all(
-            r.state is LensState.CLEAN for r in self.lenses
-        )
-        if not lenses_clean or self.runner is None:
-            return lenses_clean
-        return self.runner.status is RunnerStatus.COMPLETED
+        return self.runner is None or self.runner.status is RunnerStatus.COMPLETED
 
     @property
     def proposed_event(self) -> ReviewEvent:
@@ -546,7 +539,7 @@ def _review_lenses(
         results = tuple(ran.result for ran in runs)
         pending = {
             lens: paths
-            for lens, paths in _pending_by_lens(results).items()
+            for lens, paths in _pending_by_lens(results, changed).items()
             if library.body(lens) is not None
         }
         if (
@@ -561,7 +554,7 @@ def _review_lenses(
         after = {
             lens: paths
             for lens, paths in _pending_by_lens(
-                tuple(ran.result for ran in runs)
+                tuple(ran.result for ran in runs), changed
             ).items()
             if library.body(lens) is not None
         }
@@ -569,13 +562,15 @@ def _review_lenses(
             break
     secrets = [secret for ran in runs for secret in ran.secrets]
     flagged = tuple(value for ran in runs for value in ran.flagged)
-    return synthesize(
+    reports = tuple(ran.report for ran in runs if ran.report is not None)
+    review = synthesize(
         [ran.result for ran in runs],
         secrets,
-        _combined_runner(tuple(ran.report for ran in runs)),
+        _combined_runner(reports),
         spend,
         flagged,
     )
+    return replace(review, changed=changed, runners=reports)
 
 
 def _traced_review(
@@ -635,15 +630,18 @@ class _LensRun:
     flagged: tuple[str, ...]
 
 
-def _combined_runner(reports: Sequence[RunnerReport | None]) -> RunnerReport | None:
-    present = [report for report in reports if report is not None]
-    if not present:
+def _combined_runner(reports: Sequence[RunnerReport]) -> RunnerReport | None:
+    """The report the draft's Runner line shows: a runner that did not
+    complete, else one whose delete was not verified, else the last."""
+    if not reports:
         return None
-    failed = next(
-        (report for report in present if report.status is not RunnerStatus.COMPLETED),
-        None,
-    )
-    return failed if failed is not None else present[-1]
+    for report in reports:
+        if report.status is not RunnerStatus.COMPLETED:
+            return report
+    for report in reports:
+        if report.cleanup is CleanupStatus.DESTROY_UNVERIFIED:
+            return report
+    return reports[-1]
 
 
 def _review_one(
@@ -938,6 +936,16 @@ def render_draft(review: AgenticReview, redactor: Redactor) -> str:
         return scrubber(text).text
 
     lines = [status_line(review), "", _headline(review, scrub), ""]
+    if review.selection_note or review.not_picked:
+        lines += ["## Lens selection", ""]
+        if review.selection_note:
+            lines += [scrub(review.selection_note), ""]
+        lines += [
+            f"- NOT RUN: {quote_untrusted(name, QUOTED_CHARS, scrub=scrub)} ({why})"
+            for name, why in review.not_picked
+        ]
+        if review.not_picked:
+            lines.append("")
     lines += ["## Findings (verified quotes only)", ""]
     lines += [_finding_line(f, scrub) for f in review.verified] or [
         "No verified findings."
@@ -967,6 +975,17 @@ def render_draft(review: AgenticReview, redactor: Redactor) -> str:
                 "Runner reported, quoted: "
                 + quote_untrusted(review.runner.note, QUOTED_CHARS, scrub=scrub)
             )
+    unverified = [
+        r.runner_name
+        for r in review.runners
+        if r.cleanup is CleanupStatus.DESTROY_UNVERIFIED and r.runner_name
+    ]
+    if unverified:
+        lines.append(
+            "Runner delete NOT verified for "
+            + ", ".join(f"`{name}`" for name in unverified)
+            + "; recover each with `sweep --runner NAME --force-live`."
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -989,7 +1008,7 @@ def _headline(review: AgenticReview, scrub: Callable[[str], str]) -> str:
     ):
         named = f"runner {review.runner.status.value}"
     else:
-        named = _coverage_gap_name(review) or "no lens selected"
+        named = _lens_gap(review) or "no lens selected"
     proposed = (
         f" (the findings alone would be {review.proposed_event.value})"
         if review.proposed_event is not review.event
@@ -1018,16 +1037,20 @@ def _blocks_coverage(result: LensResult) -> bool:
     return result.state is not LensState.CLEAN and not unread_only
 
 
-def _pending_by_lens(lenses: Sequence[LensResult]) -> dict[str, frozenset[str]]:
-    """For each lens, the scope paths none of its attempts read in full.
-    A file read by a different lens does not cover it (D42: the gate is
-    per lens). A lens with no body has no attempt, so it stays pending."""
+def _pending_by_lens(
+    lenses: Sequence[LensResult], changed: frozenset[str] | None = None
+) -> dict[str, frozenset[str]]:
+    """For each lens, the paths none of its attempts read in full: its
+    assigned scope, and every changed path when `changed` is given, so a
+    lens assigned too narrow a scope is not covered by it. A file read by
+    a different lens does not cover it (D42: the gate is per lens). A lens
+    with no body has no attempt, so it stays pending."""
     assigned: dict[str, set[str]] = {}
     covered: dict[str, set[str]] = {}
     for result in lenses:
         if result.scope is None:
             continue
-        assigned.setdefault(result.lens, set()).update(result.scope)
+        assigned.setdefault(result.lens, set()).update(result.scope, changed or ())
         if result.outcome is None or result.outcome.changed_files is None:
             continue
         covered.setdefault(result.lens, set()).update(
@@ -1045,35 +1068,40 @@ def _pending_pairs(pending: dict[str, frozenset[str]]) -> set[tuple[str, str]]:
     return {(lens, path) for lens, paths in pending.items() for path in paths}
 
 
-def _still_unread(lenses: Sequence[LensResult]) -> tuple[str, ...]:
+def _still_unread(
+    lenses: Sequence[LensResult], changed: frozenset[str] | None = None
+) -> tuple[str, ...]:
     paths: set[str] = set()
-    for gap in _pending_by_lens(lenses).values():
+    for gap in _pending_by_lens(lenses, changed).values():
         paths.update(gap)
     return tuple(sorted(paths, key=lambda path: (risk_tier(path).rank, path)))
 
 
-def _coverage_gap_name(review: AgenticReview) -> str:
-    """Why a review of clean lenses is still incomplete, or "" when no
-    lens was selected. A clean outcome can still lack coverage: unread
-    paths, or no changed-file count from before the per-file gate."""
+def _lens_gap(review: AgenticReview) -> str:
+    """Why the lenses do not give complete coverage, or "" when they do.
+    The one coverage rule: `coverage_complete`, the headline and the
+    unread list all read it. A clean outcome can still lack coverage:
+    unread paths, or no changed-file count from before the per-file gate."""
+    if not review.lenses:
+        return "no lens selected"
+    if _unread_paths(review):
+        return "unread files"
     if _scoped(review.lenses):
-        if _still_unread(review.lenses):
-            return "unread files"
         if any(_blocks_coverage(result) for result in review.lenses):
             return "a lens did not finish clean"
         return ""
-    if any(r.outcome is not None and r.outcome.unread for r in review.lenses):
-        return "unread files"
     if any(
         r.outcome is not None and r.outcome.changed_files is None for r in review.lenses
     ):
         return "no recorded file coverage"
+    if any(r.state is not LensState.CLEAN for r in review.lenses):
+        return "a lens did not finish clean"
     return ""
 
 
 def _unread_paths(review: AgenticReview) -> tuple[str, ...]:
     if _scoped(review.lenses):
-        return _still_unread(review.lenses)
+        return _still_unread(review.lenses, review.changed)
     seen: list[str] = []
     for result in review.lenses:
         if result.outcome is None:

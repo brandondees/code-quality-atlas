@@ -1691,6 +1691,38 @@ def test_agentic_review_dry_run_writes_one_draft_without_credentials(tmp_path):
     assert "REVIEW INCOMPLETE" in out
 
 
+def _agentic_dry_run(tmp_path):
+    return run_cli(
+        "--state-dir", str(tmp_path), "agentic-review", "--dry-run",
+        "--event", EVENT, "--depth", "review", "--pool-size", "1",
+    )  # fmt: skip
+
+
+def test_agentic_review_puts_the_picker_fallback_note_in_the_draft(tmp_path):
+    """The offline picker's reply is not a lens list, so selection falls
+    back to the critical tier. The draft says so."""
+    code, out, err = _agentic_dry_run(tmp_path)
+    assert code == cli.EXIT_INCOMPLETE, err
+    assert "## Lens selection" in out
+    assert "the lens picker gave no usable lens list" in out
+
+
+def test_agentic_review_lists_a_picked_name_with_no_body_as_not_run(
+    tmp_path, monkeypatch
+):
+    class Picks:
+        name = "picks"
+
+        def complete(self, prompt):
+            return '{"lenses": ["made-up-lens", "reviewing-test-quality"]}'
+
+    monkeypatch.setattr(cli, "OfflineProvider", Picks)
+    code, out, err = _agentic_dry_run(tmp_path)
+    assert code == cli.EXIT_INCOMPLETE, err
+    assert '- NOT RUN: `"made-up-lens"` (no body.md in the bundle)' in out
+    assert "ranked 2 lens name(s), 1 with a body" in out
+
+
 @pytest.mark.parametrize("raw", ["Infinity", "inf", "NaN", "sNaN", "0", "-3", "abc"])
 def test_a_key_ceiling_must_be_a_finite_positive_dollar_amount(raw):
     from atlas_reviewer.cli import UsageError, _key_ceiling

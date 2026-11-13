@@ -845,7 +845,7 @@ def _lenses(tmp_path, names, model, *, pool=1, models=None, limits=None, sprites
     return result, sprites
 
 
-def test_unread_files_go_to_a_continuation_and_the_union_can_approve(tmp_path):
+def test_unread_files_go_to_a_continuation_of_the_same_lens_and_can_approve(tmp_path):
     model = ScriptedLensModel(
         [
             tools(("diff_file", {"path": "calc.py"})),
@@ -878,12 +878,17 @@ def test_a_file_one_lens_left_unread_is_not_covered_by_another_lens(tmp_path):
             final(),
             tools(("diff_file", {"path": "calc.py"})),
             tools(("diff_file", {"path": "config/keys.py"})),
-            final(),
+            _acknowledge,
+            final(text="not a contract reply"),
+            final(text="not a contract reply"),
         ]
     )
     result, _ = _lenses(tmp_path, [LENS, OTHER], model)
+    first, other = result.lenses[:2]
+    assert first.outcome.unread == ("config/keys.py",)
+    assert other.state is LensState.CLEAN
     assert not result.coverage_complete
-    assert result.lenses[0].outcome.unread == ("config/keys.py",)
+    assert result.unreviewed_paths == ("config/keys.py",)
 
 
 def test_a_file_unread_by_one_lens_is_covered_once_that_lens_reads_it():
@@ -940,3 +945,110 @@ def test_two_lenses_run_together_under_different_runner_names(tmp_path):
     assert {lens.lens for lens in result.lenses} == {LENS, OTHER}
     created = [call[1] for call in sprites.calls if call[0] == "create"]
     assert len(set(created)) == 2
+
+
+def test_a_lens_assigned_too_narrow_a_scope_does_not_cover_the_changed_files():
+    narrow = scoped(LENS, ["a.py"])
+    review = replace(synthesize([narrow]), changed=frozenset({"a.py", "b.py"}))
+    assert not review.coverage_complete
+    assert review.unreviewed_paths == ("b.py",)
+    assert replace(review, changed=frozenset({"a.py"})).coverage_complete
+
+
+def test_an_attested_reply_that_skipped_files_and_failed_a_quote_still_blocks():
+    outcome = AttemptOutcome(
+        Attestation.ATTESTED,
+        frozenset({Cause.FILES_UNREAD, Cause.QUOTES_FAILED}),
+        unread=("a.py",),
+        changed_files=1,
+    )
+    result = LensResult(LENS, 1, DIGEST, outcome, attempts=1, scope=frozenset({"a.py"}))
+    assert _blocks_coverage(result)
+
+
+def test_an_unverified_runner_delete_is_named_in_a_multi_lens_draft():
+    from atlas_reviewer.coordinator import _combined_runner
+    from atlas_reviewer.domain import RunnerReport
+
+    orphan = RunnerReport(
+        RunnerStatus.COMPLETED, CleanupStatus.DESTROY_UNVERIFIED, "cqa-rev-a", ""
+    )
+    gone = RunnerReport(
+        RunnerStatus.COMPLETED, CleanupStatus.DESTROYED_VERIFIED, "cqa-rev-b", ""
+    )
+    assert _combined_runner((orphan, gone)) is orphan
+    lens = scoped(LENS, ["a.py"])
+    review = replace(
+        synthesize([lens], runner=_combined_runner((orphan, gone))),
+        runners=(orphan, gone),
+    )
+    draft = render_draft(review, Redactor())
+    assert "cleanup destroy NOT verified" in draft
+    assert "Runner delete NOT verified for `cqa-rev-a`" in draft
+    assert "cqa-rev-b" not in draft
+    assert "attestation: attested" in draft
+
+
+def test_a_fatal_error_in_one_lens_stops_the_lenses_that_have_not_started(tmp_path):
+    def broken(request):
+        raise RuntimeError("an unexpected bug in the lens")
+
+    sprites = LocalSprites()
+    with pytest.raises(RuntimeError, match="unexpected bug"):
+        _lenses(tmp_path, [LENS, OTHER], ScriptedLensModel([broken]), sprites=sprites)
+    created = [call[1] for call in sprites.calls if call[0] == "create"]
+    deleted = [call[1] for call in sprites.calls if call[0] == "delete"]
+    assert len(created) == 1
+    assert set(created) <= set(deleted)
+
+
+def test_a_sibling_lens_failure_still_deletes_every_runner(tmp_path):
+    started = threading.Event()
+
+    def broken(request):
+        assert started.wait(5)
+        raise RuntimeError("an unexpected bug in the lens")
+
+    def first_turn(request):
+        started.set()
+        return READ_ALL
+
+    models = [
+        ScriptedLensModel([broken]),
+        ScriptedLensModel([first_turn, _acknowledge]),
+    ]
+    sprites = LocalSprites()
+    with pytest.raises(RuntimeError, match="unexpected bug"):
+        _lenses(tmp_path, [LENS, OTHER], models[0], pool=2, models=models,
+                sprites=sprites)  # fmt: skip
+    created = [call[1] for call in sprites.calls if call[0] == "create"]
+    deleted = [call[1] for call in sprites.calls if call[0] == "delete"]
+    assert len(set(created)) == 2
+    assert set(created) <= set(deleted)
+
+
+def test_the_continuation_rounds_stop_at_max_continuations(tmp_path, monkeypatch):
+    monkeypatch.setattr("atlas_reviewer.coordinator.MAX_CONTINUATIONS", 0)
+    model = ScriptedLensModel(
+        [
+            tools(("diff_file", {"path": "calc.py"})),
+            final(),
+            tools(("diff_file", {"path": "config/keys.py"})),
+            final(),
+        ]
+    )
+    result, _ = _lenses(tmp_path, [LENS], model)
+    assert [lens.lens for lens in result.lenses] == [LENS]
+    assert not result.coverage_complete
+
+
+def test_the_draft_names_the_picker_fallback_and_the_names_it_did_not_run():
+    review = replace(
+        synthesize([scoped(LENS, ["a.py"])]),
+        selection_note="Lens selection: the lens picker gave no usable lens list",
+        not_picked=(("made-up-lens", "no body.md in the bundle"),),
+    )
+    draft = render_draft(review, Redactor())
+    assert "## Lens selection" in draft
+    assert "gave no usable lens list" in draft
+    assert '- NOT RUN: `"made-up-lens"` (no body.md in the bundle)' in draft
