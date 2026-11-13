@@ -1161,6 +1161,18 @@ slug such as `deepinfra` is refused and the error names the exact tags.
 per provider. A zero required rate and a non-finite per-million price
 are refused. No live call was made.
 
+## 2026-11-12 — each agentic round reviews the whole pull request
+
+The agentic first turn can carry the PR conversation
+(`conversation.review_context`) and prior atlas rounds
+(`rounds.RoundLog`, keyed by repository and pull request, not by head
+SHA). No shipped caller wires the log yet: `review_lens` accepts
+`round_log`, and the tests pass it. A superseded head stays in the log, labelled as not this
+review's scope. The changed-file list is still every file in the
+current diff. A round that does not fit, or a log line that does not
+parse, is an omission, and that omission cannot approve. D52. The
+plan is [`plans/2026-11-12-full-pr-context-rounds.md`](plans/2026-11-12-full-pr-context-rounds.md).
+
 ## 2026-11-13 — round 2 on the configurable model pin
 
 D51's cost sentence now says each review adds one GET of the ZDR list
@@ -1175,3 +1187,33 @@ That is what `load_terms` does. The module docstring and the agentic
 README said it was fetched on every completion or turn, which was true
 before this cache. D41's sentence keeps the original design and notes
 the amendment. No live call was made.
+
+## 2026-11-13 — round 2 on whole-PR review rounds
+
+The round log keeps another pull request's records out of this review,
+compares the repository key case-insensitively, and counts the records
+it sets aside without treating them as omissions. A file that cannot
+be read is an omission. Mode 0600 is applied on every write. A record
+of 8,192 characters is kept and 8,193 is not, and the newest record is
+the one that stays when the budget holds one. Prior finding lines are
+quoted. The first turn still lists every changed file. A continuation
+may later list a subset. No live call was made. D52.
+
+## 2026-11-13 — a later round can approve after the prior budget fills
+
+A superseded round that does not fit, and a line that names another
+pull request or no pull request, no longer block approval. A line that
+names this pull request, including a future record version, still does.
+A finding is quoted up to the 8,192-character record cap. The 16,384
+default is pinned. A log write that fails after the model call returns
+the review, and the draft and the status line name the cause. A
+superseded record that does not fit is skipped instead of stopping
+the pack. No live call was made. D52.
+
+## 2026-11-13 — round 5 on whole-PR review rounds
+
+An unreadable round-log file is its own omission. A superseded record
+that does not fit no longer hides a current-head record written
+earlier. A truncated superseded record does not block a new head. The
+round-log arguments stay on the nested trace path. No live call was
+made. D52.

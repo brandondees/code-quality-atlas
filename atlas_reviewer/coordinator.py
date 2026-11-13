@@ -56,7 +56,7 @@ from atlas_reviewer.bridge import Bridge, BridgeSecret, run_bridge
 from atlas_reviewer.bridge_staging import BRIDGE_ROOT, SourceTrees
 from atlas_reviewer.committed_secrets import scan_diff
 from atlas_reviewer.diffs import by_risk, risk_tier, split_files
-from atlas_reviewer.domain import PrEvent, RunnerReport, RunnerStatus
+from atlas_reviewer.domain import Omission, PrEvent, RunnerReport, RunnerStatus
 from atlas_reviewer.keepalive import SOCKET_PATH, lens_hold
 from atlas_reviewer.lens_contract import Finding, Severity
 from atlas_reviewer.lens_loop import (
@@ -76,6 +76,15 @@ from atlas_reviewer.ports import ByokRefusedError, Clock, RunnerLedger, SpritesA
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
 from atlas_reviewer.quotes import read_sources
 from atlas_reviewer.redact import Redactor
+from atlas_reviewer.rounds import (
+    PRIOR_ROUND_CHARS,
+    SOURCE,
+    RoundLog,
+    RoundRecord,
+    fit_record,
+    prior_blocks,
+    records_for,
+)
 from atlas_reviewer.runner import event_runner_name
 from atlas_reviewer.telemetry import Telemetry
 from atlas_reviewer.tool_model import OpenRouterLensModel
@@ -151,7 +160,10 @@ class AgenticReview:
     committed_usd: str = "0"
     model_calls: int = 0
     flagged: tuple[str, ...] = field(default=(), repr=False)
+    context_omissions: tuple[Omission, ...] = ()
+    other_pull_requests: int = 0
     trace_id: str = ""
+    round_log_note: str = ""
 
     @property
     def coverage_complete(self) -> bool:
@@ -164,7 +176,14 @@ class AgenticReview:
         Unread paths block approval even when a lens's state was recorded
         clean, so a missing cause cannot approve a partial read. An outcome
         with no changed-file count predates the per-file gate and shows no
-        coverage, so it blocks approval too."""
+        coverage, so it blocks approval too. Context that was left out of
+        the first turn, or a prior-round record for this pull request
+        and this head that did not fit, is the same kind of gap: the
+        review cannot approve on a partial picture of this head. A
+        superseded round, and a line that names another pull request
+        or no pull request, are not that gap."""
+        if self.context_omissions:
+            return False
         if any(
             r.outcome is not None
             and (r.outcome.unread or r.outcome.changed_files is None)
@@ -257,6 +276,8 @@ def synthesize(
     runner: RunnerReport | None = None,
     spend: Spend | None = None,
     flagged: Sequence[str] = (),
+    context_omissions: Sequence[Omission] = (),
+    other_pull_requests: int = 0,
 ) -> AgenticReview:
     findings = rank(mint(lenses))
     return AgenticReview(
@@ -268,6 +289,8 @@ def synthesize(
         "0" if spend is None else str(spend.committed_usd),
         0 if spend is None else spend.calls,
         tuple(dict.fromkeys(flagged)),
+        tuple(context_omissions),
+        other_pull_requests,
     )
 
 
@@ -316,6 +339,9 @@ def review_lens(
     redactor: Redactor,
     clock: Clock,
     context: Sequence[UntrustedBlock] = (),
+    context_omissions: Sequence[Omission] = (),
+    round_log: RoundLog | None = None,
+    prior_chars: int = PRIOR_ROUND_CHARS,
     telemetry: Telemetry | None = None,
     nonce: Callable[[], str] = lambda: secrets.token_hex(NONCE_BYTES),
     bridge_root: str = BRIDGE_ROOT,
@@ -342,10 +368,29 @@ def review_lens(
         acquire_shared()
     try:
         return _open_review(
-            event, lens, diff, trees, library, model, resolved, ledger, sprites,
-            runner_ledger, redactor, clock, context, telemetry, nonce, bridge_root,
-            contract, task_socket, trace,
-        )  # fmt: skip
+            event,
+            lens,
+            diff,
+            trees,
+            library=library,
+            model=model,
+            resolved=resolved,
+            ledger=ledger,
+            sprites=sprites,
+            runner_ledger=runner_ledger,
+            redactor=redactor,
+            clock=clock,
+            context=context,
+            context_omissions=context_omissions,
+            round_log=round_log,
+            prior_chars=prior_chars,
+            telemetry=telemetry,
+            nonce=nonce,
+            bridge_root=bridge_root,
+            contract=contract,
+            task_socket=task_socket,
+            trace=trace,
+        )
     finally:
         if trace is None:
             release_shared()
@@ -356,6 +401,7 @@ def _open_review(
     lens: str,
     diff: str,
     trees: SourceTrees,
+    *,
     library: LensLibrary,
     model: LensModel,
     resolved: Limits,
@@ -365,6 +411,9 @@ def _open_review(
     redactor: Redactor,
     clock: Clock,
     context: Sequence[UntrustedBlock],
+    context_omissions: Sequence[Omission],
+    round_log: RoundLog | None,
+    prior_chars: int,
     telemetry: Telemetry | None,
     nonce: Callable[[], str],
     bridge_root: str,
@@ -389,20 +438,23 @@ def _open_review(
                     lens,
                     diff,
                     trees,
-                    library,
-                    model,
-                    resolved,
-                    ledger,
-                    sprites,
-                    runner_ledger,
-                    redactor,
-                    clock,
-                    context,
-                    telemetry,
-                    nonce,
-                    bridge_root,
-                    contract,
-                    task_socket,
+                    library=library,
+                    model=model,
+                    resolved=resolved,
+                    ledger=ledger,
+                    sprites=sprites,
+                    runner_ledger=runner_ledger,
+                    redactor=redactor,
+                    clock=clock,
+                    context=context,
+                    context_omissions=context_omissions,
+                    round_log=round_log,
+                    prior_chars=prior_chars,
+                    telemetry=telemetry,
+                    nonce=nonce,
+                    bridge_root=bridge_root,
+                    contract=contract,
+                    task_socket=task_socket,
                 ),
             )
     with active.lens(lens) as lens_span:
@@ -416,20 +468,23 @@ def _open_review(
                 lens,
                 diff,
                 trees,
-                library,
-                model,
-                resolved,
-                ledger,
-                sprites,
-                runner_ledger,
-                redactor,
-                clock,
-                context,
-                telemetry,
-                nonce,
-                bridge_root,
-                contract,
-                task_socket,
+                library=library,
+                model=model,
+                resolved=resolved,
+                ledger=ledger,
+                sprites=sprites,
+                runner_ledger=runner_ledger,
+                redactor=redactor,
+                clock=clock,
+                context=context,
+                context_omissions=context_omissions,
+                round_log=round_log,
+                prior_chars=prior_chars,
+                telemetry=telemetry,
+                nonce=nonce,
+                bridge_root=bridge_root,
+                contract=contract,
+                task_socket=task_socket,
             ),
         )
 
@@ -449,6 +504,7 @@ def _one_lens(
     lens: str,
     diff: str,
     trees: SourceTrees,
+    *,
     library: LensLibrary,
     model: LensModel,
     resolved: Limits,
@@ -458,6 +514,9 @@ def _one_lens(
     redactor: Redactor,
     clock: Clock,
     context: Sequence[UntrustedBlock],
+    context_omissions: Sequence[Omission],
+    round_log: RoundLog | None,
+    prior_chars: int,
     telemetry: Telemetry | None,
     nonce: Callable[[], str],
     bridge_root: str,
@@ -468,9 +527,10 @@ def _one_lens(
         event, lens, diff, trees, library=library, model=model,
         resolved=resolved, ledger=ledger, sprites=sprites,
         runner_ledger=runner_ledger, redactor=redactor, clock=clock,
-        context=context, telemetry=telemetry, nonce=nonce,
-        bridge_root=bridge_root, contract=contract, task_socket=task_socket,
-        trace=active,
+        context=context, context_omissions=context_omissions,
+        round_log=round_log, prior_chars=prior_chars, telemetry=telemetry,
+        nonce=nonce, bridge_root=bridge_root, contract=contract,
+        task_socket=task_socket, trace=active,
     )  # fmt: skip
     _annotate(lens_span, review_span, review)
     return review
@@ -491,6 +551,9 @@ def _review_lens(
     redactor: Redactor,
     clock: Clock,
     context: Sequence[UntrustedBlock],
+    context_omissions: Sequence[Omission],
+    round_log: RoundLog | None,
+    prior_chars: int,
     telemetry: Telemetry | None,
     nonce: Callable[[], str],
     bridge_root: str,
@@ -499,13 +562,24 @@ def _review_lens(
     trace: ReviewTrace,
 ) -> AgenticReview:
     contract = finding_contract() if contract is None else contract
+    blocks, omissions, other_pull_requests = _review_context(
+        event, context, context_omissions, round_log, prior_chars, redactor
+    )
     body = library.body(lens)
     if body is None:
         missing = LensResult(lens, 1, None, None, reason="no lens body in the bundle")
-        return synthesize([missing])
+        return synthesize(
+            [missing],
+            context_omissions=omissions,
+            other_pull_requests=other_pull_requests,
+        )
     key = LensKey(event.repo, event.pr_number, event.head_sha, lens, body_digest(body))
     if isinstance(next_step(ledger.attempts(key), resolved.retries), Settled):
-        return synthesize([_result(key, ledger.attempts(key), resolved, "")])
+        return synthesize(
+            [_result(key, ledger.attempts(key), resolved, "")],
+            context_omissions=omissions,
+            other_pull_requests=other_pull_requests,
+        )
 
     changed = frozenset(f.path for f in split_files(diff))
     diff_secrets = scan_diff(diff)
@@ -528,7 +602,9 @@ def _review_lens(
         body,
         key.body_sha256,
         contract,
-        first_turn(event, diff, context, fence_nonce),
+        # No scope. The first turn lists every file in `diff`. A
+        # continuation (#646) may pass `scope`. Prior findings are not one.
+        first_turn(event, diff, blocks, fence_nonce),
         changed,
         read_sources(trees.head, diff, changed),
         fence_nonce,
@@ -553,13 +629,27 @@ def _review_lens(
         root=bridge_root,
     )  # fmt: skip
     result = _result(key, ledger.attempts(key), resolved, scrub(report.note))
-    return synthesize(
+    review = synthesize(
         [result],
         session.secrets,
         report,
         spend,
         (*diff_secrets.values, *session.flagged()),
+        context_omissions=omissions,
+        other_pull_requests=other_pull_requests,
     )
+    if round_log is not None:
+        try:
+            round_log.append(_round_record(event, lens, review, scrub))
+        except OSError as exc:
+            review = replace(
+                review,
+                round_log_note=(
+                    "the round log was not written: "
+                    f"{_log_write_cause(exc)}. Detail: {exc}"
+                ),
+            )
+    return review
 
 
 def _annotate(lens_span: Any, review_span: Any, review: AgenticReview) -> None:
@@ -647,23 +737,98 @@ def _result(
     )  # fmt: skip
 
 
+def _review_context(
+    event: PrEvent,
+    context: Sequence[UntrustedBlock],
+    context_omissions: Sequence[Omission],
+    round_log: RoundLog | None,
+    prior_chars: int,
+    redactor: Redactor,
+) -> tuple[tuple[UntrustedBlock, ...], tuple[Omission, ...], int]:
+    """Caller context, then prior rounds for this pull request.
+
+    The third value is how many records belonged to another pull
+    request. The changed-file list is not built here. `first_turn`
+    always appends every file in the current diff after these blocks."""
+    blocks = list(context)
+    omissions = list(context_omissions)
+    dropped_other = 0
+    if round_log is not None:
+        loaded = round_log.read()
+        # Other pull requests in the same file are counted and are not
+        # omissions. The repository key is case-insensitive. A line that
+        # names no pull request is not charged here.
+        mine, dropped_other = records_for(loaded.records, event.repo, event.pr_number)
+        if loaded.file_unreadable:
+            unreadable = 0
+            omissions.append(
+                Omission(
+                    SOURCE,
+                    "round log file",
+                    "the round log file could not be read",
+                )
+            )
+        else:
+            key = event.repo.casefold()
+            unreadable = sum(
+                1
+                for repo, number in loaded.unreadable
+                if repo == key and number == event.pr_number
+            )
+        prior, prior_omissions = prior_blocks(
+            mine,
+            event.head_sha,
+            prior_chars,
+            unreadable=unreadable,
+            scrub=lambda text: redactor(text).text,
+        )
+        blocks = [*prior, *blocks]
+        omissions.extend(prior_omissions)
+    return tuple(blocks), tuple(omissions), dropped_other
+
+
+def _round_record(
+    event: PrEvent, lens: str, review: AgenticReview, scrub: Callable[[str], str]
+) -> RoundRecord:
+    lines = tuple(
+        scrub(
+            f"{item.id} {item.finding.severity.value} "
+            f"{item.finding.location} {item.finding.finding}"
+        )
+        for item in review.verified
+    )
+    return fit_record(
+        RoundRecord(
+            event.repo,
+            event.pr_number,
+            event.head_sha,
+            lens,
+            review.event.value,
+            lines,
+            bool(review.context_omissions),
+        )
+    )
+
+
 def first_turn(
     event: PrEvent, diff: str, context: Sequence[UntrustedBlock], nonce: str
 ) -> str:
-    """The operator's subject, then fenced: any caller context, the diff
-    stat and the changed files in risk order. No diff text: the lens reads
-    it through the tools."""
-    files = by_risk(split_files(diff))
+    """The operator's subject, then fenced: prior reviews and any caller
+    context, then the diff stat and every changed file in risk order. No
+    diff text: the lens reads the whole current diff through the tools.
+    Prior findings do not remove a file from that list. A continuation's
+    file subset is not a parameter of this turn."""
+    listed = by_risk(split_files(diff))
     listing = "\n".join(
         f"[{f.tier.label}] {f.path} (+{added} -{removed})"
-        for f in files
+        for f in listed
         for added, removed in (_counts(f.text),)
     )
     blocks = (
         *context,
         UntrustedBlock(
             "changed-files",
-            RepoText(f"{len(files)} changed file(s), highest risk first:\n{listing}"),
+            RepoText(f"{len(listed)} changed file(s), highest risk first:\n{listing}"),
         ),
     )
     subject = f"{event.repo}#{event.pr_number} at {event.head_sha}"
@@ -706,11 +871,39 @@ def status_line(review: AgenticReview) -> str:
         "unverified_findings": len(review.unverified),
         "changed_files": _changed_file_count(review),
         "unreviewed_files": len(_unread_paths(review)),
+        "context_omissions": len(review.context_omissions),
+        "other_pull_requests": review.other_pull_requests,
+        "round_log_note": _status_log_note(review.round_log_note),
         "limit_stop": _limit_stop(review),
     }
     if review.trace_id:
         fields["trace_id"] = review.trace_id
     return f"{STATUS_PREFIX}{json.dumps(fields, sort_keys=True)} -->"
+
+
+def _log_write_cause(exc: OSError) -> str:
+    """The error class and its strerror, with no filename.
+
+    `str(exc)` includes the path. The status line must not."""
+    name = type(exc).__name__
+    detail = exc.strerror or ""
+    if not detail:
+        filename = "" if exc.filename is None else str(exc.filename)
+        parts = [
+            str(arg)
+            for arg in exc.args
+            if not isinstance(arg, int) and str(arg) != filename
+        ]
+        detail = "; ".join(parts)
+    return f"{name}: {detail}" if detail else name
+
+
+def _status_log_note(note: str) -> str:
+    """The status-line form of a log-write note: the cause, not the path."""
+    marker = ". Detail: "
+    if marker in note:
+        return note.split(marker, 1)[0]
+    return note
 
 
 def _limit_stop(review: AgenticReview) -> dict[str, str] | None:
@@ -745,6 +938,14 @@ def render_draft(review: AgenticReview, redactor: Redactor) -> str:
             f"{quote_untrusted(f.problem, QUOTED_CHARS, scrub=scrub)}"
             for f in review.unverified
         ]
+    if review.context_omissions:
+        lines += ["", "## Context omissions", ""]
+        lines += [
+            f"- {quote_untrusted(item.source, scrub=scrub)} "
+            f"({quote_untrusted(item.limit, scrub=scrub)}): "
+            f"{quote_untrusted(item.detail, scrub=scrub)}"
+            for item in review.context_omissions
+        ]
     if review.secrets:
         lines += ["", "## Possible committed secrets (controller findings)", ""]
         lines += [_secret_line(s, scrub) for s in review.secrets]
@@ -754,6 +955,11 @@ def render_draft(review: AgenticReview, redactor: Redactor) -> str:
         "",
         f"Model calls: {review.model_calls}; committed: ${review.committed_usd}.",
     ]
+    if review.round_log_note:
+        lines.append(
+            "Round log, quoted: "
+            + quote_untrusted(review.round_log_note, QUOTED_CHARS, scrub=scrub)
+        )
     if review.runner is not None:
         lines.append(
             f"Runner: {review.runner.status.value}; cleanup {review.runner.cleanup.value}."
@@ -803,6 +1009,8 @@ def _coverage_gap_name(review: AgenticReview) -> str:
     """Why a review of clean lenses is still incomplete, or "" when no
     lens was selected. A clean outcome can still lack coverage: unread
     paths, or no changed-file count from before the per-file gate."""
+    if review.context_omissions:
+        return "partial context"
     if any(r.outcome is not None and r.outcome.unread for r in review.lenses):
         return "unread files"
     if any(

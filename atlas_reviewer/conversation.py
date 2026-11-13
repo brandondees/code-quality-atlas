@@ -38,6 +38,7 @@ from atlas_reviewer.evidence import (
 from atlas_reviewer.gather import Collected
 from atlas_reviewer.notes import quote_untrusted
 from atlas_reviewer.ports import BoundaryError, GitHubReader, Json, Listing
+from atlas_reviewer.prompt import UntrustedBlock
 from atlas_reviewer.redact import RedactedText, Redactor
 
 CONVERSATION_CHARS = 65_536
@@ -158,6 +159,18 @@ def _parsed(
         except BoundaryError as exc:
             out.omit(source, "malformed entry", f"entry {i} not shown: {exc}")
     return remarks
+
+
+def review_context(
+    conversation: Conversation,
+) -> tuple[UntrustedBlock, tuple[Omission, ...]]:
+    """The pull-request block and every omission, for an agentic first turn.
+
+    The description, comments and review threads are the conversation
+    text. An omission is returned with it. The coordinator does not
+    approve while one remains, and nothing here drops an omission.
+    """
+    return UntrustedBlock("pull-request", conversation.text), conversation.omissions
 
 
 def build_conversation(

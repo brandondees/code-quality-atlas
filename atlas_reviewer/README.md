@@ -965,11 +965,25 @@ D41 records the 2026-11-12 probe that did.
 - **The prompt.** The system prompt is the controller's instructions, then
   the nonce fence rule, then the whole lens `body.md` between markers that
   carry its SHA-256, then `synthesis.md`'s whole *Finding contract*
-  section. Nothing is cut. The
-  first user turn is the operator's subject, then any context the caller
-  passes and the risk-ordered changed-file list, each fenced with the
-  review's nonce. It carries no diff text: the lens reads that through the
-  tools, and every tool result comes back fenced.
+  section. Nothing is cut. The first user turn is the operator's
+  subject, then prior atlas rounds (`rounds.RoundLog`) and any context
+  the caller passes, then the risk-ordered list of every file in the
+  current diff, each fenced with the review's nonce. Prior finding
+  lines are quoted in full, up to the 8,192-character record cap,
+  not the 200-character quote default. They do not remove a file. A
+  continuation may later list a subset. This first turn does not, and
+  it has no parameter for one. The log is append-only JSONL, mode 0600
+  on every write, keyed by repository and pull request number. The
+  repository key is case-insensitive. An older head is labelled
+  superseded and is not this review's scope. A record over 8,192
+  characters stores no finding text. Prior blocks stay whole, newest
+  first, inside 16,384 characters. Leaving out a superseded round does
+  not block approval. Leaving out a round at the head under review
+  does. A line that names another pull request, or no pull request,
+  does not block this one. The path is chosen when a caller is wired. No
+  shipped caller builds one yet. It carries no diff text: the lens
+  reads that through the tools, and every tool result comes back
+  fenced.
 - **One attempt** (`lens_loop.run_attempt`). Delivery is checked before the
   first model call. The attempt ends at the final reply, or when one of
   these cuts it short: the turn cap, the call cap, the dollar reservation
@@ -1056,10 +1070,15 @@ D41 records the 2026-11-12 probe that did.
   built; there is no public fork API (Fly support, 2026-11-06).
 - **The draft** (`coordinator.render_draft`).
   - **Status line.** The first line is a status line: `"mode": "agentic"`,
-    `coverage_complete`, `changed_files`, `unreviewed_files`, the lens
-    counts by state, and `limit_stop`. The two file fields are counts.
-    `limit_stop` is the first limit that stopped a lens, or null. Paths
-    stay out of the line.
+    `coverage_complete`, `changed_files`, `unreviewed_files`,
+    `context_omissions`, `other_pull_requests`, `round_log_note`,
+    `trace_id` when a span was recorded, the lens counts by state, and
+    `limit_stop`. The two file fields are counts. `context_omissions` is
+    a count. `other_pull_requests` is how many records in the log belonged
+    to another pull request. `round_log_note` is empty, or the error class
+    and its strerror when the log could not be written. `limit_stop` is
+    the first limit that stopped a lens, or null. Paths stay out of the
+    line.
   - **Coverage.** Coverage is complete only if every selected lens settled
     clean, every changed file's diff was read, the outcome recorded a
     changed-file count, and, when this review ran a runner, that runner
@@ -1108,6 +1127,7 @@ D41 records the 2026-11-12 probe that did.
 | `agentic_config.py` | the one reader for those limits: a flag, else `ATLAS_*`, else the default | no |
 | `limit_stop.py` | the text and ledger fields for a limit that stopped a lens | no |
 | `coordinator.py` | one lens under the ledger in one runner session (`review_lens`), minted IDs, ranking, the mechanical verdict, the status line and draft; holds the Sprite for the lens (`keepalive.lens_hold`) | via ports, the ledger |
+| `rounds.py` | the prior-round log (`RoundLog`): append-only JSONL, mode 0600, one record per finished review, fenced back as untrusted data. No shipped caller builds the path yet | writes the log file |
 | `tool_model.py` | the live tool-calling adapter (`OpenRouterLensModel`): one pinned Chat Completions request per `LensModel` turn, `cache_control` and `reasoning` only when the selected endpoints list them, strict tool-call arguments, cost from `_actual_cost` (BYOK upstream included; catalog rates when the cost is missing but the token counts are usable, with cache read and write counts at the catalog's cache rates when the response reports them; a reasoning rate with no reasoning-token count is unpriced only when the cost is also missing). Not on the CLI. Tested with recorded HTTP only | via the OpenRouter client |
 | `keepalive.py` | the Sprite Tasks API hold for one lens: create, refresh every 60 seconds with a 5-minute expiry, delete on exit. Not on the CLI. Tested with `LocalSprites` and a fake socket | via the runner exec |
 | `ports.py` | the adapter interfaces (`GitHubReader`, `SpritesApi`, `ModelProvider`, `ReviewHarness`, `RunnerLedger`, `Clock`); the agentic `LensModel` port is in `lens_loop.py` | no |
