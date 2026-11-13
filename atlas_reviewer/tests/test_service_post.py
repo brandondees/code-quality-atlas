@@ -42,7 +42,7 @@ from atlas_reviewer.service_post import (
     render_comment,
 )
 from atlas_reviewer.service_queue import Board, JobState
-from atlas_reviewer.service_run import ReviewReport, ReviewRun, run_dir
+from atlas_reviewer.service_run import ReviewReport, ReviewRun, run_dir, summarize_draft
 from atlas_reviewer.telemetry import Telemetry
 
 SECRET = "webhook-secret-value"
@@ -720,6 +720,130 @@ def test_limit_timeout_stays_on_the_calling_thread():
     thread.join()
     assert tokens.token() == "ghs_minted_value"
     assert seen["timeout"] == 7.5
+    tokens._cached = None
+    assert tokens.token() == "ghs_minted_value"
+    assert seen["timeout"] == 30.0
+
+
+def test_one_workers_deadline_does_not_clear_anothers(tmp_path):
+    poster, _github = _poster(tmp_path)
+    blocked = threading.Event()
+    release = threading.Event()
+    gate = threading.Lock()
+    seen: dict[str, float | None] = {}
+
+    class Transport:
+        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
+            if method == "GET":
+                return HttpResponse(200, {}, b"[]")
+            with gate:
+                first = "first" not in seen
+                if first:
+                    seen["first"] = 1.0
+            if first:
+                blocked.set()
+                assert release.wait(2)
+                seen["remaining"] = poster._remaining()
+            review_id = 1 if first else 2
+            return HttpResponse(201, {}, json.dumps({"id": review_id}).encode())
+
+    poster._transport = Transport()
+    other = PrEvent(REPO, 8, "e" * 40)
+    first = threading.Thread(target=lambda: poster.post(EVENT, REPORT))
+    second = threading.Thread(target=lambda: poster.post(other, REPORT))
+    first.start()
+    assert blocked.wait(2)
+    second.start()
+    second.join(2)
+    release.set()
+    first.join(2)
+    assert seen["remaining"] is not None
+    assert seen["remaining"] > 0
+
+
+def test_a_hostile_narrative_is_not_posted():
+    secret = "sprt_secret_shaped_value"
+    mention = "@everyone"
+    image = "https://evil.example/tracker.png"
+    draft = f"""\
+## Review lenses
+
+| Lens | Status | Characters | Chosen as | Why not run |
+| --- | --- | --- | --- | --- |
+| tracing-correctness-and-invariants | run whole | 10 | critical |  |
+
+## Review narrative
+
+{secret} {mention} ![]({image})
+"""
+    body = render_comment(summarize_draft(draft), post_key(EVENT), lambda text: text)
+    payload = comment_payload(SHA, body)
+    assert secret not in body
+    assert mention not in body
+    assert image not in body
+    assert payload["event"] == "COMMENT"
+
+
+def test_claim_post_refuses_a_stopped_worker(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(EVENT)
+    job = board.claim()
+    assert job is not None
+    board.finish(job, JobState.POST_PENDING)
+    job.retry_at = 0
+    stop = threading.Event()
+    stop.set()
+    assert board.claim_post(time.time(), stop=stop) is None
+    assert board.states() == ((SHA, JobState.POST_PENDING),)
+
+
+def test_the_loop_does_not_retry_a_post_after_stop(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    worker = Worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        Telemetry(SystemClock()),
+        lambda event, report: None,
+        state_root=tmp_path,
+    )
+    calls: list[str] = []
+
+    def run_one() -> bool:
+        worker._stop.set()
+        return False
+
+    def retry_post() -> None:
+        calls.append("retry")
+
+    worker.run_one = run_one  # type: ignore[method-assign]
+    worker._retry_post = retry_post  # type: ignore[method-assign]
+    worker._loop()
+    assert calls == []
+
+
+def test_retry_post_does_not_claim_after_stop(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(EVENT)
+    job = board.claim()
+    assert job is not None
+    board.finish(job, JobState.POST_PENDING)
+    job.retry_at = 0
+    claimed: list[str] = []
+
+    def claim_post(*_args, **_kwargs):
+        claimed.append("claim")
+
+    board.claim_post = claim_post  # type: ignore[method-assign]
+    worker = Worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        Telemetry(SystemClock()),
+        lambda event, report: None,
+        state_root=tmp_path,
+    )
+    worker._stop.set()
+    worker._retry_post()
+    assert claimed == []
 
 
 def test_a_rejected_post_fails_without_a_retry(tmp_path):

@@ -114,10 +114,14 @@ class AppInstallationTokens:
 
     def token(self) -> str:
         with self._lock:
-            if self._cached is None or self._stale(self._cached):
-                self._cached = self._mint()
-                self._minted.append(self._cached.token)
-            return self._cached.token
+            try:
+                if self._cached is None or self._stale(self._cached):
+                    self._cached = self._mint()
+                    self._minted.append(self._cached.token)
+                return self._cached.token
+            finally:
+                if hasattr(self._timeout_override, "seconds"):
+                    del self._timeout_override.seconds
 
     def secrets(self) -> tuple[str, ...]:
         with self._lock:

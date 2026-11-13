@@ -205,7 +205,9 @@ class ReviewPoster:
         self._now = now or time.monotonic
         self._secrets = secrets or (lambda: ())
         self._bot_login = bot_login
-        self._deadline: float | None = None
+        # One poster is shared by every worker. The attempt deadline is
+        # per thread so one worker finishing cannot clear another's.
+        self._attempt = threading.local()
 
     def credential_secrets(self) -> tuple[str, ...]:
         """The App key and every token this poster has minted, for the
@@ -216,7 +218,7 @@ class ReviewPoster:
         key = post_key(event)
         if self._ledger.seen(key) is not None:
             return
-        self._deadline = self._now() + _ATTEMPT_DEADLINE_S
+        self._attempt.deadline = self._now() + _ATTEMPT_DEADLINE_S
         try:
             existing = self._find(event, marker_for(key))
             if existing is not None:
@@ -231,7 +233,7 @@ class ReviewPoster:
             review_id = self._create(event, comment_payload(event.head_sha, body))
             self._ledger.record(key, review_id)
         finally:
-            self._deadline = None
+            self._attempt.deadline = None
 
     def _create(self, event: PrEvent, payload: Mapping[str, str]) -> int:
         if payload.get("event") != "COMMENT":
@@ -281,9 +283,10 @@ class ReviewPoster:
         )
 
     def _remaining(self) -> float | None:
-        if self._deadline is None:
+        deadline = getattr(self._attempt, "deadline", None)
+        if deadline is None:
             return None
-        return self._deadline - self._now()
+        return deadline - self._now()
 
     def _request(self, method: str, url: str, body: bytes | None) -> HttpResponse:
         remaining = self._remaining()
