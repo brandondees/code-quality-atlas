@@ -28,6 +28,8 @@ from atlas_reviewer.lens_loop import (
     Spend,
     ToolResults,
     _DiffPages,
+    _Progress,
+    _time_up,
     finding_contract,
     lens_system,
     run_attempt,
@@ -83,9 +85,11 @@ def attempt(tmp_path, script, *, limits=LIMITS, clock=None, spend=None, deadline
     out = {}
 
     def body(bridge):
+        started = clock.monotonic()
         out["outcome"] = run_attempt(
             the_job or job(), bridge, model, spend, clock,
-            review_deadline=clock.monotonic() + (deadline or 600), **kw,
+            review_deadline=started + (deadline or 600),
+            review_started=started, **kw,
         )  # fmt: skip
         return "done"
 
@@ -122,6 +126,7 @@ def test_a_byok_refusal_leaves_the_loop_and_keeps_the_reservation():
         run_attempt(
             job(), object(), Model(), spend, clock,
             review_deadline=clock.monotonic() + 600,
+            review_started=clock.monotonic(),
         )  # fmt: skip
     assert spend.committed_usd == Decimal("0.01")
 
@@ -466,6 +471,27 @@ def endless():
     return [READ_ALL] * 50
 
 
+@pytest.mark.parametrize(
+    "cause",
+    [
+        Cause.INPUT_CAP,
+        Cause.OUTPUT_CAP,
+        Cause.REASONING_CAP,
+        Cause.CONTEXT,
+        Cause.TURN_CAP,
+        Cause.CALL_CAP,
+        Cause.BUDGET,
+        Cause.LENS_CLOCK,
+        Cause.REVIEW_CLOCK,
+    ],
+)
+def test_a_limit_cause_alone_is_partial_and_not_retried(cause):
+    outcome = AttemptOutcome(Attestation.UNACKNOWLEDGED, frozenset({cause}))
+    assert Cause.FILES_UNREAD not in outcome.causes
+    assert outcome.state is LensState.PARTIAL
+    assert outcome.retryable is False
+
+
 def test_a_cut_short_attempt_keeps_the_files_it_never_finished(tmp_path):
     outcome, _, _ = attempt(
         tmp_path, [READ_DIFF] * 5, limits=replace(LIMITS, max_turns=2)
@@ -480,7 +506,13 @@ def test_the_turn_cap_ends_the_lens_partial(tmp_path):
     )
     assert outcome.causes == {Cause.TURN_CAP}
     assert outcome.state is LensState.PARTIAL
+    assert outcome.retryable is False
     assert len(model.requests) == 2
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "max_turns"
+    assert outcome.limit_hit.observed == "2 used"
+    assert "configured 2" in outcome.detail
+    assert outcome.limit_hit.setting == "--max-turns or ATLAS_MAX_TURNS"
 
 
 def test_the_reviews_call_cap_ends_the_lens_before_another_call(tmp_path):
@@ -489,8 +521,15 @@ def test_the_reviews_call_cap_ends_the_lens_before_another_call(tmp_path):
     spend = Spend(replace(LIMITS, max_calls=3, max_turns=3).resolve(), calls=2)
     outcome, model, _ = attempt(tmp_path, endless(), spend=spend)
     assert outcome.causes == {Cause.CALL_CAP}
+    assert outcome.state is LensState.PARTIAL
+    assert outcome.retryable is False
     assert len(model.requests) == 1
     assert spend.calls == 3
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "max_calls"
+    assert outcome.limit_hit.observed == "next call 4"
+    assert "configured 3" in outcome.detail
+    assert outcome.limit_hit.setting == "--max-calls or ATLAS_MAX_CALLS"
 
 
 def test_the_dollar_reservation_holds_the_worst_case_before_each_call(tmp_path):
@@ -499,8 +538,13 @@ def test_the_dollar_reservation_holds_the_worst_case_before_each_call(tmp_path):
     model = ScriptedLensModel([pricey] * 10, worst_usd=Decimal("0.10"))
     outcome, model, spend = attempt(tmp_path, [], limits=limits, model=model)
     assert outcome.causes == {Cause.BUDGET}
+    assert outcome.state is LensState.PARTIAL
+    assert outcome.retryable is False
     assert len(model.requests) == 2
     assert spend.committed_usd == Decimal("0.16")
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "reservation_usd"
+    assert outcome.limit_hit.setting == "--reservation-usd or ATLAS_RESERVATION_USD"
 
 
 def test_a_zero_cost_is_a_cost_and_settles_at_zero(tmp_path):
@@ -542,7 +586,98 @@ def test_the_lens_wall_clock_ends_the_lens_partial(tmp_path):
     script = [advance(clock, 301, READ_ALL), final()]
     outcome, model, _ = attempt(tmp_path, script, clock=clock)
     assert outcome.causes == {Cause.LENS_CLOCK}
+    assert outcome.state is LensState.PARTIAL
+    assert outcome.retryable is False
     assert len(model.requests) == 1
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "lens_wall_s"
+    assert outcome.limit_hit.observed == "301.000s"
+    assert outcome.limit_hit.setting == "--lens-wall-seconds or ATLAS_LENS_WALL_S"
+
+
+def _run(tmp_path, clock, script, spend, *, review_deadline, review_started):
+    model = ScriptedLensModel(list(script))
+    out = {}
+
+    def body(bridge):
+        out["outcome"] = run_attempt(
+            job(), bridge, model, spend, clock,
+            review_deadline=review_deadline, review_started=review_started,
+        )  # fmt: skip
+        return "done"
+
+    report = run_bridge(
+        LocalSprites(),
+        MemoryLedger(),
+        trees(),
+        body,
+        redactor=Redactor(),
+        changed=CHANGED,
+        name="cqa-lens-test",
+        deadline_s=900,
+        clock=clock,
+        root=str(tmp_path / "bridge"),
+    )
+    assert report.status is RunnerStatus.COMPLETED, report.note
+    return out["outcome"]
+
+
+def test_the_lens_clock_counts_from_the_attempt_when_the_review_is_older(tmp_path):
+    """The review is already underway when the attempt starts. The lens
+    wall is what stops it, and the observed time is this attempt's own
+    seconds. A start reconstructed as the deadline minus the configured
+    wall is that number only when the review deadline did not clamp it."""
+    clock = FakeClock()
+    clock.advance(200)
+    outcome = _run(
+        tmp_path,
+        clock,
+        [advance(clock, 55, READ_ALL), final()],
+        Spend(replace(LIMITS, lens_wall_s=50).resolve()),
+        review_deadline=10_000,
+        review_started=0,
+    )
+    assert outcome.causes == {Cause.LENS_CLOCK}
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.observed == "55.000s"
+    assert outcome.limit_hit.configured == "50"
+
+
+def test_a_clamped_lens_deadline_counts_from_the_attempt():
+    """The lens deadline is the review deadline, not one lens wall after
+    the attempt started. At 460s, an attempt that started at 400s has run
+    60s. Rebuilding the start as that deadline minus the 300s lens wall
+    reports 310s."""
+    clock = FakeClock(460)
+    outcome = _time_up(
+        _Progress(), clock, LIMITS.resolve(),
+        10_000, 0, 450, 400,
+    )  # fmt: skip
+    assert outcome is not None
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "lens_wall_s"
+    assert outcome.limit_hit.observed == "60.000s"
+    assert outcome.limit_hit.configured == "300"
+
+
+def test_a_review_deadline_closer_than_the_lens_wall_is_the_review_clock(tmp_path):
+    """The review deadline clamps the lens deadline. The stop is the
+    review clock, counted from the review's start, not a lens elapsed
+    rebuilt as that deadline minus the lens wall."""
+    clock = FakeClock()
+    clock.advance(400)
+    outcome = _run(
+        tmp_path,
+        clock,
+        [advance(clock, 60, READ_ALL), final()],
+        Spend(LIMITS.resolve()),
+        review_deadline=450,
+        review_started=0,
+    )
+    assert Cause.REVIEW_CLOCK in outcome.causes
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "review_wall_s"
+    assert outcome.limit_hit.observed == "460.000s"
 
 
 def test_the_review_wall_clock_ends_the_lens_partial(tmp_path):
@@ -551,23 +686,35 @@ def test_the_review_wall_clock_ends_the_lens_partial(tmp_path):
     outcome, _, _ = attempt(tmp_path, script, clock=clock, deadline=60)
     assert outcome.causes == {Cause.REVIEW_CLOCK}
     assert outcome.state is LensState.PARTIAL
+    assert outcome.retryable is False
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "review_wall_s"
+    assert outcome.limit_hit.observed == "61.000s"
+    assert outcome.limit_hit.setting == "--review-wall-seconds or ATLAS_REVIEW_WALL_S"
 
 
 def test_a_runner_deadline_inside_a_tool_call_ends_the_lens_partial(tmp_path):
+    clock = FakeClock()
+
     class DeadBridge:
         def call(self, tool, args):
+            clock.advance(12.5)
             raise DeadlineExceededError(
                 "the review deadline passed during bridge diff_file"
             )
 
     model = ScriptedLensModel([READ_DIFF, final()])
     outcome = run_attempt(
-        job(), DeadBridge(), model, Spend(LIMITS.resolve()), FakeClock(),
-        review_deadline=600,
+        job(), DeadBridge(), model, Spend(LIMITS.resolve()), clock,
+        review_deadline=600, review_started=0,
     )  # fmt: skip
     assert outcome.causes == {Cause.REVIEW_CLOCK, Cause.FILES_UNREAD}
     assert set(outcome.unread) == set(CHANGED)
     assert "deadline passed" in outcome.detail
+    assert outcome.limit_hit is not None
+    assert outcome.limit_hit.limit == "review_wall_s"
+    assert outcome.limit_hit.observed == "12.500s"
+    assert outcome.limit_hit.configured == "600"
 
 
 def test_a_failed_model_call_fails_the_lens_and_is_not_retried(tmp_path):

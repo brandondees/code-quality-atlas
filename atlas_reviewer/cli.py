@@ -426,6 +426,10 @@ def _review_config(args: argparse.Namespace, mode: str) -> ReviewConfig:
 
 def _cmd_review(args: argparse.Namespace, run: _Run) -> int:
     env, out, err = run.env, run.out, run.err
+    # ATLAS_* limit variables are not read here, and this command does not
+    # accept the agentic limit flags. D25's one-shot ceilings stay, and a
+    # value such as ATLAS_MAX_CALLS=10 must not refuse this command. The
+    # lens entry point is what applies the variables.
     event_path = Path(args.event)
     event = load_event(event_path)
     _review_config(args, "check")

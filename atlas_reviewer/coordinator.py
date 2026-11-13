@@ -32,11 +32,12 @@ from __future__ import annotations
 
 import json
 import secrets
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import cast
 
+from atlas_reviewer.agentic_config import load_agentic_limits
 from atlas_reviewer.attestation import (
     Attempt,
     AttemptLedger,
@@ -70,12 +71,14 @@ from atlas_reviewer.lens_loop import (
 )
 from atlas_reviewer.lenses import LensLibrary
 from atlas_reviewer.notes import quote_untrusted
+from atlas_reviewer.openrouter import OpenRouterProvider
 from atlas_reviewer.ports import ByokRefusedError, Clock, RunnerLedger, SpritesApi
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
 from atlas_reviewer.quotes import read_sources
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import event_runner_name
 from atlas_reviewer.telemetry import Telemetry
+from atlas_reviewer.tool_model import OpenRouterLensModel
 from atlas_reviewer.verdict import STATUS_PREFIX, ReviewEvent
 
 QUOTED_CHARS = 600
@@ -273,6 +276,22 @@ class _Session:
         return tuple(v for b in self.bridges for v in b.flagged())
 
 
+def limits_for_lens(env: Mapping[str, str], **flags: str | None) -> AgenticLimits:
+    """The limits one lens run uses. A flag wins over its `ATLAS_*` variable.
+
+    This is the reader `review_lens` is given. The one-shot `review`
+    command does not call it, so those settings cannot refuse that path.
+    """
+    return load_agentic_limits(env, **flags)
+
+
+def model_for_lens(
+    provider: OpenRouterProvider, limits: AgenticLimits
+) -> OpenRouterLensModel:
+    """The live adapter bound to the same resolved limits as the loop."""
+    return OpenRouterLensModel(provider, per_call=limits.resolve())
+
+
 def review_lens(
     event: PrEvent,
     lens: str,
@@ -297,9 +316,14 @@ def review_lens(
     """Review `event` with one lens. The limits are resolved before any
     model, runner or ledger work. Brandon's provisional defaults are
     accepted. A limit cleared to unset is refused outright
-    (`LimitsUnsetError`). The runner holds a Sprite task for the length
-    of the lens and deletes it on the way out."""
+    (`LimitsUnsetError`). A model that names its own `per_call` bounds
+    must name these; a different set is refused before any of that work.
+    A model that names none is not checked. The runner holds a Sprite
+    task for the length of the lens and deletes it on the way out."""
     resolved = limits.resolve()
+    declared = getattr(model, "per_call", None)
+    if declared is not None and declared != resolved:
+        raise ValueError("the model's per-call limits differ from this review's limits")
     contract = finding_contract() if contract is None else contract
     body = library.body(lens)
     if body is None:
@@ -333,7 +357,8 @@ def review_lens(
         read_sources(trees.head, diff, changed),
         fence_nonce,
     )
-    review_deadline = clock.monotonic() + resolved.review_wall_s
+    review_started = clock.monotonic()
+    review_deadline = review_started + resolved.review_wall_s
 
     def in_session(bridge: Bridge) -> str:
         session.bridges.append(bridge)
@@ -341,7 +366,7 @@ def review_lens(
         with lens_hold(bridge.session, digest, task_socket):
             return _attempts(
                 bridge, job, model, spend, clock, ledger, key, resolved,
-                review_deadline, session, scrub,
+                review_deadline, review_started, session, scrub,
             )  # fmt: skip
 
     report = run_bridge(
@@ -370,6 +395,7 @@ def _attempts(
     key: LensKey,
     limits: Limits,
     review_deadline: float,
+    review_started: float,
     session: _Session,
     scrub: Callable[[str], str],
 ) -> str:
@@ -382,6 +408,7 @@ def _attempts(
             outcome = run_attempt(
                 job, bridge, model, spend, clock,
                 review_deadline=review_deadline,
+                review_started=review_started,
                 retry_of=attempts[-1].outcome if step.forced and attempts else None,
                 secrets=secrets_seen,
             )  # fmt: skip
@@ -489,8 +516,18 @@ def status_line(review: AgenticReview) -> str:
         "unverified_findings": len(review.unverified),
         "changed_files": _changed_file_count(review),
         "unreviewed_files": len(_unread_paths(review)),
+        "limit_stop": _limit_stop(review),
     }
     return f"{STATUS_PREFIX}{json.dumps(fields, sort_keys=True)} -->"
+
+
+def _limit_stop(review: AgenticReview) -> dict[str, str] | None:
+    """The first limit that stopped a lens, or null when none did."""
+    for result in review.lenses:
+        found = None if result.outcome is None else result.outcome.limit_hit
+        if found is not None:
+            return found.as_dict()
+    return None
 
 
 def render_draft(review: AgenticReview, redactor: Redactor) -> str:

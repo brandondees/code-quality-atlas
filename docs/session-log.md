@@ -1064,3 +1064,36 @@ Brandon approved a restack-only review round the same day. Before round 2+,
 green required checks posts `## Round N — restack only, layer diff unchanged`
 and carries the previous verdict forward, with no lenses and no cap count.
 A different fingerprint, a missing one, or a failed check is a normal round.
+
+## 2026-11-12 — agentic per-call limits follow the model, and a stop names which one
+
+The agentic loop no longer uses the one-shot 200,000 input cap. The
+per-call input room is the pinned model's catalog context minus the
+output reserve, and the output cap is the model's own completion
+limit. An override can tighten either and cannot exceed the model.
+OpenRouter's reasoning hint is still sent, and the reservation prices
+the whole output cap at the completion rate plus the reasoning rate,
+on this path and on the one-shot path. D43's $5 reservation and
+one-token-per-byte bound stay. The one-shot 3-call, $3, and
+200,000 ceilings stay. The eight agentic limits are flags and `ATLAS_*` variables.
+`limits_for_lens` is what a lens run uses. The one-shot `review`
+command does not read them, so a value such as `ATLAS_MAX_CALLS=10`
+does not refuse it. A limit that stops a lens is its own cause, with the
+configured value, the observed value, and where to change it, in the
+ledger and on the status line's `limit_stop`. Compaction is not built.
+The Claude Code comparison and the follow-up are
+[`research/claude-code-long-sessions.md`](research/claude-code-long-sessions.md)
+and Q26.
+
+## 2026-11-12 — the default reasoning hint leaves half the output cap for the reply
+
+The default hint was one token under the output cap. OpenRouter counts
+reasoning tokens against `max_tokens`, so a turn that used the hint had
+one token left for the reply and stopped with `finish_reason=length`,
+which the loop recorded as a model error. The default is now half the
+output cap. A length stop is an output-cap limit: the configured cap
+and `finish_reason=length`. The one-shot `review` command no longer
+accepts the eight agentic limit flags, which it did not read. The
+`ATLAS_*` variables are unchanged, and `limits_for_lens` still reads
+them. A runner deadline reports elapsed seconds, as the other two
+clock stops do.

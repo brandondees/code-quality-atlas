@@ -20,6 +20,7 @@ from atlas_reviewer.lens_loop import (
     UserText,
     tool_schemas,
 )
+from atlas_reviewer.limit_stop import LimitRefused
 from atlas_reviewer.openrouter import OpenRouterProvider
 from atlas_reviewer.ports import BoundaryError, ByokRefusedError
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, fence
@@ -50,6 +51,15 @@ def model(*chat, key=None, limits=None, catalog_reply=None):
     fake = OpenRouterFake(*chat, key=key, **extra)
     provider = OpenRouterProvider(fake, KEY, limits=limits)
     return OpenRouterLensModel(provider), fake
+
+
+def test_the_adapter_is_built_with_the_configured_limits():
+    from atlas_reviewer.coordinator import limits_for_lens, model_for_lens
+
+    limits = limits_for_lens({"ATLAS_MAX_INPUT_TOKENS": "8"})
+    adapter = model_for_lens(OpenRouterProvider(OpenRouterFake(), KEY), limits)
+    assert adapter.per_call == limits.resolve()
+    assert adapter.per_call.max_input_tokens == 8
 
 
 def sent(fake: OpenRouterFake) -> dict:
@@ -459,10 +469,13 @@ def test_a_tool_call_that_is_not_one_function_cannot_be_executed():
     ) == ToolRequest("", ())
 
 
-def test_a_truncated_turn_is_rejected():
+def test_a_truncated_turn_is_an_output_cap_stop():
     lens, _fake = model(tool_response(finish="length"))
-    with pytest.raises(BoundaryError, match="output-token limit"):
+    with pytest.raises(LimitRefused) as raised:
         lens.turn(request())
+    assert raised.value.hit.limit == "max_output_tokens"
+    assert raised.value.hit.configured == "64000"
+    assert raised.value.hit.observed == "finish_reason=length"
 
 
 def test_an_empty_or_non_text_reply_is_rejected():

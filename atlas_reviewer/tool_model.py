@@ -38,19 +38,29 @@ from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
-from atlas_reviewer.budget import check_tokens, input_token_bound, worst_case_usd
+from atlas_reviewer.budget import (
+    TokenBoundError,
+    check_tokens,
+    input_token_bound,
+    worst_case_usd,
+)
 from atlas_reviewer.http import safe_url
 from atlas_reviewer.lens_loop import (
+    AgenticLimits,
     AssistantCalls,
     FinalReply,
+    Limits,
     Message,
     ModelTurn,
+    ResolvedCall,
     ToolCalls,
     ToolRequest,
     ToolSchema,
     TurnRequest,
     UserText,
+    resolve_per_call,
 )
+from atlas_reviewer.limit_stop import LimitRefused, hit
 from atlas_reviewer.openrouter import (
     _PER_MILLION,
     MODEL_ID,
@@ -71,8 +81,15 @@ UNPRICED = Decimal("Infinity")
 class OpenRouterLensModel:
     """The phase-3 `LensModel` port, backed by the one-shot OpenRouter client."""
 
-    def __init__(self, provider: OpenRouterProvider) -> None:
+    def __init__(
+        self, provider: OpenRouterProvider, per_call: Limits | None = None
+    ) -> None:
         self.provider = provider
+        # None derives the per-call bounds from the catalog. The one-shot
+        # CallLimits on the provider stay the D25 ceilings and are not the
+        # agentic input cap. `review_lens` refuses this object when
+        # `per_call` is not the limits that review resolved.
+        self.per_call = AgenticLimits().resolve() if per_call is None else per_call
         self._ready_for_turn: tuple[ModelTerms, bool] | None = None
 
     @property
@@ -84,20 +101,22 @@ class OpenRouterLensModel:
         # The loop prices the turn and then places it. One catalog fetch
         # serves both; the next turn fetches again.
         self._ready_for_turn = (terms, counts_byok)
-        payload = _payload(self.provider, request, terms)
-        check_tokens(
-            input_token_bound(json.dumps(payload)), terms, self.provider.budget.limits
-        )
-        return worst_case_usd(
-            input_token_bound(json.dumps(payload)), terms, self.provider.budget.limits
-        )
+        bounds = resolve_per_call(self.per_call, terms)
+        payload = _payload(self.provider, request, terms, bounds)
+        bound = input_token_bound(json.dumps(payload))
+        try:
+            check_tokens(bound, terms, bounds)
+        except TokenBoundError as exc:
+            raise LimitRefused(hit(exc.limit, exc.configured, exc.observed)) from exc
+        return worst_case_usd(bound, terms, bounds)
 
     def turn(self, request: TurnRequest) -> ModelTurn:
         """One request, no retry. The loop counts the call and settles the cost."""
         cached = self._ready_for_turn
         self._ready_for_turn = None
         terms, counts_byok = self._ready() if cached is None else cached
-        payload = _payload(self.provider, request, terms)
+        bounds = resolve_per_call(self.per_call, terms)
+        payload = _payload(self.provider, request, terms, bounds)
         url = f"{self.provider._api_url}/chat/completions"
         body = json.dumps(payload).encode()
         try:
@@ -122,7 +141,7 @@ class OpenRouterLensModel:
                     "could not be parsed, so is_byok could not be checked"
                 ) from None
             raise
-        return _turn(data, terms, counts_byok)
+        return _turn(data, terms, counts_byok, bounds.max_output_tokens)
 
     def _ready(self) -> tuple[ModelTerms, bool]:
         if self.provider._key_status is None:
@@ -152,9 +171,11 @@ def _routing(provider: OpenRouterProvider, terms: ModelTerms) -> dict[str, Any]:
 
 
 def _payload(
-    provider: OpenRouterProvider, request: TurnRequest, terms: ModelTerms
+    provider: OpenRouterProvider,
+    request: TurnRequest,
+    terms: ModelTerms,
+    limits: ResolvedCall,
 ) -> dict[str, Any]:
-    limits = provider.budget.limits
     return {
         "model": MODEL_ID,
         "messages": _messages(request),
@@ -233,7 +254,9 @@ def _echo(call_id: str, call: ToolRequest) -> dict[str, Any]:
     }
 
 
-def _turn(data: Mapping[str, Any], terms: ModelTerms, counts_byok: bool) -> ModelTurn:
+def _turn(
+    data: Mapping[str, Any], terms: ModelTerms, counts_byok: bool, output_cap: int
+) -> ModelTurn:
     usage = data.get("usage")
     usage_obj = usage if isinstance(usage, dict) else {}
     if not counts_byok and _no_byok_reason(usage_obj) is not None:
@@ -248,7 +271,7 @@ def _turn(data: Mapping[str, Any], terms: ModelTerms, counts_byok: bool) -> Mode
     choice = _choice(data)
     finish = choice.get("finish_reason")
     if finish == "length":
-        raise BoundaryError("model turn stopped at the output-token limit")
+        raise LimitRefused(hit("max_output_tokens", output_cap, "finish_reason=length"))
     message = choice.get("message")
     if not isinstance(message, dict):
         raise BoundaryError("model response has no message")

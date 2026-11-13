@@ -105,6 +105,24 @@ def status(result):
 # ------------------------------------------------------------ refusals
 
 
+def test_a_model_with_other_per_call_limits_is_refused_before_anything_runs(tmp_path):
+    sprites = FakeSprites()
+    model = ScriptedLensModel([])
+    model.per_call = replace(LIMITS.resolve(), max_input_tokens=8)
+    with pytest.raises(ValueError, match="per-call limits"):
+        review(tmp_path, [], sprites=sprites, model=model)
+    assert sprites.calls == []
+    assert not (tmp_path / "state").exists()
+
+
+def test_a_model_that_names_these_limits_still_runs(tmp_path):
+    model = ScriptedLensModel([READ_ALL, final(finding())])
+    model.per_call = LIMITS.resolve()
+    result, seen, _ = review(tmp_path, [], model=model)
+    assert result.lenses[0].state is LensState.CLEAN
+    assert seen.requests
+
+
 def test_a_review_with_any_limit_unset_is_refused_before_anything_runs(tmp_path):
     sprites = FakeSprites()
     with pytest.raises(LimitsUnsetError, match="reservation_usd"):
@@ -295,6 +313,19 @@ def test_quotes_that_fail_twice_leave_the_lens_partial_and_report_only_verified(
     assert result.verdict is Verdict.APPROVE_WITH_CHANGES
     draft = render_draft(result, Redactor())
     assert "## Not verified (not reported as findings)" in draft
+
+
+def test_a_configured_turn_cap_reaches_the_loop(tmp_path):
+    from atlas_reviewer.coordinator import limits_for_lens
+
+    limits = limits_for_lens({"ATLAS_MAX_CALLS": "4"}, max_turns="2")
+    result, model, _ = review(tmp_path, [READ_ALL] * 10, limits=limits)
+    (lens,) = result.lenses
+    assert lens.outcome is not None
+    assert lens.outcome.causes == {Cause.TURN_CAP}
+    assert lens.outcome.limit_hit is not None
+    assert lens.outcome.limit_hit.configured == "2"
+    assert len(model.requests) == 2
 
 
 def test_a_cut_short_lens_is_partial_and_not_retried(tmp_path):
@@ -636,6 +667,7 @@ def test_the_status_line_is_the_drafts_first_line_and_only_controller_values():
         "unverified_findings": 0,
         "changed_files": 1,
         "unreviewed_files": 0,
+        "limit_stop": None,
     }
 
 

@@ -99,3 +99,7 @@ Also not a taxonomy cluster: [`metareview-analysis.md`](metareview-analysis.md) 
 read of [dsifry/metareview](https://github.com/dsifry/metareview), an open-source agent-native
 review *harness* (gate state machine, JSON evidence receipts, post-merge learning), feeding
 [`../map-gaps.md`](../map-gaps.md) G36.
+
+Also not a taxonomy cluster: [`claude-code-long-sessions.md`](claude-code-long-sessions.md) —
+how Claude Code keeps a session inside a context window (compaction, subagents, turn and
+dollar limits, diagnostics), mapped onto the agentic lens loop. The follow-up is Q26.

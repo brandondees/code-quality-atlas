@@ -12,8 +12,9 @@ so an element without it is data.
 
 An attempt ends with the model's final reply, or is cut short by the turn
 cap, the review's call cap or dollar reservation, the per-lens or review
-wall clock, a failed model call, or the runner's deadline. Anything but a
-final reply that meets the contract, acknowledges the body and whose
+wall clock, the output cap when the model stops at it, a failed model
+call, or the runner's deadline. Anything but a final reply that meets
+the contract, acknowledges the body and whose
 quotes all verify leaves the lens partial or failed, never clean. A final
 reply is clean only when every changed file's diff was read in full: a
 `diff_file` chain from offset 0 through every truncated page. A changed
@@ -21,10 +22,16 @@ file left unread makes the attempt partial (`FILES_UNREAD`), and that
 cause is not retried. The loop does not send the unread list back for
 another turn (D42).
 
-The five numeric limits have provisional defaults Brandon set on
-2026-11-11, for headroom. Each can be overridden. An override must be
-positive and finite, and a per-lens limit no greater than its per-review
-limit. Clearing a limit back to unset still refuses the run.
+The five review limits have defaults Brandon set on 2026-11-11, for
+headroom: a $5 reservation, 50 calls, 50 turns, 20 minutes per lens and
+60 minutes per review. Each can be overridden. An override must be
+positive and finite, and a per-lens limit no greater than its
+per-review limit. Clearing one of those five back to unset still
+refuses the run. The per-call input and output values default to the
+pinned model's own context and completion limit. The reasoning hint
+defaults to half that output cap, so the reply has the other half. An
+override can tighten a bound and cannot exceed the model. Load them with
+`agentic_config.load_agentic_limits`.
 """
 
 from __future__ import annotations
@@ -53,7 +60,9 @@ from atlas_reviewer.bridge import Bridge, BridgeResult, BridgeSecret, Status, re
 from atlas_reviewer.bridge_args import TOOLS, Rev, arg_names, required_args
 from atlas_reviewer.lens_contract import ContractError, parse_reply
 from atlas_reviewer.lenses import BUNDLE_ROOT
+from atlas_reviewer.limit_stop import LimitHit, LimitRefused, hit
 from atlas_reviewer.ports import BoundaryError, ByokRefusedError, Clock
+from atlas_reviewer.pricing import ModelTerms
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, _fence_rule, fence
 from atlas_reviewer.quotes import SourceText, Verified, check_all
 from atlas_reviewer.runner import DeadlineExceededError
@@ -76,6 +85,11 @@ class LimitsUnsetError(ValueError):
     """A limit was cleared to unset, so the run is refused."""
 
 
+# None on these three means "derive from the catalog at the call".
+# None on the five review limits means unset, which `resolve` refuses.
+_DERIVED = frozenset({"max_input_tokens", "max_output_tokens", "reasoning_max_tokens"})
+
+
 @dataclass(frozen=True)
 class Limits:
     reservation_usd: Decimal
@@ -85,6 +99,9 @@ class Limits:
     review_wall_s: float
     retries: int
     pool_size: int
+    max_input_tokens: int | None = None
+    max_output_tokens: int | None = None
+    reasoning_max_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -93,10 +110,11 @@ class AgenticLimits:
     call. `max_calls`: model calls per review. `max_turns`: model turns per
     lens attempt. `lens_wall_s` and `review_wall_s`: wall clocks, per lens
     attempt and for the whole review (the runner's deadline). The five
-    defaults are Brandon's provisional headroom (2026-11-11); pass a value
-    to override one, or None to clear it, which `resolve` refuses.
-    `retries` and `pool_size` are D31's working defaults; phase 3 runs one
-    lens at a time."""
+    defaults are Brandon's headroom (2026-11-11); pass a value to override
+    one, or None to clear it, which `resolve` refuses. `retries` and
+    `pool_size` are D31's working defaults; phase 3 runs one lens at a
+    time. The per-call token fields are None until the catalog is known:
+    `resolve_per_call` fills them from the model, and an int tightens."""
 
     reservation_usd: Decimal | None = DEFAULT_RESERVATION_USD
     max_calls: int | None = DEFAULT_MAX_CALLS
@@ -105,9 +123,16 @@ class AgenticLimits:
     review_wall_s: float | None = DEFAULT_REVIEW_WALL_S
     retries: int = RETRIES
     pool_size: int = POOL_SIZE
+    max_input_tokens: int | None = None
+    max_output_tokens: int | None = None
+    reasoning_max_tokens: int | None = None
 
     def resolve(self) -> Limits:
-        unset = [f.name for f in fields(self) if getattr(self, f.name) is None]
+        unset = [
+            f.name
+            for f in fields(self)
+            if f.name not in _DERIVED and getattr(self, f.name) is None
+        ]
         if unset:
             raise LimitsUnsetError("agentic limits are not set: " + ", ".join(unset))
         resolved = Limits(**{f.name: getattr(self, f.name) for f in fields(self)})
@@ -143,6 +168,91 @@ def _check_limits(limits: Limits) -> None:
         raise ValueError("retries must be 0 or 1")
     if limits.pool_size != POOL_SIZE:
         raise ValueError("phase 3 runs one lens at a time: pool_size must be 1")
+    for name in _DERIVED:
+        value = getattr(limits, name)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError(f"{name} must be a positive integer")
+    if (
+        limits.max_output_tokens is not None
+        and limits.reasoning_max_tokens is not None
+        and limits.reasoning_max_tokens >= limits.max_output_tokens
+    ):
+        raise ValueError("reasoning_max_tokens must be less than max_output_tokens")
+
+
+def default_reasoning_tokens(output: int) -> int:
+    """Half of `output`, so the reply has the other half.
+
+    OpenRouter counts reasoning tokens against `max_tokens`. A hint one
+    under the cap leaves one token for the tool call or the final reply,
+    and that turn stops with `finish_reason=length`.
+    """
+    return output // 2
+
+
+@dataclass(frozen=True)
+class ResolvedCall:
+    """The per-call bounds for one request, after the catalog is known."""
+
+    max_input_tokens: int
+    max_output_tokens: int
+    reasoning_max_tokens: int
+
+
+def resolve_per_call(limits: Limits, terms: ModelTerms) -> ResolvedCall:
+    """The per-call bounds for this model.
+
+    Hard caps exist to stop a runaway call, not to make a review shallow.
+    With no override, the output cap is the model's own completion limit
+    and the input cap is the context that cap leaves. The reasoning value
+    defaults to half that output cap (`default_reasoning_tokens`), so the
+    reply has the other half. OpenRouter counts reasoning tokens against
+    `max_tokens`, and the reservation does not depend on the hint. An
+    override may tighten a bound. It may not exceed the model's context,
+    and the output override may not exceed the model's completion limit.
+    An unknown context never reaches here: `parse_model_terms` has
+    already refused it.
+    """
+    output = (
+        terms.max_completion_tokens
+        if limits.max_output_tokens is None
+        else limits.max_output_tokens
+    )
+    if output > terms.max_completion_tokens:
+        raise LimitRefused(
+            hit(
+                "max_output_tokens",
+                output,
+                terms.max_completion_tokens,
+            )
+        )
+    if output < 2:
+        raise LimitRefused(hit("max_output_tokens", output, "at least 2"))
+    reasoning = (
+        default_reasoning_tokens(output)
+        if limits.reasoning_max_tokens is None
+        else limits.reasoning_max_tokens
+    )
+    if reasoning < 1 or reasoning >= output:
+        raise LimitRefused(hit("reasoning_max_tokens", reasoning, f"1..{output - 1}"))
+    room = terms.context_length - output
+    if room < 1:
+        raise LimitRefused(
+            hit("context_length", terms.context_length, f"output reserve {output}")
+        )
+    if limits.max_input_tokens is None:
+        input_cap = room
+    elif limits.max_input_tokens > terms.context_length:
+        raise LimitRefused(
+            hit("max_input_tokens", limits.max_input_tokens, terms.context_length)
+        )
+    elif limits.max_input_tokens > room:
+        raise LimitRefused(hit("max_input_tokens", limits.max_input_tokens, room))
+    else:
+        input_cap = limits.max_input_tokens
+    return ResolvedCall(input_cap, output, reasoning)
 
 
 # -------------------------------------------------------------- model port
@@ -343,11 +453,16 @@ class Spend:
     calls: int = 0
     committed_usd: Decimal = Decimal(0)
 
-    def reserve(self, worst_usd: Decimal) -> Cause | None:
+    def reserve(self, worst_usd: Decimal) -> LimitHit | None:
         if self.calls >= self.limits.max_calls:
-            return Cause.CALL_CAP
-        if self.committed_usd + worst_usd > self.limits.reservation_usd:
-            return Cause.BUDGET
+            return hit(
+                "max_calls", self.limits.max_calls, f"next call {self.calls + 1}"
+            )
+        projected = self.committed_usd + worst_usd
+        if projected > self.limits.reservation_usd:
+            return hit(
+                "reservation_usd", f"${self.limits.reservation_usd}", f"${projected}"
+            )
         self.calls += 1
         self.committed_usd += worst_usd
         return None
@@ -428,7 +543,9 @@ class _Progress:
     secrets: list[BridgeSecret] = field(default_factory=list)
     pages: _DiffPages = field(default_factory=_DiffPages)
 
-    def cut(self, cause: Cause, detail: str = "") -> AttemptOutcome:
+    def cut(
+        self, cause: Cause, detail: str = "", limit_hit: LimitHit | None = None
+    ) -> AttemptOutcome:
         self.causes.add(cause)
         unread = self.pages.unread(self.changed)
         if unread:
@@ -441,7 +558,34 @@ class _Progress:
             detail=detail,
             unread=unread,
             changed_files=len(self.changed),
+            limit_hit=limit_hit,
         )
+
+
+# Every name in limit_stop.SETTINGS. A missing name is a bug, not CONTEXT.
+_LIMIT_CAUSES = {
+    "max_calls": Cause.CALL_CAP,
+    "reservation_usd": Cause.BUDGET,
+    "max_turns": Cause.TURN_CAP,
+    "lens_wall_s": Cause.LENS_CLOCK,
+    "review_wall_s": Cause.REVIEW_CLOCK,
+    "max_input_tokens": Cause.INPUT_CAP,
+    "max_output_tokens": Cause.OUTPUT_CAP,
+    "reasoning_max_tokens": Cause.REASONING_CAP,
+    "context_length": Cause.CONTEXT,
+    "max_completion_tokens": Cause.CONTEXT,
+}
+
+
+def _cause_for(found: LimitHit) -> Cause:
+    try:
+        return _LIMIT_CAUSES[found.limit]
+    except KeyError:
+        raise ValueError(f"no cause for limit {found.limit}") from None
+
+
+def _stopped(found: LimitHit) -> tuple[Cause, str, LimitHit]:
+    return _cause_for(found), found.message(), found
 
 
 def run_attempt(
@@ -452,18 +596,20 @@ def run_attempt(
     clock: Clock,
     *,
     review_deadline: float,
+    review_started: float,
     retry_of: AttemptOutcome | None = None,
     secrets: list[BridgeSecret] | None = None,
     system_for: Callable[..., str] = lens_system,
 ) -> AttemptOutcome:
-    """Run one attempt to its end. `review_deadline` is on `clock.monotonic`.
-    Each possible committed secret a tool result reports (location and
-    pattern, never the value) is appended to `secrets`."""
+    """Run one attempt to its end. `review_deadline` and `review_started`
+    are on `clock.monotonic`. Each possible committed secret a tool result
+    reports (location and pattern, never the value) is appended to `secrets`."""
     limits = spend.limits
     system = system_for(job.lens, job.body, job.contract, retry_of, nonce=job.nonce)
     if not check_delivery(system, job.lens, job.digest):
         return AttemptOutcome(Attestation.NOT_DELIVERED)
-    lens_deadline = min(review_deadline, clock.monotonic() + limits.lens_wall_s)
+    attempt_start = clock.monotonic()
+    lens_deadline = min(review_deadline, attempt_start + limits.lens_wall_s)
     messages: list[Message] = [UserText(job.first_turn)]
     tools = tool_schemas()
     p = _Progress(
@@ -471,25 +617,28 @@ def run_attempt(
         secrets=[] if secrets is None else secrets,
     )
     while True:
-        now = clock.monotonic()
-        if now >= review_deadline:
-            return p.cut(Cause.REVIEW_CLOCK)
-        if now >= lens_deadline:
-            return p.cut(Cause.LENS_CLOCK)
-        if p.turns >= limits.max_turns:
-            return p.cut(Cause.TURN_CAP)
+        stopped = _time_up(
+            p, clock, limits, review_deadline, review_started,
+            lens_deadline, attempt_start,
+        )  # fmt: skip
+        if stopped is not None:
+            return stopped
         request = TurnRequest(system, tuple(messages), tools)
         try:
             worst = model.worst_case_usd(request)
+        except LimitRefused as exc:
+            return p.cut(*_stopped(exc.hit))
         except BoundaryError as exc:
             return p.cut(Cause.MODEL_ERROR, str(exc))
         if not _valid_cost(worst):
             return p.cut(Cause.MODEL_ERROR, "the model's worst-case cost is not a cost")
         refused = spend.reserve(worst)
         if refused is not None:
-            return p.cut(refused)
+            return p.cut(*_stopped(refused))
         try:
             reply = model.turn(request)
+        except LimitRefused as exc:
+            return p.cut(*_stopped(exc.hit))
         except ByokRefusedError as exc:
             # The refusal still leaves the loop. The turns and tool calls
             # already completed travel with it, so the ledger records them.
@@ -505,8 +654,38 @@ def run_attempt(
         try:
             results = tuple(_tool(job, bridge, call, p) for call in reply.calls)
         except DeadlineExceededError as exc:
-            return p.cut(Cause.REVIEW_CLOCK, str(exc))
+            elapsed = clock.monotonic() - review_started
+            found = hit("review_wall_s", limits.review_wall_s, f"{elapsed:.3f}s")
+            return p.cut(_cause_for(found), f"{found.message()} ({exc})", found)
         messages += [AssistantCalls(reply.calls), ToolResults(results)]
+
+
+def _time_up(
+    p: _Progress,
+    clock: Clock,
+    limits: Limits,
+    review_deadline: float,
+    review_started: float,
+    lens_deadline: float,
+    attempt_start: float,
+) -> AttemptOutcome | None:
+    """A clock or turn stop, or None to keep going. The lens deadline may
+    be the review deadline, so the lens elapsed is counted from
+    `attempt_start`, not back from that deadline."""
+    now = clock.monotonic()
+    if now >= review_deadline:
+        elapsed = now - review_started
+        return p.cut(
+            *_stopped(hit("review_wall_s", limits.review_wall_s, f"{elapsed:.3f}s"))
+        )
+    if now >= lens_deadline:
+        elapsed = now - attempt_start
+        return p.cut(
+            *_stopped(hit("lens_wall_s", limits.lens_wall_s, f"{elapsed:.3f}s"))
+        )
+    if p.turns >= limits.max_turns:
+        return p.cut(*_stopped(hit("max_turns", limits.max_turns, f"{p.turns} used")))
+    return None
 
 
 def _tool(job: LensJob, bridge: Bridge, call: ToolRequest, p: _Progress) -> str:

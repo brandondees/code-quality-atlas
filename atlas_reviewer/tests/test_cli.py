@@ -28,6 +28,44 @@ def run_cli(*argv, env=None):
     return code, out.getvalue(), err.getvalue()
 
 
+def test_review_rejects_an_agentic_limit_flag(capsys):
+    with pytest.raises(SystemExit) as raised:
+        cli.main(
+            ["review", "--event", EVENT, "--dry-run", "--reservation-usd", "0"],
+            env={},
+        )
+    assert raised.value.code == 2
+    assert "unrecognized arguments: --reservation-usd" in capsys.readouterr().err
+
+
+def test_agentic_settings_do_not_change_a_one_shot_review(tmp_path):
+    code, out, err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "review",
+        "--event",
+        EVENT,
+        "--dry-run",
+        env={"ATLAS_MAX_CALLS": "10", "ATLAS_MAX_TURNS": "nope"},
+    )
+    assert code == cli.EXIT_INCOMPLETE
+    assert "reservation_usd" not in err
+    assert "max_turns" not in err
+    assert out.startswith("<!-- atlas-review-status: {")
+    bare, bare_out, bare_err = run_cli(
+        "--state-dir",
+        str(tmp_path),
+        "review",
+        "--event",
+        EVENT,
+        "--dry-run",
+        env={"ATLAS_MAX_CALLS": "10"},
+    )
+    assert bare == cli.EXIT_INCOMPLETE
+    assert "max_calls" not in bare_err
+    assert bare_out.startswith("<!-- atlas-review-status: {")
+
+
 def test_dry_run_needs_no_credentials_and_prints_a_draft(tmp_path):
     code, out, _ = run_cli(
         "--state-dir", str(tmp_path), "review", "--event", EVENT, "--dry-run"
