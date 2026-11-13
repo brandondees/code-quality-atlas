@@ -340,12 +340,15 @@ class Board:
             self._cv.notify_all()
             return state
 
-    def release_claim(self, job: Job) -> None:
+    def release_claim(self, job: Job) -> JobState | None:
         """``stop()`` landed after this job was claimed and before it ran.
-        Put it back to ``queued`` so a later pass can claim it."""
+        Put it back to ``queued`` so a later pass can claim it. Returns
+        the state stored, or None when this job was not running. A
+        superseded job is stored as superseded, and the caller removes
+        its run directory."""
         with self._cv:
             if job.state is not JobState.RUNNING:
-                return
+                return None
             # A newer head already replaced this one. Putting it back to
             # queued would leave a job claim() never takes, and it would
             # hold an active slot until the process is wiped.
@@ -363,13 +366,14 @@ class Board:
                 elif target is JobState.QUEUED:
                     job.cancel.clear()
                 raise
+            return target
 
-    def pause_post(self, job: Job) -> None:
+    def pause_post(self, job: Job) -> JobState | None:
         """Stop landed after the post was claimed and before it was sent.
         The draft stays, and a later process can post it."""
         with self._cv:
             if job.state is not JobState.POSTING:
-                return
+                return None
             previous = job.state
             job.state = JobState.POST_PENDING
             was_set = job.cancel.is_set()
@@ -381,6 +385,7 @@ class Board:
                 if was_set:
                     job.cancel.set()
                 raise
+            return JobState.POST_PENDING
 
     def wake(self) -> None:
         with self._cv:

@@ -1404,6 +1404,49 @@ def test_a_finished_review_keeps_its_draft_when_nothing_is_posted(tmp_path):
     assert not (directory / "stderr.txt").exists()
 
 
+def test_a_supersede_during_release_removes_the_run_directory(tmp_path, monkeypatch):
+    """The worker reads ``superseded`` before ``release_claim``.
+
+    A newer head in that window makes the Board store SUPERSEDED. The
+    run directory, including the child's stderr, has to be removed, and
+    the supersede has to be logged.
+    """
+    board = Board(tmp_path / "queue.json")
+    event = PrEvent(REPO, 7, SHA_A)
+    directory = run_dir(tmp_path, event)
+    board.enqueue(event, at=datetime(2026, 11, 12, 20, tzinfo=UTC))
+
+    def runner(_event, cancel):
+        directory.mkdir(parents=True)
+        (directory / "draft.md").write_text("the review\n", encoding="utf-8")
+        (directory / "stderr.txt").write_text(
+            "plainchildsecretvalue\n", encoding="utf-8"
+        )
+        cancel.set()
+        return ReviewRun(True, REPORT)
+
+    worker = _worker(board, runner, root=tmp_path)
+    real = board.release_claim
+
+    def release(job):
+        assert (
+            board.enqueue(
+                PrEvent(REPO, 7, SHA_B),
+                at=datetime(2026, 11, 12, 21, tzinfo=UTC),
+            )
+            is Enqueue.QUEUED
+        )
+        return real(job)
+
+    monkeypatch.setattr(board, "release_claim", release)
+    assert worker.run_one() is True
+    assert (SHA_A, JobState.SUPERSEDED) in board.states()
+    assert not directory.exists()
+    assert any(
+        record.step == "review superseded" for record in worker._telemetry.events
+    )
+
+
 def test_releasing_a_superseded_claim_does_not_leave_it_queued(tmp_path):
     board = Board(tmp_path / "queue.json")
     moment = datetime(2026, 11, 12, 20, tzinfo=UTC)
@@ -1522,6 +1565,45 @@ def test_the_body_read_restores_the_handler_timeout(monkeypatch):
     assert sent == [408]
     assert handler.connection.calls
     assert min(c for c in handler.connection.calls if c is not None) < 1
+    assert handler.connection.calls[-1] == 20.0
+
+
+def test_the_body_read_restores_the_timeout_when_the_read_raises(monkeypatch):
+    import atlas_reviewer.service as service_mod
+
+    monkeypatch.setattr(service_mod, "_BODY_BUDGET_S", 0.4)
+
+    class Conn:
+        def __init__(self) -> None:
+            self.calls: list[float | None] = []
+            self._timeout: float | None = 20.0
+
+        def gettimeout(self) -> float | None:
+            return self._timeout
+
+        def settimeout(self, value: float | None) -> None:
+            self._timeout = value
+            self.calls.append(value)
+
+    class Reader:
+        def read1(self, _n: int) -> bytes:
+            raise OSError("reset")
+
+    handler = _Handler.__new__(_Handler)
+    handler.rfile = Reader()
+    handler.connection = Conn()
+    handler.headers = {"Content-Length": "40"}
+    handler.server = type(
+        "S",
+        (),
+        {
+            "config": type("C", (), {"max_body_bytes": 1_000_000})(),
+            "log": staticmethod(lambda line: None),
+        },
+    )()
+    with pytest.raises(OSError, match="reset"):
+        handler._read_post()
+    assert handler.connection.calls
     assert handler.connection.calls[-1] == 20.0
 
 

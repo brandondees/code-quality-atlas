@@ -238,7 +238,7 @@ class Worker:
         if job is None:
             return False
         if self._stop.is_set():
-            self._board.release_claim(job)
+            self._stored_supersede(job, self._board.release_claim(job))
             return False
         try:
             self._execute(job)
@@ -330,8 +330,10 @@ class Worker:
             return
         if job.cancel.is_set():
             # Stop is not a supersede. The same commit can be reviewed
-            # again after the process starts.
-            self._board.release_claim(job)
+            # again after the process starts. A newer head that landed
+            # after the check above is SUPERSEDED, and that directory
+            # still has to go.
+            self._stored_supersede(job, self._board.release_claim(job))
             return
         if not run.ok or run.report is None:
             committed = self._settle(job, JobState.FAILED)
@@ -497,26 +499,42 @@ class Worker:
             self._note(job, self._settle(job, JobState.SUPERSEDED), fields)
             return
         if job.state is JobState.POSTING:
-            self._board.pause_post(job)
+            self._stored_supersede(job, self._board.pause_post(job))
             return
-        self._board.release_claim(job)
+        self._stored_supersede(job, self._board.release_claim(job))
 
     def _settle(self, job: Job, state: JobState) -> JobState:
         committed = self._board.finish(job, state)
         if committed in {JobState.DONE, JobState.FAILED, JobState.SUPERSEDED}:
-            path = run_dir(self._state_root, job.event)
-            if path.is_dir():
-                try:
-                    shutil.rmtree(path)
-                except OSError as exc:
-                    self._telemetry.record(
-                        "service",
-                        "run dir not removed",
-                        _fields(job.event),
-                        status=ERROR,
-                        error=f"{type(exc).__name__}: {exc}",
-                    )
+            self._drop_run_dir(job)
         return committed
+
+    def _stored_supersede(self, job: Job, stored: JobState | None) -> None:
+        """The Board settled a supersede the worker had not seen yet.
+
+        ``release_claim`` and ``pause_post`` decide under the lock. When
+        they store SUPERSEDED, this is the cleanup ``_settle`` would have
+        run, including the log line.
+        """
+        if stored is not JobState.SUPERSEDED:
+            return
+        self._drop_run_dir(job)
+        self._note(job, stored, _fields(job.event))
+
+    def _drop_run_dir(self, job: Job) -> None:
+        path = run_dir(self._state_root, job.event)
+        if not path.is_dir():
+            return
+        try:
+            shutil.rmtree(path)
+        except OSError as exc:
+            self._telemetry.record(
+                "service",
+                "run dir not removed",
+                _fields(job.event),
+                status=ERROR,
+                error=f"{type(exc).__name__}: {exc}",
+            )
 
     def _note(
         self, job: Job, committed: JobState, fields: dict[str, str | int]
