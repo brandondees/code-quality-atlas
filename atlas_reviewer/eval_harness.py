@@ -388,13 +388,19 @@ def verdict_of(title: str, state: str | None = None) -> str:
 def _lead_after_heading(body: str) -> str:
     """The first sentence after a ``## Round N`` heading.
 
-    With no heading, the first sentence of ``body`` is the lead. A
-    later sentence is not.
+    A leading ``<!-- atlas-review round:N -->`` marker is not the
+    sentence. With no heading, the first sentence of ``body`` is the
+    lead. A later sentence is not.
     """
     text = body.strip()
     heading = _ROUND.search(text)
     if heading is not None:
         text = text[heading.end() :].strip()
+    while True:
+        comment = re.match(r"<!--.*?-->", text, re.DOTALL)
+        if comment is None:
+            break
+        text = text[comment.end() :].strip()
     parts = re.split(r"(?<=[.!?])\s+|\n+", text, maxsplit=1)
     return parts[0] if parts else ""
 
@@ -405,7 +411,9 @@ def findings_expected(title: str, body: str = "") -> bool:
     The none-assertion is the title, or the first sentence after the
     round heading when that sentence is the canonical lead: ``No
     findings at or above``, ``No new findings at or above``, or
-    ``Nothing new at or above``, optionally bold. A later sentence does
+    ``Nothing new at or above``, optionally bold. The
+    ``<!-- atlas-review round:N -->`` marker after the heading is not
+    that sentence. A later sentence does
     not clear the gap, and neither does a sentence that only contains
     the phrase.
     """

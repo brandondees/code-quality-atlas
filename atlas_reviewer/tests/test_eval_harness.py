@@ -483,6 +483,26 @@ def test_zero_findings_are_a_gap_unless_the_round_says_there_are_none():
         [],
     )
     assert buried is not None and buried["metadata"]["parse_gap"] is True
+
+
+def test_a_round_marker_does_not_hide_the_canonical_lead():
+    from atlas_reviewer.eval_harness import reference_row
+
+    marked = reference_row(
+        {"number": 632, "head": {"sha": "abc"}, "base": {"repo": {"full_name": "o/r"}}},
+        {
+            "state": "COMMENTED",
+            "commit_id": "abc",
+            "body": (
+                "## Round 1 — APPROVE\n"
+                "<!-- atlas-review round:1 layer-diff:abc -->\n"
+                "\n"
+                "No findings at or above this round's floor (Nit).\n"
+            ),
+        },
+        [],
+    )
+    assert marked is not None and marked["metadata"]["parse_gap"] is False
     colon = protocol_review(
         "## Round 1 — notes\n<!-- atlas-review round:1 -->\n",
         [
