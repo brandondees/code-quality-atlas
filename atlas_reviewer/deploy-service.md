@@ -67,7 +67,7 @@ ATLAS_SERVICE_PROVIDER=openrouter
 `ATLAS_GITHUB_WEBHOOK_SECRET` is new. It is the App webhook secret, at
 least 16 characters, and the same value is set on the GitHub App. The
 private key may be one line with literal `\n` sequences. The service
-refuses to listen without the webhook secret, the three `ATLAS_GITHUB_APP_*`
+refuses to listen without the webhook secret, the four `ATLAS_GITHUB_APP_*`
 values, and, for the default `openrouter` provider, `ATLAS_ALLOW_LIVE_INFERENCE=1`.
 
 The App needs Pull requests set to read and write. The service's posting

@@ -100,7 +100,7 @@ def test_image_is_pinned_python_312_slim_installed_with_hashes_as_non_root():
     entry = (ROOT / "atlas_reviewer" / "docker-entrypoint.sh").read_text(
         encoding="utf-8"
     )
-    assert "setpriv --reuid=10001 --regid=10001" in entry
+    assert "setpriv --reuid=10001 --regid=10001 --init-groups --inh-caps=-all" in entry
     assert "HOME=/home/atlas" in " ".join(args_of("ENV"))
     assert args_of("ENTRYPOINT") == ['["/usr/local/bin/atlas-reviewer"]']
     for keyword in ("EXPOSE", "ARG", "VOLUME", "HEALTHCHECK", "ADD"):

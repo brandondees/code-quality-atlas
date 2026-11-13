@@ -103,6 +103,7 @@ def test_the_runbook_names_the_secret_the_org_and_the_webhook():
         "leave `app` in `fly.service.toml` unchanged",
         "deletes the app's volumes",
         "Do not `fly deploy` it for the webhook",
+        "the four `ATLAS_GITHUB_APP_*` values",
     ):
         assert text in flat, text
 
@@ -166,7 +167,11 @@ def test_the_entrypoint_chowns_the_volume_before_dropping_root(tmp_path):
         "10001:10001",
         str(state),
     ]
-    assert "--reuid=10001" in dropped.read_text(encoding="utf-8")
+    dropped_text = dropped.read_text(encoding="utf-8")
+    assert "--reuid=10001" in dropped_text
+    assert "--regid=10001" in dropped_text
+    assert "--init-groups" in dropped_text
+    assert "--inh-caps=-all" in dropped_text
     assert recorded.read_text(encoding="utf-8").splitlines()[:2] == [
         "-m",
         "atlas_reviewer.service",
