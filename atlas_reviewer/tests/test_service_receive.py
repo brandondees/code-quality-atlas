@@ -1576,6 +1576,76 @@ def test_a_supersede_that_wins_the_pause_race_is_not_left_pending(tmp_path):
     assert (SHA_A, JobState.SUPERSEDED) in loaded.states()
 
 
+def test_a_supersede_during_pause_removes_the_run_directory(tmp_path, monkeypatch):
+    """The worker reads ``superseded`` before ``pause_post``.
+
+    A newer head in that window makes the Board store SUPERSEDED. The
+    run directory has to be removed, and the supersede has to be logged.
+    """
+    board = Board(tmp_path / "queue.json")
+    event = PrEvent(REPO, 7, SHA_A)
+    directory = run_dir(tmp_path, event)
+    directory.mkdir(parents=True)
+    (directory / "draft.md").write_text("the review\n", encoding="utf-8")
+    (directory / "stderr.txt").write_text("plainchildsecretvalue\n", encoding="utf-8")
+    board.enqueue(event, at=datetime(2026, 11, 12, 20, tzinfo=UTC))
+    job = board.claim()
+    assert job is not None
+    assert board.begin_post(job) is True
+    job.cancel.set()
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(True, REPORT), root=tmp_path
+    )
+    real = board.pause_post
+
+    def pause(claimed):
+        assert (
+            board.enqueue(
+                PrEvent(REPO, 7, SHA_B),
+                at=datetime(2026, 11, 12, 21, tzinfo=UTC),
+            )
+            is Enqueue.QUEUED
+        )
+        return real(claimed)
+
+    monkeypatch.setattr(board, "pause_post", pause)
+    worker._stopped_or_superseded(job, {"pr": 7, "sha12": SHA_A[:12], "repo": REPO})
+    assert job.state is JobState.SUPERSEDED
+    assert not directory.exists()
+    assert any(
+        record.step == "review superseded" for record in worker._telemetry.events
+    )
+
+
+def test_a_failed_pause_save_restores_a_superseded_post(tmp_path, monkeypatch):
+    import atlas_reviewer.service_queue as queue_mod
+
+    board = Board(tmp_path / "queue.json")
+    board.enqueue(PrEvent(REPO, 7, SHA_A), at=datetime(2026, 11, 12, 20, tzinfo=UTC))
+    job = board.claim()
+    assert job is not None
+    assert board.begin_post(job) is True
+    job.cancel.set()
+    assert (
+        board.enqueue(
+            PrEvent(REPO, 7, SHA_B), at=datetime(2026, 11, 12, 21, tzinfo=UTC)
+        )
+        is Enqueue.QUEUED
+    )
+    assert job.state is JobState.POSTING
+    assert job.superseded and job.cancel.is_set()
+
+    def boom(*_args, **_kwargs):
+        raise OSError("disk")
+
+    monkeypatch.setattr(queue_mod, "_store", boom)
+    with pytest.raises(OSError, match="disk"):
+        board.pause_post(job)
+    assert job.state is JobState.POSTING
+    assert job.superseded
+    assert job.cancel.is_set()
+
+
 def test_releasing_a_superseded_claim_does_not_leave_it_queued(tmp_path):
     board = Board(tmp_path / "queue.json")
     moment = datetime(2026, 11, 12, 20, tzinfo=UTC)
