@@ -10,9 +10,10 @@ stdout or a file.
 The operator CLI (`review`, `sweep`, `probe-runner`) never writes to GitHub:
 no reviews, comments, check runs, labels, or issues. It has no queue of its
 own and runs one review at a time in its state directory.
-`python -m atlas_reviewer.service` is the webhook receiver (D48). It verifies
-the delivery, queues one review per commit, and posts a single pull-request
-review with event COMMENT. It never sends APPROVE or REQUEST_CHANGES.
+`python -m atlas_reviewer.service` is the webhook receiver (D48) and posts
+one COMMENT review (D46, which amends D48's no-publish rule). It verifies
+the delivery, queues one review per commit, and posts that review with
+event COMMENT. It never sends APPROVE or REQUEST_CHANGES.
 Design and decision record:
 [`docs/plans/2026-11-06-manual-reviewer-service.md`](../docs/plans/2026-11-06-manual-reviewer-service.md)
 (D24-D30, D32, D33, D35 and D36 in
@@ -62,7 +63,8 @@ deliveries (`opened`, `synchronize`, `ready_for_review`). A draft is
 ignored. The HMAC is `X-Hub-Signature-256` over the raw body with
 `ATLAS_GITHUB_WEBHOOK_SECRET` (at least 16 characters). The repository
 must be on `ATLAS_REVIEW_REPOS` (default `brandondees/code-quality-atlas`).
-A second delivery of the same head SHA does nothing. A newer head SHA
+A second delivery of a head SHA whose review already finished does nothing.
+A head whose review failed can be queued again. A newer head SHA
 cancels the review of the previous one, and that cancelled review is not
 posted.
 

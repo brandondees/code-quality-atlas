@@ -561,10 +561,12 @@ def test_a_post_that_finds_the_head_moved_is_not_retried(tmp_path):
 
 
 def test_a_stop_during_the_post_keeps_the_draft(tmp_path):
-    """A stop while the poster is listing is not a moved head.
+    """A stubbed stop is not a moved head.
 
-    The draft stays, and the job goes back to pending so a restart can
-    post it. A supersede in the same window still removes the directory.
+    The draft stays, and the job goes back to pending. The real listing
+    path is ``test_a_stop_during_the_listing_does_not_post``. A moved
+    head still removes the directory in
+    ``test_a_post_that_finds_the_head_moved_is_not_retried``.
     """
     board = Board(tmp_path / "queue.json")
     event = PrEvent(REPO, 7, SHA_A)
@@ -2033,7 +2035,18 @@ from runpy import _run_module_as_main
 import atlas_reviewer.service as canonical
 
 def wrapped():
-    import atlas_reviewer.service_post as poster
+    import tempfile
+    from pathlib import Path
+
+    import atlas_reviewer.service_post as poster_mod
+    from atlas_reviewer.clock import SystemClock
+    from atlas_reviewer.domain import PrEvent
+    from atlas_reviewer.http import HttpResponse
+    from atlas_reviewer.service_queue import Board
+    from atlas_reviewer.service_run import ReviewReport, ReviewRun, run_dir
+    from atlas_reviewer.telemetry import Telemetry
+
+    poster = poster_mod
     token = canonical.before_send.set(lambda: False)
     try:
         hook = poster.before_send.get()
@@ -2044,11 +2057,50 @@ def wrapped():
             and poster.PostAuthError is canonical.PostAuthError
             and poster.PostRejected is canonical.PostRejected
             and poster.RateLimited is canonical.RateLimited
+            and poster.PostHookMissing is canonical.PostHookMissing
         )
     finally:
         canonical.before_send.reset(token)
-    print(f"fired={fired} same={same}")
-    return 0 if fired and same else 1
+    root = Path(tempfile.mkdtemp())
+    board = Board(root / "queue.json")
+    event = PrEvent("brandondees/code-quality-atlas", 7, "d" * 40)
+    directory = run_dir(root, event)
+    calls = []
+
+    class GitHub:
+        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
+            calls.append(method)
+            if method == "GET":
+                board.cancel_active()
+                return HttpResponse(200, {}, b"[]")
+            return HttpResponse(200, {}, b'{"id": 9}')
+
+    class Tokens:
+        def token(self):
+            return "ghs_test"
+
+    review_poster = poster.ReviewPoster(
+        GitHub(),
+        Tokens(),
+        poster.PostLedger(root / "posted.json"),
+        lambda text: text,
+    )
+    report = ReviewReport(("tracing",), (), "note", (), (), (), "COMMENT")
+
+    def runner(_event, _cancel):
+        directory.mkdir(parents=True)
+        (directory / "draft.md").write_text("the review\\n", encoding="utf-8")
+        return ReviewRun(True, report)
+
+    worker = canonical.Worker(
+        board, runner, Telemetry(SystemClock()), review_poster.post, state_root=root
+    )
+    board.enqueue(event)
+    worker.run_one()
+    posted = calls.count("POST")
+    kept = (directory / "draft.md").is_file()
+    print(f"fired={fired} same={same} posted={posted} kept={kept}")
+    return 0 if fired and same and posted == 0 and kept else 1
 
 canonical.main = wrapped
 
@@ -2074,7 +2126,7 @@ except SystemExit as exc:
         check=False,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "fired=True same=True" in proc.stdout
+    assert "fired=True same=True posted=0 kept=True" in proc.stdout
 
 
 def test_the_module_refuses_to_start_without_a_secret():

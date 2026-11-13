@@ -2,6 +2,7 @@
 """COMMENT-only posting: a failure publishes nothing, and a retry does not
 post a second review."""
 
+import contextvars
 import inspect
 import json
 import threading
@@ -90,6 +91,15 @@ class Tokens:
         return "ghs_test"
 
 
+@pytest.fixture(autouse=True)
+def _pre_create_hook_is_set():
+    """Direct poster calls are not the worker. The worker installs the
+    real check; these tests allow the create unless they clear the hook."""
+    token = before_send.set(lambda: True)
+    yield
+    before_send.reset(token)
+
+
 def _poster(
     tmp_path: Path, github: GitHub | None = None
 ) -> tuple[ReviewPoster, GitHub]:
@@ -110,6 +120,67 @@ def _posted_body(github: GitHub) -> dict[str, str]:
     payload = json.loads(posts[0][2] or b"")
     assert isinstance(payload, dict)
     return payload
+
+
+def test_a_stop_during_the_listing_does_not_post(tmp_path):
+    """A real poster, with only GitHub's HTTP faked.
+
+    ``stop`` sets the job's cancel during the review list. ``begin_post``
+    then refuses, so no create POST is sent and the draft stays. Removing
+    the cancel check from ``begin_post`` lets the create through.
+    """
+    board = Board(tmp_path / "queue.json")
+    directory = run_dir(tmp_path, EVENT)
+    github = GitHub()
+    original = github.request
+
+    def request(method, url, headers, body, timeout_s, max_bytes=None):
+        if method == "GET":
+            board.cancel_active()
+        return original(method, url, headers, body, timeout_s, max_bytes)
+
+    github.request = request
+    poster, _ = _poster(tmp_path, github)
+
+    def runner(_event, _cancel):
+        directory.mkdir(parents=True)
+        (directory / "draft.md").write_text("the review\n", encoding="utf-8")
+        return ReviewRun(True, REPORT)
+
+    worker = Worker(
+        board, runner, Telemetry(SystemClock()), poster.post, state_root=tmp_path
+    )
+    board.enqueue(EVENT)
+    assert worker.run_one() is True
+    assert [call for call in github.calls if call[0] == "POST"] == []
+    assert (directory / "draft.md").is_file()
+    assert board.states() == ((SHA, JobState.POST_PENDING),)
+
+
+def test_a_missing_pre_create_hook_does_not_post(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    github = GitHub()
+    poster, _ = _poster(tmp_path, github)
+
+    def publish(event, report):
+        before_send.set(None)
+        poster.post(event, report)
+
+    worker = Worker(
+        board,
+        lambda event, cancel: ReviewRun(True, REPORT),
+        Telemetry(SystemClock()),
+        publish,
+        state_root=tmp_path,
+    )
+    board.enqueue(EVENT)
+    assert worker.run_one() is True
+    assert [call for call in github.calls if call[0] == "POST"] == []
+    assert board.states() == ((SHA, JobState.FAILED),)
+    assert any(
+        "pre-create check" in (record.error or "")
+        for record in worker._telemetry.events
+    )
 
 
 def test_approve_and_request_changes_cannot_be_sent(tmp_path):
@@ -751,8 +822,13 @@ def test_one_workers_deadline_does_not_clear_anothers(tmp_path):
 
     poster._transport = Transport()
     other = PrEvent(REPO, 8, "e" * 40)
-    first = threading.Thread(target=lambda: poster.post(EVENT, REPORT))
-    second = threading.Thread(target=lambda: poster.post(other, REPORT))
+    # A new thread does not inherit the context. Copy it so the
+    # pre-create hook set for this test is the one each post reads.
+    first = threading.Thread(
+        target=contextvars.copy_context().run, args=(poster.post, EVENT, REPORT)
+    )
+    second_ctx = contextvars.copy_context()
+    second = threading.Thread(target=second_ctx.run, args=(poster.post, other, REPORT))
     first.start()
     assert blocked.wait(2)
     second.start()

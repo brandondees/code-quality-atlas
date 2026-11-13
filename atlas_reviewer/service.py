@@ -69,7 +69,11 @@ _BACKOFF_JITTER = 0.2
 
 
 class PostNotCurrent(Exception):
-    """The head moved before the review was sent. Do not retry."""
+    """The head moved, or a stop landed, before the review was sent."""
+
+
+class PostHookMissing(Exception):
+    """The pre-create check was not installed. Nothing is sent."""
 
 
 class PostAuthError(Exception):
@@ -422,6 +426,9 @@ class Worker:
             # is SUPERSEDED. Settling every refusal as SUPERSEDED deletes
             # a finished review that a restart should still post.
             self._stopped_or_superseded(job, fields)
+            return
+        except PostHookMissing as exc:
+            self._record_post_refusal(job, fields, f"post hook missing: {exc}")
             return
         except PostAuthError as exc:
             self._record_post_refusal(job, fields, f"post auth refused: {exc}")

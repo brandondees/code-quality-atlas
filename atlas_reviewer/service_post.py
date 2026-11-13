@@ -38,6 +38,7 @@ from atlas_reviewer.ports import BoundaryError, Clock, TokenSource
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.service import (
     PostAuthError,
+    PostHookMissing,
     PostNotCurrent,
     PostRejected,
     RateLimited,
@@ -226,8 +227,12 @@ class ReviewPoster:
                 return
             # After the list, under the queue lock, and before the create.
             # A review GitHub has already accepted cannot be recalled.
+            # A missing hook used to skip this check, which is how the
+            # double-module bug posted a stale head.
             check = before_send.get()
-            if check is not None and not check():
+            if check is None:
+                raise PostHookMissing("the pre-create check is not set")
+            if not check():
                 raise PostNotCurrent("the head moved before the review was sent")
             body = render_comment(report, key, self._scrub)
             review_id = self._create(event, comment_payload(event.head_sha, body))
