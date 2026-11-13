@@ -114,7 +114,10 @@ python -m atlas_reviewer eval --fixtures atlas_reviewer/fixtures/eval-score --ga
 checked-in row under `fixtures/eval-references/`, `--head` names a
 commit that one passing pair records, and one passing pair has
 `metadata.over_context_window` set. A directory that holds only the
-pair for `--head` does not pass. A pair fails when recall of the
+pair for `--head` does not pass. A calibration pair matches `--head`
+only at its `reviewed_commit`. A new head passes on its own pair, which
+records lens-fan-out, complete coverage, and a lens that ran, and is
+not scored for recall. A pair fails when recall of the
 reference findings is below 1, a selected lens was NOT RUN or failed,
 a lens named by a reference finding was not run, or file coverage is
 incomplete. An extra finding, a different verdict,

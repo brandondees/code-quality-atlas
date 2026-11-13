@@ -229,6 +229,20 @@ def test_a_full_directory_passes_only_with_the_head_and_an_over_context_pair(
     missed = load_directory(tmp_path, head="abc123")
     assert missed["gate_pass"] is False
     assert any("calibration row o/r#1" in item for item in missed["gate_failures"])
+    pair["input"]["pr"] = 1
+    pair["input"]["head_sha"] = "b" * 40
+    (tmp_path / "pair.json").write_text(json.dumps(pair), encoding="utf-8")
+    spoofed = load_directory(tmp_path, head="b" * 40)
+    assert spoofed["gate_pass"] is False
+    assert any("no passing pair for head" in item for item in spoofed["gate_failures"])
+    fresh = _passing_pair("c" * 40)
+    fresh["input"]["repo"] = "other/app"
+    fresh["input"]["pr"] = 9
+    fresh["candidate"]["lenses_run"] = ["reviewing-test-quality"]
+    fresh["metadata"]["run"] = "lens-fan-out"
+    (tmp_path / "head.json").write_text(json.dumps(fresh), encoding="utf-8")
+    opened = load_directory(tmp_path, head="c" * 40)
+    assert opened["gate_pass"] is True
 
 
 def test_the_reference_set_fails_closed_and_a_pair_cannot_replace_it(
@@ -345,6 +359,37 @@ def test_zero_findings_are_a_gap_unless_the_round_says_there_are_none():
         [],
     )
     assert earlier is not None and earlier["metadata"]["parse_gap"] is True
+    titled = reference_row(
+        {"number": 1, "head": {"sha": "abc"}, "base": {"repo": {"full_name": "o/r"}}},
+        {
+            "state": "APPROVED",
+            "commit_id": "abc",
+            "body": "## Round 1 — no new findings at or above this round's floor\n",
+        },
+        [],
+    )
+    assert titled is not None and titled["metadata"]["parse_gap"] is False
+    for sentence in (
+        "No findings at or above this round's floor (Nit).",
+        "**No new findings at or above this round's floor.**",
+        "`6cdc050` adds the path. Nothing new at or above this round's floor (Major).",
+    ):
+        rebuilt = reference_row(
+            {
+                "number": 1,
+                "head": {"sha": "abc"},
+                "base": {"repo": {"full_name": "o/r"}},
+            },
+            {
+                "state": "COMMENTED",
+                "commit_id": "abc",
+                "body": f"## Round 1 — APPROVE\n\n{sentence}\n",
+            },
+            [],
+        )
+        assert rebuilt is not None and rebuilt["metadata"]["parse_gap"] is False, (
+            sentence
+        )
     colon = protocol_review(
         "## Round 1 — notes\n<!-- atlas-review round:1 -->\n",
         [
@@ -391,7 +436,32 @@ def test_coverage_none_unreviewed_files_and_a_reused_finding_fail():
     )
 
 
-def test_a_non_utf8_fixture_is_a_usage_error(tmp_path):
+def test_a_reference_without_a_candidate_reports_a_parse_gap(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "atlas_reviewer.eval_harness.load_reference_set",
+        lambda: {("o/r", 1, 1, "abc"): ReferenceRow(EvalReview("COMMENT", ()), False)},
+    )
+    (tmp_path / "gap.json").write_text(
+        json.dumps(
+            {
+                "input": {
+                    "repo": "o/r",
+                    "pr": 1,
+                    "round": 1,
+                    "reviewed_commit": "abc",
+                    "head_sha": "abc",
+                },
+                "output": {"verdict": "COMMENT", "findings": []},
+                "metadata": {"parse_gap": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = load_directory(tmp_path, head="abc")
+    assert any(
+        "heading announces findings that were not parsed" in item
+        for item in report["gate_failures"]
+    )
     (tmp_path / "bad.json").write_bytes(b"\xff")
     with pytest.raises(EvalFormatError, match="cannot be read"):
         load_directory(tmp_path)
@@ -455,10 +525,10 @@ def test_the_hand_built_fixture_scores_the_overlap_the_miss_and_the_false_positi
     assert row["score"]["extras"] == 1
     assert row["score"]["verdict_agrees"] is False
     assert report["gate_pass"] is False
-    assert any("recall" in item for item in report["gate_failures"])
-    assert not any("extra" in item for item in report["gate_failures"])
-    assert not any("verdict" in item for item in report["gate_failures"])
-    assert any("coverage_complete" in item for item in report["gate_failures"])
+    assert any("recall" in item for item in row["gate_failures"])
+    assert not any("extra" in item for item in row["gate_failures"])
+    assert not any("verdict" in item for item in row["gate_failures"])
+    assert any("coverage_complete" in item for item in row["gate_failures"])
     assert any(
         "reviewing-naming-and-readability" in item for item in row["gate_failures"]
     )
@@ -726,7 +796,8 @@ def test_an_omitted_coverage_list_parses_and_fails_the_gate(tmp_path):
         encoding="utf-8",
     )
     report = load_directory(tmp_path)
-    assert any("lenses_run" in item for item in report["gate_failures"])
+    (row,) = report["results"]
+    assert any("lenses_run" in item for item in row["gate_failures"])
 
 
 def test_a_pair_without_a_reference_object_is_refused(tmp_path):

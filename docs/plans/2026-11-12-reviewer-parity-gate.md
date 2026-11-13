@@ -17,12 +17,15 @@ exits 0. The calibration set is the checked-in rows under
 `atlas_reviewer/fixtures/eval-references/`. The directory must contain a
 passing pair for every one of those rows, matched on repo, pull request,
 round, and `reviewed_commit`. One passing pair must be for the head
-being approved (`input.head_sha` or `input.reviewed_commit`), and one
-passing pair must record `metadata.over_context_window` (a diff larger
-than one model context window). A directory that holds only the pair for
-that head does not open the gate. A new pull request has no protocol row
-of its own, so the gate certifies the whole calibration set plus that
-head's pair. The reference for each pair is the checked-in row with
+being approved. A calibration pair counts only when ``--head`` is that
+row's ``reviewed_commit``. Editing its ``input.head_sha`` does not make
+another commit pass. A new pull request has no protocol row, so the
+directory also holds a pair for that head. That pair records
+``metadata.run`` ``lens-fan-out``, complete file coverage, and at least
+one lens that ran, and it is not scored against a reference it does not
+have. One passing pair must record `metadata.over_context_window` (a diff
+larger than one model context window). A directory that holds only the
+pair for that head does not open the gate. The reference for each calibration pair is the checked-in row with
 the same repo, pull request, round, and reviewed commit. A reference
 copied into the pair file is not the one the gate scores.
 
