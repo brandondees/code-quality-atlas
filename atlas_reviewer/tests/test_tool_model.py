@@ -117,7 +117,7 @@ def test_the_request_uses_the_one_shot_pin_and_only_our_tools():
     assert body["provider"]["allow_fallbacks"] is False
     assert body["model"] == MODEL_ID
     assert body["stream"] is False
-    assert body["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in body
     assert "cache_control" not in body["provider"]
     assert "plugins" not in body
     assert [tool["function"]["name"] for tool in body["tools"]] == [
@@ -129,6 +129,38 @@ def test_the_request_uses_the_one_shot_pin_and_only_our_tools():
     ]
     assert fake.chat_requests()[0][2]["Authorization"] == f"Bearer {KEY}"
     assert len(fake.chat_requests()) == 1
+
+
+def test_the_tool_request_omits_parameters_the_endpoint_does_not_list():
+    from .test_openrouter import zdr_payload
+
+    bare, fake = model(
+        reply(completion("findings")),
+        # The helper's catalog_reply is the model catalog. ZDR is separate.
+    )
+    fake.zdr = reply(zdr_payload(parameters=["max_tokens", "tools"]))
+    bare.turn(request())
+    body = sent(fake)
+    assert "reasoning" not in body
+    assert "cache_control" not in body
+    assert body["provider"]["require_parameters"] is True
+    assert body["provider"]["zdr"] is True
+    assert body["provider"]["data_collection"] == "deny"
+    assert body["provider"]["allow_fallbacks"] is False
+    assert "max_price" in body["provider"]
+    bare2, fake2 = model(reply(completion("findings")))
+    fake2.zdr = reply(zdr_payload(parameters=["tools"]))
+    bare2.turn(request())
+    assert sent(fake2)["max_tokens"] == 64_000
+
+    cached, cached_fake = model(reply(completion("findings")))
+    cached_fake.zdr = reply(
+        zdr_payload(parameters=["reasoning", "cache_control", "max_tokens", "tools"])
+    )
+    cached.turn(request())
+    sent_body = sent(cached_fake)
+    assert sent_body["cache_control"] == {"type": "ephemeral"}
+    assert sent_body["reasoning"]["exclude"] is True
 
 
 def test_a_tool_result_is_forwarded_with_its_nonce_fence_unchanged():
@@ -342,7 +374,7 @@ def test_a_reported_cost_is_used_when_cache_tokens_are_present():
     assert lens.turn(request()).cost_usd == Decimal("0.42")
 
 
-def test_a_turn_fetches_the_catalog_once():
+def test_a_review_fetches_the_catalog_and_the_zdr_list_once():
     usage = {"cost": "0.01", "is_byok": False}
     lens, fake = model(
         reply(completion("one", usage=usage)),
@@ -356,7 +388,12 @@ def test_a_turn_fetches_the_catalog_once():
     fetched = [
         url for _method, url, _headers, _body in fake.requests if "/model/" in url
     ]
-    assert len(fetched) == 2
+    zdr = [url for _m, url, _h, _b in fake.requests if url.endswith("/endpoints/zdr")]
+    assert fetched == [f"https://openrouter.ai/api/v1/model/{MODEL_ID}"]
+    assert zdr == ["https://openrouter.ai/api/v1/endpoints/zdr"]
+    other, other_fake = model(reply(completion("three", usage=usage)))
+    other.turn(request())
+    assert any("/model/" in url for _m, url, _h, _b in other_fake.requests)
 
 
 def test_an_unparseable_reply_on_a_no_byok_key_is_refused():

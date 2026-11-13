@@ -1139,11 +1139,49 @@ scrubbed, `http` export is loopback-only, and a dead collector cannot
 hold the process open at exit. D25's claim that `PyJWT[crypto]` is the
 only runtime dependency is amended: the OpenTelemetry packages are too.
 
+## 2026-11-12 — the live model and provider pin are configurable
+
+The OpenRouter model defaults to `anthropic/claude-sonnet-5.5` and can be
+set with `ATLAS_MODEL` or `--model`. `provider.only` defaults to the four
+Bedrock and Vertex slugs and can be one slug (`ATLAS_PROVIDERS` or
+`--providers`). `zdr: true`, `data_collection: deny`, `allow_fallbacks:
+false`, `require_parameters: true`, and `max_price` are not settings.
+Before a completion the adapter reads `GET /api/v1/endpoints/zdr` and
+refuses a slug that is not pure ZDR for that model. Safety Retention is
+off unless `ATLAS_ALLOW_SAFETY_RETENTION=true` or
+`--allow-safety-retention`. `reasoning` and `cache_control` are sent only
+when every selected endpoint lists them. No live call was made. D51.
+
+## 2026-11-12 — round 1 on the configurable model pin
+
+D51, not D49: #654 and #655 already use D49 and D50. A parent slug is
+refused when a child tag on the ZDR list is Safety Retention. A bare
+slug such as `deepinfra` is refused and the error names the exact tags.
+`max_tokens` stays the configured output cap. The ZDR list is read once
+per provider. A zero required rate and a non-finite per-million price
+are refused. No live call was made.
+
+## 2026-11-13 — round 2 on the configurable model pin
+
+D51's cost sentence now says each review adds one GET of the ZDR list
+per provider, which is what the cache does. A tag that only shares a
+slug's prefix, such as `amazon-bedrock-extra`, is not a child of that
+slug. No live call was made.
+
+## 2026-11-13 — round 3 on the configurable model pin
+
+The catalog is fetched once per provider for the review and reused.
+That is what `load_terms` does. The module docstring and the agentic
+README said it was fetched on every completion or turn, which was true
+before this cache. D41's sentence keeps the original design and notes
+the amendment. No live call was made.
+
 ## 2026-11-12 — agentic reviews run every selected lens, and a lens's unread files can be assigned to it again
 
 `agentic-review` is the command that applies the agentic limits. The
 one-shot `review` command does not accept those flags and does not read
-the `ATLAS_*` variables, and it still uses the
+the eight agentic `ATLAS_*` limit variables (it does read
+`ATLAS_KEY_CEILING_USD`), and it still uses the
 60,000-character lens budget, so a review-depth one-shot run still
 skips the picker. The agentic path calls the picker and runs the
 critical tier plus every ranked lens that has a body, up to the pool

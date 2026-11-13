@@ -1,34 +1,56 @@
 # SPDX-License-Identifier: MIT
 """Live OpenRouter model provider, pinned to the approved pilot settings.
 
-- Model `anthropic/claude-sonnet-5.5` only: no `models` fallback list, no
-  plugins, no web search, and a response from any other model is rejected.
-- Provider routing is pinned (`provider.only`, `allow_fallbacks: false`,
-  `require_parameters`, `zdr`, `data_collection: deny`, and `max_price` at
-  the catalog's highest prices) per
+- The model defaults to `anthropic/claude-sonnet-5.5`. `ATLAS_MODEL` or
+  `--model` selects another id. No `models` fallback list, no plugins, no
+  web search. A response is accepted only from the configured id, or from
+  a dated revision of that id (`<id>-YYYYMMDD`).
+- Provider routing stays pinned (`provider.only`, `allow_fallbacks:
+  false`, `require_parameters: true`, `zdr: true`, `data_collection:
+  deny`, and `max_price` at the catalog's highest prices) per
   https://openrouter.ai/docs/guides/routing/provider-selection (fetched
-  2026-11-07). That page's "Base Slug Matching" says a bare provider slug
-  in `only` matches every eligible endpoint of that provider, regions
-  included. A read-only check of the public provider list the same day
-  found no bare `google-vertex` endpoint, only `google-vertex/global`,
-  `google-vertex/us`, and `google-vertex/europe`, and found Amazon Bedrock
-  as the base slug `amazon-bedrock` plus region slugs it did not name.
-  `PINNED_PROVIDERS` is exactly those named slugs. A slug outside
-  `LISTED_PROVIDER_SLUGS` is refused before any request, so a doc example
-  (`google-vertex/us-east5`, `amazon-bedrock/eu-west-1`) or the bare
-  Vertex slug cannot widen routing. Bedrock's unnamed region slugs are
-  not pinned. https://openrouter.ai/docs/guides/features/in-region-routing
+  2026-11-07). `allow_fallbacks`, `require_parameters`, `zdr`,
+  `data_collection`, and `max_price` are not configurable. `only`
+  defaults to the slugs named by the 2026-11-07 public-list check
+  (`PINNED_PROVIDERS`). `ATLAS_PROVIDERS` or `--providers` replaces that
+  list, and a single slug is a valid pin. That page's "Base Slug
+  Matching" says a bare provider slug in `only` matches every eligible
+  endpoint of that provider, regions included.
+  https://openrouter.ai/docs/guides/features/in-region-routing
   ("Regional Endpoints on the Global Domain") says a bare
   `amazon-bedrock` does not pin that provider's regional-surcharge
-  endpoints.
+  endpoints, so those region slugs are not part of the default pin.
+- Before any completion the public zero-data-retention list is read,
+  without the key: `GET /api/v1/endpoints/zdr`. The guide that names
+  that URL is https://openrouter.ai/docs/guides/features/zdr (fetched
+  2026-11-12). It says the list includes Safety Retention endpoints.
+  Each row's `safety_retention` boolean was on that list the same day.
+  A requested slug is eligible only when every row for this model and
+  that exact tag has `safety_retention: false`, and every child tag
+  (`<slug>/...`) on the list for this model does too. A child that is
+  Safety Retention refuses the parent, because `only` of the parent can
+  expand to it. A slug with no exact row is refused, and the error names
+  child tags when the list has them (`deepinfra` is not a tag;
+  `deepinfra/fp8` is). A non-boolean flag refuses the slug. No
+  completion is sent. `zdr: true` still follows the account's Safety
+  Retention choice, so the client does not rely on that choice to drop
+  a listed child. `ATLAS_ALLOW_SAFETY_RETENTION=true` or
+  `--allow-safety-retention` opts in to those rows. The default is off.
+  The list and the model catalog are read once per provider and reused
+  for later completions in that review.
+- `reasoning` is sent only when every eligible row lists `reasoning` in
+  `supported_parameters`. `cache_control` is sent only when every
+  eligible row lists `cache_control`. `max_tokens` is always sent, at
+  the configured output cap. `require_parameters` stays true.
 - `preflight()` must pass before any inference: it reads the key's own
   status (`GET /api/v1/key`) and refuses unless the key has a hard credit
   limit of at most the configured ceiling (default `KEY_LIMIT_MAX_USD`),
   with credit left. A key whose `include_byok_in_limit` is false or
   absent is accepted. Raise the ceiling with `--key-ceiling-usd` or
   `ATLAS_KEY_CEILING_USD` when the key's own limit is higher.
-- Before each completion the public catalog entry is re-fetched (without
-  the key) and every limit is checked in code before a request is sent;
+- The public catalog entry is fetched once per provider for the review
+  and reused, without the key. Every limit is checked in code before a
+  request is sent;
   each attempt, retries included, reserves its worst-case cost in a
   per-review `ReviewBudget` first, capped at the lower of the review
   budget and the key's remaining credit as read by the preflight. Actual usage and cost are read from the
@@ -81,7 +103,8 @@ from __future__ import annotations
 import json
 import math
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, NoReturn
 
@@ -108,22 +131,20 @@ from atlas_reviewer.prompt import Prompt
 
 API_URL = "https://openrouter.ai/api/v1"
 MODEL_ID = "anthropic/claude-sonnet-5.5"
+ENV_MODEL = "ATLAS_MODEL"
+ENV_PROVIDERS = "ATLAS_PROVIDERS"
+ENV_ALLOW_SAFETY_RETENTION = "ATLAS_ALLOW_SAFETY_RETENTION"
 # Slugs named by the 2026-11-07 public-list check and the routing docs.
 # Not an inventory of every Bedrock region: those were reported, not named.
-LISTED_PROVIDER_SLUGS = frozenset(
-    {
-        "amazon-bedrock",
-        "google-vertex/europe",
-        "google-vertex/global",
-        "google-vertex/us",
-    }
-)
+# This is the default pin, not a closed set of slugs a request may name.
 PINNED_PROVIDERS = (
     "amazon-bedrock",
     "google-vertex/europe",
     "google-vertex/global",
     "google-vertex/us",
 )
+_MODEL_ID = re.compile(r"^[a-z0-9][a-z0-9._+-]*/[a-z0-9][a-z0-9._+-]*$")
+_PROVIDER_SLUG = re.compile(r"^[a-z0-9][a-z0-9._+-]*(?:/[a-z0-9][a-z0-9._+-]*)*$")
 KEY_LIMIT_MAX_USD = Decimal("5.00")
 RETRYABLE = frozenset({408, 429, 500, 502, 503, 504})
 _PER_MILLION = Decimal(1_000_000)
@@ -132,24 +153,259 @@ _PER_MILLION = Decimal(1_000_000)
 _MAX_RETRY_WAIT = 8.0
 
 
-def _require_listed(slugs: Sequence[str]) -> tuple[str, ...]:
-    """Refuse before any request when a slug is not on the reviewed list.
+@dataclass(frozen=True)
+class ModelRoute:
+    """The model and provider pin for one provider instance."""
 
-    An empty allowlist is refused too: `only: []` would drop the pin.
-    """
+    model_id: str
+    providers: tuple[str, ...]
+    allow_safety_retention: bool
+
+
+@dataclass(frozen=True)
+class SelectedEndpoints:
+    """Eligible ZDR rows for the route, and the parameters they all list."""
+
+    providers: tuple[str, ...]
+    supported: frozenset[str]
+
+
+def _model_id(raw: str) -> str:
+    model = raw.strip()
+    if _MODEL_ID.fullmatch(model) is None:
+        raise BudgetRefusedError(
+            f"refusing inference: {model!r} is not an OpenRouter model id"
+        )
+    return model
+
+
+def _provider_slugs(slugs: Sequence[str]) -> tuple[str, ...]:
+    """Drop duplicates. An empty list, or a slug that is not a provider
+    tag, is refused before any request: `only: []` would drop the pin."""
     if not slugs:
         raise BudgetRefusedError("refusing inference: provider allowlist is empty")
-    unknown = [slug for slug in slugs if slug not in LISTED_PROVIDER_SLUGS]
-    if unknown:
+    cleaned: list[str] = []
+    for slug in slugs:
+        text = slug.strip()
+        if _PROVIDER_SLUG.fullmatch(text) is None:
+            raise BudgetRefusedError(
+                f"refusing inference: {slug!r} is not a provider slug"
+            )
+        if text not in cleaned:
+            cleaned.append(text)
+    return tuple(cleaned)
+
+
+def _split_providers(raw: str) -> tuple[str, ...]:
+    parts = [part.strip() for part in raw.split(",")]
+    if any(part == "" for part in parts):
         raise BudgetRefusedError(
-            "refusing unlisted provider slugs: " + ", ".join(unknown)
+            "refusing inference: provider allowlist has an empty slug"
         )
-    return tuple(dict.fromkeys(slugs))
+    return _provider_slugs(parts)
+
+
+def _bool_flag(value: bool) -> bool:
+    if not isinstance(value, bool):
+        raise BudgetRefusedError(
+            "refusing inference: allow_safety_retention must be a boolean"
+        )
+    return value
+
+
+def _safety_retention_flag(raw: str | None) -> bool:
+    """Unset is off. Only `true` and `false` (any case) are values."""
+    if raw is None or raw.strip() == "":
+        return False
+    value = raw.strip().lower()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise BudgetRefusedError(
+        f"{ENV_ALLOW_SAFETY_RETENTION} must be true or false, not {raw!r}"
+    )
+
+
+def model_route(
+    env: Mapping[str, str],
+    *,
+    model: str | None = None,
+    providers: str | None = None,
+    allow_safety_retention: bool = False,
+) -> ModelRoute:
+    """A model or provider flag wins over its environment variable. An
+    empty flag is refused. An empty variable is unset, so the default
+    stands. Safety Retention is on when the flag is set or
+    `ATLAS_ALLOW_SAFETY_RETENTION` is true. The flag is store_true, so
+    it cannot turn a true environment variable off."""
+    _bool_flag(allow_safety_retention)
+    if model is not None:
+        if model.strip() == "":
+            raise BudgetRefusedError("refusing inference: model id is empty")
+        model_id = _model_id(model)
+    else:
+        raw_model = env.get(ENV_MODEL)
+        model_id = (
+            MODEL_ID
+            if raw_model is None or raw_model.strip() == ""
+            else _model_id(raw_model)
+        )
+    if providers is not None:
+        if providers.strip() == "":
+            raise BudgetRefusedError("refusing inference: provider allowlist is empty")
+        slugs = _split_providers(providers)
+    else:
+        raw_providers = env.get(ENV_PROVIDERS)
+        slugs = (
+            PINNED_PROVIDERS
+            if raw_providers is None or raw_providers.strip() == ""
+            else _split_providers(raw_providers)
+        )
+    allow = allow_safety_retention or _safety_retention_flag(
+        env.get(ENV_ALLOW_SAFETY_RETENTION)
+    )
+    return ModelRoute(model_id, slugs, allow)
+
+
+def _safety_flag(row: Json) -> bool | None:
+    flag = row.get("safety_retention")
+    if flag is True or flag is False:
+        return flag
+    return None
+
+
+def select_endpoints(data: Json, route: ModelRoute) -> SelectedEndpoints:
+    """Eligible rows of `GET /api/v1/endpoints/zdr` for this route.
+
+    A slug is eligible when the list has at least one row for this model
+    and that exact tag, and neither those rows nor any child tag
+    (`<slug>/...` for the same model) is Safety Retention, unless the
+    route opts in. A parent is refused when a child is Safety Retention,
+    because `provider.only` of the parent can expand to that child. A
+    slug with no exact row is refused, and the refusal names child tags
+    when the list has them. `supported` intersects `supported_parameters`
+    across the exact rows and those children. A parameter list that is
+    missing or not a list of strings contributes an empty set, so the
+    request omits `reasoning` and `cache_control`. `max_tokens` is not
+    optional.
+    """
+    items = data.get("data")
+    if not isinstance(items, list):
+        raise PricingUnknownError("ZDR endpoint list has no data array")
+    grouped: dict[str, list[Json]] = {}
+    for item in items:
+        if not isinstance(item, Mapping):
+            raise PricingUnknownError("ZDR endpoint list has a non-object entry")
+        if item.get("model_id") != route.model_id:
+            continue
+        tag = item.get("tag")
+        if not isinstance(tag, str):
+            continue
+        grouped.setdefault(tag, []).append(item)
+    problems: list[str] = []
+    chosen: list[Json] = []
+    for tag in route.providers:
+        rows = grouped.get(tag, [])
+        children = sorted(child for child in grouped if child.startswith(tag + "/"))
+        child_rows = [row for child in children for row in grouped[child]]
+        if not rows:
+            if children:
+                problems.append(
+                    f"{tag} has no ZDR row for {route.model_id}; pin an exact "
+                    "tag (" + ", ".join(children[:8]) + ")"
+                )
+            else:
+                problems.append(f"{tag} has no ZDR endpoint for {route.model_id}")
+            continue
+        scope = (*rows, *child_rows)
+        if any(_safety_flag(row) is None for row in scope):
+            problems.append(
+                f"{tag} has a ZDR row whose safety_retention is not a boolean"
+            )
+            continue
+        if not route.allow_safety_retention and any(
+            _safety_flag(row) is True for row in scope
+        ):
+            problems.append(
+                f"{tag} has a Safety Retention endpoint for {route.model_id}"
+                + (
+                    " (a child tag provider.only can expand to)"
+                    if any(_safety_flag(row) is True for row in child_rows)
+                    else ""
+                )
+            )
+            continue
+        chosen.extend(scope)
+    if problems:
+        raise BudgetRefusedError(
+            "refusing inference: no eligible zero-data-retention endpoint ("
+            + "; ".join(problems)
+            + "). zdr and data_collection deny stay on. Safety Retention "
+            f"requires {ENV_ALLOW_SAFETY_RETENTION}=true or --allow-safety-retention."
+        )
+    supported = _parameter_intersection(chosen)
+    return SelectedEndpoints(route.providers, supported)
+
+
+def _parameter_intersection(rows: Sequence[Json]) -> frozenset[str]:
+    sets: list[frozenset[str]] = []
+    for row in rows:
+        params = row.get("supported_parameters")
+        if not isinstance(params, list) or not all(isinstance(p, str) for p in params):
+            sets.append(frozenset())
+            continue
+        sets.append(frozenset(params))
+    if not sets:
+        return frozenset()
+    return frozenset.intersection(*sets)
+
+
+def _per_million(rate: Decimal, what: str) -> float:
+    value = float(rate * _PER_MILLION)
+    if not math.isfinite(value):
+        raise PricingUnknownError(f"{what} is not a finite per-million price")
+    return value
+
+
+def provider_preferences(providers: Sequence[str], terms: ModelTerms) -> dict[str, Any]:
+    """The routing document. The five constraints are literals.
+
+    `max_price` is the catalog's highest prompt and completion rates for
+    the model, including overrides, not only the eligible rows. A rate
+    that does not fit in a finite per-million JSON number is refused.
+    """
+    return {
+        "only": list(providers),
+        "allow_fallbacks": False,
+        "require_parameters": True,
+        "data_collection": "deny",
+        "zdr": True,
+        "max_price": {
+            "prompt": _per_million(terms.prompt_rate, "pricing.prompt"),
+            "completion": _per_million(terms.completion_rate, "pricing.completion"),
+        },
+    }
+
+
+def optional_parameters(
+    supported: frozenset[str], reasoning_max_tokens: int
+) -> dict[str, Any]:
+    """Parameters `require_parameters` would otherwise refuse.
+
+    `reasoning` and `cache_control` are included only when every selected
+    endpoint lists that name. The reasoning object, when sent, still
+    carries the configured token hint and `exclude`.
+    """
+    extra: dict[str, Any] = {}
+    if "reasoning" in supported:
+        extra["reasoning"] = {"max_tokens": reasoning_max_tokens, "exclude": True}
+    if "cache_control" in supported:
+        extra["cache_control"] = {"type": "ephemeral"}
+    return extra
 
 
 class OpenRouterProvider:
-    name = f"openrouter:{MODEL_ID}"
-
     def __init__(
         self,
         transport: Transport,
@@ -160,6 +416,8 @@ class OpenRouterProvider:
         timeout_s: float = 300.0,
         sleep: Callable[[float], None] = lambda _s: None,
         providers: Sequence[str] = PINNED_PROVIDERS,
+        model_id: str = MODEL_ID,
+        allow_safety_retention: bool = False,
         key_ceiling: Decimal = KEY_LIMIT_MAX_USD,
     ) -> None:
         self._transport = transport
@@ -167,10 +425,32 @@ class OpenRouterProvider:
         self._api_url = api_url.rstrip("/")
         self._timeout_s = timeout_s
         self._sleep = sleep
-        self._providers = _require_listed(providers)
         self.budget = ReviewBudget(limits or CallLimits())
         self._key_status: KeyStatus | None = None
         self.key_ceiling = key_ceiling
+        self._loaded: tuple[ModelRoute, ModelTerms, SelectedEndpoints] | None = None
+        self._route = ModelRoute(MODEL_ID, PINNED_PROVIDERS, False)
+        self.name = f"openrouter:{MODEL_ID}"
+        self.configure(
+            ModelRoute(
+                _model_id(model_id),
+                _provider_slugs(providers),
+                _bool_flag(allow_safety_retention),
+            )
+        )
+
+    def configure(self, route: ModelRoute) -> None:
+        self._route = route
+        self.name = f"openrouter:{route.model_id}"
+        self._loaded = None
+
+    @property
+    def model_id(self) -> str:
+        return self._route.model_id
+
+    @property
+    def _providers(self) -> tuple[str, ...]:
+        return self._route.providers
 
     def preflight(self) -> KeyStatus:
         status = parse_key_status(self._get_json("/key", authed=True))
@@ -186,7 +466,25 @@ class OpenRouterProvider:
         return status
 
     def usage_lines(self) -> tuple[str, ...]:
-        return (f"model `{MODEL_ID}` via OpenRouter", *self.budget.report())
+        return (f"model `{self.model_id}` via OpenRouter", *self.budget.report())
+
+    def load_terms(self) -> tuple[ModelTerms, SelectedEndpoints]:
+        """Catalog prices and the ZDR rows for this route. No completion.
+
+        The first call reads both documents. Later calls on this provider
+        reuse them, so one review does not download the ZDR list again.
+        `configure` drops the snapshot. A non-200 list, a transport
+        error, or an unreadable body raises and no completion is sent.
+        """
+        cached = self._loaded
+        if cached is not None and cached[0] == self._route:
+            return cached[1], cached[2]
+        terms = parse_model_terms(
+            self._get_json(f"/model/{self.model_id}"), self.model_id
+        )
+        selected = select_endpoints(self._get_json("/endpoints/zdr"), self._route)
+        self._loaded = (self._route, terms, selected)
+        return terms, selected
 
     def complete(self, prompt: Prompt) -> str:
         if self._key_status is None:
@@ -194,8 +492,9 @@ class OpenRouterProvider:
                 BudgetRefusedError("refusing inference: key preflight has not passed")
             )
         try:
-            terms = parse_model_terms(self._get_json(f"/model/{MODEL_ID}"), MODEL_ID)
-        except PricingUnknownError as exc:
+            terms, selected = self.load_terms()
+            body = self._body(prompt, terms, selected)
+        except (PricingUnknownError, BudgetRefusedError) as exc:
             self._refused(exc)
         tokens = input_token_bound(prompt.system + prompt.user)
         try:
@@ -203,7 +502,7 @@ class OpenRouterProvider:
         except BudgetRefusedError as exc:
             self._refused(exc)
         worst = worst_case_usd(tokens, terms, self.budget.limits)
-        return self._attempts(self._body(prompt, terms), terms, worst)
+        return self._attempts(body, terms, worst)
 
     def _refused(self, exc: BoundaryError) -> NoReturn:
         """Record a refusal that spent nothing and was not sent, then raise it."""
@@ -252,31 +551,27 @@ class OpenRouterProvider:
             ReviewBudget.settle(record, f"HTTP {resp.status}")
             raise BoundaryError(f"OpenRouter HTTP {resp.status} for {safe_url(url)}")
         counts_byok = self._key_status.counts_byok if self._key_status else False
-        return _completion(resp, terms, record, counts_byok=counts_byok)
+        return _completion(resp, terms, record, self.model_id, counts_byok=counts_byok)
 
-    def _body(self, prompt: Prompt, terms: ModelTerms) -> bytes:
+    def _body(
+        self, prompt: Prompt, terms: ModelTerms, selected: SelectedEndpoints
+    ) -> bytes:
         limits = self.budget.limits
-        payload = {
-            "model": MODEL_ID,
+        payload: dict[str, Any] = {
+            "model": self.model_id,
             "messages": [
                 {"role": "system", "content": prompt.system},
                 {"role": "user", "content": prompt.user},
             ],
+            # Always the configured output cap, even when the endpoint
+            # does not list max_tokens. The reservation prices this cap.
             "max_tokens": limits.max_output_tokens,
-            "reasoning": {"max_tokens": limits.reasoning_max_tokens, "exclude": True},
             "stream": False,
-            "provider": {
-                "only": list(self._providers),
-                "allow_fallbacks": False,
-                "require_parameters": True,
-                "data_collection": "deny",
-                "zdr": True,
-                "max_price": {
-                    "prompt": float(terms.prompt_rate * _PER_MILLION),
-                    "completion": float(terms.completion_rate * _PER_MILLION),
-                },
-            },
+            "provider": provider_preferences(selected.providers, terms),
         }
+        payload.update(
+            optional_parameters(selected.supported, limits.reasoning_max_tokens)
+        )
         return json.dumps(payload).encode()
 
     def _headers(self, *, authed: bool, json_body: bool = False) -> dict[str, str]:
@@ -328,7 +623,12 @@ def _json_object(raw: bytes, where: str, error: type[BoundaryError]) -> Json:
 
 
 def _completion(
-    resp: HttpResponse, terms: ModelTerms, record: CallRecord, *, counts_byok: bool
+    resp: HttpResponse,
+    terms: ModelTerms,
+    record: CallRecord,
+    model_id: str,
+    *,
+    counts_byok: bool,
 ) -> str:
     try:
         data = _json_object(resp.body, "OpenRouter chat completion", BoundaryError)
@@ -347,9 +647,9 @@ def _completion(
         _refuse_unless_explicitly_non_byok(usage_obj, terms, record)
     actual, summary = _actual_cost(usage_obj, terms)
     served = data.get("model")
-    if not isinstance(served, str) or not _is_pinned_model(served):
+    if not isinstance(served, str) or not _is_configured_model(served, model_id):
         ReviewBudget.settle(record, f"rejected: served by {served!r}", actual, summary)
-        raise BoundaryError(f"OpenRouter served {served!r}, not {MODEL_ID}")
+        raise BoundaryError(f"OpenRouter served {served!r}, not {model_id}")
     text, finish = _message(data)
     if not text.strip():
         ReviewBudget.settle(
@@ -367,11 +667,12 @@ def _completion(
     return text
 
 
-_DATED_REVISION = re.compile(re.escape(MODEL_ID) + r"-\d{8}")
-
-
-def _is_pinned_model(served: str) -> bool:
-    return served == MODEL_ID or _DATED_REVISION.fullmatch(served) is not None
+def _is_configured_model(served: str, model_id: str) -> bool:
+    """The configured id, or one dated revision of it. A different id, a
+    second suffix, or a suffix that is not eight digits is rejected."""
+    if served == model_id:
+        return True
+    return re.fullmatch(re.escape(model_id) + r"-\d{8}", served) is not None
 
 
 def _message(data: Json) -> tuple[str, str]:

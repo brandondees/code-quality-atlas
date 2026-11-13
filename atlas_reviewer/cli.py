@@ -87,7 +87,7 @@ from atlas_reviewer.ledger import (
 )
 from atlas_reviewer.lens_loop import AgenticLimits, FinalReply, LensModel, TurnRequest
 from atlas_reviewer.lenses import LensLibrary, LensStatus
-from atlas_reviewer.openrouter import KEY_LIMIT_MAX_USD, OpenRouterProvider
+from atlas_reviewer.openrouter import KEY_LIMIT_MAX_USD, OpenRouterProvider, model_route
 from atlas_reviewer.picker import Depth, picker_instructions, select_agentic_lenses
 from atlas_reviewer.ports import (
     BoundaryError,
@@ -226,6 +226,14 @@ def _select_provider(
     provider = openrouter(_require_env(env, ENV_OPENROUTER_KEY), limits)
     if isinstance(provider, OpenRouterProvider):
         provider.key_ceiling = _key_ceiling(args, env)
+        provider.configure(
+            model_route(
+                env,
+                model=args.model,
+                providers=args.providers,
+                allow_safety_retention=args.allow_safety_retention,
+            )
+        )
     telemetry.span("model preflight", "key status", provider.preflight)
     return provider
 
@@ -1111,6 +1119,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="the atlas depth mode: triage runs the critical tier with no picker call",
     )
     _events_arg(rev)
+    _model_args(rev)
     _key_ceiling_arg(rev)
     rev.add_argument("--provider", choices=PROVIDER_CHOICES, default="offline")
     rev.add_argument(
@@ -1159,6 +1168,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _events_arg(ag)
     _agentic_limit_args(ag)
+    _model_args(ag)
     _key_ceiling_arg(ag)
     ag.add_argument("--provider", choices=PROVIDER_CHOICES, default="offline")
     ag.add_argument(
@@ -1250,6 +1260,38 @@ def _positive_seconds(text: str) -> float:
     if not (math.isfinite(value) and value > 0):
         raise argparse.ArgumentTypeError("must be a positive number of seconds")
     return value
+
+
+def _model_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "OpenRouter model id (env ATLAS_MODEL; default "
+            "anthropic/claude-sonnet-5.5). A response from any other model "
+            "is rejected."
+        ),
+    )
+    parser.add_argument(
+        "--providers",
+        default=None,
+        help=(
+            "comma-separated provider slugs for provider.only (env "
+            "ATLAS_PROVIDERS; default amazon-bedrock,google-vertex/europe,"
+            "google-vertex/global,google-vertex/us). One slug pins that "
+            "provider. A slug with no pure-ZDR endpoint for the model is "
+            "refused."
+        ),
+    )
+    parser.add_argument(
+        "--allow-safety-retention",
+        action="store_true",
+        help=(
+            "allow OpenRouter Safety Retention endpoints (env "
+            "ATLAS_ALLOW_SAFETY_RETENTION=true). Off by default: a request "
+            "stays on pure zero-data-retention endpoints."
+        ),
+    )
 
 
 def _key_ceiling_arg(parser: argparse.ArgumentParser) -> None:
