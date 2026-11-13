@@ -516,8 +516,8 @@ flyp machine destroy "$MACHINE_ID" --app atlas-reviewer --force
 
 If the `fly machine wait` above errors or times out, that exit does
 not say the Machine stopped, and it does not say whether `finally`
-ran. Continue to `fly machine destroy --force`, then check the runner
-Sprite as in
+ran. Continue to `fly machine destroy --force`,
+then check the runner Sprite as in
 [Recover a runner Sprite by name](#recover-a-runner-sprite-by-name).
 If the flyctl that started this Machine is still running, kill it as in
 [Leftover flyctl after a stop](#leftover-flyctl-after-a-stop).
@@ -562,8 +562,8 @@ If the `fly machine run` that started this Machine has not returned
 in its shell, kill that flyctl once `fly machine list` no longer
 shows the Machine. In that shell, Ctrl-C kills it. If the shell is
 gone, list the matching processes. Confirm the line that carries
-`--name "$NAME"` and no `--rm` (the sweep and the probe include
-`--rm`), set `PID` to that pid, and kill it:
+`--name` with this run's `$NAME` value and no `--rm` (the sweep and
+the probe include `--rm`), set `PID` to that pid, and kill it:
 
 ```sh
 pgrep -af 'fly machine run'
