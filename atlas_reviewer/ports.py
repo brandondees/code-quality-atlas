@@ -57,6 +57,17 @@ class ResponseTooLargeError(BoundaryError):
     """A download exceeded the byte cap the caller set for it."""
 
 
+class TransportError(BoundaryError):
+    """A model call failed on the transport, before any response arrived:
+    DNS, connect, write, or a read that never completed. Distinct from a
+    model error, which is a response the provider or model produced."""
+
+
+class TransportTimeoutError(TransportError):
+    """A socket operation of the request timed out: the read side of the
+    exchange, not the model's answer."""
+
+
 class StreamTimeoutError(BoundaryError):
     """A streamed response stopped arriving. `received` is every body byte
     that did arrive, and `first_byte` says the wait that ran out was the

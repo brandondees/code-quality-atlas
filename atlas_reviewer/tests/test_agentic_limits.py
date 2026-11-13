@@ -45,7 +45,13 @@ def test_unset_limits_keep_the_defaults_and_derive_per_call_bounds():
     terms = parse_model_terms(catalog(), MODEL_ID)
     call = resolve_per_call(resolved, terms)
     assert call.max_output_tokens == 64_000
-    assert call.reasoning_max_tokens == default_reasoning_tokens(64_000) == 32_000
+    # An Anthropic Claude id keeps the half-output hint (D58 caps the
+    # default only outside `anthropic/`).
+    assert (
+        call.reasoning_max_tokens
+        == default_reasoning_tokens(64_000, MODEL_ID)
+        == 32_000
+    )
     assert call.max_output_tokens - call.reasoning_max_tokens == 32_000
     assert call.max_input_tokens == 1_000_000 - 64_000
 
@@ -123,7 +129,11 @@ def test_a_prompt_over_the_input_cap_names_the_limit_and_is_not_sent():
     with pytest.raises(LimitRefused, match="max_input_tokens") as raised:
         lens.worst_case_usd(request())
     assert raised.value.hit.setting == "--max-input-tokens or ATLAS_MAX_INPUT_TOKENS"
-    assert int(raised.value.hit.observed) > int(raised.value.hit.configured)
+    observed = raised.value.hit.observed
+    # The observed bound leads with the number and names the basis it came
+    # from (D58's diagnosability), here the byte bound of a first turn.
+    assert int(observed.partition(" ")[0]) > int(raised.value.hit.configured)
+    assert "bound from bytes" in observed
     assert fake.chat_requests() == []
 
 
@@ -225,6 +235,45 @@ def test_every_agentic_limit_can_be_set_and_a_bad_one_is_refused():
         load_agentic_limits({"ATLAS_REVIEW_WALL_S": "later"})
     with pytest.raises(ValueError, match="unknown agentic limit"):
         load_agentic_limits({}, nope="1")
+
+
+def test_the_no_progress_thresholds_are_configurable_and_bad_ones_are_refused():
+    """D58: the detector's two thresholds are limits like the others."""
+    limits = load_agentic_limits(
+        {"ATLAS_NO_PROGRESS_TURNS": "3", "ATLAS_DUPLICATE_CALLS": "2"}
+    )
+    resolved = limits.resolve()
+    assert (resolved.no_progress_turns, resolved.duplicate_calls) == (3, 2)
+    defaults = load_agentic_limits({}).resolve()
+    assert (defaults.no_progress_turns, defaults.duplicate_calls) == (6, 3)
+    with pytest.raises(ValueError, match="no_progress_turns"):
+        load_agentic_limits({"ATLAS_NO_PROGRESS_TURNS": "0"})
+    with pytest.raises(ValueError, match="duplicate_calls"):
+        load_agentic_limits({"ATLAS_DUPLICATE_CALLS": "later"})
+    with pytest.raises(ValueError, match="no_progress_turns"):
+        AgenticLimits(no_progress_turns=True).resolve()
+
+
+def test_the_reasoning_hint_is_capped_outside_anthropic():
+    """D58: the trials measured open-weight models spending up to 96% of
+    each turn on reasoning at the half-output hint, at 31-46 s a turn,
+    until the lens clock ran out. The default hint is capped at 8,192 for
+    every model outside `anthropic/`; an override still wins."""
+    deepseek = replace(
+        parse_model_terms(catalog(), MODEL_ID),
+        model_id="deepseek/deepseek-v4.1-flash",
+    )
+    resolved = AgenticLimits().resolve()
+    call = resolve_per_call(resolved, deepseek)
+    assert call.max_output_tokens == 64_000
+    assert call.reasoning_max_tokens == 8_192
+    # A small output cap leaves the hint at half of it.
+    small = replace(resolved, max_output_tokens=10_000)
+    assert resolve_per_call(small, deepseek).reasoning_max_tokens == 5_000
+    sonnet = parse_model_terms(catalog(), MODEL_ID)
+    assert resolve_per_call(resolved, sonnet).reasoning_max_tokens == 32_000
+    overridden = replace(resolved, reasoning_max_tokens=2000)
+    assert resolve_per_call(overridden, deepseek).reasoning_max_tokens == 2000
 
 
 def test_a_per_call_override_must_be_a_positive_int_the_model_can_hold():

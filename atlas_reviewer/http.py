@@ -25,6 +25,7 @@ from atlas_reviewer.ports import (
     BoundaryError,
     ResponseTooLargeError,
     StreamTimeoutError,
+    TransportTimeoutError,
 )
 
 DEFAULT_MAX_BYTES = 50 * 1024 * 1024
@@ -104,7 +105,23 @@ class UrllibTransport:
         except urllib.error.HTTPError as exc:
             return HttpResponse(exc.code, dict(exc.headers or {}), _read(exc, cap, url))
         except (urllib.error.URLError, OSError) as exc:
-            raise BoundaryError(f"{method} {safe_url(url)} failed: {exc}") from exc
+            raise _transport_error(method, url, exc) from exc
+
+
+def _transport_error(method: str, url: str, exc: Exception) -> BoundaryError:
+    """The request's failure as a boundary error, a `TransportTimeoutError`
+    when the underlying error is a timeout. A `URLError` carries the socket
+    error as its `reason`; a timeout during the body read arrives here as
+    the `OSError` itself. An SSL read timeout surfaces as an `SSLError`
+    whose text says "timed out", so the text is checked too."""
+    reason = getattr(exc, "reason", exc)
+    timed_out = isinstance(reason, TimeoutError) or (
+        isinstance(reason, OSError) and "timed out" in str(reason).lower()
+    )
+    message = f"{method} {safe_url(url)} failed: {exc}"
+    if timed_out:
+        return TransportTimeoutError(message)
+    return BoundaryError(message)
 
 
 @dataclass(frozen=True)
