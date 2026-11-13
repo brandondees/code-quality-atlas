@@ -77,6 +77,27 @@ def test_the_child_receives_only_the_allowlist():
     }
 
 
+def test_the_child_receives_the_route_settings_and_not_other_secrets():
+    env = child_env(
+        {
+            WEBHOOK_SECRET_ENV: "s" * 16,
+            APP_KEY_ENV: "pem-secret-value",
+            "ATLAS_REQUIRE_ZDR": "false",
+            "ATLAS_MAX_OUTPUT_TOKENS": "65536",
+            "ATLAS_MODEL": "z-ai/glm-5.3",
+            "FLY_API_TOKEN": "fly-token-value",
+            "PATH": "/usr/bin",
+        },
+        token="ghs_read",
+    )
+    assert env["ATLAS_REQUIRE_ZDR"] == "false"
+    assert env["ATLAS_MAX_OUTPUT_TOKENS"] == "65536"
+    assert env["ATLAS_MODEL"] == "z-ai/glm-5.3"
+    assert "FLY_API_TOKEN" not in env
+    assert APP_KEY_ENV not in env
+    assert WEBHOOK_SECRET_ENV not in env
+
+
 def test_the_child_does_not_receive_the_app_private_key():
     env = child_env(
         {

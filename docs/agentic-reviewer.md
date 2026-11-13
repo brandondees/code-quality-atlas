@@ -223,9 +223,12 @@ itself, and a timeout is a coverage gap.
   list). Agentic mode has
   Brandon's provisional defaults (2026-11-11), for headroom and
   configurable. The $5 reservation is D43's decision; the other four
-  limits stay provisional. The per-call input cap is the pinned model's
-  context minus the output reserve, and the output cap is the model's
-  completion limit. The reasoning value is a hint; the reservation does
+  limits stay provisional. The per-call input cap is the pinned
+  endpoints' context minus the output reserve. The output cap is those
+  endpoints' completion limit, unless that limit is more than a quarter
+  of the context, in which case the default is the quarter.
+  `ATLAS_MAX_OUTPUT_TOKENS` overrides it. The reasoning value is a hint;
+  the reservation does
   not depend on it. The tool-calling adapter and the Sprite keepalive
   are built offline (D41), and the D41 probe (2026-11-12) is recorded
   there.
