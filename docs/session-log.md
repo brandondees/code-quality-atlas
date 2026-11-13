@@ -1160,3 +1160,10 @@ slug such as `deepinfra` is refused and the error names the exact tags.
 `max_tokens` stays the configured output cap. The ZDR list is read once
 per provider. A zero required rate and a non-finite per-million price
 are refused. No live call was made.
+
+## 2026-11-13 — round 2 on the configurable model pin
+
+D51's cost sentence now says each review adds one GET of the ZDR list
+per provider, which is what the cache does. A tag that only shares a
+slug's prefix, such as `amazon-bedrock-extra`, is not a child of that
+slug. No live call was made.

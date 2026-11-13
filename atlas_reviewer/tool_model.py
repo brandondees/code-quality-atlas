@@ -101,8 +101,9 @@ class OpenRouterLensModel:
 
     def worst_case_usd(self, request: TurnRequest) -> Decimal:
         terms, counts_byok, selected = self._ready()
-        # The loop prices the turn and then places it. One catalog fetch
-        # serves both; the next turn fetches again.
+        # The loop prices the turn and then places it. The catalog and the
+        # ZDR snapshot are loaded once for this provider and reused for
+        # later turns in the review.
         self._ready_for_turn = (terms, counts_byok, selected)
         bounds = resolve_per_call(self.per_call, terms)
         payload = _payload(self.provider, request, terms, bounds, selected)

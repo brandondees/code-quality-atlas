@@ -513,6 +513,25 @@ def test_a_bare_slug_with_only_child_rows_names_those_tags_and_sends_nothing():
     assert fake.chat_requests() == []
 
 
+def test_a_tag_sharing_only_the_prefix_does_not_refuse_the_parent():
+    payload = zdr_payload(providers=("amazon-bedrock",))
+    payload["data"].append(
+        {
+            "model_id": MODEL_ID,
+            "tag": "amazon-bedrock-extra",
+            "safety_retention": True,
+            "supported_parameters": ["reasoning", "max_tokens"],
+        }
+    )
+    fake = OpenRouterFake(reply(completion()), zdr=reply(payload))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    assert adapter.complete(SMALL) == "review text"
+    assert json.loads(fake.chat_requests()[0][3])["provider"]["only"] == [
+        "amazon-bedrock"
+    ]
+
+
 def test_a_pure_child_does_not_rewrite_the_requested_slug():
     payload = zdr_payload(providers=("amazon-bedrock",))
     payload["data"].append(
