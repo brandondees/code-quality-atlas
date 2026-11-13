@@ -3,10 +3,13 @@
 code before a request is sent. No test here touches the network."""
 
 import json
+import re
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
+from atlas_reviewer import openrouter
 from atlas_reviewer.budget import (
     BudgetRefusedError,
     CallLimits,
@@ -17,10 +20,13 @@ from atlas_reviewer.budget import (
 )
 from atlas_reviewer.http import HttpResponse
 from atlas_reviewer.openrouter import (
-    LISTED_PROVIDER_SLUGS,
+    ENV_ALLOW_SAFETY_RETENTION,
+    ENV_MODEL,
+    ENV_PROVIDERS,
     MODEL_ID,
     PINNED_PROVIDERS,
     OpenRouterProvider,
+    model_route,
 )
 from atlas_reviewer.ports import BoundaryError, ByokRefusedError
 from atlas_reviewer.pricing import (
@@ -64,6 +70,47 @@ def key_status(limit=5, remaining=5, usage=0, include_byok_in_limit=True, **extr
     return {"data": data}
 
 
+def zdr_payload(
+    model=MODEL_ID,
+    providers=PINNED_PROVIDERS,
+    *,
+    safety=False,
+    parameters=None,
+):
+    params = (
+        ["reasoning", "include_reasoning", "max_tokens", "tools"]
+        if parameters is None
+        else list(parameters)
+    )
+    rows = [
+        {
+            "model_id": model,
+            "tag": tag,
+            "safety_retention": safety,
+            "supported_parameters": params,
+        }
+        for tag in providers
+    ]
+    # A different model and a non-string tag are present and must be ignored.
+    rows.append(
+        {
+            "model_id": "other/model",
+            "tag": "other",
+            "safety_retention": False,
+            "supported_parameters": ["reasoning"],
+        }
+    )
+    rows.append(
+        {
+            "model_id": model,
+            "tag": None,
+            "safety_retention": False,
+            "supported_parameters": ["reasoning"],
+        }
+    )
+    return {"data": rows}
+
+
 def completion(text="review text", model=MODEL_ID, usage=None, finish="stop"):
     return {
         "model": model,
@@ -80,17 +127,24 @@ def reply(payload, status=200, headers=None):
 class OpenRouterFake:
     """Serves the key and catalog endpoints; chat replies come from a script."""
 
-    def __init__(self, *chat, key=None, model=None):
+    def __init__(self, *chat, key=None, model=None, zdr=None, catalogs=None):
         self.chat = list(chat)
         self.key = key if key is not None else reply(key_status())
         self.model = model if model is not None else reply(catalog())
+        self.catalogs = catalogs or {}
+        self.zdr = zdr if zdr is not None else reply(zdr_payload())
         self.requests = []
 
     def request(self, method, url, headers, body, timeout_s, max_bytes=None):
         self.requests.append((method, url, dict(headers), body))
         if url == f"{API}/key":
             return self.key
-        if url == f"{API}/model/{MODEL_ID}":
+        if url == f"{API}/endpoints/zdr":
+            return self.zdr
+        if url.startswith(f"{API}/model/"):
+            model_id = url[len(f"{API}/model/") :]
+            if model_id in self.catalogs:
+                return self.catalogs[model_id]
             return self.model
         step = self.chat.pop(0)
         if isinstance(step, Exception):
@@ -131,8 +185,26 @@ def test_request_is_pinned_to_one_model_with_no_fallbacks_or_plugins():
         "zdr": True,
         "max_price": {"prompt": 6.0, "completion": 22.5},
     }
-    assert set(PINNED_PROVIDERS) == LISTED_PROVIDER_SLUGS
     assert "google-vertex" not in sent["provider"]["only"]
+
+
+@pytest.mark.parametrize(
+    "slugs",
+    [
+        (),
+        ("",),
+        ("Google-Vertex/us",),
+        ("../amazon-bedrock",),
+        ("amazon bedrock",),
+    ],
+)
+def test_an_empty_or_malformed_provider_slug_is_refused_before_any_request(slugs):
+    fake = OpenRouterFake(reply(completion()))
+    with pytest.raises(
+        BudgetRefusedError, match="allowlist is empty|not a provider slug"
+    ):
+        OpenRouterProvider(fake, KEY, providers=slugs)
+    assert fake.requests == []
 
 
 @pytest.mark.parametrize(
@@ -142,24 +214,391 @@ def test_request_is_pinned_to_one_model_with_no_fallbacks_or_plugins():
         ("google-vertex/us-east5",),
         ("amazon-bedrock/eu-west-1",),
         ("openai",),
-        ("amazon-bedrock", "not-a-provider"),
-        (),
+        ("not-a-provider",),
     ],
 )
-def test_unknown_or_unlisted_provider_slugs_fail_closed(slugs):
+def test_a_slug_with_no_pure_zdr_endpoint_is_not_sent(slugs):
     fake = OpenRouterFake(reply(completion()))
-    with pytest.raises(
-        BudgetRefusedError, match="unlisted provider slugs|allowlist is empty"
-    ):
-        OpenRouterProvider(fake, KEY, providers=slugs)
-    assert fake.requests == []
+    adapter = OpenRouterProvider(fake, KEY, providers=slugs)
+    adapter.preflight()
+    with pytest.raises(BudgetRefusedError, match="no eligible zero-data-retention"):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []
+    assert any(url.endswith("/endpoints/zdr") for _m, url, _h, _b in fake.requests)
 
 
 def test_catalog_is_fetched_without_the_key():
     fake = OpenRouterFake(reply(completion()))
     provider(fake).complete(SMALL)
     catalog_get = next(r for r in fake.requests if "/model/" in r[1])
+    zdr_get = next(r for r in fake.requests if r[1].endswith("/endpoints/zdr"))
     assert "Authorization" not in catalog_get[2]
+    assert "Authorization" not in zdr_get[2]
+
+
+def test_one_provider_is_a_valid_pin_and_the_output_cap_stays_configured():
+    fake = OpenRouterFake(reply(completion()))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    assert adapter.complete(SMALL) == "review text"
+    sent = json.loads(fake.chat_requests()[0][3])
+    assert sent["provider"]["only"] == ["amazon-bedrock"]
+    assert sent["provider"]["zdr"] is True
+    assert sent["provider"]["data_collection"] == "deny"
+    assert sent["provider"]["allow_fallbacks"] is False
+    assert sent["provider"]["require_parameters"] is True
+    # The catalog fixture's completion limit is 64_000. The request uses
+    # the configured cap, not that catalog number.
+    assert sent["max_tokens"] == 24_000
+    assert sent["reasoning"] == {"max_tokens": 12_000, "exclude": True}
+    assert "cache_control" not in sent
+
+
+def test_reasoning_and_cache_control_follow_the_endpoint_parameters():
+    both = zdr_payload(parameters=["reasoning", "cache_control", "max_tokens"])
+    fake = OpenRouterFake(reply(completion()), zdr=reply(both))
+    adapter = provider(fake)
+    adapter.complete(SMALL)
+    sent = json.loads(fake.chat_requests()[0][3])
+    assert sent["reasoning"]["max_tokens"] == 12_000
+    assert sent["cache_control"] == {"type": "ephemeral"}
+    assert sent["provider"]["require_parameters"] is True
+
+    no_reasoning = zdr_payload(parameters=["max_tokens", "tools"])
+    bare = OpenRouterFake(reply(completion()), zdr=reply(no_reasoning))
+    provider(bare).complete(SMALL)
+    omitted = json.loads(bare.chat_requests()[0][3])
+    assert "reasoning" not in omitted
+    assert "cache_control" not in omitted
+    assert omitted["max_tokens"] == 24_000
+
+    mixed = {
+        "data": [
+            {
+                "model_id": MODEL_ID,
+                "tag": "amazon-bedrock",
+                "safety_retention": False,
+                "supported_parameters": ["reasoning", "cache_control"],
+            },
+            {
+                "model_id": MODEL_ID,
+                "tag": "google-vertex/global",
+                "safety_retention": False,
+                "supported_parameters": ["reasoning"],
+            },
+        ]
+    }
+    half = OpenRouterFake(reply(completion()), zdr=reply(mixed))
+    pinned = OpenRouterProvider(
+        half, KEY, providers=("amazon-bedrock", "google-vertex/global")
+    )
+    pinned.preflight()
+    pinned.complete(SMALL)
+    body = json.loads(half.chat_requests()[0][3])
+    assert "reasoning" in body
+    assert "cache_control" not in body
+
+
+def test_safety_retention_is_off_unless_the_route_opts_in():
+    retained = zdr_payload(providers=("google-vertex/global",), safety=True)
+    fake = OpenRouterFake(reply(completion()), zdr=reply(retained))
+    adapter = OpenRouterProvider(fake, KEY, providers=("google-vertex/global",))
+    adapter.preflight()
+    with pytest.raises(BudgetRefusedError, match="Safety Retention"):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []
+
+    allowed = OpenRouterProvider(
+        fake, KEY, providers=("google-vertex/global",), allow_safety_retention=True
+    )
+    allowed.preflight()
+    assert allowed.complete(SMALL) == "review text"
+    assert json.loads(fake.chat_requests()[0][3])["provider"]["zdr"] is True
+
+
+def test_a_mixed_safety_row_blocks_the_slug_until_the_opt_in():
+    mixed = {
+        "data": [
+            {
+                "model_id": MODEL_ID,
+                "tag": "google-vertex/global",
+                "safety_retention": False,
+                "supported_parameters": ["reasoning"],
+            },
+            {
+                "model_id": MODEL_ID,
+                "tag": "google-vertex/global",
+                "safety_retention": True,
+                "supported_parameters": ["reasoning"],
+            },
+        ]
+    }
+    fake = OpenRouterFake(reply(completion()), zdr=reply(mixed))
+    adapter = OpenRouterProvider(fake, KEY, providers=("google-vertex/global",))
+    adapter.preflight()
+    with pytest.raises(BudgetRefusedError, match="Safety Retention"):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []
+
+
+def test_a_response_is_accepted_only_from_the_configured_model():
+    alt = "deepseek/deepseek-v4.1-flash"
+    listed = catalog()
+    listed["data"]["id"] = alt
+    fake = OpenRouterFake(
+        reply(completion(model=MODEL_ID)),
+        catalogs={alt: reply(listed)},
+        zdr=reply(zdr_payload(alt, ("deepinfra/fp8",), parameters=["max_tokens"])),
+    )
+    adapter = OpenRouterProvider(fake, KEY, model_id=alt, providers=("deepinfra/fp8",))
+    adapter.preflight()
+    with pytest.raises(BoundaryError, match=re.escape(MODEL_ID)):
+        adapter.complete(SMALL)
+    assert json.loads(fake.chat_requests()[0][3])["model"] == alt
+
+    dated = OpenRouterFake(
+        reply(completion(model=f"{alt}-20261017")),
+        catalogs={alt: reply(listed)},
+        zdr=reply(zdr_payload(alt, ("deepinfra/fp8",), parameters=["max_tokens"])),
+    )
+    ok = OpenRouterProvider(dated, KEY, model_id=alt, providers=("deepinfra/fp8",))
+    ok.preflight()
+    assert ok.complete(SMALL) == "review text"
+
+    other = OpenRouterFake(
+        reply(completion(model=f"{alt}-turbo")),
+        catalogs={alt: reply(listed)},
+        zdr=reply(zdr_payload(alt, ("deepinfra/fp8",), parameters=["max_tokens"])),
+    )
+    rejected = OpenRouterProvider(
+        other, KEY, model_id=alt, providers=("deepinfra/fp8",)
+    )
+    rejected.preflight()
+    with pytest.raises(BoundaryError, match="turbo"):
+        rejected.complete(SMALL)
+
+
+def test_the_route_reads_the_flag_before_the_environment():
+    route = model_route({})
+    assert route.model_id == MODEL_ID
+    assert route.providers == PINNED_PROVIDERS
+    assert route.allow_safety_retention is False
+
+    chosen = model_route(
+        {
+            ENV_MODEL: "deepseek/deepseek-v4.1-flash",
+            ENV_PROVIDERS: "fireworks, fireworks",
+            ENV_ALLOW_SAFETY_RETENTION: "true",
+        },
+        model="google/gemini-3.5-flash",
+        providers="deepinfra/fp8",
+        allow_safety_retention=False,
+    )
+    # The flag names the model and the provider. The env can still turn
+    # Safety Retention on, because the flag's store_true cannot say "off".
+    assert chosen.model_id == "google/gemini-3.5-flash"
+    assert chosen.providers == ("deepinfra/fp8",)
+    assert chosen.allow_safety_retention is True
+
+    with pytest.raises(BudgetRefusedError, match="not an OpenRouter model id"):
+        model_route({}, model="anthropic/claude-sonnet-5.5:online")
+    with pytest.raises(BudgetRefusedError, match="empty"):
+        model_route({}, model="")
+    with pytest.raises(BudgetRefusedError, match="must be true or false"):
+        model_route({ENV_ALLOW_SAFETY_RETENTION: "yes"})
+    # An empty variable is unset, so the default model stands.
+    assert model_route({ENV_MODEL: "  "}).model_id == MODEL_ID
+    assert (
+        model_route({ENV_ALLOW_SAFETY_RETENTION: "FALSE"}).allow_safety_retention
+        is False
+    )
+    with pytest.raises(BudgetRefusedError, match="empty slug"):
+        model_route({}, providers="amazon-bedrock,,google-vertex/us")
+    with pytest.raises(BudgetRefusedError, match="allowlist is empty"):
+        model_route({}, providers="  ")
+    with pytest.raises(BudgetRefusedError, match="must be a boolean"):
+        model_route({}, allow_safety_retention="true")  # type: ignore[arg-type]
+
+
+def test_an_unreadable_zdr_list_refuses_before_a_completion():
+    fake = OpenRouterFake(reply(completion()), zdr=reply({"data": "nope"}))
+    adapter = provider(fake)
+    with pytest.raises(PricingUnknownError, match="no data array"):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []
+
+    broken = OpenRouterFake(
+        reply(completion()),
+        zdr=reply({"data": [{"model_id": MODEL_ID, "tag": "amazon-bedrock"}]}),
+    )
+    # The other three default slugs have no row, so the refusal names them.
+    # The bedrock row has no boolean and is refused on its own if it is the
+    # only slug. Pin that one slug so the missing flag is the reason.
+    only = OpenRouterProvider(broken, KEY, providers=("amazon-bedrock",))
+    only.preflight()
+    with pytest.raises(BudgetRefusedError, match="not a boolean"):
+        only.complete(SMALL)
+    assert broken.chat_requests() == []
+
+    foreign = OpenRouterFake(reply(completion()), zdr=reply({"data": ["row"]}))
+    refused = provider(foreign)
+    with pytest.raises(PricingUnknownError, match="non-object"):
+        refused.complete(SMALL)
+    assert foreign.chat_requests() == []
+
+    messy = zdr_payload(providers=("amazon-bedrock",), parameters=["reasoning"])
+    messy["data"][0]["supported_parameters"] = {"reasoning": True}
+    quiet = OpenRouterFake(reply(completion()), zdr=reply(messy))
+    pinned = OpenRouterProvider(quiet, KEY, providers=("amazon-bedrock",))
+    pinned.preflight()
+    pinned.complete(SMALL)
+    assert "reasoning" not in json.loads(quiet.chat_requests()[0][3])
+
+
+def test_a_non_200_zdr_list_and_a_timeout_send_no_completion():
+    refused = OpenRouterFake(reply(completion()), zdr=reply({}, status=503))
+    adapter = provider(refused)
+    with pytest.raises(PricingUnknownError, match="HTTP 503"):
+        adapter.complete(SMALL)
+    assert refused.chat_requests() == []
+    assert any(url.endswith("/endpoints/zdr") for _m, url, _h, _b in refused.requests)
+
+    class Timeout(OpenRouterFake):
+        def request(self, method, url, headers, body, timeout_s, max_bytes=None):
+            if str(url).endswith("/endpoints/zdr"):
+                self.requests.append((method, url, dict(headers), body))
+                raise BoundaryError("timed out")
+            return super().request(method, url, headers, body, timeout_s, max_bytes)
+
+    timed = Timeout(reply(completion()))
+    waiting = provider(timed)
+    with pytest.raises(BoundaryError, match="timed out"):
+        waiting.complete(SMALL)
+    assert timed.chat_requests() == []
+
+
+def test_max_tokens_is_sent_when_the_endpoint_does_not_advertise_it():
+    fake = OpenRouterFake(
+        reply(completion()), zdr=reply(zdr_payload(parameters=["tools"]))
+    )
+    provider(fake).complete(SMALL)
+    sent = json.loads(fake.chat_requests()[0][3])
+    assert sent["max_tokens"] == 24_000
+    assert "max_tokens" not in sent.get("provider", {})
+
+
+def test_a_safety_retention_child_refuses_the_parent_slug():
+    payload = zdr_payload(providers=("amazon-bedrock",))
+    payload["data"].append(
+        {
+            "model_id": MODEL_ID,
+            "tag": "amazon-bedrock/eu-west-1",
+            "safety_retention": True,
+            "supported_parameters": ["reasoning", "max_tokens"],
+        }
+    )
+    fake = OpenRouterFake(reply(completion()), zdr=reply(payload))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    with pytest.raises(BudgetRefusedError, match="child tag"):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []
+
+
+def test_a_bare_slug_with_only_child_rows_names_those_tags_and_sends_nothing():
+    payload = zdr_payload(providers=("deepinfra/fp8",), parameters=["tools"])
+    fake = OpenRouterFake(reply(completion()), zdr=reply(payload))
+    adapter = OpenRouterProvider(fake, KEY, providers=("deepinfra",))
+    adapter.preflight()
+    with pytest.raises(BudgetRefusedError, match="deepinfra/fp8"):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []
+
+
+def test_a_tag_sharing_only_the_prefix_does_not_refuse_the_parent():
+    payload = zdr_payload(providers=("amazon-bedrock",))
+    payload["data"].append(
+        {
+            "model_id": MODEL_ID,
+            "tag": "amazon-bedrock-extra",
+            "safety_retention": True,
+            "supported_parameters": ["reasoning", "max_tokens"],
+        }
+    )
+    fake = OpenRouterFake(reply(completion()), zdr=reply(payload))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    assert adapter.complete(SMALL) == "review text"
+    assert json.loads(fake.chat_requests()[0][3])["provider"]["only"] == [
+        "amazon-bedrock"
+    ]
+
+
+def test_a_pure_child_does_not_rewrite_the_requested_slug():
+    payload = zdr_payload(providers=("amazon-bedrock",))
+    payload["data"].append(
+        {
+            "model_id": MODEL_ID,
+            "tag": "amazon-bedrock/us-east-1",
+            "safety_retention": False,
+            "supported_parameters": ["reasoning", "max_tokens", "tools"],
+        }
+    )
+    fake = OpenRouterFake(reply(completion()), zdr=reply(payload))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    assert adapter.complete(SMALL) == "review text"
+    assert json.loads(fake.chat_requests()[0][3])["provider"]["only"] == [
+        "amazon-bedrock"
+    ]
+
+
+def test_the_catalog_is_documented_as_fetched_once_per_review():
+    doc = openrouter.__doc__ or ""
+    assert "fetched once per provider for the review" in doc
+    assert "re-fetched" not in doc
+    readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+    assert "fetched once per provider for the review and reused" in readme
+    assert "fetched once per turn" not in readme
+
+
+def test_the_zdr_list_is_read_once_for_the_provider():
+    fake = OpenRouterFake(reply(completion()), reply(completion()))
+    adapter = provider(fake)
+    adapter.complete(SMALL)
+    adapter.complete(SMALL)
+    zdr_reads = [
+        url for _m, url, _h, _b in fake.requests if url.endswith("/endpoints/zdr")
+    ]
+    assert zdr_reads == [f"{API}/endpoints/zdr"]
+
+
+def test_a_zero_catalog_rate_and_a_non_finite_price_send_no_completion():
+    zero = catalog(prompt="0", completion="0", overrides=[])
+    fake = OpenRouterFake(reply(completion()), model=reply(zero))
+    adapter = provider(fake)
+    with pytest.raises(PricingUnknownError, match="pricing.prompt is zero"):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []
+
+    huge = catalog(prompt="1e1000", overrides=[])
+    overflow = OpenRouterFake(reply(completion()), model=reply(huge))
+    priced = provider(overflow)
+    with pytest.raises(PricingUnknownError, match="not a finite"):
+        priced.complete(SMALL)
+    assert overflow.chat_requests() == []
+
+
+def test_the_environment_selects_the_model_and_provider_without_a_flag():
+    route = model_route(
+        {
+            ENV_MODEL: "deepseek/deepseek-v4.1-flash",
+            ENV_PROVIDERS: "fireworks",
+        }
+    )
+    assert route.model_id == "deepseek/deepseek-v4.1-flash"
+    assert route.providers == ("fireworks",)
+    assert route.allow_safety_retention is False
 
 
 # --- 3-call cap, retries included ------------------------------------------

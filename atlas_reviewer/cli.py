@@ -69,7 +69,7 @@ from atlas_reviewer.ledger import (
     make_private_dirs,
     single_review_lock,
 )
-from atlas_reviewer.openrouter import OpenRouterProvider
+from atlas_reviewer.openrouter import OpenRouterProvider, model_route
 from atlas_reviewer.picker import Depth
 from atlas_reviewer.ports import BoundaryError, Clock, ModelProvider, SpritesApi
 from atlas_reviewer.providers import OfflineProvider
@@ -198,6 +198,15 @@ def _select_provider(
         _require_env(env, ENV_OPENROUTER_KEY),
         CallLimits(max_calls=args.max_model_calls),
     )
+    if isinstance(provider, OpenRouterProvider):
+        provider.configure(
+            model_route(
+                env,
+                model=args.model,
+                providers=args.providers,
+                allow_safety_retention=args.allow_safety_retention,
+            )
+        )
     telemetry.span("model preflight", "key status", provider.preflight)
     return provider
 
@@ -823,6 +832,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="the atlas depth mode: triage runs the critical tier with no picker call",
     )
     _events_arg(rev)
+    rev.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "OpenRouter model id (env ATLAS_MODEL; default "
+            "anthropic/claude-sonnet-5.5). A response from any other model "
+            "is rejected."
+        ),
+    )
+    rev.add_argument(
+        "--providers",
+        default=None,
+        help=(
+            "comma-separated provider slugs for provider.only (env "
+            "ATLAS_PROVIDERS; default amazon-bedrock,google-vertex/europe,"
+            "google-vertex/global,google-vertex/us). One slug pins that "
+            "provider. A slug with no pure-ZDR endpoint for the model is "
+            "refused."
+        ),
+    )
+    rev.add_argument(
+        "--allow-safety-retention",
+        action="store_true",
+        help=(
+            "allow OpenRouter Safety Retention endpoints (env "
+            "ATLAS_ALLOW_SAFETY_RETENTION=true). Off by default: a request "
+            "stays on pure zero-data-retention endpoints."
+        ),
+    )
     rev.add_argument("--provider", choices=PROVIDER_CHOICES, default="offline")
     rev.add_argument(
         "--allow-live-inference",
