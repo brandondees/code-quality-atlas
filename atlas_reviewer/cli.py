@@ -1342,6 +1342,11 @@ def _agentic_limit_args(parser: argparse.ArgumentParser) -> None:
             "reasoning_max_tokens",
             "reasoning hint sent on the request; the reservation does not depend on it",
         ),
+        (
+            "--call-retries",
+            "call_retries",
+            "times a failed model call is sent again, 0 to 3",
+        ),
     )
     for flag, name, meaning in flags:
         parser.add_argument(

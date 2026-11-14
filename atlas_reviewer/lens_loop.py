@@ -12,8 +12,11 @@ so an element without it is data.
 
 An attempt ends with the model's final reply, or is cut short by the turn
 cap, the review's call cap or dollar reservation, the per-lens or review
-wall clock, the output cap when the model stops at it, a failed model
-call, or the runner's deadline. A final reply outside the finding
+wall clock, the output cap when the model stops at it, a model call
+that still fails after its retries (`call_retries`, one by default,
+each after a short backoff), or the runner's deadline. A retried call
+reserves and settles like any other call, and the failed call's
+reservation stays committed. A final reply outside the finding
 contract is sent back once, with the validation error quoted, and a
 second such reply is the attempt's result. Anything but a final reply
 that meets the contract, acknowledges the body and whose quotes all
@@ -41,6 +44,7 @@ from __future__ import annotations
 import json
 import math
 import threading
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields
 from decimal import Decimal
@@ -81,6 +85,9 @@ DEFAULT_MAX_CALLS = 50
 DEFAULT_MAX_TURNS = 50
 DEFAULT_LENS_WALL_S = 1200
 DEFAULT_REVIEW_WALL_S = 3600
+DEFAULT_CALL_RETRIES = 1
+MAX_CALL_RETRIES = 3
+CALL_RETRY_BACKOFF_S = 2.0
 
 # ------------------------------------------------------------------ limits
 
@@ -103,6 +110,7 @@ class Limits:
     review_wall_s: float
     retries: int
     pool_size: int
+    call_retries: int = DEFAULT_CALL_RETRIES
     max_input_tokens: int | None = None
     max_output_tokens: int | None = None
     reasoning_max_tokens: int | None = None
@@ -117,7 +125,8 @@ class AgenticLimits:
     defaults are Brandon's headroom (2026-11-11); pass a value to override
     one, or None to clear it, which `resolve` refuses. `retries` is 0 or
     1. `pool_size` is how many lenses run at once (1 to 16; the default
-    is one). The per-call token fields are None until the catalog is known:
+    is one). `call_retries` is how many times a failed model call is sent
+    again within one turn (0 to 3; the default is one). The per-call token fields are None until the catalog is known:
     `resolve_per_call` fills them from the model, and an int tightens."""
 
     reservation_usd: Decimal | None = DEFAULT_RESERVATION_USD
@@ -127,6 +136,7 @@ class AgenticLimits:
     review_wall_s: float | None = DEFAULT_REVIEW_WALL_S
     retries: int = RETRIES
     pool_size: int = POOL_SIZE
+    call_retries: int = DEFAULT_CALL_RETRIES
     max_input_tokens: int | None = None
     max_output_tokens: int | None = None
     reasoning_max_tokens: int | None = None
@@ -176,6 +186,12 @@ def _check_limits(limits: Limits) -> None:
         or not 1 <= limits.pool_size <= 16
     ):
         raise ValueError("pool_size must be an integer from 1 to 16")
+    if isinstance(limits.call_retries, bool) or limits.call_retries not in range(
+        MAX_CALL_RETRIES + 1
+    ):
+        raise ValueError(
+            f"call_retries must be an integer from 0 to {MAX_CALL_RETRIES}"
+        )
     for name in _DERIVED:
         value = getattr(limits, name)
         if value is None:
@@ -664,6 +680,40 @@ def _stopped(found: LimitHit) -> tuple[Cause, str, LimitHit]:
     return _cause_for(found), found.message(), found
 
 
+def _place_turn(
+    request: TurnRequest, model: LensModel, spend: Spend, p: _Progress
+) -> ModelTurn | AttemptOutcome | str:
+    """One model call: price it, reserve that, send it, settle it. A str
+    is a failed call the loop may retry. Its reservation stays committed,
+    since the provider may still have billed it."""
+    priced = _reserve_call(model, request, spend)
+    if not isinstance(priced, Decimal):
+        return p.cut(*priced)
+    worst = priced
+    try:
+        reply = model.turn(request)
+    except LimitRefused as exc:
+        return p.cut(*_stopped(exc.hit))
+    except ByokRefusedError as exc:
+        # The refusal still leaves the loop. The turns and tool calls
+        # already completed travel with it, so the ledger records them.
+        # No other lens in this review makes another model call.
+        spend.halt()
+        exc.turns = p.turns
+        exc.tools = tuple(p.tools)
+        raise
+    except BoundaryError as exc:
+        return str(exc)
+    spend.settle(worst, reply.cost_usd)
+    return reply
+
+
+def _failed_calls(failures: list[str]) -> str:
+    if len(failures) == 1:
+        return failures[0]
+    return f"{len(failures)} calls failed: " + "; ".join(failures)
+
+
 def run_attempt(
     job: LensJob,
     bridge: Bridge,
@@ -676,6 +726,7 @@ def run_attempt(
     retry_of: AttemptOutcome | None = None,
     secrets: list[BridgeSecret] | None = None,
     system_for: Callable[..., str] = lens_system,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> AttemptOutcome:
     """Run one attempt to its end. `review_deadline` and `review_started`
     are on `clock.monotonic`. Each possible committed secret a tool result
@@ -700,25 +751,24 @@ def run_attempt(
         if stopped is not None:
             return stopped
         request = TurnRequest(system, tuple(messages), tools)
-        priced = _reserve_call(model, request, spend)
-        if not isinstance(priced, Decimal):
-            return p.cut(*priced)
-        worst = priced
-        try:
-            reply = model.turn(request)
-        except LimitRefused as exc:
-            return p.cut(*_stopped(exc.hit))
-        except ByokRefusedError as exc:
-            # The refusal still leaves the loop. The turns and tool calls
-            # already completed travel with it, so the ledger records them.
-            # No other lens in this review makes another model call.
-            spend.halt()
-            exc.turns = p.turns
-            exc.tools = tuple(p.tools)
-            raise
-        except BoundaryError as exc:
-            return p.cut(Cause.MODEL_ERROR, str(exc))
-        spend.settle(worst, reply.cost_usd)
+        failures: list[str] = []
+        while True:
+            placed = _place_turn(request, model, spend, p)
+            if not isinstance(placed, str):
+                break
+            failures.append(placed)
+            if len(failures) > limits.call_retries:
+                return p.cut(Cause.MODEL_ERROR, _failed_calls(failures))
+            sleep(CALL_RETRY_BACKOFF_S * len(failures))
+            stopped = _time_up(
+                p, clock, limits, review_deadline, review_started,
+                lens_deadline, attempt_start,
+            )  # fmt: skip
+            if stopped is not None:
+                return stopped
+        if isinstance(placed, AttemptOutcome):
+            return placed
+        reply = placed
         p.turns += 1
         if isinstance(reply, FinalReply):
             done = _accept_or_repair(job, reply.text, p, messages)

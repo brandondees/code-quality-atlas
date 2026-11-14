@@ -371,6 +371,7 @@ Environment variables (names only; never commit values):
 | `ATLAS_PROVIDERS` | OpenRouter adapter | Comma-separated `provider.only` slugs. Unset is `amazon-bedrock,google-vertex/europe,google-vertex/global,google-vertex/us`. One slug pins that provider. `--providers` wins |
 | `ATLAS_ALLOW_SAFETY_RETENTION` | OpenRouter adapter | `true` allows Safety Retention endpoints. Unset or `false` keeps the request on pure zero-data-retention endpoints. `--allow-safety-retention` also turns it on |
 | `ATLAS_REQUIRE_ZDR` | OpenRouter adapter | Unset or `true` sends `zdr: true` and selects only the ZDR list. `false` or `--no-require-zdr` drops that requirement. Caching does not depend on it. `data_collection: deny` stays on either way. The flag wins over the variable |
+| `ATLAS_CALL_RETRIES` | agentic lens entry | Times a failed model call is sent again within a turn, 0 to 3. Unset is 1 |
 | `ATLAS_KEY_CEILING_USD` | `review` and `agentic-review` | The most the OpenRouter key's own credit limit may be. Unset is $5. A higher key is refused before inference, and the refusal names this variable |
 
 The six credential and state variables above the limit rows never reach a
@@ -972,7 +973,9 @@ D41 records the 2026-11-12 probe that did.
   positive and finite, and a per-lens limit no greater than its per-review
   limit. Clearing one back to unset makes `resolve` raise
   `LimitsUnsetError`, naming each unset field, before any model, runner or
-  ledger work. `retries` is 1. `pool_size` is 1 to 16. It defaults to
+  ledger work. `retries` is 1. `call_retries` is 0 to 3 and defaults
+  to 1: a failed model call is sent again after a 2s backoff, and each
+  call reserves its own worst case (D49). `pool_size` is 1 to 16. It defaults to
   1, and `agentic-review` uses 4 when neither `--pool-size` nor
   `ATLAS_POOL_SIZE` is set. The per-call
   input cap is the pinned model's catalog context minus the output
@@ -981,15 +984,16 @@ D41 records the 2026-11-12 probe that did.
   reasoning hint defaults to half the output cap, so the reply has the
   other half. The reservation prices the whole output cap at the
   completion rate plus the reasoning rate.
-  `coordinator.limits_for_lens` reads the eight limits through
+  `coordinator.limits_for_lens` reads the ten limits through
   `agentic_config.load_agentic_limits`, from `ATLAS_*` or a flag string
   a caller passes. `model_for_lens` builds the adapter with those same
   bounds, and `review_lens` refuses a model whose per-call bounds differ.
   The `review` command does not accept these flags and does not read the
-  variables. The one-shot path keeps its 3 calls, $3.00 and 200,000 input cap.
-  On `agentic-review`, the picker's provider takes the smaller of those
-  ceilings and `max_calls` / `reservation_usd`, and the picker's calls and
-  dollars count toward the review's totals.
+  variables. `agentic-review` applies them. The one-shot path keeps its
+  3 calls, $3.00 and 200,000 input cap. On `agentic-review`, the picker's
+  provider takes the smaller of those ceilings and `max_calls` /
+  `reservation_usd`, and the picker's calls and dollars count toward the
+  review's totals.
 - **The prompt.** The system prompt is the controller's instructions, then
   the nonce fence rule, then the whole lens `body.md` between markers that
   carry its SHA-256, then `synthesis.md`'s whole *Finding contract*

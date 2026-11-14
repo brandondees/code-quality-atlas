@@ -28,7 +28,8 @@ Tool calls are parsed and handed back. The loop runs them through the
 bridge, which rejects an unknown tool or bad arguments before anything
 executes and returns that refusal, nonce-fenced, as the next tool
 result. This module does not execute a tool and does not retry a call:
-a retry would be a second billed request under one reservation.
+a retry would be a second billed request under one reservation. The
+loop's retry (D49) prices and reserves the call again.
 """
 
 from __future__ import annotations

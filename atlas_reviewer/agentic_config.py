@@ -27,6 +27,7 @@ ENV = {
     "max_output_tokens": "ATLAS_MAX_OUTPUT_TOKENS",
     "reasoning_max_tokens": "ATLAS_REASONING_MAX_TOKENS",
     "pool_size": "ATLAS_POOL_SIZE",
+    "call_retries": "ATLAS_CALL_RETRIES",
 }
 
 
@@ -78,6 +79,8 @@ def _apply(limits: AgenticLimits, name: str, raw: str) -> AgenticLimits:
         return replace(limits, reasoning_max_tokens=_positive_int(name, raw))
     if name == "pool_size":
         return replace(limits, pool_size=_positive_int(name, raw))
+    if name == "call_retries":
+        return replace(limits, call_retries=_count(name, raw))
     raise ValueError(f"unknown agentic limit {name}")  # pragma: no cover
 
 
@@ -98,6 +101,13 @@ def _positive_int(name: str, raw: str) -> int:
     if value < 1:
         raise ValueError(f"{name} must be a positive integer, not {raw!r}")
     return value
+
+
+def _count(name: str, raw: str) -> int:
+    try:
+        return int(raw)
+    except ValueError:
+        raise ValueError(f"{name} must be a whole number, not {raw!r}") from None
 
 
 def _positive_seconds(name: str, raw: str) -> float:

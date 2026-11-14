@@ -19,6 +19,7 @@ from atlas_reviewer.bridge_args import TOOLS, RejectedError, Rev, validate
 from atlas_reviewer.domain import RunnerStatus
 from atlas_reviewer.fakes import MemoryLedger, ScriptedLensModel
 from atlas_reviewer.lens_loop import (
+    CALL_RETRY_BACKOFF_S,
     CONTRACT_HEADING,
     SYNTHESIS,
     AgenticLimits,
@@ -83,6 +84,7 @@ def attempt(tmp_path, script, *, limits=LIMITS, clock=None, spend=None, deadline
     model = model or ScriptedLensModel(list(script))
     clock = clock or FakeClock()
     spend = spend or Spend(limits.resolve())
+    kw.setdefault("sleep", clock.advance)
     out = {}
 
     def body(bridge):
@@ -268,6 +270,9 @@ def test_a_pool_from_one_to_sixteen_is_accepted():
         {"pool_size": 0},
         {"pool_size": 17},
         {"pool_size": True},
+        {"call_retries": -1},
+        {"call_retries": 4},
+        {"call_retries": True},
     ],
 )
 def test_a_limit_outside_its_range_is_refused(change):
@@ -868,13 +873,59 @@ def test_a_runner_deadline_inside_a_tool_call_ends_the_lens_partial(tmp_path):
     assert outcome.limit_hit.configured == "600"
 
 
-def test_a_failed_model_call_fails_the_lens_and_is_not_retried(tmp_path):
-    outcome, _, spend = attempt(tmp_path, [BoundaryError("OpenRouter HTTP 502")])
+def test_a_model_call_that_keeps_failing_fails_the_lens(tmp_path):
+    clock = FakeClock()
+    script = [
+        BoundaryError("OpenRouter HTTP 502"),
+        BoundaryError("finish_reason=error"),
+    ]
+    outcome, model, spend = attempt(tmp_path, script, clock=clock)
     assert outcome.causes == {Cause.MODEL_ERROR, Cause.FILES_UNREAD}
+    assert outcome.detail == "2 calls failed: OpenRouter HTTP 502; finish_reason=error"
     assert set(outcome.unread) == set(CHANGED)
     assert outcome.state is LensState.FAILED
     assert not outcome.retryable
-    assert spend.committed_usd == ScriptedLensModel([]).worst_usd
+    assert len(model.requests) == 2
+    assert (spend.calls, spend.committed_usd) == (2, 2 * model.worst_usd)
+    assert clock.t == CALL_RETRY_BACKOFF_S
+
+
+def test_a_failed_model_call_is_sent_once_more_and_the_lens_goes_on(tmp_path):
+    script = [BoundaryError("model turn did not finish (finish_reason=error)")]
+    outcome, model, spend = attempt(tmp_path, [*script, READ_ALL, final()])
+    assert outcome.state is LensState.CLEAN
+    assert model.requests[0] == model.requests[1]
+    assert outcome.turns == 2
+    assert spend.calls == 3
+
+
+def test_with_no_call_retries_one_failed_call_fails_the_lens(tmp_path):
+    no_retry = replace(LIMITS, call_retries=0)
+    outcome, model, spend = attempt(
+        tmp_path, [BoundaryError("OpenRouter HTTP 502")], limits=no_retry
+    )
+    assert outcome.causes == {Cause.MODEL_ERROR, Cause.FILES_UNREAD}
+    assert outcome.detail == "OpenRouter HTTP 502"
+    assert (len(model.requests), spend.calls) == (1, 1)
+
+
+def test_a_retry_still_needs_a_reservation(tmp_path):
+    one_call = replace(LIMITS, max_calls=1, max_turns=1)
+    outcome, model, _ = attempt(
+        tmp_path, [BoundaryError("OpenRouter HTTP 502"), final()], limits=one_call
+    )
+    assert Cause.CALL_CAP in outcome.causes
+    assert len(model.requests) == 1
+
+
+def test_a_backoff_past_the_lens_clock_stops_the_lens(tmp_path):
+    clock = FakeClock()
+    outcome, model, _ = attempt(
+        tmp_path, [BoundaryError("OpenRouter HTTP 502"), final()], clock=clock,
+        sleep=lambda s: clock.advance(400),
+    )  # fmt: skip
+    assert Cause.LENS_CLOCK in outcome.causes
+    assert len(model.requests) == 1
 
 
 def test_a_tool_that_hits_the_session_limit_is_a_coverage_gap(tmp_path):

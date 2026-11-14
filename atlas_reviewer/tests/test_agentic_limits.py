@@ -227,6 +227,19 @@ def test_every_agentic_limit_can_be_set_and_a_bad_one_is_refused():
         load_agentic_limits({}, nope="1")
 
 
+def test_call_retries_default_to_one_and_can_be_turned_off():
+    assert load_agentic_limits({}).call_retries == 1
+    assert load_agentic_limits({"ATLAS_CALL_RETRIES": "3"}).call_retries == 3
+    assert (
+        load_agentic_limits({"ATLAS_CALL_RETRIES": "3"}, call_retries="0").call_retries
+        == 0
+    )
+    with pytest.raises(ValueError, match="call_retries must be a whole number"):
+        load_agentic_limits({"ATLAS_CALL_RETRIES": "once"})
+    with pytest.raises(ValueError, match="call_retries must be an integer from 0 to 3"):
+        load_agentic_limits({"ATLAS_CALL_RETRIES": "4"})
+
+
 def test_a_per_call_override_must_be_a_positive_int_the_model_can_hold():
     with pytest.raises(ValueError, match="max_input_tokens"):
         AgenticLimits(max_input_tokens=True).resolve()
