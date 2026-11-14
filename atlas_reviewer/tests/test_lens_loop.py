@@ -535,6 +535,92 @@ def test_a_reply_is_kept_when_the_model_answers_the_nudge_without_reading(
     assert outcome.state is LensState.PARTIAL
 
 
+def test_a_finding_less_hold_dies_with_its_answered_turn(tmp_path):
+    """Review round 4, Minor 1, probe H: a finding-less hold (a no-findings
+    reply nudged for unread files) does not outlive its own answered turn
+    -- once the model reads the missing file and the cap lands, the causes
+    are exactly the stop's."""
+    outcome, _, _ = attempt(
+        tmp_path,
+        [
+            READ_DIFF,
+            final(),
+            tools(("diff_file", {"path": "config/keys.py"})),
+        ],
+        limits=replace(LIMITS, max_turns=3),
+    )
+    assert outcome.findings == ()
+    assert outcome.causes == {Cause.TURN_CAP}
+    assert outcome.state is LensState.PARTIAL
+
+
+def test_a_verified_finding_survives_a_repair_turn_answered_with_tool_work(
+    tmp_path,
+):
+    """Review round 4, Minor 2, probe E: a verified finding-bearing reply
+    is nudged, the model reads, then sends a garbage reply (a repair turn
+    is placed), the repair is answered with tool work, and the cap lands.
+    The verified finding survives; on the pre-fix head this probe gave 0
+    findings."""
+    outcome, _, _ = attempt(
+        tmp_path,
+        [
+            READ_DIFF,
+            final(finding()),
+            tools(("read_file", {"path": "config/keys.py"})),
+            final(text="no schema here"),
+            READ_DIFF,
+        ],
+        limits=replace(LIMITS, max_turns=5, max_calls=10),
+    )
+    (checked,) = outcome.findings
+    assert checked.verified
+    assert outcome.causes == {Cause.FILES_UNREAD, Cause.TURN_CAP}
+    assert outcome.state is LensState.PARTIAL
+    assert outcome.attestation is Attestation.ATTESTED
+
+
+def test_a_repair_turn_that_never_runs_reports_the_refusal(tmp_path):
+    """Review round 4, probe D, unchanged: a garbage reply whose repair
+    turn is never placed (the cap lands first) reports the refusal itself
+    -- 0 findings, the repair's UNPARSED with the cap, retryable. The
+    nudge-obeying read closed the coverage gap first."""
+    outcome, _, _ = attempt(
+        tmp_path,
+        [
+            READ_DIFF,
+            final(finding()),
+            tools(("diff_file", {"path": "config/keys.py"})),
+            final(text="no schema here"),
+        ],
+        limits=replace(LIMITS, max_turns=4, max_calls=10),
+    )
+    assert outcome.findings == ()
+    assert outcome.causes == {Cause.UNPARSED, Cause.TURN_CAP}
+    assert outcome.state is LensState.FAILED
+    assert outcome.retryable
+
+
+def test_a_repair_refusal_followed_by_tool_work_loses_unparsed(tmp_path):
+    """Review round 4, probe I, unchanged: a repair refusal that is
+    answered with tool work loses UNPARSED on a later cap, exactly as
+    D44 on main behaves. Here no finding-bearing reply ever existed."""
+    outcome, _, _ = attempt(
+        tmp_path,
+        [
+            READ_DIFF,
+            final(),
+            final(text="no schema here"),
+            READ_DIFF,
+        ],
+        limits=replace(LIMITS, max_turns=4, max_calls=10),
+    )
+    assert outcome.findings == ()
+    assert Cause.UNPARSED not in outcome.causes
+    assert Cause.TURN_CAP in outcome.causes
+    assert not outcome.retryable
+
+
 def test_a_repair_held_reply_keeps_its_unparsed_cause_when_the_turn_never_runs(
     tmp_path,
 ):

@@ -664,13 +664,15 @@ class _Progress:
     unread_nudged: bool = False
     stall_nudged: bool = False
     # The last judged outcome whose follow-up turn was queued but not yet
-    # answered. Any stop before that turn is placed returns it, so a valid
-    # reply's findings are never thrown away (D58, review M1); once the
-    # follow-up was placed and answered with tool work, only a
-    # finding-bearing held outcome survives a later stop (review round 3,
-    # M-b).
+    # answered: any stop before that turn is placed returns it, whatever it
+    # carries (D58, review M1). Once the follow-up was placed and answered
+    # with tool work, the last finding-bearing judgment anywhere in the
+    # attempt is the evidence a later stop returns (review round 3, M-b;
+    # round 4, probes E and H: a finding-less hold and a repair refusal do
+    # not outlive their own turn).
     held_outcome: AttemptOutcome | None = None
     held_placed: bool = False
+    finding_hold: AttemptOutcome | None = None
 
     def cut(
         self, cause: Cause, detail: str = "", limit_hit: LimitHit | None = None
@@ -681,10 +683,9 @@ class _Progress:
             self.causes.add(Cause.FILES_UNREAD)
         held = self.held_outcome
         self.held_outcome = None
-        if held is not None and (not self.held_placed or held.findings):
-            # The judged reply stays the attempt's evidence: before its
-            # follow-up turn ran, whatever the stop; after it, until a
-            # newer final reply replaces it, when it carried findings.
+        if held is not None and not self.held_placed:
+            # The follow-up turn never ran: the newest judgment stands,
+            # with the stop's cause and the limit named.
             both = (
                 f"{held.detail}; {detail}" if held.detail and detail else
                 (detail or held.detail)
@@ -692,6 +693,22 @@ class _Progress:
             return replace(
                 held,
                 causes=frozenset(held.causes) | frozenset(self.causes),
+                detail=both,
+                limit_hit=limit_hit,
+                nudges=tuple(self.nudges),
+            )
+        best = held if held is not None and held.findings else self.finding_hold
+        if best is not None and best.findings:
+            # The last verified reply stays the attempt's evidence across
+            # the tool work a follow-up asked for, with that work and the
+            # stop recorded on it.
+            both = (
+                f"{best.detail}; {detail}" if best.detail and detail else
+                (detail or best.detail)
+            )  # fmt: skip
+            return replace(
+                best,
+                causes=frozenset(best.causes) | frozenset(self.causes),
                 tools=tuple(self.tools),
                 turns=self.turns,
                 detail=both,
@@ -970,9 +987,10 @@ def _accept_or_repair(
     goes back into this conversation, and the next final reply is the one
     that counts. While a queued turn goes unanswered, the judged outcome
     is held on the progress, so a stop before it is placed keeps the
-    reply's findings (D58, review M1); the hold survives the tool work
-    the nudge asked for, until this function judges a newer reply (review
-    round 3, M-b)."""
+    reply's findings (D58, review M1); a finding-bearing judgment is also
+    kept on its own, as the evidence a later stop returns across the tool
+    work any follow-up asked for, until this function judges a newer
+    reply (review round 3, M-b; round 4, probes E and H)."""
     repaired = _repair(text, p)
     if repaired is not None:
         before = set(p.causes)
@@ -987,6 +1005,10 @@ def _accept_or_repair(
         return None
     before = set(p.causes)
     outcome = _final(job, text, p)
+    if outcome.findings:
+        # The newest finding-bearing judgment is the evidence a later stop
+        # returns, across any follow-up turns (review round 4, probe E).
+        p.finding_hold = outcome
     if not p.unread_nudged and outcome.unread:
         # D58 reverses D42's no-nudge rule once: the unread list goes back
         # before a final reply is accepted, so a triaging model can finish

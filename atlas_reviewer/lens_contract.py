@@ -30,7 +30,6 @@ MAX_LINE = 10_000_000
 # The longest lens name in the suite is 44 characters.
 MAX_LENS_CHARS = 80
 DIGEST = re.compile(r"[0-9a-f]{64}")
-_FENCED = re.compile(r"\A```[^\n]*\n(.*)\n```\Z", re.DOTALL)
 _ANY_FENCE = re.compile(r"```[^\n]*\n(.*?)\n```", re.DOTALL)
 _RANGE = re.compile(r"(?P<path>.+):(?P<start>[1-9][0-9]*)(?:-(?P<end>[1-9][0-9]*))?")
 _DESIGN = re.compile(r"(?:boundary|component):\S.*")
@@ -154,12 +153,11 @@ class LensReply:
 
 def parse_reply(text: str) -> LensReply:
     """The reply as one JSON object `{"lens", "body_sha256", "findings"}`,
-    bare, as the whole reply inside one ```json fence, or as the last
-    fenced JSON object after prose."""
+    bare, or as the last fenced JSON object when prose surrounds it (the
+    whole reply inside one fence is that last block)."""
     stripped = text.strip()
-    fenced = _FENCED.fullmatch(stripped)
     try:
-        data = json.loads(fenced.group(1) if fenced else stripped)
+        data = json.loads(stripped)
     except json.JSONDecodeError:
         data = _last_fenced_object(stripped)
         if data is _NO_OBJECT:
