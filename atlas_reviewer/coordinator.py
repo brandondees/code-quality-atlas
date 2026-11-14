@@ -643,16 +643,16 @@ def _traced_review(
     redactor: Redactor,
     body: Callable[[ReviewTrace], AgenticReview],
 ) -> AgenticReview:
-    """Run `body` under one review span, or under the caller's open one."""
+    """Run `body` under one review span, or under the caller's open one.
+    A caller that opened the span sets `atlas.review_event` itself, after
+    any change it makes to the event."""
     if trace is None:
         acquire_shared()
     try:
         active = opening_trace(trace, lambda text: redactor(text).text)
         outer = current_review()
         if outer is not None:
-            review = body(active)
-            outer.set("atlas.review_event", review.event.value)
-            return _with_trace(outer, review)
+            return _with_trace(outer, body(active))
         with active.review(event.repo, event.pr_number, event.head_sha) as span:
             review = body(active)
             span.set("atlas.review_event", review.event.value)
