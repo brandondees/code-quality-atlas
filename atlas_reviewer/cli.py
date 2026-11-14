@@ -205,6 +205,7 @@ def _select_provider(
                 model=args.model,
                 providers=args.providers,
                 allow_safety_retention=args.allow_safety_retention,
+                require_zdr=False if args.no_require_zdr else None,
             )
         )
     telemetry.span("model preflight", "key status", provider.preflight)
@@ -859,6 +860,16 @@ def build_parser() -> argparse.ArgumentParser:
             "allow OpenRouter Safety Retention endpoints (env "
             "ATLAS_ALLOW_SAFETY_RETENTION=true). Off by default: a request "
             "stays on pure zero-data-retention endpoints."
+        ),
+    )
+    rev.add_argument(
+        "--no-require-zdr",
+        action="store_true",
+        help=(
+            "do not require zero-data-retention endpoints (env "
+            "ATLAS_REQUIRE_ZDR=false). Off by default, so zdr stays true. "
+            "data_collection deny, allow_fallbacks false, and provider.only "
+            "stay. The flag wins over a true environment variable."
         ),
     )
     rev.add_argument("--provider", choices=PROVIDER_CHOICES, default="offline")

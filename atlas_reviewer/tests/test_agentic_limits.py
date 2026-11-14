@@ -17,6 +17,7 @@ from atlas_reviewer.lens_loop import (
     AgenticLimits,
     Spend,
     _cause_for,
+    default_output_tokens,
     default_reasoning_tokens,
     resolve_per_call,
     run_attempt,
@@ -32,7 +33,7 @@ from .helpers import FakeClock
 from .test_attestation import KEY
 from .test_coordinator import lens_result
 from .test_lens_loop import job
-from .test_openrouter import catalog, completion, reply
+from .test_openrouter import catalog, completion, reply, zdr_payload
 from .test_tool_model import model, request, sent
 
 
@@ -242,9 +243,14 @@ def test_a_per_call_override_must_be_a_positive_int_the_model_can_hold():
     with pytest.raises(LimitRefused, match="max_input_tokens"):
         resolve_per_call(replace(base, max_input_tokens=950_000), terms)
     tight = replace(terms, context_length=64_000, max_completion_tokens=64_000)
+    # The completion limit fills the context. The default leaves a quarter
+    # of it for output so the call still has input room.
+    fitted = resolve_per_call(base, tight)
+    assert fitted.max_output_tokens == 16_000
+    assert fitted.max_input_tokens == 48_000
     with pytest.raises(LimitRefused, match="context_length") as raised:
-        resolve_per_call(base, tight)
-    assert raised.value.hit.setting == "the pinned model's catalog context_length"
+        resolve_per_call(replace(base, max_output_tokens=64_000), tight)
+    assert raised.value.hit.setting == "the pinned endpoints' context_length"
     with pytest.raises(ValueError, match="unknown limit"):
         hit("not-a-limit", 1, 2)
 
@@ -272,9 +278,7 @@ def test_a_limit_refused_on_the_turn_is_not_a_model_error():
     assert outcome.state is LensState.PARTIAL
     assert outcome.retryable is False
     assert outcome.limit_hit is not None
-    assert (
-        outcome.limit_hit.setting == "the pinned model's catalog max_completion_tokens"
-    )
+    assert outcome.limit_hit.setting == "the pinned endpoints' max_completion_tokens"
 
 
 def test_a_damaged_limit_object_abandons_the_ledger_line(tmp_path):
@@ -371,3 +375,82 @@ def test_an_output_override_and_a_reasoning_hint_have_their_own_causes():
     assert Cause.CONTEXT not in output.causes
     assert Cause.REASONING_CAP in reasoning.causes
     assert Cause.CONTEXT not in reasoning.causes
+
+
+def test_a_context_limited_endpoint_caps_max_tokens_not_the_catalog():
+    """DeepInfra's context was smaller than the catalog, and the request
+    asked for the catalog's completion limit."""
+    rows = zdr_payload(context_length=16_384, max_completion_tokens=8_192)
+    lens, fake = model(reply(completion("ok")), zdr=reply(rows))
+    lens.turn(request())
+    body = sent(fake)
+    # 16_384 // 4 == 4_096. The catalog fixture's completion limit is 64_000.
+    assert body["max_tokens"] == 4_096
+    assert body["provider"]["max_price"] == {"prompt": 6.0, "completion": 22.5}
+    assert body["provider"]["zdr"] is True
+
+
+def test_the_default_output_cap_leaves_input_room_when_completion_fills_the_context():
+    """Kimi and Qwen left 26_215 input tokens (262_144 - 235_929) when the
+    cap was the full completion limit. GLM's ~944k cap priced one call
+    over the $5 reservation."""
+    rows = zdr_payload(context_length=262_144, max_completion_tokens=235_929)
+    lens, fake = model(
+        reply(completion("ok")), reply(completion("ok")), zdr=reply(rows)
+    )
+    lens.turn(request())
+    assert sent(fake)["max_tokens"] == 65_536
+    assert default_output_tokens(262_144, 235_929) == 65_536
+    # Sonnet's 64_000 completion on a 1_000_000 context stays 64_000.
+    assert default_output_tokens(1_000_000, 64_000) == 64_000
+
+    lens.per_call = replace(AgenticLimits().resolve(), max_output_tokens=100_000)
+    lens.turn(request())
+    assert json.loads(fake.chat_requests()[-1][3])["max_tokens"] == 100_000
+
+
+def test_a_run_records_whether_zdr_was_required_and_whether_caching_was_enabled():
+    from atlas_reviewer.openrouter import model_route
+    from atlas_reviewer.tracing import memory_trace
+
+    lens, _fake = model(reply(completion("ok")))
+    trace, exporter = memory_trace(lambda text: text)
+    try:
+        with trace.lens("tracing-correctness-and-invariants"):
+            trace.wrap_model(lens).turn(request())
+    finally:
+        trace.shutdown()
+    span = next(s for s in exporter.get_finished_spans() if s.name == "completion")
+    assert span.attributes["atlas.zdr_required"] is True
+    assert span.attributes["atlas.cache_control"] is True
+    assert "zdr required: true" in lens.provider.usage_lines()[0]
+    assert "cache_control: true" in lens.provider.usage_lines()[0]
+
+    cached = {
+        "data": {
+            "id": MODEL_ID,
+            "endpoints": [
+                {
+                    "tag": "amazon-bedrock",
+                    "provider_name": "Amazon Bedrock",
+                    "pricing": {"prompt": "0.000003", "completion": "0.000015"},
+                    "context_length": 1_000_000,
+                    "max_completion_tokens": 64_000,
+                    "supported_parameters": ["max_tokens"],
+                }
+            ],
+        }
+    }
+    off, off_fake = model(
+        reply(completion("ok")),
+        zdr=reply({"data": []}),
+        route=model_route({}, providers="amazon-bedrock", require_zdr=False),
+    )
+    off_fake.endpoints = reply(cached)
+    off.turn(request())
+    body = json.loads(off_fake.chat_requests()[-1][3])
+    assert "zdr" not in body["provider"]
+    assert body["cache_control"] == {"type": "ephemeral"}
+    assert body["provider"]["data_collection"] == "deny"
+    assert "zdr required: false" in off.provider.usage_lines()[0]
+    assert "cache_control: true" in off.provider.usage_lines()[0]

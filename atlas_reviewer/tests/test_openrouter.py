@@ -23,6 +23,7 @@ from atlas_reviewer.openrouter import (
     ENV_ALLOW_SAFETY_RETENTION,
     ENV_MODEL,
     ENV_PROVIDERS,
+    ENV_REQUIRE_ZDR,
     MODEL_ID,
     PINNED_PROVIDERS,
     OpenRouterProvider,
@@ -70,24 +71,84 @@ def key_status(limit=5, remaining=5, usage=0, include_byok_in_limit=True, **extr
     return {"data": data}
 
 
+def endpoint_price(**changes):
+    """The fixture's selected-endpoint rates. They match the catalog's
+    highest tier so older assertions keep their numbers, and a test that
+    needs a different rate passes the change here, not on the catalog."""
+    price = {
+        "prompt": "0.000006",
+        "completion": "0.0000225",
+        "request": "0",
+        "input_cache_write": "0.00000375",
+    }
+    price.update(changes)
+    return {key: value for key, value in price.items() if value is not None}
+
+
+def display_name(tag):
+    """A human-readable provider name that is not the slug.
+
+    Live rows carry both. `provider_name` is ``Amazon Bedrock`` where
+    `tag` is ``amazon-bedrock``.
+    """
+    known = {
+        "amazon-bedrock": "Amazon Bedrock",
+        "google-vertex/europe": "Google",
+        "google-vertex/global": "Google",
+        "google-vertex/us": "Google",
+        "fireworks": "Fireworks",
+        "deepinfra/fp8": "DeepInfra",
+        "deepinfra/fp4": "DeepInfra",
+    }
+    if tag in known:
+        return known[tag]
+    titled = tag.replace("-", " ").replace("/", " ").title()
+    if titled == tag:
+        return f"{tag} provider"
+    return titled
+
+
+def with_terms(row, **changes):
+    """A hand-built endpoint row the selector can price."""
+    filled = {
+        "pricing": endpoint_price(),
+        "context_length": 1_000_000,
+        "max_completion_tokens": 64_000,
+    }
+    filled.update(row)
+    filled.update(changes)
+    tag = filled.get("tag")
+    if isinstance(tag, str) and "provider_name" not in filled:
+        filled["provider_name"] = display_name(tag)
+    return filled
+
+
 def zdr_payload(
     model=MODEL_ID,
     providers=PINNED_PROVIDERS,
     *,
     safety=False,
     parameters=None,
+    pricing=None,
+    context_length=1_000_000,
+    max_completion_tokens=64_000,
 ):
     params = (
         ["reasoning", "include_reasoning", "max_tokens", "tools"]
         if parameters is None
         else list(parameters)
     )
+    price = endpoint_price(**(pricing or {}))
     rows = [
         {
             "model_id": model,
             "tag": tag,
+            "provider_name": display_name(tag),
             "safety_retention": safety,
             "supported_parameters": params,
+            "pricing": price,
+            "context_length": context_length,
+            "max_completion_tokens": max_completion_tokens,
         }
         for tag in providers
     ]
@@ -127,12 +188,15 @@ def reply(payload, status=200, headers=None):
 class OpenRouterFake:
     """Serves the key and catalog endpoints; chat replies come from a script."""
 
-    def __init__(self, *chat, key=None, model=None, zdr=None, catalogs=None):
+    def __init__(
+        self, *chat, key=None, model=None, zdr=None, catalogs=None, endpoints=None
+    ):
         self.chat = list(chat)
         self.key = key if key is not None else reply(key_status())
         self.model = model if model is not None else reply(catalog())
         self.catalogs = catalogs or {}
         self.zdr = zdr if zdr is not None else reply(zdr_payload())
+        self.endpoints = endpoints
         self.requests = []
 
     def request(self, method, url, headers, body, timeout_s, max_bytes=None):
@@ -141,7 +205,13 @@ class OpenRouterFake:
             return self.key
         if url == f"{API}/endpoints/zdr":
             return self.zdr
-        if url.startswith(f"{API}/model/"):
+        models = f"{API}/models/"
+        if url.startswith(models) and url.endswith("/endpoints"):
+            if self.endpoints is None:
+                model_id = url[len(models) : -len("/endpoints")]
+                return reply({"data": {"id": model_id, "endpoints": []}})
+            return self.endpoints
+        if url.startswith(f"{API}/model/") and not url.startswith(models):
             model_id = url[len(f"{API}/model/") :]
             if model_id in self.catalogs:
                 return self.catalogs[model_id]
@@ -251,11 +321,49 @@ def test_one_provider_is_a_valid_pin_and_the_output_cap_stays_configured():
     # the configured cap, not that catalog number.
     assert sent["max_tokens"] == 24_000
     assert sent["reasoning"] == {"max_tokens": 12_000, "exclude": True}
-    assert "cache_control" not in sent
+    assert sent["cache_control"] == {"type": "ephemeral"}
 
 
-def test_reasoning_and_cache_control_follow_the_endpoint_parameters():
-    both = zdr_payload(parameters=["reasoning", "cache_control", "max_tokens"])
+def test_an_anthropic_route_sends_cache_control_even_when_no_endpoint_lists_it():
+    """OpenRouter never lists cache_control. ZDR Bedrock still honors it."""
+    listed = zdr_payload(
+        providers=("amazon-bedrock",), parameters=["reasoning", "max_tokens"]
+    )
+    assert all(
+        "cache_control" not in row["supported_parameters"]
+        for row in listed["data"]
+        if row.get("tag")
+    )
+    fake = OpenRouterFake(reply(completion()), zdr=reply(listed))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    adapter.complete(SMALL)
+    sent = json.loads(fake.chat_requests()[0][3])
+    assert sent["model"] == MODEL_ID
+    assert sent["provider"]["zdr"] is True
+    assert sent["provider"]["require_parameters"] is True
+    assert sent["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control: true" in adapter.usage_lines()[0]
+
+    other = "z-ai/glm-5.3"
+    catalog_row = catalog()
+    catalog_row["data"]["id"] = other
+    quiet = zdr_payload(other, ("fireworks",), parameters=["reasoning", "max_tokens"])
+    bare = OpenRouterFake(
+        reply(completion(model=other)),
+        model=reply(catalog_row),
+        zdr=reply(quiet),
+    )
+    glm = OpenRouterProvider(bare, KEY, model_id=other, providers=("fireworks",))
+    glm.preflight()
+    glm.complete(SMALL)
+    body = json.loads(bare.chat_requests()[0][3])
+    assert "cache_control" not in body
+    assert "cache_control: false" in glm.usage_lines()[0]
+
+
+def test_reasoning_follows_the_endpoint_parameters():
+    both = zdr_payload(parameters=["reasoning", "max_tokens"])
     fake = OpenRouterFake(reply(completion()), zdr=reply(both))
     adapter = provider(fake)
     adapter.complete(SMALL)
@@ -269,23 +377,27 @@ def test_reasoning_and_cache_control_follow_the_endpoint_parameters():
     provider(bare).complete(SMALL)
     omitted = json.loads(bare.chat_requests()[0][3])
     assert "reasoning" not in omitted
-    assert "cache_control" not in omitted
+    assert omitted["cache_control"] == {"type": "ephemeral"}
     assert omitted["max_tokens"] == 24_000
 
     mixed = {
         "data": [
-            {
-                "model_id": MODEL_ID,
-                "tag": "amazon-bedrock",
-                "safety_retention": False,
-                "supported_parameters": ["reasoning", "cache_control"],
-            },
-            {
-                "model_id": MODEL_ID,
-                "tag": "google-vertex/global",
-                "safety_retention": False,
-                "supported_parameters": ["reasoning"],
-            },
+            with_terms(
+                {
+                    "model_id": MODEL_ID,
+                    "tag": "amazon-bedrock",
+                    "safety_retention": False,
+                    "supported_parameters": ["reasoning"],
+                }
+            ),
+            with_terms(
+                {
+                    "model_id": MODEL_ID,
+                    "tag": "google-vertex/global",
+                    "safety_retention": False,
+                    "supported_parameters": ["max_tokens"],
+                }
+            ),
         ]
     }
     half = OpenRouterFake(reply(completion()), zdr=reply(mixed))
@@ -295,8 +407,8 @@ def test_reasoning_and_cache_control_follow_the_endpoint_parameters():
     pinned.preflight()
     pinned.complete(SMALL)
     body = json.loads(half.chat_requests()[0][3])
-    assert "reasoning" in body
-    assert "cache_control" not in body
+    assert "reasoning" not in body
+    assert body["cache_control"] == {"type": "ephemeral"}
 
 
 def test_safety_retention_is_off_unless_the_route_opts_in():
@@ -383,6 +495,7 @@ def test_the_route_reads_the_flag_before_the_environment():
     assert route.model_id == MODEL_ID
     assert route.providers == PINNED_PROVIDERS
     assert route.allow_safety_retention is False
+    assert route.require_zdr is True
 
     chosen = model_route(
         {
@@ -399,6 +512,11 @@ def test_the_route_reads_the_flag_before_the_environment():
     assert chosen.model_id == "google/gemini-3.5-flash"
     assert chosen.providers == ("deepinfra/fp8",)
     assert chosen.allow_safety_retention is True
+    assert chosen.require_zdr is True
+    assert model_route({ENV_REQUIRE_ZDR: "false"}).require_zdr is False
+    assert (
+        model_route({ENV_REQUIRE_ZDR: "true"}, require_zdr=False).require_zdr is False
+    )
 
     with pytest.raises(BudgetRefusedError, match="not an OpenRouter model id"):
         model_route({}, model="anthropic/claude-sonnet-5.5:online")
@@ -537,12 +655,14 @@ def test_a_tag_sharing_only_the_prefix_does_not_refuse_the_parent():
 def test_a_pure_child_does_not_rewrite_the_requested_slug():
     payload = zdr_payload(providers=("amazon-bedrock",))
     payload["data"].append(
-        {
-            "model_id": MODEL_ID,
-            "tag": "amazon-bedrock/us-east-1",
-            "safety_retention": False,
-            "supported_parameters": ["reasoning", "max_tokens", "tools"],
-        }
+        with_terms(
+            {
+                "model_id": MODEL_ID,
+                "tag": "amazon-bedrock/us-east-1",
+                "safety_retention": False,
+                "supported_parameters": ["reasoning", "max_tokens", "tools"],
+            }
+        )
     )
     fake = OpenRouterFake(reply(completion()), zdr=reply(payload))
     adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
@@ -581,9 +701,10 @@ def test_a_zero_catalog_rate_and_a_non_finite_price_send_no_completion():
         adapter.complete(SMALL)
     assert fake.chat_requests() == []
 
-    huge = catalog(prompt="1e1000", overrides=[])
-    overflow = OpenRouterFake(reply(completion()), model=reply(huge))
-    priced = provider(overflow)
+    huge = zdr_payload(providers=("amazon-bedrock",), pricing={"prompt": "1e1000"})
+    overflow = OpenRouterFake(reply(completion()), zdr=reply(huge))
+    priced = OpenRouterProvider(overflow, KEY, providers=("amazon-bedrock",))
+    priced.preflight()
     with pytest.raises(PricingUnknownError, match="not a finite"):
         priced.complete(SMALL)
     assert overflow.chat_requests() == []
@@ -788,16 +909,15 @@ def test_worst_case_over_the_key_remaining_credit_is_never_sent():
 
 
 @pytest.mark.parametrize(
-    "prompt,model,match",
+    "prompt,zdr_kwargs,match",
     [
-        (Prompt("s", "x" * 200_001), catalog(), "input cap"),
-        (SMALL, {"data": {**catalog()["data"], "top_provider": {"max_completion_tokens": 8000}}},
-         "completion limit"),
-        (SMALL, {"data": {**catalog()["data"], "context_length": 20_000}}, "context"),
+        (Prompt("s", "x" * 200_001), {}, "input cap"),
+        (SMALL, {"max_completion_tokens": 8000}, "completion limit"),
+        (SMALL, {"context_length": 20_000}, "context"),
     ],
-)  # fmt: skip
-def test_token_bounds_are_checked_before_sending(prompt, model, match):
-    fake = OpenRouterFake(reply(completion()), model=reply(model))
+)
+def test_token_bounds_are_checked_before_sending(prompt, zdr_kwargs, match):
+    fake = OpenRouterFake(reply(completion()), zdr=reply(zdr_payload(**zdr_kwargs)))
     with pytest.raises(BudgetRefusedError, match=match):
         provider(fake).complete(prompt)
     assert fake.chat_requests() == []
@@ -1234,20 +1354,20 @@ def test_fallback_cost_includes_a_separate_reasoning_charge():
     }
     fake = OpenRouterFake(
         reply(completion(usage=usage)),
-        model=reply(catalog(internal_reasoning="0.00005")),
+        zdr=reply(zdr_payload(pricing={"internal_reasoning": "0.00005"})),
     )
     p = provider(fake)
     p.complete(SMALL)
     # 1000 x 0.000006 + 100 x 0.0000225 + 40 x 0.00005
     assert p.budget.committed_usd() == Decimal("0.01025")
-    assert "cost computed at the highest catalog rates" in p.usage_lines()[1]
+    assert "cost computed at the highest endpoint rates" in p.usage_lines()[1]
 
 
 def test_priced_reasoning_without_a_token_count_keeps_the_reservation():
     usage = {"prompt_tokens": 1000, "completion_tokens": 100}
     fake = OpenRouterFake(
         reply(completion(usage=usage)),
-        model=reply(catalog(internal_reasoning="0.00005")),
+        zdr=reply(zdr_payload(pricing={"internal_reasoning": "0.00005"})),
     )
     p = provider(fake)
     p.complete(SMALL)
@@ -1276,7 +1396,7 @@ def test_refusals_before_a_call_are_reported_and_not_counted_as_calls():
     bounded = provider(
         OpenRouterFake(
             reply(completion()),
-            model=reply({"data": {**catalog()["data"], "context_length": 20_000}}),
+            zdr=reply(zdr_payload(context_length=20_000)),
         )
     )
     with pytest.raises(BudgetRefusedError, match="context"):
@@ -1293,7 +1413,7 @@ def test_cost_is_computed_from_catalog_rates_when_not_reported():
     p = provider(OpenRouterFake(reply(completion(usage=usage))))
     p.complete(SMALL)
     assert "actual $0.0082" in p.usage_lines()[1]
-    assert "cost computed at the highest catalog rates" in p.usage_lines()[1]
+    assert "cost computed at the highest endpoint rates" in p.usage_lines()[1]
 
 
 @pytest.mark.parametrize(
@@ -1359,3 +1479,148 @@ def test_unparseable_completion_is_settled_and_raised(body):
     with pytest.raises(BoundaryError, match="non-JSON"):
         p.complete(SMALL)
     assert "unparseable response" in p.usage_lines()[1]
+
+
+def test_max_price_is_the_pinned_endpoints_highest_price_not_the_catalog_headline():
+    """GLM-5.3's catalog headline was $0.084/$3.60 per million and Fireworks
+    was $1.40/$4.40. OpenRouter's max_price filter dropped the pin."""
+    headline = catalog(prompt="0.000000084", completion="0.0000036", overrides=[])
+    rows = zdr_payload(
+        providers=("fireworks",),
+        pricing={"prompt": "0.0000014", "completion": "0.0000044"},
+    )
+    fake = OpenRouterFake(
+        reply(completion()),
+        model=reply(headline),
+        zdr=reply(rows),
+    )
+    adapter = OpenRouterProvider(fake, KEY, providers=("fireworks",))
+    adapter.preflight()
+    adapter.complete(SMALL)
+    sent = json.loads(fake.chat_requests()[0][3])
+    assert sent["provider"]["only"] == ["fireworks"]
+    assert sent["provider"]["allow_fallbacks"] is False
+    assert sent["provider"]["data_collection"] == "deny"
+    assert sent["provider"]["zdr"] is True
+    assert sent["provider"]["max_price"] == {"prompt": 1.4, "completion": 4.4}
+    assert "zdr required: true" in adapter.usage_lines()[0]
+    assert "cache_control: true" in adapter.usage_lines()[0]
+
+
+def test_two_pinned_rows_price_the_dearest_and_not_the_catalog_headline():
+    cheap = with_terms(
+        {
+            "model_id": MODEL_ID,
+            "tag": "deepinfra/fp8",
+            "safety_retention": False,
+            "supported_parameters": ["max_tokens"],
+            "pricing": endpoint_price(prompt="0.0000002", completion="0.0000008"),
+        }
+    )
+    dear = with_terms(
+        {
+            "model_id": MODEL_ID,
+            "tag": "deepinfra/fp4",
+            "safety_retention": False,
+            "supported_parameters": ["max_tokens"],
+            "pricing": endpoint_price(prompt="0.0000014", completion="0.0000044"),
+        }
+    )
+    fake = OpenRouterFake(
+        reply(completion()),
+        model=reply(
+            catalog(prompt="0.000000084", completion="0.0000036", overrides=[])
+        ),
+        zdr=reply({"data": [cheap, dear]}),
+    )
+    adapter = OpenRouterProvider(
+        fake, KEY, providers=("deepinfra/fp8", "deepinfra/fp4")
+    )
+    adapter.preflight()
+    adapter.complete(SMALL)
+    sent = json.loads(fake.chat_requests()[0][3])
+    assert sent["provider"]["max_price"] == {"prompt": 1.4, "completion": 4.4}
+    assert sent["provider"]["only"] == ["deepinfra/fp8", "deepinfra/fp4"]
+
+
+def test_a_context_smaller_than_the_catalog_refuses_the_one_shot_cap():
+    fake = OpenRouterFake(
+        reply(completion()),
+        zdr=reply(zdr_payload(context_length=16_384, max_completion_tokens=8_192)),
+    )
+    adapter = provider(fake)
+    with pytest.raises(BudgetRefusedError, match="completion limit"):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []
+
+
+def test_an_endpoint_row_without_a_price_is_refused_before_a_call():
+    payload = zdr_payload(providers=("amazon-bedrock",))
+    del payload["data"][0]["pricing"]
+    fake = OpenRouterFake(reply(completion()), zdr=reply(payload))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    with pytest.raises(PricingUnknownError, match="no pricing object"):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []
+
+
+def test_zdr_stays_on_by_default_and_can_be_turned_off():
+    on = OpenRouterFake(reply(completion()))
+    required = provider(on)
+    required.complete(SMALL)
+    pinned = json.loads(on.chat_requests()[0][3])
+    assert pinned["provider"]["zdr"] is True
+    assert pinned["provider"]["data_collection"] == "deny"
+    assert pinned["provider"]["allow_fallbacks"] is False
+    # Caching is the Anthropic breakpoint, not the ZDR switch. The default
+    # rows do not list cache_control, and the request still sends it.
+    assert pinned["cache_control"] == {"type": "ephemeral"}
+    assert [url for _m, url, _h, _b in on.requests if url.endswith("/endpoints/zdr")]
+
+    off_rows = {
+        "data": {
+            "id": MODEL_ID,
+            "endpoints": [
+                {
+                    "tag": "amazon-bedrock",
+                    "provider_name": "Amazon Bedrock",
+                    "pricing": {"prompt": "0.000003", "completion": "0.000015"},
+                    "context_length": 1_000_000,
+                    "max_completion_tokens": 64_000,
+                    "supported_parameters": ["reasoning", "max_tokens"],
+                }
+            ],
+        }
+    }
+    off = OpenRouterFake(reply(completion()), endpoints=reply(off_rows))
+    relaxed = OpenRouterProvider(off, KEY)
+    relaxed.configure(model_route({}, providers="amazon-bedrock", require_zdr=False))
+    relaxed.preflight()
+    relaxed.complete(SMALL)
+    sent = json.loads(off.chat_requests()[0][3])
+    assert "zdr" not in sent["provider"]
+    assert sent["provider"]["data_collection"] == "deny"
+    assert sent["provider"]["allow_fallbacks"] is False
+    assert sent["provider"]["only"] == ["amazon-bedrock"]
+    assert sent["cache_control"] == {"type": "ephemeral"}
+    assert sent["provider"]["max_price"] == {"prompt": 3.0, "completion": 15.0}
+    urls = [url for _m, url, _h, _b in off.requests]
+    assert f"{API}/models/{MODEL_ID}/endpoints" in urls
+    assert f"{API}/endpoints/zdr" not in urls
+    assert "zdr required: false" in relaxed.usage_lines()[0]
+    assert "cache_control: true" in relaxed.usage_lines()[0]
+
+
+def test_a_display_name_next_to_a_different_tag_is_still_selected():
+    """Live rows carry both. `provider_name` is not another spelling of `tag`."""
+    payload = zdr_payload(providers=("amazon-bedrock",))
+    row = payload["data"][0]
+    assert row["tag"] == "amazon-bedrock"
+    assert row["provider_name"] == "Amazon Bedrock"
+    fake = OpenRouterFake(reply(completion()), zdr=reply(payload))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    adapter.complete(SMALL)
+    sent = json.loads(fake.chat_requests()[0][3])
+    assert sent["provider"]["only"] == ["amazon-bedrock"]
