@@ -126,6 +126,7 @@ class OpenRouterLensModel:
             bound_by = ""
             prompt_binds = (
                 terms.max_prompt_tokens is not None
+                and bounds.max_input_tokens == terms.max_prompt_tokens
                 and terms.max_prompt_tokens
                 < terms.context_length - bounds.max_output_tokens
             )
