@@ -349,6 +349,34 @@ def test_an_unreadable_usage_count_falls_back_to_the_byte_bound():
     )
 
 
+def test_an_unreadable_usage_count_after_a_baseline_falls_back_to_the_byte_bound():
+    """Review round 4, Minor 4 (CodeRabbit 4569797416): a usable baseline
+    followed by unreadable usage must reset to the byte bound -- keeping
+    the stale baseline would measure the new bytes from the larger, newer
+    prefix and undercount them."""
+    usage = {"prompt_tokens": 1000, "completion_tokens": 5, "is_byok": False}
+    lens, _fake = model(
+        reply(completion("done", usage=usage)),
+        reply(completion("done", usage={"is_byok": False})),
+    )
+    first = request()
+    lens.worst_case_usd(first)
+    lens.turn(first)
+    grown = request(
+        UserText("Review the change."),
+        AssistantCalls((ToolRequest("diff_stat", {}),)),
+        ToolResults(("fenced result",)),
+    )
+    lens.worst_case_usd(grown)
+    lens.turn(grown)
+    lens.worst_case_usd(grown)
+    assert "no reported usage yet" in lens.bound_note
+    assert (
+        f"bytes {len(json.dumps(_payload_of(lens, grown)))} + overhead 64"
+        in lens.bound_note
+    )
+
+
 def test_a_zero_reported_count_falls_back_to_the_byte_bound():
     """Review Minor 1: a reported `prompt_tokens` of 0 cannot have produced
     a reply; using it as the baseline would ignore the whole prefix."""
