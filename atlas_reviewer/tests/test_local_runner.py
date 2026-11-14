@@ -5,10 +5,12 @@ bridge, lens-loop, keepalive and end-to-end suites; this file pins the
 socket server's own behavior."""
 
 import socket
+import time
 
 from atlas_reviewer.keepalive import SocketTaskClient
-from atlas_reviewer.local_runner import LocalTasks
+from atlas_reviewer.local_runner import LocalSprites, LocalTasks
 from atlas_reviewer.ports import BoundaryError
+from atlas_reviewer.runner import exec_argv
 
 
 def client(tmp_path):
@@ -66,3 +68,32 @@ def test_an_unknown_method_is_refused(tmp_path):
         sock.close()
     finally:
         tasks.close()
+
+
+def test_an_exec_finishing_inside_its_budget_answers():
+    api = LocalSprites()
+    api.create("cqa-rev-test-abc")
+    try:
+        raw = api.exec("cqa-rev-test-abc", exec_argv("echo atlas-ok", 0), b"", 10)
+        assert b"atlas-ok" in raw
+    finally:
+        api.delete("cqa-rev-test-abc")
+
+
+def test_an_exec_that_outlives_its_budget_is_a_boundary_error_not_a_crash():
+    """The budget is the subprocess's own timeout, so a hung script ends at
+    its budget with the failure a live runner reports, and the review
+    fails closed instead of dying on an uncaught `TimeoutExpired`."""
+    api = LocalSprites()
+    api.create("cqa-rev-test-abc")
+    try:
+        started = time.monotonic()
+        try:
+            api.exec("cqa-rev-test-abc", exec_argv("exec sleep 5", 0), b"", 1)
+        except BoundaryError as exc:
+            assert "did not finish within its 1s budget" in str(exc)
+        else:
+            raise AssertionError("the over-budget exec was answered")
+        assert time.monotonic() - started < 10
+    finally:
+        api.delete("cqa-rev-test-abc")

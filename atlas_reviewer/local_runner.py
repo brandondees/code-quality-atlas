@@ -27,20 +27,33 @@ from pathlib import Path
 from typing import Self
 
 from atlas_reviewer.fakes import FakeSprites
+from atlas_reviewer.ports import BoundaryError
 
 
 class LocalSprites(FakeSprites):
     """Runs the exec wrapper's argv here and answers with its stdout as
-    one stdout frame, the shape the live exec stream has."""
+    one stdout frame, the shape the live exec stream has. The exec's
+    budget is honored as the subprocess's own timeout; a command that
+    outlives it is a `BoundaryError`, the same failure a live runner
+    reports, not a crash."""
 
     def exec(self, name, argv, stdin, timeout_s, first_byte_s=None):
         self._record("exec", name, argv[-1])
         self._get(name)
         self.argv_seen.append(tuple(argv))
         self.timeouts_seen.append(timeout_s)
-        done = subprocess.run(
-            list(argv), input=stdin, capture_output=True, timeout=60, check=False
-        )
+        try:
+            done = subprocess.run(
+                list(argv),
+                input=stdin,
+                capture_output=True,
+                timeout=timeout_s,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise BoundaryError(
+                f"local exec did not finish within its {timeout_s}s budget"
+            ) from exc
         return b"\x01" + done.stdout
 
 
