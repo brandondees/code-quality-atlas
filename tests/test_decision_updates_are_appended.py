@@ -141,7 +141,10 @@ def _violation(frozen: str, current: str) -> str | None:
         )
     appended = current[len(frozen) :]
     if appended and not appended.startswith(("\n", " ")):
-        return "the update is spliced into the frozen text, not appended as text"
+        return (
+            "the update is spliced into the frozen text, not appended as "
+            "text after the entry's last line"
+        )
     return None
 
 
@@ -220,16 +223,24 @@ def test_a_removed_entry_fails_the_guard() -> None:
 
 
 def test_a_missing_base_fails_closed_under_ci(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Review round 7, m4: under CI a base that cannot be read fails the
-    guard instead of skipping it (round 5, m1's regression is pinned)."""
+    """Review round 7, m4; hardened round 8, m5: under CI a base that
+    cannot be read fails the guard instead of skipping it (round 5, m1's
+    regression is pinned). A `pytest.skip` escaping as a Skipped outcome
+    would leave the suite green, so the outcome's exact type is asserted:
+    it must be a failure, with the guard's message."""
     import sys
 
     guard = sys.modules[__name__]
 
     monkeypatch.setattr(guard, "_base_doc", lambda: None)
     monkeypatch.setattr(guard, "_under_ci", lambda: True)
-    with pytest.raises(pytest.fail.Exception, match="the guard must run"):
+    with pytest.raises(BaseException) as raised:
         guard.test_every_decision_entry_appends_to_its_frozen_body()
+    # A skip-instead-of-fail regression raises Skipped, which pytest would
+    # report as a skip and the suite would stay green; assert it is a
+    # failure and that it is this rule's failure.
+    assert raised.type is pytest.fail.Exception, f"the guard raised {raised.type}"
+    assert "the guard must run" in str(raised.value)
 
 
 def test_a_shadow_bullet_does_not_shadow_the_real_entry() -> None:
@@ -264,6 +275,14 @@ def test_a_continuation_line_edit_fails_the_guard() -> None:
     assert _failures(base, base) == []
     edited = base.replace("sub-bullet one", "sub-bullet ONE")
     problems = _failures(base, edited)
+    assert len(problems) == 1 and problems[0].startswith("D31: the frozen body")
+    # Review round 8, m6: the paragraph after the blank line is part of
+    # the block too, so an edit inside it fails; a parser that ends the
+    # block at the blank line would pass it and unguard the paragraph.
+    edited_paragraph = base.replace(
+        "A paragraph after the blank line.", "A paragraph EDITED."
+    )
+    problems = _failures(base, edited_paragraph)
     assert len(problems) == 1 and problems[0].startswith("D31: the frozen body")
 
 
