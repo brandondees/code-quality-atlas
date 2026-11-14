@@ -3,12 +3,17 @@
 
 The child is ``python -m atlas_reviewer review``. It receives an allowlist
 of environment variables: the model key, the Sprites token, a read-only
-installation token, and the process basics (``PATH``, ``HOME``, language
-and CA paths). The webhook secret, the App private key, and anything else
-the parent holds, including a Fly API token, are not passed on. When the
-queue cancels the job, or the wall-clock deadline passes, the child is
-signalled SIGTERM, which the CLI turns into the stop that deletes its
-Sprite, and the result is not a draft to post. Exit codes 0, 4 and 5 are
+installation token, ``ATLAS_MODEL``, ``ATLAS_PROVIDERS``,
+``ATLAS_ALLOW_SAFETY_RETENTION``, ``ATLAS_REQUIRE_ZDR``,
+``ATLAS_KEY_CEILING_USD``, and the process basics (``PATH``, ``HOME``,
+language and CA paths). The one-shot review reads those. It does not
+read the agentic limit variables, so they are not passed, and D25's
+ceilings stay. The webhook secret, the App private key, and anything
+else the parent holds, including a Fly API token, are not passed on. When the queue cancels the job, or the
+wall-clock deadline passes, the child is signalled SIGTERM, which the CLI
+turns into the stop that deletes its Sprite. The parent waits out the
+Sprite cleanup budget plus one Sprites call before SIGKILL, and the
+result is not a draft to post. Exit codes 0, 4 and 5 are
 the CLI's finished reviews (complete, incomplete coverage, changes
 requested). Any other exit, or a finished process with no draft file, is
 a failure and produces no report.
@@ -31,6 +36,14 @@ from typing import Any
 
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.ledger import make_private_dirs
+from atlas_reviewer.openrouter import (
+    ENV_ALLOW_SAFETY_RETENTION,
+    ENV_KEY_CEILING_USD,
+    ENV_MODEL,
+    ENV_PROVIDERS,
+    ENV_REQUIRE_ZDR,
+)
+from atlas_reviewer.runner import CLEANUP_BUDGET_S
 from atlas_reviewer.verdict import parse_status
 
 WEBHOOK_SECRET_ENV = "ATLAS_GITHUB_WEBHOOK_SECRET"
@@ -60,20 +73,11 @@ _CHILD_ALLOWED = frozenset(
         "ATLAS_OPENROUTER_API_KEY",
         "ATLAS_SPRITES_TOKEN",
         READ_TOKEN_ENV,
-        # Not secrets. The review child is the process that calls the model,
-        # so the route and the per-call caps have to travel with it (D57).
-        "ATLAS_MODEL",
-        "ATLAS_PROVIDERS",
-        "ATLAS_ALLOW_SAFETY_RETENTION",
-        "ATLAS_REQUIRE_ZDR",
-        "ATLAS_MAX_OUTPUT_TOKENS",
-        "ATLAS_MAX_INPUT_TOKENS",
-        "ATLAS_REASONING_MAX_TOKENS",
-        "ATLAS_RESERVATION_USD",
-        "ATLAS_MAX_CALLS",
-        "ATLAS_MAX_TURNS",
-        "ATLAS_LENS_WALL_S",
-        "ATLAS_REVIEW_WALL_S",
+        ENV_MODEL,
+        ENV_PROVIDERS,
+        ENV_ALLOW_SAFETY_RETENTION,
+        ENV_REQUIRE_ZDR,
+        ENV_KEY_CEILING_USD,
     }
 )
 # The parent stops the child after this long even if the child is still
@@ -84,7 +88,12 @@ _DEADLINE_EXIT = -1
 # The CLI's review exits. 4 is incomplete file coverage and 5 is a finished
 # review that requests changes. Both still wrote a draft.
 POSTABLE_EXITS = frozenset({0, 4, 5})
-_STOP_WAIT_S = 5.0
+# ``CLEANUP_BUDGET_S`` is how long a destroy may start new Sprites calls.
+# One call can still be in flight, and ``SpritesClient`` bounds that call
+# at 30 seconds. SIGKILL before both have elapsed leaves the Sprite up.
+_SPRITE_CALL_S = 30.0
+CLEANUP_WAIT_S = CLEANUP_BUDGET_S + _SPRITE_CALL_S
+_KILL_WAIT_S = 5.0
 _QUOTED = re.compile(r"`(\"(?:\\.|[^\"\\])*\")`")
 
 Popen = Callable[..., Any]
@@ -149,6 +158,10 @@ def child_env(env: Mapping[str, str], *, token: str = "") -> dict[str, str]:
     """The review process gets only ``_CHILD_ALLOWED``. ``token`` is a
     read-only installation token, when the parent minted one."""
     cleaned = {key: value for key, value in env.items() if key in _CHILD_ALLOWED}
+    # The image starts as root, so HOME can still be /root after the
+    # uid drop. The child must not inherit a home it cannot write.
+    if cleaned.get("HOME") == "/root":
+        cleaned["HOME"] = "/home/atlas"
     if token:
         cleaned[READ_TOKEN_ENV] = token
     return cleaned
@@ -162,14 +175,17 @@ def make_runner(
     sleeper: Sleeper = time.sleep,
     deadline_s: float = REVIEW_DEADLINE_S,
     clock: Callable[[], float] = time.monotonic,
+    read_token: Callable[[Mapping[str, str], PrEvent], tuple[str, str]] | None = None,
 ) -> Callable[[PrEvent, threading.Event], ReviewRun]:
+    mint = read_token or _read_token
+
     def run(event: PrEvent, cancel: threading.Event) -> ReviewRun:
         directory = run_dir(config.state_root, event)
         make_private_dirs(directory)
         _write_event(directory / "event.json", event)
         stderr_path = directory / "stderr.txt"
         argv = review_argv(config, directory)
-        token, mint_error = _read_token(env, event)
+        token, mint_error = mint(env, event)
         if mint_error:
             return ReviewRun(False, error=mint_error)
         code = run_process(
@@ -377,7 +393,7 @@ def _stop(proc: subprocess.Popen[bytes]) -> None:
         return
     proc.send_signal(signal.SIGTERM)
     try:
-        proc.wait(timeout=_STOP_WAIT_S)
+        proc.wait(timeout=CLEANUP_WAIT_S)
     except subprocess.TimeoutExpired:
         proc.kill()
-        proc.wait(timeout=_STOP_WAIT_S)
+        proc.wait(timeout=_KILL_WAIT_S)

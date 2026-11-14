@@ -1,0 +1,55 @@
+# Webhook receiver. A second app from the one-off controller in fly.toml,
+# which stays a non-service. This file is what `fly deploy -c` releases.
+# Runbook: atlas_reviewer/deploy-service.md
+
+app = "atlas-reviewer-service"
+primary_region = "iad"
+# A review's Sprite cleanup may take 60s plus one 30s Sprites call. The
+# parent waits that out before SIGKILL. This is longer, so Fly's own
+# SIGKILL does not land while that cleanup is still running.
+kill_signal = "SIGINT"
+kill_timeout = "120s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[processes]
+  app = "serve"
+
+[env]
+  # The volume below. The queue and the post ledger live here, so a
+  # restart does not forget a post. The process default is loopback;
+  # Fly's proxy is not on loopback, so the service listens on every
+  # interface. The port is 8080, the same value as internal_port. The
+  # process refuses any other ATLAS_SERVICE_PORT.
+  ATLAS_REVIEWER_STATE_DIR = "/data"
+  ATLAS_SERVICE_HOST = "0.0.0.0"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Both off, together, on purpose. Fly Proxy's auto-stop would stop the
+  # Machine between reviews, and GitHub closes a webhook that waits longer
+  # than 10 seconds. A cold start is not bounded under that window.
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  processes = ["app"]
+
+[[http_service.checks]]
+  grace_period = "20s"
+  interval = "15s"
+  method = "GET"
+  timeout = "2s"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1024mb"
+
+# Created on first deploy when the volume does not exist yet
+# (fly deploy reads initial_size). One Machine, one volume, region iad.
+[mounts]
+  source = "atlas_reviewer_state"
+  destination = "/data"
+  initial_size = "1gb"
+  processes = ["app"]
