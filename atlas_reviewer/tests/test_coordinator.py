@@ -1108,10 +1108,10 @@ def test_a_quote_matched_within_two_lines_is_tagged_in_the_draft():
     assert result.event is ReviewEvent.COMMENT
 
 
-def test_a_drifted_major_finding_still_requests_changes():
+def test_a_drifted_major_finding_stays_a_comment():
     drifted = CheckedFinding(checked(Severity.MAJOR).finding, QuoteSource.HEAD_NEAR)
     result = synthesize([lens_result(clean(drifted))])
-    assert result.event is ReviewEvent.REQUEST_CHANGES
+    assert result.event is ReviewEvent.COMMENT
 
 
 def test_an_unverified_findings_problem_text_is_scrubbed_in_the_draft():
