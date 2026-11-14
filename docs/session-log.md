@@ -1292,5 +1292,6 @@ on, and an unreadable ZDR list refuses the call. The smallest context
 and completion limit are the ones the request uses, and a row's
 `max_prompt_tokens` caps the input when the row sets it. The usage
 line and the completion span name the selected tags and those limits.
-Sonnet 5.5's completion limit in the worked example is 128,000. No
-live call was made. D57.
+Sonnet 5.5's completion limit in the worked example is 128,000. The
+one-shot path refuses a prompt over a row's `max_prompt_tokens` before
+it is sent, and a bad tier names that row. No live call was made. D57.

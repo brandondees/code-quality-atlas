@@ -122,13 +122,24 @@ class OpenRouterLensModel:
         try:
             check_tokens(bound, terms, bounds)
         except TokenBoundError as exc:
+            limit = exc.limit
             bound_by = ""
-            if exc.limit == "context_length":
+            prompt_binds = (
+                terms.max_prompt_tokens is not None
+                and terms.max_prompt_tokens
+                < terms.context_length - bounds.max_output_tokens
+            )
+            if limit == "max_input_tokens" and prompt_binds:
+                limit = "max_prompt_tokens"
+                bound_by = terms.prompt_limit_tags
+            elif limit == "context_length":
                 bound_by = terms.context_limit_tags
-            elif exc.limit == "max_output_tokens":
+            elif limit == "max_output_tokens":
                 bound_by = terms.completion_limit_tags
+            elif limit == "max_prompt_tokens":
+                bound_by = terms.prompt_limit_tags
             raise LimitRefused(
-                hit(exc.limit, exc.configured, exc.observed, bound_by=bound_by)
+                hit(limit, exc.configured, exc.observed, bound_by=bound_by)
             ) from exc
         return worst_case_usd(bound, terms, bounds)
 

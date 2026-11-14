@@ -94,7 +94,7 @@ def _count(value: Any, what: str) -> int:
     return value
 
 
-def _tiers(pricing: Json) -> list[Json]:
+def tiers(pricing: Json) -> list[Json]:
     overrides = pricing.get("overrides", [])
     if not isinstance(overrides, list) or not all(
         isinstance(o, Mapping) for o in overrides
@@ -103,7 +103,7 @@ def _tiers(pricing: Json) -> list[Json]:
     return [pricing, *overrides]
 
 
-def _optional_rate(tiers: Iterable[Json], *keys: str) -> Decimal | None:
+def optional_rate(tiers: Iterable[Json], *keys: str) -> Decimal | None:
     """The highest rate among keys a tier actually carries, or None when
     none of them appear. Absence is not a free rate."""
     present = [
@@ -117,7 +117,7 @@ def _optional_rate(tiers: Iterable[Json], *keys: str) -> Decimal | None:
     return max(present)
 
 
-def _max_rate(tiers: Iterable[Json], key: str, required: bool) -> Decimal:
+def max_rate(tiers: Iterable[Json], key: str, required: bool) -> Decimal:
     present = [(i, t[key]) for i, t in enumerate(tiers) if key in t]
     if required and not any(i == 0 for i, _ in present):
         raise PricingUnknownError(f"pricing.{key} is missing")
@@ -135,16 +135,16 @@ def parse_model_terms(data: Json, expected_id: str) -> ModelTerms:
     pricing = model.get("pricing")
     if not isinstance(pricing, Mapping):
         raise PricingUnknownError("catalog entry has no pricing object")
-    tiers = _tiers(pricing)
-    prompt = _max_rate(tiers, "prompt", required=True)
+    priced = tiers(pricing)
+    prompt = max_rate(priced, "prompt", required=True)
     if prompt == ZERO:
         raise PricingUnknownError("pricing.prompt is zero")
-    completion = _max_rate(tiers, "completion", required=True)
+    completion = max_rate(priced, "completion", required=True)
     if completion == ZERO:
         raise PricingUnknownError("pricing.completion is zero")
     cache_write = max(
-        _max_rate(tiers, "input_cache_write", required=False),
-        _max_rate(tiers, "input_cache_write_1h", required=False),
+        max_rate(priced, "input_cache_write", required=False),
+        max_rate(priced, "input_cache_write_1h", required=False),
     )
     top = model.get("top_provider")
     return ModelTerms(
@@ -152,16 +152,16 @@ def parse_model_terms(data: Json, expected_id: str) -> ModelTerms:
         input_rate=max(prompt, cache_write),
         prompt_rate=prompt,
         completion_rate=completion,
-        reasoning_rate=_max_rate(tiers, "internal_reasoning", required=False),
-        request_fee=_max_rate(tiers, "request", required=False),
+        reasoning_rate=max_rate(priced, "internal_reasoning", required=False),
+        request_fee=max_rate(priced, "request", required=False),
         context_length=_count(model.get("context_length"), "context_length"),
         max_completion_tokens=_count(
             top.get("max_completion_tokens") if isinstance(top, Mapping) else None,
             "top_provider.max_completion_tokens",
         ),
-        cache_read_rate=_optional_rate(tiers, "input_cache_read"),
-        cache_write_rate=_optional_rate(
-            tiers, "input_cache_write", "input_cache_write_1h"
+        cache_read_rate=optional_rate(priced, "input_cache_read"),
+        cache_write_rate=optional_rate(
+            priced, "input_cache_write", "input_cache_write_1h"
         ),
     )
 

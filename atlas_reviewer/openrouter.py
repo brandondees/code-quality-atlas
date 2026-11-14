@@ -137,12 +137,12 @@ from atlas_reviewer.pricing import (
     KeyStatus,
     ModelTerms,
     PricingUnknownError,
-    _max_rate,
-    _optional_rate,
-    _tiers,
+    max_rate,
     money,
+    optional_rate,
     parse_key_status,
     parse_model_terms,
+    tiers,
 )
 from atlas_reviewer.prompt import Prompt
 
@@ -565,9 +565,13 @@ def terms_from_endpoints(
         pricing = row.get("pricing")
         if not isinstance(pricing, Mapping):
             raise PricingUnknownError(f"endpoint row {index} has no pricing object")
-        tiers = _tiers(pricing)
-        prompt = _max_rate(tiers, "prompt", required=True)
-        completion = _max_rate(tiers, "completion", required=True)
+        label = _row_label(row, index)
+        try:
+            row_tiers = tiers(pricing)
+            prompt = max_rate(row_tiers, "prompt", required=True)
+            completion = max_rate(row_tiers, "completion", required=True)
+        except PricingUnknownError as exc:
+            raise PricingUnknownError(f"endpoint row {index} ({label}): {exc}") from exc
         if prompt == 0:
             raise PricingUnknownError(f"endpoint row {index} pricing.prompt is zero")
         if completion == 0:
@@ -576,7 +580,6 @@ def terms_from_endpoints(
             )
         prompts.append(prompt)
         completions.append(completion)
-        label = _row_label(row, index)
         contexts.append(
             (
                 label,
@@ -605,12 +608,17 @@ def terms_from_endpoints(
                     ),
                 )
             )
-        requests.append(_max_rate(tiers, "request", required=False))
-        reasonings.append(_max_rate(tiers, "internal_reasoning", required=False))
-        write = _optional_rate(tiers, "input_cache_write", "input_cache_write_1h")
+        try:
+            requests.append(max_rate(row_tiers, "request", required=False))
+            reasonings.append(max_rate(row_tiers, "internal_reasoning", required=False))
+            write = optional_rate(
+                row_tiers, "input_cache_write", "input_cache_write_1h"
+            )
+            read = optional_rate(row_tiers, "input_cache_read")
+        except PricingUnknownError as exc:
+            raise PricingUnknownError(f"endpoint row {index} ({label}): {exc}") from exc
         if write is not None:
             cache_writes.append(write)
-        read = _optional_rate(tiers, "input_cache_read")
         if read is not None:
             cache_reads.append(read)
     prompt_rate = max(prompts)

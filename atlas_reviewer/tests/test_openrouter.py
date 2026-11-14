@@ -1768,3 +1768,29 @@ def test_zdr_off_still_refuses_a_safety_retention_tag_unless_opted_in():
     with pytest.raises(PricingUnknownError, match="HTTP 500"):
         refused.complete(SMALL)
     assert unread.chat_requests() == []
+
+
+def test_the_one_shot_path_refuses_a_prompt_over_the_row_prompt_ceiling():
+    rows = zdr_payload(providers=("amazon-bedrock",))
+    rows["data"][0]["max_prompt_tokens"] = 1
+    fake = OpenRouterFake(reply(completion()), zdr=reply(rows))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    with pytest.raises(BudgetRefusedError, match="max_prompt_tokens") as raised:
+        adapter.complete(SMALL)
+    assert "amazon-bedrock" in str(raised.value)
+    assert fake.chat_requests() == []
+
+
+def test_a_malformed_override_names_the_endpoint_row():
+    rows = zdr_payload(
+        providers=("amazon-bedrock",), pricing={"overrides": "nope"}
+    )
+    fake = OpenRouterFake(reply(completion()), zdr=reply(rows))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    with pytest.raises(
+        PricingUnknownError, match=r"endpoint row 0 \(amazon-bedrock\)"
+    ):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []

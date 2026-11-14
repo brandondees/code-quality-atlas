@@ -283,15 +283,6 @@ def resolve_per_call(limits: Limits, terms: ModelTerms) -> ResolvedCall:
     room = context_room
     if terms.max_prompt_tokens is not None:
         room = min(room, terms.max_prompt_tokens)
-    if room < 1:
-        raise LimitRefused(
-            hit(
-                "max_prompt_tokens",
-                terms.max_prompt_tokens,
-                f"output reserve {output}",
-                bound_by=terms.prompt_limit_tags,
-            )
-        )
     prompt_binds = (
         terms.max_prompt_tokens is not None and terms.max_prompt_tokens < context_room
     )

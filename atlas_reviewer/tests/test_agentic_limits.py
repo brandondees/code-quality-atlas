@@ -524,3 +524,7 @@ def test_max_prompt_tokens_caps_the_input_when_a_row_sets_it():
     assert call.max_output_tokens == 1_000
     assert call.max_input_tokens == 500
     assert terms.prompt_limit_tags == "amazon-bedrock"
+    with pytest.raises(LimitRefused, match="max_prompt_tokens") as raised:
+        lens.worst_case_usd(request())
+    assert "amazon-bedrock" in raised.value.hit.setting
+    assert "ATLAS_MAX_INPUT_TOKENS" not in raised.value.hit.setting
