@@ -391,6 +391,7 @@ def test_quotes_that_fail_twice_leave_the_lens_partial_and_report_only_verified(
     assert [f.id for f in result.verified] == ["L1-F1"]
     assert [f.id for f in result.unverified] == ["L1-F2"]
     assert result.verdict is Verdict.APPROVE_WITH_CHANGES
+    assert result.event is ReviewEvent.COMMENT
     draft = render_draft(result, Redactor())
     assert "## Not verified (not reported as findings)" in draft
 
@@ -1254,14 +1255,18 @@ def clean(*findings):
         ((checked(Severity.MAJOR),), Verdict.APPROVE_WITH_CHANGES, ReviewEvent.COMMENT),
         ((checked(Severity.NIT), checked(Severity.BLOCKER)), Verdict.BLOCK,
          ReviewEvent.REQUEST_CHANGES),
+        ((checked(Severity.MINOR), checked(Severity.MAJOR)),
+         Verdict.APPROVE_WITH_CHANGES, ReviewEvent.COMMENT),
+        ((checked(Severity.MINOR), checked(Severity.BLOCKER)), Verdict.BLOCK,
+         ReviewEvent.REQUEST_CHANGES),
         ((checked(Severity.BLOCKER, route=Route.LEGAL),), Verdict.BLOCK,
          ReviewEvent.REQUEST_CHANGES),
         ((checked(Severity.BLOCKER, attribution=Attribution.PRE_EXISTING),),
          Verdict.APPROVE, ReviewEvent.APPROVE),
         ((checked(Severity.BLOCKER, verified=False),), Verdict.APPROVE, ReviewEvent.APPROVE),
     ],
-    ids=["none", "nit", "minor", "major", "blocker", "routed-blocker", "pre-existing",
-         "unverified"],
+    ids=["none", "nit", "minor", "major", "blocker", "minor-and-major",
+         "minor-and-blocker", "routed-blocker", "pre-existing", "unverified"],
 )  # fmt: skip
 def test_the_verdict_follows_only_verified_introduced_defects(findings, verdict, event):
     result = synthesize([lens_result(clean(*findings))])
@@ -1501,6 +1506,7 @@ def test_a_pooled_review_appends_one_round_record_from_its_combined_verdict(tmp_
     result, _ = _lenses(
         tmp_path, [LENS, OTHER], models[0], pool=1, models=models, round_log=log
     )
+    # An introduced Major is a comment (D55). The record carries that event.
     assert result.event is ReviewEvent.COMMENT
     records = log.read().records
     assert len(records) == 1
