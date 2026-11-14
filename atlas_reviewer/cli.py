@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Operator entry point: `python -m atlas_reviewer {review,sweep,eval,probe-runner}`.
+"""Operator entry point: `python -m atlas_reviewer {review,agentic-review,sweep,eval,probe-runner}`.
 
 `review --dry-run` needs no credentials and no network: GitHub is a fixture
 directory, the runner is the in-memory fake, the provider is offline.
@@ -30,11 +30,20 @@ import sys
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, ExitStack, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import TextIO
+from typing import TextIO, cast
 
-from atlas_reviewer.budget import CallLimits
+from atlas_reviewer.agentic_config import ENV as AGENTIC_ENV
+from atlas_reviewer.attestation import AttemptLedger
+from atlas_reviewer.bridge_staging import fetch_sources
+from atlas_reviewer.budget import (
+    BUDGET_CEILING_USD,
+    MAX_CALLS_CEILING,
+    CallLimits,
+    ReviewBudget,
+)
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.controller import (
     DEFAULT_DIFF_CHARS_PER_CALL,
@@ -44,6 +53,13 @@ from atlas_reviewer.controller import (
     ReviewConfig,
     run_review,
 )
+from atlas_reviewer.coordinator import (
+    limits_for_lens,
+    model_for_lens,
+    render_draft,
+    review_lenses,
+)
+from atlas_reviewer.diffs import diff_paths
 from atlas_reviewer.domain import (
     CleanupStatus,
     InvalidEventError,
@@ -69,9 +85,23 @@ from atlas_reviewer.ledger import (
     make_private_dirs,
     single_review_lock,
 )
-from atlas_reviewer.openrouter import OpenRouterProvider, model_route
-from atlas_reviewer.picker import Depth
-from atlas_reviewer.ports import BoundaryError, Clock, ModelProvider, SpritesApi
+from atlas_reviewer.lens_loop import AgenticLimits, FinalReply, LensModel, TurnRequest
+from atlas_reviewer.lenses import LensLibrary, LensStatus
+from atlas_reviewer.openrouter import (
+    ENV_KEY_CEILING_USD,
+    KEY_LIMIT_MAX_USD,
+    OpenRouterProvider,
+    model_route,
+)
+from atlas_reviewer.picker import Depth, picker_instructions, select_agentic_lenses
+from atlas_reviewer.ports import (
+    BoundaryError,
+    Clock,
+    ModelProvider,
+    PickRequest,
+    SpritesApi,
+)
+from atlas_reviewer.prompt import RepoText, UntrustedBlock
 from atlas_reviewer.providers import OfflineProvider
 from atlas_reviewer.redact import Redactor
 from atlas_reviewer.runner import (
@@ -94,7 +124,10 @@ from atlas_reviewer.sprites_api import RUNNER_PREFIX, SpritesClient
 from atlas_reviewer.stops import raise_if_stopped
 from atlas_reviewer.telemetry import JsonlSink, Telemetry
 from atlas_reviewer.tracing import (
+    acquire_shared,
     header_values,
+    opening_trace,
+    release_shared,
     shared_trace,
     shutdown_shared,
     validate_export,
@@ -185,6 +218,7 @@ def _select_provider(
     env: Mapping[str, str],
     openrouter: Callable[[str, CallLimits], OpenRouterProvider],
     telemetry: Telemetry,
+    limits: CallLimits,
 ) -> ModelProvider:
     if args.provider == "offline":
         return OfflineProvider()
@@ -194,17 +228,16 @@ def _select_provider(
         raise UsageError(
             "live inference is off: pass --allow-live-inference with --provider openrouter"
         )
-    provider = openrouter(
-        _require_env(env, ENV_OPENROUTER_KEY),
-        CallLimits(max_calls=args.max_model_calls),
-    )
+    provider = openrouter(_require_env(env, ENV_OPENROUTER_KEY), limits)
     if isinstance(provider, OpenRouterProvider):
+        provider.key_ceiling = _key_ceiling(args, env)
         provider.configure(
             model_route(
                 env,
                 model=args.model,
                 providers=args.providers,
                 allow_safety_retention=args.allow_safety_retention,
+                require_zdr=False if args.no_require_zdr else None,
             )
         )
     telemetry.span("model preflight", "key status", provider.preflight)
@@ -469,6 +502,7 @@ def _review_config(args: argparse.Namespace, mode: str) -> ReviewConfig:
 
 def _cmd_review(args: argparse.Namespace, run: _Run) -> int:
     env, out, err = run.env, run.out, run.err
+    _key_ceiling(args, env)
     # ATLAS_* limit variables are not read here, and this command does not
     # accept the agentic limit flags. D25's one-shot ceilings stay, and a
     # value such as ATLAS_MAX_CALLS=10 must not refuse this command. The
@@ -482,7 +516,13 @@ def _cmd_review(args: argparse.Namespace, run: _Run) -> int:
             args, run, "review", claims, default_file=not args.dry_run
         )
         run.telemetry = telemetry
-        provider = _select_provider(args, env, args.openrouter_factory, telemetry)
+        provider = _select_provider(
+            args,
+            env,
+            args.openrouter_factory,
+            telemetry,
+            CallLimits(max_calls=args.max_model_calls),
+        )
         if args.dry_run:
             wiring = _dry_run_wiring(args, event_path, provider, telemetry)
         else:
@@ -503,6 +543,259 @@ def _cmd_review(args: argparse.Namespace, run: _Run) -> int:
         f"{len(verdict.coverage.unreviewed)}\n"
     )
     return review_exit(verdict)
+
+
+AGENTIC_POOL = 4
+_BODY_MARKER = re.compile(r"=== lens body begins: (\S+) \(sha256 ([0-9a-f]{64})\) ===")
+
+
+class _DryRunLensModel:
+    """A lens turn that acknowledges the delivered body and reports no
+    findings. It calls no tool, so a dry run spends nothing and leaves
+    file coverage incomplete."""
+
+    name = "dry-run"
+
+    def worst_case_usd(self, request: TurnRequest) -> Decimal:
+        return Decimal("0.01")
+
+    def turn(self, request: TurnRequest) -> FinalReply:
+        system = getattr(request, "system", "")
+        match = _BODY_MARKER.search(system)
+        payload: dict[str, object] = {"findings": []}
+        if match is not None:
+            payload = {
+                "lens": match.group(1),
+                "body_sha256": match.group(2),
+                "findings": [],
+            }
+        return FinalReply(json.dumps(payload), Decimal("0.01"))
+
+
+def _cmd_agentic_review(args: argparse.Namespace, run: _Run) -> int:
+    """Every selected lens, concurrently up to the pool, then one draft.
+
+    The one-shot `review` command does not call this. A dry run uses the
+    fixture directory and an in-memory runner and does not read credentials.
+    """
+    env, out, err = run.env, run.out, run.err
+    limits = _agentic_limits(args, env)
+    event = load_event(Path(args.event))
+    _check_out_path(args.out)
+    with _review_lock(args, env), ExitStack() as claims:
+        telemetry = _telemetry(
+            args, run, "agentic-review", claims, default_file=not args.dry_run
+        )
+        run.telemetry = telemetry
+        lens_model: LensModel
+        model_factory: Callable[[], LensModel] | None
+        picker_provider: ModelProvider
+        github: FixtureGitHub | GitHubClient
+        if args.dry_run:
+            fixtures = Path(args.fixtures) if args.fixtures else Path(args.event).parent
+            if not fixtures.is_dir():
+                raise UsageError(f"fixture directory {fixtures} does not exist")
+            github = FixtureGitHub(fixtures)
+            sprites = _scripted_runner(fixtures / "runner-script.json")
+            redactor = Redactor()
+            lens_model = _DryRunLensModel()
+            model_factory = None
+            picker_provider = OfflineProvider()
+        else:
+            provider = _select_provider(
+                args, env, args.openrouter_factory, telemetry, _picker_limits(limits)
+            )
+            if not isinstance(provider, OpenRouterProvider):
+                raise UsageError(
+                    "agentic-review live mode needs --provider openrouter "
+                    "--allow-live-inference"
+                )
+            github = _live_github(args, env, event, run.credentials)
+            sprites = args.sprites_factory(env)
+            redactor = run.credentials.redactor
+            picker_provider = provider
+
+            def live_model() -> LensModel:
+                return cast(LensModel, model_for_lens(provider, limits))
+
+            lens_model = live_model()
+            model_factory = live_model
+
+        clock = SystemClock()
+        pull = github.get_pull(event.repo, event.pr_number)
+        _require_head(pull, event, "the PR head is no longer the event SHA")
+        diff = github.get_pull_diff(event.repo, event.pr_number)
+        _require_head(
+            github.get_pull(event.repo, event.pr_number),
+            event,
+            "the PR head moved while the diff was fetched",
+        )
+        base = pull.get("base") if isinstance(pull, dict) else None
+        ref = base.get("ref") if isinstance(base, dict) else None
+        if not isinstance(ref, str) or not ref:
+            raise UsageError("the pull request has no base ref")
+        trees = fetch_sources(github, event.repo, ref, event.head_sha)
+        library = LensLibrary()
+        depth = Depth(args.depth)
+        harness = SkillBundleHarness(picker_provider, load_bundle(), redactor)
+
+        def scrub(text: str) -> str:
+            return redactor(text).text
+
+        def run_picker() -> str:
+            paths = diff_paths(diff)[:500]
+            shown = "\n".join(paths) or "(no changed paths)"
+            title = pull.get("title") if isinstance(pull, dict) else ""
+            return harness.pick(
+                PickRequest(
+                    event.repo,
+                    event.pr_number,
+                    event.head_sha,
+                    picker_instructions(depth),
+                    (
+                        UntrustedBlock("pull-request", redactor(str(title or ""))),
+                        UntrustedBlock("changed-paths", RepoText(shown)),
+                    ),
+                )
+            )
+
+        acquire_shared()
+        try:
+            with opening_trace(None, scrub).review(
+                event.repo, event.pr_number, event.head_sha
+            ) as span:
+                selection, plan = select_agentic_lenses(
+                    depth,
+                    None if depth is Depth.TRIAGE else run_picker,
+                    library,
+                    scrub=scrub,
+                )
+                names = tuple(loaded.name for loaded in plan.loaded)
+                budget = getattr(picker_provider, "budget", None)
+                picker_spend = (
+                    (len(budget.calls), budget.committed_usd())
+                    if isinstance(budget, ReviewBudget)
+                    else (0, Decimal(0))
+                )
+                ledger = AttemptLedger(
+                    _state_dir(args, env) / "attestation.ledger", clock
+                )
+                review = review_lenses(
+                    event,
+                    names,
+                    diff,
+                    trees,
+                    library=library,
+                    model=lens_model,
+                    limits=limits,
+                    ledger=ledger,
+                    sprites=sprites,
+                    runner_ledger=FileLedger(_state_dir(args, env) / "runners.ledger"),
+                    redactor=redactor,
+                    clock=clock,
+                    telemetry=telemetry,
+                    model_for=model_factory,
+                    picker_spend=picker_spend,
+                )
+                review = replace(
+                    review,
+                    selection_note=selection.note,
+                    not_picked=tuple(
+                        (use.name, use.reason)
+                        for use in plan.uses
+                        if use.status is LensStatus.NOT_RUN
+                    ),
+                )
+                span.set("atlas.review_event", review.event.value)
+        finally:
+            release_shared()
+    written = _emit(render_draft(review, redactor), args.out, out, err)
+    (out if written else err).write(
+        f"{_telemetry_line(run, telemetry)}"
+        f"review event: {review.event.value}; coverage_complete="
+        f"{str(review.coverage_complete).lower()}; unreviewed_files="
+        f"{len(review.unreviewed_paths)}; lenses={len(names)}; "
+        f"not_run={len(review.not_picked)}\n"
+    )
+    if not review.coverage_complete:
+        return EXIT_INCOMPLETE
+    if review.proposed_event is ReviewEvent.REQUEST_CHANGES:
+        return EXIT_CHANGES_REQUESTED
+    return EXIT_OK
+
+
+def _picker_limits(limits: AgenticLimits) -> CallLimits:
+    """The picker's provider budget: no more calls or dollars than the
+    agentic review allows, and never past the one-shot D25 ceilings."""
+    resolved = limits.resolve()
+    return CallLimits(
+        max_calls=min(resolved.max_calls, MAX_CALLS_CEILING),
+        budget_usd=min(resolved.reservation_usd, BUDGET_CEILING_USD),
+    )
+
+
+def _require_head(pull: object, event: PrEvent, why: str) -> None:
+    """The diff endpoint serves the PR's current head; the lenses read
+    files at `event.head_sha`. Refuse before any model call when the two
+    can differ."""
+    head = pull.get("head") if isinstance(pull, dict) else None
+    sha = head.get("sha") if isinstance(head, dict) else None
+    if sha != event.head_sha:
+        raise BoundaryError(f"{why}; no model call was made")
+
+
+def _live_github(
+    args: argparse.Namespace,
+    env: Mapping[str, str],
+    event: PrEvent,
+    credentials: _Credentials,
+) -> GitHubClient:
+    transport = UrllibTransport()
+    tokens = _app_tokens(env, event, args.include_issues, transport)
+    credentials.register(tokens.secrets)
+    return GitHubClient(transport, tokens)
+
+
+def _agentic_limits(args: argparse.Namespace, env: Mapping[str, str]) -> AgenticLimits:
+    flags = {name: getattr(args, name, None) for name in AGENTIC_ENV}
+    try:
+        limits = limits_for_lens(env, **flags)
+    except ValueError as exc:
+        raise UsageError(str(exc)) from exc
+    if flags.get("pool_size") is None and not env.get("ATLAS_POOL_SIZE"):
+        limits = replace(limits, pool_size=AGENTIC_POOL)
+        try:
+            limits.resolve()
+        except ValueError as exc:
+            raise UsageError(str(exc)) from exc
+    return limits
+
+
+def _key_ceiling(args: argparse.Namespace, env: Mapping[str, str]) -> Decimal:
+    raw = getattr(args, "key_ceiling_usd", None)
+    if raw == "":
+        raise UsageError(
+            "--key-ceiling-usd was given an empty value; set a positive number "
+            "of dollars, or omit it to keep the $5.00 pilot ceiling"
+        )
+    if raw is None:
+        raw = env.get(ENV_KEY_CEILING_USD)
+    if raw is None or raw == "":
+        return KEY_LIMIT_MAX_USD
+    try:
+        value = Decimal(raw)
+    except InvalidOperation:
+        raise UsageError(
+            "the key ceiling must be a positive number of dollars "
+            "(--key-ceiling-usd or ATLAS_KEY_CEILING_USD), "
+            f"not {raw!r}"
+        ) from None
+    if not value.is_finite() or value <= 0:
+        raise UsageError(
+            "the key ceiling must be a positive number of dollars "
+            f"(--key-ceiling-usd or ATLAS_KEY_CEILING_USD), not {raw!r}"
+        )
+    return value
 
 
 def review_exit(verdict: Verdict) -> int:
@@ -832,35 +1125,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="the atlas depth mode: triage runs the critical tier with no picker call",
     )
     _events_arg(rev)
-    rev.add_argument(
-        "--model",
-        default=None,
-        help=(
-            "OpenRouter model id (env ATLAS_MODEL; default "
-            "anthropic/claude-sonnet-5.5). A response from any other model "
-            "is rejected."
-        ),
-    )
-    rev.add_argument(
-        "--providers",
-        default=None,
-        help=(
-            "comma-separated provider slugs for provider.only (env "
-            "ATLAS_PROVIDERS; default amazon-bedrock,google-vertex/europe,"
-            "google-vertex/global,google-vertex/us). One slug pins that "
-            "provider. A slug with no pure-ZDR endpoint for the model is "
-            "refused."
-        ),
-    )
-    rev.add_argument(
-        "--allow-safety-retention",
-        action="store_true",
-        help=(
-            "allow OpenRouter Safety Retention endpoints (env "
-            "ATLAS_ALLOW_SAFETY_RETENTION=true). Off by default: a request "
-            "stays on pure zero-data-retention endpoints."
-        ),
-    )
+    _model_args(rev)
+    _key_ceiling_arg(rev)
     rev.add_argument("--provider", choices=PROVIDER_CHOICES, default="offline")
     rev.add_argument(
         "--allow-live-inference",
@@ -869,6 +1135,54 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _first_frame_arg(rev)
     rev.set_defaults(handler=_cmd_review)
+    ag = sub.add_parser(
+        "agentic-review",
+        help="review one PR with every selected lens and write one draft",
+    )
+    ag.add_argument(
+        "--event", required=True, help="JSON file with repo, pr_number, head_sha"
+    )
+    ag.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="fixtures + in-memory runner; no credentials and no model spend",
+    )
+    ag.add_argument(
+        "--fixtures",
+        help="fixture directory for --dry-run (default: the event file's directory)",
+    )
+    ag.add_argument("--out", help="write the draft here instead of stdout")
+    ag.add_argument(
+        "--include-issues",
+        action="store_true",
+        help="opt in to fetching issues the PR closes",
+    )
+    ag.add_argument(
+        "--depth",
+        choices=[d.value for d in Depth],
+        default=Depth.REVIEW.value,
+        help="triage runs the critical tier and does not call the picker",
+    )
+    ag.add_argument(
+        "--pool-size",
+        dest="pool_size",
+        default=None,
+        help=(
+            "lenses at once, 1 to 16 "
+            f"(env {AGENTIC_ENV['pool_size']}; {AGENTIC_POOL} when unset)"
+        ),
+    )
+    _events_arg(ag)
+    _agentic_limit_args(ag)
+    _model_args(ag)
+    _key_ceiling_arg(ag)
+    ag.add_argument("--provider", choices=PROVIDER_CHOICES, default="offline")
+    ag.add_argument(
+        "--allow-live-inference",
+        action="store_true",
+        help="required with --provider openrouter; spends real money (capped)",
+    )
+    ag.set_defaults(handler=_cmd_agentic_review)
     swp = sub.add_parser(
         "sweep", help="destroy runners a crashed review left in the ledger"
     )
@@ -952,6 +1266,95 @@ def _positive_seconds(text: str) -> float:
     if not (math.isfinite(value) and value > 0):
         raise argparse.ArgumentTypeError("must be a positive number of seconds")
     return value
+
+
+def _model_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "OpenRouter model id (env ATLAS_MODEL; default "
+            "anthropic/claude-sonnet-5.5). A response from any other model "
+            "is rejected."
+        ),
+    )
+    parser.add_argument(
+        "--providers",
+        default=None,
+        help=(
+            "comma-separated provider slugs for provider.only (env "
+            "ATLAS_PROVIDERS; default amazon-bedrock,google-vertex/europe,"
+            "google-vertex/global,google-vertex/us). One slug pins that "
+            "provider. A slug with no pure-ZDR endpoint for the model is "
+            "refused."
+        ),
+    )
+    parser.add_argument(
+        "--allow-safety-retention",
+        action="store_true",
+        help=(
+            "allow OpenRouter Safety Retention endpoints (env "
+            "ATLAS_ALLOW_SAFETY_RETENTION=true). Off by default: a request "
+            "stays on pure zero-data-retention endpoints."
+        ),
+    )
+    parser.add_argument(
+        "--no-require-zdr",
+        action="store_true",
+        help=(
+            "do not require zero-data-retention endpoints (env "
+            "ATLAS_REQUIRE_ZDR=false). Off by default, so zdr stays true. "
+            "data_collection deny, allow_fallbacks false, and provider.only "
+            "stay. The flag wins over a true environment variable."
+        ),
+    )
+
+
+def _key_ceiling_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--key-ceiling-usd",
+        default=None,
+        help=(
+            "most the OpenRouter key's own credit limit may be "
+            f"(default ${KEY_LIMIT_MAX_USD}; env ATLAS_KEY_CEILING_USD). "
+            "A preflight that finds a higher limit names this setting."
+        ),
+    )
+
+
+def _agentic_limit_args(parser: argparse.ArgumentParser) -> None:
+    """The agentic limit flags. `agentic-review` applies them. The one-shot
+    `review` command does not accept them."""
+    note = "This command applies it."
+    flags = (
+        ("--reservation-usd", "reservation_usd", "per-review dollar reservation"),
+        ("--max-calls", "max_calls", "model calls per agentic review"),
+        ("--max-turns", "max_turns", "model turns per lens"),
+        ("--lens-wall-seconds", "lens_wall_s", "seconds per lens"),
+        ("--review-wall-seconds", "review_wall_s", "seconds per review"),
+        (
+            "--max-input-tokens",
+            "max_input_tokens",
+            "per-call input cap; default is the model's context minus the output reserve",
+        ),
+        (
+            "--max-output-tokens",
+            "max_output_tokens",
+            "per-call output cap; unset uses a quarter of the endpoint context when the completion limit is larger, otherwise that limit",
+        ),
+        (
+            "--reasoning-max-tokens",
+            "reasoning_max_tokens",
+            "reasoning hint sent on the request; the reservation does not depend on it",
+        ),
+    )
+    for flag, name, meaning in flags:
+        parser.add_argument(
+            flag,
+            dest=name,
+            default=None,
+            help=(f"{meaning} (env {AGENTIC_ENV[name]}; default when unset). {note}"),
+        )
 
 
 def _events_arg(parser: argparse.ArgumentParser) -> None:

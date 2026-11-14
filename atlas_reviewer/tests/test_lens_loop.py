@@ -23,6 +23,7 @@ from atlas_reviewer.lens_loop import (
     SYNTHESIS,
     AgenticLimits,
     AssistantCalls,
+    AssistantText,
     LensJob,
     LimitsUnsetError,
     Spend,
@@ -131,6 +132,77 @@ def test_a_byok_refusal_leaves_the_loop_and_keeps_the_reservation():
     assert spend.committed_usd == Decimal("0.01")
 
 
+def test_a_call_after_a_byok_refusal_elsewhere_in_the_review_is_not_sent():
+    model = ScriptedLensModel([final()])
+    spend = Spend(LIMITS.resolve())
+    spend.halt()
+    clock = FakeClock()
+    outcome = run_attempt(
+        job(), object(), model, spend, clock,
+        review_deadline=clock.monotonic() + 600,
+        review_started=clock.monotonic(),
+    )  # fmt: skip
+    assert Cause.MODEL_ERROR in outcome.causes
+    assert model.requests == []
+    assert spend.calls == 0
+
+
+def test_a_halt_while_the_call_is_priced_stops_the_call():
+    """Pricing can wait on the catalog. A lens that halts the review in
+    that wait stops this lens's call before it is reserved or sent."""
+    spend = Spend(LIMITS.resolve())
+
+    class Model(ScriptedLensModel):
+        def worst_case_usd(self, request):
+            spend.halt()
+            return Decimal("0.01")
+
+    model = Model([final()])
+    clock = FakeClock()
+    outcome = run_attempt(
+        job(), object(), model, spend, clock,
+        review_deadline=clock.monotonic() + 600,
+        review_started=clock.monotonic(),
+    )  # fmt: skip
+    assert Cause.MODEL_ERROR in outcome.causes
+    assert model.requests == []
+    assert spend.calls == 0
+
+
+def test_concurrent_reservations_never_pass_the_call_cap():
+    """Pooled lenses reserve at once. A worst case whose addition is slow
+    holds each thread between the cap check and the count; only the lock
+    keeps the other threads out of that window."""
+    import threading
+    import time
+
+    class Slow(Decimal):
+        def __radd__(self, other):
+            time.sleep(0.05)
+            return Decimal(other) + Decimal(self)
+
+    spend = Spend(replace(LIMITS, max_calls=1, max_turns=1).resolve())
+    start = threading.Barrier(8)
+    refused = []
+
+    def reserve():
+        start.wait()
+        refused.append(spend.reserve(Slow("0.01")))
+
+    threads = [threading.Thread(target=reserve) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert spend.calls == 1
+    assert sum(r is None for r in refused) == 1
+
+
+def test_two_spends_with_the_same_totals_are_equal():
+    """The lock and the halt flag are not fields a caller passes or compares."""
+    assert Spend(LIMITS.resolve()) == Spend(LIMITS.resolve())
+
+
 def test_brandons_provisional_defaults_are_accepted():
     resolved = AgenticLimits().resolve()
     assert (
@@ -175,6 +247,11 @@ def test_the_working_defaults_are_one_retry_and_one_worker():
     assert (resolved.retries, resolved.pool_size) == (1, 1)
 
 
+def test_a_pool_from_one_to_sixteen_is_accepted():
+    assert replace(LIMITS, pool_size=4).resolve().pool_size == 4
+    assert replace(LIMITS, pool_size=16).resolve().pool_size == 16
+
+
 @pytest.mark.parametrize(
     "change",
     [
@@ -188,7 +265,9 @@ def test_the_working_defaults_are_one_retry_and_one_worker():
         {"lens_wall_s": 0},
         {"review_wall_s": -1},
         {"retries": 2},
-        {"pool_size": 2},
+        {"pool_size": 0},
+        {"pool_size": 17},
+        {"pool_size": True},
     ],
 )
 def test_a_limit_outside_its_range_is_refused(change):
@@ -442,13 +521,29 @@ def test_a_finding_whose_quote_is_not_at_head_is_unverified_and_retried(tmp_path
     assert [c.verified for c in outcome.findings] == [True, False]
 
 
-def test_a_reply_outside_the_contract_fails_and_is_retried(tmp_path):
-    outcome, _, _ = attempt(tmp_path, [READ_ALL, final(text="Looks fine to me!")])
+def test_a_reply_outside_the_contract_is_sent_back_once_then_fails(tmp_path):
+    bad = final(text="Looks fine to me!")
+    outcome, model, _ = attempt(tmp_path, [READ_ALL, bad, bad])
     assert outcome.attestation is Attestation.UNACKNOWLEDGED
     assert outcome.causes == {Cause.UNPARSED}
     assert outcome.state is LensState.FAILED
     assert outcome.retryable
     assert outcome.findings == ()
+    repair = model.requests[2].messages[-1].text
+    assert "the reply is not one JSON object" in repair
+    assert "quoted" in repair
+    assert model.requests[2].messages[-2] == AssistantText("Looks fine to me!")
+    assert len(model.requests) == 3
+    assert Cause.UNPARSED in outcome.causes
+    assert outcome.state is not LensState.CLEAN
+
+
+def test_a_repaired_reply_that_meets_the_contract_is_accepted(tmp_path):
+    outcome, _, _ = attempt(
+        tmp_path, [READ_ALL, final(text="Looks fine to me!"), final()]
+    )
+    assert outcome.state is LensState.CLEAN
+    assert outcome.causes == set()
 
 
 @pytest.mark.parametrize(

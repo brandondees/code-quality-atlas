@@ -4,11 +4,12 @@
 The child is ``python -m atlas_reviewer review``. It receives an allowlist
 of environment variables: the model key, the Sprites token, a read-only
 installation token, ``ATLAS_MODEL``, ``ATLAS_PROVIDERS``,
-``ATLAS_ALLOW_SAFETY_RETENTION``, and the process basics (``PATH``,
-``HOME``, language and CA paths). The agentic limit variables are not
-passed. This command is the one-shot review, and D25's ceilings stay.
-The webhook secret, the App private key, and anything else the parent
-holds, including a Fly API token, are not passed on. When the queue cancels the job, or the
+``ATLAS_ALLOW_SAFETY_RETENTION``, ``ATLAS_REQUIRE_ZDR``,
+``ATLAS_KEY_CEILING_USD``, and the process basics (``PATH``, ``HOME``,
+language and CA paths). The one-shot review reads those. It does not
+read the agentic limit variables, so they are not passed, and D25's
+ceilings stay. The webhook secret, the App private key, and anything
+else the parent holds, including a Fly API token, are not passed on. When the queue cancels the job, or the
 wall-clock deadline passes, the child is signalled SIGTERM, which the CLI
 turns into the stop that deletes its Sprite. The parent waits out the
 Sprite cleanup budget plus one Sprites call before SIGKILL, and the
@@ -37,8 +38,10 @@ from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.ledger import make_private_dirs
 from atlas_reviewer.openrouter import (
     ENV_ALLOW_SAFETY_RETENTION,
+    ENV_KEY_CEILING_USD,
     ENV_MODEL,
     ENV_PROVIDERS,
+    ENV_REQUIRE_ZDR,
 )
 from atlas_reviewer.runner import CLEANUP_BUDGET_S
 from atlas_reviewer.verdict import parse_status
@@ -73,6 +76,8 @@ _CHILD_ALLOWED = frozenset(
         ENV_MODEL,
         ENV_PROVIDERS,
         ENV_ALLOW_SAFETY_RETENTION,
+        ENV_REQUIRE_ZDR,
+        ENV_KEY_CEILING_USD,
     }
 )
 # The parent stops the child after this long even if the child is still

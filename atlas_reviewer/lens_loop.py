@@ -13,9 +13,11 @@ so an element without it is data.
 An attempt ends with the model's final reply, or is cut short by the turn
 cap, the review's call cap or dollar reservation, the per-lens or review
 wall clock, the output cap when the model stops at it, a failed model
-call, or the runner's deadline. Anything but a final reply that meets
-the contract, acknowledges the body and whose
-quotes all verify leaves the lens partial or failed, never clean. A final
+call, or the runner's deadline. A final reply outside the finding
+contract is sent back once, with the validation error quoted, and a
+second such reply is the attempt's result. Anything but a final reply
+that meets the contract, acknowledges the body and whose quotes all
+verify leaves the lens partial or failed, never clean. A final
 reply is clean only when every changed file's diff was read in full: a
 `diff_file` chain from offset 0 through every truncated page. A changed
 file left unread makes the attempt partial (`FILES_UNREAD`), and that
@@ -38,6 +40,7 @@ from __future__ import annotations
 
 import json
 import math
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields
 from decimal import Decimal
@@ -61,6 +64,7 @@ from atlas_reviewer.bridge_args import TOOLS, Rev, arg_names, required_args
 from atlas_reviewer.lens_contract import ContractError, parse_reply
 from atlas_reviewer.lenses import BUNDLE_ROOT
 from atlas_reviewer.limit_stop import LimitHit, LimitRefused, hit
+from atlas_reviewer.notes import quote_untrusted
 from atlas_reviewer.ports import BoundaryError, ByokRefusedError, Clock
 from atlas_reviewer.pricing import ModelTerms
 from atlas_reviewer.prompt import RepoText, UntrustedBlock, _fence_rule, fence
@@ -111,9 +115,9 @@ class AgenticLimits:
     lens attempt. `lens_wall_s` and `review_wall_s`: wall clocks, per lens
     attempt and for the whole review (the runner's deadline). The five
     defaults are Brandon's headroom (2026-11-11); pass a value to override
-    one, or None to clear it, which `resolve` refuses. `retries` and
-    `pool_size` are D31's working defaults; phase 3 runs one lens at a
-    time. The per-call token fields are None until the catalog is known:
+    one, or None to clear it, which `resolve` refuses. `retries` is 0 or
+    1. `pool_size` is how many lenses run at once (1 to 16; the default
+    is one). The per-call token fields are None until the catalog is known:
     `resolve_per_call` fills them from the model, and an int tightens."""
 
     reservation_usd: Decimal | None = DEFAULT_RESERVATION_USD
@@ -166,8 +170,12 @@ def _check_limits(limits: Limits) -> None:
         raise ValueError("lens_wall_s must be no greater than review_wall_s")
     if isinstance(limits.retries, bool) or limits.retries not in range(2):
         raise ValueError("retries must be 0 or 1")
-    if limits.pool_size != POOL_SIZE:
-        raise ValueError("phase 3 runs one lens at a time: pool_size must be 1")
+    if (
+        isinstance(limits.pool_size, bool)
+        or not isinstance(limits.pool_size, int)
+        or not 1 <= limits.pool_size <= 16
+    ):
+        raise ValueError("pool_size must be an integer from 1 to 16")
     for name in _DERIVED:
         value = getattr(limits, name)
         if value is None:
@@ -201,22 +209,46 @@ class ResolvedCall:
     reasoning_max_tokens: int
 
 
+def default_output_tokens(context_length: int, max_completion_tokens: int) -> int:
+    """Output tokens to reserve when no cap was configured.
+
+    A review turn needs the diff, the lens, and tool results in the
+    input. When the endpoint's completion limit is larger than a quarter
+    of its context, the default is that quarter (at least 2, and never
+    above the completion limit). Otherwise the default is the completion
+    limit itself. On a 262,144-token context the quarter is 65,536
+    output tokens, which leaves 196,608 for input. On a 1,000,000-token
+    context whose completion limit is already 64,000, the default stays
+    64,000. `ATLAS_MAX_OUTPUT_TOKENS` can set a larger cap, up to the
+    completion limit, as long as one input token remains.
+    """
+    quarter = context_length // 4
+    if max_completion_tokens > quarter:
+        cap = max(quarter, 2)
+    else:
+        cap = max_completion_tokens
+    if cap > max_completion_tokens:
+        return max_completion_tokens
+    return cap
+
+
 def resolve_per_call(limits: Limits, terms: ModelTerms) -> ResolvedCall:
     """The per-call bounds for this model.
 
     Hard caps exist to stop a runaway call, not to make a review shallow.
-    With no override, the output cap is the model's own completion limit
-    and the input cap is the context that cap leaves. The reasoning value
-    defaults to half that output cap (`default_reasoning_tokens`), so the
-    reply has the other half. OpenRouter counts reasoning tokens against
-    `max_tokens`, and the reservation does not depend on the hint. An
-    override may tighten a bound. It may not exceed the model's context,
-    and the output override may not exceed the model's completion limit.
-    An unknown context never reaches here: `parse_model_terms` has
-    already refused it.
+    With no override, the output cap is `default_output_tokens`: the
+    completion limit, unless that limit would leave less than three
+    quarters of the context for input. The input cap is the context that
+    cap leaves. The reasoning value defaults to half that output cap
+    (`default_reasoning_tokens`), so the reply has the other half.
+    OpenRouter counts reasoning tokens against `max_tokens`, and the
+    reservation does not depend on the hint. An override may be larger
+    than the quarter and may not exceed the model's context. The output
+    override may not exceed the model's completion limit. An unknown
+    context never reaches here: the endpoint rows have already refused it.
     """
     output = (
-        terms.max_completion_tokens
+        default_output_tokens(terms.context_length, terms.max_completion_tokens)
         if limits.max_output_tokens is None
         else limits.max_output_tokens
     )
@@ -284,13 +316,21 @@ class AssistantCalls:
 
 
 @dataclass(frozen=True)
+class AssistantText:
+    """A final reply the contract rejected, sent back as the model's own
+    turn so the repair turn can correct it."""
+
+    text: str
+
+
+@dataclass(frozen=True)
 class ToolResults:
     """One fenced result per call of the turn before, in order."""
 
     results: tuple[str, ...]
 
 
-Message = UserText | AssistantCalls | ToolResults
+Message = UserText | AssistantCalls | AssistantText | ToolResults
 
 
 @dataclass(frozen=True)
@@ -452,8 +492,27 @@ class Spend:
     limits: Limits
     calls: int = 0
     committed_usd: Decimal = Decimal(0)
+    _lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False, compare=False
+    )
+    _halted: threading.Event = field(
+        default_factory=threading.Event, init=False, repr=False, compare=False
+    )
+
+    @property
+    def halted(self) -> bool:
+        """Set once the key refused BYOK spend or a lens failed fatally.
+        No further model call is made in this review after that."""
+        return self._halted.is_set()
+
+    def halt(self) -> None:
+        self._halted.set()
 
     def reserve(self, worst_usd: Decimal) -> LimitHit | None:
+        with self._lock:
+            return self._reserve(worst_usd)
+
+    def _reserve(self, worst_usd: Decimal) -> LimitHit | None:
         if self.calls >= self.limits.max_calls:
             return hit(
                 "max_calls", self.limits.max_calls, f"next call {self.calls + 1}"
@@ -468,8 +527,9 @@ class Spend:
         return None
 
     def settle(self, worst_usd: Decimal, actual_usd: Any) -> None:
-        if _valid_cost(actual_usd):
-            self.committed_usd += actual_usd - worst_usd
+        with self._lock:
+            if _valid_cost(actual_usd):
+                self.committed_usd += actual_usd - worst_usd
 
 
 def _valid_cost(value: Any) -> bool:
@@ -477,6 +537,11 @@ def _valid_cost(value: Any) -> bool:
 
 
 # ------------------------------------------------------------- the attempt
+
+HALTED_CALL = (
+    "the review stopped before this call: the key refused BYOK spend "
+    "or another lens failed"
+)
 
 GAP_STATUSES = frozenset(
     {Status.TIMED_OUT, Status.UNAVAILABLE, Status.OVER_SESSION_LIMIT}
@@ -542,6 +607,7 @@ class _Progress:
     read_source: bool = False
     secrets: list[BridgeSecret] = field(default_factory=list)
     pages: _DiffPages = field(default_factory=_DiffPages)
+    repair_sent: bool = False
 
     def cut(
         self, cause: Cause, detail: str = "", limit_hit: LimitHit | None = None
@@ -624,17 +690,10 @@ def run_attempt(
         if stopped is not None:
             return stopped
         request = TurnRequest(system, tuple(messages), tools)
-        try:
-            worst = model.worst_case_usd(request)
-        except LimitRefused as exc:
-            return p.cut(*_stopped(exc.hit))
-        except BoundaryError as exc:
-            return p.cut(Cause.MODEL_ERROR, str(exc))
-        if not _valid_cost(worst):
-            return p.cut(Cause.MODEL_ERROR, "the model's worst-case cost is not a cost")
-        refused = spend.reserve(worst)
-        if refused is not None:
-            return p.cut(*_stopped(refused))
+        priced = _reserve_call(model, request, spend)
+        if not isinstance(priced, Decimal):
+            return p.cut(*priced)
+        worst = priced
         try:
             reply = model.turn(request)
         except LimitRefused as exc:
@@ -642,6 +701,8 @@ def run_attempt(
         except ByokRefusedError as exc:
             # The refusal still leaves the loop. The turns and tool calls
             # already completed travel with it, so the ledger records them.
+            # No other lens in this review makes another model call.
+            spend.halt()
             exc.turns = p.turns
             exc.tools = tuple(p.tools)
             raise
@@ -650,7 +711,10 @@ def run_attempt(
         spend.settle(worst, reply.cost_usd)
         p.turns += 1
         if isinstance(reply, FinalReply):
-            return _final(job, reply.text, p)
+            done = _accept_or_repair(job, reply.text, p, messages)
+            if done is not None:
+                return done
+            continue
         try:
             results = tuple(_tool(job, bridge, call, p) for call in reply.calls)
         except DeadlineExceededError as exc:
@@ -658,6 +722,29 @@ def run_attempt(
             found = hit("review_wall_s", limits.review_wall_s, f"{elapsed:.3f}s")
             return p.cut(_cause_for(found), f"{found.message()} ({exc})", found)
         messages += [AssistantCalls(reply.calls), ToolResults(results)]
+
+
+def _reserve_call(
+    model: LensModel, request: TurnRequest, spend: Spend
+) -> Decimal | tuple[Cause, str] | tuple[Cause, str, LimitHit]:
+    """The call's reserved worst case, or why it is not sent."""
+    if spend.halted:
+        return Cause.MODEL_ERROR, HALTED_CALL
+    try:
+        worst = model.worst_case_usd(request)
+    except LimitRefused as exc:
+        return _stopped(exc.hit)
+    except BoundaryError as exc:
+        return Cause.MODEL_ERROR, str(exc)
+    # The estimate can wait on the catalog while another lens halts.
+    if spend.halted:
+        return Cause.MODEL_ERROR, HALTED_CALL
+    if not _valid_cost(worst):
+        return Cause.MODEL_ERROR, "the model's worst-case cost is not a cost"
+    refused = spend.reserve(worst)
+    if refused is not None:
+        return _stopped(refused)
+    return worst
 
 
 def _time_up(
@@ -708,6 +795,34 @@ def _reads_source(result: BridgeResult, changed: frozenset[str]) -> bool:
     args = json.loads(result.args)
     at_head = result.tool == "diff_file" or args["rev"] == Rev.HEAD
     return bool(at_head and args["path"] in changed)
+
+
+def _accept_or_repair(
+    job: LensJob, text: str, p: _Progress, messages: list[Message]
+) -> AttemptOutcome | None:
+    repaired = _repair(text, p)
+    if repaired is None:
+        return _final(job, text, p)
+    messages += [AssistantText(text), UserText(repaired)]
+    return None
+
+
+def _repair(text: str, p: _Progress) -> str | None:
+    """One chance to correct a reply outside the finding contract. The
+    validation error is quoted. A second failure is the lens's result."""
+    try:
+        parse_reply(text)
+    except ContractError as exc:
+        if p.repair_sent:
+            return None
+        p.repair_sent = True
+        return (
+            "The final reply was not accepted. The validation error, quoted: "
+            f"{quote_untrusted(str(exc), scrub=str)}. "
+            "Reply once with one JSON object that meets the finding contract. "
+            "Do not call a tool."
+        )
+    return None
 
 
 def _final(job: LensJob, text: str, p: _Progress) -> AttemptOutcome:

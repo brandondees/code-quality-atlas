@@ -74,12 +74,15 @@ provider, `ATLAS_ALLOW_LIVE_INFERENCE=1`.
 The child also receives the model settings when they are set on the
 Machine. They are not secrets, and they do not belong in `service.env`.
 `ATLAS_MODEL` selects the model. `ATLAS_PROVIDERS` is the provider list.
-`ATLAS_ALLOW_SAFETY_RETENTION` opts into provider retention. The child is
-the one-shot `review` command. It does not read the agentic limit
-variables, and D25's ceilings apply: 3 calls, $3, and 200,000 input
-tokens. The only GitHub credential the child receives is still the
-read-only installation token the parent minted. The App private key, the
-webhook secret, and `FLY_API_TOKEN` stay in the parent.
+`ATLAS_ALLOW_SAFETY_RETENTION` opts into provider retention.
+`ATLAS_REQUIRE_ZDR` set to `false` turns off the zero-data-retention
+requirement; unset keeps it on. `ATLAS_KEY_CEILING_USD` is the most the
+OpenRouter key's own credit limit may be, and the one-shot review reads
+it. The child is the one-shot `review` command. It does not read the
+agentic limit variables, and D25's ceilings apply: 3 calls, $3, and
+200,000 input tokens. The only GitHub credential the child receives is
+still the read-only installation token the parent minted. The App private
+key, the webhook secret, and `FLY_API_TOKEN` stay in the parent.
 
 The App needs Pull requests set to read and write. The service's posting
 token asks for `pull_requests: write` and no other write. The operator CLI
@@ -208,9 +211,13 @@ review writes its ledger under `/data/runs/<repo>-<pr>-<sha>/state/`, and
 that directory is removed when the job ends, so the plain sweep finds
 nothing.
 
-The Sprite name is `cqa-rev-pr<number>-<first 12 hex of the head>-<8 hex>`.
-Every review Sprite starts with `cqa-rev-`. Sweep each leftover with
-`--runner` and that name, from a machine that holds
+A leftover Sprite is named the way the README states it:
+`cqa-rev-pr<PR>-<first 12 of the head SHA>-<8 hex of a SHA-256 over repo,
+PR, and SHA>`. The same name is the `runner` field on the `runner named`
+line in `/data/service.jsonl`, which the ssh tail earlier in this runbook
+shows while the Machine is up. A name that is still running can also be
+read in the Sprites console by the `cqa-rev-` prefix. Sweep each leftover
+with `--runner` and that name, from a machine that holds
 `ATLAS_SPRITES_TOKEN`. The run directory is removed when the job ends, so
 this teardown does not copy an event file and does not use `--event`. The
 sweep prints `verified absent` for each name. `NOT verified` means that

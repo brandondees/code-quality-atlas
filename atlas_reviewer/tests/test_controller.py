@@ -548,9 +548,23 @@ def openrouter_setup(*chat, lenses=None, **limits):
     from atlas_reviewer.budget import CallLimits
     from atlas_reviewer.openrouter import OpenRouterProvider
 
-    from .test_openrouter import KEY, OpenRouterFake, catalog, reply
+    from .test_openrouter import KEY, OpenRouterFake, catalog, reply, zdr_payload
 
-    fake = OpenRouterFake(*chat, model=reply(catalog(overrides=None)))
+    # This catalog drops overrides, so the selected rows use the base
+    # rates. The default row prices are the catalog's highest tier.
+    fake = OpenRouterFake(
+        *chat,
+        model=reply(catalog(overrides=None)),
+        zdr=reply(
+            zdr_payload(
+                pricing={
+                    "prompt": "0.000003",
+                    "completion": "0.000015",
+                    "input_cache_write": "0.00000375",
+                }
+            )
+        ),
+    )
     provider = OpenRouterProvider(fake, KEY, limits=CallLimits(**limits))
     provider.preflight()
     harness = SkillBundleHarness(provider, load_bundle(), Redactor((KEY,)))

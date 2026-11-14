@@ -15,6 +15,7 @@ from atlas_reviewer.picker import (
     load_picker,
     parse_picks,
     picker_instructions,
+    select_agentic_lenses,
     select_lenses,
 )
 from atlas_reviewer.ports import BoundaryError, ByokRefusedError
@@ -184,6 +185,26 @@ def test_the_critical_tier_lenses_all_exist_in_the_bundle():
 
 def never():
     raise AssertionError("the picker must not be called")
+
+
+def test_agentic_selection_calls_the_picker_when_the_one_shot_budget_would_not():
+    """The real bundle leaves no room for a one-shot pick. The agentic
+    path still calls the picker and keeps every ranked lens that has a body,
+    including a repo-shaped one."""
+    calls = []
+
+    def run():
+        calls.append("called")
+        return picks("checking-restraint", "auditing-documentation-health")
+
+    selection, plan = select_agentic_lenses(Depth.REVIEW, run, REAL, scrub=str)
+    assert calls == ["called"]
+    assert selection.used_call
+    assert "one-shot character budget does not apply" in selection.note
+    ran = [use.name for use in plan.uses if use.status is LensStatus.RUN]
+    assert set(CRITICAL_TIER) <= set(ran)
+    assert "checking-restraint" in ran
+    assert "auditing-documentation-health" in ran
 
 
 def test_the_picker_is_not_called_when_no_other_real_lens_can_fit_whole():

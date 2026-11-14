@@ -26,6 +26,7 @@ ENV = {
     "max_input_tokens": "ATLAS_MAX_INPUT_TOKENS",
     "max_output_tokens": "ATLAS_MAX_OUTPUT_TOKENS",
     "reasoning_max_tokens": "ATLAS_REASONING_MAX_TOKENS",
+    "pool_size": "ATLAS_POOL_SIZE",
 }
 
 
@@ -75,6 +76,8 @@ def _apply(limits: AgenticLimits, name: str, raw: str) -> AgenticLimits:
         return replace(limits, max_output_tokens=_positive_int(name, raw))
     if name == "reasoning_max_tokens":
         return replace(limits, reasoning_max_tokens=_positive_int(name, raw))
+    if name == "pool_size":
+        return replace(limits, pool_size=_positive_int(name, raw))
     raise ValueError(f"unknown agentic limit {name}")  # pragma: no cover
 
 

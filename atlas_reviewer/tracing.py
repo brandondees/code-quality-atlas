@@ -24,7 +24,8 @@ Attribute names are the OpenInference semantic conventions
 ``llm.cost.total``, ``llm.finish_reason``, ``input.value``, ``output.value``,
 ``tool.name``, ``tool.parameters``. ``atlas.*`` attributes are this
 service's own, including ``atlas.provider_endpoint``, ``atlas.cost_usd``,
-and ``atlas.reservation_usd``.
+``atlas.reservation_usd``, ``atlas.zdr_required``, and
+``atlas.cache_control``.
 """
 
 from __future__ import annotations
@@ -422,6 +423,27 @@ class _TracedModel:
         return reply
 
 
+def _routing_attributes(note: _Note, model: LensModel) -> None:
+    """Record whether this run required ZDR and sent `cache_control`.
+
+    Only a `(bool, bool)` from `routing` is written. Anything else is
+    ignored, the same way an unreadable model field is ignored.
+    """
+    routing = getattr(model, "routing", None)
+    if not callable(routing):
+        return
+    found = routing()
+    if (
+        not isinstance(found, tuple)
+        or len(found) != 2
+        or not isinstance(found[0], bool)
+        or not isinstance(found[1], bool)
+    ):
+        return
+    note.set("atlas.zdr_required", found[0])
+    note.set("atlas.cache_control", found[1])
+
+
 def _model_attributes(
     note: _Note,
     model: LensModel,
@@ -438,6 +460,7 @@ def _model_attributes(
         model_name = facts.model
     note.set("llm.model_name", model_name)
     note.set("atlas.latency_s", latency_s)
+    _routing_attributes(note, model)
     if facts is not None:
         _tokens(note, facts)
         if facts.finish_reason:

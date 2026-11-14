@@ -118,17 +118,26 @@ def test_the_child_process_starts_without_the_app_key(tmp_path):
     assert "FLY_API_TOKEN" not in child
 
 
-def test_the_child_receives_the_model_settings_and_not_the_limit_variables():
+def test_the_child_receives_the_route_settings_and_not_the_limit_variables():
     from atlas_reviewer.agentic_config import ENV as LIMIT_ENV
+    from atlas_reviewer.openrouter import (
+        ENV_ALLOW_SAFETY_RETENTION,
+        ENV_KEY_CEILING_USD,
+        ENV_MODEL,
+        ENV_PROVIDERS,
+        ENV_REQUIRE_ZDR,
+    )
 
     parent = {
-        "ATLAS_MODEL": "anthropic/claude-sonnet-5.5",
-        "ATLAS_PROVIDERS": "amazon-bedrock",
-        "ATLAS_ALLOW_SAFETY_RETENTION": "true",
+        ENV_MODEL: "z-ai/glm-5.3",
+        ENV_PROVIDERS: "amazon-bedrock",
+        ENV_ALLOW_SAFETY_RETENTION: "true",
+        ENV_REQUIRE_ZDR: "false",
+        ENV_KEY_CEILING_USD: "4",
         "ATLAS_MAX_CALLS": "4",
         "ATLAS_MAX_TURNS": "4",
         "ATLAS_MAX_INPUT_TOKENS": "8000",
-        "ATLAS_MAX_OUTPUT_TOKENS": "2000",
+        "ATLAS_MAX_OUTPUT_TOKENS": "65536",
         "ATLAS_REASONING_MAX_TOKENS": "1000",
         "ATLAS_RESERVATION_USD": "1",
         "ATLAS_LENS_WALL_S": "60",
@@ -140,11 +149,14 @@ def test_the_child_receives_the_model_settings_and_not_the_limit_variables():
         "PATH": "/usr/bin",
     }
     env = child_env(parent, token="ghs_read")
-    assert env["ATLAS_MODEL"] == "anthropic/claude-sonnet-5.5"
-    assert env["ATLAS_PROVIDERS"] == "amazon-bedrock"
-    assert env["ATLAS_ALLOW_SAFETY_RETENTION"] == "true"
+    assert env[ENV_MODEL] == "z-ai/glm-5.3"
+    assert env[ENV_PROVIDERS] == "amazon-bedrock"
+    assert env[ENV_ALLOW_SAFETY_RETENTION] == "true"
+    assert env[ENV_REQUIRE_ZDR] == "false"
+    assert env[ENV_KEY_CEILING_USD] == "4"
     for name in LIMIT_ENV.values():
         assert name not in env
+    assert "ATLAS_MAX_OUTPUT_TOKENS" not in env
     assert "ATLAS_NOT_A_CHILD_SETTING" not in env
     assert "FLY_API_TOKEN" not in env
     assert APP_KEY_ENV not in env

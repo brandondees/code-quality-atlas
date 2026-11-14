@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import fcntl
 import os
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -23,22 +24,28 @@ class FileLedger:
     """One runner name per line. `record` is fsynced, file and directory,
     before the caller creates anything remotely, so a crash leaves a
     sweepable trail; `clear` syncs its replacement the same way, so a
-    crash mid-clear cannot leave an empty ledger."""
+    crash mid-clear cannot leave an empty ledger. `clear` rewrites the
+    file from what it read, so `record` and `clear` share one lock: lenses
+    run in parallel threads, and an append landing between that read and
+    the replace would drop a live runner from the record."""
 
     def __init__(self, path: Path) -> None:
         self._path = path
+        self._lock = threading.Lock()
 
     def record(self, name: str) -> None:
-        _make_dirs_synced(self._path.parent)
-        _write_synced(self._path, "a", name + "\n")
-        _sync_dir(self._path.parent)
+        with self._lock:
+            _make_dirs_synced(self._path.parent)
+            _write_synced(self._path, "a", name + "\n")
+            _sync_dir(self._path.parent)
 
     def clear(self, name: str) -> None:
-        remaining = [n for n in self.pending() if n != name]
-        tmp = self._path.with_name(self._path.name + ".clearing")
-        _write_synced(tmp, "w", "".join(n + "\n" for n in remaining))
-        tmp.replace(self._path)
-        _sync_dir(self._path.parent)
+        with self._lock:
+            remaining = [n for n in self.pending() if n != name]
+            tmp = self._path.with_name(self._path.name + ".clearing")
+            _write_synced(tmp, "w", "".join(n + "\n" for n in remaining))
+            tmp.replace(self._path)
+            _sync_dir(self._path.parent)
 
     def pending(self) -> tuple[str, ...]:
         if not self._path.exists():

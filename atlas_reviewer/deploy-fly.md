@@ -130,6 +130,18 @@ commands below.
 | `ATLAS_SPRITES_TOKEN` | controller, as the Sprites control-plane bearer token |
 | `ATLAS_OPENROUTER_API_KEY` | controller, only when the review passes `--provider openrouter --allow-live-inference` |
 
+These are not secrets. Set them as ordinary environment variables when
+the pilot should change the default. `ATLAS_REQUIRE_ZDR` defaults to on.
+`false` drops `zdr: true` and the ZDR-only endpoint filter. Prompt
+caching does not depend on that switch: Anthropic-family routes send
+`cache_control` either way. `data_collection` stays `deny`.
+`ATLAS_MAX_OUTPUT_TOKENS` overrides the per-call output cap. Unset, that
+cap is a quarter of the selected endpoints' context when their
+completion limit is larger than that quarter, and the completion limit
+otherwise. `ATLAS_MODEL` and `ATLAS_PROVIDERS` select the model and the
+`provider.only` pin. The review child receives these names. It does not
+receive the webhook secret or the App private key.
+
 The installation still asks for `contents`, `checks`, `actions`, and
 `pull_requests` read. The review does not gain a GitHub write from being
 on Fly.
@@ -196,7 +208,7 @@ two over-counts: an upstream amount larger than `usage.cost` settles at
 that amount, and an upstream value that is present, not null and
 unreadable keeps the full reservation. A null or absent upstream settles
 `usage.cost`. With no usable `usage.cost` the call is priced from the
-highest catalog rates and upstream is still not added. The settlement
+highest endpoint rates and upstream is still not added. The settlement
 line records the raw upstream value, cut to 200 characters. A present,
 non-null, unreadable upstream value keeps the reservation on any
 response, including an explicitly non-BYOK one. A null upstream keeps

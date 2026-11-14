@@ -19,6 +19,7 @@ import pytest
 from atlas_reviewer.clock import SystemClock
 from atlas_reviewer.domain import PrEvent
 from atlas_reviewer.redact import Redactor
+from atlas_reviewer.runner import event_runner_name
 from atlas_reviewer.service import (
     _MAX_HTTP_HANDLERS,
     PostAuthError,
@@ -824,6 +825,20 @@ def test_a_publisher_that_ignores_the_recheck_is_not_called_once_superseded(tmp_
     worker._send(job, REPORT)
     assert called == []
     assert board.states() == ((SHA_A, JobState.SUPERSEDED),)
+
+
+def test_a_review_logs_the_runner_name(tmp_path):
+    board = Board(tmp_path / "queue.json")
+    worker = _worker(
+        board, lambda event, cancel: ReviewRun(True, REPORT), root=tmp_path
+    )
+    event = PrEvent(REPO, 7, SHA_A)
+    board.enqueue(event)
+    job = board.claim()
+    assert job is not None
+    worker._execute(job)
+    named = [item for item in worker._telemetry.events if item.step == "runner named"]
+    assert [item.fields["runner"] for item in named] == [event_runner_name(event)]
 
 
 def test_a_supersede_during_finish_is_what_the_log_says(tmp_path):
