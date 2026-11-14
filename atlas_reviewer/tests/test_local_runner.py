@@ -108,7 +108,9 @@ def test_an_exec_that_outlives_its_budget_raises_a_stream_timeout():
         assert raised.value.first_byte is False
         assert b"atlas-partial" in raised.value.received
         assert "did not finish within its 1s budget" in str(raised.value)
-        assert time.monotonic() - started < 10
+        # Well under the 5s the killed command would have run to: a mutant
+        # that only reaps (and waits for the pipes) rides that 5s.
+        assert time.monotonic() - started < 3
     finally:
         api.delete("cqa-rev-test-abc")
 
@@ -142,14 +144,22 @@ def test_a_local_timeout_reports_the_stage_and_purpose_like_a_live_runner():
 def test_a_timeout_kills_the_whole_process_group(tmp_path):
     """`communicate` kills only the direct child; the exec runs in its own
     process group so a grandchild of `sh` cannot outlive the budget. The
-    script's `sleep` is a grandchild, not an `exec` replacement."""
+    script's `sleep` is a grandchild, not an `exec` replacement, and the
+    timing bound is what locks the kill in: `exec` must return at the
+    budget, not after the grandchild's own `sleep 5` closes the pipes a
+    reap-only kill would ride to the end."""
     pidfile = tmp_path / "orphan.pid"
     script = f"sleep 5 & echo $! > {shlex.quote(str(pidfile))}; wait"
     api = LocalSprites()
     api.create("cqa-rev-test-abc")
     try:
+        started = time.monotonic()
         with pytest.raises(StreamTimeoutError):
             api.exec("cqa-rev-test-abc", exec_argv(script, 0), b"", 1)
+        # `exec` must not wait for the grandchild: a kill that only reaps
+        # (or kills the direct child alone) returns only once the
+        # grandchild's own `sleep 5` has closed the inherited pipes.
+        assert time.monotonic() - started < 3
         pid = int(pidfile.read_text().strip())
         deadline = time.monotonic() + 2
         while _alive(pid) and time.monotonic() < deadline:

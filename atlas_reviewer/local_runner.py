@@ -31,6 +31,8 @@ from typing import Self
 from atlas_reviewer.fakes import FakeSprites
 from atlas_reviewer.ports import BoundaryError, StreamTimeoutError
 
+REAP_TIMEOUT_S = 5.0
+
 
 class LocalSprites(FakeSprites):
     """Runs the exec wrapper's argv here and answers with its stdout as
@@ -71,12 +73,20 @@ class LocalSprites(FakeSprites):
 def _kill_process_group(proc: subprocess.Popen) -> None:
     """Kill the exec's whole process group and reap it. `communicate` left
     the direct child alive; `start_new_session` made it its group's
-    leader, so a grandchild `sh` left behind cannot outlive the budget."""
+    leader, so a grandchild `sh` left behind cannot outlive the budget.
+    The reap is bounded: something that left the group but kept the
+    inherited pipes could otherwise hold this wait past the budget, and
+    the caller's own timeout error is the one that matters."""
     try:
         os.killpg(proc.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
-    proc.communicate()
+    try:
+        proc.communicate(timeout=REAP_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        for stream in (proc.stdout, proc.stderr):
+            if stream is not None:
+                stream.close()
 
 
 class LocalTasks:
