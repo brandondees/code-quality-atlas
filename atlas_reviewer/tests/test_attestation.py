@@ -92,14 +92,22 @@ def test_a_reply_acknowledges_only_its_own_lens_and_body():
         (
             Attestation.UNACKNOWLEDGED,
             {Cause.UNPARSED, Cause.FILES_UNREAD},
+            # D58: an unread file no longer cancels an UNPARSED retry.
             LensState.FAILED,
-            False,
+            True,
         ),
         (Attestation.MISACKNOWLEDGED, {Cause.FILES_UNREAD}, LensState.FAILED, False),
         (Attestation.UNACKNOWLEDGED, {Cause.TURN_CAP}, LensState.PARTIAL, False),
         (Attestation.UNACKNOWLEDGED, {Cause.LENS_CLOCK}, LensState.PARTIAL, False),
         (Attestation.UNACKNOWLEDGED, {Cause.UNPARSED}, LensState.FAILED, True),
         (Attestation.UNACKNOWLEDGED, {Cause.MODEL_ERROR}, LensState.FAILED, False),
+        (Attestation.UNACKNOWLEDGED, {Cause.TRANSPORT_ERROR}, LensState.FAILED, True),
+        (
+            Attestation.UNACKNOWLEDGED,
+            {Cause.TRANSPORT_ERROR, Cause.FILES_UNREAD},
+            LensState.FAILED,
+            False,
+        ),
         (Attestation.NOT_DELIVERED, set(), LensState.FAILED, True),
         (Attestation.MISACKNOWLEDGED, set(), LensState.FAILED, True),
         (Attestation.UNRECORDED, {Cause.ABANDONED}, LensState.FAILED, True),

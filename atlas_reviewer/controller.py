@@ -762,7 +762,9 @@ def _pick_lenses(
         # `run_picker is None` guard, before it ever reads `scrub`. No
         # `depth`/`config` combination reaching this branch can make the
         # forwarded `scrub` observable -- #624.
-        return select_lenses(config.depth, None, deps.lenses, scrub=scrub)
+        return select_lenses(
+            config.depth, None, deps.lenses, scrub=scrub, pr_text=pull.body.text
+        )
     paths = diff_paths(diff.text)
     request = PickRequest(
         event.repo,
@@ -781,6 +783,7 @@ def _pick_lenses(
         ),
         deps.lenses,
         scrub=scrub,
+        pr_text=pull.body.text,
     )
 
 
