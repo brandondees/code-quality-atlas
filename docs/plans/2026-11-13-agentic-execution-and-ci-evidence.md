@@ -7,9 +7,10 @@ wired into the controller.
 ## Why this plan exists
 
 The 2026-11-13 model trials (Brandon's run log, "model trials: 2026-11-13,
-14:51–16:21 CT", diagnosis §3) found that 5 of the 7 protocol Minors the live
+14:51–16:21 CT", diagnosis §3) found that four of the 7 protocol Minors the live
 models missed were not missed because the owning lens failed to run. They were
-missed because the agentic lenses can only *read*:
+missed because the agentic lenses can only *read*; two more are addressed by
+D58 instead of this plan:
 
 | Minor | What reaching it needs | This plan's part |
 |---|---|---|
@@ -76,6 +77,21 @@ change that:
   later attempt inherits unless the record says so. A mutant that escapes the
   copy is contained by the Sprite's own filesystem, which is destroyed with the
   runner (cleanup already verified-absent per lens).
+- **`run_tests` does not run against the review trees either.** A test run
+  executes PR-controlled code, and PR-controlled code can write: a test that
+  rewrites `calc.py` in place would otherwise change what every later
+  `read_file` and `diff_file` call reviews. `run_tests` therefore stages its
+  own copy (the same staging `mutate` uses, minus the mutation), and the
+  BASE/HEAD trees the bridge reads stay read-only for the whole attempt. A
+  test's writes die with the copy, inside the Sprite that is destroyed with
+  the runner.
+- **An inconclusive mutant is not a survived mutant.** A mutant whose baseline
+  run fails before the mutation (the test suite was already broken), whose
+  selected tests all skip, or whose run hits the wall clock is reported
+  `inconclusive` with its reason. Only a mutant whose baseline passed and
+  whose mutated run also passes is `survived`; a lens may report a survived
+  mutant as a finding, and an inconclusive one as a gap, never as evidence
+  the guard is unpinned.
 - **Execution is the new trust boundary.** Running PR-controlled code is what
   the deny-all policy exists for. The tool executes only test entrypoints
   (pytest and the repo's declared test command), with argv built by the bridge,
@@ -103,8 +119,9 @@ change that:
 Phases below are sequenced so each lands reviewable and the eval gate can run
 between them.
 
-1. **Decision record.** A `### D<next>` entry in `docs/open-questions.md`
-   covering the two tools, the threat model above, and the limits, before any
+1. **Decision record.** A `- **D<next> …**` bullet in `docs/open-questions.md`'s
+   decisions list, in the house format, covering the two tools, the threat
+   model above, and the limits, before any
    code. The bridge's tool table (`bridge_args.TOOLS`) and the session limits
    are the surfaces the record names.
 2. **Bridge tools.** `run_tests` (execute the repo's declared test command or a

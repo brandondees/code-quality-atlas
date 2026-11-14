@@ -60,16 +60,24 @@ COMPREHENSIVE_LIMIT = 40
 PR_HYGIENE = "reviewing-pr-and-process-hygiene"
 _NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 _FENCE = re.compile(r"\A```[a-z]*\n(.*)\n```\Z", re.DOTALL)
-_ANY_FENCE = re.compile(r"```[a-z]*\n(.*?)\n```", re.DOTALL)
 # Heuristics over the PR body (untrusted text): a stated test count, a
-# coverage figure or percentage, or a CI or check-run claim. A body that
-# only describes the change does not match.
+# coverage figure or percentage, or a CI or check-run result. A body that
+# only describes the change -- or only mentions CI, as a flake fix does --
+# does not match. The digit runs are bounded so a crafted body cannot
+# backtrack the scan into minutes, and the scan reads at most a body's
+# first 65,536 characters, GitHub's own cap.
+VERIFICATION_TEXT_CHARS = 65_536
 _VERIFICATION_PATTERNS = (
-    re.compile(r"\b\d[\d,]*\s+(?:tests?\s+)?passed\b", re.IGNORECASE),
-    re.compile(r"\b\d[\d,]*\s+(?:tests?\s+)?failed\b", re.IGNORECASE),
-    re.compile(r"\bcoverage\b\s*(?:of\s*)?(?:\d[\d,.]*\s*)?%", re.IGNORECASE),
-    re.compile(r"\bcoverage\s+(?:is\s+)?\d[\d,.]*", re.IGNORECASE),
-    re.compile(r"\bCI\b"),
+    re.compile(r"\b\d[\d,]{0,15}\s+(?:tests?\s+)?passed\b", re.IGNORECASE),
+    re.compile(r"\b\d[\d,]{0,15}\s+(?:tests?\s+)?failed\b", re.IGNORECASE),
+    re.compile(r"\bcoverage\b[^.\n]{0,40}?\d[\d,.]*\s*%", re.IGNORECASE),
+    re.compile(r"\b\d[\d,.]{0,15}\s*%\s*(?:\w+\s+){0,3}coverage\b", re.IGNORECASE),
+    re.compile(r"\bcoverage\s+(?:is\s+)?\d[\d,.]{0,15}", re.IGNORECASE),
+    re.compile(
+        r"\bCI\b[^.\n]{0,80}\b(?:pass(?:ed|ing)?|fail(?:ed|ing)?|green|red|"
+        r"succeeded|successful)\b",
+        re.IGNORECASE,
+    ),
     re.compile(
         r"\bchecks?\s+(?:are\s+|run\s+)?(?:green|passing|pass|passed|failed|failing)\b",
         re.IGNORECASE,
@@ -195,10 +203,12 @@ def _last_object(text: str) -> dict[str, Any] | None:
 
 def body_states_verification(text: str) -> bool:
     """Whether a pull request body states verification results: a test
-    count, a coverage figure, or a CI or check-run claim. The text is
+    count, a coverage figure, or a CI or check-run result. The text is
     untrusted; the result only decides whether `PR_HYGIENE` is added to
-    the selection, never what any lens reports."""
-    return any(pattern.search(text) for pattern in _VERIFICATION_PATTERNS)
+    the selection, never what any lens reports. At most GitHub's own body
+    cap of 65,536 characters is read."""
+    head = text[:VERIFICATION_TEXT_CHARS]
+    return any(pattern.search(head) for pattern in _VERIFICATION_PATTERNS)
 
 
 def _hygiene_choice(pr_text: str) -> tuple[LensChoice, ...]:
@@ -384,7 +394,7 @@ def _with_critical(
     picked = tuple(
         LensChoice(n, f"picker rank {rank[n]}")
         for n in names
-        if n not in CRITICAL_TIER and n != PR_HYGIENE
+        if n not in CRITICAL_TIER and (n != PR_HYGIENE or not hygiene)
     )
     return critical + hygiene + picked
 

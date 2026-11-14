@@ -83,6 +83,17 @@ def test_a_reply_whose_last_fenced_block_is_one_json_object_parses():
     assert f.severity is Severity.MAJOR
 
 
+def test_a_fence_in_the_prose_does_not_eat_the_json_fence():
+    """A ```python block in the prose must not make its closing fence act
+    as the JSON fence's opener; the last closed block is still the reply."""
+    text = (
+        "The diff shows:\n\n```python\nx = 1\n```\n\nFinal answer:\n\n"
+        "```json\n" + reply(finding()) + "\n```"
+    )
+    (f,) = parse_reply(text).findings
+    assert f.severity is Severity.MAJOR
+
+
 def test_a_fence_that_does_not_hold_the_contract_is_still_refused_whole():
     text = 'Here is my review:\n\n```json\n{"findings": []}\n```'
     with pytest.raises(ContractError, match="exactly the keys"):

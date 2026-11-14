@@ -215,7 +215,7 @@ def test_the_span_names_the_input_bound_the_hint_and_any_nudge():
         ),
     )
     model.bound_note = (
-        "usage 22914 + 4123 new bytes at 2.4 bytes/token + overhead 64 = 24893"
+        "usage 22914 + 4123 new bytes at 1 token per byte + overhead 64 = 27038"
     )
     try:
         with trace.lens(LENS):
@@ -232,6 +232,55 @@ def test_the_span_names_the_input_bound_the_hint_and_any_nudge():
     assert attrs["atlas.input_bound"] == model.bound_note
     assert attrs["atlas.reasoning_hint"] == 8192
     assert attrs["atlas.nudge"] == "no-progress"
+
+
+def test_the_span_names_a_timeout_retry():
+    """Review M2: the completion that follows a timed-out request's one
+    retry names the retry on its span."""
+    from atlas_reviewer.call_facts import note_timeout_retry
+
+    trace, exporter = memory_trace(scrub)
+    try:
+        with trace.lens(LENS):
+            wrapper = trace.wrap_model(_Model(FinalReply("done", Decimal("0.01"))))
+            ask = TurnRequest("system", (), ())
+            wrapper.worst_case_usd(ask)
+            note_timeout_retry()
+            wrapper.turn(ask)
+    finally:
+        trace.shutdown()
+    attrs = _attrs(
+        next(s for s in exporter.get_finished_spans() if s.name == "completion")
+    )
+    assert attrs["atlas.timeout_retry"] == 1
+
+
+def test_the_flush_wait_is_bounded_not_the_sdk_ignored_timeout():
+    """Review Minor 6: SDK 1.45.2's `force_flush` ignores its timeout, so
+    the wait is bounded by a thread join here: `flush` returns while a
+    dead collector's export is still running, instead of blocking on it."""
+    import threading
+
+    trace, _exporter = memory_trace(scrub)
+    blocked = threading.Event()
+    released = threading.Event()
+
+    class Stuck:
+        def force_flush(self, timeout_millis=None):
+            blocked.set()
+            released.wait(5)
+
+    trace._processor = Stuck()
+    try:
+        trace.flush()
+        # flush returned while the flush thread is still blocked on the
+        # dead collector.
+        assert blocked.is_set()
+        assert not released.is_set()
+    finally:
+        released.set()
+        trace._processor = None
+        trace.shutdown()
 
 
 def test_a_completion_without_a_nudge_records_no_nudge_attribute():
