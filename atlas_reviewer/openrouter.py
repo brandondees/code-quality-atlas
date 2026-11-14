@@ -545,8 +545,9 @@ def terms_from_endpoints(
     including that row's `pricing.overrides`, so `max_price` and the
     reservation cover a long-context tier as well as the base. Context
     and the completion limit are the smallest, so a tighter endpoint
-    cannot be asked for more than it serves. `max_prompt_tokens`, when
-    a row sets it, is the smallest such ceiling. A selected row with no
+    cannot be asked for more than it serves.     `max_prompt_tokens`, when a row sets a positive integer, is the
+    smallest such ceiling. A null is the same as a missing key: that
+    row adds no prompt ceiling. A selected row with no
     pricing object, a zero required rate, or a missing limit refuses
     the call. Catalog headline numbers are not read here.
     """
@@ -598,12 +599,15 @@ def terms_from_endpoints(
                 ),
             )
         )
-        if "max_prompt_tokens" in row:
+        # Live rows carry this key as null when the endpoint has no
+        # separate prompt ceiling. Null is absence, not a bad number.
+        prompt_cap = row.get("max_prompt_tokens")
+        if prompt_cap is not None:
             prompt_caps.append(
                 (
                     label,
                     _positive_count(
-                        row.get("max_prompt_tokens"),
+                        prompt_cap,
                         f"endpoint row {index} max_prompt_tokens",
                     ),
                 )

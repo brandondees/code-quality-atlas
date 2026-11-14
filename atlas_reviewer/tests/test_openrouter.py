@@ -117,6 +117,8 @@ def with_terms(row, **changes):
     }
     filled.update(row)
     filled.update(changes)
+    if "max_prompt_tokens" not in filled:
+        filled["max_prompt_tokens"] = None
     tag = filled.get("tag")
     if isinstance(tag, str) and "provider_name" not in filled:
         filled["provider_name"] = display_name(tag)
@@ -149,6 +151,9 @@ def zdr_payload(
             "pricing": price,
             "context_length": context_length,
             "max_completion_tokens": max_completion_tokens,
+            # Present and null on the live ZDR list (2026-11-14): 1,071 of
+            # 1,108 rows, including every default Sonnet pin.
+            "max_prompt_tokens": None,
         }
         for tag in providers
     ]
@@ -1790,3 +1795,89 @@ def test_a_malformed_override_names_the_endpoint_row():
     with pytest.raises(PricingUnknownError, match=r"endpoint row 0 \(amazon-bedrock\)"):
         adapter.complete(SMALL)
     assert fake.chat_requests() == []
+
+
+def _sonnet_live_row(tag, provider_name):
+    """One public Sonnet 5.5 endpoint row, read 2026-11-14.
+
+    `max_prompt_tokens` is present and null. Pricing has no `overrides`
+    key. The numbers are that read, not a live call from the test.
+    """
+    return {
+        "model_id": MODEL_ID,
+        "tag": tag,
+        "provider_name": provider_name,
+        "safety_retention": False,
+        "context_length": 1_000_000,
+        "max_completion_tokens": 128_000,
+        "max_prompt_tokens": None,
+        "supported_parameters": [
+            "reasoning",
+            "include_reasoning",
+            "max_tokens",
+            "tools",
+        ],
+        "pricing": {
+            "prompt": "0.000002",
+            "completion": "0.00001",
+            "input_cache_read": "0.0000001",
+            "input_cache_write": "0.0000025",
+            "input_cache_write_1h": "0.000004",
+        },
+    }
+
+
+def test_a_null_max_prompt_tokens_is_no_ceiling_on_either_path():
+    from atlas_reviewer.lens_loop import AgenticLimits, resolve_per_call
+    from atlas_reviewer.tool_model import OpenRouterLensModel
+
+    from .test_tool_model import request
+
+    rows = [
+        _sonnet_live_row(tag, name)
+        for tag, name in (
+            ("amazon-bedrock", "Amazon Bedrock"),
+            ("google-vertex/europe", "Google"),
+            ("google-vertex/global", "Google"),
+            ("google-vertex/us", "Google"),
+        )
+    ]
+    assert all(row["max_prompt_tokens"] is None for row in rows)
+    fake = OpenRouterFake(
+        reply(completion()), reply(completion()), zdr=reply({"data": rows})
+    )
+    adapter = provider(fake)
+    assert adapter.complete(SMALL) == "review text"
+    terms, _selected = adapter.load_terms()
+    assert terms.max_prompt_tokens is None
+    assert (terms.context_length, terms.max_completion_tokens) == (1_000_000, 128_000)
+    sent = json.loads(fake.chat_requests()[0][3])
+    assert sent["provider"]["max_price"] == {"prompt": 2.0, "completion": 10.0}
+    call = resolve_per_call(AgenticLimits().resolve(), terms)
+    assert call.max_output_tokens == 128_000
+    assert call.max_input_tokens == 1_000_000 - 128_000
+    lens = OpenRouterLensModel(adapter)
+    lens.per_call = AgenticLimits().resolve()
+    lens.turn(request())
+    assert len(fake.chat_requests()) == 2
+
+
+@pytest.mark.parametrize("bad", [0, "x"])
+def test_a_bad_max_prompt_tokens_is_still_refused(bad):
+    rows = zdr_payload(providers=("amazon-bedrock",))
+    rows["data"][0]["max_prompt_tokens"] = bad
+    fake = OpenRouterFake(reply(completion()), zdr=reply(rows))
+    adapter = OpenRouterProvider(fake, KEY, providers=("amazon-bedrock",))
+    adapter.preflight()
+    with pytest.raises(PricingUnknownError, match="max_prompt_tokens"):
+        adapter.complete(SMALL)
+    assert fake.chat_requests() == []
+
+
+def test_d57_says_zdr_off_reads_both_lists():
+    text = (
+        Path(__file__).resolve().parents[2] / "docs" / "open-questions.md"
+    ).read_text(encoding="utf-8")
+    assert (
+        "reads both `GET /api/v1/models/{id}/endpoints` and `GET /api/v1/endpoints/zdr`"
+    ) in text

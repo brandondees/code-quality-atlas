@@ -1294,4 +1294,7 @@ and completion limit are the ones the request uses, and a row's
 line and the completion span name the selected tags and those limits.
 Sonnet 5.5's completion limit in the worked example is 128,000. The
 one-shot path refuses a prompt over a row's `max_prompt_tokens` before
-it is sent, and a bad tier names that row. No live call was made. D57.
+it is sent, and a bad tier names that row. A null `max_prompt_tokens`
+is no ceiling: the live ZDR list and the Sonnet endpoint rows carry
+the key as null. With ZDR off both the model endpoint list and the
+ZDR list are read. No live call is made from the tests. D57.
