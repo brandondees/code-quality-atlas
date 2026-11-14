@@ -25,6 +25,7 @@ SETTINGS: dict[str, str] = {
     "reasoning_max_tokens": "--reasoning-max-tokens or ATLAS_REASONING_MAX_TOKENS",
     "context_length": "the pinned endpoints' context_length",
     "max_completion_tokens": "the pinned endpoints' max_completion_tokens",
+    "max_prompt_tokens": "the pinned endpoints' max_prompt_tokens",
 }
 
 
@@ -61,9 +62,13 @@ class LimitRefused(BoundaryError):
         self.hit = hit
 
 
-def hit(limit: str, configured: object, observed: object) -> LimitHit:
+def hit(
+    limit: str, configured: object, observed: object, *, bound_by: str = ""
+) -> LimitHit:
     try:
         setting = SETTINGS[limit]
     except KeyError:
         raise ValueError(f"unknown limit {limit}") from None
+    if bound_by:
+        setting = f"{setting} (set by {bound_by})"
     return LimitHit(limit, str(configured), str(observed), setting)

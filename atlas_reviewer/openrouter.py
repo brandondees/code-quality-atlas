@@ -41,10 +41,11 @@
   `--allow-safety-retention` opts in to those rows. The default is off.
   With the ZDR requirement off, the read is
   `GET /api/v1/models/{author}/{slug}/endpoints` instead, so a row that
-  is not on the ZDR list can still be selected. A missing
-  `safety_retention` on that document is not a refusal. A row that sets
-  the flag true is still refused unless the opt-in is on.
-  `data_collection: deny` stays on either way. The list and the model
+  is not on the ZDR list can still be selected. That document has no
+  `safety_retention` field. The ZDR list is still read, and a tag it
+  marks `safety_retention: true` is refused unless the opt-in is on.
+  An unreadable ZDR list refuses the call. `data_collection: deny`
+  stays on either way. The list and the model
   catalog are read once per provider and reused for later completions
   in that review. The catalog confirms the model id. Prices, context
   and the completion limit come from the selected rows (D57).
@@ -136,9 +137,12 @@ from atlas_reviewer.pricing import (
     KeyStatus,
     ModelTerms,
     PricingUnknownError,
+    max_rate,
     money,
+    optional_rate,
     parse_key_status,
     parse_model_terms,
+    tiers,
 )
 from atlas_reviewer.prompt import Prompt
 
@@ -472,10 +476,64 @@ def _positive_count(value: Any, what: str) -> int:
     return value
 
 
-def _optional_money(
-    pricing: Mapping[str, Any], keys: Sequence[str], what: str
-) -> list[Decimal]:
-    return [money(pricing[key], f"{what} {key}") for key in keys if key in pricing]
+def _refuse_marked_safety_retention(data: Json, route: ModelRoute) -> None:
+    """A ZDR-list tag marked Safety Retention stays opt-in.
+
+    The full endpoint list does not carry `safety_retention`. This
+    checks the ZDR list for the pinned tags and their child tags.
+    A tag that is not on that list is not marked, so it is allowed.
+    The opt-in allows a marked tag. A present flag that is not a
+    boolean refuses the call.
+    """
+    items = _endpoint_rows(data, route.model_id)
+    grouped: dict[str, list[Mapping[str, Any]]] = {}
+    for item in items:
+        if item.get("model_id") != route.model_id:
+            continue
+        tag = _row_tag(item)
+        if tag is None:
+            continue
+        grouped.setdefault(tag, []).append(item)
+    problems: list[str] = []
+    for tag in route.providers:
+        children = sorted(child for child in grouped if child.startswith(tag + "/"))
+        scope = [
+            *grouped.get(tag, []),
+            *[row for child in children for row in grouped[child]],
+        ]
+        for row in scope:
+            if "safety_retention" in row and _safety_flag(row) is None:
+                problems.append(
+                    f"{tag} has a ZDR row whose safety_retention is not a boolean"
+                )
+                break
+            if _safety_flag(row) is True and not route.allow_safety_retention:
+                problems.append(
+                    f"{tag} has a Safety Retention endpoint for {route.model_id}"
+                )
+                break
+    if problems:
+        raise BudgetRefusedError(
+            "refusing inference: Safety Retention stays opt-in ("
+            + "; ".join(problems)
+            + f"). {ENV_ALLOW_SAFETY_RETENTION}=true or "
+            "--allow-safety-retention is required. data_collection deny stays on."
+        )
+
+
+def _row_label(row: Mapping[str, Any], index: int) -> str:
+    tag = row.get("tag")
+    if isinstance(tag, str) and tag:
+        return tag
+    return f"row {index}"
+
+
+def _labels_at(pairs: Sequence[tuple[str, int]], target: int) -> str:
+    names: list[str] = []
+    for label, value in pairs:
+        if value == target and label not in names:
+            names.append(label)
+    return ", ".join(names)
 
 
 def terms_from_endpoints(
@@ -483,19 +541,24 @@ def terms_from_endpoints(
 ) -> ModelTerms:
     """Prices and limits from the rows the route itself selected.
 
-    Prompt and completion are the highest rate on any selected row, so
-    `max_price` and the reservation cover the dearest pinned endpoint.
-    Context and the completion limit are the smallest, so a tighter
-    endpoint cannot be asked for more than it serves. A selected row
-    with no pricing object, a zero required rate, or a missing limit
-    refuses the call. Catalog headline numbers are not read here.
+    Prompt and completion are the highest rate on any selected row,
+    including that row's `pricing.overrides`, so `max_price` and the
+    reservation cover a long-context tier as well as the base. Context
+    and the completion limit are the smallest, so a tighter endpoint
+    cannot be asked for more than it serves. `max_prompt_tokens`, when
+    a row sets a positive integer, is the smallest such ceiling. A null
+    is the same as a missing key: that row adds no prompt ceiling. A
+    selected row with no pricing object, a zero required rate, or a
+    missing limit refuses the call. Catalog headline numbers are not
+    read here.
     """
     if not rows:
         raise PricingUnknownError("no endpoint rows to price")
     prompts: list[Decimal] = []
     completions: list[Decimal] = []
-    contexts: list[int] = []
-    outputs: list[int] = []
+    contexts: list[tuple[str, int]] = []
+    outputs: list[tuple[str, int]] = []
+    prompt_caps: list[tuple[str, int]] = []
     requests: list[Decimal] = []
     reasonings: list[Decimal] = []
     cache_reads: list[Decimal] = []
@@ -504,49 +567,88 @@ def terms_from_endpoints(
         pricing = row.get("pricing")
         if not isinstance(pricing, Mapping):
             raise PricingUnknownError(f"endpoint row {index} has no pricing object")
-        where = f"endpoint row {index} pricing"
-        prompt = money(pricing.get("prompt"), f"{where}.prompt")
-        completion = money(pricing.get("completion"), f"{where}.completion")
+        label = _row_label(row, index)
+        try:
+            row_tiers = tiers(pricing)
+            prompt = max_rate(row_tiers, "prompt", required=True)
+            completion = max_rate(row_tiers, "completion", required=True)
+        except PricingUnknownError as exc:
+            raise PricingUnknownError(f"endpoint row {index} ({label}): {exc}") from exc
         if prompt == 0:
-            raise PricingUnknownError(f"{where}.prompt is zero")
+            raise PricingUnknownError(f"endpoint row {index} pricing.prompt is zero")
         if completion == 0:
-            raise PricingUnknownError(f"{where}.completion is zero")
+            raise PricingUnknownError(
+                f"endpoint row {index} pricing.completion is zero"
+            )
         prompts.append(prompt)
         completions.append(completion)
         contexts.append(
-            _positive_count(
-                row.get("context_length"),
-                f"endpoint row {index} context_length",
+            (
+                label,
+                _positive_count(
+                    row.get("context_length"),
+                    f"endpoint row {index} context_length",
+                ),
             )
         )
         outputs.append(
-            _positive_count(
-                row.get("max_completion_tokens"),
-                f"endpoint row {index} max_completion_tokens",
+            (
+                label,
+                _positive_count(
+                    row.get("max_completion_tokens"),
+                    f"endpoint row {index} max_completion_tokens",
+                ),
             )
         )
-        requests.extend(_optional_money(pricing, ("request",), where))
-        reasonings.extend(_optional_money(pricing, ("internal_reasoning",), where))
-        cache_reads.extend(_optional_money(pricing, ("input_cache_read",), where))
-        cache_writes.extend(
-            _optional_money(
-                pricing, ("input_cache_write", "input_cache_write_1h"), where
+        # Live rows carry this key as null when the endpoint has no
+        # separate prompt ceiling. Null is absence, not a bad number.
+        prompt_cap = row.get("max_prompt_tokens")
+        if prompt_cap is not None:
+            prompt_caps.append(
+                (
+                    label,
+                    _positive_count(
+                        prompt_cap,
+                        f"endpoint row {index} max_prompt_tokens",
+                    ),
+                )
             )
-        )
+        try:
+            requests.append(max_rate(row_tiers, "request", required=False))
+            reasonings.append(max_rate(row_tiers, "internal_reasoning", required=False))
+            write = optional_rate(
+                row_tiers, "input_cache_write", "input_cache_write_1h"
+            )
+            read = optional_rate(row_tiers, "input_cache_read")
+        except PricingUnknownError as exc:
+            raise PricingUnknownError(f"endpoint row {index} ({label}): {exc}") from exc
+        if write is not None:
+            cache_writes.append(write)
+        if read is not None:
+            cache_reads.append(read)
     prompt_rate = max(prompts)
     completion_rate = max(completions)
-    cache_write = max(cache_writes) if cache_writes else Decimal(0)
+    cache_write_rate = max(cache_writes) if cache_writes else None
+    context_length = min(value for _label, value in contexts)
+    completion_limit = min(value for _label, value in outputs)
+    prompt_limit = min((value for _label, value in prompt_caps), default=None)
     return ModelTerms(
         model_id=model_id,
-        input_rate=max(prompt_rate, cache_write),
+        input_rate=max(prompt_rate, cache_write_rate or Decimal(0)),
         prompt_rate=prompt_rate,
         completion_rate=completion_rate,
         reasoning_rate=max(reasonings) if reasonings else Decimal(0),
         request_fee=max(requests) if requests else Decimal(0),
-        context_length=min(contexts),
-        max_completion_tokens=min(outputs),
+        context_length=context_length,
+        max_completion_tokens=completion_limit,
         cache_read_rate=max(cache_reads) if cache_reads else None,
-        cache_write_rate=max(cache_writes) if cache_writes else None,
+        cache_write_rate=cache_write_rate,
+        max_prompt_tokens=prompt_limit,
+        context_limit_tags=_labels_at(contexts, context_length),
+        completion_limit_tags=_labels_at(outputs, completion_limit),
+        prompt_limit_tags=(
+            "" if prompt_limit is None else _labels_at(prompt_caps, prompt_limit)
+        ),
     )
 
 
@@ -678,7 +780,46 @@ class OpenRouterProvider:
                 f"; zdr required: {str(required).lower()}"
                 f"; cache_control: {str(caching).lower()}"
             )
+        facts = self.diagnosis()
+        if facts is not None:
+            line += (
+                f"; endpoints: {facts['atlas.endpoint_tags']}"
+                f"; context {facts['atlas.context_length']}"
+                f" (set by {facts['atlas.context_limit_tags']})"
+                f"; completion {facts['atlas.max_completion_tokens']}"
+                f" (set by {facts['atlas.completion_limit_tags']})"
+                f"; max_price prompt {facts['atlas.max_price_prompt']}"
+                f" completion {facts['atlas.max_price_completion']}"
+            )
         return (line, *self.budget.report())
+
+    def diagnosis(self) -> dict[str, str] | None:
+        """Selected tags and the terms those rows set, for logs and traces.
+
+        None until the endpoint list has been read for the current route.
+        """
+        loaded = self._loaded
+        if loaded is None or loaded[0] != self._route:
+            return None
+        terms = loaded[1]
+        selected = loaded[2]
+        tags: list[str] = []
+        for row in selected.rows:
+            tag = row.get("tag")
+            if isinstance(tag, str) and tag and tag not in tags:
+                tags.append(tag)
+        prices = provider_preferences(
+            selected.providers, terms, require_zdr=selected.require_zdr
+        )["max_price"]
+        return {
+            "atlas.endpoint_tags": ", ".join(tags),
+            "atlas.context_length": str(terms.context_length),
+            "atlas.max_completion_tokens": str(terms.max_completion_tokens),
+            "atlas.context_limit_tags": terms.context_limit_tags,
+            "atlas.completion_limit_tags": terms.completion_limit_tags,
+            "atlas.max_price_prompt": str(prices["prompt"]),
+            "atlas.max_price_completion": str(prices["completion"]),
+        }
 
     def routing(self) -> tuple[bool, bool] | None:
         """Whether this run required ZDR, and whether `cache_control` was sent.
@@ -709,9 +850,15 @@ class OpenRouterProvider:
         parse_model_terms(self._get_json(f"/model/{self.model_id}"), self.model_id)
         if self._route.require_zdr:
             document = self._get_json("/endpoints/zdr")
+            selected = select_endpoints(document, self._route)
         else:
             document = self._get_json(f"/models/{self.model_id}/endpoints")
-        selected = select_endpoints(document, self._route)
+            # The full endpoint list has no safety_retention field. The
+            # ZDR list still names those rows. An unreadable list refuses
+            # the call before a completion is sent.
+            zdr_list = self._get_json("/endpoints/zdr")
+            selected = select_endpoints(document, self._route)
+            _refuse_marked_safety_retention(zdr_list, self._route)
         terms = terms_from_endpoints(selected.rows, self.model_id)
         self._loaded = (self._route, terms, selected)
         return terms, selected

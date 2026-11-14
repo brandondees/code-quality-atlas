@@ -442,6 +442,15 @@ def _routing_attributes(note: _Note, model: LensModel) -> None:
         return
     note.set("atlas.zdr_required", found[0])
     note.set("atlas.cache_control", found[1])
+    diagnose = getattr(model, "diagnosis", None)
+    if not callable(diagnose):
+        return
+    facts = diagnose()
+    if not isinstance(facts, Mapping):
+        return
+    for key, value in facts.items():
+        if isinstance(key, str) and key.startswith("atlas.") and isinstance(value, str):
+            note.set(key, value)
 
 
 def _model_attributes(

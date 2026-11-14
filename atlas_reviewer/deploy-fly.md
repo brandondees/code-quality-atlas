@@ -320,11 +320,20 @@ flyp machine run "$IMAGE" \
   --entrypoint /usr/local/bin/atlas-reviewer \
   --env ATLAS_EVENT_JSON="$EVENT" \
   --env ATLAS_HOLD_SECONDS=3600 \
+  --env ATLAS_REQUIRE_ZDR=true \
+  --env ATLAS_MAX_OUTPUT_TOKENS=128000 \
   -- review --event /home/atlas/event.json \
        --out /home/atlas/out/draft.md \
        --events /home/atlas/out/events.jsonl \
        --provider openrouter --allow-live-inference
 ```
+
+`ATLAS_REQUIRE_ZDR=true` is the default; set it to `false` on that
+Machine to drop the ZDR requirement. Safety Retention stays opt-in
+either way. `ATLAS_MAX_OUTPUT_TOKENS=128000` is Sonnet 5.5's completion
+limit, which is also the unset default on its 1,000,000-token context.
+Set another positive integer to override the per-call output cap.
+Omit either variable to keep its default.
 
 Set `MACHINE_ID` to the Machine ID that command prints. `fly machine
 list` shows it too.
